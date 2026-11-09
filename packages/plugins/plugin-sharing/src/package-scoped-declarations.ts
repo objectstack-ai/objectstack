@@ -34,6 +34,21 @@
  *    and the Setup doors that switch or guard them, which belong to no
  *    package (ADR-0150 D3, "a caller with no package").
  *
+ * ## A read from inside a package (`callerPackageId`)
+ *
+ * A reference a package WRITES — a declared sharing rule's queue recipient —
+ * is read from that package (ADR-0150 D3), not from the environment: the
+ * reader passes the package as `callerPackageId`, and the resolver answers
+ * the package's own item, else the unique holder in its declared dependency
+ * closure plus `sys`, else a refusal naming every candidate. That answer is
+ * final: one listed holder is no shortcut there, since the one item listed
+ * may be outside the package's reach. The population still bounds it: the
+ * resolver is asked over {@link listedHoldersView}, which leaves out a holder
+ * the listing hides (its package is disabled). So a package whose one
+ * reachable holder is disabled gets the resolver's own refusal, naming every
+ * holder the listing still serves as outside its closure, never that hidden
+ * holder's item and never silence.
+ *
  * A registry that cannot answer `(package, name)` — one with no
  * package-scoped slice (`packageScopedHoldersOf` and its two readers), such
  * as the kernel `metadata` service the declared sharing rules fall back to on
@@ -114,21 +129,55 @@ function listingRefusal(type: SharingDeclarationType, name: string, holders: rea
   return { ...base, message: packageScopedRefusalMessage(base) };
 }
 
+/** A caller package id, or `null` for a caller with no package (the resolver's own reading). */
+function callerPackageOf(callerPackageId: string | null | undefined): string | null {
+  return typeof callerPackageId === 'string' && callerPackageId !== '' ? callerPackageId : null;
+}
+
+/**
+ * `registry` as the listing sees it: a package the listing hides (disabled,
+ * the filter `listItems` applies) holds nothing. Every other member reads
+ * through unchanged. ⛔ Not a resolver: it only narrows the holders the one
+ * resolver is asked about, so its steps and refusals stay objectql's. A
+ * registry that cannot say whether a package is disabled is read as is.
+ */
+export function listedHoldersView(registry: PackageScopedRegistry): PackageScopedRegistry {
+  const isDisabled = (registry as { isPackageDisabled?: (id?: string) => boolean }).isPackageDisabled;
+  if (typeof isDisabled !== 'function') return registry;
+  return {
+    getPackage: (id) => registry.getPackage(id),
+    getAllPackages: () => registry.getAllPackages(),
+    packageScopedHoldersOf: (type, name) =>
+      registry.packageScopedHoldersOf(type, name).filter((id) => !isDisabled.call(registry, id)),
+    getPackageScopedItem: (type, name, packageId, member) => registry.getPackageScopedItem(type, name, packageId, member),
+    getEnvironmentScopedItem: (type, name, member) => registry.getEnvironmentScopedItem(type, name, member),
+  } as PackageScopedRegistry;
+}
+
 /**
  * Resolve the bare `name` of a declared `type` among `listed` — the items
- * `listItems(type)` (or the fallback source) lists — as the module doc says:
- * one listed item answers itself, two or more are asked of
- * {@link resolvePackageScopedName} when `registry` can answer it, and
- * refused otherwise.
+ * `listItems(type)` (or the fallback source) lists — as the module doc says.
+ * With no caller package: one listed item answers itself, two or more are
+ * asked of {@link resolvePackageScopedName} when `registry` can answer it,
+ * and refused otherwise. With `callerPackageId` and a registry that can
+ * answer it: the resolver's answer from that package, bounded by the listing.
  */
 export function resolveDeclaredName<T>(
   registry: unknown,
   type: SharingDeclarationType,
   name: string,
   listed: readonly T[],
+  callerPackageId?: string | null,
 ): DeclaredNameAnswer<T> {
   const matches = listed.filter((item) => nameOf(item) === name);
   if (matches.length === 0) return { status: 'not-found' };
+  const caller = callerPackageOf(callerPackageId);
+  if (caller !== null && isPackageScopedRegistry(registry)) {
+    const fromPackage = resolvePackageScopedName<T>(listedHoldersView(registry), { type, name, callerPackageId: caller });
+    if (fromPackage.status === 'refused') return { status: 'refused', refusal: fromPackage };
+    if (fromPackage.status === 'not-found') return { status: 'not-found' };
+    return { status: 'resolved', item: fromPackage.item };
+  }
   const holders = [...new Set(matches.map(declaredPackageIdOf))];
   if (matches.length === 1) return { status: 'resolved', item: matches[0] };
   if (!isPackageScopedRegistry(registry)) {

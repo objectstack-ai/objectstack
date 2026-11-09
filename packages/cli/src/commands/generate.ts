@@ -155,12 +155,13 @@ export interface ScaffoldBinds {
  * `defineStack` may refuse. `generate-object-namespace-prefix.test.ts` pins
  * both the prefix and the flag against the templates.
  *
- * Every other metadata name carries it too (ruling C on #30798). The
- * scaffold's own `name` on an action, a flow, a dashboard, an app, a skill, a
- * picklist, a permission set or a dataset goes through {@link itemNameFor}:
- * `${namespace}_${name}` in a namespaced project, unless the derived name
- * already carries the namespace. `os lint`'s `naming/namespace-prefix` warns
- * on a bare one, and `generate-scaffold-validates.test.ts` holds every
+ * The scaffold's own `name` on an action, a flow, a dashboard, an app, a
+ * skill, a picklist, a permission set or a dataset goes through
+ * {@link itemNameFor}: `${namespace}_${name}` in a namespaced project, unless
+ * the derived name already carries the namespace. Since ADR-0150 that prefix
+ * is a kept spelling, not a requirement: these types are identified by
+ * (package, name), `os lint` no longer warns on a bare one, and a prefixed
+ * name stays valid (D9). `generate-scaffold-validates.test.ts` holds every
  * scaffold to zero findings. A view container writes no `name` at all: it is
  * registered under the object it binds to (#21325, see the `view` generator).
  *
@@ -1098,13 +1099,11 @@ function prefixedObjectName(shortName: string, namespace?: string): string {
 }
 
 /**
- * The NON-object machine name a scaffold writes (ruling C on #30798): every
- * metadata name a package authors carries its namespace, the way an object
- * name does. `shortName` is the name as the generator derives it
- * (`task_done_flow`); it gains `${namespace}_` unless it already carries the
- * namespace — the predicate `os lint`'s `naming/namespace-prefix` judges with,
- * so a scaffold is never written in a spelling the lint reports. With no
- * namespace it is written as derived.
+ * The NON-object machine name a scaffold writes. `shortName` is the name as
+ * the generator derives it (`task_done_flow`); it gains `${namespace}_`
+ * unless it already carries the namespace (`carriesPackageNamespace`). Since
+ * ADR-0150 the prefix is a kept spelling that stays valid (D9), not one the
+ * lint asks for. With no namespace it is written as derived.
  */
 function itemNameFor(shortName: string, namespace?: string): string {
   return namespacedItemName(shortName, namespace);

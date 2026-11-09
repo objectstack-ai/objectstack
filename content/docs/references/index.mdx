@@ -1,7 +1,7 @@
 ---
 title: Protocol reference — every schema by module
 navTitle: Protocol Reference
-description: Every schema published by @objectstack/spec — 1650 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1652 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -20,7 +20,7 @@ counts are sums of the rows they head. Regenerate with
 
 | Module | Pages | Schemas | Description |
 | :--- | ---: | ---: | :--- |
-| [AI Protocol](/docs/references/ai) | 13 | 78 | Agents, tools, skills, RAG and knowledge sources, model registry, conversations. |
+| [AI Protocol](/docs/references/ai) | 13 | 80 | Agents, tools, skills, RAG and knowledge sources, model registry, conversations. |
 | [API Protocol](/docs/references/api) | 36 | 488 | REST contracts, endpoints, routing, realtime, batch, discovery. |
 | [Automation Protocol](/docs/references/automation) | 16 | 81 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
 | [Data Protocol](/docs/references/data) | 34 | 183 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
@@ -34,13 +34,13 @@ counts are sums of the rows they head. Regenerate with
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
 | [System Protocol](/docs/references/system) | 40 | 297 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 16 | 176 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **216** | **1650** | 14 protocol modules |
+| **Total** | **216** | **1652** | 14 protocol modules |
 
 ---
 
 ## AI Protocol
 
-**Source:** `packages/spec/src/ai/` · **Import:** `@objectstack/spec/ai` · **13 pages, 78 schemas**
+**Source:** `packages/spec/src/ai/` · **Import:** `@objectstack/spec/ai` · **13 pages, 80 schemas**
 
 Agents, tools, skills, RAG and knowledge sources, model registry, conversations.
 
@@ -53,7 +53,7 @@ Agents, tools, skills, RAG and knowledge sources, model registry, conversations.
 | [`embedding.zod.ts`](/docs/references/ai/embedding) | `EmbeddingModel`, `VectorStore`, `VectorStoreProvider` |
 | [`knowledge-document.zod.ts`](/docs/references/ai/knowledge-document) | `KnowledgeChunk`, `KnowledgeDocument`, `KnowledgeHit` |
 | [`knowledge-source.zod.ts`](/docs/references/ai/knowledge-source) | `FileKnowledgeSource`, `HttpKnowledgeSource`, `KnowledgeRefreshPolicy`, `KnowledgeSource`, `KnowledgeSourceKind`, `ObjectKnowledgeSource` |
-| [`mcp.zod.ts`](/docs/references/ai/mcp) | `MCPApprovalPolicy`, `MCPServerRef`, `MCPToolBinding`, `MCPTransport` |
+| [`mcp.zod.ts`](/docs/references/ai/mcp) | `MCPApprovalPolicy`, `MCPServerRef`, `MCPToolBinding`, `MCPTransport`, `McpActionNamespace`, `McpListedActionAddress` |
 | [`model-registry.zod.ts`](/docs/references/ai/model-registry) | `ModelCapability`, `ModelConfig`, `ModelLimits`, `ModelPricing`, `ModelProvider`, `ModelRegistry`, `ModelRegistryEntry`, `ModelSelectionCriteria`, `PromptTemplate`, `PromptVariable` |
 | [`skill.zod.ts`](/docs/references/ai/skill) | `Skill`, `SkillTriggerCondition` |
 | [`solution-blueprint.zod.ts`](/docs/references/ai/solution-blueprint) | `BlueprintApp`, `BlueprintCondition`, `BlueprintDashboard`, `BlueprintField`, `BlueprintNavItem`, `BlueprintObject`, `BlueprintSeed`, `BlueprintSummaryOperations`, `BlueprintView`, `BlueprintWidgetCondition`, `SolutionBlueprint`, `SolutionBlueprintStrict` |

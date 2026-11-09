@@ -138,11 +138,17 @@ describe('[#29898] picklist-reference-unknown — the author-time door and the m
   const boundCase = (picklist: string) =>
     caseObj({ subject: { type: 'text', label: 'Subject' }, status: { type: 'select', label: 'Status', picklist } });
 
-  /** One artifact: the core body carries the object, the app body declares `parity_status`. */
+  /**
+   * One artifact: the core body carries the object, the app body declares
+   * `parity_status`. [ADR-0150 D3, child E6; N1 ruled on #31678: the declared
+   * dependency closure only] Forced edit: the core body declares its
+   * dependency on the app body — a sibling it does not depend on is outside
+   * its closure, and the boot refuses that reference.
+   */
   const artifactWith = (picklist: string): AnyRec => ({
     manifest: manifest(STACK_ID),
     packages: [
-      { manifest: { ...manifest('com.example.parity.core'), objects: [boundCase(picklist)] } },
+      { manifest: { ...manifest('com.example.parity.core'), dependencies: { 'com.example.parity.app': '^1.0.0' }, objects: [boundCase(picklist)] } },
       { manifest: { ...manifest('com.example.parity.app'), picklists: [status] } },
     ],
   });

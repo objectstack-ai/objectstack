@@ -88,6 +88,18 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         label: "AI 액세스",
         help: "이 사용자가 AI 시트를 보유하는지 여부입니다. 시트는 `ai_seat` 시스템 권한을 부여하며, 이를 통해 앱의 AI 어시스턴트(빌드 및 질문)를 사용할 수 있습니다. 보유할 수 있는 사용자 수는 라이선스에 포함된 시트 수로 제한됩니다."
       },
+      principal_kind: {
+        label: "주체 유형",
+        help: "이 사용자가 사람인지 AI 서비스 계정인지 여부입니다. AI 서비스 계정은 로그인하지 않으며 자체 API 키로만 작업합니다. 사용자를 만들 때 정해지며 바뀌지 않습니다.",
+        options: {
+          human: "사람",
+          agent: "AI 서비스 계정"
+        }
+      },
+      accountable_user_id: {
+        label: "책임자",
+        help: "AI 서비스 계정의 경우 그 계정을 책임지는 사람입니다. 사람에게는 비어 있습니다. 책임자 자신의 권한은 계정에 넘어가지 않습니다."
+      },
       image: {
         label: "프로필 이미지"
       },
@@ -2123,6 +2135,11 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
             label: "매핑: 이름 클레임",
             helpText: "선택 사항입니다. 표시 이름에 매핑되는 클레임입니다. 기본값은 \"name\"입니다.",
             placeholder: "name"
+          },
+          mapGroups: {
+            label: "매핑: 그룹 클레임",
+            helpText: "선택 사항입니다. 사용자의 그룹을 담는 클레임입니다(예: \"groups\"). 로그인할 때마다 해당 그룹에 매핑된 권한 집합이 부여됩니다. 비워 두면 그룹을 매핑하지 않습니다.",
+            placeholder: "groups"
           }
         }
       },
@@ -2153,6 +2170,11 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
             label: "NameID 형식",
             helpText: "선택 사항입니다. 요청할 SAML NameID 형식입니다. 기본값은 IdP에 구성된 형식입니다.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+          },
+          mapGroups: {
+            label: "매핑: 그룹 속성",
+            helpText: "선택 사항입니다. 사용자의 그룹을 담는 어설션 속성입니다. 로그인할 때마다 해당 그룹에 매핑된 권한 집합이 부여됩니다. 비워 두면 그룹을 매핑하지 않습니다.",
+            placeholder: "groups"
           }
         }
       },
@@ -2181,6 +2203,35 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       edit_sso_sign_in_options: {
         label: "로그인 옵션 편집",
         successMessage: "로그인 옵션 저장됨"
+      },
+      show_sso_groups_claim: {
+        label: "그룹 클레임 보기",
+        resultDialog: {
+          title: "그룹 클레임",
+          description: "이 공급자가 로그인할 때마다 사용자의 그룹을 읽는 OIDC 클레임 또는 SAML 속성입니다. 비어 있으면 이 공급자는 그룹을 매핑하지 않습니다. \"그룹 클레임 편집\"으로 변경하세요.",
+          acknowledge: "완료",
+          fields: {
+            groupsClaim: "그룹 클레임"
+          }
+        }
+      },
+      edit_sso_groups_claim: {
+        label: "그룹 클레임 편집",
+        params: {
+          groupsClaim: {
+            label: "그룹 클레임",
+            helpText: "사용자의 그룹을 담는 OIDC 클레임 또는 SAML 속성입니다. 로그인할 때마다 해당 그룹에 매핑된 권한 집합이 부여됩니다. 비워 두면 제거되며, 이 공급자는 더 이상 그룹을 매핑하지 않습니다.",
+            placeholder: "groups"
+          }
+        },
+        resultDialog: {
+          title: "그룹 클레임이 저장됨",
+          description: "이 공급자가 이제 로그인할 때마다 읽는 그룹 클레임입니다. 비어 있으면 그룹을 매핑하지 않습니다.",
+          acknowledge: "완료",
+          fields: {
+            groupsClaim: "그룹 클레임"
+          }
+        }
       }
     }
   },

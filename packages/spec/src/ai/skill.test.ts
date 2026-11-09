@@ -99,7 +99,7 @@ describe('SkillSchema', () => {
   });
 
   it('should enforce snake_case for skill name', () => {
-    const validNames = ['case_management', 'order_ops', '_internal', 'knowledge_search'];
+    const validNames = ['case_management', 'order_ops', 'knowledge_search'];
     validNames.forEach(name => {
       expect(() => SkillSchema.parse({
         name,
@@ -108,7 +108,8 @@ describe('SkillSchema', () => {
       })).not.toThrow();
     });
 
-    const invalidNames = ['caseManagement', 'Order-Ops', '123skill'];
+    // `_internal`: a leading `_` is router-reserved (ADR-0150 D5).
+    const invalidNames = ['caseManagement', 'Order-Ops', '123skill', '_internal'];
     invalidNames.forEach(name => {
       expect(() => SkillSchema.parse({
         name,

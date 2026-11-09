@@ -27,7 +27,13 @@
  *    door every session the account held is still a `sys_session` row
  *    afterwards, stamped `revoked_at` and `revoke_reason: password_reset`, and
  *    it still answers 401; the control, an administrator's forced reset over
- *    the same engine, stamps `admin_password_reset` instead.
+ *    the same engine, stamps `admin_password_reset` instead;
+ *  - a password-state write names the person who caused it: the forced
+ *    reset's `must_change_password` set names the administrator (and the
+ *    administrator at the keyboard of an impersonation session), the user's
+ *    own `/change-password` clear names the user, both still as the system;
+ *    the stamp is never credited to another session's holder, and the
+ *    sign-in stamp and the emailed-link reset are unchanged.
  */
 
 import { describe, it, expect, afterAll, afterEach, vi } from 'vitest';
@@ -38,6 +44,7 @@ import { runAdminSetUserPassword, type AdminUserEndpointDeps } from './admin-use
 import { authIdentityObjects } from './manifest.js';
 import { REVOKE_SESSIONS_ON_PASSWORD_RESET_RETIRED } from '@objectstack/spec/system';
 import { assertPasswordResetEndsSessions } from './password-reset-ends-sessions.js';
+import { runAttributedToUser } from './auth-actor-attribution.js';
 import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
 import { sqliteEnginePool } from './__tests__/sqlite-engine-pool.testkit';
 // better-auth's first module load is paid here, at module load, not inside the
@@ -502,5 +509,174 @@ describe('ADR-0069 D2: an account whose failed_login_count is NULL is counted an
     const res = await signIn(a, FIRST);
     expect(res.status, await res.clone().text()).toBe(200);
     expect(Number((await lockoutRow(a.engine)).failed_login_count)).toBe(0);
+  }, 60_000);
+});
+
+describe('a password-state write names the person who caused it', () => {
+  // The `sys_user` writes that set and clear `must_change_password` reach the
+  // engine as the system (their authorization, unchanged) and name their
+  // caller on the attribution seam (`auth-actor-attribution.ts`): the
+  // execution context's `attributedUserId`, and `impersonatedBy` from an
+  // impersonation session. plugin-audit's ledger writer turns that channel
+  // into `sys_audit_log.user_id` and `actor` (its own `audit-writers.test.ts`
+  // pins the `provenance.attributedUserId` read), the way the sign-in stamp
+  // is already attributed. Observed on the raw engine, beneath every caller,
+  // so the context is the one the audit writer's hooks are built from.
+  const THIRD = 'Th1rd!Password-After-Change';
+  const ADMIN = 'admin_password_state';
+
+  interface UserWrite {
+    patch: Record<string, unknown>;
+    context: Record<string, unknown>;
+  }
+
+  /** Every `sys_user` update with the context it reached the engine with. Call-through. */
+  function observeUserUpdates(engine: ObjectQL): UserWrite[] {
+    const writes: UserWrite[] = [];
+    const original = engine.update.bind(engine);
+    vi.spyOn(engine, 'update').mockImplementation((async (object: string, data: Record<string, unknown>, options?: { context?: Record<string, unknown> }) => {
+      if (object === 'sys_user') writes.push({ patch: { ...data }, context: { ...(options?.context ?? {}) } });
+      return original(object as never, data as never, options as never);
+    }) as never);
+    return writes;
+  }
+
+  /** The one write that touched `field`. */
+  const writeOf = (writes: UserWrite[], field: string): UserWrite => {
+    const hits = writes.filter((w) => field in w.patch);
+    expect(hits, JSON.stringify(writes.map((w) => Object.keys(w.patch)))).toHaveLength(1);
+    return hits[0];
+  };
+
+  /** The authorization half and the attribution half of a write's context. */
+  const credit = (w: UserWrite) => ({
+    isSystem: w.context.isSystem,
+    userId: w.context.userId ?? null,
+    attributedUserId: w.context.attributedUserId ?? null,
+    impersonatedBy: w.context.impersonatedBy ?? null,
+  });
+
+  async function userOf(a: Account): Promise<{ id: string; must_change_password: unknown }> {
+    const [user] = (await a.engine.find('sys_user', { where: { email: EMAIL }, limit: 1 }, SYS)) as Array<{
+      id: string;
+      must_change_password: unknown;
+    }>;
+    return user;
+  }
+
+  /** An administrator's forced reset through the door `auth-plugin.ts` mounts, with the deps it hands it. */
+  function forcedReset(a: Account, userId: string, actor: { id: string; email?: string; impersonatedBy?: string }) {
+    const m = a.manager;
+    const deps = {
+      getAuthApi: () => m.getApi(),
+      getAuthContext: () => m.getAuthContext(),
+      getDataEngine: () => m.getDataEngine(),
+      assertPasswordComplexity: (pw: string) => m.checkPasswordComplexity(pw),
+      noteMustChangePasswordIssued: () => m.noteMustChangePasswordIssued(),
+      phoneNumberEnabled: () => m.isPhoneNumberEnabled(),
+      getMembershipPolicy: () => m.getMembershipPolicy(),
+      logger: { warn() {}, info() {}, error() {}, debug() {} },
+    } as unknown as AdminUserEndpointDeps;
+    return runAdminSetUserPassword(
+      deps,
+      new Request(`${AUTH}/admin/set-user-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', origin: BASE },
+        body: JSON.stringify({ userId, newPassword: SECOND }),
+      }),
+      actor as never,
+    );
+  }
+
+  it("the administrator's forced reset: the must_change_password write names the administrator, and still runs as the system", async () => {
+    const a = await signedInAccount();
+    const user = await userOf(a);
+    const writes = observeUserUpdates(a.engine);
+
+    const forced = await forcedReset(a, user.id, { id: ADMIN, email: 'admin@example.com' });
+
+    // CONTROL: the door's answer and the value it writes are unchanged.
+    expect(forced.status, JSON.stringify(forced.body)).toBe(200);
+    expect(forced.body.data?.mustChangePassword).toBe(true);
+    const flag = writeOf(writes, 'must_change_password');
+    expect(flag.patch).toEqual({ id: user.id, must_change_password: true });
+    expect((await userOf(a)).must_change_password).toBeTruthy();
+    // The authorization half is the system's, as before; the attribution half names the administrator.
+    expect(flag.context).toMatchObject({ isSystem: true, positions: [], permissions: [] });
+    expect(credit(flag)).toEqual({ isSystem: true, userId: null, attributedUserId: ADMIN, impersonatedBy: null });
+  }, 60_000);
+
+  it('from an impersonation session, the administrator at the keyboard rides beside the admitted actor', async () => {
+    const a = await signedInAccount();
+    const user = await userOf(a);
+    const writes = observeUserUpdates(a.engine);
+
+    const forced = await forcedReset(a, user.id, { id: ADMIN, impersonatedBy: 'admin_at_keyboard' });
+
+    expect(forced.status, JSON.stringify(forced.body)).toBe(200);
+    expect(credit(writeOf(writes, 'must_change_password'))).toEqual({
+      isSystem: true,
+      userId: null,
+      attributedUserId: ADMIN,
+      impersonatedBy: 'admin_at_keyboard',
+    });
+  }, 60_000);
+
+  it("the user's own change-password: the clear names the user; the sign-in stamp before it is unchanged", async () => {
+    const a = await signedInAccount();
+    const user = await userOf(a);
+    expect((await forcedReset(a, user.id, { id: ADMIN })).status).toBe(200);
+    const writes = observeUserUpdates(a.engine);
+
+    const signedIn = await post(a.manager, '/sign-in/email', { email: EMAIL, password: SECOND });
+    expect(signedIn.status, await signedIn.clone().text()).toBe(200);
+    // CONTROL: the sign-in stamp is the user's, as it already was.
+    expect(credit(writeOf(writes, 'last_login_at'))).toEqual({
+      isSystem: true,
+      userId: null,
+      attributedUserId: user.id,
+      impersonatedBy: null,
+    });
+
+    const changed = await post(
+      a.manager,
+      '/change-password',
+      { currentPassword: SECOND, newPassword: THIRD },
+      { cookie: cookieFrom(signedIn) },
+    );
+    // CONTROL: the door's answer and the values it writes are unchanged.
+    expect(changed.status, await changed.clone().text()).toBe(200);
+    const clear = writeOf(writes, 'must_change_password');
+    expect(Object.keys(clear.patch).sort()).toEqual(['id', 'must_change_password', 'password_changed_at']);
+    expect(clear.patch).toMatchObject({ id: user.id, must_change_password: false });
+    expect((await userOf(a)).must_change_password).toBeFalsy();
+    expect(clear.context).toMatchObject({ isSystem: true, positions: [], permissions: [] });
+    expect(credit(clear)).toEqual({ isSystem: true, userId: null, attributedUserId: user.id, impersonatedBy: null });
+  }, 60_000);
+
+  it("a stamp is credited only to the account's own holder: another session's holder, or none, leaves it the system's", async () => {
+    const a = await signedInAccount();
+    const user = await userOf(a);
+    const stamp = (a.manager as never as { stampPasswordChangedAt(u: string): Promise<void> }).stampPasswordChangedAt.bind(a.manager);
+    const writes = observeUserUpdates(a.engine);
+
+    await runAttributedToUser('someone_else', () => stamp(user.id));
+    await runAttributedToUser(user.id, () => stamp(user.id));
+    expect(writes.map(credit)).toEqual([
+      { isSystem: true, userId: null, attributedUserId: null, impersonatedBy: null },
+      { isSystem: true, userId: null, attributedUserId: user.id, impersonatedBy: null },
+    ]);
+
+    // CONTROL: the emailed-link reset carries no session, so its stamp stays the system's.
+    writes.length = 0;
+    const token = await requestResetToken(a);
+    const reset = await post(a.manager, '/reset-password', { token, newPassword: SECOND });
+    expect(reset.status, await reset.clone().text()).toBe(200);
+    expect(credit(writeOf(writes, 'must_change_password'))).toEqual({
+      isSystem: true,
+      userId: null,
+      attributedUserId: null,
+      impersonatedBy: null,
+    });
   }, 60_000);
 });

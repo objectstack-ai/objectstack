@@ -45,6 +45,7 @@
 
 import type { AuthManager } from './auth-manager.js';
 import type { AuthGate } from '@objectstack/core';
+import { authSystemWriteContext } from './auth-actor-attribution.js';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
 import { effectiveMfaLevel, effectiveSessionLimits } from './organization-access-policy.js';
 
@@ -267,12 +268,21 @@ export async function stampPasswordChangedAt(this: Pick<PasswordSessionPolicyHos
   if (!engine || !userId) return;
   try {
     const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
+    // The stamp is credited to the account's own holder when this request's
+    // session names them (a `/change-password`, impersonation included):
+    // the attribution seam's answer, attribution only, so the write still
+    // authorizes as the system. A request whose session names nobody, or
+    // somebody else (a token-carrying `/reset-password` sent beside another
+    // account's cookie), stays the system's: the holder of that session did
+    // not change this account's password.
+    const attribution = await authSystemWriteContext();
+    const context = attribution.attributedUserId === userId ? { ...SYSTEM_CTX, ...attribution } : SYSTEM_CTX;
     // #2766 V1 — a completed password change also satisfies any pending
     // admin-issued force-change flag, so clear it in the same write.
     await engine.update(
       'sys_user',
       { id: userId, password_changed_at: new Date(), must_change_password: false },
-      { context: SYSTEM_CTX } as any,
+      { context } as any,
     );
   } catch (e) {
     // Never break a valid password change — the new password IS set.

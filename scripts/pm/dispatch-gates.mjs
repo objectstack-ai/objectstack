@@ -2200,7 +2200,7 @@ function tailBeforeRedirection(tail, nextChar) {
  * The +106 is 0.08% of the refused widening's price. Six of the nine new
  * families contribute no pairs at all; the three that do declare the
  * population themselves — `release-rehearsal-clone.mjs` +75 (the `.changeset`
- * tree its self-test clones), `pm/ci-failure.mjs` +30 (`.github`),
+ * tree its self-test clones), a PM Actions-failure reader +30 (`.github`; deleted since, PR #31752),
  * `pr-labels.mjs` +1 (`.github/labeler.yml`).
  *
  * All nine also become GATE FILES, which `discoverFamilies` excludes from
@@ -2210,7 +2210,7 @@ function tailBeforeRedirection(tail, nextChar) {
  * families, `ts-parse.mjs` by 18, `js-comment-mask.mjs` by 14,
  * `pm/git-history.mjs` by 2 — and all four declare ZERO path literals, so the
  * edges carried nothing to lose. The three that do declare literals
- * (`release-rehearsal-clone.mjs` 7, `pm/ci-failure.mjs` 2, `pr-labels.mjs` 1)
+ * (`release-rehearsal-clone.mjs` 7, that deleted reader 2, `pr-labels.mjs` 1)
  * are followed by no family at all. Net subtraction: zero hints, zero pairs.
  * Asserted in the self-test rather than left as this paragraph, because a
  * subtraction here is silent — a lead that stops appearing looks exactly like

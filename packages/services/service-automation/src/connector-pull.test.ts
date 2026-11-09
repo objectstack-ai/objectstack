@@ -12,6 +12,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { buildFieldMetaMap, runImport } from '@objectstack/core';
 import {
     pullConnectorSource,
     ConnectorPullError,
@@ -389,6 +390,68 @@ describe('[#28040] connector pull — the input is checked against the action\'s
         const res = await pullConnectorSource(h.deps, { mapping: 'crm_contacts' });
         expect(h.handler).toHaveBeenCalledTimes(1);
         expect(res.pulled).toBe(1);
+        expect(h.writes).toHaveLength(1);
+    });
+});
+
+describe('[#31810] connector pull — a record whose match key is blank is a row error, never a create', () => {
+    /** The source dropped its `id` column for the changed record: `external_id` maps to nothing. */
+    const noKey = { name: 'Grace Hopper', updated_at: '2026-01-03' };
+
+    it('upsert: the keyless record is not created, and it is counted as an error naming the mapping and the key', async () => {
+        const h = harness({ result: { status: 200, ok: true, body: [{ id: 'c1', name: 'Ada', updated_at: '2026-01-02' }, noKey] } });
+        const res = await pullConnectorSource(h.deps, { mapping: 'crm_contacts' });
+        // Only the keyed record reached the protocol: no row with a blank external_id.
+        expect(h.writes).toHaveLength(1);
+        expect((h.writes[0] as { data: Record<string, unknown> }).data.external_id).toBe('c1');
+        // `errors` is the tally the job's run outcome reads: above zero, the run is degraded, not success.
+        expect({ created: res.summary.created, updated: res.summary.updated, skipped: res.summary.skipped, errors: res.summary.errors })
+            .toEqual({ created: 1, updated: 0, skipped: 0, errors: 1 });
+        const refused = res.summary.results.find((r) => r.row === 2);
+        expect(refused).toMatchObject({ ok: false, action: 'failed', code: 'BLANK_MATCH_KEY' });
+        expect(refused?.error).toContain('crm_contacts');
+        expect(refused?.error).toContain('external_id');
+    });
+
+    it('update: the keyless record is counted as an error too, not a silent skip', async () => {
+        const h = harness({
+            mapping: baseMapping({ mode: 'update' }),
+            result: { status: 200, ok: true, body: [noKey] },
+        });
+        const res = await pullConnectorSource(h.deps, { mapping: 'crm_contacts' });
+        expect(h.writes).toHaveLength(0);
+        expect({ skipped: res.summary.skipped, errors: res.summary.errors }).toEqual({ skipped: 0, errors: 1 });
+        expect(res.summary.results[0]).toMatchObject({ ok: false, action: 'failed', code: 'BLANK_MATCH_KEY' });
+    });
+
+    it('CONTROL: a record that still carries its key upserts as before — the stored row is updated, nothing is refused', async () => {
+        const h = harness({
+            stored: [{ id: 'rec_1', external_id: 'c1', name: 'Ada', synced_at: '2026-01-01' }],
+            result: { status: 200, ok: true, body: [{ id: 'c1', name: 'Ada Lovelace', updated_at: '2026-01-02' }] },
+        });
+        const res = await pullConnectorSource(h.deps, { mapping: 'crm_contacts' });
+        expect({ created: res.summary.created, updated: res.summary.updated, skipped: res.summary.skipped, errors: res.summary.errors })
+            .toEqual({ created: 0, updated: 1, skipped: 0, errors: 0 });
+        expect(h.writes).toHaveLength(1);
+        expect(h.writes[0]).toMatchObject({ object: 'contact', id: 'rec_1' });
+    });
+
+    it('CONTROL: the import door itself is unchanged — runImport with skipBlankMatchKey false still creates the blank-key row', async () => {
+        const h = harness();
+        const summary = await runImport({
+            p: h.deps.protocol,
+            objectName: 'contact',
+            rows: [{ name: 'Grace Hopper' }],
+            metaMap: buildFieldMetaMap(contactObject),
+            writeMode: 'upsert',
+            matchFields: ['external_id'],
+            dryRun: false,
+            runAutomations: true,
+            trimWhitespace: true,
+            createMissingOptions: false,
+            skipBlankMatchKey: false,
+        });
+        expect({ created: summary.created, errors: summary.errors }).toEqual({ created: 1, errors: 0 });
         expect(h.writes).toHaveLength(1);
     });
 });
