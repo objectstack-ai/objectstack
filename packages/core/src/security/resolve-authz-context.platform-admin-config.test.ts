@@ -437,18 +437,22 @@ describe('[#11663 L5] the legacy grant row is an anchor under `single`, and NOWH
   });
 });
 
-describe('[#11663 L2] the sys_user read stays CONDITIONAL on config', () => {
+describe('[#11663 L2, ADR-0151 D3] the sys_user read is ONE read, config or not', () => {
   const seeded = { nowMs: NOW, seedEmail: 'seeded@corp.example', seedPermissions: ['ai_seat'] };
 
-  it('a fully-seeded principal reads NO sys_user row when nothing is declared', async () => {
-    // This is the property that leaves the pinned batch-equivalence query
-    // multiset untouched for every deployment that has not adopted the config
-    // anchor: pin P2's short-circuit answers "not an admin" on an empty list
-    // BEFORE any row is looked at.
+  it('a fully-seeded principal reads its sys_user row exactly ONCE when nothing is declared, and is not an admin', async () => {
+    // [ADR-0151 D3] Forced edit: this pin used to assert NO read here — the
+    // config anchor's read was conditional, and a fully seeded principal asked
+    // for none. The row's `principal_kind` now decides whether the principal
+    // is an AI service account, which no caller seeds, so the row is read on
+    // every resolution (the sixth recorded move in the batch-equivalence
+    // header). What still holds is pin P2's short-circuit: with nothing
+    // declared, the config branch confers nothing, whatever the row says.
     declare(undefined);
     const ql = makeQl(configOnlyTables({ id: 'usr_1', email: 'a@b.c', email_verified: true }));
-    await resolveUserAuthzGrants(ql, 'usr_1', seeded);
-    expect(ql.calls.filter((c) => c.object === 'sys_user')).toHaveLength(0);
+    const grants = await resolveUserAuthzGrants(ql, 'usr_1', seeded);
+    expect(ql.calls.filter((c) => c.object === 'sys_user')).toHaveLength(1);
+    expect(grants.posture).not.toBe('PLATFORM_ADMIN');
   });
 
   it('…and reads it exactly ONCE when administrators ARE declared', async () => {
@@ -576,13 +580,17 @@ describe('[#11663 L5] the legacy anchor confers only on the rigs Choice 4A keeps
     expect(reads.single.length).toBeGreaterThan(0); // the fixture really did resolve
   });
 
-  it('…and costs no sys_user read of its own — the gate never reaches for the row', async () => {
-    // Seed `grants.email` and the `ai_seat` capability and NOTHING in the
-    // resolution needs the `sys_user` row. The posture gate must still answer,
-    // on both sides, without issuing one: it reads the environment. #13667 owed
+  it('…and costs no sys_user read of its own — the one row read is the kind\'s, the same on both sides', async () => {
+    // Seed `grants.email` and the `ai_seat` capability, and the only thing in
+    // the resolution that needs the `sys_user` row is the principal's kind
+    // (ADR-0151 D3: an AI service account is withheld the `everyone` anchor
+    // and every standing). The posture gate must still answer, on both sides,
+    // without issuing a read of its own: it reads the environment. #13667 owed
     // this for the notice's `userRow?.email` lookup; L5 owes it because the gate
     // now decides STANDING, and a read added here would be added to every
-    // request on every walled rig.
+    // request on every walled rig. [ADR-0151 D3] Forced edit: the count was 0
+    // before the kind was read; it is 1 on both postures now — the memoized
+    // row, never a second read.
     const seeded = { nowMs: NOW, seedEmail: 'seeded@corp.example', seedPermissions: ['ai_seat'] };
     for (const p of ['single', 'isolated'] as const) {
       declare(undefined);
@@ -592,7 +600,7 @@ describe('[#11663 L5] the legacy anchor confers only on the rigs Choice 4A keeps
       const ql = makeQl(legacyTables());
       const grants = await resolveUserAuthzGrants(ql, 'usr_1', seeded);
 
-      expect(ql.calls.filter((c) => c.object === 'sys_user'), p).toHaveLength(0);
+      expect(ql.calls.filter((c) => c.object === 'sys_user'), p).toHaveLength(1);
       expect(grants.posture, p).toBe(p === 'single' ? 'PLATFORM_ADMIN' : 'MEMBER');
       expect(sink.warns, p).toEqual([]);
     }

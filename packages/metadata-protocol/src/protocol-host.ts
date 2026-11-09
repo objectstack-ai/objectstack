@@ -159,6 +159,7 @@ export interface ProtocolHost {
     readonly namesWithOwnStoredRow: ObjectStackProtocolImplementation['namesWithOwnStoredRow'];
     readonly notifyMutationListenersLocal: ObjectStackProtocolImplementation['notifyMutationListenersLocal'];
     readonly objectExtensionItemRefusal: ObjectStackProtocolImplementation['objectExtensionItemRefusal'];
+    readonly objectNamespaceObjectNameClash: ObjectStackProtocolImplementation['objectNamespaceObjectNameClash'];
     readonly objectNamespacePrefixViolation: ObjectStackProtocolImplementation['objectNamespacePrefixViolation'];
     readonly objectRegistrationRefusal: ObjectStackProtocolImplementation['objectRegistrationRefusal'];
     readonly optimisticConflictAuditEntry: (typeof ObjectStackProtocolImplementation)['optimisticConflictAuditEntry'];

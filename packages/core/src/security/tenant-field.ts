@@ -1,5 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { platformProvisionsStorage } from '@objectstack/spec/data';
+
 /**
  * The tenancy-scope predicates a layer below the engine has to ask too: which
  * column an object is tenant-scoped by ({@link resolveTenantFieldName}, with
@@ -100,11 +102,23 @@ export function resolveTenantFieldName(schema: unknown): string | null {
  * the #4632 durability ERROR, although nothing durable was lost. Every
  * install-local install on a showcase host printed that false alarm.
  *
- * It is a PRESENCE test, `external != null`, and deliberately not a reading of
- * the datasource's `schemaMode`. An object with no `external` block is not
- * federated, whatever datasource it lands on. If its DDL is refused, that is a
- * real lost sync, and it keeps the ERROR.
+ * It is a PRESENCE test on the object's own `external` block, and deliberately
+ * not a reading of the datasource's `schemaMode`. An object with no `external`
+ * block is not federated, whatever datasource it lands on. If its DDL is
+ * refused, that is a real lost sync, and it keeps the ERROR.
+ *
+ * ## It reads the spec's predicate and restates nothing
+ *
+ * `@objectstack/spec/data`'s `platformProvisionsStorage` is the one spelling
+ * of "the platform provisions this object's storage" (the #7865 convergence
+ * map), and a federated object is exactly one it does not. So this binding is
+ * its negation, and every runtime layer asks this binding (plugin-security and
+ * plugin-sharing re-export it under their own module paths) rather than
+ * re-spelling the `external` test. A change to what "federated" means is then
+ * one edit in the spec. On an input that is not an object record (`null`,
+ * `undefined`, an array, a primitive) the spec answers "provisioned", so this
+ * answers "not federated", as the presence test it replaced did.
  */
 export function isFederatedObject(schema: unknown): boolean {
-  return (schema as { external?: unknown } | null | undefined)?.external != null;
+  return !platformProvisionsStorage(schema);
 }

@@ -704,6 +704,14 @@
     },
     "queries": [
       {
+        "object": "sys_user",
+        "where": {
+          "id": "u_seed"
+        },
+        "limit": 1,
+        "isSystem": true
+      },
+      {
         "object": "sys_member",
         "where": {
           "user_id": "u_seed"

@@ -44,7 +44,7 @@ import { textMatchPredicateSql, sqlDialectFor, type AnalyticsSqlDialect } from '
 import { resolveAnalyticsDateRangeString } from '@objectstack/core';
 import { explicitDateRangeWindow } from '../date-range-array-arm.js';
 import { scopedMeasureFilter } from '../scoped-measure-key.js';
-import { declaredCubeMemberKey } from '../cube-member-key.js';
+import { declaredCubeFilterMember, declaredCubeMemberKey } from '../cube-member-key.js';
 import {
   rebucketCrossObject,
   RECOMBINABLE_METHODS,
@@ -286,16 +286,35 @@ function lookupCubeMember(
 }
 
 /**
+ * [#31880] The definition a FILTER member resolves to: the declared member it
+ * names across both bags ({@link declaredCubeFilterMember}: dimensions, then
+ * measures, the where gate's order), else — for a dotted one — the synthetic
+ * relation traversal. `NativeSQLStrategy.lookupFilterMember` is the same
+ * reading, so `CUBE.total` filters the measure's column on both strategies
+ * exactly as `total` does.
+ */
+function lookupCubeFilterMember(cube: Cube, member: string): { sql: string; type?: string } | undefined {
+  const declared = declaredCubeFilterMember(cube, member);
+  if (declared) return declared.kind === 'dimension' ? cube.dimensions[declared.key] : cube.measures[declared.key];
+  return lookupCubeMember(cube, member, 'dimension');
+}
+
+/**
  * The column `member` reads on the base object; `ObjectQLStrategy.resolveFieldName` is this function.
+ * `'any'` is a filter member's reading ({@link lookupCubeFilterMember}).
  * Module-level, and not exported from the package root, so the draft preview names the members over a
  * column with the strategy's own reading (`assertDatasetGroupColumnsDistinct`).
  */
 export function resolveCubeFieldName(cube: Cube, member: string, kind: 'dimension' | 'measure' | 'any'): string {
-  if (kind === 'dimension' || kind === 'any') {
+  if (kind === 'any') {
+    const entry = lookupCubeFilterMember(cube, member);
+    return entry ? entry.sql.replace(/^\$/, '') : member;
+  }
+  if (kind === 'dimension') {
     const dim = lookupCubeMember(cube, member, 'dimension');
     if (dim) return dim.sql.replace(/^\$/, '');
   }
-  if (kind === 'measure' || kind === 'any') {
+  if (kind === 'measure') {
     const measure = lookupCubeMember(cube, member, 'measure');
     if (measure) return measure.sql.replace(/^\$/, '');
   }
@@ -1887,9 +1906,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     baseObject: string,
     referenceOf: HopReference | undefined,
   ): { object: string; field: string } {
-    const dim = this.lookupMember(cube, member, 'dimension');
-    const measure = dim ? undefined : this.lookupMember(cube, member, 'measure');
-    const rawSql = dim?.sql ?? measure?.sql ?? (member.includes('.') ? member.split('.').slice(1).join('.') : member);
+    // [#31842] An undeclared member is the member itself, as in the native
+    // twin: a dotted one is a relationship path (and `lookupCubeFilterMember`
+    // answers every dotted one), never its tail read as a base column.
+    const rawSql = lookupCubeFilterMember(cube, member)?.sql ?? member;
     if (rawSql.includes('.')) {
       const segments = rawSql.split('.');
       const field = segments[segments.length - 1];

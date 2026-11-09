@@ -99,6 +99,18 @@
  * fixture resolves in three legs, the completion read being its own. The
  * first read itself, its bound and every other recorded read are unchanged,
  * and so is every other fixture: none comes back at the bound.
+ *
+ * ⚠️ A sixth recorded move ([ADR-0151] D3): the resolver reads the caller's
+ * own `sys_user` row on EVERY resolution, no longer only when a seed, the
+ * `ai_seat` synthesis or the platform-admin config asks for it, because the
+ * row's `principal_kind` decides whether the principal is an AI service
+ * account — which is withheld the `everyone` anchor and every administrator
+ * standing — and no caller seeds that. ONE golden moved,
+ * `seeded-permissions-and-email`, the only fixture whose seeds suppressed the
+ * read: `queries` gains `sys_user {id: 'u_seed'}`, limit 1, in wave 1 beside
+ * the other identity reads, so it still resolves in two legs. Its `grants`
+ * envelope is byte-identical, and so is every other fixture's golden: each
+ * already read the row.
  */
 
 import { readFileSync } from 'node:fs';
@@ -183,7 +195,9 @@ describe('[#10825] batched resolveUserAuthzGrants — equivalence with the seque
    *
    * ⛔ If a future leg makes the read unconditional, the golden MOVES and the
    * move is written down in the PR that makes it. It is never re-captured to
-   * agree with new output.
+   * agree with new output. [ADR-0151 D3] One did: the sixth recorded move in
+   * this file's header. The variable is still cleared, because the config
+   * anchor's own derivation must not run on an ambient value.
    */
   const ENV = 'OS_PLATFORM_OWNER_EMAIL';
   let ambientOwnerEmail: string | undefined;

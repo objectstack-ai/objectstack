@@ -5,7 +5,12 @@ import { defineConfig } from 'tsup';
 import { dropSourcesContent } from '../../scripts/tsup-drop-sources-content.mjs';
 
 export default defineConfig({
-  entry: ['src/index.ts'],
+  // `file-extraction-worker` is `read_file`'s PDF/Word extraction worker
+  // (#31828): no export points at it; the pool starts it from
+  // `new URL('./file-extraction-worker.js' | '.cjs', import.meta.url)`, so it
+  // must sit beside `index` in both formats. `splitting: false` makes each
+  // entry self-contained (the worker carries its own copy of the extractors).
+  entry: ['src/index.ts', 'src/file-extraction-worker.ts'],
   splitting: false,
   sourcemap: true,
   clean: true,

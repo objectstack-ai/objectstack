@@ -52,6 +52,7 @@
  * | `accessToken` | `'carry'`: the dispatcher and the storage download door. `'withhold'`: REST and the `/auth/me` endpoints |
  * | `oauth` | the dispatcher's `/mcp` face, which alone speaks the OAuth scope vocabulary; `undefined` elsewhere |
  * | `onAdmission` | the dispatcher, whose gate needs the credential the envelope does not carry; `undefined` elsewhere |
+ * | `transport` | [#31821] the one OPTIONAL key, for now: the transport's peer address, for the `credential_use` row an admitted API key writes. Taken by REST and the dispatcher; a door that omits it writes that row's address as `not_supplied` until it is wired. Never read for any verdict |
  *
  * ## What stays at the door
  *
@@ -78,12 +79,13 @@ import {
 } from './assemble-execution-context.js';
 import { normalizeAuthGate, userAuthGateSourceOf, type AuthGate } from './auth-gate.js';
 import { AuthzStoreUnavailableError } from './authz-store-unavailable.js';
+import type { CredentialUseClientInput } from './credential-use-client.js';
 import { resolveAuthzContext, resolveLocalizationContext, type ResolvedAuthzContext } from './resolve-authz-context.js';
 
 /** The slice of the kernel's `auth` service this composition reads. */
 export type RequestAuthService = Pick<
   IAuthService,
-  'api' | 'getApi' | 'isAuthGateActive' | 'resolveUserAuthGates' | 'resolveApiKeyLifecyclePolicy'
+  'api' | 'getApi' | 'isAuthGateActive' | 'resolveUserAuthGates' | 'resolveApiKeyLifecyclePolicy' | 'resolveClientAddress'
 >;
 
 /**
@@ -163,6 +165,49 @@ export interface RequestExecutionContextInput {
   oauth: OAuthTokenProvenance | undefined;
   /** Told which credential admitted the principal; not called for an anonymous request. */
   onAdmission: ((admission: RequestAdmission) => void) | undefined;
+  /**
+   * [#31821] The transport's own peer address (`IHttpRequest.remoteAddress`),
+   * `undefined` when the transport exposes none. The auth service establishes
+   * the client address from it and the headers under the deployment's trust
+   * rule (`IAuthService.resolveClientAddress`), for the `credential_use` row
+   * an admitted API key's use stamp writes. Never read for any verdict.
+   * Omitted: that row records the address as `not_supplied`.
+   */
+  transport?: { remoteAddress: string | undefined };
+}
+
+/** Request headers as the plain lower-cased record `IAuthService.resolveClientAddress` reads. */
+function plainHeaders(headers: Headers): Record<string, string> {
+  const out: Record<string, string> = {};
+  try {
+    headers.forEach((value, name) => {
+      out[name.toLowerCase()] = value;
+    });
+  } catch {
+    // An unreadable headers object establishes nothing from its headers.
+  }
+  return out;
+}
+
+/**
+ * [#31821] The client facts a door handed over, for the key-admission seam:
+ * the address the auth service establishes under the deployment's trust rule,
+ * or `undefined` when it establishes none, or when no auth service can apply
+ * the rule (⛔ the peer address is never taken here without the rule).
+ */
+function credentialUseClientInputOf(input: RequestExecutionContextInput): CredentialUseClientInput | undefined {
+  if (!input.transport) return undefined;
+  let address: string | undefined;
+  try {
+    const resolved = input.authService?.resolveClientAddress?.({
+      headers: plainHeaders(input.headers),
+      ...(input.transport.remoteAddress ? { remoteAddress: input.transport.remoteAddress } : {}),
+    });
+    address = typeof resolved === 'string' && resolved ? resolved : undefined;
+  } catch {
+    address = undefined;
+  }
+  return { transport: 'http', address };
 }
 
 /** `.api` (the legacy direct mount) or `getApi()` (the lazy plugin). */
@@ -259,6 +304,7 @@ export async function resolveRequestExecutionContext(
     guestEntry: input.anonymous === 'guest' ? true : undefined,
     userAuthGates: userAuthGateSourceOf(authService),
     apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService),
+    client: credentialUseClientInputOf(input),
   });
   if (authz.userId && authz.credential) {
     input.onAdmission?.({ credential: authz.credential, authGate: authz.authGate });
