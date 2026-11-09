@@ -40,6 +40,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "组织",
         help: "此授权所属的组织。"
       },
+      permission_set_package: {
+        label: "权限集所属应用",
+        help: "该权限集来自哪个应用。由平台填写；权限集是在这里创建的，或有多个应用提供同名权限集时为空。"
+      },
       granted_by: {
         label: "授权人",
         help: "授予该权限集的用户。"

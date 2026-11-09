@@ -229,6 +229,55 @@ describe('#8844 the decision — the ruling as one pure function', () => {
   });
 });
 
+describe('ObjectQL#systemWriteOrganization — the engine answers the decision its system insert makes', () => {
+  // A caller with no organization of its own (a job pull) asks this up front,
+  // so the organization its reads scope by is the one its writes are stamped
+  // with. It must be the insert's own assembly: same posture, same probe (and
+  // memo), same registry fact — and it writes nothing.
+  const probes = (observed: ObservedCall[]) => observed.filter((c) => c.object === 'sys_organization' && c.method === 'find').length;
+
+  it('single, one organization: derived — the organization a system insert is then stamped with', async () => {
+    const { engine, observed } = await makeEngine({ posture: 'single' });
+    expect(await engine.systemWriteOrganization()).toEqual({ kind: 'derived', organizationId: ORG_ID });
+    expect(observed.filter((c) => c.method !== 'find')).toEqual([]);
+
+    await engine.insert('dispatch_order', { subject: 'stamped' }, { context: SYSTEM_CTX } as any);
+    expect(lastWrite(observed, 'dispatch_order')?.options?.tenantId).toBe(ORG_ID);
+    // One probe for both: the answer and the insert share the engine's memo.
+    expect(probes(observed)).toBe(1);
+  });
+
+  it('single, several organizations: refuse (ambiguous), as the insert refuses', async () => {
+    const { engine } = await makeEngine({ posture: 'single', organizations: [ORG_ID, SECOND_ORG_ID] });
+    expect(await engine.systemWriteOrganization())
+      .toEqual({ kind: 'refuse', reason: 'ambiguous-organization', organizationCount: 2 });
+  });
+
+  it.each(['group', 'isolated'] as const)('the injected %s posture: refuse (walled), and nothing is probed', async (posture) => {
+    const { engine, observed } = await makeEngine({ posture });
+    expect(await engine.systemWriteOrganization()).toEqual({ kind: 'refuse', reason: 'walled-posture' });
+    expect(probes(observed)).toBe(0);
+  });
+
+  it('no provider injected: the posture is the deployment\'s, as on the insert', async () => {
+    vi.stubEnv('OS_TENANCY_POSTURE', 'isolated');
+    const { engine } = await makeEngine();
+    expect(await engine.systemWriteOrganization()).toEqual({ kind: 'refuse', reason: 'walled-posture' });
+  });
+
+  it('a composition with no organization object: no-organization-object', async () => {
+    const { engine } = await makeEngine({ posture: 'single', lean: true });
+    expect(await engine.systemWriteOrganization()).toEqual({ kind: 'no-organization-object' });
+  });
+
+  it('a probe that cannot run propagates — it is not answered as "no organization"', async () => {
+    const { engine } = await makeEngine({ posture: 'single' });
+    const driver = engine.getDriverForObject('dispatch_order') as any;
+    driver.find = async () => { throw new Error('connection reset'); };
+    await expect(engine.systemWriteOrganization()).rejects.toThrow('connection reset');
+  });
+});
+
 describe('#8844 single-tenant — the system write is stamped like a session write', () => {
   it('derives the install organization for a system-context insert, and a session write is unchanged', async () => {
     const { engine, observed } = await makeEngine();

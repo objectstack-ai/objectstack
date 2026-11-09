@@ -40,6 +40,22 @@ export const SysAssignmentCursor = ObjectSchema.create({
       group: 'Rule',
     }),
 
+    // [ADR-0150 D8 row R13] The package that holds the assignment rule `rule`
+    // names, beside the name (ADR-0126 §4: two facts, two columns). Backfilled
+    // at boot from the rule's one package holder
+    // (`stored-declaration-package-backfill.ts`); empty for a name no single
+    // package holds. The engine still reads and writes the cursor by name
+    // alone, so a cursor written after a boot is filled by the next one.
+    // Width: the package-id class (`sys_metadata.package_id`).
+    rule_package: Field.text({
+      label: 'Assignment Rule Package',
+      required: false,
+      readonly: true,
+      maxLength: 255,
+      description: 'The app the assignment rule comes from.',
+      group: 'Rule',
+    }),
+
     entry: Field.text({
       label: 'Entry',
       required: true,
