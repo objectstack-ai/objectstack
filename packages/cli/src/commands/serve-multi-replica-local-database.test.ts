@@ -35,6 +35,8 @@ import '@objectstack/driver-turso';
 import '@objectstack/driver-sql';
 import '@objectstack/platform-objects/plugin';
 import '@objectstack/plugin-security';
+// …and what it reaches through `start.ts` (`declaresReplicasSharingState`).
+import '@objectstack/cloud-connection';
 
 /** The remedy the refusal names, as an operator would copy it. */
 const REMEDY = 'OS_DATABASE_URL=postgres://';
