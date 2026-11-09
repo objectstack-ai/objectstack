@@ -6872,20 +6872,22 @@ async function selfTest() {
       // E5's shape (`engine-insert.ts`): other plain `./engine.js` names beside the type-only class.
       const r4Idm = r4.modules.get('engine-identity.ts') ?? '';
       const r4Run = engineRunOf(tm, 'engine-identity.ts', r4Idm, [CLASS_NAME]);
-      const r4Routed = rerouteModule(tm, 'engine-identity.ts', r4Idm);
+      const r4Refusal = refusalOf(() => rerouteModule(tm, 'engine-identity.ts', r4Idm));
+      const r4Routed = r4Refusal ? '' : rerouteModule(tm, 'engine-identity.ts', r4Idm);
       check('a module whose `./engine.js` line carries other plain names beside the type-only class is rerouted, keeping them beside the pair',
-        r4Run && r4Run.others.size > 0 && r4Run.text === unroutedEngineImport(r4Run.others) &&
-        engineLines(r4Routed) === routedEngineImports(r4Run.others) && routesStatics(r4Routed), engineLines(r4Routed));
+        !r4Refusal && r4Run && r4Run.others.size > 0 && r4Run.text === unroutedEngineImport(r4Run.others) &&
+        engineLines(r4Routed) === routedEngineImports(r4Run.others) && routesStatics(r4Routed), r4Refusal || engineLines(r4Routed));
       check('R10 undoes that reroute to the module it read, other names and all',
-        unrouteModule(tm, 'engine-identity.ts', r4Routed, () => {}) === r4Idm);
+        !r4Refusal && unrouteModule(tm, 'engine-identity.ts', r4Routed, () => {}) === r4Idm);
+      // staticReader made to read `Scoped`, which the rerouted module already imports.
+      const scopedHost = r4.host.replace('    return n + ObjectQL.SECRET + this.count + (self ? 1 : 0);', '    return n + ObjectQL.SECRET + this.count + (self ? 1 : 0) + new Scoped(0, this).n;');
+      let scopedMod = '';
+      const scopedRefusal = refusalOf(() => {
+        scopedMod = generateMembers(tm, scopedHost, r4Mods, planMembers(tm, scopedHost, r4Mods, ['staticReader'], opts)).modules.get('engine-identity.ts') ?? '';
+      });
       check('R4 of a name a routed module already imports on its `./engine.js` line needs no edit there',
-        (() => {
-          // staticReader made to read `Scoped`, which the rerouted module already imports.
-          const host = r4.host.replace('    return n + ObjectQL.SECRET + this.count + (self ? 1 : 0);', '    return n + ObjectQL.SECRET + this.count + (self ? 1 : 0) + new Scoped(0, this).n;');
-          const out = generateMembers(tm, host, r4Mods, planMembers(tm, host, r4Mods, ['staticReader'], opts));
-          const mod = out.modules.get('engine-identity.ts') ?? '';
-          return host !== r4.host && mod.includes('new Scoped(0, this.facade).n') && engineLines(mod) === routedEngineImports(r4Run.others);
-        })());
+        !scopedRefusal && scopedHost !== r4.host && scopedMod.includes('new Scoped(0, this.facade).n') && engineLines(scopedMod) === routedEngineImports(r4Run.others),
+        scopedRefusal || engineLines(scopedMod));
       check('a module whose `./engine.js` import is not as the first pass writes it refuses the route',
         /not the one/.test(refusalOf(() => planMembers(tm, input, new Map([...mods, ['engine-identity.ts', baseIdm.replace(unroutedEngineImport(), unroutedEngineImport().replace('{ ', '{'))]]), ['staticReader'], opts))));
     }
