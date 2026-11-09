@@ -19,6 +19,17 @@
  * naming the queue (any of the five set-valued kinds), whichever source the
  * queue has.
  *
+ * ## One declared holder per name (ADR-0150 D3/D4, child E4)
+ *
+ * A queue is addressed by `(package, name)` (ADR-0150 D1 bucket 2): two
+ * packages may each declare a queue of one name. Every read of a declared
+ * queue by name — resolution, the activation door's lookup, the active set
+ * the session flag, the look-through and the user's queues read — goes
+ * through `package-scoped-declarations.ts` (objectql's shared resolver), so a
+ * name two packages declare is refused, naming both, and reported once; it is
+ * never answered as the first (or, as `queuesOf` once did, the last) holder
+ * listed. It stays a declared name: no `sys_queue` row may take it.
+ *
  * ## One expander
  *
  * {@link OwnershipQueueService.expandMembers} is the function the access path,
@@ -86,6 +97,13 @@ import type { SharingEngine } from './sharing-service.js';
 import { TeamGraphService, readMembershipToCompletion, teamHasMember } from './team-graph.js';
 import { PositionGraphService } from './position-graph.js';
 import { BusinessUnitGraphService } from './business-unit-graph.js';
+import {
+  PackageScopedNameRefusedError,
+  reportRefusedDeclaration,
+  resolveDeclaredName,
+  servedDeclarations,
+  type DeclaredNameAnswer,
+} from './package-scoped-declarations.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
@@ -211,6 +229,8 @@ export class OwnershipQueueService implements IOwnershipQueueService {
   private readonly engine: () => OwnershipQueueEngine | null | undefined;
   private readonly logger?: OptionalSharingLogger;
   private readonly warned = new Set<string>();
+  /** [ADR-0150, child E4] Declared queue names already reported as held by two or more packages. */
+  private readonly refusedReported = new Set<string>();
 
   constructor(options: OwnershipQueueServiceOptions) {
     this.engine = options.engine;
@@ -232,7 +252,16 @@ export class OwnershipQueueService implements IOwnershipQueueService {
   private async resolve(name: string, organizationId: string | null, refuse: boolean): Promise<ResolvedQueue | null> {
     const engine = this.engine();
     if (!engine || !name) return null;
-    const declared = await this.declaredQueueItem(name);
+    const answer = this.declaredQueueAnswer(name);
+    if (answer.status === 'refused') {
+      // [ADR-0150 D3, child E4] Two packages declare this name: it is neither
+      // of them, and — a declared name — never an authored row either. Under
+      // 'refuse' the caller is told so, naming every holder; otherwise it
+      // resolves nowhere, which for every 'nobody' consumer denies.
+      if (refuse) throw new PackageScopedNameRefusedError(answer.refusal);
+      return null;
+    }
+    const declared = answer.status === 'resolved' ? await this.switchedOnDeclared(answer.item) : null;
     if (declared) {
       const authoredMembers = await this.authoredMemberSpecs(engine, [name], organizationId, refuse);
       return {
@@ -248,7 +277,7 @@ export class OwnershipQueueService implements IOwnershipQueueService {
     }
     // A declared name switched off in the ledger resolves nowhere — not even to
     // an authored row, which may not take a declared queue's name.
-    if (this.declaredItems().some((q) => q.name === name)) return null;
+    if (answer.status === 'resolved') return null;
     const row = await this.authoredQueueRow(engine, name, organizationId, refuse);
     if (!row) return null;
     const authoredMembers = await this.authoredMemberSpecs(engine, [name], organizationId, refuse);
@@ -274,7 +303,7 @@ export class OwnershipQueueService implements IOwnershipQueueService {
     } catch (err) {
       // Only a call under 'refuse' gets here: under 'nobody' every read
       // behind the queue answers nobody in place (module header).
-      if (!pass.refuse) throw err;
+      if (!pass.refuse || err instanceof PackageScopedNameRefusedError) throw err;
       throw queueReadRefusal(name, organizationId, err);
     }
   }
@@ -292,7 +321,7 @@ export class OwnershipQueueService implements IOwnershipQueueService {
       if (!queue) return false;
       return await this.specsReachUser(queue.members, userId, organizationId, pass);
     } catch (err) {
-      if (!pass.refuse) throw err;
+      if (!pass.refuse || err instanceof PackageScopedNameRefusedError) throw err;
       throw queueReadRefusal(name, organizationId, err);
     }
   }
@@ -347,17 +376,33 @@ export class OwnershipQueueService implements IOwnershipQueueService {
    * could never switch it back on. {@link resolveQueue} reads the ledger.
    */
   async declaredQueueNamed(name: string): Promise<{ name: string; packageId?: string } | null> {
-    const item = this.declaredItems().find((q) => q.name === name);
-    if (!item) return null;
+    const answer = this.declaredQueueAnswer(name);
+    // [ADR-0150 D3, child E4] A name two packages declare names one queue of
+    // neither: the door refuses (409, every holder named) rather than switch
+    // the first one listed.
+    if (answer.status === 'refused') throw new PackageScopedNameRefusedError(answer.refusal);
+    if (answer.status === 'not-found') return null;
+    const item = answer.item;
     const packageId = str(item._packageId ?? item.packageId);
     return { name: item.name, ...(packageId ? { packageId } : {}) };
   }
 
-  private async declaredQueueItem(name: string): Promise<DeclaredQueueItem | null> {
-    const item = this.declaredItems().find((q) => q.name === name);
-    if (!item) return null;
-    const off = await this.switchedOff(QUEUE_ACTIVATION_TYPE, [name]);
-    return off.has(name) ? null : item;
+  /**
+   * [ADR-0150 D3/D4, child E4] The declared queue a bare `name` addresses —
+   * one holder's, `not-found`, or the shared resolver's refusal naming every
+   * package that declares it (`package-scoped-declarations.ts`). Switched on
+   * or off: the ledger is read by the caller. A refusal is reported once.
+   */
+  private declaredQueueAnswer(name: string): DeclaredNameAnswer<DeclaredQueueItem> {
+    const answer = resolveDeclaredName(this.engine()?.registry, 'queue', name, this.declaredItems());
+    if (answer.status === 'refused') reportRefusedDeclaration(this.logger, this.refusedReported, answer.refusal);
+    return answer;
+  }
+
+  /** `item`, unless the activation ledger switches its name off. */
+  private async switchedOnDeclared(item: DeclaredQueueItem): Promise<DeclaredQueueItem | null> {
+    const off = await this.switchedOff(QUEUE_ACTIVATION_TYPE, [item.name]);
+    return off.has(item.name) ? null : item;
   }
 
   /** Is `name` a declared queue's name, switched on or off? The authored-row guard's question. */
@@ -546,8 +591,15 @@ export class OwnershipQueueService implements IOwnershipQueueService {
     return items.filter((q): q is DeclaredQueueItem => isRecord(q) && typeof q.name === 'string' && q.name !== '');
   }
 
+  /**
+   * Every declared queue switched on, one per name (ADR-0150 D3/D4, child E4):
+   * a name two packages declare is refused and serves neither — never the
+   * first or the last one listed.
+   */
   private async activeDeclaredQueues(): Promise<DeclaredQueueItem[]> {
-    const items = this.declaredItems();
+    const items = servedDeclarations(this.engine()?.registry, 'queue', this.declaredItems(), (refusal) =>
+      reportRefusedDeclaration(this.logger, this.refusedReported, refusal),
+    );
     if (items.length === 0) return [];
     const off = await this.switchedOff(QUEUE_ACTIVATION_TYPE, items.map((q) => q.name));
     return items.filter((q) => !off.has(q.name));

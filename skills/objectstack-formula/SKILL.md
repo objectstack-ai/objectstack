@@ -22,8 +22,7 @@ metadata:
 
 ObjectStack has **one** expression language across every domain that needs
 computation or boolean predicates: **CEL** (Google Common Expression
-Language). This skill is the canonical reference for AI authors emitting
-formula / condition / predicate / dynamic-seed metadata.
+Language).
 
 > **Predicates / formulas are bare CEL — never wrap field references in `{…}`
 > braces.** The #1 authoring mistake is a condition like
@@ -230,11 +229,15 @@ If you need a helper that doesn't exist, prefer adding it to the stdlib
 
 ## Mandatory patterns for AI emission
 
+The ❌ blocks are wrong on purpose, so `check:skill-examples` skips them.
+
 ### 1. Computed text formula — always coalesce nullable operands
 
 ✅ **Correct**
 
+<!-- os:check -->
 ```ts
+import { F } from '@objectstack/spec';
 F`coalesce(record.salutation, '') + ' '
   + coalesce(record.first_name, '') + ' '
   + coalesce(record.last_name, '')`
@@ -250,7 +253,9 @@ F`record.salutation + ' ' + record.first_name + ' ' + record.last_name`
 
 ✅
 
+<!-- os:check -->
 ```ts
+import { F } from '@objectstack/spec';
 F`coalesce(record.cost, 0) > 0
   ? ((coalesce(record.revenue, 0) - record.cost) * 100) / record.cost
   : 0.0`
@@ -269,9 +274,8 @@ P`record.amount != null && record.amount > 10000 && record.region in ['us', 'eu'
 P`!isBlank(record.po_number)`;
 ```
 
-For field-level conditional rules, emit the canonical field properties:
-`visibleWhen`, `readonlyWhen`, and `requiredWhen`. Never emit
-`conditionalRequired` — it was REMOVED in protocol 17 and is a parse error.
+Never emit `conditionalRequired` (use `requiredWhen`) — it was REMOVED in
+protocol 17 and is a parse error.
 
 ❌ Salesforce-flavor — **fails CEL compile**: `os build` errors with a
 located message, and the flow engine throws if it ever reaches runtime:
@@ -286,8 +290,10 @@ located message, and the flow engine throws if it ever reaches runtime:
 
 ✅
 
+<!-- os:check -->
 ```ts
-{ close_date: cel`daysFromNow(45)`, created_at: cel`now()` }
+import { cel } from '@objectstack/spec';
+const seed = { close_date: cel`daysFromNow(45)`, created_at: cel`now()` };
 ```
 
 ❌ Compile-time evaluation — every customer gets the package author's clock:
@@ -306,12 +312,11 @@ so they are safe inside one.
 
 ✅
 
+<!-- os:check -->
 ```ts
+import { P } from '@objectstack/spec';
 P`previous.status != 'escalated' && record.status == 'escalated'`
 ```
-
-ISCHANGED-style logic does not exist as a function; use explicit `previous`
-comparison.
 
 `record` is the record's **state**, not this write's diff: stored row ⊕
 payload, so `record.status == 'escalated'` is true on *every* update of an
@@ -342,7 +347,9 @@ the condition is evaluated before any handler runs).
 Write it once, on a `before*` or an `after*` event, and it means the same thing
 whether the write carries an id or a predicate:
 
+<!-- os:check -->
 ```ts
+import { P } from '@objectstack/spec';
 // Fires once per row that ACTUALLY transitioned — on `update(id)` and on
 // `update({multi: true})` alike.
 P`previous.status != 'done' && record.status == 'done'`

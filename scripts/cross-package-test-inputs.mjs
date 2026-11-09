@@ -1409,7 +1409,15 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // discrimination tests degrade are its fixtures, and scenario-cards.test.ts
     // holds each control card's `expect` equal to what that corpus derives, so
     // a corpus edit moves this suite's verdict.
-    globs: ['docs/qa/scenarios/*.json', 'docs/qa/platform-checklist/areas/*.json', 'packages/cli/src/lint/corpus.ts'],
+    //
+    // test/score/entry.test.ts reads ADR-0150 D1's bucket-1 and position rows,
+    // the table the bare-name check restates, so an edit to that table does too.
+    globs: [
+      'docs/qa/scenarios/*.json',
+      'docs/qa/platform-checklist/areas/*.json',
+      'packages/cli/src/lint/corpus.ts',
+      'docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md',
+    ],
     heldBy: {
       // The areas directory is listed (`readdirSync`) and its basenames taken,
       // so the roster holds the directory and no `*.json` name under it.

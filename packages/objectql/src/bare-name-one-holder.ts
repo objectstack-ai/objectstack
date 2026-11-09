@@ -11,7 +11,8 @@
  * under #30803: the data family first, then the request family (`api`, the
  * object-less `action`, the engine's function registry), then the flow family
  * (`flow`, `webhook`, `connector`, `email_template`), and last the AI family
- * (`agent`, `skill`), which closes the series.
+ * (`agent`, `skill`), which closed the series. `tool` joined after it, in its
+ * own change under #31414, once its readers were measured.
  *
  * ## The rule
  *
@@ -60,7 +61,12 @@
  *  - `skill` — an MCP client's `prompts/get` of a skill keeps the
  *    FIRST-registered package's skill (`listSkillPrompts` keeps the first
  *    row per name and drops the other), and `/meta/skill/NAME` serves the
- *    same one.
+ *    same one;
+ *  - `tool` — `/meta/tool/NAME` serves the FIRST-registered package's tool,
+ *    and every reference to a tool carries its bare name alone: a skill's
+ *    `tools` list admits only a snake_case name, an AI tool definition and a
+ *    tool call carry a name and no package, and an MCP server registers one
+ *    tool per name.
  *
  * Every one of them flips with registration order, and none says so (the
  * object-less action's handler bind warns that it replaces one, and names
@@ -154,7 +160,7 @@ export type BareNameRegistryType =
   | 'picklist' | 'mapping' | 'dataset'
   | 'api' | 'action'
   | 'flow' | 'webhook' | 'connector' | 'email_template'
-  | 'agent' | 'skill';
+  | 'agent' | 'skill' | 'tool';
 
 /**
  * A covered type: a registry type, or `function` — the engine's function
@@ -183,6 +189,8 @@ export const BARE_NAME_ONE_HOLDER_TYPES: readonly BareNameOneHolderType[] = Obje
   // the AI family
   'agent',
   'skill',
+  // joined after the AI family, in its own change
+  'tool',
 ]);
 
 /** The covered registry types, in the order a refusal lists them. */
@@ -227,6 +235,7 @@ const COLLECTION_KEY: Readonly<Record<BareNameRegistryType, string>> = Object.fr
   email_template: 'emailTemplates',
   agent: 'agents',
   skill: 'skills',
+  tool: 'tools',
 });
 
 /**
@@ -248,6 +257,7 @@ export const BUILT_IN_BARE_NAMES: Readonly<Record<BareNameOneHolderType, Readonl
   email_template: new Set<string>(),
   agent: new Set<string>(),
   skill: new Set<string>(),
+  tool: new Set<string>(),
 });
 
 /**
@@ -277,6 +287,7 @@ export const OVERRIDABLE_BASELINE_PACKAGES: Readonly<Record<BareNameOneHolderTyp
   email_template: new Set<string>(['com.objectstack.service.email']),
   agent: new Set<string>(),
   skill: new Set<string>(),
+  tool: new Set<string>(),
 });
 
 /**
@@ -403,6 +414,7 @@ const CONSUMER_CLAUSE: Readonly<Record<BareNameOneHolderType, string>> = Object.
   email_template: 'a send names its email template',
   agent: '`/meta/agent/NAME` serves one agent per name',
   skill: 'an MCP client fetches a skill\'s prompt by its name',
+  tool: 'a skill\'s `tools` and an MCP client name a tool',
 });
 
 /** The noun a reason names a covered type by. */
@@ -419,6 +431,7 @@ const TYPE_NOUN: Readonly<Record<BareNameOneHolderType, string>> = Object.freeze
   email_template: 'an email template',
   agent: 'an agent',
   skill: 'a skill',
+  tool: 'a tool',
 });
 
 const joinList = (parts: readonly string[]): string =>
