@@ -189,7 +189,9 @@ import { findConnectorUrlCredentials, type ConnectorUrlCredential } from './conn
 // registry; and no engine ran a strategy, a direction, a batch, a watermark, a
 // conflict policy or a delete policy. The defaults read as configured policy
 // and did nothing: `latest_wins` resolved no conflict, and `soft_delete` named
-// a mode the platform does not have — every delete is a hard delete.
+// a delete mode no sync engine ran. (The recycle bin that shipped later,
+// ADR-0148, keeps a by-id delete of a business object restorable; it is not a
+// sync delete policy, and a platform object's delete is still permanent.)
 //
 // The capability is mainstream, so it was ruled ENFORCE rather than RETIRE —
 // but not on the connector. Every mainstream platform binds a sync definition

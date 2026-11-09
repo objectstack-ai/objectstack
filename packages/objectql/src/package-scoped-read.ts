@@ -50,7 +50,7 @@
  * `@objectstack/metadata-core`.
  */
 
-import type { PackageScopedRefusal } from '@objectstack/core';
+import { PackageScopedNameRefusedError } from '@objectstack/core';
 import {
   resolvePackageScopedName,
   type PackageScopedQuery,
@@ -83,28 +83,12 @@ export function isPackageScopedReadType(type: unknown): type is PackageScopedRea
 }
 
 /**
- * A by-name read the package-scoped resolver refused (ADR-0150 D3): the name
- * means more than one item here, or only items the caller may not reach. The
- * message is the resolver's own sentence, which names every candidate.
- *
- * The ADR-0112 envelope a wire door answers: `409 RESOURCE_CONFLICT`, the
- * standard catalog's member for a name in conflict, which ADR-0150 D5 gives a
- * by-name door's ambiguity. ⛔ Never the `500` fallback, and never `404`.
+ * The refusal a by-name read throws: `@objectstack/core`'s one class (ADR-0150
+ * D5, `409 RESOURCE_CONFLICT`), re-exported under its own name so every
+ * existing import keeps resolving — the same binding plugin-sharing's doors
+ * throw, so one `instanceof` matches both.
  */
-export class PackageScopedNameRefusedError extends Error {
-  readonly code = 'RESOURCE_CONFLICT';
-  readonly status = 409;
-  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads. */
-  readonly httpStatus = 409;
-  /** The resolver's refusal: the reason, the caller's package and every candidate. */
-  readonly refusal: PackageScopedRefusal;
-
-  constructor(refusal: PackageScopedRefusal) {
-    super(refusal.message);
-    this.name = 'PackageScopedNameRefusedError';
-    this.refusal = refusal;
-  }
-}
+export { PackageScopedNameRefusedError };
 
 /**
  * Read `(type, name)` for a caller through {@link resolvePackageScopedName}:

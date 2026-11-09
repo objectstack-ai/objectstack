@@ -25,7 +25,8 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { SchemaRegistry } from '@objectstack/objectql';
+import { SchemaRegistry, PackageScopedNameRefusedError as ObjectQLPackageScopedNameRefusedError } from '@objectstack/objectql';
+import { PackageScopedNameRefusedError as CorePackageScopedNameRefusedError } from '@objectstack/core';
 import { createDeclaredSharingRuleSource } from './declared-sharing-rules.js';
 import { SharingRuleService, bindDeclaredRuleNameGuard } from './sharing-rule-service.js';
 import { OwnershipQueueService } from './ownership-queue-service.js';
@@ -536,5 +537,37 @@ describe('a queue read from a caller package resolves by D3 (ADR-0150, the queue
     const { queues } = queueService();
     expect(await queues.queuesNaming('position', new Set(['beta_agent']), 'org_a')).toEqual(['support']);
     expect(await queues.queuesNaming('position', new Set(['gamma_agent']), 'org_a')).toEqual(['support']);
+  });
+});
+
+describe('one refusal class: objectql\'s readers and this plugin\'s doors throw the same class (#31852)', () => {
+  it('this plugin re-exports @objectstack/core\'s class, the same binding objectql exports', () => {
+    expect(PackageScopedNameRefusedError).toBe(CorePackageScopedNameRefusedError);
+    expect(ObjectQLPackageScopedNameRefusedError).toBe(CorePackageScopedNameRefusedError);
+  });
+
+  it('a refusal thrown by objectql\'s by-name reader is instanceof the class this plugin exports', () => {
+    registry.registerItem<Row>('app', { name: 'home', label: 'alpha home' }, 'name', ALPHA);
+    registry.registerItem<Row>('app', { name: 'home', label: 'beta home' }, 'name', BETA);
+    const refused = (() => {
+      try {
+        registry.getApp('home');
+      } catch (err) {
+        return err;
+      }
+      return undefined;
+    })();
+    expect(refused).toBeInstanceOf(PackageScopedNameRefusedError);
+    expect(refused).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+  });
+
+  it('a refusal thrown by this plugin\'s by-name door is instanceof the class objectql exports', async () => {
+    declare('sharing_rule', ALPHA, sharingRule('emea_share', 'alpha_agent'));
+    declare('sharing_rule', BETA, sharingRule('emea_share', 'beta_agent'));
+    const source = createDeclaredSharingRuleSource({ engine: { registry } });
+    const rules = new SharingRuleService({ engine: makeEngine() as any, sharing: {} as any, declaredRules: source, logger: { warn: () => {} } });
+    const refused = await rules.declaredRuleNamed('emea_share').catch((e: unknown) => e);
+    expect(refused).toBeInstanceOf(ObjectQLPackageScopedNameRefusedError);
+    expect(refused).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
   });
 });

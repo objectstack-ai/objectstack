@@ -243,3 +243,63 @@ describe('the API arm is closed', () => {
     expect(issuesAt(r, 'read').map((i) => i.code)).toEqual(['invalid_type']);
   });
 });
+
+// [#31840] The same-origin rule moved into `./same-origin-api-read.ts`, which an
+// action's `preflight` read imports too. The card's ruling: "The page
+// element's accept set and its messages stay byte-identical (pin it)." The
+// battery above holds the accept set class by class; this block holds the
+// messages WHOLE, as they read before the move, and the published `pattern`.
+// The texts below are copied from `page.zod.ts` at the commit before the move
+// (origin/main cc16008a), so a later edit to the shared module that changes
+// what a page author reads goes red here, not silently.
+describe('the move into the shared same-origin module leaves the page element byte-identical', () => {
+  const OPENING = '`read.url` of an `api` data source must be a same-origin API path — one that '
+    + 'opens with a single `/`, such as `/api/v1/cloud/home`. ';
+  const CLOSING = ' Write the endpoint\'s path on this deployment\'s own origin. The console reads it '
+    + 'with its own signed-in fetch, so a host, a scheme or a credential is never written in metadata.';
+  const WHY: ReadonlyArray<readonly [url: string, why: string]> = [
+    ['/api/a b', 'This value holds a space or an ASCII control character. The browser\'s URL parser deletes a '
+      + 'tab, line feed or carriage return wherever it stands and strips spaces and control characters '
+      + 'from both ends before it reads the URL, so what it fetches is not what was written: a slash, a '
+      + 'tab and then `/host` is read as `//host`, another origin. Percent-encode a space the path '
+      + 'really needs (`%20`).'],
+    ['https://evil.example/api', 'This value is an absolute URL: it opens with a scheme (`https:`, `http:`, `mailto:`, '
+      + '`javascript:`, `data:`, …), so it names an origin of its own.'],
+    ['//evil.example/api', 'This value opens with `//`, a protocol-relative URL: the browser reads what follows as a host '
+      + 'name, so it is another origin.'],
+    ['/\\evil.example/api', 'This value puts a backslash where the browser\'s URL parser reads a slash, so it is read as '
+      + '`//host`, another origin.'],
+    ['./home', 'This value does not open with `/`, so it is a relative path: it resolves against the page\'s '
+      + 'own address, never the API.'],
+  ];
+
+  it.each(WHY.map(([url, why]) => [url, why]))('refuses %j with the message it carried before the move', (url, why) => {
+    const at = issuesAt(apiComponent({ url }), 'dataSource.read.url');
+    expect(at.map((i) => i.message)).toEqual([OPENING + why + CLOSING]);
+  });
+
+  it('the `path` refusal, the method refusal and the credential guidance read as before', () => {
+    expect(issuesAt(apiComponent({ url: '/api/x' }, { path: '$.data' }), 'dataSource.path').map((i) => i.message)).toEqual([
+      '`path` of an `api` data source is a dotted path into the response, '
+        + 'such as `data.environments`: segments of letters, digits, `_` or `-` joined by single dots — '
+        + 'no brackets, no leading `$`, no slashes.',
+    ]);
+    expect(issuesAt(apiComponent({ url: '/api/x', method: 'POST' }), 'dataSource.read.method').map((i) => i.message)).toEqual([
+      'The read of an `api` data source is sent as `GET`: the console issues every read with '
+        + '`GET`, whatever the request declares, so no other method is honoured. Omit `method` or write `\'GET\'`.',
+    ]);
+    const credential = issuesAt(apiComponent({ url: '/api/x', token: 't' }), 'dataSource.read');
+    expect(credential.find((i) => i.code === 'unrecognized_keys')!.message).toContain(
+      'No credential is written in metadata: the console reads the endpoint with its own signed-in '
+        + 'fetch, so the request already carries the user\'s session. Delete this key.',
+    );
+  });
+
+  it('the published `pattern` is the rule\'s source as it was declared in `page.zod.ts`', () => {
+    const json = z.toJSONSchema(ElementApiDataSourceSchema) as unknown as {
+      properties: { read: { properties: { url: { pattern: string } } }; path: { pattern: string } };
+    };
+    expect(json.properties.read.properties.url.pattern).toBe(String.raw`^\/(?:[^/\\\x00-\x20\x7F][^\x00-\x20\x7F]*)?$`);
+    expect(json.properties.path.pattern).toBe(String.raw`^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$`);
+  });
+});

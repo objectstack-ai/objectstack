@@ -472,6 +472,37 @@ export function packageScopedRefusalMessage(refusal: Omit<PackageScopedRefusal, 
   }
 }
 
+/**
+ * A by-name read the package-scoped rule refused (ADR-0150 D3): the name means
+ * more than one item here, or only items the caller may not reach. The message
+ * is the refusal's own sentence ({@link packageScopedRefusalMessage}), which
+ * names every candidate.
+ *
+ * The ONE class every package-scoped by-name door throws — objectql's readers
+ * and plugin-sharing's declared-name doors alike re-export this binding, so a
+ * catcher matches every one of them with a single `instanceof`. It lives here,
+ * beside the refusal it carries, because this is the lowest package all of
+ * them read.
+ *
+ * The ADR-0112 envelope a wire door answers: `409 RESOURCE_CONFLICT`, the
+ * standard catalog's member for a name in conflict, which ADR-0150 D5 gives a
+ * by-name door's ambiguity. ⛔ Never the `500` fallback, and never `404`.
+ */
+export class PackageScopedNameRefusedError extends Error {
+  readonly code = 'RESOURCE_CONFLICT';
+  readonly status = 409;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads. */
+  readonly httpStatus = 409;
+  /** The refusal: the reason, the caller's package and every candidate. */
+  readonly refusal: PackageScopedRefusal;
+
+  constructor(refusal: PackageScopedRefusal) {
+    super(refusal.message);
+    this.name = 'PackageScopedNameRefusedError';
+    this.refusal = refusal;
+  }
+}
+
 function refuse(
   query: PackageScopedHoldersQuery,
   callerPackageId: string | null,
