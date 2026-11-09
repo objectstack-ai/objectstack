@@ -2867,15 +2867,6 @@ export class AutomationEngine implements IAutomationService {
      * {@link flowVersionHistory}, or a pinned body read back on resume.
      */
     private readonly flowChecksums = new WeakMap<FlowParsed, string>();
-    /**
-     * [ADR-0150 D3] The package whose own body each registered body IS: set
-     * only for a body the caller armed as the loader's (`armedFrom.source ===
-     * 'package'`, {@link registerFlow}), to the package the loader's set names
-     * for it. Keyed by the parsed object the engine executes, as
-     * {@link flowChecksums} is, so a rollback to another version answers for
-     * that version's body. See {@link armedFlowPackage}.
-     */
-    private readonly packageBodies = new WeakMap<FlowParsed, string>();
     /** [#28405] Where a pinned body is read back by its identity — see {@link setFlowHistorySource}. */
     private flowHistorySource?: FlowHistorySource;
     private nodeExecutors = new Map<string, NodeExecutor>();
@@ -4565,16 +4556,7 @@ export class AutomationEngine implements IAutomationService {
         return canonicalizeFlow.call(host, name, definition, options);
     }
 
-    /**
-     * @param options.armedFrom what the caller's ADR-0005/ADR-0126 precedence
-     *   decided this body is (`resolveFlowPrecedence`'s winner). Only
-     *   `'package'` — the loader's own body for a name the loader's set holds —
-     *   makes the body its package's ({@link armedFlowPackage}); a declared
-     *   override, a stored or runtime row, and a registration that says
-     *   nothing (an authoring door, a rollback, a direct caller) are no
-     *   package's.
-     */
-    registerFlow(name: string, definition: unknown, options: { armedFrom?: FlowContender } = {}): FlowParsed {
+    registerFlow(name: string, definition: unknown): FlowParsed {
         // One canonicalization policy, shared with the stored-row migration so
         // the two can never disagree about what "canonical" means (#4454).
         // Execution takes the parsed shape (schema defaults materialized).
@@ -4619,11 +4601,6 @@ export class AutomationEngine implements IAutomationService {
         // history keys this version by. See {@link SuspendedRun.flowChecksum}.
         const checksum = flowContentChecksum(definition);
         if (checksum !== undefined) this.flowChecksums.set(parsed, checksum);
-        // [ADR-0150 D3] Whose body this is, from what the caller's precedence
-        // decided — never from the body's own `_packageId`, which a stored row
-        // carries too. See {@link armedFlowPackage}.
-        const loaderOwner = options.armedFrom?.source === 'package' ? this.packagedFlowOwner(name) : undefined;
-        if (loaderOwner !== undefined) this.packageBodies.set(parsed, loaderOwner);
         this.flows.set(name, parsed);
         // [#23316] Held now, so no longer refused — see {@link flowRefusals}.
         this.flowRefusals.delete(name);
@@ -4998,29 +4975,6 @@ export class AutomationEngine implements IAutomationService {
     packagedFlowOwner(name: string): string | undefined {
         const owner = this.packagedFlowSource?.(name);
         return typeof owner === 'string' && owner !== '' ? owner : undefined;
-    }
-
-    /**
-     * [ADR-0150 D3] The package the body ARMED for `name` belongs to: the
-     * package the loader's set names, when the body the engine runs for the
-     * name is that package's own (registered as the precedence's `'package'`
-     * winner); `undefined` for every other body — a declared `.custom`
-     * override (ADR-0146 D9), a stored or runtime-authored row, a body an
-     * authoring door or a direct caller registered — and for a name the
-     * engine holds nothing under.
-     *
-     * The package a reference written in a flow's body is read from. ADR-0150
-     * D3: a reference in an environment-authored overlay is the environment's
-     * and resolves as a caller with no package, never from the package the
-     * overlay customizes — so this differs from {@link packagedFlowOwner}
-     * (which classifies the NAME) exactly when an override of a packaged flow
-     * is armed. ⛔ Never the armed body's `_packageId`: the boot hydration
-     * stamps a stored row with its package too.
-     */
-    armedFlowPackage(name: string): string | undefined {
-        const body = this.flows.get(name);
-        const owner = body ? this.packageBodies.get(body) : undefined;
-        return owner !== undefined && this.packagedFlowOwner(name) === owner ? owner : undefined;
     }
 
     /** [#20761] Is `name` a packaged flow — {@link packagedFlowOwner}, as a verdict. */

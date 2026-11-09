@@ -111,15 +111,6 @@ export interface FlowPrecedenceWinner {
     definition: unknown;
     /** Present only when this name had more than one contender. */
     shadowing?: FlowShadowingRecord;
-    /**
-     * [ADR-0150 D3] What the winner is — the classification the receipt's
-     * `armed` records — for a name with more than one contender. A name with
-     * one is not classified here (precedence decides nothing there, and asks
-     * the loader's set nothing): ask {@link describeArmedFlowContender}. The
-     * caller hands the answer to `AutomationEngine.registerFlow`, so the engine
-     * knows whose body it runs (`armedFlowPackage`).
-     */
-    armedFrom?: FlowContender;
 }
 
 /**
@@ -177,47 +168,6 @@ function classifyContender(item: unknown, owner: string | undefined, installed: 
         source: 'runtime',
         ...(typeof packageId === 'string' && packageId ? { packageId } : {}),
     };
-}
-
-/**
- * [ADR-0150 D3] What a name's ONLY contender is — the body
- * {@link resolveFlowPrecedence} arms for an uncontested name, which it does
- * not classify — for `AutomationEngine.registerFlow`'s `armedFrom`. Asks the
- * loader's set once, for that name. See {@link armedContender}.
- */
-export function describeArmedFlowContender(
-    item: unknown,
-    packagedFlowOwner: PackagedFlowSource | undefined,
-    installed: InstalledManifestLookup,
-): FlowContender {
-    const owner = loaderSetOwner(packagedFlowOwner, (item as { name?: unknown } | null | undefined)?.name);
-    return armedContender(item, classifyContender(item, owner, installed), owner, installed);
-}
-
-/**
- * [ADR-0150 D3] What a name's ONLY contender is, for its winner's `armedFrom`:
- * {@link classifyContender}'s answer, except that a body the protocol's view
- * serves in the shipping package's slot as that package's declared override
- * is the `override` it is.
- *
- * The view serves the override (ADR-0146 D9 item 1) as one entry in place of
- * the loader's body, with the package's envelope on it — measured on a real
- * kernel: `_packageId` the base, `_provenance: 'package'` — and the stored
- * row's binding ({@link storedRowBindingOf}) does not travel on that copy, so
- * the classification reads it as the loader's body. What the copy keeps is
- * its own declaration, `overrides.package` = the owner: the view serves a body
- * in the owner's slot only after the one served-override predicate admitted
- * its row by the row's column, and the loader's own body declares no override
- * of its own package. ⛔ Only this narrows: a body that does not declare it
- * stays as classified. Two or more contenders are judged on the registry's
- * entries, which keep their binding, by the precedence below.
- */
-function armedContender(item: unknown, contender: FlowContender, owner: string | undefined, installed: InstalledManifestLookup): FlowContender {
-    if (contender.source !== 'package' || owner === undefined) return contender;
-    const declared = (item as { overrides?: { package?: unknown } } | null | undefined)?.overrides?.package;
-    if (declared !== owner) return contender;
-    const pair = pairOf(owner, installed);
-    return { source: 'override', ...(pair.ok ? { packageId: pair.value } : {}) };
 }
 
 /**
@@ -441,7 +391,7 @@ export function resolveFlowPrecedence(
         const overrideOverOwnBase = armed.contender.source === 'override'
             && shadowed.every((contender) => contender.source === 'package' && contender.packageId === owner);
         if (overrideOverOwnBase) {
-            winners.push({ name, definition: armed.definition, armedFrom: armed.contender });
+            winners.push({ name, definition: armed.definition });
             continue;
         }
         // [#20913] Say WHY this one is armed, per case — the cases are
@@ -500,7 +450,6 @@ export function resolveFlowPrecedence(
             name,
             definition: armed.definition,
             shadowing: { name, armed: armed.contender, shadowed },
-            armedFrom: armed.contender,
         });
     }
     return winners;
