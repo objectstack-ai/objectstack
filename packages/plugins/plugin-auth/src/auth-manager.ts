@@ -4795,6 +4795,23 @@ export class AuthManager {
           if (this.config.logger) this.audienceLogError(message, meta);
           else console.error(message, meta);
         },
+        // [#31796] A `skip_consent` client has no consent row to stamp, so its
+        // use reaches the compliance ledger here instead, under the same
+        // throttle (`mcp-client-last-use.ts`, module note). No audit plugin ⇒
+        // no row, as for every other auth event.
+        onConsentlessUse: async (use) => {
+          const sink = this.config.getAuditSink?.();
+          if (!sink || typeof sink.recordCredentialUse !== 'function') return;
+          await sink.recordCredentialUse({
+            kind: 'oauth_access_token',
+            objectName: 'sys_oauth_application',
+            credentialId: use.applicationId,
+            userId: use.userId,
+            clientId: use.clientId,
+            ...(use.organizationId ? { organizationId: use.organizationId } : {}),
+            usedAt: use.hour.toISOString(),
+          });
+        },
       },
     ));
     runAfterResponse(
