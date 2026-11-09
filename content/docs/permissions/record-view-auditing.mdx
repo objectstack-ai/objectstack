@@ -166,8 +166,12 @@ should read this as "record-detail views", not "reads".
 | `actor` | The principal label, falling back to `user_id` (stamped only where the column exists) |
 | `object_name` | The object whose record was opened |
 | `record_id` | The record's id |
-| `tenant_id` / `organization_id` | The **viewed record's** own organization, falling back to the viewer's session organization |
+| `tenant_id` | The **viewed record's** own organization, falling back to the viewer's session organization |
 | `old_value` / `new_value` | Always `null` — see below |
+
+A view row has no `organization_id` column: `sys_audit_log` declares
+`systemFields: { tenant: false }`, so no organization column is injected, and
+`tenant_id` records the organization the viewed record belongs to.
 
 The tenant stamp comes from the record rather than the viewer deliberately: a
 row about an org-A record stamped with the viewer's active org B would land
