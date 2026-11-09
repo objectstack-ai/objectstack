@@ -596,7 +596,10 @@ describe('read_file bounds PDF and Word extraction by the host\'s CPU budget and
       const text = await callTool(runtime, bridge, 'read_file', { objectName: 'claim', recordId: 'c1', field: 'policy' });
       expect(text.isError).toBeUndefined();
     } finally {
+      // Let the held two finish even when an assertion above failed, so no
+      // slot stays taken into the next test.
       release();
+      await Promise.allSettled(held);
     }
     for (const done of await Promise.all(held)) expect(done).toMatchObject({ kind: 'text', text: 'Held open' });
     // The held two finished, so their slots are free again.
