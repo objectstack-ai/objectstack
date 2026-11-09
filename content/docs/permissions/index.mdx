@@ -117,6 +117,19 @@ ObjectStack implements a multi-layered security model:
 └─────────────────────────────────────┘
 ```
 
+### AI service accounts
+
+An unattended agent gets its own identity, an **AI service account**: a user
+of kind `agent`, accountable to a named person, holding a plain membership of
+one organization. Its permissions are exactly the grants given to it; it never
+holds administrator standing, and the agent ceiling clears View All, Modify
+All, transfer, restore, purge, system permissions and admin scopes from any
+set it is given (giving it such a set is refused). Registration is an
+organization or platform administrator's act; its owner or an administrator
+mints its API key. It never signs in, and it is never counted among the
+administrators that keep an organization manageable. See
+[AI service account](/docs/ai/agents#connect-your-ai-byo-ai-over-mcp).
+
 ### Security Layers
 
 1. **Object Permissions**: Control create, read, update, delete on entire objects

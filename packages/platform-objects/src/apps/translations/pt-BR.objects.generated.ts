@@ -267,6 +267,43 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      register_service_account: {
+        label: "Registrar conta de serviço de IA",
+        description: "Registre uma conta de serviço de IA nesta organização: uma identidade própria para um agente que funciona sem uma pessoa e age apenas por meio das chaves de API criadas para ela. Ela não pode fazer nada até receber conjuntos de permissões e nunca tem acesso de administrador.",
+        successMessage: "Conta de serviço de IA registrada",
+        params: {
+          name: {
+            label: "Nome",
+            helpText: "O que o agente é e para que serve. É por este nome que a conta é reconhecida na lista de usuários e na trilha de auditoria."
+          },
+          ownerId: {
+            label: "Responsável",
+            helpText: "A pessoa responsável por esta conta, membro desta organização. Deixe em branco para ser você o responsável."
+          }
+        }
+      },
+      create_service_account_key: {
+        label: "Criar chave de API",
+        description: "Crie uma chave de API para esta conta de serviço de IA. A chave age como a conta, com as permissões da própria conta, na organização da conta.",
+        params: {
+          name: {
+            label: "Nome da chave"
+          },
+          expires_at: {
+            label: "Expira em",
+            helpText: "Deixe em branco para usar a validade padrão definida em Configuração → Autenticação → Chaves de API (Validade padrão da chave, 90 dias se não for alterada). Uma data posterior à Validade máxima da chave definida lá é recusada."
+          }
+        },
+        resultDialog: {
+          title: "Chave de API criada",
+          description: "Copie a chave agora — ela é mostrada apenas uma vez e não pode ser recuperada. Se ela vazar, revogue-a e crie uma nova.",
+          acknowledge: "Guardei a chave",
+          fields: {
+            key: "Chave de API",
+            expires_at: "Expira em"
+          }
+        }
+      },
       update_my_profile: {
         label: "Atualizar perfil",
         successMessage: "Perfil atualizado"

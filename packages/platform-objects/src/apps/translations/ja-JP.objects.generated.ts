@@ -267,6 +267,43 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      register_service_account: {
+        label: "AI サービスアカウントを登録",
+        description: "この組織に AI サービスアカウントを登録します。人が介在せずに動作するエージェントのための独立した ID で、作成された API キーを通じてのみ動作します。権限セットが付与されるまでは何もできず、管理者権限を持つことはありません。",
+        successMessage: "AI サービスアカウントを登録しました",
+        params: {
+          name: {
+            label: "名前",
+            helpText: "このエージェントが何であり、何のためのものか。ユーザー一覧と監査証跡では、この名前でアカウントを識別します。"
+          },
+          ownerId: {
+            label: "責任者",
+            helpText: "このアカウントに責任を持つ人で、この組織のメンバーである必要があります。空欄のままにすると、あなた自身が責任者になります。"
+          }
+        }
+      },
+      create_service_account_key: {
+        label: "API キーを作成",
+        description: "この AI サービスアカウントの API キーを作成します。キーはアカウント自身として、アカウント自身の権限で、アカウントの組織内で動作します。",
+        params: {
+          name: {
+            label: "キー名"
+          },
+          expires_at: {
+            label: "有効期限",
+            helpText: "空欄のままにすると、「設定 → 認証 → API キー」のキーの既定の有効期間(変更していなければ 90 日)が使われます。そこにあるキーの最大有効期間より後の日付は拒否されます。"
+          }
+        },
+        resultDialog: {
+          title: "API キーを作成しました",
+          description: "今すぐキーをコピーしてください。キーは一度しか表示されず、後から取得することはできません。漏えいした場合は失効させて新しいキーを作成してください。",
+          acknowledge: "キーを保存しました",
+          fields: {
+            key: "API キー",
+            expires_at: "有効期限"
+          }
+        }
+      },
       update_my_profile: {
         label: "プロフィール更新",
         successMessage: "プロフィールを更新しました"

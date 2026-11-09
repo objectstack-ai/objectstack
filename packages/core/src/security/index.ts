@@ -165,6 +165,11 @@ export {
   API_KEY_REVOKED_CODE,
   API_KEY_LIFECYCLE_REFUSAL_STATUS,
   apiKeyLifecyclePolicySourceOf,
+  // [ADR-0151 D4] The one signing-expiry rule both mint doors apply.
+  readRequestedApiKeyExpiry,
+  signApiKeyExpiry,
+  type ApiKeyExpiryRefusal,
+  type ApiKeyExpiryCeilingRefusal,
   ApiKeyLifecycleRefusalError,
   isApiKeyLifecycleRefusalError,
   type ApiKeyLifecyclePolicySource,

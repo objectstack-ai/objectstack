@@ -267,6 +267,43 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      register_service_account: {
+        label: "註冊 AI 服務帳號",
+        description: "在此組織中註冊一個 AI 服務帳號：為無人值守執行的智慧代理提供獨立身分，它只能透過為其建立的 API 金鑰行事。在被授予權限集之前它什麼都不能做，而且永遠不會擁有管理員權限。",
+        successMessage: "AI 服務帳號已註冊",
+        params: {
+          name: {
+            label: "名稱",
+            helpText: "說明這個智慧代理是什麼、用來做什麼。使用者清單與稽核記錄中以此名稱辨識該帳號。"
+          },
+          ownerId: {
+            label: "負責人",
+            helpText: "對此帳號負責的人，須為此組織的成員。留空則由你本人擔任負責人。"
+          }
+        }
+      },
+      create_service_account_key: {
+        label: "建立 API 金鑰",
+        description: "為此 AI 服務帳號建立一個 API 金鑰。該金鑰以帳號本身的身分、依帳號自己的授權，在帳號所屬的組織中行事。",
+        params: {
+          name: {
+            label: "金鑰名稱"
+          },
+          expires_at: {
+            label: "到期時間",
+            helpText: "留空則使用「設定 → 身分驗證 → API 金鑰」中的預設金鑰有效期（未修改時為 90 天）。晚於該處金鑰最長有效期的日期會被拒絕。"
+          }
+        },
+        resultDialog: {
+          title: "API 金鑰已建立",
+          description: "請立即複製金鑰——它只顯示這一次，之後無法找回。如果洩露，請撤銷它並建立新的金鑰。",
+          acknowledge: "我已儲存金鑰",
+          fields: {
+            key: "API 金鑰",
+            expires_at: "到期時間"
+          }
+        }
+      },
       update_my_profile: {
         label: "更新資料",
         successMessage: "已更新資料"

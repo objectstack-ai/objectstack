@@ -267,6 +267,43 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      register_service_account: {
+        label: "AI 서비스 계정 등록",
+        description: "이 조직에 AI 서비스 계정을 등록합니다. 사람 없이 실행되는 에이전트를 위한 고유한 ID로, 이를 위해 만든 API 키를 통해서만 동작합니다. 권한 집합을 부여받기 전에는 아무것도 할 수 없으며, 관리자 권한은 절대 갖지 않습니다.",
+        successMessage: "AI 서비스 계정이 등록되었습니다",
+        params: {
+          name: {
+            label: "이름",
+            helpText: "이 에이전트가 무엇이며 무엇을 위한 것인지 적으세요. 사용자 목록과 감사 기록에서 이 이름으로 계정을 식별합니다."
+          },
+          ownerId: {
+            label: "책임자",
+            helpText: "이 계정에 책임을 지는 사람으로, 이 조직의 구성원이어야 합니다. 비워 두면 본인이 책임자가 됩니다."
+          }
+        }
+      },
+      create_service_account_key: {
+        label: "API 키 만들기",
+        description: "이 AI 서비스 계정의 API 키를 만듭니다. 키는 계정 자신으로서, 계정 자신의 권한으로, 계정의 조직에서 동작합니다.",
+        params: {
+          name: {
+            label: "키 이름"
+          },
+          expires_at: {
+            label: "만료 시각",
+            helpText: "설정 → 인증 → API 키에서 정한 기본 수명(기본 키 수명, 변경하지 않았다면 90일)을 쓰려면 비워 두세요. 그곳의 최대 키 수명보다 늦은 날짜는 거부됩니다."
+          }
+        },
+        resultDialog: {
+          title: "API 키 생성됨",
+          description: "지금 키를 복사하세요. 한 번만 표시되며 복구할 수 없습니다. 유출되면 취소하고 새 키를 만드세요.",
+          acknowledge: "키를 저장했습니다",
+          fields: {
+            key: "API 키",
+            expires_at: "만료 시각"
+          }
+        }
+      },
       update_my_profile: {
         label: "프로필 업데이트",
         successMessage: "프로필 업데이트됨"

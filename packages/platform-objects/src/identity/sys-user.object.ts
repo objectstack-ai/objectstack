@@ -2,7 +2,9 @@
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { PLATFORM_ADMIN_USERS_GATE } from './platform-admin-action-gate.js';
-import { INVITATION_ROLE_OPTIONS } from '@objectstack/spec/identity';
+import {
+  INVITATION_ROLE_OPTIONS, MEMBERSHIP_ROLE_ADMIN, MEMBERSHIP_ROLE_OWNER, mapMembershipRole,
+} from '@objectstack/spec/identity';
 import { INVITE_USER_OUTCOME_MESSAGES } from './invite-outcome-messages.js';
 import { MEMBERSHIP_ROLE_PARAM_HELP } from './membership-role-help.js';
 
@@ -48,6 +50,19 @@ export const SYS_USER_LOCALE_TAG_PATTERN = '^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*
  * returns `temporaryPassword` only when it generated one: the instruction
  * shows exactly when there is a password to copy.
  */
+/**
+ * [ADR-0151 D1/D4] Who is offered the AI service account actions: a platform
+ * administrator, or an owner or admin of the current organization (the
+ * grades `isOrgAdminGrade` admits, read here off `current_user.positions` as
+ * the `requiresMembershipReach` sugar reads them). Display only: the
+ * plugin-auth doors judge the caller themselves, and a key's door also
+ * admits the account's accountable owner.
+ */
+const SERVICE_ACCOUNT_ADMIN_VISIBLE = [
+  'current_user.isPlatformAdmin == true',
+  ...[MEMBERSHIP_ROLE_OWNER, MEMBERSHIP_ROLE_ADMIN].map((grade) => `'${mapMembershipRole(grade)}' in current_user.positions`),
+].join(' || ');
+
 const TEMPORARY_PASSWORD_LABEL = 'Temporary password: copy it now, it is shown only once and never stored';
 
 /**
@@ -629,6 +644,88 @@ export const SysUser = ObjectSchema.create({
         acknowledge: 'Close',
         fields: [
           { path: 'entries', label: 'Platform administrators', format: 'code-list' },
+        ],
+      },
+    },
+
+    // ── AI service accounts (ADR-0151) ───────────────────────────────
+    //
+    // An AI service account is a `sys_user` row of kind `agent`: a registered
+    // principal of its own that acts only through its own API keys, under the
+    // agent ceiling, and never signs in. These two actions are its
+    // registration and its key mint (plugin-auth `service-account-doors.ts`).
+    // Each door reads the caller from the session and judges them itself;
+    // `visible` is display only. No `ai` block: an account and its keys are
+    // a person's decision, so both stay human-only.
+    {
+      name: 'register_service_account',
+      label: 'Register AI Service Account',
+      icon: 'bot',
+      variant: 'secondary',
+      locations: ['list_toolbar'],
+      type: 'api',
+      target: '/api/v1/auth/service-account/register',
+      // Offered in a cloud-managed environment too: an account is no person
+      // the identity provider brings, and a licence plugin observes or
+      // refuses the registration on its own `sys_user` write (ADR-0151 D7).
+      visible: SERVICE_ACCOUNT_ADMIN_VISIBLE,
+      description:
+        'Register an AI service account in this organization: an identity of its own for an agent that runs '
+        + 'without a person, acting only through API keys created for it. It can do nothing until it is granted '
+        + 'permission sets, and it never holds administrator access.',
+      successMessage: 'AI service account registered',
+      refreshAfter: true,
+      params: [
+        {
+          name: 'name',
+          label: 'Name',
+          type: 'text',
+          required: true,
+          helpText: 'What the agent is and what it is for. This name is how the account is recognised in the user list and the audit trail.',
+        },
+        {
+          name: 'ownerId',
+          label: 'Accountable Owner',
+          type: 'lookup',
+          reference: 'sys_user',
+          required: false,
+          helpText: 'The person accountable for this account, a member of this organization. Leave empty to be the owner yourself.',
+        },
+      ],
+    },
+    {
+      name: 'create_service_account_key',
+      label: 'Create API Key',
+      icon: 'key-round',
+      variant: 'secondary',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      target: '/api/v1/auth/service-account/create-key',
+      // An AI service account's row only. Its owner is admitted by the door
+      // too; this term offers it to administrators and to the owner.
+      visible: `has(record.principal_kind) && record.principal_kind == "agent" && ((${SERVICE_ACCOUNT_ADMIN_VISIBLE}) || (has(record.accountable_user_id) && record.accountable_user_id == current_user.id))`,
+      recordIdParam: 'userId',
+      description:
+        'Create an API key for this AI service account. The key acts as the account, with the account\'s own '
+        + 'grants, in the account\'s organization.',
+      refreshAfter: false,
+      params: [
+        { name: 'name', label: 'Key Name', type: 'text', required: true },
+        {
+          name: 'expires_at',
+          label: 'Expires At',
+          type: 'datetime',
+          required: false,
+          helpText: 'Leave empty for the default lifetime set under Setup → Authentication → API keys (Default key lifetime, 90 days unless changed). A date later than the Maximum key lifetime there is refused.',
+        },
+      ],
+      resultDialog: {
+        title: 'API key created',
+        description: 'Copy the key now — it is shown only once and cannot be recovered. If it leaks, revoke it and create a new one.',
+        acknowledge: 'I have saved the key',
+        fields: [
+          { path: 'key', label: 'API Key', format: 'secret' },
+          { path: 'expires_at', label: 'Expires At', format: 'text' },
         ],
       },
     },

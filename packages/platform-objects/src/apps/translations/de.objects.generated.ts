@@ -267,6 +267,43 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      register_service_account: {
+        label: "KI-Dienstkonto registrieren",
+        description: "Registrieren Sie ein KI-Dienstkonto in dieser Organisation: eine eigene Identität für einen Agenten, der ohne Person läuft und nur über die für ihn angelegten API-Schlüssel handelt. Es kann nichts tun, bis ihm Berechtigungssätze erteilt werden, und es hat nie Administratorzugriff.",
+        successMessage: "KI-Dienstkonto registriert",
+        params: {
+          name: {
+            label: "Name",
+            helpText: "Was der Agent ist und wofür er dient. Unter diesem Namen erscheint das Konto in der Benutzerliste und im Prüfprotokoll."
+          },
+          ownerId: {
+            label: "Verantwortliche Person",
+            helpText: "Die für dieses Konto verantwortliche Person, ein Mitglied dieser Organisation. Leer lassen, um selbst verantwortlich zu sein."
+          }
+        }
+      },
+      create_service_account_key: {
+        label: "API-Schlüssel anlegen",
+        description: "Legen Sie einen API-Schlüssel für dieses KI-Dienstkonto an. Der Schlüssel handelt als das Konto, mit dessen eigenen Berechtigungen, in der Organisation des Kontos.",
+        params: {
+          name: {
+            label: "Schlüsselname"
+          },
+          expires_at: {
+            label: "Läuft ab am",
+            helpText: "Leer lassen für die Standardlaufzeit unter „Setup → Authentifizierung → API-Schlüssel“ (Standardlaufzeit für Schlüssel, 90 Tage, sofern nicht geändert). Ein Datum nach der dort festgelegten maximalen Schlüssellaufzeit wird abgelehnt."
+          }
+        },
+        resultDialog: {
+          title: "API-Schlüssel angelegt",
+          description: "Kopieren Sie den Schlüssel jetzt – er wird nur einmal angezeigt und kann nicht wiederhergestellt werden. Falls er bekannt wird, widerrufen Sie ihn und legen einen neuen an.",
+          acknowledge: "Ich habe den Schlüssel gespeichert",
+          fields: {
+            key: "API-Schlüssel",
+            expires_at: "Läuft ab am"
+          }
+        }
+      },
       update_my_profile: {
         label: "Profil aktualisieren",
         successMessage: "Profil aktualisiert"
