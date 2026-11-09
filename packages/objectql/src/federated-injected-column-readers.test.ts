@@ -30,7 +30,9 @@
  *     field, and so how it reaches an injected lookup: `referenceCarrierOf`,
  *     `referenceTargetOf`;
  *  3. the tenant-column resolver, `resolveTenantFieldName`, and the constant
- *     it resolves to, `DEFAULT_TENANT_FIELD`;
+ *     it resolves to, `DEFAULT_TENANT_FIELD` (both, and `isFederatedObject`,
+ *     are defined in `@objectstack/core` and re-exported here, so their
+ *     definitions are outside this scan and only their readers are in it);
  *  4. every spelling of an injected column's NAME: a string literal, an object
  *     literal key, or a `SystemFieldName` member. The names are not listed
  *     here. They are `injectedSystemColumnDefs` (`@objectstack/spec/data`)
@@ -519,17 +521,9 @@ const READERS: Record<string, Row> = {
       "leaves the column out of an update's static-readonly schema view where the wall's seam judges it; " +
       'it reads a registered definition and the payload in hand, never storage',
   },
-  'tenancy/system-write-organization.ts#<module> :: organization_id': {
-    disposition: 'not-a-read',
-    why: 'the declaration of the default tenant column name',
-  },
   'tenancy/system-write-organization.ts#buildRefusalMessage :: organization_id': {
     disposition: 'not-a-read',
     why: 'names the column in refusal text',
-  },
-  'tenancy/system-write-organization.ts#resolveTenantFieldName :: organization_id': {
-    disposition: 'definition',
-    why: 'the tenant-column resolver every tenant reader above asks; it reads a schema, never a row',
   },
   'federated-object.ts#isFederatedUnprovisionedInjectedColumn :: isFederatedObject()': {
     disposition: 'definition',

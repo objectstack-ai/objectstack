@@ -9,6 +9,7 @@ import type {
   JobScheduleOptions,
 } from '@objectstack/spec/contracts';
 import { runWithPolicy, JobTimeoutError } from './run-with-policy.js';
+import { skippedTickMessage, type ScheduledFire } from './scheduled-fire.js';
 
 /**
  * Monotonic counter that makes every adapter instance's registry prefix unique
@@ -25,10 +26,25 @@ function sanitizeNamespaceLabel(label: string | undefined): string {
   return trimmed.length > 0 ? trimmed.slice(0, 48) : 'kernel';
 }
 
+/**
+ * The part of a lock handle (`LockHandle` in `@objectstack/spec/contracts`) a
+ * scheduled fire uses. Every cluster driver's handle carries `renew` and
+ * `isHeld`; they are optional here only so a structural double that models a
+ * lease nobody renews stays assignable. A handle without `renew` is held for
+ * its first lease and no longer.
+ */
+interface SchedulerLockHandle {
+  release(): Promise<void>;
+  /** Extend the lease by `ttlMs`. Throws when the lease was lost. */
+  renew?(ttlMs?: number): Promise<void>;
+  /** True while this handle still owns the lock. */
+  isHeld?(): boolean;
+}
+
 /** Minimal cluster lock surface for scheduler leader-election (structural — no hard dep on the cluster contract). */
 interface SchedulerCluster {
   lock?: {
-    acquire(key: string, opts?: { ttlMs?: number; waitMs?: number }): Promise<{ release(): Promise<void> } | null>;
+    acquire(key: string, opts?: { ttlMs?: number; waitMs?: number }): Promise<SchedulerLockHandle | null>;
   };
 }
 
@@ -44,7 +60,11 @@ export interface CronJobAdapterOptions {
    * node fires each scheduled job; with the in-memory driver the lock always
    * succeeds so single-node behaviour is unchanged. */
   cluster?: SchedulerCluster;
-  /** Lease TTL (ms) held while a scheduled fire runs. Default 60000. */
+  /**
+   * Lease TTL (ms) a scheduled fire takes on `job:<name>`. Default 60000. The
+   * fire renews it every `leaseMs / 3` while it runs (#31843), so a run longer
+   * than the lease keeps it.
+   */
   leaseMs?: number;
   /**
    * Human-readable label folded into this adapter's entry in croner's
@@ -86,6 +106,11 @@ export class CronJobAdapter implements IJobService {
    * the outage is warned about once, not once per tick of every job.
    */
   private lockOutage = false;
+  /**
+   * job name → the scheduled fire of it still in flight on THIS node, if any
+   * (#31811). See {@link CronJobAdapter.runScheduled}.
+   */
+  private readonly scheduledInFlight = new Map<string, ScheduledFire>();
 
   /**
    * This instance's prefix in croner's PROCESS-GLOBAL name registry.
@@ -232,10 +257,40 @@ export class CronJobAdapter implements IJobService {
    * case on an NTP-synced deployment). A replica whose clock lags past the
    * window finds the lock already released and reruns the job; `once` has no
    * later tick during which a business-level de-duplication marker could win.
+   *
+   * **A job never overlaps its own scheduled run on this node** (#31811).
+   * Before the lock is asked, the per-job in-flight latch below skips a tick
+   * whose previous scheduled fire has not settled, and says so in one `warn`.
+   * It is in-process on purpose: nothing persisted, so a restart cannot leave
+   * it stuck. Manual `trigger()` neither checks nor sets it.
+   *
+   * **Across nodes the lease is what excludes a second fire**, so the fire
+   * keeps it alive: {@link CronJobAdapter.runElected} renews the handle on a
+   * heartbeat while the handler runs (#31843). If a renewal fails, the run
+   * goes on; once the lease lapses, another node's next tick may take the key
+   * and start the job there too. The latch still covers this node.
    */
   private async runScheduled(name: string): Promise<void> {
     const record = this.jobs.get(name);
     if (!record) return;
+    const running = this.scheduledInFlight.get(name);
+    if (running) {
+      this.logger?.warn(skippedTickMessage('CronJobAdapter', name, running));
+      return;
+    }
+    // Set before the first await, so a tick landing while this one is still
+    // asking for the lock reads it too.
+    const fire: ScheduledFire = { startedAt: new Date().toISOString() };
+    this.scheduledInFlight.set(name, fire);
+    try {
+      await this.runElected(name, record);
+    } finally {
+      if (this.scheduledInFlight.get(name) === fire) this.scheduledInFlight.delete(name);
+    }
+  }
+
+  /** The leader-elected half of {@link CronJobAdapter.runScheduled}. */
+  private async runElected(name: string, record: CronJobRecord): Promise<void> {
     const lock = this.cluster?.lock;
     if (!lock) { await this.execute(record); return; }
     // The timers above fire this as `void this.runScheduled(...)`, so a
@@ -253,9 +308,11 @@ export class CronJobAdapter implements IJobService {
     }
     this.reportLockAnswered();
     if (!handle) return; // another node is the leader for this fire
+    const stopHeartbeat = this.keepLeaseAlive(name, handle);
     try {
       await this.execute(record);
     } finally {
+      stopHeartbeat();
       try {
         await handle.release();
       } catch (err) {
@@ -263,6 +320,52 @@ export class CronJobAdapter implements IJobService {
         this.reportLockFailure(name, 'release', err);
       }
     }
+  }
+
+  /**
+   * Renew `handle`'s lease every `leaseMs / 3` until the returned stop
+   * function is called (#31843). Uses the handle's own `renew()` — the
+   * lease stays a lease: a node that dies stops renewing and the key frees
+   * itself on its TTL.
+   *
+   * A failed renewal never cancels the run: it logs one `warn` per failure,
+   * naming the job and the error. While the handle still reports it holds the
+   * lock (a store that did not answer), the next heartbeat tries again; once it
+   * reports the lease lost, renewal stops for this run, since a lapsed lease
+   * cannot be renewed. Each heartbeat is armed after the previous renewal
+   * settles, so a slow store never stacks renewals.
+   */
+  private keepLeaseAlive(name: string, handle: SchedulerLockHandle): () => void {
+    if (typeof handle.renew !== 'function') return () => {};
+    const periodMs = Math.max(1, Math.floor(this.leaseMs / 3));
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const beat = async (): Promise<void> => {
+      try {
+        await handle.renew!(this.leaseMs);
+      } catch (err) {
+        if (stopped) return;
+        const held = handle.isHeld?.() === true;
+        this.logger?.warn(
+          `CronJobAdapter: could not renew the cluster lease on "job:${name}" while its scheduled run is in flight ` +
+            `(${err instanceof Error ? err.message : String(err)}). The run continues; once the lease lapses, another ` +
+            "node's next tick may take the key and start the same job. " +
+            (held ? 'Renewal is retried on the next heartbeat.' : 'The lease is lost; renewal stops for this run.'),
+        );
+        if (!held) return;
+      }
+      arm();
+    };
+    const arm = (): void => {
+      if (stopped) return;
+      timer = setTimeout(() => { void beat(); }, periodMs);
+      (timer as any)?.unref?.();
+    };
+    arm();
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    };
   }
 
   /** One warning per outage of the cluster lock, never one per tick. */

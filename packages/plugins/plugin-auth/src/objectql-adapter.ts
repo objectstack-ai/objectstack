@@ -1117,6 +1117,15 @@ export function createObjectQLAdapterFactory(
         // count, unreachable from here — refused rather than coerced, so this
         // adapter never hands `normaliseLegacyDates` a count shaped as a row.
         if (!result || typeof result === 'number') return null;
+        // [#8009] Read half on the write echo too. `/sso/update-provider` takes
+        // the provider it merges into from THIS answer (`lockSSOProviderRow`
+        // is an `update`), not from a `findOne`: with the secret lifted to its
+        // encrypted column, an echo without the read half hands the vendor a
+        // blob with no `clientSecret`, and every update carrying an
+        // `oidcConfig` — a mapping-only edit included — is refused "clientSecret
+        // is required". Same two read halves as `findOne`, same order.
+        await injectClientSecretOnRead(secretEngine, objectName, result);
+        applyIdpInitiatedToOidcConfigOnRead(objectName, result);
         const norm = normaliseLegacyDates(model, result);
         return (bridged ? remapKeys(norm, snakeToCamel) : norm) as T;
       },

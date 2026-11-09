@@ -145,10 +145,22 @@ describe('[#20864] boot-time precedence classifies by the loader\'s set, not by 
         expect(describeFlowContender(loaderEntry(), () => '', NOTHING_INSTALLED)).toEqual({ source: 'runtime', packageId: 'crm' });
     });
 
-    it('asks the set once per contested name, and never for an uncontested one', () => {
+    // [ADR-0150 D3, epic #31527 child E5] An uncontested name is asked too:
+    // its one body is classified for the arm the engine records
+    // (`registerFlow`'s `armedFrom`), so a stamp on it can never make it the
+    // loader's own body. Still ONE question per name, every contender of a
+    // contested name judged against that one answer.
+    it('asks the set once per name, contested or not, and classifies an uncontested body by it', () => {
         const reader = vi.fn(HOLDS_FLOW);
-        resolveFlowPrecedence([flowBody('lonely_flow', 'L', CLAIMED), loaderEntry(), tenantRow()], silent(), reader, NOTHING_INSTALLED);
-        expect(reader.mock.calls).toEqual([[FLOW]]);
+        const winners = resolveFlowPrecedence(
+            [flowBody('lonely_flow', 'L', CLAIMED), loaderEntry(), tenantRow()],
+            silent(),
+            reader,
+            NOTHING_INSTALLED,
+        );
+        expect(reader.mock.calls).toEqual([['lonely_flow'], [FLOW]]);
+        // The set does not hold `lonely_flow`, so its claimed id buys nothing.
+        expect(winners.find((w) => w.name === 'lonely_flow')?.contender.source).toBe('runtime');
     });
 });
 

@@ -2,6 +2,7 @@
 
 import type { IJobService, JobSchedule, JobHandler, JobExecution, JobScheduleOptions } from '@objectstack/spec/contracts';
 import { runWithPolicy, JobTimeoutError } from './run-with-policy.js';
+import { skippedTickMessage, type ScheduledFire } from './scheduled-fire.js';
 
 /**
  * Internal record for a scheduled job.
@@ -55,6 +56,8 @@ export class IntervalJobAdapter implements IJobService {
   private readonly jobs = new Map<string, JobRecord>();
   private readonly maxExecutions: number;
   private readonly logger?: IntervalJobAdapterOptions['logger'];
+  /** job name → its timer-fired run still in flight, if any (#31811). See {@link IntervalJobAdapter.runScheduled}. */
+  private readonly scheduledInFlight = new Map<string, ScheduledFire>();
 
   constructor(options: IntervalJobAdapterOptions = {}) {
     this.maxExecutions = options.maxExecutions ?? 100;
@@ -66,13 +69,13 @@ export class IntervalJobAdapter implements IJobService {
 
     if (schedule.type === 'interval' && schedule.intervalMs) {
       record.timerId = setInterval(async () => {
-        await this.executeJob(record);
+        await this.runScheduled(record);
       }, schedule.intervalMs);
     } else if (schedule.type === 'once' && schedule.at) {
       const delay = new Date(schedule.at).getTime() - Date.now();
       if (delay > 0) {
         record.timerId = setTimeout(async () => {
-          await this.executeJob(record);
+          await this.runScheduled(record);
         }, delay);
       }
     } else if (schedule.type === 'cron') {
@@ -182,6 +185,27 @@ export class IntervalJobAdapter implements IJobService {
       }
     }
     this.jobs.clear();
+  }
+
+  /**
+   * A timer-fired run of `record`, skipped while the job's previous timer-fired
+   * run is still in flight (#31811) — the same in-process latch, and the same
+   * one-line `warn`, as `CronJobAdapter.runScheduled()`. Manual `trigger()`
+   * goes straight to `executeJob` and neither checks nor sets it.
+   */
+  private async runScheduled(record: JobRecord): Promise<void> {
+    const running = this.scheduledInFlight.get(record.name);
+    if (running) {
+      this.logger?.warn(skippedTickMessage('IntervalJobAdapter', record.name, running));
+      return;
+    }
+    const fire: ScheduledFire = { startedAt: new Date().toISOString() };
+    this.scheduledInFlight.set(record.name, fire);
+    try {
+      await this.executeJob(record);
+    } finally {
+      if (this.scheduledInFlight.get(record.name) === fire) this.scheduledInFlight.delete(record.name);
+    }
   }
 
   private async executeJob(record: JobRecord, data?: unknown): Promise<void> {

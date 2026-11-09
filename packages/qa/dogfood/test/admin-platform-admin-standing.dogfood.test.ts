@@ -261,6 +261,14 @@ const ADMITTED = [
   'POST /api/v1/auth/admin/sso/register-saml',
   'POST /api/v1/auth/admin/sso/request-domain-verification',
   'POST /api/v1/auth/admin/sso/verify-domain',
+  // #31666 — the SSO Providers form's groups claim (show, and set or clear):
+  // ObjectStack raw mounts whose FIRST statement is the ADR-0068 gate. The
+  // probe names a provider this boot does not hold, so the admin reaches the
+  // handler and gets 404 and nothing moves; the stored effect (the mapping
+  // written where the register door writes it, and the grant at sign-in) is
+  // pinned in plugin-auth's `sso-oidc-refusal-cause.test.ts`.
+  'POST /api/v1/auth/admin/sso/get-groups-claim',
+  'POST /api/v1/auth/admin/sso/set-groups-claim',
   // #30958 — the SCIM connection credential door: ObjectStack raw mounts whose
   // FIRST statement is the ADR-0068 gate. SCIM is on at this boot
   // (`OS_SCIM_ENABLED`), so the mint reaches a 200 and stores a credential;
@@ -765,6 +773,12 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
       },
       'POST /api/v1/auth/admin/sso/request-domain-verification': { body: { providerId: 'standing-probe-oidc' } },
       'POST /api/v1/auth/admin/sso/verify-domain': { body: { providerId: 'standing-probe-oidc' } },
+      // #31666. `providerId` is required by both; the set takes the claim as
+      // text (a non-text one answers `400 INVALID_REQUEST` past the gate).
+      'POST /api/v1/auth/admin/sso/get-groups-claim': { body: { providerId: 'standing-probe-groups-claim' } },
+      'POST /api/v1/auth/admin/sso/set-groups-claim': {
+        body: { providerId: 'standing-probe-groups-claim', groupsClaim: 'groups' },
+      },
       // #30958. A connection id is the only required field; the revoke names a
       // credential id that does not exist, so it moves nothing.
       'POST /api/v1/auth/admin/scim/mint-credential': { body: { connectionId: 'standing-probe-scim' } },

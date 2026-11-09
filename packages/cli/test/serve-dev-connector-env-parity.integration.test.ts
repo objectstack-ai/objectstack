@@ -43,7 +43,9 @@
  *   build-time one.
  * - `os dev --no-compile`: the served one still reads the build-time port.
  *   The `serve` child reads its supervisor's decision and never compiles on
- *   its own, so the old shortcut stays the operator's to choose.
+ *   its own, so the old shortcut stays the operator's to choose. Since #31761
+ *   dispatch reads that same artifact too (the app wrap carries the door's
+ *   file), so the two copies agree on the build-time value.
  * - `os serve` (production): it composes no artifact door and compiles
  *   nothing, so dispatch reads the module's copy as before and the artifact's
  *   bytes stay as built. (Its `/meta` answer, the module's copy, was measured
@@ -381,7 +383,9 @@ describe('#26242 — a direct `os serve --dev` serves the connector baseUrl disp
     const { served, materialized, artifactUntouched } = recorded('devNoCompile');
     expect(served).toBe(BUILD_URL);
     expect(artifactUntouched).toBe(true);
-    expect(materialized).not.toBe(BUILD_URL);
+    // #31761: one copy per boot — dispatch materializes the artifact's
+    // connector, the one `/meta` serves (it read the module's before).
+    expect(materialized).toBe(BUILD_URL);
   });
 
   it('production `os serve` is unchanged: dispatch on the module\'s baseUrl, and the artifact left as built', () => {

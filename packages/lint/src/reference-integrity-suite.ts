@@ -114,6 +114,7 @@ import { validateReportDateRange } from './validate-report-date-range.js';
 import { validateReportRuntimeFilters } from './validate-report-runtime-filter.js';
 import { validateDatasetReferences } from './validate-dataset-references.js';
 import { validateMappingTargetFields } from './validate-mapping-target-fields.js';
+import { validateMappingConnectorSources } from './validate-mapping-connector-source.js';
 import { validateNavAccess } from './validate-nav-access.js';
 import { validateNavTargetRefs } from './validate-nav-target-refs.js';
 import { validateNavObjectServability } from './validate-nav-object-servability.js';
@@ -613,6 +614,14 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // write at the runtime publish gate would be its own crossing, with its own
   // measurement; at runtime the import door already refuses the mapping.
   { name: 'validateMappingTargetFields', run: validateMappingTargetFields },
+  // The mapping's other name: `connectorSource.connector`, resolved against the
+  // `connectors[]` entries (this stack's and its sibling packages') whose
+  // provider a pull reads through, rest or openapi. It advises: the connector
+  // universe also holds other installed packages' and Studio-published
+  // connectors, which no single package's lint sees (the reason
+  // `validateAiToolReferences` below advises). NO `runtimeTypes`, for the reason
+  // its sibling above gives: no per-write snapshot carries `stack.mappings`.
+  { name: 'validateMappingConnectorSources', run: validateMappingConnectorSources },
   { name: 'validateNavAccess', run: validateNavAccess },
   // Nav targets that are NOT object names — page/report/dashboard. Restores the
   // coverage `defineStack`'s own cross-reference block switches off whenever the

@@ -106,7 +106,7 @@ import {
   type DiagnosedObjectListing,
 } from './metadata-completeness.js';
 // [#30892] The file seam and what `read_file` renders from it.
-import { READ_FILE_MAX_BYTES, renderReadFile, type McpFileBridge } from './file-content.js';
+import { READ_FILE_MAX_BYTES, ReadFileExtractionBusyError, renderReadFile, type McpFileBridge } from './file-content.js';
 
 export interface McpObjectSummary {
   name: string;
@@ -3054,6 +3054,17 @@ export function registerFileTools(
           const file = await readFn(objectName, recordId, target, { maxBytes: READ_FILE_MAX_BYTES });
           return { content: await renderReadFile(file) };
         } catch (err) {
+          // [#31826] Over the process-wide extraction cap: the coded refusal,
+          // with the seconds to wait in `details` (the slot the rate limiter's
+          // 429 carries them in), since a tool result has no Retry-After header.
+          if (err instanceof ReadFileExtractionBusyError) {
+            return codedErrorResult({
+              code: err.code,
+              message: err.message,
+              status: err.status,
+              details: { retryAfterSeconds: err.retryAfterSeconds },
+            });
+          }
           return errorResultWithCode(err);
         }
       },

@@ -31,8 +31,11 @@ export const arGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_oauth_application.fields.jwks_uri.label": "2a4339df734ab269",
   "objects.sys_platform_setting_audit.fields.source.options.api": "4baeeff968e192d1",
   "objects.sys_setting_audit.fields.source.options.api": "4baeeff968e192d1",
+  "objects.sys_sso_provider._actions.edit_sso_groups_claim.params.groupsClaim.placeholder": "833cddda1a6e25f9",
   "objects.sys_sso_provider._actions.register_saml_provider.params.identifierFormat.placeholder": "5945ff9a6b644855",
+  "objects.sys_sso_provider._actions.register_saml_provider.params.mapGroups.placeholder": "833cddda1a6e25f9",
   "objects.sys_sso_provider._actions.register_sso_provider.params.mapEmail.placeholder": "66309c7adf5c9436",
+  "objects.sys_sso_provider._actions.register_sso_provider.params.mapGroups.placeholder": "833cddda1a6e25f9",
   "objects.sys_sso_provider._actions.register_sso_provider.params.mapName.placeholder": "a484c34aaf624bd6",
   "objects.sys_sso_provider._actions.register_sso_provider.params.scopes.placeholder": "58ac90cde28c764d",
 };

@@ -13,8 +13,7 @@ an unset ref leaves its instance degraded until set. Keep `automation` in
 
 - Actions come from the upstream (an OpenAPI `operationId`, an MCP tool name,
   the `rest` provider's single `request`) — authored on the entry, they are refused.
-- `connectorConfig.input` is a value-slot map (SKILL.md's `connector_action`
-  row): a top-level CEL envelope is evaluated, any other value kept as written,
+- `connectorConfig.input` is a value-slot map: a top-level CEL envelope is evaluated, any other value kept as written,
   so a value from the record is a CEL envelope. The pre-dispatch `inputSchema`
   judgement honours OpenAPI `nullable`, reads `null` on an optional parameter
   as absent and names each breached path. Text is never converted: cast a
@@ -22,13 +21,13 @@ an unset ref leaves its instance degraded until set. Keep `automation` in
 - The answer lands as `<nodeId>.<key>` (`rest` / `openapi`: `{ status, ok, body }`;
   `mcp`: `{ ok, content, structuredContent? }`), read from a later node's value slot.
 - `auth`, each variant with a `credentialRef`: `bearer`; `api-key` (`headerName`,
-  or `paramName` for a query-string key); `basic` (`username`
-  stays in metadata); `signed` on `openapi` / `rest` (`scheme`
+  or `paramName` for a query-string key); `basic`;
+  `signed` on `openapi` / `rest` (`scheme`
   `aliyun-acs3-hmac-sha256`, `tencentcloud-tc3-hmac-sha256` or `alipay-v3`,
   `keyId`) signs each request — WeChat Pay has no scheme yet: blocked;
   `oauth2` / `app-credential`: recipe 6. A secret in a url path has no variant — use a
   token-authenticated connector. `authentication: { token }` is refused at `os validate`.
-- `defineConnector`: `@objectstack/spec/integration`; `defineFlow`: `@objectstack/spec`; both register in `defineStack`.
+- `defineConnector` and `defineFlow` register in `defineStack`.
 
 ## 1 · OpenAPI document, static key — Stripe balance, nightly
 
@@ -111,7 +110,9 @@ export const WarehouseApi = defineConnector({
 
 ## 4 · Vendor callback — an `api` flow with `secretRef`
 
+<!-- os:check -->
 ```ts
+import { defineFlow } from '@objectstack/spec';
 export const CarrierCallback = defineFlow({
   name: 'carrier_callback', label: 'Carrier status callback', type: 'api',
   runAs: 'system',
@@ -134,7 +135,9 @@ its own header adds, keyed by that ref, `signature: { signs: 'body', header:
 
 ## 5 · Vendor with no machine-readable spec — write the document by hand
 
+<!-- os:check -->
 ```ts
+import { defineConnector } from '@objectstack/spec';
 export const LegacyErp = defineConnector({
   name: 'legacy_erp', label: 'Legacy ERP', type: 'api', provider: 'openapi',
   providerConfig: { spec: {

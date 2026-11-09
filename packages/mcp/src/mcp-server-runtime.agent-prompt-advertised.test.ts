@@ -409,6 +409,30 @@ describe('agent_prompt — one reader with GET /meta/agent/NAME (the protocol)',
     }
   });
 
+  it('[#31680, ADR-0150 D3] a by-name read the package-scoped resolver refuses (409 RESOURCE_CONFLICT) travels naming every holder: never "not found", never the outage text', async () => {
+    // The protocol's package-less by-name read refuses a name more than one
+    // package holds, naming each (child E8). Read here as a miss it would tell
+    // the client the agent does not exist; read as the #6055 outage it would
+    // say nothing is known. It is neither: it travels as the refusal it is.
+    const refusal = Object.assign(
+      new Error('agent "pkg_helper" is held by com.acme.alpha and com.acme.beta: qualify the name with its package'),
+      { code: 'RESOURCE_CONFLICT', status: 409, httpStatus: 409 },
+    );
+    const session = await connectWith(
+      metadataService({ agents: [] }),
+      protocol({ byName: async () => { throw refusal; } }),
+    );
+    try {
+      const got = session.client.getPrompt({ name: 'agent_prompt', arguments: { agentName: 'pkg_helper' } });
+      await expect(got).rejects.toThrow(/com\.acme\.alpha and com\.acme\.beta/);
+      await expect(got).rejects.not.toThrow(/not found|SERVICE_UNAVAILABLE/);
+      await expect(got).rejects.not.toThrow(PACKAGE_AGENT.instructions);
+      expect(session.log.warn).not.toHaveBeenCalledWith(expect.stringContaining('agent prompt refused'), expect.anything());
+    } finally {
+      await session.close();
+    }
+  });
+
   it('a degraded roster verdict with the protocol present and no agent named keeps the prompt listed, naming no agent', async () => {
     const session = await connectWith(
       metadataService({
