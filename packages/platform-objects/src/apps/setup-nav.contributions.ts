@@ -160,6 +160,12 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // `lifecycle` is `@objectstack/objectql`'s manifest (ADR-0057), offered
       // wherever a settings service is mounted, like the entries above.
       { id: 'nav_settings_lifecycle', type: 'url', label: 'Data Lifecycle', url: '/apps/setup/system/settings/lifecycle', icon: 'timer', requiredPermissions: ['manage_platform_settings'] },
+      // The recycle bin (ADR-0148, objectstack#30239): each object's deleted
+      // records, to restore one or empty the bin. Beside the `sys_recycle_bin`
+      // store this package registers. No `requiredPermissions`: the grant is
+      // per object (`manageRecycleBin`), and the page lists only the objects
+      // whose bin the caller manages.
+      { id: 'nav_recycle_bin', type: 'component', label: 'Recycle Bin', componentRef: 'data:recycle-bin', icon: 'trash-2' },
     ],
   },
   {
