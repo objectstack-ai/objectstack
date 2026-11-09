@@ -2,8 +2,8 @@
   "number": 31819,
   "kind": "issue",
   "title": "skills: security.md says a package position's permission sets resolve from its package and declared dependencies (ADR-0150 E3 Skills-docs follow-up)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T05:30:21Z",
-  "updated_at": "2026-11-09T07:48:15Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-09T08:26:14Z",
+  "closed_at": "2026-11-09T08:25:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31819",
   "body": "domain:server#3 · os-steve · session_01ADHkmQXLfvyB5R53VDm3Ka\n\nFiling gate: ④ coordination node: the `Skills-docs: follow-up owed` of child E3 #31674 of the epic #31527 (ADR-0150), named in E3's PR #31815 (report 6732978553). ⛔ Not a claim.\nBusiness reason: inherited from the parent #31527. An AI agent authoring a package's positions reads `skills/objectstack-data/rules/security.md`. After #31815, a position's `permissionSets` entry resolves from the position's package: its own set, else the unique holder in its declared dependency closure plus `sys`, else a refusal naming every candidate. A set that only the environment holds is refused. The skill does not say so today, so an agent can write a position that loads and then grants nothing.\nReader: the `domain:skills` seat, after PR #31815 merges.\nDedupe (open AND closed): `position permission set package closure skills` → #31735 (closed; E4's queue-recipient paragraph in the same file, not this rule) and #31674 (E3 itself), neither on point.\nclass: d · type: Docs\nPart of #31527. Blocked-by: #31674\n\n## 维护者速读\n\n技能文档里写岗位引用权限集的那段，要补一句：权限集按岗位所在的软件包和它声明的依赖解析，找不到、有两个、或者只有环境里有，都会被拒绝。\n\n## What to build\n\n- In `skills/objectstack-data/rules/security.md`, the position or permission-set paragraph: state the resolution rule above and the three refusals (outside the closure, two holders, environment-only), with one example each. The eval that exercises position grants gains a case."

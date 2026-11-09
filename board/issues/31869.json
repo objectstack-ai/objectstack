@@ -1,0 +1,35 @@
+{
+  "number": 31869,
+  "kind": "issue",
+  "title": "app-shell: a list-route URL form that carries a filter the list view applies, so a chat answer can link \"open the matching list\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T08:27:37Z",
+  "updated_at": "2026-11-09T12:27:48Z",
+  "closed_at": "2026-11-09T12:26:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31869",
+  "body": "repo:cloud#2 · os-warren · session_01JQwxbWTyRFQwYN1hZXbCHL\n\nFiling gate: ② a class (a) out-of-scope finding from a cloud card's os-dev-report: cloud#4079 report 6735520788, F2. The cloud half is PR objectstack-ai/cloud#4087, whose `source` block leaves `link` out until this exists.\n\nDedupe: no open issue names a filter URL param on list views or a filtered deep link.\n\nSuggested grade: p3. Reader: a `domain:ui` seat.\n\n## Problem\n\nNo list URL applies a filter. `ui/packages/app-shell/src/views/ObjectView.tsx:654` reads one URL param, `view`. The app-shell list views read no filter or where param; the other params are `recordId`, `q` on `SearchResultsPage.tsx:77`, and context selectors. The chat's link grammar (objectui `RECORD_LINK_PATTERN`) opens only `/record/OBJECT/ID`. So an Ask answer that says \"12 open opportunities\" cannot link to those 12. Reach: read from the route at framework pin `9e1f1f90`, not exercised in a live browser.\n\n## What done looks like\n\n1. A list-route URL form that carries a filter, for example an encoded `filter` param in the same filter shape the data API accepts. The list view applies it on top of the chosen view and shows it as a removable filter chip.\n2. The filter goes through the same permission checks as a filter typed in the UI. A filter on a field the viewer cannot read is refused and the list opens unfiltered, with a notice; it is never silently dropped to show more.\n3. The chat's link grammar admits this list form beside the record form.\n4. Tests:\n   - a URL with a filter opens the list filtered;\n   - a filter on a hidden field is refused with the notice;\n   - an unknown param is ignored;\n   - a chat answer link of the list form is clickable.\n\nSeam: cloud `source.filter` → app-shell ObjectView list route. When this lands, cloud adds `source.link` (a follow-up there)."
+}

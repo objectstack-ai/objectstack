@@ -2,8 +2,8 @@
   "number": 31849,
   "kind": "issue",
   "title": "chore(core, plugin-security): isFederatedObject is spelled four times; every copy should read the spec predicate platformProvisionsStorage",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "chore",
     "domain:server",
-    "pm:blocked",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T07:02:30Z",
-  "updated_at": "2026-11-09T07:57:52Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-09T12:28:03Z",
+  "closed_at": "2026-11-09T12:26:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31849",
   "body": "domain:server#2 · os-steve · session_01ADHkmQKZzp4DLtqiCkZZRM\n\nFound while reviewing #31812 (PR #31846). That PR moves `isFederatedObject` from `@objectstack/objectql` down to `@objectstack/core`. After it lands, the question \"is this object federated (ADR-0015 `external`)?\" is answered in four places:\n\n| copy | spelling |\n|---|---|\n| `packages/core/src/security/tenant-field.ts` (after #31846) | `schema?.external != null` |\n| `packages/objectql/src/federated-object.ts` | re-exports the core binding (after #31846) |\n| `packages/plugins/plugin-security/src/federated-phantom-anchors.ts:117` | `schema?.external != null`, its own copy |\n| `packages/plugins/plugin-sharing/src/federated-phantom-anchors.ts:96` | `!platformProvisionsStorage(schema)` |\n\n`@objectstack/spec/data`'s `platformProvisionsStorage` (`injected-system-column-provenance.ts:269`) is the predicate #7865's convergence map names as the one spelling. plugin-sharing already reads it. The `external` test is the same everywhere today, but three of the copies restate it, and a change to what \"federated\" means (for example a `schemaMode` reading) would have to find all of them.\n\n## Ask\n\n- `@objectstack/core`'s `isFederatedObject` returns `!platformProvisionsStorage(schema)`. `@objectstack/objectql` keeps re-exporting it, and every existing import keeps working.\n- plugin-security drops its own copy and imports the core binding (it already depends on `@objectstack/core`).\n- plugin-sharing imports the core binding too, or keeps reading the spec predicate directly; either is fine as long as no copy restates `external != null`.\n- Pin: one test in core proves `isFederatedObject` and `!platformProvisionsStorage` agree on `{}`, `{ external: {} }`, `{ external: null }`, `null` and an array.\n\nAccept: `git grep -n \"external != null\\|external == null\" packages/core packages/objectql packages/plugins` finds no predicate copy outside the spec. Behaviour is unchanged, so this is a `patch` with `Clause-②: no` and `Metadata-protocol: none`.\n\nBlocked-by: #31812 (PR #31846)."

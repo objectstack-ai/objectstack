@@ -1,0 +1,36 @@
+{
+  "number": 31918,
+  "kind": "issue",
+  "title": "pm-dispatch: charter the cloud lane (references/lanes/cloud.md) — each cloud seat clears untriaged cloud cards before claiming, and files every card with priority + pm state",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T11:54:58Z",
+  "updated_at": "2026-11-09T13:44:40Z",
+  "closed_at": "2026-11-09T13:43:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31918",
+  "body": "repo:cloud#1 · os-warren · session_01JQwxbYK6SZCmyzbGnrvmkk\n\nFiling gate: ③ maintainer-dispatched task.\n\n## Maintainer's ruling\n\nOn 2026-11-09 at 11:52Z, in the project, the maintainer picked option A on who owns first triage of `objectstack-ai/cloud` cards. His words, verbatim:\n\n> A（推荐）：维持\"cloud 席位自己首次分诊\"，把它落实到流程里。\n> 1. 给 cloud 写一份车道章程（lanes/cloud.md），写明 cloud 席位每轮巡查先清空未分诊的卡，再去认领；\n> 2. 席位巡查清单里加上这一项；\n> 3. cloud 席位立卡时就打好优先级和状态（排队或阻塞）；\n> 4. 我每天对账一次兜底：cloud 有超过 4 小时没状态的卡，就写信给 cloud 席位，我不代打标签。\n\nItem 4 is spoken by triage, so its duty sits with the triage lane.\n\n## Why\n\nTriage's daily two-repo reconciliation on 2026-11-09 (mailbox objectstack#31612, comment 6739206386) found 17 open cloud cards with no `pm:*` state. No seat's selection could see them, cloud#3832 among them, and the maintainer named that card the first Enterprise priority. `cross-repo-coordination.md` lines 5–7 already make first touch a single-lane repo's own job (\"单车道仓 `repo:*` 席自理机械三务 … 自做首触\"). But `references/lanes/` has no `cloud.md`, and no patrol checklist item makes a cloud seat do first touch before it claims. So first touch happened only when a seat happened to look.\n\n## Do\n\n1. **New `references/lanes/cloud.md`**, in the same shape as `lanes/hotcrm.md` (a job description; current state stays on the seat posts):\n   - **Shape:** cloud is a single-lane repo with seats `repo:cloud#1..3` that claim, dispatch, review and land in `objectstack-ai/cloud`. It produces no `domain:*` label. Card-thread orders live in the project's `pm-orders/cloud/seatN/` folders.\n   - **Scope:** the whole cloud repo, plus objectstack cards carrying `domain:cloud` + `repo:cloud` (domain table, SKILL.md line 164).\n   - **Standing commitments:**\n     - (a) **First triage first:** each patrol round clears every open cloud card with no `pm:*` state (give it priority + `pm:queue` / `pm:blocked` + `Blocked-by:`, or close it with a reason) before claiming anything.\n     - (b) **Filed complete:** every card a cloud seat files carries `priority:*` and a pm state at creation.\n     - (c) **Order of work:** Enterprise cards follow `cloud/ROADMAP.md` tiers (#31635, objectstack#31574). Enterprise cards are sub-issues of cloud#3538 (ruling cloud#3538 6739105247).\n     - (d) **Priority floor:** from 2026-11-09, cloud dispatches only p1/p2 to new work; cards already in flight continue (maintainer 11:42Z and 11:44Z).\n     - (e) **Security in-lane:** private repo, private `security` issues (#31301 ruling; mechanism only in `security-findings.md`).\n   - **Backstop:** triage reconciles daily and mails the cloud seats about any card stateless for more than 4 h. Triage never labels.\n2. **Patrol checklist:** add the first-triage-first item to `references/dispatch-runbook.md` 〈巡查常设项〉, scoped to single-lane repo seats. Point to it from `cross-repo-coordination.md` line 5–7 and from the new charter.\n3. **Triage lane:** add the daily >4 h stateless check with \"mail, never label\" to `references/lanes/triage.md`.\n4. **SKILL.md:** register `lanes/cloud.md` wherever the other lane charters are listed (the domain table row for `domain:cloud`, line 164, is the natural pointer).\n5. Keep every ratchet green: the skill line and token ratchets, `check-skill-id-lint`, and `pnpm check:pm-governed-prose`.\n\n## Done when\n\n- `references/lanes/cloud.md` exists with (a)–(e) and the backstop.\n- The patrol item is in `dispatch-runbook.md`, the triage item is in `lanes/triage.md`, and the SKILL.md pointer is in place.\n- The ratchets are green, and the PR has landed per its tier (`.claude/**` is Tier S in this repo: the owning seat lands it on a contract-tier review of record).\n\n## Reader\n\nThe `domain:skills` seat owns the `.claude/**` surface and lands it. The cloud seats supply the cloud facts; this card states them, and repo:cloud#1 answers questions on it.\n\nDedup: `references/lanes/` has no `cloud.md` at origin/main `6a8f4151`. Search `repo:objectstack-ai/objectstack is:issue \"lanes/cloud.md\"`: none found."
+}

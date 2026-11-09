@@ -2,8 +2,8 @@
   "number": 31866,
   "kind": "issue",
   "title": "meta door: a list view naming a field its object lacks reads with _diagnostics valid and no warning (forms get one since #29196), so the list opens on a rejected query with nothing pointing at the field",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,17 +12,24 @@
   },
   "labels": [
     "bug",
+    "domain:server",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T08:15:18Z",
-  "updated_at": "2026-11-09T08:15:18Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-09T12:28:42Z",
+  "closed_at": "2026-11-09T12:26:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31866",
   "body": "repo:cloud#3 · os-warren · session_01JQwxbZqfEd7pcckjz3pGqn\n\nFiling gate: **① a product defect with a named location and a measured reproduction.** cloud#4074 measured it (PR cloud#4084, report cloud#4074 comment 6735297830, `pm-orders/cloud/seat3/repro-4074-*`). Not a security finding.\n\n## 维护者速读\n\n- 问题：列表视图里某一列引用了对象上不存在的字段时，元数据接口照样回\"有效\"（`_diagnostics.valid: true`），没有任何警告。打开列表时查询被拒（400 INVALID_FIELD），页面只显示\"该视图的查询被拒绝\"，看不出是哪一列错了。\n- 对比：表单视图的同类问题已在 #29196 / #29307 解决（读取时带上警告）；列表视图还没有。\n- 要做：读取列表视图时，照表单视图的做法，把 lint 已有的 `list-view-field-unknown` 结果放进 `_diagnostics.warnings`。\n- 需要你做的：无，分诊定车道。\n\n## Reproduction (objectstack pin 9e1f1f90, cloud main 3177bd3)\n\n- cloud's AI service plugin shipped the `ai_traces` list view with a column `cost_total`; the object declares `total_cost`.\n- On a real `objectstack serve` of objectos-ee with the pinned console, the meta read of that view answers `_diagnostics: { valid: true }` with no warning.\n- The console projects the grid's columns (`?select=…,cost_total`), the data read answers `400 INVALID_FIELD`, and the list and its `by_model` view open on \"This view's query was rejected\" with no rows. Nothing on the page or in Studio names the bad column.\n\n## Location (objectstack main 1ff1d45d)\n\n- `packages/lint/src/validate-list-view-field-refs.ts` already owns the rule (`list-view-field-unknown`, #14107). It runs only on the authoring paths (`os validate` / build).\n- `packages/metadata-protocol/src/protocol.ts` L447–540: `withFormLayoutWarnings` serves the lint's `form-field-unknown` / `form-section-group-unknown` on a form view's read (#29196, PR #29307; save-time advisories #29389; layered read #29683). There is no list-view counterpart, so the read's `_diagnostics` stays the Zod shape only.\n- Plugin-registered views (manifest `views:` from code) never pass `os validate`, so the read is the only place this could surface.\n\n## Wanted\n\n1. A list view's read (single item, list overlay and layered read, as the form fix covers) carries each `list-view-field-unknown` finding in `_diagnostics.warnings`, judged against the object the view binds.\n2. The same advisory on save and publish, as #29389 did for forms.\n3. Optional and a lane call: the console's \"query was rejected\" state names the field from the 400, so an operator can tell which column to fix.\n\n## Done when\n\n- The `cost_total` view above reads with a warning naming `columns[…].field: cost_total` on `ai_traces`.\n- A valid list view reads with no warning.\n\n## Who acts\n\n- Triage decides the lane (the form fix was `domain:server`, metadata-protocol). cloud has its own guard for its shipped AI views (cloud#4084), so cloud is not blocked.\n\nDedupe: `org:objectstack-ai is:issue` \"list-view-field-unknown plugin manifest\": 5 hits, none about the read (nearest objectstack#24563, closed, a different rule); \"_diagnostics valid true unknown field view\": 37 hits, all the form-view family (#29196, #29021, #29311, #29435, closed).\n\nRelated: objectstack#29196, #29307, #29389, #29683, #14107, cloud#4074, cloud#4084."

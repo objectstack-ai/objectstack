@@ -1,0 +1,34 @@
+{
+  "number": 31941,
+  "kind": "issue",
+  "title": "ci(test-ui): the live-tree \"imported path walker\" test in select-affected-tests runs at 12 s of a 15 s budget on PR CI and times out in the merge queue",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T13:35:08Z",
+  "updated_at": "2026-11-09T14:14:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31941",
+  "body": "domain:ui#3 · zhuangjianguo · session_01QsR2jVEjiYrK7onirxUGyo\n\nFiling gate: ① a queue red the seat triaged on its own landing (#31936 for #31891). It ejected the same unchanged head twice with one signature, so pm-dispatch `landing-operations.md` says stop and do not re-enqueue. ⛔ Not a claim.\n\n## 维护者速读\n\n- **问题：** `ui/scripts/__tests__/select-affected-tests.test.ts` 里有一条“读真实仓库”的测试，在合并队列里两次超时（15.9 秒、15.4 秒，上限 15 秒），把 #31936 踢出了队列两次。同一条测试在 PR 自己的 CI 上用了 12.1 秒才通过，已经用掉上限的 81%。这条测试与 #31936 改的代码无关：只要 PR 改到 `ui/packages/react` 这类会选中全量 UI 测试的包，它就会被选中，然后在队列机器的负载下超时。\n- **要做：** 让这条测试不再贴着 15 秒跑。可以按实测给它单独设一个超时，也可以让它的三次全仓选择共用一次文件遍历。具体做法在第一步测量后再定。\n- **需要你做的：** 无。修好落地后，#31936 合并 main、重新入队。\n\n## Signature\n\n- **Test:** `select-affected-tests — the live tree > a change to the imported path walker selects what a change to the selector itself does (objectstack#31520)`, around `ui/scripts/__tests__/select-affected-tests.test.ts:617` on `origin/main`.\n- **Failure:** `Error: Test timed out in 15000ms.` The budget is the `ui/vitest.config.mts` default, `testTimeout: 15000`. The test sets no timeout of its own.\n- **Queue reds** (both PR #31936, head `8cbe0605`, Test UI (14/16)):\n  - run 42623482799, 15892 ms;\n  - run 42623780886, 15391 ms.\n- **The same test green on PR CI:** run 42620148110, job 129171167460, 12127 ms. It is the slowest test in that shard; the next slowest is 4.7 s.\n- **Why it is slow:** it calls `selectAffectedTests` three times on the live tree (`walker`, `selector`, `empty`), and each call walks the whole tracked tree.\n- **Selection:** the test only runs when a diff selects the `scripts/` owner directory or the full UI suite. #31926's queue group on the same shard (run 42624136571) ran 418 other files and was green, so this hits only PRs whose diff reaches the full UI suite.\n\n## Initial diagnosis\n\nThese are the three facts `landing-operations.md` asks for:\n\n1. **Not this diff.** The failing file imports `ui/scripts/select-affected-tests.mjs`, `scripts/ci-shard-matrix.mjs`, `./helpers/root-ci` and `yaml`. That closure does not meet #31936's diff (`ui/packages/app-shell`, `ui/packages/react`, docs, changeset).\n2. **The first error is a timeout, not an assertion.**\n3. **Base shard: not established.** The base group (run 42623109973) skipped the shard.\n\nThe same signature fired twice on an unchanged head. So the head is not re-enqueued until the budget is fixed.\n\n## Acceptance\n\n1. **The test passes with headroom.** On PR CI, under the full UI suite, the walker test's recorded time is at most half its own budget. The PR reports the measured times before and after.\n2. **Selection is unchanged.** The assertions in the test are unchanged. If the three selections now share one walk, the test still proves that a change to the walker selects what a change to the selector does.\n3. **CONTROL:** the other live-tree tests in the same `describe` keep their recorded times or get faster.\n\n**Reader:** `domain:ui` (the selector card #31520 was `domain:ui`). **Suggested grade:** p1, because it blocks a landing and any PR that reaches the full UI suite. **Clause-②:** expected no. **Metadata-protocol:** none.\n\n## Dedupe\n\nOpen and closed issues were searched on 2026-11-09 for \"imported path walker\", \"select-affected-tests timed out\" and \"select-affected-tests.test.ts timeout\". Nothing matched. The queue triage bot found no other PR with this signature in 24 h, but it notes that count is a lower bound. **New.**\n"
+}

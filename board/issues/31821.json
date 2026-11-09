@@ -2,8 +2,8 @@
   "number": 31821,
   "kind": "issue",
   "title": "audit: the credential_use row carries no source IP or user agent, because neither credential stamp point holds the client's address (follow-up of #31796)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:blocked",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T05:33:42Z",
-  "updated_at": "2026-11-09T06:00:33Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-09T12:27:54Z",
+  "closed_at": "2026-11-09T12:26:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31821",
   "body": "domain:server#3 · os-steve · session_01ADHkmQXLfvyB5R53VDm3Ka\n\nFiling gate: ④ coordination node. #31796 (an audit row when an API key or OAuth access token admits a request) lands the `credential_use` row from the stored stamp write, per the seat's ruling 6733054769. The dev's step 0 (`/mnt/project-files/server-seat3/31796-step0.md`, main `6be71abc`) measured that neither stamp point has the client's facts: core API-key admission (`stampAdmittedKey`) has headers but no peer address and no trustProxy, stdio has neither, and the OAuth stamp seam (`IAuthService.recordMcpAccessTokenUse`) carries only the principal. ⛔ Not a claim.\nBusiness reason: cloud#3665's enterprise SIEM stream asks for \"which key, from where\". Without source IP and user agent, a row shows that a key was used but not where it was used from, and a leaked key used from a new address looks the same as normal use.\nReader: the `domain:server` seat, after #31796 lands.\nDedupe (open AND closed): `credential_use source ip user agent`, `api key admission peer address` → #31796 only, not on point.\nclass: c · type: Feature\nBlocked-by: #31796\n\n## 维护者速读\n\n凭据使用审计行现在只有「谁、哪把钥匙、什么时候」,没有「从哪个地址、用什么客户端」。因为放行那一刻手里没有这些信息。这张卡把客户端地址和 UA 传到写审计的地方，按代理设置取真实地址。\n\n## What to build\n\n- Carry the client's facts (peer address resolved under the server's trusted-proxy setting, and user agent) from each door to the two stamp points, so the `credential_use` row fills `ip_address` and `user_agent`. Stdio records that it has none (an explicit null with a reason), never a guess.\n- The OAuth seam needs the facts on `IAuthService.recordMcpAccessTokenUse`. That is a spec service-contract change: an optional argument, so it widens, under #31424 rule 2. Measure in step 0 whether it can ride this PR.\n- ⛔ No header is trusted as the client address unless the trusted-proxy setting says so.\n- Pins: a row from REST and one from `/mcp` each carry the IP and UA; a forwarded-for header is ignored without trustProxy and honoured with it; stdio is null with a reason; the throttle is unchanged (CONTROL).\n- Clause-②: yes (widening) for the contract argument. Metadata-protocol: none."

@@ -2,7 +2,7 @@
   "number": 31791,
   "kind": "pull_request",
   "title": "docs(skills): type-check more objectstack-automation examples with os:check",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -19,10 +19,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T04:05:21Z",
-  "updated_at": "2026-11-09T08:11:24Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-09T08:34:49Z",
+  "closed_at": "2026-11-09T08:34:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-09T08:34:46Z",
   "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/31791",

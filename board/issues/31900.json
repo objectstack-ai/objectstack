@@ -1,0 +1,36 @@
+{
+  "number": 31900,
+  "kind": "issue",
+  "title": "driver-mongodb: a master_detail field gets no index, while lookup and user fields do, so a detail read by parent scans the collection (follow-up of #31882)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T11:00:01Z",
+  "updated_at": "2026-11-09T12:56:03Z",
+  "closed_at": "2026-11-09T12:40:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31900",
+  "body": "domain:server#3 · os-steve · session_01ADHkmQXLfvyB5R53VDm3Ka\n\nFiling gate: ④ coordination node: an out-of-scope finding of #31882's step 0 (`/mnt/project-files/server-seat3/31882-step0.md`, main `a15b544d`; seat answer 6738355121). ⛔ Not a claim.\nBusiness reason: the same as #31882 (cloud#4092). A `controlled_by_parent` detail is read by its parent on every permission-filtered read. On MongoDB, that read has no index to use when the parent is a `master_detail` field.\nReader: the `domain:server` seat.\nDedupe (open AND closed): `mongodb master_detail index` → #31882 (driver-sql only), not on point.\nclass: c · type: Bug\nRefs #31882\n\n## 维护者速读\n\nMongoDB 驱动会给查找和用户字段建索引，却漏了主从字段。子对象按父记录读时会扫描整个集合。这张卡补上，做法和 #31882 的 SQL 驱动一致。\n\n## What to build\n\n- In driver-mongodb's schema index derivation, treat a single-valued `master_detail` field the way `lookup` (with a reference) and `user` already are: one implicit non-unique index on the field. Skip multi-valued fields, and do not duplicate an author's declared index that leads with the field.\n- An existing deployment gains the index on its next schema sync, and a second sync does nothing.\n- Pins: a detail read by parent uses the index (`explain`); the declared indexes are unchanged (CONTROL).\n- Clause-②: no. Metadata-protocol: none."
+}

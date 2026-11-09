@@ -2,8 +2,8 @@
   "number": 31823,
   "kind": "issue",
   "title": "job pull: a job with no declared organization runs its pull with no tenantId, so the import match lookup cannot carry the organization the writes are stamped with",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T05:43:07Z",
-  "updated_at": "2026-11-09T08:05:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-09T10:47:37Z",
+  "closed_at": "2026-11-09T10:46:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31823",
   "body": "domain:server#2 · os-steve · session_01ADHkmQKZzp4DLtqiCkZZRM\n\nFiling gate: ① product defect with a named seam and a measured reach (step-0 finding of #31812, from #31778 G9). ⛔ Not a claim.\nreach: measured by #31812's card thread on `origin/main` `6be71abc` (SQLite, real ObjectQL + SqlDriver + protocol). `packages/runtime/src/app-artifact-handlers.ts` `jobExecutionContext(undefined)` answers `{ isSystem: true }` with no `tenantId` for a job that declares no `organization`, which is #31778's G9 setup. #31812 makes the `runImport` match lookup carry the caller's organization when the context has a `tenantId`, so on this path the lookup still has no organization predicate and still scans the table once per row (62 min for 100,000 rows in G9). Yet every write of the same pull IS stamped with the install's organization: `objectql/src/tenancy/system-write-organization.ts` `resolveSystemWriteOrganization` derives it at write time (#8844; ADR-0131 D9: derived under `single` only when exactly one organization exists, otherwise refused).\nBusiness reason: the most common sync setup (a job with no organization on a single-organization install) keeps the slow, table-scanning match even after #31812, so a large sync stays unusable.\nReader: the next `domain:server` seat, from `pm:queue`, after #31812 lands.\nDedupe (open AND closed): `jobExecutionContext organization derive`, `job pull tenantId system context` → nothing on point.\nclass: a · type: Bug (performance)\nGrade: p2. Same reach as #31812, on the path #31778 measured.\n\n## 维护者速读\n\n没有声明组织的定时同步任务，运行时上下文里没有组织信息。#31812 修好后，导入匹配会带上调用者的组织条件，但这条路径带不上，同步大表时照样逐行扫全表。可数据写入时，系统其实已经推导出了组织并写进每一行。这张卡让任务在运行前就用同一套规则推导出组织，交给拉取使用。\n\n## What to build\n\n1. A job that declares no `organization` runs with the organization that a system-context write would resolve to (`resolveSystemWriteOrganization`, the one rule). The context is resolved once per run, before the pull reads or writes. ⛔ No second derivation rule. Where the rule refuses (several organizations, a wall), the run keeps today's behaviour, which is the write-time refusal; say so in the PR.\n2. Tests: a no-organization job on a single-organization install → the pull's context carries that organization, and the match lookup carries it (a pin on the query, RED on main). CONTROL: a job that declares an organization is unchanged; a multi-organization install refuses as it does today.\n\n## Surface\n\n- Expected file surface: `packages/runtime/src/app-artifact-handlers.ts` and its tests, root `.changeset/`. Name any other file in the PR.\n- Clause-②: no.\n\nRelated: #31812, #31778 (G9), epic #31763. Blocked-by: #31812.\n\n<!-- signed: domain:server#2 · os-steve · session_01ADHkmQKZzp4DLtqiCkZZRM -->"

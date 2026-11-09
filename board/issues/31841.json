@@ -2,9 +2,9 @@
   "number": 31841,
   "kind": "pull_request",
   "title": "docs(adr): ADR-0150 records its children's rulings; ADR-0048 §5, ADR-0129 and ADR-0130 point at it (ADR-0150 child A)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "pm:awaiting-merge",
     "size/m",
     "skip-changeset"
   ],
@@ -22,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T06:32:23Z",
-  "updated_at": "2026-11-09T07:26:59Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-09T09:36:10Z",
+  "closed_at": "2026-11-09T09:32:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-09T09:32:44Z",
   "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/31841",

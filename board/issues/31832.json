@@ -2,8 +2,8 @@
   "number": 31832,
   "kind": "issue",
   "title": "os validate: a field naming a sibling package's picklist without a declared dependency passes the author-time door, then is refused at install (ADR-0150 D3)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T06:08:10Z",
-  "updated_at": "2026-11-09T08:12:18Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-09T12:31:59Z",
+  "closed_at": "2026-11-09T12:31:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31832",
   "body": "domain:server#2 · os-steve · session_01ADHkmQKZzp4DLtqiCkZZRM\n\nFiling gate: ③ door drift with a named seam (finding F1 of the CONTRACT_REVIEW_TIER record on PR #31731, E6 #31678 of epic #31527). ⛔ Not a claim.\nreach: read on PR #31731's head `bf7e3295` against `main`. After E6, a packaged field whose `picklist` names a list a SIBLING package in the same artifact owns, without a declared dependency on it, warns at boot, serves no options, and is refused at the post-seal install door. This follows the maintainer ruling 6729820123 (declared dependency closure only). The author-time door still accepts it: `packages/cli/src/utils/picklist-references.ts` `judgePicklistReferences` resolves against every picklist the stack declares, and its module header says \"a list a SIBLING package in the same artifact owns resolves here exactly as one the declaring package owns\" (ADR-0130). So `os validate` / `os build` no longer foretell the install door for this case. The ruling gives the ADR-0130 note to child A #31685, but names no carrier for the door's code.\nBusiness reason: an author is told the package is valid, then the install refuses it and the field shows no options. The fix at author time is one line (declare the dependency), but nothing says so until install.\nReader: the next `domain:server` seat, from `pm:queue`, after PR #31731 lands.\nDedupe (open AND closed): `judgePicklistReferences sibling dependency`, `picklist-references sibling ADR-0150` → nothing on point. #31685 (child A) carries the ADR text only.\nclass: c · type: Bug\nGrade: p3. An authoring door that disagrees with the install door. No wrong data.\n\n## 维护者速读\n\nADR-0150 落地后（E6），一个字段引用同一发布包里兄弟包的选项列表、却没有声明依赖时，安装会被拒，字段也拿不到选项。可是 `os validate` 仍然放行，作者直到安装才发现问题。这张卡让 `os validate` 当场指出缺少依赖，提示和安装时的拒绝一致。\n\n## What to build\n\n1. `judgePicklistReferences` resolves a packaged field's `picklist` the way the runtime does after E6: the field's own package, then its declared dependency closure, then `sys`. Where it can, it reuses the same resolver (`resolvePackageScopedHolders` in `@objectstack/core` and `packageResolutionClosure` in `@objectstack/metadata-core`). ⛔ No second closure walk. A sibling's list without a declared dependency is refused with the runtime's sentence, which names the candidate and the one-line fix (declare the dependency).\n2. Update the module header's ADR-0130 paragraph to the ruled rule, citing ADR-0150 D3 and ruling 6729820123. Coordinate the wording with child A #31685, which writes the ADR note.\n3. Tests: a sibling list without a declared dependency → refused, RED on main (accepted). CONTROL: with the dependency declared → accepted; the declaring package's own list → accepted; the boot-parity test stays green.\n\n## Surface\n\n- Expected file surface: `packages/cli/src/utils/picklist-references.ts` and its tests, root `.changeset/`.\n- Clause-②: no (narrowing). The door now refuses what the runtime already refuses. The seat owes a contract review at CONTRACT_REVIEW_TIER.\n\nRelated: #31678 (E6), PR #31731, #31685, epic #31527. Blocked-by: #31678's PR #31731.\n\n<!-- signed: domain:server#2 · os-steve · session_01ADHkmQKZzp4DLtqiCkZZRM -->"

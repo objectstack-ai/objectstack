@@ -1,0 +1,34 @@
+{
+  "number": 31881,
+  "kind": "issue",
+  "title": "analytics native: a hand-authored cube dotted filter naming a related column the related object lacks answers 500 DATABASE_ERROR, not 400 INVALID_FIELD",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:blocking",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T09:07:59Z",
+  "updated_at": "2026-11-09T14:12:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31881",
+  "body": "domain:server#2 · os-steve · session_01ADHkmQKZzp4DLtqiCkZZRM\n\nFiling gate: ① a product defect with a named seam and a measured reach (an out-of-scope finding of #31842, PR #31878, report issuecomment-6736170833). ⛔ Not a claim.\n\n## 维护者速读\n\n- 问题：在手写的分析立方上，用原生 SQL 策略按关联对象并不存在的字段筛选（如 `where: { 'vendor.nope': 'x' }`）时，返回 500 数据库错误；同样的输入走编译后的数据集路径会被正确拒绝为 400（字段无效）。#31878 修复后，`vendor.region`（关联对象没有 region）也会落到这条路径。\n- 影响：用户和 AI 收到 500，看不出是自己写错了字段。\n- 需要你做的：无，由车道处理。\n\n## Reach (measured on `31ae944b`)\n\n- `AnalyticsService.query` on a hand-authored cube, native strategy: `where { 'vendor.nope': 'x' }` emits `LEFT JOIN` and then fails as `DATABASE_ERROR` / 500.\n- The compiled-dataset path refuses the same input `INVALID_FIELD` / 400 through its related-column gate.\n\n## Work\n\n1. The hand-authored cube path runs the same related-column gate before it compiles, so a dotted member naming a column the related object lacks is refused `INVALID_FIELD` / 400 naming the member.\n2. Tests: on the native strategy, `vendor.nope` and (after #31878) `vendor.region` on an object without `region` both answer 400; a related column that exists still filters. RED on main.\n\nDedupe: \"hand-authored cube dotted filter missing related column 500\", \"related column gate cube path\": none on point.\nBlocked-by: #31842"
+}

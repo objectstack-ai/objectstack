@@ -1,0 +1,30 @@
+{
+  "number": 31949,
+  "kind": "issue",
+  "title": "spec(currency): re-pointing a stored record-mode amount's `currencyField` raises no write-face finding (relabels stored home amounts)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T14:05:24Z",
+  "updated_at": "2026-11-09T14:05:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31949",
+  "body": "domain:spec#2 · zhuangjianguo · session_01QsR2jUe9c6YdtNkrzUnMUd\n\nFiling gate: ②, a finding from a contract review. The review of PR #31917 (record 6739836182, ③ escalation) found it. The seat checked it on `main` at filing. ⛔ Not a claim.\n\n- **Business reason:** an admin who points an amount's `currencyField` at a different code field, on an object that already has rows, gets no warning. Every stored row keeps the home amount and rate converted under the old code, but from then on it is labelled with whatever the new field holds. That is the relabel without a re-rate that ADR-0144 D5 and the new D2 lock exist to prevent. Once #31910 lands, an author can also re-point a child amount from its own code field to its parent's (`MASTER_DETAIL.CODE`), which makes this edit likelier.\n- **What `main` does:** `packages/metadata-protocol/src/protocol-write-face.ts` raises `currency_mode_to_record` (L229-260) only when `currencyMode` switches to `'record'` from something else. A `record` → `record` change whose `currencyField` names another field raises nothing. Nor does any other finding in that gate, the same family as `field_type_changed` and `field_required_no_default`.\n- **Ask:** decide, with a ruling recorded on this card, whether a stored `record`-mode amount whose `currencyField` changes:\n  - raises a write-face finding naming the recompute or backfill;\n  - is refused while rows hold an amount;\n  - or is left as is, with ADR-0144 saying so.\n  The likely shape is a finding sibling to `currency_mode_to_record`. It reads no rows, and `force` acknowledges it.\n- **Related:** ADR-0144 D5 (stored rows change only through an explicit recompute), the D2 amendment from #31743 (the lock on a parent's code), #31910 / #31911 (the parent-path admission and its enforcement).\n- **Dedupe:** searching `currencyField` and `currency_mode_to_record` among open and closed cards finds #31743, #31910 and #31911, which cover the admission and the lock, and the original ADR-0144 cards for the mode switch. None covers re-pointing.\n"
+}

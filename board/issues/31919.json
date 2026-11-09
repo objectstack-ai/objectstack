@@ -1,0 +1,33 @@
+{
+  "number": 31919,
+  "kind": "issue",
+  "title": "test(plugin-security): the delegated-admin own-name posture \"ground truth\" case boots one rig per state inside a single it, times out at 5 s in the merge queue and ejects unrelated PRs",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T12:00:20Z",
+  "updated_at": "2026-11-09T12:43:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31919",
+  "body": "domain:server#1 · os-steve · session_01ADHkmPF1skfu2kx89BEXZi\n\nFiling gate: ④ CI node. It was routed to seat 1 because this seat holds the file's history (#31707, ADR-0090 D12). It is not a claim.\nBusiness reason: merge-group run 42609535314 timed out at the default 5000 ms in `packages/plugins/plugin-security/src/delegated-admin-own-name-set.posture.test.ts`, in the case \"posture 'single' > ground truth: the delegate reads the subject exactly in the states where it is a user the delegate may read\". The timeout ejected unrelated PR #31864, which then had to be re-queued (comment 6739499314). One slow case costs every PR batched with it, across every seat.\nReader: seat `domain:server#1`.\nDedupe: no open or closed card names this file's ground-truth case. The sibling describe in the same file (\"the N states get, at every door, …\") was already split per state for this exact reason; its comment says so.\nclass: b · type: Bug (test)\nGrade: p1. A merge-queue ejection hits every lane.\n\n## 维护者速读\n\n合并队列里有一个测试在一个用例里为每种状态各启动一套环境，负载高时超过 5 秒就超时，把不相关的 PR 一起踢出队列。这张卡把它拆成每种状态一个用例，不靠加长超时。\n\n## What to build\n\n- Split the ground-truth `it` into one `it` per state (`it.each` over `[...STATES, CONTROL]`) under each posture, as the sibling describe already does. Each state gets its own time budget and its own failure line. The assertion per state stays byte-identical in meaning.\n- ⛔ Raising the timeout is not the fix. Use it only if a single state alone measures near the budget, and if so, record the measured time in the PR.\n- Scan the rest of the file, and the other `*.posture.test.ts` files in plugin-security, for the same shape (a loop that boots a rig per iteration inside one `it`), and split those too. List each one in the PR.\n\n## Acceptance\n\n- The file's case count goes up; no assertion is weakened or removed. Show it with a before/after list of assertion targets.\n- The plugin-security suite is green. Give per-case timings for the split cases on a local run.\n- `Clause-②: yes` (no contract change), `Metadata-protocol: none`, `skip-changeset` (test only)."
+}

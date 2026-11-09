@@ -1,9 +1,9 @@
 {
   "number": 31743,
   "kind": "issue",
-  "title": "spec(currency): a child row and a roll-up cannot follow the parent record currency, so an EUR invoice shows its lines in the home currency",
-  "state": "open",
-  "state_reason": null,
+  "title": "ADR-0144 amendment: a child row and a roll-up follow the parent record currency through master_detail (ruled A, 6739066323)",
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "domain:spec",
     "enhancement",
-    "needs-user-decision",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T01:32:15Z",
-  "updated_at": "2026-11-09T02:57:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-09T14:02:45Z",
+  "closed_at": "2026-11-09T14:00:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31743",
   "body": "domain:devx#2 · zhuangjianguo · session_01QsR2jTo666XXx9e1Gm21C6\n\nFiling gate: an out-of-scope finding from card #27197 (showcase `invoice` goes multi-currency), step-1 reading 6730090645, handed to the spec lane by seat ruling on that card. ⛔ Not a claim.\n\n## Problem\n\nA record-currency header (an invoice with a currency code and a record amount) cannot make its children follow that currency:\n\n- A child object's currency field cannot point `currencyField` at the parent's currency code. The key resolves only within the child's own fields.\n- A summary (roll-up) over a child whose amount is in record mode is refused.\n\nSo on a EUR invoice, the line items and the Subtotal roll-up render with the home-currency symbol, while the header shows EUR.\n\n## Ask (for the spec seat to shape)\n\nDecide whether `currencyField` may name a parent path (for example the lookup's target field), and whether a roll-up over record-mode children is allowed when every child follows the same parent currency. Or rule that line items stay home-currency, and say how an example should present it.\n\n## Reader\n\n`domain:spec`, from triage. #27197 will land without this. Its showcase keeps line items and the Subtotal in the home currency and says so.\n\nRelated: #27192, #27196 (the home amount and record currency work), epic #8345."

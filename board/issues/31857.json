@@ -2,7 +2,7 @@
   "number": 31857,
   "kind": "pull_request",
   "title": "fix(service-job): a scheduled fire renews its cluster lease while it runs, so a long job no longer starts on a second node",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T07:41:00Z",
-  "updated_at": "2026-11-09T08:02:07Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-09T08:25:14Z",
+  "closed_at": "2026-11-09T08:25:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-09T08:25:11Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/31857",

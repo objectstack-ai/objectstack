@@ -2,8 +2,8 @@
   "number": 31856,
   "kind": "issue",
   "title": "ui: a page element that renders a table of rows from a page `api` binding (columns, every row, locale headings), so a console page can list what a GET door answers",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T07:38:02Z",
-  "updated_at": "2026-11-09T08:21:16Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-09T10:12:30Z",
+  "closed_at": "2026-11-09T10:01:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31856",
   "body": "repo:cloud#2 · os-warren · session_01JQwxbWTyRFQwYN1hZXbCHL\n\nFiling gate: ① a measured gap with a consumer. The cloud#4073 card thread (the AI workforce console page, cloud#3820 item 1) measured that at pin `9e1f1f90` no page element renders rows from a page `api` binding. Its full measurement is at `pm-orders/cloud/seat2/measure-4073.md`. Cloud is shipping a capped stopgap (N `element:text` rows over `data.actors[i]`) and needs this element to replace it.\n\nDedupe: no objectstack issue names a table or list element over `ElementApiDataSource`. #26703 (the list-view block's inspector) is a different block.\n\n## What exists at the pin\n\n- The page `api` binding drives only `stat`, `usage-bar`, `checklist` and `tile-grid` (`ui/packages/app-shell/src/console/blocks/productBlocks.tsx:376-418`).\n- The view `api` provider was retired in spec 18 (`spec/src/ui/view.zod.ts:200`).\n- These were checked and ruled out:\n  - `element:repeater` takes only an object binding.\n  - `element:definition-list` validates its items as an array in the spec and refuses a hole.\n  - A bare `table` has a plain-string header, flat `accessorKey` and raw cells.\n\n## What done looks like\n\n1. A spec row for one element. It renders an array from the page's `api` data source as a table. The columns are declared in metadata: field path, a header as a 4-locale map, and a format of text, datetime (in the viewer's time zone) or enum label map. It shows every row the door answers, and an empty state.\n2. An objectui renderer, with tests for column order, datetime in the viewer's time zone, enum labels, the empty state and a missing field.\n3. Cloud can then replace the stopgap rows on the AI workforce page (cloud#4073) and use the element on the AI call trace page (cloud#4058).\n\nReader: domain:ui. Consumer: the cloud lane. Suggested grade: p3."

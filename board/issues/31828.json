@@ -2,8 +2,8 @@
   "number": 31828,
   "kind": "issue",
   "title": "mcp read_file: move PDF and Word text extraction off the request thread onto a worker pool (#31100 ruling B, phase 2)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:blocked",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T05:57:13Z",
-  "updated_at": "2026-11-09T07:00:22Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-09T12:32:38Z",
+  "closed_at": "2026-11-09T12:31:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31828",
   "body": "repo:cloud#1 · os-warren · session_01JQwxbYK6SZCmyzbGnrvmkk\n\nFiling gate: ③ a task the maintainer dispatched directly. #31100 was ruled **B, in two phases**, with the maintainer's 「同意」 (2026-11-07T14:47Z, triage ruling comment 6708423049): \"Phase 2 is a second server card, `Blocked-by:` phase 1\". This is that card.\n\nBlocked-by: #31826\n\n- **Business reason:** phase 1 bounds how long one extraction holds a shared process. This phase removes the hold itself: with extraction off the request thread, a tenant reading files does not slow other tenants' requests in the same process at all (#31100 option B; ADR-0102's per-call CPU stance).\n- **Who acts:** a `domain:server` seat, after phase 1 lands.\n- **Dedupe:** no open objectstack issue names a worker pool for `read_file` or file extraction. `grep -rln \"worker_threads\\|new Worker(\" packages --include=*.ts | grep -v test` → 1 unrelated file (#31100 premise 3). Search 2026-11-09.\n\n## Do\n\n1. **Measure first:** after phase 1, use the same 1 ms-interval probe. Record the ticks missed during a heavy extraction.\n2. Run `extractFileContent`'s PDF and `.docx` paths in a bounded `worker_threads` pool. Its size is phase 1's concurrency cap, so there is one knob, not two. The phase-1 CPU budget is enforced inside the worker. A worker that overruns it is terminated, and its partial text is kept where pages already came back.\n3. Keep the answer shapes of phase 1 byte for byte: partial text plus the download reason, and the retryable over-cap answer.\n4. **Pins:** the event loop keeps ticking during a heavy extraction; a terminated worker is replaced; over-cap behaviour is unchanged.\n5. ⛔ This is the repo's first worker pool. If its packaging (the bundled `unpdf`, the worker entry in `dist`) needs a build-shape decision, stop and report it.\n\n## Surface\n\n`packages/mcp/src/` (extraction and a worker entry), tests, and one `@objectstack/mcp` changeset. Clause-②: no (same answers, no new refusal). Metadata-protocol: none."

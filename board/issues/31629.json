@@ -2,8 +2,8 @@
   "number": 31629,
   "kind": "issue",
   "title": "recycle bin: a platform object exposing delete is annotated restore/purge, and four spec/core texts still say the bin does not exist",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T17:39:30Z",
-  "updated_at": "2026-11-09T08:03:30Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-09T09:54:44Z",
+  "closed_at": "2026-11-09T09:43:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31629",
   "body": "domain:server#3 · os-project-manager · session_01FEkQ5pXkgNXVpCn2GZDjyy\n\nFiling gate: ② two non-blocking nits (N1, N2) from the at-tier contract review of PR #31595 (#30237 PR 5), record 6724784594. ⛔ Not a claim.\nReach: (N1) core `annotateEffectiveApiOperations` on a `sys_` / `cloud_` / `ai_` object whose exposure includes `delete`. Today that is reachable only through the super-user seeded closure. (N2) author-facing guidance and doc prose.\nclass: a · type: Bug\nGrade: p3 (self-graded; Ruling-ref: the maintainer, 「定级你可以自己决定」). Nothing leaks: the bin holds no platform rows, and the doors refuse precisely. The annotation and the prose just say something untrue.\nDedupe (open AND closed): `recycle bin platform object restore purge` found only #3146 (the parent epic).\n\n## 维护者速读\n\n#31595 让 `apiOperations` 在对象开放 `delete` 时也列出 `restore`/`purge`。但平台对象（`sys_`/`cloud_`/`ai_`）按 ADR-0148 D5 没有回收站，门会答 400/404，注解却说\"可以\"。另外 spec 和 core 里还有四处文字仍写\"没有回收站运行时\"。本卡只修这两处说法，不改任何接受集。\n\n## Task\n\n- **N1:** in core, withhold `restore` / `purge` from the effective annotation where `hasPlatformObjectPrefix(obj)`. Follow the #30370 pattern: a refusal the derivation table (a pure function of `EnableLike`) cannot see, folded at the annotation. Add one docblock clause to `packages/spec/src/data/api-derivation.ts`: \"a platform object has no bin; the annotation withholds the two verbs there\". Optionally, the doors answer 405 there for parity; say which you chose.\n- **N2:** correct the texts PRs 1–5 made false:\n  - `packages/spec/src/data/object.zod.ts:84–85`: `LEGACY_API_METHOD_GUIDANCE.restore/purge` (\"never derives … soft-delete work is parked\"). This is printed by the strip warning.\n  - `object.zod.ts:1667`: the `softDelete` tombstone (\"no soft-delete/recycle-bin runtime\").\n  - `packages/spec/src/automation/webhook.zod.ts:31`: `undelete`, \"no restore operation\".\n  - `packages/core/src/security/effective-object-permissions.ts:580`: \"`restore` / `purge`, which never derive today\".\n  Leave `skills/objectstack-api/SKILL.md:414` alone; it belongs to #30847.\n- `Clause-②: no` (prose only, plus the N1 annotation narrowing, which is `no (narrowing)`). The two `packages/spec/src` files need maintainer spec consent before they are committed. Shape it like #31508.\n\n## Acceptance\n\n- A pin, red then green: a `sys_` object whose exposure includes `delete` is annotated without `restore` / `purge`, while a business object keeps them.\n- No sentence anywhere in spec or core says the recycle bin does not exist.\n\nRefs #30237, PR #31595, #3146, #30370"

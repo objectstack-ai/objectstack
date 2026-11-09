@@ -2,8 +2,8 @@
   "number": 31813,
   "kind": "issue",
   "title": "os validate: a mapping's connectorSource.connector naming something that is not a connectors[] entry passes validate and boot, then fails every tick with no log line",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T05:14:10Z",
-  "updated_at": "2026-11-09T06:44:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-09T08:58:21Z",
+  "closed_at": "2026-11-09T08:57:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31813",
   "body": "domain:server#2 · os-steve · session_01ADHkmQKZzp4DLtqiCkZZRM\n\nFiling gate: ③ authoring trap with a measured reach (out-of-scope finding of #31778's report 6732731853, G1 and G7). ⛔ Not a claim.\nreach: measured on `origin/main` `c2bb879f`. A mapping whose `connectorSource.connector` names a datasource (`legacy_db`), not a `connectors[]` entry: `os validate` exits 0 with no warning, and the boot schedules the pull (`{\"pulls\":1,\"notScheduled\":0}`). Every tick then writes `sys_job_run.status = failed` with `Mapping \"crm_contacts\" pulls from connector \"legacy_db\", which is not registered…`, and logs nothing at `info`.\nBusiness reason: an author who points a sync at the wrong name is told everything is fine at authoring time and at boot. The sync then fails silently on every tick; only someone who reads `sys_job_run` finds out.\nReader: the next `domain:server` seat, from `pm:queue`.\nDedupe (open AND closed): `connectorSource connector cross-reference validate` → #21127 (closed: `os lint` / `os validate` crashed on any `connectorSource`, a different defect) and #21672 (closed: install-local accepting an unbindable `job.pull`, a different door). Nothing on point.\nclass: c · type: Bug\nGrade: p3. An authoring trap. Run time already refuses it, but only quietly.\n\n## 维护者速读\n\n同步配置里 `connectorSource.connector` 写错了名字（比如写成了一个数据源而不是连接器）时，`os validate` 和启动都不报错。之后每次定时同步都失败，日志里也没有任何提示。这张卡让 `os validate` 当场指出这个名字不是已声明的连接器，并在每次同步失败时记一条日志。\n\n## What to build\n\n1. `os validate` refuses (or warns, following the nearest existing cross-reference rule, and say which) a mapping whose `connectorSource.connector` is not a `connectors[]` entry with provider `rest` or `openapi`. When the name is a datasource, the message says it is a datasource.\n2. A failed pull logs one line at `warn` naming the mapping and the reason, beside the existing `sys_job_run.error`.\n3. Tests: validate on that stack → the new finding, RED on main (exit 0). CONTROL: a mapping naming a declared rest connector validates as before.\n\n## Surface\n\n- Expected file surface: the cli validate rule set (name the file), `packages/services/service-automation/src/connector-pull.ts` (the log line), tests, root `.changeset/`.\n- Clause-②: no.\n\nRelated: #31778 (G1, G7), epic #31763.\n\n<!-- signed: domain:server#2 · os-steve · session_01ADHkmQKZzp4DLtqiCkZZRM -->"

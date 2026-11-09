@@ -1,0 +1,35 @@
+{
+  "number": 31873,
+  "kind": "pull_request",
+  "title": "fix(mcp): one tool per name on the stdio server when the AI tool registry carries a native data tool name",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T08:34:28Z",
+  "updated_at": "2026-11-09T09:26:17Z",
+  "closed_at": "2026-11-09T09:26:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-09T09:26:15Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31873",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9VBGAc66DtZYVbM24V9d2t2)_\nFixes #31836\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：MCP 长连接服务器（stdio）上，AI 工具注册表和原生数据工具同名时只留原生数据工具，另一边跳过并记一行 debug 日志。\n- 为什么改：企业版打开 stdio 后启动失败（\"Tool list_objects is already registered\"），整个 MCP 插件回滚。\n- 风险与回滚：只影响同名工具；不同名的注册表工具照旧桥接。HTTP 本来就只给原生工具，两边现在一致。回滚即撤本 PR。\n- 先看：`packages/mcp/src/mcp-server-runtime.ts` 的 `yieldBridgedTool` 与 `bridgeDataTools`；`packages/mcp/src/mcp-stdio-tools.test.ts` 新增的 #31836 用例。\n- 两分钟验证：`pnpm --filter @objectstack/mcp exec vitest run src/mcp-stdio-tools.test.ts`，预期 18 个全绿，其中 6 个 #31836 用例在 main 上是红的。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `MCPServerRuntime` keeps the handles of the AI-registry tools `bridgeTools` registered on the long-lived server, and the names `bridgeDataTools` registered there.\n- The rule, for a name both sources offer: the native data tool is served, the registry tool of that name is not, and one `debug` line names the tool and the source that was skipped. It sits in the runtime where both registrations meet, so it gives the same answer in either call order:\n  - registry first (the order `MCPServerPlugin.start` uses): each native registration first removes a bridged tool of its name (`yieldBridgedTool`, via the SDK's `RegisteredTool.remove()`);\n  - data tools first: `bridgeTools` skips a name already native.\n- `bridgeTools`' info line now counts the tools it actually bridged.\n- `plugin.ts` is unchanged.\n\n## Why\n\nA licensed host's AI registry carries `list_objects` and data tools of the same names as the native set. `bridgeDataTools` then hit the SDK's duplicate refusal, and the plugin's boot rolled back.\n\nMeasurement (step 0, on `origin/main` 31ae944b): HTTP `/api/v1/mcp` builds each request's server from `wireBridgeTools(bridge)` plus the host's authoring registry under `metadata:write`; it never bridges the AI `ToolRegistry`. So HTTP has always served the native data tool under these names, and stdio now serves the same one. No tool that a caller could reach before is refused now: on the colliding host stdio never booted, and on a host without a collision nothing changes. That is why `Clause-②: no`.\n\n## Tests\n\nNew top-level `describe` in `packages/mcp/src/mcp-stdio-tools.test.ts` (real `StdioServerTransport`), plus one case in that file's existing plugin-composition `describe` (the card's repro through `MCPServerPlugin.start`). No existing test edited.\n\n- tools/list names each tool once, registry bridged first.\n- `list_objects` reaches the data bridge and not the registry; exactly two debug lines, naming `list_objects` and `query_records`.\n- Same answer with the data tools registered first.\n- Over stdio, the `list_objects` entry equals the one HTTP lists for the same bridge.\n- CONTROL: a registry tool with no native namesake (`summarize_pipeline`) is still listed and its call reaches the registry.\n- Plugin boot with an `ai` service whose `toolRegistry` carries the colliding names.\n\n## Acceptance notes\n\n- Divergence left as it was (noted here, not filed): HTTP never exposes AI-registry tools at all, while stdio exposes those with no native namesake. This card only settles names both offer.\n- A plugin's own tools registered on `mcp:ready` still meet the SDK's duplicate refusal; this rule covers only the registry bridge and the native data tools.\n\n## Verification\n\nHead: 0b9e56b135 (fix commit ed8186f5; merge of `origin/main` 2e9121ed70 after #31848 landed as ce223960d0; then 0b9e56b135 moves the new log helper above the class's doc comment, a comment-position change only).\n\n<details><summary>Red on main, green on the fix</summary>\n\nOn 31ae944b, with the new pins only: `Tests  6 failed | 12 passed (18)`, each `Error: Tool list_objects is already registered`. With the fix: `Tests  18 passed (18)`.\n</details>\n\n<details><summary>Ablations (scripts/ablation-replace.mjs, restored blob == HEAD, git diff HEAD empty)</summary>\n\n- `yieldBridgedTool` made to return before removing (the skip dropped, plugin order): 5 failed, each `Tool list_objects is already registered`; the data-tools-first case stays green, as expected.\n- `bridgeTools`' native-name skip disabled: 1 failed (`gives the same answer when the data tools register first`), same error.\n</details>\n\n<details><summary>Package and gates</summary>\n\n- `pnpm --filter @objectstack/mcp test`: 62 files, 994 tests passed on 0b9e56b135 (985 before the merge). `pnpm --filter @objectstack/mcp typecheck` (tsc + check:test-typecheck): exit 0.\n- `eslint --no-inline-config` on both touched source files: exit 0 (the package has no `lint` script).\n- `node scripts/pm/dispatch-gates.mjs --commands`: 64 families, run on 0b9e56b135 and before that on ce223960d0; all 64 exit 0 on both, `--ran` reconciled: \"64 run, 0 NOT-MEASURED\". On the pre-merge head ed8186f5 the same 64 ran with `check:dual-build-cjs-loads` NOT MEASURED (exit 3, no full build then).\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmSheMCfRrgSamoMm75)_\n\n<!-- signed: domain:server#2 · os-steve · session_01ADHkmQKZzp4DLtqiCkZZRM -->\n"
+}

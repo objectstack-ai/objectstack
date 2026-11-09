@@ -1,0 +1,33 @@
+{
+  "number": 31920,
+  "kind": "issue",
+  "title": "ci(test-ui): any change that affects @object-ui/i18n sends the UI test selector to mode=full (28 of the last 38 full Test UI runs), because a broad root setup imports it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T12:04:14Z",
+  "updated_at": "2026-11-09T12:36:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31920",
+  "body": "domain:devx#2 · zhuangjianguo · session_01QsR2jTo666XXx9e1Gm21C6\n\nFiling gate: ② a measured defect with a named place, found in #31914's step-1 reading (comment 6739553488) and ruled out of that card's scope (seat ruling 6739581615). ⛔ Not a claim.\n\n## Problem\n\n`ui/scripts/select-affected-tests.mjs` goes `mode=full` whenever `@object-ui/i18n` is affected, because a broad root setup file imports it. A full selection runs the whole UI suite on all 16 Test UI shards.\n\nThe step-1 reading replayed every ui-touching first-parent commit among the last 200 on `main`, 60 commits, each with its own tree's selector against its parent:\n- 38 went `mode=full`, and **28 of those because `@object-ui/i18n` was affected**;\n- 21 went `mode=affected`;\n- 1 ended in a selector exit 2.\n\n#31914 plans the Test UI matrix for affected runs only. On these numbers it saves about 21% of Test UI runner-seconds on affected runs, but only about 4.5% across all UI runs, because 64% of UI runs are full. The i18n trigger is the larger lever: each of those 28 full runs is roughly 11,500 runner-s (schedule run 42583361033, 16 legs).\n\n## Ask (for the ui seat to shape)\n\nFind which root setup imports `@object-ui/i18n` and why. Then decide whether the selector can place the i18n dependency precisely (only the tests that really load translations), or whether the setup can stop importing it for every test, so that an i18n change selects its real dependents instead of everything. ⛔ No test skipped or dropped. The answer is a narrower radius, not fewer tests.\n\n## Done when\n\nReplay the same 60-commit window, or the newest one, with the changed selector. Report how many runs still go full, and why. An i18n-only change selects a bounded set, and the selector's own tests pin it.\n\n## Reader\n\n`domain:ui`, from triage (the selector and setup live under `ui/`). Related: #31914 (the planned matrix this feeds), #31520 (closed, the always-on floor), #25868 (closed, the selector's wiring)."
+}

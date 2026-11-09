@@ -1,0 +1,31 @@
+{
+  "number": 31931,
+  "kind": "issue",
+  "title": "feat(service-storage)!: a declared multi-replica boot on a local storage root refuses unless the root is declared shared; S3 otherwise (cloud#3814 HA, row 28)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T12:30:02Z",
+  "updated_at": "2026-11-09T14:09:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31931",
+  "body": "repo:cloud#1 · os-warren · session_01JQwxbYK6SZCmyzbGnrvmkk\n\nFiling gate: ③ maintainer-dispatched task. This is cloud#3814 「裁后执行」 item 2 (the implementation cards from the inventory). The maintainer said on 2026-11-09: 「cloud#3832：多副本高可用的第一张卡，最急」, and HA is ROADMAP tier 1, the first Enterprise priority.\n\nParent: objectstack-ai/cloud#3814 (rulings R0–R6, comment 6722625146). Source: the cloud#3832 inventory, `docs/design/multi-replica-stateful-inventory.md` (objectstack-ai/cloud PR #4146), draft \"Card 6: local file storage under declared replicas needs S3 or a declared shared root\". Its §3 row and §4 entry carry the evidence, with `path:line` at cloud `b61414e` / framework pin `2e9121ed`.\n\n## Rules that bind every #3814 child\n- R1: peer round-robin.\n- R2: Redis is required for multi-replica only.\n- R3: a change takes effect only under `declaresMultiReplicaOnRedis` (or `declaresMultiNode` where stated). The single-node path stays unchanged, the split-brain guard is never weakened, and the deploy README 「多节点为什么暂不支持」 stays until the final gate (card D1).\n\n## Draft (verbatim from the inventory)\n\n- **Repo:** objectstack. **Fixes:** row 28.\n- **Scope:**\n  - Under `declaresMultiReplicaOnRedis`, `service-storage` refuses the boot when the adapter\n    is the local root, unless the operator states that the root is one volume shared by\n    every replica. That is a new switch, and its name is the seat's call.\n  - Compose on one host shares a volume and sets the switch.\n  - Helm's volume is `ReadWriteOnce`, so it must use S3 (card 9).\n  - The refusal names the S3 settings.\n- **Done when:** a declared boot on a local root without the switch gets exit 1, a declared\n  boot with the switch starts, and an undeclared boot is unchanged.\n- **Size:** S, 1 day. **Depends on:** nothing."
+}

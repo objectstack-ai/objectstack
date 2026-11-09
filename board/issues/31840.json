@@ -2,8 +2,8 @@
   "number": 31840,
   "kind": "issue",
   "title": "spec(action): ActionSchema.preflight — a declared same-origin GET read shown in an action's param dialog before submit, with answer-to-param seeding (spec child of #31808)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,8 +13,6 @@
   "labels": [
     "domain:spec",
     "enhancement",
-    "pm:blocking",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T06:26:40Z",
-  "updated_at": "2026-11-09T07:48:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-09T10:02:09Z",
+  "closed_at": "2026-11-09T10:00:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31840",
   "body": "domain:ui#3 · zhuangjianguo · session_01QsR2jVEjiYrK7onirxUGyo\n\nFiling gate: **spec child of a product card** (lanes/spec.md: metadata-protocol changes go through a spec child, filed on first touch, and the product card is `Blocked-by:` it). Parent: #31808 (domain:ui, p3). The shape comes from the parent's step-1 report 6733724428, accepted by the seat in the parent's claim amendment. Dedupe: open issues searched for \"action preflight\", \"param dialog server read\" and \"seed param from read\"; none found.\n\n## 维护者速读\n\n- 问题：动作（action）没有办法声明「提交前先读一个接口」。云端安装升级需要在对话框里先显示「这次升级会改什么」，并把确认令牌自动带进参数，现在做不到。\n- 要做：给 `ActionSchema` 加一个新键 `preflight`：一个同源 GET，答复显示在参数上方，答复里的值可以填进指定参数（只读、照原样提交）。同源规则与页面元素的接口读取共用一个模块，不另立第二套。\n- 影响：纯新增（放宽接受集），已有元数据不受影响；控制台的实现在 #31808，等本卡合并后再做。\n- 需要你做的：无。\n\n## The key\n\n```ts\npreflight?: {\n  read: { url: string, method?: 'GET' },        // same-origin path template\n  path?: string,                                 // dotted path into the answer\n  fields?: Array<{ path, label?, format? }>,     // resultDialog.fields' row shape and format set, reused\n  seed?: Array<{ param, path }>,                 // answer value -> param value\n}\n```\n\n- `read.url` takes the page element read's same-origin rule (`SAME_ORIGIN_API_PATH_RE` and its class-naming refusal, `packages/spec/src/ui/page.zod.ts:391-445`). Move the regex, its refusal text, the response-path regex (`:448`) and the no-credentials guidance into **one shared module** that both `page.zod.ts` and `action.zod.ts` import. The page element's accept set and its messages stay byte-identical (pin it).\n- Holes are the runner's existing grammar, closed to `${param.NAME}`, `${ctx.recordId}` and `${ctx.record.FIELD}`. `${result.*}` is refused.\n- `method` is `z.literal('GET')`. The object is strict: `headers`, `auth`, `token`, `credentials`, `apiKey`, `body` and `params` are refused with the element read's guidance.\n- No `title` member: the panel takes a generic translated heading in the console. A title is a later widening if anyone needs one.\n\n## Refused at `ActionSchema` parse (each with its issue path)\n\n1. `read.url` is not a same-origin path (scheme, `//`, backslash, space or control, relative), and the message names the class. It projects into the JSON Schema as `pattern`.\n2. `read.method` is not `GET`.\n3. A credential-shaped or unknown key.\n4. A hole outside the closed set, or a `${param.NAME}` naming no declared param (`superRefine`).\n5. `preflight` on an action with no non-empty `params` (no dialog opens; the same rule `submitText` follows).\n6. A `seed.param` naming no declared param; a param seeded twice; a seeded param that also declares `defaultValue`, `defaultFromRow` or `carryOver`; a seeded param read by a hole (a cycle).\n7. **The spec owners' call; the seat recommends yes:** `preflight` beside `execution: 'aggregate'`. No console surface draws it there (the grid bulk dialog has no single row to read), so accepting it would be declared but not enforced. It is cheaper to widen later than to retire.\n\n## Work\n\n1. The key and refusals 1–6 (and 7 if ruled) in `packages/spec/src/ui/action.zod.ts`, with the shared same-origin module.\n2. Tests: the cloud-shaped example from the parent's step-1 report parses green; one refusal per class with its issue path; the page element's accept/refuse set unchanged.\n3. Liveness: `preflight` as `planned` in `packages/spec/liveness/action.json`, naming #31808 as the consumer. The ui card flips it to `live` (the seat allows that file on the ui card's surface).\n4. The Studio action form row, or its omit row (`action.form.ts`, `metadata-form-zod-reconciliation.test.ts`).\n5. Generated artifacts (`gen:schema`, `gen:docs`, and `gen:api-surface` if the shared module exports).\n6. Docs: `content/docs/protocol/objectui/actions.mdx`. Skills: `skills/objectstack-ui/rules/actions.md` carries the key once it lands.\n\n## Declarations\n\n- `Metadata-protocol: added` (`ActionSchema.preflight`), `Clause-②: yes (widening)`, a `minor` changeset on `@objectstack/spec`, `Skills-docs:` owed.\n\n## Done when\n\n- An action declaring the parent's cloud-shaped `preflight` parses; each refusal above fires at parse with its path; the page element read's behaviour is unchanged; the liveness row reads `planned`.\n\nRelated: #31808 (the console half), cloud#3863, cloud#4038.\n"

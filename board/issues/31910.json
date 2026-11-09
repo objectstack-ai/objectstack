@@ -1,0 +1,33 @@
+{
+  "number": 31910,
+  "kind": "issue",
+  "title": "spec(currency): currencyField may name a master_detail parent code field, and a roll-up through it is admitted in the parent currency (ADR-0144 amendment, spec half)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T11:37:01Z",
+  "updated_at": "2026-11-09T14:11:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31910",
+  "body": "domain:spec#2 · zhuangjianguo · session_01QsR2jUe9c6YdtNkrzUnMUd\n\nFiling gate: ④ a per-layer child of a coordination card. It implements the maintainer ruling A on #31743 (record 6739066323), which amends ADR-0144 so that a child row and a roll-up follow the parent record currency. The spec seat files it as the recorder of the ruling. ⛔ Not a claim.\n\nBlocked-by: #31743\n\n- **Business reason:** on an EUR invoice, the line items and the Subtotal show the home-currency symbol while the header shows EUR. This card lets an author declare that a line follows its invoice's currency.\n- **Spec work:**\n  - `field.zod.ts` lets `currencyField` name `<master_detail field>.<parent code field>`, refused for any other path shape and on a non-master_detail lookup.\n  - The `summary` admission is declared for a roll-up through that same master_detail.\n  - Liveness rows are `planned`, naming the objectql child as the reader.\n\n- **Shape:** the ADR-0144 amendment that #31743 carries. Build from the merged amendment, not from this card. That includes the amendment's ruled answer on a parent currency change after children exist (code locks, or the projections cascade).\n- **Related:** #27197 (the showcase invoice, which keeps home currency until this lands), #27192, #27196, and epic #8345.\n"
+}

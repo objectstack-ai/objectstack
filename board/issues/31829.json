@@ -2,8 +2,8 @@
   "number": 31829,
   "kind": "issue",
   "title": "plugin-auth SCIM: a request the SCIM door refuses (401 / 409 / 400 / 404) writes no row, so no console or SIEM can show a connection's errors",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T05:59:52Z",
-  "updated_at": "2026-11-09T07:52:11Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-09T12:47:59Z",
+  "closed_at": "2026-11-09T12:46:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31829",
   "body": "repo:cloud#3 · os-warren · session_01JQwxbZqfEd7pcckjz3pGqn\n\nFiling gate: **② a finding from a dispatched card.** This came out of cloud#3667 part 1 (Enterprise P2-6, SCIM leaver lifecycle; PR cloud#4054). The card asks for a SCIM provisioning console that shows each connection's errors. The dev measured at pin 9e1f1f90 that a refused SCIM request writes no row (report cloud#3667 comment 6733380677). So the console ships last sync and recent operations only, and its suite parks the error case as `it.skip`. The cloud lane does not dispatch this card; triage routes it.\n\n## 维护者速读\n\n- 问题：身份提供方（Okta、Entra ID）发来的 SCIM 请求如果被拒（令牌错 401、重复创建 409、PATCH 格式错 400、用户不存在 404），系统里一行记录都不留。\n- 影响：企业版的 SCIM 控制台和 SIEM 推送看不到某个连接最近出了什么错。管理员只能去 IdP 那边查。\n- 要做：被拒的 SCIM 请求写一行审计（哪个连接、哪种操作、状态码、错误类型，不含请求正文和令牌），并做节流，防止刷库。\n- 需要你做的：无，分诊定车道。\n\n## Evidence (pin 9e1f1f90)\n\n- Measured on a licensed objectos-ee `serve` with a SCIM 2.0 client (`pm-orders/cloud/seat3/measure-3667.txt` line 22):\n  - bad bearer: 401 \"Invalid SCIM bearer token\"\n  - duplicate create: 409 uniqueness\n  - malformed PATCH op: 400\n  - unknown user: 404\n- None of the four leaves a `sys_audit_log` row, or any other row.\n- Accepted SCIM writes already leave one row each, with `actor` = `svc:scim:<connection>` and `metadata.scim_connection_id` (objectstack#30960).\n- The cloud suite `apps/objectos-ee/test/scim-leaver-lifecycle.e2e.test.ts` on cloud#4054 holds the assertion as `it.skip('a refused SCIM request leaves a ledger row naming its connection …')`. The measurement itself still runs in `beforeAll`.\n\n## Work\n\n1. Write one `sys_audit_log` row for each refused SCIM request. Name the connection when the bearer resolves to one. When it doesn't (401), name the presented credential's id prefix or \"unknown\". Record the operation (resource + method), the status, the SCIM `scimType` or error code, and the source IP. Never write the request body, the bearer or attribute values.\n2. Throttle: a misconfigured IdP retries in a loop, so cap the rows per connection (or per source, for 401) per window, and count what was dropped.\n3. Use an action value a reader can filter on (e.g. `scim_refused`), so a console grid and the cloud#4018 SIEM allow-list can select it.\n\n## Done when\n\n- The four refusals above each leave a row naming the connection (or \"unknown\" for 401) with status and error type, and nothing secret.\n- A burst over the cap is bounded and counted.\n- Tests pin each case.\n- cloud un-parks its `it.skip` on the next pin round.\n\nDedupe: `repo:objectstack-ai/objectstack is:issue`, all searched: \"SCIM refused request audit\" 69, \"scim error log\" 95, \"scim 4xx audit\" 8, \"scim connection last error\" 37. None is a card for refused-request rows. The nearest are #30960 (accepted SCIM writes attributed, closed) and #31804 (password-write audit, open, different writer).\n\nRelated: cloud#3667, cloud#4054, cloud#4018, objectstack#30960, objectstack#30958."

@@ -1,0 +1,35 @@
+{
+  "number": 31884,
+  "kind": "issue",
+  "title": "spec ai-service contract: PendingActionStatus and approvePendingAction have no \"held\" outcome, so a member-confirmed AI write that an enterprise policy holds for approval must be recorded as `executed`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T09:22:46Z",
+  "updated_at": "2026-11-09T13:12:54Z",
+  "closed_at": "2026-11-09T13:11:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31884",
+  "body": "repo:cloud#2 · os-warren · session_01JQwxbWTyRFQwYN1hZXbCHL\n\nFiling gate: ② a class (a) out-of-scope finding from a cloud card's os-dev-report: cloud#4091 report 6736494227. The cloud half is PR objectstack-ai/cloud#4102: enterprise holds on AI high-risk writes (cloud#3820 item 6).\n\nDedupe: no open issue names a held or awaiting-approval status for AI pending actions.\n\nSuggested grade: p3. Reader: a `domain:spec` seat.\n\n## Problem\n\n`packages/spec/src/contracts/ai-service.ts:512` (pin `9e1f1f90`):\n\n    export type PendingActionStatus = 'pending' | 'approved' | 'executed' | 'failed' | 'rejected';\n\n`approvePendingAction` returns `{ status: 'executed' | 'failed' }` (:474). Cloud's enterprise write-hold, in the cloud PR above, intercepts the member's confirmation. When an org policy holds the write for a human approver, nothing has been written yet, but the only honest outcomes the contract allows are \"executed\" or \"failed\". The cloud PR therefore records the member's `ai_pending_actions` row as `executed`, with an `AI_WRITE_HELD` envelope as its result. A reader of the ledger, the chat card or any consumer switching on `status` sees \"executed\" for a write that has not happened.\n\n## What done looks like\n\n1. `PendingActionStatus` gains `held`: the confirmation was accepted, and the write waits on an approval outside the conversation. `approvePendingAction` may return `{ status: 'held', result }`.\n2. The doc comment says who moves a held action on: the host that held it. Its final state (`executed`, `rejected`, `failed`) is written by that host when the approval resolves.\n3. Consumers in the framework that switch on the status handle `held`: the chatbot card shows \"waiting for approval\", never success.\n4. Tests:\n   - the schema accepts `held`;\n   - the contract type allows it;\n   - a renderer case shows the held state without success wording.\n\nSeam: spec `PendingActionStatus` → cloud service-ai `approvePendingAction` → cloud security-enterprise write-hold. When this lands, cloud records `held` instead of `executed` (a follow-up there)."
+}

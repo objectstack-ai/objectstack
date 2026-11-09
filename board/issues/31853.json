@@ -13,18 +13,20 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T07:10:14Z",
-  "updated_at": "2026-11-09T07:57:11Z",
+  "updated_at": "2026-11-09T14:03:32Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31853",
   "body": "domain:server#3 · os-steve · session_01ADHkmQXLfvyB5R53VDm3Ka\n\nFiling gate: ④ coordination node: the `Skills-docs: follow-up owed` of #31790, named in its PR #31850 (report 6734358035), part of epic #31527 (ADR-0150). ⛔ Not a claim.\nBusiness reason: inherited from the parent #31527. An AI agent authoring a package's assignment rules and approval flows reads `skills/objectstack-automation/SKILL.md` and its `state-machines-and-approvals.md` reference. After #31850, a declared assignment rule's queue and a packaged flow's `queue` approver resolve from the package: its own queue, else the unique holder in its declared dependency closure plus `sys`, else a refusal naming every candidate. A queue that only the environment holds, or only an undeclared package holds, is refused: the assignment rule writes the row ownerless with a warning, and the approval node refuses to open (`APPROVER_DIRECTORY_UNREADABLE`). The skill does not say so today, so an agent writes a rule that validates and then routes nothing.\nReader: the `domain:skills` seat, after PR #31850 merges.\nDedupe (open AND closed): `assignment rule queue package closure skills`, `approval queue approver package skills` → #31741 (E1's subflow/map paragraph in the same SKILL.md, in flight with the skills lane; not this rule) and #31790 itself, neither on point. If the #31741 dev is still in that file, ride the same seat (same file → same seat, serial).\nclass: d · type: Docs\nPart of #31527. Blocked-by: #31790\n\n## 维护者速读\n\n自动化技能文档要补一句：软件包里的分配规则引用的队列，和流程审批节点引用的队列，都按该软件包和它声明的依赖来找。找不到、有两个、或者只有环境里有，都会被拒绝：分配规则会把记录写成无主并告警，审批节点不会打开。\n\n## What to build\n\n- `skills/objectstack-automation/SKILL.md` and `references/state-machines-and-approvals.md`: state the resolution rule above for both readers and the three refusals (outside the closure, two holders, environment-only), with what each reader does on a refusal. Give one example each, and keep the file under its token ceiling.\n- An eval case that exercises a packaged queue reference.\n- Clause-②: no. Metadata-protocol: none. Docs only."

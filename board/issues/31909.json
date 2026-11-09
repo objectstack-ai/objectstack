@@ -1,0 +1,33 @@
+{
+  "number": 31909,
+  "kind": "issue",
+  "title": "plugin-audit: sys_audit_log calls itself \"immutable\" in its doc comment and description; the measured guarantee is read-only through the data API",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T11:35:09Z",
+  "updated_at": "2026-11-09T13:32:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31909",
+  "body": "repo:cloud#3 · os-warren · session_01JQwxbZqfEd7pcckjz3pGqn\n\nFiling gate: **① a product defect with a named location and a measured reproduction.** cloud#4016 measured it (design doc `docs/design/audit-tamper-evidence.md` §2.1 and §6 in objectstack-ai/cloud, merged as cloud PR #4025). The shipped object description is a sentence that is wrong. It is not a security finding: the guarantee itself is unchanged and public.\n\n**Cloud consumer:** objectstack-ai/cloud#4016. docs.objectos.ai and the Enterprise security questionnaire already say \"cannot be edited or deleted through the data API or in Setup\" (cloud#4029). The framework's own description still says \"immutable\".\n\n## 维护者速读\n\n- 问题：`sys_audit_log` 的对象说明和文档注释写着\"不可篡改（Immutable）\"，但实测只能做到\"数据接口里只读\"：系统上下文写入、到期删除和脱敏迁移都能改删，而且不留痕迹。\n- 要做：把这两处措辞收窄成实测到的保证。防篡改证明另有卡（cloud#4016 的裁定 (c)）。\n- 需要你做的：无。\n\n## Location (objectstack main)\n\n- `packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts:68`: \" * Immutable audit trail for all significant platform events.\"\n- `:101`: `description: 'Immutable audit trail for platform events'` (shipped: every metadata read and Setup shows it).\n\n## Work\n\nSay what holds: rows are written only by the platform and are read-only through the data API and in Setup. Don't claim tamper-evidence until the sealer ships. Check that no test or snapshot pins the old string.\n\n## Who acts\n\nThe server lane, one small PR.\n\nDedupe: `org:objectstack-ai is:issue sys_audit_log immutable description`: 4 hits. The nearest is cloud#4029 (the docs and questionnaire wording, done); none covers the framework description.\n\nRelated: cloud#4016, cloud#4029."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 31885,
+  "kind": "issue",
+  "title": "spec(i18n): walk and overlay ActionSchema.preflight.fields labels like resultDialog.fields (before #31808 goes live)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T09:24:59Z",
+  "updated_at": "2026-11-09T13:45:18Z",
+  "closed_at": "2026-11-09T13:43:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31885",
+  "body": "domain:spec#2 · zhuangjianguo · session_01QsR2jUe9c6YdtNkrzUnMUd\n\nFiling gate: ③, a finding of the contract review of PR #31859 (card #31840, record 6736578967 on head `e6937e36`). The review judged this a follow-up, not a defect of that PR. The spec seat files it as its own finding.\n\nBlocked-by: #31840\n\n- **What is missing:** `ActionSchema.preflight.fields[].label` is an `I18nLabel`, built from the same row as `resultDialog.fields`. Bundle translation covers only `resultDialog.fields`:\n  - `packages/lint/src/i18n-walk.ts` walks `resultDialog.fields` (`pushActionResultDialog`) but not `preflight.fields`;\n  - `packages/spec/src/system/i18n-resolver.ts` overlays `resultDialog.fields` (`resolveActionResultDialog`) but not `preflight.fields`.\n\n  So a preflight field label can be translated only inline, as a locale map, never through a bundle.\n- **Business reason:** the first author is the cloud install/upgrade preview (#31808). Its field labels (\"Tables changed\", \"Rows affected\") are user-facing in every locale the console ships. Without the walker and overlay, a translator never sees them, and a zh-CN user reads English labels in the confirmation dialog.\n- **Why not now:** `preflight` is `planned` in `liveness/action.json`. Nothing draws the label until #31808, so an overlay would have no reader yet. This card must land **before** #31808 flips `preflight` to `live`.\n- **Surface:** the walker entry, the resolver overlay, and the `validate-translation-references` analogue for `actions.<name>.preflight.fields.<path>.label`, mirroring `resultDialog`, with their tests. Declare the bundle key in `system/translation.zod.ts` if `resultDialog`'s key is declared there.\n- **Dedupe (open and closed):** a search for `preflight` finds only #31840, #31808 and #31860. None of them covers translation.\n"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 31874,
+  "kind": "issue",
+  "title": "security: may an AI service account trigger a flow declared runAs system? (ADR-0151 non-goal, #31739 follow-up)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "needs-user-decision",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T08:38:51Z",
+  "updated_at": "2026-11-09T08:38:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31874",
+  "body": "domain:server#1 · os-steve · session_01ADHkmPF1skfu2kx89BEXZi\n\nFiling gate: ④ decision node, a follow-up to #31739 (ADR-0151, AI service account). It is not a claim, and it names a question the seat cannot rule on.\nBusiness reason: PR #31867 (#31739 PR-2) holds an AI service account to its explicit grants and never lets it run as the system (ADR-0151 D3). A flow whose author declared `runAs: 'system'` still runs as the system when an account triggers it, because the flow author granted that run to whoever may trigger the flow. ADR-0151's Non-goals list says \"a flow or job `runAs` naming an account\" is not decided there, and ADR-0073's automation principal stays the identity of user-less runs. Whether the trigger door should refuse an account in front of a system flow is therefore a narrowing beyond the ADR's declaration.\nReader: the maintainer, through the `needs-user-decision` label. The fix lands on server seat 1 if the answer is A.\nDedupe: no open or closed card asks whether a `runAs` system flow may be triggered by an agent account.\nclass: c · type: Decision\nGrade: p2. Nothing is exposed today: no account can be registered before #31739 PR-3, and option B gives the account no power the flow author did not already give every member allowed to trigger the flow.\n\n## 维护者速读\n\nAI 服务账号（ADR-0151）只能用显式授予的权限，永远不以系统身份运行。但如果某个流程的作者把它声明为以系统身份运行（`runAs: 'system'`），账号触发它时，流程照样以系统身份跑。ADR-0151 把这件事明确列为\"本记录不决定\"。需要你定：是在触发入口拒绝账号（A），还是保持现状、把它当作流程作者的授权（B）。\n\n## Options\n\n- **A. Refuse at the trigger door.** An account that triggers a flow declared `runAs: 'system'` gets a refusal by name. This narrows every automation an account may trigger, so it needs an ADR-0151 amendment (or an O6 decision) and a `Clause-②: no (narrowing)` changeset.\n- **B. Keep today's behaviour (seat recommends).** The flow author's `runAs: 'system'` is the grant. The account is the trigger, not the acting identity, and the run now carries `principalKind: 'agent'` on its trigger facts, so O2 and O6 (the ADR's named readers of the kind) can route or hold it later. ADR-0151 gets one sentence in its Non-goals saying so when it is next amended.\n\n## Seat analysis\n\nB is safe and adds no power: a member who may trigger the flow already gets the same system run, and the account's own grants are clamped and refused at assignment by PR #31867. A also leaves a gap, because `runAs` naming a person (not the system) is the same shape and is equally undecided; ruling A alone would split the two. The PR #31867 contract review (issuecomment-6735749732, ③ flag 4a) reads the same. The seat recommends B."
+}

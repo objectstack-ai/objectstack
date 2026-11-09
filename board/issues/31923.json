@@ -1,0 +1,31 @@
+{
+  "number": 31923,
+  "kind": "issue",
+  "title": "runtime: export a headless action dispatch a host's own action door can call, so a host does not keep a second copy of the action admission rules",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T12:14:46Z",
+  "updated_at": "2026-11-09T13:57:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31923",
+  "body": "repo:cloud#3 · os-warren · session_01JQwxbZqfEd7pcckjz3pGqn\n\nFiling gate: **② a producer contract a named consumer needs.** The consumer is cloud's in-product AI action tool (`packages/service-ai/src/tools/action-tools.ts` in objectstack-ai/cloud). It must give the same answer as `POST /api/v1/actions/:object/:action` and MCP `run_action`. At cloud's pin (`2e9121ed`), `packages/runtime/package.json` exports only `.` and `./compiled-plugin-manifest-file`, and `src/index.ts` re-exports nothing from `action-execution.ts` or `flow-start-admission.ts`. So cloud now keeps a mirror of two of the door's rules (`tools/action-admission.ts`), which `flow-start-admission.ts`'s own header calls a defect. A mirror test in cloud reds on the day this export lands.\n\n## 维护者速读\n\n- 问题：框架的 action 门（REST `/actions` 和 MCP `run_action` 共用 `action-execution.ts`）在运行 action 前要问一串规则，但 `@objectstack/runtime` 没有导出它，宿主自己的 action 入口（比如 cloud 产品内 AI 的 action 工具）只能照抄其中几条。\n- 要做：导出一个无头的 action 分发函数，宿主传入 `ExecutionContext`、对象名、action 名、参数和请求凭证，它按框架门的全部规则（`requiredPermissions`、flow 启动准入、启用状态、参数契约、确认门）判断并运行，返回和框架门相同的答复。至少也要导出 `flowStartRefusal` 和 `actionPermissionError`。\n- 需要你做的：无。\n\n## Ask\n\n1. A public export from `@objectstack/runtime` of the action door's dispatch, callable without an HTTP request: it takes the caller's `ExecutionContext`, the object and action names, the params, and (for an `api` action) the caller's own request credential headers to forward in memory. It asks every rule the door asks: the action's `requiredPermissions` (ADR-0066 D4), flow start admission, the ADR-0126 §8 activation consult, the param contract (ADR-0104), the confirmation gate, and the start-record read. It returns the door's answer, with its code and status.\n2. A script action's body runs in the same context it runs in at the door.\n3. If the whole dispatch cannot be exported now, export `flowStartRefusal` and `actionPermissionError` as a first step.\n\n## Done when\n\nA host can import the dispatch from the package root, a test proves the export's answer equals the door's for one gated action and one elevated flow, and the docs name it as the host's way to run an action.\n\n## Who acts\n\nThe server lane. Cloud follows with a pin round and one small PR that calls the export and deletes its mirror.\n\nDedupe: `org:objectstack-ai is:issue export headless action dispatch runtime`: 60 hits; `org:objectstack-ai is:issue flowStartRefusal export`: 3 hits. None asks for the export."
+}

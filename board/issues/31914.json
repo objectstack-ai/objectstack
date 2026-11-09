@@ -1,0 +1,32 @@
+{
+  "number": 31914,
+  "kind": "issue",
+  "title": "ci(test-ui): plan the Test UI shard matrix from the selected tests, like Test Core's, with the ~230 whole-tree gate tests as a fixed lane",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T11:38:07Z",
+  "updated_at": "2026-11-09T14:16:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31914",
+  "body": "domain:ui#3 · zhuangjianguo · session_01QsR2jVEjiYrK7onirxUGyo\n\nFiling gate ③, a task the maintainer directed. The maintainer ruled on #31520's decision card (2026-11-09T11:34:16Z, 「同意」 to the recommendation in the project's analysis thread). They re-scoped #31520 to the measured selector floor, which closes it, and opened this card at p1, Tier H, with #31520's second acceptance line moved here. ⛔ Not a claim. Lane: `domain:devx` (`.github/workflows/**` is this lane's by path, lanes/devx.md).\n\n## 维护者速读\n\n- **问题：** Test UI 的分片数是写死的 16。即使只改了一个 UI 包、只选中少量测试，也会启动全部 16 个分片。在 run 42478811805 上，每个分片约 41% 的时间花在安装和准备上。#31520 已把空 diff 的常驻测试集从 691 降到 509，这是选择器能达到的下限，但它改变不了「永远 16 个分片」。\n- **要做：** 照 Test Core 的做法给 Test UI 做一个按计划生成的分片矩阵（`ci.yml` + `scripts/ci-shard-matrix.mjs`）：分片数跟着选中的测试数走。约 230 个静态无法限定范围的整树门禁测试（spawn 或 glob、运行真实库程序、读 `ui/` 以外的文件）单独归成一条固定通道。\n- **影响：** 改 `.github/workflows/ci.yml`，属于 Tier H，需要维护者批准后才能合并。\n- **需要你做的：** PR 就绪后批准 Tier H 合并。\n\n## Measured\n\n- **Always-on floor:** 509 test files on an empty diff, after #31520's three slices (691 → 579 → 519 → 509; landed notes on #31520, final slice PR #31639 at `711c4ec9`).\n- **What keeps them always-on:** #31520's S3 plan (comment 6724362736) counts about 230 files that no static radius bounds:\n  - 92 spawn or glob;\n  - 56 run a real library program (`typescript`, `vite`, `tailwindcss`, `postcss`);\n  - 67 read the monorepo outside `ui/`.\n  These are the fixed lane's candidates.\n- **Setup cost:** about 41% of each Test UI shard's wall is setup, on run 42478811805. The always-on shrink cannot touch that while `test-ui`'s matrix is the literal 16.\n- **Test Core already plans its shards:** `scripts/ci-shard-matrix.mjs` is the one reader of the matrix sizes, and `partition-test-shards.mjs` and `check-shard-attestation.mjs` consume it. Test UI's `--shard k/16` denominator, and the \"all sixteen shards green\" borrowed-verdict probe in `ci.yml` (#31519 Q2 = B), both assume 16 today.\n\n## Wanted\n\n1. **Plan the Test UI matrix from the selection.** The shard count follows the number of tests `ui/scripts/select-affected-tests.mjs` selects, as Test Core's plan does. The whole suite still gets its full count.\n2. **A fixed lane for the whole-tree gate tests.** The about 230 structurally unboundable tests run as their own lane on every UI run, so the planned shards carry only package-placed tests.\n3. **Keep the guards true at the new count.**\n   - The borrowed-verdict probe (\"ran the whole ui suite on N green shards\") and shard attestation read the planned count, not a literal 16.\n   - `ci-shard-matrix.mjs` stays the one reader.\n4. ⛔ No test skipped, quarantined or dropped from Test UI. Every selected test runs in exactly one shard or in the fixed lane, and attestation proves it.\n\n## Acceptance\n\n- **Moved from #31520:** for three real one-package UI PRs after landing, put on this card how many Test UI shards each started, and each one's Test UI runner minutes.\n- **An empty-diff UI run:** the shard count, and the fixed lane's wall time.\n- **The whole-suite run:** still every test, at full count, with attestation green.\n\n**Size:** M. **Tier:** H (`.github/workflows/ci.yml`). **Clause-②:** no. **Metadata-protocol:** none. **Priority:** p1, by the maintainer.\n\n## Dedupe\n\nOn 2026-11-09, open issues were searched for \"Test UI shard matrix\", \"planned shard Test UI\" and \"ci-shard-matrix test-ui\". None was found (the analysis thread's search agrees). Nearest: #31520 (closed with this filing; the always-on set), #31519 (the borrowed verdict), and #26084 (closed; empty shards). **New.**\n"
+}

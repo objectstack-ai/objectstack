@@ -1,0 +1,36 @@
+{
+  "number": 31895,
+  "kind": "issue",
+  "title": "cloud-connection: the declared-rename planner service is registered only by the install door's plugin, so a kernel without the door cannot reach it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T10:30:54Z",
+  "updated_at": "2026-11-09T13:34:27Z",
+  "closed_at": "2026-11-09T13:33:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31895",
+  "body": "repo:cloud#3 · os-warren · session_01JQwxbZqfEd7pcckjz3pGqn\n\nFiling gate: **① a product gap with a named location and a measured reproduction.** It is a follow-up to #31801, which exported the planner, but its consumer still cannot reach it. Measured by the objectstack-ai/cloud#3862 card thread (`session_01JQwxbadWGSGHtyrx8m5r94`) before any build, on cloud `f1405f5` at framework pin `2e9121ed`. Not a security finding. ⛔ Not a claim.\n\n**Cloud consumer:** objectstack-ai/cloud#3862. A hosted managed install must check a declared rename (`renamedFrom`) against the environment's columns before it writes desired state, and it must use the framework's planner with no planning logic in cloud. That card goes back to `pm:blocked` on this one.\n\n## 维护者速读\n\n- 问题：#31801 已把\"声明式重命名安装规划器\"作为服务名（`marketplace-install-rename-planner`）导出，但只有安装入口插件（`MarketplaceInstallLocalPlugin`）在 `init` 里注册它。不挂这个安装入口的内核拿不到规划器，托管环境内核就是这种情况。\n- 影响：托管安装无法在写入前检查重命名，只能先接受、等环境重建时再被拒（cloud#3862 的问题）。为了拿到规划器而在每个租户内核上挂安装入口插件，又会把安装、卸载、重播、清除这些路由交给租户，正是 #31851 拆开的东西。\n- 要做：提供一个不带安装入口的规划器挂载，例如一个只注册该服务的小插件，或者把规划器放到 `manifest` 服务上。安装入口继续调用同一个实现。\n- 需要你做的：无，分诊定车道。\n\n## Reproduction (cloud `f1405f5`, pin `2e9121ed`)\n\n| Kernel | `getService('marketplace-install-rename-planner')` |\n|:--|:--|\n| A: cloud's `ArtifactKernelFactory.create()` (the hosted env kernel), `requires: []` | throws `[Kernel] Service 'marketplace-install-rename-planner' not found` |\n| B: the same, with all 19 capability tokens | throws, same message |\n| C (control): bare `ObjectKernel` + `ObjectQLPlugin` + `MarketplaceInstallLocalPlugin` | present; `plan` is a function |\n\n## Location (objectstack `2e9121ed`)\n\n- `packages/cloud-connection/src/marketplace-install-local-plugin.ts:1549`: the planner is registered only inside `MarketplaceInstallLocalPlugin.init()`. The same `init` registers the install door at `:1528`, and `providesServices` (`:1473`) declares both.\n- `:1552-1608`: that plugin's `start()` rehydrates its file ledger and mounts the install-local HTTP routes (install, uninstall, reseed, purge) at `kernel:ready`.\n- `packages/cloud-connection/src/index.ts:37,43-51`: the root exports the door plugin, the service name and the result types. There is no standalone planner plugin, and the planner body (`planDeclaredRenames`) is private to the door plugin.\n\n## Wanted\n\n1. A way to mount the planner with no door. For example, an exported plugin that registers only `marketplace-install-rename-planner` and needs only the `objectql` engine and its driver, or the planner offered on the `manifest` service. The lane decides which.\n2. The install door keeps calling the same planner entry, so there is one implementation.\n3. A test that a kernel with only that mount resolves the service and answers `plan()`, and that it mounts no install route.\n\n## Done when\n\n- On a kernel without `MarketplaceInstallLocalPlugin`, the planner resolves and plans; no install-local route exists.\n- The door's existing declared-rename suites stay green.\n\n## Who acts\n\n- Triage grades and routes it (#31801 was cloud-connection). Cloud picks it up at its next pin round and then resumes cloud#3862.\n\nDedupe: `repo:objectstack-ai/objectstack is:issue` \"\"marketplace-install-rename-planner\"\": 1 hit, #31801 (closed, the export this follows up); \"INSTALL_RENAME_PLANNER_SERVICE\": 1 hit, #31801; \"planDeclaredRenames\": 1 hit, #31801; \"planner without install door\": 19 hits, none about a door-less mount (nearest #30885, closed, the rename carry itself).\n\nRelated: #31801, #31851, #31402, objectstack-ai/cloud#3862, objectstack-ai/cloud#3654."
+}

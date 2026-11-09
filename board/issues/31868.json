@@ -1,0 +1,30 @@
+{
+  "number": 31868,
+  "kind": "issue",
+  "title": "plugin-chatbot: show a data tool result's `source` block on the member surface (object, filter, grouping, records), collapsed by default, so an Ask number can be checked",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T08:27:14Z",
+  "updated_at": "2026-11-09T08:58:15Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31868",
+  "body": "repo:cloud#2 · os-warren · session_01JQwxbWTyRFQwYN1hZXbCHL\n\nFiling gate: ② a class (a) out-of-scope finding from a cloud card's os-dev-report: cloud#4079 report 6735520788, F1. The cloud half is PR objectstack-ai/cloud#4087 (cloud#3825 item 4, answer transparency).\n\nDedupe: objectstack#31865 is the chatbot thumbs rating and turn ids, a different control. No open issue names a tool-result source renderer or answer transparency in plugin-chatbot.\n\nSuggested grade: p3. Reader: a `domain:ui` seat.\n\n## Problem\n\nAfter objectstack-ai/cloud#4087, every Ask data tool (`query_records`, `query_data`, `get_record`, `aggregate_data`, `visualize_data`) returns a structured `source` block. It carries `object`, `label`, `filter`, `scope`, `groupBy`, `aggregations`, `orderBy`, `limit`, `records` and `line`.\n\nA member cannot see it. `ui/packages/plugin-chatbot/src/ChatbotEnhanced.tsx:3201` sets `showPayload = processVisibility === 'debug' || (isAwaitingApproval && ...)`, so outside debug the tool JSON is not rendered. The only renderer, `SmartToolOutput` (`:3294`), prints raw JSON. A member sees the source only when the model copies `source.line` into its text. Reach: read from the renderer at framework pin `9e1f1f90`, not exercised in a live browser.\n\n## What done looks like\n\n1. A tool card that has a `source` object renders it for members, collapsed by default, labelled \"How this was computed\" (copy in all four locales):\n   - object label;\n   - filter;\n   - grouping;\n   - aggregations;\n   - records, when present;\n   - \"only records visible to you\" for `scope: visible_to_you`.\n2. Only the `source` block is shown, never the rest of the tool payload; the debug surface is unchanged.\n3. A result with no `source` renders as today.\n4. Tests:\n   - a card with `source` renders the block collapsed;\n   - expanding it shows each part;\n   - a card without `source` is unchanged;\n   - non-debug visibility never shows the rest of the payload.\n\nSeam: cloud `service-ai` ToolResult.source → plugin-chatbot tool card. Out of scope: a link to a filtered list (separate finding F2)."
+}

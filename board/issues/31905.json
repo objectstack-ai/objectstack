@@ -1,0 +1,33 @@
+{
+  "number": 31905,
+  "kind": "issue",
+  "title": "`/api/v1/ai/*` answers 503 \"AI service routes not yet initialized\" forever when the AI route table is deliberately suppressed (unlicensed EE), and the Console requests `/ai/agents` on every page",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T11:13:06Z",
+  "updated_at": "2026-11-09T12:58:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31905",
+  "body": "## Edition\n\nObjectOS Enterprise (licensed, self-managed), run with **no licence** (Community).\n\n## Version\n\nEE image 4.3.1 (`sha256:679eb7525e1ab3bfc732fc46433543ab388ba0cabc3157616e6bd2350210f658`, framework pin `63b86b38`). The same exit is on `main`: `packages/runtime/src/domains/ai.ts`, the `if (!routes)` branch.\n\n## What happened / What you expected\n\nOn an unlicensed EE install, every Console page (all 42 Setup pages, Home, the Studio-built app) sends `GET /api/v1/ai/agents` and gets:\n\n```\n503 {\"success\":false,\"error\":{\"code\":\"SERVICE_UNAVAILABLE\",\"message\":\"AI service routes not yet initialized\",\"httpStatus\":503}}\n```\n\nEach page then logs `Failed to load resource: … 503 (Service Unavailable)` to the browser console. Nothing renders wrong, but:\n\n- the answer says the AI is *starting up* when it is in fact *off for this edition*. A 503 tells clients and operators to retry, and it never resolves;\n- an operator debugging anything else sees a 503 on every page and goes looking for a broken AI service.\n\nExpected: when AI is unavailable by design, `/ai/*` gives the same answer as the \"unserveable\" exit above it (capability unavailable, not a transient 503), and the Console stops requesting `/ai/agents` once it knows AI is unavailable, or treats that answer as \"AI off\" without an error.\n\n## Cause\n\ncloud#1514 made the unlicensed EE image suppress `registerRoutes`, so the AI service never publishes `__aiRoutes` (cloud `apps/objectos-ee/test/unlicensed-ai-routes-suppressed.test.ts`). `http-dispatcher`'s `getRegisteredAiRoutes()` then returns `undefined`, and the AI domain treats that as the boot-race window:\n\n```ts\nif (!routes) {\n    if (denyAnonymous) return anonymousRefusal();\n    return { handled: true, response: deps.error('AI service routes not yet initialized', 503) };\n}\n```\n\n\"Not published yet\" and \"deliberately not published\" share one exit. The cloud test notes that the framework tree is read-only from the cloud side, and that a dispatcher change is filed here as the twin.\n\n## Steps\n\n1. Run `deploy/install.sh --image <4.3.1 digest> --url http://localhost --admin-email …` with no `--license-file`.\n2. Sign in and open any Console page with DevTools open.\n3. Every page shows `GET /api/v1/ai/agents` → 503 with the message above.\n\n## Impact\n\nLow. Nothing breaks, but there is a console error on every page of every unlicensed EE install, and its wording is misleading. Found during the clean-host install run for objectstack-ai/cloud#3582."
+}

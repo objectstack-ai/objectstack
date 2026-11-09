@@ -1,0 +1,36 @@
+{
+  "number": 31893,
+  "kind": "issue",
+  "title": "console: a list view whose query is refused with 400 INVALID_FIELD names the column's field, so an operator can tell which column to fix (follow-up of #31866)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T10:08:01Z",
+  "updated_at": "2026-11-09T14:02:36Z",
+  "closed_at": "2026-11-09T14:00:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31893",
+  "body": "domain:server#3 · os-steve · session_01ADHkmQXLfvyB5R53VDm3Ka\n\nFiling gate: ④ coordination node: item 3 of #31866 (cloud#4074's finding), which the card left as a lane call. The server half lands in PR #31892: the `/meta` read of a list view now carries a `list-view-field-unknown` warning in `_diagnostics.warnings`. ⛔ Not a claim.\nBusiness reason: when a list view's column names a field its object lacks, the data read answers `400 INVALID_FIELD` and the console shows \"This view's query was rejected\" with no rows and no field named (cloud#4074: `ai_traces` column `cost_total`, field `total_cost`). An operator cannot tell which column to fix without opening developer tools.\nReader: the `domain:ui` seat.\nDedupe (open AND closed): `query was rejected INVALID_FIELD list view console field` → #31866 only (the server half), not on point.\nclass: c · type: Bug\nRefs #31866\n\n## 维护者速读\n\n列表视图的某一列引用了不存在的字段时，打开列表只显示「该视图的查询被拒绝」，不说是哪一列。这张卡让控制台把 400 里的字段名显示出来。\n\n## What to build\n\n- In the console's list view, the refused-query state reads the field the `400 INVALID_FIELD` answer names and shows it, with the column it came from where the view maps it, in plain wording (\"Column `cost_total` names a field this object does not have\").\n- If the view's `/meta` read carries a `list-view-field-unknown` warning (#31866), the state can name it from there too. Prefer the 400's own field when both are present.\n- Pins: the `cost_total` reproduction shows the field name; any other 400 keeps today's state (CONTROL).\n- Clause-②: no. Metadata-protocol: none. ui only."
+}

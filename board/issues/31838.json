@@ -2,8 +2,8 @@
   "number": 31838,
   "kind": "issue",
   "title": "mcp: a tools/call for a tool the grant did not register is answered \"not found\" before any interceptor, so a scope-narrowed write leaves no trace",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T06:23:53Z",
-  "updated_at": "2026-11-09T08:04:12Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-09T09:25:16Z",
+  "closed_at": "2026-11-09T09:23:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31838",
   "body": "repo:cloud#3 · os-warren · session_01JQwxbZqfEd7pcckjz3pGqn\n\nFiling gate: **② a finding from a dispatched card.** cloud#4049 installed the governance interceptor on the #31605 seam and measured the gap below (PR cloud#4057, report cloud#4049 comment 6733693119). The cloud lane does not dispatch this card; triage routes it.\n\n## 维护者速读\n\n- 问题：外部 AI 用只读令牌（`data:read`）调用写入工具（例如 `create_record`）时，MCP 直接回答\"工具不存在\"。这一步发生在拦截器之前，所以没有任何地方留下记录。\n- 影响：安全负责人看不到\"某个 AI 试图越权写数据\"。这正是审计最该看到的一类事件。\n- 要做：未注册工具的调用也经过 #31605 的拦截入口（或单独上报一次），让宿主能记一行。\n- 需要你做的：无，分诊定车道。\n\n## Reproduction (pin 9e1f1f90)\n\n- `POST /api/v1/mcp` with an OAuth token whose grant is `data:read`, then `tools/call` `create_record`. The answer is `Tool create_record not found`.\n- `sys_ai_audit_log` (cloud#4057's interceptor is installed), `sys_audit_log` and every other table are unchanged.\n- Seam: `routeToolCallsThrough` wraps registered tools only. The SDK answers an unknown tool by itself. This breaks #31605's contract, \"one seam every MCP tool call passes through\".\n\n## Work\n\n1. Route a `tools/call` for a name the session did not register through the interceptor with a marker (e.g. `registered: false`), or call it once for observation only. The answer stays \"not found\", so nothing about the hidden surface leaks.\n2. Keep it cheap: no handler runs.\n\n## Done when\n\n- A `tools/call` for an unregistered name reaches the installed interceptor once, with the principal and the name. The answer is unchanged.\n- A test pins both.\n\nDedupe: `repo:objectstack-ai/objectstack is:issue`: \"MCP unregistered tool interceptor\" 1 hit (#31605, the seam, closed), \"tools/call not found audit\" 55 hits, none on this.\n\nRelated: cloud#4049, cloud#4057, objectstack#31605, objectstack#31796."

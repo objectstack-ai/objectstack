@@ -1,0 +1,34 @@
+{
+  "number": 31934,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): charter the cloud lane and run its first-touch sweep before claiming",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T12:35:48Z",
+  "updated_at": "2026-11-09T13:43:12Z",
+  "closed_at": "2026-11-09T13:43:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-09T13:43:09Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31934",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbP1PWu7DRtanSArPuehBcPC)_\n\nFixes #31916\nFixes #31918\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么:** 新增 cloud 车道章程 `lanes/cloud.md`,写明 cloud 席位每轮巡查先清空未分诊的 cloud 卡再认领、立卡即打好优先级和状态;席位巡查清单加一行;分诊职责加一行每日兜底(超 4 小时无状态的 cloud 卡写信给 cloud 席位,分诊不代打标签)。\n- **为什么改:** 规则早就说 cloud 卡由 cloud 席位自己首次分诊,但没落到任何席位的巡查流程里,导致 17 张 cloud 卡没有状态、没人看见(含企业版第一优先的卡)。您 11-09 选了 A,本 PR 照 A 落实。\n- **风险与回滚:** 只改内部技能文本,不碰产品代码和门禁;三个文件的行数上限都没抬,新行用删除已在别处写过的旧行抵扣。回滚即 revert 本 PR。\n- **先看:** ① `.claude/skills/pm-dispatch/references/lanes/cloud.md`(常设承诺一节);② `references/seat-lifecycle.md` 新增的巡查行和合并的标题行;③ `references/triage-duties.md` 新增兜底行与删掉的那行。\n- **两分钟验证:** 运行 `node scripts/pm/check-skill-line-ratchet.mjs --self-test`,预期最后一行 `164 cases pass`,且无红行。\n- **需要你做的:** 无,席位落地(Tier S,席位做契约复审后落地)。\n\n## What changes\n\n- **New `references/lanes/cloud.md` (28 lines)**, the `repo:cloud` lane charter in the house shape (形态 / 范围 / 常设承诺), written from ruling 6739409918 (letter A) and the cloud seats' own statements on #31918:\n  - Shape: single-lane execution seats `repo:cloud#N`; no `domain:*`; the mechanical three duties per the single-lane repo rule in `cross-repo-coordination.md`; card-thread orders in the project's `pm-orders/cloud/seatN/` folders.\n  - Scope: the whole cloud repo, plus objectstack cards carrying `domain:cloud` + `repo:cloud`.\n  - Commitments: first touch before claiming (open cards with no `pm:*` state or no `priority:*`, graded by roadmap order, given a state or closed with a reason); every filed card carries grade and state; Enterprise order by the cloud roadmap as sub-issues of the Enterprise parent; the p1/p2 floor for new dispatch; security stays in-lane; the triage backstop; the cloud release-board producer (an existing fact from `seat-post-protocol.md`).\n  - Facts are written as descriptions, with no tracker ids (`check:pm-skill-id-lint`).\n- **`references/seat-lifecycle.md`**: one patrol line, placed before the standby line: a single-lane repo seat runs its first-touch sweep before the five standby items. Paid by folding L26 into L25 (seat ruling, claim amendment 6739562343): the title rule keeps 「仅慢状态」; the dropped clause 「快状态留在说明段」 survives at seat-lifecycle.md L22 (the 说明 section) and L30 (mid-round state on the claim, pointer rows and 席位核对). 98 → 98.\n- **`references/triage-duties.md`**: one backstop line after the daily reconciliation line (cloud card stateless over 4 h ⇒ mail the `repo:cloud` seats; triage never labels). Paid by deleting old L53, the (c) boundary-warning line, which survives at `.claude/agents/os-dev.md:51`. 101 → 101.\n- **`SKILL.md`**: the `domain:cloud` row points at `references/lanes/cloud.md`, inside the row byte pin (row 338 B, pin 341 B).\n- **`scripts/pm/check-skill-line-ratchet.mjs`**: the new file's `CEILINGS` row (28, landed count, headroom 0) and its `MAX_TABLE_ROW_BYTES` row (0). No other row moves.\n\n## Why\n\nRuling 6739409918 (letter A on #31916): the cloud seats keep first-touch triage of the cloud repo, and the rule is wired into their loop. #31918 carries the same ruling from the cloud side and supplies the cloud seats' commitments; one PR closes both. Where #31918 named other placements (`dispatch-runbook.md`, `lanes/triage.md`), the ruling of record's placements were kept (seat-lifecycle.md, triage-duties.md), per the seat's instruction.\n\n## Acceptance notes\n\n- `SEAT_BARE_LANES` (`scripts/pm/mailbox-open.mjs`) and `SIGNATURE_LANE_SOURCE` (`scripts/pm/check-half-states.mjs`) already accept `repo:cloud#N` through the `repo:` kind; nothing added.\n- `references/project-forms.md` L16 lists seat words by lane file name and does not name `cloud`; no gate reads that list and the line has 4 B of room, so it was left alone by seat ruling.\n- The charter writes `repo:cloud#N`, not a seat count: its own header line keeps current values on the seat posts.\n- The sweep definition follows the ruling (no `pm:*` state or no `priority:*`) and names no exclusions; the seat posts and tracking parents are left to the seats' judgment as today.\n\n## Verification\n\nAll on head `5696173c` (the `9e86d449` content plus a clean merge of `origin/main`, which touched none of these files); the derived sweep ran on `9e86d449`, and the ratchet family re-ran on `5696173c`.\n\n<details><summary>Derived gates: 42 families, all exit 0</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 42 commands for this diff; all 42 exit 0, plus `node scripts/pm/check-skill-line-ratchet.mjs --self-test` exit 0 (164 cases). `--ran` reconciliation: 42 derived families accounted for, 42 run, 0 NOT-MEASURED. `pnpm check:pm-dispatch-gates`: 2205 cases pass (fast tier, 325 s). Prerequisite: `turbo run build --filter=@objectstack/formula --filter=@objectstack/lint` (82 s locked) for `check:doc-formula-expressions`.\n\n</details>\n\n<details><summary>Final-head re-run on 5696173c</summary>\n\n`pnpm check:pm-skill-ratchet`, `check-skill-line-ratchet.mjs --self-test`, `pnpm check:pm-skill-id-lint`, `pnpm check:pm-governed-prose`, `pnpm check:doc-authoring`, `pnpm check:nul-bytes`: all exit 0. Line counts against ceilings: `lanes/cloud.md` 28/28 (new), `seat-lifecycle.md` 98/98, `triage-duties.md` 101/101, `SKILL.md` widest row 341/341 (the edited row 338).\n\n</details>\n\nTier S (`.claude/**`): lands on a contract review of record by the owning seat. skip-changeset: nothing published moves.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jTFXo967GUTX3ayppD)_\n"
+}
