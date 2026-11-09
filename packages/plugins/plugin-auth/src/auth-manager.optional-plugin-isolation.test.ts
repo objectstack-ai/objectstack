@@ -133,7 +133,7 @@ describe('AuthManager – optional better-auth plugin isolation', () => {
     // enter through the invitation carve-out (see audience-gate-test-support).
     // This harness's engine hides its tables, so the seed goes through
     // engine.insert and MUST be awaited.
-    await inviteForAudienceGate(manager, email);
+    const invitationId = await inviteForAudienceGate(manager, email);
     return manager.handleRequest(
       new Request('http://localhost:3000/api/v1/auth/sign-up/email', {
         method: 'POST',
@@ -142,6 +142,7 @@ describe('AuthManager – optional better-auth plugin isolation', () => {
           email,
           password: 'S3cure!Passw0rd-isolation',
           name: 'Isolation Test',
+          invitationId,
         }),
       }),
     );

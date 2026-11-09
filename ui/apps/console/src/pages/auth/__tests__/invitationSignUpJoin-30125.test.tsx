@@ -164,3 +164,14 @@ describe('console /register — a sign-up from an invitation link joins it (#301
     expect(lands(assign.mock.calls[0][0] as string)).toBe(`/_console${ACCEPT_PATH}`);
   });
 });
+
+describe('console /register — the sign-up presents the invitation its link names', () => {
+  it('sends the redirect\'s invitation id with the sign-up', async () => {
+    const client = createMockClient();
+    renderRegister(client);
+    await signUpOnTheForm();
+
+    await waitFor(() => expect(client.signUp).toHaveBeenCalledTimes(1));
+    expect(client.signUp).toHaveBeenCalledWith(expect.objectContaining({ email: USER.email, invitationId: INVITATION_ID }));
+  });
+});

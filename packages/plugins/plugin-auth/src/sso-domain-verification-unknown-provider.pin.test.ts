@@ -88,8 +88,8 @@ async function bootStack(ssoDomainVerification: boolean): Promise<Stack> {
       }),
     );
 
-  await inviteForAudienceGate(manager, email);
-  const signUp = await direct('/sign-up/email', { email, password: PASSWORD, name: 'Platform Admin' });
+  const invitationId = await inviteForAudienceGate(manager, email);
+  const signUp = await direct('/sign-up/email', { email, password: PASSWORD, name: 'Platform Admin', invitationId });
   expect(signUp.status, `sign-up: ${await signUp.clone().text()}`).toBe(200);
   const admin = ((engine.tables.get('sys_user') ?? []) as any[]).find((r) => r.email === email)!;
   // The legacy scalar `isPlatformAdminUser` accepts — `gateAdmin` admits.

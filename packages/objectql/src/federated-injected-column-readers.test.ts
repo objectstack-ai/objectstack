@@ -439,6 +439,10 @@ const READERS: Record<string, Row> = {
     why: 'the name the injection writes the ADR-0142 D3 ownership-queue column under',
   },
   'assignment-rules.ts#<module> :: owner_id': { disposition: 'not-a-read', why: VOCABULARY },
+  'namespace-co-owner-names.ts#<module> :: queue': {
+    disposition: 'not-a-read',
+    why: 'names the `queue` metadata TYPE in the namespace name rule\'s type list (ADR-0150 D2); it reads no row and no column',
+  },
   'assignment-rules.ts#<module> :: queue': { disposition: 'not-a-read', why: VOCABULARY },
   'package-scoped-resolver.ts#<module> :: queue': {
     disposition: 'not-a-read',

@@ -90,15 +90,15 @@ const makeManager = (engine: any) =>
     plugins: { admin: true, sso: true },
   } as any);
 
-const signUp = (manager: AuthManager, email: string, name: string) => {
+const signUp = async (manager: AuthManager, email: string, name: string) => {
   // [#11739] default posture invite_only: fixture users beyond the first
   // enter through the invitation carve-out (see audience-gate-test-support).
-  inviteForAudienceGate(manager, email);
+  const invitationId = await inviteForAudienceGate(manager, email);
   return manager.handleRequest(
     new Request(`${BASE}/sign-up/email`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password: PASSWORD, name }),
+      body: JSON.stringify({ email, password: PASSWORD, name, invitationId }),
     }),
   );
 };
