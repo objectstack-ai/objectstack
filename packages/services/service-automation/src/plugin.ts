@@ -2229,6 +2229,8 @@ export class AutomationServicePlugin implements Plugin {
                         // (`resolveAuthzContext` copies it off this same
                         // resolution), derived once there and never here.
                         ...(grants.posture ? { posture: grants.posture } : {}),
+                        // [ADR-0151 D3] An AI service account runs as an agent.
+                        ...(grants.principalKind ? { principalKind: grants.principalKind } : {}),
                         ...(tenantId ? { tenantId } : {}),
                     };
                 });

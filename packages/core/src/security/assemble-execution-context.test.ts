@@ -652,3 +652,59 @@ describe('impersonatedBy — the administrator of an impersonation session, carr
     expect('impersonatedBy' in guest!).toBe(false);
   });
 });
+
+describe('[ADR-0151 D3] an AI service account is an agent principal of its own: no onBehalfOf, no system permission', () => {
+  const ACCOUNT = baseAuthz({
+    userId: 'u_bot',
+    tenantId: 'org1',
+    principalKind: 'agent',
+    positions: ['org_member'],
+    permissions: ['crm_lead_reader'],
+    // What the resolver never hands an account; the assembler withholds it anyway.
+    systemPermissions: ['manage_users'],
+    org_user_ids: ['u_bot', 'u2'],
+    accessible_org_ids: ['org1'],
+  });
+
+  it('stamps principalKind agent, keeps userId the account and its own grants, and carries no onBehalfOf, performer or system permission', () => {
+    const ctx = assembleExecutionContext({ authz: ACCOUNT, oauth: undefined, localization: undefined, requestLocale: undefined, accessToken: undefined, authGate: undefined })!;
+    expect(ctx.userId).toBe('u_bot');
+    expect(ctx.principalKind).toBe('agent');
+    expect(ctx.permissions).toEqual(['crm_lead_reader']);
+    expect(ctx.systemPermissions).toEqual([]);
+    expect(ctx.isSystem).toBe(false);
+    for (const key of ['onBehalfOf', 'performedBy', 'oauthScopes']) expect(Object.keys(ctx)).not.toContain(key);
+  });
+
+  it('takes precedence over an OAuth arm: an account is never re-read as a person an OAuth client acts for', () => {
+    const ctx = assembleExecutionContext({
+      authz: ACCOUNT,
+      oauth: { userId: 'u_bot', scopes: ['data:read'], clientId: 'cli1', scopePermissions: ['mcp_agent_data_read'], delegatesActions: true },
+      localization: undefined, requestLocale: undefined, accessToken: undefined, authGate: undefined,
+    })!;
+    expect(ctx.principalKind).toBe('agent');
+    expect(ctx.onBehalfOf).toBeUndefined();
+    expect(ctx.performedBy).toBeUndefined();
+    expect(ctx.permissions).toEqual(['crm_lead_reader']);
+    expect(ctx.systemPermissions).toEqual([]);
+  });
+
+  it('CONTROL: an OAuth-delegated agent keeps today\'s shape, and a person\'s envelope is unchanged', () => {
+    const delegated = assembleExecutionContext({
+      authz: HUMAN_FULL,
+      oauth: { userId: 'u1', scopes: ['data:read', 'actions:execute'], clientId: 'cli1', scopePermissions: ['mcp_agent_data_read'], delegatesActions: true },
+      localization: undefined, requestLocale: undefined, accessToken: undefined, authGate: undefined,
+    })!;
+    expect(delegated.principalKind).toBe('agent');
+    expect(delegated.userId).toBe('u1');
+    expect(delegated.onBehalfOf).toEqual({ userId: 'u1', principalKind: 'human' });
+    expect(delegated.performedBy).toEqual({ clientId: 'cli1' });
+    expect(delegated.permissions).toEqual(['mcp_agent_data_read']);
+    expect(delegated.systemPermissions).toEqual(HUMAN_FULL.systemPermissions);
+
+    const person = assembleExecutionContext({ authz: HUMAN_FULL, oauth: undefined, localization: undefined, requestLocale: undefined, accessToken: undefined, authGate: undefined })!;
+    expect(person.principalKind).toBe('human');
+    expect(person.systemPermissions).toEqual(HUMAN_FULL.systemPermissions);
+    expect(person.onBehalfOf).toBeUndefined();
+  });
+});
