@@ -4150,42 +4150,40 @@ export class AuthPlugin implements Plugin {
       resolveApiKeyLifecyclePolicy: () => this.authManager!.resolveApiKeyLifecyclePolicy(),
     });
     const serviceAccountRoute = (
-      path: string,
+      path: 'register' | 'create-key',
       run: (
         deps: import('./service-account-doors.js').ServiceAccountDoorDeps,
         caller: import('./service-account-doors.js').ServiceAccountCaller,
         request: Request,
       ) => Promise<import('./admin-user-endpoints.js').EndpointResult>,
-    ): void => {
-      rawApp.post(`${basePath}/service-account/${path}`, async (c: any) => {
-        try {
-          const caller = await serviceAccountCaller(c);
-          if (caller instanceof Response) return caller;
-          const { status, body } = await runAttributedToUser(caller, () => run(serviceAccountDeps(), caller, c.req.raw));
-          return c.json(body, status as any);
-        } catch (error) {
-          // An unreadable membership or policy is an outage, never a caller
-          // without standing: answered 503 in the shared seam's words.
-          if (isAuthzStoreUnavailableError(error)) {
-            return c.json(
-              { success: false, error: { code: AUTHZ_STORE_UNAVAILABLE_CODE, message: AUTHZ_STORE_UNAVAILABLE_MESSAGE } },
-              AUTHZ_STORE_UNAVAILABLE_STATUS,
-            );
-          }
-          const err = error instanceof Error ? error : new Error(String(error));
-          ctx.logger.error(`[AuthPlugin] service-account/${path} failed`, err);
-          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'The request could not be completed.' } }, 500);
+    ) => async (c: any) => {
+      try {
+        const caller = await serviceAccountCaller(c);
+        if (caller instanceof Response) return caller;
+        const { status, body } = await runAttributedToUser(caller, () => run(serviceAccountDeps(), caller, c.req.raw));
+        return c.json(body, status as any);
+      } catch (error) {
+        // An unreadable membership or policy is an outage, never a caller
+        // without standing: answered 503 in the shared seam's words.
+        if (isAuthzStoreUnavailableError(error)) {
+          return c.json(
+            { success: false, error: { code: AUTHZ_STORE_UNAVAILABLE_CODE, message: AUTHZ_STORE_UNAVAILABLE_MESSAGE } },
+            AUTHZ_STORE_UNAVAILABLE_STATUS,
+          );
         }
-      });
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error(`[AuthPlugin] service-account/${path} failed`, err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'The request could not be completed.' } }, 500);
+      }
     };
-    serviceAccountRoute('register', async (deps, caller, request) => {
+    rawApp.post(`${basePath}/service-account/register`, serviceAccountRoute('register', async (deps, caller, request) => {
       const { runRegisterServiceAccount } = await import('./service-account-doors.js');
       return runRegisterServiceAccount(deps, caller, request);
-    });
-    serviceAccountRoute('create-key', async (deps, caller, request) => {
+    }));
+    rawApp.post(`${basePath}/service-account/create-key`, serviceAccountRoute('create-key', async (deps, caller, request) => {
       const { runCreateServiceAccountKey } = await import('./service-account-doors.js');
       return runCreateServiceAccountKey(deps, caller, request);
-    });
+    }));
 
     // ────────────────────────────────────────────────────────────────────
     // [#30398] ADR-0069 D5 — admin: the caller's own address as the
