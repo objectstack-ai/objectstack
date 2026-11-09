@@ -292,16 +292,17 @@ export async function runRetireServiceAccount(
   if (!found.isAdministrator) return administratorOnly('retire it');
   if (!found.organizationId) return retired(read.id);
 
-  const keys = await readRows(found.engine, API_KEY_OBJECT, { user_id: read.id }, ['id', 'revoked']);
+  const engine: ServiceAccountLifecycleEngine = found.engine;
+  const keys = await readRows(engine, API_KEY_OBJECT, { user_id: read.id }, ['id', 'revoked']);
   const context = await authSystemWriteContext();
   await deps.runAtomically(async () => {
-    await found.engine.delete(MEMBER_OBJECT, { where: { user_id: read.id }, multi: true, context });
+    await engine.delete(MEMBER_OBJECT, { where: { user_id: read.id }, multi: true, context });
     // Every key, revoked or not: a key an owner revoked must not be restorable
     // either, so each one carries the terminal reason.
     for (const key of keys) {
       const id = str(key.id);
       if (!id) continue;
-      await found.engine.update(
+      await engine.update(
         API_KEY_OBJECT,
         { id, revoked: true, revoked_reason: MEMBERSHIP_ENDED_REVOKE_REASON },
         { context },
@@ -354,7 +355,8 @@ export async function runRevokeServiceAccountKey(
   // reason already on the key is never overwritten.
   const storedReason = str(found.key.revoked_reason);
   if (!storedReason && caller.isPlatformAdmin) data.revoked_reason = ADMINISTRATOR_SUSPENDED_REVOKE_REASON;
-  await found.engine.update(API_KEY_OBJECT, data, { context: await authSystemWriteContext() });
+  const engine: ServiceAccountLifecycleEngine = found.engine;
+  await engine.update(API_KEY_OBJECT, data, { context: await authSystemWriteContext() });
   return ok({ id: found.key.id, revoked: true });
 }
 
@@ -388,7 +390,8 @@ export async function runRestoreServiceAccountKey(
   }
   if (found.key.revoked !== true && !storedReason) return ok({ id: found.key.id, revoked: false });
 
-  await found.engine.update(
+  const engine: ServiceAccountLifecycleEngine = found.engine;
+  await engine.update(
     API_KEY_OBJECT,
     { id: found.key.id, revoked: false, revoked_reason: null },
     { context: await authSystemWriteContext() },

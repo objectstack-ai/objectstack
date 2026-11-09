@@ -111,6 +111,19 @@ SKILL.md download (`GET /api/v1/mcp/skill`), and API-key minting.
   key — the account's own included — can neither register an account nor mint
   one's key. An account is never counted as one of the administrators that
   keep an organization manageable, and never receives administrator mail.
+  Its lifecycle has doors of its own, each taking a signed-in session only
+  (`POST /api/v1/auth/service-account/<door>`):
+  - **`suspend`** (its owner or an administrator) stops every key on its
+    next call, without revoking any; **`resume`** (an administrator only, so
+    an owner cannot undo an administrator's stop) lets the same keys work again.
+  - **`revoke-key`** and **`restore-key`** (its owner or an administrator)
+    stop or restart one key and leave its others alone. A platform
+    administrator's revoke can be restored only by a platform administrator.
+  - **`set-owner`** (an administrator) names another member as the
+    accountable owner. When the owner leaves the organization, the account is
+    suspended, and it is not resumed until an administrator names a new owner.
+  - **`retire`** (an administrator) ends its membership and revokes every key
+    for good; the account's record stays, so what it wrote still names it.
 
 Per client:
 
