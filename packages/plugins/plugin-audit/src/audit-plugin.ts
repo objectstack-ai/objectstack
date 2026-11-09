@@ -32,6 +32,11 @@ import { createAuthEventAuditSink } from './auth-event-audit.js';
 import { createActionInvocationAuditWriter } from './action-invocation-audit.js';
 import { createDataExportAuditWriter } from './data-export-audit.js';
 import { createPackageLifecycleAuditWriter } from './package-lifecycle-audit.js';
+import {
+  createCredentialUseAuditWriter,
+  installCredentialUseAudit,
+  type CredentialUseAuditWriter,
+} from './credential-use-audit.js';
 import { installCommentAccessHooks, installCommentReadVisibility } from './comment-access-hooks.js';
 import {
   COMMENT_REACTION_REMOVE_ROUTE,
@@ -263,6 +268,13 @@ export class AuditPlugin implements Plugin {
    */
   private readAuditWriter: ReadAuditWriterHandle | null = null;
 
+  /**
+   * [#31796] The credential-use writer, built in `init()` (the `audit` slot
+   * carries it) and handed to the stamp hook `start()` installs, so the slot
+   * and the hook write through one writer.
+   */
+  private credentialUseWriter: CredentialUseAuditWriter | null = null;
+
   constructor(private readonly options: AuditPluginOptions = {}) {}
 
   async init(ctx: PluginContext): Promise<void> {
@@ -348,11 +360,20 @@ export class AuditPlugin implements Plugin {
         }
       }
     };
+    //
+    // [#31796] And the credential-use writer (`recordCredentialUse`): one
+    // `credential_use` row per credential per use window. The two stamped
+    // credentials reach it through the stamp hook `start()` installs; a
+    // `skip_consent` OAuth client, which has no consent row to stamp, through
+    // this slot, from plugin-auth's OAuth stamp point
+    // (`credential-use-audit.ts`).
+    this.credentialUseWriter = createCredentialUseAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger });
     ctx.registerService('audit', {
       ...createAuthEventAuditSink({ getEngine: getLedgerEngine, logger: ctx.logger }),
       ...createActionInvocationAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger }),
       ...createDataExportAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger }),
       ...createPackageLifecycleAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger }),
+      ...this.credentialUseWriter,
     });
 
     // ADR-0029 D8 — contribute this plugin's object translations to the i18n
@@ -470,6 +491,13 @@ export class AuditPlugin implements Plugin {
           admitMentionRecipients({ engine: engine as any, getTenancyPosture, logger: ctx.logger as any }, input),
       });
       ctx.logger.info('AuditPlugin: audit + activity writers installed');
+
+      // [#31796] The `credential_use` row: recognised on each credential's own
+      // throttled use stamp, so it adds no timer of its own
+      // (`credential-use-audit.ts`).
+      if (this.credentialUseWriter) {
+        installCredentialUseAudit(engine as any, this.credentialUseWriter, { packageId: this.name });
+      }
 
       // [#8992] Record-view auditing — the `read` half of the ledger. Installed
       // only over the objects this deployment opted in, and returns null when

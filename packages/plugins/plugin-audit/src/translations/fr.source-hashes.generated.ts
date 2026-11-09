@@ -21,6 +21,7 @@ export const frGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_activity.fields.type.label": "901bb552898b2cab",
   "objects.sys_activity.fields.url.label": "2203b0b9f72534f7",
   "objects.sys_audit_log.fields.action.label": "a36bba313a7aa9ab",
+  "objects.sys_audit_log.fields.action.options.credential_use": "68af3e0d078292d7",
   "objects.sys_audit_log.fields.action.options.export": "cdfbf4ace38f5a21",
   "objects.sys_audit_log.fields.action.options.import": "05c80d3a61ec3290",
   "objects.sys_audit_log.fields.action.options.package_unmanaged_import": "676d7ce8c9d1fda4",

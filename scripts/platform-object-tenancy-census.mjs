@@ -50,8 +50,9 @@
  *     `registry.ts` documents it as "the single source consumed by
  *     `applySystemFields`", and it is deliberately runtime-free so author-time
  *     consumers can call it.
- *   - `resolveTenantFieldName` (`packages/objectql/src/tenancy/
- *     system-write-organization.ts`) -- the engine's own resolver, the exact
+ *   - `resolveTenantFieldName` (`packages/core/src/security/
+ *     tenant-field.ts`, which `@objectstack/objectql` re-exports as the same
+ *     binding) -- the engine's own resolver, the exact
  *     function the header's prose names.
  *
  * A transcription of either rule here would be a SECOND copy of a rule the
@@ -126,16 +127,18 @@ export const ARTEFACT = 'scripts/platform-object-tenancy-census.json';
  * hand-written digits this artefact replaced. That ledger retired under ADR-0131
  * D13: the tenant-audit's scope became the schema predicate this census executes,
  * so the pointer now lives where that predicate is defined and documented --
- * `resolveTenantFieldName`'s own docblock. The artefact's reader moved with it:
+ * `resolveTenantFieldName`'s own docblock, which moved down to `@objectstack/core`
+ * with the function when the import runner became its second asker (the engine
+ * re-exports the same binding). The artefact's reader moved with it:
  * `reach: in` is now, by construction, "inside the system-write rule AND the
  * tenant-audit", with no per-table verdict beside it.
  */
-export const HEADER = 'packages/objectql/src/tenancy/system-write-organization.ts';
+export const HEADER = 'packages/core/src/security/tenant-field.ts';
 
 /** The two files the predicate is loaded from. Both are executed, not read. */
 export const PREDICATE_SOURCES = {
   injectedColumns: 'packages/spec/src/data/injected-system-columns.ts',
-  tenantFieldResolver: 'packages/objectql/src/tenancy/system-write-organization.ts',
+  tenantFieldResolver: 'packages/core/src/security/tenant-field.ts',
 };
 
 /**

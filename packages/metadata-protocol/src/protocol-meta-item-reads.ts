@@ -92,6 +92,22 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     const wantedMember = bundleMemberDiscriminator(request.type, member);
     const isWantedMember = (candidate: unknown): boolean =>
         wantedMember === undefined || itemDiscriminator(request.type, candidate) === wantedMember;
+    // [ADR-0150 D3, #31680 child E8] A read that names no package is a caller
+    // with no package. For a type whose by-name readers consult
+    // `(package, name)` (the registry's `readsByPackage`), the registry's
+    // answer is the ONE package-scoped resolver's (`resolveItem`): the
+    // environment's own item, else the unique package holder. A name two
+    // packages hold is refused HERE, before any layer below is read, naming
+    // both (a thrown `409 RESOURCE_CONFLICT`); it served the first registered.
+    // Step 3 serves this answer in place of `getItem`'s, and nothing else
+    // below changes. A read that names a package (`?package=`) keeps
+    // `getItem`'s prefer-local read: that address is the exact qualifier of
+    // child G1 (ADR-0150 D5), not a caller.
+    const registry = host.engine?.registry;
+    const packagelessScopedRead: { item: unknown } | undefined =
+        !request.packageId && typeof registry?.readsByPackage === 'function' && registry.readsByPackage(request.type)
+            ? { item: registry.resolveItem(request.type, request.name, null, member) }
+            : undefined;
     let item: unknown;
     // [ADR-0131 D6] Environment → code: the environment's stored row,
     // else the code packages' definition. No organization's row is read —
@@ -566,10 +582,17 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
         if (artifact !== undefined && isWantedMember(artifact)) item = artifact;
     }
     if (item === undefined) {
-        item = host.engine.registry.getItem(request.type, request.name, request.packageId, member);
-        if (item === undefined) {
-            const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
-            if (alt) item = host.engine.registry.getItem(alt, request.name, request.packageId, member);
+        // [ADR-0150 D3, #31680] The package-scoped resolver's answer, read
+        // once above, for a caller with no package of a type it covers; no
+        // first-composite read and no plural-spelling retry beside it.
+        if (packagelessScopedRead) {
+            item = packagelessScopedRead.item;
+        } else {
+            item = host.engine.registry.getItem(request.type, request.name, request.packageId, member);
+            if (item === undefined) {
+                const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
+                if (alt) item = host.engine.registry.getItem(alt, request.name, request.packageId, member);
+            }
         }
         // [#22877] A registry that does not narrow by member (a host
         // double, an older registry) can answer another member of the
