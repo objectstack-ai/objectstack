@@ -2241,6 +2241,14 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "dimensions.nullLabel": {
         label: "Etiqueta de nulos"
       },
+      "dimensions.synonyms": {
+        label: "Sinónimos",
+        helpText: "Palabras que la gente usa para esta dimensión en una pregunta (p. ej., etapa, etapa de venta, stage), separadas por comas; se pueden mezclar idiomas. Las cotejan las herramientas de IA del conjunto de datos y nunca se muestran. Como máximo 20, cada una de 60 caracteres como máximo; una palabra solo puede corresponder a un miembro de este conjunto de datos"
+      },
+      "dimensions.description": {
+        label: "Descripción",
+        helpText: "Definición de negocio en lenguaje sencillo: una o dos frases sobre qué es esta dimensión y cuándo usarla. Se publica con los metadatos de análisis y la leen las herramientas de IA del conjunto de datos; es una definición, nunca un prompt ni una instrucción para una IA. Como máximo 500 caracteres"
+      },
       measures: {
         label: "Medidas",
         helpText: "Cada medida: nombre, agregación, campo (opcional para count) y formato de visualización/moneda"
@@ -2274,6 +2282,14 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "measures.duration": {
         label: "Duración"
+      },
+      "measures.synonyms": {
+        label: "Sinónimos",
+        helpText: "Palabras que la gente usa para esta medida en una pregunta (p. ej., ingresos, ventas, revenue), separadas por comas; se pueden mezclar idiomas. Las cotejan las herramientas de IA del conjunto de datos y nunca se muestran. Como máximo 20, cada una de 60 caracteres como máximo; una palabra solo puede corresponder a un miembro de este conjunto de datos"
+      },
+      "measures.description": {
+        label: "Descripción",
+        helpText: "Definición de negocio en lenguaje sencillo: una o dos frases sobre qué es esta medida y cuándo usarla. Se publica con los metadatos de análisis y la leen las herramientas de IA del conjunto de datos; es una definición, nunca un prompt ni una instrucción para una IA. Como máximo 500 caracteres"
       }
     }
   },

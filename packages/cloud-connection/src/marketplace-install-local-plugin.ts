@@ -356,10 +356,13 @@ import {
 } from './marketplace-install-local-seed-owner.js';
 import { planCustomizationPairInstall, type PairInstallItem } from './marketplace-install-local-customization-pair.js';
 import {
+    INSTALL_RENAME_PLANNER_SERVICE,
     carryInstallDeclaredRenames,
     planInstallDeclaredRenames,
     reverseInstallDeclaredRenames,
     type InstallRenameEngine,
+    type InstallRenamePlanner,
+    type InstallRenameRefusal,
     type InstallRenameTable,
 } from './marketplace-install-declared-renames.js';
 import type {
@@ -1463,8 +1466,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     readonly name = 'com.objectstack.runtime.marketplace-install-local';
     readonly version = '1.0.0';
 
-    /** [#30964] Services init() registers on every path (ADR-0116): the in-process install door. */
-    readonly providesServices = [INSTALL_LOCAL_DOOR_SERVICE];
+    /**
+     * [#30964] Services init() registers on every path (ADR-0116): the in-process install door, and [#31801] the
+     * read-only declared-rename planner.
+     */
+    readonly providesServices = [INSTALL_LOCAL_DOOR_SERVICE, INSTALL_RENAME_PLANNER_SERVICE];
 
     private readonly cloudUrl: string;
     private readonly ledger: LocalManifestSource;
@@ -1520,6 +1526,27 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 this.installForGrant(routeContextOf(request), ctx, options?.grant),
         };
         ctx.registerService?.(INSTALL_LOCAL_DOOR_SERVICE, door);
+
+        // [#31801, cloud#3862] The declared-rename planner, read-only, as its
+        // own service: what step 2c″ of the door would carry and refuse for
+        // the same two versions ({@link planDeclaredRenames}, the one entry
+        // both call). A service apart from the door's, so a reader is never
+        // handed the install.
+        const planner: InstallRenamePlanner = {
+            plan: async ({ manifestId, incoming, installed }) => {
+                const plan = await this.planDeclaredRenames(
+                    ctx,
+                    manifestId,
+                    this.convertPackageBodyForward(ctx, incoming),
+                    installed === null || installed === undefined ? installed : this.convertPackageBodyForward(ctx, installed),
+                );
+                return {
+                    carries: plan.tables.flatMap((t) => t.carries.map((c) => ({ object: t.object, table: c.table, from: c.from, to: c.to }))),
+                    refusals: plan.refusals,
+                };
+            },
+        };
+        ctx.registerService?.(INSTALL_RENAME_PLANNER_SERVICE, planner);
     };
 
     start = async (ctx: PluginContext): Promise<void> => {
@@ -4167,14 +4194,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         converted: unknown,
         installed: unknown,
     ): Promise<{ refusal?: { body: Record<string, unknown>; status: 422 | 503 }; tables: InstallRenameTable[] }> => {
-        let engine: InstallRenameEngine | undefined;
-        try { engine = ctx.getService('objectql') as InstallRenameEngine | undefined; } catch { /* no data engine */ }
-        const typeChanges = installed === null || installed === undefined
-            ? []
-            : comparePackageVersions(packageUpgradeSideOf(installed), packageUpgradeSideOf(converted)).typeChanges;
-        let plan: Awaited<ReturnType<typeof planInstallDeclaredRenames>>;
+        let plan: { tables: InstallRenameTable[]; refusals: InstallRenameRefusal[] };
         try {
-            plan = await planInstallDeclaredRenames({ manifestId, incoming: converted, installed, engine, typeChanges });
+            plan = await this.planDeclaredRenames(ctx, manifestId, converted, installed);
         } catch (err: any) {
             return {
                 tables: [],
@@ -4213,6 +4235,30 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 },
             },
         };
+    };
+
+    /**
+     * [#30885, #31801] The declared-rename plan of `converted` over
+     * `installed` (both converted forward; `installed` `null` on a fresh
+     * install, `undefined` when none can be read): the type changes the
+     * package upgrade plan lists, judged with the tables by
+     * {@link planInstallDeclaredRenames}. The ONE entry: step 2c″ of the door
+     * ({@link evaluateDeclaredRenames}) and the read-only planner service
+     * ({@link INSTALL_RENAME_PLANNER_SERVICE}) both call it. It writes
+     * nothing; a table that cannot be read throws.
+     */
+    private planDeclaredRenames = async (
+        ctx: PluginContext,
+        manifestId: string,
+        converted: unknown,
+        installed: unknown,
+    ): Promise<{ tables: InstallRenameTable[]; refusals: InstallRenameRefusal[] }> => {
+        let engine: InstallRenameEngine | undefined;
+        try { engine = ctx.getService('objectql') as InstallRenameEngine | undefined; } catch { /* no data engine */ }
+        const typeChanges = installed === null || installed === undefined
+            ? []
+            : comparePackageVersions(packageUpgradeSideOf(installed), packageUpgradeSideOf(converted)).typeChanges;
+        return planInstallDeclaredRenames({ manifestId, incoming: converted, installed, engine, typeChanges });
     };
 
     /**

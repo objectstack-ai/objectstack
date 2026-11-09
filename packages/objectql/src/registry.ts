@@ -99,6 +99,9 @@ import {
   type BareNameHolder,
   type BareNameOneHolderType,
 } from './bare-name-one-holder.js';
+// [ADR-0150 D3, #31680 child E8] The by-name readers that consult (package, name):
+// `resolveItem` hands the types they cover to the one package-scoped resolver.
+import { isPackageScopedReadType, readPackageScopedItem } from './package-scoped-read.js';
 // [ADR-0150 D2, child N] Inside one namespace, a `(type, name)` of the twelve
 // uncovered bucket 2/3 types has one package holder — the one predicate the
 // package door and `os validate` both ask (module doc).
@@ -8559,6 +8562,37 @@ export class SchemaRegistry {
     return unbound[0]?.item as T | undefined;
   }
 
+  /**
+   * [ADR-0150 D3, #31680 child E8] Does a by-name read of `type` consult
+   * `(package, name)` — is it one of `PACKAGE_SCOPED_READ_TYPES`
+   * (`package-scoped-read.ts`)? Asked by a reader that picks its path before
+   * it reads, such as the protocol's by-name read.
+   */
+  readsByPackage(type: string): boolean {
+    return isPackageScopedReadType(type);
+  }
+
+  /**
+   * [ADR-0150 D3, #31680 child E8] The by-name read for a caller. A type of
+   * `PACKAGE_SCOPED_READ_TYPES` resolves through the ONE package-scoped
+   * resolver (`readPackageScopedItem` over `resolvePackageScopedName`): the
+   * caller's own item, else the unique holder in its declared closure; for a
+   * caller with no package the environment's own item, else the unique package
+   * holder. Every other type is {@link getItem}'s, unchanged, until its own
+   * child of epic #31527 wires it.
+   *
+   * @param callerPackageId - The package the caller belongs to; omitted or
+   *   `null` is a caller with no package (the whole environment).
+   * @returns the item, or `undefined` when nothing holds the name.
+   * @throws {PackageScopedNameRefusedError} when the resolver refuses — never
+   *   `undefined` for a name that means more than one item, or only items the
+   *   caller may not reach.
+   */
+  resolveItem<T>(type: string, name: string, callerPackageId?: string | null, member?: string): T | undefined {
+    if (!isPackageScopedReadType(type)) return this.getItem<T>(type, name, callerPackageId ?? undefined, member);
+    return readPackageScopedItem<T>(this, { type, name, callerPackageId, member });
+  }
+
   /** The bare-slot entries of `(type, name)`: one, or a bundle's members, canonical first. */
   private bareSlotEntriesOf(type: string, collection: Map<string, any>, name: string): BundleEntry[] {
     const disc = ITEM_KEY_DISCRIMINATORS[type];
@@ -9566,11 +9600,20 @@ export class SchemaRegistry {
     this.registerItem('app', app, 'name', packageId);
   }
 
+  /**
+   * One app by name, with its navigation contributions merged in.
+   *
+   * [ADR-0150 D3, #31680 child E8] Resolved through the one package-scoped
+   * resolver ({@link resolveItem}): `currentPackageId` is the caller's
+   * package (its own app, else the unique holder in its declared closure);
+   * omitted, the caller has no package (the environment's own app, else the
+   * unique package holder). A name two holders make ambiguous, or one the
+   * caller may not reach, is refused naming every candidate.
+   *
+   * @throws {PackageScopedNameRefusedError} when the resolver refuses.
+   */
   getApp(name: string, currentPackageId?: string): any {
-    // ADR-0048 §3.1 — apps are addressed by package id (one app per package).
-    // When the caller knows it (route segment / `_packageId`), resolve
-    // prefer-local; otherwise this is a best-effort by-name lookup.
-    const app = this.getItem('app', name, currentPackageId);
+    const app = this.resolveItem<any>('app', name, currentPackageId);
     if (!app) return app;
     return this.applyNavContributions(app);
   }

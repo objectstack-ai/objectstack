@@ -2241,6 +2241,14 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "dimensions.nullLabel": {
         label: "Null 레이블"
       },
+      "dimensions.synonyms": {
+        label: "동의어",
+        helpText: "질문에서 이 차원을 가리킬 때 쓰는 말(예: 단계, 영업 단계, stage). 쉼표로 구분하며 여러 언어를 섞어도 됩니다. 데이터셋 AI 도구가 일치 여부를 판단하며 화면에는 표시되지 않습니다. 최대 20개, 각 60자 이내. 한 단어는 이 데이터셋의 한 멤버에만 대응할 수 있습니다"
+      },
+      "dimensions.description": {
+        label: "설명",
+        helpText: "쉬운 업무 용어로 쓴 정의: 이 차원이 무엇이고 언제 쓰는지 한두 문장으로 설명합니다. 분석 메타데이터와 함께 게시되고 데이터셋 AI 도구가 읽습니다. 정의일 뿐 프롬프트나 AI에 대한 지시가 아닙니다. 최대 500자"
+      },
       measures: {
         label: "측정값",
         helpText: "각 항목: 이름, 집계, 필드(count는 선택 사항), 표시 형식/통화"
@@ -2274,6 +2282,14 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "measures.duration": {
         label: "지속 시간"
+      },
+      "measures.synonyms": {
+        label: "동의어",
+        helpText: "질문에서 이 측정값을 가리킬 때 쓰는 말(예: 수익, 매출, revenue). 쉼표로 구분하며 여러 언어를 섞어도 됩니다. 데이터셋 AI 도구가 일치 여부를 판단하며 화면에는 표시되지 않습니다. 최대 20개, 각 60자 이내. 한 단어는 이 데이터셋의 한 멤버에만 대응할 수 있습니다"
+      },
+      "measures.description": {
+        label: "설명",
+        helpText: "쉬운 업무 용어로 쓴 정의: 이 측정값이 무엇이고 언제 쓰는지 한두 문장으로 설명합니다. 분석 메타데이터와 함께 게시되고 데이터셋 AI 도구가 읽습니다. 정의일 뿐 프롬프트나 AI에 대한 지시가 아닙니다. 최대 500자"
       }
     }
   },

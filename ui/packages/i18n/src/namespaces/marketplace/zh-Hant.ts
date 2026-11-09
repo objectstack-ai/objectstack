@@ -215,6 +215,7 @@ const zhHant = {
         businessFunction: '職能',
         industry: '行業',
         solutionType: '型別',
+        languages: '語言',
       },
       businessFunction: {
         sales: '銷售',
@@ -248,6 +249,11 @@ const zhHant = {
       },
       maturity: {
         beta: '測試版',
+      },
+      languages: {
+        none: '無語言資訊',
+        more: '另有 {{extra}} 種',
+        default: '（預設）',
       },
       relativeTime: {
         today: '今天',
