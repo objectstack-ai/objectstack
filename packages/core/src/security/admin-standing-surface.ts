@@ -138,10 +138,14 @@ export const ADMIN_STANDING_SURFACE: Readonly<Record<string, AdminStandingTable>
       + 'zero-config first-user promotion mints, owned by the Default Organization (see '
       + '`sys_organization`). [ADR-0131 D4] The grant holds its set BY '
       + 'NAME (`permission_set`): a grant that names nothing confers nothing, and its '
-      + '`permission_set_id` is not read here.',
+      + '`permission_set_id` is not read here. [ADR-0150 D8 R1] Its `permission_set_package` names '
+      + 'which holder\'s set that name is: a set column reads that package\'s definition and no other, '
+      + 'so a column naming a package that does not hold the set confers neither the set nor the '
+      + 'standing; a null column resolves the name with no caller, as before.',
     columns: [
       'user_id',
       'permission_set',
+      'permission_set_package',
       'organization_id',
       'organizationId',
       'valid_from',
