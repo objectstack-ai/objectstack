@@ -252,3 +252,38 @@ describe('the boot run', () => {
     expect(String(log.warn.mock.calls[0][0])).toContain('did not finish');
   });
 });
+
+describe('no unique key widens: the package column sits beside the keys, never in them', () => {
+  it('every index of the three tables is byte-identical to the one before the column', () => {
+    expect(JSON.stringify(SysSharingRule.indexes)).toBe(JSON.stringify([
+      { fields: ['object_name', 'active'], unique: false },
+      { fields: ['name'], unique: 'organization' },
+      { fields: ['organization_id'], unique: false },
+    ]));
+    expect(JSON.stringify(SysQueueMember.indexes)).toBe(JSON.stringify([
+      { fields: ['queue'], unique: false },
+      { fields: ['recipient_type', 'recipient_id'], unique: false },
+      { fields: ['queue', 'recipient_type', 'recipient_id'], unique: 'organization' },
+    ]));
+    expect(JSON.stringify(SysAssignmentCursor.indexes)).toBe(JSON.stringify([
+      { fields: ['rule', 'entry'], unique: 'organization' },
+    ]));
+  });
+
+  it('the store still refuses a second row on each key, whatever either row\'s package column says', async () => {
+    const engine = await boot();
+    const cases: Array<[string, string, (id: string, extra: Record<string, unknown>) => Record<string, unknown>]> = [
+      [RULES.object, 'package_id', (id, extra) => rule(id, 'k_rule', 'package', extra)],
+      [MEMBERS.object, 'queue_package', (id, extra) => ({ ...member(id, 'k_queue', extra), recipient_id: 'pos_k' })],
+      [CURSORS.object, 'rule_package', (id, extra) => ({ ...cursor(id, 'k_rule'), entry: 'k_entry', ...extra })],
+    ];
+    for (const [object, column, row] of cases) {
+      await engine.insert(object, row(`${object}_1`, {}), { context: SYS_ORG });
+      // Both null: the case a widened key would quietly let through.
+      await expect(engine.insert(object, row(`${object}_2`, {}), { context: SYS_ORG })).rejects.toThrow();
+      // One differs only in the new column: still the same row.
+      await expect(engine.insert(object, row(`${object}_3`, { [column]: CRM }), { context: SYS_ORG })).rejects.toThrow();
+      expect((await engine.find(object, { where: {}, context: SYSTEM_CTX })) as unknown[]).toHaveLength(1);
+    }
+  });
+});

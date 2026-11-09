@@ -278,3 +278,31 @@ describe('the boot run', () => {
     expect(String(log.warn.mock.calls[0][0])).toContain('did not finish');
   });
 });
+
+describe('no unique key widens: the package column sits beside the keys, never in them', () => {
+  it('every index of both tables is byte-identical to the one before the column', () => {
+    expect(JSON.stringify(SysUserPermissionSet.indexes)).toBe(JSON.stringify([
+      { fields: ['user_id', 'permission_set', 'organization_id'], unique: 'organization' },
+      { fields: ['user_id'], unique: false },
+      { fields: ['organization_id'], unique: false },
+    ]));
+    expect(JSON.stringify(SysAudienceBindingSuggestion.indexes)).toBe(JSON.stringify([
+      { fields: ['package_id', 'permission_set_name', 'anchor'], unique: 'organization' },
+      { fields: ['status'], unique: false },
+      { fields: ['package_id'], unique: false },
+    ]));
+  });
+
+  it('the store still refuses a second grant of one set to one user, whatever either row\'s package column says', async () => {
+    const engine = await boot();
+    await engine.insert(GRANTS.object, grant('k1', ONE_HOLDER, { user_id: 'u_k' }), { context: SYS_ORG });
+    // Both null: the case a widened key would quietly let through.
+    await expect(engine.insert(GRANTS.object, grant('k2', ONE_HOLDER, { user_id: 'u_k' }), { context: SYS_ORG })).rejects.toThrow();
+    // One differs only in the new column: still the same grant.
+    await expect(
+      engine.insert(GRANTS.object, grant('k3', ONE_HOLDER, { user_id: 'u_k', permission_set_package: CRM }), { context: SYS_ORG }),
+    ).rejects.toThrow();
+    const rows = (await engine.find(GRANTS.object, { where: { user_id: 'u_k' }, context: SYSTEM_CTX })) as unknown[];
+    expect(rows).toHaveLength(1);
+  });
+});
