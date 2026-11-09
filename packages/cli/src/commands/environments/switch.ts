@@ -107,7 +107,7 @@ export default class EnvironmentsSwitch extends Command {
         console.log('  ⚠ no local credential store to record it in — run `os login` or `os cloud login`');
       }
       if (!flags.remote) {
-        console.log('  (local only — access not confirmed on the server)');
+        console.log('  (local only — /activate was not called)');
       }
       console.log('');
     } catch (error: any) {
