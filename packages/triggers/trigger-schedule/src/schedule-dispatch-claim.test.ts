@@ -23,7 +23,12 @@
 // where `DbJobAdapter` IS in-package source.
 
 import { describe, it, expect, vi } from 'vitest';
-import { AutomationEngine, InMemoryFlowDispatchStore } from '@objectstack/service-automation';
+import {
+    AutomationEngine,
+    InMemoryFlowDispatchStore,
+    bareDispatchKeyFlow,
+    scopedDispatchKey,
+} from '@objectstack/service-automation';
 import {
     ScheduleTrigger,
     computeTickWindow,
@@ -500,5 +505,143 @@ describe('declared degradations', () => {
         r.trigger.stop(FLOW);
         await flush();
         expect(r.job.guard()).toBeNull();
+    });
+});
+
+// ─── [ADR-0150 D8 row R10, epic #31527 child S3] the key carries the flow's package ──
+
+/** The package that holds FLOW in these pins. */
+const PKG = 'com.acme.digest';
+
+/**
+ * The real ledger, with the flow's holder answered the way the automation
+ * plugin's resolver answers it (`flowNameResolver`: the one D3 rule, asked
+ * with no caller). `holder` is that answer's holder.
+ */
+function packagedLedger(store: InMemoryFlowDispatchStore, holder: { kind: 'package'; packageId: string } | { kind: 'environment' } | 'refused') {
+    const { engine, ledger } = realLedger(store);
+    engine.setFlowNameResolver((name) => {
+        if (name !== FLOW) return { status: 'not-found' } as never;
+        if (holder === 'refused') {
+            return { status: 'refused', candidates: [{ kind: 'package', packageId: PKG }, { kind: 'package', packageId: 'com.acme.other' }] } as never;
+        }
+        return { status: 'resolved', item: {}, holder, via: 'unique-holder' } as never;
+    });
+    return ledger;
+}
+
+async function packagedRig(store: InMemoryFlowDispatchStore, holder: Parameters<typeof packagedLedger>[1] = { kind: 'package', packageId: PKG }) {
+    const ledger = packagedLedger(store, holder);
+    const job = captureJobService();
+    const { logger } = recordingLogger();
+    const runs: string[] = [];
+    const trigger = new ScheduleTrigger(() => job.service, logger, () => ledger, () => IN_WINDOW);
+    trigger.start(CRON, async () => { runs.push('r'); });
+    await flush();
+    return { job, runs, trigger };
+}
+
+describe('R10 — a flow one package holds is keyed by that package', () => {
+    const window = () => computeTickWindow(CRON.schedule as any, IN_WINDOW)!;
+    const bare = () => `schedule:${FLOW}:2026-09-07T01:00:00.000Z`;
+    const scoped = () => `schedule:${PKG}:${FLOW}:2026-09-07T01:00:00.000Z`;
+
+    it('the scoped key is the bare key with the package in front of the flow; the automation re-key reads the same grammar', () => {
+        expect(scheduleDispatchKey(FLOW, window(), PKG)).toBe(scoped());
+        expect(scheduleDispatchKey(FLOW, window())).toBe(bare());
+        expect(scheduleDispatchKey(FLOW, window(), null)).toBe(bare());
+        const split = bareDispatchKeyFlow(bare());
+        expect(split?.flow).toBe(FLOW);
+        expect(scopedDispatchKey(split!, PKG)).toBe(scheduleDispatchKey(FLOW, window(), PKG));
+        expect(bareDispatchKeyFlow(scoped())).toBeUndefined();
+    });
+
+    it('a tick claims the scoped key and never the bare one', async () => {
+        const store = new InMemoryFlowDispatchStore();
+        const r = await packagedRig(store);
+        await r.job.fire();
+        expect(r.runs).toHaveLength(1);
+        await expect(store.read(scoped())).resolves.toMatchObject({ outcome: 'succeeded' });
+        await expect(store.read(bare())).resolves.toBeNull();
+    });
+
+    it('a flow two packages hold, or the environment holds, keeps the bare key', async () => {
+        for (const holder of ['refused', { kind: 'environment' }] as const) {
+            const store = new InMemoryFlowDispatchStore();
+            const r = await packagedRig(store, holder);
+            await r.job.fire();
+            await expect(store.read(bare())).resolves.toMatchObject({ outcome: 'succeeded' });
+        }
+    });
+
+    it('CONTROL: a ledger with no flowHolderPackage keys by the bare shape, as before', async () => {
+        const store = new InMemoryFlowDispatchStore();
+        const plain: ScheduleDispatchLedger = {
+            claim: (k) => store.claim(k),
+            settleDispatch: (k, o) => store.settle(k, o),
+            readDispatch: (k) => store.read(k),
+        };
+        const job = captureJobService();
+        const trigger = new ScheduleTrigger(() => job.service, recordingLogger().logger, () => plain, () => IN_WINDOW);
+        trigger.start(CRON, async () => {});
+        await flush();
+        await job.fire();
+        await expect(store.read(bare())).resolves.toMatchObject({ outcome: 'succeeded' });
+    });
+});
+
+describe('R10 — the transition read: a bare-shape claim of the window is the window\'s claim (seat condition 2)', () => {
+    const bare = () => `schedule:${FLOW}:2026-09-07T01:00:00.000Z`;
+    const scoped = () => `schedule:${PKG}:${FLOW}:2026-09-07T01:00:00.000Z`;
+
+    it('a window an older node claimed under the bare key does not fire again', async () => {
+        const store = new InMemoryFlowDispatchStore();
+        // The previous release's node claimed and delivered the window.
+        await store.claim(bare());
+        await store.settle(bare(), 'succeeded');
+
+        const r = await packagedRig(store);
+        await r.job.fire();
+        expect(r.runs).toHaveLength(0);
+        // Nothing was claimed under the new key either: the window stays one claim.
+        await expect(store.read(scoped())).resolves.toBeNull();
+    });
+
+    it('an UNSETTLED bare claim (an older node mid-run) also counts: a claim, not a delivery, is what holds a window', async () => {
+        const store = new InMemoryFlowDispatchStore();
+        await store.claim(bare());
+        const r = await packagedRig(store);
+        await r.job.fire();
+        expect(r.runs).toHaveLength(0);
+    });
+
+    it('the replay guard reads both keys: a window delivered under the bare key is refused', async () => {
+        const store = new InMemoryFlowDispatchStore();
+        await store.claim(bare());
+        await store.settle(bare(), 'succeeded');
+        const r = await packagedRig(store);
+        const decision = await r.job.guard()!({ force: false });
+        expect(decision.allow).toBe(false);
+    });
+
+    it('a missed-run check reads both keys: a window claimed under the bare key is dispatched, not missed', async () => {
+        const store = new InMemoryFlowDispatchStore();
+        const { engine } = realLedger(store);
+        await store.claim(bare());
+        const missed = {
+            flowName: FLOW, dueAt: '2026-09-07T01:00:00.000Z', detectedAt: '2026-09-07T09:41:30.000Z',
+            dispatchKey: scoped(), legacyDispatchKey: bare(),
+        };
+        await expect(engine.recordMissedRun(missed)).resolves.toBe('dispatched');
+        // CONTROL: without the transition read's key the same window reads as missed.
+        await expect(engine.recordMissedRun({ ...missed, legacyDispatchKey: undefined })).resolves.toBe('recorded');
+    });
+
+    it('CONTROL: with no bare claim the window fires once under the scoped key', async () => {
+        const store = new InMemoryFlowDispatchStore();
+        const r = await packagedRig(store);
+        await r.job.fire();
+        await r.job.fire();
+        expect(r.runs).toHaveLength(1);
     });
 });

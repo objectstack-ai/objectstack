@@ -14,6 +14,7 @@ import {
     type TriggerLogger,
 } from './index.js';
 import { TimeRelativeTriggerPlugin } from './time-relative-plugin.js';
+import { timeRelativeDispatchKey } from './time-relative-trigger.js';
 import { withScheduledWorkOff, withScheduledWorkOn } from './deployment-switch.test-support.js';
 import { SCHEDULED_WORK_ENV } from '@objectstack/types';
 
@@ -1585,5 +1586,75 @@ describe('TimeRelativeTrigger — switched ON under `group` (#18378)', () => {
         expect(hits.length, 'said once per engine, not once per record').toBe(1);
         expect(hits[0]).toContain('will be refused');
         for (const ctx of seen) expect('tenantId' in ctx).toBe(false);
+    });
+});
+
+// ─── [ADR-0150 D8 row R10, epic #31527 child S3] the key carries the flow's package ──
+
+describe('TimeRelativeTrigger — R10: a flow one package holds is keyed by that package', () => {
+    withScheduledWorkOn('single');
+
+    const JOB = 'flow-time-relative:renewal_alert';
+    const PKG = 'com.acme.renewals';
+    const BARE = 'time-relative:renewal_alert:2026-07-25:offset7:c1';
+    const SCOPED = `time-relative:${PKG}:renewal_alert:2026-07-25:offset7:c1`;
+    const desc = { object: 'contracts', dateField: 'end_date', offsetDays: [7] };
+    const rows: Row[] = [{ id: 'c1', end_date: '2026-07-25T09:00:00.000Z' }]; // T+7 from NOW
+
+    /** {@link fakeClaimLedger}, plus the transition read and the flow's holder. */
+    function packagedClaimLedger(packageId: string | null, preclaimed: string[] = []) {
+        const base = fakeClaimLedger();
+        for (const key of preclaimed) base.keys.add(key);
+        const reads: string[] = [];
+        const surface: FlowDispatchClaimSurface = {
+            claim: base.surface.claim,
+            async readDispatch(key) { reads.push(key); return base.keys.has(key) ? { key } : null; },
+            flowHolderPackage: (flowName) => (flowName === 'renewal_alert' ? packageId : null),
+        };
+        return { ...base, surface, reads };
+    }
+
+    async function sweep(surface: FlowDispatchClaimSurface) {
+        const job = fakeJobService();
+        const { engine } = fakeDataEngine(rows);
+        const trigger = new TimeRelativeTrigger(() => job.service, () => engine, silentLogger(), NOW, () => surface);
+        const launched: string[] = [];
+        trigger.start(binding(desc), async (ctx) => { launched.push((ctx.record as Row).id as string); });
+        await flush();
+        await job.fire(JOB);
+        return launched;
+    }
+
+    it('the key builder: the package goes in front of the flow; no package is the bare key', () => {
+        expect(timeRelativeDispatchKey('renewal_alert', '2026-07-25:offset7', 'c1', PKG)).toBe(SCOPED);
+        expect(timeRelativeDispatchKey('renewal_alert', '2026-07-25:offset7', 'c1')).toBe(BARE);
+        expect(timeRelativeDispatchKey('renewal_alert', '2026-07-25:offset7', 'c1', null)).toBe(BARE);
+    });
+
+    it('a sweep claims the scoped key', async () => {
+        const ledger = packagedClaimLedger(PKG);
+        expect(await sweep(ledger.surface)).toEqual(['c1']);
+        expect(ledger.claims).toEqual([SCOPED]);
+    });
+
+    it('a flow no single package holds keeps the bare key', async () => {
+        const ledger = packagedClaimLedger(null);
+        expect(await sweep(ledger.surface)).toEqual(['c1']);
+        expect(ledger.claims).toEqual([BARE]);
+    });
+
+    it('the transition read: a record an older node claimed under the bare key is not dispatched again (seat condition 2)', async () => {
+        const ledger = packagedClaimLedger(PKG, [BARE]);
+        expect(await sweep(ledger.surface)).toEqual([]);
+        expect(ledger.reads).toEqual([BARE]);
+        // Nothing claimed under the new key: the window stays one claim.
+        expect(ledger.claims).toEqual([]);
+    });
+
+    it('CONTROL: a surface with no readDispatch or flowHolderPackage keys and claims as before', async () => {
+        const ledger = fakeClaimLedger();
+        ledger.keys.add(BARE);
+        expect(await sweep(ledger.surface)).toEqual([]);
+        expect(ledger.claims).toEqual([BARE]);
     });
 });
