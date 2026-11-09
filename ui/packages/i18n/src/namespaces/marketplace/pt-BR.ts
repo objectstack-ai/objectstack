@@ -220,6 +220,7 @@ const pt = {
       businessFunction: 'Função de negócio',
       industry: 'Setor',
       solutionType: 'Tipo',
+      languages: 'Idiomas',
     },
     businessFunction: {
       sales: 'Vendas',
@@ -253,6 +254,11 @@ const pt = {
     },
     maturity: {
       beta: 'Beta',
+    },
+    languages: {
+      none: 'Sem informações de idioma',
+      more: '+{{extra}} outros',
+      default: '(padrão)',
     },
     relativeTime: {
       today: "hoje",
