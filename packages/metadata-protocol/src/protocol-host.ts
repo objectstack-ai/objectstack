@@ -83,6 +83,7 @@ export interface ProtocolHost {
     readonly classifyObjectContribution: ObjectStackProtocolImplementation['classifyObjectContribution'];
     clusterNodeId: ObjectStackProtocolImplementation['clusterNodeId'];
     clusterPubSub: ObjectStackProtocolImplementation['clusterPubSub'];
+    clusterResync: ObjectStackProtocolImplementation['clusterResync'];
     clusterUnsubscribe: ObjectStackProtocolImplementation['clusterUnsubscribe'];
     readonly codeOnlyCreateError: (typeof ObjectStackProtocolImplementation)['codeOnlyCreateError'];
     readonly codeOnlyOverrideError: (typeof ObjectStackProtocolImplementation)['codeOnlyOverrideError'];
