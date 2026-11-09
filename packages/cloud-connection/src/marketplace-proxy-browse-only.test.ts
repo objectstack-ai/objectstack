@@ -13,6 +13,8 @@
  * facet, AND across, and pages the filtered set. The retired `?category=`
  * filter is refused with the spec's prescription, and so is a facet the
  * catalog cannot answer, before either path (public snapshot or cloud) is asked.
+ * A list request carrying a key the snapshot does not evaluate (the cloud's
+ * `languages` facet, or any other) takes the cloud path, query string verbatim.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
