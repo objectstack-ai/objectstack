@@ -347,6 +347,23 @@ Refresh the ObjectStack scenario gallery. Run each step in order and stop at the
    title and the same text. Never open a second one.
 ```
 
+### Checking a gallery PR — `export-gallery --check`
+
+```bash
+pnpm --filter @objectstack/scenarios export-gallery --check "$(realpath ../gallery)"   # from a checkout
+npx @objectstack/scenarios export-gallery --check .                                  # from npm, in a gallery clone
+```
+
+The check a PR on objectstack-ai/gallery must pass before it is merged (`src/export/check.ts`, CLI
+`src/export/check-cli.ts`). It writes nothing and reads the exporter's own contract (the `index.json` schema, the app
+layout), so the two cannot drift. It prints one `CODE PATH: MESSAGE` line per finding and exits 1 on any, 0 on a clean
+tree: `index.json` that does not validate (absent is an empty gallery); an entry without a complete `apps/<id>/`
+(README, run record, scorecard and transcript in JSON and Markdown, `source/objectstack.config.ts`, at least one
+screenshot, every listed screenshot on disk and none unlisted); a directory under `apps/` no entry lists; a
+`framework.version` that is not a stable release published for `@objectstack/cli` (read with `npm view … versions`,
+only when the index lists an app); and anywhere in the tree a `.env*` name, a `node_modules` directory, a symbolic link
+or a text file naming a local absolute path.
+
 ## Other agent tools — Codex and the external driver contract
 
 The same card can measure another agent tool. Every record (`env.driver`) and every gallery app page (`- Driver:`)
