@@ -172,8 +172,8 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         }
       },
       package_id: {
-        label: "Package",
-        help: "The app a rule that came with an app belongs to. Filled in by the platform; empty for rules created here."
+        label: "所屬應用",
+        help: "隨應用安裝的規則屬於哪個應用。由平台填寫；在這裡建立的規則為空。"
       },
       customized: {
         label: "已自訂",
@@ -327,8 +327,8 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         help: "此成員所屬佇列的名稱。"
       },
       queue_package: {
-        label: "Queue Package",
-        help: "The app the queue comes from. Filled in by the platform; empty for queues created here."
+        label: "佇列所屬應用",
+        help: "該佇列來自哪個應用。由平台填寫；在這裡建立的佇列為空。"
       },
       recipient_type: {
         label: "成員類型",

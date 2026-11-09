@@ -172,8 +172,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         }
       },
       package_id: {
-        label: "Package",
-        help: "The app a rule that came with an app belongs to. Filled in by the platform; empty for rules created here."
+        label: "所属应用",
+        help: "随应用安装的规则属于哪个应用。由平台填写；在这里创建的规则为空。"
       },
       customized: {
         label: "已定制",
@@ -327,8 +327,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "该成员所属队列的名称。"
       },
       queue_package: {
-        label: "Queue Package",
-        help: "The app the queue comes from. Filled in by the platform; empty for queues created here."
+        label: "队列所属应用",
+        help: "该队列来自哪个应用。由平台填写；在这里创建的队列为空。"
       },
       recipient_type: {
         label: "成员类型",
