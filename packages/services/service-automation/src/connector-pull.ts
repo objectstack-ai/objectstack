@@ -219,8 +219,33 @@ function shapeOf(value: unknown): string {
 /**
  * Pull one `mapping`'s `connectorSource` and write what it returns. Throws
  * {@link ConnectorPullError} on every refusal, before anything is written.
+ *
+ * Every failed pull also logs ONE `warn` line naming the mapping and the
+ * reason, then rethrows unchanged. A scheduled pull's caller is the job
+ * runner, whose only record is the failed job run's `error`; without this
+ * line a binding that can never pull failed on every tick and nothing in the
+ * process log said so. `warn`, not `error`: nothing was written, so nothing
+ * claims to be persisted that is not (AGENTS.md, degradation log levels), and
+ * the caller still receives the failure.
  */
 export async function pullConnectorSource(
+    deps: ConnectorPullDeps,
+    opts: ConnectorPullOptions,
+): Promise<ConnectorPullResult> {
+    try {
+        return await pullOnce(deps, opts);
+    } catch (err) {
+        const reason = err instanceof ConnectorPullError ? err.reason : 'failed';
+        const message = err instanceof Error ? err.message : String(err);
+        deps.logger.warn(
+            `[Automation] connector pull of mapping "${opts.mapping}" failed (${reason}): ${message}`,
+            { mapping: opts.mapping, reason },
+        );
+        throw err;
+    }
+}
+
+async function pullOnce(
     deps: ConnectorPullDeps,
     opts: ConnectorPullOptions,
 ): Promise<ConnectorPullResult> {

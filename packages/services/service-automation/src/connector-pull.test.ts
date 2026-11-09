@@ -392,3 +392,38 @@ describe('[#28040] connector pull — the input is checked against the action\'s
         expect(h.writes).toHaveLength(1);
     });
 });
+
+describe('a failed pull logs one warn line naming the mapping and the reason', () => {
+    function recording(h: Harness): { warns: Array<{ message: string; meta?: Record<string, unknown> }> } {
+        const warns: Array<{ message: string; meta?: Record<string, unknown> }> = [];
+        h.deps.logger = { ...silent, warn: (message: string, meta?: Record<string, unknown>) => { warns.push({ message, meta }); } } as ConnectorPullDeps['logger'];
+        return { warns };
+    }
+
+    it('a mapping naming a datasource, not a connector: one warn line, and the refusal still reaches the caller', async () => {
+        const h = harness({ mapping: baseMapping({ connectorSource: { connector: 'legacy_db', action: 'request' } }) });
+        const { warns } = recording(h);
+        expectRefused(await refusal(h), { code: 'VALIDATION_ERROR', status: 400, reason: 'connector_not_registered' });
+        expect(warns).toHaveLength(1);
+        expect(warns[0].meta).toEqual({ mapping: 'crm_contacts', reason: 'connector_not_registered' });
+        expect(warns[0].message).toContain('"crm_contacts"');
+        expect(warns[0].message).toContain('connector_not_registered');
+    });
+
+    it('a throw that is not a typed refusal is logged too, and rethrown as it was', async () => {
+        const h = harness();
+        h.handler.mockRejectedValueOnce(new Error('socket hang up'));
+        const { warns } = recording(h);
+        const err = await pullConnectorSource(h.deps, { mapping: 'crm_contacts' }).catch((e: unknown) => e);
+        expect((err as Error).message).toBe('socket hang up');
+        expect(warns.map((w) => w.meta)).toEqual([{ mapping: 'crm_contacts', reason: 'failed' }]);
+    });
+
+    it('CONTROL: a pull that succeeds logs no warn line', async () => {
+        const h = harness({ result: { status: 200, ok: true, body: [{ id: 'c1', name: 'Ada' }] } });
+        const { warns } = recording(h);
+        const res = await pullConnectorSource(h.deps, { mapping: 'crm_contacts' });
+        expect(res.pulled).toBe(1);
+        expect(warns).toEqual([]);
+    });
+});
