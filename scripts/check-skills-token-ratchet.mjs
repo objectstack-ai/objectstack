@@ -558,7 +558,19 @@ export const CEILINGS = new Map([
   // metadata lives in the public skills … The private corpus's rules of that
   // kind move there". The raise path is the standing 2026-10-27 ruling (ruling
   // record 6513306068), quoted verbatim and untranslated in the PR body.
-  ['skills/objectstack-automation/SKILL.md', 6527],
+  // 6527 -> 6568 (card #31741, the ADR-0150 E1 skills follow-up): the
+  // `subflow` / `map` rows teach how a child's bare `config.flowName`
+  // resolves from the calling flow's package (own flow, else the one holder
+  // in its `dependencies` closure plus `sys`) and the three run-time refusals.
+  // Raise path the standing ruling 「A:先削重复,余额按实测提高」 (ruling record
+  // 6513306068, letter B). PAID DOWN FIRST — nine restatements cut, each
+  // keeping its other home (listed in the PR body and the changeset). Arithmetic
+  // in priced bytes (stamp line excluded), against `main`'s 26108 (headroom 0):
+  // the rows add 581, the cuts remove 417, so the LANDED priced text is 26272
+  // bytes -> ceil(26272 / 4) = 6568; the ceiling moves +41, the measured
+  // remainder only. Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-automation/SKILL.md) - 20) / 4) == ceil(26272 / 4)
+  ['skills/objectstack-automation/SKILL.md', 6568],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
