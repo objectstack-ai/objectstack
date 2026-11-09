@@ -248,6 +248,9 @@ export async function judgeRedeliverEntitlement(
             accessToken: 'withhold',
             oauth: undefined,
             onAdmission: undefined,
+            // [#31898] `'session-only'` reads no API key, so no `credential_use` row is
+            // written here and no transport is handed.
+            transport: undefined,
         });
         if (!context || context.userId !== input.userId) return refuse(NOT_ENTITLED);
         const tenantId = typeof context.tenantId === 'string' && context.tenantId.length > 0
