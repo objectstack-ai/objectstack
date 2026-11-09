@@ -39,6 +39,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { IDataEngine } from '@objectstack/spec/contracts';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { isExitSignal } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
@@ -134,7 +135,7 @@ async function seedDatabase(file: string): Promise<void> {
     composeHostStack: true, composeServedPlatform: true, composeAuthGatedSecurity: true,
   });
   try {
-    const ql = stack.kernel.getService('objectql') as any;
+    const ql: IDataEngine = stack.kernel.getService('objectql');
     const ctx = { context: { isSystem: true, tenantId: ORG } };
     for (const name of ['m31693_share', 'm31693_only_a']) {
       await ql.insert('sys_sharing_rule', {
