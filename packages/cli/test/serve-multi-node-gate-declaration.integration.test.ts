@@ -185,6 +185,21 @@ function writeApp(prefix: string, gate: boolean): string {
   return dir;
 }
 
+/**
+ * The primary database every gate case boots over: one all replicas would
+ * share, because several replicas declared over redis refuse a database local
+ * to each one (SQLite, the default) before the gate's verdict reaches the
+ * split-brain guard — the second `describe` pins that refusal. Nothing listens
+ * on the port, so the connect fails, and the driver-connect escape hatch keeps
+ * the boot walking: these cases read the gate and the guard, never the data.
+ * `mysql://` because its client ships with the SQL driver; `pg` is optional.
+ */
+const SHARED_DATABASE_ENV = {
+  OS_DATABASE_URL: 'mysql://fixture@127.0.0.1:9/fixture',
+  OS_DATABASE_DRIVER: undefined,
+  OS_ALLOW_DRIVER_CONNECT_FAILURE: 'true',
+};
+
 /** Boot once; `booted` is true only when the child printed a complete banner with the port it bound. */
 async function boot(prefix: string, gate: boolean, env: Record<string, string | undefined>) {
   const dir = writeApp(prefix, gate);
@@ -197,6 +212,7 @@ async function boot(prefix: string, gate: boolean, env: Record<string, string | 
       OS_EXPECT_MULTI_NODE: undefined,
       OS_CLUSTER_REPLICAS: undefined,
       OS_ALLOW_MEMORY_CLUSTER_MULTINODE: undefined,
+      ...SHARED_DATABASE_ENV,
       ...env,
     },
   });
