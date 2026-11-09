@@ -200,12 +200,17 @@ export const ADMIN_STANDING_SURFACE: Readonly<Record<string, AdminStandingTable>
       + 'reachable writes, and neither touches a grant table. `banned` stays absent from the '
       + 'column list because the resolver still never reads it; the guard watches the ban/delete '
       + 'WRITE SHAPES on this table for its own reasons, which is a different question from what '
-      + 'this resolver consumes.',
+      + 'this resolver consumes. [ADR-0151 D3] `principal_kind` (read in either spelling) is read '
+      + 'too: a row of kind `agent` — an AI service account — confers NO standing through either '
+      + 'anchor, whatever it holds. The kind is born with the row and immutable for every caller, '
+      + 'so no write moves a person\'s row to `agent`.',
     columns: [
       'id',
       'email',
       'email_verified',
       'ai_access',
+      'principal_kind',
+      'principalKind',
     ],
   },
 

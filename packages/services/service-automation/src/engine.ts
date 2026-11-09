@@ -828,6 +828,12 @@ export interface FlowUserGrants {
    * a principal below it: the run sees less, never more.
    */
   posture?: SeededRunContext['posture'];
+  /**
+   * [ADR-0151 D3] `'agent'` when the user is an AI service account
+   * (`resolveUserAuthzGrants`' own field, under its own name). Run setup seeds
+   * it beside the grants ({@link SeededRunContext.principalKind}).
+   */
+  principalKind?: 'agent';
 }
 
 /**

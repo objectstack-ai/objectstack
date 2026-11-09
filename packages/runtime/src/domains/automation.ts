@@ -226,6 +226,13 @@ export function buildAutomationContext(body: any, context: HttpProtocolContext):
     // re-resolve them and this is the only way it gets one.
     // `AutomationContext.posture` names its readers.
     if (typeof ec?.posture === 'string' && ec.posture.length > 0) automationContext.posture = ec.posture;
+    // [ADR-0151 D3] An AI service account's kind, forwarded beside its grants
+    // for the same reason: the run carries those grants, so its setup does not
+    // re-resolve them, and without the kind the account's run would be
+    // evaluated as a person's (the member baseline, no agent ceiling). Only the
+    // account (`agent` with no `onBehalfOf`); an OAuth-delegated agent is
+    // forwarded as before. Read by `runPrincipalKind` (`@objectstack/service-automation`).
+    if (ec?.principalKind === 'agent' && !ec?.onBehalfOf) automationContext.principalKind = 'agent';
     // [#22450] The caller's language, already resolved (the request's
     // `Accept-Language` first, then the `localization` settings) — forwarded,
     // never re-derived, so a refused run's message renders in the language of
@@ -1043,25 +1050,29 @@ const CONNECTOR_CONNECTION_DENY_MESSAGE =
     `Connecting, reconnecting or revoking a connector instance, or reading its connection, requires the \`${CONNECTOR_CONNECTION_CAPABILITY}\` capability.`;
 
 /**
- * ADR-0143 D5 — a caller that acts for a person instead of being that person
- * signed in, by kind: `agent` (an envelope that names a delegator,
- * `principalKind: 'agent'` or `onBehalfOf`), `oauth` (admitted by an OAuth
- * access token) or `api_key` (admitted by an API key). The credential half is
- * the forward table's own reading ({@link apiForwardCredentialKind}), so the
- * two doors cannot disagree about which credential admitted a caller.
+ * ADR-0143 D5 — a caller that is not a person signed in, by kind: `agent`
+ * (an envelope that names a delegator, `onBehalfOf`), `agent_account` (an AI
+ * service account, ADR-0151 D3: `principalKind: 'agent'` with no
+ * `onBehalfOf` — its own subject, acting for nobody, admitted by its own API
+ * key), `oauth` (admitted by an OAuth access token)
+ * or `api_key` (admitted by an API key). The credential half is the forward
+ * table's own reading ({@link apiForwardCredentialKind}), so the two doors
+ * cannot disagree about which credential admitted a caller.
  */
-export type ConnectorConnectionDelegatedCaller = 'agent' | 'oauth' | 'api_key';
+export type ConnectorConnectionDelegatedCaller = 'agent' | 'agent_account' | 'oauth' | 'api_key';
 
 /** The delegated kind of this request's caller, or `undefined` for a person signed in (or no recorded credential). */
 export function connectorConnectionDelegatedCaller(context: HttpProtocolContext | undefined): ConnectorConnectionDelegatedCaller | undefined {
     const ec: any = context?.executionContext;
-    if (ec?.principalKind === 'agent' || ec?.onBehalfOf) return 'agent';
+    if (ec?.onBehalfOf) return 'agent';
+    if (ec?.principalKind === 'agent') return 'agent_account';
     const credential = apiForwardCredentialKind(context);
     return credential === 'oauth' || credential === 'api_key' ? credential : undefined;
 }
 
 const CONNECTOR_CONNECTION_DELEGATED_CALLER_NAMES: Readonly<Record<ConnectorConnectionDelegatedCaller, string>> = {
     agent: 'an agent acting on a person\'s behalf',
+    agent_account: 'an AI service account, which acts as itself and never signs in',
     oauth: 'an OAuth access token, which a client holds to act for a person',
     api_key: 'an API key, which acts for its owner without them present',
 };

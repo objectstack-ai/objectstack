@@ -234,6 +234,9 @@ export {
 export {
   resolveAuthzContext,
   resolveUserAuthzGrants,
+  // [ADR-0151 D1] Is a `sys_user` row an AI service account? The one reading
+  // the resolver applies, for a gate that reads a holder's row itself.
+  isAgentAccountRow,
   // [#10348] The ONE id-shaped platform-admin predicate (ADR-0068 D2). Every
   // surface that only knows a user id asks this instead of re-reading
   // `sys_*_permission_set` — the prohibition resolve-authz-context.ts states.

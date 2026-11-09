@@ -344,7 +344,11 @@ function asIdList(id: unknown): Array<string | number> | null {
  *      D10 rule "an agent's grants are EXACTLY its scope-derived ceiling" on
  *      `principalKind === 'agent'`; stripped, the additive human baseline was
  *      appended to an agent's ceiling on this path, so the sets the bypass
- *      probe evaluated were a SUPERSET of what the user consented to.
+ *      probe evaluated were a SUPERSET of what the user consented to. The
+ *      same key carries an AI service account (ADR-0151 D3: `principalKind:
+ *      'agent'`, no `onBehalfOf`), whose grants are its own assignments under
+ *      the agent ceiling, with no member baseline: stripped, it would read as
+ *      a person and gain the baseline and lose the ceiling clamp.
  *
  *    `systemPermissions`, `accessible_org_ids`, `posture`, `audience` and
  *    `rlsMembership` were dropped by the same projection; they are forwarded

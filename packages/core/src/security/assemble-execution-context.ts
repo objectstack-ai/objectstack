@@ -235,8 +235,10 @@ export interface ExecutionContextAssemblyInput {
   /**
    * OAuth access-token provenance, or `undefined` on a face that does not
    * accept one. Only the `/mcp` dispatch door passes a value; REST passes
-   * `undefined` — which is why `principalKind: 'agent'`, `onBehalfOf` and
-   * `oauthScopes` are not representable there.
+   * `undefined` — which is why an OAuth-delegated agent (`onBehalfOf`,
+   * `oauthScopes`) is not representable there. An AI service account's key
+   * makes `principalKind: 'agent'` on every face (ADR-0151 D3), with no
+   * `onBehalfOf`: that agent is its own subject, read from `authz`.
    */
   oauth: OAuthTokenProvenance | undefined;
   /**
@@ -317,7 +319,17 @@ function entryFields(
   // consented scope OR the user's own reach (confused-deputy prevention).
   // `userId` stays the human so owner-stamping and `current_user.*` RLS resolve
   // to them.
-  const agent = !anonymous && oauth?.clientId ? oauth : undefined;
+  //
+  // [ADR-0151 D3] An AI service account is an agent principal of a different
+  // provenance: its own subject. Its API key admits it, its row says so
+  // (`authz.principalKind`), and it acts for nobody — no `onBehalfOf`, so no
+  // intersection with anyone's grants: its own explicit grants are its whole
+  // authority, under the agent ceiling. It carries no system permission. It
+  // takes precedence over the OAuth arm: an account never consents to a client,
+  // so no token names it, and an `onBehalfOf` naming it as a person would be
+  // false.
+  const account = !anonymous && authz.principalKind === 'agent';
+  const agent = !anonymous && !account && oauth?.clientId ? oauth : undefined;
 
   return {
     // [ADR-0090 D9/D10] Principal taxonomy at the HTTP entry: a session-backed
@@ -334,13 +346,15 @@ function entryFields(
     // OBJECT access stays denied to the agent regardless of this line). The
     // `actions:execute` scope IS the user's consent to let this agent invoke
     // actions on their behalf; without it the agent holds none.
-    systemPermissions: agent
-      ? agent.delegatesActions
-        ? (authz.systemPermissions ?? [])
-        : []
-      : authz.systemPermissions,
+    systemPermissions: account
+      ? []
+      : agent
+        ? agent.delegatesActions
+          ? (authz.systemPermissions ?? [])
+          : []
+        : authz.systemPermissions,
     isSystem: false,
-    principalKind: agent ? 'agent' : anonymous ? 'guest' : 'human',
+    principalKind: agent || account ? 'agent' : anonymous ? 'guest' : 'human',
     onBehalfOf: agent ? { userId: authz.userId!, principalKind: 'human' } : undefined,
     // [ADR-0090 D10 rule 4 — dual attribution] The same `azp` that made this
     // an agent principal, carried as the PERFORMER so the write is attributable

@@ -52,6 +52,7 @@ import { POSITION_ASSIGNMENT_OBJECT, createPositionCatalogRefusal } from './posi
 import { registerGrantHolderMembershipRefusal } from './grant-holder-membership-refusal.js';
 import { registerGrantPermissionSetNameHooks } from './grant-permission-set-name.js';
 import { registerAgentCeilingGrantRefusal } from './agent-ceiling-grant-refusal.js';
+import { registerAgentAccountGrantRefusal } from './agent-account-grant-refusal.js';
 import { reportCatalogReferences } from './catalog-reference-report.js';
 import {
   reportAccessUpgrade,
@@ -134,6 +135,14 @@ export function registerStartHooks(
   // `permission_set`), for every caller. Engine hooks; see
   // `agent-ceiling-grant-refusal.ts`.
   registerAgentCeilingGrantRefusal(ql, ctx.logger);
+  // [ADR-0151 D3] An AI service account is never assigned a set above the
+  // agent ceiling: a non-system `sys_user_permission_set` or
+  // `sys_user_position` write that would give an account a set carrying View
+  // All, Modify All, the destructive class, a system permission or an admin
+  // scope is refused by the set's name (`400 VALIDATION_FAILED`,
+  // `invalid_value`). The clamp at evaluation is the guarantee; this is the
+  // early answer. Engine hooks; see `agent-account-grant-refusal.ts`.
+  registerAgentAccountGrantRefusal(ql, ctx.logger);
 
   // [ADR-0131 D3, C3 stage 8] No data-door write-through and no walled
   // catalog data-door refusal is registered: the catalog objects are

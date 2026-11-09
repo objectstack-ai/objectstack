@@ -149,6 +149,13 @@ export interface ResolvedAuthzContext {
    */
   audience?: 'external';
   /**
+   * [ADR-0151 D3] `'agent'` when {@link userId} is an AI service account
+   * ({@link UserAuthzGrants.principalKind}). Only an API key admits one (an
+   * account never holds a session). The shared assembler stamps it as the agent
+   * principal of its own request, with no `onBehalfOf`.
+   */
+  principalKind?: 'agent';
+  /**
    * [#23287, ruling C′ item 3] The credential that admitted {@link userId}:
    * `'api_key'` when an API key did (step 1 below), `'session'` when the
    * session / bearer read did (step 2). Absent for an anonymous request and for
@@ -825,6 +832,7 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
   if (grants.tabPermissions) ctx.tabPermissions = grants.tabPermissions;
   if (grants.posture) ctx.posture = grants.posture;
   if (grants.audience) ctx.audience = grants.audience;
+  if (grants.principalKind) ctx.principalKind = grants.principalKind;
   if (grants.email && !ctx.email) ctx.email = grants.email;
 
   return ctx;
@@ -879,6 +887,20 @@ export interface UserAuthzGrants {
   audience?: 'external';
   /** The user's unique email (`sys_user`), for `current_user.email` owner RLS. */
   email?: string;
+  /**
+   * [ADR-0151 D3] `'agent'` when the user row is an AI service account
+   * (`sys_user.principal_kind`), absent for a person. Read from the row every
+   * resolution reads, so every envelope built from these grants (a request, an
+   * automation run, an approval, a mention) can stamp the account as the agent
+   * principal it is, with no `onBehalfOf`: it acts for nobody.
+   *
+   * An account's grants are already narrowed here: it does not hold the
+   * `everyone` anchor, it carries no system permission, and no grant confers
+   * platform or organization administrator standing on it. The ceiling over the
+   * sets it does hold is clamped where they are evaluated
+   * (`@objectstack/plugin-security`).
+   */
+  principalKind?: 'agent';
   /**
    * [ADR-0090 D6] Where each name in `permissions` came from, keyed by name —
    * present only when the caller asked for it
@@ -1487,6 +1509,19 @@ function heldPositionNames(
 }
 
 /**
+ * [ADR-0151 D1] Is this `sys_user` row an AI service account? Its
+ * `principal_kind` column reads `agent` — the row shape, or the camel-cased
+ * one a driver may hand back, as `@objectstack/plugin-auth` reads it at the
+ * sign-in refusals. Every other value, and an absent row, is a person: every
+ * row written before the column existed.
+ */
+export function isAgentAccountRow(row: unknown): boolean {
+  if (!row || typeof row !== 'object') return false;
+  const r = row as { principal_kind?: unknown; principalKind?: unknown };
+  return (r.principal_kind ?? r.principalKind) === 'agent';
+}
+
+/**
  * [ruling of record 6355206139, E1] Does a principal holding `held` belong to
  * the organization's EXTERNAL population — does it hold `org_external`, the
  * projection of `sys_member.role = external`? Its holder is not given the
@@ -1925,32 +1960,35 @@ export async function resolveUserAuthzGrants(
   // (equivalence pinned in resolve-authz-context.batch-equivalence.test.ts).
   // `getUserRow` stays memoized; issuing it here is not a new read on any
   // path that reads it at all — the email fallback below and §7's ai_seat
-  // synthesis consume the same memo. The CONDITION mirrors the sequential
-  // implementation exactly: `sys_user` was read iff the caller seeded no
-  // email OR did not seed `ai_seat` — a fully-seeded API-key principal never
-  // touched the table, and the batch must not start (equivalence suite pins
-  // the query multiset per fixture).
+  // synthesis consume the same memo.
   //
-  // [#11663 L2] The CONFIG anchor adds a third reason to read `sys_user`: §6b's
-  // config branch compares the caller's STORED email against the declared
-  // administrator list, so the row is needed whenever that list is non-empty.
-  // Resolved here — before the batch — precisely so the read joins the SAME
-  // wave rather than opening a sixth sequential leg after it. The read stays
-  // CONDITIONAL ON CONFIG on purpose (pin P2: empty/unset config answers "not a
-  // platform admin" before touching any row), which is why a deployment that
-  // has not declared administrators issues byte-identically the same queries it
-  // issued before this leg — see the batch-equivalence goldens, which are
-  // unchanged for exactly that reason.
+  // [#11663 L2] §6b's config branch compares the caller's STORED email against
+  // the declared administrator list off this same row, so it joins the SAME
+  // wave rather than opening a sixth sequential leg after it. The config branch
+  // still answers "not a platform admin" before looking at the row when no
+  // administrator is declared (pin P2).
+  //
+  // [ADR-0151 D3] The row is now read on EVERY resolution: its
+  // `principal_kind` says whether the user is an AI service account, and every
+  // caller of this function (a request, an automation run, an approval, a
+  // mention, the explainer) must get the account's narrowed grants, not a
+  // person's. A fully seeded caller (an email AND `ai_seat`) was the only one
+  // that skipped it, and since key scopes are refused (`keys.ts`) no caller
+  // seeds `ai_seat`, so the read was already taken on every live path. The
+  // batch-equivalence goldens that seeded both now record the read.
   const platformAdminConfig = resolvePlatformAdminEmails();
-  const needsUserRow =
-    !grants.email || !grants.permissions.includes('ai_seat') || platformAdminConfig.emails.length > 0;
   const [, members, userPositionRows, orgMembersLeg, upsRowsAll] = await Promise.all([
-    needsUserRow ? getUserRow() : Promise.resolve(undefined),
+    getUserRow(),
     tryFind(ql, 'sys_member', { user_id: userId }, 200, undefined, MEMBER_ROW_COLUMNS),
     tryFind(ql, 'sys_user_position', { user_id: userId }, 200),
     tenantId ? tryFind(ql, 'sys_member', { organization_id: tenantId }, ORG_MEMBERS_FIRST_READ_ROWS, undefined, ORG_MEMBER_PAGE_COLUMNS) : Promise.resolve([] as any[]),
     tryFind(ql, 'sys_user_permission_set', { user_id: userId }, 100, undefined, GRANT_ROW_COLUMNS),
   ]);
+
+  // [ADR-0151 D3] An AI service account is the agent principal of its own
+  // requests: it holds explicit grants only, under the agent ceiling.
+  const agentAccount = isAgentAccountRow(userRow);
+  if (agentAccount) grants.principalKind = 'agent';
 
   // Resolve the caller's unique email for `current_user.email` RLS owner
   // policies when the caller didn't supply it (e.g. API-key auth).
@@ -2099,7 +2137,13 @@ export async function resolveUserAuthzGrants(
   //     platform baseline nor an app's `isDefault` set nor an accepted package
   //     default bound to it reaches the holder. Its baseline is what its own
   //     identity position names (§6a); everything else is an explicit grant.
-  if (!holdsExternalIdentity(grants.positions) && !grants.positions.includes('everyone')) grants.positions.push('everyone');
+  //
+  //     [ADR-0151 D3] …and an AI service account: its grants are the explicit
+  //     ones an administrator assigned it, so a newly registered account can do
+  //     nothing until it is granted something.
+  if (!agentAccount && !holdsExternalIdentity(grants.positions) && !grants.positions.includes('everyone')) {
+    grants.positions.push('everyone');
+  }
 
   // [#10757 leg 4] The Default Organization read (§6) and the activation-ledger
   // read (§6a) are ONE wave. They used to be two serial round trips, because the
@@ -2230,7 +2274,10 @@ export async function resolveUserAuthzGrants(
     // every posture. What a walled rig stops deriving from the grant is
     // PLATFORM_ADMIN STANDING — the rung, the built-in `platform_admin` position
     // and everything downstream of them.
-    if (anchorsPlatformStanding(grant) && active) {
+    //
+    // [ADR-0151 D3] An AI service account is never an administrator: no grant
+    // confers platform standing on it.
+    if (anchorsPlatformStanding(grant) && active && !agentAccount) {
       hasPlatformAdminGrant = true;
     }
   }
@@ -2271,7 +2318,8 @@ export async function resolveUserAuthzGrants(
   //     administrator — which is the fail-closed answer the boot-side backstop in
   //     `plugin-security` announces at startup.
   const configConfersPlatformAdmin =
-    platformAdminConfig.emails.length > 0
+    !agentAccount
+    && platformAdminConfig.emails.length > 0
     && matchesConfiguredPlatformAdmin(await getUserRow(), platformAdminConfig);
   if (configConfersPlatformAdmin) {
     // [Choice 6A] The capability CONTENT comes from the one declaration in
@@ -2299,6 +2347,12 @@ export async function resolveUserAuthzGrants(
   // fail-closed line (`plugin-security/src/bootstrap-platform-admin.ts`), which is
   // where an operator can act on it, not inside the per-request authorization path.
 
+  // [ADR-0151 D3] An AI service account carries no system permission, from
+  // any set it holds: an action gated by one is closed to it until a decision
+  // widens the agent ceiling. The sets themselves stay on `permissions` and are
+  // clamped where they are evaluated.
+  if (agentAccount) grants.systemPermissions = [];
+
   // 6c. Project the derived platform_admin built-in role (leads the list).
   if (hasPlatformAdminGrant && !grants.positions.includes(BUILTIN_IDENTITY_PLATFORM_ADMIN)) {
     grants.positions.unshift(BUILTIN_IDENTITY_PLATFORM_ADMIN);
@@ -2324,7 +2378,8 @@ export async function resolveUserAuthzGrants(
     isPlatformAdmin: hasPlatformAdminGrant,
     // [ADR-0105 D4] Either org-admin capability set resolves the rung — the
     // wall-less variant differs only by withholding the superuser bits.
-    isTenantAdmin: ORGANIZATION_ADMIN_GRANTS.some((n: string) => grants.permissions.includes(n)),
+    // [ADR-0151 D3] Never for an AI service account, whatever it holds.
+    isTenantAdmin: !agentAccount && ORGANIZATION_ADMIN_GRANTS.some((n: string) => grants.permissions.includes(n)),
     isExternal: external,
   });
   if (external) grants.audience = 'external';
