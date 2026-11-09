@@ -5102,10 +5102,12 @@ function addressedActionHits(
  *     same convention as the engine registration key (`objectName` field,
  *     legacy `object` field, else the object-less `GLOBAL_ACTION_OBJECT_KEY`).
  *
- * On a key clash (`objectName:name`) the object-embedded declaration wins,
- * mirroring the execution layer's artifact-wins rule — `resyncAuthoredActions`
- * refuses to clobber an artifact-registered handler, so the embedded
- * declaration is the one that matches what actually runs. All MCP gating
+ * On a key clash (`objectName:name`) within ONE holder, the object-embedded
+ * declaration wins, mirroring the execution layer's artifact-wins rule —
+ * `resyncAuthoredActions` refuses to clobber an artifact-registered handler,
+ * so the embedded declaration is the one that matches what actually runs. A
+ * standalone declaration of ANOTHER holder bound to the same object is its
+ * own row (ADR-0150 D4, below). All MCP gating
  * (`ai.exposed`, ADR-0066 D4, headless-invokability) applies downstream of
  * this collection, unchanged.
  *
@@ -5130,10 +5132,17 @@ function addressedActionHits(
  *
  * [ADR-0150 D4] Each row carries `packageId`: the package that holds the
  * declaration (a standalone item's `_packageId`, an embedded one's object's),
- * absent for the environment's own. Two packages' standalone declarations of
- * one key are BOTH rows — the key is `(package, objectName, name)` — so a name
- * two packages hold is listed twice and resolved by the package rule
- * ({@link resolveActionByName}), never by which one this walk met first.
+ * absent for the environment's own. Two holders' declarations of one key are
+ * BOTH rows — the key is `(package, objectName, name)`, for an embedded row as
+ * for a standalone one — so a name two packages hold is listed twice and
+ * resolved by the package rule ({@link resolveActionByName}), never by which
+ * one this walk met first. In particular a package's standalone action bound
+ * to ANOTHER package's object that embeds the same name survives here, so its
+ * package-qualified address (`/actions/NS/OBJECT/NAME`, `run_action` with
+ * `namespace`) reaches it (ADR-0150 "Covered and uncovered types"). A bare call
+ * on such a pair keeps its answer, the object's own declaration: the
+ * no-package refusal of an object-bound pair is the action family's own card
+ * (epic ruling record 6729825528), not this walk's.
  */
 export async function collectActionDeclarations(deps: ActionExecutionDeps, 
     meta: any,
@@ -5146,14 +5155,18 @@ export async function collectActionDeclarations(deps: ActionExecutionDeps,
         if (typeof obj?.name === 'string') objByName.set(obj.name, obj);
     }
     const out: Array<{ action: any; objectName: string; obj: any; packageId?: string }> = [];
+    // [ADR-0150 D4] One holder's `objectName:name` once, keyed by its package
+    // (the environment's own as ''): an embedded declaration shadows only its
+    // own holder's standalone duplicate, never another package's.
+    const holdingOf = (packageId: string | undefined, key: string) => `${packageId ?? ''}\u0000${key}`;
     const seen = new Set<string>();
     for (const obj of objs) {
         const objectName: string | undefined = obj?.name;
         if (!objectName) continue;
         for (const action of Array.isArray(obj?.actions) ? obj.actions : []) {
             if (!action || typeof action.name !== 'string') continue;
-            seen.add(`${objectName}:${action.name}`);
             const packageId = declaringPackageOf(action) ?? declaringPackageOf(obj);
+            seen.add(holdingOf(packageId, `${objectName}:${action.name}`));
             out.push({ action, objectName, obj, ...(packageId !== undefined ? { packageId } : {}) });
         }
     }
@@ -5167,17 +5180,15 @@ export async function collectActionDeclarations(deps: ActionExecutionDeps,
             standalone = []; // no standalone-item source on this metadata service
         }
     }
-    const seenStandalone = new Set<string>();
     for (const action of standalone) {
         if (!action || typeof action.name !== 'string') continue;
         const objectName = standaloneActionObjectName(deps, action);
-        const key = `${objectName}:${action.name}`;
-        if (seen.has(key)) continue; // object-embedded declaration wins
         const packageId = declaringPackageOf(action);
-        // One holder's key once; another package's declaration of the key is its own row.
-        const holding = `${packageId ?? ''}\u0000${key}`;
-        if (seenStandalone.has(holding)) continue;
-        seenStandalone.add(holding);
+        // The holder's own embedded declaration wins, and its key counts once;
+        // another holder's declaration of the key is its own row.
+        const holding = holdingOf(packageId, `${objectName}:${action.name}`);
+        if (seen.has(holding)) continue;
+        seen.add(holding);
         out.push({ action, objectName, obj: objByName.get(objectName), ...(packageId !== undefined ? { packageId } : {}) });
     }
     return out;

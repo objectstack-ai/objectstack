@@ -312,3 +312,81 @@ describe('carry-in: an addressed call on an object falls back to the holder\'s o
         expect(ran).toEqual([{ obj: 'lead', key: 'log_call', packageId: CRM }]);
     });
 });
+
+describe('a package\'s standalone action bound to another package\'s object that embeds the same name: each address reaches its own', () => {
+    // crm's `lead` embeds `convert` (the object is crm's; the embedded row
+    // carries no stamp of its own), and hr ships a standalone `convert` bound
+    // to `lead`. The collector keeps both: the key is (package, object, name).
+    const lead = () => ({ name: 'lead', _packageId: CRM, fields: { name: { type: 'text' } }, actions: [act('convert', undefined)] });
+    const pair = (hrExtra: Record<string, unknown> = {}) =>
+        dispatcherWith([lead()], [act('convert', HR, { objectName: 'lead', ...hrExtra })]);
+
+    it('REST: /actions/crm/lead/convert runs crm\'s, /actions/hr/lead/convert runs hr\'s', async () => {
+        const { post, ran } = pair();
+        const crm = await post('/crm/lead/convert/r1');
+        expect(crm.status, JSON.stringify(crm.body)).toBe(200);
+        const hr = await post('/hr/lead/convert/r1');
+        expect(hr.status, JSON.stringify(hr.body)).toBe(200);
+        expect(ran).toEqual([
+            { obj: 'lead', key: 'convert', packageId: CRM },
+            { obj: 'lead', key: 'convert', packageId: HR },
+        ]);
+    });
+
+    it('MCP: run_action(convert, { namespace, objectName: lead }) reaches each package\'s declaration', async () => {
+        const { bridge, ran } = pair();
+        expect((await bridge.runAction('convert', { namespace: 'crm', objectName: 'lead', recordId: 'r1' })).ok).toBe(true);
+        expect((await bridge.runAction('convert', { namespace: 'hr', objectName: 'lead', recordId: 'r1' })).ok).toBe(true);
+        expect(ran).toEqual([
+            { obj: 'lead', key: 'convert', packageId: CRM },
+            { obj: 'lead', key: 'convert', packageId: HR },
+        ]);
+    });
+
+    it('the address reaches hr\'s DECLARATION, not only its handler: hr\'s own gate judges the hr call, crm\'s call is not gated by it', async () => {
+        const { post, bridge, ran } = pair({ requiredPermissions: ['hr_admin'] });
+        expect((await post('/hr/lead/convert/r1')).status).toBe(403);
+        expect((await refusalOf(bridge.runAction('convert', { namespace: 'hr', objectName: 'lead', recordId: 'r1' }))).status).toBe(403);
+        expect((await post('/crm/lead/convert/r1')).status).toBe(200);
+        expect(ran).toEqual([{ obj: 'lead', key: 'convert', packageId: CRM }]);
+    });
+
+    it('list_actions lists both, each under its own namespace', async () => {
+        const { bridge } = pair();
+        const listed = ((await bridge.listActions()) as any[]).filter((a) => a.name === 'convert');
+        expect(listed.map((a) => [a.objectName, a.namespace]).sort()).toEqual([['lead', 'crm'], ['lead', 'hr']]);
+    });
+
+    it('the bare call keeps its answer, the object\'s own (crm\'s), on REST and MCP: no pick by package, no refusal — the no-package refusal of an object-bound pair is the action family\'s own card (ADR-0150 child B, epic ruling record 6729825528); flip these when it lands', async () => {
+        // hr's declaration is gated and the caller holds nothing: had a bare
+        // door read hr's, it would answer 403.
+        const { post, bridge, ran } = pair({ requiredPermissions: ['hr_admin'] });
+        const rest = await post('/lead/convert/r1');
+        expect(rest.status, JSON.stringify(rest.body)).toBe(200);
+        expect((await bridge.runAction('convert', { objectName: 'lead', recordId: 'r1' })).ok).toBe(true);
+        expect((await bridge.runAction('convert', {})).ok).toBe(true);
+        expect(ran).toEqual([
+            { obj: 'lead', key: 'convert' },
+            { obj: 'lead', key: 'convert' },
+            { obj: 'lead', key: 'convert' },
+        ]);
+    });
+
+    it('CONTROL — one package holding both an embedded and a standalone `convert` on its object: the embedded one wins, listed once', async () => {
+        const { post, bridge, ran } = dispatcherWith(
+            [lead()],
+            [act('convert', CRM, { objectName: 'lead', requiredPermissions: ['crm_admin'] })],
+        );
+        // The standalone duplicate is gated; the embedded one is not. The
+        // address answers 200, so it read the embedded declaration.
+        const answer = await post('/crm/lead/convert/r1');
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect((await bridge.runAction('convert', { namespace: 'crm', objectName: 'lead', recordId: 'r1' })).ok).toBe(true);
+        expect(ran).toEqual([
+            { obj: 'lead', key: 'convert', packageId: CRM },
+            { obj: 'lead', key: 'convert', packageId: CRM },
+        ]);
+        const listed = ((await bridge.listActions()) as any[]).filter((a) => a.name === 'convert');
+        expect(listed.map((a) => [a.objectName, a.namespace])).toEqual([['lead', 'crm']]);
+    });
+});
