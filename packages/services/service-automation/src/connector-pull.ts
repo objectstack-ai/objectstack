@@ -503,11 +503,12 @@ function refuseBlankMatchKeys(
     const results = summary.results.map((r) => {
         if (r.action !== 'skipped' || r.code !== 'BLANK_MATCH_KEY') return r;
         count++;
+        // The runner's row, its `row` and its code kept: the verdict is the
+        // runner's, only its reading (skip → failure) is the pull's.
         return {
-            row: r.row,
+            ...r,
             ok: false,
             action: 'failed' as const,
-            code: 'BLANK_MATCH_KEY',
             error: `Mapping "${mappingName}": the pulled record has no value for upsertKey ${matchFields.join(' + ')}, `
                 + 'so it was not written — a pull never creates a record it cannot match again',
         };
