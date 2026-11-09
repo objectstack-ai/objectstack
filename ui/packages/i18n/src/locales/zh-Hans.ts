@@ -4254,6 +4254,7 @@ const zh = {
     tabAll: '全部',
     statusPending: '待审批',
     statusApproved: '已通过',
+    statusHeld: '审批中',
     statusExecuted: '已执行',
     statusFailed: '失败',
     statusRejected: '已拒绝',

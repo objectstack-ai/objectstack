@@ -4357,6 +4357,7 @@ const ar = {
     tabAll: "الكل",
     statusPending: "قيد الانتظار",
     statusApproved: "تمت الموافقة",
+    statusHeld: "معلّق بانتظار الموافقة",
     statusExecuted: "تم التنفيذ",
     statusFailed: "فشل",
     statusRejected: "مرفوض",

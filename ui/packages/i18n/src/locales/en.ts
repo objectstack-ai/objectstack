@@ -4889,6 +4889,7 @@ const en = {
     tabAll: 'All',
     statusPending: 'Pending',
     statusApproved: 'Approved',
+    statusHeld: 'Waiting for approval',
     statusExecuted: 'Executed',
     statusFailed: 'Failed',
     statusRejected: 'Rejected',

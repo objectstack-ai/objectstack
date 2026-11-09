@@ -4123,6 +4123,7 @@ const es = {
     tabAll: "Todas",
     statusPending: "Pendiente",
     statusApproved: "Aprobada",
+    statusHeld: "En espera de aprobación",
     statusExecuted: "Ejecutada",
     statusFailed: "Fallida",
     statusRejected: "Rechazada",

@@ -4044,6 +4044,7 @@ const de = {
     tabAll: "Alle",
     statusPending: "Ausstehend",
     statusApproved: "Genehmigt",
+    statusHeld: "Wartet auf Freigabe",
     statusExecuted: "Ausgeführt",
     statusFailed: "Fehlgeschlagen",
     statusRejected: "Abgelehnt",

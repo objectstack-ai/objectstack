@@ -4043,6 +4043,7 @@ const ko = {
     tabAll: "전체",
     statusPending: "대기 중",
     statusApproved: "승인됨",
+    statusHeld: "승인 대기 중",
     statusExecuted: "실행됨",
     statusFailed: "실패",
     statusRejected: "거부됨",
