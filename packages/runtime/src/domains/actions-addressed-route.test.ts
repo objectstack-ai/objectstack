@@ -386,6 +386,11 @@ describe('a package\'s standalone action bound to another package\'s object that
             { obj: 'lead', key: 'convert', packageId: CRM },
             { obj: 'lead', key: 'convert', packageId: CRM },
         ]);
+    });
+
+    it('CONTROL — the same holder\'s standalone duplicate is no row of its own: list_actions lists `convert` once', async () => {
+        // Ungated, so the listing's permission filter cannot hide a second row.
+        const { bridge } = dispatcherWith([lead()], [act('convert', CRM, { objectName: 'lead' })]);
         const listed = ((await bridge.listActions()) as any[]).filter((a) => a.name === 'convert');
         expect(listed.map((a) => [a.objectName, a.namespace])).toEqual([['lead', 'crm']]);
     });
