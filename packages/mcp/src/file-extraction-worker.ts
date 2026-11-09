@@ -3,7 +3,7 @@
 import { performance } from 'node:perf_hooks';
 import { parentPort } from 'node:worker_threads';
 
-import { extractDocument, type CpuBudget } from './file-content.js';
+import { extractDocument, preloadPdfReader, type CpuBudget } from './file-content.js';
 import type { ExtractionWorkerMessage, ExtractionWorkerRequest } from './file-extraction-pool.js';
 
 /**
@@ -23,8 +23,9 @@ import type { ExtractionWorkerMessage, ExtractionWorkerRequest } from './file-ex
  *    else spends only on this job.
  *  - An extractor that throws answers `failed` and the worker stays usable;
  *    `read_file` answers its could-not-read sentence, as in-process.
- *  - `unpdf` stays a dynamic import inside the extractor: the first PDF a
- *    worker reads loads it.
+ *  - `unpdf` stays a dynamic import (never loaded with the package), and the
+ *    worker loads and sets it up before it says it is ready (`preloadPdfReader`), so the
+ *    load is part of the worker's start and never of a job's ceiling.
  */
 
 /** This thread's CPU time, in milliseconds. */
@@ -59,5 +60,7 @@ if (port) {
       }
     })();
   });
-  send({ type: 'ready' });
+  // Ready only once pdf.js is loaded and set up: that belongs to the worker's start
+  // (bounded by the pool's start timeout), never to a job's ceiling.
+  void preloadPdfReader().then(() => send({ type: 'ready' }));
 }

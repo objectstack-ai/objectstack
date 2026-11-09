@@ -504,6 +504,68 @@ function loadUnpdf(): Promise<UnpdfModule> {
   return unpdfModule;
 }
 
+/** A one-page PDF reading "warm", for {@link preloadPdfReader}. */
+function warmUpPdf(): Uint8Array {
+  const stream = 'BT /F1 12 Tf 72 720 Td (warm) Tj ET';
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  let out = '%PDF-1.4\n';
+  const offsets: number[] = [];
+  objects.forEach((body, i) => {
+    offsets.push(out.length);
+    out += `${i + 1} 0 obj\n${body}\nendobj\n`;
+  });
+  const xref = out.length;
+  out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const o of offsets) out += `${String(o).padStart(10, '0')} 00000 n \n`;
+  out += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return new Uint8Array(Buffer.from(out, 'latin1'));
+}
+
+/**
+ * Make the PDF reader ready now rather than on the first PDF: load `unpdf`
+ * and read one page of a built-in one-page PDF, which is when pdf.js sets up
+ * its in-thread worker and loads the rest of itself. A pool worker does this
+ * before it says it is ready, so that one-time cost (hundreds of milliseconds
+ * on a busy host) belongs to the worker's start and is never charged to a
+ * job's wall-clock ceiling. Charged to a job, a small ceiling could stop a
+ * cold worker's first read every time, and its replacement would start cold
+ * again. A failure here is left to the first PDF read, which answers its
+ * could-not-read sentence as before.
+ */
+export async function preloadPdfReader(): Promise<void> {
+  try {
+    const unpdf = await loadUnpdf();
+    const doc = await unpdf.getDocumentProxy(warmUpPdf(), pdfOpenOptions());
+    try {
+      const page = await doc.getPage(1);
+      await page.getTextContent();
+      page.cleanup?.();
+    } finally {
+      await doc.destroy();
+    }
+  } catch {
+    // Left to the first PDF read.
+  }
+}
+
+/** How every PDF is opened: pdf.js's `eval` path off, its console output off, no font loading. */
+function pdfOpenOptions(): Record<string, unknown> {
+  return {
+    isEvalSupported: false,
+    // Errors only: pdf.js warns through `console.log`, which on a stdio
+    // transport is the protocol stream.
+    verbosity: 0,
+    disableFontFace: true,
+    useSystemFonts: false,
+  };
+}
+
 /**
  * A PDF's answer from the pages read, in order: their text joined, cut at the
  * length cap, `truncated` when fewer than `numPages` were read, and the budget
@@ -534,14 +596,7 @@ async function extractPdfText(bytes: Uint8Array, budget: CpuBudget, onProgress?:
   try {
     const unpdf = await loadUnpdf();
     // pdf.js keeps the buffer it is handed; it gets a copy.
-    doc = await unpdf.getDocumentProxy(new Uint8Array(bytes), {
-      isEvalSupported: false,
-      // Errors only: pdf.js warns through `console.log`, which on a stdio
-      // transport is the protocol stream.
-      verbosity: 0,
-      disableFontFace: true,
-      useSystemFonts: false,
-    });
+    doc = await unpdf.getDocumentProxy(new Uint8Array(bytes), pdfOpenOptions());
   } catch (err) {
     const passworded = (err as { name?: unknown })?.name === 'PasswordException';
     return {
