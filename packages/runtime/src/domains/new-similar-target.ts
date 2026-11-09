@@ -35,9 +35,18 @@
  *
  * ## The closure
  *
- * `resolvePackageClosure` (`@objectstack/lint/runtime`), the ONE walk the
- * save door's publish gate (`resolveWritePackageScope`) and Studio's object
- * pickers use, over the same registry. A source with no package (an item
+ * `packageDependencyClosure` (`@objectstack/metadata-protocol`, ADR-0150 D3:
+ * one declared closure for every reader), the closure the save door's write
+ * scope (`resolveWritePackageScope`) judges the copy's save against, over the
+ * same registry: the shared walk (`resolvePackageClosure`,
+ * `@objectstack/lint/runtime`) with an App's pair widened by the App's members
+ * (ADR-0146 D3, ruling record 6691022506: a member's pair IS its App's pair,
+ * and that pair declares only the App). ⛔ Never the bare walk here: the door
+ * that hands an App member's copy to the App's pair would then refuse the
+ * pair the save gate accepts — the pair it created a moment before. The
+ * widening reaches only a pair that declares its App, and only the packages
+ * whose pair it is (`pairOf`), so a target that is not that pair is judged
+ * exactly by its own declared dependencies. A source with no package (an item
  * authored in the deployment) asks no closure question here: its references
  * are judged by the save into the target, as every save into a package is.
  *
@@ -46,9 +55,9 @@
  * [#28563] A door whose item DECLARES the objects it reaches (a permission
  * set's `objects`, `fields` and row-level rules) passes them as `objects`, and
  * each must survive the save gate's own closure predicate,
- * `narrowObjectsToPackageClosure` (`@objectstack/lint/runtime`): a platform /
- * system object, an unpackaged one, or one owned by the target or a package in
- * its closure. That is what a set copied from an environment-authored source
+ * `narrowObjectsToPackageClosure` (`@objectstack/lint/runtime`), over the same
+ * closure: a platform / system object, an unpackaged one, or one owned by the
+ * target or a package in its closure. That is what a set copied from an environment-authored source
  * (no package, so no closure question above) is judged by, and what catches a
  * packaged set that grants on another package's object. An object no registry
  * holds is the save's to judge, not this rule's. A door with no honest object
@@ -57,8 +66,8 @@
  * Pure over the registry the `objectql` service carries; it writes nothing.
  */
 
-import { isWritablePackage } from '@objectstack/metadata-protocol';
-import { narrowObjectsToPackageClosure, resolvePackageClosure } from '@objectstack/lint/runtime';
+import { isWritablePackage, packageDependencyClosure } from '@objectstack/metadata-protocol';
+import { narrowObjectsToPackageClosure } from '@objectstack/lint/runtime';
 import type { HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps } from '../domain-handler-registry.js';
 
@@ -78,6 +87,8 @@ export type NewSimilarTargetRefusal = Error & {
 /** The registry slice the rule reads. */
 interface TargetRegistry {
     getPackage?(id: string): { manifest?: unknown } | undefined;
+    /** Read by the pair widening of {@link packageDependencyClosure}. */
+    getAllPackages?(): ReadonlyArray<{ manifest?: unknown }>;
     getObject?(name: string): unknown;
     getObjectOwner?(name: string): { packageId?: string } | undefined;
 }
@@ -147,8 +158,10 @@ export function newSimilarTargetRefusal(
             + '(ADR-0146 D3). Nothing was written.',
             target);
     }
+    // The save gate's closure of the target (see the module header), asked
+    // once for both questions below.
+    const closure = packageDependencyClosure(target, registry);
     if (sourcePackageId !== undefined && sourcePackageId !== target) {
-        const closure = resolvePackageClosure(target, (id) => getPackage(id));
         if (!closure?.dependencies.includes(sourcePackageId)) {
             return refusal('RESOURCE_CONFLICT', 409,
                 `[new_similar_target_outside_closure] Cannot land a copy of ${subject} in package '${target}': `
@@ -169,7 +182,7 @@ export function newSimilarTargetRefusal(
             if (!object || typeof object !== 'object') continue;
             entries.push({ ...object, name, _packageId: registry?.getObjectOwner?.(name)?.packageId });
         }
-        const kept = new Set(narrowObjectsToPackageClosure(entries, resolvePackageClosure(target, (id) => getPackage(id))));
+        const kept = new Set(narrowObjectsToPackageClosure(entries, closure));
         const outside = entries.filter((entry) => !kept.has(entry));
         if (outside.length > 0) {
             const named = outside.map((o) => `'${o.name}' (package '${o._packageId}')`).join(', ');
