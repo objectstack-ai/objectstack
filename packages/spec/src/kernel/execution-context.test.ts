@@ -5,6 +5,7 @@ import {
   AuthGateCodeSchema,
   AuthGateScopeSchema,
   AUTH_GATE_SCOPES,
+  PermissionSetAddressSchema,
 } from './execution-context.zod';
 import { EXPORT_ENTRY_POINTS, exportNamesOf, holdersOf } from '../../scripts/lib/export-origins-testkit';
 
@@ -197,6 +198,70 @@ describe('AUTH_GATE_SCOPES — each posture code declares its scope', () => {
 
   it('is frozen, so no consumer can re-scope a code at runtime', () => {
     expect(Object.isFrozen(AUTH_GATE_SCOPES)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ADR-0150 D3 — `permissionSetAddresses` carries each granted permission set as
+// its `(packageId, name)` address, beside `permissions` and without moving it.
+// Absent must stay absent (no default): a consumer that never reads the key
+// behaves exactly as before, and a resolver that did not fill it is
+// distinguishable from one that resolved zero sets.
+// ---------------------------------------------------------------------------
+describe('ExecutionContextSchema.permissionSetAddresses — granted sets by (packageId, name)', () => {
+  it('parses an absent key to undefined — no default is applied', () => {
+    const ctx = ExecutionContextSchema.parse({ userId: 'u1' });
+    expect(ctx.permissionSetAddresses).toBeUndefined();
+    expect('permissionSetAddresses' in ctx).toBe(false);
+  });
+
+  it('round-trips a well-formed list, a null holder and a package holder alike, in order', () => {
+    const addresses = [
+      { packageId: null, name: 'everyone' },
+      { packageId: 'com.acme.crm', name: 'sales_rep' },
+    ];
+    const ctx = ExecutionContextSchema.parse({ userId: 'u1', permissionSetAddresses: addresses });
+    expect(ctx.permissionSetAddresses).toEqual(addresses);
+    expect(ctx.permissionSetAddresses?.[0]?.packageId).toBeNull();
+  });
+
+  it('keeps an empty list as an empty list, distinct from absent', () => {
+    const ctx = ExecutionContextSchema.parse({ permissionSetAddresses: [] });
+    expect(ctx.permissionSetAddresses).toEqual([]);
+  });
+
+  it('refuses an empty name, at the name', () => {
+    const parsed = ExecutionContextSchema.safeParse({
+      permissionSetAddresses: [{ packageId: null, name: '' }],
+    });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues.map((i) => [i.code, i.path.join('.')])).toEqual([
+      ['too_small', 'permissionSetAddresses.0.name'],
+    ]);
+  });
+
+  it('refuses a missing packageId key — the holder is always named, null included', () => {
+    const parsed = ExecutionContextSchema.safeParse({
+      permissionSetAddresses: [{ name: 'sales_rep' }],
+    });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues.map((i) => [i.code, i.path.join('.')])).toEqual([
+      ['invalid_type', 'permissionSetAddresses.0.packageId'],
+    ]);
+  });
+
+  it('leaves permissions untouched: still defaults to [] and is not derived from the addresses', () => {
+    expect(ExecutionContextSchema.parse({}).permissions).toEqual([]);
+    const ctx = ExecutionContextSchema.parse({
+      permissionSetAddresses: [{ packageId: 'com.acme.crm', name: 'sales_rep' }],
+    });
+    expect(ctx.permissions).toEqual([]);
+  });
+
+  it('exports the element schema on its own, with the same rules', () => {
+    expect(PermissionSetAddressSchema.parse({ packageId: null, name: 'x' })).toEqual({ packageId: null, name: 'x' });
+    expect(PermissionSetAddressSchema.safeParse({ packageId: 'p', name: '' }).success).toBe(false);
+    expect(PermissionSetAddressSchema.safeParse({ name: 'x' }).success).toBe(false);
   });
 });
 
