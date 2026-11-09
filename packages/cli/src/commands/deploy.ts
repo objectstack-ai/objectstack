@@ -253,8 +253,10 @@ export default class Deploy extends Command {
 
   async run(): Promise<void> {
     const { flags } = await this.parse(Deploy);
-    // `--json`: stdout carries the one document; every human line goes to stderr.
-    if (flags.json) reserveStdoutForJson();
+    // `--json`: stdout carries the one document; every human line goes to
+    // stderr. Released when the command ends, so an in-process caller (a
+    // test) gets its stdout back.
+    const releaseStdout = flags.json ? reserveStdoutForJson() : undefined;
     printHeader('Deploy');
 
     try {
@@ -398,6 +400,8 @@ export default class Deploy extends Command {
       // Only a self-hosted target reaches here under `--json` (the cloud one refuses the flag first).
       if (flags.json) await emitJson(deployDocument({ target: 'runtime', result: 'failed', error: (error as Error).message }));
       this.exit(1);
+    } finally {
+      releaseStdout?.();
     }
   }
 

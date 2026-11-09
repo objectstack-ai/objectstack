@@ -21,14 +21,25 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { EventEmitter } from 'node:events';
 
-const compileForDeploy = vi.fn<(artifactPath: string) => number>();
-vi.mock('../src/utils/deploy-build.js', () => ({ compileForDeploy: (p: string) => compileForDeploy(p) }));
+const compileForDeploy = vi.fn<(artifactPath: string, options?: { stdoutToStderr?: boolean }) => number>();
+vi.mock('../src/utils/deploy-build.js', () => ({
+  compileForDeploy: (p: string, options?: { stdoutToStderr?: boolean }) => compileForDeploy(p, options),
+}));
+// The terminal question (#30887): no terminal by default, as under CI.
+const canAskOnTerminal = vi.fn<() => boolean>(() => false);
+const askYesNo = vi.fn<(question: string) => Promise<boolean>>(async () => false);
+vi.mock('../src/utils/terminal-confirm.js', () => ({
+  canAskOnTerminal: () => canAskOnTerminal(),
+  askYesNo: (question: string) => askYesNo(question),
+}));
 
 const { default: Deploy, reportVerdict } = await import('../src/commands/deploy.js');
 const { waitUntilServed, interpretServedReport } = await import('../src/utils/served-version.js');
 const { devVersion } = await import('../src/utils/dev-version.js');
 const { default: PackageInstall } = await import('../src/commands/package/install.js');
+const { attachDeployKey } = await import('../src/utils/dev-deploy-key.js');
 
 const CLOUD_PLANE = 'http://cloud.test';
 const MANAGED_ENV = ['OS_CLOUD_URL', 'OS_CLOUD_API_KEY', 'OS_TOKEN', 'OS_ENVIRONMENT_ID', 'OS_ORG_ID', 'OS_PACKAGE_MANIFEST_ID', 'OS_CLOUD_TIMEOUT_MS'] as const;
@@ -444,6 +455,10 @@ describe('os deploy — a self-hosted runtime as the active target (os environme
     const record = (...args: unknown[]) => { output.push(args.map(String).join(' ')); };
     vi.spyOn(console, 'log').mockImplementation(record);
     vi.spyOn(console, 'error').mockImplementation(record);
+    canAskOnTerminal.mockReset();
+    canAskOnTerminal.mockImplementation(() => false);
+    askYesNo.mockReset();
+    askYesNo.mockImplementation(async () => false);
   });
 
   afterEach(async () => {
@@ -656,5 +671,243 @@ describe('os deploy — a self-hosted runtime as the active target (os environme
     expect(sent).toHaveLength(0);
     expect(compileForDeploy).not.toHaveBeenCalled();
     expect(text()).toContain('`--confirm-global-uniques` confirms a self-hosted runtime');
+  });
+  // ── #30887: the plan before the install (epic cloud#3652 Q3) ──────────────
+
+  const SUSPECTED_PLAN = {
+    dryRun: true, manifestId: 'com.acme.crm', version: '1.2.0', installedVersion: '1.1.0',
+    plan: {
+      fields: { added: [{ object: 'acme_lead', field: 'account_name', type: 'text' }], removed: [{ object: 'acme_lead', field: 'company', type: 'text' }] },
+      declaredRenames: [],
+      suspectedRenames: [{ object: 'acme_lead', field: 'company', type: 'text', candidates: [{ field: 'account_name', type: 'text' }] }],
+      typeChanges: [],
+    },
+    environment: { columns: [{ object: 'acme_lead', field: 'company', rows: 7 }] },
+  };
+  const SCHEMA_REFUSAL = refused(409, 'SCHEMA_UPGRADE_CONFIRMATION_REQUIRED', 'confirm', {
+    findings: [{ kind: 'suspected_rename', describe: 'acme_lead.company (text) is removed while acme_lead.account_name (text) is added' }],
+    findingSet: 'schema-upgrade:abc',
+  });
+
+  /** A runtime that judges as install-local does: the suspected-rename plan, and the install refused unless the token rides along. */
+  function stubJudgingRuntime(): Sent[] {
+    const sent: Sent[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: string, init: any = {}) => {
+      const body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined;
+      sent.push({ url: String(input), method: init.method ?? 'GET', headers: { ...(init.headers ?? {}) }, body });
+      const answer = body?.dryRun
+        ? ok(SUSPECTED_PLAN)
+        : body?.confirmSchemaUpgrade === 'schema-upgrade:abc' ? ok(INSTALLED) : SCHEMA_REFUSAL;
+      return {
+        ok: answer.status < 300, status: answer.status, statusText: String(answer.status),
+        headers: { get: () => null }, json: async () => answer.body,
+      } as any;
+    }));
+    return sent;
+  }
+
+  it('a plan with only additions and a declared rename installs without a question, even on a terminal', async () => {
+    canAskOnTerminal.mockImplementation(() => true);
+    const sent = stubRuntime({
+      dryRun: ok({ ...PLAN, plan: { ...PLAN.plan, fields: { added: [{ object: 'lead', field: 'mobile', type: 'text' }] } } }),
+    });
+
+    expect(await deploy(), text()).toBeUndefined();
+
+    expect(sent).toHaveLength(2);
+    expect(askYesNo).not.toHaveBeenCalled();
+    expect(text()).toContain('+ lead.mobile (text)');
+    expect(text()).toContain('lead.phone → mobile');
+    expect(text()).toContain(`Live: ${RUNTIME} now serves com.acme.crm 1.2.0.`);
+  });
+
+  it('an undeclared suspected rename stops before any write off a terminal: the plan, the renamedFrom hint, exit 1, no question', async () => {
+    const sent = stubJudgingRuntime();
+
+    expect(await deploy()).toBe(1);
+
+    expect(sent).toHaveLength(2);
+    expect(sent[1].body.confirmSchemaUpgrade).toBeUndefined();
+    expect(askYesNo).not.toHaveBeenCalled();
+    expect(text()).toContain('Suspected renames (no renamedFrom links them)');
+    expect(text()).toContain("declare its old key in the new field's `renamedFrom`");
+    expect(text()).toContain('os deploy --confirm-upgrade schema-upgrade:abc');
+    expect(text()).not.toContain('Live:');
+  });
+
+  it("on a terminal the Q3 stop asks; yes installs with the refusal's own token in the body", async () => {
+    canAskOnTerminal.mockImplementation(() => true);
+    askYesNo.mockImplementation(async () => true);
+    const sent = stubJudgingRuntime();
+
+    expect(await deploy(), text()).toBeUndefined();
+
+    expect(askYesNo).toHaveBeenCalledTimes(1);
+    expect(askYesNo.mock.calls[0][0]).toContain('accepting each finding as listed');
+    expect(sent.map((s) => s.body?.confirmSchemaUpgrade ?? null)).toEqual([null, null, 'schema-upgrade:abc']);
+    expect(text()).toContain(`Live: ${RUNTIME} now serves com.acme.crm 1.2.0.`);
+  });
+
+  it('on a terminal, declining the Q3 stop deploys nothing: exit 1, no third call', async () => {
+    canAskOnTerminal.mockImplementation(() => true);
+    const sent = stubJudgingRuntime();
+
+    expect(await deploy()).toBe(1);
+
+    expect(askYesNo).toHaveBeenCalledTimes(1);
+    expect(sent).toHaveLength(2);
+    expect(text()).toContain(`Nothing was deployed to ${RUNTIME}.`);
+    expect(text()).not.toContain('Live:');
+  });
+
+  it('only the Q3 stop asks: an access-upgrade refusal on a terminal prints its retry and asks nothing', async () => {
+    canAskOnTerminal.mockImplementation(() => true);
+    const sent = stubRuntime({ install: refused(409, 'ACCESS_UPGRADE_CONFIRMATION_REQUIRED', 'confirm', { findings: [], findingSet: 'fs_1' }) });
+
+    expect(await deploy()).toBe(1);
+
+    expect(askYesNo).not.toHaveBeenCalled();
+    expect(sent).toHaveLength(2);
+    expect(text()).toContain('os deploy --confirm-access-upgrade fs_1');
+  });
+
+  it('--dry-run builds, prints the plan and what would stop, and installs nothing', async () => {
+    const sent = stubJudgingRuntime();
+
+    expect(await deploy(['--dry-run']), text()).toBeUndefined();
+
+    expect(compileForDeploy).toHaveBeenCalledTimes(1);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].body.dryRun).toBe(true);
+    expect(text()).toContain('acme_lead.company → account_name?');
+    expect(text()).toContain('Deploying this build would stop for your confirmation — 1 finding(s):');
+    expect(text()).toContain('acme_lead.company (text) is removed while acme_lead.account_name (text) is added');
+    expect(text()).toContain(`Dry run: nothing was installed into ${RUNTIME}.`);
+  });
+
+  it('--dry-run on a plan in which nothing asks says it installs as it is', async () => {
+    const sent = stubRuntime({ dryRun: ok({ ...PLAN, plan: { ...PLAN.plan, suspectedRenames: [], typeChanges: [] } }) });
+
+    expect(await deploy(['--dry-run']), text()).toBeUndefined();
+
+    expect(sent).toHaveLength(1);
+    expect(text()).toContain('Nothing in this plan asks for a confirmation');
+  });
+
+  /** Run with `--json`, capturing what reaches the REAL stdout. */
+  async function deployJson(argv: string[]): Promise<{ exit: number | undefined; stdout: string }> {
+    const writes: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: unknown, ...rest: unknown[]) => {
+      writes.push(String(chunk));
+      const done = rest.find((r) => typeof r === 'function') as (() => void) | undefined;
+      done?.();
+      return true;
+    }) as any);
+    const exit = await deploy(['--json', ...argv]);
+    return { exit, stdout: writes.join('') };
+  }
+
+  it('--json: the plan and the Q3 refusal are ONE document on stdout, and the exit is non-zero', async () => {
+    canAskOnTerminal.mockImplementation(() => true);
+    const sent = stubJudgingRuntime();
+
+    const { exit, stdout } = await deployJson([]);
+
+    expect(exit).toBe(1);
+    expect(sent).toHaveLength(2);
+    expect(askYesNo, 'never asked under --json').not.toHaveBeenCalled();
+    expect(compileForDeploy.mock.calls[0][1]).toEqual({ stdoutToStderr: true });
+    const doc = JSON.parse(stdout);
+    expect(doc).toMatchObject({
+      target: 'runtime',
+      url: RUNTIME,
+      result: 'refused',
+      package: { manifestId: 'com.acme.crm', version: '1.2.0', installedVersion: '1.1.0' },
+      plan: SUSPECTED_PLAN.plan,
+      environment: SUSPECTED_PLAN.environment,
+      refusal: { status: 409, code: 'SCHEMA_UPGRADE_CONFIRMATION_REQUIRED' },
+      confirm: 'os deploy --confirm-upgrade schema-upgrade:abc',
+    });
+    expect(doc.refusal.details.findingSet).toBe('schema-upgrade:abc');
+    expect(doc.wouldStop).toHaveLength(1);
+  });
+
+  it('--json --dry-run: the plan as one document, exit 0, nothing installed', async () => {
+    const sent = stubRuntime({ dryRun: ok({ ...PLAN, plan: { ...PLAN.plan, suspectedRenames: [], typeChanges: [] } }) });
+
+    const { exit, stdout } = await deployJson(['--dry-run']);
+
+    expect(exit).toBeUndefined();
+    expect(sent).toHaveLength(1);
+    expect(JSON.parse(stdout)).toMatchObject({ result: 'planned', refusal: null, confirm: null, wouldStop: [] });
+  });
+
+  it('--json on a clean deploy: one document, result installed, exit 0', async () => {
+    stubRuntime({});
+
+    const { exit, stdout } = await deployJson([]);
+
+    expect(exit).toBeUndefined();
+    expect(JSON.parse(stdout)).toMatchObject({ result: 'installed', error: null, wouldStop: null });
+  });
+
+  it('--dry-run is refused when the target is ObjectOS Cloud, before anything is built or sent', async () => {
+    await writeFile(join(home, '.objectstack', 'cloud.json'), JSON.stringify({ url: CLOUD_PLANE, token: 'cloud_tok', createdAt: 'now' }));
+    const sent = stubRuntime({});
+
+    expect(await deploy(['--dry-run'])).toBe(1);
+    expect(sent).toHaveLength(0);
+    expect(compileForDeploy).not.toHaveBeenCalled();
+    expect(text()).toContain("`--dry-run` reads a self-hosted runtime's upgrade plan; the deploy target is ObjectOS Cloud");
+  });
+
+  it('--json is refused when the target is ObjectOS Cloud, as a document, before anything is built or sent', async () => {
+    await writeFile(join(home, '.objectstack', 'cloud.json'), JSON.stringify({ url: CLOUD_PLANE, token: 'cloud_tok', createdAt: 'now' }));
+    const sent = stubRuntime({});
+
+    const { exit, stdout } = await deployJson([]);
+
+    expect(exit).toBe(1);
+    expect(sent).toHaveLength(0);
+    expect(compileForDeploy).not.toHaveBeenCalled();
+    expect(JSON.parse(stdout)).toMatchObject({ target: 'cloud', result: 'failed' });
+  });
+
+  it("os dev's d key on a plan with an undeclared rename: the question shows on a cooked terminal; declining deploys nothing", async () => {
+    canAskOnTerminal.mockImplementation(() => true);
+    const sent = stubJudgingRuntime();
+    // The key's own fake terminal; the deploy it runs is this command, in-process.
+    const terminal = Object.assign(new EventEmitter(), {
+      isTTY: true,
+      raw: false,
+      setRawMode(mode: boolean) { terminal.raw = mode; return terminal; },
+      setEncoding() { return terminal; },
+      resume() { return terminal; },
+      pause() { return terminal; },
+    });
+    askYesNo.mockImplementation(async () => {
+      expect(terminal.raw, 'the question must read a cooked terminal').toBe(false);
+      return false;
+    });
+    const printed: string[] = [];
+    const handle = attachDeployKey({
+      input: terminal as any,
+      print: (line) => printed.push(line),
+      isLoggedIn: async () => true,
+      runLogin: async () => 0,
+      runDeploy: async () => (await deploy()) ?? 0,
+      runtimeTarget: async () => RUNTIME,
+      onInterrupt: () => {},
+    });
+
+    terminal.emit('data', 'd');
+    await handle!.current;
+
+    expect(askYesNo).toHaveBeenCalledTimes(1);
+    expect(sent).toHaveLength(2);
+    expect(sent.every((s) => s.body?.confirmSchemaUpgrade === undefined)).toBe(true);
+    expect(printed).toContain('os deploy exited with status 1 — see above. Press d to try again.');
+    expect(terminal.raw, 'the key listens again').toBe(true);
+    handle!.detach();
   });
 });
