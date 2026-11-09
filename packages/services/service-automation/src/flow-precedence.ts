@@ -43,10 +43,11 @@
 // ADR-0126 §2 says, and it does.
 //
 // ⛔ NOT DONE HERE: making the engine's flow map package-aware. That is a much
-// larger change, and ADR-0048 does not ask for it. For two packages shipping
-// one bare name, ADR-0150 D3 answers: the engine refuses the name, naming
-// every holder (`AutomationEngine.registerFlow`), and the warning here says
-// that neither body is armed.
+// larger change, and ADR-0048 does not ask for it. ADR-0150 D3 answers a
+// bare name the package-scoped resolver cannot answer for a caller with no
+// package (two packages hold it) with a refusal: `registerFlow` refuses it,
+// naming every holder, and arms nothing. So the warning below asks that same
+// resolver (`refusalOf`) and, when it refuses, says no definition is armed.
 //
 // [#20864, ADR-0126 §2 / §7.3] WHICH CONTENDER IS PACKAGED IS THE LOADER'S SET.
 //
@@ -93,6 +94,15 @@ import { isCodeArtifactBody, pairOf, type InstalledManifestLookup } from '@objec
 // `_packageId`.
 import { isServedOverrideRowOf, storedRowBindingOf } from '@objectstack/metadata-protocol';
 import type { FlowContender, FlowShadowingRecord, PackagedFlowSource } from './engine.js';
+
+/**
+ * [ADR-0150 D3] The refusal message the engine's flow-name resolver gives a
+ * bare flow name for a caller with no package, or `undefined` when it serves
+ * the name. The automation plugin builds it from `flowNameResolver`, the reader
+ * `AutomationEngine.setFlowNameResolver` is given, so precedence asks exactly
+ * what `registerFlow` asks.
+ */
+export type FlowNameRefusalReader = (name: string) => string | undefined;
 
 /** One flow name's resolved winner, plus the receipt when it displaced others. */
 export interface FlowPrecedenceWinner {
@@ -285,8 +295,9 @@ function undeclaredRemedy(owner: string | undefined, installed: InstalledManifes
  * bare name. Package-scoped resolution disambiguates them properly for callers
  * that can express it; the engine's bare-name flow map cannot, so it needs SOME
  * deterministic answer, and a sorted package id is one that does not change when
- * boot order does. [ADR-0150 D3] The engine then refuses that name rather than
- * arm the body handed on, so its warning says neither is armed.
+ * boot order does. That case is warned about too — it is exactly as invisible as
+ * the package-vs-stored-row one. [ADR-0150 D3] Where the engine's resolver
+ * refuses the name, the engine arms none of them, and the warning says so.
  *
  * Two `runtime` contenders tie on both rules and keep arrival order. The boot
  * hydration registers every stored row under the one bare-name slot, so the
@@ -313,12 +324,18 @@ function undeclaredRemedy(owner: string | undefined, installed: InstalledManifes
  *                           come from: the declared override of a shipped flow
  *                           is its App's pair's (`pairOf` in
  *                           `@objectstack/metadata-core`)
+ * @param refusalOf          [ADR-0150 D3] the refusal the engine's flow-name
+ *                           resolver gives `name` for a caller with no package
+ *                           (the question `registerFlow` asks before it arms),
+ *                           or `undefined` when it serves the name. Absent,
+ *                           nothing is refused and every line reads as before.
  */
 export function resolveFlowPrecedence(
     items: readonly unknown[],
     logger: { warn(message: string, meta?: unknown): void } | undefined,
     packagedFlowOwner: PackagedFlowSource | undefined,
     installed: InstalledManifestLookup,
+    refusalOf?: FlowNameRefusalReader,
 ): FlowPrecedenceWinner[] {
     // Group by bare name, remembering arrival order for a stable tie-break.
     const groups = new Map<string, Array<{ definition: unknown; index: number }>>();
@@ -382,29 +399,46 @@ export function resolveFlowPrecedence(
         const sealedOverStored =
             (armed.contender.source === 'package' || armed.contender.source === 'override')
             && shadowed.some((contender) => contender.source === 'runtime');
-        // [ADR-0150 D3, #31677 Q1] Every contender is a package's: packages
-        // hold the name and no environment row answers a caller with no
-        // package, so `registerFlow` refuses the name, naming every holder,
-        // and arms NEITHER body. The line says so — ⛔ never "arming <first>":
-        // the body below is handed on only to be refused.
-        const packagesHoldName = armed.contender.source === 'package' && !sealedOverStored;
         const why = armed.contender.source === 'override'
             ? ` because it is the declared override of '${owner}' (ADR-0146 D9)`
             : sealedOverStored
                 ? ` because a managed package's flow is sealed (ADR-0126 §2)`
-                : ' by arrival order';
+                : armed.contender.source === 'package'
+                    ? ' by package id'
+                    : ' by arrival order';
         const remedy = sealedOverStored
             ? undeclaredRemedy(owner, installed)
             : 'Rename one of them.';
-        const outcome = packagesHoldName
-            ? `arming neither: ${group.length} packages hold the name, and the engine refuses a bare name ` +
-                `more than one package holds instead of picking one (ADR-0150 D3). Neither definition ` +
-                `dispatches; the 'failed to register flow' warning for '${name}' names every holder. ${remedy}`
-            : `arming ${renderFlowContender(armed.contender)}${why}, and shadowing ` +
-                `${shadowed.length} other definition(s). Only the armed definition dispatches. ${remedy}`;
+        // [ADR-0150 D3, #31677 Q1] The engine's resolver refuses the name, so
+        // `registerFlow` refuses the body handed on below and arms nothing,
+        // whichever rule ranked it first. ⛔ Never "arming <first>" here, in
+        // the text or in the meta: the line asks the resolver the engine asks,
+        // never a guess from the contenders' shapes.
+        if (refusalOf?.(name) !== undefined) {
+            const contenders = ranked.map((entry) => renderFlowContender(entry.contender)).join(', ');
+            logger?.warn(
+                `[Automation] Flow name collision: '${name}' is claimed by ${group.length} definitions ` +
+                `(${contenders}); arming ${group.length === 2 ? 'neither' : 'none of them'}: the engine refuses ` +
+                `this bare name for a caller with no package (ADR-0150 D3), so no definition dispatches; the ` +
+                `'failed to register flow' warning for '${name}' names every holder. Rename one of them.`,
+                {
+                    flow: name,
+                    refused: true,
+                    contenders: ranked.map((entry) => entry.contender),
+                },
+            );
+            winners.push({
+                name,
+                definition: armed.definition,
+                shadowing: { name, armed: armed.contender, shadowed },
+            });
+            continue;
+        }
         logger?.warn(
             `[Automation] Flow name collision: '${name}' is claimed by ${group.length} definitions ` +
-            `(${ranked.map((entry) => renderFlowContender(entry.contender)).join(', ')}); ${outcome}`,
+            `(${ranked.map((entry) => renderFlowContender(entry.contender)).join(', ')}); ` +
+            `arming ${renderFlowContender(armed.contender)}${why}, and shadowing ` +
+            `${shadowed.length} other definition(s). Only the armed definition dispatches. ${remedy}`,
             {
                 flow: name,
                 armed: armed.contender,

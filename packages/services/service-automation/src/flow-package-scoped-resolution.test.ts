@@ -369,23 +369,30 @@ describe('FlowActivationProjection', () => {
 });
 
 /**
- * [#31754, ADR-0150 D3] The boot pull's flow name collision line agrees with
- * the engine. For a name two packages hold, precedence still hands the
- * lexicographically first body on, and `registerFlow` refuses it (red line 2
- * above), so the line says NEITHER is armed and points at that refusal —
- * never "arming <first> by package id". Every other collision class keeps its
- * wording byte for byte (the CONTROL cases below).
+ * [#31754, ADR-0150 D3] The boot pull's flow name collision line asks the
+ * resolver the engine asks (`refusalOf`, built here as the plugin builds it,
+ * from `flowNameResolver`). For a name two packages hold, precedence still
+ * hands the lexicographically first body on and `registerFlow` refuses it
+ * (red line 2 above), so the line says NEITHER is armed and points at that
+ * refusal. The three shapes on a real cold boot are pinned in
+ * `flow-declared-override-first-boot-pull.integration.test.ts`. CONTROL: with
+ * no resolver handed in, every arm's line is byte for byte main's.
  */
 describe('[#31754] the collision line for a name two packages hold says neither is armed', () => {
     const NOTHING_INSTALLED = installedManifestsOf(undefined);
     /** The boot pull's two steps over the registry: precedence (its one warning), then registration. */
     function pull(): { line: string; refusal: unknown } {
         const warn = vi.fn();
+        const resolver = flowNameResolver({ getService: () => ({ registry }) } as never);
         const [winner] = resolveFlowPrecedence(
             registry.listItems('flow') as unknown[],
             { warn },
             (name) => engine.packagedFlowOwner(name),
             NOTHING_INSTALLED,
+            (name) => {
+                const resolution = resolver(name, null);
+                return resolution?.status === 'refused' ? resolution.message : undefined;
+            },
         );
         expect(warn).toHaveBeenCalledTimes(1);
         let refusal: unknown;
@@ -412,8 +419,12 @@ describe('[#31754] the collision line for a name two packages hold says neither 
             loaderSet.notify = A;
 
             const { line, refusal } = pull();
-            expect(line).toContain("is claimed by 2 definitions (package 'com.acme.alpha', package 'com.acme.stranger'); arming neither:");
-            expect(line).toContain("Neither definition dispatches; the 'failed to register flow' warning for 'notify' names every holder.");
+            expect(line).toBe(
+                "[Automation] Flow name collision: 'notify' is claimed by 2 definitions (package 'com.acme.alpha', " +
+                    "package 'com.acme.stranger'); arming neither: the engine refuses this bare name for a caller with " +
+                    "no package (ADR-0150 D3), so no definition dispatches; the 'failed to register flow' warning for " +
+                    "'notify' names every holder. Rename one of them.",
+            );
             expect(line).not.toContain('arming package');
             expect(line).not.toContain('by package id');
             expect(line).not.toContain('Only the armed definition dispatches');
@@ -426,6 +437,18 @@ describe('[#31754] the collision line for a name two packages hold says neither 
             expect(await engine.getFlow('notify')).toBeNull();
         });
     }
+
+    it('CONTROL: with no resolver, two packages keep main\'s line byte for byte (by package id)', () => {
+        const line = lineOf(
+            [{ ...leaf('notify'), _packageId: Q, _provenance: 'package' }, { ...leaf('notify'), _packageId: A, _provenance: 'package' }],
+            { notify: A },
+        );
+        expect(line).toBe(
+            "[Automation] Flow name collision: 'notify' is claimed by 2 definitions (package 'com.acme.alpha', " +
+                "package 'com.acme.stranger'); arming package 'com.acme.alpha' by package id, and shadowing 1 other " +
+                'definition(s). Only the armed definition dispatches. Rename one of them.',
+        );
+    });
 
     it('CONTROL: a package beside an environment row keeps its line byte for byte (ADR-0126 §2)', () => {
         const line = lineOf(
