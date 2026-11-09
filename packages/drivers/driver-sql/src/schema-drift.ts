@@ -2303,16 +2303,25 @@ export function indexedKeyColumns(args: {
   tenantField: string | null;
   declaredIndexes?: DeclaredIndexInput[];
 }): Map<string, { unique: boolean }> {
+  const { table, fields, tenantField, declaredIndexes } = args;
   const out = new Map<string, { unique: boolean }>();
-  // The one composition (implicit reference indexes included, #31882), so the
-  // columns this answers are exactly the ones the index sync keys.
-  for (const idx of declaredIndexSet(args)) {
+  const declared: ExpectedIndex[] = [];
+  const record = (idx: ExpectedIndex) => {
+    declared.push(idx);
     for (const column of idx.columns) {
       const prev = out.get(column);
       if (prev) prev.unique ||= idx.unique;
       else out.set(column, { unique: idx.unique });
     }
+  };
+  for (const idx of uniqueIndexesFromFields(table, fields, tenantField)) record(idx);
+  for (const idx of Array.isArray(declaredIndexes) ? declaredIndexes : []) {
+    const norm = normalizeDeclaredIndex(table, idx, tenantField);
+    if (norm) record(norm);
   }
+  // [#31882] The implicit reference indexes key their columns too, so this
+  // answers exactly the columns the index sync keys.
+  for (const idx of implicitReferenceIndexesOver(table, fields, tenantField, declared)) record(idx);
   return out;
 }
 
