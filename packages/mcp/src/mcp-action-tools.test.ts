@@ -262,6 +262,8 @@ describe('MCP action tools (list_actions / run_action)', () => {
 // the exact qualifier only when the caller gives one.
 describe('MCP action tools: namespace and face (ADR-0150)', () => {
   let runtime: MCPServerRuntime;
+  // The wire answer, read as the JSON-RPC envelope it is.
+  const callJson = async (body: unknown, bridge: unknown): Promise<any> => (await call(runtime, body, bridge)).json;
 
   beforeEach(() => {
     runtime = new MCPServerRuntime({ name: 'objectstack-test', version: '9.9.9' });
@@ -290,7 +292,7 @@ describe('MCP action tools: namespace and face (ADR-0150)', () => {
 
   it('list_actions lists both holders of one name, each with its namespace and face', async () => {
     const bridge = pairBridge([digest('crm'), digest('hr')]);
-    const { json } = await call(runtime, toolsCall(1, 'list_actions', {}), bridge);
+    const json = await callJson(toolsCall(1, 'list_actions', {}), bridge);
     const payload = JSON.parse(json.result.content[0].text);
     expect(payload.actions.map((a: any) => [a.namespace, a.face])).toEqual([
       ['crm', 'crm-send_digest'],
@@ -303,7 +305,7 @@ describe('MCP action tools: namespace and face (ADR-0150)', () => {
   it('a face two actions derive is refused once, naming both, and neither row is dropped', async () => {
     const twin = (namespace: string) => ({ ...digest(namespace), face: 'shared-face' });
     const bridge = pairBridge([twin('crm'), twin('hr'), digest('ops')]);
-    const { json } = await call(runtime, toolsCall(2, 'list_actions', {}), bridge);
+    const json = await callJson(toolsCall(2, 'list_actions', {}), bridge);
     const payload = JSON.parse(json.result.content[0].text);
     expect(payload.totalCount).toBe(3);
     expect(payload.actions.map((a: any) => a.namespace)).toEqual(['crm', 'hr', 'ops']);
@@ -316,11 +318,7 @@ describe('MCP action tools: namespace and face (ADR-0150)', () => {
 
   it('run_action forwards namespace to the bridge when given', async () => {
     const bridge = makeBridge();
-    const { json } = await call(
-      runtime,
-      toolsCall(3, 'run_action', { actionName: 'send_digest', namespace: 'hr' }),
-      bridge,
-    );
+    const json = await callJson(toolsCall(3, 'run_action', { actionName: 'send_digest', namespace: 'hr' }), bridge);
     expect(json.result.isError).toBeFalsy();
     const runCall = bridge.calls.find((c) => c[0] === 'runAction');
     expect(runCall[1]).toBe('send_digest');
@@ -343,7 +341,7 @@ describe('MCP action tools: namespace and face (ADR-0150)', () => {
         );
       },
     });
-    const { json } = await call(runtime, toolsCall(5, 'run_action', { actionName: 'send_digest' }), bridge);
+    const json = await callJson(toolsCall(5, 'run_action', { actionName: 'send_digest' }), bridge);
     expect(json.result.isError).toBe(true);
     const text = json.result.content[0].text;
     expect(text).toContain('RESOURCE_CONFLICT');
