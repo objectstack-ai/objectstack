@@ -31,7 +31,9 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SecurityPlugin } from '@objectstack/plugin-security';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
-import { authIdentityObjects } from './manifest.js';
+import { authIdentityObjects, authObjectExtensions } from './manifest.js';
+import { SysSecret } from '@objectstack/platform-objects';
+import type { CryptoHandle, ICryptoProvider } from '@objectstack/spec/contracts';
 import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-guard.js';
 import { runDeleteIdpGroupMapping, runSetIdpGroupMapping, type IdpGroupMappingAdminDeps } from './idp-group-mapping-admin.js';
 import { createEngineSsoProviderConfigReader, runSetSsoGroupsClaim, runShowSsoGroupsClaim } from './register-sso-provider.js';
@@ -560,16 +562,42 @@ async function bootGroupEngine(): Promise<BootedSqliteEngine> {
   const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
   engine.registerDriver(driver, true);
   await engine.init();
-  for (const object of [...authIdentityObjects, sysUserPermissionSet]) {
-    engine.registry.registerObject(object as never, '@objectstack/plugin-auth');
+  for (const object of [...authIdentityObjects, sysUserPermissionSet, SysSecret]) {
+    engine.registry.registerObject(withAuthExtensions(object) as never, '@objectstack/plugin-auth');
   }
   await engine.syncSchemas();
+  // The OIDC client secret's encrypted channel, as the host composes it: a provider
+  // write through the vendor (`/sso/update-provider`) lifts the secret onto
+  // `oidc_client_secret` (`sso-client-secret.ts`), which needs the column and a
+  // crypto provider. Rows these cases insert keep it in the blob (an un-migrated row).
+  engine.setCryptoProvider(base64Crypto());
   await engine.insert('sys_organization', { id: DEFAULT_ORG, name: 'Default Organization', slug: 'default' }, SYSTEM);
   await engine.insert('sys_organization', { id: GROUP_ORG, name: 'Acme', slug: 'acme' }, SYSTEM);
   // [ADR-0131 D3/D4] `admin_full_access` is a catalog definition the guard resolves a grant's set name to.
   bindTestSecurityCatalog(engine, { permissions: [{ name: ADMIN_FULL_ACCESS }] });
   registerLastAdminGuard(engine as unknown as LastAdminGuardEngine, { packageId: 'test.last-admin-guard' });
   return { engine, driver };
+}
+
+/** An object with the fields plugin-auth's manifest adds to it (`authObjectExtensions`). */
+function withAuthExtensions(object: { name?: string; fields?: Record<string, unknown> }): unknown {
+  const extension = authObjectExtensions.find((e) => e.extend === object.name);
+  return extension ? { ...object, fields: { ...object.fields, ...extension.fields } } : object;
+}
+
+/** A stand-in `ICryptoProvider`: base64 is enough to round-trip the secret column. */
+function base64Crypto(): ICryptoProvider {
+  let n = 0;
+  return {
+    async encrypt(plain: string): Promise<CryptoHandle> {
+      n += 1;
+      return { id: `sec_${n}`, kmsKeyId: 'local', alg: 'test-b64', version: 1, ciphertext: Buffer.from(plain, 'utf8').toString('base64') };
+    },
+    async decrypt(handle: CryptoHandle): Promise<string> { return Buffer.from(handle.ciphertext, 'base64').toString('utf8'); },
+    async rotateKey(handle: CryptoHandle): Promise<CryptoHandle> { return { ...handle, version: handle.version + 1 }; },
+    digest(plain: string): string { return `d:${plain.length}`; },
+    async keyedDigest(plain: string): Promise<string> { return `k:${plain.length}`; },
+  };
 }
 
 /** The catalog the security service judges against; a case may redefine a set after its mapping is saved. */
@@ -889,7 +917,8 @@ describe('the SSO Providers form sets the groups claim a sign-in grants from, an
     const stored = await readerOf(rp)(PROVIDER_ID);
     return JSON.parse(String(stored!.oidcConfig));
   }
-  const withoutMapping = ({ mapping: _mapping, ...rest }: Record<string, unknown>) => rest;
+  /** The stored config apart from the mapping and the client secret (the vendor's write lifts it to its encrypted column). */
+  const withoutMapping = ({ mapping: _mapping, clientSecret: _secret, ...rest }: Record<string, unknown>) => rest;
 
   it('a claim saved through the form is stored as the register door stores it, and a sign-in grants its mapped set', async () => {
     const rp = await makeGroupRp({ provider: { oidc_config: configWith(PLAIN_MAPPING) } });
