@@ -439,6 +439,38 @@ describe('picklist — resolved from the package that writes the reference (ADR-
     expect(engine.registry.resolvePicklistOptions('env_tier')!.map((o) => o.value)).toEqual(['gold']);
   });
 
+  // [epic seat review on #31731] An owner and an extender in different
+  // packages both write the field's reference: neither is picked by fold
+  // order. The field is served only when every referrer reaches the same list.
+  it('two packages writing one field\'s reference: served no options unless BOTH reach the list (no fold-order pick)', async () => {
+    const engine = await bootEngine();
+    engine.registerApp({ id: 'com.test.lists', name: 'lists', picklists: [{ ...ENV_LIST }] });
+    // The owner does not depend on the list's package; the extender (folded LAST) does.
+    engine.registerApp({ id: 'com.test.pkg', name: 'pkg', objects: [member('env_tier')] });
+    engine.registerApp({
+      id: 'com.test.ext', name: 'ext', dependencies: { 'com.test.lists': '^1.0.0' },
+      objectExtensions: [{ extend: 'pk_member', fields: { tier: { name: 'tier', type: 'select', picklist: 'env_tier' } } }],
+    });
+    expect((engine.registry.getObject('pk_member')!.fields.tier as any).options).toBeUndefined();
+    expect(engine.registry.findUnresolvedPicklistReferences()).toEqual([
+      expect.objectContaining({ object: 'pk_member', field: 'tier', packageId: 'com.test.pkg' }),
+    ]);
+  });
+
+  it('CONTROL — the same owner and extender, both depending on the list\'s package, are served the list', async () => {
+    const engine = await bootEngine();
+    engine.registerApp({ id: 'com.test.lists', name: 'lists', picklists: [{ ...ENV_LIST }] });
+    engine.registerApp({
+      id: 'com.test.pkg', name: 'pkg', dependencies: { 'com.test.lists': '^1.0.0' }, objects: [member('env_tier')],
+    });
+    engine.registerApp({
+      id: 'com.test.ext', name: 'ext', dependencies: { 'com.test.lists': '^1.0.0' },
+      objectExtensions: [{ extend: 'pk_member', fields: { tier: { name: 'tier', type: 'select', picklist: 'env_tier' } } }],
+    });
+    expect(values(engine.registry.getObject('pk_member')!.fields.tier)).toEqual(['gold']);
+    expect(engine.registry.findUnresolvedPicklistReferences()).toEqual([]);
+  });
+
   it('a package\'s `picklistExtensions` target resolves caller-less: it extends the one holder\'s list, dependency or not', async () => {
     const engine = await bootEngine();
     engine.registerApp(CORE);

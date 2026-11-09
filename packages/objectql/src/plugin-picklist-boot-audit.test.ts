@@ -186,3 +186,43 @@ describe('the picklist boot audit — a list only the environment holds (ADR-015
     expect(servedValues(kernel.getService<ObjectQL>('objectql'), 'pb_account', 'industry')).toEqual(['technology']);
   });
 });
+
+/**
+ * [ADR-0150 D3, child E6; epic seat review on #31731] After the seal, the
+ * install door judges each reference of a multi-package artifact from the
+ * package that writes it: a list its OWN manifest declares is its own, and a
+ * list a SIBLING manifest declares is reached only the way R reaches any
+ * holder — through the referrer's declared dependency closure. No
+ * artifact-wide "some member declares it" pass. ⛔ The refusal pin below is the
+ * N1 arm (a same-artifact sibling with no declared dependency), pending the
+ * maintainer's ruling on #31678.
+ */
+describe('the picklist install door — a sibling in the same artifact (ADR-0150 D3)', () => {
+  const suite = (app: Record<string, unknown>) => ({
+    id: 'com.test.suite',
+    version: '1.0.0',
+    packages: [
+      { manifest: { id: 'com.test.suite.lists', name: 'lists', version: '1.0.0', type: 'module', picklists: [INDUSTRY] } },
+      { manifest: { id: 'com.test.suite.app', name: 'app', version: '1.0.0', type: 'module', objects: [ACCOUNT], ...app } },
+    ],
+  });
+
+  it('refuses a reference to a list only a sibling it does not depend on declares, naming that sibling', async () => {
+    const { kernel, use } = kernelWith(new ObjectQLPlugin());
+    await use();
+    await kernel.bootstrap();
+    const manifest = kernel.getService<ManifestService>('manifest');
+    await expect(Promise.resolve().then(() => manifest.register(suite({}))))
+      .rejects.toThrow(/references picklist 'industry' \(The picklist "industry" is held outside the declared dependency closure of package "com\.test\.suite\.app": package "com\.test\.suite\.lists"/);
+    expect(kernel.getService<ObjectQL>('objectql').registry.getObject('pb_account')).toBeUndefined();
+  });
+
+  it('CONTROL — the same artifact registers when the app depends on its sibling', async () => {
+    const { kernel, use } = kernelWith(new ObjectQLPlugin());
+    await use();
+    await kernel.bootstrap();
+    const manifest = kernel.getService<ManifestService>('manifest');
+    await manifest.register(suite({ dependencies: { 'com.test.suite.lists': '^1.0.0' } }));
+    expect(servedValues(kernel.getService<ObjectQL>('objectql'), 'pb_account', 'industry')).toEqual(['technology']);
+  });
+});
