@@ -86,10 +86,12 @@
  *    definition here, so it grants nothing, and {@link
  *    SecurityCatalogReader.resolveReference} names every candidate — the boot
  *    report prints them (plugin-security `catalog-reference-report.ts`).
- *    ⛔ No first-registered fallback, and no metadata-service answer for a
- *    caller with a package: the metadata service reads by name only, so asking
- *    it for a package caller would be the environment-wide guess ADR-0150 D3
- *    refuses.
+ *    ⛔ No first-registered fallback, and no second lookup once the registry
+ *    has answered: a holder it resolved that may not be served (a disabled
+ *    package's set) is not-found. The metadata service is read only for a
+ *    name the registry holds nowhere, and it reads by name only, so its body
+ *    is the environment's: a caller with no package is served it, and a
+ *    package's reference is the D3 (a) refusal naming the environment.
  *  - **The list** answers one entry per `(package, name)` holder, plus the
  *    environment's own item — never one entry per name picked among holders.
  *  - **Positions are unchanged** (ADR-0150 D7, ruled Q2 = A): one
@@ -151,7 +153,9 @@ import { packageResolutionClosure, type PackageClosureRegistry } from '@objectst
 import { AuthzStoreUnavailableError } from './authz-store-unavailable.js';
 import {
   describePackageScopedHolder,
+  packageScopedRefusalMessage,
   resolvePackageScopedHolders,
+  type PackageScopedHolder,
   type PackageScopedResolution,
 } from '../package-scoped-resolution.js';
 
@@ -521,14 +525,34 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
       };
     }
     if (outcome.status === 'resolved') {
+      // The registry's answer is final: a holder it resolved that may not be
+      // served (a disabled package's set) is not-found, never a second,
+      // by-name lookup in the metadata service.
       const definition = servable(outcome.item, name);
-      if (definition) return { status: 'resolved', entry: entry('permission', definition, 'registry') };
+      return definition ? { status: 'resolved', entry: entry('permission', definition, 'registry') } : { status: 'not-found' };
     }
-    // Nothing the registry may serve. The metadata service reads by name only,
-    // so it answers a caller with no package, never a package's reference.
-    if (caller !== null) return { status: 'not-found' };
+    // The registry holds the name nowhere. The metadata service reads by name
+    // only, so its body is the environment's: it answers a caller with no
+    // package, and for a package's reference it is the D3 (a) refusal, naming
+    // the environment — reported, never served and never hidden as a miss.
     const declared = await fromMetadata('permission', name);
-    return declared ? { status: 'resolved', entry: entry('permission', declared, 'metadata') } : { status: 'not-found' };
+    if (!declared) return { status: 'not-found' };
+    if (caller === null) return { status: 'resolved', entry: entry('permission', declared, 'metadata') };
+    const environment: PackageScopedHolder = { kind: 'environment' };
+    const refusal = {
+      status: 'refused' as const,
+      reason: 'outside-closure' as const,
+      type: 'permission' as const,
+      name,
+      callerPackageId: caller,
+      candidates: [environment],
+    };
+    return {
+      status: 'refused',
+      reason: refusal.reason,
+      candidates: refusal.candidates.map(describePackageScopedHolder),
+      message: packageScopedRefusalMessage(refusal),
+    };
   };
 
   const resolveReference = async (

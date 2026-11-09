@@ -368,21 +368,30 @@ describe('security catalog read — permission sets by (package, name) through t
     expect(r.asked).toEqual([{ name: 'x', caller: 'com.acme.app' }]);
   });
 
-  it("the metadata service answers a name nothing in the registry holds for no package, never for a package's reference", async () => {
+  it("a name the registry holds nowhere: the metadata service's body serves a caller with no package, and a package's reference is the D3 (a) refusal naming the environment", async () => {
     const reader = createSecurityCatalogReader({
-      registry: scopedRegistry({}),
+      registry: scopedRegistry({}, { packages: { [P]: {} } }),
       metadata: metadata({ permission: [{ name: 'declared_set', label: 'from the metadata service' }] }),
     });
     expect((await reader.resolve('permission', 'declared_set'))?.source).toBe('metadata');
     expect(await reader.resolve('permission', 'declared_set', at())).toBeUndefined();
+    const answer = await resolveCatalogReference(reader, 'permission', 'declared_set', at());
+    expect(answer).toMatchObject({ status: 'refused', reason: 'outside-closure', candidates: [expect.stringContaining('the environment')] });
+    if (answer.status === 'refused') {
+      expect(answer.message).toContain(P);
+      expect(answer.message).toContain('declared_set');
+    }
+    expect(await resolveCatalogReference(reader, 'permission', 'nowhere_set', at())).toEqual({ status: 'not-found' });
   });
 
-  it('a resolved item of a disabled package is not served', async () => {
+  it("a resolved holder that may not be served (a disabled package's set) is final: not-found, never a by-name metadata-service read", async () => {
     const reader = createSecurityCatalogReader({
       registry: scopedRegistry({}, { disabled: ['com.acme.off'], holders: { off_set: [{ packageId: 'com.acme.off', item: { name: 'off_set', _packageId: 'com.acme.off' } }] } }),
-      metadata: metadata({}),
+      metadata: metadata({ permission: [{ name: 'off_set', label: 'a metadata-service body of that name' }] }),
     });
     expect(await reader.resolve('permission', 'off_set')).toBeUndefined();
+    expect(await resolveCatalogReference(reader, 'permission', 'off_set')).toEqual({ status: 'not-found' });
+    expect(await reader.resolve('permission', 'off_set', at())).toBeUndefined();
   });
 
   it('the permission-set list carries one entry per (package, name) holder, never one picked per name', async () => {
