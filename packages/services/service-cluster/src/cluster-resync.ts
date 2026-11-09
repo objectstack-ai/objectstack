@@ -107,6 +107,17 @@ export interface ClusterDriverLivenessOptions {
 }
 
 /**
+ * The slice of a connection {@link ClusterDriverLiveness.watchConnection}
+ * listens on — an ioredis client's, declared structurally so this package
+ * takes no dependency on a Redis client library.
+ */
+interface WatchedConnection {
+    on(event: 'error' | 'close' | 'ready', listener: (...args: unknown[]) => void): unknown;
+    off(event: 'error' | 'close' | 'ready', listener: (...args: unknown[]) => void): unknown;
+    readonly status?: string;
+}
+
+/**
  * The connection state machine a remote driver feeds. The driver reports each
  * connection it holds by a stable `source` name (`'command'`, `'subscriber'`):
  * {@link reportDown} on an error or an unexpected close, {@link reportUp} when
@@ -178,6 +189,38 @@ export class ClusterDriverLiveness {
                 `(node=${this.nodeId}) after ${outageMs} ms; emitting "${CLUSTER_RESYNC_EVENT}" so caches re-read what they may have missed.`,
         );
         this.emitResync({ event: CLUSTER_RESYNC_EVENT, driver: this.driver, nodeId: this.nodeId, outageMs, at });
+    }
+
+    /**
+     * Feed this liveness from one connection, reported as `source`: `error`
+     * and an unexpected `close` report it down, `ready` reports it up (as does
+     * a connection already ready when watched). The `error` listener is also
+     * what keeps the client from treating its failures as unhandled — ioredis
+     * otherwise prints `[ioredis] Unhandled error event` with a stack on every
+     * reconnect attempt.
+     *
+     * The one listener style for every connection a remote driver's store is
+     * reached through: the driver's own (the redis driver's
+     * `watchRedisConnection` delegates here) and any connection derived from
+     * one ({@link watchClusterDriverConnection}). Returns the disposer; call it
+     * BEFORE a deliberate `quit()`, so that close is not reported as an outage.
+     */
+    watchConnection(client: WatchedConnection, source: string): () => void {
+        const onError = (err: unknown): void => this.reportDown(source, err);
+        const onClose = (): void => this.reportDown(source);
+        const onReady = (): void => this.reportUp(source);
+        client.on('error', onError);
+        client.on('close', onClose);
+        client.on('ready', onReady);
+        if (client.status === 'ready') this.reportUp(source);
+        let watching = true;
+        return () => {
+            if (!watching) return;
+            watching = false;
+            client.off('error', onError);
+            client.off('close', onClose);
+            client.off('ready', onReady);
+        };
     }
 
     /** Stop reporting: a deliberate close is not an outage. Idempotent. */
@@ -295,6 +338,28 @@ export function onClusterResync(cluster: unknown, handler: ClusterResyncHandler)
     const liveness = readLiveness(cluster);
     if (!liveness) return () => {};
     return liveness.onResync(handler);
+}
+
+/**
+ * Report `client` — a connection derived from `cluster`'s driver connection
+ * (`readClusterDriverConnection(...).client.duplicate()`) — into the driver's
+ * liveness as `source`. One outage across every connection to the store then
+ * logs once, and `cluster.resync` waits until this connection is back too.
+ * See {@link ClusterDriverLiveness.watchConnection}: call the returned
+ * disposer before quitting `client`.
+ *
+ * On a cluster whose driver offers no liveness this attaches nothing and
+ * returns a disposer that does nothing (`readClusterDriverHealth(cluster)` is
+ * `undefined` in exactly that case, for a caller that must still listen).
+ */
+export function watchClusterDriverConnection(
+    cluster: unknown,
+    client: WatchedConnection,
+    source: string,
+): () => void {
+    const liveness = readLiveness(cluster);
+    if (!liveness) return () => {};
+    return liveness.watchConnection(client, source);
 }
 
 /**

@@ -14,7 +14,7 @@ import { assembleMetadataProtocol, isServedOverrideRowOf } from '@objectstack/me
 import { installedManifestsOf, isTenantAuthored, readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import type { MetadataAuthoringChannel } from '@objectstack/metadata-protocol';
 import { Plugin, PluginContext } from '@objectstack/core';
-import { resolveArtifactPackageEntries, artifactPackageId, readDeploymentOrgScopingEntitlement } from '@objectstack/core';
+import { resolveArtifactPackageEntries, artifactPackageId, declaredDependencyIds, readDeploymentOrgScopingEntitlement } from '@objectstack/core';
 // [ADR-0130 D4] The residual rule's decision half — which top-level items of a
 // multi-package stack no body declares, and the id they take. See
 // `unclaimedTopLevelObjects` below.
@@ -78,11 +78,14 @@ import { SecurityCatalogNameConflictError, findEnvironmentHeldSecurityCatalogNam
 // connector, an email template, an agent, a skill, a tool) — the cold boot's seal and its one switch
 // (`bare-name-one-holder.ts`, "The cold boot").
 import { sealBareNameHoldersAtColdBoot } from './registry.js';
+import { backfillActivationLedgerAtBoot } from './activation-ledger-backfill.js';
 import { BARE_NAME_COLD_BOOT_MODE } from './bare-name-one-holder.js';
 import { planPackageUpgrade, type UpgradeServedOverride } from './package-upgrade-environment.js';
 // [ADR-0029 D3] The registry's own refusal of a second owner — read, never
 // re-derived, when a residual object's name is already owned.
 import { ObjectOwnershipConflictError, collectManifestBoundActions, collectManifestObjectNames, describeBoundActionCollision, describeUnboundActionTargets, FIND_BOUND_ACTION_COLLISIONS, type BoundActionCollision } from './registry.js';
+// [#31715] The one schema-migration lock `os migrate apply` takes too.
+import { acquireSchemaMigrationLock, type SchemaMigrationLock } from './schema-migration-lock.js';
 
 export type { Plugin, PluginContext };
 
@@ -1037,6 +1040,13 @@ export class ObjectQLPlugin implements Plugin {
         // own; the door's word, `code` when it states none, is its origin.
         const residualOwnerId = residual?.ownerId ?? residualItems?.ownerId;
         if (residualOwnerId !== undefined) ql.recordResidualOwner(residualOwnerId, options?.source ?? 'code');
+        // [ADR-0130 D4, epic #31527 R2] …and what the residual's owner
+        // declares it depends on (the stack's own manifest): no package record
+        // carries it, so the one closure walk reads it here, and a residual
+        // reaches its declared dependencies through every reader of the walk.
+        if (residualOwnerId !== undefined) {
+          ql.registry.recordResidualOwnerDependencies(residualOwnerId, declaredDependencyIds((artifact as { manifest?: unknown })?.manifest ?? artifact));
+        }
         // [ADR-0150 D2, #31720] …and the residual as a holder of its namespace,
         // so a package registering after this stack is judged against it too.
         // Recorded on the same terms: once the artifact has registered whole.
@@ -1299,6 +1309,11 @@ export class ObjectQLPlugin implements Plugin {
         // hooks: there the doors never refuse.
         const registry = this.ql?.registry;
         if (registry) sealBareNameHoldersAtColdBoot(registry, BARE_NAME_COLD_BOOT_MODE, ctx.logger);
+        // [ADR-0150 D8 row R4] With the holders sealed, bind every activation
+        // ledger row that names no package to the one package that holds its
+        // item, and report the rows two packages hold (never guessed). Writes
+        // only `package_id`, so every later boot finds nothing new; never fatal.
+        await backfillActivationLedgerAtBoot(this.ql, registry, ctx.logger);
         // [ADR-0139 D5.2 / D5.3] A `controlled_by_parent` detail over a master
         // the engine composes no read over fails the boot, naming both and the
         // remedy. Judged HERE, not at `kernel:ready`: the object-scoped read
@@ -1521,37 +1536,48 @@ export class ObjectQLPlugin implements Plugin {
     // table; we only assume the DDL is in place and skip straight to
     // hydration. This avoids one round-trip per table × N objects on
     // every cold boot.
-    await this.installRegisteredSchemas(ctx);
+    //
+    // [#31715] Phases 1 to 3 are this boot's schema sync, and they run under
+    // the schema-migration lock, released in `finally` once Phase 3 is done:
+    // N replicas booting together otherwise each read the same missing tables
+    // and each create them (a `pg_type` collision, measured). See
+    // {@link acquireBootSchemaMigrationLock}.
+    const migrationLock = await this.acquireBootSchemaMigrationLock(ctx);
+    try {
+      await this.installRegisteredSchemas(ctx);
 
-    // Phase 2: Hydrate SchemaRegistry from sys_metadata (loads custom/template objects).
-    // Project kernels (environmentId set) USUALLY source metadata from the
-    // artifact (MetadataPlugin) or a control-plane proxy and have no local
-    // sys_metadata, so hydration is skipped to avoid querying a table that
-    // does not exist (or, worse, a proxied remote one). EXCEPTION: an
-    // isolated, proxy-free project kernel that persists its OWN sys_metadata
-    // locally (the cloud single-env tenant runtime) opts in via
-    // `hydrateMetadataFromDb` so objects CREATED AT RUNTIME there re-enter the
-    // registry after a restart — otherwise registry.getObject() returns
-    // nothing for them and every registry consumer (the unknown-$select
-    // guard, hooks, relationships) silently degrades. Safe because each engine
-    // owns its registry (no cross-kernel leakage) and hydration tolerates a
-    // missing table.
-    if (this.environmentId === undefined || this.hydrateMetadataFromDb) {
-        await this.restoreMetadataFromDb(ctx);
-    } else {
-        ctx.logger.info('Project kernel — skipping sys_metadata hydration (metadata sourced from artifact)');
+      // Phase 2: Hydrate SchemaRegistry from sys_metadata (loads custom/template objects).
+      // Project kernels (environmentId set) USUALLY source metadata from the
+      // artifact (MetadataPlugin) or a control-plane proxy and have no local
+      // sys_metadata, so hydration is skipped to avoid querying a table that
+      // does not exist (or, worse, a proxied remote one). EXCEPTION: an
+      // isolated, proxy-free project kernel that persists its OWN sys_metadata
+      // locally (the cloud single-env tenant runtime) opts in via
+      // `hydrateMetadataFromDb` so objects CREATED AT RUNTIME there re-enter the
+      // registry after a restart — otherwise registry.getObject() returns
+      // nothing for them and every registry consumer (the unknown-$select
+      // guard, hooks, relationships) silently degrades. Safe because each engine
+      // owns its registry (no cross-kernel leakage) and hydration tolerates a
+      // missing table.
+      if (this.environmentId === undefined || this.hydrateMetadataFromDb) {
+          await this.restoreMetadataFromDb(ctx);
+      } else {
+          ctx.logger.info('Project kernel — skipping sys_metadata hydration (metadata sourced from artifact)');
+      }
+
+      // [ADR-0048 N.3, ruling letter A on #22307] The environment catalog is in
+      // the registry now, and every package registered before it: a package-held
+      // position or permission-set name the environment already holds refuses the
+      // boot here, before any other plugin starts. See
+      // {@link refuseEnvironmentHeldSecurityCatalogNames}.
+      this.refuseEnvironmentHeldSecurityCatalogNames();
+
+      // Phase 3: Sync any new schemas that were just hydrated from the DB
+      // (e.g. CRM objects seeded via template — they must have tables before use).
+      await this.installRegisteredSchemas(ctx);
+    } finally {
+      await migrationLock?.release();
     }
-
-    // [ADR-0048 N.3, ruling letter A on #22307] The environment catalog is in
-    // the registry now, and every package registered before it: a package-held
-    // position or permission-set name the environment already holds refuses the
-    // boot here, before any other plugin starts. See
-    // {@link refuseEnvironmentHeldSecurityCatalogNames}.
-    this.refuseEnvironmentHeldSecurityCatalogNames();
-
-    // Phase 3: Sync any new schemas that were just hydrated from the DB
-    // (e.g. CRM objects seeded via template — they must have tables before use).
-    await this.installRegisteredSchemas(ctx);
 
     // Bridge all SchemaRegistry objects to metadata service.
     //
@@ -2398,6 +2424,43 @@ export class ObjectQLPlugin implements Plugin {
       undefined,
       { bound, unbound: unbound.length, unsupported: unsupported.length, failed: failed.length },
     );
+  }
+
+  /**
+   * [#31715] The schema-migration lock ({@link acquireSchemaMigrationLock}) for
+   * the boot's schema sync — the same lock, under the same name and key, that
+   * `os migrate apply` takes, so a server boot, an `OS_MIGRATE_AND_EXIT=1` job
+   * and a migrator exclude one another on one database.
+   *
+   * Taken on the DEFAULT datasource's driver, the database the boot's tables
+   * live in; Postgres and MySQL only, so every other driver answers `null`
+   * without a statement. Taken even when nothing turns out to be pending: the
+   * sync reads what is missing and then creates it, and only a read made under
+   * the lock is still true when the write lands. Uncontended it is one
+   * statement and prints nothing.
+   *
+   * `null`, no statement, for a boot that performs no DDL here:
+   *  - `skipSchemaSync` — the DDL is managed out of band;
+   *  - a default driver holding its DDL back (`schemaDdlDeferred`, armed by
+   *    `os migrate plan` / `apply`) — that command takes the lock itself, before
+   *    it reads what the boot held back, so taking it here as well would only
+   *    make one migrator wait twice.
+   *
+   * The wait is bounded by half this plugin's start budget, so a boot queued
+   * behind a long migration refuses with the lock's own message (which names
+   * the lock and says nothing was changed) instead of the kernel's start
+   * timeout, and keeps the other half for its own sync.
+   */
+  private async acquireBootSchemaMigrationLock(ctx: PluginContext): Promise<SchemaMigrationLock | null> {
+    if (this.skipSchemaSync || !this.ql) return null;
+    const name = this.ql.getDefaultDriverName();
+    const driver = name ? this.ql.getDriverByName(name) : undefined;
+    if (!driver || (driver as { schemaDdlDeferred?: unknown }).schemaDdlDeferred === true) return null;
+    return acquireSchemaMigrationLock(driver, {
+      database: "the default datasource's database",
+      warn: (line) => ctx.logger.warn(line),
+      waitMs: Math.trunc(this.startupTimeout / 2),
+    });
   }
 
   /**

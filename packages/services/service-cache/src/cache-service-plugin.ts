@@ -6,7 +6,13 @@ import {
   NoopMetricsRegistry,
   type MetricsRegistry,
 } from '@objectstack/observability';
-import { declaresMultiNode, readClusterDriverConnection } from '@objectstack/service-cluster';
+import {
+  ClusterDriverLiveness,
+  declaresMultiNode,
+  readClusterDriverConnection,
+  readClusterDriverHealth,
+  watchClusterDriverConnection,
+} from '@objectstack/service-cluster';
 import { MemoryCacheAdapter } from './memory-cache-adapter.js';
 import type { MemoryCacheAdapterOptions } from './memory-cache-adapter.js';
 import { RedisCacheAdapter, type RedisCacheClient } from './redis-cache-adapter.js';
@@ -280,7 +286,15 @@ export class CacheServicePlugin implements Plugin {
         ownsClient: plan.ownsClient,
       });
       ctx.registerService('cache', cache);
+      // Only the connection this plugin derived is watched: an injected client
+      // and a borrowed driver connection belong to their owners, who listen.
+      const unwatch =
+        plan.ownsClient && plan.source === 'cluster-driver'
+          ? watchDerivedConnection(readRegisteredCluster(ctx), plan.client, ctx.logger)
+          : () => {};
       ctx.hook('kernel:shutdown', async () => {
+        // Detach first: the close the deliberate quit causes is not an outage.
+        unwatch();
         await cache.close();
       });
       ctx.logger.info(
@@ -297,6 +311,57 @@ export class CacheServicePlugin implements Plugin {
     );
     if (plan.notice) ctx.logger.warn(plan.notice);
   }
+}
+
+/** The events a derived ioredis connection emits, checked structurally (a test double may have none). */
+type WatchableConnection = Parameters<ClusterDriverLiveness['watchConnection']>[0];
+
+function isWatchable(client: unknown): client is WatchableConnection {
+  const c = client as Partial<Record<'on' | 'off', unknown>> | null;
+  return !!c && typeof c.on === 'function' && typeof c.off === 'function';
+}
+
+/**
+ * Watch the connection this plugin derived from the cluster driver's, so an
+ * outage is never an unhandled `error` event (ioredis prints one, with a stack,
+ * per reconnect attempt). Returns the disposer to call before the cache quits.
+ *
+ * - The driver offers a liveness (the redis driver does): the connection
+ *   reports into it as `'cache'`, the same way the driver's own connections
+ *   do — one outage logs once across all of them, and `cluster.resync` waits
+ *   for this connection too.
+ * - It offers none (a driver released before the liveness offer): the
+ *   connection gets a liveness of its own, so its outage is still logged once,
+ *   credential-free, through this plugin's logger — never one line per
+ *   reconnect attempt, and never silently swallowed. Nothing subscribes to
+ *   that liveness's resync.
+ */
+function watchDerivedConnection(
+  cluster: unknown,
+  client: unknown,
+  logger: PluginContext['logger'],
+): () => void {
+  if (!isWatchable(client)) return () => {};
+  if (readClusterDriverHealth(cluster) !== undefined) {
+    return watchClusterDriverConnection(cluster, client, 'cache');
+  }
+  const own = new ClusterDriverLiveness({
+    driver: describeDriver(cluster) ?? 'redis',
+    nodeId: describeNodeId(cluster) ?? 'node',
+    logger,
+  });
+  const unwatch = own.watchConnection(client, 'cache');
+  return () => {
+    unwatch();
+    own.close();
+  };
+}
+
+/** The registered cluster's node id, or `undefined`. */
+function describeNodeId(cluster: unknown): string | undefined {
+  if (!cluster || typeof cluster !== 'object') return undefined;
+  const nodeId = (cluster as { nodeId?: unknown }).nodeId;
+  return typeof nodeId === 'string' ? nodeId : undefined;
 }
 
 /**

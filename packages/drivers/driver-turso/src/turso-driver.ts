@@ -1107,8 +1107,13 @@ export const REMOTE_FACE_ANSWERS = {
   // declares, the input its drift detector diffs against.
   registerObjectMetadata: 'remote',
   // Deferred DDL: arming is refused, so nothing is ever deferred here, and the
-  // three inherited members answer that truthfully without reaching Knex.
+  // four inherited members answer that truthfully without reaching Knex
+  // (`schemaDdlDeferred` reads `false`, so the engine's boot asks for the
+  // schema-migration lock, #31715; the lock reads `dialectName`, `'sqlite'`
+  // here, and answers `null` WITHOUT calling `getKnex()`, which this face
+  // refuses by throwing).
   setDeferredDdl: 'refused',
+  schemaDdlDeferred: 'inherited',
   deferredSchemaObjectCount: 'inherited',
   previewDeferredSchemaWork: 'inherited',
   flushDeferredSchemaDdl: 'inherited',

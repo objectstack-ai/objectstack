@@ -38,8 +38,10 @@ import { describe, it, expect, vi } from 'vitest';
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 import {
+    backfillActivationLedgerPackages,
     InMemoryMetadataActivationStore,
     listPackageMetadataActivations,
+    type ActivationLedgerHolder,
     METADATA_ACTIVATION_TABLE,
     ObjectStoreMetadataActivationStore,
 } from './metadata-activation-store.js';
@@ -468,5 +470,134 @@ describe('listPackageMetadataActivations — one package\'s rows across types (#
         expect(await listPackageMetadataActivations(engine, '')).toEqual([]);
         expect(await listPackageMetadataActivations(engine, undefined as unknown as string)).toEqual([]);
         expect(engine.find).not.toHaveBeenCalled();
+    });
+});
+
+/**
+ * A STATEFUL ledger for the backfill: `update` patches the row it addresses, so
+ * a second run reads what the first one wrote. The backfill's one read is
+ * unscoped (`where: {}`), so the double answers every row and refuses any other
+ * WHERE rather than filtering it.
+ */
+function makeLedger(rows: any[]) {
+    const table = rows.map((r) => ({ ...r }));
+    const updates: Array<{ data: any; options: any }> = [];
+    const engine = {
+        find: vi.fn(async (_object: string, options?: any) => {
+            if (Object.keys(options?.where ?? {}).length > 0) {
+                throw new Error('makeLedger: the backfill reads the whole ledger; a scoped read is not modelled');
+            }
+            return table.map((r) => ({ ...r }));
+        }),
+        update: vi.fn(async (_object: string, data: any, options?: any) => {
+            assertEngineUpdateDispatch(data, options);
+            updates.push({ data, options });
+            const row = table.find((r) => r.id === data.id);
+            if (row) Object.assign(row, data);
+            return data;
+        }),
+    };
+    return { engine, table, updates };
+}
+
+describe('backfillActivationLedgerPackages — rows with no package take their one holder (ADR-0150 D8 row R4)', () => {
+    const holders: Record<string, ActivationLedgerHolder> = {
+        'flow:nightly_sync': { kind: 'package', packageId: 'crm' },
+        'sharing_rule:share_open': { kind: 'ambiguous', candidates: ['crm', 'support'] },
+        'permission:env_set': { kind: 'environment' },
+        'action:gone': { kind: 'unheld' },
+        'position:crm_manager': { kind: 'unaddressed' },
+        'action:mark_done': { kind: 'package', packageId: 'other' },
+    };
+    const holderOf = vi.fn((type: string, name: string): ActivationLedgerHolder =>
+        holders[`${type}:${name}`] ?? { kind: 'unheld' });
+    const rows = () => [
+        { id: 'r1', metadata_type: 'flow', name: 'nightly_sync', package_id: null, active: false },
+        { id: 'r2', metadata_type: 'sharing_rule', name: 'share_open', active: false },
+        { id: 'r3', metadata_type: 'permission', name: 'env_set', package_id: null, active: false },
+        { id: 'r4', metadata_type: 'action', name: 'gone', package_id: null, active: true },
+        { id: 'r5', metadata_type: 'position', name: 'crm_manager', package_id: null, active: false },
+        // Already bound: never read as a candidate, even where the resolver
+        // would now answer a different package.
+        { id: 'r6', metadata_type: 'action', name: 'mark_done', package_id: 'crm', active: 0 },
+    ];
+
+    it('binds a single-holder row to its package, writing package_id alone, under the system context', async () => {
+        const { engine, table, updates } = makeLedger(rows());
+        const report = await backfillActivationLedgerPackages(engine, holderOf);
+
+        expect(report.bound).toEqual([{ metadataType: 'flow', name: 'nightly_sync', packageId: 'crm' }]);
+        expect(updates).toHaveLength(1);
+        // `active` is the administrator's choice: the backfill never writes it.
+        expect(updates[0].data).toEqual({ id: 'r1', package_id: 'crm' });
+        expect(updates[0].options?.context?.isSystem).toBe(true);
+        expect(table.find((r) => r.id === 'r1')).toMatchObject({ package_id: 'crm', active: false });
+    });
+
+    it('leaves an ambiguous row as it is and reports EVERY candidate — never a guess', async () => {
+        const { engine, table, updates } = makeLedger(rows());
+        const report = await backfillActivationLedgerPackages(engine, holderOf);
+
+        expect(report.ambiguous).toEqual([
+            { metadataType: 'sharing_rule', name: 'share_open', candidates: ['crm', 'support'] },
+        ]);
+        expect(updates.some((u) => u.data.id === 'r2')).toBe(false);
+        expect(table.find((r) => r.id === 'r2')?.package_id).toBeUndefined();
+    });
+
+    it('leaves the environment\'s own item, an unheld name and an unaddressed type null, saying why', async () => {
+        const { engine, updates } = makeLedger(rows());
+        const report = await backfillActivationLedgerPackages(engine, holderOf);
+
+        expect(report.unchanged).toEqual([
+            { metadataType: 'permission', name: 'env_set', reason: 'environment' },
+            { metadataType: 'action', name: 'gone', reason: 'unheld' },
+            { metadataType: 'position', name: 'crm_manager', reason: 'unaddressed' },
+        ]);
+        expect(updates.map((u) => u.data.id)).toEqual(['r1']);
+    });
+
+    it('never asks about, or moves, a row that already names a package', async () => {
+        holderOf.mockClear();
+        const { engine, updates } = makeLedger(rows());
+        await backfillActivationLedgerPackages(engine, holderOf);
+
+        expect(holderOf).not.toHaveBeenCalledWith('action', 'mark_done');
+        expect(updates.some((u) => u.data.id === 'r6')).toBe(false);
+    });
+
+    it('is re-runnable: the second run over the same ledger binds nothing and writes nothing', async () => {
+        const { engine, updates } = makeLedger(rows());
+        await backfillActivationLedgerPackages(engine, holderOf);
+        const writesAfterFirst = updates.length;
+
+        const second = await backfillActivationLedgerPackages(engine, holderOf);
+
+        expect(writesAfterFirst).toBe(1);
+        expect(updates).toHaveLength(writesAfterFirst);
+        expect(second.bound).toEqual([]);
+        // The ambiguous row is still reported, still with every candidate.
+        expect(second.ambiguous).toEqual([
+            { metadataType: 'sharing_rule', name: 'share_open', candidates: ['crm', 'support'] },
+        ]);
+    });
+
+    it('a dry run reports the same binding and writes nothing', async () => {
+        const { engine, table, updates } = makeLedger(rows());
+        const report = await backfillActivationLedgerPackages(engine, holderOf, { dryRun: true });
+
+        expect(report.bound).toEqual([{ metadataType: 'flow', name: 'nightly_sync', packageId: 'crm' }]);
+        expect(updates).toHaveLength(0);
+        expect(table.find((r) => r.id === 'r1')?.package_id).toBeNull();
+    });
+
+    it('reads the whole ledger once, unscoped, under the system context', async () => {
+        const { engine } = makeLedger(rows());
+        await backfillActivationLedgerPackages(engine, holderOf);
+        expect(engine.find).toHaveBeenCalledTimes(1);
+        expect(engine.find).toHaveBeenCalledWith(METADATA_ACTIVATION_TABLE, expect.objectContaining({
+            where: {},
+            context: expect.objectContaining({ isSystem: true }),
+        }));
     });
 });

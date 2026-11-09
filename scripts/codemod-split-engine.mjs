@@ -1589,6 +1589,17 @@ const TYPES_CYCLE_PARA = [
   ' * evaluation cycle. `index.ts` re-exports nothing from this module.',
 ].join('\n');
 
+/**
+ * A routed facet module's header paragraph on the statics route: what
+ * `ObjectQL` names there. The first pass writes it for a module it routes, and
+ * the fourth pass's R10 (#30020) for one it reroutes.
+ */
+const STATICS_PARA = [
+  ` * \`${CLASS_NAME}\` here is \`${STATICS_NAME}\` (imported AS \`${CLASS_NAME}\`): forwarders to the`,
+  ' * statics the bodies read, private ones included, which the class fills in a',
+  ` * static block; the class as a type is \`${CLASS_TYPE_ALIAS}\`.`,
+].join('\n');
+
 /** Does a facet module import a VALUE from `./engine.js`? */
 const importsEngineValues = (text) => /^import \{[^}]*\} from '\.\/engine\.js';$/m.test(text);
 
@@ -1651,9 +1662,7 @@ function moduleText(moduleFile, title, movers, scope, leafNames, routed = false)
   }
   if (routed) {
     out.push(' *');
-    out.push(` * \`ObjectQL\` here is \`${STATICS_NAME}\` (imported AS \`ObjectQL\`): forwarders to the`);
-    out.push(' * statics the bodies read, private ones included, which the class fills in a');
-    out.push(` * static block; the class as a type is \`${CLASS_TYPE_ALIAS}\`.`);
+    out.push(STATICS_PARA);
   }
   out.push(' *');
   out.push(readsHostValues ? VALUES_CYCLE_PARA : TYPES_CYCLE_PARA);
@@ -4027,9 +4036,9 @@ async function mainHandDocs(tm, argv) {
 // module of its section that the first pass wrote, in class order. That
 // module's header, host interface and import lines grow by what the moved
 // bodies read, and so do the class's statics route and that facet's host
-// factory. Nothing else moves, and the pass never starts a facet, reroutes a
-// module or widens a generated export list: each refuses (exit 2), and is a
-// decision someone writes here.
+// factory. Nothing else moves, and the pass never starts a facet or widens a
+// generated export list: each refuses (exit 2), and is a decision someone
+// writes here. It reroutes a module onto the statics route only by R10 below.
 //
 // The proof (`--members --verify --base REF` re-runs it) undoes the moves from
 // the head, as the first pass's does: each moved body, docblock and `async`
@@ -4079,6 +4088,20 @@ async function mainHandDocs(tm, argv) {
 //    line in the statement's place, which the undo turns back into it. Any
 //    other write to such a field keeps the constructor whole
 //    (`definite-assignment`).
+//
+// One more rule puts a written module on the statics route (#30020 E4):
+//
+//  - R10, the statics route for a written module. A body that reads a
+//    non-public static (`ObjectQL.REFERENCE_PROBE_BATCH`) moving into a module
+//    the first pass wrote off the route takes the route the first pass would
+//    have given it (`rerouteModule`): the one `import type { ObjectQL }` line
+//    becomes the routed pair, the host interface types its members by
+//    `ObjectQLClass`, and the header gains `STATICS_PARA`. A module of any
+//    other shape refuses, and so does one whose code names `ObjectQL` anywhere
+//    else. The undo (`unrouteModule`) is the inverse rewrite, applied to the
+//    head before the moved members come out, due only where the base module
+//    was off the route and a moved member reads a static; a member the module
+//    keeps that reads one fails it.
 //
 // A statement the hand grew on one line past the wrap width (`runStyles`) is
 // kept on one line by the move and by the undo alike.
@@ -4259,6 +4282,138 @@ function staticsRegionOf(text) {
   return { kinds, ahead: { start: a, end: a + t.ahead.length }, block: { start: b, end: b + t.block.length } };
 }
 
+// R10 (#30020 E4), the statics route for a written module. The first pass
+// routes a module when one of its bodies reads a non-public static, and a
+// module it wrote without one carries `import type { ObjectQL }`. A body the
+// fourth pass moves into such a module that reads a non-public static takes
+// the route the first pass would have given the module: the one `./engine.js`
+// line becomes the routed pair (`ObjectQLStatics` AS `ObjectQL`, the class as
+// `ObjectQLClass`), the host interface types its members by `ObjectQLClass`,
+// and the header gains `STATICS_PARA`, so the module is the text the first
+// pass writes for a routed module. The members the module already held name
+// `ObjectQL` nowhere else (a hand edit that does refuses), so they read what
+// they read. The undo is the one inverse rewrite, applied to the head before
+// the moved members are taken out, and is due only when the base module was
+// not routed and a moved member reads a static.
+
+/** Is a facet module on the statics route (`ObjectQLStatics` imported AS `ObjectQL`)? */
+const routesStatics = (text) => new RegExp(`^import \\{[^}]*\\b${STATICS_NAME} as ${CLASS_NAME}\\b[^}]*\\} from '\\./engine\\.js';$`, 'm').test(text);
+
+/** The one `./engine.js` line of a written module off the route, and the pair R10 turns it into. */
+const unroutedEngineImport = () => `import type { ${CLASS_NAME} } from './engine.js';`;
+const routedEngineImports = () => importPair('./engine.js', new Map([
+  [`${STATICS_NAME} as ${CLASS_NAME}`, { value: true }],
+  [`${CLASS_NAME} as ${CLASS_TYPE_ALIAS}`, { value: false }],
+])).join('\n');
+
+/** The identifiers named `name` in a module's code (comments are not code), outside its import declarations and the `skip` regions. */
+function codeIdentifiersNamed(tm, file, text, name, skip = []) {
+  const ts = tm.ts;
+  const sf = parseSourceFile(join(SRC_DIR, file), text);
+  const hits = [];
+  const visit = (node) => {
+    if (ts.isImportDeclaration(node)) return;
+    const at = node.getStart(sf);
+    if (skip.some(([a, b]) => at >= a && node.getEnd() <= b)) return;
+    if (ts.isIdentifier(node) && node.text === name) hits.push(at);
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(sf, visit);
+  return hits;
+}
+
+/**
+ * Does a module's code read a static off `ObjectQL` (`ObjectQL.x`)? Comments
+ * are not code. `members`, when given, narrows the reading to the facet
+ * class's members of those names.
+ */
+function readsClassStatic(tm, file, text, members = null) {
+  const ts = tm.ts;
+  const sf = parseSourceFile(join(SRC_DIR, file), text);
+  const facet = facetNameOf(file);
+  let found = false;
+  const visit = (node) => {
+    if (found) return;
+    if (members && ts.isClassElement(node) && ts.isClassDeclaration(node.parent) && node.parent.name?.text === facet &&
+      !(node.name && ts.isIdentifier(node.name) && members.includes(node.name.text))) return;
+    if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === CLASS_NAME) { found = true; return; }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(sf, (node) => {
+    // Narrowed to members, only the facet class is read.
+    if (members && !(ts.isClassDeclaration(node) && node.name?.text === facet)) return;
+    visit(node);
+  });
+  return found;
+}
+
+/** The header's statics paragraph, in the place the first pass writes it: between the host paragraph and the import paragraph. */
+const staticsParaAt = (text) => {
+  const cycle = text.includes(VALUES_CYCLE_PARA) ? VALUES_CYCLE_PARA : TYPES_CYCLE_PARA;
+  return { routed: `\n *\n${STATICS_PARA}\n *\n${cycle}`, plain: `\n *\n${cycle}` };
+};
+
+/**
+ * R10's rewrite: a written module off the statics route, put on it. Refuses
+ * (exit 2) any module that is not exactly the first pass's unrouted shape for
+ * it: on the route already, a `./engine.js` import other than the one
+ * type-only `ObjectQL`, no host interface, a header without one import
+ * paragraph, or `ObjectQL` / `ObjectQLClass` named anywhere else in its code.
+ */
+function rerouteModule(tm, file, text) {
+  if (routesStatics(text)) refuse(`${file}: already on the statics route`);
+  const engineDecls = importDeclsOf(tm, file, text).filter((d) => d.specifier === './engine.js');
+  if (engineDecls.length !== 1 || text.slice(engineDecls[0].start, engineDecls[0].end) !== unroutedEngineImport()) {
+    refuse(`${file}: its \`./engine.js\` import is not the one \`${unroutedEngineImport()}\` a module off the statics route carries: this pass reroutes only that shape`);
+  }
+  const iface = interfaceRegionOf(text, hostNameOf(file));
+  if (!iface || iface.classType !== CLASS_NAME) refuse(`${file}: it has no host interface typed by \`${CLASS_NAME}\`: this pass reroutes a module with a host only`);
+  const others = codeIdentifiersNamed(tm, file, text, CLASS_NAME, [[iface.start, iface.end]]);
+  if (others.length > 0) refuse(`${file}: its code names \`${CLASS_NAME}\` outside its import and its host interface (static-route-conflict: the route makes that name the statics)`);
+  if (codeIdentifiersNamed(tm, file, text, CLASS_TYPE_ALIAS).length > 0 || text.includes(`as ${CLASS_TYPE_ALIAS}`)) {
+    refuse(`${file}: it names \`${CLASS_TYPE_ALIAS}\`, the name the statics route gives the class`);
+  }
+  const para = staticsParaAt(text);
+  if (text.includes(STATICS_PARA) || text.indexOf(para.plain) < 0 || text.indexOf(para.plain) !== text.lastIndexOf(para.plain)) {
+    refuse(`${file}: its header carries no single import paragraph as the first pass writes one`);
+  }
+  const ifaceText = text.slice(iface.start, iface.end)
+    .replace(new RegExp(`: ${CLASS_NAME}\\['`, 'g'), `: ${CLASS_TYPE_ALIAS}['`)
+    .replace(`readonly ${FACADE_MEMBER}: ${CLASS_NAME};`, `readonly ${FACADE_MEMBER}: ${CLASS_TYPE_ALIAS};`);
+  const out = applyOrderedEdits(text, [
+    { start: engineDecls[0].start, end: engineDecls[0].end, text: routedEngineImports() },
+    { start: iface.start, end: iface.end, text: ifaceText },
+  ]);
+  return withCyclePara(out.replace(para.plain, para.routed), file);
+}
+
+/**
+ * R10's undo: a module the fourth pass put on the statics route, taken off
+ * it, from its head text alone (its moved members still in it). Checks the
+ * shape on the way (`fail`): exactly the routed pair from `./engine.js`, the
+ * statics paragraph once, in its place, and `ObjectQLClass` named only by the
+ * host interface. Returns the text, or null after a failure.
+ */
+function unrouteModule(tm, file, text, fail) {
+  const engineDecls = importDeclsOf(tm, file, text).filter((d) => d.specifier === './engine.js');
+  const span = engineDecls.length > 0 ? text.slice(engineDecls[0].start, engineDecls.at(-1).end) : '';
+  if (engineDecls.length !== 2 || span !== routedEngineImports()) { fail(`${file}: its \`./engine.js\` lines are not the statics route's pair as R10 writes it`); return null; }
+  const iface = interfaceRegionOf(text, hostNameOf(file));
+  if (!iface || iface.classType !== CLASS_TYPE_ALIAS) { fail(`${file}: its host interface is not typed by \`${CLASS_TYPE_ALIAS}\``); return null; }
+  if (codeIdentifiersNamed(tm, file, text, CLASS_TYPE_ALIAS, [[iface.start, iface.end]]).length > 0) { fail(`${file}: its code names \`${CLASS_TYPE_ALIAS}\` outside its host interface`); return null; }
+  const para = staticsParaAt(text);
+  const at = text.indexOf(para.routed);
+  if (at < 0 || text.indexOf(STATICS_PARA) !== text.lastIndexOf(STATICS_PARA)) { fail(`${file}: its header does not carry the statics paragraph once, in its place`); return null; }
+  const ifaceText = text.slice(iface.start, iface.end)
+    .replace(new RegExp(`: ${CLASS_TYPE_ALIAS}\\['`, 'g'), `: ${CLASS_NAME}['`)
+    .replace(`readonly ${FACADE_MEMBER}: ${CLASS_TYPE_ALIAS};`, `readonly ${FACADE_MEMBER}: ${CLASS_NAME};`);
+  return applyOrderedEdits(text, [
+    { start: engineDecls[0].start, end: engineDecls.at(-1).end, text: unroutedEngineImport() },
+    { start: iface.start, end: iface.end, text: ifaceText },
+    { start: at, end: at + para.routed.length, text: para.plain },
+  ]);
+}
+
 /** The facet class of a module and its members' texts, each from its line start; null unless they are joined by one blank line. */
 function facetMembersOf(tm, moduleFile, text) {
   const sf = parse(tm, join(SRC_DIR, moduleFile), text);
@@ -4393,10 +4548,19 @@ function planMembers(tm, text, moduleTexts, names, { anchors = SECTION_ANCHORS, 
   records.sort((a, b) => a.node.getStart() - b.node.getStart());
   const modules = new Map();
   for (const r of records) modules.set(r.module, [...(modules.get(r.module) ?? []), r]);
+  const reroutes = new Set();
   for (const [file, movers] of modules) {
     const mod = moduleTexts.get(file);
     if (mod == null || !mod.includes(MARK)) refuse(`${file} is not on disk as the first pass wrote it: this pass adds to a written facet, never starts one`);
-    const routed = new RegExp(`^import \\{[^}]*\\b${STATICS_NAME} as ${CLASS_NAME}\\b[^}]*\\} from '\\./engine\\.js';$`, 'm').test(mod);
+    // R10 (#30020 E4): a mover that reads a non-public static puts a module
+    // off the route on it, as the first pass routes a module for one; the
+    // rewrite refuses any module that is not the first pass's unrouted shape.
+    let routed = routesStatics(mod);
+    if (!routed && movers.some((r) => r.readsNonPublicStatic)) {
+      rerouteModule(tm, file, mod);
+      reroutes.add(file);
+      routed = true;
+    }
     const hasHost = interfaceRegionOf(mod, hostNameOf(file)) !== null;
     const typeImportsClass = new RegExp(`^import type \\{[^}]*\\b${CLASS_NAME}\\b[^}]*\\} from '\\./engine\\.js';$`, 'm').test(mod);
     for (const r of movers) {
@@ -4409,7 +4573,8 @@ function planMembers(tm, text, moduleTexts, names, { anchors = SECTION_ANCHORS, 
       if (r.host.size > 0 && r.node.getParameters().some((p) => p.getName() === hostVarOf(file))) {
         refuse(`${r.name}: a parameter is named ${hostVarOf(file)}, which its stub reads as the facet's host`);
       }
-      if (r.classStatics.size > 0 && !routed) refuse(`${r.name} reads statics of ${CLASS_NAME}, and ${file} does not take the statics route: this pass does not reroute a module`);
+      if (r.classStatics.size > 0 && !routed) refuse(`${r.name} reads statics of ${CLASS_NAME}, none of them non-public, and ${file} does not take the statics route: this pass reroutes a module only for a body that reads a non-public static (R10)`);
+      if (routed && (r.imports.has(CLASS_TYPE_ALIAS) || r.moduleRefs.has(CLASS_TYPE_ALIAS))) refuse(`${file}: ${r.name} reads ${CLASS_TYPE_ALIAS}, a name the statics route generates in that module`);
       if (routed) {
         const blockers = [...r.routeBlockers, ...(r.classOther ? ['static-route-conflict'] : [])];
         if (blockers.length > 0) refuse(`${r.name} stays on the class, as the first pass would keep it in a routed module: ${blockers.join('; ')}`);
@@ -4430,7 +4595,7 @@ function planMembers(tm, text, moduleTexts, names, { anchors = SECTION_ANCHORS, 
       }
     }
   }
-  return { ctx, records, modules };
+  return { ctx, records, modules, reroutes };
 }
 
 /** Apply a `planMembers` plan. Returns `{ host, modules, pruned }` (`modules`: the receiving modules' new texts). Pure. */
@@ -4485,7 +4650,8 @@ function generateMembers(tm, text, moduleTexts, planned) {
 
   const moduleOut = new Map();
   for (const [file, movers] of modules) {
-    const mod = moduleTexts.get(file);
+    // R10: a module this plan reroutes is put on the statics route first, and grows from there.
+    const mod = planned.reroutes?.has(file) ? rerouteModule(tm, file, moduleTexts.get(file)) : moduleTexts.get(file);
     const title = movers[0].section;
     const modEdits = [];
     // The members, in class order among the ones the module holds.
@@ -4675,7 +4841,17 @@ function importEditsOf(tm, file, baseText, headText, movedText, fail) {
  * interface is the union of the `Pick`s, and no import binding is unread.
  * Returns the text, or null when the head is not a module this pass can read.
  */
-function undoMembersModule(tm, file, text, names, title, fail, baseText) {
+function undoMembersModule(tm, file, headText, names, title, fail, baseText) {
+  if (importsEngineValues(headText) !== headText.includes(VALUES_CYCLE_PARA)) fail(`${file}: its header's import paragraph does not say what its \`./engine.js\` lines import`);
+  // R10's undo first: a module its base held off the statics route comes off
+  // it, its moved members still in it, when one of them reads a static.
+  let text = headText;
+  if (!routesStatics(headText) && readsClassStatic(tm, file, headText, names)) fail(`${file}: a member this pass moved reads a static, and the module is off the statics route (R10)`);
+  if (routesStatics(headText) && !routesStatics(baseText)) {
+    if (!readsClassStatic(tm, file, headText, names)) fail(`${file}: on the statics route at head and off it at base, and no member this pass moved reads a static (R10)`);
+    text = unrouteModule(tm, file, headText, fail);
+    if (text === null) return null;
+  }
   const facet = facetMembersOf(tm, file, text);
   const header = headerNamesOf(text, title);
   if (!facet || !header) { fail(`${file}: not a facet module as the first pass writes one`); return null; }
@@ -4698,8 +4874,9 @@ function undoMembersModule(tm, file, text, names, title, fail, baseText) {
     const kept = union(keep);
     edits.push({ start: iface.start, end: iface.end, text: [...iface.members].filter(([k]) => kept.has(k)).map(([, v]) => v.line).join('\n') });
   }
-  if (importsEngineValues(text) !== text.includes(VALUES_CYCLE_PARA)) fail(`${file}: its header's import paragraph does not say what its \`./engine.js\` lines import`);
-  return withCyclePara(pruneModuleImports(tm, file, applyOrderedEdits(text, edits), inverse), file);
+  const undone = applyOrderedEdits(text, edits);
+  if (text !== headText && readsClassStatic(tm, file, undone)) fail(`${file}: R10 took it off the statics route, and a member it keeps reads a static`);
+  return withCyclePara(pruneModuleImports(tm, file, undone, inverse), file);
 }
 
 /** The statics `ObjectQL.x` each routed module's text reads. */
@@ -5494,6 +5671,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'identity port, computed keys and exported names (fourth pass, #30020)': 23,
   'hand-series host slots (fifth pass, #30020)': 17,
   'constructor and definite-assignment wiring (fourth pass, #30020 R8)': 17,
+  'statics route for a written module (fourth pass, #30020 R10)': 18,
   'scoped members, instance identity port and symbol keys (second pass, #30020 S1)': 25,
 });
 const SELF_TEST_BATTERY_FLOOR = 5;
@@ -5907,7 +6085,7 @@ const IDENTITY_FIXTURE_ANCHORS = Object.freeze([
   ['seed', 'Identity', 'engine-identity.ts'],
   ['keptSection', 'Kept', null],
 ]);
-function identityFixtureSource({ facadeField = false } = {}) {
+function identityFixtureSource({ facadeField = false, staticReader = false } = {}) {
   const pad = Array.from({ length: 12 }, (_, i) => `    const p${i} = ${i};`).join('\n');
   const extra = `
   protected seed(): number {
@@ -5955,7 +6133,14 @@ ${pad}
 ${pad}
     return this.facade;
   }
-`;
+${staticReader ? `
+  /** Reads a private static (R10) and hands the engine on (R1). */
+  protected staticReader(n: number): number {
+${pad}
+    const self = (this as any)._flag ? this : null;
+    return n + ObjectQL.SECRET + this.count + (self ? 1 : 0);
+  }
+` : ''}`;
   const source = `${fixtureSource(extra)}
 export class Scoped {
   constructor(readonly n: number, readonly q: ObjectQL) {}
@@ -6574,6 +6759,84 @@ async function selfTest() {
       check('a statement in neither form reads as null, so the pass refuses the run rather than rewrap it',
         runStyles(neither, importDeclsOf(tm, 'engine-identity.ts', neither), leaf) === null);
     }
+  }
+
+  open('statics route for a written module (fourth pass, #30020 R10)');
+  {
+    const opts = { anchors: IDENTITY_FIXTURE_ANCHORS, pins: FIXTURE_PINS, needles: FIXTURE_NEEDLES, classNeedles: FIXTURE_CLASS_NEEDLES };
+    const source = identityFixtureSource({ staticReader: true });
+    const split = generate(tm, source, plan(tm, source, opts));
+    const input = split.host;
+    const mods = split.modules;
+    const baseIdm = mods.get('engine-identity.ts') ?? '';
+    const routedLife = mods.get('engine-lifecycle.ts') ?? '';
+    check('the first pass keeps the static reader on the class (bare-this) and writes its section\'s module off the statics route',
+      input.includes('  protected staticReader(n: number): number {\n    const p0') && baseIdm.includes('static seed(') &&
+      !routesStatics(baseIdm) && baseIdm.includes(`\n${unroutedEngineImport()}\n`) && routesStatics(routedLife));
+    const planned = planMembers(tm, input, mods, ['staticReader'], opts);
+    check('the plan reroutes that module for a mover that reads a non-public static',
+      [...planned.reroutes].join() === 'engine-identity.ts' && planned.records.map((r) => r.name).join() === 'staticReader');
+    const out = generateMembers(tm, input, mods, planned);
+    const again = generateMembers(tm, input, mods, planMembers(tm, input, mods, ['staticReader'], opts));
+    const head = new Map([...mods, ...out.modules]);
+    const v = verifyMembers(tm, input, out.host, mods, head, opts);
+    check('the generated move proves against its base', v.failures.length === 0 && v.moved.join() === 'staticReader', v.failures.join(' | '));
+    check('two runs on one input write byte-identical trees',
+      treeHash(new Map([['h', out.host], ...out.modules])) === treeHash(new Map([['h', again.host], ...again.modules])));
+    const idm = out.modules.get('engine-identity.ts') ?? '';
+    const engineLines = (t) => importDeclsOf(tm, 'x.ts', t).filter((d) => d.specifier === './engine.js').map((d) => t.slice(d.start, d.end)).join('\n');
+    check('the `./engine.js` line becomes the routed pair, exactly as the first pass writes it for a module it routes',
+      engineLines(idm) === routedEngineImports() && !idm.includes(unroutedEngineImport()) &&
+      engineLines(routedLife).includes("import { ObjectQLStatics as ObjectQL, ") && engineLines(routedLife).endsWith("\nimport type { ObjectQL as ObjectQLClass } from './engine.js';"), engineLines(idm));
+    check('the host interface types every member by the class alias, the identity port too',
+      idm.includes("  readonly count: ObjectQLClass['count'];") && idm.includes(`${FACADE_DOC}\n  readonly facade: ObjectQLClass;`) &&
+      !/: ObjectQL\[/.test(idm) && !idm.includes('facade: ObjectQL;'));
+    check('the header gains the statics paragraph between the host paragraph and the import paragraph, which now says values',
+      idm.includes(`\n *\n${STATICS_PARA}\n *\n${VALUES_CYCLE_PARA}\n */`) && routedLife.includes(`\n *\n${STATICS_PARA}\n *\n`) &&
+      baseIdm.includes(`\n *\n${TYPES_CYCLE_PARA}\n */`) && !baseIdm.includes(STATICS_PARA));
+    check('the moved body reads `ObjectQL.SECRET` unedited, through the forwarder the route already carries',
+      idm.includes('    return n + ObjectQL.SECRET + this.count + (self ? 1 : 0);') && out.host === pruneHostImports(tm, out.host, usedImportNames(tm, out.host)).text &&
+      out.host.includes("  readonly SECRET: (typeof ObjectQL)['SECRET'];"));
+    {
+      // The move without R10's rewrite: the body reads `ObjectQL.SECRET` through a type-only import.
+      const offRoute = generateMembers(tm, input, mods, { ...planned, reroutes: new Set() });
+      const ov = verifyMembers(tm, input, offRoute.host, mods, new Map([...mods, ...offRoute.modules]), opts);
+      check('a moved member that reads a static in a module left off the route fails',
+        !routesStatics(offRoute.modules.get('engine-identity.ts') ?? '') && ov.failures.some((f) => f.includes('off the statics route')), ov.failures.join(' | '));
+    }
+    check('the rewrite and its undo are inverses on the base module',
+      withCyclePara(unrouteModule(tm, 'engine-identity.ts', rerouteModule(tm, 'engine-identity.ts', baseIdm), () => {}) ?? '', 'engine-identity.ts') === baseIdm);
+    // A negative control whose edit changed nothing would pass for the wrong reason: it fails the case instead.
+    const fails = (edited, re = null) => {
+      if (edited.every(([f, t]) => t === head.get(f))) return false;
+      const fs = verifyMembers(tm, input, out.host, mods, new Map([...head, ...edited]), opts).failures;
+      return fs.length > 0 && (!re || fs.some((f) => re.test(f)));
+    };
+    check('a head without the statics paragraph fails', fails([['engine-identity.ts', idm.replace(`\n *\n${STATICS_PARA}`, '')]], /statics paragraph/));
+    check('a head whose `./engine.js` lines are not the routed pair fails',
+      fails([['engine-identity.ts', idm.replace(`import type { ObjectQL as ObjectQLClass } from './engine.js';`, `import type { ObjectQL as ObjectQLClass, Scoped } from './engine.js';`)]], /routed pair|statics route's pair/));
+    check('a host interface member left typed by the class itself fails',
+      fails([['engine-identity.ts', idm.replace("  readonly count: ObjectQLClass['count'];", "  readonly count: ObjectQL['count'];")]]));
+    {
+      // A module put on the route though no moved member reads a static: the undo refuses it.
+      const plain = generateMembers(tm, input, mods, planMembers(tm, input, mods, ['computed'], opts));
+      const plainIdm = plain.modules.get('engine-identity.ts') ?? '';
+      const forced = rerouteModule(tm, 'engine-identity.ts', plainIdm);
+      const pv = verifyMembers(tm, input, plain.host, mods, new Map([...mods, ...plain.modules, ['engine-identity.ts', forced]]), opts);
+      check('a module rerouted though no member the pass moved reads a static fails',
+        !routesStatics(plainIdm) && routesStatics(forced) && pv.failures.some((f) => f.includes('no member this pass moved reads a static')), pv.failures.join(' | '));
+    }
+    check('a module whose code names `ObjectQL` outside its import and host interface refuses the route (static-route-conflict)',
+      /static-route-conflict/.test(refusalOf(() => planMembers(tm, input, new Map([...mods, ['engine-identity.ts', baseIdm.replace('    return this.count;', '    return this.count as ObjectQL[\'count\'];')]]), ['staticReader'], opts))));
+    check('R4 into a module this pass reroutes refuses, as it does for a routed one',
+      /takes the statics route/.test(refusalOf(() => planMembers(tm, input, mods, ['identity', 'staticReader'], opts))));
+    {
+      const r4 = generateMembers(tm, input, mods, planMembers(tm, input, mods, ['identity'], opts));
+      const r4Mods = new Map([...mods, ...r4.modules]);
+      check('a module whose `./engine.js` import is not the one type-only line refuses the route',
+        /not the one/.test(refusalOf(() => planMembers(tm, r4.host, r4Mods, ['staticReader'], opts))));
+    }
+    check('a module already on the route is not rerouted', refused(() => rerouteModule(tm, 'engine-lifecycle.ts', routedLife)));
   }
 
   open('constructor and definite-assignment wiring (fourth pass, #30020 R8)');
