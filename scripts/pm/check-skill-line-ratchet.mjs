@@ -1699,6 +1699,15 @@ export const CEILINGS = new Map([
   // row moves; set at the landed line count (headroom 0, same convention as
   // every lane charter above).
   ['.claude/skills/pm-dispatch/references/lanes/qa.md', 29],
+  // AI eval seat charter (`eval#N`): the standing seat that runs the AI
+  // regressions (scenario cards over MCP, the in-product Q&A baseline, the
+  // hosted chat eval set, the five AI write gates) on the maintainer's
+  // Routines cadence; it dispatches no dev and changes no product code.
+  // Ruling of record: comment 6721331178, the maintainer's 「同意开 AI 评测 车道」
+  // transcribed verbatim, whose workload names `references/lanes/eval.md`. A
+  // NEW file, so this is an added row and no other row moves; set at the
+  // landed line count (headroom 0, same convention as every lane charter above).
+  ['.claude/skills/pm-dispatch/references/lanes/eval.md', 45],
   // 399 → 405 (#11126): maintainer-ruled (2026-08-23, option B, quoted in that
   // PR) — the +6-line cross-repo dispatch-gates caveat, sized so the queued
   // #11137 (395→399 on main) and this PR's +6 compose to exactly 405.
@@ -2508,6 +2517,7 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/lanes/triage.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/review.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/qa.md', 0],
+  ['.claude/skills/pm-dispatch/references/lanes/eval.md', 0],
   ['.claude/agents/os-dev.md', 0],
   ['.claude/skills/checklist-test/SKILL.md', 221],
   ['.claude/skills/checklist-author/SKILL.md', 0],
