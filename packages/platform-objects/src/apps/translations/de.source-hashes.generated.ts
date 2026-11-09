@@ -174,4 +174,5 @@ export const deGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_team.pluralLabel": "3fe8519872f65108",
   "objects.sys_team_member.fields.team_id.label": "42b87165ac826b2b",
   "objects.sys_user.fields.name.label": "5274417ff1ccaf01",
+  "objects.sys_user.fields.principal_kind.options.human": "ed18d3469e10aef2",
 };

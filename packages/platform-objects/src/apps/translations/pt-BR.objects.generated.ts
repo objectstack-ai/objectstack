@@ -88,6 +88,18 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         label: "Acesso à IA",
         help: "Indica se este usuário ocupa uma licença de IA. A licença concede a capacidade `ai_seat`, que abre os assistentes de IA no app (criar e perguntar). Quantos usuários podem ter uma é limitado pelas licenças incluídas no seu plano."
       },
+      principal_kind: {
+        label: "Tipo de principal",
+        help: "Indica se este usuário é uma pessoa ou uma conta de serviço de IA. Uma conta de serviço de IA nunca entra no sistema e age apenas por meio das próprias chaves de API. Definido na criação do usuário; nunca muda.",
+        options: {
+          human: "Pessoa",
+          agent: "Conta de serviço de IA"
+        }
+      },
+      accountable_user_id: {
+        label: "Responsável",
+        help: "Para uma conta de serviço de IA, a pessoa responsável por ela. Vazio para uma pessoa. As permissões do próprio responsável nunca passam para a conta."
+      },
       image: {
         label: "Foto do perfil"
       },
