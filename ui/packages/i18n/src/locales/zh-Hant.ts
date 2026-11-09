@@ -4283,6 +4283,7 @@ const zhHant = {
     tabAll: '全部',
     statusPending: '待審批',
     statusApproved: '已通過',
+    statusHeld: '審批中',
     statusExecuted: '已執行',
     statusFailed: '失敗',
     statusRejected: '已拒絕',
