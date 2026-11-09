@@ -39,7 +39,8 @@
 //      and of a matched row;
 //  (f) parity: every input a write-side `evaluateValidationRules` call passes
 //      is passed by the preview's call too (read from the source itself: the
-//      writes in `engine.ts`, the preview in `engine-validate.ts`).
+//      writes in `engine.ts` and `engine-insert.ts`, the preview in
+//      `engine-validate.ts`).
 //
 // (a), (b) and (e) were red before the fix.
 //
@@ -520,7 +521,9 @@ describe('#22474 (e) — the import dry run of a detail row, through the protoco
 // enclosing class method or function: the one in `validate` is the preview,
 // every other is a write. [#25522 cut 16] The preview's body moved out of
 // `engine.ts` into `engine-validate.ts` (the function `validate`), so both
-// files are read; the writes stay in `engine.ts`. A call's inputs are the keys of its options object literal,
+// files are read; the writes stay in `engine.ts`. [#30020 E5] The body of
+// `insert` moved into `engine-insert.ts` (the facet method `insert`), so its
+// write calls are read there. A call's inputs are the keys of its options object literal,
 // including the keys of an object literal spread into it (`...(c ? { k } : {})`).
 // An options argument this reader cannot see into is a failure, never a pass.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -560,7 +563,7 @@ function ruleCallsIn(file: string, source: string): RuleCall[] {
 }
 
 describe('#22474 (f) — parity: the preview passes every input a write passes', () => {
-  const calls = ['engine.ts', 'engine-validate.ts']
+  const calls = ['engine.ts', 'engine-insert.ts', 'engine-validate.ts']
     .flatMap((file) => ruleCallsIn(file, readFileSync(new URL(`./${file}`, import.meta.url), 'utf8')));
   const previews = calls.filter((c) => c.method === 'validate');
   const writes = calls.filter((c) => c.method !== 'validate');
