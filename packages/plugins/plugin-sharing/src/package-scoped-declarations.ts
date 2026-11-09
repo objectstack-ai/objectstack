@@ -42,9 +42,12 @@
  * the package's own item, else the unique holder in its declared dependency
  * closure plus `sys`, else a refusal naming every candidate. That answer is
  * final: one listed holder is no shortcut there, since the one item listed
- * may be outside the package's reach. The population still bounds it: a
- * resolved item the listing would hide (its package is disabled) serves
- * nothing, as an unlisted name serves nothing.
+ * may be outside the package's reach. The population still bounds it: the
+ * resolver is asked over {@link listedHoldersView}, which leaves out a holder
+ * the listing hides (its package is disabled). So a package whose one
+ * reachable holder is disabled gets the resolver's own refusal, naming every
+ * holder the listing still serves as outside its closure, never that hidden
+ * holder's item and never silence.
  *
  * A registry that cannot answer `(package, name)` — one with no
  * package-scoped slice (`packageScopedHoldersOf` and its two readers), such
@@ -131,12 +134,24 @@ function callerPackageOf(callerPackageId: string | null | undefined): string | n
   return typeof callerPackageId === 'string' && callerPackageId !== '' ? callerPackageId : null;
 }
 
-/** Does the listing hide `item` — is its package disabled (the filter `listItems` applies)? */
-function hiddenByListing(registry: unknown, item: unknown): boolean {
-  const isDisabled = (registry as { isPackageDisabled?: (id?: string) => boolean } | null | undefined)?.isPackageDisabled;
-  if (typeof isDisabled !== 'function') return false;
-  const owner = (item as { _packageId?: unknown } | null | undefined)?._packageId;
-  return isDisabled.call(registry, typeof owner === 'string' ? owner : undefined);
+/**
+ * `registry` as the listing sees it: a package the listing hides (disabled,
+ * the filter `listItems` applies) holds nothing. Every other member reads
+ * through unchanged. ⛔ Not a resolver: it only narrows the holders the one
+ * resolver is asked about, so its steps and refusals stay objectql's. A
+ * registry that cannot say whether a package is disabled is read as is.
+ */
+export function listedHoldersView(registry: PackageScopedRegistry): PackageScopedRegistry {
+  const isDisabled = (registry as { isPackageDisabled?: (id?: string) => boolean }).isPackageDisabled;
+  if (typeof isDisabled !== 'function') return registry;
+  return {
+    getPackage: (id) => registry.getPackage(id),
+    getAllPackages: () => registry.getAllPackages(),
+    packageScopedHoldersOf: (type, name) =>
+      registry.packageScopedHoldersOf(type, name).filter((id) => !isDisabled.call(registry, id)),
+    getPackageScopedItem: (type, name, packageId, member) => registry.getPackageScopedItem(type, name, packageId, member),
+    getEnvironmentScopedItem: (type, name, member) => registry.getEnvironmentScopedItem(type, name, member),
+  } as PackageScopedRegistry;
 }
 
 /**
@@ -158,9 +173,9 @@ export function resolveDeclaredName<T>(
   if (matches.length === 0) return { status: 'not-found' };
   const caller = callerPackageOf(callerPackageId);
   if (caller !== null && isPackageScopedRegistry(registry)) {
-    const fromPackage = resolvePackageScopedName<T>(registry, { type, name, callerPackageId: caller });
+    const fromPackage = resolvePackageScopedName<T>(listedHoldersView(registry), { type, name, callerPackageId: caller });
     if (fromPackage.status === 'refused') return { status: 'refused', refusal: fromPackage };
-    if (fromPackage.status === 'not-found' || hiddenByListing(registry, fromPackage.item)) return { status: 'not-found' };
+    if (fromPackage.status === 'not-found') return { status: 'not-found' };
     return { status: 'resolved', item: fromPackage.item };
   }
   const holders = [...new Set(matches.map(declaredPackageIdOf))];

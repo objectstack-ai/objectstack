@@ -56,6 +56,7 @@ import { resolvePackageScopedName, type PackageScopedRefusal } from '@objectstac
 import {
   PackageScopedNameRefusedError,
   isPackageScopedRegistry,
+  listedHoldersView,
   reportRefusedDeclaration,
 } from './package-scoped-declarations.js';
 import { listShareableObjects, type ShareableObject, type ShareableObjectsEngine } from './shareable-objects.js';
@@ -2335,7 +2336,11 @@ export class SharingRuleService implements ISharingRuleService {
     if (!isPackageScopedRegistry(registry)) return null;
     const declared = await this.declaredRuleNamed(rule.name);
     if (!declared?.packageId) return null;
-    const resolution = resolvePackageScopedName(registry, {
+    // Over the holders the listing serves: a disabled package holds nothing
+    // here, so P whose one reachable holder is disabled is refused, naming
+    // every holder still served as outside its closure (never served the
+    // disabled one, never an unrelated one).
+    const resolution = resolvePackageScopedName(listedHoldersView(registry), {
       type: 'queue',
       name: rule.recipient_id,
       callerPackageId: declared.packageId,

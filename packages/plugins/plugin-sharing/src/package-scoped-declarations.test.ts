@@ -488,12 +488,47 @@ describe('a queue read from a caller package resolves by D3 (ADR-0150, the queue
     }
   });
 
-  it('serves nothing when the holder the caller reaches is disabled, never the unrelated package’s queue', async () => {
+  it('refuses when the holder the caller reaches is disabled, naming the unrelated holder as outside the closure — never serving it, never silent', async () => {
     dependencyAndUnrelated();
     registry.disablePackage(BETA);
-    const { queues } = queueService();
+    const { warnings, logger } = logs();
+    const engine = makeEngine(tables());
+    const queues = new OwnershipQueueService({ engine: () => engine as any, logger });
+    const outsideClosure = {
+      reason: 'outside-closure',
+      callerPackageId: ALPHA,
+      candidates: [{ kind: 'package', packageId: GAMMA }],
+    };
     expect(await queues.resolveQueue('support', 'org_a', { callerPackageId: ALPHA })).toBeNull();
-    expect(await queues.expandMembers('support', 'org_a', { callerPackageId: ALPHA, onFailedRead: 'refuse' })).toEqual([]);
+    expect(await queues.expandMembers('support', 'org_a', { callerPackageId: ALPHA })).toEqual([]);
+    const refused = await queues.expandMembers('support', 'org_a', { callerPackageId: ALPHA, onFailedRead: 'refuse' }).catch((e: unknown) => e);
+    expect(refused).toBeInstanceOf(PackageScopedNameRefusedError);
+    expect(refused).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+    expect((refused as PackageScopedNameRefusedError).refusal).toMatchObject(outsideClosure);
+    // Reported, not silent: once, naming the unrelated holder.
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].meta).toMatchObject({ type: 'queue', name: 'support', reason: 'outside-closure', candidates: [GAMMA] });
+
+    // The declared rule's recipient: the rule service's own check refuses first
+    // (it guards a queue service written before the key), naming the same holder.
+    const rule = declaredQueueRule();
+    const ruleLogs = logs();
+    const service = new SharingRuleService({
+      engine: makeEngine({
+        ...tables(),
+        sys_record_share: [{ id: 'rs_1', source: 'rule', source_id: 'share_support', organization_id: 'org_a', recipient_id: 'u_gamma' }],
+      }) as any,
+      sharing: {} as any,
+      declaredRules: createDeclaredSharingRuleSource({ engine: { registry } }),
+      ownershipQueues: () => queues,
+      logger: { warn: ruleLogs.logger.warn, error: () => {} },
+    });
+    const ruleRefused = await service.revokeRuleGrantsForRetiredRecipients(rule).catch((e: unknown) => e);
+    expect(ruleRefused).toBeInstanceOf(PackageScopedNameRefusedError);
+    expect((ruleRefused as PackageScopedNameRefusedError).refusal).toMatchObject(outsideClosure);
+    expect(ruleLogs.warnings.map((w) => w.meta)).toContainEqual(
+      expect.objectContaining({ type: 'queue', name: 'support', reason: 'outside-closure', candidates: [GAMMA] }),
+    );
   });
 
   it('looks through every holder’s positions, so a position move in the dependency’s queue reaches the rule', async () => {
