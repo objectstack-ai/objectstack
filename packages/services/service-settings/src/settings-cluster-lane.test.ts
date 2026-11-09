@@ -290,6 +290,15 @@ describe('[#31597] CONTROL: no declared multi-replica deployment over redis, sin
     expect(b.events).toEqual([]);
   });
 
+  it('resync on a service with no transport attached announces nothing', async () => {
+    const lone = new SettingsService({ env: {} });
+    lone.registerManifest(authSettingsManifest);
+    const seen: SettingsChangeEvent[] = [];
+    lone.subscribe(undefined, (e) => seen.push(e));
+    await lone.resyncSettingsChangePubSub();
+    expect(seen).toEqual([]);
+  });
+
   it('a malformed or own-origin message is ignored', async () => {
     const { b, shared } = track(await bootPair());
     const raw = (payload: unknown) =>
