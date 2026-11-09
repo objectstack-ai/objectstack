@@ -459,7 +459,8 @@ describe('defineStack: a roll-up through that master_detail declares the parent\
     const total = (salesOrder({ currencyConfig: undefined }).fields as Record<string, unknown>).total;
     expect(() => defineStack({
       manifest: stackManifest, objects: [region, orderLine()],
-      objectExtensions: [{ extend: 'sales_order', fields: { total } }],
+      // The extension carries the code field too, so only the extension-only skip keeps the roll-up unjudged.
+      objectExtensions: [{ extend: 'sales_order', fields: { currency_code: CODE_FIELD, total } }],
     } as Parameters<typeof defineStack>[0])).not.toThrow();
   });
 
