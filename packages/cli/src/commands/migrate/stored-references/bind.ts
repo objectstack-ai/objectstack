@@ -43,8 +43,9 @@ async function confirm(question: string): Promise<boolean> {
  * composes the audit plugin, so each bind leaves one `sys_audit_log` row (the
  * column's old and new value). Confirmed with `[y/N]` or `--yes`.
  *
- * Exit status: 0 when the row was bound; 1 when the bind was refused, not
- * confirmed, or the composition could not be read.
+ * Exit status: 0 when the row was bound, or the prompt was declined (as its
+ * siblings, a decline keeps its code); 1 when the bind was refused, was run
+ * non-interactively without `--yes`, or the composition could not be read.
  */
 export default class MigrateStoredReferencesBind extends Command {
   static override description =
@@ -91,7 +92,6 @@ export default class MigrateStoredReferencesBind extends Command {
       const ok = await confirm(chalk.bold(`\nBind ${flags.table} "${flags.id}" to package "${flags.package}"? [y/N] `));
       if (!ok) {
         printInfo('Aborted — nothing written.');
-        this.exit(1);
         return;
       }
     }

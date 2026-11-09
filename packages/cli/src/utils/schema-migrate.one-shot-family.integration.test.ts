@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 30 — spawns the real producer once per single-cause fixture: one served boot writes the template database, then its 129 cases boot in process, each over its own copy (every bootSchemaStack caller's modes on a present file, on an absent file and in a development key home, plus the lifecycle and key-home controls), each a distinct (command, mode, state); slowest CI reading 17.7 s (run 41255489006) of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
+// test-budget: 30 — spawns the real producer once per single-cause fixture: one served boot writes the template database, then its 134 cases boot in process, each over its own copy (every bootSchemaStack caller's modes on a present file, on an absent file and in a development key home, plus the lifecycle and key-home controls), each a distinct (command, mode, state); slowest CI reading 17.7 s (run 41255489006) of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
 
 /**
  * [#21391] Every command that boots through `bootSchemaStack` keeps the two
@@ -83,6 +83,8 @@ import MigrateRecordedBy from '../commands/migrate/recorded-by.js';
 import MigrateResume from '../commands/migrate/resume.js';
 import MigrateSecurityCatalogOverlays from '../commands/migrate/security-catalog-overlays.js';
 import MigrateStoredExpressions from '../commands/migrate/stored-expressions.js';
+import MigrateStoredReferences from '../commands/migrate/stored-references/index.js';
+import MigrateStoredReferencesBind from '../commands/migrate/stored-references/bind.js';
 import MigrateSummaryNulls from '../commands/migrate/summary-nulls.js';
 import MigrateUnmappedColumns from '../commands/migrate/unmapped-columns.js';
 import MigrateValueShapes from '../commands/migrate/value-shapes.js';
@@ -357,6 +359,24 @@ const CALLERS: Record<string, Caller> = {
     // nothing and `--apply` writes nothing — the boot is what these cases are about.
     noWrite: [{ label: 'migrate stored-expressions', argv: ['--database-url', '@DB@', '--json'] }],
     write: [{ label: 'migrate stored-expressions --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
+  },
+  'commands/migrate/stored-references/index.ts': {
+    run: invoke(MigrateStoredReferences),
+    noWrite: [{ label: 'migrate stored-references', argv: ['--database-url', '@DB@', '--json'] }],
+    write: [],
+    note: 'the ADR-0150 D10 report: read-only; its writing mode is `stored-references bind`, its own module',
+  },
+  'commands/migrate/stored-references/bind.ts': {
+    run: invoke(MigrateStoredReferencesBind),
+    noWrite: [],
+    // The fixture stores no sharing rule, so the bind is refused for want of
+    // the row and writes nothing — the plain boot (audit plugin composed) is
+    // what these cases are about.
+    write: [{
+      label: 'migrate stored-references bind --yes',
+      argv: ['--table', 'sys_sharing_rule', '--id', 'r1', '--package', 'com.example.crm', '--yes', '--database-url', '@DB@', '--json'],
+    }],
+    note: 'the reviewed bind of one row: every mode writes; `os migrate stored-references` is its preview',
   },
   'commands/migrate/summary-nulls.ts': {
     run: invoke(MigrateSummaryNulls),

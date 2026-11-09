@@ -172,6 +172,12 @@ const FAMILY: Record<string, string[]> = {
   'migrate security-catalog-overlays': [],
   // Its dry run takes the `summary-nulls` shape: a read-only boot, no row written.
   'migrate stored-expressions': [],
+  // [ADR-0150 D10] Read-only, its only form: it boots as `os serve` composes
+  // (`deferSchemaDdl` + `readOnlyProbe`) and reports. Its `bind` declares no
+  // `json:` literal of its own (it spreads the report's flags), so this
+  // discovery does not reach it; its one-document `--json` stdout is pinned in
+  // `stored-references.integration.test.ts`, every run parsed whole.
+  'migrate stored-references': [],
   'migrate summary-nulls': [],
   // One object per run, so it needs a name: the fixture's own `jp_ticket`,
   // which the composed host config registers. No database file exists, so the
