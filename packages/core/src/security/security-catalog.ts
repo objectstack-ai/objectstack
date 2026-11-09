@@ -443,16 +443,21 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
 
   /** [ADR-0150 D8] Each stale (package, name) column is said once (`SecurityCatalogSources.logger`). */
   const staleSaid = new Set<string>();
-  const warnStale = (packageId: string, name: string): void => {
+  const warnStale = (packageId: string, name: string, answer: SecurityCatalogResolution): void => {
     const key = `${packageId}::${name}`;
     if (!sources.logger || staleSaid.has(key)) return;
     staleSaid.add(key);
+    const read = answer.status === 'resolved'
+      ? `it now reads ${answer.entry.packageId ? `package "${answer.entry.packageId}"'s set` : 'the environment\'s set'}`
+      : answer.status === 'refused'
+        ? `it is refused: ${answer.message}`
+        : 'nothing serves it';
     try {
       sources.logger.warn(
-        `[security] a stored reference names permission set "${name}" of package "${packageId}", which does not serve it; `
-          + 'it is read by the resolution rule instead, as a reference with no package is. '
+        `[security] a stored reference names permission set "${name}" of package "${packageId}", which no longer serves it; `
+          + `it is read by the resolution rule instead, as a reference with no package is, and ${read}. `
           + 'Review it with `os migrate stored-references` and bind it again.',
-        { type: 'permission', name, packageId },
+        { type: 'permission', name, packageId, answer: answer.status },
       );
     } catch { /* a sink that throws says nothing; the read goes on */ }
   };
@@ -586,7 +591,10 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
       // row: the rule below grants the one holder and refuses two, naming
       // every candidate. Never not-found on its own say: a grant would be
       // dropped silently where a column-less one is honoured.
-      warnStale(exact, name);
+      const { packageId: _stale, ...unbound } = reference as SecurityCatalogReferenceScope;
+      const answer = await resolvePermissionScoped(scope, name, unbound);
+      warnStale(exact, name, answer);
+      return answer;
     }
     let caller: string | null;
     let outcome: PackageScopedResolution;

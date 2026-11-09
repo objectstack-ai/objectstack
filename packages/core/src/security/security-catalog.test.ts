@@ -484,6 +484,8 @@ describe('security catalog read — permission sets by (package, name) through t
         'com.acme.gone:q_only', 'com.acme.gone:env_set', 'com.acme.gone:meta_only', 'com.acme.gone:shared',
       ]);
       expect(warn.mock.calls[0][0]).toContain('os migrate stored-references');
+      expect(warn.mock.calls[0][0]).toContain(`package "${Q}"'s set`);
+      expect(warn.mock.calls[3][0]).toContain('it is refused');
     });
 
     it('a null column with two or more holders is refused, naming every candidate — never the first registered', async () => {
