@@ -50,7 +50,13 @@ const composed = (top: AnyRec, coreExtra: AnyRec = {}): AnyRec => ({
 /** One refused stack and one control. */
 const STACKS: Record<string, AnyRec> = {
   'a list nothing names': composed({ picklists: [unused] }),
-  'CONTROL: a body-declared list a body field names': composed({}, { objects: [caseObj(statusField)] }),
+  // [ADR-0150 D3] Forced edit: the core body declares its dependency on the
+  // app body, so the door accepts the whole stack — a sibling it does not
+  // depend on is refused (the third describe below).
+  'CONTROL: a body-declared list a body field names': composed({}, {
+    dependencies: { 'com.example.parity.app': '^1.0.0' },
+    objects: [caseObj(statusField)],
+  }),
 };
 
 const kernels: ObjectKernel[] = [];
@@ -99,6 +105,7 @@ describe('picklist-residual-unreferenced — the author-time door and the boot a
     const boot = await bootRefusal(stack);
     if (label.startsWith('CONTROL')) {
       expect(door).toEqual([]);
+      expect(judgePicklistReferences(stack)).toEqual({ refusals: [], notices: [] });
       expect(boot?.message ?? '').not.toContain('is declared on the top level of stack');
       return;
     }
@@ -238,5 +245,35 @@ describe('[ADR-0150 D3] picklist-reference-unknown — a sibling\'s list with no
     expect(door.refusals.filter((r) => r.rule === PICKLIST_REFERENCE_UNKNOWN)).toEqual([]);
     expect(door.notices).toEqual([]);
     expect(outsideClosure(engine)).toEqual([]);
+  });
+
+
+  // [ADR-0150 D3] Two holders one reference reaches: the boot refuses them
+  // (`INVALID_METADATA`), quoting R's sentence, and so does the door.
+  const twoHolders = (core: AnyRec): AnyRec => ({
+    manifest: manifest(STACK_ID),
+    packages: [
+      { manifest: { ...manifest('com.example.parity.core'), ...core } },
+      { manifest: { ...manifest('com.example.parity.app'), picklists: [status] } },
+      { manifest: { ...manifest('com.example.parity.crm'), picklists: [status] } },
+    ],
+  });
+
+  it.each([
+    ['a field whose package depends on both holders', twoHolders({
+      dependencies: { 'com.example.parity.app': '^1.0.0', 'com.example.parity.crm': '^1.0.0' },
+      objects: [caseObj(statusField)],
+    })],
+    ['an extension whose target two packages hold', twoHolders({
+      picklistExtensions: [{ extend: 'parity_status', options: [{ label: 'Closed', value: 'closed' }] }],
+    })],
+  ])('%s: the door refuses it, and the boot refuses it quoting the same sentence', async (_label, stack) => {
+    const door = judgePicklistReferences(stack).refusals.filter((r) => r.rule === PICKLIST_REFERENCE_UNKNOWN);
+    const { refusal } = await bootStack(stack);
+
+    expect(door).toHaveLength(1);
+    expect(door[0].message).toContain('Nothing picks one of them');
+    expect(refusal?.code).toBe('INVALID_METADATA');
+    expect(refusal?.message).toContain(`(${door[0].message})`);
   });
 });

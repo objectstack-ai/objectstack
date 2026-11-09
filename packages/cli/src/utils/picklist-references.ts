@@ -86,6 +86,11 @@
  *     reject a stack that is correct. The notice names the dependencies, so the
  *     skipped judgement is said out loud rather than read as a pass.
  *
+ * A reference that reaches TWO holders — two packages of the declaring
+ * package's closure for a field, two packages of the stack for an extension —
+ * is refused whatever the outside dependencies: an outside package can add a
+ * holder, never remove one, and the boot refuses the same ambiguity.
+ *
  * A field and an extension take the SAME verdict and the same two rule ids:
  * what is judged is one fact — a name that resolves to no list from where it
  * is written — and the finding's `where`, `path` and message say which key
@@ -397,22 +402,22 @@ function refusedReferenceHint(refusal: PackageScopedRefusal, bodies: readonly Ju
 }
 
 /**
- * The notice's verdict and fix for a reference R refused, when the declaring
- * package also depends on a package this stack does not carry: short, because
- * a notice is one line ({@link printPicklistReferenceNotices}).
+ * The notice's verdict and fix for a reference R refused as held only OUTSIDE
+ * the declaring package's closure, when that package also depends on a
+ * package this stack does not carry: short, because a notice is one line
+ * ({@link printPicklistReferenceNotices}) and `os explain` carries the why.
  */
-function refusedReferenceNotice(ref: PicklistReference, refusal: PackageScopedRefusal): { judged: string; noticeHint: string } {
-  const key = ref.site === 'field' ? 'picklist' : 'extend';
+function outsideClosureNotice(
+  ref: PicklistReference,
+  refusal: PackageScopedRefusal,
+  outside: readonly string[],
+): { notice: string; noticeHint: string } {
   const holders = dependencyList(refusal.candidates.flatMap((c) => (c.kind === 'package' ? [`'${c.packageId}'`] : [])));
-  const outside = refusal.reason === 'outside-closure' && refusal.callerPackageId !== null;
   return {
-    judged: outside
-      ? `\`${key}: '${ref.picklist}'\` is held only by ${holders}, not a declared dependency`
-      : `\`${key}: '${ref.picklist}'\` is held by each of ${holders}`,
-    noticeHint: `If one of those packages declares '${ref.picklist}', nothing is wrong. Otherwise ` +
-      (outside
-        ? `declare a dependency on ${holders} in package '${refusal.callerPackageId}'.`
-        : `keep the list in one package of ${holders}.`),
+    notice: `${ref.where}: '${ref.picklist}' is only in ${holders}, undeclared — not judged: ` +
+      `${dependencyList(outside.map((id) => `'${id}'`))} may hold it`,
+    noticeHint: `If one of those packages declares '${ref.picklist}', nothing is wrong. Otherwise declare a dependency ` +
+      `on ${holders} in package '${refusal.callerPackageId}'.`,
   };
 }
 
@@ -420,8 +425,9 @@ function refusedReferenceNotice(ref: PicklistReference, refusal: PackageScopedRe
  * Every picklist reference in this stack — a field's `picklist`, an
  * extension's `extend` — that resolves to no list from where it is written
  * (ADR-0150 D3): refused, or reported when the declaring package names
- * dependencies outside the stack. See the module header for the walk, the
- * rule and the two verdicts.
+ * dependencies outside the stack and an outside package could still supply
+ * the list. See the module header for the walk, the rule and the two
+ * verdicts.
  *
  * Returns two empty lists for a stack whose every reference resolves.
  */
@@ -443,12 +449,23 @@ export function judgePicklistReferences(parsed: AnyRec): PicklistReferenceJudgem
         ? {
             refusal: verdict.message,
             refusalHint: refusedReferenceHint(verdict, bodies),
-            // The notice is one verdict line (`os explain` carries the why),
-            // so it names the holders, not R's whole sentence.
-            ...refusedReferenceNotice(ref, verdict),
+            ...(verdict.reason === 'outside-closure' ? outsideClosureNotice(ref, verdict, judged.outside) : { notice: '', noticeHint: '' }),
           }
-        : { refusal: unknown.consequence, refusalHint: unknown.refusalHint, judged: unknown.names, noticeHint: unknown.noticeHint };
-      if (judged.outside.length === 0) {
+        : {
+            refusal: unknown.consequence,
+            refusalHint: unknown.refusalHint,
+            notice:
+              `${ref.where}: ${unknown.names} — not judged: it may come from ` +
+              `${dependencyList(judged.outside.map((id) => `'${id}'`))}, ` +
+              `${judged.outside.length === 1 ? 'a dependency' : 'dependencies'} this stack does not carry`,
+            noticeHint: unknown.noticeHint,
+          };
+      // An outside package can only SUPPLY a list: it softens a name nothing
+      // here holds, or holds only outside the closure, to a notice. Two
+      // holders one reference reaches stay two whatever else is installed,
+      // so an ambiguity is refused even then — as the boot refuses it.
+      const outsideCouldSupply = verdict.status === 'not-found' || verdict.reason === 'outside-closure';
+      if (judged.outside.length === 0 || !outsideCouldSupply) {
         // `where` names the field (or the extension) and every printer leads
         // the line with it, so the message does not repeat it.
         refusals.push({
@@ -469,10 +486,7 @@ export function judgePicklistReferences(parsed: AnyRec): PicklistReferenceJudgem
           // [#22161] One verdict sentence; why a dependency outside the stack
           // cannot be read is this rule's `RULE_EXPLANATIONS` entry
           // (`os explain picklist-reference-unverified`).
-          message:
-            `${ref.where}: ${wording.judged} — not judged: it may come from ` +
-            `${dependencyList(judged.outside.map((id) => `'${id}'`))}, ` +
-            `${judged.outside.length === 1 ? 'a dependency' : 'dependencies'} this stack does not carry`,
+          message: wording.notice,
           hint: wording.noticeHint,
         });
       }

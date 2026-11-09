@@ -5640,8 +5640,9 @@ const PICKLIST_REFERENCE_UNVERIFIED_EXPLANATION: RuleExplanation = {
       '`picklist` resolves from the package that declares the field: its own `picklists`, then the ' +
       'packages its manifest declares as dependencies, transitively, plus every `sys` package. A sibling ' +
       'package of the same artifact counts only when it is declared. An extension\'s `extend` resolves ' +
-      'against every package of the stack. A name that resolves to no list, or only to lists held ' +
-      'outside the declaring package\'s declared dependencies, is refused as `picklist-reference-unknown`.',
+      'against the one package of the stack that holds the list. A name that resolves to no list, only ' +
+      'to lists held outside the declaring package\'s declared dependencies, or to two holders, is ' +
+      'refused as `picklist-reference-unknown`.',
     'When the package that declares the reference depends on a package this stack does not carry, the ' +
       'list could live there, and this command cannot read it: `manifest.dependencies` maps package ids ' +
       'to version ranges the installer resolves, and nothing maps such an id to a file the CLI could ' +

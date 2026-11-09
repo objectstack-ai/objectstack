@@ -245,11 +245,84 @@ describe('judgePicklistReferences — a field naming a sibling package\'s list (
       rule: PICKLIST_REFERENCE_UNVERIFIED,
       path: 'packages[1].manifest.objects[0].fields.industry.picklist',
     });
-    expect(notices[0].message).toContain('is held only by \'com.example.core\', not a declared dependency');
+    expect(notices[0].message).toContain('\'industry\' is only in \'com.example.core\', undeclared');
     expect(notices[0].message).toContain('\'com.acme.crm\'');
     expect(notices[0].hint).toContain('declare a dependency on \'com.example.core\' in package \'com.example.orders\'');
-    // A notice is one verdict line of at most 200 characters (`os explain` carries the why).
-    expect(notices[0].message.length).toBeLessThanOrEqual(200);
+  });
+
+  it('keeps that notice one verdict line of at most 200 characters, at realistic name lengths', () => {
+    const list = { ...industry, name: 'opportunity_industry_segment' };
+    const { notices } = judgePicklistReferences({
+      packages: [
+        { manifest: { ...manifest('com.acmecorp.crm.sales.core'), picklists: [list] } },
+        {
+          manifest: {
+            ...manifest('com.acmecorp.crm.sales.pipeline', { dependencies: { 'com.acmecorp.erp.integration': '^2.0.0' } }),
+            objects: [{
+              name: 'crm_opportunity_line_item',
+              label: 'Line item',
+              fields: { industry_segment: { type: 'select', label: 'Segment', picklist: 'opportunity_industry_segment' } },
+            }],
+          },
+        },
+      ],
+    });
+    expect(notices).toHaveLength(1);
+    // `os explain picklist-reference-unverified` carries the why; the notice is the verdict.
+    expect(notices[0].message.length, notices[0].message).toBeLessThanOrEqual(200);
+  });
+
+  // An outside package can add a holder, never remove one: two holders the
+  // closure reaches are refused whatever the outside dependencies.
+  it('refuses two sibling holders the declaring package depends on both of, naming each — even with an outside dependency', () => {
+    const crm = { manifest: { ...manifest('com.example.crm'), picklists: [industry] } };
+    const both = { 'com.example.core': '^1.0.0', 'com.example.crm': '^1.0.0' };
+    for (const dependencies of [both, { ...both, 'com.acme.erp': '^1.0.0' }]) {
+      const { refusals, notices } = judgePicklistReferences({ packages: [core(), crm, orders({ dependencies })] });
+      expect(notices).toEqual([]);
+      expect(refusals).toHaveLength(1);
+      expect(refusals[0]).toMatchObject({
+        severity: 'error',
+        rule: PICKLIST_REFERENCE_UNKNOWN,
+        path: 'packages[2].manifest.objects[0].fields.industry.picklist',
+      });
+      expect(refusals[0].message).toBe(packageScopedRefusalMessage({
+        status: 'refused',
+        reason: 'ambiguous-in-closure',
+        type: 'picklist',
+        name: 'industry',
+        callerPackageId: 'com.example.orders',
+        candidates: [{ kind: 'package', packageId: 'com.example.core' }, { kind: 'package', packageId: 'com.example.crm' }],
+      }));
+    }
+  });
+
+  it('judges a field an `objectExtensions` entry adds from the EXTENDING package: a sibling\'s list it does not depend on is refused', () => {
+    const { refusals } = judgePicklistReferences({
+      packages: [
+        core({ objects: [{ name: 'pk_account', label: 'Account', fields: { name: { type: 'text', label: 'Name' } } }] }),
+        {
+          manifest: {
+            ...manifest('com.example.lists'),
+            picklists: [{ ...industry, name: 'segment' }],
+          },
+        },
+        {
+          manifest: {
+            ...manifest('com.example.orders', { dependencies: { 'com.example.core': '^1.0.0' } }),
+            objectExtensions: [{ extend: 'pk_account', fields: { segment: { type: 'select', label: 'Segment', picklist: 'segment' } } }],
+          },
+        },
+      ],
+    });
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]).toMatchObject({
+      rule: PICKLIST_REFERENCE_UNKNOWN,
+      where: 'field "pk_account.segment"',
+      path: 'packages[2].manifest.objectExtensions[0].fields.segment.picklist',
+    });
+    expect(refusals[0].message).toContain('package "com.example.orders"');
+    expect(refusals[0].message).toContain('package "com.example.lists"');
   });
 
   it('CONTROL: the sibling declared as a dependency resolves', () => {
@@ -284,6 +357,33 @@ describe('judgePicklistReferences — a field naming a sibling package\'s list (
     expect(judgePicklistReferences({
       packages: [core(), { manifest: { ...manifest('com.example.orders'), picklistExtensions: [extension('industry')] } }],
     })).toEqual({ refusals: [], notices: [] });
+  });
+
+  // Ruling X: the target resolves with no caller, so it needs ONE holder in
+  // the stack; two are refused, naming each — even with an outside dependency.
+  it('refuses an extension whose target two packages of the stack hold, naming each', () => {
+    const crm = { manifest: { ...manifest('com.example.crm'), picklists: [industry] } };
+    for (const extra of [{}, { dependencies: { 'com.acme.erp': '^1.0.0' } }]) {
+      const { refusals, notices } = judgePicklistReferences({
+        packages: [core(), crm, { manifest: { ...manifest('com.example.orders', extra), picklistExtensions: [extension('industry')] } }],
+      });
+      expect(notices).toEqual([]);
+      expect(refusals).toHaveLength(1);
+      expect(refusals[0]).toMatchObject({
+        severity: 'error',
+        rule: PICKLIST_REFERENCE_UNKNOWN,
+        where: 'picklist extension "industry"',
+        path: 'packages[2].manifest.picklistExtensions[0].extend',
+      });
+      expect(refusals[0].message).toBe(packageScopedRefusalMessage({
+        status: 'refused',
+        reason: 'ambiguous-in-environment',
+        type: 'picklist',
+        name: 'industry',
+        callerPackageId: null,
+        candidates: [{ kind: 'package', packageId: 'com.example.core' }, { kind: 'package', packageId: 'com.example.crm' }],
+      }));
+    }
   });
 });
 
