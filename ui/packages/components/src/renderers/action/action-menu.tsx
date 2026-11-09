@@ -325,6 +325,9 @@ const ActionMenuRenderer = forwardRef<HTMLButtonElement, { schema: ActionMenuSch
             // See action-button.tsx — overflow-menu actions need the
             // resultDialog spec forwarded too or the one-shot reveal is lost.
             resultDialog: (action as any).resultDialog,
+            // See action-button.tsx — the param dialog's preflight read
+            // (objectstack#31808).
+            preflight: action.preflight,
             // See action-button.tsx — the declared post-success hop
             // (objectui#5493). An overflow action must hop like its inline
             // twin, or the `action:bar` `maxVisible` split decides whether the

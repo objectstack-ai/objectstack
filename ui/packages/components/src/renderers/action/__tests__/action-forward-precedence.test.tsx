@@ -129,7 +129,7 @@ const BUTTON_ORDER = [
   'type', 'name', 'label', 'description', 'submitText', 'cancelText', 'target', 'openIn', 'endpoint', 'method',
   'params',
   'bodyExtra', 'bodyShape', 'operation', 'confirmText', 'variant', 'successMessage', 'outcomeMessages', 'errorMessage',
-  'refreshAfter', 'undoable', 'recordIdField', 'locations', 'toast', 'resultDialog', 'onSuccess', 'objectName',
+  'refreshAfter', 'undoable', 'recordIdField', 'locations', 'toast', 'resultDialog', 'preflight', 'onSuccess', 'objectName',
 ];
 
 /**
@@ -141,7 +141,7 @@ const ICON_ORDER = [
   'type', 'name', 'label', 'description', 'submitText', 'cancelText', 'target', 'openIn', 'endpoint', 'method',
   'params',
   'bodyExtra', 'bodyShape', 'operation', 'confirmText', 'variant', 'successMessage', 'outcomeMessages', 'errorMessage',
-  'refreshAfter', 'locations', 'toast', 'resultDialog', 'onSuccess', 'objectName',
+  'refreshAfter', 'locations', 'toast', 'resultDialog', 'preflight', 'onSuccess', 'objectName',
 ];
 
 // See action-bodyExtra-forward.test.tsx for why this is not
