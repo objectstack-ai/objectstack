@@ -42,6 +42,7 @@
 
 import { resolveDisplayField, TITLE_ELIGIBLE_TYPES } from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
+import { isFederatedObject } from './federated-object.js';
 
 /**
  * Name of the hidden companion column. Double-underscore prefixed so it can
@@ -220,9 +221,8 @@ export function resolveSearchCompanionSources(schema: CompanionObjectMeta | unde
  * plugin.ts`, verbatim: "their schema is owned by the remote database, so DDL
  * (syncSchema/initObjects) is forbidden and would throw".
  *
- * ⛔ The predicate is `external != null`, and it is deliberately the SAME
- * expression that seam tests rather than a second question about the same
- * fact. The two ends must agree by construction: every object the sync seam
+ * ⛔ The predicate is `isFederatedObject`, and it is deliberately the SAME
+ * binding that seam asks rather than a second question about the same fact. The two ends must agree by construction: every object the sync seam
  * declines to build a column for is exactly an object this seam declines to
  * declare one on. Asking the datasource's `schemaMode` here instead would be a
  * second implementation of one rule — and this module cannot ask it anyway
@@ -252,7 +252,7 @@ export function resolveSearchCompanionSources(schema: CompanionObjectMeta | unde
  * already-present entry before ever reaching this gate.
  */
 function isDdlManaged(schema: CompanionObjectMeta): boolean {
-  return schema.external == null;
+  return !isFederatedObject(schema);
 }
 
 /**

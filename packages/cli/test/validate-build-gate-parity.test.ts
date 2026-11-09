@@ -229,6 +229,14 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // registry rule gets cannot see. Both doors make the call, right after the
   // parse.
   'findNamespaceNameRefusals',
+  // [ADR-0150 D6, child K] A namespace of the artifact equal to one of its
+  // object names, or an object short-named `custom` — the spec's predicate
+  // (`findNamespaceObjectNameClashes`), which the install, publish and save
+  // doors and `defineStack` ask too. Not a registry rule: cross-package by
+  // construction (one body's namespace against another body's object), which
+  // the per-package walk a registry rule gets cannot see. Both doors make the
+  // call, right after the parse.
+  'findNamespaceObjectNameRefusals',
 ];
 
 /**

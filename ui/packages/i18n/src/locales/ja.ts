@@ -2459,6 +2459,7 @@ const ja = {
       cannotEditMetaView: "このビューはコードで定義された組み込みビューのため、変更できません。",
       resetView: "ビューの設定に戻す",
       resetViewTitle: "このビュー本来のフィルター、検索、並べ替え、グループ、列の配置、非表示フィールド、密度、レイアウト、行の色、行番号、インライン編集に戻します。ピン留めしたビュー、お気に入り、レコードの開き方は変わりません。変わるのはあなたのリストだけです。",
+      linkFilterRefused: 'このリンクのフィルターは適用されませんでした。ここでは絞り込めないフィールドが含まれているため、ビュー本来の内容を表示しています。',
       personalized: "個人設定あり",
       personalizedHeading: "このビューと異なる項目",
       personalizedParts: {
@@ -4074,6 +4075,7 @@ const ja = {
     tabAll: "すべて",
     statusPending: "承認待ち",
     statusApproved: "承認済み",
+    statusHeld: "承認者の承認待ち",
     statusExecuted: "実行済み",
     statusFailed: "失敗",
     statusRejected: "却下",

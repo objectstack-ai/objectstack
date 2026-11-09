@@ -47,7 +47,8 @@ import {
   MessageResponse,
   type MessageProps,
 } from './elements/message';
-import { RecordLinkContext } from './recordLink';
+import { ListLinkContext, RecordLinkContext } from './recordLink';
+import type { OpenListLink } from './recordLink';
 import { isHitlContinuation } from './hitlContinuation';
 import type { PublishHealth, PublishOutcome } from './publishHealth';
 import {
@@ -807,6 +808,13 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
   onOpenBuilder?: (handoff: { prompt: string; packageId?: string }) => void;
   /** cloud#1658 — open the record an `open_record` hand-off points at. */
   onOpenRecord?: (handoff: { objectName: string; recordId: string; label?: string; reason?: string }) => void;
+  /**
+   * objectstack#31869 — open the list a `/list/OBJECT` link in an answer
+   * names: the object, and optionally a view and the Filter panel conditions.
+   * The host resolves the app and builds the list address from these values.
+   * Absent → a list link keeps the default link-safety dialog.
+   */
+  onOpenList?: OpenListLink;
   /** Heading for the ADR-0057 P4 "Open in Builder" handoff card (default "Build this in the Builder"). */
   builderHandoffTitleLabel?: string;
   /** Label for the handoff card's primary action button (default "Open in Builder →"). */
@@ -1047,10 +1055,17 @@ export type { PublishHealth, PublishOutcome } from './publishHealth';
  * `success` `result` is what the dispatcher answered (cloud#3565 — the
  * record-write card draws "written" and the record's link from them; the
  * generic approval strip reads `message` alone, as before).
+ *
+ * `held`: the confirmation was accepted, but a host policy holds the write
+ * for an approval outside the conversation, so nothing has been written yet
+ * (the spec's `held` approve outcome). Both cards draw "waiting for
+ * approval" for it, never success wording; `result` is what the host
+ * answered about the hold.
  */
 export type ToolDecisionState =
   | { state: 'pending'; message?: string; decision?: 'approved' | 'rejected' }
   | { state: 'success'; message?: string; decision?: 'approved' | 'rejected'; result?: unknown }
+  | { state: 'held'; message?: string; decision?: 'approved'; result?: unknown }
   | { state: 'error'; message: string; decision?: 'approved' | 'rejected' };
 
 export interface ChatbotModelOption {
@@ -2283,6 +2298,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       builderHandoffSupersededTitle = 'A newer request is available',
       onOpenBuilder,
       onOpenRecord,
+      onOpenList,
       planExtendLabel,
       resolveAppLabel,
       planQuestionsLabel = 'Confirm before building',
@@ -2344,6 +2360,11 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
     // standalone hosts) each call returns the English fallback passed beside
     // it, so nothing below can render a raw key.
     const tt = useSafeTranslate();
+    // A confirmed write a host policy holds for an approver outside the
+    // conversation (decision state `held`): both approval cards read this,
+    // never success wording. Borrowed from the inbox's status label so the
+    // badge and the card say the same words.
+    const heldForApprovalLabel = tt('aiApprovals.statusHeld', 'Waiting for approval');
     // objectui#12724 — the plan card's section heads and its 等待确认 chip.
     const planAwaitingLabel = tt('chatbot.plan.awaitingConfirm', 'Awaiting confirmation');
     const planObjectsLabel = tt('chatbot.plan.objectsAndFields', 'Objects and fields');
@@ -3304,23 +3325,33 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                     ? 'bg-destructive/10 text-destructive'
                     : decision.state === 'success'
                       ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
-                      : 'bg-muted/30 text-muted-foreground')
+                      : decision.state === 'held'
+                        ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
+                        : 'bg-muted/30 text-muted-foreground')
                 }
+                data-testid="tool-decision"
+                data-state={decision.state}
               >
-                <span aria-hidden="true">
-                  {decision.state === 'pending'
-                    ? '...'
-                    : decision.state === 'success'
-                      ? 'OK'
-                      : 'X'}
-                </span>
-                <span>
-                  {decision.message ??
-                    (decision.state === 'pending'
-                      ? 'Submitting decision...'
+                {decision.state === 'held' ? (
+                  <Hourglass className="size-3.5" aria-hidden="true" />
+                ) : (
+                  <span aria-hidden="true">
+                    {decision.state === 'pending'
+                      ? '...'
                       : decision.state === 'success'
-                        ? 'Action approved and executed.'
-                        : 'Decision failed.')}
+                        ? 'OK'
+                        : 'X'}
+                  </span>
+                )}
+                <span>
+                  {decision.state === 'held'
+                    ? heldForApprovalLabel
+                    : decision.message ??
+                      (decision.state === 'pending'
+                        ? 'Submitting decision...'
+                        : decision.state === 'success'
+                          ? 'Action approved and executed.'
+                          : 'Decision failed.')}
                 </span>
               </div>
             ) : null}
@@ -3669,13 +3700,20 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                         ? 'text-destructive'
                         : decision.state === 'success'
                           ? 'text-emerald-700 dark:text-emerald-400'
-                          : 'text-muted-foreground')
+                          : decision.state === 'held'
+                            ? 'text-amber-700 dark:text-amber-400'
+                            : 'text-muted-foreground')
                     }
                   >
                     {decision.state === 'error' ? (
                       <>
                         <XCircle className="size-3.5" />
                         {decision.message}
+                      </>
+                    ) : decision.state === 'held' ? (
+                      <>
+                        <Hourglass className="size-3.5" />
+                        {heldForApprovalLabel}
                       </>
                     ) : decision.state === 'pending' ? (
                       <>
@@ -4782,7 +4820,10 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                         // objectui#13037 — a record link in the answer opens
                         // the record through the same host opener as the
                         // `open_record` card.
+                        // objectstack#31869 — a list link the same way,
+                        // through the host's list opener.
                         <RecordLinkContext.Provider value={onOpenRecord ?? null}>
+                        <ListLinkContext.Provider value={onOpenList ?? null}>
                           {answerBlocks.map((block, i) =>
                             block.kind === 'charts' ? (
                               <AnswerCharts key={i} charts={block.charts} />
@@ -4800,6 +4841,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                               </React.Fragment>
                             ) : null,
                           )}
+                        </ListLinkContext.Provider>
                         </RecordLinkContext.Provider>
                       ) : null}
                       {!isUser && sources.length > 0 ? (

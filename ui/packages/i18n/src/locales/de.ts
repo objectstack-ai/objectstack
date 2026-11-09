@@ -2457,6 +2457,7 @@ const de = {
       cannotEditMetaView: "Diese Ansicht ist integriert und im Code definiert – sie kann nicht geändert werden.",
       resetView: "Auf Ansicht zurücksetzen",
       resetViewTitle: "Stellt die eigenen Filter, Suche, Sortierung, Gruppierung, Spaltenanordnung, ausgeblendeten Felder, Dichte, Layout, Zeilenfarbe, Zeilennummern und Inline-Bearbeitung dieser Ansicht wieder her. Angeheftete Ansichten, Favoriten und die Art, wie Datensätze geöffnet werden, bleiben unverändert. Nur Ihre Liste ändert sich.",
+      linkFilterRefused: 'Der Filter dieses Links wurde nicht angewendet. Er nennt ein Feld, nach dem Sie hier nicht filtern können, daher zeigt die Liste die Ansicht ohne ihn.',
       personalized: "Personalisiert",
       personalizedHeading: "Ihre Liste weicht von dieser Ansicht ab bei",
       personalizedParts: {
@@ -4072,6 +4073,7 @@ const de = {
     tabAll: "Alle",
     statusPending: "Ausstehend",
     statusApproved: "Genehmigt",
+    statusHeld: "Wartet auf Freigabe",
     statusExecuted: "Ausgeführt",
     statusFailed: "Fehlgeschlagen",
     statusRejected: "Abgelehnt",

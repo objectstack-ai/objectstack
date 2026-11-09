@@ -2514,6 +2514,7 @@ const pt = {
       cannotEditMetaView: "Esta exibição é integrada e definida no código — não é possível alterá-la.",
       resetView: "Voltar à exibição",
       resetViewTitle: "Restaura os filtros, a pesquisa, a ordenação, o agrupamento, a disposição das colunas, os campos ocultos, a densidade, o layout, a cor da linha, os números de linha e a edição em linha próprios desta exibição. Exibições fixadas, favoritos e a forma de abrir registros não mudam. Apenas a sua lista muda.",
+      linkFilterRefused: 'O filtro deste link não foi aplicado. Ele cita um campo pelo qual você não pode filtrar aqui, então a lista mostra a visualização sem ele.',
       personalized: "Personalizada",
       personalizedHeading: "Sua lista difere desta exibição em",
       personalizedParts: {
@@ -4148,6 +4149,7 @@ const pt = {
     tabAll: "Todas",
     statusPending: "Pendente",
     statusApproved: "Aprovada",
+    statusHeld: "Aguardando aprovação",
     statusExecuted: "Executada",
     statusFailed: "Falhou",
     statusRejected: "Rejeitada",

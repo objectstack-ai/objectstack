@@ -78,6 +78,9 @@ import { findViewContainerNameRefusals } from '../utils/view-container-names.js'
 // bucket 2/3 types has one package holder: the package door's predicate and
 // sentence, walked over the artifact's packages in boot order.
 import { findNamespaceNameRefusals } from '../utils/namespace-co-owner-names.js';
+// [ADR-0150 D6, child K] A namespace never equals an object name, both directions,
+// and no object is short-named `custom` — the spec's predicate over one artifact.
+import { findNamespaceObjectNameRefusals } from '../utils/namespace-object-names.js';
 // [ADR-0146 D2, #28410] The override write gate's author-time half: the publish
 // door's own judge, walked over the artifact's packages.
 import { findOverrideDeclarationRefusals } from '../utils/override-declarations.js';
@@ -541,6 +544,36 @@ export default class Validate extends Command {
         printBulletList(
           namespaceNameRefusals.map((r) => r.message),
           { noun: 'namespace name refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
+      // 2c-ter. [ADR-0150 D6, child K] A namespace of this artifact equal to
+      //     one of its object names (either direction), or an object
+      //     short-named `custom` (`NS_custom`, the ADR-0146 pair's namespace),
+      //     is REFUSED, naming both spellings — the install, publish and save
+      //     doors and `defineStack` ask the same predicate
+      //     (`findNamespaceObjectNameClashes`). The packages a deployment
+      //     already holds, and a dependency outside this artifact, are not
+      //     visible here. `os build` makes the same call.
+      const namespaceObjectRefusals = findNamespaceObjectNameRefusals(result.data as Record<string, unknown>);
+      if (namespaceObjectRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({
+            valid: false,
+            errors: namespaceObjectRefusals,
+            warnings: warningsSoFar(),
+            conversions: conversionNotices,
+            duration: timer.elapsed(),
+          });
+          this.exit(1);
+        }
+        const n = namespaceObjectRefusals.length;
+        console.log('');
+        printError(`The server would refuse this stack at boot (${n} namespace${n > 1 ? 's' : ''} or object${n > 1 ? 's' : ''} that would name each other)`);
+        printBulletList(
+          namespaceObjectRefusals.map((r) => r.message),
+          { noun: 'namespace/object name refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
         );
         this.exit(1);
       }

@@ -89,7 +89,7 @@ const KEYS = [
   'common.refresh', 'common.cancel', 'common.loading', 'common.ok',
   'aiApprovals.title', 'aiApprovals.description', 'aiApprovals.tabPending',
   'aiApprovals.tabDecided', 'aiApprovals.tabAll', 'aiApprovals.statusPending',
-  'aiApprovals.statusApproved', 'aiApprovals.statusExecuted', 'aiApprovals.statusFailed',
+  'aiApprovals.statusApproved', 'aiApprovals.statusHeld', 'aiApprovals.statusExecuted', 'aiApprovals.statusFailed',
   'aiApprovals.statusRejected', 'aiApprovals.colTool', 'aiApprovals.colAction',
   'aiApprovals.colObject', 'aiApprovals.colStatus', 'aiApprovals.colProposed',
   'aiApprovals.colDecision', 'aiApprovals.emptyTitle', 'aiApprovals.emptyDescription',

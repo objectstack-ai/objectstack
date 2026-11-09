@@ -2519,6 +2519,7 @@ const es = {
       cannotEditMetaView: "Esta vista está integrada y definida en el código: no se puede modificar.",
       resetView: "Restablecer a la vista",
       resetViewTitle: "Restaura los filtros, la búsqueda, la ordenación, la agrupación, la disposición de columnas, los campos ocultos, la densidad, el diseño, el color de fila, los números de fila y la edición en línea propios de esta vista. Las vistas fijadas, los favoritos y la forma de abrir los registros no cambian. Solo cambia su lista.",
+      linkFilterRefused: 'No se aplicó el filtro de este enlace. Incluye un campo por el que no puede filtrar aquí, así que la lista muestra la vista sin él.',
       personalized: "Personalizada",
       personalizedHeading: "Su lista difiere de esta vista en",
       personalizedParts: {
@@ -4153,6 +4154,7 @@ const es = {
     tabAll: "Todas",
     statusPending: "Pendiente",
     statusApproved: "Aprobada",
+    statusHeld: "En espera de aprobación",
     statusExecuted: "Ejecutada",
     statusFailed: "Fallida",
     statusRejected: "Rechazada",

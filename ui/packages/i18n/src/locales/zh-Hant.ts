@@ -2546,6 +2546,7 @@ const zhHant = {
       cannotEditMetaView: '該檢視為內建檢視，由程式碼定義，無法修改。',
       resetView: '恢復為檢視設定',
       resetViewTitle: '恢復此檢視自身的篩選、搜尋、排序、分組、列布局、隱藏欄位、密度、佈局、行顏色、行號和行內編輯。固定的檢視、收藏和記錄的開啟方式保持不變。只影響你自己的列表。',
+      linkFilterRefused: '此連結的篩選條件未應用：其中包含你在此處無法篩選的欄位，因此列表按檢視本身顯示。',
       personalized: '已個性化',
       personalizedHeading: '你的列表與此檢視不同之處',
       personalizedParts: {
@@ -4282,6 +4283,7 @@ const zhHant = {
     tabAll: '全部',
     statusPending: '待審批',
     statusApproved: '已通過',
+    statusHeld: '審批中',
     statusExecuted: '已執行',
     statusFailed: '失敗',
     statusRejected: '已拒絕',

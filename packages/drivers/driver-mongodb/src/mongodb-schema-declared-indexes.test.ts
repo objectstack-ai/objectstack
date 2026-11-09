@@ -228,3 +228,210 @@ describe('the field-level lookup arm, on a lane that actually runs', () => {
     ]);
   });
 });
+
+/**
+ * A recorder that also keeps the collection's index set the way `mongod` does,
+ * so a sequence of syncs can be read as "what got BUILT", not only "what was
+ * asked for". Only the three rules the create loop meets are modelled:
+ *
+ * - the same name with the same key and options is a no-op (`createIndex` is
+ *   idempotent);
+ * - the same name with a different key or options is refused
+ *   `IndexKeySpecsConflict` (86);
+ * - another name over the same key with the same partial filter is refused
+ *   `IndexOptionsConflict` (85), which the create loop skips.
+ *
+ * `preexisting` seeds the collection as an earlier release left it.
+ */
+function indexKeepingDb(preexisting: Array<{ name: string; key: Record<string, unknown>; options?: Record<string, unknown> }> = []) {
+  const asked: CreatedIndex[] = [];
+  const built: string[] = [];
+  const live = new Map<string, { key: Record<string, unknown>; options: Record<string, unknown> }>();
+  for (const p of preexisting) live.set(p.name, { key: p.key, options: { ...p.options, name: p.name } });
+  // Key ORDER matters inside an index key and nowhere else, so options compare
+  // with sorted keys and index keys compare as written.
+  const sorted = (v: unknown): unknown =>
+    v && typeof v === 'object' && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b)).map(([k, x]) => [k, sorted(x)]))
+      : v;
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const sameOptions = (a: unknown, b: unknown) => JSON.stringify(sorted(a)) === JSON.stringify(sorted(b));
+  const conflict = (code: number, codeName: string) => Object.assign(new Error(codeName), { code, codeName });
+  const db = {
+    listCollections: () => ({ toArray: async () => [{ name: 'existing' }] }),
+    createCollection: async () => undefined,
+    collection: () => ({
+      createIndex: async (key: Record<string, unknown>, options: Record<string, unknown>) => {
+        asked.push({ spec: key, options });
+        const name = options.name as string;
+        const existing = live.get(name);
+        if (existing) {
+          if (same(existing.key, key) && sameOptions(existing.options, options)) return name;
+          throw conflict(86, 'IndexKeySpecsConflict');
+        }
+        for (const other of live.values()) {
+          if (same(other.key, key) && sameOptions(other.options.partialFilterExpression, options.partialFilterExpression)) {
+            throw conflict(85, 'IndexOptionsConflict');
+          }
+        }
+        live.set(name, { key, options });
+        built.push(name);
+        return name;
+      },
+      indexes: async () => [...live.entries()].map(([name, i]) => ({ name, key: i.key, ...i.options })),
+      dropIndex: async (name: string) => {
+        live.delete(name);
+      },
+    }),
+  } as unknown as Db;
+  /** Every live index whose key is exactly `key`. */
+  const onKey = (key: Record<string, unknown>) =>
+    [...live.entries()].filter(([, i]) => same(i.key, key)).map(([name]) => name);
+  return { db, asked, built, live, onKey };
+}
+
+/**
+ * A detail object read by its parent: `project` is the `master_detail` the
+ * read filters on, beside a `lookup` and a `user` field that main already
+ * indexes (the CONTROL fields).
+ */
+const timeEntry = (extra: { indexes?: Array<{ name?: string; fields?: string[]; unique?: boolean | 'global' | 'organization' }> } = {}) => ({
+  name: 'time_entry',
+  fields: {
+    project: { type: 'master_detail', reference: 'project' },
+    task: { type: 'lookup', reference: 'task' },
+    member: { type: 'user' },
+    work_date: { type: 'date' },
+    seq: { type: 'number' },
+  },
+  ...extra,
+});
+
+/** What main's sync builds for {@link timeEntry} with no declared indexes. */
+const MAIN_BUILT = [
+  { name: 'idx_id_unique', key: { id: 1 }, options: { unique: true } },
+  { name: 'idx_created_at', key: { created_at: 1 } },
+  { name: 'idx_updated_at', key: { updated_at: 1 } },
+  { name: 'idx_task_lookup', key: { task: 1 } },
+  { name: 'idx_member_lookup', key: { member: 1 } },
+];
+
+describe('a master_detail field gets the index its by-parent read needs', () => {
+  it('builds one plain index on a single-valued master_detail, and leaves the lookup and user indexes as they were', async () => {
+    const { db, asked } = indexKeepingDb();
+    await syncCollectionSchema(db, 'time_entry', timeEntry());
+
+    const project = byName(asked, 'idx_project');
+    expect(project).toBeDefined();
+    expect(project!.spec).toEqual({ project: 1 });
+    // A read index, never a constraint: many details share one parent.
+    expect(project!.options).toEqual({ name: 'idx_project' });
+
+    // CONTROL: the lookup and user arm is byte-identical to main.
+    expect(byName(asked, 'idx_task_lookup')).toEqual({ spec: { task: 1 }, options: { name: 'idx_task_lookup' } });
+    expect(byName(asked, 'idx_member_lookup')).toEqual({ spec: { member: 1 }, options: { name: 'idx_member_lookup' } });
+
+    expect(names(asked)).toEqual([
+      'idx_id_unique',
+      'idx_created_at',
+      'idx_updated_at',
+      'idx_project',
+      'idx_task_lookup',
+      'idx_member_lookup',
+    ]);
+  });
+
+  it('skips a multi-valued master_detail and one that names no parent', async () => {
+    // Both shapes are refused by `FieldSchema`, but `syncSchema(object, schema:
+    // unknown)` forwards metadata without Zod, so they can still arrive here.
+    const { db, asked } = indexKeepingDb();
+    await syncCollectionSchema(db, 'time_entry', {
+      name: 'time_entry',
+      fields: {
+        projects: { type: 'master_detail', reference: 'project', multiple: true },
+        orphan: { type: 'master_detail' },
+        blank: { type: 'master_detail', reference: '' },
+      },
+    });
+
+    expect(names(asked)).toEqual(['idx_id_unique', 'idx_created_at', 'idx_updated_at']);
+  });
+
+  it('adds nothing when a declared index already leads with the field, and keeps every declared index as declared', async () => {
+    const cases: Array<{ label: string; indexes: Array<{ name?: string; fields: string[]; unique?: boolean }> }> = [
+      { label: 'single-column', indexes: [{ fields: ['project'] }] },
+      { label: 'compound', indexes: [{ fields: ['project', 'work_date'] }] },
+      { label: 'author-named', indexes: [{ name: 'by_parent', fields: ['project', 'work_date'] }] },
+      { label: 'unique compound', indexes: [{ fields: ['project', 'seq'], unique: true }] },
+    ];
+    for (const { label, indexes } of cases) {
+      const withDetail = indexKeepingDb();
+      await syncCollectionSchema(withDetail.db, 'time_entry', timeEntry({ indexes }));
+
+      // Exactly one live index answers the parent read's leading key; no
+      // second single-key index is built beside a declaration that covers it.
+      const leading = [...withDetail.live.entries()]
+        .filter(([, i]) => !i.options.unique && Object.keys(i.key)[0] === 'project')
+        .map(([name]) => name);
+      expect(leading, label).toHaveLength(1);
+      if (indexes[0].fields.length > 1) expect(withDetail.onKey({ project: 1 }), label).toEqual([]);
+
+      // CONTROL: the declared ops are the ones the same declaration asks for
+      // when `project` is not a master_detail at all.
+      const plain = indexKeepingDb();
+      const asText = timeEntry({ indexes });
+      await syncCollectionSchema(plain.db, 'time_entry', {
+        ...asText,
+        fields: { ...asText.fields, project: { type: 'text' } },
+      });
+      expect(withDetail.asked, label).toEqual(plain.asked);
+    }
+  });
+
+  it('still builds the index when the declared index has the field in a later position', async () => {
+    const { db, asked } = indexKeepingDb();
+    await syncCollectionSchema(db, 'time_entry', timeEntry({ indexes: [{ fields: ['work_date', 'project'] }] }));
+
+    expect(byName(asked, 'idx_project')).toEqual({ spec: { project: 1 }, options: { name: 'idx_project' } });
+    expect(byName(asked, 'idx_work_date_project')).toEqual({
+      spec: { work_date: 1, project: 1 },
+      options: { name: 'idx_work_date_project' },
+    });
+  });
+
+  it('a master_detail that is also field-level unique keeps the one read index the unique arm already builds', async () => {
+    const { db, asked } = indexKeepingDb();
+    await syncCollectionSchema(db, 'profile_detail', {
+      name: 'profile_detail',
+      fields: { account: { type: 'master_detail', reference: 'account', unique: true } },
+    });
+
+    expect(names(asked).filter((n) => n === 'idx_account')).toHaveLength(1);
+    expect(byName(asked, 'idx_account_unique')!.options.unique).toBe(true);
+  });
+
+  it('an existing deployment gains the index on its next sync, and the sync after that builds nothing', async () => {
+    const { db, built, onKey } = indexKeepingDb(MAIN_BUILT);
+
+    await syncCollectionSchema(db, 'time_entry', timeEntry());
+    expect(built).toEqual(['idx_project']);
+
+    await syncCollectionSchema(db, 'time_entry', timeEntry());
+    expect(built).toEqual(['idx_project']);
+
+    // CONTROL: the lookup and user indexes main built are still the only ones
+    // on their keys.
+    expect(onKey({ task: 1 })).toEqual(['idx_task_lookup']);
+    expect(onKey({ member: 1 })).toEqual(['idx_member_lookup']);
+  });
+
+  it('an author who later declares the same index gets no second one', async () => {
+    const { db, built, onKey } = indexKeepingDb(MAIN_BUILT);
+
+    await syncCollectionSchema(db, 'time_entry', timeEntry());
+    await syncCollectionSchema(db, 'time_entry', timeEntry({ indexes: [{ fields: ['project'] }] }));
+
+    expect(built).toEqual(['idx_project']);
+    expect(onKey({ project: 1 })).toEqual(['idx_project']);
+  });
+});

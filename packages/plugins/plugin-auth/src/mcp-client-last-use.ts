@@ -104,9 +104,21 @@
  * not a failure at all: a consent withdrawn between the read and the write
  * leaves nothing to stamp, so the real store answers that write's
  * `RECORD_NOT_FOUND` as done.
+ *
+ * ## Where the use came from (#31821)
+ *
+ * The principal arrives with the client facts of the call that admitted it
+ * (`AuthManager.recordMcpAccessTokenUse`: the address established under the
+ * deployment's trust rule, and the user agent). The stamp is written inside
+ * their scope (`@objectstack/core` `runWithCredentialUseClient`), so the
+ * `credential_use` ledger row the stamp produces records them; a consentless
+ * use carries them on its hand-off. They are the facts of the first call of the
+ * hour, the one that claims the hour, and never a reason to stamp: the throttle
+ * above is unchanged.
  */
 
 import { decodeJwt } from 'jose';
+import { runWithCredentialUseClient, type CredentialUseClient } from '@objectstack/core';
 
 /** The stamp's granularity: one clock hour. */
 export const MCP_CLIENT_LAST_USE_GRANULARITY_MS = 60 * 60 * 1000;
@@ -128,6 +140,8 @@ export interface VerifiedMcpPrincipal {
   organizationId?: string;
   /** The verified token's `iat`, in seconds. Without one, no consent admits the token, so nothing is stamped. */
   issuedAt?: number;
+  /** [#31821] Where the admitted call came from. Absent: the use records no client facts. */
+  client?: CredentialUseClient;
 }
 
 /** One consent row, as the store reads it for the stamp. */
@@ -167,6 +181,8 @@ export interface ConsentlessMcpClientUse {
   applicationId: string;
   /** The start of the clock hour the use fell in. */
   hour: Date;
+  /** [#31821] Where the call that claimed the hour came from. */
+  client?: CredentialUseClient;
 }
 
 /**
@@ -305,7 +321,7 @@ export class McpClientLastUseStamper {
    * is already stamped. Resolves once the stamp is settled; never rejects.
    */
   async record(principal: VerifiedMcpPrincipal): Promise<void> {
-    const { userId, clientId, organizationId, issuedAt } = principal;
+    const { userId, clientId, organizationId, issuedAt, client } = principal;
     if (!userId || !clientId) return;
     const hour = lastUseHourOf((this.opts.now ?? Date.now)());
     const key = JSON.stringify([clientId, userId, organizationId ?? null]);
@@ -322,11 +338,12 @@ export class McpClientLastUseStamper {
       const consents = await this.store.consentsFor(clientId, userId);
       const consent = consentForToken(consents, organizationId, issuedAt);
       if (!consent) {
-        await this.handOffConsentlessUse(consents, { userId, clientId, organizationId }, hour);
+        await this.handOffConsentlessUse(consents, { userId, clientId, organizationId, client }, hour);
         return;
       }
       if (consent.lastUsedAt && consent.lastUsedAt.getTime() >= hour) return;
-      await this.store.stamp(consent.id, new Date(hour));
+      const stamp = () => this.store.stamp(consent.id, new Date(hour));
+      await (client ? runWithCredentialUseClient(client, stamp) : stamp());
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (this.reportedFailures.has(message)) return;
@@ -347,7 +364,7 @@ export class McpClientLastUseStamper {
    */
   private async handOffConsentlessUse(
     consents: readonly StampableConsent[],
-    principal: { userId: string; clientId: string; organizationId?: string },
+    principal: { userId: string; clientId: string; organizationId?: string; client?: CredentialUseClient },
     hour: number,
   ): Promise<void> {
     const onConsentlessUse = this.opts.onConsentlessUse;
@@ -365,6 +382,7 @@ export class McpClientLastUseStamper {
       ...(organizationId ? { organizationId } : {}),
       applicationId: application.id,
       hour: new Date(hour),
+      ...(principal.client ? { client: principal.client } : {}),
     });
   }
 }

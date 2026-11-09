@@ -280,6 +280,10 @@ async function resolveStdioExecutionContext(
     tenancyPosture,
     userAuthGates,
     apiKeyLifecycle,
+    // [#31821] A stdio process has no network peer and no user agent: the
+    // `credential_use` row this key's use stamp writes records the address as
+    // absent because of the transport, never a guessed one.
+    client: { transport: 'stdio' },
   });
   return assembleExecutionContext({
     authz,

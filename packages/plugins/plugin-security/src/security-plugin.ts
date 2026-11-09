@@ -482,7 +482,7 @@ interface ObjectSecurityMeta {
    * backing store, because `syncObjectSchema` issues no DDL for a federated
    * object. Layer 0 reads this to answer "is this a tenant object?" truthfully;
    * see `federated-phantom-anchors.ts` for the provenance test and for why the
-   * question is provenance rather than `external != null`.
+   * question is provenance rather than `isFederatedObject`.
    *
    * `false` on every local object and on a federated object that declares a
    * real remote `organization_id` — both keep the tenant wall exactly as it is.

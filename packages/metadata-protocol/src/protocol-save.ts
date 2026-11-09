@@ -325,7 +325,7 @@ export class ProtocolSaveFacet {
     }
 
     /** [#28355] The body of {@link saveMetaItem} before its refusal audit; that method's docblock is the contract. */
-    static async saveMetaItemUnaudited(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'applyRegistryWriteThrough' | 'assertLockAllowsWrite' | 'assertRuntimeAuthoringRules' | 'authoredLockFamily' | 'authoringChannel' | 'carryForwardRedactedCredentials' | 'classifyObjectContribution' | 'codeOnlyCreateError' | 'codeOnlyOverrideError' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'emitMetadataMutation' | 'engine' | 'ensureObjectStorage' | 'ensureOverlayIndex' | 'envWritableTypes' | 'externalBindingSaveRefusal' | 'flowCanonicalizeFallbackWarned' | 'flowSaveReplaysRetired' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isWritablePackage' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'packagelessOverlayWriteRefusal' | 'permissionSetNameCollisionRefusal' | 'readMetaItem' | 'receiptVersion' | 'recordMetadataAudit' | 'refuseOrganizationScopedWrite' | 'refusePackagedBaseOverride' | 'refuseUngrammaticalMetaItemName' | 'refuseUnmintableMetaType' | 'registryAllowsOverlay' | 'resolveFlowCanonicalizer' | 'resolveSduiManifest' | 'restoreInjectedColumnEchoes' | 'restoreTranslatedObjectEchoes' | 'restoredCredentialPathsFor' | 'runAuthoringGate' | 'runMutationProjector' | 'saveConflict' | 'saveWriteBinding' | 'seedExternalIdSaveRefusal' | 'storableViewFallbackWarned' | 'storedParentForToken' | 'stripServedObjectColumns' | 'tenantAuthoredWriteRefusal' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal' | 'viewContainerNameCollisionRefusal'>, request: SaveMetaItemRequest) {
+    static async saveMetaItemUnaudited(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'applyRegistryWriteThrough' | 'assertLockAllowsWrite' | 'assertRuntimeAuthoringRules' | 'authoredLockFamily' | 'authoringChannel' | 'carryForwardRedactedCredentials' | 'classifyObjectContribution' | 'codeOnlyCreateError' | 'codeOnlyOverrideError' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'emitMetadataMutation' | 'engine' | 'ensureObjectStorage' | 'ensureOverlayIndex' | 'envWritableTypes' | 'externalBindingSaveRefusal' | 'flowCanonicalizeFallbackWarned' | 'flowSaveReplaysRetired' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isWritablePackage' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'packagelessOverlayWriteRefusal' | 'permissionSetNameCollisionRefusal' | 'readMetaItem' | 'receiptVersion' | 'recordMetadataAudit' | 'refuseOrganizationScopedWrite' | 'refusePackagedBaseOverride' | 'refuseUngrammaticalMetaItemName' | 'refuseUnmintableMetaType' | 'registryAllowsOverlay' | 'resolveFlowCanonicalizer' | 'resolveSduiManifest' | 'restoreInjectedColumnEchoes' | 'restoreTranslatedObjectEchoes' | 'restoredCredentialPathsFor' | 'runAuthoringGate' | 'runMutationProjector' | 'saveConflict' | 'saveWriteBinding' | 'seedExternalIdSaveRefusal' | 'storableViewFallbackWarned' | 'storedParentForToken' | 'stripServedObjectColumns' | 'tenantAuthoredWriteRefusal' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal' | 'viewContainerNameCollisionRefusal'>, request: SaveMetaItemRequest) {
         // [ADR-0131 D6] FIRST, before every other gate and every read: an
         // organization-scoped write is refused for every type, draft or
         // publish. See {@link organizationScopedWriteRefusal}.
@@ -955,6 +955,17 @@ export class ProtocolSaveFacet {
             if (prefixViolation) {
                 const err: any = new Error(prefixViolation);
                 err.code = 'NAMESPACE_PREFIX';
+                err.status = 422;
+                throw err;
+            }
+            // [ADR-0150 D6, child K] …and a namespace never equals an object
+            // name: the object's name against every installed namespace and
+            // its own package's `NS_custom` — the spec's predicate, the install
+            // door's code (`NAMESPACE_CONFLICT` / 422).
+            const nameClash = host.objectNamespaceObjectNameClash(request.name, request.packageId);
+            if (nameClash) {
+                const err: any = new Error(nameClash);
+                err.code = 'NAMESPACE_CONFLICT';
                 err.status = 422;
                 throw err;
             }
