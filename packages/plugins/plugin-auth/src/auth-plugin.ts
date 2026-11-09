@@ -91,6 +91,7 @@ import { MFA_REQUIREMENT_LEVELS, readMfaRequirementLevel } from './organization-
 import { registerMfaRequiredEnrollmentPredicate } from './mfa-required-enrollment-predicate.js';
 import { registerPersonalViewHooks } from './personal-view-hooks.js';
 import { registerUserPreferenceHooks } from './user-preference-hooks.js';
+import { registerServiceAccountRowGuard } from './service-account-identity.js';
 import { personalViewCallerResolver, registerPersonalViewRoutes, PERSONAL_VIEW_REMOVE_ROUTE, type PersonalViewEngine } from './personal-view-routes.js';
 import { registerMembershipEndedSessionTrigger } from './membership-ended-session.js';
 import { registerMemberRoleCanonicalization } from './member-role-canonical.js';
@@ -2010,6 +2011,14 @@ export class AuthPlugin implements Plugin {
         // priority 6, judging the canonical spelling the hook above wrote.
         registerExternalMembershipGuard(engine, {
           packageId: 'com.objectstack.plugin-auth.external-membership',
+        });
+        // [ADR-0151 D1] A user's principal kind is fixed when the row is
+        // created, and an AI service account names a person accountable for
+        // it — for every writer, the system included, ahead of every other
+        // `sys_user` hook (priority 4). See service-account-identity.ts.
+        registerServiceAccountRowGuard(engine, {
+          packageId: 'com.objectstack.plugin-auth.service-account-row',
+          logger: ctx.logger,
         });
         registerIdentityWriteGuard(engine, {
           packageId: 'com.objectstack.plugin-auth.identity-write-guard',
