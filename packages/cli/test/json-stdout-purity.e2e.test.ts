@@ -68,6 +68,8 @@ import { maskComments } from '../../../scripts/js-comment-mask.mjs';
 import { MANIFEST_FILENAME, computeIntegrity, createTarGz, type ArchiveFile } from '../src/utils/osplugin.js';
 import { childEnv } from './helpers/serve-process.js';
 import { CONFIG_MISS_FAMILY, discoverConfigMissFamily } from './helpers/config-miss-family.js';
+// [#10126] Paid at MODULE LOAD (`scripts/check-test-source-alias.mjs`): `osplugin.ts` reaches it by a dynamic `import()`.
+import '@objectstack/runtime';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');

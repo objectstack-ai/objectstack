@@ -57,6 +57,18 @@ import { isExitSignal } from './format.js';
 import { MANIFEST_FILENAME, computeIntegrity, createTarGz, type ArchiveFile } from './osplugin.js';
 import { bootSchemaStack } from './schema-migrate.js';
 import { buildDataMigrationPlugins } from './data-migration-plugins.js';
+// [#10126] Pay the first transform of the dist-resolved workspace deps the
+// family reaches through dynamic `import()`s at MODULE LOAD, not inside a
+// clocked case (`scripts/check-test-source-alias.mjs`).
+import '@objectstack/service-datasource';
+import '@objectstack/driver-turso';
+import '@objectstack/service-automation';
+import '@objectstack/platform-objects/system';
+import '@objectstack/spec/automation';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
+import '@objectstack/metadata';
+import '@objectstack/plugin-hono-server';
 import DbOrphans from '../commands/db/orphans.js';
 import MigrateAccountIssuer from '../commands/migrate/account-issuer.js';
 import MigrateActivityChangedFields from '../commands/migrate/activity-changed-fields.js';

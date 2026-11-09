@@ -53,6 +53,10 @@ import '@objectstack/runtime';
 import '@objectstack/metadata-protocol';
 import '@objectstack/platform-objects/plugin';
 import '@objectstack/plugin-audit';
+import '@objectstack/service-datasource';
+import '@objectstack/driver-turso';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI_ROOT = resolve(HERE, '..', '..', '..');
