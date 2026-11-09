@@ -95,6 +95,7 @@ import {
   applyIndexKeyParts,
   isHashShadowCarrier,
   parseHashShadowKeyParts,
+  parseHashShadowRowScope,
   parseIndexDdl,
   type PhysicalIndex,
 } from './schema-drift.js';
@@ -1018,8 +1019,13 @@ export async function resolveHashShadowKeys(
       }
     }
     for (const i of carriers) {
-      const parts = parseHashShadowKeyParts(exprByColumn.get(i.columns[0]!) ?? '');
-      if (parts.length > 0) i.shadowKey = parts;
+      const expr = exprByColumn.get(i.columns[0]!) ?? '';
+      const parts = parseHashShadowKeyParts(expr);
+      if (parts.length === 0) continue;
+      i.shadowKey = parts;
+      // A row-scoped shadow is a partial unique on its key parts (MariaDB's
+      // only spelling of one) — see `parseHashShadowRowScope`.
+      if (parseHashShadowRowScope(expr) !== null) i.partial = true;
     }
   } catch {
     /* see the head note: an unresolved carrier degrades to "no finding". */

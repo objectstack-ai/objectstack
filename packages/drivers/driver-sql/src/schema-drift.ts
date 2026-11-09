@@ -627,13 +627,51 @@ export interface HashShadowKeyPart {
  * nothing.
  */
 export function parseHashShadowKeyParts(generationExpression: string): HashShadowKeyPart[] {
-  const matches = String(generationExpression ?? '').matchAll(
+  // A row-scoped shadow ({@link parseHashShadowRowScope}) hashes the parts
+  // after its `then`; the column its `when` tests is the scope, not a key part.
+  const raw = String(generationExpression ?? '');
+  const digest = HASH_SHADOW_ROW_SCOPE.exec(raw)?.[2] ?? raw;
+  const matches = digest.matchAll(
     /(coalesce\s*\(\s*)?`((?:[^`]|``)+)`/gi,
   );
   return [...matches].map((m) => ({
     column: m[2]!.replace(/``/g, '`'),
     nullSafe: m[1] != null,
   }));
+}
+
+/**
+ * `case when <col> is null then <digest> end`, as MariaDB stores it — the shape
+ * of a ROW-SCOPED hash shadow. See {@link parseHashShadowRowScope}.
+ */
+const HASH_SHADOW_ROW_SCOPE = /^\s*case\s+when\s+`((?:[^`]|``)+)`\s+is\s+null\s+then\s+([\s\S]*\S)\s+end\s*$/i;
+
+/**
+ * The column a ROW-SCOPED hash shadow tests, or `null` for an ordinary shadow.
+ *
+ * The driver's own shadows (`createHashShadowUniqueIndex`) hash every row. One
+ * index is built with a shadow whose digest is NULL outside a row scope:
+ * `metadata-protocol`'s activation-ledger package-less guard on MariaDB
+ * (`activation-ledger-packageless-index.ts`, ADR-0150 D4), `CASE WHEN
+ * package_id IS NULL THEN <digest of metadata_type, name> END`. MariaDB has no
+ * partial index and no functional key part, so this is how it says
+ * `UNIQUE (metadata_type, name) WHERE package_id IS NULL`: a UNIQUE key over the
+ * shadow exempts every row whose digest is NULL, which is every packaged row.
+ *
+ * So such a carrier IS a partial unique on the digest's key parts, and the
+ * introspection records it as one (`partial: true`, `shadowKey` = those parts):
+ * a partial index is runtime-managed ({@link isSyncReproducibleIndex}), so the
+ * differ never offers to drop it as an orphan, and it is the guard
+ * {@link widenedUniqueReplacements} asks for before it retires the narrower key.
+ * Read on its raw expression, the carrier would key `(package_id, metadata_type,
+ * name)` and read as a destructive orphan (measured, MariaDB 11.8).
+ *
+ * Only `IS NULL` scopes are recognised: that is the one form any producer
+ * writes, and a scope this parser cannot read leaves the carrier as it was.
+ */
+export function parseHashShadowRowScope(generationExpression: string): string | null {
+  const m = HASH_SHADOW_ROW_SCOPE.exec(String(generationExpression ?? ''));
+  return m ? m[1]!.replace(/``/g, '`') : null;
 }
 
 /** Minimal shape of an introspected physical column (see SqlDriver.introspectColumns). */
@@ -2397,16 +2435,18 @@ function widenedUniqueReplacements(args: {
  * Does a partial UNIQUE index on exactly `columns`, in key order, stand on the
  * table? The guard {@link widenedUniqueReplacements} requires before it calls
  * retiring a narrower key a pure relaxation when the gained column is nullable.
+ *
+ * Read through the ENFORCED key ({@link enforcedIndexKey}), so a row-scoped
+ * hash-shadow carrier — MariaDB's spelling of the partial guard, which stores
+ * one digest column ({@link parseHashShadowRowScope}) — answers by the columns
+ * it hashes, exactly as the SQLite/PostgreSQL partial index answers by its own.
  */
 function hasPartialUniqueGuard(physical: ReadonlyArray<PhysicalIndex>, columns: readonly string[]): boolean {
-  return physical.some(
-    (p) =>
-      p.unique &&
-      p.partial === true &&
-      (p.expressions?.length ?? 0) === 0 &&
-      p.columns.length === columns.length &&
-      p.columns.every((c, i) => c === columns[i]),
-  );
+  return physical.some((p) => {
+    if (!p.unique || p.partial !== true || (p.expressions?.length ?? 0) > 0) return false;
+    const key = enforcedIndexKey(p).columns;
+    return key.length === columns.length && key.every((c, i) => c === columns[i]);
+  });
 }
 
 /** The tenant arms of {@link legacyUniqueReplacements}: a unique now scoped per organization. */
