@@ -311,9 +311,10 @@ describe('#8928 os migrate duplicates — against a really booted stack', () => 
     // sees that something is blocked without reading every entry.
     expect(produced.summary.runtimeIndexesBlocked).toBe(1);
     expect(produced.summary.runtimeIndexBlockingRows).toBe(2);
-    // `sys_setting` is absent on this fixture; whatever each status, the four
-    // indexes are all accounted for.
-    expect(produced.runtimeIndexPreflight).toHaveLength(4);
+    // `sys_setting` is absent on this fixture; whatever each status, the five
+    // indexes (the fifth is the activation ledger's package-less index,
+    // ADR-0150 D4) are all accounted for.
+    expect(produced.runtimeIndexPreflight).toHaveLength(5);
     expect(produced.reportVersion).toBe(2);
 
     // The whole run — boot included — wrote nothing. If a future change arms a

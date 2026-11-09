@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { DatabaseSync } from 'node:sqlite';
+import { inspect } from 'node:util';
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
@@ -163,5 +164,74 @@ describe('the MySQL-family arms (statement and verdict)', () => {
         const message = String(log.error.mock.calls[0]?.[0] ?? '');
         expect(message).toContain('is NOT enforced by an index of its own');
         expect(message).toContain('keeps its old (metadata_type, name) index');
+    });
+});
+
+/**
+ * [#21418] The one `operatorFacingErrorText()` site in this migration (the
+ * CREATE's failure detail) and the presence read's detail it also reports: a
+ * value bound into a refused raw statement reaches neither the returned result
+ * nor the `error` line. The fixture is the raw terminal's envelope, as
+ * `raw-exec-operator-detail-16657.test.ts` builds it for the sibling migrations.
+ */
+describe('[#21418] a bound sentinel reaches no carrier this migration writes', () => {
+    const SENTINEL = 'SENTINEL-21418-BOUND-VALUE';
+
+    /** knex's message for a refused raw statement: values inlined, then the dialect's words. */
+    const knexDump = (sql: string, params: readonly unknown[], diagnostic: string): string => {
+        let i = 0;
+        return `${sql.replace(/\?/g, () => `'${String(params[i++])}'`)} - ${diagnostic}`;
+    };
+
+    /** `rawStatementFaultError`'s shape: a composed envelope, the dialect text on a non-enumerable cause. */
+    function rawStatementFault(dialect: string, causeCode = 'SQLITE_ERROR'): Error {
+        const err = Object.assign(new Error('The database refused to run a raw statement.'), {
+            code: 'DATABASE_ERROR',
+            status: 500,
+        });
+        const cause = Object.assign(new Error(dialect), { code: causeCode });
+        Object.defineProperty(err, 'cause', { value: cause, enumerable: false, writable: true, configurable: true });
+        return err;
+    }
+
+    const carriers = (result: unknown, log: { error: ReturnType<typeof vi.fn>; warn: ReturnType<typeof vi.fn> }) =>
+        [inspect(result, { depth: 8 }), ...[...log.error.mock.calls, ...log.warn.mock.calls].map((c) => inspect(c, { depth: 8 }))].join('\n');
+
+    const presentTable = async (sql: string) => {
+        if (/information_schema|sqlite_master|to_regclass|WHERE 1 = 0/i.test(sql)) return [[{ present: 1 }]];
+        return [];
+    };
+
+    it('[the fixture] the raw path really carries the sentinel on the cause the helper reads', () => {
+        const thrown = rawStatementFault(knexDump('select ? as v', [SENTINEL], 'no such column: v'));
+        expect((thrown as { cause?: Error }).cause?.message).toContain(SENTINEL);
+        expect(thrown.message).not.toContain(SENTINEL);
+    });
+
+    it.each([
+        ['failed', 'no such column: v', 'SQLITE_ERROR'],
+        ['unsupported', 'near "WHERE": syntax error', 'SQLITE_ERROR'],
+    ] as const)('the CREATE refused (%s): the result detail and the error line carry the dialect text, never the bound value', async (status, diagnostic, code) => {
+        const exec: IndexExec = async (sql) => {
+            if (sql.startsWith('CREATE')) throw rawStatementFault(knexDump(`${sql} -- ?`, [SENTINEL], diagnostic), code);
+            return presentTable(sql);
+        };
+        const log = { error: vi.fn(), warn: vi.fn() };
+        const result = await ensureActivationLedgerPackagelessIndex(exec, log, { client: 'better-sqlite3' });
+        expect(result.status).toBe(status);
+        expect(result.detail).toContain(diagnostic);
+        expect(log.error).toHaveBeenCalled();
+        expect(carriers(result, log)).not.toContain(SENTINEL);
+    });
+
+    it('the presence read refused: the failed result and its error line carry no bound value', async () => {
+        const exec: IndexExec = async () => {
+            throw rawStatementFault(knexDump('select ? as v', [SENTINEL], 'no such column: v'));
+        };
+        const log = { error: vi.fn(), warn: vi.fn() };
+        const result = await ensureActivationLedgerPackagelessIndex(exec, log, { client: 'better-sqlite3' });
+        expect(result.status).toBe('failed');
+        expect(log.error).toHaveBeenCalled();
+        expect(carriers(result, log)).not.toContain(SENTINEL);
     });
 });
