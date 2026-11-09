@@ -9054,9 +9054,13 @@ export class ObjectQL implements IObjectQLEngine {
               // walk touches it, and writes the one entry after the walk and
               // before this row goes. A removal that throws takes the entry
               // with it: the transaction's rollback when one covers the bin,
-              // the capture's compensation otherwise. A caller's `multi: true`
-              // opens none, even here: the lifecycle sweep reaps by id with it.
-              // Nor does a permanent delete, which is the point of it.
+              // the capture's compensation otherwise. [#31630] A removal the
+              // driver answers as removing nothing withdraws the entry inside
+              // the same unit, so no entry stays for a row that is still live
+              // (`capture.ts` says why it is not written after instead).
+              // A caller's `multi: true` opens none, even here: the lifecycle
+              // sweep reaps by id with it. Nor does a permanent delete, which
+              // is the point of it.
               //
               // [#30237] The entry's id is told to the caller
               // (`options.onRecycleBinEntry`) only once the unit has landed:
@@ -9075,8 +9079,10 @@ export class ObjectQL implements IObjectQLEngine {
                   );
                   // Told only for a row the driver says it removed: `false`
                   // (not found) and an off-contract count of 0 (kept) name no
-                  // deletion an undo could reverse.
+                  // deletion an undo could reverse, and their entry is
+                  // withdrawn.
                   if (removed !== false && (removed as unknown) !== 0) binEntryId = entry?.id;
+                  else await entry?.withdraw();
                   return removed;
                 } catch (e) {
                   await entry?.compensate();
