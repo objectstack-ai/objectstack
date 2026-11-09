@@ -80,10 +80,35 @@ import { Args, Command, Flags } from '@oclif/core';
 import { INSTALL_MODES, customizationBasePackageId, type InstallMode } from '@objectstack/spec/kernel';
 import { printHeader, printKV, printSuccess, printWarning, printError, printStep, isExitSignal } from '../../utils/format.js';
 import { DEFAULT_RUNTIME_INSTALL_URL, runtimeInstallTarget } from '../../utils/runtime-target.js';
+import {
+  readSchemaUpgradeRefusal,
+  renderSchemaUpgradeRefusal,
+  renderUpgradePlan,
+  type SchemaUpgradeRefusal,
+} from '../../utils/upgrade-plan.js';
 
-/** What an install answered, for an in-process caller (`os deploy`). Unset until the runtime answered 2xx. */
+/** The plan printer moved to `utils/upgrade-plan.ts`, shared with `os deploy`; still exported here. */
+export { renderUpgradePlan };
+
+/**
+ * What an install answered, for an in-process caller (`os deploy`). Unset
+ * until the runtime answered: a 2xx is one of the answered kinds, a refusal
+ * the runtime sent (a status and an error envelope) is `refused`, with the
+ * envelope verbatim and — for the Q3 stop — its findings and token read.
+ */
 export type PackageInstallOutcome =
-  | { kind: 'dry-run'; manifestId: string; version: string; installedVersion: string | null }
+  | {
+    kind: 'dry-run'; manifestId: string; version: string; installedVersion: string | null;
+    /** The answer's plan reading, verbatim (`data.plan`, `data.environment`). */
+    plan: unknown; environment: unknown;
+    /** The runtime could not read its record of the installed version: the plan is against none. */
+    installedRecordUnreadable: boolean;
+  }
+  | {
+    kind: 'refused'; status: number; code: string | null; message: string; details: unknown;
+    /** Set when the refusal is the Q3 stop: what an explicit confirmation must echo. */
+    schemaUpgrade?: SchemaUpgradeRefusal;
+  }
   | { kind: 'installed'; manifestId: string; version: string; hotLoaded: boolean; runtime: string }
   | { kind: 'other'; manifestId: string };
 
@@ -101,102 +126,6 @@ export type PackageInstallOutcome =
  * withheld, or a runtime that predates the key) prints nothing, and nothing
  * is guessed from the artifact the command sent.
  */
-/** One row count, or the honest "could not be read". */
-function rowsText(rows: unknown, noun: string): string {
-  if (rows === null) return 'its rows could not be read';
-  if (typeof rows !== 'number') return '';
-  return `${rows} row(s) ${noun}`;
-}
-
-/**
- * [epic cloud#3652 Q3, #30884] The lines a dry run's answer prints: the
- * package upgrade plan (`data.plan`, `comparePackageVersions`) with the
- * environment's readings beside each finding (`data.environment`). Printed
- * from the answer only; a list the answer does not carry prints nothing.
- */
-export function renderUpgradePlan(data: any): string[] {
-  const plan = data?.plan ?? {};
-  const env = data?.environment ?? {};
-  const lines: string[] = [];
-  const columnRows = new Map<string, unknown>();
-  for (const c of Array.isArray(env.columns) ? env.columns : []) columnRows.set(`${c.object}.${c.field}`, c.rows);
-  const objectRows = new Map<string, unknown>();
-  for (const o of Array.isArray(env.removedObjects) ? env.removedObjects : []) objectRows.set(o.object, o.rows);
-  const list = (value: unknown): any[] => (Array.isArray(value) ? value : []);
-  const held = (object: string, field: string) => {
-    const text = rowsText(columnRows.get(`${object}.${field}`), 'hold a value');
-    return text ? ` — ${text}` : '';
-  };
-
-  const section = (title: string, items: string[]) => {
-    if (items.length === 0) return;
-    lines.push(`  ${title}`);
-    for (const item of items) lines.push(`    ${item}`);
-  };
-  section('Objects', [
-    ...list(plan.objects?.added).map((name: string) => `+ ${name}`),
-    ...list(plan.objects?.removed).map((name: string) => {
-      const text = rowsText(objectRows.get(name), 'in it');
-      return `- ${name}${text ? ` — ${text}; the table is not dropped` : ''}`;
-    }),
-  ]);
-  section('Fields', [
-    ...list(plan.fields?.added).map((f: any) => `+ ${f.object}.${f.field}${f.type ? ` (${f.type})` : ''}${f.required ? ' required' : ''}`),
-    ...list(plan.fields?.removed).map((f: any) => `- ${f.object}.${f.field}${f.type ? ` (${f.type})` : ''}${held(f.object, f.field)}; the column is not dropped`),
-  ]);
-  section('Renames declared by renamedFrom', list(plan.declaredRenames).map((r: any) =>
-    `${r.object}.${r.from} → ${r.to}${held(r.object, r.from)}`));
-  section('Suspected renames (no renamedFrom links them)', list(plan.suspectedRenames).map((r: any) =>
-    `${r.object}.${r.field} → ${list(r.candidates).map((c: any) => c.field).join(' or ')}?${held(r.object, r.field)}; `
-    + 'the new key would install as a new empty column. Declare renamedFrom on the new field and rebuild if it is a rename'));
-  section('Type changes', list(plan.typeChanges).map((t: any) =>
-    `${t.object}.${t.field}: ${t.from} → ${t.to} (${t.category})${t.renamedFrom ? `, renamed from ${t.renamedFrom}` : ''}`
-    + `${held(t.object, t.renamedFrom ?? t.field)}`));
-
-  const overwrites = new Map<string, any>();
-  for (const o of list(env.seeds)) overwrites.set(o.key, o);
-  const seedLine = (d: any, sign: string) => {
-    const o = overwrites.get(d.key);
-    let line = `${sign} ${d.key} (mode ${d.fromMode && d.fromMode !== d.mode ? `${d.fromMode} → ${d.mode}` : d.mode}, ${d.records} record(s))`;
-    if (Array.isArray(d.changed)) line += `: ${d.changed.join(', ')} changed`;
-    if (o) {
-      line += o.editedRows === null
-        ? ' — rows a customer edited could not be read'
-        : ` — ${o.editedRows} row(s) a customer edited would be overwritten${o.editedKeys?.length ? ` (${o.editedKeys.join(', ')})` : ''}`;
-    }
-    return line;
-  };
-  const changedKeys = new Set(list(plan.seeds?.changed).map((d: any) => d.key));
-  section('Seed datasets', [
-    ...list(plan.seeds?.added).map((d: any) => seedLine(d, '+')),
-    ...list(plan.seeds?.removed).map((d: any) => `- ${d.key} (mode ${d.mode}); its rows are not removed`),
-    ...list(plan.seeds?.changed).map((d: any) => seedLine(d, '~')),
-    // An unchanged overwriting dataset still writes over the rows a customer edited.
-    ...list(env.seeds).filter((o: any) => !changedKeys.has(o.key) && o.editedRows !== 0)
-      .map((o: any) => `= ${o.key} (mode ${o.mode}, unchanged)${o.editedRows === null
-        ? ' — rows a customer edited could not be read'
-        : ` — ${o.editedRows} row(s) a customer edited would be overwritten${o.editedKeys?.length ? ` (${o.editedKeys.join(', ')})` : ''}`}`),
-  ]);
-  if (lines.length === 0) lines.push('  No change to objects, fields or seed datasets.');
-
-  // [ADR-0146 D2, as amended] The advisory class: overrides of the base in
-  // its paired `.custom` package. Advice only: nothing here stops the
-  // install, and no confirmation covers it. `null` = the runtime could not
-  // read them; a runtime that predates the key carries none and prints none.
-  const overrides = env.overrides;
-  if (overrides === null) {
-    lines.push('  Overrides (advisory): the customizations of this package could not be read.');
-  } else if (overrides && typeof overrides === 'object') {
-    const named = (f: any) => `${f.type} '${f.name}'${f.member ? ` (${f.member})` : ''}`;
-    const baseDoes = (change: unknown) => (change === 'removed' ? 'no longer ships it' : change === 'added' ? 'now ships it' : 'changes it');
-    section('Overrides that hide a change in this upgrade (advisory; the upgrade installs either way)', list(overrides.hidesChange).map((f: any) =>
-      `${named(f)}: the base ${baseDoes(f.change)}${f.basedOn ? `; the override was taken from ${f.basedOn}` : ''}. ${f.next ?? ''}`.trimEnd()));
-    section('Overrides taken from another version than the installed one (advisory)', list(overrides.stale).map((f: any) =>
-      `${named(f)}: taken from ${f.basedOn}, installed ${f.installedVersion ?? 'unknown'}. ${f.next ?? ''}`.trimEnd()));
-  }
-  return lines;
-}
-
 function printWithheldMaps(withheldMaps: unknown): void {
   const maps: Array<{ type?: unknown; name?: unknown; path?: unknown }> =
     Array.isArray(withheldMaps) ? withheldMaps : [];
@@ -454,6 +383,19 @@ export default class PackageInstall extends Command {
       }, flags.timeout);
 
       if (!res.ok) {
+        // The refusal, for an in-process caller, before any of it is printed.
+        // A status of 0 is no answer at all (a timeout, a refused connection).
+        if (res.status !== 0) {
+          const error = res.body?.error;
+          this.outcome = {
+            kind: 'refused',
+            status: res.status,
+            code: typeof error?.code === 'string' ? error.code : null,
+            message: String(res.error ?? ''),
+            details: error?.details ?? null,
+            schemaUpgrade: readSchemaUpgradeRefusal(res.body),
+          };
+        }
         // [ADR-0120 D5e] The `isolated`-posture stop. Rendered as its own case
         // rather than a bare "Install failed (409)": the whole point of the gate
         // is that the installer READS the list and decides per index, so the
@@ -490,19 +432,11 @@ export default class PackageInstall extends Command {
         // confirm exactly these findings.
         if (res.body?.error?.code === 'SCHEMA_UPGRADE_CONFIRMATION_REQUIRED') {
           const details = res.body.error.details ?? {};
-          const findings: Array<{ kind?: string; describe?: string }> = Array.isArray(details.findings) ? details.findings : [];
-          // A record of the installed version the runtime could not read is a
-          // finding too (no comparison ran): there is no field to declare.
-          const fieldFindings = findings.some((f) => f.kind === 'suspected_rename' || f.kind === 'type_change');
-          printError(fieldFindings
-            ? 'Upgrade stopped — it would rename or retype stored fields without carrying their values'
-            : 'Upgrade stopped — the runtime cannot compare it with the installed version');
-          console.log('');
-          for (const finding of findings) console.log(`  • ${finding.describe ?? JSON.stringify(finding)}`);
-          console.log('');
-          if (fieldFindings) console.log("  If a field was renamed, declare its old key in the new field's `renamedFrom` and rebuild.");
-          console.log('  To upgrade anyway, accepting each finding as listed, confirm exactly these findings:');
-          console.log(`    ${retry} --confirm-upgrade ${details.findingSet}`);
+          const refusal = readSchemaUpgradeRefusal(res.body)
+            ?? { findings: Array.isArray(details.findings) ? details.findings : [], findingSet: String(details.findingSet) };
+          const { headline, lines } = renderSchemaUpgradeRefusal(refusal, retry);
+          printError(headline);
+          for (const line of lines) console.log(line);
           this.exit(1);
           return;
         }
@@ -547,6 +481,9 @@ export default class PackageInstall extends Command {
           manifestId: String(data.manifestId ?? label),
           version: String(data.version ?? flags.version),
           installedVersion: typeof data.installedVersion === 'string' ? data.installedVersion : null,
+          plan: data.plan ?? null,
+          environment: data.environment ?? null,
+          installedRecordUnreadable: data.installedRecordUnreadable === true,
         };
         console.log('');
         printSuccess('Dry run — nothing was installed or written');

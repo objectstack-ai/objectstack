@@ -197,18 +197,33 @@ function isStaticallyKnownLanguage(lang: string, config?: I18nConfig): boolean {
 const BUILT_IN_LANGUAGE_CODES: readonly string[] = BUILT_IN_CODES;
 
 /**
- * Every language this renderer can produce *without asking the app*: the
- * built-in packs plus `config.resources`.
+ * The platform locale table's languages an app's locale list names, as table
+ * tags, de-duplicated, in the order the app wrote them (ruling F of
+ * objectstack#29349: one list of languages, each complete on every surface).
  *
- * This is the offline/no-backend answer — the set the switcher offers when
- * there is no `loadLocales` wiring, or when the app's locale endpoint cannot
- * be reached (objectui#4039).
+ * Each code is read through {@link resolveBuiltInLanguage} — the table's read
+ * aliases, then shorter prefixes — the same resolution that picks the pack the
+ * code renders in. So the menu names what the user will actually get:
+ *
+ *   - a stored spelling becomes its table tag (`zh-CN` → `zh-Hans`, `ja-JP` →
+ *     `ja`), which carries the table's own label and is what a pick writes to
+ *     `sys_user.locale`;
+ *   - two spellings of one language (`zh-CN` beside `zh-Hans`) are one entry;
+ *   - a code that lands on no table tag (`th`) is not offered at all. No
+ *     Console pack, Studio catalogue, platform bundle or built-in email serves
+ *     it, and the platform has no second tier of half-supported languages.
+ *
+ * The server answers `GET /i18n/locales` with the app's declared
+ * `i18n.supportedLocales` as written, so a table tag picked here reaches the
+ * app's bundles through the same table language (`resolveLocaleAmong`).
  */
-function resolvableLanguages(config?: I18nConfig): string[] {
-  const extra = Object.keys(config?.resources ?? {}).filter(
-    (code) => !BUILT_IN_LANGUAGE_CODES.includes(code),
-  );
-  return [...BUILT_IN_LANGUAGE_CODES, ...extra];
+function offeredTableTags(codes: readonly string[]): string[] {
+  const offered: string[] = [];
+  for (const code of codes) {
+    const tag = resolveBuiltInLanguage(code);
+    if (tag !== null && !offered.includes(tag)) offered.push(tag);
+  }
+  return offered;
 }
 
 /**
@@ -240,13 +255,14 @@ function isWellFormedLanguageTag(tag: string): boolean {
  * enumerate what it will answer for synchronously — the app's pack for `th`
  * lives behind `GET /api/v1/i18n/translations/th`, not in `config.resources`.
  *
- * This is the lockstep half of objectui#4039. The switcher now offers the
- * app's own locales, so the restore validation had to grow with it or a
- * user-picked app locale would be purged on the next reload — the exact bug
- * objectstack#5418 predicted this fix would otherwise mint. The bound stays
- * honest rather than absent: only well-formed tags qualify, and the app's own
- * locale list adjudicates the choice for real once it lands (see the
- * `provisional` self-heal in {@link I18nProvider}).
+ * This is the lockstep half of objectui#4039, which let the switcher offer the
+ * app's own locales. The bound stays honest rather than absent: only
+ * well-formed tags qualify, and nothing synchronous decides the choice. Since
+ * objectstack#30514 the switcher offers only the platform locale table's
+ * languages, so a value accepted on this credit alone is adjudicated against
+ * the OFFERED set once the app's list lands (see the `provisional` self-heal
+ * in {@link I18nProvider}): an out-of-table `th` boots, then reverts and is
+ * purged.
  */
 function canResolveLanguage(lang: string, config?: I18nConfig, hasLoader = false): boolean {
   if (isStaticallyKnownLanguage(lang, config)) return true;
@@ -470,16 +486,17 @@ interface I18nContextValue {
   /** The underlying i18next instance */
   i18n: I18nInstance;
   /**
-   * The languages a switcher may offer (objectui#4039): the app's own locale
-   * list ∩ what this renderer can resolve. Computed here because only the
-   * provider knows both sides — the built-in packs, `config.resources` and
-   * whether a dynamic loader is wired.
+   * The languages a switcher may offer: the platform locale table ∩ the
+   * app's own locale list (objectui#4039, ruling F of objectstack#29349), as
+   * table tags (`zh-Hans`, never `zh-CN`), de-duplicated, in the app's order.
+   * A code that lands on no table tag is not offered. Computed here because
+   * only the provider knows both sides.
    *
    * `null` means "still asking the app". Consumers render nothing (or a
    * skeleton) rather than a list they will have to retract a tick later.
    * Without {@link I18nProviderProps.loadLocales} wiring, or when the app's
-   * endpoint cannot be reached, this is the offline fallback: the built-in
-   * packs plus `config.resources`.
+   * answer names no table language, this is the offline fallback: the table's
+   * tags.
    */
   offerableLanguages: readonly string[] | null;
 }
@@ -574,9 +591,8 @@ export interface I18nProviderProps {
    * the app owns the transport, the provider owns what is done with the answer.
    *
    * The console reads `GET /api/v1/i18n/locales`; see
-   * `apps/console/src/loadLocales.ts`. Without this prop the switcher keeps
-   * offering the built-in packs (plus `config.resources`) exactly as before, so
-   * an app that never wires it is unaffected.
+   * `apps/console/src/loadLocales.ts`. Without this prop the switcher offers
+   * the platform locale table's tags.
    *
    * @example
    * ```tsx
@@ -791,27 +807,31 @@ export function I18nProvider({
   }, [loadLocales]);
 
   const offerableLanguages = useMemo<readonly string[] | null>(() => {
-    const fallback = resolvableLanguages(config);
-    // No wiring at all: the built-in packs are the whole truth, as before.
-    if (!hasLocaleLoader) return fallback;
+    // No wiring at all: the platform locale table is the whole truth. An entry
+    // in `config.resources` overlays a table language or names one outside the
+    // table, and neither adds a menu entry (see `offeredTableTags`).
+    if (!hasLocaleLoader) return BUILT_IN_LANGUAGE_CODES;
     if (appLocales === null) return null;
-    const offerable = appLocales.filter((code) => canResolveLanguage(code, config, hasLoader));
-    // An app that answers with nothing this renderer can produce leaves the
-    // user with no way to switch at all — strictly worse than the offline
-    // fallback, so the fallback wins.
-    return offerable.length > 0 ? offerable : fallback;
-  }, [config, hasLocaleLoader, appLocales, hasLoader]);
+    const offerable = offeredTableTags(appLocales);
+    // An app that answers with no table language leaves the user with no way
+    // to switch at all — strictly worse than the offline fallback, so the
+    // fallback wins.
+    return offerable.length > 0 ? offerable : BUILT_IN_LANGUAGE_CODES;
+  }, [hasLocaleLoader, appLocales]);
 
   // Self-heal: a stored language accepted on the loader's credit alone is
-  // adjudicated by the app's real list once it lands. Without this, widening
-  // the restore validation would reintroduce exactly what it was written to
-  // stop — one stale entry locking the UI to a locale with no translations.
-  // Scoped to our own optimism: only the bootstrap language, only while the
-  // user has not moved on, and never on an empty/failed answer.
+  // adjudicated once the app's real list lands — against what the menu
+  // OFFERS, not the raw list, so a locale the app lists but the platform
+  // locale table does not name (`th`) is reverted and purged like one the app
+  // dropped (objectstack#30514). Without this, widening the restore validation
+  // would reintroduce exactly what it was written to stop — one stale entry
+  // locking the UI to a locale with no translations. Scoped to our own
+  // optimism: only the bootstrap language, only while the user has not moved
+  // on, and never on an empty/failed answer.
   useEffect(() => {
     const provisional = bootstrap.provisional;
-    if (!provisional || !appLocales || appLocales.length === 0) return;
-    if (appLocales.includes(provisional)) return;
+    if (!provisional || !appLocales || appLocales.length === 0 || !offerableLanguages) return;
+    if (offerableLanguages.includes(provisional)) return;
     if ((i18nInstance.language || '') !== provisional) return;
     const revertTo = config?.defaultLanguage || config?.fallbackLanguage || 'en';
     void (async () => {
@@ -826,7 +846,7 @@ export function I18nProvider({
       // theirs to keep.
       if ((i18nInstance.language || '') === revertTo) clearStoredLanguage();
     })();
-  }, [bootstrap, appLocales, i18nInstance, config]);
+  }, [bootstrap, appLocales, offerableLanguages, i18nInstance, config]);
 
   const contextValue = useMemo<I18nContextValue>(
     () => ({

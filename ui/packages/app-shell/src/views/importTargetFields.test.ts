@@ -114,3 +114,24 @@ describe('importTargetFields', () => {
     );
   });
 });
+
+describe('importTargetFields: a field carrying an expression (objectstack#31759)', () => {
+  const computedFields = {
+    amount: { type: 'currency', label: 'Amount', expression: 'record.quantity * record.unit_price' },
+    margin: { type: 'number', label: 'Margin', expression: { dialect: 'cel', source: 'record.a - record.b' } },
+    price: { type: 'currency', label: 'Price' },
+    total: { type: 'formula', label: 'Total', expression: 'record.a * 2' },
+  };
+
+  it('is a match key only, never a write column, as a readonly field is', () => {
+    const byName = Object.fromEntries(importTargetFields('line', computedFields).map((f) => [f.name, f]));
+    expect(byName.amount).toMatchObject({ matchOnly: true, required: false });
+    expect(byName.margin).toMatchObject({ matchOnly: true, required: false });
+  });
+
+  it('CONTROL: the same currency field without one stays a write column, a formula stays absent', () => {
+    const byName = Object.fromEntries(importTargetFields('line', computedFields).map((f) => [f.name, f]));
+    expect(byName.price.matchOnly).toBeUndefined();
+    expect(byName.total).toBeUndefined();
+  });
+});

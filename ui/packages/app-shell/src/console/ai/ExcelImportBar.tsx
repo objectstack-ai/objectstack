@@ -32,7 +32,7 @@ import {
 import { createAuthenticatedFetch } from '@object-ui/auth';
 import { toast } from 'sonner';
 import { useObjectTranslation } from '@object-ui/i18n';
-import { resolveAffordance } from '@object-ui/core';
+import { resolveAffordance, isExpressionComputedField } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import { ImportWizard } from '@object-ui/plugin-grid';
 
@@ -60,13 +60,20 @@ interface ExcelImportBarProps {
 const SKIP_OBJECT_PREFIXES = ['sys_', 'ai_', 'cloud_'];
 const NON_WRITABLE_TYPES = ['formula', 'summary', 'autonumber'];
 
-/** Normalize a getObjectSchema result's fields → the ImportWizard field shape. */
+/**
+ * Normalize a getObjectSchema result's fields → the ImportWizard field shape.
+ *
+ * Only fields an import can write are kept: not a computed type, and not a
+ * stored field carrying an `expression`, which the engine computes on every
+ * write so an imported value never stands (objectstack#31759).
+ */
 function normalizeFields(schema: any): WizardField[] {
   const raw = schema?.fields ?? schema?.data?.fields ?? schema?.item?.fields ?? {};
   const entries: Array<[string, any]> = Array.isArray(raw)
     ? raw.map((f: any) => [f?.name, f])
     : Object.entries(raw);
   return entries
+    .filter(([, def]) => !isExpressionComputedField(def))
     .map(([name, def]) => ({
       name: (def?.name ?? name) as string,
       label: (def?.label ?? def?.name ?? name) as string,

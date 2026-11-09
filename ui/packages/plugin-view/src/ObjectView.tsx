@@ -77,6 +77,7 @@ import { useObjectTranslation, createSafeTranslation, useDisplayLocale, pickLoca
 // record by reference. Resolved the way `ListView` resolves its own `label`.
 import { resolveI18nLabel as resolveInlineI18nLabel } from '@objectstack/spec/ui';
 import type { ListView as SpecListView } from '@objectstack/spec/ui';
+import { objectPermissionGrants, type EffectiveObjectPermission } from '@objectstack/spec/security';
 import {
   buildExpandFields,
   normalizeListViewSchema,
@@ -573,6 +574,25 @@ function resolveFilterSegments(segments: AuthoredFilterSegments, scope: FilterTo
  * English when no I18nProvider is mounted (standalone usage) — via the
  * key-identity probe, not a caught throw.
  */
+/**
+ * The delete toast's Undo (ADR-0148 D2): the data source's restore bound to
+ * the object, offered only when the caller's effective map grants
+ * `allowRestoreOwnDeleted` there (the spec's `objectPermissionGrants`, read
+ * as `MePermissionsProvider` reads the map) — the restore door refuses
+ * anyone else. `undefined` keeps today's toast.
+ */
+function recycleBinRestoreFor(
+  dataSource: { restoreRecycleBinEntry?: (resource: string, entryId: string) => Promise<unknown> } | null | undefined,
+  objectName: string | undefined,
+  effectiveObjects: Readonly<Record<string, Readonly<Record<string, unknown>>>> | undefined,
+): ((entryId: string) => Promise<unknown>) | undefined {
+  const restoreEntry = dataSource?.restoreRecycleBinEntry;
+  if (typeof restoreEntry !== 'function' || !objectName || !effectiveObjects) return undefined;
+  const perm = effectiveObjects[objectName.toLowerCase()] ?? effectiveObjects[objectName] ?? effectiveObjects['*'];
+  if (!objectPermissionGrants(perm as EffectiveObjectPermission | undefined, 'allowRestoreOwnDeleted')) return undefined;
+  return (entryId: string) => restoreEntry.call(dataSource, objectName, entryId);
+}
+
 function useCreateVerb(): string {
   // No try/catch: `useObjectTranslation` is provider-safe (optional context
   // read + react-i18next global-instance fallback) and never throws, so the
@@ -648,6 +668,24 @@ const VIEW_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // `_other` row for a numeric `count`, as i18next reads the `en` pack.
   'console.objectView.bulkDeleteConfirm_one': 'Delete {{count}} selected record? This cannot be undone.',
   'console.objectView.bulkDeleteConfirm_other': 'Delete {{count}} selected records? This cannot be undone.',
+  // ADR-0148 — a business object's delete goes to the recycle bin: its
+  // question promises neither permanence nor recovery, and the toast's Undo
+  // restores the entry the delete wrote.
+  'objectActions.deleteConfirmQuestion': 'Are you sure you want to delete this record?',
+  'console.objectView.bulkDeleteQuestion': 'Delete {{count}} selected records?',
+  'console.objectView.bulkDeleteQuestion_one': 'Delete {{count}} selected record?',
+  'console.objectView.bulkDeleteQuestion_other': 'Delete {{count}} selected records?',
+  'actions.undo': 'Undo',
+  'objectActions.restoredNamed': '{{label}} "{{name}}" restored',
+  'objectActions.restoreSuccess': '{{label}} restored',
+  'objectActions.restoreFailed': 'Failed to restore {{label}}',
+  'recycleBin.refusal.uniqueValueTaken': "Can't restore: another record now has the same {{field}} value. Change that record first, then restore.",
+  'recycleBin.refusal.parentPurged': "Can't restore: the {{parent}} record it belonged to has been permanently deleted.",
+  'recycleBin.refusal.packageUninstalled': "Can't restore: the package that provided {{object}} has been uninstalled.",
+  'recycleBin.refusal.parentInRecycleBin': "Can't restore yet: the {{parent}} record it belongs to is also in the recycle bin. Restore that record first.",
+  'recycleBin.refusal.notFound': 'This record is no longer in the recycle bin. It may have been purged.',
+  'recycleBin.refusal.permissionDenied': "You don't have permission to restore this record.",
+  'recycleBin.refusal.notAvailable': 'The recycle bin is not available on this deployment.',
   'objectActions.deleteSuccess': '{{label}} deleted successfully',
   'objectActions.deletedNamed': '{{label}} "{{name}}" deleted',
   'objectActions.deleteFailed': 'Failed to delete {{label}}',
@@ -3397,6 +3435,9 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
                   t: tView,
                   toast,
                   onRefresh: announceOwnWrite,
+                  // ADR-0148 — Undo only for a caller who may restore its own
+                  // deletes on the object, through a data source that can.
+                  restore: recycleBinRestoreFor(dataSource, schema.objectName, perms.effectiveObjects),
                 },
                 bulk
                   ? { params: { records } }

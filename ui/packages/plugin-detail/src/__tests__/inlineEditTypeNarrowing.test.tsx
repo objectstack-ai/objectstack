@@ -28,13 +28,13 @@
  */
 
 import { describe, it, expect, beforeAll, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, cleanup } from '@testing-library/react';
 import * as React from 'react';
 import { RecordContextProvider, InlineEditProvider } from '@object-ui/react';
 import type { DetailViewSection } from '@object-ui/types';
 import { RecordHighlightsRenderer } from '../renderers/record-highlights';
 import { DetailSection } from '../DetailSection';
-import { isComputedFieldType } from '../fieldEnrichment';
+import { isComputedFieldType, isComputedDetailField } from '../fieldEnrichment';
 
 const COMPUTED_TYPES = ['formula', 'summary', 'rollup', 'auto_number'] as const;
 
@@ -236,5 +236,52 @@ describe('isComputedFieldType — union, not precedence (#3355)', () => {
     expect(isComputedFieldType('number', 'number')).toBe(false);
     expect(isComputedFieldType(undefined, undefined)).toBe(false);
     expect(isComputedFieldType('text', null)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A stored field carrying an `expression` (objectstack#31759) — computed by
+// the engine on every write, so no detail surface offers it an editor.
+// ---------------------------------------------------------------------------
+
+describe('a stored field carrying an expression is computed on the record page (objectstack#31759)', () => {
+  const computed = { fields: { supply_share: { type: 'currency', expression: 'record.quantity * record.unit_price' } } };
+  const plain = { fields: { supply_share: { type: 'currency' } } };
+
+  it('the highlight strip offers no editor', () => {
+    const { container } = renderStrip(['supply_share'], computed);
+    expect(hasInlineEditAffordance(container)).toBe(false);
+  });
+
+  it('the details body offers no pencil, and no input in edit mode, and still shows the value', () => {
+    renderSection({ name: 'supply_share' }, computed);
+    expect(hasPencil()).toBe(false);
+    cleanup();
+    const { container } = renderSection({ name: 'supply_share' }, computed, { isEditing: true });
+    expect(container.querySelector('input')).toBeNull();
+    expect(screen.getByText(/28\.57/)).toBeInTheDocument();
+  });
+
+  it('an envelope expression locks it too', () => {
+    renderSection({ name: 'supply_share' }, {
+      fields: { supply_share: { type: 'number', expression: { dialect: 'cel', source: 'record.a + 1' } } },
+    });
+    expect(hasPencil()).toBe(false);
+  });
+
+  it('CONTROL: the same currency field without an expression stays editable on both surfaces', () => {
+    const { container } = renderStrip(['supply_share'], plain);
+    expect(hasInlineEditAffordance(container)).toBe(true);
+    cleanup();
+    renderSection({ name: 'supply_share' }, plain);
+    expect(hasPencil()).toBe(true);
+  });
+
+  it('isComputedDetailField is the type union OR the expression', () => {
+    expect(isComputedDetailField(undefined, { type: 'currency', expression: 'record.a' })).toBe(true);
+    expect(isComputedDetailField(undefined, { type: 'formula' })).toBe(true);
+    expect(isComputedDetailField('formula', { type: 'currency' })).toBe(true);
+    expect(isComputedDetailField(undefined, { type: 'currency' })).toBe(false);
+    expect(isComputedDetailField(undefined, undefined)).toBe(false);
   });
 });

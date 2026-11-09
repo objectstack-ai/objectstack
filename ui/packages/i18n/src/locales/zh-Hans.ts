@@ -1329,6 +1329,7 @@ const zh = {
     copyToClipboard: '复制到剪贴板',
     copied: '已复制！',
     deleteConfirmation: '确定要删除此记录吗？此操作无法撤销。',
+    deleteConfirmQuestion: '确定要删除此记录吗？',
     deleted: '记录已删除',
     editRecord: '编辑记录',
     viewAll: '查看全部',
@@ -2597,6 +2598,9 @@ const zh = {
       bulkDeleteConfirm: '确定要删除选中的 {{count}} 条记录吗？此操作无法撤销。',
       bulkDeleteConfirm_one: '确定要删除选中的 {{count}} 条记录吗？此操作无法撤销。',
       bulkDeleteConfirm_other: '确定要删除选中的 {{count}} 条记录吗？此操作无法撤销。',
+      bulkDeleteQuestion: '确定要删除选中的 {{count}} 条记录吗？',
+      bulkDeleteQuestion_one: '确定要删除选中的 {{count}} 条记录吗？',
+      bulkDeleteQuestion_other: '确定要删除选中的 {{count}} 条记录吗？',
       duplicateViewName: '已存在同名视图。',
       viewTypeGrid: '表格',
       viewTypeGridDesc: '电子表格风格的记录表格。',
@@ -3748,12 +3752,31 @@ const zh = {
     undoFailed: '撤销导航变更失败',
     updateFailed: '更新导航失败',
   },
+  // ADR-0148 — why a recycle-bin restore was refused, one sentence per code the
+  // restore door answers (`recycleBinRestoreRefusalText` in @object-ui/core).
+  recycleBin: {
+    refusal: {
+      uniqueValueTaken: '无法恢复：另一条记录已在使用相同的「{{field}}」值。请先修改那条记录，再恢复。',
+      parentPurged: '无法恢复：它所属的{{parent}}记录已被永久删除。',
+      packageUninstalled: '无法恢复：提供「{{object}}」的软件包已被卸载。',
+      parentInRecycleBin: '暂时无法恢复：它所属的{{parent}}记录也在回收站中。请先恢复那条记录。',
+      notFound: '这条记录已不在回收站中，可能已被清除。',
+      permissionDenied: '您没有恢复这条记录的权限。',
+      notAvailable: '此部署未启用回收站。',
+    },
+  },
   objectActions: {
     deleteSuccess: '{{label}} 删除成功',
     deletedNamed: '{{label}}“{{name}}”已删除',
     deleteFailed: '删除 {{label}} 失败',
     noRecordId: '未提供记录 ID',
     deleteConfirm: '确定要删除此记录吗？此操作无法撤销。',
+    // ADR-0148 — a business object's delete goes to the recycle bin: the
+    // question alone, promising neither permanence nor recovery.
+    deleteConfirmQuestion: '确定要删除此记录吗？',
+    restoredNamed: '{{label}}“{{name}}”已恢复',
+    restoreSuccess: '{{label}} 已恢复',
+    restoreFailed: '恢复 {{label}} 失败',
     deleteConfirmTitle: '删除{{label}}“{{name}}”？',
     bulkDeleteConfirmTitle: '删除 {{count}} 条 {{label}} 记录？',
     bulkDeleteConfirmTitle_one: '删除 {{count}} 条 {{label}} 记录？',

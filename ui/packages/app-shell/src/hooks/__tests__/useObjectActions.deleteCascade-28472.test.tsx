@@ -33,8 +33,8 @@ vi.mock('sonner', () => ({
 import { useObjectActions } from '../useObjectActions';
 
 type Pack = {
-  objectActions: { deleteConfirm: string; deleteCascade: string };
-  console: { objectView: { bulkDeleteConfirm_other: string } };
+  objectActions: { deleteConfirmQuestion: string; deleteCascade: string };
+  console: { objectView: { bulkDeleteQuestion_other: string } };
 };
 const EN = builtInLocales.en as unknown as Pack;
 const ZH = builtInLocales['zh-Hans'] as unknown as Pack;
@@ -98,7 +98,7 @@ describe('console row Delete names the cascade objects (objectstack#28472)', () 
     const message = await askedMessage(onConfirm, 'row-delete');
     expect(getObjectSchema).toHaveBeenCalledWith('crm_lead');
     expect(message).toBe(
-      `${EN.objectActions.deleteConfirm} ${fill(EN.objectActions.deleteCascade, { objects: 'Campaign Member' })}`,
+      `${EN.objectActions.deleteConfirmQuestion} ${fill(EN.objectActions.deleteCascade, { objects: 'Campaign Member' })}`,
     );
     expect(message).not.toContain('crm_campaign_member');
   });
@@ -108,23 +108,23 @@ describe('console row Delete names the cascade objects (objectstack#28472)', () 
     const message = await askedMessage(onConfirm, 'row-delete');
     expect(ZH.objectActions.deleteCascade).not.toBe(EN.objectActions.deleteCascade);
     expect(message).toBe(
-      `${ZH.objectActions.deleteConfirm} ${fill(ZH.objectActions.deleteCascade, { objects: 'Campaign Member' })}`,
+      `${ZH.objectActions.deleteConfirmQuestion} ${fill(ZH.objectActions.deleteCascade, { objects: 'Campaign Member' })}`,
     );
   });
 
   it('a served empty list adds nothing', async () => {
     const { onConfirm } = mount([]);
-    expect(await askedMessage(onConfirm, 'row-delete')).toBe(EN.objectActions.deleteConfirm);
+    expect(await askedMessage(onConfirm, 'row-delete')).toBe(EN.objectActions.deleteConfirmQuestion);
   });
 
   it('no served list adds nothing and keeps today\'s text', async () => {
     const { onConfirm } = mount(undefined);
-    expect(await askedMessage(onConfirm, 'row-delete')).toBe(EN.objectActions.deleteConfirm);
+    expect(await askedMessage(onConfirm, 'row-delete')).toBe(EN.objectActions.deleteConfirmQuestion);
   });
 
   it('a failed schema read adds nothing and still asks', async () => {
     const { onConfirm, dataSource } = mount('throw');
-    expect(await askedMessage(onConfirm, 'row-delete')).toBe(EN.objectActions.deleteConfirm);
+    expect(await askedMessage(onConfirm, 'row-delete')).toBe(EN.objectActions.deleteConfirmQuestion);
     expect(dataSource.delete).not.toHaveBeenCalled();
   });
 
@@ -132,7 +132,7 @@ describe('console row Delete names the cascade objects (objectstack#28472)', () 
     const { onConfirm } = mount(['crm_campaign_member']);
     const message = await askedMessage(onConfirm, 'bulk-delete');
     expect(message).toBe(
-      `${fill(EN.console.objectView.bulkDeleteConfirm_other, { count: 2 })} ${fill(EN.objectActions.deleteCascade, { objects: 'Campaign Member' })}`,
+      `${fill(EN.console.objectView.bulkDeleteQuestion_other, { count: 2 })} ${fill(EN.objectActions.deleteCascade, { objects: 'Campaign Member' })}`,
     );
   });
 });

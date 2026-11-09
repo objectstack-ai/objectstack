@@ -1310,6 +1310,7 @@ const ru = {
     copyToClipboard: "Копировать в буфер обмена",
     copied: "Скопировано!",
     deleteConfirmation: "Вы уверены, что хотите удалить эту запись? Это действие нельзя отменить.",
+    deleteConfirmQuestion: "Вы уверены, что хотите удалить эту запись?",
     deleted: "Запись удалена",
     editRecord: "Редактировать запись",
     viewAll: "Показать все",
@@ -2652,6 +2653,11 @@ const ru = {
       bulkDeleteConfirm_few: "Удалить {{count}} выбранные записи? Это действие нельзя отменить.",
       bulkDeleteConfirm_many: "Удалить {{count}} выбранных записей? Это действие нельзя отменить.",
       bulkDeleteConfirm_other: "Удалить {{count}} выбранной записи? Это действие нельзя отменить.",
+      bulkDeleteQuestion: "Удалить {{count}} выбранных записей?",
+      bulkDeleteQuestion_one: "Удалить {{count}} выбранную запись?",
+      bulkDeleteQuestion_few: "Удалить {{count}} выбранные записи?",
+      bulkDeleteQuestion_many: "Удалить {{count}} выбранных записей?",
+      bulkDeleteQuestion_other: "Удалить {{count}} выбранной записи?",
       duplicateViewName: "Представление с таким именем уже существует.",
       viewTypeGrid: "Таблица",
       viewTypeGridDesc: "Таблица записей в стиле электронной таблицы.",
@@ -3660,12 +3666,31 @@ const ru = {
     undoFailed: "Не удалось отменить изменение навигации",
     updateFailed: "Не удалось обновить навигацию",
   },
+  // ADR-0148 — why a recycle-bin restore was refused, one sentence per code the
+  // restore door answers (`recycleBinRestoreRefusalText` in @object-ui/core).
+  recycleBin: {
+    refusal: {
+      uniqueValueTaken: "Невозможно восстановить: другая запись уже использует то же значение поля «{{field}}». Сначала измените ту запись, затем восстановите.",
+      parentPurged: "Невозможно восстановить: родительская запись ({{parent}}) удалена безвозвратно.",
+      packageUninstalled: "Невозможно восстановить: пакет, предоставлявший {{object}}, удалён.",
+      parentInRecycleBin: "Пока нельзя восстановить: родительская запись ({{parent}}) тоже находится в корзине. Сначала восстановите её.",
+      notFound: "Этой записи больше нет в корзине. Возможно, она удалена безвозвратно.",
+      permissionDenied: "У вас нет прав на восстановление этой записи.",
+      notAvailable: "Корзина недоступна в этом развёртывании.",
+    },
+  },
   objectActions: {
     deleteSuccess: "{{label}} успешно удалён",
     deletedNamed: "{{label}} \"{{name}}\" удалён",
     deleteFailed: "Не удалось удалить {{label}}",
     noRecordId: "ID записи не указан",
     deleteConfirm: "Удалить эту запись? Это действие нельзя отменить.",
+    // ADR-0148 — a business object's delete goes to the recycle bin: the
+    // question alone, promising neither permanence nor recovery.
+    deleteConfirmQuestion: "Удалить эту запись?",
+    restoredNamed: '{{label}} "{{name}}" восстановлен',
+    restoreSuccess: "{{label}} успешно восстановлен",
+    restoreFailed: "Не удалось восстановить {{label}}",
     deleteConfirmTitle: "Удалить {{label}} \"{{name}}\"?",
     bulkDeleteConfirmTitle: "Удалить {{count}} записей {{label}}?",
     bulkDeleteConfirmTitle_one: "Удалить {{count}} запись {{label}}?",

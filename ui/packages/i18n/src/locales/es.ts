@@ -1274,6 +1274,7 @@ const es = {
     copyToClipboard: "Copiar al portapapeles",
     copied: "¡Copiado!",
     deleteConfirmation: "¿Está seguro de que desea eliminar este registro? Esto no se puede deshacer.",
+    deleteConfirmQuestion: "¿Está seguro de que desea eliminar este registro?",
     deleted: "Registro eliminado",
     editRecord: "Editar registro",
     viewAll: "Ver todo",
@@ -2582,6 +2583,10 @@ const es = {
       bulkDeleteConfirm_one: "¿Eliminar {{count}} registro seleccionado? Esto no se puede deshacer.",
       bulkDeleteConfirm_many: "¿Eliminar {{count}} de registros seleccionados? Esto no se puede deshacer.",
       bulkDeleteConfirm_other: "¿Eliminar {{count}} registros seleccionados? Esto no se puede deshacer.",
+      bulkDeleteQuestion: "¿Eliminar {{count}} registros seleccionados?",
+      bulkDeleteQuestion_one: "¿Eliminar {{count}} registro seleccionado?",
+      bulkDeleteQuestion_many: "¿Eliminar {{count}} de registros seleccionados?",
+      bulkDeleteQuestion_other: "¿Eliminar {{count}} registros seleccionados?",
       duplicateViewName: "Ya existe una vista con ese nombre.",
       viewTypeGrid: "Cuadrícula",
       viewTypeGridDesc: "Tabla tipo hoja de cálculo de registros.",
@@ -3582,12 +3587,31 @@ const es = {
     undoFailed: "No se pudo deshacer el cambio de navegación",
     updateFailed: "No se pudo actualizar la navegación",
   },
+  // ADR-0148 — why a recycle-bin restore was refused, one sentence per code the
+  // restore door answers (`recycleBinRestoreRefusalText` in @object-ui/core).
+  recycleBin: {
+    refusal: {
+      uniqueValueTaken: "No se puede restaurar: otro registro tiene ahora el mismo valor de {{field}}. Cambia primero ese registro y luego restaura.",
+      parentPurged: "No se puede restaurar: el registro principal ({{parent}}) se eliminó de forma permanente.",
+      packageUninstalled: "No se puede restaurar: se desinstaló el paquete que proporcionaba {{object}}.",
+      parentInRecycleBin: "Aún no se puede restaurar: el registro principal ({{parent}}) también está en la papelera. Restáuralo primero.",
+      notFound: "Este registro ya no está en la papelera. Es posible que se haya eliminado de forma permanente.",
+      permissionDenied: "No tienes permiso para restaurar este registro.",
+      notAvailable: "La papelera no está disponible en esta implementación.",
+    },
+  },
   objectActions: {
     deleteSuccess: "{{label}} eliminado correctamente",
     deletedNamed: "{{label}} \"{{name}}\" eliminado",
     deleteFailed: "No se pudo eliminar {{label}}",
     noRecordId: "No se proporcionó ID de registro",
     deleteConfirm: "¿Eliminar este registro? Esto no se puede deshacer.",
+    // ADR-0148 — a business object's delete goes to the recycle bin: the
+    // question alone, promising neither permanence nor recovery.
+    deleteConfirmQuestion: "¿Eliminar este registro?",
+    restoredNamed: '{{label}} "{{name}}" restaurado',
+    restoreSuccess: "{{label}} restaurado correctamente",
+    restoreFailed: "No se pudo restaurar {{label}}",
     deleteConfirmTitle: "¿Eliminar {{label}} \"{{name}}\"?",
     bulkDeleteConfirmTitle: "¿Eliminar {{count}} registros de {{label}}?",
     bulkDeleteConfirmTitle_one: "¿Eliminar {{count}} registro de {{label}}?",

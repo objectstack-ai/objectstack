@@ -43,8 +43,8 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 }));
 vi.mock('@object-ui/plugin-grid', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  ImportWizard: (props: { objectName: string }) => {
-    h.wizard.push({ objectName: props.objectName });
+  ImportWizard: (props: { objectName: string; fields?: Array<{ name: string }> }) => {
+    h.wizard.push({ objectName: props.objectName, fields: props.fields });
     return <div data-testid="import-wizard" />;
   },
 }));
@@ -138,5 +138,26 @@ describe("the spreadsheet import bar: the map's other layers and fail-open (obje
     fireEvent.click(within(listbox).getAllByRole('option').find((o) => o.textContent === 'Deal')!);
     await waitFor(() => expect(importButton()).not.toBeDisabled());
     expect(await pressImport(dataSource)).toBe('crm_deal');
+  });
+});
+
+describe('the spreadsheet import bar: a field carrying an expression (objectstack#31759)', () => {
+  it('is not offered to the wizard: the engine computes it on every write, so an imported value never stands', async () => {
+    const dataSource = {
+      getObjectSchema: vi.fn(async (_name: string) => ({
+        fields: {
+          title: { type: 'text', label: 'Title' },
+          price: { type: 'currency', label: 'Price' },
+          amount: { type: 'currency', label: 'Amount', expression: 'record.quantity * record.unit_price' },
+          total: { type: 'formula', label: 'Total' },
+        },
+      })),
+    };
+    render(<ExcelImportBar file={FILE} dataSource={dataSource} onDone={vi.fn()} />);
+    await settle();
+    expect(await pressImport(dataSource)).toBe('crm_account');
+    const offered = (h.wizard[h.wizard.length - 1].fields as Array<{ name: string }>).map((f) => f.name);
+    // CONTROL: the plain currency field of the same shape is still offered; a formula still is not.
+    expect(offered).toEqual(['title', 'price']);
   });
 });

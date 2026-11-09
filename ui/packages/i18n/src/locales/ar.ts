@@ -1373,6 +1373,7 @@ const ar = {
     copyToClipboard: "نسخ إلى الحافظة",
     copied: "تم النسخ!",
     deleteConfirmation: "هل أنت متأكد أنك تريد حذف هذا السجل؟ لا يمكن التراجع عن ذلك.",
+    deleteConfirmQuestion: "هل أنت متأكد أنك تريد حذف هذا السجل؟",
     deleted: "تم حذف السجل",
     editRecord: "تحرير السجل",
     viewAll: "عرض الكل",
@@ -2771,6 +2772,13 @@ const ar = {
       bulkDeleteConfirm_few: "حذف {{count}} سجلات محددة؟ لا يمكن التراجع عن ذلك.",
       bulkDeleteConfirm_many: "حذف {{count}} سجلًا محددًا؟ لا يمكن التراجع عن ذلك.",
       bulkDeleteConfirm_other: "حذف {{count}} سجل محدد؟ لا يمكن التراجع عن ذلك.",
+      bulkDeleteQuestion: "حذف {{count}} سجل(ات) محدد(ة)؟",
+      bulkDeleteQuestion_zero: "حذف {{count}} سجل محدد؟",
+      bulkDeleteQuestion_one: "حذف {{count}} سجل محدد؟",
+      bulkDeleteQuestion_two: "حذف سجلين محددين ({{count}})؟",
+      bulkDeleteQuestion_few: "حذف {{count}} سجلات محددة؟",
+      bulkDeleteQuestion_many: "حذف {{count}} سجلًا محددًا؟",
+      bulkDeleteQuestion_other: "حذف {{count}} سجل محدد؟",
       duplicateViewName: "يوجد عرض بهذا الاسم بالفعل.",
       viewTypeGrid: "شبكة",
       viewTypeGridDesc: "جدول سجلات بأسلوب جدول البيانات.",
@@ -3786,12 +3794,31 @@ const ar = {
     undoFailed: "تعذر التراجع عن تغيير التنقل",
     updateFailed: "تعذر تحديث التنقل",
   },
+  // ADR-0148 — why a recycle-bin restore was refused, one sentence per code the
+  // restore door answers (`recycleBinRestoreRefusalText` in @object-ui/core).
+  recycleBin: {
+    refusal: {
+      uniqueValueTaken: "تتعذر الاستعادة: يستخدم سجل آخر الآن القيمة نفسها للحقل {{field}}. عدّل ذلك السجل أولًا ثم أعد المحاولة.",
+      parentPurged: "تتعذر الاستعادة: السجل الأصل ({{parent}}) الذي كان ينتمي إليه حُذف نهائيًا.",
+      packageUninstalled: "تتعذر الاستعادة: أُلغي تثبيت الحزمة التي كانت توفر {{object}}.",
+      parentInRecycleBin: "لا يمكن الاستعادة بعد: السجل الأصل ({{parent}}) موجود أيضًا في سلة المحذوفات. استعده أولًا.",
+      notFound: "لم يعد هذا السجل في سلة المحذوفات. ربما حُذف نهائيًا.",
+      permissionDenied: "ليس لديك إذن باستعادة هذا السجل.",
+      notAvailable: "سلة المحذوفات غير متاحة في هذا النشر.",
+    },
+  },
   objectActions: {
     deleteSuccess: "تم حذف {{label}} بنجاح",
     deletedNamed: "تم حذف {{label}} \"{{name}}\"",
     deleteFailed: "تعذر حذف {{label}}",
     noRecordId: "لم يتم توفير معرف سجل",
     deleteConfirm: "حذف هذا السجل؟ لا يمكن التراجع عن ذلك.",
+    // ADR-0148 — a business object's delete goes to the recycle bin: the
+    // question alone, promising neither permanence nor recovery.
+    deleteConfirmQuestion: "حذف هذا السجل؟",
+    restoredNamed: 'تمت استعادة {{label}} "{{name}}"',
+    restoreSuccess: "تمت استعادة {{label}} بنجاح",
+    restoreFailed: "تعذرت استعادة {{label}}",
     deleteConfirmTitle: "حذف {{label}} \"{{name}}\"؟",
     bulkDeleteConfirmTitle: "حذف {{count}} سجل(ات) {{label}}؟",
     bulkDeleteConfirmTitle_zero: "حذف {{count}} من سجلات {{label}}؟",

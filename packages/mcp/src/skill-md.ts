@@ -109,6 +109,15 @@ export interface RenderSkillOptions {
    * see the bridge, so the host says so.
    */
   fileTools?: boolean;
+  /**
+   * [ADR-0149 D2] Whether the host's bridge carries the dataset pair
+   * (`list_datasets` / `query_dataset`, `registerDatasetTools`). The entries,
+   * and the D3 selection rule that teaches a client when to use them, render
+   * only when this is true AND {@link grantedScopes} admit `data:read`, so the
+   * skill names them exactly where `tools/list` lists them. Default false: the
+   * renderer cannot see the bridge, so the host says so.
+   */
+  datasetTools?: boolean;
 }
 
 const URL_PLACEHOLDER = '<YOUR_ENV_MCP_URL>'; // e.g. https://<env>.objectos.app/api/v1/mcp
@@ -192,6 +201,46 @@ const UPLOAD_LINK_TOOL_LINES = `- **create_upload_link({ objectName, recordId, f
   record and field only, and expires at \`expiresAt\`. The upload is stored
   as the user, so they must be able to edit the record.
 `;
+
+/**
+ * [ADR-0149 D2/D3] The dataset pair's entries and the selection rule that
+ * tells a client when a governed metric answers instead of an object query.
+ * The rule is ADR-0149 D3's, in the client's terms: an exact word match
+ * (after normalization) is the only hit, one hit wins, several hits are a
+ * question for the user, no hit falls back to the object tools with the
+ * answer labelled as not a governed metric, and a dimension alone is not an
+ * answer.
+ */
+const DATASET_TOOL_LINES = `- **list_datasets({ terms? })** — the governed datasets (business metrics)
+  you may query: each dataset's measures and dimensions with their business
+  labels, descriptions and synonyms. Pass the business words of the question
+  as \`terms\`; the answer's \`matches\` says which member each word names
+  exactly. \`membersWithheld: true\` means some measures exist that you may not
+  read: say so rather than saying the metric does not exist.
+- **query_dataset({ datasetName, selection })** — compute a governed metric:
+  \`selection\` takes \`measures\`, \`dimensions\` and a \`runtimeFilter\`, by
+  the names \`list_datasets\` gives. The answer carries \`provenance\` (the
+  dataset and measures used); cite the source from it, not from memory, and
+  use a measure's \`description\` to explain what the number includes.
+- **Choosing between a metric and an object query.** Call \`list_datasets\`
+  with the question's business words first. A word matches only when it
+  equals a member's name, label or synonym (case, spacing, \`_\` and \`-\`
+  aside), never by similarity. One measure match: answer with
+  \`query_dataset\`. Several matches (two datasets or two members): ask the
+  user which one they mean, listing each candidate's label, dataset and
+  description; do not pick. No match: fall back to \`query_records\` /
+  \`aggregate_records\` and say the answer is not from a governed metric. A
+  dimension match alone (a grouping such as "by stage") is not an answer: you
+  still need a measure match, or ask.
+`;
+
+/** The dataset pair's entries for a host whose bridge carries them, under the grant that registers them. */
+function renderDatasetToolLines(options: RenderSkillOptions): string {
+  if (options.datasetTools !== true) return '';
+  // Mirrors the gate in `registerDatasetTools` (`!scopes || scopes.includes(data:read)`).
+  const scopes = options.grantedScopes;
+  return !scopes || scopes.includes(MCP_OAUTH_SCOPE_DATA_READ) ? DATASET_TOOL_LINES : '';
+}
 
 /** The file pair's entries for a host whose bridge carries them, each for the grant that registers it. */
 function renderFileToolLines(options: RenderSkillOptions): string {
@@ -360,7 +409,7 @@ create/update payload.
   screen, which you fill with another \`resume_run\`. Only the user whose call
   started the run can resume it, under the same gates as \`run_action\`
   (including \`confirm: true\` for an action flagged \`requiresConfirmation\`).
-${renderFileToolLines(options)}${options.federationTools === true && grantsAuthoringTools(options.grantedScopes) ? FEDERATION_TOOL_LINES : ''}${authoringTools ? renderAuthoringSection(authoringTools, describeObjectRegistered) : ''}
+${renderFileToolLines(options)}${renderDatasetToolLines(options)}${options.federationTools === true && grantsAuthoringTools(options.grantedScopes) ? FEDERATION_TOOL_LINES : ''}${authoringTools ? renderAuthoringSection(authoringTools, describeObjectRegistered) : ''}
 ## Conventions & gotchas
 
 - **Permissions/RLS apply to every call.** Fewer rows than expected, or a
