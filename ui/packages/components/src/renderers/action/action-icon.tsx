@@ -217,6 +217,9 @@ const ActionIconRenderer = forwardRef<
           // its label members from the contract. ⛔ Never widen either end back
           // to `as any`.
           resultDialog: schema.resultDialog,
+          // See action-button.tsx — the param dialog's preflight read
+          // (objectstack#31808).
+          preflight: schema.preflight,
           // See action-button.tsx — the declared post-success hop
           // (objectui#5493). The runner reads it off the forwarded def; dropped
           // here the action succeeds and the authored navigation never runs.

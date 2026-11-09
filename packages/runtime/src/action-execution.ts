@@ -51,6 +51,11 @@ import { markAppAutomationElevation } from '@objectstack/core';
 // Managing API keys is a signed-in-session act: the one rule this door's
 // per-object gate asks beside the exposure decision, shared with `RestServer`.
 import { apiKeyManagementCredentialRefusal } from '@objectstack/core';
+import {
+    PackageScopedNameRefusedError,
+    packageScopedHolderSource,
+    resolvePackageScopedHolders,
+} from '@objectstack/core';
 // [#9446] The ONE #9378 status table. Imported rather than re-read here: this
 // door's blanket `FLOW_FAILED` was the second of three readings of one engine
 // result, and a second definition of the rule is what let the doors diverge.
@@ -4448,7 +4453,17 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     // param on any action that declares params (and on a declarative update
     // that declares none, #24268), and silently accepted on a handler action
     // that declares none — one placement, two opposite behaviours.
-    input: { objectName?: string; recordId?: string; params?: Record<string, unknown> } & AIActionConfirmation,
+    input: {
+        objectName?: string;
+        /**
+         * [ADR-0150 D5] The namespace of the package whose action is meant —
+         * the exact qualifier ({@link resolveActionByName}). Omitted, the bare
+         * name resolves as before.
+         */
+        namespace?: string;
+        recordId?: string;
+        params?: Record<string, unknown>;
+    } & AIActionConfirmation,
     wiring: {
         driver: any;
         envId?: string;
@@ -4473,8 +4488,19 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     const recordId = typeof input?.recordId === 'string' && input.recordId.length > 0 ? input.recordId : undefined;
 
     // Resolve the action def by declarative name (optionally scoped).
+    // [ADR-0150 D5] A namespace maps to its packages through the registry's
+    // namespace table (`getNamespaceOwners`), the table the install gate keeps.
+    const namespace = typeof input?.namespace === 'string' ? input.namespace : undefined;
+    let qualifier: { namespace: string; namespaceOwners: (namespace: string) => readonly string[] } | undefined;
+    if (namespace !== undefined) {
+        const registry: any = (await deps.getObjectQL(requestContext, envId).catch(() => undefined))?.registry;
+        qualifier = {
+            namespace,
+            namespaceOwners: (ns) => (typeof registry?.getNamespaceOwners === 'function' ? registry.getNamespaceOwners(ns) : []),
+        };
+    }
     const resolved = await resolveActionByName(
-        deps, meta, name, input?.objectName, await readObjects?.(), await readActions?.(),
+        deps, meta, name, input?.objectName, await readObjects?.(), await readActions?.(), qualifier,
     );
     if (!resolved) {
         throw new Error(
@@ -4483,7 +4509,9 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
                 : `Action '${name}' not found`,
         );
     }
-    const { action, objectName, obj } = resolved;
+    // [ADR-0150 D4] Set only for a qualified call: the resolved holder's
+    // package, whose handler the dispatch runs (the engine's package key).
+    const { action, objectName, obj, packageId } = resolved;
 
     // Fail-closed on system-object actions, PER ACTION (#27681): a `sys_*`
     // action passes only on its author's `ai.exposed` opt-in, and every gate
@@ -4536,6 +4564,7 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
         // point the REST `/actions` door asks the same function.
         const ownerRefusal = await actionHandlerOwnerRefusal(deps, requestContext, {
             ql: activationEngine, action, objectName, candidates: resolveActionHandlerKeys(action), ec, envId, obj,
+            ...(packageId !== undefined ? { packageId } : {}),
         });
         if (ownerRefusal) {
             throw Object.assign(new Error(ownerRefusal.message), { code: ownerRefusal.code, status: ownerRefusal.status });
@@ -4609,6 +4638,7 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     try {
         answer = await dispatchAdmittedBusinessAction(deps, requestContext, name, {
             action, objectName, recordId, params, subject, ec, driver, envId, callData,
+            ...(packageId !== undefined ? { packageId } : {}),
         });
     } catch (err) {
         // [#28856] A refusal carrying the action's answer is answered as the
@@ -4666,9 +4696,15 @@ async function dispatchAdmittedBusinessAction(deps: ActionExecutionDeps,
         driver: any;
         envId?: string;
         callData: (action: string, params: any, dataDriver?: any, scopeId?: string, ec?: ExecutionContext) => Promise<any>;
+        /**
+         * [ADR-0150 D4] The package of the declaration a qualified call
+         * resolved ({@link invokeBusinessAction}): the engine runs that
+         * package's handler. Omitted, the unqualified handler, as before.
+         */
+        packageId?: string;
     },
 ): Promise<any> {
-    const { action, objectName, recordId, params, subject, ec, driver, envId, callData } = admitted;
+    const { action, objectName, recordId, params, subject, ec, driver, envId, callData, packageId } = admitted;
     const record = subject.record;
 
     // ── declarative update ── [#15079] BEFORE the `type` switch below, and
@@ -4824,7 +4860,7 @@ async function dispatchAdmittedBusinessAction(deps: ActionExecutionDeps,
     // [ADR-0110 D2] Handler-key derivation + the probe rotation are shared with
     // the REST `/actions` route — one addressing algorithm, not two.
     const dispatch = await executeRegisteredAction(
-        deps, ql, objectName, resolveActionHandlerKeys(action), actionContext,
+        deps, ql, objectName, resolveActionHandlerKeys(action), actionContext, packageId,
     );
     if (!dispatch.dispatched) {
         // No key carried a handler: the routing miss the REST `/actions` door
@@ -4863,19 +4899,129 @@ export async function resolveActionByName(deps: ActionExecutionDeps,
     objectName?: string,
     objects?: readonly any[],
     actions?: readonly any[],
-): Promise<{ action: any; objectName: string; obj: any } | null> {
+    /**
+     * [ADR-0150 D5] The exact qualifier: the namespace of the package whose
+     * action is meant, mapped to its packages by `namespaceOwners` (the
+     * registry's `getNamespaceOwners`). Given, only those packages'
+     * declarations answer; a namespace no installed package has is refused
+     * by name. Omitted, the bare name resolves as below.
+     */
+    qualifier?: { namespace: string; namespaceOwners: (namespace: string) => readonly string[] },
+): Promise<{ action: any; objectName: string; obj: any; packageId?: string } | null> {
     const decls = await collectActionDeclarations(deps, meta, objects, actions);
+    if (qualifier) return resolveQualifiedActionDeclaration(decls, name, objectName, qualifier);
     if (objectName) {
-        const hit = decls.find((d) => d.objectName === objectName && d.action?.name === name);
-        return hit ? { action: hit.action, objectName, obj: hit.obj } : null;
+        const hits = decls.filter((d) => d.objectName === objectName && d.action?.name === name);
+        if (hits.length === 0) return null;
+        // [ADR-0150 D3] Two packages' object-less action of one name: R's rule
+        // for a caller with no package, never the first listed.
+        if (isObjectLessActionKey(objectName)) return pickActionHolder(hits, name, false);
+        // ⛔ An object-bound pair two packages bind to ONE object keeps today's
+        // answer (the first declaration): its no-package refusal is the action
+        // family's own card (ADR-0150 "Covered and uncovered types", record
+        // 6729825528), not this door's.
+        return { action: hits[0].action, objectName, obj: hits[0].obj };
     }
     const matches = decls.filter((d) => d.action?.name === name);
     if (matches.length === 0) return null;
-    if (matches.length > 1) {
+    const owners = [...new Set(matches.map((m) => m.objectName))];
+    if (owners.length > 1) {
         const where = matches.map((m) => m.objectName).join(', ');
         throw new Error(`Action '${name}' exists on multiple objects (${where}); pass objectName to disambiguate`);
     }
+    if (isObjectLessActionKey(owners[0])) return pickActionHolder(matches, name, false);
     return { action: matches[0].action, objectName: matches[0].objectName, obj: matches[0].obj };
+}
+
+type ActionDeclarationRow = Awaited<ReturnType<typeof collectActionDeclarations>>[number];
+
+/**
+ * [ADR-0150 D3] One declaration among same-named declarations of ONE owner key
+ * (an object, or the object-less key), by R's rule for a caller with no
+ * package (`resolvePackageScopedHolders`, `@objectstack/core`): the
+ * environment's own declaration, else the one package holder, else a refusal
+ * naming every holder — `409 RESOURCE_CONFLICT` ({@link PackageScopedNameRefusedError}).
+ * `qualified` (the caller named a namespace) carries the holder's package to
+ * the dispatch, so that package's handler runs; a bare call carries none and
+ * dispatches unqualified, as before.
+ */
+function pickActionHolder(
+    hits: readonly ActionDeclarationRow[],
+    name: string,
+    qualified: boolean,
+): { action: any; objectName: string; obj: any; packageId?: string } {
+    const holdings: Array<readonly [string | null, ActionDeclarationRow]> = [];
+    const held = new Set<string | null>();
+    for (const hit of hits) {
+        const holder = hit.packageId ?? null;
+        if (held.has(holder)) continue; // one holder holds a name once: its first declaration
+        held.add(holder);
+        holdings.push([holder, hit]);
+    }
+    const resolution = resolvePackageScopedHolders<ActionDeclarationRow>(
+        { type: 'action', name, callerPackageId: null },
+        packageScopedHolderSource(holdings),
+        // A caller with no package is never asked for a closure.
+        () => new Set<string>(),
+    );
+    if (resolution.status === 'refused') throw new PackageScopedNameRefusedError(resolution);
+    const hit = resolution.status === 'resolved' ? resolution.item : hits[0];
+    return {
+        action: hit.action, objectName: hit.objectName, obj: hit.obj,
+        ...(qualified && hit.packageId !== undefined ? { packageId: hit.packageId } : {}),
+    };
+}
+
+/**
+ * [ADR-0150 D5] `name` in the packages `qualifier.namespace` maps to — the
+ * exact qualifier, never a closure: only those packages' declarations are
+ * candidates, bound to `objectName` first and object-less after (the order
+ * the router reaches a handler in), and R's rule picks among them
+ * ({@link pickActionHolder}): one holder answers, two — a shareable
+ * namespace's co-owners (ADR-0150 D2) — are refused naming each.
+ *
+ * Refused by name, `404`: a namespace no installed package has, and a name
+ * its packages do not declare.
+ */
+function resolveQualifiedActionDeclaration(
+    decls: readonly ActionDeclarationRow[],
+    name: string,
+    objectName: string | undefined,
+    qualifier: { namespace: string; namespaceOwners: (namespace: string) => readonly string[] },
+): { action: any; objectName: string; obj: any; packageId?: string } {
+    const { namespace } = qualifier;
+    const owners = new Set(qualifier.namespaceOwners(namespace));
+    if (owners.size === 0) {
+        throw Object.assign(
+            new Error(`No installed package has the namespace '${namespace}'; list_actions names the namespace of each action`),
+            { code: standardErrorCodeForHttpStatus(404), status: 404 },
+        );
+    }
+    const inNamespace = decls.filter((d) => d.action?.name === name && d.packageId !== undefined && owners.has(d.packageId));
+    let hits: ActionDeclarationRow[];
+    if (objectName && !isObjectLessActionKey(objectName)) {
+        const bound = inNamespace.filter((d) => d.objectName === objectName);
+        hits = bound.length > 0 ? bound : inNamespace.filter((d) => isObjectLessActionKey(d.objectName));
+    } else if (objectName) {
+        hits = inNamespace.filter((d) => isObjectLessActionKey(d.objectName));
+    } else {
+        hits = inNamespace;
+        const where = [...new Set(hits.map((d) => d.objectName))];
+        if (where.length > 1) {
+            throw new Error(
+                `Action '${name}' exists on multiple objects in namespace '${namespace}' (${where.join(', ')}); pass objectName to disambiguate`,
+            );
+        }
+    }
+    if (hits.length === 0) {
+        throw Object.assign(
+            new Error(objectName
+                ? `Action '${name}' not found on object '${objectName}' in namespace '${namespace}'`
+                : `Action '${name}' not found in namespace '${namespace}'`),
+            { code: standardErrorCodeForHttpStatus(404), status: 404 },
+        );
+    }
+    return pickActionHolder(hits, name, true);
 }
 
 /**
@@ -4915,18 +5061,25 @@ export async function resolveActionByName(deps: ActionExecutionDeps,
  * object-less action, and an authored one, were never listed nor resolved
  * while REST's `POST /actions/global/NAME` ran them; and an artifact
  * package's action outlived the package's disable there.
+ *
+ * [ADR-0150 D4] Each row carries `packageId`: the package that holds the
+ * declaration (a standalone item's `_packageId`, an embedded one's object's),
+ * absent for the environment's own. Two packages' standalone declarations of
+ * one key are BOTH rows — the key is `(package, objectName, name)` — so a name
+ * two packages hold is listed twice and resolved by the package rule
+ * ({@link resolveActionByName}), never by which one this walk met first.
  */
 export async function collectActionDeclarations(deps: ActionExecutionDeps, 
     meta: any,
     objects?: readonly any[],
     actions?: readonly any[],
-): Promise<Array<{ action: any; objectName: string; obj: any }>> {
+): Promise<Array<{ action: any; objectName: string; obj: any; packageId?: string }>> {
     const objs: readonly any[] = objects ?? (await meta?.listObjects?.()) ?? [];
     const objByName = new Map<string, any>();
     for (const obj of objs) {
         if (typeof obj?.name === 'string') objByName.set(obj.name, obj);
     }
-    const out: Array<{ action: any; objectName: string; obj: any }> = [];
+    const out: Array<{ action: any; objectName: string; obj: any; packageId?: string }> = [];
     const seen = new Set<string>();
     for (const obj of objs) {
         const objectName: string | undefined = obj?.name;
@@ -4934,7 +5087,8 @@ export async function collectActionDeclarations(deps: ActionExecutionDeps,
         for (const action of Array.isArray(obj?.actions) ? obj.actions : []) {
             if (!action || typeof action.name !== 'string') continue;
             seen.add(`${objectName}:${action.name}`);
-            out.push({ action, objectName, obj });
+            const packageId = declaringPackageOf(action) ?? declaringPackageOf(obj);
+            out.push({ action, objectName, obj, ...(packageId !== undefined ? { packageId } : {}) });
         }
     }
     let standalone: readonly any[] = [];
@@ -4947,15 +5101,26 @@ export async function collectActionDeclarations(deps: ActionExecutionDeps,
             standalone = []; // no standalone-item source on this metadata service
         }
     }
+    const seenStandalone = new Set<string>();
     for (const action of standalone) {
         if (!action || typeof action.name !== 'string') continue;
         const objectName = standaloneActionObjectName(deps, action);
         const key = `${objectName}:${action.name}`;
         if (seen.has(key)) continue; // object-embedded declaration wins
-        seen.add(key);
-        out.push({ action, objectName, obj: objByName.get(objectName) });
+        const packageId = declaringPackageOf(action);
+        // One holder's key once; another package's declaration of the key is its own row.
+        const holding = `${packageId ?? ''}\u0000${key}`;
+        if (seenStandalone.has(holding)) continue;
+        seenStandalone.add(holding);
+        out.push({ action, objectName, obj: objByName.get(objectName), ...(packageId !== undefined ? { packageId } : {}) });
     }
     return out;
+}
+
+/** [ADR-0150 D4] The package a declaration row is stamped with (`_packageId`), or `undefined` for none. */
+function declaringPackageOf(row: any): string | undefined {
+    const packageId = row?._packageId;
+    return typeof packageId === 'string' && packageId !== '' ? packageId : undefined;
 }
 
 
