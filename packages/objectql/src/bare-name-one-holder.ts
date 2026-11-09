@@ -55,13 +55,13 @@
  *  - `email_template` — a send's `template: NAME` resolves the
  *    FIRST-registered package's bundle, and `/meta/email_template/NAME`
  *    serves the same one;
- *  - `agent` — `/meta/agent/NAME` serves the FIRST-registered package's
+ *  - `agent` — `/meta/agent/NAME` served the FIRST-registered package's
  *    agent, the one by-name read of an agent the open framework serves (the
  *    agent runtime that resolves an agent by name is the cloud's);
- *  - `skill` — an MCP client's `prompts/get` of a skill keeps the
- *    FIRST-registered package's skill (`listSkillPrompts` keeps the first
- *    row per name and drops the other), and `/meta/skill/NAME` serves the
- *    same one;
+ *  - `skill` — an MCP client's `prompts/get` of a skill kept the
+ *    FIRST-registered package's skill (`listSkillPrompts` kept the first
+ *    row per name and dropped the other), and `/meta/skill/NAME` served the
+ *    same one (both since narrowed to the namespace: "The narrowing");
  *  - `tool` — `/meta/tool/NAME` serves the FIRST-registered package's tool,
  *    and every reference to a tool carries its bare name alone: a skill's
  *    `tools` list admits only a snake_case name, an AI tool definition and a
@@ -125,12 +125,31 @@
  * re-install or an upgrade of a package that came through the boot beside
  * another holder keeps its name, while a third package is refused naming both.
  *
+ * ## The narrowing (ADR-0150 D2, D9)
+ *
+ * Once a type's by-name readers resolve a name by `(package, name)` (refusing
+ * a bare name two packages hold, naming both), its AI face is derived from
+ * the namespace, and its stored references carry the package, the rule for
+ * that type narrows from one package holder per deployment to one per
+ * namespace: the type joins {@link NAMESPACE_SCOPED_BARE_NAME_TYPES}, and
+ * {@link bareNameHoldersMeet} is the one predicate the doors, the item seam
+ * and the cold boot ask before two package holders count as a conflict. Two
+ * packages that declare two different namespaces may then each hold the name;
+ * two packages of one namespace still may not, with the same refusal as
+ * before, nor a package with no namespace beside any other holder, nor a
+ * built-in name (D9: the refusal narrows, it does not go). `agent` and `skill`
+ * narrowed first (#31701): `/meta/agent|skill/NAME` read through
+ * `readPackageScopedItem`, and the MCP prompt and agent faces are `NS-NAME`.
+ *
  * ## What it deliberately does not judge
  *
  *  - ⛔ The environment catalog (above).
  *  - ⛔ A downgrade. `OS_METADATA_COLLISION=warn` softens the ADR-0048 Phase 1
  *    namespace gate only.
  *  - A package's own name again — one holder, not two.
+ *  - For a narrowed type ({@link NAMESPACE_SCOPED_BARE_NAME_TYPES}), a
+ *    package holding a name another package holds in a DIFFERENT namespace
+ *    ("The narrowing").
  *  - `picklistExtensions` — an extension adds values to another package's list
  *    by design; its own refusal (a repeated value) is the picklist module's.
  *  - An action bound to an object, and a hook's `handler` (above).
@@ -237,6 +256,42 @@ export const BUILT_IN_BARE_NAMES: Readonly<Record<BareNameOneHolderType, Readonl
   skill: new Set<string>(),
   tool: new Set<string>(),
 });
+
+/**
+ * [ADR-0150 D2/D9, child B] The covered types whose one-holder rule has
+ * narrowed from the deployment to the namespace (module doc, "The narrowing").
+ * Each type joins in its own trailing change, once its by-name readers, its
+ * AI faces and its stored references all carry the package: the AI family's
+ * `agent` and `skill` first (#31701). A type not listed here keeps one package
+ * holder per deployment.
+ */
+export const NAMESPACE_SCOPED_BARE_NAME_TYPES: readonly BareNameOneHolderType[] = Object.freeze([
+  'agent',
+  'skill',
+]);
+
+/** Has `type`'s one-holder rule narrowed to the namespace ({@link NAMESPACE_SCOPED_BARE_NAME_TYPES})? */
+export function isNamespaceScopedBareNameType(type: unknown): boolean {
+  return typeof type === 'string' && (NAMESPACE_SCOPED_BARE_NAME_TYPES as readonly string[]).includes(type);
+}
+
+/**
+ * Do two PACKAGE holders of `(type, name)` meet under the rule — may one be
+ * refused because the other holds the name? Always, for a type that has not
+ * narrowed. For a narrowed type, unless both packages declare a namespace and
+ * the two differ: two namespaces give the two items two addresses
+ * (`NS/NAME`) and two AI faces (`NS-NAME`), and every by-name reader resolves
+ * a bare name by `(package, name)` or refuses it naming both. A package with
+ * no namespace has no address of its own, so it still meets every holder.
+ */
+export function bareNameHoldersMeet(
+  type: BareNameOneHolderType,
+  incomingNamespace: string | undefined,
+  holderNamespace: string | undefined,
+): boolean {
+  if (!isNamespaceScopedBareNameType(type)) return true;
+  return !(incomingNamespace && holderNamespace && incomingNamespace !== holderNamespace);
+}
 
 /**
  * The prefix the runtime binds a package's handlers under
