@@ -24,6 +24,9 @@ import { installBuiltinNodes } from './builtin/index.js';
 import { flowNameResolver } from './plugin.js';
 import { InMemoryFlowActivationStore } from './flow-activation-store.js';
 import { FlowActivationProjection } from './flow-activation-projection.js';
+import { resolveFlowPrecedence } from './flow-precedence.js';
+import { bindStoredRow } from '@objectstack/metadata-protocol';
+import { installedManifestsOf } from '@objectstack/metadata-core';
 
 const P = 'com.acme.caller';
 const A = 'com.acme.alpha';
@@ -362,5 +365,89 @@ describe('FlowActivationProjection', () => {
         const projection = new FlowActivationProjection(readers(undefined));
         projection.add('notify', Q);
         expect(projection.has('notify')).toBe(true);
+    });
+});
+
+/**
+ * [#31754, ADR-0150 D3] The boot pull's flow name collision line agrees with
+ * the engine. For a name two packages hold, precedence still hands the
+ * lexicographically first body on, and `registerFlow` refuses it (red line 2
+ * above), so the line says NEITHER is armed and points at that refusal —
+ * never "arming <first> by package id". Every other collision class keeps its
+ * wording byte for byte (the CONTROL cases below).
+ */
+describe('[#31754] the collision line for a name two packages hold says neither is armed', () => {
+    const NOTHING_INSTALLED = installedManifestsOf(undefined);
+    /** The boot pull's two steps over the registry: precedence (its one warning), then registration. */
+    function pull(): { line: string; refusal: unknown } {
+        const warn = vi.fn();
+        const [winner] = resolveFlowPrecedence(
+            registry.listItems('flow') as unknown[],
+            { warn },
+            (name) => engine.packagedFlowOwner(name),
+            NOTHING_INSTALLED,
+        );
+        expect(warn).toHaveBeenCalledTimes(1);
+        let refusal: unknown;
+        try {
+            engine.registerFlow(winner.name, winner.definition as never);
+        } catch (e) {
+            refusal = e;
+        }
+        return { line: String(warn.mock.calls[0][0]), refusal };
+    }
+    /** One collision line from precedence alone. */
+    function lineOf(listed: unknown[], owner: Record<string, string>): string {
+        const warn = vi.fn();
+        resolveFlowPrecedence(listed, { warn }, (name) => owner[name], NOTHING_INSTALLED);
+        expect(warn).toHaveBeenCalledTimes(1);
+        return String(warn.mock.calls[0][0]);
+    }
+
+    for (const order of [[A, Q], [Q, A]] as const) {
+        it(`two packages, registered ${order[0] === A ? 'alpha' : 'stranger'} first: the line arms neither, and the engine refuses`, async () => {
+            install(A);
+            install(Q);
+            for (const id of order) registry.registerItem('flow', { ...leaf('notify'), _packageId: id }, 'name' as never, id);
+            loaderSet.notify = A;
+
+            const { line, refusal } = pull();
+            expect(line).toContain("is claimed by 2 definitions (package 'com.acme.alpha', package 'com.acme.stranger'); arming neither:");
+            expect(line).toContain("Neither definition dispatches; the 'failed to register flow' warning for 'notify' names every holder.");
+            expect(line).not.toContain('arming package');
+            expect(line).not.toContain('by package id');
+            expect(line).not.toContain('Only the armed definition dispatches');
+            expect(line).not.toContain('\n');
+            // What the line points at: the refusal, naming both, and nothing armed.
+            expect(String((refusal as Error)?.message)).toMatch(/held by 2 packages in this environment[\s\S]*com\.acme\.alpha[\s\S]*com\.acme\.stranger/);
+            expect(await engine.getFlow('notify')).toBeNull();
+        });
+    }
+
+    it('CONTROL: a package beside an environment row keeps its line byte for byte (ADR-0126 §2)', () => {
+        const line = lineOf(
+            [{ ...leaf('notify'), _packageId: A, _provenance: 'package' }, { ...leaf('notify'), _provenance: 'org' }],
+            { notify: A },
+        );
+        expect(line).toBe('SEALED');
+    });
+
+    it('CONTROL: the declared override beside a stored row keeps its line byte for byte (ADR-0146 D9)', () => {
+        const pair = `${A}.custom`;
+        const declared = { overrides: { package: A, basedOn: '1.0.0' }, _provenance: 'org' };
+        const line = lineOf(
+            [
+                bindStoredRow({ ...leaf('notify'), _provenance: 'org' }, null),
+                { ...leaf('notify'), _packageId: A, _provenance: 'package' },
+                bindStoredRow({ ...leaf('notify'), ...declared }, pair),
+            ],
+            { notify: A },
+        );
+        expect(line).toBe('OVERRIDE');
+    });
+
+    it('CONTROL: two environment rows of a name no package ships keep their line byte for byte (arrival order)', () => {
+        const line = lineOf([{ ...leaf('notify'), _provenance: 'org' }, { ...leaf('notify'), _provenance: 'org' }], {});
+        expect(line).toBe('ARRIVAL');
     });
 });
