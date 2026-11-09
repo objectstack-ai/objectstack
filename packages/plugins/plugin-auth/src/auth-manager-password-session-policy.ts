@@ -66,7 +66,7 @@ export interface PasswordSessionPolicyHost {
   anyOrganizationRequiresMfa: AuthManager['anyOrganizationRequiresMfa'];
   getDataEngine: AuthManager['getDataEngine'];
   getOrganizationAccessPolicy: AuthManager['getOrganizationAccessPolicy'];
-  isMfaAdministrator: AuthManager['isMfaAdministrator'];
+  isOrganizationAdministrator: AuthManager['isOrganizationAdministrator'];
   judgeSessionScoping: AuthManager['judgeSessionScoping'];
   isTwoFactorEnabled: AuthManager['isTwoFactorEnabled'];
   logDurabilityDegradation: AuthManager['logDurabilityDegradation'];
@@ -152,7 +152,7 @@ export function refreshOrgMfaCacheIfStale(this: Pick<PasswordSessionPolicyHost, 
 
 /** The body of `AuthManager#resolveUserAuthGates`; the method's docblock there is its contract. */
 export async function resolveUserAuthGates(
-  this: Pick<PasswordSessionPolicyHost, '_mustChangeCache' | '_orgMfaCache' | 'config' | 'getDataEngine' | 'getOrganizationAccessPolicy' | 'isMfaAdministrator' | 'isTwoFactorEnabled' | 'noteMfaRequirementWithoutEnrollment' | 'refreshMustChangeCacheIfStale' | 'refreshOrgMfaCacheIfStale'>,
+  this: Pick<PasswordSessionPolicyHost, '_mustChangeCache' | '_orgMfaCache' | 'config' | 'getDataEngine' | 'getOrganizationAccessPolicy' | 'isOrganizationAdministrator' | 'isTwoFactorEnabled' | 'noteMfaRequirementWithoutEnrollment' | 'refreshMustChangeCacheIfStale' | 'refreshOrgMfaCacheIfStale'>,
   userId: string,
   options: { organizationId?: string } = {},
 ): Promise<AuthGate[]> {
@@ -234,7 +234,7 @@ export async function resolveUserAuthGates(
     // `administrators` holds ADR-0090 D12's three kinds and lets everyone else
     // through; asked only for an unenrolled user, the one it can hold.
     const mfaRequired =
-      level === 'everyone' || (level === 'administrators' && unenrolled && (await this.isMfaAdministrator(userId, activeOrgId)));
+      level === 'everyone' || (level === 'administrators' && unenrolled && (await this.isOrganizationAdministrator(userId, activeOrgId)));
     if (mfaRequired && unenrolled && !this.isTwoFactorEnabled()) {
       this.noteMfaRequirementWithoutEnrollment();
     } else if (mfaRequired && unenrolled) {

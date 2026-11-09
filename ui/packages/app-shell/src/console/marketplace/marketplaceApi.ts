@@ -197,6 +197,29 @@ export interface MarketplacePackageVersion {
   signed?: boolean;
   /** Whether the marketplace counter-signed (reviewed + approved) this version. */
   platform_verified?: boolean;
+
+  /**
+   * The languages this version ships, measured by the control plane when the
+   * version was published (never authored): the locales that carry text, the
+   * default first, as the app declares them (`zh-CN`). `null` on a version
+   * published before the measurement — "no language information", never
+   * "English only". Absent on a catalog that does not serve it yet, and then
+   * nothing is drawn. `MarketplaceLanguages.tsx` reads it.
+   */
+  supported_locales?: readonly string[] | null;
+  /**
+   * How much of the app each language translates, from the same measurement:
+   * `coverage_percent` is `translated / expected_keys`, rounded to one decimal.
+   * `null` and absent read as `supported_locales` does.
+   */
+  locale_coverage?: MarketplaceLocaleCoverage | null;
+}
+
+/** A version's measured translation coverage (`MarketplacePackageVersion.locale_coverage`). */
+export interface MarketplaceLocaleCoverage {
+  default_locale: string;
+  expected_keys: number;
+  locales: readonly { locale: string; translated: number; coverage_percent: number }[];
 }
 
 export interface MarketplaceListResponse {

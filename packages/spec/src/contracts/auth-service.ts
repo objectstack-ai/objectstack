@@ -269,6 +269,29 @@ export interface IAuthService {
     ): Promise<readonly NonNullable<ExecutionContext['authGate']>[]>;
 
     /**
+     * [ADR-0090 D12] Is `userId` an administrator in `organizationId`? The ONE
+     * reading of that question: the multi-factor requirement's
+     * `administrators` level asks this same member, so a caller outside the
+     * auth provider gets the gate's own answer. Read-only and in-process; no
+     * route reaches it.
+     *
+     * True for any of D12's three kinds: a tenant-level administrator (the
+     * `PLATFORM_ADMIN` posture rung), an organization-level administrator of
+     * `organizationId` (the `TENANT_ADMIN` rung, conferred by an owner or
+     * admin membership), and a delegated administrator there (a permission
+     * set carrying an `adminScope`). A delegated grant that cannot be read
+     * counts as an administrator: a requirement that holds administrators
+     * holds rather than lapses. A provider that does not judge delegated
+     * administrators answers from the two rungs alone.
+     *
+     * @param userId - The user asked about
+     * @param organizationId - The organization the question is asked in;
+     *   `undefined` asks about the tenant-level kind and global grants only
+     * @returns Whether the user is an administrator there
+     */
+    isOrganizationAdministrator?(userId: string, organizationId: string | undefined): Promise<boolean>;
+
+    /**
      * [#23367, ruling A] The API-key lifecycle policy in force, read from the
      * auth configuration (the `auth` settings keys `api_key_*`, bound into the
      * service). Two readers, one source: the signing door (`POST /keys`,

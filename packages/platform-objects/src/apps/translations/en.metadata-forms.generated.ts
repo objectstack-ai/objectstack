@@ -2241,6 +2241,14 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "dimensions.nullLabel": {
         label: "Null Label"
       },
+      "dimensions.synonyms": {
+        label: "Synonyms",
+        helpText: "Words people use for this dimension in a question (e.g. stage, deal stage, phase), comma-separated; mixed languages are fine. Matched by the dataset AI tools, never shown. At most 20, each at most 60 characters; a word may answer to only one member of this dataset"
+      },
+      "dimensions.description": {
+        label: "Description",
+        helpText: "Business definition in plain language: one or two sentences on what this dimension is and when to use it. Published with the analytics metadata and read by the dataset AI tools; a definition, never a prompt or an instruction to an AI. At most 500 characters"
+      },
       measures: {
         label: "Measures",
         helpText: "Each: name, aggregate, field (optional for count), and display format/currency"
@@ -2274,6 +2282,14 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "measures.duration": {
         label: "Duration"
+      },
+      "measures.synonyms": {
+        label: "Synonyms",
+        helpText: "Words people use for this measure in a question (e.g. revenue, sales, turnover), comma-separated; mixed languages are fine. Matched by the dataset AI tools, never shown. At most 20, each at most 60 characters; a word may answer to only one member of this dataset"
+      },
+      "measures.description": {
+        label: "Description",
+        helpText: "Business definition in plain language: one or two sentences on what this measure is and when to use it. Published with the analytics metadata and read by the dataset AI tools; a definition, never a prompt or an instruction to an AI. At most 500 characters"
       }
     }
   },

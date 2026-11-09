@@ -117,6 +117,13 @@ const ACTIONS_WITH_WRITERS: ReadonlyArray<readonly [action: string, writer: stri
       + 'called by cloud-connection/src/marketplace-install-local-plugin.ts (installUnmanaged, the unmanaged '
       + 'branch both install doors reach) once per copy it attempted (#30964)',
   ],
+  [
+    'credential_use',
+    'plugin-audit/src/credential-use-audit.ts — createCredentialUseAuditWriter on the `audit` slot, fed by '
+      + 'installCredentialUseAudit\'s afterUpdate hook on the two credential use stamps (core/src/security/'
+      + 'api-key.ts stampAdmittedKey, plugin-auth/src/mcp-client-last-use.ts) and by plugin-auth\'s hand-off '
+      + 'for a skip_consent OAuth client (#31796)',
+  ],
 ];
 
 /** Option values declared by the `action` select field. */

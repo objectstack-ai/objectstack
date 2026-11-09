@@ -224,6 +224,7 @@ const en = {
         businessFunction: 'Business function',
         industry: 'Industry',
         solutionType: 'Type',
+        languages: 'Languages',
       },
       businessFunction: {
         sales: 'Sales',
@@ -257,6 +258,11 @@ const en = {
       },
       maturity: {
         beta: 'Beta',
+      },
+      languages: {
+        none: 'No language information',
+        more: '+{{extra}} more',
+        default: '(default)',
       },
       relativeTime: {
         today: 'today',

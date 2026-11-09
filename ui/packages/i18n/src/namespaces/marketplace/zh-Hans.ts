@@ -220,6 +220,7 @@ const zh = {
         businessFunction: '职能',
         industry: '行业',
         solutionType: '类型',
+        languages: '语言',
       },
       businessFunction: {
         sales: '销售',
@@ -253,6 +254,11 @@ const zh = {
       },
       maturity: {
         beta: '测试版',
+      },
+      languages: {
+        none: '无语言信息',
+        more: '另有 {{extra}} 种',
+        default: '（默认）',
       },
       relativeTime: {
         today: '今天',
