@@ -892,6 +892,7 @@ import type {
   UsageBarBlockSchema,
   ChecklistBlockSchema,
   TileGridBlockSchema,
+  RowTableBlockSchema,
 } from './product-blocks.js';
 import type { RecordApprovalDecisionBlockSchema } from './record-approval-decision.js';
 import type { RecordApprovalsBlockSchema, RecordAttachmentsBlockSchema } from './record-panels.js';
@@ -1048,6 +1049,10 @@ export type {
   TileGridBlockAddTile,
   TileGridBlockProps,
   TileGridBlockSchema,
+  // `row-table` (#31856), the sixth product block.
+  RowTableColumn,
+  RowTableBlockProps,
+  RowTableBlockSchema,
 } from './product-blocks.js';
 
 export type {
@@ -1174,7 +1179,9 @@ export type AnySchema =
   | StatBlockSchema
   | UsageBarBlockSchema
   | ChecklistBlockSchema
-  | TileGridBlockSchema;
+  | TileGridBlockSchema
+  // #31856 — landed with its zod arm.
+  | RowTableBlockSchema;
 
 /**
  * Utility type to extract the schema type from a type string.

@@ -561,6 +561,52 @@ describe('[#30370] an object whose external write gate is closed grants no write
   });
 });
 
+describe('[#31629] a platform object exposing delete is not annotated restore / purge: it has no recycle bin', () => {
+  // ADR-0148 D5: the bin takes no object in the platform namespaces (`sys_`,
+  // `cloud_`, `ai_`), so its doors refuse there whatever `apiMethods` says.
+  // The derivation table is a pure function of `enable` and cannot see that.
+  const SCHEMAS: Record<string, any> = {
+    sys_widget: { name: 'sys_widget' },
+    cloud_widget: { name: 'cloud_widget', enable: { apiMethods: ['get', 'list', 'delete'] } },
+    ai_widget: { name: 'ai_widget', enable: { apiEnabled: true } },
+    crm_widget: { name: 'crm_widget' },
+    crm_narrow: { name: 'crm_narrow', enable: { apiMethods: ['get', 'list', 'delete'] } },
+    sys_reader: { name: 'sys_reader', enable: { apiMethods: ['get', 'list'] } },
+    sys_closed: { name: 'sys_closed', enable: { apiEnabled: false } },
+  };
+  const source = { allSchemas: () => Object.values(SCHEMAS), schemaOf: (n: string) => SCHEMAS[n] };
+  const EVERY = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
+  const SUPER = { ...EVERY, viewAllRecords: true, modifyAllRecords: true };
+  const FULL = ['get', 'list', 'create', 'update', 'delete', 'upsert', 'bulk', 'aggregate', 'search', 'restore', 'purge', 'import'];
+  const withoutBin = (ops: string[]) => ops.filter((op) => op !== 'restore' && op !== 'purge');
+
+  it('an unrestricted platform object is annotated without restore / purge; a business object keeps both (CONTROL)', () => {
+    const map: any = buildEffectiveObjectPermissions([{ objects: { '*': SUPER } }], source);
+    expect(map.sys_widget.apiOperations).toEqual(withoutBin(FULL));
+    expect(map.ai_widget.apiOperations).toEqual(withoutBin(FULL));
+    expect(map.crm_widget.apiOperations).toEqual(FULL);
+  });
+
+  it('a platform object that would otherwise need no annotation is annotated, so the client offers no bin door', () => {
+    const map: any = buildEffectiveObjectPermissions([{ objects: { '*': { ...EVERY, allowExport: true } } }], source);
+    expect(map.sys_widget.apiOperations).toEqual([...withoutBin(FULL), 'export']);
+    // CONTROL: the business object keeps its whole closure, so it still carries no annotation.
+    expect(map.crm_widget).not.toHaveProperty('apiOperations');
+  });
+
+  it('an apiMethods subset that includes delete loses restore / purge on a platform object only', () => {
+    const map: any = buildEffectiveObjectPermissions([{ objects: { '*': SUPER } }], source);
+    expect(map.cloud_widget.apiOperations).toEqual(['get', 'list', 'delete', 'aggregate', 'search']);
+    expect(map.crm_narrow.apiOperations).toEqual(['get', 'list', 'delete', 'aggregate', 'search', 'restore', 'purge']);
+  });
+
+  it('a platform object without delete, or with its API closed, is annotated exactly as before', () => {
+    const map: any = buildEffectiveObjectPermissions([{ objects: { '*': SUPER } }], source);
+    expect(map.sys_reader.apiOperations).toEqual(['get', 'list', 'aggregate', 'search']);
+    expect(map.sys_closed.apiOperations).toEqual([]);
+  });
+});
+
 describe('[#30440] a guarded managed object grants no verb its write guard refuses, modifyAllRecords included', () => {
   const SCHEMAS: Record<string, any> = {
     // engine-owned, nothing opted in: the guard refuses every user-context write.

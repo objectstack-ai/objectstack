@@ -367,7 +367,7 @@ import './console/connect/ConnectAgentWidget.js';
 import './console/connect/ManagedPersonAssistants.js';
 import './console/security/UserEffectiveAccess.js';
 // Generic product-page blocks — hero, stat, usage-bar, checklist, tile-grid
-// (objectui#12197).
+// (objectui#12197), and row-table (#31856).
 import './console/blocks/productBlocks.js';
 // SDUI widget for the Cloud welcome page's seeded workspace-timezone line (objectui#11930).
 import './console/home/CloudWorkspaceTimezoneNotice.js';
