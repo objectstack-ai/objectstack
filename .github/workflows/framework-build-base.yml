@@ -17,8 +17,20 @@ name: Framework Build Base Image
 #     with the PR's Dockerfile and pushes nothing; its job has no packages grant.
 #
 # A tag is written once. A request for a commit whose tag already exists reports
-# the existing digest and builds nothing (dispatch with `rebuild: true` to
-# replace it), so a downstream can ask on every pin move at no cost.
+# the existing digest and builds nothing, so a downstream can ask on every pin
+# move at no cost. Replacing a published tag takes a dispatch with BOTH
+# `rebuild: true` and `replace_published: true`: `rebuild: true` alone over a
+# published tag is refused, naming the digest it would move. A
+# repository_dispatch carries neither input, so it never replaces anything.
+#
+# Every digest this workflow publishes also carries a tag of its own,
+# `<sha>-<the first 12 hex of the digest>`, and that tag is never deleted or
+# re-pointed. A downstream pins this image by digest (cloud's committed
+# .objectstack-base-image), and a registry serves a digest only while some tag
+# holds it: a cleanup of untagged versions, or a replace that moves the `<sha>`
+# tag, would otherwise take the pinned digest away. A request whose `<sha>` tag
+# already exists writes its missing digest tag too, so a digest published
+# before this rule becomes durable the next time it is requested.
 #
 # The image definition always comes from THIS run's checkout of main; only the
 # build context is the requested commit. So a commit that predates this file can
@@ -29,7 +41,7 @@ name: Framework Build Base Image
 # settings (Danger Zone, Change visibility; it cannot be made private again).
 # Until then the anonymous-pull step below is red and names that fix.
 
-# dispatch-gates: no-check-families -- the steps are an image build, a registry read and an in-image check script (docker/framework-build-base/check-image.sh, which needs the built image), not named local checks
+# dispatch-gates: no-check-families -- the steps are an image build and push, registry reads and digest-tag writes, and an in-image check script (docker/framework-build-base/check-image.sh, which needs the built image), not named local checks
 
 on:
   workflow_dispatch:
@@ -39,7 +51,12 @@ on:
         required: true
         type: string
       rebuild:
-        description: 'Rebuild and re-push even when the tag already exists (the digest changes)'
+        description: 'Rebuild and re-push even when the tag already exists (the digest changes); over a published tag it also needs replace_published'
+        required: false
+        type: boolean
+        default: false
+      replace_published:
+        description: 'With rebuild, move a published tag to the new digest (the old digest stays served under its own sha-digest tag; downstream pins must then be rewritten)'
         required: false
         type: boolean
         default: false
@@ -190,16 +207,59 @@ jobs:
         env:
           REF: ${{ env.IMAGE }}:${{ steps.sha.outputs.sha }}
           REBUILD: ${{ inputs.rebuild && 'true' || 'false' }}
+          REPLACE: ${{ inputs.replace_published && 'true' || 'false' }}
         run: |
           set -euo pipefail
           DIGEST="$(docker buildx imagetools inspect "$REF" --format '{{json .Manifest}}' 2>/dev/null | jq -r '.digest // empty' || true)"
-          if [ -n "$DIGEST" ] && [ "$REBUILD" != true ]; then
-            echo "$REF already exists at $DIGEST; nothing to build (dispatch with rebuild: true to replace it)."
+          # A published digest is handed on whatever happens next: the digest-tag
+          # step below keeps it served under a tag of its own.
+          if [ -n "$DIGEST" ]; then echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"; fi
+          if [ -z "$DIGEST" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          elif [ "$REBUILD" != true ]; then
+            echo "$REF already exists at $DIGEST; nothing to build."
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          elif [ "$REPLACE" != true ]; then
+            echo "::error::$REF is published at $DIGEST, and rebuild: true would move it to a new digest. To replace it on purpose, dispatch again with rebuild: true and replace_published: true; then rewrite every downstream pin (cloud: scripts/framework-base-image.sh write, then commit .objectstack-base-image)."
+            exit 1
           else
+            echo "$REF is published at $DIGEST; replace_published: true, so it is rebuilt and the tag moves. The old digest stays served under its digest tag."
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
+
+      # Every published digest keeps a tag of its own, `<sha>-<12 hex>`, that is
+      # never deleted or re-pointed (see the header). The two steps below run the
+      # same script: this one for the digest already published under `<sha>`
+      # (the backfill, before a replace can move the `<sha>` tag), the next one
+      # for the digest this run pushed.
+      - name: Keep the published digest served under its own tag
+        if: steps.existing.outputs.digest != ''
+        id: kept
+        env:
+          SHA: ${{ steps.sha.outputs.sha }}
+          DIGEST: ${{ steps.existing.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+            echo "::error::refusing to tag '$DIGEST': a digest is sha256: followed by 64 lowercase hex"
+            exit 1
+          fi
+          TAG="$IMAGE:$SHA-${DIGEST:7:12}"
+          held() { docker buildx imagetools inspect "$TAG" --format '{{json .Manifest}}' 2>/dev/null | jq -r '.digest // empty' || true; }
+          HELD="$(held)"
+          if [ -z "$HELD" ]; then
+            # --prefer-index=false copies the manifest as it is. The default
+            # wraps a lone image manifest in a new index, whose digest differs,
+            # so the tag would not hold DIGEST at all.
+            docker buildx imagetools create --prefer-index=false --tag "$TAG" "$IMAGE@$DIGEST"
+            HELD="$(held)"
+          fi
+          if [ "$HELD" != "$DIGEST" ]; then
+            echo "::error::$TAG holds ${HELD:-nothing}, not $DIGEST. A digest tag is never re-pointed, so nothing was changed; read the tag's history in the package's settings before touching it."
+            exit 1
+          fi
+          echo "$TAG holds $DIGEST"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Free runner disk
         if: steps.existing.outputs.skip != 'true'
@@ -257,6 +317,35 @@ jobs:
           START: ${{ steps.clock.outputs.start }}
         run: echo "seconds=$(( $(date +%s) - START ))" >> "$GITHUB_OUTPUT"
 
+      - name: Tag the pushed digest under its own name
+        if: steps.existing.outputs.skip != 'true'
+        id: digest_tag
+        env:
+          SHA: ${{ steps.sha.outputs.sha }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+            echo "::error::refusing to tag '$DIGEST': a digest is sha256: followed by 64 lowercase hex"
+            exit 1
+          fi
+          TAG="$IMAGE:$SHA-${DIGEST:7:12}"
+          held() { docker buildx imagetools inspect "$TAG" --format '{{json .Manifest}}' 2>/dev/null | jq -r '.digest // empty' || true; }
+          HELD="$(held)"
+          if [ -z "$HELD" ]; then
+            # --prefer-index=false copies the manifest as it is. The default
+            # wraps a lone image manifest in a new index, whose digest differs,
+            # so the tag would not hold DIGEST at all.
+            docker buildx imagetools create --prefer-index=false --tag "$TAG" "$IMAGE@$DIGEST"
+            HELD="$(held)"
+          fi
+          if [ "$HELD" != "$DIGEST" ]; then
+            echo "::error::$TAG holds ${HELD:-nothing}, not $DIGEST. A digest tag is never re-pointed, so nothing was changed; read the tag's history in the package's settings before touching it."
+            exit 1
+          fi
+          echo "$TAG holds $DIGEST"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
       # The image is for anyone to pull, so it is read back the way a stranger
       # would: logged out. A fresh build is pulled whole and looked inside; an
       # existing tag only has its manifest read, anonymously.
@@ -292,6 +381,9 @@ jobs:
           SKIPPED: ${{ steps.existing.outputs.skip }}
           WALL: ${{ steps.wall.outputs.seconds }}
           PULL: ${{ steps.pull.outcome }}
+          BUILT: ${{ steps.build.outputs.digest }}
+          PUSHED_TAG: ${{ steps.digest_tag.outputs.tag }}
+          KEPT_TAG: ${{ steps.kept.outputs.tag }}
         run: |
           {
             echo "### $IMAGE"
@@ -299,6 +391,12 @@ jobs:
             echo "- framework commit: \`$SHA\`"
             echo "- tag: \`$IMAGE:$SHA\`"
             echo "- digest: \`${DIGEST:-none}\`"
+            if [ -n "$BUILT" ]; then
+              echo "- digest tag (never deleted or re-pointed): \`${PUSHED_TAG:-not written}\`"
+              if [ -n "$KEPT_TAG" ]; then echo "- the replaced digest stays served under: \`$KEPT_TAG\`"; fi
+            else
+              echo "- digest tag (never deleted or re-pointed): \`${KEPT_TAG:-not written}\`"
+            fi
             if [ "$SKIPPED" = true ]; then
               echo "- build: skipped, the tag already existed"
             else

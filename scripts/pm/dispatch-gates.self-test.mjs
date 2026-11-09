@@ -8067,7 +8067,7 @@ export function selfTest({ tier = 'full' } = {}) {
       // is paths-filtered (its own file and docker/framework-build-base/) and builds
       // an image, then checks it with a script that needs the built image, so it
       // discovers no `check:` family.
-      '.github/workflows/framework-build-base.yml:32 no-check-families',
+      '.github/workflows/framework-build-base.yml:44 no-check-families',
       '.github/workflows/merged-branch-reaper.yml:212 no-check-families',
       '.github/workflows/os-create-smoke.yml:48 no-check-families',
       '.github/workflows/scaffold-e2e.yml:23 no-check-families',
