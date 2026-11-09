@@ -384,6 +384,8 @@ the hosted ObjectOS Cloud control plane.
 | `OS_TELEMETRY_CLIENT_ERROR_REPORTING_TRACES_SAMPLE_RATE` | number | `0.1` | Fraction (`0`–`1`) of Console transactions sampled for performance tracing. Out-of-range or unparseable values are refused at mount and fall back to the default. Inert without a DSN. |
 | `OS_TELEMETRY_CLIENT_ERROR_REPORTING_REPLAY_SAMPLE_RATE` | number | `0` | Fraction (`0`–`1`) of Console **error** sessions recorded as session replays. Off by default — replay records what the user did, so it is the deliberate choice of the deployment that wants it. Inert without a DSN. |
 
+With several replicas declared over the Redis cluster driver (`OS_CLUSTER_REPLICAS` greater than 1 or `OS_EXPECT_MULTI_NODE=true`, with `OS_CLUSTER_DRIVER=redis`), the OTLP resource also carries `service.instance.id`, one value per replica: `HOSTNAME-PID` (the host name is the pod name on Kubernetes), or a random id when the host reports no name. It has no variable of its own. Every other boot exports `service.name` and `deployment.environment` only.
+
 ---
 
 ## Tuning (advanced)
