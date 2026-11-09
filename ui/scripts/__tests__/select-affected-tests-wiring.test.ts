@@ -260,6 +260,16 @@ function runShard(event: Event, temp: string, slot: Outputs, shard = 1, run = RU
   return { argv: fs.readFileSync(argvFile, 'utf8').split('\n').slice(0, -1), log: ran.log };
 }
 
+/**
+ * The files a leg runs: each positional of its run step expanded over the
+ * stand-in collection the way vitest's filename filter matches, since a slot
+ * hands vitest only the shortest path of each filter unit.
+ */
+function ranBy(argv: string[]): string[] {
+  const filters = filesOf(argv);
+  return collected.filter((file) => filters.some((filter) => matches(file, filter)));
+}
+
 /** The files a leg's run step handed vitest: its argv after the last flag. */
 function filesOf(argv: string[]): string[] {
   let last = -1;
@@ -285,7 +295,21 @@ let replay = '';
 let lister = '';
 /** The ui-relative paths the stand-in collection holds: all of them, and the ones the real filters match. */
 let collected: string[] = [];
+/**
+ * A filter pair this tree does not hold today (0 such pairs), added to the
+ * stand-in collection and to the selector's verdict as it would read with it:
+ * vitest matches a positional as a case-insensitive substring, so `x.test.ts`
+ * also runs `X.test.tsx`, and the selector keeps only the shorter filter
+ * (`dedupeFilters`) while listing both files always-on. The case-only
+ * difference pins the case-insensitive match (contract review 6745712800, F2).
+ */
+const PAIR = ['scripts/__tests__/__wiring-pair-31965__/x.test.ts', 'scripts/__tests__/__wiring-pair-31965__/X.test.tsx'];
 let selectedPaths: string[] = [];
+
+/** Vitest's filename filter: the filter is a case-insensitive substring of the path. */
+function matches(file: string, filter: string): boolean {
+  return file.toLowerCase().includes(filter.toLowerCase());
+}
 
 function freshTemp(leg: string): string {
   return fs.mkdtempSync(path.join(scratch, `${leg}-`));
@@ -314,8 +338,10 @@ beforeAll(() => {
   const lane = path.join(temp, 'always-on-tests.txt');
   const stdout = path.join(temp, 'select.out');
   real = { ...runSelect({ name: 'pull_request', base: BASE_REF }, temp), filters: [], lane: [], temp };
-  real.filters = fs.readFileSync(filters, 'utf8').split('\n').filter(Boolean);
-  real.lane = fs.readFileSync(lane, 'utf8').split('\n').filter(Boolean);
+  real.filters = [...fs.readFileSync(filters, 'utf8').split('\n').filter(Boolean), PAIR[0]];
+  real.lane = [...fs.readFileSync(lane, 'utf8').split('\n').filter(Boolean), ...PAIR];
+  fs.writeFileSync(filters, real.filters.map((f) => `${f}\n`).join(''));
+  fs.writeFileSync(lane, real.lane.map((f) => `${f}\n`).join(''));
   replay = standIn(
     'node',
     [
@@ -330,12 +356,13 @@ beforeAll(() => {
   );
 
   // One collection for every step that lists: this checkout's tracked test
-  // files, and the subset the real filters reach (a vitest filter is a
-  // substring of the path, relative to the ui root).
+  // files plus PAIR, and the subset the real filters reach (a vitest filter is
+  // a case-insensitive substring of the path, relative to the ui root).
   collected = execFileSync('git', ['ls-files', '--', '.'], { cwd: repoRoot, encoding: 'utf8' })
     .split('\n')
-    .filter((file) => /\.(test|spec)\.[cm]?[jt]sx?$/.test(file) && !file.startsWith('e2e/'));
-  selectedPaths = collected.filter((file) => real.filters.some((filter) => file.includes(filter)));
+    .filter((file) => /\.(test|spec)\.[cm]?[jt]sx?$/.test(file) && !file.startsWith('e2e/'))
+    .concat(PAIR);
+  selectedPaths = collected.filter((file) => real.filters.some((filter) => matches(file, filter)));
   const asList = (files: string[]) => JSON.stringify(files.map((file) => ({ file: path.join(repoRoot, file), projectName: 'unit' })));
   const all = path.join(scratch, 'list-all.json');
   const selected = path.join(scratch, 'list-selected.json');
@@ -426,7 +453,10 @@ describe('the steps, as ci.yml writes them (objectui#13350, objectstack#31914)',
     // Slot 1 is the always-on lane: the selector's `--lane-out`, every one of them collected here.
     expect(real.lane.length).toBeGreaterThan(0);
     expect(real.lane.every((file) => selectedPaths.includes(file))).toBe(true);
-    expect([...filesOf(legs[0].run.argv)].sort()).toEqual([...real.lane].sort());
+    expect([...ranBy(legs[0].run.argv)].sort()).toEqual([...real.lane].sort());
+    // The pair rides on its shorter path alone: the guard refuses a positional another one contains.
+    expect(filesOf(legs[0].run.argv)).toContain(PAIR[0]);
+    expect(filesOf(legs[0].run.argv)).not.toContain(PAIR[1]);
     expect(legs[0].slot.log).toContain('the always-on lane');
     const ran: string[] = [];
     for (const { shard, slot, run } of legs) {
@@ -436,7 +466,7 @@ describe('the steps, as ci.yml writes them (objectui#13350, objectstack#31914)',
       expect(run.argv).toContain('--reporter=json');
       const files = filesOf(run.argv);
       expect(run.log).toContain(`Affected speed: ${files.length} test file(s) planned into slot ${shard} of ${SHARDS}.`);
-      ran.push(...files);
+      ran.push(...ranBy(run.argv));
     }
     expect([...ran].sort()).toEqual([...selectedPaths].sort());
   });
