@@ -351,6 +351,8 @@ export class ProtocolClassHeadFacet {
         ledger.seed(() => host.findEnvironmentRows('sys_metadata', {
             where: { state: 'active' },
             fields: [...RESYNC_ROW_FIELDS],
+            // Platform plumbing: no caller to authorize, as the repository's own reads.
+            context: { isSystem: true },
         }));
         host.clusterUnsubscribe = pubsub.subscribe<ClusterMetadataMutationPayload>(
             METADATA_MUTATION_CLUSTER_CHANNEL,
@@ -401,6 +403,7 @@ export class ProtocolClassHeadFacet {
             readActiveRows: () => host.findEnvironmentRows('sys_metadata', {
                 where: { state: 'active' },
                 fields: [...RESYNC_ROW_FIELDS],
+                context: { isSystem: true },
             }),
             converge: (evt) => host.applyRemoteMetadataMutation(evt),
         });

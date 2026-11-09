@@ -152,8 +152,14 @@ function makeReplica(store: ReturnType<typeof makeSharedStore>) {
             if (table !== 'sys_metadata') return null;
             return findRow(opts.where)?.row ?? null;
         },
-        async find(table: string, opts?: { where?: Record<string, unknown>; limit?: number; fields?: string[] }) {
+        async find(table: string, opts?: { where?: Record<string, unknown>; limit?: number; fields?: string[]; context?: { isSystem?: boolean } }) {
             failRead(table, opts);
+            // [#31722] A secured engine refuses a read that carries no principal
+            // (the booted showcase answers PermissionDeniedError). Held for the
+            // resync's active-row read — the one column-subset read of the table.
+            if (table === 'sys_metadata' && opts?.fields !== undefined && opts.context?.isSystem !== true) {
+                throw new Error('PermissionDeniedError: sys_metadata read under a context that carries no principal');
+            }
             // Hold the caller's bound AFTER the filter, by PRESENCE — the
             // objectql-double-limit contract: a bound the double ignores makes
             // a pagination bug invisible to every test built on it.
