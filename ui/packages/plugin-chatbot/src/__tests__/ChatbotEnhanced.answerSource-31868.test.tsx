@@ -168,12 +168,13 @@ describe('objectstack#31868 — the "How this was computed" block', () => {
     },
   );
 
-  it('debug mode keeps its tool card and its raw payload, and draws the block too', () => {
+  it('debug mode keeps its tool card with its raw payload, and draws the block too', () => {
     renderTurn([withSource()], 'debug');
     expect(screen.getByTestId('answer-source')).toBeInTheDocument();
-    // The debug card is the developer surface it was: its raw payload, sentinel included.
-    fireEvent.click(screen.getByRole('button', { name: /Aggregate the data/ }));
-    expect(document.body).toHaveTextContent(SENTINEL);
+    // The debug card is the developer surface it was: its raw parameters and result.
+    fireEvent.click(screen.getByRole('button', { name: /aggregate_data/ }));
+    expect(screen.getByText('Parameters')).toBeInTheDocument();
+    expect(screen.getByText('Result')).toBeInTheDocument();
   });
 
   it('reads the shipped zh pack', async () => {

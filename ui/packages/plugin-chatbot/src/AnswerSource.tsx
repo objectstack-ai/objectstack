@@ -73,6 +73,33 @@ const PRESENCE_OPERATORS: Readonly<Record<string, readonly [string, string]>> = 
   $exists: ['exists', 'notExists'],
 };
 
+/**
+ * The `en` pack's words for each operator key above, the fallback when no
+ * locale provider is mounted (byte-equal to `filterBuilder.operators.*`).
+ */
+const OPERATOR_WORDS_EN: Readonly<Record<string, string>> = {
+  equals: 'Equals',
+  not_equals: 'Does not equal',
+  greater_than: 'Greater than',
+  greater_than_or_equal: 'Greater than or equal',
+  less_than: 'Less than',
+  less_than_or_equal: 'Less than or equal',
+  in: 'In',
+  not_in: 'Not in',
+  contains: 'Contains',
+  icontains: 'Contains (ignore case)',
+  not_contains: 'Does not contain',
+  starts_with: 'Starts with',
+  ends_with: 'Ends with',
+  between: 'Between',
+  is_null: 'Is null',
+  is_not_null: 'Is not null',
+  is_empty: 'Is empty',
+  is_not_empty: 'Is not empty',
+  exists: 'Is set',
+  notExists: 'Is not set',
+};
+
 const isScalar = (v: unknown): v is Scalar =>
   typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean';
 
@@ -196,10 +223,10 @@ function AnswerSourceSection({ source }: { source: AnswerSource }) {
           <ul className="space-y-0.5" data-testid="answer-source-filter">
             {lowered.rows.map((row, i) => (
               <li key={`${row.field}-${i}`}>
-                {i > 0 ? <span className="mr-1 text-muted-foreground">{joiner}</span> : null}
+                {i > 0 ? <span className="text-muted-foreground">{joiner} </span> : null}
                 <span className="font-medium">{row.field}</span>{' '}
                 <span className="text-muted-foreground">
-                  {t(`filterBuilder.operators.${row.operator}`)}
+                  {tt(`filterBuilder.operators.${row.operator}`, OPERATOR_WORDS_EN[row.operator])}
                 </span>
                 {row.values.length > 0 ? (
                   <>
