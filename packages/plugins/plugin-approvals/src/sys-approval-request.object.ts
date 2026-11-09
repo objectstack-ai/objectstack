@@ -240,6 +240,23 @@ export const SysApprovalRequest = ObjectSchema.create({
       group: 'Target',
     }),
 
+    // [ADR-0150 D8 row R7] The package that holds the flow `process_name`
+    // names (`flow:NAME`), beside the name (ADR-0126 §4: two facts, two
+    // columns). Backfilled at boot on OPEN requests only (`pending`, and
+    // `returned`, whose run waits in the revise window) from the flow's one
+    // package holder (`stored-process-package-backfill.ts`); a decided
+    // request stays as written. Empty for an environment-authored flow and
+    // for a name no single package holds. Nothing reads it yet and no writer
+    // stamps it. Width: the package-id class (`sys_metadata.package_id`).
+    process_package: Field.text({
+      label: 'Source Package',
+      required: false,
+      readonly: true,
+      maxLength: 255,
+      description: 'The app the flow that opened this request comes from. Filled in by the platform; empty for flows created here.',
+      group: 'Target',
+    }),
+
     // The flow's authored label when the request was opened — a snapshot the
     // engine writes once, in `openNodeRequest`, from the label the flow engine
     // seeds as `$flowLabel` (`FlowSchema.label`, required). A rename of the flow

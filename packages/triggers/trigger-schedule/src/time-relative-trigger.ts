@@ -89,6 +89,34 @@ export interface TimeRelativeDataEngine {
  */
 export interface FlowDispatchClaimSurface {
     claim(key: string): Promise<boolean>;
+    /**
+     * [ADR-0150 D8 row R10] One claim row, or `null` — read only for the
+     * transition read of a window's bare-shape key ({@link timeRelativeDispatchKey}).
+     * Optional: a surface without it skips that read.
+     */
+    readDispatch?(key: string): Promise<unknown | null>;
+    /**
+     * [ADR-0150 D8 row R10] The package that holds the flow (the one D3 rule,
+     * asked with no caller), or `null` when no single package holds it: the
+     * key's package segment. Optional: a surface without it keys by the bare
+     * shape, as before.
+     */
+    flowHolderPackage?(flowName: string): string | null;
+}
+
+/**
+ * The `(flow, window scope, record)` dispatch key (#10220).
+ *
+ * [ADR-0150 D8 row R10] A flow one package holds carries that package:
+ * `time-relative:PACKAGE:FLOW:SCOPE:RECORD_ID`; any other flow keeps the bare
+ * shape `time-relative:FLOW:SCOPE:RECORD_ID`. A scope begins with the window's
+ * date, so the two shapes never collide; the automation service's boot re-key
+ * reads the same grammar (`bareDispatchKeyFlow`).
+ */
+export function timeRelativeDispatchKey(flowName: string, scope: string, recordId: string, packageId?: string | null): string {
+    return packageId
+        ? `time-relative:${packageId}:${flowName}:${scope}:${recordId}`
+        : `time-relative:${flowName}:${scope}:${recordId}`;
 }
 
 /** Job-name namespace so time-relative sweeps never collide with plain schedule jobs. */
@@ -589,7 +617,8 @@ export class TimeRelativeTrigger implements FlowTrigger {
 
         const scopes = computeWindowClaimScopes(desc, this.now());
         const seenIds = new Set<unknown>();
-        const matched: Array<{ record: Record<string, unknown>; claimKey: string | null }> = [];
+        const matched: Array<{ record: Record<string, unknown>; claimKey: string | null; legacyKey: string | null }> = [];
+        const packageId = this.flowPackage(flowName);
 
         for (const { window, scope } of scopes) {
             if (matched.length >= maxRecords) break;
@@ -653,8 +682,9 @@ export class TimeRelativeTrigger implements FlowTrigger {
                 // #10220 — dispatch key: the MATCHED WINDOW's identity + the
                 // record. A row without an id can't be keyed; it is dispatched
                 // unconditionally, exactly as it was never dedupable before.
-                const claimKey = id != null ? `time-relative:${flowName}:${scope}:${String(id)}` : null;
-                matched.push({ record: row, claimKey });
+                const claimKey = id != null ? timeRelativeDispatchKey(flowName, scope, String(id), packageId) : null;
+                const legacyKey = id != null ? timeRelativeDispatchKey(flowName, scope, String(id)) : null;
+                matched.push({ record: row, claimKey, legacyKey });
                 if (matched.length >= maxRecords) break;
             }
         }
@@ -669,12 +699,12 @@ export class TimeRelativeTrigger implements FlowTrigger {
         let launched = 0;
         let failed = 0;
         let deduped = 0;
-        for (const { record, claimKey } of matched) {
+        for (const { record, claimKey, legacyKey } of matched) {
             // #10220 — idempotency gate: launch only if this (flow, record,
             // window) key has not been dispatched before. A re-scan of the same
             // window (denser schedule, kernel rebuild + persisted ledger,
             // future catch-up sweep) skips instead of re-minting.
-            if (claimKey != null && !(await this.claimDispatch(flowName, claimKey))) {
+            if (claimKey != null && !(await this.claimDispatch(flowName, claimKey, legacyKey))) {
                 deduped++;
                 continue;
             }
@@ -834,6 +864,21 @@ export class TimeRelativeTrigger implements FlowTrigger {
     }
 
     /**
+     * [ADR-0150 D8 row R10] The dispatch key's package segment for `flowName`
+     * ({@link FlowDispatchClaimSurface.flowHolderPackage}), or `null` — the
+     * bare shape — when the surface cannot say or no single package holds it.
+     */
+    private flowPackage(flowName: string): string | null {
+        const surface = this.getClaimSurface();
+        if (!surface || typeof surface.flowHolderPackage !== 'function') return null;
+        try {
+            return surface.flowHolderPackage(flowName) ?? null;
+        } catch {
+            return null; // no answer is the bare key, as before the segment existed
+        }
+    }
+
+    /**
      * Claim one dispatch key (#10220): `true` = launch, `false` = an earlier
      * sweep already dispatched this (flow, record, window).
      *
@@ -848,10 +893,19 @@ export class TimeRelativeTrigger implements FlowTrigger {
      *    would hide that the once-per-window guarantee no longer survives a
      *    kernel rebuild.
      */
-    private async claimDispatch(flowName: string, key: string): Promise<boolean> {
+    private async claimDispatch(flowName: string, key: string, legacyKey?: string | null): Promise<boolean> {
         const surface = this.getClaimSurface();
         if (surface && typeof surface.claim === 'function') {
             try {
+                // [ADR-0150 D8 row R10] The transition read, until every node
+                // runs a release that keys by package: a claim an older node
+                // wrote under the bare-shape key is this window's claim. Retire
+                // it once the ledger's retention has passed since the release
+                // that added the package segment.
+                if (legacyKey && legacyKey !== key && typeof surface.readDispatch === 'function'
+                    && (await surface.readDispatch(legacyKey)) != null) {
+                    return false;
+                }
                 return await surface.claim(key);
             } catch (err) {
                 this.logger.warn(
