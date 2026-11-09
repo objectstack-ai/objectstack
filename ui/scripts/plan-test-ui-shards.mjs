@@ -78,6 +78,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
+import { isEntrypoint } from './invoked-as.mjs';
 import { datasetWeights, medianWeight, MIN_WEIGHT_MS, partition, pathKey, planShards } from './test-shard-partition.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -351,7 +352,7 @@ async function main(argv) {
   return 2;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isEntrypoint(import.meta.url)) {
   main(process.argv.slice(2)).then(
     (code) => process.exit(code),
     (error) => {
