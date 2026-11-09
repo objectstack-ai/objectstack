@@ -98,6 +98,12 @@ export default defineConfig({
         find: /^@objectstack\/spec$/,
         replacement: path.resolve(__dirname, '../../spec/src/index.ts'),
       },
+      // [#31597] The settings-lane suite boots the real cluster bridge
+      // (`settings-cluster-lane.test.ts`); its source, like every sibling here.
+      {
+        find: /^@objectstack\/service-cluster$/,
+        replacement: path.resolve(__dirname, '../service-cluster/src/index.ts'),
+      },
       {
         find: /^@objectstack\/types$/,
         replacement: path.resolve(__dirname, '../../types/src/index.ts'),
