@@ -9,6 +9,8 @@ import type {
   QueueBackoffPolicy,
 } from '@objectstack/spec/contracts';
 import { SysEmail, SysEmailTemplate, SysIdentityEmail } from '@objectstack/platform-objects/audit';
+import { backfillTemplatePackages, logTemplatePackageBackfill } from './stored-template-package-backfill.js';
+import type { PackageScopedRegistry } from '@objectstack/objectql';
 import {
   EmailService,
   LogTransport,
@@ -698,6 +700,33 @@ export class EmailServicePlugin implements Plugin {
   }
 
   async start(ctx: PluginContext): Promise<void> {
+    // [ADR-0150 D8 row R20] Legacy `sys_email_template` rows gain the package
+    // that holds their template, once the registry's bare-name holders are
+    // sealed (`kernel:bootstrapped`): before that, a package of this boot could
+    // still register and change who holds a name. The ambiguous set is
+    // reported, never bound; never fails the boot. See
+    // `stored-template-package-backfill.ts`.
+    ctx.hook('kernel:bootstrapped', async () => {
+      try {
+        const engine = resolveDataEngine(ctx) as unknown as { find?: unknown; update?: unknown; registry?: unknown } | null;
+        const registry = engine?.registry as (Partial<PackageScopedRegistry> & { bareNameHoldersAreSealed?: boolean; getObject?(name: string): unknown }) | undefined;
+        if (!engine || typeof engine.find !== 'function' || typeof engine.update !== 'function') return;
+        if (registry?.bareNameHoldersAreSealed !== true) return;
+        if (typeof registry.packageScopedHoldersOf !== 'function' || typeof registry.getPackageScopedItem !== 'function'
+          || typeof registry.getEnvironmentScopedItem !== 'function' || typeof registry.getPackage !== 'function'
+          || typeof registry.getAllPackages !== 'function') return;
+        if (!registry.getObject?.('sys_email_template')) return;
+        const report = await backfillTemplatePackages(engine as any, registry as PackageScopedRegistry);
+        logTemplatePackageBackfill(report, ctx.logger as any);
+      } catch (err) {
+        ctx.logger.warn(
+          '[email] the sys_email_template.package_id backfill did not finish: rows that name no package keep naming none, '
+            + 'and the next boot tries again.',
+          { error: err instanceof Error ? err.message : String(err) },
+        );
+      }
+    });
+
     ctx.hook('kernel:ready', async () => {
       const engine = resolveDataEngine(ctx);
       if (!engine || !this.service) return;

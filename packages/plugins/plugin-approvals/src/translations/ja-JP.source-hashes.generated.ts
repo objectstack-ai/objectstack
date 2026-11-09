@@ -44,4 +44,6 @@ export const jaJPGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_approval_request.fields.flow_run_id.label": "d0124e323da966f9",
   "objects.sys_approval_request.fields.node_config_json.help": "e832e60ef12791e6",
   "objects.sys_approval_request.fields.node_config_json.label": "e64eb4bf7d7ea033",
+  "objects.sys_approval_request.fields.process_package.help": "2c4cfa5880a99e24",
+  "objects.sys_approval_request.fields.process_package.label": "e2102a7a50e2a26d",
 };

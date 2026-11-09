@@ -35,6 +35,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Source",
         help: "Origin of the request — `flow:<flowName|nodeId>` for node-driven approvals"
       },
+      process_package: {
+        label: "Source Package",
+        help: "The app the flow that opened this request comes from. Filled in by the platform; empty for flows created here."
+      },
       process_label: {
         label: "Flow",
         help: "Label of the flow that opened this request, as it stood when the request was opened"

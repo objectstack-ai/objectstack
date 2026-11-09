@@ -2953,6 +2953,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Name",
         help: "Dotted snake_case identifier (e.g. auth.password_reset)"
       },
+      package_id: {
+        label: "Package",
+        help: "The app the template comes from. Filled in by the platform; empty for templates created here."
+      },
       label: {
         label: "Label",
         help: "Human-readable name shown in Studio"

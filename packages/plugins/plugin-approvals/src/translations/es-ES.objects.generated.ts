@@ -35,6 +35,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Origen",
         help: "Origen de la solicitud — `flow:<flowName|nodeId>` para aprobaciones por nodo"
       },
+      process_package: {
+        label: "Source Package",
+        help: "The app the flow that opened this request comes from. Filled in by the platform; empty for flows created here."
+      },
       process_label: {
         label: "Flujo",
         help: "Etiqueta del flujo que abrió esta solicitud, tal como estaba cuando se abrió"
