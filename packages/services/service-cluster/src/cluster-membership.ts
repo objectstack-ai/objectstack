@@ -335,7 +335,7 @@ function sameIds(a: readonly string[], b: readonly string[]): boolean {
     return a.length === b.length && a.every((id, i) => id === b[i]);
 }
 
-async function withinBound(work: Promise<void>, ms: number): Promise<void> {
+async function withinBound(work: Promise<unknown>, ms: number): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([
         work,
