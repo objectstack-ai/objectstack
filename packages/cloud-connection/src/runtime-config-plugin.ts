@@ -348,6 +348,9 @@ async function openTimingGateForAdmin(ctx: PluginContext, headers: Headers): Pro
             accessToken: 'withhold',
             oauth: undefined,
             onAdmission: undefined,
+            // [#31898] `'session-only'` reads no API key, so no `credential_use` row is
+            // written here and no transport is handed.
+            transport: undefined,
         });
         if (context && isPerfDisclosurePrincipal(context)) allowPerfDisclosure();
     } catch {

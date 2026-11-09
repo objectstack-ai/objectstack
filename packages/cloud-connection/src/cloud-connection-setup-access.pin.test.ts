@@ -41,7 +41,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { hashApiKey, isAuthzStoreUnavailableError } from '@objectstack/core';
+import { currentCredentialUseClient, hashApiKey, isAuthzStoreUnavailableError } from '@objectstack/core';
 import { ApiErrorSchema, BaseResponseSchema, envelopeViolations } from '@objectstack/spec/api';
 import { CloudConnectionPlugin } from './cloud-connection-plugin.js';
 import { CLOUD_CONNECTION_UI_BUNDLE } from './cloud-connection-ui.js';
@@ -156,11 +156,15 @@ const unreachableFind = async (): Promise<never> => {
 };
 
 /** The data engine the grants are read from. `outage` makes every read fail. */
-function grantsEngine(opts: { outage?: boolean } = {}) {
+function grantsEngine(opts: { outage?: boolean; stamps?: unknown[] } = {}) {
     const rows = grantRows();
     return bindCatalogFromTables({
         find: opts.outage ? unreachableFind : boundedFind(rows),
-        update: async () => undefined,
+        // [#31898] The key's use stamp: what plugin-audit's hook reads, read here when asked.
+        update: async () => {
+            opts.stamps?.push(currentCredentialUseClient() ?? null);
+            return undefined;
+        },
     }, rows);
 }
 
@@ -175,9 +179,12 @@ function makeRawApp() {
     };
 }
 
-function makeC(path: string, opts: { user?: string; body?: unknown; apiKey?: string } = {}) {
+function makeC(
+    path: string,
+    opts: { user?: string; body?: unknown; apiKey?: string; client?: { headers?: Record<string, string>; remoteAddress?: string } } = {},
+) {
     const url = `${ORIGIN}${path}`;
-    const headers = new Headers();
+    const headers = new Headers(opts.client?.headers);
     if (opts.user) headers.set('x-test-user', opts.user);
     if (opts.apiKey) headers.set('x-api-key', opts.apiKey);
     return {
@@ -189,6 +196,8 @@ function makeC(path: string, opts: { user?: string; body?: unknown; apiKey?: str
             text: async () => JSON.stringify(opts.body ?? {}),
         },
         json: (payload: any, status?: number) => ({ payload, status: status ?? 200 }),
+        // [#31898] Where `@hono/node-server` puts the socket: the transport's peer.
+        ...(opts.client?.remoteAddress ? { env: { incoming: { socket: { remoteAddress: opts.client.remoteAddress } } } } : {}),
     };
 }
 
@@ -213,11 +222,19 @@ afterEach(() => {
  * whose credential is the stored device token — the one shape in which
  * `unbind` still disconnects (ruling 甲, #25097).
  */
-async function mount(mode: 'single' | 'multi', opts: { outage?: boolean; serviceKey?: string } = {}) {
+async function mount(
+    mode: 'single' | 'multi',
+    opts: {
+        outage?: boolean;
+        serviceKey?: string;
+        /** [#31898] The trust rule's answer, and where the key's use stamps land. */
+        probe?: { establish: (transport: { headers?: Record<string, unknown>; remoteAddress?: string }) => string | undefined; stamps: unknown[] };
+    } = {},
+) {
     const rawApp = makeRawApp();
     const hooks = new Map<string, any>();
-    const auth = sessionAuth();
-    const objectql = grantsEngine(opts);
+    const auth = { ...sessionAuth(), ...(opts.probe ? { resolveClientAddress: opts.probe.establish } : {}) };
+    const objectql = grantsEngine({ outage: opts.outage, stamps: opts.probe?.stamps });
     const credentialPath = join(dir, 'cloud-connection.json');
     new ConnectionCredentialStore(credentialPath).write({ runtimeToken: 'oscc_pin', runtimeId: 'rt_1', environmentId: 'env-1' });
     const envKernelServices: Record<string, unknown> = { auth, objectql };
@@ -437,3 +454,34 @@ for (const mode of ['single', 'multi'] as const) {
         }
     });
 }
+
+/**
+ * [#31898] The platform-settings check hands where the request came from to
+ * the key's use stamp: the raw-app request's socket peer and the headers go to
+ * the auth service's trust rule, and the address it establishes is what the
+ * `credential_use` row records, with the user agent. The door reads no
+ * forwarded header itself.
+ */
+describe('[#31898] the platform-settings check hands its client facts to the key\'s use stamp', () => {
+    it('the stamp runs with the address the trust rule established from the peer, and the user agent', async () => {
+        const handed: Array<{ headers?: Record<string, unknown>; remoteAddress?: string }> = [];
+        const probe = {
+            establish: (transport: { headers?: Record<string, unknown>; remoteAddress?: string }) => {
+                handed.push(transport);
+                return '203.0.113.7';
+            },
+            stamps: [] as unknown[],
+        };
+        const { drive } = await mount('single', { probe });
+        const res = await drive(`GET ${CC}/status`, `${CC}/status`, {
+            user: ADMIN,
+            apiKey: ADMIN_KEY,
+            client: { headers: { 'user-agent': 'ci-agent/3.1', 'x-forwarded-for': '198.51.100.9' }, remoteAddress: '10.0.0.5' },
+        });
+        expect(res.status).toBe(200);
+        expect(handed).toHaveLength(1);
+        expect(handed[0].remoteAddress).toBe('10.0.0.5');
+        expect(handed[0].headers?.['x-forwarded-for'], 'handed over raw: the auth service decides whether it counts').toBe('198.51.100.9');
+        expect(probe.stamps).toEqual([{ ipAddress: '203.0.113.7', userAgent: 'ci-agent/3.1' }]);
+    });
+});

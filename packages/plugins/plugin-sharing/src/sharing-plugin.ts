@@ -25,6 +25,7 @@ import {
   // [#30237] A write's class (purge → delete, restore/transfer → update): the
   // one mapping plugin-security's write gates read too.
   rlsOperationForVerb,
+  credentialUseClientFor,
 } from '@objectstack/core';
 import type { EngineMiddleware, OperationContext } from '@objectstack/objectql';
 import type {
@@ -1191,6 +1192,9 @@ export class SharingServicePlugin implements Plugin {
                   userAuthGates: userAuthGateSourceOf(authService),
                   // [#23367] The API-key lifecycle policy, from the same service.
                   apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService),
+                  // [#31898] Where the request came from, for the `credential_use` row an
+                  // admitted API key writes; the auth service applies the trust rule.
+                  client: credentialUseClientFor(authService, { headers, remoteAddress: req.remoteAddress || undefined }),
                 });
                 // [ADR-0069 · #23287] The envelope carries the posture the
                 // shared resolver decided for whichever credential admitted

@@ -32,7 +32,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { hashApiKey } from '@objectstack/core';
+import { currentCredentialUseClient, hashApiKey } from '@objectstack/core';
 
 const seedCalls: unknown[] = [];
 vi.mock('@objectstack/runtime', () => ({
@@ -122,7 +122,13 @@ type Handler = (c: any) => Promise<any>;
  * Boot the plugin with an auth service whose per-user posture is read from
  * `postures` on every ask, so a test can move it while the doors are live.
  */
-async function mountInstallLocal(storageDir: string, postures: Record<string, Posture[]>) {
+/** [#31898] What the key's use stamp ran with, and what the trust rule was handed. */
+interface ClientProbe {
+    establish: (transport: { headers?: Record<string, unknown>; remoteAddress?: string }) => string | undefined;
+    stamps: unknown[];
+}
+
+async function mountInstallLocal(storageDir: string, postures: Record<string, Posture[]>, probe?: ClientProbe) {
     const register = vi.fn(async () => undefined);
     const syncSchemas = vi.fn(async () => undefined);
     const widgets = [{ id: 'w1', code: 'a' }, { id: 'w2', code: 'b' }];
@@ -149,6 +155,7 @@ async function mountInstallLocal(storageDir: string, postures: Record<string, Po
             // No session: every caller below presents the key alone.
             api: { getSession: async () => null },
             resolveUserAuthGates: async (userId: string) => postures[userId] ?? [],
+            ...(probe ? { resolveClientAddress: probe.establish } : {}),
         },
         objectql: bindCatalogFromTables({
             syncSchemas,
@@ -158,6 +165,8 @@ async function mountInstallLocal(storageDir: string, postures: Record<string, Po
                 return typeof q?.limit === 'number' ? matched.slice(0, q.limit) : matched;
             },
             delete: engineDelete,
+            // [#31898] The key's use stamp: what plugin-audit's hook reads, read here.
+            ...(probe ? { update: async () => { probe.stamps.push(currentCredentialUseClient() ?? null); return {}; } } : {}),
         }, rows),
         metadata: { getObject: async () => ({ name: 'widget', fields: {} }) },
     };
@@ -186,8 +195,12 @@ async function mountInstallLocal(storageDir: string, postures: Record<string, Po
     };
 }
 
-function withKey(body: unknown = {}, manifestId?: string) {
-    const headers = new Headers({ 'x-api-key': KEY });
+function withKey(
+    body: unknown = {},
+    manifestId?: string,
+    client: { headers?: Record<string, string>; remoteAddress?: string } = {},
+) {
+    const headers = new Headers({ ...client.headers, 'x-api-key': KEY });
     const url = `http://localhost${IL}`;
     return {
         req: {
@@ -198,6 +211,8 @@ function withKey(body: unknown = {}, manifestId?: string) {
             param: () => manifestId,
         },
         json: (payload: any, status?: number) => ({ payload, status: status ?? 200 }),
+        // [#31898] Where `@hono/node-server` puts the socket: the transport's peer.
+        ...(client.remoteAddress ? { env: { incoming: { socket: { remoteAddress: client.remoteAddress } } } } : {}),
     };
 }
 
@@ -268,5 +283,35 @@ describe('install-local doors — a key answers as its owner\'s session does (#2
         expect(again.payload.success).toBe(true);
         expect(existsSync(join(dir, LEDGER_FILE))).toBe(true);
         expect(m.keyRowUnchanged(), 'the hold wrote to the key row').toBe(true);
+    });
+});
+
+/**
+ * [#31898] The install-local doors' caller resolution hands where the request
+ * came from to the key's use stamp: the raw-app request's socket peer and the
+ * headers go to the auth service's trust rule, and the address it establishes
+ * is what the `credential_use` row records, with the user agent. The door reads
+ * no forwarded header itself.
+ */
+describe('[#31898] the install-local doors hand their client facts to the key\'s use stamp', () => {
+    it('the stamp runs with the address the trust rule established from the peer, and the user agent', async () => {
+        const handed: Array<{ headers?: Record<string, unknown>; remoteAddress?: string }> = [];
+        const probe: ClientProbe = {
+            establish: (transport) => {
+                handed.push(transport);
+                return '203.0.113.7';
+            },
+            stamps: [],
+        };
+        const m = await mountInstallLocal(dir, {}, probe);
+        const listed = await m.routes.get(`GET ${IL}`)!(withKey({}, undefined, {
+            headers: { 'user-agent': 'ci-agent/3.1', 'x-forwarded-for': '198.51.100.9' },
+            remoteAddress: '10.0.0.5',
+        }));
+        expect(listed.status, JSON.stringify(listed.payload)).toBe(200);
+        expect(handed).toHaveLength(1);
+        expect(handed[0].remoteAddress).toBe('10.0.0.5');
+        expect(handed[0].headers?.['x-forwarded-for'], 'handed over raw: the auth service decides whether it counts').toBe('198.51.100.9');
+        expect(probe.stamps).toEqual([{ ipAddress: '203.0.113.7', userAgent: 'ci-agent/3.1' }]);
     });
 });

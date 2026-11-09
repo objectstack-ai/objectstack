@@ -180,14 +180,20 @@ export {
 // [#31821] Where a credential use came from: the client facts the
 // `credential_use` ledger row records, carried from the key-admission seam's
 // (and plugin-auth's OAuth) stamp write to plugin-audit's stamp hook.
+// [#31898] `credentialUseClientFor` is the one place a door's facts meet the
+// client-address trust rule; every key-admitting door hands its facts through it.
 export {
+  credentialUseClientFor,
   credentialUseClientOf,
   currentCredentialUseClient,
   runWithCredentialUseClient,
+  transportPeerAddressOf,
   userAgentOf,
+  type ClientAddressAuthority,
   type CredentialUseClient,
   type CredentialUseClientAbsence,
   type CredentialUseClientInput,
+  type CredentialUseDoorFacts,
 } from './credential-use-client.js';
 
 // The one "does this user's ban hold" predicate: the key-admission seam and
