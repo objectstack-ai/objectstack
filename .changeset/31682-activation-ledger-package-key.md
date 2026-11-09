@@ -1,9 +1,9 @@
 ---
-'@objectstack/core': minor
+'@objectstack/core': patch
 '@objectstack/platform-objects': patch
 '@objectstack/objectql': patch
 '@objectstack/driver-sql': patch
-'@objectstack/metadata-protocol': minor
+'@objectstack/metadata-protocol': patch
 '@objectstack/driver-mongodb': patch
 ---
 
