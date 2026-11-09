@@ -61,6 +61,9 @@ import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatch
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 import { readDispatchedBody } from '../deferred-request-body.js';
 
+/** [#23367] The ceiling refusal, as its wire pair (ADR-0112 ledger, `@objectstack/runtime`). */
+const API_KEY_EXPIRY_TOO_LONG = { code: 'API_KEY_EXPIRY_TOO_LONG', status: 400 } as const;
+
 /**
  * The one method this domain serves, on every path it claims (the handler
  * never reads the path): the `Allow` value of its 405.
@@ -254,7 +257,11 @@ export async function handleKeysRequest(
     if (!signed.ok) {
         return {
             handled: true,
-            response: deps.error(signed.message, signed.status, { code: signed.code }),
+            response: deps.error(
+                signed.message,
+                API_KEY_EXPIRY_TOO_LONG.status,
+                { code: API_KEY_EXPIRY_TOO_LONG.code },
+            ),
         };
     }
     const expiresAt = signed.expiresAt;

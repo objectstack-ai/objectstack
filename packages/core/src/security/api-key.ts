@@ -230,14 +230,25 @@ export function apiKeyLifecyclePolicySourceOf(
  */
 const API_KEY_EXPIRY_CEILING_SKEW_MS = 60_000;
 
-/** [#23367] The ceiling refusal's code (ADR-0112 ledger). */
-export const API_KEY_EXPIRY_TOO_LONG_CODE = 'API_KEY_EXPIRY_TOO_LONG';
-
-/** A refused signing: always `400`, with the code and the located message. */
+/** A request `expires_at` that is no date, or not in the future: always `400 VALIDATION_ERROR`. */
 export interface ApiKeyExpiryRefusal {
   ok: false;
   status: 400;
-  code: 'VALIDATION_ERROR' | typeof API_KEY_EXPIRY_TOO_LONG_CODE;
+  code: 'VALIDATION_ERROR';
+  message: string;
+}
+
+/**
+ * A date further away than the policy's ceiling. It carries no wire code: each
+ * door answers it with its own ledgered code (`POST /keys` with
+ * `API_KEY_EXPIRY_TOO_LONG`, under `@objectstack/runtime`), and `latest` is the
+ * latest expiry a key signed now may have.
+ */
+export interface ApiKeyExpiryCeilingRefusal {
+  ok: false;
+  status: 400;
+  ceiling: true;
+  latest: string;
   message: string;
 }
 
@@ -270,14 +281,14 @@ export function readRequestedApiKeyExpiry(
  * for gets the policy's default life (never a permanent key), or no expiry
  * when no policy is configured (a kernel with no `auth` service has no auth
  * configuration). A date further away than the policy's ceiling is refused
- * `400 API_KEY_EXPIRY_TOO_LONG`, naming the latest date that would be
- * accepted; exactly the ceiling is accepted.
+ * with a message naming the latest date that would be accepted (each door
+ * picks the wire code); exactly the ceiling is accepted.
  */
 export function signApiKeyExpiry(
   policy: ApiKeyLifecyclePolicy | undefined,
   requestedMs: number | undefined,
   nowMs: number,
-): { ok: true; expiresAt?: string } | ApiKeyExpiryRefusal {
+): { ok: true; expiresAt?: string } | ApiKeyExpiryCeilingRefusal {
   if (requestedMs === undefined) {
     return policy
       ? { ok: true, expiresAt: new Date(nowMs + policy.defaultExpiryDays * DAY_MS).toISOString() }
@@ -288,7 +299,8 @@ export function signApiKeyExpiry(
     return {
       ok: false,
       status: 400,
-      code: API_KEY_EXPIRY_TOO_LONG_CODE,
+      ceiling: true,
+      latest,
       message:
         `expires_at ${new Date(requestedMs).toISOString()} is further away than this deployment allows: the `
         + `Authentication API key policy's Maximum key lifetime is ${policy.maxExpiryDays} days, so the `

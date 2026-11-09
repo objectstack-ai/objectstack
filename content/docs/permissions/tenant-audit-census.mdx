@@ -132,7 +132,7 @@ are reported as `undecidable` rather than assumed either way.
 
 The same holds twice over for the context. An options argument spelled as a
 literal can be read; one spelled `options`, `{ ...opts }`, or handed through a
-forwarding shim cannot, and **57 of the 280 sites are spelled that way**. A
+forwarding shim cannot, and **57 of the 282 sites are spelled that way**. A
 context resolved from an inline literal or a local `const` can be tested for
 `isSystem`; one arriving from a helper call cannot.
 
@@ -197,10 +197,10 @@ reproduce them. Where it disagrees, it disagrees on the page:
 
 | carried figure | where it survives | this census |
 | :--- | :--- | ---: |
-| 175 write call sites | quoted in the merged changeset | **280** |
+| 175 write call sites | quoted in the merged changeset | **282** |
 | 24 carrying no tenant context | quoted in the merged changeset | **3** provable and tenancy-enabled; **30** more whose options argument is unreadable |
-| 127 of 175 statically decidable, 48 runtime-parameter-name sites | restated on the `isSystem`-scoping card | **198 of 280** decidable, **82** undecidable |
-| 135 (77%) silenced by the `isSystem` guard before the posture gate | the lost issue body — **no surviving corroboration** | **not reproduced**: 157 decidably elevated, 0 decidably not, 113 undecidable |
+| 127 of 175 statically decidable, 48 runtime-parameter-name sites | restated on the `isSystem`-scoping card | **199 of 282** decidable, **83** undecidable |
+| 135 (77%) silenced by the `isSystem` guard before the posture gate | the lost issue body — **no surviving corroboration** | **not reproduced**: 157 decidably elevated, 0 decidably not, 115 undecidable |
 | 141 and 132, two independent re-derivations | the card that filed this work | — |
 
 **The differences are not reconciled, and deliberately so.** The old census's
@@ -211,17 +211,17 @@ at any commit.
 
 Two structural facts do plausibly widen this reading against any hand or regex
 one, and both are counted in the generated tables below: the 62 sites reached
-through an erased (`any`) receiver, and the 72 that name their object through a
+through an erased (`any`) receiver, and the 73 that name their object through a
 `const` rather than inline. An instrument that read either the way a person does
 would report a smaller number and would not say so.
 
 The fourth row is the one worth flagging to anyone citing it. **The 135 / 77%
 figure has no surviving corroboration anywhere in the tree.** This census reads
-157 of 280 (56%) as decidably elevated, with 113 more whose elevation is a
+157 of 282 (56%) as decidably elevated, with 115 more whose elevation is a
 run-time fact — so the claim is neither confirmed nor refuted, and the honest
 answer is that a static reading cannot settle it.
 
-⇒ **Cite `3 / 280`, and say what it is**: the sites whose options argument was
+⇒ **Cite `3 / 282`, and say what it is**: the sites whose options argument was
 READ and holds no tenant context, against a decidably tenancy-enabled object.
 That is the control's provable yield surface. ⛔ Do not cite it as "the sites
 without tenant context" — **30 further sites** have an options argument this
@@ -233,31 +233,31 @@ cannot read, and they are neither in nor out.
 
 | what | count |
 | :--- | ---: |
-| write call sites on the application surface | **280** |
-| …whose object name is statically decidable | 198 |
-| …whose object name is chosen at run time | 82 |
+| write call sites on the application surface | **282** |
+| …whose object name is statically decidable | 199 |
+| …whose object name is chosen at run time | 83 |
 | …against an object with tenancy ENABLED | 192 |
-| …against an object that declares tenancy off | 6 |
-| threading a tenant context | 213 |
+| …against an object that declares tenancy off | 7 |
+| threading a tenant context | 215 |
 | PROVABLY carrying none (options read, no context key) | **10** |
 | …of those, against a decidably tenancy-enabled object | **3** |
 | options argument UNREADABLE — may or may not carry one | 57 |
 | …of those, against a decidably tenancy-enabled object | 30 |
 | threading a decidably ELEVATED (`isSystem`) context | 157 |
 | threading a context that is decidably NOT elevated | 0 |
-| threading a context whose elevation is a run-time fact | 113 |
+| threading a context whose elevation is a run-time fact | 115 |
 
 | how the instrument reached the site | count |
 | :--- | ---: |
-| receiver carried a readable engine type | 218 |
+| receiver carried a readable engine type | 220 |
 | receiver erased, placed by the object NAME | 52 |
 | receiver erased, placed by an `object: string` PARAMETER | 5 |
 | receiver erased, placed by an `UNTYPED_RECEIVERS` row | 5 |
 
 | object name spelled inline | 126 |
-| object name spelled through a `const` | 72 |
+| object name spelled through a `const` | 73 |
 | object name is an `object: string` parameter | 9 |
-| object name is some other run-time expression | 73 |
+| object name is some other run-time expression | 74 |
 
 ### Subtractions the census could NOT defend — enforced
 
@@ -307,13 +307,13 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-09 at `4e6c24cf7`.
+Measured on 2026-11-09 at `9a53066ce`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1088 |
-| engine-shaped types recognised | 120 |
+| tracked non-test sources scanned | 1091 |
+| engine-shaped types recognised | 121 |
 | declared objects in the registry | 133 |
-| same-named calls subtracted as non-engine | 253 |
+| same-named calls subtracted as non-engine | 254 |
 
 {/* END GENERATED: tenant-audit-census */}

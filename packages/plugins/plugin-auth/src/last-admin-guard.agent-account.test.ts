@@ -167,7 +167,7 @@ describe('[ADR-0151 D2/D3] the break-glass guard never counts an AI service acco
 
   it('revoking the last person administrator\'s grant is refused, although an account holds the same grant', async () => {
     const engine = await environment();
-    await expect(engine.delete('sys_user_permission_set', { where: { id: 'ups_admin' }, ...SYSTEM } as any))
+    await expect(engine.delete('sys_user_permission_set', { where: { id: 'ups_admin' }, ...SYSTEM }))
       .rejects.toMatchObject(refusal);
   });
 

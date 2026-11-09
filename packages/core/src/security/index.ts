@@ -168,8 +168,8 @@ export {
   // [ADR-0151 D4] The one signing-expiry rule both mint doors apply.
   readRequestedApiKeyExpiry,
   signApiKeyExpiry,
-  API_KEY_EXPIRY_TOO_LONG_CODE,
   type ApiKeyExpiryRefusal,
+  type ApiKeyExpiryCeilingRefusal,
   ApiKeyLifecycleRefusalError,
   isApiKeyLifecycleRefusalError,
   type ApiKeyLifecyclePolicySource,

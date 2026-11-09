@@ -382,7 +382,21 @@ export async function runCreateServiceAccountKey(
     throw new AuthzStoreUnavailableError('api_key_policy', cause);
   }
   const signed = signApiKeyExpiry(policy, requested.requestedMs, nowMs);
-  if (!signed.ok) return fail(signed.status, signed.code, signed.message);
+  if (!signed.ok) {
+    // The ceiling, answered as a refusal of the field (`POST /keys` answers it
+    // with its own ledgered `API_KEY_EXPIRY_TOO_LONG`, which is the runtime's).
+    return {
+      status: 400,
+      body: {
+        success: false,
+        error: {
+          code: 'VALIDATION_FAILED',
+          message: signed.message,
+          fields: [{ field: 'expires_at', code: 'invalid_value', message: signed.message }],
+        },
+      },
+    };
+  }
 
   // Generated after every check, so a refused request never mints.
   const generated = generateApiKey();

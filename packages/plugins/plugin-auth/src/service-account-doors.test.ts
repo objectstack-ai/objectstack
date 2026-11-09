@@ -86,13 +86,16 @@ let failMemberReads = false;
 
 const POLICY = { defaultExpiryDays: 90, maxExpiryDays: 365, inactivityDays: 90 } as any;
 
+type FindArgs = Parameters<ObjectQL['find']>;
+type InsertArgs = Parameters<ObjectQL['insert']>;
+
 const deps = (): ServiceAccountDoorDeps => ({
   getDataEngine: () => ({
     find: (object, query, options) => {
       if (failMemberReads && object === 'sys_member') return Promise.reject(new Error('sys_member is unreachable'));
-      return engine.find(object, query as any, options as any);
+      return engine.find(object, query as FindArgs[1], options as FindArgs[2]);
     },
-    insert: (object, data, options) => engine.insert(object, data, options as any),
+    insert: (object, data, options) => engine.insert(object, data, options as InsertArgs[2]),
   }),
   addMember: async ({ userId, organizationId }) => {
     if (refuseMembership) throw refuseMembership;
@@ -115,7 +118,7 @@ const post = (body: unknown) =>
   });
 
 const rows = async (object: string, where: Record<string, unknown> = {}) =>
-  (await engine.find(object, { where, ...SYSTEM } as any)) as Array<Record<string, any>>;
+  (await engine.find(object, { where, ...SYSTEM })) as Array<Record<string, any>>;
 
 beforeEach(async () => {
   refuseMembership = undefined;
@@ -298,14 +301,14 @@ describe('[ADR-0151 D4] create-key: who may mint, and what the key is', () => {
 
   it('a retired account (no membership) gets no key', async () => {
     const bot = await registered();
-    await engine.delete('sys_member', { where: { user_id: bot }, multi: true, ...SYSTEM } as any);
+    await engine.delete('sys_member', { where: { user_id: bot }, multi: true, ...SYSTEM });
     const r = await runCreateServiceAccountKey(deps(), caller('usr_admin'), post({ userId: bot }));
     expect(r).toMatchObject({ status: 409, body: { error: { code: 'RESOURCE_CONFLICT' } } });
   });
 
   it('the owner who has left the organization is no longer admitted as owner', async () => {
     const bot = await registered();
-    await engine.delete('sys_member', { where: { user_id: 'usr_owner' }, multi: true, ...SYSTEM } as any);
+    await engine.delete('sys_member', { where: { user_id: 'usr_owner' }, multi: true, ...SYSTEM });
     const r = await runCreateServiceAccountKey(deps(), caller('usr_owner'), post({ userId: bot }));
     expect(r).toMatchObject({ status: 403, body: { error: { code: 'PERMISSION_DENIED' } } });
   });
@@ -315,7 +318,10 @@ describe('[ADR-0151 D4] create-key: who may mint, and what the key is', () => {
     const tooFar = await runCreateServiceAccountKey(
       deps(), caller('usr_owner'), post({ userId: bot, expires_at: new Date(NOW + 400 * DAY_MS).toISOString() }),
     );
-    expect(tooFar).toMatchObject({ status: 400, body: { error: { code: 'API_KEY_EXPIRY_TOO_LONG' } } });
+    expect(tooFar).toMatchObject({
+      status: 400,
+      body: { error: { code: 'VALIDATION_FAILED', fields: [{ field: 'expires_at', code: 'invalid_value' }] } },
+    });
     const ceiling = new Date(NOW + 365 * DAY_MS).toISOString();
     const ok = await runCreateServiceAccountKey(deps(), caller('usr_owner'), post({ userId: bot, expires_at: ceiling }));
     expect(ok.body.data).toMatchObject({ expires_at: ceiling });

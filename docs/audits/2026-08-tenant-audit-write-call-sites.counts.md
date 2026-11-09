@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 280 |
-| Object name statically decidable | 198 |
-| Object name chosen at run time | 82 |
+| Write call sites | 282 |
+| Object name statically decidable | 199 |
+| Object name chosen at run time | 83 |
 | Against a tenancy-enabled object | 192 |
-| Against an object declaring tenancy off | 6 |
-| Threading a tenant context | 213 |
+| Against an object declaring tenancy off | 7 |
+| Threading a tenant context | 215 |
 | Provably carrying none | 10 |
 | …and decidably tenancy-enabled | 3 |
 | Options argument unreadable | 57 |
 | …and decidably tenancy-enabled | 30 |
 | Threading a decidably elevated context | 157 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 113 |
+| Threading a context of undecidable elevation | 115 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-09 at `4e6c24cf7`.
+Measured on 2026-11-09 at `9a53066ce`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1088 |
-| engine-shaped types recognised | 120 |
+| tracked non-test sources scanned | 1091 |
+| engine-shaped types recognised | 121 |
 | declared objects in the registry | 133 |
-| same-named calls subtracted as non-engine | 253 |
+| same-named calls subtracted as non-engine | 254 |
 
 ## Every site
 
@@ -181,6 +181,8 @@ Measured on 2026-11-09 at `4e6c24cf7`.
 | `packages/plugins/plugin-auth/src/scim-connection-service.ts` | `update` | `sys_scim_connection_credential` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/scim-group-projection.ts` | `delete` | `sys_user_permission_set` | enabled | PROVABLY NONE | 1 |
 | `packages/plugins/plugin-auth/src/scim-group-projection.ts` | `insert` | `sys_user_permission_set` | enabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/service-account-doors.ts` | `insert` | `sys_api_key` | disabled | context, elevation undecidable | 1 |
+| `packages/plugins/plugin-auth/src/service-account-doors.ts` | `insert` | `USER_OBJECT` | undecidable | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-auth/src/session-tombstone.ts` | `update` | `objectName` | undecidable | options unreadable | 1 |
 | `packages/plugins/plugin-auth/src/sso-client-secret.ts` | `update` | `sys_sso_provider` | disabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/sys-session-revoke.ts` | `update` | `SystemObjectName.SESSION` | undecidable | elevated | 1 |
