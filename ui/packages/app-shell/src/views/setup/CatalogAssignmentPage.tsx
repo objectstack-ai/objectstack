@@ -54,13 +54,19 @@ export interface CatalogAssignmentPageProps {
   icon: React.ReactNode;
   copy: CatalogAssignmentCopy;
   /** The assignment section for the picked item. */
-  renderSection: (name: string) => React.ReactNode;
+  renderSection: (name: string, entry: CatalogEntry) => React.ReactNode;
   testId: string;
+  /**
+   * Narrow the catalog to the items this caller may pick (the recycle-bin
+   * page keeps the objects whose bin it manages). Applied to a catalog that
+   * read; an item it drops is unknown to the page, as one the catalog lacks.
+   */
+  select?: (entries: CatalogEntry[]) => CatalogEntry[];
 }
 
 type CatalogRead = { kind: 'loading' } | { kind: 'failed' } | { kind: 'ready'; entries: CatalogEntry[] };
 
-export function CatalogAssignmentPage({ type, param, icon, copy, renderSection, testId }: CatalogAssignmentPageProps) {
+export function CatalogAssignmentPage({ type, param, icon, copy, renderSection, testId, select }: CatalogAssignmentPageProps) {
   const metadata = useMetadata();
   // Read through a ref: the store's context value is rebuilt whenever any
   // cached type settles, and AGENTS.md #10 forbids keying the read on it.
@@ -103,7 +109,7 @@ export function CatalogAssignmentPage({ type, param, icon, copy, renderSection, 
     );
   };
 
-  const entries = read.kind === 'ready' ? read.entries : [];
+  const entries = read.kind === 'ready' ? (select ? select(read.entries) : read.entries) : [];
   const shown = filterCatalogEntries(entries, query);
   const pickedKnown = entries.some((e) => e.name === picked);
 
@@ -192,7 +198,7 @@ export function CatalogAssignmentPage({ type, param, icon, copy, renderSection, 
         <code className="font-mono text-xs text-muted-foreground">{entry.name}</code>
         {entry.description && <p className="mt-1 text-sm text-muted-foreground">{entry.description}</p>}
         {/* Keyed by the item: the section's state is that item's, never carried to the next one. */}
-        <React.Fragment key={entry.name}>{renderSection(entry.name)}</React.Fragment>
+        <React.Fragment key={entry.name}>{renderSection(entry.name, entry)}</React.Fragment>
       </div>
     );
   }
