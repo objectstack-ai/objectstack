@@ -91,7 +91,7 @@ export function isComputedFieldType(
  */
 export function isComputedDetailField(
   viewFieldType: unknown,
-  objectDefField: { type?: unknown } | null | undefined,
+  objectDefField: { type?: unknown; expression?: unknown } | null | undefined,
 ): boolean {
   return isComputedFieldType(viewFieldType, objectDefField?.type) || isExpressionComputedField(objectDefField);
 }
