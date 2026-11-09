@@ -249,3 +249,123 @@ describe('ObjectQL.registerAction on a key another owner holds', () => {
         expect(await engine.executeAction('bc_org', 'rename', {})).toBe(2);
     });
 });
+
+/**
+ * [ADR-0150 D4, #31673] The handler half of the action's
+ * `(package, objectName, name)` key: each package's handler under one object
+ * and name is kept, and a call that names its package runs its own.
+ */
+describe('ObjectQL action handlers keyed (package, objectName, name)', () => {
+    const OWNER = 'com.test.owner';
+    const TWIN = 'com.test.twin';
+
+    it('two packages\' handlers for one object and name coexist: a call naming each package runs its own', async () => {
+        const engine = new ObjectQL();
+        engine.registerAction('bc_org', 'rename', () => 'owner', `app:${OWNER}`);
+        engine.registerAction('bc_org', 'rename', () => 'twin', `app:${TWIN}`);
+        expect(await engine.executeAction('bc_org', 'rename', {}, { packageId: OWNER })).toBe('owner');
+        expect(await engine.executeAction('bc_org', 'rename', {}, { packageId: TWIN })).toBe('twin');
+    });
+
+    it('[#31697 interim] a call that names no package keeps today\'s answer exactly: the last registration runs', async () => {
+        // Ruling 6728550494 (epic #31527, option B): whether this call refuses
+        // when two packages hold one object and name is #31697's decision.
+        const engine = new ObjectQL();
+        engine.registerAction('bc_org', 'rename', () => 'owner', `app:${OWNER}`);
+        engine.registerAction('bc_org', 'rename', () => 'twin', `app:${TWIN}`);
+        expect(await engine.executeAction('bc_org', 'rename', {})).toBe('twin');
+        engine.registerAction('bc_org', 'rename', () => 'owner again', `app:${OWNER}`);
+        expect(await engine.executeAction('bc_org', 'rename', {})).toBe('owner again');
+    });
+
+    it('withdrawing one package keeps the other\'s handler for a call naming it', async () => {
+        const engine = new ObjectQL();
+        engine.registerAction('bc_org', 'rename', () => 'owner', `app:${OWNER}`);
+        engine.registerAction('bc_org', 'rename', () => 'twin', `app:${TWIN}`);
+        engine.removeActionsByPackage(`app:${TWIN}`);
+        expect(await engine.executeAction('bc_org', 'rename', {}, { packageId: OWNER })).toBe('owner');
+        await expect(engine.executeAction('bc_org', 'rename', {}, { packageId: TWIN })).rejects.toThrow(/not found/);
+    });
+
+    it('a call naming a package with no handler of its own runs the ONE plugin-registered handler under the key', async () => {
+        const engine = new ObjectQL();
+        engine.registerAction('bc_org', 'rename', () => 'plugin', 'com.test.plugin');
+        expect(await engine.executeAction('bc_org', 'rename', {}, { packageId: OWNER })).toBe('plugin');
+    });
+
+    it('never runs another package\'s handler', async () => {
+        const engine = new ObjectQL();
+        engine.registerAction('bc_org', 'rename', () => 'owner', `app:${OWNER}`);
+        await expect(engine.executeAction('bc_org', 'rename', {}, { packageId: 'com.test.third' })).rejects.toThrow(/not found/);
+    });
+
+    it('never runs the environment\'s handler (the authored-action resync) for another holder\'s declaration', async () => {
+        // B's declaration resolved, B registered no handler, and the
+        // environment's own same-key action has one: that is not B's code.
+        const engine = new ObjectQL();
+        engine.registerAction('bc_org', 'rename', () => 'environment', 'metadata-service');
+        await expect(engine.executeAction('bc_org', 'rename', {}, { packageId: TWIN })).rejects.toThrow(/not found/);
+        // Control: the no-package call still runs it, as before.
+        expect(await engine.executeAction('bc_org', 'rename', {})).toBe('environment');
+    });
+
+    it('reaches host code registered with no owner — the way a package binds its own target-bound actions', async () => {
+        // `examples/app-todo`: `engine.registerAction('todo_task', 'completeTask', fn)`.
+        const engine = new ObjectQL();
+        engine.registerAction('bc_org', 'rename', () => 'environment', 'metadata-service');
+        engine.registerAction('bc_org', 'rename', () => 'host');
+        expect(await engine.executeAction('bc_org', 'rename', {}, { packageId: TWIN })).toBe('host');
+    });
+
+    it('a host handler and a plugin handler under one key are two candidates: refused, never a pick', async () => {
+        const engine = new ObjectQL();
+        engine.registerAction('bc_org', 'rename', () => 'host');
+        engine.registerAction('bc_org', 'rename', () => 'plugin', 'com.test.plugin');
+        await expect(engine.executeAction('bc_org', 'rename', {}, { packageId: TWIN })).rejects.toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+    });
+
+    it('lists, for a call naming a package, the handler that call dispatches under each key', async () => {
+        const engine = new ObjectQL();
+        engine.registerAction('bc_org', 'rename', () => 'owner', `app:${OWNER}`);
+        engine.registerAction('bc_org', 'rename', () => 'twin', `app:${TWIN}`);
+        engine.registerAction('bc_org', 'archive', () => 'environment', 'metadata-service');
+        const rows = (packageId?: string) => engine.listRegisteredActions(packageId === undefined ? undefined : { packageId })
+            .map((r) => `${r.objectName}:${r.actionName}=${r.package ?? ''}`).sort();
+        expect(rows()).toEqual(['bc_org:archive=metadata-service', `bc_org:rename=app:${TWIN}`]);
+        expect(rows(OWNER)).toEqual([`bc_org:rename=app:${OWNER}`]);
+    });
+
+    it('refuses 409 RESOURCE_CONFLICT naming every owner when two plugins hold the key — never "not found", never a pick', async () => {
+        const engine = new ObjectQL();
+        engine.registerAction('bc_org', 'rename', () => 'one', 'com.test.plugin-one');
+        engine.registerAction('bc_org', 'rename', () => 'two', 'com.test.plugin-two');
+        engine.registerAction('bc_org', 'rename', () => 'environment', 'metadata-service');
+        const refusal = await engine.executeAction('bc_org', 'rename', {}, { packageId: OWNER }).then(() => undefined, (err: any) => err);
+        expect(refusal).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409, owners: ['com.test.plugin-one', 'com.test.plugin-two'] });
+        for (const owner of ['com.test.plugin-one', 'com.test.plugin-two', OWNER]) expect(refusal.message).toContain(owner);
+        expect(refusal.message).not.toMatch(/not found/);
+        // A package's own handler still answers for it.
+        engine.registerAction('bc_org', 'rename', () => 'owner', `app:${OWNER}`);
+        expect(await engine.executeAction('bc_org', 'rename', {}, { packageId: OWNER })).toBe('owner');
+    });
+
+    it('handlers on two objects under one name are two keys for every caller', async () => {
+        const engine = new ObjectQL();
+        engine.registerAction('bc_org', 'rename', () => 'org', `app:${OWNER}`);
+        engine.registerAction('bc_person', 'rename', () => 'person', `app:${TWIN}`);
+        expect(await engine.executeAction('bc_org', 'rename', {})).toBe('org');
+        expect(await engine.executeAction('bc_person', 'rename', {})).toBe('person');
+        expect(await engine.executeAction('bc_person', 'rename', {}, { packageId: TWIN })).toBe('person');
+    });
+
+    it('a declared override binds over its base package\'s handler; withdrawing it restores the base\'s', async () => {
+        const engine = new ObjectQL();
+        engine.registerAction('bc_org', 'rename', () => 'base', `app:${OWNER}`);
+        engine.registerAction('bc_org', 'rename', () => 'twin', `app:${TWIN}`);
+        engine.registerActionOverride('bc_org', 'rename', () => 'override', 'app:com.test.custom', OWNER);
+        expect(await engine.executeAction('bc_org', 'rename', {}, { packageId: OWNER })).toBe('override');
+        expect(await engine.executeAction('bc_org', 'rename', {}, { packageId: TWIN })).toBe('twin');
+        engine.removeActionsByPackage('app:com.test.custom');
+        expect(await engine.executeAction('bc_org', 'rename', {}, { packageId: OWNER })).toBe('base');
+    });
+});
