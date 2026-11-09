@@ -31,6 +31,7 @@
 import type { DriverOptions } from '@objectstack/spec/data';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import type { Knex } from 'knex';
+import { MSSQL_NEUTRAL_ORDER_SQL, mssqlWindow } from '@objectstack/core';
 import { nanoid } from 'nanoid';
 import { createHash } from 'node:crypto';
 import {
@@ -155,23 +156,19 @@ export class CrudFacet {
           b.orderBy(this.remoteColumn(object, key.field, this.mapSortField(key.field)), key.direction);
         }
       }
-      // [#31327] SQL Server rejects `OFFSET n ROWS` without an ORDER BY (a
-      // syntax error, not a reshuffle). When nothing above ordered the read —
-      // a keyless federated table, or the #3821 rung that dropped the sort —
-      // `(SELECT NULL)` is the order that changes nothing but the statement's
-      // validity; the nondeterministic-paging warning has already been given.
-      if (this.isMssql && query.offset && !(withOrderBy && orderKeys.length > 0)) {
-        b.orderByRaw('(SELECT NULL)');
-      }
-
       // PAGINATION
-      if (this.isMssql && query.limit === 0) {
-        // [#31327] `FETCH NEXT 0 ROWS` is an error on SQL Server ("must be
-        // greater than zero"), where every other dialect answers `LIMIT 0`
-        // with no rows. Without the offset knex compiles `SELECT TOP (0)`,
-        // which is the same empty answer — and an offset into no rows is no
-        // rows.
-        b.limit(0);
+      if (this.isMssql) {
+        // [#31327, #31626] SQL Server's window — an `OFFSET` ordered by
+        // `(SELECT NULL)` when nothing above ordered the read (a keyless
+        // federated table, or the #3821 rung that dropped the sort; the
+        // nondeterministic-paging warning has already been given), and
+        // `limit: 0` as `TOP (0)` with no offset — decided by `mssqlWindow`
+        // in `@objectstack/core`, which the analytics echo renders too.
+        const window = mssqlWindow(query.limit, query.offset, withOrderBy && orderKeys.length > 0);
+        if (window.neutralOrder) b.orderByRaw(MSSQL_NEUTRAL_ORDER_SQL);
+        if (window.offset !== null) b.offset(window.offset);
+        const rows = window.top ?? window.fetch;
+        if (rows !== null) b.limit(rows);
         return b;
       }
       if (query.offset !== undefined) b.offset(query.offset);

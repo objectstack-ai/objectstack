@@ -136,7 +136,7 @@ describe('getMeta — a compiled dataset cube publishes what the compiler wrote'
     ],
   });
 
-  it('carries each dataset measure `format`, and no description (the compiler writes none)', async () => {
+  it('carries each dataset measure `format`, and no description where the dataset declares none', async () => {
     const svc = service([]);
     svc.registerDataset(dataset);
     const [cube] = await svc.getMeta('order_metrics');
@@ -144,11 +144,47 @@ describe('getMeta — a compiled dataset cube publishes what the compiler wrote'
     expect(cube.measures.find((m) => m.name === 'order_metrics.revenue')?.format).toBe('$0,0');
     expect(cube.measures.find((m) => m.name === 'order_metrics.count')).not.toHaveProperty('format');
     // The dataset's own `description` is not copied onto the cube it compiles to
-    // (`dataset-compiler.ts#compileDataset`), and a dataset measure or dimension
-    // has no `description` key to copy. Nothing is filled in on this path.
+    // (`dataset-compiler.ts#compileDataset`), and these members declare no
+    // `description` of their own (ADR-0149 D1). Nothing is filled in on this path.
     expect(cube).not.toHaveProperty('description');
     for (const member of [...cube.measures, ...cube.dimensions]) {
       expect(member).not.toHaveProperty('description');
     }
+  });
+
+  it('[ADR-0149 D1/M1] publishes a member `description` the dataset declares, resolved like its label', async () => {
+    const svc = service([]);
+    svc.registerDataset(
+      DatasetSchema.parse({
+        name: 'order_vocab',
+        label: 'Order vocabulary',
+        object: 'shop_order',
+        include: [],
+        dimensions: [
+          { name: 'status', field: 'status', type: 'string', description: 'Fulfilment status of the order.' },
+          { name: 'channel', field: 'channel', type: 'string' },
+        ],
+        measures: [
+          {
+            name: 'revenue',
+            aggregate: 'sum',
+            field: 'amount',
+            synonyms: ['sales'],
+            description: { en: 'Won order amount.', 'zh-CN': '已赢单金额合计' },
+          },
+          { name: 'count', aggregate: 'count' },
+        ],
+      }),
+    );
+    const [cube] = await svc.getMeta('order_vocab');
+
+    expect(cube.measures.find((m) => m.name === 'order_vocab.revenue')?.description).toBe('Won order amount.');
+    expect(cube.measures.find((m) => m.name === 'order_vocab.count')).not.toHaveProperty('description');
+    expect(cube.dimensions.find((d) => d.name === 'order_vocab.status')?.description).toBe(
+      'Fulfilment status of the order.',
+    );
+    expect(cube.dimensions.find((d) => d.name === 'order_vocab.channel')).not.toHaveProperty('description');
+    // Synonyms are match input, never published on a human surface.
+    expect(JSON.stringify(cube)).not.toContain('sales');
   });
 });
