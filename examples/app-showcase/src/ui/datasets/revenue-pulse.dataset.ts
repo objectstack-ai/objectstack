@@ -28,7 +28,7 @@ export const ShowcaseInvoiceDataset = defineDataset({
     // invoice's currency) adds euros to yen. The consolidated figure sums the
     // HOME-currency amount the engine stored at write: one currency, the
     // organization's, whatever each invoice was billed in.
-    { name: 'total_home_sum', label: 'Total (Home Currency)', aggregate: 'sum', field: 'amount_home', format: '0,0' },
+    { name: 'total_home_sum', label: 'Total incl. Tax (Home Currency)', aggregate: 'sum', field: 'amount_home', format: '0,0' },
     // A RATE — the percent-scale case (objectui#3136). `paid_rate` is a 0–1
     // ratio by construction, and grouping by `status` makes the Paid bucket
     // exactly 1: the value a magnitude-guessing renderer printed as "1.0%"

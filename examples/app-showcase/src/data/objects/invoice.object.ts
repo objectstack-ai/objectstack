@@ -216,7 +216,7 @@ export const Invoice = ObjectSchema.create({
     // chosen: an amount of money with no currency is not an amount the engine
     // will store or convert.
     amount: Field.currency({
-      label: 'Total',
+      label: 'Total incl. Tax',
       expression: cel`record.currency_code == null || record.currency_code == '' ? null : (record.total == null ? 0 : record.total) * (1 + (record.tax_rate == null ? 0 : record.tax_rate) / 100)`,
       currencyConfig: {
         currencyMode: 'record',
@@ -227,7 +227,7 @@ export const Invoice = ObjectSchema.create({
     // Written by the engine only (`readonly`), in `dynamic` mode: it displays
     // in the home currency, so this metadata never names that currency.
     amount_home: Field.currency({
-      label: 'Total (Home Currency)',
+      label: 'Total incl. Tax (Home Currency)',
       readonly: true,
     }),
     // The rate the conversion used, kept with every digit it was stored with
