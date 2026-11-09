@@ -98,6 +98,7 @@ interface Booted {
   /** Kernel lifecycle hooks the plugin registered, by event — collected, fired only by a test. */
   hooks: Map<string, Array<() => Promise<unknown>>>;
   catalog: SecurityCatalogReader;
+  /** [ADR-0150 D3/D4] The catalog the plugin binds: permission sets by (package, name). */
   /** The metadata service's declarations, by type — remove one and the catalog stops resolving it. */
   declared: { position: Map<string, Record<string, unknown>>; permission: Map<string, Record<string, unknown>> };
   report(): Promise<CatalogReferenceReport>;
@@ -156,7 +157,12 @@ async function boot(opts: { posture?: 'single' | 'isolated' } = {}): Promise<Boo
   };
   const protocol = new ObjectStackProtocolImplementation(engine as never, () => new Map(), undefined);
   const services: Record<string, unknown> = {
-    manifest: { register: vi.fn() },
+    // [ADR-0150 D3, #31674] The manifest service registers the plugin's own
+    // permission sets into the engine registry under the plugin's package, as
+    // a booted kernel does, so a built-in position resolves them as its own.
+    manifest: { register: vi.fn((m: { id: string; permissions?: Array<Record<string, unknown>> }) => {
+      for (const ps of m.permissions ?? []) (engine as any).registry.registerItem('permission', structuredClone(ps), 'name', m.id);
+    }) },
     objectql: engine,
     metadata,
     protocol,
@@ -438,11 +444,28 @@ describe('[ADR-0131 D4] a position definition naming a permission set the catalo
   const PKG_SET = { name: 's3_pkg_set', label: 'Package set', objects: {} };
   const BINDING_POSITION = 's3_bound_lead';
 
-  const installSet = (b: Booted) =>
+  /**
+   * The set package ships the package set and the auditor set: in a booted
+   * kernel every permission set a package position names is in the engine
+   * registry (the catalog read's measurement table), so ADR-0150 D3 resolves
+   * it from the position's package. The rig's metadata service still holds the
+   * auditor set for the package-less readers.
+   */
+  const installSet = (b: Booted) => {
     (b.engine as any).registry.registerItem('permission', structuredClone(PKG_SET), 'name', SET_PKG);
+    (b.engine as any).registry.registerItem('permission', structuredClone(AUDITOR), 'name', SET_PKG);
+  };
   /** The set leaves the registry the way an uninstall of its package removes it. */
   const uninstallSet = (b: Booted) => (b.engine as any).registry.unregisterItem('permission', PKG_SET.name);
+  /** An installed package, declaring `dependencies` — the closure ADR-0150 D3 resolves a package position's sets in. */
+  const installManifest = (b: Booted, id: string, dependencies: string[] = []) =>
+    (b.engine as any).registry.installPackage({
+      id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop(),
+      ...(dependencies.length > 0 ? { dependencies: Object.fromEntries(dependencies.map((d) => [d, '^1.0.0'])) } : {}),
+    }, 'code');
   const bindPositions = (b: Booted) => {
+    // The binding position's package declares the package that holds the set.
+    installManifest(b, PKG, [SET_PKG]);
     (b.engine as any).registry.registerItem(
       'position',
       { name: BINDING_POSITION, label: 'Bound lead', permissionSets: [PKG_SET.name, AUDITOR.name, PKG_SET.name] },
@@ -467,6 +490,7 @@ describe('[ADR-0131 D4] a position definition naming a permission set the catalo
     installSet(b);
     bindPositions(b);
     uninstallSet(b);
+    (b.engine as any).registry.unregisterItem('permission', AUDITOR.name);
     b.declared.permission.delete(AUDITOR.name);
 
     const report = await b.report();
@@ -510,6 +534,27 @@ describe('[ADR-0131 D4] a position definition naming a permission set the catalo
     await reportCatalogReferences(b.engine as any, { catalog: b.catalog, logger });
     expect(logger.error).not.toHaveBeenCalled();
     expect(logger.info).toHaveBeenCalledTimes(1);
+  });
+
+  it('[ADR-0150 D3/D7] lists a set the position\'s package cannot reach, with the refusal naming every candidate', async () => {
+    const OTHER_PKG = 'com.example.s3.other';
+    const OTHER_POSITION = 's3_other_lead';
+    const b = await boot();
+    installSet(b);
+    bindPositions(b);
+    expect((await b.report()).positions).toEqual([]);
+    // A second package's position names the same set without declaring the
+    // package that holds it: the set is held, but outside its closure.
+    installManifest(b, OTHER_PKG);
+    (b.engine as any).registry.registerItem(
+      'position', { name: OTHER_POSITION, label: 'Other lead', permissionSets: [PKG_SET.name] }, 'name', OTHER_PKG,
+    );
+    const report = await collectCatalogReferences(b.engine as any, { catalog: b.catalog });
+    expect(report.positions.map((p) => p.position)).toEqual([OTHER_POSITION]);
+    expect(report.positions[0]).toMatchObject({ position: OTHER_POSITION, packageId: OTHER_PKG, permissionSets: [PKG_SET.name] });
+    expect(report.positions[0]?.refusals).toEqual([
+      expect.objectContaining({ permissionSet: PKG_SET.name, reason: 'outside-closure', candidates: [expect.stringContaining(SET_PKG)] }),
+    ]);
   });
 
   it('an unreadable position list stops the report: no finding, and the stop is said', async () => {

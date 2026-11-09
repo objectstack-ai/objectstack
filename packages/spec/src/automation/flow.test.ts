@@ -389,7 +389,7 @@ describe('FlowSchema', () => {
     });
 
     it('should enforce snake_case for flow name', () => {
-      const validNames = ['approval_flow', 'send_email', 'create_record', '_internal'];
+      const validNames = ['approval_flow', 'send_email', 'create_record'];
       validNames.forEach(name => {
         expect(() => FlowSchema.parse({
           name,
@@ -400,7 +400,8 @@ describe('FlowSchema', () => {
         })).not.toThrow();
       });
 
-      const invalidNames = ['approvalFlow', 'Approval-Flow', '123flow'];
+      // `_internal`: a leading `_` is router-reserved (ADR-0150 D5).
+      const invalidNames = ['approvalFlow', 'Approval-Flow', '123flow', '_internal'];
       invalidNames.forEach(name => {
         expect(() => FlowSchema.parse({
           name,

@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { CORE_PLUGIN_TYPES } from './plugin.zod';
 import { PROTOCOL_MAJOR } from './protocol-version';
 import { SEMVER_2_0_0_VERSION_PATTERN } from './version-grammar';
+import { NAMESPACE_PATTERN } from './address-grammar';
 import { enumWithRetiredValues, retiredKey } from '../shared/retired-key';
 import { closedObject, strictObject, strictObjectError } from '../shared/strict-object';
 import { formatSuggestion } from '../shared/suggestions.zod';
@@ -562,7 +563,7 @@ export const ManifestSchema = strictObject({
    *   them but never define them).
    */
   namespace: z.string()
-    .regex(/^[a-z][a-z0-9_]{1,19}$/, 'Namespace must be 2-20 chars, start with a lowercase letter, and contain only lowercase letters, digits and underscores')
+    .regex(NAMESPACE_PATTERN, 'Namespace must be 2-20 chars, start with a lowercase letter, and contain only lowercase letters, digits and underscores')
     .optional()
     .describe('Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project")'),
 

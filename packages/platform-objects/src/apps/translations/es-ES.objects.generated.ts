@@ -88,6 +88,18 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Acceso a IA",
         help: "Indica si este usuario dispone de una plaza de IA. La plaza otorga la capacidad `ai_seat`, que da acceso a los asistentes de IA de la aplicación (build y ask). El número de usuarios que pueden tenerla está limitado por las plazas que incluye su licencia."
       },
+      principal_kind: {
+        label: "Tipo de principal",
+        help: "Indica si este usuario es una persona o una cuenta de servicio de IA. Una cuenta de servicio de IA nunca inicia sesión y actúa solo mediante sus propias claves de API. Se fija al crear el usuario y no cambia nunca.",
+        options: {
+          human: "Persona",
+          agent: "Cuenta de servicio de IA"
+        }
+      },
+      accountable_user_id: {
+        label: "Responsable",
+        help: "En una cuenta de servicio de IA, la persona responsable de ella. Vacío en una persona. Los permisos del responsable nunca pasan a la cuenta."
+      },
       image: {
         label: "Imagen de perfil"
       },
@@ -2123,6 +2135,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
             label: "Mapeo: reclamo de nombre",
             helpText: "Opcional. Reclamo asignado al nombre visible. Valor predeterminado: «name».",
             placeholder: "name"
+          },
+          mapGroups: {
+            label: "Mapeo: reclamo de grupos",
+            helpText: "Opcional. Reclamo que contiene los grupos del usuario, p. ej. «groups». Cada inicio de sesión concede los conjuntos de permisos asignados a esos grupos. Déjelo en blanco para no asignar grupos.",
+            placeholder: "groups"
           }
         }
       },
@@ -2153,6 +2170,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
             label: "Formato de NameID",
             helpText: "Opcional. Formato de NameID SAML solicitado. Por defecto, el formato configurado en el IdP.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+          },
+          mapGroups: {
+            label: "Mapeo: atributo de grupos",
+            helpText: "Opcional. Atributo de la aserción que contiene los grupos del usuario. Cada inicio de sesión concede los conjuntos de permisos asignados a esos grupos. Déjelo en blanco para no asignar grupos.",
+            placeholder: "groups"
           }
         }
       },
@@ -2181,6 +2203,35 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       edit_sso_sign_in_options: {
         label: "Editar opciones de inicio de sesión",
         successMessage: "Opciones de inicio de sesión guardadas"
+      },
+      show_sso_groups_claim: {
+        label: "Mostrar reclamo de grupos",
+        resultDialog: {
+          title: "Reclamo de grupos",
+          description: "El reclamo OIDC o el atributo SAML del que este proveedor lee los grupos del usuario en cada inicio de sesión. Vacío significa que el proveedor no asigna grupos. Cámbielo con «Editar reclamo de grupos».",
+          acknowledge: "Hecho",
+          fields: {
+            groupsClaim: "Reclamo de grupos"
+          }
+        }
+      },
+      edit_sso_groups_claim: {
+        label: "Editar reclamo de grupos",
+        params: {
+          groupsClaim: {
+            label: "Reclamo de grupos",
+            helpText: "El reclamo OIDC o el atributo SAML que contiene los grupos del usuario. Cada inicio de sesión concede los conjuntos de permisos asignados a esos grupos. Déjelo en blanco para eliminarlo: el proveedor dejará de asignar grupos.",
+            placeholder: "groups"
+          }
+        },
+        resultDialog: {
+          title: "Reclamo de grupos guardado",
+          description: "El reclamo de grupos que este proveedor lee ahora en cada inicio de sesión. Vacío significa que no se asignan grupos.",
+          acknowledge: "Hecho",
+          fields: {
+            groupsClaim: "Reclamo de grupos"
+          }
+        }
       }
     }
   },

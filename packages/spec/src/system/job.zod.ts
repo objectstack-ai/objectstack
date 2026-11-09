@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { ROUTER_ADDRESSABLE_NAME_MESSAGE, ROUTER_ADDRESSABLE_NAME_PATTERN } from '../kernel/address-grammar';
 import { CronExpressionInputSchema } from '../shared/expression.zod';
 
 /**
@@ -297,7 +298,7 @@ export const JobSchema = lazySchema(() => strictObject({
   guidance: { id: JOB_ID_RETIRED },
 }, {
   // `id` removed in 17.0.0 (#4667) — see JOB_ID_RETIRED. `name` is the identity.
-  name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Job name (snake_case)'),
+  name: z.string().regex(ROUTER_ADDRESSABLE_NAME_PATTERN, { message: ROUTER_ADDRESSABLE_NAME_MESSAGE }).describe('Job name (snake_case)'),
   label: z.string().optional().describe('Human-readable label'),
   description: z.string().optional().describe('Job description / purpose'),
   schedule: ScheduleSchema.describe('Job schedule configuration'),

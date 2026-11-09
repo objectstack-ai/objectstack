@@ -28,12 +28,12 @@
   "dependencies": {
     "@objectstack/core": "workspace:*",
     "@objectstack/formula": "workspace:*",
+    "@objectstack/objectql": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "nodemailer": "^10.1.4"
   },
   "devDependencies": {
-    "@objectstack/objectql": "workspace:*",
     "@objectstack/service-queue": "workspace:*",
     "@objectstack/service-settings": "workspace:*",
     "@types/node": "^26.6.5",
