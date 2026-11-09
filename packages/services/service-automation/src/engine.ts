@@ -2331,6 +2331,14 @@ export interface MissedScheduledRun {
      * have claimed — the trigger computes it, the engine never learns how.
      */
     readonly dispatchKey: string;
+    /**
+     * [ADR-0150 D8 row R10] The bare-shape key the same window had before the
+     * key gained the flow's package, when it differs from {@link dispatchKey}.
+     * A claim an older node wrote under it during a rolling upgrade is the
+     * same window's claim (the transition read; retired once retention has
+     * passed).
+     */
+    readonly legacyDispatchKey?: string;
     /** The acting organization the flow declares, when it declares one. */
     readonly organization?: string | null;
 }
@@ -3346,6 +3354,10 @@ export class AutomationEngine implements IAutomationService {
         if (!store || typeof store.read !== 'function') return 'unverifiable';
         try {
             if (await store.read(missed.dispatchKey)) return 'dispatched';
+            // [ADR-0150 D8 row R10] The transition read: the same window
+            // claimed under its bare-shape key by a node of the previous release.
+            if (missed.legacyDispatchKey && missed.legacyDispatchKey !== missed.dispatchKey
+                && await store.read(missed.legacyDispatchKey)) return 'dispatched';
         } catch (err) {
             this.logger.warn(
                 `[automation] missed-run check for flow '${missed.flowName}' due ${missed.dueAt} could not read ` +
@@ -5143,6 +5155,61 @@ export class AutomationEngine implements IAutomationService {
         const armed = this.flows.get(name);
         if (!armed || this.flowArms.get(armed)?.source !== 'package') return undefined;
         return this.packagedFlowOwner(name);
+    }
+
+    /**
+     * [ADR-0150 D4, D8 rows R7–R10] WHICH flow the bare name `name` is: the
+     * one D3 rule ({@link FlowNameResolver}) asked for a caller with no
+     * package, over the whole registry. `undefined` when no resolver is
+     * attached. Read-only; records nothing.
+     *
+     * This is the flow's identity, not a caller: a stored row that names a
+     * flow (an approval request, a paused run, a credential, a dispatch key)
+     * belongs to the item `(package, name)`, and an environment override of
+     * P's flow is the overlay of P's item, not a second one (D4), so it
+     * answers P. {@link armedFlowPackage} answers the other question, the
+     * package a reference written in the armed body resolves from, and is
+     * never this answer.
+     */
+    flowHolder(name: string): PackageScopedResolution | undefined {
+        return this.flowNameResolver?.(name, null);
+    }
+
+    /**
+     * [ADR-0150 D8 row R10] The package of {@link flowHolder}'s answer when
+     * one package holds `name`, else `null`: an environment-authored flow, a
+     * flow registered straight into the engine, a name two packages hold and a
+     * name nothing holds all answer `null`, so their dispatch keys keep the
+     * bare shape. ⛔ No first-registered fallback: a refusal is `null`.
+     */
+    flowHolderPackage(name: string): string | null {
+        const answer = this.flowHolder(name);
+        return answer?.status === 'resolved' && answer.holder.kind === 'package' ? answer.holder.packageId : null;
+    }
+
+    /**
+     * [ADR-0150 D8 row R10] The dispatch key's coordinates for `name`, read by
+     * the schedule and time-relative triggers:
+     *
+     *  - one package holds it: `{ packageId: P, claimBare: true }`. The key is
+     *    scoped to P, and the window's bare-shape key is claimed first, so a
+     *    node of an older release (which claims only the bare key) and this
+     *    one share one arbiter during a rolling upgrade;
+     *  - two or more packages hold it: `{ packageId: <the armed body's
+     *    package> | null, claimBare: false }` — the collision guard. The bare
+     *    key would be one row for every holder, the cross-package collision
+     *    the package segment removes, so it is neither claimed nor read.
+     *    Unreachable while {@link registerFlow} refuses a second package's
+     *    same-named flow (#31754); the guard keeps the bare claim safe once
+     *    ADR-0150 D9 lets two packages hold one name;
+     *  - anything else (the environment's own flow, a flow registered straight
+     *    into the engine, no holder, no resolver): `{ packageId: null,
+     *    claimBare: true }` — the bare key, as before.
+     */
+    flowDispatchHolder(name: string): { packageId: string | null; claimBare: boolean } {
+        const answer = this.flowHolder(name);
+        if (answer?.status === 'refused') return { packageId: this.armedFlowPackage(name) ?? null, claimBare: false };
+        return { packageId: this.flowHolderPackage(name), claimBare: true };
     }
 
     /**

@@ -14,6 +14,7 @@ import {
     type TriggerLogger,
 } from './index.js';
 import { TimeRelativeTriggerPlugin } from './time-relative-plugin.js';
+import { timeRelativeDispatchKey } from './time-relative-trigger.js';
 import { withScheduledWorkOff, withScheduledWorkOn } from './deployment-switch.test-support.js';
 import { SCHEDULED_WORK_ENV } from '@objectstack/types';
 
@@ -1585,5 +1586,105 @@ describe('TimeRelativeTrigger — switched ON under `group` (#18378)', () => {
         expect(hits.length, 'said once per engine, not once per record').toBe(1);
         expect(hits[0]).toContain('will be refused');
         for (const ctx of seen) expect('tenantId' in ctx).toBe(false);
+    });
+});
+
+// ─── [ADR-0150 D8 row R10, epic #31527 child S3] the key carries the flow's package ──
+
+describe('TimeRelativeTrigger — R10: a flow one package holds is keyed by that package', () => {
+    withScheduledWorkOn('single');
+
+    const JOB = 'flow-time-relative:renewal_alert';
+    const PKG = 'com.acme.renewals';
+    const BARE = 'time-relative:renewal_alert:2026-07-25:offset7:c1';
+    const SCOPED = `time-relative:${PKG}:renewal_alert:2026-07-25:offset7:c1`;
+    const desc = { object: 'contracts', dateField: 'end_date', offsetDays: [7] };
+    const rows: Row[] = [{ id: 'c1', end_date: '2026-07-25T09:00:00.000Z' }]; // T+7 from NOW
+
+    /** {@link fakeClaimLedger}, plus the flow's holder: a node of this release. */
+    function packagedClaimLedger(packageId: string | null, preclaimed: string[] = []) {
+        const base = fakeClaimLedger();
+        for (const key of preclaimed) base.keys.add(key);
+        return { ...base, surface: newNode(base, packageId) };
+    }
+
+    /** A node of this release over the shared ledger `base`: it knows the flow's holder. */
+    function newNode(base: ReturnType<typeof fakeClaimLedger>, packageId: string | null = PKG): FlowDispatchClaimSurface {
+        return { claim: base.surface.claim, flowDispatchHolder: (flowName) => ({ packageId: flowName === 'renewal_alert' ? packageId : null, claimBare: true }) };
+    }
+
+    /** A node of an older release over the shared ledger `base`: no holder, so it claims the bare key only. */
+    function oldNode(base: ReturnType<typeof fakeClaimLedger>): FlowDispatchClaimSurface {
+        return { claim: base.surface.claim };
+    }
+
+    async function sweep(surface: FlowDispatchClaimSurface) {
+        const job = fakeJobService();
+        const { engine } = fakeDataEngine(rows);
+        const trigger = new TimeRelativeTrigger(() => job.service, () => engine, silentLogger(), NOW, () => surface);
+        const launched: string[] = [];
+        trigger.start(binding(desc), async (ctx) => { launched.push((ctx.record as Row).id as string); });
+        await flush();
+        await job.fire(JOB);
+        return launched;
+    }
+
+    it('the key builder: the package goes in front of the flow; no package is the bare key', () => {
+        expect(timeRelativeDispatchKey('renewal_alert', '2026-07-25:offset7', 'c1', PKG)).toBe(SCOPED);
+        expect(timeRelativeDispatchKey('renewal_alert', '2026-07-25:offset7', 'c1')).toBe(BARE);
+        expect(timeRelativeDispatchKey('renewal_alert', '2026-07-25:offset7', 'c1', null)).toBe(BARE);
+    });
+
+    it('a sweep claims the bare key first, then the scoped key', async () => {
+        const ledger = packagedClaimLedger(PKG);
+        expect(await sweep(ledger.surface)).toEqual(['c1']);
+        expect(ledger.claims).toEqual([BARE, SCOPED]);
+    });
+
+    it('a flow no single package holds keeps the bare key', async () => {
+        const ledger = packagedClaimLedger(null);
+        expect(await sweep(ledger.surface)).toEqual(['c1']);
+        expect(ledger.claims).toEqual([BARE]);
+    });
+
+    it('a record an older node claimed under the bare key is not dispatched again, and nothing is claimed under the new key', async () => {
+        const ledger = packagedClaimLedger(PKG, [BARE]);
+        expect(await sweep(ledger.surface)).toEqual([]);
+        expect(ledger.claims).toEqual([BARE]);
+        expect([...ledger.keys]).toEqual([BARE]);
+    });
+
+    it('rolling upgrade: an older node and a node of this release fire the record once, in either order', async () => {
+        const oldFirst = fakeClaimLedger();
+        expect([...(await sweep(oldNode(oldFirst))), ...(await sweep(newNode(oldFirst)))]).toEqual(['c1']);
+        const newFirst = fakeClaimLedger();
+        expect([...(await sweep(newNode(newFirst))), ...(await sweep(oldNode(newFirst)))]).toEqual(['c1']);
+        expect([...newFirst.keys].sort()).toEqual([BARE, SCOPED].sort());
+    });
+
+    it('two nodes of this release fire the record once', async () => {
+        const shared = fakeClaimLedger();
+        expect([...(await sweep(newNode(shared))), ...(await sweep(newNode(shared)))]).toEqual(['c1']);
+    });
+
+    it('the collision guard: a name two packages hold fires the record once per package and writes no bare row', async () => {
+        const shared = fakeClaimLedger();
+        const holderOf = (packageId: string): FlowDispatchClaimSurface => ({
+            claim: shared.surface.claim,
+            flowDispatchHolder: () => ({ packageId, claimBare: false }),
+        });
+        const OTHER = 'com.acme.other';
+        expect(await sweep(holderOf(PKG))).toEqual(['c1']);
+        expect(await sweep(holderOf(OTHER))).toEqual(['c1']);
+        expect(await sweep(holderOf(PKG))).toEqual([]);
+        expect(shared.claims).not.toContain(BARE);
+        expect([...shared.keys].sort()).toEqual([SCOPED, `time-relative:${OTHER}:renewal_alert:2026-07-25:offset7:c1`].sort());
+    });
+
+    it('CONTROL: a surface with no flowDispatchHolder keys and claims as before', async () => {
+        const ledger = fakeClaimLedger();
+        ledger.keys.add(BARE);
+        expect(await sweep(ledger.surface)).toEqual([]);
+        expect(ledger.claims).toEqual([BARE]);
     });
 });

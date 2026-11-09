@@ -2953,6 +2953,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         label: "Name",
         help: "Kennung in snake_case mit Punkten (z. B. auth.password_reset)"
       },
+      package_id: {
+        label: "Package",
+        help: "The app the template comes from. Filled in by the platform; empty for templates created here."
+      },
       label: {
         label: "Bezeichnung",
         help: "Lesbarer Name, der in Studio angezeigt wird"

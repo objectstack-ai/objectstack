@@ -5,6 +5,8 @@ import type { IClusterService } from '@objectstack/spec/contracts';
 import type { ClusterCapabilityConfig } from '@objectstack/spec/kernel';
 import { defineCluster } from './cluster.js';
 import { assertClusterDriverSafeForTopology } from './split-brain-guard.js';
+import { declaresMultiReplicaOnRedis } from './multi-replica.js';
+import { ClusterMembershipHeartbeat } from './cluster-membership.js';
 
 /**
  * Options for `ClusterServicePlugin`.
@@ -19,6 +21,14 @@ export interface ClusterServicePluginOptions {
     cluster?: IClusterService;
     /** Config forwarded to `defineCluster()` when `cluster` is absent. */
     config?: ClusterCapabilityConfig;
+    /**
+     * Membership heartbeat timing (cloud#3814). Read only under a declared
+     * multi-replica deployment on the Redis driver, where each replica beats
+     * its `cluster:member:NODE_ID` key every `heartbeatMs` (default 5000) with
+     * a TTL of `ttlMs` (default 15000, never below two beats);
+     * `readClusterMembers(cluster)` lists the replicas whose key is alive.
+     */
+    membership?: { heartbeatMs?: number; ttlMs?: number };
 }
 
 /**
@@ -52,6 +62,7 @@ export class ClusterServicePlugin implements Plugin {
     private readonly options: ClusterServicePluginOptions;
     private cluster?: IClusterService;
     private owned = false;
+    private heartbeat?: ClusterMembershipHeartbeat;
 
     constructor(options: ClusterServicePluginOptions = {}) {
         this.options = options;
@@ -75,7 +86,27 @@ export class ClusterServicePlugin implements Plugin {
             `ClusterServicePlugin: registered "${this.cluster.driver}" driver (node=${this.cluster.nodeId})`,
         );
 
+        // [cloud#3814 R3] The membership heartbeat runs only under a declared
+        // multi-replica deployment on the Redis driver; the single-node path
+        // writes nothing. Started at `kernel:ready` and not awaited, so an
+        // unreachable store never delays the boot.
+        if (declaresMultiReplicaOnRedis(process.env, this.cluster.driver)) {
+            const heartbeat = new ClusterMembershipHeartbeat({
+                cluster: this.cluster,
+                heartbeatMs: this.options.membership?.heartbeatMs,
+                ttlMs: this.options.membership?.ttlMs,
+                logger: { debug: (message) => ctx.logger.debug(message) },
+            });
+            this.heartbeat = heartbeat;
+            ctx.hook('kernel:ready', async () => {
+                heartbeat.start();
+            });
+        }
+
         ctx.hook('kernel:shutdown', async () => {
+            // Stop beating before the cluster closes, so the last act on the
+            // store is deleting this replica's member key.
+            await this.heartbeat?.stop();
             if (this.owned && this.cluster) {
                 try {
                     await this.cluster.close();

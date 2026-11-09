@@ -145,6 +145,18 @@ export interface ScheduleDispatchClaim {
  */
 export interface ScheduleDispatchLedger {
     claim(key: string): Promise<boolean>;
+    /**
+     * [ADR-0150 D8 row R10] The dispatch key's coordinates for the flow
+     * `flowName` names (`AutomationEngine.flowDispatchHolder`: the one D3
+     * rule, asked with no caller). `packageId` is the key's package segment
+     * ({@link scheduleDispatchKey}), `null` for the bare shape; `claimBare`
+     * says whether the window's bare-shape key is claimed first (one package
+     * holds the flow) or neither claimed nor read (two or more packages hold
+     * it, so the bare key would be one row for all of them). Optional for the
+     * reason the members below are: a ledger without it keys every flow by
+     * the bare shape, as before.
+     */
+    flowDispatchHolder?(flowName: string): { packageId: string | null; claimBare: boolean };
     settleDispatch?(key: string, outcome: ScheduleDispatchOutcome): Promise<void>;
     readDispatch?(key: string): Promise<ScheduleDispatchClaim | null>;
     /**
@@ -169,6 +181,8 @@ export interface MissedScheduledRunInput {
     readonly dueAt: string;
     readonly detectedAt: string;
     readonly dispatchKey: string;
+    /** [ADR-0150 D8 row R10] The window's bare-shape key, read as the same claim (the transition read). */
+    readonly legacyDispatchKey?: string;
     readonly organization?: string | null;
 }
 
@@ -270,9 +284,16 @@ export function computeTickWindow(schedule: JobSchedule, now: Date): TickWindow 
  *
  * Namespaced `schedule:` so it can never collide with the time-relative
  * trigger's `time-relative:` keys in the one shared ledger.
+ *
+ * [ADR-0150 D8 row R10] The key names WHICH flow it was claimed for, so a
+ * flow one package holds carries that package: `schedule:PACKAGE:FLOW:WINDOW`.
+ * Any other flow (`packageId` null or absent) keeps the bare shape,
+ * `schedule:FLOW:WINDOW`. A flow name is snake_case and a window start begins
+ * with a digit or a sign, so the two shapes never collide; the automation
+ * service's boot re-key reads the same grammar (`bareDispatchKeyFlow`).
  */
-export function scheduleDispatchKey(flowName: string, window: TickWindow): string {
-    return `schedule:${flowName}:${window.startedAt}`;
+export function scheduleDispatchKey(flowName: string, window: TickWindow, packageId?: string | null): string {
+    return packageId ? `schedule:${packageId}:${flowName}:${window.startedAt}` : `schedule:${flowName}:${window.startedAt}`;
 }
 
 /** Minimal logger surface (matches core's `ctx.logger`). */
@@ -811,7 +832,7 @@ export class ScheduleTrigger implements FlowTrigger {
             // on a re-tick inside the window, after a restart inside the
             // window, and at an operator replay.
             const window = computeTickWindow(schedule, this.now());
-            const key = window ? scheduleDispatchKey(binding.flowName, window) : null;
+            const { key, legacyKey } = window ? this.dispatchKeys(binding.flowName, window) : { key: null, legacyKey: null };
             if (key) {
                 // A guard-issued pass means this run IS the re-dispatch of a
                 // window whose claim was absent or failed (or a forced replay
@@ -819,7 +840,7 @@ export class ScheduleTrigger implements FlowTrigger {
                 // dispatch, but do not let a claim miss stop it.
                 const replayPass = this.replayPasses.get(binding.flowName) === key;
                 if (replayPass) this.replayPasses.delete(binding.flowName);
-                const claimed = await this.claimDispatch(binding.flowName, key);
+                const claimed = await this.claimDispatch(binding.flowName, key, legacyKey);
                 if (!claimed && !replayPass) {
                     this.logger.debug?.(
                         `[schedule] flow '${binding.flowName}' already dispatched for ${window!.label} — skipping`,
@@ -875,7 +896,7 @@ export class ScheduleTrigger implements FlowTrigger {
                     callerParamKeys: [],
                 };
                 await callback(ctx);
-                if (key) await this.settleDispatch(binding.flowName, key, 'succeeded');
+                if (key) await this.settleDispatch(binding.flowName, key, 'succeeded', legacyKey);
             } catch (err) {
                 // Error isolation: a scheduled flow failure must not crash the
                 // job runner / ticker. Log and swallow.
@@ -888,7 +909,7 @@ export class ScheduleTrigger implements FlowTrigger {
                 this.logger.warn(
                     `[schedule] flow '${binding.flowName}' execution failed: ${(err as Error)?.message ?? String(err)}`,
                 );
-                if (key) await this.settleDispatch(binding.flowName, key, 'failed');
+                if (key) await this.settleDispatch(binding.flowName, key, 'failed', legacyKey);
             }
         };
 
@@ -1040,12 +1061,14 @@ export class ScheduleTrigger implements FlowTrigger {
         for (const due of dueTimes) {
             const window = computeTickWindow(armed, due);
             if (!window) continue;
+            const keys = this.dispatchKeys(flowName, window);
             try {
                 const outcome = await ledger.recordMissedRun({
                     flowName,
                     dueAt: due.toISOString(),
                     detectedAt,
-                    dispatchKey: scheduleDispatchKey(flowName, window),
+                    dispatchKey: keys.key,
+                    legacyDispatchKey: keys.legacyKey ?? undefined,
                     organization,
                 });
                 if (outcome === 'recorded') recorded++;
@@ -1114,9 +1137,16 @@ export class ScheduleTrigger implements FlowTrigger {
         jobService.setReplayGuard(jobName, async ({ force }) => {
             const window = computeTickWindow(schedule, this.now());
             if (!window) return { allow: true };
-            const key = scheduleDispatchKey(flowName, window);
-            const claim = force ? null : await this.readDispatch(flowName, key);
-            if (claim?.outcome === 'succeeded') {
+            const { key, legacyKey } = this.dispatchKeys(flowName, window);
+            // [ADR-0150 D8 row R10] The transition read: the window's claim
+            // under its bare-shape key — the one an older node wrote, or the
+            // row the boot re-key copied — is the same window's. Delivered
+            // under either key is delivered.
+            const claims = force
+                ? []
+                : [await this.readDispatch(flowName, key), ...(legacyKey ? [await this.readDispatch(flowName, legacyKey)] : [])];
+            const claim = claims.find((c) => c?.outcome === 'succeeded');
+            if (claim) {
                 return { allow: false, window: window.label, claimedAt: claim.claimedAt };
             }
             // Absent, failed, unsettled, or forced — this replay re-runs the
@@ -1137,10 +1167,22 @@ export class ScheduleTrigger implements FlowTrigger {
      * digest), and a missing ledger is warned once because the once-per-window
      * guarantee then no longer survives a kernel rebuild.
      */
-    private async claimDispatch(flowName: string, key: string): Promise<boolean> {
+    private async claimDispatch(flowName: string, key: string, legacyKey?: string | null): Promise<boolean> {
         const ledger = this.getLedger();
         if (ledger && typeof ledger.claim === 'function') {
             try {
+                // [ADR-0150 D8 row R10] The bare claim first: a node of an
+                // older release claims only the window's bare-shape key, so
+                // whoever inserts that key wins the window, on either release,
+                // in either order; the scoped key is claimed second. A bare row
+                // an older node wrote, or the boot re-key copied from, loses
+                // the window here. `legacyKey` is null when two or more
+                // packages hold the flow (the collision guard,
+                // {@link dispatchKeys}): their bare key would be one row for
+                // all of them.
+                if (legacyKey && !(await ledger.claim(legacyKey))) {
+                    return false;
+                }
                 return await ledger.claim(key);
             } catch (err) {
                 this.logger.warn(
@@ -1167,11 +1209,16 @@ export class ScheduleTrigger implements FlowTrigger {
         flowName: string,
         key: string,
         outcome: ScheduleDispatchOutcome,
+        legacyKey?: string | null,
     ): Promise<void> {
         const ledger = this.getLedger();
         if (!ledger || typeof ledger.settleDispatch !== 'function') return;
         try {
             await ledger.settleDispatch(key, outcome);
+            // [ADR-0150 D8 row R10] The bare claim {@link claimDispatch} made
+            // beside it settles too, so an older node's replay guard — which
+            // reads only the bare key — reads the window as delivered.
+            if (legacyKey) await ledger.settleDispatch(legacyKey, outcome);
         } catch (err) {
             this.logger.warn(
                 `[schedule] flow '${flowName}' could not record dispatch outcome '${outcome}' for key '${key}' — ` +
@@ -1179,6 +1226,30 @@ export class ScheduleTrigger implements FlowTrigger {
                     `${(err as Error)?.message ?? String(err)}`,
             );
         }
+    }
+
+    /**
+     * [ADR-0150 D8 row R10] The window's dispatch key, and the bare-shape key
+     * claimed first, settled beside it and read as the same claim — or `null`
+     * when there is none: the key is already bare, or two or more packages
+     * hold the flow (the collision guard,
+     * {@link ScheduleDispatchLedger.flowDispatchHolder}). A ledger that cannot
+     * say, or whose answer throws, keys by the bare shape, as before the
+     * package segment existed.
+     */
+    private dispatchKeys(flowName: string, window: TickWindow): { key: string; legacyKey: string | null } {
+        const ledger = this.getLedger();
+        let holder: { packageId: string | null; claimBare: boolean } = { packageId: null, claimBare: true };
+        if (ledger && typeof ledger.flowDispatchHolder === 'function') {
+            try {
+                holder = ledger.flowDispatchHolder(flowName) ?? holder;
+            } catch {
+                // no answer is the bare key, as before the segment existed
+            }
+        }
+        const key = scheduleDispatchKey(flowName, window, holder.packageId);
+        const bare = scheduleDispatchKey(flowName, window);
+        return { key, legacyKey: holder.claimBare && bare !== key ? bare : null };
     }
 
     /** Read one dispatch claim. A ledger that cannot answer reports `null`. */

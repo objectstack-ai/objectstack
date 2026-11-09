@@ -42,7 +42,7 @@ their callbacks, and **assignment rules**.
 | `screen` | Interactive — presents UI screens to the user (wizards, forms) |
 | `schedule` | Runs on a cron/interval cadence declared on the **start node's `config.schedule`** — or a **per-record date sweep** via `config.timeRelative`, see *Time-relative triggers* |
 | `record_change` | Fires automatically on record create/update/delete. `autolaunched` + the same `record-*` binding behaves identically; `record_change` also opts into the trigger-readiness lint |
-| `api` | Inbound **webhook** — needs a start-node `secretRef` (*Inbound webhook triggers*); a flow only ever started explicitly is `autolaunched` |
+| `api` | Inbound **webhook** (*Inbound webhook triggers*); a flow only ever started explicitly is `autolaunched` |
 
 **A flow an installed package ships** is read-only. To change what it does, save
 a same-named flow in the base's paired `.custom` package declaring
@@ -101,7 +101,7 @@ Flows are built from **built-in node types** (plugins register more):
 
 | Node | Purpose |
 |:-----|:--------|
-| `approval` | Route a record for human sign-off — **suspends** the run until a decision, then continues down the `approve` / `reject` branch |
+| `approval` | Route a record for human sign-off |
 
 ### `notify` — the most-used node type
 
@@ -325,9 +325,18 @@ export const caseIntake = defineAssignmentRule({
 `strategy` is for a queue target only; `assignTo: { type: 'user', value: '<id>' }`
 names one owner, who holds the row only while an active member of its organization
 (else ownerless). Queues are declared in `queues` (objectstack-data); an approval
-for the same people is `approvers: [{ type: 'queue', value: 'crm_support_intake' }]`
-([Approver Types](./references/state-machines-and-approvals.md#approver-types)).
+for the same people is a `queue` approver ([Approver Types](./references/state-machines-and-approvals.md#approver-types)).
 ⛔ Never a `beforeInsert` hook that picks an owner, nor a round-robin counter field.
+
+**A packaged rule's queue** (ADR-0150 D3) is its package's own, else the one holder
+in its `dependencies` closure plus `sys`: `acme.helpdesk` naming `acme.crm`'s queue
+declares `dependencies: { 'acme.crm': '^1.0.0' }`. Else refused — `outside-closure`
+(an undeclared package's or environment-only queue), `ambiguous-in-closure` (two
+in it) — the row is written ownerless, in no queue, and the server log warns once
+(`… does not resolve … from the rule's package`). An organization's
+`sys_assignment_rule` row and a rule no package ships read environment-wide (two
+package holders: `ambiguous-in-environment`). A name no `queues` entry declares
+reads the organization's `sys_queue` row.
 
 ---
 
@@ -384,8 +393,8 @@ node `config`**:
 
 ### Trigger Configuration — on the `start` node
 
-This is the start node alone, not a whole flow (a flow also
-owns `label`, `type`, `nodes` and the `edges` `FlowSchema` requires):
+A flow around it also owns `label`, `type`, `nodes` and the `edges`
+`FlowSchema` requires:
 
 ```typescript
 {

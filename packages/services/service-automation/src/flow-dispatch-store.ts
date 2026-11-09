@@ -132,7 +132,36 @@ export class InMemoryFlowDispatchStore implements FlowDispatchStore {
 export class ObjectStoreFlowDispatchStore implements FlowDispatchStore {
   constructor(private readonly engine: FlowDispatchStoreEngine) {}
 
+  /** What every claim, settle and read waits for first ({@link holdUntil}); settled when nothing holds them. */
+  private held: Promise<void> = Promise.resolve();
+
+  /**
+   * [ADR-0150 D8 row R10] Hold every {@link claim}, {@link settle} and
+   * {@link read} until `until` settles (fulfilled or rejected alike), or until
+   * `timeoutMs` has passed, whichever is first — then answer as always.
+   *
+   * The automation plugin holds the ledger at `start()` until the boot's
+   * re-key of the dispatch keys (`flow-dispatch-key-package-backfill.ts`) has
+   * run at `kernel:bootstrapped`, so a trigger's first claim after an upgrade
+   * reads the re-keyed rows. The bound keeps a re-key that never finishes from
+   * stopping every scheduled flow; a claim it lets through still sees a window
+   * claimed under the bare key, through the triggers' transition read.
+   */
+  holdUntil(until: Promise<unknown>, timeoutMs: number, onTimeout?: () => void): void {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const bound = new Promise<void>((resolve) => {
+      timer = setTimeout(() => {
+        onTimeout?.();
+        resolve();
+      }, timeoutMs);
+      (timer as { unref?: () => void }).unref?.();
+    });
+    const settled = until.then(() => undefined, () => undefined);
+    this.held = Promise.race([settled, bound]).finally(() => clearTimeout(timer));
+  }
+
   async claim(key: string): Promise<boolean> {
+    await this.held;
     const existing = await this.engine.find(TABLE, {
       where: { id: key }, limit: 1, context: SYSTEM_CTX,
     });
@@ -185,6 +214,7 @@ export class ObjectStoreFlowDispatchStore implements FlowDispatchStore {
    * the engine does not have yet.
    */
   async settle(key: string, outcome: FlowDispatchOutcome): Promise<void> {
+    await this.held;
     const current = await this.read(key);
     if (!current) return; // never claimed — settling does not create rows
     if (!isSettleAllowed(current.outcome, outcome)) return;
@@ -202,6 +232,7 @@ export class ObjectStoreFlowDispatchStore implements FlowDispatchStore {
 
   /** The claim row for `key`, or `null` when the key was never claimed. */
   async read(key: string): Promise<FlowDispatchClaim | null> {
+    await this.held;
     const rows = await this.engine.find(TABLE, {
       where: { id: key }, limit: 1, context: SYSTEM_CTX,
     });

@@ -124,6 +124,8 @@ export const frGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_email_template.fields.description.label": "779a4342c8eb6707",
   "objects.sys_email_template.fields.id.label": "00b0385c9c152888",
   "objects.sys_email_template.fields.managed_by.options.package": "1c8c6168730324a3",
+  "objects.sys_email_template.fields.package_id.help": "e1f8cc4d0105cedc",
+  "objects.sys_email_template.fields.package_id.label": "aacf5e74a8641b2b",
   "objects.sys_email_template.fields.reply_to.label": "90ad8f2ca791a95a",
   "objects.sys_email_template.fields.variables_json.label": "c2cfff50e8151e3d",
   "objects.sys_exchange_rate.fields.id.label": "00b0385c9c152888",

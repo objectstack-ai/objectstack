@@ -194,11 +194,15 @@
  * `advisory_create`, `advisory_collaborators_add`, `advisory_versions` and
  * `advisory_state`, below) are `repository-advisories: write`, and the two
  * that read (`advisory_read` and `advisory_list`, below) spend the same grant
- * at `read` alone (each row's `grant`), the seven rows spending it; the sender gate's
+ * at `read` alone (each row's `grant`), the seven rows spending it; the
+ * front-of-queue enqueue (`pr_enqueue_front`, below) is `merge-queues: write`,
+ * the one row spending it — GitHub's GraphQL mutations are outside that ledger,
+ * so this one is the App-permission vocabulary's (`permission-merge-queues` on
+ * `actions/create-github-app-token`), NOT MEASURED until its first stroke; the sender gate's
  * `GET /repos/{o}/{r}/collaborators/{login}/permission` is `metadata: read`.
  * `PERMISSIONS` is that set and nothing wider. The workflow declares the five
  * grants every stroke gets as literal `permission-*` inputs on
- * `actions/create-github-app-token`, and the two grants a stroke gets only
+ * `actions/create-github-app-token`, and the three grants a stroke gets only
  * when it spends one (`STROKE_SCOPED_PERMISSIONS`) as inputs read from the
  * validator's output; `validate.mjs --self-test` pins both spellings equal to
  * this table.
@@ -285,6 +289,54 @@
  * `runs/{digits}/rerun-failed-jobs`; the whole-run `rerun`, a job's `rerun`,
  * cancel, delete, logs, caches, artifacts, secrets and variables all stay
  * refused, and `validate.mjs --self-test` pins each.
+ *
+ * ## The one row that reorders the merge queue — `pr_enqueue_front`
+ *
+ * `enqueuePullRequest(input: { pullRequestId, jump: true, expectedHeadOid })`
+ * puts a pull at the FRONT of its base's merge queue. Whether it also moves a
+ * pull that is ALREADY queued is NOT MEASURED until the first live stroke on
+ * one; if GitHub refuses that case, the row reads FAILED. Jumping rebuilds every merge group behind it (GitHub's
+ * own documentation of the option), and it is an ADDITIONAL repository
+ * permission above write ("Jump to the front of the queue", a custom-role
+ * permission an admin holds by default), so the row is fenced like
+ * `run_rerun_failed` and spends a grant no other row spends:
+ *
+ *   - the GRANT: `merge-queues: write`, minted for that stroke alone through
+ *     `STROKE_SCOPED_PERMISSIONS`, as `actions` is; `contents` and
+ *     `workflows` are its `alsoSpends`, the literal grants `automerge_enable`
+ *     already spends to enqueue (a pull changing `.github/workflows/**` is
+ *     enqueued only by a token carrying `workflows`). Whether the App
+ *     installation holds the grant, and whether GitHub honours `jump` for an
+ *     App token holding it, is NOT MEASURED until the first live stroke: an
+ *     installation without it fails the mint with zero writes, and an answer
+ *     that queues the pull without the jump is a FAILED action (below);
+ *   - ALONE: a stroke carrying it carries exactly that one action;
+ *   - the HEAD: `expected_head_sha` is REQUIRED and full-length, judged
+ *     against the pull's own GET and sent as `expectedHeadOid`, so a push
+ *     between the seat's ACCEPT and the relay's run is refused twice — by the
+ *     fence, then by the platform;
+ *   - the PULL (`ENQUEUE_FRONT_FENCES`, judged by the executor on its own
+ *     reads immediately before the mutation): open, not a draft, its head the
+ *     expected one, not the Version Packages pull (`changeset-release/*`
+ *     head or a `chore: version packages` title, AGENTS.md Prime Directive
+ *     #15), no governed path in its whole file list (`governedPathsIn`: a
+ *     governed pull's place in the queue stays a human's), and at most
+ *     `HUMAN_MERGE_LINE_THRESHOLD` changed lines (AGENTS.md §7's third class);
+ *   - the QUEUE (`MERGE_QUEUE_READ_QUERY`, the pull's base): the base has a
+ *     queue, the entry list is read whole, and no entry is already jumped — one
+ *     jumped pull per repository at a time, a second refused while the first is
+ *     still queued, the pull itself included.
+ *
+ * The 200 is an acceptance, not a landing: the executor re-reads the queue
+ * and the action LANDS only on `enqueueFrontReadBack` — the pull's entry
+ * listed with `jump` true and no entry ahead of it. An entry listed without
+ * the jump, or behind another, is a FAILED action whose sentence says the
+ * pull IS queued and was not jumped (⛔ never re-sent: a second send meets
+ * nothing the fences refuse, and would rebuild the groups again). GraphQL
+ * errors — "Resource not accessible by integration" is the grant missing —
+ * are a FAILED action with nothing changed. The queue read is a GraphQL
+ * query, a read: unpaced, like every GET. WHEN a seat may send the stroke is
+ * pm-dispatch's rule (`references/landing-operations.md`), never this table's.
  *
  * ## A workflow's inputs are CLOSED per file — `WORKFLOW_DISPATCH_INPUTS`
  *
@@ -758,7 +810,7 @@
 
 import { createCipheriv, createDecipheriv, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes } from 'node:crypto';
 
-import { GOVERNED_REPOS } from '../check-governed-merges.mjs';
+import { GOVERNED_REPOS, HUMAN_MERGE_LINE_THRESHOLD } from '../check-governed-merges.mjs';
 
 /**
  * The relay's four files, repo-relative — the population a card touching any
@@ -999,6 +1051,120 @@ export function rerunFailedLandedText(v) {
   const jobs = v.rerun.map((j) => `\`${j.name}\` job ${j.id} ${j.status}`).join(', ');
   const later = v.notListed.length ? ` · not listed yet: ${v.notListed.map((n) => `\`${n}\``).join(', ')} (a job is listed when its needs finish)` : '';
   return `attempt ${v.attempt} · re-run: ${jobs}${later}`;
+}
+
+/**
+ * The front-of-queue enqueue (header: "The one row that reorders the merge
+ * queue"). The mutation sends the pull's node id and the expected head; the
+ * answer selects the entry the read-back judges. The queue read names the
+ * pull's base by name and reads the entry list at the connection's page
+ * maximum — `hasNextPage` true is a truncated SUBSET and is refused, since it
+ * can hide a jumped entry.
+ */
+export const ENQUEUE_FRONT_MUTATION = 'mutation($id: ID!, $head: GitObjectID!) { enqueuePullRequest(input: { pullRequestId: $id, jump: true, expectedHeadOid: $head }) { mergeQueueEntry { position jump state pullRequest { number } } } }';
+export const MERGE_QUEUE_PAGE_SIZE = 100;
+export const MERGE_QUEUE_READ_QUERY = `query($owner: String!, $name: String!, $branch: String!) { repository(owner: $owner, name: $name) { mergeQueue(branch: $branch) { entries(first: ${MERGE_QUEUE_PAGE_SIZE}) { totalCount pageInfo { hasNextPage } nodes { position jump state pullRequest { number } } } } } }`;
+/** The Version Packages pull, as the release workflow opens it (AGENTS.md Prime Directive #15) — never jumped. */
+export const VERSION_PACKAGES_HEAD_PREFIX = 'changeset-release/';
+export const VERSION_PACKAGES_TITLE = /^chore: version packages\b/i;
+
+/**
+ * A queue read's answer as the fences and the read-back see it: `{ present, complete, entries }` —
+ * `present` the base has a merge queue, `complete` the list was read whole, `entries` `[{ number, jump, position, state }]`.
+ * `null` when the answer carries no repository. Pure.
+ */
+export function mergeQueueOf(json) {
+  const repo = json?.data?.repository;
+  if (!repo || typeof repo !== 'object') return null;
+  const queue = repo.mergeQueue;
+  if (!queue) return { present: false, complete: true, entries: [] };
+  const nodes = Array.isArray(queue.entries?.nodes) ? queue.entries.nodes : null;
+  const complete = nodes !== null && queue.entries?.pageInfo?.hasNextPage === false;
+  const entries = (nodes ?? []).filter((e) => e && typeof e === 'object').map((e) => ({ number: e.pullRequest?.number ?? null, jump: e.jump === true, position: Number.isInteger(e.position) ? e.position : null, state: e.state ?? null }));
+  return { present: true, complete, entries };
+}
+
+/**
+ * The fences on the PULL and its QUEUE (header): `fence` its name, `wants` what the relay jumps, `reads` what the
+ * failure sentence quotes, `holds` the predicate. Each takes one context `{ pull, expectedHeadSha, governed, queue }`:
+ * `pull` the pull's own GET, `governed` the governed slice of its whole file list (`governedPathsIn`), `queue`
+ * `mergeQueueOf`'s reading of its base's queue. The two other fences — alone in its stroke, the stroke-scoped grant —
+ * are the validator's. The executor judges these on the reads taken immediately before the mutation.
+ */
+export const ENQUEUE_FRONT_FENCES = Object.freeze([
+  Object.freeze({ fence: 'open', wants: 'an open pull', reads: (c) => `state ${c.pull?.state ?? null}`, holds: (c) => c.pull?.state === 'open' }),
+  Object.freeze({ fence: 'ready', wants: 'a pull out of draft', reads: (c) => `draft ${c.pull?.draft ?? null}`, holds: (c) => c.pull?.draft === false }),
+  Object.freeze({
+    fence: 'head',
+    wants: 'a pull whose current head is expected_head_sha, the head the seat accepted',
+    reads: (c) => `head ${shortHead(c.pull?.head?.sha)}, expected ${shortHead(c.expectedHeadSha)}`,
+    holds: (c) => typeof c.pull?.head?.sha === 'string' && c.pull.head.sha === c.expectedHeadSha,
+  }),
+  Object.freeze({
+    fence: 'release',
+    wants: `a pull that is not the Version Packages pull (head ${VERSION_PACKAGES_HEAD_PREFIX}*, or a "chore: version packages" title) — its merge is the release trigger`,
+    reads: (c) => `head ref ${c.pull?.head?.ref ?? null}, title ${JSON.stringify(c.pull?.title ?? null)}`,
+    holds: (c) => typeof c.pull?.head?.ref === 'string' && !c.pull.head.ref.startsWith(VERSION_PACKAGES_HEAD_PREFIX) && !VERSION_PACKAGES_TITLE.test(c.pull?.title ?? ''),
+  }),
+  Object.freeze({
+    fence: 'governed',
+    wants: "a pull whose whole file list touches no governed surface — a governed pull's place in the queue stays a human's",
+    reads: (c) => (Array.isArray(c.governed) ? `${c.governed.length} governed path(s)${c.governed.length ? `: ${c.governed.slice(0, 3).join(', ')}` : ''}` : 'the file list unread'),
+    holds: (c) => Array.isArray(c.governed) && c.governed.length === 0,
+  }),
+  Object.freeze({
+    fence: 'size',
+    wants: `at most ${HUMAN_MERGE_LINE_THRESHOLD} changed lines (additions + deletions) — a larger pull lands the way a Tier H one does`,
+    reads: (c) => `${(c.pull?.additions ?? 0) + (c.pull?.deletions ?? 0)} changed line(s)`,
+    holds: (c) => Number.isInteger(c.pull?.additions) && Number.isInteger(c.pull?.deletions) && c.pull.additions + c.pull.deletions <= HUMAN_MERGE_LINE_THRESHOLD,
+  }),
+  Object.freeze({
+    fence: 'queue',
+    wants: "a base with a merge queue whose entry list was read whole",
+    reads: (c) => (!c.queue ? 'the queue unread' : !c.queue.present ? 'no merge queue on the base' : `${c.queue.entries.length} entr(ies), ${c.queue.complete ? 'read whole' : 'a truncated list'}`),
+    holds: (c) => Boolean(c.queue?.present && c.queue.complete),
+  }),
+  Object.freeze({
+    fence: 'one-jump',
+    wants: 'a queue with no entry already jumped — one jumped pull per repository at a time, this pull included',
+    reads: (c) => {
+      const jumped = (c.queue?.entries ?? []).filter((e) => e.jump).map((e) => `#${e.number}`);
+      return jumped.length ? `jumped: ${jumped.join(', ')}` : 'none jumped';
+    },
+    holds: (c) => Boolean(c.queue) && !c.queue.entries.some((e) => e.jump),
+  }),
+]);
+
+/** The fences a context fails: `[{ fence, wants, got }]`, in `ENQUEUE_FRONT_FENCES` order; `[]` when all hold. Pure. */
+export function enqueueFrontFenceFailures(ctx) {
+  return ENQUEUE_FRONT_FENCES.filter((f) => !f.holds(ctx)).map((f) => ({ fence: f.fence, wants: f.wants, got: f.reads(ctx) ?? null }));
+}
+
+/** The sentence a fence refusal prints — every failing fence by name, what was read and what the relay jumps. Pure. */
+export function enqueueFrontFenceText(failures) {
+  return failures.map((f) => `fence \`${f.fence}\`: the relay read ${JSON.stringify(f.got)}, and it jumps only ${f.wants}`).join('; ');
+}
+
+/**
+ * What LANDED means for a `pr_enqueue_front` (header): the queue read back after the mutation shows the pull's entry
+ * with `jump` true and no entry ahead of it (the lowest position — the platform's numbering base is not assumed).
+ * Answers `{ ok, pending, entry, ahead, why }`: `pending` the entry not listed yet (the executor re-reads inside its
+ * window); neither `ok` nor `pending` a FAILED action — the pull queued without the jump, or behind another. Pure.
+ */
+export function enqueueFrontReadBack({ pull, queue } = {}) {
+  if (!queue?.present) return { ok: false, pending: true, entry: null, ahead: [], why: 'the queue read back shows no merge queue on the base' };
+  const entry = queue.entries.find((e) => e.number === pull) ?? null;
+  if (!entry) return { ok: false, pending: true, entry, ahead: [], why: `the queue read back lists no entry for #${pull}` };
+  const ahead = queue.entries.filter((e) => e.number !== pull && Number.isInteger(e.position) && Number.isInteger(entry.position) && e.position < entry.position).map((e) => e.number);
+  if (!entry.jump) return { ok: false, pending: false, entry, ahead, why: `#${pull} IS in the merge queue at position ${entry.position} but its entry reads jump false — queued at its place, not jumped` };
+  if (!Number.isInteger(entry.position)) return { ok: false, pending: true, entry, ahead, why: `#${pull}'s entry reads no position yet` };
+  if (ahead.length) return { ok: false, pending: false, entry, ahead, why: `#${pull} IS in the merge queue, jumped, at position ${entry.position}, behind ${ahead.map((n) => `#${n}`).join(', ')}` };
+  return { ok: true, pending: false, entry, ahead, why: '' };
+}
+
+/** The read-back line a landing prints. Pure. */
+export function enqueueFrontLandedText(v, total) {
+  return `#${v.entry.number} at the front of the merge queue · position ${v.entry.position} · jump true · ${v.entry.state ?? 'state unread'} · ${total} entr(ies) queued`;
 }
 
 /** The two modes of the hierarchy rows (header: "The two rows that write an issue's hierarchy") — the descriptor's `subIssue.mode`. */
@@ -2123,13 +2289,17 @@ export const FIELDS = Object.freeze({
  * write alone, and minted only for a stroke carrying one of them, the same
  * way; `advisory_read` and `advisory_list` spend that grant at `read` (each
  * row's `grant`), so a read's stroke is minted the lower level and never write.
+ * `merge-queues: write` is spent by the `pr_enqueue_front` row alone, and
+ * minted only for its stroke, the same way (header: "The one row that
+ * reorders the merge queue").
  */
-export const PERMISSIONS = Object.freeze({ issues: 'write', 'pull-requests': 'write', contents: 'write', workflows: 'write', metadata: 'read', actions: 'write', 'repository-advisories': 'write' });
+export const PERMISSIONS = Object.freeze({ issues: 'write', 'pull-requests': 'write', contents: 'write', workflows: 'write', metadata: 'read', actions: 'write', 'repository-advisories': 'write', 'merge-queues': 'write' });
 
 /**
  * The permissions minted ONLY for a stroke carrying an op that spends them —
  * `actions: write`, the `workflow_dispatch` and `run_rerun_failed` rows'
- * alone, and `repository-advisories`, the seven advisory rows' alone — at
+ * alone, `repository-advisories`, the seven advisory rows' alone, and
+ * `merge-queues`, the `pr_enqueue_front` row's alone — at
  * write, or at the row's `grant` (`advisory_read`'s and `advisory_list`'s `read`); each of those
  * rows travels alone in its stroke. `validate.mjs`
  * computes a stroke's permission set (`tokenPermissionsOf`) and writes each of
@@ -2140,7 +2310,7 @@ export const PERMISSIONS = Object.freeze({ issues: 'write', 'pull-requests': 'wr
  * returns the set unchanged), so every other stroke's token carries the
  * literal grants alone.
  */
-export const STROKE_SCOPED_PERMISSIONS = Object.freeze(['actions', 'repository-advisories']);
+export const STROKE_SCOPED_PERMISSIONS = Object.freeze(['actions', 'repository-advisories', 'merge-queues']);
 
 const issues = (repo, n) => `/repos/${repo}/issues/${n}`;
 const pulls = (repo, n) => `/repos/${repo}/pulls/${n}`;
@@ -2251,7 +2421,8 @@ export function transferRemedy(source, target) {
  *                 one action — `workflow_dispatch`'s and `run_rerun_failed`'s,
  *                 the two rows spending `actions: write`, and
  *                 the seven advisory rows', the ones spending
- *                 `repository-advisories` (header above);
+ *                 `repository-advisories`, and `pr_enqueue_front`'s, the one
+ *                 spending `merge-queues` (header above);
  *   `closedInputs` (optional) the per-workflow closed inputs —
  *                 `WORKFLOW_DISPATCH_INPUTS`, `workflow_dispatch`'s alone: the
  *                 action's `inputs` must be exactly the entry its `workflow`
@@ -2274,7 +2445,7 @@ export function transferRemedy(source, target) {
  *                 the hierarchy rows' `issue` and `sub_issue`: an issue is
  *                 never its own sub-issue (header above);
  *   `requests`    the request descriptors the executor issues, in order:
- *                 `{ verb, path, body?, idempotent404?, graphql?, updateBranch?, rerunFailed?, subIssue?, advisoryRead?, fromAnswer?, assigned?, labelled? }`
+ *                 `{ verb, path, body?, idempotent404?, graphql?, updateBranch?, rerunFailed?, enqueueFront?, subIssue?, advisoryRead?, fromAnswer?, assigned?, labelled? }`
  *                 — a `graphql` descriptor names the mutation and the pull (or
  *                 the issue and target) whose node ids it needs; a pull's
  *                 descriptor also carries `landed`, its `PR_LANDED_STATE`
@@ -2313,7 +2484,13 @@ export function transferRemedy(source, target) {
  *                 to have landed (`requestLanded`, execute.mjs); a
  *                 `mailboxBranch` descriptor carries the pull and the branch
  *                 the executor fences before the DELETE and reads back after
- *                 it (`mailboxBranchPreflight`, execute.mjs).
+ *                 it (`mailboxBranchPreflight`, execute.mjs); an
+ *                 `enqueueFront` descriptor carries the pull and the expected
+ *                 head the executor fences, sends as `expectedHeadOid`, and
+ *                 judges the queue read back against
+ *                 (`enqueueFrontPreflight` / `confirmEnqueueFront`,
+ *                 execute.mjs) — its graphql descriptor carries no `landed`,
+ *                 since the answer is a queue entry, not a pull.
  */
 export const OPS = Object.freeze({
   comment: Object.freeze({
@@ -2449,6 +2626,17 @@ export const OPS = Object.freeze({
     required: Object.freeze(['pull']),
     optional: Object.freeze([]),
     requests: (a) => [{ verb: 'POST', path: '/graphql', graphql: { mutation: 'disablePullRequestAutoMerge', query: PR_MUTATIONS.automerge_disable, pull: a.pull, landed: PR_LANDED_STATE.automerge_disable } }],
+  }),
+  // The one row that reorders the merge queue — see the header. `merge-queues` is minted for its stroke alone;
+  // `contents` and `workflows` are the literal grants `automerge_enable` already spends to enqueue. The fences on the
+  // pull and its queue are the executor's, on its own reads immediately before the mutation; the queue is read back.
+  pr_enqueue_front: Object.freeze({
+    permission: 'merge-queues',
+    alsoSpends: Object.freeze(['contents', 'workflows']),
+    alone: true,
+    required: Object.freeze(['pull', 'expected_head_sha']),
+    optional: Object.freeze([]),
+    requests: (a) => [{ verb: 'POST', path: '/graphql', graphql: { mutation: 'enqueuePullRequest', query: ENQUEUE_FRONT_MUTATION, pull: a.pull }, enqueueFront: { pull: a.pull, expectedHeadSha: a.expected_head_sha } }],
   }),
   // The one row that deletes a ref — see the header. `branch` is held to `MAILBOX_BRANCH_SHAPE` before the dispatch;
   // the pull's fences are the executor's, on its own answers immediately before the DELETE; the ref is read back absent.
@@ -2684,4 +2872,4 @@ export const REFUSED_PATH_FAMILIES = Object.freeze([
 ]);
 
 /** The GraphQL mutations the table may name — anything else in a `graphql` descriptor is a bug this pins. */
-export const ALLOWED_MUTATIONS = Object.freeze(['markPullRequestReadyForReview', 'convertPullRequestToDraft', 'enablePullRequestAutoMerge', 'disablePullRequestAutoMerge', 'transferIssue']);
+export const ALLOWED_MUTATIONS = Object.freeze(['markPullRequestReadyForReview', 'convertPullRequestToDraft', 'enablePullRequestAutoMerge', 'disablePullRequestAutoMerge', 'enqueuePullRequest', 'transferIssue']);

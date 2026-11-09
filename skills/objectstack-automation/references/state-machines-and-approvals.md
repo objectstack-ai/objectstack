@@ -45,7 +45,7 @@ Notes:
   guard is expressed as a sibling `script` / `conditional` validation rule;
   "do something when the state changes" is a **record-triggered Flow**
   (ADR-0019) — a `record_change` flow whose start-node condition gates on the
-  transition, e.g. `previous.status != 'escalated' && record.status == 'escalated'`.
+  transition.
 - **Introspection:** `GET /api/v1/meta/object/:name/state/:field?from=:state`
   returns the legal next states so UIs/agents can read the transition table
   instead of hard-coding it (`next: null` = no FSM governs the field, **or**
@@ -65,8 +65,7 @@ run **suspends** when it reaches the node and **resumes** down the node's
 just successive Approval nodes wired together on the canvas, so the whole review
 is one diagram a reviewer (or AI) can read end-to-end.
 
-> There is no `approvals: [...]` stack collection — approval flows live in your
-> normal `flows: [...]`. The approval *state* (`sys_approval_request` /
+> There is no `approvals: [...]` stack collection. The approval *state* (`sys_approval_request` /
 > `sys_approval_action`, the record lock, the status mirror, approver
 > resolution) is owned by `plugin-approvals`.
 
@@ -168,7 +167,7 @@ Three pieces author it:
 2. **`type: 'back'` resubmit edge** — the edge from the revise window back into
    the approval node MUST be typed `'back'`. This is the *only* thing that
    legalizes the cycle: `registerFlow` validates the graph **minus `back` edges**
-   as a DAG, so an **unmarked** cycle is rejected — you opt in, edge by edge. At
+   as a DAG, so an **unmarked** cycle is rejected. At
    run time a back-edge traverses normally (it just re-enters the node).
 3. **`maxRevisions`** on the approval `config` (default `3`) — the budget of
    send-backs per run; exceeding it **auto-rejects** (resumes down the `reject`
@@ -254,8 +253,18 @@ an id that does not exist gets.
 | `department` | A department + all descendant departments |
 | `manager`    | The submitter's manager (`sys_user.manager_id`) |
 | `field`      | User id read from a record field (`value` = field name). Resolved against the record's **live** state at node entry, so a field written mid-flow routes correctly; a multi-select user field fans out into one approver per user |
-| `queue`      | Members of ownership queue `value` at node entry; an empty queue adds nobody |
+| `queue`      | Members of ownership queue `value` at node entry; an empty queue adds nobody. In a packaged flow, see below |
 | `expression` | A **CEL expression** resolved at node entry (`value` = the expression) — see **Dynamic approvers** below. The optional `resolveAs: 'user'(default) \| 'department' \| 'position' \| 'team'` re-expands each resolved id through the graph |
+
+**A packaged flow's `queue` approver** (ADR-0150 D3) resolves `value` as a
+packaged assignment rule does (SKILL.md § Assignment rules), from the package
+whose flow body runs; a disabled package holds none. `acme.deals` naming
+`acme.crm`'s `crm_finance` declares `dependencies: { 'acme.crm': '^1.0.0' }`.
+Refused (`outside-closure`, `ambiguous-in-closure`), the node opens no request:
+`APPROVER_DIRECTORY_UNREADABLE: … its name was refused (ADR-0150 D3, <reason>)`
+naming every candidate, `retryable: false`, no `fallbackApprovers` /
+`onEmptyApprovers`. A deployment-authored flow or `.custom` override reads
+environment-wide (`ambiguous-in-environment`).
 
 ### Dynamic approvers (`type: 'expression'`)
 
@@ -269,9 +278,7 @@ entered. Its CEL source sees exactly **three roots** — nothing else:
 | `vars.*` | Flow variables — node outputs (`vars.<nodeId>.<key>`), `get_record` results, `vars.previous` (the pre-update row) | BPMN process variables |
 
 **`record` and bare field names are NOT available and fail the node loudly.**
-Everywhere else on this platform `record` means "the record at event time"
-(flow conditions: the trigger snapshot; hook conditions: the stored record
-overlaid with the write's payload) — at an
+Everywhere else on this platform `record` means "the record at event time" — at an
 approval node that phrase is ambiguous between two different times, so you must
 say which one: `current.x` or `trigger.x`. Do not carry the `record.x` habit
 over from conditions.

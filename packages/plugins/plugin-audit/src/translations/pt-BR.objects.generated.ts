@@ -42,7 +42,8 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           action_invocation: "Invocação de ação",
           package_uninstall: "Desinstalação de pacote",
           package_unmanaged_import: "Package Unmanaged Import",
-          credential_use: "Credential Use"
+          credential_use: "Credential Use",
+          scim_refused: "SCIM Refused"
         }
       },
       user_id: {

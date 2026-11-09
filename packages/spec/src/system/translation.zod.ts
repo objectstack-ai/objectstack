@@ -297,6 +297,39 @@ export const ActionResultDialogTranslationSchema = lazySchema(() => strictObject
 export type ActionResultDialogTranslation = z.input<typeof ActionResultDialogTranslationSchema>;
 
 /**
+ * Action Preflight Translation Schema
+ *
+ * Translations for an action's `preflight` panel (the same-origin read the
+ * param dialog shows above its params). Shared by object `_actions` and
+ * `globalActions`.
+ *
+ * Convention:
+ *   …_actions.<action_name>.preflight.fields.<path>
+ *
+ * `fields` is keyed exactly as `resultDialog.fields` is: by the **literal**
+ * `preflight.fields[].path` from the action metadata (e.g. `"findings"`,
+ * `"verdict.summary"`), each value the translated label itself. Keys may
+ * contain dots — resolvers must index the record directly, not split on `.`.
+ * There is no `title` leaf: a preflight declares none, and the console draws
+ * its panel under its own translated heading.
+ *
+ * Module-local, unlike `ActionResultDialogTranslationSchema`: it is reachable
+ * as `TranslationDataSchema`'s `…preflight` node, and a new named export would
+ * rewrite the published skills' reference indexes, which list this module's
+ * exports.
+ */
+const ActionPreflightTranslationSchema = lazySchema(() => strictObject({
+  surface: 'this action preflight translation',
+  history: TRANSLATION_HISTORY,
+  guidance: {
+    title: 'A preflight declares no `title`: the console draws its panel under its own translated heading, so there is nothing here to translate.',
+  },
+}, {
+  fields: z.record(z.string(), z.string()).optional()
+    .describe('Preflight panel field labels keyed by the literal field path declared in the action metadata (keys may contain dots)'),
+}).describe('Translations for an action preflight panel'));
+
+/**
  * Action translations — one shape, used at two addresses: an object's
  * `_actions.<name>` and the top-level `globalActions.<name>` (the same split
  * `resolveActionLabel` walks). Built by a factory rather than transcribed
@@ -365,6 +398,12 @@ const actionTranslationSchema = (surface: string) => strictObject({
   })).optional().describe('Action parameter translations keyed by parameter name'),
   resultDialog: ActionResultDialogTranslationSchema.optional()
     .describe('Translations for the action result dialog'),
+  // `ActionSchema.preflight` (#31840) — the panel's field labels, keyed by
+  // the literal `preflight.fields[].path` exactly as `resultDialog.fields`
+  // is; overlaid by `translateAction` (`resolveActionPreflight`) for the
+  // fields the action declares.
+  preflight: ActionPreflightTranslationSchema.optional()
+    .describe('Translations for the action preflight panel'),
 });
 
 /**
@@ -640,6 +679,7 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
    *   objects.<object>._actions.<action_name>.params.<param_name>.placeholder
    *   objects.<object>._actions.<action_name>.params.<param_name>.options.<value>
    *   objects.<object>._actions.<action_name>.resultDialog.*
+   *   objects.<object>._actions.<action_name>.preflight.fields.<path>
    */
   _actions: z.record(z.string(), actionTranslationSchema('this object action translation'))
     .optional().describe('Action translations keyed by action name'),
@@ -1168,6 +1208,7 @@ const appTranslationDataShape = () => ({
    *   globalActions.<action_name>.params.<param_name>.placeholder
    *   globalActions.<action_name>.params.<param_name>.options.<value>
    *   globalActions.<action_name>.resultDialog.*
+   *   globalActions.<action_name>.preflight.fields.<path>
    */
   globalActions: z.record(z.string(), actionTranslationSchema('this global action translation'))
     .optional().describe('Global action translations keyed by action name'),

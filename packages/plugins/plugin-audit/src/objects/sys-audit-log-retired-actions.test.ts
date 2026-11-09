@@ -124,6 +124,13 @@ const ACTIONS_WITH_WRITERS: ReadonlyArray<readonly [action: string, writer: stri
       + 'api-key.ts stampAdmittedKey, plugin-auth/src/mcp-client-last-use.ts) and by plugin-auth\'s hand-off '
       + 'for a skip_consent OAuth client (#31796)',
   ],
+  [
+    'scim_refused',
+    'plugin-audit/src/scim-refusal-audit.ts — createScimRefusalAuditWriter on the `audit` slot; called by '
+      + 'plugin-auth/src/auth-manager-request-routing.ts (handleRequest, the SCIM arm every /scim/v2/* request '
+      + 'passes) through plugin-auth/src/scim-refusal-audit.ts for each request answered 400 or above, '
+      + 'bounded per connection (#31829)',
+  ],
 ];
 
 /** Option values declared by the `action` select field. */
