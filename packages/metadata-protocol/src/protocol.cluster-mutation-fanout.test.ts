@@ -36,6 +36,11 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+// `@objectstack/lint` is reached through the save door's author-time gate, a
+// dynamic `import()` (`metadata-diagnostics.ts`). Paid here, at collection, so no
+// case's `testTimeout` window pays that first load
+// (`scripts/check-test-source-alias.mjs`, "The source reach").
+import '@objectstack/lint';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import {
     ObjectStackProtocolImplementation,
