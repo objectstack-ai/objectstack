@@ -14,7 +14,7 @@ Metadata-protocol: none
 
 **BREAKING** for three bare-name reads that were served a guess and are now refused with `409 RESOURCE_CONFLICT`, the message naming every holder:
 
-1. A caller with no package reads a name that two packages both ship (for app, page, dashboard, report, book, analytics cube or tool; skills and agents already allow one holder only). It was served whichever package registered first.
+1. A caller with no package reads a name that two packages both ship. For an app, page, dashboard, report, book or analytics cube that can happen today; for an agent, skill or tool only on a deployment that booted already holding the clash (a new install of a held name is refused). It was served whichever package registered first.
 2. A package caller reads a name that only the environment's own item holds.
 3. A package caller reads a name whose one holder is a package it does not declare as a dependency.
 
