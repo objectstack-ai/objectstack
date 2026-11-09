@@ -243,11 +243,13 @@ const signedIn = async () => {
   const email = nextEmail();
   // The default audience posture is invite_only, and the shared server's first
   // sign-up is its only uninvited one: every user enters through a pending
-  // invitation, the lane `@objectstack/verify`'s signUp takes.
+  // invitation, which the sign-up presents, the lane `@objectstack/verify`'s
+  // signUp takes.
+  const invitationId = `inv_${emailSeq}`;
   await engine.insert(
     'sys_invitation',
     {
-      id: `inv_${emailSeq}`,
+      id: invitationId,
       email,
       status: 'pending',
       organization_id: 'org_rotation_audience_gate',
@@ -257,7 +259,7 @@ const signedIn = async () => {
     },
     { context: { isSystem: true } } as never,
   );
-  await client.auth.register({ email, password: PASSWORD, name: 'Rotating User' });
+  await client.auth.register({ email, password: PASSWORD, name: 'Rotating User', invitationId });
   const token = storedToken(client);
   expect(token, 'register stored no bearer token — the premise of this suite is gone').toBeTruthy();
   return { engine, manager, client, email, token: String(token) };

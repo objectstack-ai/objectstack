@@ -315,8 +315,10 @@ ships next.
 
 The opt-in binds the platform's `sys_*` actions exactly as it binds an app's: an action reaches an
 agent only when it declares `ai: { exposed: true, description }`. The named actions on the twelve
-identity objects in `packages/platform-objects/src/identity/` were assessed once, as one set, into
-three buckets, and the declarations were written in the same change as this addendum.
+identity objects that carried them in `packages/platform-objects/src/identity/` at the 2026-10-30
+assessment were assessed once, as one set, into three buckets, and the declarations were written in
+the same change as this addendum; the 2026-11-07 amendment below brought in a thirteenth,
+`sys_scim_connection_credential`.
 
 | Bucket | Test | What the action declares |
 |:--|:--|:--|

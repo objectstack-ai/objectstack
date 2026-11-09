@@ -502,7 +502,8 @@ function main(argv, env = process.env) {
       '  This run measured NOTHING. It is not a green, and it is not a red about any citation.',
     );
     console.error(
-      '  In CI the checkout needs `fetch-depth: 0`; locally, `git fetch origin main` first, or',
+      "  In CI, run the step `Fetch this commit's history and the base branch` before this gate\n" +
+        '  (ci.yml), or give the checkout `fetch-depth: 0` (lint.yml); locally, `git fetch origin main` first, or',
     );
     console.error('  name a base explicitly with `--base <ref>`.');
     return EXIT_CODES.couldNotRun;

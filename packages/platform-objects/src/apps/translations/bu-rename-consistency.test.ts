@@ -20,6 +20,7 @@ import { frObjects } from './fr.objects.generated.js';
 import { ptBRObjects } from './pt-BR.objects.generated.js';
 import { ruObjects } from './ru.objects.generated.js';
 import { deObjects } from './de.objects.generated.js';
+import { koObjects } from './ko.objects.generated.js';
 
 const LOCALES = [
   { name: 'en', objs: enObjects as Record<string, any>, old: /\bDepartment\b/ },
@@ -32,6 +33,7 @@ const LOCALES = [
   { name: 'pt-BR', objs: ptBRObjects as Record<string, any>, old: /Departamento/ },
   { name: 'ru', objs: ruObjects as Record<string, any>, old: /Отдел/ },
   { name: 'de', objs: deObjects as Record<string, any>, old: /Abteilung/ },
+  { name: 'ko', objs: koObjects as Record<string, any>, old: /부서/ },
 ];
 const OBJECTS = ['sys_business_unit', 'sys_business_unit_member'];
 

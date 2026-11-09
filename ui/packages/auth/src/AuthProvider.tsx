@@ -458,7 +458,14 @@ export function AuthProvider({
   }, []);
 
   const signUp = useCallback(
-    async (name: string, email: string, password: string, callbackURL?: string, captchaToken?: string) => {
+    async (
+      name: string,
+      email: string,
+      password: string,
+      callbackURL?: string,
+      captchaToken?: string,
+      invitationId?: string,
+    ) => {
       setIsLoading(true);
       setError(null);
       try {
@@ -468,6 +475,7 @@ export function AuthProvider({
           password,
           ...(callbackURL ? { callbackURL } : {}),
           ...(captchaToken ? { captchaToken } : {}),
+          ...(invitationId ? { invitationId } : {}),
         });
         if (result.requiresVerification) {
           // No session was created — the user must verify their email before

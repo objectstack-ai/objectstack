@@ -112,12 +112,12 @@ async function serve(deployment: Deployment) {
 
   /** Create the fixture user directly (no mount), so only the sign-in crosses the gate. */
   const signUp = async () => {
-    await inviteForAudienceGate(manager, EMAIL);
+    const invitationId = await inviteForAudienceGate(manager, EMAIL);
     const res = await manager.handleRequest(
       new Request(`${ORIGIN}${BASE}/sign-up/email`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', origin: ORIGIN },
-        body: JSON.stringify({ email: EMAIL, password: PASSWORD, name: 'Allow-list Member' }),
+        body: JSON.stringify({ email: EMAIL, password: PASSWORD, name: 'Allow-list Member', invitationId }),
       }),
     );
     expect(res.status, `sign-up: ${await res.clone().text()}`).toBe(200);

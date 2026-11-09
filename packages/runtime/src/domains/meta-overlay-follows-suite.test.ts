@@ -239,3 +239,96 @@ describe('[#31593] a tenant\'s edit follows its view across the packages of one 
         expect((r?.item ?? r)?.label).toBe('Case');
     }, 60_000);
 });
+
+/** The views `packageId`'s customizations read lists as overridden, by name and recorded `basedOn`. */
+async function listedOverrides(s: Session, packageId: string) {
+    const entries: Array<{ type: string; name: string; basedOn?: string }> = await s.protocol.listServedOverrides({ packageId });
+    return entries.filter((e) => e.type === 'view').map((e) => [e.name, e.basedOn ?? null]);
+}
+/** What the item lock answers for the view at `packageId`'s address: the read's envelope, and the save door. */
+async function lockAt(s: Session, packageId: string) {
+    const r: any = await s.protocol.getMetaItem({ type: 'view', name: VIEW, packageId });
+    const save = await s.protocol.saveMetaItem({
+        type: 'view', name: VIEW, packageId: PAIR, item: { ...(await editedView(s, packageId)), overrides: { package: packageId, basedOn: '6.2.0' } },
+    }).then(() => 'saved', (e: any) => e?.code ?? String(e));
+    return { lock: r?.lock, editable: r?.editable, deletable: r?.deletable, lockReason: r?.lockReason, save };
+}
+
+describe('[#31656] the customizations read lists a moved edit under the package that serves it, and the item lock answers for it as for an edit there', () => {
+    it('flat → composed: the module lists the edit saved under the App, and the App no longer does', async () => {
+        const db = tenantDb();
+        const flat = await boot(db, 'flat');
+        await editInPair(flat, APP, '6.1.0');
+        // CONTROL: listed under its own package, as before the move.
+        expect(await listedOverrides(flat, APP)).toEqual([[VIEW, '6.1.0']]);
+
+        const composed = await boot(db, 'composed');
+        expect(await composed.label(MODULE)).toBe(EDITED);
+        expect({ module: await listedOverrides(composed, MODULE), app: await listedOverrides(composed, APP) })
+            .toEqual({ module: [[VIEW, '6.1.0']], app: [] });
+    }, 60_000);
+
+    it('composed → flat (rollback): the App lists the edit saved under the module, though the module is gone', async () => {
+        const db = tenantDb();
+        const composed = await boot(db, 'composed');
+        await editInPair(composed, MODULE, '6.2.0');
+        expect(await listedOverrides(composed, MODULE)).toEqual([[VIEW, '6.2.0']]);
+
+        const flat = await boot(db, 'flat');
+        expect(await flat.label(APP)).toBe(EDITED);
+        expect({ app: await listedOverrides(flat, APP), module: await listedOverrides(flat, MODULE) })
+            .toEqual({ app: [[VIEW, '6.2.0']], module: [] });
+    }, 60_000);
+
+    it('CONTROL: a former owner that still ships the view lists its edit as today; the module lists nothing', async () => {
+        const db = tenantDb();
+        const flat = await boot(db, 'flat');
+        await editInPair(flat, APP, '6.1.0');
+        const both = await boot(db, 'both');
+        expect({ app: await listedOverrides(both, APP), module: await listedOverrides(both, MODULE) })
+            .toEqual({ app: [[VIEW, '6.1.0']], module: [] });
+    }, 60_000);
+
+    it('NEGATIVE: a row of another App\'s pair, or a declaration naming another App, is never listed under the module', async () => {
+        const db = tenantDb();
+        const flat = await boot(db, 'flat', { partner: true });
+        const body = await editedView(flat, APP);
+        const composed = await boot(db, 'composed', { partner: true });
+        expect(((await composed.protocol.ensureCustomizationPackage({ basePackageId: PARTNER })) as any).packageId).toBe(`${PARTNER}.custom`);
+        await composed.layRow('view', VIEW, `${PARTNER}.custom`, { ...body, overrides: { package: APP, basedOn: '6.1.0' } });
+        expect(await listedOverrides(composed, MODULE)).toEqual([]);
+        await composed.layRow('view', VIEW, PAIR, { ...body, overrides: { package: PARTNER, basedOn: '2.0.0' } });
+        expect({ module: await listedOverrides(composed, MODULE), app: await listedOverrides(composed, APP), partner: await listedOverrides(composed, PARTNER) })
+            .toEqual({ module: [], app: [], partner: [] });
+    }, 60_000);
+
+    it('CONTROL: a pre-close row bound to the App is served at the module and listed under neither, as such a row bound to its owner is not listed today', async () => {
+        const db = tenantDb();
+        const flat = await boot(db, 'flat');
+        await flat.layRow('view', VIEW, APP, await editedView(flat, APP));
+        expect(await listedOverrides(flat, APP)).toEqual([]);
+        const composed = await boot(db, 'composed');
+        expect(await composed.label(MODULE)).toBe(EDITED);
+        expect({ module: await listedOverrides(composed, MODULE), app: await listedOverrides(composed, APP) }).toEqual({ module: [], app: [] });
+    }, 60_000);
+
+    it('the item lock answers for a moved edit at the module exactly what it answers for an edit saved at the module', async () => {
+        // The lock a stamped row carries (a loader's or an install's stamp;
+        // no save door writes one), on the module's own edit and on a moved one.
+        const stamped = { _lock: 'no-overlay', _lockReason: 'Stamped by the install.' };
+        const ownDb = tenantDb();
+        const own = await boot(ownDb, 'composed');
+        await own.layRow('view', VIEW, PAIR, { ...(await editedView(own, MODULE)), overrides: { package: MODULE, basedOn: '6.2.0' }, ...stamped });
+        const atOwner = await lockAt(own, MODULE);
+
+        const movedDb = tenantDb();
+        const flat = await boot(movedDb, 'flat');
+        await flat.layRow('view', VIEW, PAIR, { ...(await editedView(flat, APP)), overrides: { package: APP, basedOn: '6.1.0' }, ...stamped });
+        const composed = await boot(movedDb, 'composed');
+        expect(await composed.label(MODULE)).toBe(EDITED);
+        const moved = await lockAt(composed, MODULE);
+
+        expect(atOwner).toEqual({ lock: 'no-overlay', editable: false, deletable: true, lockReason: 'Stamped by the install.', save: 'ITEM_LOCKED' });
+        expect(moved).toEqual(atOwner);
+    }, 60_000);
+});

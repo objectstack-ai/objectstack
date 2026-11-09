@@ -207,6 +207,8 @@ The seam is real and is deliberately left empty, on both sides:
 That is the decision, not an oversight: a group→role mapping is an authorization contract, and V1
 declines to invent one. Filling the seam is a later decision with its own record.
 
+> **Filled by [ADR-0152](./0152-scim-group-grants-only-an-ordinary-permission-set-through-a-per-connection-mapping.md) (2026-11-08, ruling of record `6718345088` on #30959)** — for ordinary permission sets only: a SCIM group grants the set its per-connection `sys_idp_group_mapping` row names, never administrator standing; the text above is unchanged.
+
 ### D7 (open half) — SCIM conformance / smoke coverage runs in this repo's CI
 
 The half of D7 whose mechanism is open code: **the provisioning surface is exercised by tests that run

@@ -67,6 +67,7 @@ export default class Register extends Command {
     '$ os register',
     '$ os register --email user@example.com --name "Jane Doe" --password mypassword',
     '$ os register --url https://api.example.com',
+    '$ os register --email invitee@example.com --invitation aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY',
   ];
 
   static override flags = {
@@ -87,6 +88,11 @@ export default class Register extends Command {
     password: Flags.string({
       char: 'p',
       description: 'Password',
+    }),
+    invitation: Flags.string({
+      description:
+        'The id of the invitation this account presents: the last segment of its accept link. ' +
+        'Under the invite_only audience posture a sign-up is admitted only by the invitation it presents.',
     }),
     json: Flags.boolean({
       description: 'Output as JSON',
@@ -125,7 +131,12 @@ export default class Register extends Command {
       if (!password) throw new Error('Password is required');
 
       const client = new ObjectStackClient({ baseUrl: flags.url });
-      const registerPayload: RegisterRequest = { email, password, name };
+      const registerPayload: RegisterRequest = {
+        email,
+        password,
+        name,
+        ...(flags.invitation ? { invitationId: flags.invitation } : {}),
+      };
       const response = await client.auth.register(registerPayload);
 
       const token = response.data?.token ?? (response as any).token;
