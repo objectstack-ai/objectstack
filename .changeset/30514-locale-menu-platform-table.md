@@ -4,8 +4,14 @@
 '@object-ui/console': patch
 ---
 
+fix(i18n): the Console language menu offers the platform locale table's languages, intersected with the app's locale list
+
 Clause-②: no (narrowing)
 Metadata-protocol: none
+
+<!-- adr-0087: not-required (no-migration-prescription) no metadata an author writes changes: `i18n.supportedLocales` accepts the same values, `GET /api/v1/i18n/locales` reports the same list and no stored shape is rewritten; what narrows is the Console menu's reading of that list, and a language outside the platform locale table has no replacement spelling to migrate to -->
+
+**BREAKING** for an app whose locale list names a language outside the platform locale table (for example `th`): the Console language menu no longer offers it. No first-party app does — examples/app-crm, app-showcase, app-todo and HotCRM declare only table languages, through read-alias spellings that now show as their table entries.
 
 The Console language menu now offers the platform locale table's languages,
 intersected with the app's locale list (ruling F). `offerableLanguages` reads
