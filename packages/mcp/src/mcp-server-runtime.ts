@@ -1429,6 +1429,16 @@ export interface McpHttpCaller {
 }
 
 /**
+ * [#31836] The one line a skipped AI-registry tool leaves: which name, which
+ * source was not served, and which was ({@link MCPServerRuntime.yieldBridgedTool}).
+ */
+function logNativeToolServed(logger: Logger | undefined, name: string): void {
+  logger?.debug(
+    `[MCP] Tool "${name}": serving the native data tool; the ToolRegistry tool of that name is not bridged`,
+  );
+}
+
+/**
  * MCPServerRuntime — Bridges ObjectStack kernel services to the Model Context Protocol.
  *
  * Responsibilities:
@@ -1448,16 +1458,6 @@ export interface McpHttpCaller {
  *                                                             └── http transport (future)
  * ```
  */
-/**
- * [#31836] The one line a skipped AI-registry tool leaves: which name, which
- * source was not served, and which was ({@link MCPServerRuntime.yieldBridgedTool}).
- */
-function logNativeToolServed(logger: Logger | undefined, name: string): void {
-  logger?.debug(
-    `[MCP] Tool "${name}": serving the native data tool; the ToolRegistry tool of that name is not bridged`,
-  );
-}
-
 export class MCPServerRuntime {
   private readonly mcpServer: McpServer;
   private readonly config: Required<Pick<MCPServerRuntimeConfig, 'name' | 'version'>> & MCPServerRuntimeConfig;
