@@ -2507,10 +2507,12 @@ function refusePreflightContradictions(
     if (name !== undefined && !declared.has(name)) declared.set(name, p);
   }
 
-  // Holes of the read.
+  // Holes of the read. A URL the same-origin rule already refused carries its
+  // own issue at `read.url`; judging its holes too would answer one mistake twice.
   const url = preflight.read.url;
   const holeParams = new Set<string>();
-  for (const match of url.matchAll(PREFLIGHT_HOLE_RE)) {
+  const holes = SAME_ORIGIN_API_PATH_RE.test(url) ? [...url.matchAll(PREFLIGHT_HOLE_RE)] : [];
+  for (const match of holes) {
     const body = match[1];
     const hole = preflightHoleParam(body);
     if (hole === null) {
@@ -2541,7 +2543,7 @@ function refusePreflightContradictions(
       }
     }
   }
-  if (url.replace(PREFLIGHT_HOLE_RE, '').includes('${')) {
+  if (SAME_ORIGIN_API_PATH_RE.test(url) && url.replace(PREFLIGHT_HOLE_RE, '').includes('${')) {
     ctx.addIssue({
       code: 'custom',
       path: ['preflight', 'read', 'url'],
