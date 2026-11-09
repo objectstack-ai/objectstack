@@ -4075,6 +4075,7 @@ const ja = {
     tabAll: "すべて",
     statusPending: "承認待ち",
     statusApproved: "承認済み",
+    statusHeld: "承認者の承認待ち",
     statusExecuted: "実行済み",
     statusFailed: "失敗",
     statusRejected: "却下",
