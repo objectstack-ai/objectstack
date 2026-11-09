@@ -9180,7 +9180,30 @@ export class SchemaRegistry {
    * @throws {NamespaceNameConflictError} ADR-0112 envelope, naming every holder.
    */
   private refuseNamespaceNameConflicts(manifest: ObjectStackManifest): void {
-    const incoming = namespacePackageOf(manifest);
+    this.refuseNamespaceHolderConflicts(namespacePackageOf(manifest));
+  }
+
+  /**
+   * [ADR-0150 D2, #31720] The same refusal for a `packages[]` stack's
+   * RESIDUAL — the top-level items no package body declares, which the
+   * `manifest` service registers under the residual's owner id after every
+   * body and never through {@link installPackage}. `residual` is that holder
+   * as the predicate sees it (`residualNamespacePackageOf`): the owner id, the
+   * stack's own `manifest.namespace`, its covered items. Judged against the
+   * installed packages of that namespace — the stack's own bodies included,
+   * once they have installed — exactly as a package is, in the same envelope.
+   * `undefined` (no residual, or none of the covered types) refuses nothing.
+   */
+  refuseResidualNamespaceNameConflicts(residual: NamespacePackage | undefined): void {
+    this.refuseNamespaceHolderConflicts(residual);
+  }
+
+  /**
+   * The one walk both refusals above share: `incoming` against every installed
+   * package record of its namespace, read through the same predicate, thrown
+   * in one envelope.
+   */
+  private refuseNamespaceHolderConflicts(incoming: NamespacePackage | undefined): void {
     if (incoming === undefined || !isNamespaceJudged(incoming.namespace) || incoming.names.length === 0) return;
     const sitting: NamespacePackage[] = [];
     for (const record of this.metadata.get('package')?.values() ?? []) {
