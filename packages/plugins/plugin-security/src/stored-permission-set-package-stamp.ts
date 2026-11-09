@@ -39,10 +39,10 @@
  *
  * ## What a write keeps
  *
- * - **An insert** is stamped from its name. A SYSTEM insert that names the
- *   package itself keeps it (the writer knows better than a lookup); any other
- *   caller's value is replaced — the column is `readonly`, and what it names
- *   is what the authorization resolver reads.
+ * - **An insert** is stamped from its name, whoever writes it: a value the
+ *   writer sent is replaced — the column is `readonly`, and what it names is
+ *   what the authorization resolver reads. No writer today knows more than the
+ *   name; binding a refused name is the operator's reviewed bind, an update.
  * - **An update** is stamped only when it changes what the reference names:
  *   the set's name, or (R3) the package that wrote it. A rename never keeps the
  *   old package. An update that touches neither — the backfill's and the
@@ -107,7 +107,6 @@ function onInsert(engine: StampEngine, reference: StoredPermissionSetReference, 
   if (!isPlainRecord(data)) return;
   const name = named(data[reference.nameColumn]);
   if (name === null) return;
-  if (ctx?.session?.isSystem === true && named(data[reference.packageColumn]) !== null) return;
   data[reference.packageColumn] = stampFor(engine, name, writerOf(reference, data));
 }
 
@@ -122,7 +121,6 @@ function onUpdate(engine: StampEngine, reference: StoredPermissionSetReference, 
   const touchesWriter = reference.callerColumn !== undefined && hasOwn(data, reference.callerColumn)
     && named(data[reference.callerColumn]) !== named(previous[reference.callerColumn]);
   if (!touchesName && !touchesWriter) return;
-  if (ctx?.session?.isSystem === true && named(data[reference.packageColumn]) !== null) return;
   const after = { ...previous, ...data };
   const name = named(after[reference.nameColumn]);
   data[reference.packageColumn] = name === null ? null : stampFor(engine, name, writerOf(reference, after));

@@ -433,11 +433,12 @@ describe('the write seam stamps the package column on every write that names a s
     expect(await packagesById(engine, GRANTS.object)).toEqual({ w1: CRM, w2: null, w3: null, w4: null });
   });
 
-  it('R1: a caller\'s own package value is replaced by the rule\'s answer; a system writer naming the package keeps it', async () => {
+  it('R1: a writer\'s own package value is replaced by the rule\'s answer — a system writer\'s too', async () => {
     const engine = await stamped();
     await engine.insert(GRANTS.object, grant('f1', TWO_HOLDERS, { permission_set_package: HR }), { context: { userId: 'u_admin', tenantId: ORG } });
     await engine.insert(GRANTS.object, grant('f2', TWO_HOLDERS, { permission_set_package: HR }), { context: SYS_ORG });
-    expect(await packagesById(engine, GRANTS.object)).toEqual({ f1: null, f2: HR });
+    await engine.insert(GRANTS.object, grant('f3', ONE_HOLDER, { permission_set_package: HR }), { context: SYS_ORG });
+    expect(await packagesById(engine, GRANTS.object)).toEqual({ f1: null, f2: null, f3: CRM });
   });
 
   it('R1: a rename re-stamps the column and never keeps the old package; a write that names no set leaves it', async () => {
