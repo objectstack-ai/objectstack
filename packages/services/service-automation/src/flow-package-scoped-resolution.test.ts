@@ -257,18 +257,47 @@ describe('reading (b) — bare-name behaviour is unchanged for a name with one h
 });
 
 describe('ADR-0150 D4 — the activation ledger switches off the (package, name) it names', () => {
-    it("a row naming the shipping package switches its flow off; another package's row does not", async () => {
+    const staleWarnings = () =>
+        engineLogger.warn.mock.calls.filter((call: unknown[]) => String(call[0]).includes('no longer holds that name'));
+
+    it("a row naming the shipping package switches its flow off; a row of another package that still holds the name does not", async () => {
         install(A);
+        install(Q);
         ship(A, leaf('notify'));
+        // Q holds a flow of the same name too (a sealed clash); the engine armed A's.
+        registry.registerItem('flow', { ...leaf('notify'), _packageId: Q }, 'name' as never, Q);
         const store = new InMemoryFlowActivationStore();
         await store.setActive({ name: 'notify', packageId: Q, active: false });
         engine.setFlowActivationStore(store);
         expect(await engine.hydrateFlowActivations()).toEqual([]);
         expect((await engine.execute('notify')).success).toBe(true);
+        expect(staleWarnings()).toHaveLength(0);
 
         await store.setActive({ name: 'notify', packageId: A, active: false });
         expect(await engine.hydrateFlowActivations()).toEqual(['notify']);
         expect(await engine.execute('notify')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
+    });
+
+    it('a stale row — its package no longer holds the name — still switches the holder off, warned once naming both and the remedy', async () => {
+        install(A);
+        install(Q);
+        ship(A, leaf('notify'));
+        const store = new InMemoryFlowActivationStore();
+        await store.setActive({ name: 'notify', packageId: Q, active: false });
+        engine.setFlowActivationStore(store);
+        expect(await engine.hydrateFlowActivations()).toEqual(['notify']);
+        expect(await engine.execute('notify')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
+        expect(await engine.execute('notify')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
+        const warned = staleWarnings();
+        expect(warned).toHaveLength(1);
+        expect(warned[0][0]).toContain('package "com.acme.stranger"');
+        expect(warned[0][0]).toContain('package "com.acme.alpha" ships it today');
+        expect(warned[0][0]).toContain('switch the flow again');
+
+        // The remedy: switching the flow writes the holder's own row.
+        await engine.toggleFlow('notify', true);
+        expect((await engine.execute('notify')).success).toBe(true);
+        expect(await store.list()).toContainEqual({ name: 'notify', packageId: A, active: true });
     });
 
     it('the toggle door writes and reads the row under the shipping package', async () => {
@@ -285,24 +314,39 @@ describe('ADR-0150 D4 — the activation ledger switches off the (package, name)
 });
 
 describe('FlowActivationProjection', () => {
+    const readers = (holder: string | undefined, holds: string[] = [], reported: unknown[] = []) => ({
+        holderOf: () => holder,
+        stillHolds: (_name: string, packageId: string) => holds.includes(packageId),
+        reportStale: (stale: unknown) => void reported.push(stale),
+    });
+
     it('a row naming no package binds to the one holder', () => {
-        const projection = new FlowActivationProjection(() => A);
+        const projection = new FlowActivationProjection(readers(A));
         projection.add('notify');
         expect(projection.has('notify')).toBe(true);
         projection.delete('notify');
         expect(projection.has('notify')).toBe(false);
     });
 
-    it("answers for the package that ships the name, never another package's row", () => {
-        const projection = new FlowActivationProjection(() => A);
+    it("a row of another package that still holds the name keys only that package", () => {
+        const projection = new FlowActivationProjection(readers(A, [Q]));
         projection.add('notify', Q);
         expect(projection.has('notify')).toBe(false);
         projection.add('notify', A);
         expect(projection.has('notify')).toBe(true);
     });
 
+    it('a stale row switches the holder off and is reported once', () => {
+        const reported: unknown[] = [];
+        const projection = new FlowActivationProjection(readers(A, [], reported));
+        projection.add('notify', Q);
+        expect(projection.has('notify')).toBe(true);
+        expect(projection.has('notify')).toBe(true);
+        expect(reported).toEqual([{ name: 'notify', rowPackageId: Q, holderPackageId: A }]);
+    });
+
     it('with no reader to say who ships the name, every row of it still switches it off', () => {
-        const projection = new FlowActivationProjection(() => undefined);
+        const projection = new FlowActivationProjection(readers(undefined));
         projection.add('notify', Q);
         expect(projection.has('notify')).toBe(true);
     });

@@ -2802,7 +2802,23 @@ export class AutomationEngine implements IAutomationService {
     // [ADR-0150 D4] Keyed by `(package, name)`: a row switches off the flow of
     // the package it names, read against the package that ships the name
     // today — see {@link FlowActivationProjection}.
-    private flowLedgerDisabled = new FlowActivationProjection((name) => this.packagedFlowOwner(name));
+    private flowLedgerDisabled = new FlowActivationProjection({
+        holderOf: (name) => this.packagedFlowOwner(name),
+        // A package still holds `name` when the resolver reaches that
+        // package's OWN flow for it; no resolver, no answer: stale.
+        stillHolds: (name, packageId) => {
+            const resolution = this.flowNameResolver?.(name, packageId);
+            return resolution?.status === 'resolved' && resolution.via === 'own';
+        },
+        reportStale: ({ name, rowPackageId, holderPackageId }) =>
+            this.logger.warn(
+                `[Automation] The flow "${name}" is switched off by an activation row of package "${rowPackageId}", `
+                    + `which no longer holds that name; package "${holderPackageId}" ships it today. The row still `
+                    + 'switches the flow off. To keep it off or turn it on, switch the flow again: that writes '
+                    + `package "${holderPackageId}"'s own row.`,
+                { flow: name, rowPackageId, holderPackageId },
+            ),
+    });
     /**
      * The durable ledger behind {@link flowLedgerDisabled}. `null` until a host
      * attaches one via {@link setFlowActivationStore} — an engine with no
