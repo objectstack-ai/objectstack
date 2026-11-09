@@ -620,6 +620,12 @@ GET /ready
   → 503 while still booting or shutting down
   → 503 carrying { state, drivers: [...] } in error.details when a data driver
         stops answering
+  → 200 with a cluster entry when the deployment declares multi-node and runs
+        the redis cluster driver:
+        { status: "ready", state, cluster: { driver: "redis", reachable: true } }
+        { status: "degraded", state,
+          cluster: { driver: "redis", reachable: false, reason } }
+        while Redis cannot be reached (still 200, never 503)
 ```
 
 The two probes answer deliberately different questions (#3756). `/health`
@@ -631,6 +637,23 @@ would put every replica into a restart storm for the length of the outage.
 otherwise fail 100% of its requests. The readiness check fails **open**: a
 kernel with no data engine, or a probe that itself errors, still reads as ready
 rather than black-holing a working deployment.
+
+On a deployment that declares itself multi-node (`OS_EXPECT_MULTI_NODE=true` or
+`OS_CLUSTER_REPLICAS` greater than 1) and runs the redis cluster driver, `/ready`
+also reports whether the replicas can still reach their shared Redis — the store
+their locks, counters and cross-replica events go through. The 200 body gains a
+`cluster` entry. While Redis answers it reads `reachable: true` and `status` stays
+`"ready"`; while it does not, `status` becomes `"degraded"`, `reachable` is
+`false`, and `reason` is one of `timeout`, `ping-failed`, `unexpected-reply` or
+`no-probe`. The store's address never appears in the body. The answer stays
+**200**, deliberately: every replica loses a shared Redis at the same moment, so
+a 503 would take all of them out of rotation and turn a degraded cluster into a
+total outage while the database can still serve. Alert on `status: "degraded"`
+instead. The check is one `PING` bounded at 500 ms and memoized ~1s, and it runs
+only on the 200 paths: the booting / shutting-down 503 and the data-driver 503
+are answered before it, unchanged. A single node, a deployment on the in-process
+`memory` cluster driver, and one with no cluster service see exactly the body
+they saw before, and their Redis, if any, is never probed.
 
 <Callout type="info">
 `GET /health` returns a compact liveness body (`status`, `timestamp`, `version`,

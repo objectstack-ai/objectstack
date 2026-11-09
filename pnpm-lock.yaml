@@ -4613,6 +4613,9 @@ importers:
       '@object-ui/types':
         specifier: workspace:*
         version: link:../types
+      '@objectstack/formula':
+        specifier: workspace:^
+        version: link:../../../packages/formula
       '@objectstack/spec':
         specifier: workspace:^
         version: link:../../../packages/spec

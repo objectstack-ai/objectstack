@@ -37,6 +37,7 @@
     "@object-ui/permissions": "workspace:*",
     "@object-ui/react": "workspace:*",
     "@object-ui/types": "workspace:*",
+    "@objectstack/formula": "workspace:^",
     "@objectstack/spec": "workspace:^",
     "hast-util-to-jsx-runtime": "^2.3.6",
     "hastscript": "^9.0.1",

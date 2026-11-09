@@ -396,6 +396,7 @@ import {
 } from '@objectstack/metadata-protocol';
 import { resolveThrownHttpError, type ThrownHttpError } from '@objectstack/types';
 import { unknownQueryParamRefusalMessage } from '@objectstack/rest';
+import { composedClusterDriver, declaresMultiReplicaOnRedis, MULTI_REPLICA_PACKAGE_CHANGE_REFUSED } from '@objectstack/service-cluster';
 
 /** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
 type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
@@ -1365,6 +1366,40 @@ function refuseHeldSession(c: any, principal: InstallPrincipal): Response | null
 }
 
 /**
+ * [cloud#3814 R6] The refusal the install and uninstall doors give when this
+ * deployment declares several replicas over the Redis cluster driver
+ * (`declaresMultiReplicaOnRedis`, `@objectstack/service-cluster` — the one
+ * condition every multi-replica card keys on), right after the caller is
+ * admitted and before the body is read or anything is written.
+ *
+ * These doors change ONE replica: they write the install ledger under the
+ * serving process's own `OS_HOME` and load the package into (or withdraw it
+ * from) that process's kernel alone, and the other replicas never see it —
+ * a permanent divergence, since each replica rehydrates its own ledger at
+ * boot. So under declared replicas the change is refused, `409`, with
+ * `MULTI_REPLICA_PACKAGE_CHANGE_REFUSED` and the maintenance-window recipe;
+ * nothing is written, registered or withdrawn. The cluster service's driver
+ * is read here, per request, where the answer is used. `null` on a single
+ * node, the in-process driver or any other driver: the door proceeds exactly
+ * as before.
+ */
+function refuseMultiReplicaPackageChange(c: any, ctx: PluginContext, subject: 'Installing' | 'Uninstalling'): Response | null {
+    if (!declaresMultiReplicaOnRedis(process.env, composedClusterDriver(ctx))) return null;
+    const what = subject === 'Installing' ? 'the package' : 'the uninstall';
+    return c.json({
+        success: false,
+        error: {
+            code: MULTI_REPLICA_PACKAGE_CHANGE_REFUSED,
+            message: `${subject} a package through install-local was refused: this deployment declares several replicas `
+                + '(OS_CLUSTER_REPLICAS greater than 1, or OS_EXPECT_MULTI_NODE=true) on the Redis cluster driver, and '
+                + 'install-local changes only the replica that serves the request: its own install ledger and its own '
+                + `kernel. The other replicas would never see ${what}. Make the change in a maintenance window instead: `
+                + 'run the install script, then restart every replica. Nothing was installed, uninstalled or written.',
+        },
+    }, 409);
+}
+
+/**
  * [#15204 W2] What an admitted mutating request carries past
  * `requireInstallCapability`: the acting user, plus the two inputs ADR-0131
  * D3's refusal needs, both off the admission's single authorization read.
@@ -2093,6 +2128,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const admission = await this.requireInstallCapability(c, ctx, 'Installing a package');
         if (!admission.ok) return admission.response;
         const userId = admission.userId;
+
+        // [cloud#3814 R6] Declared replicas over the Redis driver: this door
+        // would install into one replica only. Refused before the body is read.
+        {
+            const refused = refuseMultiReplicaPackageChange(c, ctx, 'Installing');
+            if (refused) return refused;
+        }
 
         // [#23914] A declared JSON body that does not parse is refused 400,
         // never read as no body (`./request-json-body.ts`).
@@ -3433,6 +3475,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     private handleUninstall = async (c: any, ctx: PluginContext): Promise<Response> => {
         const admission = await this.requireInstallCapability(c, ctx, 'Uninstalling a package');
         if (!admission.ok) return admission.response;
+        // [cloud#3814 R6] Declared replicas over the Redis driver: this door
+        // would withdraw the package from one replica only. Refused before
+        // the ledger is read.
+        {
+            const refused = refuseMultiReplicaPackageChange(c, ctx, 'Uninstalling');
+            if (refused) return refused;
+        }
         const manifestId = String(c.req.param?.('manifestId') ?? c.req.params?.manifestId ?? '').trim();
         if (!manifestId) {
             return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'manifestId path param required.' } }, 400);
