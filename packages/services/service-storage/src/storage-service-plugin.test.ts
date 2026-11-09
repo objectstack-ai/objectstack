@@ -1,12 +1,15 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { IStorageService } from '@objectstack/spec/contracts';
 import { StorageServicePlugin } from './storage-service-plugin.js';
 import { SwappableStorageService } from './swappable-storage-service.js';
+import { LocalStorageAdapter } from './local-storage-adapter.js';
+import { S3StorageAdapter } from './s3-storage-adapter.js';
+import { LOCAL_ROOT_SHARED_ENV, MULTI_REPLICA_LOCAL_STORAGE_REFUSAL } from './multi-replica-local-root.js';
 
 /**
  * Plugin-level integration test exercising the settings live-wire.
@@ -588,3 +591,117 @@ describe('StorageServicePlugin: sys_file orphan lifecycle wiring (#2755)', () =>
 // Fresh-datastore attestation (#3438, ADR-0104) moved to PlatformObjectsPlugin
 // with the sys_migration registration it belongs to (#4243) — its tests live in
 // @objectstack/platform-objects (src/plugin.test.ts).
+
+// cloud#3814: several replicas declared over the redis cluster driver may not
+// serve uploads from an unshared local root. The adapter in use is decided at
+// `kernel:ready` (settings swap S3 in there), so every case boots through it.
+describe('StorageServicePlugin: local root under declared replicas (cloud#3814)', () => {
+  afterEach(() => { vi.unstubAllEnvs(); });
+
+  /** Several replicas declared; `OS_EXPECT_MULTI_NODE` cleared so only the count speaks. */
+  function declareReplicas(): void {
+    vi.stubEnv('OS_EXPECT_MULTI_NODE', '');
+    vi.stubEnv('OS_CLUSTER_REPLICAS', '3');
+  }
+
+  function undeclared(): void {
+    vi.stubEnv('OS_EXPECT_MULTI_NODE', '');
+    vi.stubEnv('OS_CLUSTER_REPLICAS', '');
+  }
+
+  async function bootLocal(opts: { driver?: string; settings?: ReturnType<typeof makeFakeSettings> } = {}) {
+    const plugin = new StorageServicePlugin({
+      adapter: 'local',
+      local: { rootDir: await fs.mkdtemp(join(tmpdir(), 'oss-replicas-')) },
+      registerRoutes: false,
+    });
+    const ctx = makeCtx();
+    if (opts.driver !== undefined) ctx.registerService('cluster', { driver: opts.driver });
+    if (opts.settings) ctx.registerService('settings', opts.settings);
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    return { plugin, ctx, proxy: ctx.getService('storage') as SwappableStorageService };
+  }
+
+  /** `storage` settings selecting S3, pinned by env the way `OS_STORAGE_ADAPTER=s3` pins them. */
+  function s3Settings() {
+    const values = { adapter: 's3', s3_bucket: 'uploads', s3_region: 'us-east-1' };
+    return makeFakeSettings(values, { adapter: 'env', s3_bucket: 'env', s3_region: 'env' });
+  }
+
+  it('refuses the boot on a local root with no shared-root declaration, naming the S3 settings and the switch', async () => {
+    declareReplicas();
+    vi.stubEnv(LOCAL_ROOT_SHARED_ENV, '');
+    const { ctx } = await bootLocal({ driver: 'redis' });
+
+    const boot = ctx._flushReady();
+    await expect(boot).rejects.toThrow(MULTI_REPLICA_LOCAL_STORAGE_REFUSAL);
+    await expect(boot).rejects.toThrow(/OS_STORAGE_ADAPTER=s3/);
+    await expect(boot).rejects.toThrow(new RegExp(`${LOCAL_ROOT_SHARED_ENV}=true`));
+  });
+
+  it('boots on a local root the operator declares shared', async () => {
+    declareReplicas();
+    vi.stubEnv(LOCAL_ROOT_SHARED_ENV, ' TRUE ');
+    const { ctx, proxy } = await bootLocal({ driver: 'redis' });
+
+    await expect(ctx._flushReady()).resolves.toBeUndefined();
+    expect(proxy.getInner()).toBeInstanceOf(LocalStorageAdapter);
+  });
+
+  it('boots when the storage settings select S3', async () => {
+    declareReplicas();
+    vi.stubEnv(LOCAL_ROOT_SHARED_ENV, '');
+    const { ctx, proxy } = await bootLocal({ driver: 'redis', settings: s3Settings() });
+
+    await expect(ctx._flushReady()).resolves.toBeUndefined();
+    expect(proxy.getInner()).toBeInstanceOf(S3StorageAdapter);
+  });
+
+  // CONTROLS: R3 — outside the declaration nothing changes. Green before and
+  // after the change by construction; ⛔ not ablation evidence.
+  it.each([
+    ['no replicas declared, redis driver', undeclared, 'redis'],
+    ['replicas declared, memory driver', declareReplicas, 'memory'],
+    ['replicas declared, no cluster service', declareReplicas, undefined],
+  ] as const)('CONTROL: boots on a local root — %s', async (_name, env, driver) => {
+    env();
+    vi.stubEnv(LOCAL_ROOT_SHARED_ENV, '');
+    const { ctx, proxy } = await bootLocal({ driver });
+
+    await expect(ctx._flushReady()).resolves.toBeUndefined();
+    expect(proxy.getInner()).toBeInstanceOf(LocalStorageAdapter);
+  });
+
+  it('refuses a settings change onto a local root and keeps the S3 adapter serving', async () => {
+    declareReplicas();
+    vi.stubEnv(LOCAL_ROOT_SHARED_ENV, '');
+    const settings = s3Settings();
+    const { ctx, proxy } = await bootLocal({ driver: 'redis', settings });
+    await ctx._flushReady();
+    const s3 = proxy.getInner();
+    expect(s3).toBeInstanceOf(S3StorageAdapter);
+
+    settings.values = { adapter: 'local', local_root: await fs.mkdtemp(join(tmpdir(), 'oss-replicas-swap-')) };
+    settings._emit('storage');
+    await vi.waitFor(() => expect(ctx._logs.error.join('\n')).toContain(MULTI_REPLICA_LOCAL_STORAGE_REFUSAL));
+
+    expect(proxy.getInner()).toBe(s3);
+  });
+
+  it('applies a settings change onto a local root the operator declares shared', async () => {
+    declareReplicas();
+    vi.stubEnv(LOCAL_ROOT_SHARED_ENV, 'true');
+    const settings = s3Settings();
+    const { ctx, proxy } = await bootLocal({ driver: 'redis', settings });
+    await ctx._flushReady();
+    const s3 = proxy.getInner();
+
+    settings.values = { adapter: 'local', local_root: await fs.mkdtemp(join(tmpdir(), 'oss-replicas-swap-')) };
+    settings._emit('storage');
+    await vi.waitFor(() => expect(proxy.getInner()).toBeInstanceOf(LocalStorageAdapter));
+
+    expect(proxy.getInner()).not.toBe(s3);
+    expect(ctx._logs.error).toEqual([]);
+  });
+});
