@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AuthPlugin } from './auth-plugin';
+import type { AuthPluginOptions } from './auth-plugin';
 import { AuthManager } from './auth-manager';
 import { invitationAcceptPath } from './invitation-link-action';
 import type { PluginContext } from '@objectstack/core';
@@ -2237,7 +2238,7 @@ describe('AuthPlugin base URL port correction honours a configured origin', () =
   const SECRET = 'test-secret-at-least-32-chars-long';
 
   /** Boots the plugin through `kernel:ready` against a server bound to `boundPort`. */
-  async function bootAgainstPort(options: Record<string, unknown>, boundPort: number) {
+  async function bootAgainstPort(options: AuthPluginOptions, boundPort: number) {
     const handlers = new Map<string, Array<() => Promise<void>>>();
     const registered = new Map<string, any>();
     const httpServer = {
