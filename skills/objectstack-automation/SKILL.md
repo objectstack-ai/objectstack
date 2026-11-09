@@ -42,7 +42,7 @@ their callbacks, and **assignment rules**.
 | `screen` | Interactive — presents UI screens to the user (wizards, forms) |
 | `schedule` | Runs on a cron/interval cadence declared on the **start node's `config.schedule`** — or a **per-record date sweep** via `config.timeRelative`, see *Time-relative triggers* |
 | `record_change` | Fires automatically on record create/update/delete. `autolaunched` + the same `record-*` binding behaves identically; `record_change` also opts into the trigger-readiness lint |
-| `api` | Inbound **webhook** — needs a start-node `secretRef` (see *Inbound webhook triggers* below); a flow only ever started explicitly is `autolaunched` |
+| `api` | Inbound **webhook** — needs a start-node `secretRef` (*Inbound webhook triggers*); a flow only ever started explicitly is `autolaunched` |
 
 **A flow an installed package ships** is read-only. To change what it does, save
 a same-named flow in the base's paired `.custom` package declaring
@@ -109,8 +109,10 @@ Flows are built from **built-in node types** (plugins register more):
 error. **RAW** keys are read as written: a
 `{token}` in one is refused.
 
+<!-- os:check -->
 ```ts
-{ id: 'tell_owner', type: 'notify', label: 'Notify Owner', config: {
+import type { FlowNode } from '@objectstack/spec/automation';
+const notify: FlowNode = { id: 'tell_owner', type: 'notify', label: 'Notify Owner', config: {
     recipients: { dialect: 'cel', source: 'record.assignee' }, // REQUIRED — id, list, or envelope; a CSV is ONE id.
     // 4th form `{ emailField: 'applicant_email' }`: an `email` field of the trigger record, for a non-user —
     // then `channels: 'email'` alone. An envelope must yield USER ids: an address no user holds fails the node
@@ -122,7 +124,7 @@ error. **RAW** keys are read as written: a
     sourceObject: 'task',              // link: PAIR, else dropped; none of the 3 ⇒ the
     sourceId: { dialect: 'cel', source: 'record.id' }, // trigger record (not on delete/before-create), if any
     actionUrl: '/tasks/{{ record.id }}', // overrides the pair
-} }
+} };
 ```
 
 An option label in a notice: `{{ stage | option:opportunity.stage }}` in the mail
@@ -218,8 +220,7 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 
 ## Valid-but-silently-wrong (passes build, fails at runtime)
 
-Legal metadata authors get wrong; most are caught by `objectstack build` —
-write them right the first time:
+Legal metadata authors get wrong; most are caught by `objectstack build`:
 
 1. **A value slot takes a literal or a CEL envelope — never a `{…}` token.**
    In `assignments.*`, `fields.*`, `subflow` / `map` `input.*`, `script`
@@ -246,7 +247,6 @@ write them right the first time:
    'current_user.id' } }`), then write `{{ v }}`.
 
 2. **`create_record`'s `outputVariable` holds the created RECORD, not its id.**
-   Reference a field explicitly.
    ❌ `fields: { ref: { dialect: 'cel', source: 'newRec' } }` → writes the whole record object
    ✅ `source: 'newRec.id'`
 
@@ -406,7 +406,7 @@ owns `label`, `type`, `nodes` and the `edges` `FlowSchema` requires):
 > `record-before-*` flow that throws silently blocks the write — give it a
 > user-facing message.
 
-→ [references/examples-flows.md](./references/examples-flows.md) § Time-relative triggers — scheduled per-record date sweep.
+→ [references/examples-flows.md](./references/examples-flows.md) § Time-relative triggers.
 
 ---
 
