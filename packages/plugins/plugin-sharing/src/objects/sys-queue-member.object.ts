@@ -52,6 +52,22 @@ export const SysQueueMember = ObjectSchema.create({
       group: 'Queue',
     }),
 
+    // [ADR-0150 D8 row R6] The package that holds the declared queue `queue`
+    // names, beside the name (ADR-0126 §4: two facts, two columns). Backfilled
+    // at boot from the queue's one package holder
+    // (`stored-declaration-package-backfill.ts`); empty for an organization's
+    // own queue and for a name no single package holds. Position recipients
+    // stay bare (ADR-0150 D7). Nothing reads it yet and no writer stamps it.
+    // Width: the package-id class (`sys_metadata.package_id`).
+    queue_package: Field.text({
+      label: 'Queue Package',
+      required: false,
+      readonly: true,
+      maxLength: 255,
+      description: 'The app the queue comes from. Filled in by the platform; empty for queues created here.',
+      group: 'Queue',
+    }),
+
     recipient_type: Field.select({
       options: [
         { value: 'user', label: 'User' },
