@@ -296,7 +296,7 @@ describe('[#31626] SQL Server: the echo prints the window driver-sql\'s find pat
       } as never,
       { bypassTenantAudit: true } as never,
     );
-    return sent.at(-1)!.toLowerCase();
+    return sent[sent.length - 1]!.toLowerCase();
   };
 
   /** The window half of a driver statement: `top (n) ` and the tail after the table, its order key cut. */

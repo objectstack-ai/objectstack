@@ -189,7 +189,7 @@ describe('[#31626] find on SQL Server: the window statement is unchanged by the 
       const d = probe();
       const statements = sent(d);
       await d.find('t', { fields: ['name'], ...window } as never, { bypassTenantAudit: true } as never);
-      expect(statements.at(-1)).toBe(expected);
+      expect(statements[statements.length - 1]).toBe(expected);
     });
   }
 });
