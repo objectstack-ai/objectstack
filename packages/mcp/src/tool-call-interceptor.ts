@@ -20,6 +20,18 @@
  * tools, `experimental.tasks.registerToolTask`, are not routed: nothing in the
  * platform registers one.)
  *
+ * ## A call for a name nothing registered
+ *
+ * [#31838] The SDK answers a `tools/call` for a name the server holds no tool
+ * of by itself (a `Tool NAME not found` tool error), inside its own request handler, before
+ * any registered handler. So the route also wraps the server's `tools/call`
+ * request handler: when an interceptor is installed and the SDK's registry
+ * holds no tool of the requested name, the interceptor is told once, with the
+ * principal, the name and `registered: false`, and the client gets the SDK's
+ * own answer, byte for byte, whatever the interceptor returns. The scope a
+ * grant narrowed thus leaves a trace a host can record (a read-only token
+ * calling a write tool), and nothing about the hidden surface leaks.
+ *
  * ## Nothing installed, nothing changed
  *
  * The gate reads the interceptor slot AT EACH CALL. When it is empty the
@@ -44,6 +56,7 @@
  */
 
 import type { McpServer, RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { Logger, ToolExecutionContext } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { StandardErrorCode } from '@objectstack/spec/api';
@@ -189,6 +202,104 @@ export function routeToolCallsThrough(server: McpServer, route: ToolCallRoute): 
 
   server.registerTool = routed(server.registerTool.bind(server) as ToolRegistration) as typeof server.registerTool;
   server.tool = routed(server.tool.bind(server) as ToolRegistration) as typeof server.tool;
+
+  // [#31838] The SDK installs its `tools/call` handler when the first tool
+  // registers; it is wrapped as it is installed.
+  const protocol = server.server;
+  const setRequestHandler = protocol.setRequestHandler.bind(protocol) as (...a: unknown[]) => void;
+  protocol.setRequestHandler = ((schema: unknown, handler: unknown) =>
+    setRequestHandler(
+      schema,
+      schema === CallToolRequestSchema && typeof handler === 'function'
+        ? observeUnregisteredCalls(server, route, handler as ToolCallRequestHandler)
+        : handler,
+    )) as typeof protocol.setRequestHandler;
+}
+
+type ToolCallRequestHandler = (request: { params: { name: string } }, extra: unknown) => unknown;
+
+/**
+ * [#31838] Wrap the SDK's `tools/call` handler: a call for a name its registry
+ * holds no tool of is shown to the installed interceptor once, and answered
+ * exactly as the SDK answers it. Every other call, and every call while no
+ * interceptor is installed, goes to the SDK's handler untouched.
+ */
+function observeUnregisteredCalls(
+  server: McpServer,
+  route: ToolCallRoute,
+  handler: ToolCallRequestHandler,
+): ToolCallRequestHandler {
+  return (request, extra) => {
+    const interceptor = route.interceptor();
+    if (!interceptor) return handler(request, extra);
+    const name = request?.params?.name;
+    if (typeof name !== 'string' || isRegisteredTool(server, name, route.logger)) return handler(request, extra);
+    // The SDK's own answer, computed once: no tool handler runs for a name
+    // nothing registered. It is what the client receives, whatever the
+    // interceptor does.
+    return Promise.resolve(handler(request, extra)).then(async (sdkAnswer) => {
+      await observeUnregisteredCall(interceptor, route, name, sdkAnswer);
+      return sdkAnswer;
+    });
+  };
+}
+
+/** Whether the SDK's registry holds a tool of `name` (enabled or not): the lookup its own handler makes first. */
+function isRegisteredTool(server: McpServer, name: string, logger: Logger | undefined): boolean {
+  const tools = (server as unknown as { _registeredTools?: unknown })._registeredTools;
+  if (tools === null || typeof tools !== 'object') {
+    // An SDK whose registry this cannot read: no call is taken for
+    // unregistered, so the interceptor is never told of a tool that ran.
+    if (!unreadableRegistryWarned) {
+      unreadableRegistryWarned = true;
+      logger?.warn(
+        '[MCP] The MCP SDK\'s tool registry could not be read, so a tools/call for a name no tool is registered '
+          + 'under is not shown to the installed tool-call interceptor. Fix: align the tool-call route with this '
+          + 'version of @modelcontextprotocol/sdk.',
+      );
+    }
+    return true;
+  }
+  return Object.prototype.hasOwnProperty.call(tools, name);
+}
+let unreadableRegistryWarned = false;
+
+/**
+ * Tell the interceptor of one call for an unregistered name. Observation only:
+ * `next()` resolves to a frozen copy of the SDK's own answer, the verdict is
+ * never served, and a principal that cannot be resolved or an interceptor that
+ * throws is logged, never answered, so the client's answer stays the SDK's.
+ */
+async function observeUnregisteredCall(
+  interceptor: McpToolInterceptor,
+  route: ToolCallRoute,
+  toolName: string,
+  sdkAnswer: unknown,
+): Promise<void> {
+  try {
+    const principal = await route.principal();
+    const call: McpToolCallContext = Object.freeze({
+      door: MCP_TOOL_DOOR,
+      transport: route.transport,
+      toolName,
+      // The client's arguments were validated against no schema: none
+      // reaches the host.
+      arguments: Object.freeze({}),
+      principal,
+      registered: false,
+    });
+    const seen = deepFreeze(structuredClone(sdkAnswer)) as McpToolCallResult;
+    await interceptor(call, () => Promise.resolve(seen));
+  } catch (err) {
+    // Once per call, naming the tool and the failure's kind only: never the
+    // call's arguments, and never a message that could quote them.
+    const code = (err as { code?: unknown } | null)?.code;
+    const kind = typeof code === 'string' && code.length > 0 ? code : err instanceof Error ? err.name : typeof err;
+    route.logger?.warn(
+      `[MCP] The tool-call interceptor failed (${kind}) while told of a call for "${toolName}", a name no tool is `
+        + 'registered under. The call was answered as before: the SDK\'s own "not found".',
+    );
+  }
 }
 
 /** Run one call through an installed interceptor. */
