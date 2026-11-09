@@ -414,12 +414,13 @@ describe('prompts, seed order, template manifest and change size', () => {
     expect(questionPrompt(crm, 'tech_accounts')).toMatch(/^How many accounts are in tech\?/);
   });
 
-  it('every authoring prompt states the every-item-prefixed rule, and the contract names every item prefixed', () => {
+  it('every authoring prompt states the literal-prefix rule for the types the scorer judges, and the contract names every item prefixed', () => {
     const card = namespacedScenario(crm).card;
     const server = { baseUrl: 'http://x', adminEmail: 'a@x', adminPassword: 'p' };
     for (const p of [buildPrompt(card), iteratePrompt(card), templateIteratePrompt(card, server)]) {
-      expect(p).toContain("Naming: this app's namespace is `democrm`. Name EVERY metadata item you declare `democrm_<name>`");
-      expect(p).toMatch(/not only objects, but also views, apps, .*dashboards.*permission sets/);
+      expect(p).toContain("Naming: this app's namespace is `democrm`. Name each object, view, doc and position you declare `democrm_<name>`, and each capability `democrm.<name>`");
+      expect(p).toMatch(/Every other item \(apps, .*dashboards, .*actions, flows, jobs, permission sets, .*tools, skills, agents and the rest\) belongs to this package and needs no prefix/);
+      expect(p).not.toMatch(/EVERY metadata item/);
     }
     const contract = dataContract(card);
     expect(contract).toContain('- `democrm_delete_contact` on `democrm_contact`');

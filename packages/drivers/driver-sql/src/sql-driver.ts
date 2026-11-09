@@ -5063,6 +5063,15 @@ export class SqlDriver implements IDataDriver {
     return DeferredDdlFacet.setDeferredDdl.call(deferredDdlHost.of(this), deferred);
   }
 
+  /**
+   * [#31715] Whether {@link setDeferredDdl} holds this driver's schema DDL back
+   * right now. The engine's boot reads it to leave the schema-migration lock to
+   * the command that deferred the DDL, which takes it before the flush.
+   */
+  get schemaDdlDeferred(): boolean {
+    return this.deferredDdl;
+  }
+
   /** How many objects are waiting for {@link flushDeferredSchemaDdl}. */
   get deferredSchemaObjectCount(): number {
     return this.deferredSchemaObjects.size;
