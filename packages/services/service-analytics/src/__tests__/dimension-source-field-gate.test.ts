@@ -480,7 +480,9 @@ describe('#5520 — what the gate must NOT do', () => {
             dimensions: {},
             public: true,
         };
-        const { service } = makeService({ cubes: [joined] });
+        // [#31944] `owner` is a field of the account, as a relationship hop is: a
+        // hop naming no field of the object it leaves is refused by its own gate.
+        const { service } = makeService({ cubes: [joined], fields: [...ACCOUNT_FIELDS, 'owner'] });
 
         const settled = await settle(
             service.query({ cube: 'joined_cube', measures: ['count'], dimensions: ['owner.region'] } as any),
