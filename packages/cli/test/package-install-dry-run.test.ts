@@ -18,6 +18,7 @@
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import PackageInstall, { renderUpgradePlan } from '../src/commands/package/install.js';
+import { previewSchemaUpgradeStop, readSchemaUpgradeRefusal } from '../src/utils/upgrade-plan.js';
 
 type Answer = { ok: boolean; status: number; body: unknown };
 
@@ -222,5 +223,40 @@ describe('os package install --confirm-upgrade (epic cloud#3652 Q3)', () => {
     expect(out).toContain('acme_deal.amount changes type text → number (needs_confirm)');
     expect(out).toContain('`renamedFrom`');
     expect(out).toContain(`os package install com.acme.crm --confirm-upgrade ${TOKEN}`);
+  });
+});
+
+describe('the shared upgrade plan reader (#30887): one reading for os package install and os deploy', () => {
+  it('reads a Q3 refusal into its findings and token, and nothing else as one', () => {
+    const findings = [{ kind: 'suspected_rename', describe: 'x' }];
+    expect(readSchemaUpgradeRefusal({ error: { code: 'SCHEMA_UPGRADE_CONFIRMATION_REQUIRED', details: { findings, findingSet: 'schema-upgrade:1' } } }))
+      .toEqual({ findings, findingSet: 'schema-upgrade:1' });
+    expect(readSchemaUpgradeRefusal({ error: { code: 'ACCESS_UPGRADE_CONFIRMATION_REQUIRED', details: { findings, findingSet: 'fs' } } })).toBeUndefined();
+    expect(readSchemaUpgradeRefusal({ error: { code: 'SCHEMA_UPGRADE_CONFIRMATION_REQUIRED', details: { findings } } }), 'no token, nothing to confirm with').toBeUndefined();
+    expect(readSchemaUpgradeRefusal(null)).toBeUndefined();
+  });
+
+  it("previews the framework verdict off a dry run's plan: a suspected rename and a needs_confirm type change ask; a declared rename, a removal and a safe change do not", () => {
+    const plan = {
+      suspectedRenames: [{ object: 'acme_lead', field: 'company', type: 'text', candidates: [{ field: 'account_name', type: 'text' }] }],
+      typeChanges: [
+        { object: 'acme_deal', field: 'amount', from: 'text', to: 'number', category: 'needs_confirm' },
+        { object: 'acme_deal', field: 'note', from: 'text', to: 'textarea', category: 'safe' },
+      ],
+      declaredRenames: [{ object: 'lead', from: 'phone', to: 'mobile' }],
+      fields: { added: [], removed: [{ object: 'acme_lead', field: 'fax', type: 'text' }] },
+    };
+    expect(previewSchemaUpgradeStop('com.acme.crm', { plan })!.map((f) => [f.kind, f.describe?.split(' ')[0]])).toEqual([
+      ['suspected_rename', 'acme_lead.company'],
+      ['type_change', 'acme_deal.amount'],
+    ]);
+    expect(previewSchemaUpgradeStop('com.acme.crm', { plan: { ...plan, suspectedRenames: [], typeChanges: [] } })).toEqual([]);
+  });
+
+  it('an unreadable installed record previews its one finding; a plan it cannot read previews nothing, never "nothing to confirm"', () => {
+    expect(previewSchemaUpgradeStop('com.acme.crm', { installedRecordUnreadable: true, plan: { suspectedRenames: [], typeChanges: [] } })!
+      .map((f) => f.kind)).toEqual(['installed_record_unreadable']);
+    expect(previewSchemaUpgradeStop('com.acme.crm', { plan: {} })).toBeUndefined();
+    expect(previewSchemaUpgradeStop('com.acme.crm', null)).toBeUndefined();
   });
 });
