@@ -869,6 +869,127 @@ export function detectRecordWrite(result: unknown): RecordWrite | undefined {
 }
 
 /**
+ * The `source` block a data tool answers beside its result (`query_records`,
+ * `query_data`, `get_record`, `aggregate_data`, `visualize_data`): the object,
+ * filter, grouping, aggregations and records the answer was computed from,
+ * composed by the tool and never typed by the model. The chat draws it as the
+ * turn's "How this was computed" block.
+ *
+ * Local until the spec declares the object-query source beside
+ * `DatasetProvenanceSchema` (`@objectstack/spec/ai`, ADR-0149 D3); this type
+ * then becomes that one. `groupBy` and `aggregations` are read in the spec
+ * query's own vocabulary (`GroupByNode`, `AggregationNode`), since the block
+ * echoes the query the tool ran.
+ */
+export interface AnswerSource {
+  /** The object's API name. */
+  object: string;
+  /** The object's label, as the producer served it. */
+  label?: string;
+  /** The filter the tool applied, as served; the renderer lowers it to rows when it can. */
+  filter?: Record<string, unknown> | unknown[];
+  /** Whose records were read; `visible_to_you` is the one the block names. */
+  scope?: string;
+  /** The grouping fields, in order. */
+  groupBy: Array<{ field: string; dateGranularity?: string }>;
+  /** The aggregations, in order; `function` is drawn through the report's words when the spec names it. */
+  aggregations: Array<{ function: string; field?: string }>;
+  /** The records the answer names, in order. */
+  records?: Array<{ id?: string; label: string }>;
+}
+
+/** One member's reading: `undefined` when absent, `false` when present but not the shape. */
+type MemberReading<T> = T | undefined | false;
+
+const nonEmpty = (v: unknown): string | undefined => {
+  const t = typeof v === 'string' ? v.trim() : '';
+  return t.length > 0 ? t : undefined;
+};
+
+function readSourceGroupBy(raw: unknown): MemberReading<AnswerSource['groupBy']> {
+  if (raw === undefined) return undefined;
+  const list = Array.isArray(raw) ? raw : [raw];
+  const out: AnswerSource['groupBy'] = [];
+  for (const entry of list) {
+    const bare = nonEmpty(entry);
+    if (bare) {
+      out.push({ field: bare });
+      continue;
+    }
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+    const e = entry as Record<string, unknown>;
+    const field = nonEmpty(e.field);
+    if (!field) return false;
+    const dateGranularity = nonEmpty(e.dateGranularity);
+    out.push({ field, ...(dateGranularity ? { dateGranularity } : {}) });
+  }
+  return out;
+}
+
+function readSourceAggregations(raw: unknown): MemberReading<AnswerSource['aggregations']> {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw)) return false;
+  const out: AnswerSource['aggregations'] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+    const e = entry as Record<string, unknown>;
+    const fn = nonEmpty(e.function);
+    if (!fn) return false;
+    const field = nonEmpty(e.field);
+    out.push({ function: fn, ...(field ? { field } : {}) });
+  }
+  return out;
+}
+
+function readSourceRecords(raw: unknown): MemberReading<NonNullable<AnswerSource['records']>> {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw)) return false;
+  const out: NonNullable<AnswerSource['records']> = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+    const e = entry as Record<string, unknown>;
+    const label = nonEmpty(e.label);
+    if (!label) return false;
+    const id = nonEmpty(e.id);
+    out.push({ ...(id ? { id } : {}), label });
+  }
+  return out;
+}
+
+/**
+ * Lift a data tool result's `source` block, member by member, so the member
+ * face can draw it and nothing else of the payload. Keys the block does not
+ * declare are left behind; a block without `object`, or with a declared member
+ * that is not its shape, is no block at all, so a producer that drifts is seen
+ * as a missing block rather than drawn half-right. Each member has its own
+ * reader above, so pinning a member's served shape is a change to that reader.
+ */
+export function detectAnswerSource(result: unknown): AnswerSource | undefined {
+  const raw = parseResultEnvelope(result)?.source;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const o = raw as Record<string, unknown>;
+  const object = nonEmpty(o.object);
+  if (!object) return undefined;
+  if (o.label !== undefined && !nonEmpty(o.label)) return undefined;
+  if (o.scope !== undefined && !nonEmpty(o.scope)) return undefined;
+  const filter = o.filter;
+  if (filter !== undefined && (filter === null || typeof filter !== 'object')) return undefined;
+  const groupBy = readSourceGroupBy(o.groupBy);
+  const aggregations = readSourceAggregations(o.aggregations);
+  const records = readSourceRecords(o.records);
+  if (groupBy === false || aggregations === false || records === false) return undefined;
+  return {
+    object,
+    ...(nonEmpty(o.label) ? { label: nonEmpty(o.label) } : {}),
+    ...(filter !== undefined ? { filter: filter as AnswerSource['filter'] } : {}),
+    ...(nonEmpty(o.scope) ? { scope: nonEmpty(o.scope) } : {}),
+    groupBy: groupBy ?? [],
+    aggregations: aggregations ?? [],
+    ...(records ? { records } : {}),
+  };
+}
+
+/**
  * cloud#3565 — 「清理示例数据」: the chat's `remove_sample_data` queues a HITL
  * pending action and answers `{ status:'pending_approval', pendingActionId,
  * sampleDataCleanup:{ tables:[{ objectName, label, count }], total, absent,
@@ -1388,6 +1509,7 @@ function extractToolInvocations(
       const builderHandoff = detectBuilderHandoff(result);
       const recordHandoff = detectRecordHandoff(result);
       const recordWrite = detectRecordWrite(result);
+      const answerSource = detectAnswerSource(result);
       const sampleDataCleanup = detectSampleDataCleanup(result);
       // Promote a dangling `input-*` state to a terminal one so a reloaded
       // conversation never shows "Running" forever (the server doesn't always
@@ -1425,6 +1547,7 @@ function extractToolInvocations(
         builderHandoff,
         recordHandoff,
         recordWrite,
+        answerSource,
         sampleDataCleanup,
         replayOutcome,
       } satisfies ChatToolInvocation;
