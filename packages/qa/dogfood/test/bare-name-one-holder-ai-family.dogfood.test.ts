@@ -27,8 +27,8 @@
 //     package (`?package=`) serves each package's own;
 //   - [#31692, ADR-0150 D6] over the live MCP transport, `prompts/get` of the
 //     bare skill name is refused naming both faces, each face (`NS-NAME`)
-//     serves its own package's skill, and `agent_prompt` serves each face's
-//     own agent;
+//     serves its own package's skill (`agent_prompt` is the stdio transport's
+//     alone: its faces are pinned beside it, in `packages/mcp`);
 //   - `POST /marketplace/install-local` of a package of a THIRD namespace
 //     declaring the held agent and skill names installs; of a co-owner of
 //     `alpha`'s namespace declaring either is 422 PLUGIN_REGISTER_FAILED
@@ -188,6 +188,13 @@ describe('agent and skill names held per namespace, a tool name per deployment, 
     return { text: String(rpc.result?.messages?.[0]?.content?.text ?? '') };
   };
 
+  /** The text `prompts/get` of `name` answers; a JSON-RPC error fails, naming itself. */
+  const promptText = async (name: string, args?: Record<string, string>): Promise<string> => {
+    const { text, error } = await getPrompt(name, args);
+    expect(error, JSON.stringify(error)).toBeUndefined();
+    return text ?? '';
+  };
+
   /** The prompt names `prompts/list` advertises. */
   const promptNames = async (): Promise<string[]> => {
     const rpc = await mcp('prompts/list', {});
@@ -241,8 +248,8 @@ describe('agent and skill names held per namespace, a tool name per deployment, 
   it('MCP: each skill is listed under its own face, each face serves its own skill, and the bare name is refused naming both faces', async () => {
     const names = await promptNames();
     expect(names).toEqual(expect.arrayContaining([`alpha-${SKILL}`, `beta-${SKILL}`]));
-    expect((await getPrompt(`alpha-${SKILL}`)).text).toContain('alpha skill instructions');
-    expect((await getPrompt(`beta-${SKILL}`)).text).toContain('beta skill instructions');
+    expect(await promptText(`alpha-${SKILL}`)).toContain('alpha skill instructions');
+    expect(await promptText(`beta-${SKILL}`)).toContain('beta skill instructions');
     const bare = await getPrompt(SKILL);
     expect(bare.text, 'never silently the first package\'s skill').toBeUndefined();
     expect(bare.error?.data?.code, JSON.stringify(bare.error)).toBe('RESOURCE_CONFLICT');
@@ -250,17 +257,10 @@ describe('agent and skill names held per namespace, a tool name per deployment, 
     expect([...(bare.error?.data?.candidates ?? [])].sort()).toEqual([`alpha-${SKILL}`, `beta-${SKILL}`]);
   });
 
-  it('MCP: `agent_prompt` serves each face\'s own agent', async () => {
-    expect((await getPrompt('agent_prompt', { agentName: `alpha-${AGENT}` })).text).toContain('alpha agent instructions');
-    expect((await getPrompt('agent_prompt', { agentName: `beta-${AGENT}` })).text).toContain('beta agent instructions');
-    const bare = await getPrompt('agent_prompt', { agentName: AGENT });
-    expect(bare.text ?? '', 'never silently the first package\'s agent').not.toContain('agent instructions');
-  });
-
   it('install-local of a co-owner of `alpha`\'s namespace declaring the held agent or skill name is 422 PLUGIN_REGISTER_FAILED, naming the holder and the rename, as before; nothing is installed', async () => {
     for (const [p, collections, type, name] of [
-      ['alpha_mod', { agents: [agent('alpha_mod')] }, 'agent', AGENT],
-      ['alpha_ext', { skills: [skill('alpha_ext')] }, 'skill', SKILL],
+      ['alphamod', { agents: [agent('alphamod')] }, 'agent', AGENT],
+      ['alphaext', { skills: [skill('alphaext')] }, 'skill', SKILL],
     ] as const) {
       const before = await packageIds();
       const { status, body } = await installLocal(inline(p, collections as never, 'alpha'));
@@ -299,9 +299,8 @@ describe('agent and skill names held per namespace, a tool name per deployment, 
     expect(await metaPackage('agent', 'epsilon_agent')).toBe('com.qa.bare.epsilon');
     expect(await metaPackage('skill', 'epsilon_skill')).toBe('com.qa.bare.epsilon');
     expect(await metaPackage('tool', 'epsilon_tool')).toBe('com.qa.bare.epsilon');
-    expect((await getPrompt('epsilon-epsilon_skill')).text).toContain('epsilon skill instructions');
-    expect((await getPrompt('epsilon_skill')).text, 'one holder: the bare name still answers').toContain('epsilon skill instructions');
-    expect((await getPrompt('agent_prompt', { agentName: 'epsilon_agent' })).text).toContain('epsilon agent instructions');
+    expect(await promptText('epsilon-epsilon_skill')).toContain('epsilon skill instructions');
+    expect(await promptText('epsilon_skill'), 'one holder: the bare name still answers').toContain('epsilon skill instructions');
   });
 
   it('[#31701] install-local of a package of a THIRD namespace declaring the held agent and skill names installs; the bare read then names all three holders', async () => {
@@ -315,7 +314,7 @@ describe('agent and skill names held per namespace, a tool name per deployment, 
     await expectMetaRefused('skill', SKILL, all);
     // The first packages' items are unchanged.
     expect(await metaAt('agent', AGENT, 'com.qa.bare.alpha')).toEqual(['com.qa.bare.alpha', 'alpha agent']);
-    expect((await getPrompt(`alpha-${SKILL}`)).text).toContain('alpha skill instructions');
-    expect((await getPrompt(`gamma-${SKILL}`)).text).toContain('gamma skill instructions');
+    expect(await promptText(`alpha-${SKILL}`)).toContain('alpha skill instructions');
+    expect(await promptText(`gamma-${SKILL}`)).toContain('gamma skill instructions');
   });
 });
