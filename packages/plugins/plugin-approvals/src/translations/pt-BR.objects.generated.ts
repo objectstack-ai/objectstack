@@ -35,6 +35,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         label: "Origem",
         help: "Origem da solicitação — `flow:<flowName|nodeId>` para aprovações conduzidas por nó"
       },
+      process_package: {
+        label: "Source Package",
+        help: "The app the flow that opened this request comes from. Filled in by the platform; empty for flows created here."
+      },
       process_label: {
         label: "Fluxo",
         help: "Rótulo do fluxo que abriu esta solicitação, como estava quando ela foi aberta"

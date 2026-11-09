@@ -35,6 +35,10 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         label: "출처",
         help: "요청의 출처 — 노드 기반 승인은 `flow:<flowName|nodeId>`"
       },
+      process_package: {
+        label: "Source Package",
+        help: "The app the flow that opened this request comes from. Filled in by the platform; empty for flows created here."
+      },
       process_label: {
         label: "플로",
         help: "이 요청을 연 플로의 레이블로, 요청을 열 때의 값입니다"

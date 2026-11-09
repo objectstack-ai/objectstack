@@ -50,6 +50,8 @@ export const ptBRGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_email_template.fields.category.options.marketing": "9d7f1456a6e64b03",
   "objects.sys_email_template.fields.category.options.workflow": "926ed40d693c428d",
   "objects.sys_email_template.fields.id.label": "00b0385c9c152888",
+  "objects.sys_email_template.fields.package_id.help": "e1f8cc4d0105cedc",
+  "objects.sys_email_template.fields.package_id.label": "aacf5e74a8641b2b",
   "objects.sys_email_template.fields.reply_to.label": "90ad8f2ca791a95a",
   "objects.sys_exchange_rate.fields.id.label": "00b0385c9c152888",
   "objects.sys_exchange_rate.fields.source.options.app": "0c4630a782d594ab",
