@@ -599,6 +599,7 @@ import {
 } from './protocol-meta-list-reads.js';
 // [#25467 E2 cut 1b] The metadata item reads and the layered reads.
 import { getMetaItem, getMetaItemForExecution, readMetaItem } from './protocol-meta-item-reads.js';
+import { admitEnvironmentQualifier, resolveMetaItemAddress, type MetaItemAddress } from './protocol-exact-qualifier.js';
 import { getMetaItemLayered, packagelessLayeredReadRefusal } from './protocol-meta-layered-reads.js';
 // [#25467 E2 section 3] The single-record data writes.
 import { createData, deleteData, updateData, validateData } from './protocol-data-writes.js';
@@ -3997,6 +3998,31 @@ export class ObjectStackProtocolImplementation implements
             get reportedMultiAppPackages() { return readReportedMultiAppPackages(); },
         };
         return (resolveAppPackageIdKey<R>).call(host, request);
+    }
+
+    /**
+     * [ADR-0150 D5, epic #31527 child G1] How the qualified by-name path
+     * `GET /meta/:type/:segment/:name` reads its middle segment: `_env`, an
+     * installed namespace (the read is then `?package=<holder>`, the exact
+     * qualifier {@link getMetaItem} judges), or `undefined` — no qualified
+     * address. Both transports ask it, after checking the last segment against
+     * {@link META_ITEM_SUBRESOURCE_SEGMENTS}, which keeps its route.
+     */
+    resolveMetaItemAddress(request: { type: string; segment: string; name: string }): MetaItemAddress | undefined {
+        const address = resolveMetaItemAddress(protocolHost(this), canonicalizeMetaRequestType(request));
+        return address;
+    }
+
+    /**
+     * [ADR-0150 D5, child G1] Judge a read addressed to the environment
+     * (`GET /meta/:type/_env/:name`) before it is read as a caller with no
+     * package: refused naming every holder when packages hold the name and the
+     * environment does not. See {@link admitEnvironmentQualifier}.
+     *
+     * @throws {PackageScopedNameRefusedError} `409 RESOURCE_CONFLICT`.
+     */
+    admitEnvironmentQualifier(request: { type: string; name: string; member?: string }): void {
+        admitEnvironmentQualifier(protocolHost(this), canonicalizeMetaRequestType(request));
     }
 
     /**

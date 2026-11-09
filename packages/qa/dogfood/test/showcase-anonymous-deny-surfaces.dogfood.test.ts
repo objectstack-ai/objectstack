@@ -308,7 +308,8 @@ interface MetaWriteDoor {
  * no longer exist. A retired door cannot sit in this table: the registered-door
  * anti-vacuity leg below asserts `.not.toBe(404)`, which is exactly what a
  * retired route answers. Its own case lives beside these — the compound
- * spelling must now 404 for EVERYONE, anonymous or not.
+ * spelling must now be unrouted for EVERYONE, anonymous or not (405 with
+ * `Allow: GET, HEAD` since the qualified read, ADR-0150 D5, shares its shape).
  */
 const META_WRITE_DOORS: readonly MetaWriteDoor[] = [
   { seam: 'POST /meta/_migrate-stored', method: 'POST', path: '/meta/_migrate-stored', body: {} },
@@ -528,18 +529,29 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     expect(body.error?.code).toBe('RESOURCE_NOT_FOUND');
   });
 
-  it('[#12176 D3] the retired compound save routes NOWHERE — 404 for everyone, not a 401', async () => {
+  it('[#12176 D3] the retired compound save routes NOWHERE — no PUT on that shape, for everyone, not a 401', async () => {
     // The compound arity used to be the sixth row of the table above. Retired,
-    // it must answer the same 404 to an anonymous caller and to a member: a
-    // 401 here would mean the route is BACK (an auth floor only speaks for a
-    // door that exists), and #6603's history says a re-mounted compound door
-    // arrives ungated. The composed-app leg of that statement lives here; the
-    // registrar-level absence pins live in
+    // it must answer the same unrouted answer to an anonymous caller and to a
+    // member: a 401 here would mean the route is BACK (an auth floor only
+    // speaks for a door that exists), and #6603's history says a re-mounted
+    // compound door arrives ungated. The composed-app leg of that statement
+    // lives here; the registrar-level absence pins live in
     // `rest/src/meta-compound-save-and-reset-capability-gate.test.ts`.
-    const anonRes = await anon('PUT', RETIRED_COMPOUND_PATH, { name: META_PROBE_VIEW });
-    expect(anonRes.status, 'retired compound save must be unrouted, not auth-refused').toBe(404);
-    const memberRes = await stack.apiAs(memberToken, 'PUT', RETIRED_COMPOUND_PATH, { name: META_PROBE_VIEW });
-    expect(memberRes.status, 'a session must not change the answer on a route that is gone').toBe(404);
+    //
+    // [ADR-0150 D5, #31691] The shape `/meta/:type/:x/:y` now has ONE route,
+    // the qualified by-name READ `GET /meta/:type/:ns/:name`. So the adapter's
+    // unmatched sink answers a PUT there `405 METHOD_NOT_ALLOWED` with the
+    // verbs the shape does serve — `GET, HEAD` and never `PUT` — where it
+    // answered 404 while the shape had no route at all. Either way no PUT is
+    // routed, and no auth floor speaks.
+    const unrouted = async (res: Response, who: string) => {
+      const body = (await res.json()) as { error?: { code?: string; details?: { allowed?: string[] } } };
+      expect([res.status, body.error?.code], `${who}: the retired compound save must be unrouted, not auth-refused`)
+        .toEqual([405, 'METHOD_NOT_ALLOWED']);
+      expect(body.error?.details?.allowed, `${who}: the shape serves the qualified read only`).toEqual(['GET', 'HEAD']);
+    };
+    await unrouted(await anon('PUT', RETIRED_COMPOUND_PATH, { name: META_PROBE_VIEW }), 'anonymous');
+    await unrouted(await stack.apiAs(memberToken, 'PUT', RETIRED_COMPOUND_PATH, { name: META_PROBE_VIEW }), 'member');
   });
 
   // ── /data (surface-level; served by @objectstack/rest, its sole owner) ──

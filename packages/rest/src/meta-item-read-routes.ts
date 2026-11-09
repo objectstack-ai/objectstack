@@ -172,6 +172,9 @@ export interface MetaItemReadRouteHost {
     sendMetaReadRefusal: (typeof RestServer)['sendMetaReadRefusal'];
 }
 
+/** The `GET /meta/:type/:name` handler, as the route manager runs it. */
+export type MetaItemReadHandler = (req: any, res: any) => Promise<void>;
+
 /**
  * Register the `/meta` per-item reads — the reference sweep, the layered read,
  * the book tree and the item read, the fourth group of
@@ -181,8 +184,13 @@ export interface MetaItemReadRouteHost {
  * the published declaration carries, names the families, their switches and
  * the ordering facts the routes below keep.
  */
-export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: MetaRouteScope): void {
+export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: MetaRouteScope): MetaItemReadHandler | undefined {
     const { metadata, metaPath, isScoped } = scope;
+    // [ADR-0150 D5, epic #31527 child G1] The item read's handler, handed back
+    // to the registrar so the qualified path `GET /meta/:type/:ns/:name`
+    // (`meta-qualified-item-route.ts`, registered after every literal sibling)
+    // answers through THIS handler, never a copy of it.
+    let readItem: MetaItemReadHandler | undefined;
 
     // GET /meta/:type/:name - Get specific item
     //
@@ -440,7 +448,7 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
         this.routeManager.register({
             method: 'GET',
             path: `${metaPath}/:type/:name`,
-            handler: async (req: any, res: any) => {
+            handler: readItem = async (req: any, res: any) => {
                 try {
                     // [#6877] Declared at the top for the same reason #3984
                     // normalizes `:type` here: this handler reads its query
@@ -1186,6 +1194,7 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
             },
         });
     }
+    return readItem;
 }
 
 // [#23050 slice 13b] Moved here from `rest-server.ts`, verbatim, with the body above:

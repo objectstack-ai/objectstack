@@ -43,11 +43,11 @@
  *     `POST {dataPrefix}/:object/query`. The query door has no switch of its
  *     own, so a pin asserting "the list route disappeared" passes while half
  *     the intent is broken.
- *   - `metadata.endpoints.item` gates THIRTEEN — the per-item reads, `PUT`,
- *     `DELETE`, the whole history family and the app metadata bundle
- *     (#27627). A pin that only watched
- *     `GET {prefix}/:type/:name` would sit green through twelve of them
- *     moving, which is the state #15854 measured.
+ *   - `metadata.endpoints.item` gates FOURTEEN — the per-item reads, `PUT`,
+ *     `DELETE`, the whole history family, the app metadata bundle
+ *     (#27627) and the qualified by-name read (ADR-0150 D5, #31691). A pin
+ *     that only watched `GET {prefix}/:type/:name` would sit green through
+ *     the others moving, which is the state #15854 measured.
  *   - `metadata.endpoints.maintenance` gates FOUR, two of them write doors:
  *     `POST {prefix}/_migrate-stored` and the record-currency code backfill
  *     `POST {prefix}/_migrate-record-currency-codes`.
@@ -233,6 +233,8 @@ const CASES: Array<{ path: string; removes: string[] }> = [
             `GET ${META}/:type/:name/layers`,
             `GET ${META}/:type/:name/published`,
             `GET ${META}/:type/:name/references`,
+            // [ADR-0150 D5, #31691 G1] The qualified by-name read rides the item read's own handler.
+            `GET ${META}/:type/:ns/:name`,
             `GET ${META}/app/:appId/bundle`,
             `GET ${META}/book/:name/tree`,
             `POST ${META}/:type/:name/publish`,
@@ -273,6 +275,8 @@ const CASES: Array<{ path: string; removes: string[] }> = [
             `GET ${META}/:type/:name/layers`,
             `GET ${META}/:type/:name/published`,
             `GET ${META}/:type/:name/references`,
+            // [ADR-0150 D5, #31691 G1] The qualified by-name read rides the item read's own handler.
+            `GET ${META}/:type/:ns/:name`,
             `GET ${META}/_drafts`,
             `GET ${META}/app/:appId/bundle`,
             `GET ${META}/book/:name/tree`,

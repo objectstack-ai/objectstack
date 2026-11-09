@@ -60,7 +60,11 @@ import { OWNERSHIP_QUEUE_SERVICE, type IOwnershipQueueService, type ISharingRule
 import {
     METADATA_ACTIVATION_TABLE,
     ObjectStoreMetadataActivationStore,
+    PackageScopedNameRefusedError,
+    packageScopedRefusalMessage,
     securityCatalogReaderOf,
+    type PackageScopedHolder,
+    type PackageScopedRefusal,
     type SecurityCatalogEntry,
 } from '@objectstack/core';
 import {
@@ -183,12 +187,62 @@ function declaredAssignmentRuleNamed(
     const registry = (ql as { registry?: { listItems?: (type: string) => unknown } } | null | undefined)?.registry;
     if (typeof registry?.listItems !== 'function') return undefined;
     return Promise.resolve(registry.listItems('assignment_rule')).then((items) => {
-        const item = (Array.isArray(items) ? items : [])
-            .find((i: any) => i && typeof i === 'object' && i.name === name) as Record<string, unknown> | undefined;
-        if (!item) return null;
-        const packageId = item._packageId ?? item.packageId;
-        return { name, ...(typeof packageId === 'string' && packageId ? { packageId } : {}) };
+        const declared = (Array.isArray(items) ? items : [])
+            .filter((i: any) => i && typeof i === 'object' && i.name === name) as Array<Record<string, unknown>>;
+        if (declared.length === 0) return null;
+        const packageOf = (item: Record<string, unknown>): string | undefined => {
+            const packageId = item._packageId ?? item.packageId;
+            return typeof packageId === 'string' && packageId ? packageId : undefined;
+        };
+        // [ADR-0150 D3/D5, child G1] Two packages declaring the name are two
+        // items, and the door names neither by package: refused naming every
+        // holder (`409 RESOURCE_CONFLICT`), never the first one listed.
+        const holders = [...new Set(declared.map(packageOf))];
+        if (holders.length > 1) {
+            const candidates: PackageScopedHolder[] = holders.map((packageId) =>
+                (packageId === undefined ? { kind: 'environment' as const } : { kind: 'package' as const, packageId }));
+            const refusal = {
+                status: 'refused' as const,
+                reason: 'ambiguous-in-environment' as const,
+                type: 'assignment_rule' as const,
+                name,
+                callerPackageId: null,
+                candidates,
+            };
+            throw new PackageScopedNameRefusedError({ ...refusal, message: packageScopedRefusalMessage(refusal) });
+        }
+        const packageId = packageOf(declared[0]);
+        return { name, ...(packageId ? { packageId } : {}) };
     });
+}
+
+/**
+ * [ADR-0150 D5, epic #31527 child G1] The package-scoped rule's refusal a
+ * declared-name reader threw (plugin-sharing's `declaredRuleNamed` and
+ * `declaredQueueNamed` since E4, the assignment-rule lookup above), or
+ * `undefined` for any other failure. A refusal is an answer about the name —
+ * two holders, nothing picked — never a read that failed, so the door answers
+ * it as one.
+ */
+function packageScopedRefusalOf(err: unknown): PackageScopedRefusal | undefined {
+    if (err instanceof PackageScopedNameRefusedError) return err.refusal;
+    const refusal = (err as { code?: unknown; refusal?: Partial<PackageScopedRefusal> } | null | undefined);
+    return refusal?.code === 'RESOURCE_CONFLICT' && refusal.refusal?.status === 'refused'
+        && Array.isArray(refusal.refusal.candidates) && typeof refusal.refusal.message === 'string'
+        ? refusal.refusal as PackageScopedRefusal
+        : undefined;
+}
+
+/**
+ * The door's answer to a refused name: `409 RESOURCE_CONFLICT`, the
+ * resolver's sentence, and every candidate in the envelope — the shape the
+ * `/actions` door answers its own refusal with. Nothing is written.
+ */
+function refusedNameAnswer(deps: DomainHandlerDeps, refusal: PackageScopedRefusal): HttpDispatcherResult {
+    return {
+        handled: true,
+        response: deps.error(refusal.message, 409, { code: 'RESOURCE_CONFLICT', candidates: refusal.candidates }),
+    };
 }
 
 /**
@@ -377,6 +431,8 @@ export async function handleCatalogActivationWrite(
         try {
             entry = (await pending) ?? undefined;
         } catch (err: any) {
+            const refusal = packageScopedRefusalOf(err);
+            if (refusal) return refusedNameAnswer(deps, refusal);
             return {
                 handled: true,
                 response: deps.error(
@@ -416,6 +472,8 @@ export async function handleCatalogActivationWrite(
     try {
         if (reader) entry = (await reader.resolve(type as 'position' | 'permission', name)) as SecurityCatalogEntry | undefined;
     } catch (err: any) {
+        const refusal = packageScopedRefusalOf(err);
+        if (refusal) return refusedNameAnswer(deps, refusal);
         return {
             handled: true,
             response: deps.error(
