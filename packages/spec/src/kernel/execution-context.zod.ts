@@ -68,6 +68,28 @@ export const AUTH_GATE_SCOPES: Readonly<Record<AuthGateCode, AuthGateScope>> = O
   MFA_REQUIRED: 'account',
 });
 
+/**
+ * [ADR-0150 D3] The address of ONE granted permission set: the package that
+ * holds it and its name. Permission sets are behavioural metadata, identified
+ * by `(package, name)`, so a name alone does not say which set a principal
+ * holds once two packages may each declare one of that name.
+ *
+ * `packageId` is a non-empty package id, or `null` for a set that no package
+ * holds: one the environment authored, or one the platform registers. It is
+ * always present, never omitted, and never `''`: an address names its
+ * holder, the `null` holder included (the `packageId: z.string().nullable()`
+ * spelling of the pending-drafts read in `api/protocol.zod.ts`, tightened to
+ * non-empty).
+ */
+export const PermissionSetAddressSchema = lazySchema(() => z.object({
+  packageId: z.string().min(1).nullable().describe('The package that holds the permission set, a non-empty package id; `null` for a set no package holds (environment-authored, or registered by the platform). Always present: an address names its holder.'),
+  name: z.string().min(1).describe('The permission set\'s name, as its holder declares it (never rewritten or prefixed).'),
+}).describe('The address of one granted permission set (ADR-0150 D3): the package that holds it (`null` for the environment\'s own or the platform\'s) and its name.'));
+/** Caller-supplied form of {@link PermissionSetAddressSchema}. */
+export type PermissionSetAddress = z.input<typeof PermissionSetAddressSchema>;
+/** Post-parse form of {@link PermissionSetAddressSchema}. */
+export type PermissionSetAddressParsed = z.infer<typeof PermissionSetAddressSchema>;
+
 export const ExecutionContextSchema = lazySchema(() => z.object({
   /** Current user ID (resolved from session) */
   userId: z.string().optional(),
@@ -380,6 +402,25 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
 
   /** Aggregated permission names (resolved from PermissionSet) */
   permissions: z.array(z.string()).default([]),
+
+  /**
+   * [ADR-0150 D3] The permission sets the principal was granted, each as its
+   * address `(packageId, name)` ({@link PermissionSetAddressSchema}).
+   *
+   * Filled only from a resolved `(package, name)`: the resolver writes the
+   * holder the D3 resolution rule answered, never a holder it guessed. A name
+   * the rule refuses never appears here.
+   *
+   * {@link permissions} stays the display and compatibility field, with the
+   * same order and contents as before; this field sits beside it and changes
+   * nothing about it. No reader consumes this field yet.
+   *
+   * Optional with NO default: a context resolved without addresses parses
+   * without the key, and since no reader consumes it yet, its absence changes
+   * no answer anywhere. It is not an access gate.
+   * Server-constructed only, never client-supplied.
+   */
+  permissionSetAddresses: z.array(PermissionSetAddressSchema).optional().describe('The permission sets the principal was granted, each as its (packageId, name) address (ADR-0150 D3). Filled only from a resolved (package, name), never from a guessed holder; a name the resolution rule refuses never appears. `permissions` stays the display and compatibility field, same order and contents. Optional with no default: a context resolved without addresses parses without the key, and since no reader consumes it yet its absence changes no answer. Not an access gate. Server-constructed only, never client-supplied.'),
 
   /**
    * Aggregated system permissions (union of `PermissionSet.systemPermissions`

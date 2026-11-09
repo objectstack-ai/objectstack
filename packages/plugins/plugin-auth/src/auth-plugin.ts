@@ -94,6 +94,7 @@ import { registerUserPreferenceHooks } from './user-preference-hooks.js';
 import { registerServiceAccountRowGuard } from './service-account-identity.js';
 import { personalViewCallerResolver, registerPersonalViewRoutes, PERSONAL_VIEW_REMOVE_ROUTE, type PersonalViewEngine } from './personal-view-routes.js';
 import { registerMembershipEndedSessionTrigger } from './membership-ended-session.js';
+import { registerServiceAccountOwnerLeavesTrigger } from './service-account-owner-leaves.js';
 import { registerMemberRoleCanonicalization } from './member-role-canonical.js';
 import { registerUserLocaleCaseFold } from './sys-user-locale-case.js';
 import { registerSessionFirstActivity } from './session-first-activity.js';
@@ -2103,6 +2104,12 @@ export class AuthPlugin implements Plugin {
         // `resolve-authz-context.ts`, which stays untouched.
         registerMembershipEndedSessionTrigger(engine, {
           packageId: 'com.objectstack.plugin-auth.membership-ended-session',
+          logger: ctx.logger,
+        });
+        // [ADR-0151 D6] An AI service account whose accountable owner leaves
+        // its organization is suspended, on the same two sys_member seams.
+        registerServiceAccountOwnerLeavesTrigger(engine, {
+          packageId: 'com.objectstack.plugin-auth.service-account-owner-leaves',
           logger: ctx.logger,
         });
       } catch {
@@ -4162,7 +4169,9 @@ export class AuthPlugin implements Plugin {
         ...(typeof impersonatedBy === 'string' && impersonatedBy.trim() !== '' ? { impersonatedBy: impersonatedBy.trim() } : {}),
       };
     };
-    const serviceAccountDeps = (): import('./service-account-doors.js').ServiceAccountDoorDeps => ({
+    type ServiceAccountDeps = import('./service-account-doors.js').ServiceAccountDoorDeps
+      & import('./service-account-lifecycle.js').ServiceAccountLifecycleDeps;
+    const serviceAccountDeps = (): ServiceAccountDeps => ({
       getDataEngine: () => this.authManager!.getDataEngine() as any,
       addMember: async ({ userId, organizationId }) => {
         const authApi: any = await this.authManager!.getApi();
@@ -4178,9 +4187,9 @@ export class AuthPlugin implements Plugin {
       resolveApiKeyLifecyclePolicy: () => this.authManager!.resolveApiKeyLifecyclePolicy(),
     });
     const serviceAccountRoute = (
-      path: 'register' | 'create-key',
+      path: string,
       run: (
-        deps: import('./service-account-doors.js').ServiceAccountDoorDeps,
+        deps: ServiceAccountDeps,
         caller: import('./service-account-doors.js').ServiceAccountCaller,
         request: Request,
       ) => Promise<import('./admin-user-endpoints.js').EndpointResult>,
@@ -4211,6 +4220,34 @@ export class AuthPlugin implements Plugin {
     rawApp.post(`${basePath}/service-account/create-key`, serviceAccountRoute('create-key', async (deps, caller, request) => {
       const { runCreateServiceAccountKey } = await import('./service-account-doors.js');
       return runCreateServiceAccountKey(deps, caller, request);
+    }));
+    // [ADR-0151 D6] The lifecycle: suspend (the owner or an administrator),
+    // resume, set-owner and retire (an administrator), and one key's revoke
+    // and restore (the owner or an administrator). Same session-only caller
+    // (service-account-lifecycle.ts).
+    rawApp.post(`${basePath}/service-account/suspend`, serviceAccountRoute('suspend', async (deps, caller, request) => {
+      const { runSuspendServiceAccount } = await import('./service-account-lifecycle.js');
+      return runSuspendServiceAccount(deps, caller, request);
+    }));
+    rawApp.post(`${basePath}/service-account/resume`, serviceAccountRoute('resume', async (deps, caller, request) => {
+      const { runResumeServiceAccount } = await import('./service-account-lifecycle.js');
+      return runResumeServiceAccount(deps, caller, request);
+    }));
+    rawApp.post(`${basePath}/service-account/set-owner`, serviceAccountRoute('set-owner', async (deps, caller, request) => {
+      const { runSetServiceAccountOwner } = await import('./service-account-lifecycle.js');
+      return runSetServiceAccountOwner(deps, caller, request);
+    }));
+    rawApp.post(`${basePath}/service-account/retire`, serviceAccountRoute('retire', async (deps, caller, request) => {
+      const { runRetireServiceAccount } = await import('./service-account-lifecycle.js');
+      return runRetireServiceAccount(deps, caller, request);
+    }));
+    rawApp.post(`${basePath}/service-account/revoke-key`, serviceAccountRoute('revoke-key', async (deps, caller, request) => {
+      const { runRevokeServiceAccountKey } = await import('./service-account-lifecycle.js');
+      return runRevokeServiceAccountKey(deps, caller, request);
+    }));
+    rawApp.post(`${basePath}/service-account/restore-key`, serviceAccountRoute('restore-key', async (deps, caller, request) => {
+      const { runRestoreServiceAccountKey } = await import('./service-account-lifecycle.js');
+      return runRestoreServiceAccountKey(deps, caller, request);
     }));
 
     // ────────────────────────────────────────────────────────────────────
