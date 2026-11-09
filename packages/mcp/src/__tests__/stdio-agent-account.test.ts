@@ -41,6 +41,19 @@ interface FindCall {
   options: { context?: ExecutionContext; where?: Record<string, unknown> };
 }
 
+/**
+ * Scalar equality only. A combinator or an operator is not implemented here, so
+ * it is refused rather than read as a field name.
+ */
+function matchesWhere(row: Record<string, unknown>, where: Record<string, unknown>): boolean {
+  return Object.entries(where).every(([k, v]) => {
+    if (k.startsWith('$') || (v !== null && typeof v === 'object')) {
+      throw new Error(`stdio-agent-account double: unsupported where ${JSON.stringify(where)}`);
+    }
+    return row[k] === v;
+  });
+}
+
 function createHarness() {
   const finds: FindCall[] = [];
   const ql = {
@@ -49,7 +62,7 @@ function createHarness() {
       const rows = TABLES[object];
       if (!rows) return object.startsWith('sys_') ? [] : [{ id: 'r_1', name: 'Acme' }];
       const where = options?.where ?? {};
-      return rows.filter((row) => Object.entries(where).every(([k, v]) => row[k] === v));
+      return rows.filter((row) => matchesWhere(row, where));
     }),
   };
   const metadata = {

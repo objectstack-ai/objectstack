@@ -14,6 +14,8 @@
 // (`connector-connection-door.test.ts`).
 
 import { describe, it, expect, vi } from 'vitest';
+// The stack loads the metadata service lazily; pay that load at collection, never in a clocked case.
+import '@objectstack/metadata';
 
 import { PLATFORM_CAPABILITIES } from '@objectstack/spec/security';
 import { assembleExecutionContext } from '@objectstack/core';

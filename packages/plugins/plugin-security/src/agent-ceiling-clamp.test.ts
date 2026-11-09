@@ -119,7 +119,7 @@ describe('the security plugin reads every agent principal\'s sets under the ceil
     const services: Record<string, unknown> = {
       manifest: { register: vi.fn() },
       // An engine double: the middleware is registered and never driven here.
-      objectql: { registerMiddleware: vi.fn(), getSchema: () => undefined, find: async () => [], findOne: async () => null },
+      objectql: { registerMiddleware: vi.fn(), getSchema: () => undefined, find: async () => [] },
       metadata: { get: async () => null, list: async () => [BREACHING, CLEAN] },
     };
     const ctx = {

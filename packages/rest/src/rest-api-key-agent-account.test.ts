@@ -9,6 +9,8 @@
 // uses). CONTROL: a person's key over the same store is unchanged.
 
 import { describe, it, expect, vi } from 'vitest';
+// The route modules load ObjectQL lazily; pay that load at collection, never in a clocked case.
+import '@objectstack/objectql';
 import { hashApiKey } from '@objectstack/core';
 import { RestServer } from './rest-server';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
@@ -41,33 +43,40 @@ const USERS: Record<string, Record<string, unknown>> = {
     u_mia: { id: 'u_mia', email: 'mia@example.com', principal_kind: 'human' },
 };
 
+/** The rows the store holds for `object` under the `where` of `opts`, before any bound. */
+function rowsOf(object: string, opts: any): Record<string, unknown>[] {
+    const where = opts?.where ?? {};
+    if (object === 'sys_api_key') {
+        const rows = [
+            { id: 'k_bot', key: hashApiKey(BOT_KEY), revoked: false, user_id: 'u_bot', expires_at: FUTURE, active_organization_id: 'org_a' },
+            { id: 'k_mia', key: hashApiKey(MIA_KEY), revoked: false, user_id: 'u_mia', expires_at: FUTURE, active_organization_id: 'org_a' },
+        ];
+        return rows.filter((row) => Object.entries(where).every(([k, v]) => (row as any)[k] === v));
+    }
+    if (object === 'sys_user') return USERS[where.id] ? [USERS[where.id]] : [];
+    if (object === 'sys_member') {
+        const rows = [
+            { user_id: 'u_bot', organization_id: 'org_a', role: 'member' },
+            { user_id: 'u_mia', organization_id: 'org_a', role: 'member' },
+        ];
+        return rows.filter((row) => Object.entries(where).every(([k, v]) => (row as any)[k] === v));
+    }
+    if (object === 'sys_organization') return [{ id: 'org_default', slug: 'default' }];
+    if (object === 'sys_user_permission_set') {
+        if (where.user_id !== 'u_bot' && where.user_id !== 'u_mia') return [];
+        return [
+            { user_id: where.user_id, permission_set: 'ops_tools', organization_id: 'org_a' },
+            { user_id: where.user_id, permission_set: 'admin_full_access', organization_id: 'org_default' },
+        ];
+    }
+    return [];
+}
+
 const makeQl = () => bindTestSecurityCatalog({
+    // The caller's bound applies after the filter, by presence, as ObjectQL applies it.
     find: async (object: string, opts: any) => {
-        const where = opts?.where ?? {};
-        if (object === 'sys_api_key') {
-            const rows = [
-                { id: 'k_bot', key: hashApiKey(BOT_KEY), revoked: false, user_id: 'u_bot', expires_at: FUTURE, active_organization_id: 'org_a' },
-                { id: 'k_mia', key: hashApiKey(MIA_KEY), revoked: false, user_id: 'u_mia', expires_at: FUTURE, active_organization_id: 'org_a' },
-            ];
-            return rows.filter((row) => Object.entries(where).every(([k, v]) => (row as any)[k] === v));
-        }
-        if (object === 'sys_user') return USERS[where.id] ? [USERS[where.id]] : [];
-        if (object === 'sys_member') {
-            const rows = [
-                { user_id: 'u_bot', organization_id: 'org_a', role: 'member' },
-                { user_id: 'u_mia', organization_id: 'org_a', role: 'member' },
-            ];
-            return rows.filter((row) => Object.entries(where).every(([k, v]) => (row as any)[k] === v));
-        }
-        if (object === 'sys_organization') return [{ id: 'org_default', slug: 'default' }];
-        if (object === 'sys_user_permission_set') {
-            if (where.user_id !== 'u_bot' && where.user_id !== 'u_mia') return [];
-            return [
-                { user_id: where.user_id, permission_set: 'ops_tools', organization_id: 'org_a' },
-                { user_id: where.user_id, permission_set: 'admin_full_access', organization_id: 'org_default' },
-            ];
-        }
-        return [];
+        const rows = rowsOf(object, opts);
+        return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
     },
 }, {
     permissions: [

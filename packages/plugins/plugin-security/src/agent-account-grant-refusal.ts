@@ -32,14 +32,22 @@
  * so no existing write is narrowed. A DELETE is never judged.
  *
  * It stands down on every `isSystem` write, the stand-down its sibling
- * refusals on these tables take, and on a value the catalog holds no
- * definition for (the catalog refusals answer that).
+ * refusals on these tables take; on a value the catalog holds no definition
+ * for (the catalog refusals answer that); in a composition with no `sys_user`
+ * object; and on a holder the caller's own read door does not return. That
+ * last one is the membership refusal's discipline: the engine's reference
+ * check answers an unreadable holder as one that does not exist, and a
+ * refusal naming its kind would tell the caller what it cannot read. The
+ * clamp at evaluation still holds for such a row.
  *
  * ## Reads, and what a failed one does
  *
- * One `sys_user` read per judged row, by id, under the system context in the
- * writer's transaction; a read that throws propagates, as the membership
- * refusal's does. The set and position definitions come from the security
+ * First the caller's own read of the holder, projected to its id — the read
+ * the membership refusal asks, memoised per write, so a row both judge pays
+ * it once (`callerReadsGrantHolder`). Then, for a holder the caller reads,
+ * one `sys_user` read by id under the system context in the writer's
+ * transaction; a read that throws propagates, as the membership refusal's
+ * does. The set and position definitions come from the security
  * catalog bound to the engine (`securityCatalogReaderOf`, the reader every
  * grant refusal asks). A catalog read that throws is reported at `warn` and
  * the write proceeds unjudged: the clamp still holds.
@@ -63,6 +71,7 @@ import type { FieldErrorCode } from '@objectstack/spec/api';
 import { classifyFilterToken, isPlainRecord } from '@objectstack/spec/data';
 import { validationFailure } from '@objectstack/types';
 import { agentCeilingBreaches } from './agent-ceiling-clamp.js';
+import { callerReadsGrantHolder } from './grant-holder-membership-refusal.js';
 import { GRANT_OBJECT, GRANT_SET_NAME_FIELD, grantSetNameOf } from './grant-permission-set-name.js';
 import { POSITION_ASSIGNMENT_OBJECT, POSITION_FIELD } from './position-catalog-refusal.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
@@ -171,6 +180,7 @@ interface AgentAccountGrantEngine {
   ) => void;
   unregisterHooksByPackage?: (packageId: string) => number;
   find?: (object: string, query: any) => Promise<any[]>;
+  getSchema?: (object: string) => unknown;
 }
 
 type Logger = { warn?: (msg: string, meta?: any) => void } | undefined;
@@ -192,6 +202,8 @@ function nameOf(value: unknown): string | undefined {
 /** Is `userId` an AI service account? One `sys_user` read by id, in the writer's transaction. Throws when it fails. */
 async function isAgentAccount(engine: AgentAccountGrantEngine, userId: string, transaction: unknown): Promise<boolean> {
   if (typeof engine.find !== 'function') return false;
+  // A composition with no user object holds no account to judge.
+  if (typeof engine.getSchema === 'function' && !engine.getSchema(USER_OBJECT)) return false;
   const context: Record<string, unknown> = { isSystem: true };
   if (transaction !== undefined) context.transaction = transaction;
   // A placeholder-shaped id is compared literally, as the membership refusal compares it.
@@ -232,6 +244,10 @@ async function judge(
   if (value === undefined) return;
   const catalog = securityCatalogReaderOf(engine);
   if (!catalog) return;
+  // A holder the caller's own door does not read is never read here: the
+  // engine's reference check (or the stored row) answers it, and an answer
+  // naming the holder's kind would tell the caller what it cannot read.
+  if ((await callerReadsGrantHolder(ctx, image[HOLDER_FIELD], userId)) === false) return;
   if (!(await isAgentAccount(engine, userId, ctx?.transaction))) return;
   let breaching: AgentAccountBreachingSet[];
   try {

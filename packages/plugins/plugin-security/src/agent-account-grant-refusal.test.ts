@@ -24,6 +24,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveThrownHttpError } from '@objectstack/types';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { SysUser } from '@objectstack/platform-objects/identity';
+import { bindSecurityCatalogReader } from '@objectstack/core';
 
 import { SecurityPlugin } from './security-plugin.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
@@ -215,6 +216,46 @@ describe('[ADR-0151 D3] a set above the agent ceiling is refused for an AI servi
     const h = await boot();
     await h.engine.insert('sys_user_permission_set', { user_id: 'u_bot', permission_set: BREACHING_SET, organization_id: ORG }, { context: { ...SYS, tenantId: ORG } });
     expect(await rows(h, 'sys_user_permission_set', { user_id: 'u_bot' })).toHaveLength(1);
+  });
+
+  /** The bound `beforeInsert` handler over a double engine whose user row is an account. */
+  function boundInsertHandler(opts: { hasUserObject: boolean }) {
+    const handlers: Record<string, (ctx: any) => Promise<void>> = {};
+    const find = vi.fn(async () => [{ id: 'u_bot', principal_kind: 'agent' }]);
+    const engine = {
+      registerHook: (event: string, handler: any) => { handlers[event] = handler; },
+      find,
+      getSchema: (name: string) => (name === 'sys_user' && !opts.hasUserObject ? undefined : { name }),
+    };
+    bindSecurityCatalogReader(engine, {
+      resolve: async (kind: string, name: string) => (kind === 'permission' && name === BREACHING_SET
+        ? { definition: { name, objects: { crm_lead: { allowRead: true, viewAllRecords: true } } } }
+        : undefined),
+    } as any);
+    expect(registerAgentAccountGrantRefusal(engine)).toBe(true);
+    return { handler: handlers.beforeInsert!, find };
+  }
+
+  const insertCtx = (callerReads: boolean) => ({
+    object: 'sys_user_permission_set',
+    session: { userId: 'u_caller' },
+    input: { data: { user_id: 'u_bot', permission_set: BREACHING_SET } },
+    api: { object: () => ({ find: async () => (callerReads ? [{ id: 'u_bot' }] : []) }) },
+  });
+
+  it('a holder the caller\'s own door does not read is never read as the system, and is not judged here', async () => {
+    const { handler, find } = boundInsertHandler({ hasUserObject: true });
+    await expect(handler(insertCtx(false))).resolves.toBeUndefined();
+    expect(find).not.toHaveBeenCalled();
+    // CONTROL: the same row, with a holder the caller reads, is read and refused.
+    expectAccountRefusal(await refusalOf(() => handler(insertCtx(true))), 'permission_set', BREACHING_SET);
+    expect(find).toHaveBeenCalledTimes(1);
+  });
+
+  it('a composition with no sys_user object has no account to judge, and reads none', async () => {
+    const { handler, find } = boundInsertHandler({ hasUserObject: false });
+    await expect(handler(insertCtx(true))).resolves.toBeUndefined();
+    expect(find).not.toHaveBeenCalled();
   });
 
   it('binds once, and says so when the engine has no hook registry', () => {
