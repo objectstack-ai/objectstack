@@ -116,6 +116,7 @@ SKILL.md download (`GET /api/v1/mcp/skill`), and API-key minting.
   - **`suspend`** (its owner or an administrator) stops every key on its
     next call, without revoking any; **`resume`** (an administrator only, so
     an owner cannot undo an administrator's stop) lets the same keys work again.
+    A ban a platform administrator placed only a platform administrator lifts.
   - **`revoke-key`** and **`restore-key`** (its owner or an administrator)
     stop or restart one key and leave its others alone. A platform
     administrator's revoke can be restored only by a platform administrator.

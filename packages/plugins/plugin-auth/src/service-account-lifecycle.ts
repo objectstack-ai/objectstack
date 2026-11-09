@@ -39,6 +39,14 @@
  * left its organization (`service-account-owner-leaves.ts` suspends it) is not
  * resumed until an administrator names a new owner.
  *
+ * The ban state is shared with the platform administrator's `/admin/ban-user`,
+ * so this family marks its own: a suspension's `ban_reason` is
+ * {@link SERVICE_ACCOUNT_SUSPENDED_REASON} (or it, `: ` and the caller's words),
+ * the owner's leaving records its own reason, and a ban already in force is
+ * never rewritten. An administrator of the account's organization lifts only
+ * those; any other ban only a platform administrator lifts, as the restore
+ * guard keeps a platform administrator's stop of a key.
+ *
  * ## Keys
  *
  * Revoke and restore act on one key of an account and leave the others alone.
@@ -61,11 +69,13 @@
  * attribution seam), so the CRUD audit records who acted.
  */
 
+import { isUserBanInForce } from '@objectstack/core';
 import type { EndpointResult } from './admin-user-endpoints.js';
 import { ADMINISTRATOR_SUSPENDED_REVOKE_REASON } from './api-key-restore-guard.js';
 import { authSystemWriteContext } from './auth-actor-attribution.js';
 import { FORCED_RESET_REVOKE_REASON } from './forced-reset-revocation.js';
 import { MEMBERSHIP_ENDED_REVOKE_REASON } from './membership-ended-session.js';
+import { SERVICE_ACCOUNT_OWNER_LEFT_REASON } from './service-account-owner-leaves.js';
 import { isAgentAccountRow } from './service-account-identity.js';
 import {
   API_KEY_OBJECT,
@@ -95,8 +105,22 @@ export interface ServiceAccountLifecycleDeps {
   now?(): number;
 }
 
-/** The ban reason a suspension records when the caller names none. */
+/**
+ * The ban reason a suspension records: this phrase alone, or followed by
+ * `: ` and the caller's own words. It marks a ban as this family's, which an
+ * administrator of the account's organization may lift; any other ban (a
+ * platform administrator's, through `/admin/ban-user`) only a platform
+ * administrator lifts.
+ */
 export const SERVICE_ACCOUNT_SUSPENDED_REASON = 'AI service account suspended';
+
+/** Is this ban reason one this family wrote (a suspension, or the owner's leaving)? */
+export function isServiceAccountSuspensionReason(reason: unknown): boolean {
+  const r = typeof reason === 'string' ? reason : '';
+  return r === SERVICE_ACCOUNT_SUSPENDED_REASON
+    || r.startsWith(`${SERVICE_ACCOUNT_SUSPENDED_REASON}: `)
+    || r === SERVICE_ACCOUNT_OWNER_LEFT_REASON;
+}
 
 /** The longest ban reason a suspension records. */
 const REASON_MAX_LENGTH = 500;
@@ -190,8 +214,8 @@ export async function runSuspendServiceAccount(
 ): Promise<EndpointResult> {
   const read = await accountIdOf(request);
   if ('status' in read) return read;
-  const reason = str(read.body.reason) ?? SERVICE_ACCOUNT_SUSPENDED_REASON;
-  if (reason.length > REASON_MAX_LENGTH) {
+  const words = str(read.body.reason);
+  if (words && words.length > REASON_MAX_LENGTH) {
     const message = `The suspension reason is at most ${REASON_MAX_LENGTH} characters.`;
     return {
       status: 400,
@@ -202,6 +226,13 @@ export async function runSuspendServiceAccount(
   if (isResult(found)) return found;
   if (!found.isOwner && !found.isAdministrator) return ownerOrAdministrator('suspend it');
 
+  // A ban already in force stays exactly as it is: its reason is never
+  // relabelled, so a platform administrator's stop never reads as this
+  // family's (which an organization administrator could then lift).
+  if (isUserBanInForce(found.account as never, found.nowMs)) {
+    return ok({ userId: read.id, suspended: true, reason: found.account.ban_reason ?? null });
+  }
+  const reason = words ? `${SERVICE_ACCOUNT_SUSPENDED_REASON}: ${words}` : SERVICE_ACCOUNT_SUSPENDED_REASON;
   await writeUser(found.engine, read.id, { banned: true, ban_reason: reason, ban_expires: null });
   return ok({ userId: read.id, suspended: true, reason });
 }
@@ -219,6 +250,23 @@ export async function runResumeServiceAccount(
   if (isResult(found)) return found;
   if (!found.isAdministrator) return administratorOnly('resume it');
   if (!found.organizationId) return retired(read.id);
+
+  // Only this family's suspension is an organization administrator's to
+  // lift. A ban written any other way (a platform administrator's) is lifted
+  // by a platform administrator only, as the restore guard keeps a platform
+  // administrator's stop of a key.
+  if (
+    isUserBanInForce(found.account as never, found.nowMs)
+    && !isServiceAccountSuspensionReason(found.account.ban_reason)
+    && !caller.isPlatformAdmin
+  ) {
+    return fail(
+      403,
+      'PERMISSION_DENIED',
+      `The AI service account '${read.id}' was stopped by a platform administrator, so only a platform `
+        + 'administrator can resume it.',
+    );
+  }
 
   // No agent is left running with nobody accountable: an owner who has left
   // the organization is replaced first.
@@ -293,12 +341,16 @@ export async function runRetireServiceAccount(
   if (!found.organizationId) return retired(read.id);
 
   const engine: ServiceAccountLifecycleEngine = found.engine;
-  const keys = await readRows(engine, API_KEY_OBJECT, { user_id: read.id }, ['id', 'revoked']);
   const context = await authSystemWriteContext();
-  await deps.runAtomically(async () => {
+  const keysRevoked = await deps.runAtomically(async () => {
     await engine.delete(MEMBER_OBJECT, { where: { user_id: read.id }, multi: true, context });
-    // Every key, revoked or not: a key an owner revoked must not be restorable
-    // either, so each one carries the terminal reason.
+    // The keys are read inside the unit of work, after the membership ends:
+    // the mint door refuses an account with no membership, so every key that
+    // exists at commit is one read here. Every key, revoked or not: a key an
+    // owner revoked must not be restorable either, so each one carries the
+    // terminal reason (a stored reason is overwritten, which only makes a
+    // restore stricter).
+    const keys = await readRows(engine, API_KEY_OBJECT, { user_id: read.id }, ['id']);
     for (const key of keys) {
       const id = str(key.id);
       if (!id) continue;
@@ -308,8 +360,9 @@ export async function runRetireServiceAccount(
         { context },
       );
     }
+    return keys.length;
   });
-  return ok({ userId: read.id, retired: true, keysRevoked: keys.length });
+  return ok({ userId: read.id, retired: true, keysRevoked });
 }
 
 // ── POST /service-account/revoke-key and restore-key ───────────────────────

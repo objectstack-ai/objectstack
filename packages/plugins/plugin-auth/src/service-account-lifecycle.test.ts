@@ -214,7 +214,7 @@ describe('[ADR-0151 D6] suspend: the ban state, written by the owner or an admin
     const b = await account('B');
     expect((await suspend(ADMIN, { userId: a, reason: 'Runaway loop' })).status).toBe(200);
     expect((await suspend(PLATFORM, { userId: b })).status).toBe(200);
-    expect((await userRow(a)).ban_reason).toBe('Runaway loop');
+    expect((await userRow(a)).ban_reason).toBe(`${SERVICE_ACCOUNT_SUSPENDED_REASON}: Runaway loop`);
     expect((await userRow(b)).banned).toBe(true);
   });
 
@@ -274,6 +274,25 @@ describe('[ADR-0151 D6] resume: an administrator only, and never with nobody acc
     expect((await userRow(id)).banned).toBe(false);
   });
 
+  it('a platform administrator\'s ban is not an organization administrator\'s to lift: 403, the account stays banned', async () => {
+    const id = await account();
+    // The state `/admin/ban-user` writes, with a reason of its own.
+    await engine.update('sys_user', { id, banned: true, ban_reason: 'Abuse report', ban_expires: null }, SYSTEM);
+    expect(await resume(ADMIN, id)).toMatchObject(DENIED);
+    expect(await userRow(id)).toMatchObject({ banned: true, ban_reason: 'Abuse report' });
+
+    expect((await resume(PLATFORM, id)).status, 'CONTROL: a platform administrator lifts it').toBe(200);
+    expect((await userRow(id)).banned).toBe(false);
+  });
+
+  it('suspending an account already banned leaves its ban exactly as it is: the reason is never relabelled', async () => {
+    const id = await account();
+    await engine.update('sys_user', { id, banned: true, ban_reason: 'Abuse report', ban_expires: null }, SYSTEM);
+    expect((await suspend(OWNER, { userId: id, reason: 'mine now' })).status).toBe(200);
+    expect(await userRow(id)).toMatchObject({ banned: true, ban_reason: 'Abuse report' });
+    expect(await resume(ADMIN, id)).toMatchObject(DENIED);
+  });
+
   it('a retired account is not resumed', async () => {
     const id = await account();
     await retire(ADMIN, id);
@@ -327,6 +346,24 @@ describe('[ADR-0151 D6] retire: terminal, the row kept', () => {
 
     expect(await runCreateServiceAccountKey(deps(), PLATFORM, post({ userId: id }))).toMatchObject(CONFLICT);
     expect(await retire(PLATFORM, id)).toMatchObject(CONFLICT);
+  });
+
+  it('every key present at commit is revoked, one written after the membership ends included', async () => {
+    const id = await account();
+    await keyOf(id);
+    // A key landing between the membership's end and the key read: written
+    // from inside the unit of work, after the delete.
+    const pkg = 'test.service-account-lifecycle.late-key';
+    engine.registerHook('afterDelete', async (ctx: any) => {
+      if (ctx?.previous?.user_id !== id) return;
+      await engine.insert('sys_api_key', { id: 'key_late', name: 'late', key: 'h', prefix: 'p', user_id: id, revoked: false }, SYSTEM);
+    }, { object: 'sys_member', packageId: pkg });
+    try {
+      expect(await retire(ADMIN, id)).toMatchObject({ status: 200, body: { data: { keysRevoked: 2 } } });
+    } finally {
+      engine.unregisterHooksByPackage(pkg);
+    }
+    expect(await keyRow('key_late')).toMatchObject({ revoked: true, revoked_reason: 'organization_membership_ended' });
   });
 
   it('the owner and another member cannot retire it', async () => {
@@ -420,6 +457,6 @@ describe('[ADR-0151 D6] the owner leaves: the account is suspended', () => {
     const id = await account();
     await suspend(ADMIN, { userId: id, reason: 'Runaway loop' });
     await engine.delete('sys_member', { where: { user_id: 'usr_owner', organization_id: ORG }, multi: true, ...SYSTEM });
-    expect((await userRow(id)).ban_reason).toBe('Runaway loop');
+    expect((await userRow(id)).ban_reason).toBe(`${SERVICE_ACCOUNT_SUSPENDED_REASON}: Runaway loop`);
   });
 });
