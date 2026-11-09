@@ -2125,8 +2125,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
             placeholder: "name"
           },
           mapGroups: {
-            label: "Map: Groups claim",
-            helpText: "Optional. Claim that carries the user’s groups, e.g. \"groups\". Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.",
+            label: "Mapeo: reclamo de grupos",
+            helpText: "Opcional. Reclamo que contiene los grupos del usuario, p. ej. «groups». Cada inicio de sesión concede los conjuntos de permisos asignados a esos grupos. Déjelo en blanco para no asignar grupos.",
             placeholder: "groups"
           }
         }
@@ -2160,8 +2160,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
           mapGroups: {
-            label: "Map: Groups attribute",
-            helpText: "Optional. Assertion attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.",
+            label: "Mapeo: atributo de grupos",
+            helpText: "Opcional. Atributo de la aserción que contiene los grupos del usuario. Cada inicio de sesión concede los conjuntos de permisos asignados a esos grupos. Déjelo en blanco para no asignar grupos.",
             placeholder: "groups"
           }
         }
@@ -2193,31 +2193,31 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Opciones de inicio de sesión guardadas"
       },
       show_sso_groups_claim: {
-        label: "Show Groups Claim",
+        label: "Mostrar reclamo de grupos",
         resultDialog: {
-          title: "Groups claim",
-          description: "The OIDC claim or SAML attribute this provider reads the user’s groups from at each sign-in. Empty means the provider maps no groups. Change it with “Edit Groups Claim”.",
-          acknowledge: "Done",
+          title: "Reclamo de grupos",
+          description: "El reclamo OIDC o el atributo SAML del que este proveedor lee los grupos del usuario en cada inicio de sesión. Vacío significa que el proveedor no asigna grupos. Cámbielo con «Editar reclamo de grupos».",
+          acknowledge: "Hecho",
           fields: {
-            groupsClaim: "Groups claim"
+            groupsClaim: "Reclamo de grupos"
           }
         }
       },
       edit_sso_groups_claim: {
-        label: "Edit Groups Claim",
+        label: "Editar reclamo de grupos",
         params: {
           groupsClaim: {
-            label: "Groups claim",
-            helpText: "The OIDC claim or SAML attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to remove it: the provider then maps no groups.",
+            label: "Reclamo de grupos",
+            helpText: "El reclamo OIDC o el atributo SAML que contiene los grupos del usuario. Cada inicio de sesión concede los conjuntos de permisos asignados a esos grupos. Déjelo en blanco para eliminarlo: el proveedor dejará de asignar grupos.",
             placeholder: "groups"
           }
         },
         resultDialog: {
-          title: "Groups claim saved",
-          description: "The groups claim this provider now reads at each sign-in. Empty means it maps no groups.",
-          acknowledge: "Done",
+          title: "Reclamo de grupos guardado",
+          description: "El reclamo de grupos que este proveedor lee ahora en cada inicio de sesión. Vacío significa que no se asignan grupos.",
+          acknowledge: "Hecho",
           fields: {
-            groupsClaim: "Groups claim"
+            groupsClaim: "Reclamo de grupos"
           }
         }
       }

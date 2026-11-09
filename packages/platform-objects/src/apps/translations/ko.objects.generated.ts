@@ -2125,8 +2125,8 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
             placeholder: "name"
           },
           mapGroups: {
-            label: "Map: Groups claim",
-            helpText: "Optional. Claim that carries the user’s groups, e.g. \"groups\". Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.",
+            label: "매핑: 그룹 클레임",
+            helpText: "선택 사항입니다. 사용자의 그룹을 담는 클레임입니다(예: \"groups\"). 로그인할 때마다 해당 그룹에 매핑된 권한 집합이 부여됩니다. 비워 두면 그룹을 매핑하지 않습니다.",
             placeholder: "groups"
           }
         }
@@ -2160,8 +2160,8 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
           mapGroups: {
-            label: "Map: Groups attribute",
-            helpText: "Optional. Assertion attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.",
+            label: "매핑: 그룹 속성",
+            helpText: "선택 사항입니다. 사용자의 그룹을 담는 어설션 속성입니다. 로그인할 때마다 해당 그룹에 매핑된 권한 집합이 부여됩니다. 비워 두면 그룹을 매핑하지 않습니다.",
             placeholder: "groups"
           }
         }
@@ -2193,31 +2193,31 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "로그인 옵션 저장됨"
       },
       show_sso_groups_claim: {
-        label: "Show Groups Claim",
+        label: "그룹 클레임 보기",
         resultDialog: {
-          title: "Groups claim",
-          description: "The OIDC claim or SAML attribute this provider reads the user’s groups from at each sign-in. Empty means the provider maps no groups. Change it with “Edit Groups Claim”.",
-          acknowledge: "Done",
+          title: "그룹 클레임",
+          description: "이 공급자가 로그인할 때마다 사용자의 그룹을 읽는 OIDC 클레임 또는 SAML 속성입니다. 비어 있으면 이 공급자는 그룹을 매핑하지 않습니다. \"그룹 클레임 편집\"으로 변경하세요.",
+          acknowledge: "완료",
           fields: {
-            groupsClaim: "Groups claim"
+            groupsClaim: "그룹 클레임"
           }
         }
       },
       edit_sso_groups_claim: {
-        label: "Edit Groups Claim",
+        label: "그룹 클레임 편집",
         params: {
           groupsClaim: {
-            label: "Groups claim",
-            helpText: "The OIDC claim or SAML attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to remove it: the provider then maps no groups.",
+            label: "그룹 클레임",
+            helpText: "사용자의 그룹을 담는 OIDC 클레임 또는 SAML 속성입니다. 로그인할 때마다 해당 그룹에 매핑된 권한 집합이 부여됩니다. 비워 두면 제거되며, 이 공급자는 더 이상 그룹을 매핑하지 않습니다.",
             placeholder: "groups"
           }
         },
         resultDialog: {
-          title: "Groups claim saved",
-          description: "The groups claim this provider now reads at each sign-in. Empty means it maps no groups.",
-          acknowledge: "Done",
+          title: "그룹 클레임이 저장됨",
+          description: "이 공급자가 이제 로그인할 때마다 읽는 그룹 클레임입니다. 비어 있으면 그룹을 매핑하지 않습니다.",
+          acknowledge: "완료",
           fields: {
-            groupsClaim: "Groups claim"
+            groupsClaim: "그룹 클레임"
           }
         }
       }

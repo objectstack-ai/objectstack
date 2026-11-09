@@ -2125,8 +2125,8 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
             placeholder: "name"
           },
           mapGroups: {
-            label: "Map: Groups claim",
-            helpText: "Optional. Claim that carries the user’s groups, e.g. \"groups\". Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.",
+            label: "التعيين: مطالبة المجموعات",
+            helpText: "اختياري. المطالبة التي تحمل مجموعات المستخدم، مثل \"groups\". يمنح كل تسجيل دخول مجموعات الأذونات المعيَّنة لتلك المجموعات. اتركه فارغًا لعدم تعيين أي مجموعات.",
             placeholder: "groups"
           }
         }
@@ -2160,8 +2160,8 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
           mapGroups: {
-            label: "Map: Groups attribute",
-            helpText: "Optional. Assertion attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.",
+            label: "التعيين: سمة المجموعات",
+            helpText: "اختياري. سمة التأكيد التي تحمل مجموعات المستخدم. يمنح كل تسجيل دخول مجموعات الأذونات المعيَّنة لتلك المجموعات. اتركه فارغًا لعدم تعيين أي مجموعات.",
             placeholder: "groups"
           }
         }
@@ -2193,31 +2193,31 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "تم حفظ خيارات تسجيل الدخول"
       },
       show_sso_groups_claim: {
-        label: "Show Groups Claim",
+        label: "عرض مطالبة المجموعات",
         resultDialog: {
-          title: "Groups claim",
-          description: "The OIDC claim or SAML attribute this provider reads the user’s groups from at each sign-in. Empty means the provider maps no groups. Change it with “Edit Groups Claim”.",
-          acknowledge: "Done",
+          title: "مطالبة المجموعات",
+          description: "مطالبة OIDC أو سمة SAML التي يقرأ منها هذا الموفّر مجموعات المستخدم عند كل تسجيل دخول. القيمة الفارغة تعني أن الموفّر لا يعيّن أي مجموعات. غيّرها عبر \"تعديل مطالبة المجموعات\".",
+          acknowledge: "تم",
           fields: {
-            groupsClaim: "Groups claim"
+            groupsClaim: "مطالبة المجموعات"
           }
         }
       },
       edit_sso_groups_claim: {
-        label: "Edit Groups Claim",
+        label: "تعديل مطالبة المجموعات",
         params: {
           groupsClaim: {
-            label: "Groups claim",
-            helpText: "The OIDC claim or SAML attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to remove it: the provider then maps no groups.",
+            label: "مطالبة المجموعات",
+            helpText: "مطالبة OIDC أو سمة SAML التي تحمل مجموعات المستخدم. يمنح كل تسجيل دخول مجموعات الأذونات المعيَّنة لتلك المجموعات. اتركه فارغًا لإزالتها: عندها لا يعيّن الموفّر أي مجموعات.",
             placeholder: "groups"
           }
         },
         resultDialog: {
-          title: "Groups claim saved",
-          description: "The groups claim this provider now reads at each sign-in. Empty means it maps no groups.",
-          acknowledge: "Done",
+          title: "تم حفظ مطالبة المجموعات",
+          description: "مطالبة المجموعات التي يقرأها هذا الموفّر الآن عند كل تسجيل دخول. القيمة الفارغة تعني عدم تعيين أي مجموعات.",
+          acknowledge: "تم",
           fields: {
-            groupsClaim: "Groups claim"
+            groupsClaim: "مطالبة المجموعات"
           }
         }
       }

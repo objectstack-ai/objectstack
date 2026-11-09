@@ -2125,8 +2125,8 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
             placeholder: "name"
           },
           mapGroups: {
-            label: "Map: Groups claim",
-            helpText: "Optional. Claim that carries the user’s groups, e.g. \"groups\". Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.",
+            label: "Mapear: declaração de grupos",
+            helpText: "Opcional. Declaração que contém os grupos do usuário, por exemplo \"groups\". Cada login concede os conjuntos de permissões mapeados para esses grupos. Deixe em branco para não mapear grupos.",
             placeholder: "groups"
           }
         }
@@ -2160,8 +2160,8 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
           mapGroups: {
-            label: "Map: Groups attribute",
-            helpText: "Optional. Assertion attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.",
+            label: "Mapear: atributo de grupos",
+            helpText: "Opcional. Atributo da asserção que contém os grupos do usuário. Cada login concede os conjuntos de permissões mapeados para esses grupos. Deixe em branco para não mapear grupos.",
             placeholder: "groups"
           }
         }
@@ -2193,31 +2193,31 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Opções de login salvas"
       },
       show_sso_groups_claim: {
-        label: "Show Groups Claim",
+        label: "Mostrar declaração de grupos",
         resultDialog: {
-          title: "Groups claim",
-          description: "The OIDC claim or SAML attribute this provider reads the user’s groups from at each sign-in. Empty means the provider maps no groups. Change it with “Edit Groups Claim”.",
-          acknowledge: "Done",
+          title: "Declaração de grupos",
+          description: "A declaração OIDC ou o atributo SAML de onde este provedor lê os grupos do usuário a cada login. Vazio significa que o provedor não mapeia grupos. Altere com \"Editar declaração de grupos\".",
+          acknowledge: "Concluído",
           fields: {
-            groupsClaim: "Groups claim"
+            groupsClaim: "Declaração de grupos"
           }
         }
       },
       edit_sso_groups_claim: {
-        label: "Edit Groups Claim",
+        label: "Editar declaração de grupos",
         params: {
           groupsClaim: {
-            label: "Groups claim",
-            helpText: "The OIDC claim or SAML attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to remove it: the provider then maps no groups.",
+            label: "Declaração de grupos",
+            helpText: "A declaração OIDC ou o atributo SAML que contém os grupos do usuário. Cada login concede os conjuntos de permissões mapeados para esses grupos. Deixe em branco para removê-la: o provedor deixa de mapear grupos.",
             placeholder: "groups"
           }
         },
         resultDialog: {
-          title: "Groups claim saved",
-          description: "The groups claim this provider now reads at each sign-in. Empty means it maps no groups.",
-          acknowledge: "Done",
+          title: "Declaração de grupos salva",
+          description: "A declaração de grupos que este provedor lê agora a cada login. Vazio significa que nenhum grupo é mapeado.",
+          acknowledge: "Concluído",
           fields: {
-            groupsClaim: "Groups claim"
+            groupsClaim: "Declaração de grupos"
           }
         }
       }

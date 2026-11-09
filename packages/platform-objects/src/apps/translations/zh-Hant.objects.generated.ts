@@ -2125,8 +2125,8 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
             placeholder: "name"
           },
           mapGroups: {
-            label: "Map: Groups claim",
-            helpText: "Optional. Claim that carries the user’s groups, e.g. \"groups\". Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.",
+            label: "對應：群組 claim",
+            helpText: "可選。攜帶使用者所屬群組的 claim，例如「groups」。每次登入都會授予對應到這些群組的權限集。留空則不對應任何群組。",
             placeholder: "groups"
           }
         }
@@ -2160,8 +2160,8 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
           mapGroups: {
-            label: "Map: Groups attribute",
-            helpText: "Optional. Assertion attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.",
+            label: "對應：群組屬性",
+            helpText: "可選。攜帶使用者所屬群組的斷言屬性。每次登入都會授予對應到這些群組的權限集。留空則不對應任何群組。",
             placeholder: "groups"
           }
         }
@@ -2193,31 +2193,31 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "登入選項已儲存"
       },
       show_sso_groups_claim: {
-        label: "Show Groups Claim",
+        label: "檢視群組 claim",
         resultDialog: {
-          title: "Groups claim",
-          description: "The OIDC claim or SAML attribute this provider reads the user’s groups from at each sign-in. Empty means the provider maps no groups. Change it with “Edit Groups Claim”.",
-          acknowledge: "Done",
+          title: "群組 claim",
+          description: "此提供者在每次登入時讀取使用者所屬群組的 OIDC claim 或 SAML 屬性。空白表示此提供者不對應任何群組。可透過「編輯群組 claim」變更。",
+          acknowledge: "完成",
           fields: {
-            groupsClaim: "Groups claim"
+            groupsClaim: "群組 claim"
           }
         }
       },
       edit_sso_groups_claim: {
-        label: "Edit Groups Claim",
+        label: "編輯群組 claim",
         params: {
           groupsClaim: {
-            label: "Groups claim",
-            helpText: "The OIDC claim or SAML attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to remove it: the provider then maps no groups.",
+            label: "群組 claim",
+            helpText: "攜帶使用者所屬群組的 OIDC claim 或 SAML 屬性。每次登入都會授予對應到這些群組的權限集。留空即移除：此提供者將不再對應任何群組。",
             placeholder: "groups"
           }
         },
         resultDialog: {
-          title: "Groups claim saved",
-          description: "The groups claim this provider now reads at each sign-in. Empty means it maps no groups.",
-          acknowledge: "Done",
+          title: "群組 claim 已儲存",
+          description: "此提供者此後每次登入時讀取的群組 claim。空白表示不對應任何群組。",
+          acknowledge: "完成",
           fields: {
-            groupsClaim: "Groups claim"
+            groupsClaim: "群組 claim"
           }
         }
       }

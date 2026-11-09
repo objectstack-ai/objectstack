@@ -2125,8 +2125,8 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
             placeholder: "name"
           },
           mapGroups: {
-            label: "Map: Groups claim",
-            helpText: "Optional. Claim that carries the user’s groups, e.g. \"groups\". Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.",
+            label: "Сопоставление: утверждение групп",
+            helpText: "Необязательно. Утверждение, содержащее группы пользователя, например \"groups\". При каждом входе выдаются наборы разрешений, сопоставленные этим группам. Оставьте пустым, чтобы не сопоставлять группы.",
             placeholder: "groups"
           }
         }
@@ -2160,8 +2160,8 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
           mapGroups: {
-            label: "Map: Groups attribute",
-            helpText: "Optional. Assertion attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.",
+            label: "Сопоставление: атрибут групп",
+            helpText: "Необязательно. Атрибут утверждения SAML, содержащий группы пользователя. При каждом входе выдаются наборы разрешений, сопоставленные этим группам. Оставьте пустым, чтобы не сопоставлять группы.",
             placeholder: "groups"
           }
         }
@@ -2193,31 +2193,31 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Параметры входа сохранены"
       },
       show_sso_groups_claim: {
-        label: "Show Groups Claim",
+        label: "Показать утверждение групп",
         resultDialog: {
-          title: "Groups claim",
-          description: "The OIDC claim or SAML attribute this provider reads the user’s groups from at each sign-in. Empty means the provider maps no groups. Change it with “Edit Groups Claim”.",
-          acknowledge: "Done",
+          title: "Утверждение групп",
+          description: "Утверждение OIDC или атрибут SAML, из которого этот провайдер читает группы пользователя при каждом входе. Пустое значение означает, что провайдер не сопоставляет группы. Изменить можно через «Изменить утверждение групп».",
+          acknowledge: "Готово",
           fields: {
-            groupsClaim: "Groups claim"
+            groupsClaim: "Утверждение групп"
           }
         }
       },
       edit_sso_groups_claim: {
-        label: "Edit Groups Claim",
+        label: "Изменить утверждение групп",
         params: {
           groupsClaim: {
-            label: "Groups claim",
-            helpText: "The OIDC claim or SAML attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to remove it: the provider then maps no groups.",
+            label: "Утверждение групп",
+            helpText: "Утверждение OIDC или атрибут SAML, содержащий группы пользователя. При каждом входе выдаются наборы разрешений, сопоставленные этим группам. Оставьте пустым, чтобы удалить его: тогда провайдер не сопоставляет группы.",
             placeholder: "groups"
           }
         },
         resultDialog: {
-          title: "Groups claim saved",
-          description: "The groups claim this provider now reads at each sign-in. Empty means it maps no groups.",
-          acknowledge: "Done",
+          title: "Утверждение групп сохранено",
+          description: "Утверждение групп, которое этот провайдер теперь читает при каждом входе. Пустое значение означает, что группы не сопоставляются.",
+          acknowledge: "Готово",
           fields: {
-            groupsClaim: "Groups claim"
+            groupsClaim: "Утверждение групп"
           }
         }
       }

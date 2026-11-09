@@ -2125,8 +2125,8 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
             placeholder: "name"
           },
           mapGroups: {
-            label: "Map: Groups claim",
-            helpText: "Optional. Claim that carries the user’s groups, e.g. \"groups\". Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.",
+            label: "Mappage : revendication groupes",
+            helpText: "Facultatif. Revendication qui contient les groupes de l’utilisateur, par ex. « groups ». Chaque connexion accorde les ensembles d’autorisations mappés à ces groupes. Laissez vide pour ne mapper aucun groupe.",
             placeholder: "groups"
           }
         }
@@ -2160,8 +2160,8 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
           mapGroups: {
-            label: "Map: Groups attribute",
-            helpText: "Optional. Assertion attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.",
+            label: "Mappage : attribut groupes",
+            helpText: "Facultatif. Attribut d’assertion qui contient les groupes de l’utilisateur. Chaque connexion accorde les ensembles d’autorisations mappés à ces groupes. Laissez vide pour ne mapper aucun groupe.",
             placeholder: "groups"
           }
         }
@@ -2193,31 +2193,31 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Options de connexion enregistrées"
       },
       show_sso_groups_claim: {
-        label: "Show Groups Claim",
+        label: "Afficher la revendication des groupes",
         resultDialog: {
-          title: "Groups claim",
-          description: "The OIDC claim or SAML attribute this provider reads the user’s groups from at each sign-in. Empty means the provider maps no groups. Change it with “Edit Groups Claim”.",
-          acknowledge: "Done",
+          title: "Revendication des groupes",
+          description: "La revendication OIDC ou l’attribut SAML dans lequel ce fournisseur lit les groupes de l’utilisateur à chaque connexion. Vide signifie que le fournisseur ne mappe aucun groupe. Modifiez-la avec « Modifier la revendication des groupes ».",
+          acknowledge: "Terminé",
           fields: {
-            groupsClaim: "Groups claim"
+            groupsClaim: "Revendication des groupes"
           }
         }
       },
       edit_sso_groups_claim: {
-        label: "Edit Groups Claim",
+        label: "Modifier la revendication des groupes",
         params: {
           groupsClaim: {
-            label: "Groups claim",
-            helpText: "The OIDC claim or SAML attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to remove it: the provider then maps no groups.",
+            label: "Revendication des groupes",
+            helpText: "La revendication OIDC ou l’attribut SAML qui contient les groupes de l’utilisateur. Chaque connexion accorde les ensembles d’autorisations mappés à ces groupes. Laissez vide pour la supprimer : le fournisseur ne mappe alors aucun groupe.",
             placeholder: "groups"
           }
         },
         resultDialog: {
-          title: "Groups claim saved",
-          description: "The groups claim this provider now reads at each sign-in. Empty means it maps no groups.",
-          acknowledge: "Done",
+          title: "Revendication des groupes enregistrée",
+          description: "La revendication des groupes que ce fournisseur lit désormais à chaque connexion. Vide signifie qu’aucun groupe n’est mappé.",
+          acknowledge: "Terminé",
           fields: {
-            groupsClaim: "Groups claim"
+            groupsClaim: "Revendication des groupes"
           }
         }
       }

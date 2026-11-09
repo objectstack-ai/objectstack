@@ -2125,8 +2125,8 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
             placeholder: "name"
           },
           mapGroups: {
-            label: "Map: Groups claim",
-            helpText: "Optional. Claim that carries the user’s groups, e.g. \"groups\". Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.",
+            label: "Zuordnung: Gruppen-Claim",
+            helpText: "Optional. Claim, der die Gruppen des Benutzers enthält, z. B. „groups“. Jede Anmeldung vergibt die diesen Gruppen zugeordneten Berechtigungssätze. Leer lassen, um keine Gruppen zuzuordnen.",
             placeholder: "groups"
           }
         }
@@ -2160,8 +2160,8 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
           mapGroups: {
-            label: "Map: Groups attribute",
-            helpText: "Optional. Assertion attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.",
+            label: "Zuordnung: Gruppenattribut",
+            helpText: "Optional. Assertion-Attribut, das die Gruppen des Benutzers enthält. Jede Anmeldung vergibt die diesen Gruppen zugeordneten Berechtigungssätze. Leer lassen, um keine Gruppen zuzuordnen.",
             placeholder: "groups"
           }
         }
@@ -2193,31 +2193,31 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Anmeldeoptionen gespeichert"
       },
       show_sso_groups_claim: {
-        label: "Show Groups Claim",
+        label: "Gruppen-Claim anzeigen",
         resultDialog: {
-          title: "Groups claim",
-          description: "The OIDC claim or SAML attribute this provider reads the user’s groups from at each sign-in. Empty means the provider maps no groups. Change it with “Edit Groups Claim”.",
-          acknowledge: "Done",
+          title: "Gruppen-Claim",
+          description: "Der OIDC-Claim oder das SAML-Attribut, aus dem dieser Anbieter bei jeder Anmeldung die Gruppen des Benutzers liest. Leer bedeutet, dass der Anbieter keine Gruppen zuordnet. Ändern Sie ihn mit „Gruppen-Claim bearbeiten“.",
+          acknowledge: "Fertig",
           fields: {
-            groupsClaim: "Groups claim"
+            groupsClaim: "Gruppen-Claim"
           }
         }
       },
       edit_sso_groups_claim: {
-        label: "Edit Groups Claim",
+        label: "Gruppen-Claim bearbeiten",
         params: {
           groupsClaim: {
-            label: "Groups claim",
-            helpText: "The OIDC claim or SAML attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to remove it: the provider then maps no groups.",
+            label: "Gruppen-Claim",
+            helpText: "Der OIDC-Claim oder das SAML-Attribut, das die Gruppen des Benutzers enthält. Jede Anmeldung vergibt die diesen Gruppen zugeordneten Berechtigungssätze. Leer lassen, um ihn zu entfernen: Der Anbieter ordnet dann keine Gruppen zu.",
             placeholder: "groups"
           }
         },
         resultDialog: {
-          title: "Groups claim saved",
-          description: "The groups claim this provider now reads at each sign-in. Empty means it maps no groups.",
-          acknowledge: "Done",
+          title: "Gruppen-Claim gespeichert",
+          description: "Der Gruppen-Claim, den dieser Anbieter jetzt bei jeder Anmeldung liest. Leer bedeutet, dass keine Gruppen zugeordnet werden.",
+          acknowledge: "Fertig",
           fields: {
-            groupsClaim: "Groups claim"
+            groupsClaim: "Gruppen-Claim"
           }
         }
       }
