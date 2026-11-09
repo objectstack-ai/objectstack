@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { ROUTER_ADDRESSABLE_NAME_MESSAGE, ROUTER_ADDRESSABLE_NAME_PATTERN } from '../kernel/address-grammar';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { OverrideDeclarationFields } from '../kernel/override-declaration.zod';
@@ -1128,7 +1129,7 @@ export const FlowSchema = lazySchema(() => strictObject(
   },
   {
   /** Identity */
-  name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Machine name'),
+  name: z.string().regex(ROUTER_ADDRESSABLE_NAME_PATTERN, { message: ROUTER_ADDRESSABLE_NAME_MESSAGE }).describe('Machine name'),
   label: z.string().describe('Flow label'),
   description: z.string().optional(),
 
