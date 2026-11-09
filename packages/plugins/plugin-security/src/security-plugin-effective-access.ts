@@ -32,7 +32,9 @@
  * is the human baseline the security service adds for every authenticated
  * member (`humanBaselineFor`, the helper the set resolution and the explainer
  * read): those sets join last, as `default`, and a set already listed keeps
- * its place and gains the origin.
+ * its place and gains the origin. An AI service account (ADR-0151 D3) holds
+ * no member baseline: its `default` is the agent floor the set resolution
+ * gives every agent principal, the restricted set.
  *
  * The organization is explain's: the caller's active one, kept only while the
  * described user could be resolved in it (`vetOrganizationClaim`, the session
@@ -40,6 +42,7 @@
  */
 import { resolveUserAuthzGrants, vetOrganizationClaim } from '@objectstack/core';
 import type { EffectiveAccess, EffectivePermissionSet, EffectivePermissionSetOrigin } from '@objectstack/spec/contracts';
+import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
 import type { SecurityPlugin } from './security-plugin.js';
 import { PermissionDeniedError } from './errors.js';
 import { readSysUserRow } from './explain-engine.js';
@@ -119,7 +122,10 @@ export async function describeEffectiveAccess(
     }
     for (const origin of derivedBy) add(name, origin);
   }
-  for (const name of humanBaselineFor(grants.positions, this.baselinePermissionSets)) {
+  const baseline = grants.principalKind === 'agent'
+    ? [MCP_AGENT_PERMISSION_SET_RESTRICTED]
+    : humanBaselineFor(grants.positions, this.baselinePermissionSets);
+  for (const name of baseline) {
     add(name, { kind: 'default' });
   }
 

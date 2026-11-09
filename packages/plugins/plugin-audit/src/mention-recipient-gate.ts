@@ -263,6 +263,8 @@ async function contextForMentionedUser(
     ...(grants.tabPermissions ? { tabPermissions: grants.tabPermissions } : {}),
     ...(grants.posture ? { posture: grants.posture } : {}),
     ...(grants.email ? { email: grants.email } : {}),
+    // [ADR-0151 D3] An AI service account is judged as the agent it is.
+    ...(grants.principalKind ? { principalKind: grants.principalKind } : {}),
   };
 }
 

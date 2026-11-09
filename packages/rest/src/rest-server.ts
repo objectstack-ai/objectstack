@@ -3497,11 +3497,15 @@ export class RestServer {
                 accessToken: 'withhold',
                 // OAuth access tokens are honoured on the `/mcp` door alone
                 // (`acceptOAuthAccessToken`), precisely so coarse tool-family
-                // scopes cannot ride onto REST. [ADR-0090 D10 rule 5] The agent
-                // principal (`principalKind: 'agent'`, `onBehalfOf`,
-                // `oauthScopes`) is represented here for one caller only: an
-                // agent a forward credential carried. Its ceiling is derived
-                // from the consented scopes exactly as the MCP door derives it.
+                // scopes cannot ride onto REST. [ADR-0090 D10 rule 5] The
+                // OAuth-delegated agent principal (`principalKind: 'agent'`,
+                // `onBehalfOf`, `oauthScopes`) is represented here for one
+                // caller only: an agent a forward credential carried. Its
+                // ceiling is derived from the consented scopes exactly as the
+                // MCP door derives it. [ADR-0151 D3] An AI service account's
+                // own API key is the other agent provenance on this face: the
+                // assembler stamps it from the account's row, with no
+                // `onBehalfOf` and no OAuth input.
                 oauth: forwardAgent
                     ? {
                         userId: forwardAgent.userId,
@@ -3519,6 +3523,15 @@ export class RestServer {
                 // credential of its own admitted it here, and the key-management
                 // rule must not read it as a signed-in session.
                 onAdmission: forwardAgent ? undefined : (admission) => { admittedBy = admission.credential; },
+                // [#31821] The transport's own peer address, for the
+                // `credential_use` row an admitted API key writes. The auth
+                // service applies the deployment's trust rule to it and the
+                // headers; this door reads no forwarded header as an address.
+                transport: {
+                    remoteAddress: typeof req?.remoteAddress === 'string' && req.remoteAddress
+                        ? req.remoteAddress
+                        : undefined,
+                },
             });
             if (!base) return undefined;
 

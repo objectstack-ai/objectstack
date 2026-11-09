@@ -50,7 +50,13 @@ const composed = (top: AnyRec, coreExtra: AnyRec = {}): AnyRec => ({
 /** One refused stack and one control. */
 const STACKS: Record<string, AnyRec> = {
   'a list nothing names': composed({ picklists: [unused] }),
-  'CONTROL: a body-declared list a body field names': composed({}, { objects: [caseObj(statusField)] }),
+  // [ADR-0150 D3] Forced edit: the core body declares its dependency on the
+  // app body, so the door accepts the whole stack — a sibling it does not
+  // depend on is refused (the third describe below).
+  'CONTROL: a body-declared list a body field names': composed({}, {
+    dependencies: { 'com.example.parity.app': '^1.0.0' },
+    objects: [caseObj(statusField)],
+  }),
 };
 
 const kernels: ObjectKernel[] = [];
@@ -99,6 +105,7 @@ describe('picklist-residual-unreferenced — the author-time door and the boot a
     const boot = await bootRefusal(stack);
     if (label.startsWith('CONTROL')) {
       expect(door).toEqual([]);
+      expect(judgePicklistReferences(stack)).toEqual({ refusals: [], notices: [] });
       expect(boot?.message ?? '').not.toContain('is declared on the top level of stack');
       return;
     }
@@ -121,8 +128,9 @@ describe('picklist-residual-unreferenced — the author-time door and the boot a
  * options) because a runtime write is judged against the packages INSTALLED
  * here. So the agreement is pinned rather than inherited — and pinned where
  * the two can disagree: a list a SIBLING package of the same artifact owns,
- * which this door resolves under ADR-0130 D4 and the save door must resolve
- * because the boot registered it.
+ * which this door resolves through the declaring package's declared
+ * dependency on it (ADR-0150 D3) and the save door must resolve because the
+ * boot registered it.
  *
  * Asked of the save door's judge directly, over the real registry the boot
  * filled. `readMetaItem` is stubbed to "no stored row", so the case is a FIRST
@@ -194,5 +202,78 @@ describe('[#29898] picklist-reference-unknown — the author-time door and the m
     expect(saveDoor?.issues?.map((i) => i.path)).toEqual(['fields.status.picklist']);
     expect(door[0].path, door[0].path).toBe('packages[0].manifest.objects[0].fields.status.picklist');
     expect(door[0].path?.endsWith(saveDoor!.issues![0].path)).toBe(true);
+  });
+});
+
+/**
+ * [ADR-0150 D3; maintainer ruling N1, record 6729820123] The third parity: a
+ * field naming a list a SIBLING package of the same artifact declares, with no
+ * declared dependency on it. Since E6 the boot serves that field no options
+ * and warns with R's refusal (`findOutsideClosurePicklistReferences`), and the
+ * install judge refuses it; this door refuses it first, in the same sentence —
+ * both read `resolvePackageScopedHolders` over `packageResolutionClosure`.
+ */
+describe('[ADR-0150 D3] picklist-reference-unknown — a sibling\'s list with no declared dependency: the door and the boot say one sentence', () => {
+  const artifact = (dependencies?: Record<string, string>): AnyRec => ({
+    manifest: manifest(STACK_ID),
+    packages: [
+      { manifest: { ...manifest('com.example.parity.core'), ...(dependencies ? { dependencies } : {}), objects: [caseObj(statusField)] } },
+      { manifest: { ...manifest('com.example.parity.app'), picklists: [status] } },
+    ],
+  });
+  const outsideClosure = (engine: { registry: unknown } | undefined) =>
+    (engine?.registry as { findOutsideClosurePicklistReferences(): Array<{ field: string; refusal?: string }> })
+      .findOutsideClosurePicklistReferences();
+
+  it('the door refuses it, with the sentence the boot warns with', async () => {
+    const stack = artifact();
+    const door = judgePicklistReferences(stack).refusals.filter((r) => r.rule === PICKLIST_REFERENCE_UNKNOWN);
+    const { refusal, engine } = await bootStack(stack);
+
+    expect(refusal, String(refusal?.message)).toBeUndefined();
+    expect(door).toHaveLength(1);
+    expect(door[0].path).toBe('packages[0].manifest.objects[0].fields.status.picklist');
+    expect(outsideClosure(engine).map((o) => [o.field, o.refusal])).toEqual([['status', door[0].message]]);
+  });
+
+  it('CONTROL: with the dependency declared, the door accepts it and the boot warns nothing', async () => {
+    const stack = artifact({ 'com.example.parity.app': '^1.0.0' });
+    const door = judgePicklistReferences(stack);
+    const { refusal, engine } = await bootStack(stack);
+
+    expect(refusal, String(refusal?.message)).toBeUndefined();
+    expect(door.refusals.filter((r) => r.rule === PICKLIST_REFERENCE_UNKNOWN)).toEqual([]);
+    expect(door.notices).toEqual([]);
+    expect(outsideClosure(engine)).toEqual([]);
+  });
+
+
+  // [ADR-0150 D3] Two holders one reference reaches: the boot refuses them
+  // (`INVALID_METADATA`), quoting R's sentence, and so does the door.
+  const twoHolders = (core: AnyRec): AnyRec => ({
+    manifest: manifest(STACK_ID),
+    packages: [
+      { manifest: { ...manifest('com.example.parity.core'), ...core } },
+      { manifest: { ...manifest('com.example.parity.app'), picklists: [status] } },
+      { manifest: { ...manifest('com.example.parity.crm'), picklists: [status] } },
+    ],
+  });
+
+  it.each([
+    ['a field whose package depends on both holders', twoHolders({
+      dependencies: { 'com.example.parity.app': '^1.0.0', 'com.example.parity.crm': '^1.0.0' },
+      objects: [caseObj(statusField)],
+    })],
+    ['an extension whose target two packages hold', twoHolders({
+      picklistExtensions: [{ extend: 'parity_status', options: [{ label: 'Closed', value: 'closed' }] }],
+    })],
+  ])('%s: the door refuses it, and the boot refuses it quoting the same sentence', async (_label, stack) => {
+    const door = judgePicklistReferences(stack).refusals.filter((r) => r.rule === PICKLIST_REFERENCE_UNKNOWN);
+    const { refusal } = await bootStack(stack);
+
+    expect(door).toHaveLength(1);
+    expect(door[0].message).toContain('Nothing picks one of them');
+    expect(refusal?.code).toBe('INVALID_METADATA');
+    expect(refusal?.message).toContain(`(${door[0].message})`);
   });
 });

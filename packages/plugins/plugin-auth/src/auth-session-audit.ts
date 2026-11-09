@@ -117,6 +117,7 @@
  * still never recorded, and the password never read.
  */
 
+import type { CredentialUseClient } from '@objectstack/core';
 import { getIP } from '@better-auth/core/utils/ip';
 import { canonicalClientAddress } from './client-address-canonical.js';
 
@@ -167,6 +168,8 @@ export interface AuthEventAuditSurface {
     clientId?: string;
     /** The start of the use window, as an ISO instant. */
     usedAt?: string;
+    /** [#31821] Where the use came from (`@objectstack/core` `CredentialUseClient`). */
+    client?: CredentialUseClient;
   }): Promise<unknown>;
 }
 

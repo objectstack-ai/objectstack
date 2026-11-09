@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
+import { isFederatedObject } from '@objectstack/core';
 import type { Cube, FilterCondition } from '@objectstack/spec/data';
 import { AggregationFunction, referenceCarrierOf } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -1505,7 +1506,7 @@ export class AnalyticsServicePlugin implements Plugin {
       // hit the wrong physical table) and the driver-correct ObjectQL path runs.
       isExternalObject: (objectName: string) => {
         const obj = dataEngine()?.getObject?.(objectName);
-        return !!(obj && obj.external != null);
+        return isFederatedObject(obj);
       },
       // [#3867] Existence probe for the cube auto-inference gate. Reads the
       // same schema registry the data path's #3770 gate consults, through the

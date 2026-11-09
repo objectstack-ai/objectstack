@@ -410,6 +410,10 @@ const READERS: Record<string, Row> = {
   'plugin.ts#reconcileFederatedBindings :: isFederatedObject()': { disposition: 'not-a-read', why: SYNC_ROUTE },
   'plugin.ts#registerSchemasWithoutDdl :: isFederatedObject()': { disposition: 'not-a-read', why: SYNC_ROUTE },
   'plugin.ts#syncRegisteredSchemas :: isFederatedObject()': { disposition: 'not-a-read', why: SYNC_ROUTE },
+  'search-companion.ts#isDdlManaged :: isFederatedObject()': {
+    disposition: 'not-a-read',
+    why: 'declines to declare the __search companion column on an object the sync seam issues no DDL for; it reads no row',
+  },
   'declared-read-columns.ts#<module> :: created_at': { disposition: 'not-a-read', why: VOCABULARY },
   'declared-read-columns.ts#<module> :: updated_at': { disposition: 'not-a-read', why: VOCABULARY },
   'having-filter.ts#declaredReferenceNames :: created_at': { disposition: 'not-a-read', why: VOCABULARY },

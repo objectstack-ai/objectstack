@@ -246,6 +246,7 @@ import {
     defaultRecordPageSaveRefusal,
     externalBindingDatasourceDefinition,
     externalBindingSaveRefusal,
+    objectNamespaceObjectNameClash,
     objectNamespacePrefixViolation,
     objectsBoundExternallyTo,
     permissionSetNameCollisionRefusal,
@@ -1289,6 +1290,7 @@ export class ObjectStackProtocolImplementation implements
             namesWithOwnStoredRow: (...a) => protocol.namesWithOwnStoredRow(...a),
             notifyMutationListenersLocal: (...a) => protocol.notifyMutationListenersLocal(...a),
             objectExtensionItemRefusal: (...a) => protocol.objectExtensionItemRefusal(...a),
+            objectNamespaceObjectNameClash: (...a) => protocol.objectNamespaceObjectNameClash(...a),
             objectNamespacePrefixViolation: (...a) => protocol.objectNamespacePrefixViolation(...a),
             objectRegistrationRefusal: (...a) => protocol.objectRegistrationRefusal(...a),
             optimisticConflictAuditEntry: (...a) => ObjectStackProtocolImplementation.optimisticConflictAuditEntry(...a),
@@ -1902,6 +1904,7 @@ export class ObjectStackProtocolImplementation implements
             foldStoredCollection: (...a) => this.foldStoredCollection(...a),
             getOverlayRepo: (...a) => this.getOverlayRepo(...a),
             hierarchyResolverMounted: (...a) => this.hierarchyResolverMounted(...a),
+            objectNamespaceObjectNameClash: (...a) => this.objectNamespaceObjectNameClash(...a),
             objectNamespacePrefixViolation: (...a) => this.objectNamespacePrefixViolation(...a),
             orgWallEnforced: (...a) => this.orgWallEnforced(...a),
             resolveSduiManifest: (...a) => this.resolveSduiManifest(...a),
@@ -9178,6 +9181,24 @@ export class ObjectStackProtocolImplementation implements
      * package, are not judged — like `defineStack`, nothing here invents a
      * prefix (`validateObjectNamespacePrefix` skips an empty namespace).
      */
+    /**
+     * [ADR-0150 D6, child K] The verdict that a namespace never equals an object
+     * name, for one object the save door, the per-item publish and the publish
+     * pre-flight are about to make live (and the draft verdict tells): its name
+     * against every installed package's namespace, and against its own
+     * package's `NS_custom`. `null` when the spec's predicate finds no clash;
+     * otherwise the predicate's sentences, which name both spellings. The doors
+     * refuse with `NAMESPACE_CONFLICT` / 422, the install door's code for the
+     * same rule.
+     */
+    private objectNamespaceObjectNameClash(name: string, packageId: string | null | undefined): string | null {
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof objectNamespaceObjectNameClash> = {
+            get engine() { return readEngine(); },
+        };
+        return objectNamespaceObjectNameClash.call(host, name, packageId);
+    }
+
     private objectNamespacePrefixViolation(name: string, packageId: string | null | undefined): string | null {
         // [#25467 cut 6] The body moved to `protocol-save-door-refusals.ts` (see `SaveDoorRefusalHost`).
         const readEngine = () => this.engine;
@@ -10076,6 +10097,18 @@ export class ObjectStackProtocolImplementation implements
                     name: d.name,
                     error: err,
                     code: 'NAMESPACE_PREFIX',
+                });
+            }
+            // [ADR-0150 D6, child K] …and the namespace/object-name rule, the
+            // save door's and the per-item publish's judge, so the batch is
+            // refused before anything is promoted.
+            const clash = this.objectNamespaceObjectNameClash(d.name, request.packageId);
+            if (clash) {
+                preflightViolations.push({
+                    type: d.type,
+                    name: d.name,
+                    error: clash,
+                    code: 'NAMESPACE_CONFLICT',
                 });
             }
         }

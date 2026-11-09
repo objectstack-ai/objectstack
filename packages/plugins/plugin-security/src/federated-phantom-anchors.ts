@@ -9,8 +9,8 @@
  * `applySystemFields` (the ObjectQL registry) injects `organization_id`,
  * `owner_id`, `owning_business_unit_id` and the audit `*_by` lookups into every
  * object that has not opted out — **including federated ones** (ADR-0015
- * `external`). But `Engine.syncObjectSchema` returns EARLY for `external != null`
- * and issues no DDL: the remote schema is owned externally. So for a federated
+ * `external`). But `Engine.syncObjectSchema` returns EARLY for a federated
+ * object and issues no DDL: the remote schema is owned externally. So for a federated
  * object those columns exist in the registered schema and **nowhere else**.
  * Measured on the shipped showcase at `origin/main` @ `b54aaab`:
  *
@@ -69,6 +69,8 @@
  * does today. The fail direction is toward isolation, never toward exposure.
  */
 
+import { isFederatedObject } from '@objectstack/core';
+
 // [#6562] The injected-column DEFINITION table lives in `@objectstack/metadata-core`
 // (the registry that provisions the columns re-exports it from there, and the `/meta`
 // read path consumes the same one). Importing the constant — rather than restating
@@ -113,10 +115,12 @@ function equalsShippedDef(def: unknown, shipped: Readonly<Record<string, unknown
 /**
  * Is `schema` a federated (ADR-0015 `external`) object binding a remote table?
  * The platform provisions no storage for one, so nothing it injects is real.
+ *
+ * Re-exported, not restated: `@objectstack/core`'s binding is the runtime's one
+ * answer (it reads the spec's `platformProvisionsStorage`), and this module path
+ * keeps exporting it so every importer here resolves to that same function.
  */
-export function isFederatedObject(schema: unknown): boolean {
-  return (schema as { external?: unknown } | null | undefined)?.external != null;
-}
+export { isFederatedObject };
 
 /**
  * Does this object's `organization_id` exist only in the registry — i.e. is it

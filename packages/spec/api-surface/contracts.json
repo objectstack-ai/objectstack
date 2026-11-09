@@ -50,6 +50,7 @@
     "AudienceBindingSuggestion (type)",
     "AudienceBindingSuggestionFilter (interface)",
     "AudienceBindingSuggestionSync (interface)",
+    "AuthRequestTransport (interface)",
     "AuthResult (interface)",
     "AuthSession (interface)",
     "AuthSessionApi (interface)",
