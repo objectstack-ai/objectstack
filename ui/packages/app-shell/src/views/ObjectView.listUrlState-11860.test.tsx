@@ -419,7 +419,8 @@ describe('a malformed or stale param is dropped — the list opens and nothing t
     expect(params.has(LIST_FILTER_PARAM)).toBe(false);
     expect(params.get(LIST_SEARCH_PARAM)).toBe('acme');
     expect(toast.warning).toHaveBeenCalledTimes(1);
-    expect(toast.warning).toHaveBeenCalledWith(expect.stringMatching(/link.s filter was not applied/i));
+    // No i18n provider here, so the notice is its catalogue key.
+    expect(toast.warning).toHaveBeenCalledWith('console.objectView.linkFilterRefused');
   });
 });
 
