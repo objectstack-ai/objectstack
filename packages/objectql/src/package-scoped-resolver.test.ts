@@ -689,8 +689,11 @@ describe('R2 — engine functions resolve in their referrer\'s package (ADR-0150
         status: 'refused', reason: 'ambiguous-in-closure',
         candidates: [{ kind: 'package', packageId: A }, { kind: 'platform' }],
       });
-      // A caller with no package keeps the environment-wide order: the platform's first.
-      expect(tagOf(resolveFn('score'))).toBe('host');
+      // A caller with no package counts it as one more holder: beside a package's, it refuses (6730444942).
+      expect(resolveFn('score')).toMatchObject({
+        status: 'refused', reason: 'ambiguous-in-environment', callerPackageId: null,
+        candidates: [{ kind: 'package', packageId: A }, { kind: 'platform' }],
+      });
     });
   });
 

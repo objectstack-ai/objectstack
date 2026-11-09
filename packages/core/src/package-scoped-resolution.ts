@@ -68,8 +68,9 @@
  *  - **The platform's item** ({@link PackageScopedHolderSource.platformItem}:
  *    an engine function a plugin or the host registers under no package) is
  *    in every caller's reach, like `sys` (D2): step 2 counts it beside the
- *    closure's holders, and a caller with no package reaches it after the
- *    environment's own item (epic seat ruling on #31733, 6729484996).
+ *    closure's holders, and a caller with no package counts it beside every
+ *    package holder once no environment item answers (epic seat rulings on
+ *    #31733, 6729484996 and 6730444942).
  */
 
 // ---------------------------------------------------------------------------
@@ -379,9 +380,9 @@ export interface PackageScopedHolderSource<T = unknown> {
    * under no package (an owner-less engine function) — or `undefined`.
    * Omitted, there is none. Like a `sys` package (ADR-0150 D2) it is in every
    * caller's reach: a package caller that holds no item itself counts it
-   * beside its closure's holders (one answers, two or more refuse naming
-   * each), and a caller with no package reaches it after the environment's
-   * own item and before the package holders.
+   * beside its closure's holders, and a caller with no package counts it
+   * beside every package holder once no environment item answers. Either
+   * way the only candidate answers, and two or more refuse naming each.
    */
   platformItem?(): T | undefined;
 }
@@ -460,7 +461,7 @@ export function packageScopedRefusalMessage(refusal: Omit<PackageScopedRefusal, 
       return `${subject} is held by ${refusal.candidates.length} ${platform ? 'holders' : 'packages'} in the declared dependency closure of ` +
         `package "${refusal.callerPackageId}"${platform ? ' and the platform' : ''}: ${named}. Nothing picks one of them: address it by its package.`;
     case 'ambiguous-in-environment':
-      return `${subject} is held by ${refusal.candidates.length} packages in this environment and the caller names ` +
+      return `${subject} is held by ${refusal.candidates.length} ${platform ? 'holders' : 'packages'} in this environment and the caller names ` +
         `no package: ${named}. Nothing picks one of them: address it by its package.`;
     case 'outside-closure':
       return `${subject} is held outside the declared dependency closure of package "${refusal.callerPackageId}": ` +
@@ -517,8 +518,13 @@ function resolveEnvironmentWide<T>(
   if (environmentItem !== undefined) {
     return { status: 'resolved', item: environmentItem, holder: { kind: 'environment' }, via: 'environment' };
   }
+  // The platform's item is one more holder beside the packages: the only one
+  // answers, and beside any package holder the name refuses, naming each.
   const platformItem = source.platformItem?.();
-  if (platformItem !== undefined) return { status: 'resolved', item: platformItem, holder: { kind: 'platform' }, via: 'platform' };
+  if (platformItem !== undefined) {
+    if (source.packageHolders.length === 0) return { status: 'resolved', item: platformItem, holder: { kind: 'platform' }, via: 'platform' };
+    return refuse(query, callerPackageId, 'ambiguous-in-environment', [...source.packageHolders.map(packageHolder), { kind: 'platform' }]);
+  }
   const pick = pickUnique(query.type, source.packageHolders);
   if (pick.kind === 'one') return packageItem<T>(source, pick.packageId, pick.baseline ? 'baseline' : 'unique-holder');
   if (pick.kind === 'several') return refuse(query, callerPackageId, 'ambiguous-in-environment', pick.packageIds.map(packageHolder));

@@ -177,8 +177,14 @@ describe('the platform\'s item — in every caller\'s reach, like `sys` (epic se
     expect(r.status === 'refused' && r.message).toContain('the platform');
   });
 
-  it('a caller with no package: the environment\'s own item, then the platform\'s, then the unique package holder', () => {
-    expect(ask([[A, 'a']], 'host', [])).toMatchObject({ status: 'resolved', item: 'host', via: 'platform' });
+  it('a caller with no package: the environment\'s own item first, then the platform counted as one more holder', () => {
+    expect(ask([], 'host', [])).toEqual({ status: 'resolved', item: 'host', holder: { kind: 'platform' }, via: 'platform' });
+    const both = ask([[A, 'a']], 'host', []);
+    expect(both).toMatchObject({
+      status: 'refused', reason: 'ambiguous-in-environment', callerPackageId: null,
+      candidates: [{ kind: 'package', packageId: A }, { kind: 'platform' }],
+    });
+    expect(both.status === 'refused' && both.message).toContain('the platform');
     const env = { ...withPlatform([[A, 'a']], 'host'), environmentItem: () => 'env' };
     expect(resolvePackageScopedHolders({ type: ENGINE_FUNCTION_TYPE, name: 'score' }, env, closure([]))).toMatchObject({ item: 'env', via: 'environment' });
     expect(ask([[A, 'a']], undefined, [])).toMatchObject({ item: 'a', via: 'unique-holder' });
