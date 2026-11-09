@@ -110,7 +110,7 @@ async start(ctx: PluginContext) {
   const cache = ctx.getService<ICacheService>('cache');
 
   // Use services
-  const result = await db.object('account').find();
+  const result = await db.find('account');
   await cache.set('accounts', result);
 }
 ```
@@ -123,7 +123,7 @@ Check availability before calling:
 async start(ctx: PluginContext) {
   try {
     const realtime = ctx.getService<IRealtimeService>('realtime');
-    realtime.publish('my-event', data);
+    await realtime.publish({ type: 'my-event', payload: data, timestamp: new Date().toISOString() });
   } catch {
     ctx.logger.debug('Realtime service not available — skipping');
   }
