@@ -430,6 +430,16 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'pressed',
     why: "planned, not yet rendered — the reader's pressed-state predicate is validated at parse (CEL only, no boolean literal) and judged at the authoring doors in the `record` scope, but no action surface draws the pressed face until the console's header buttons read it. A form control offered today would let an author write a predicate nothing shows",
   },
+  // #31840 — an action's preflight read lands spec-first the same way:
+  // `planned` in the liveness ledger, sent by no param dialog until the console
+  // card (#31808) draws the panel and applies the seeds.
+  {
+    kind: 'omit',
+    type: 'action',
+    path: ROOT_PATH,
+    key: 'preflight',
+    why: "planned, not yet read — the same-origin `GET`, its closed hole set and its answer-to-param seeds are validated at parse (each hole and seed judged against the action's declared params), but no param dialog sends the read, shows the answer or fills a param until the console's param dialog reads it. A form control offered today would let an author declare a read nothing sends",
+  },
 
   // #27945 — a lookup's pick autofill lands spec-first the same way: `planned`
   // in the liveness ledger, read by no form or grid until the ui card's lookup

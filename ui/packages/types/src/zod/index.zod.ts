@@ -471,6 +471,8 @@ export {
   TileGridBlockItemSchema,
   TileGridBlockAddTileSchema,
   TileGridBlockSchema,
+  RowTableColumnSchema,
+  RowTableBlockSchema,
   ProductBlockComponentSchema,
 } from './product-blocks.zod.js';
 export type { ProductBlockComponentZodType } from './product-blocks.zod.js';
