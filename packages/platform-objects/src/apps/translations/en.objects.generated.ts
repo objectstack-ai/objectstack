@@ -267,6 +267,43 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      register_service_account: {
+        label: "Register AI Service Account",
+        description: "Register an AI service account in this organization: an identity of its own for an agent that runs without a person, acting only through API keys created for it. It can do nothing until it is granted permission sets, and it never holds administrator access.",
+        successMessage: "AI service account registered",
+        params: {
+          name: {
+            label: "Name",
+            helpText: "What the agent is and what it is for. This name is how the account is recognised in the user list and the audit trail."
+          },
+          ownerId: {
+            label: "Accountable Owner",
+            helpText: "The person accountable for this account, a member of this organization. Leave empty to be the owner yourself."
+          }
+        }
+      },
+      create_service_account_key: {
+        label: "Create API Key",
+        description: "Create an API key for this AI service account. The key acts as the account, with the account's own grants, in the account's organization.",
+        params: {
+          name: {
+            label: "Key Name"
+          },
+          expires_at: {
+            label: "Expires At",
+            helpText: "Leave empty for the default lifetime set under Setup → Authentication → API keys (Default key lifetime, 90 days unless changed). A date later than the Maximum key lifetime there is refused."
+          }
+        },
+        resultDialog: {
+          title: "API key created",
+          description: "Copy the key now — it is shown only once and cannot be recovered. If it leaks, revoke it and create a new one.",
+          acknowledge: "I have saved the key",
+          fields: {
+            key: "API Key",
+            expires_at: "Expires At"
+          }
+        }
+      },
       update_my_profile: {
         label: "Update Profile",
         successMessage: "Profile updated"

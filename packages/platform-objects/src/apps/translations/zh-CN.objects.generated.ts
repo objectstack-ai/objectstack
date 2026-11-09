@@ -267,6 +267,43 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      register_service_account: {
+        label: "注册 AI 服务账号",
+        description: "在此组织中注册一个 AI 服务账号：为无人值守运行的智能体提供一个独立身份，它只能通过为其创建的 API 密钥行事。在被授予权限集之前它什么也做不了，并且永远不会拥有管理员权限。",
+        successMessage: "AI 服务账号已注册",
+        params: {
+          name: {
+            label: "名称",
+            helpText: "说明这个智能体是什么、用来做什么。用户列表和审计记录中靠这个名称识别该账号。"
+          },
+          ownerId: {
+            label: "责任人",
+            helpText: "对该账号负责的人，须是此组织的成员。留空则由你本人担任责任人。"
+          }
+        }
+      },
+      create_service_account_key: {
+        label: "创建 API 密钥",
+        description: "为此 AI 服务账号创建一个 API 密钥。该密钥以账号本身的身份、按账号自己的授权，在账号所属的组织中行事。",
+        params: {
+          name: {
+            label: "密钥名称"
+          },
+          expires_at: {
+            label: "过期时间",
+            helpText: "留空则使用「设置 → 身份验证 → API 密钥」中的默认密钥有效期(未修改时为 90 天)。晚于该处密钥最长有效期的日期会被拒绝。"
+          }
+        },
+        resultDialog: {
+          title: "API 密钥已创建",
+          description: "请立即复制密钥——它只显示这一次，之后无法找回。如果泄露，请撤销它并创建新的密钥。",
+          acknowledge: "我已保存密钥",
+          fields: {
+            key: "API 密钥",
+            expires_at: "过期时间"
+          }
+        }
+      },
       update_my_profile: {
         label: "更新资料",
         successMessage: "已更新资料"

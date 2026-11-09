@@ -267,6 +267,43 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      register_service_account: {
+        label: "Enregistrer un compte de service IA",
+        description: "Enregistrez un compte de service IA dans cette organisation : une identité propre pour un agent qui fonctionne sans personne et n'agit qu'au moyen des clés d'API créées pour lui. Il ne peut rien faire tant qu'aucun ensemble d'autorisations ne lui est attribué, et il n'a jamais d'accès administrateur.",
+        successMessage: "Compte de service IA enregistré",
+        params: {
+          name: {
+            label: "Nom",
+            helpText: "Ce qu'est l'agent et à quoi il sert. C'est sous ce nom que le compte apparaît dans la liste des utilisateurs et dans le journal d'audit."
+          },
+          ownerId: {
+            label: "Responsable",
+            helpText: "La personne responsable de ce compte, membre de cette organisation. Laissez vide pour en être vous-même le responsable."
+          }
+        }
+      },
+      create_service_account_key: {
+        label: "Créer une clé d'API",
+        description: "Créez une clé d'API pour ce compte de service IA. La clé agit en tant que compte, avec les autorisations propres du compte, dans l'organisation du compte.",
+        params: {
+          name: {
+            label: "Nom de la clé"
+          },
+          expires_at: {
+            label: "Expire le",
+            helpText: "Laissez vide pour la durée de vie par défaut définie dans Configuration → Authentification → Clés API (Durée de vie par défaut des clés, 90 jours sauf modification). Une date postérieure à la Durée de vie maximale des clés qui y est définie est refusée."
+          }
+        },
+        resultDialog: {
+          title: "Clé API créée",
+          description: "Copiez la clé maintenant — elle n’est affichée qu’une seule fois et ne peut pas être récupérée. En cas de fuite, révoquez-la et créez-en une nouvelle.",
+          acknowledge: "J’ai enregistré la clé",
+          fields: {
+            key: "Clé API",
+            expires_at: "Expire le"
+          }
+        }
+      },
       update_my_profile: {
         label: "Mettre à jour le profil",
         successMessage: "Profil mis à jour"
