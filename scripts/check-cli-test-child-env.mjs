@@ -2635,13 +2635,20 @@ export function selfTest() {
       .filter((abs) => builtEntrypointSpawns(abs, readFileSync(abs, 'utf8')).spawns > 0)
       .map((abs) => relative(REPO_ROOT, abs).split(sep).join('/'))
       .sort();
-    t('the built-entrypoint population is exactly the twenty files that spawn bin/run.js',
+    t('the built-entrypoint population is exactly the twenty-one files that spawn bin/run.js',
       JSON.stringify(builtFiles) === JSON.stringify([
         // [#26130] Joined the population deliberately: its subject is a plain
         // `os dev` boot that compiles before it serves, measured on the BUILT
         // packages the way `dev-standalone-self-heal` measures its `os dev`
         // boots. Its spawn hands the child `NODE_ENV: undefined`.
         'packages/cli/test/dev-connector-env-parity.integration.test.ts',
+        // [#31761] Joined the population deliberately: its CONTROL leg is a
+        // plain `os start` on a host config in PRODUCTION posture (no dev
+        // artifact door, so the config module is the only copy), which
+        // `bin/run-dev.js` cannot reach — it sets `NODE_ENV=development` before
+        // argv is parsed, and `os start` then composes the door. Every spawn
+        // hands its child `NODE_ENV: undefined`.
+        'packages/cli/test/dev-host-config-artifact-source.integration.test.ts',
         // [#26615] Joined the population deliberately, beside
         // `dev-standalone-self-heal`: its subject is a plain `os dev` whose
         // refused boot runs the organization-ownership ceremony through the
