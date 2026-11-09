@@ -46,7 +46,7 @@ import {
   builtinSettingsManifests,
   registerSettingsRoutes,
 } from '@objectstack/service-settings';
-import { AuthzStoreUnavailableError, hashApiKey } from '@objectstack/core';
+import { AuthzStoreUnavailableError, currentCredentialUseClient, hashApiKey } from '@objectstack/core';
 import { AuthPlugin } from './auth-plugin.js';
 import type { AuthManager } from './auth-manager.js';
 import type { OrganizationAddressReaderContext } from './client-address-read.js';
@@ -597,6 +597,43 @@ describe("an API key its own lifecycle refuses is answered that refusal at the o
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('API_KEY_EXPIRED');
     expect(res.body.error.message.startsWith(`This API key (osk_client…) expired on ${LONG_AGO}. `)).toBe(true);
+  });
+});
+
+/**
+ * [#31898] The organization address read's caller resolution hands where the
+ * request came from to the key's use stamp: the raw-app request's socket peer
+ * and the headers go to the auth service's own trust rule, and the address it
+ * establishes is what the `credential_use` row records, with the user agent.
+ * With no `trustProxy` declared, a forwarded header names nothing.
+ */
+describe('[#31898] the organization address read hands its client facts to the key\'s use stamp', () => {
+  it('the stamp runs with the peer the trust rule established, ignoring the forwarded header, and the user agent', async () => {
+    const KEY = 'osk_client_address_31898';
+    const rig = await boot();
+    const keyHash = hashApiKey(KEY);
+    const stamps: unknown[] = [];
+    vi.spyOn(rig.manager, 'getDataEngine').mockReturnValue({
+      find: async (object: string, q: any) => (
+        object === 'sys_api_key' && q?.where?.key === keyHash
+          ? [{ id: 'key_1', key: keyHash, prefix: 'osk_client', user_id: 'usr_key_owner', revoked: false, scopes: '[]', expires_at: '2999-01-01T00:00:00.000Z' }]
+          : object === 'sys_user' && q?.where?.id === 'usr_key_owner' ? [{ id: 'usr_key_owner' }] : []
+      ),
+      // The key's use stamp: what plugin-audit's hook reads, read here.
+      update: async () => {
+        stamps.push(currentCredentialUseClient() ?? null);
+        return {};
+      },
+    } as any);
+    const established = vi.spyOn(rig.manager, 'resolveClientAddress');
+    await rig.orgRead(
+      { headers: { 'x-api-key': KEY, 'user-agent': 'ci-agent/3.1', 'x-forwarded-for': '198.51.100.9' }, remoteAddress: '203.0.113.9' },
+      { caller: 'resolved' },
+    );
+    // The route asks the rule for its own answer too; every ask is handed the peer.
+    expect(established).toHaveBeenCalled();
+    for (const [transport] of established.mock.calls) expect(transport.remoteAddress).toBe('203.0.113.9');
+    expect(stamps).toEqual([{ ipAddress: '203.0.113.9', userAgent: 'ci-agent/3.1' }]);
   });
 });
 

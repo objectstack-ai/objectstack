@@ -43,6 +43,9 @@ import { fileURLToPath } from 'node:url';
 
 import { beforeAll, describe, expect, it } from 'vitest';
 
+// The one code/prose separator, typed by its `.d.mts` sibling.
+import { maskComments, maskCommentsAndLiterals } from '../../../../scripts/js-comment-mask.mjs';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** …/packages/core/src/security → repo root */
 const REPO_ROOT = resolve(HERE, '../../../..');
@@ -141,25 +144,25 @@ const CALLERS: Record<string, Classification> = {
     kind: 'door',
     door: 'the settings routes',
     calls: { resolveRequestExecutionContext: 1 },
-    pin: 'packages/services/service-settings/src/settings-credential-use-client.test.ts',
+    pin: 'packages/services/service-settings/src/settings-routes.api-key-account-posture.pin.test.ts',
   },
   'packages/plugins/plugin-sharing/src/shareable-objects-routes.ts': {
     kind: 'door',
     door: 'the shareable-objects route',
     calls: { resolveRequestExecutionContext: 1 },
-    pin: 'packages/plugins/plugin-sharing/src/sharing-credential-use-client.test.ts',
+    pin: 'packages/plugins/plugin-sharing/src/shareable-objects.test.ts',
   },
   'packages/plugins/plugin-sharing/src/sharing-plugin.ts': {
     kind: 'door',
     door: 'the sharing routes',
     calls: { resolveAuthzContext: 1 },
-    pin: 'packages/plugins/plugin-sharing/src/sharing-credential-use-client.test.ts',
+    pin: 'packages/plugins/plugin-sharing/src/share-link-routes.api-key-account-posture.pin.test.ts',
   },
   'packages/services/service-messaging/src/preference-options-routes.ts': {
     kind: 'door',
     door: 'the notification preference options route',
     calls: { resolveRequestExecutionContext: 1 },
-    pin: 'packages/services/service-messaging/src/preference-options-credential-use-client.test.ts',
+    pin: 'packages/services/service-messaging/src/preference-options-routes.integration.test.ts',
   },
   'packages/plugins/plugin-auth/src/auth-plugin.ts': {
     kind: 'door',
@@ -171,25 +174,25 @@ const CALLERS: Record<string, Classification> = {
     kind: 'door',
     door: 'the cloud-connection platform-settings check',
     calls: { resolveAuthzContext: 1 },
-    pin: 'packages/cloud-connection/src/cloud-connection-credential-use-client.test.ts',
+    pin: 'packages/cloud-connection/src/cloud-connection-setup-access.pin.test.ts',
   },
   'packages/cloud-connection/src/marketplace-install-local-plugin.ts': {
     kind: 'door',
     door: 'the local marketplace install doors',
     calls: { resolveAuthzContext: 1 },
-    pin: 'packages/cloud-connection/src/cloud-connection-credential-use-client.test.ts',
+    pin: 'packages/cloud-connection/src/marketplace-install-local-api-key-account-posture.pin.test.ts',
   },
   'packages/services/service-datasource/src/admin-routes.ts': {
     kind: 'door',
     door: 'the datasource admin routes',
     calls: { resolveAuthzContext: 1 },
-    pin: 'packages/services/service-datasource/src/admin-routes-credential-use-client.test.ts',
+    pin: 'packages/services/service-datasource/src/__tests__/admin-routes-api-key-account-posture.pin.test.ts',
   },
   'packages/services/service-print/src/print-routes.ts': {
     kind: 'door',
     door: 'the print route',
     calls: { resolveAuthzContext: 1 },
-    pin: 'packages/services/service-print/src/print-routes-credential-use-client.test.ts',
+    pin: 'packages/services/service-print/src/print-routes.test.ts',
   },
 
   // ── Session-only doors: they read no API key and write no `credential_use` row. ──
@@ -229,11 +232,21 @@ function git(args: string[]): string[] {
 const isScannedSource = (path: string) =>
   path.endsWith('.ts') && !path.endsWith('.d.ts') && !/\.(test|spec)\.ts$/.test(path);
 
-/** The source with its comments blanked, so a docblock that names a call is not one. */
-function codeOf(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
-    .replace(/(^|[^:'"`\\])\/\/[^\n]*/g, (_m, lead: string) => lead);
+/**
+ * The two projections of a source the scan reads, from the repo's one
+ * code/prose separator (`scripts/js-comment-mask.mjs`), never a regex here: a
+ * `/*` inside a template (`${basePath}/*`) opens no comment. `code` blanks
+ * comments AND literal contents, so a docblock or a string that names a seam
+ * is not a call and a quoted paren never unbalances one; `text` blanks only
+ * comments, so a call's argument text still reads `credentials: 'session-only'`.
+ * Both keep every offset, so a call located on `code` indexes `text` alike.
+ */
+interface Projections {
+  code: string;
+  text: string;
+}
+function codeOf(source: string): Projections {
+  return { code: maskCommentsAndLiterals(source), text: maskComments(source) };
 }
 
 /** The text between a call's opening parenthesis (at `open`) and its matching close. */
@@ -270,16 +283,21 @@ function topLevelArguments(args: string): string[] {
 
 interface SeamCall {
   seam: Seam;
+  /** The argument text with comments blanked: literals read as written. */
   args: string;
+  /** The same span with literal contents blanked too: where the commas that split arguments are. */
+  argsCode: string;
 }
 
 /** Every CALL of the four functions in `code` (a definition is not a call). */
-function seamCallsOf(code: string): SeamCall[] {
+function seamCallsOf({ code, text }: Projections): SeamCall[] {
   const calls: SeamCall[] = [];
   const re = new RegExp(`\\b(${SEAMS.join('|')})\\s*\\(`, 'g');
   for (let m = re.exec(code); m; m = re.exec(code)) {
     if (/\bfunction\s+$/.test(code.slice(Math.max(0, m.index - 16), m.index))) continue;
-    calls.push({ seam: m[1] as Seam, args: argumentsAt(code, m.index + m[0].length - 1) });
+    const open = m.index + m[0].length - 1;
+    const argsCode = argumentsAt(code, open);
+    calls.push({ seam: m[1] as Seam, args: text.slice(open + 1, open + 1 + argsCode.length), argsCode });
   }
   return calls;
 }
@@ -295,7 +313,7 @@ function handsFacts(call: SeamCall): true | string {
     case 'resolveAuthzContext':
       return /\bclient\s*:\s*(?!undefined\b)\S/.test(call.args) ? true : 'hands no `client`';
     case 'resolveApiKeyAdmission':
-      return topLevelArguments(call.args).length >= 7 ? true : 'hands no trailing `client` argument';
+      return topLevelArguments(call.argsCode).length >= 7 ? true : 'hands no trailing `client` argument';
     case 'resolveApiKeyPrincipal':
       return '`resolveApiKeyPrincipal` takes no client; call `resolveApiKeyAdmission` with one';
   }
@@ -383,6 +401,10 @@ describe('[#31898] every door that can admit an API key hands its client facts t
       for (const [file, entry] of Object.entries(CALLERS)) {
         if (entry.kind !== 'door') continue;
         expect(existsSync(join(REPO_ROOT, entry.pin)), `the behaviour pin of ${file} is missing: ${entry.pin}`).toBe(true);
+        expect(
+          readFileSync(join(REPO_ROOT, entry.pin), 'utf8'),
+          `${entry.pin} pins no door's client facts (no [#31821] / [#31898] case)`,
+        ).toMatch(/\[#3(?:1821|1898)\]/);
       }
       expect(existsSync(join(REPO_ROOT, AUDIT_PIN)), 'the row\'s own pin').toBe(true);
     },
@@ -396,6 +418,8 @@ describe('[#31898] every door that can admit an API key hands its client facts t
       const one = (src: string) => seamCallsOf(codeOf(src));
       // A docblock or a line comment naming a call is not one; a definition is not one.
       expect(one('/** resolveAuthzContext({ }) */\n// resolveAuthzContext({})\nexport async function resolveAuthzContext(input) {}')).toEqual([]);
+      // A `/*` inside a template or a string opens no comment, and a seam named in a string is not a call.
+      expect(one('const a = `${base}/*`;\nresolveAuthzContext({ client: x });\nconst b = "*/ resolveAuthzContext(";').map((c) => c.seam)).toEqual(['resolveAuthzContext']);
       const reec = (body: string) => handsFacts(one(`resolveRequestExecutionContext({ headers, ${body} })`)[0]);
       expect(reec("credentials: 'api-key-and-session', transport: { remoteAddress: req.remoteAddress }")).toBe(true);
       expect(reec("credentials: 'api-key-and-session', transport: undefined")).not.toBe(true);
