@@ -1,7 +1,7 @@
 /**
  * Product-page blocks (objectui#12197)
  *
- * Five generic SDUI blocks for the pages a product composes as metadata —
+ * Six generic SDUI blocks for the pages a product composes as metadata —
  * a product's welcome page, a CRM's sales home — named for what they draw
  * (ADR-0060 rule 2), never for the product that asked for them:
  *
@@ -11,6 +11,7 @@
  *   - `usage-bar` — how much of a limit is used, as a bar.
  *   - `checklist` — steps that tick as they are done.
  *   - `tile-grid` — the console home's launcher tiles, as a block.
+ *   - `row-table` — the rows a bound list holds, as a table (#31856).
  *
  * ## Props, and bound data
  *
@@ -44,6 +45,11 @@
  *   - `tile-grid` draws the apps strip's tile (`../home/launcherTile.ts`, moved
  *     out of `HomeAppsStrip` string for string), and leads with a router
  *     `Link`, as the strip does.
+ *   - `row-table` draws the `Table` primitives (`@object-ui/components`), reads
+ *     each column's `path` with the binding's own path reader
+ *     (`selectElementApiPath`), formats `datetime` through the one date-display
+ *     path (`formatDateTime`, `@object-ui/core`, the `datetime` cell's face),
+ *     and draws a list it cannot read with the binding's error panel.
  *
  * Types and arms: `@object-ui/types` `product-blocks.ts` /
  * `zod/product-blocks.zod.ts`.
@@ -53,9 +59,27 @@
 import * as React from 'react';
 import { Link } from 'react-router-dom';
 import { Check, CheckCircle2, Circle, Copy, Plus } from 'lucide-react';
-import { ComponentRegistry } from '@object-ui/core';
-import { SchemaRenderer, useConfigBagEvaluator } from '@object-ui/react';
-import { Badge, Button, Card, CardContent, Progress, cn } from '@object-ui/components';
+import { ComponentRegistry, formatDateTime, getDisplayTimeZone, subscribeDisplayTimeZone } from '@object-ui/core';
+import {
+  ElementDataSourceErrorPanel,
+  SchemaRenderer,
+  selectElementApiPath,
+  useConfigBagEvaluator,
+} from '@object-ui/react';
+import {
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  Progress,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  cn,
+} from '@object-ui/components';
 import { formatDisplayNumber, pickLocalized, useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
 import type { DeclaredNode } from '@object-ui/types';
 import { getIcon } from '../../utils/getIcon.js';
@@ -339,6 +363,150 @@ export function TileGridBlock({ schema, className }: BlockRendererProps) {
 }
 
 // ---------------------------------------------------------------------------
+// row-table
+// ---------------------------------------------------------------------------
+
+/** The formats a `row-table` column draws; anything else is refused. */
+const ROW_TABLE_FORMATS = new Set(['text', 'datetime', 'enum']);
+
+/** One column, read from the props bag. */
+interface RowTableColumn {
+  path: string;
+  label: unknown;
+  format: 'text' | 'datetime' | 'enum';
+  enum?: Record<string, unknown>;
+}
+
+/** What `rows` resolved to, named for the refusal sentence. */
+function kindOf(value: unknown): string {
+  if (value === undefined) return 'nothing';
+  if (value === null) return 'null';
+  if (typeof value === 'string') return `the text "${value}"`;
+  return Array.isArray(value) ? 'a list' : typeof value === 'object' ? 'an object' : `a ${typeof value}`;
+}
+
+/**
+ * The block's rows and columns, or the one sentence saying why it cannot draw
+ * them. A list it cannot read is refused, never drawn as the empty state: an
+ * empty table would hide a hole that names the wrong member.
+ */
+export function readRowTable(
+  props: Record<string, unknown>,
+): { ok: true; rows: unknown[]; columns: RowTableColumn[] } | { ok: false; message: string } {
+  const rows = props.rows;
+  if (!Array.isArray(rows)) {
+    return { ok: false, message: `row-table: rows resolved to ${kindOf(rows)}, not a list of rows.` };
+  }
+  const authored = props.columns;
+  if (!Array.isArray(authored) || authored.length === 0) {
+    return { ok: false, message: 'row-table: columns is not a list of at least one column.' };
+  }
+  const columns: RowTableColumn[] = [];
+  for (const [index, column] of authored.entries()) {
+    const at = `row-table: columns[${index}]`;
+    if (!isRecord(column) || typeof column.path !== 'string' || column.path === '') {
+      return { ok: false, message: `${at} has no path.` };
+    }
+    const format = column.format ?? 'text';
+    if (typeof format !== 'string' || !ROW_TABLE_FORMATS.has(format)) {
+      return { ok: false, message: `${at}.format "${String(format)}" is not one of text, datetime, enum.` };
+    }
+    if (format === 'enum' && !isRecord(column.enum)) {
+      return { ok: false, message: `${at} has format enum and no enum label map.` };
+    }
+    columns.push({
+      path: column.path,
+      label: column.label,
+      format: format as RowTableColumn['format'],
+      enum: isRecord(column.enum) ? column.enum : undefined,
+    });
+  }
+  return { ok: true, rows, columns };
+}
+
+/** A cell's text: `—` for a field the row lacks, `null` or `''`. */
+function rowTableCell(
+  row: unknown,
+  column: RowTableColumn,
+  language: string,
+  locale: string | undefined,
+): string {
+  const selected = selectElementApiPath(row, column.path);
+  const value = selected.found ? selected.value : undefined;
+  if (value === undefined || value === null || value === '') return '—';
+  if (column.format === 'datetime') {
+    return typeof value === 'string' || typeof value === 'number'
+      ? formatDateTime(value, { locale, style: 'compact' })
+      : '—';
+  }
+  if (column.format === 'enum' && (typeof value === 'string' || typeof value === 'number')) {
+    const key = String(value);
+    if (column.enum && Object.prototype.hasOwnProperty.call(column.enum, key)) {
+      const label = pickLocalized(column.enum[key], language);
+      if (label) return label;
+    }
+    return key;
+  }
+  return typeof value === 'object' ? JSON.stringify(value) : String(value);
+}
+
+export function RowTableBlock({ schema, className }: BlockRendererProps) {
+  const props = propsOf(schema);
+  const { t, language } = useObjectTranslation();
+  const locale = useDisplayLocale();
+  // A datetime cell is an instant in the display zone: draw again when the
+  // host declares another one.
+  React.useSyncExternalStore(subscribeDisplayTimeZone, getDisplayTimeZone, getDisplayTimeZone);
+  const read = readRowTable(props);
+  if (!read.ok) {
+    return (
+      <ElementDataSourceErrorPanel
+        testId="row-table"
+        title={t('element.component.apiUnreadable', { defaultValue: 'This component’s API data source could not be read' })}
+        message={read.message}
+      />
+    );
+  }
+  const { rows, columns } = read;
+  if (rows.length === 0) {
+    return (
+      <p className={cn('py-6 text-center text-sm text-muted-foreground', className)} data-testid="row-table-empty">
+        {pickLocalized(props.emptyLabel, language) || t('table.noRows', { defaultValue: 'No rows to display' })}
+      </p>
+    );
+  }
+  return (
+    <div className={cn('w-full', className)} data-testid="row-table-block">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            {columns.map((column, index) => (
+              <TableHead key={`${column.path}-${index}`} data-testid={`row-table-head-${index}`}>
+                {pickLocalized(column.label, language)}
+              </TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((row, rowIndex) => (
+            <TableRow key={rowIndex} data-testid={`row-table-row-${rowIndex}`}>
+              {columns.map((column, index) => (
+                <TableCell
+                  key={`${column.path}-${index}`}
+                  className={cn(column.format === 'datetime' && 'tabular-nums whitespace-nowrap')}
+                >
+                  {rowTableCell(row, column, language, locale)}
+                </TableCell>
+              ))}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Registrations
 // ---------------------------------------------------------------------------
 
@@ -416,6 +584,18 @@ ComponentRegistry.register('tile-grid', TileGridBlock, {
   inputs: [
     { name: 'items', type: ['array', 'string'], of: 'object', required: true, description: 'The tiles: { label, href, icon?, caption? }, or a ${…} hole naming a list of them in the bound data. href is a console route or an absolute URL; icon is a Lucide icon name (a generic icon when omitted). The tiles wrap to the container\'s width.' },
     { name: 'addTile', type: 'object', description: 'A dashed "add" tile after the others: { label, href }. None when omitted.' },
+    API_BINDING_INPUT,
+  ],
+});
+
+ComponentRegistry.register('row-table', RowTableBlock, {
+  namespace: 'app-shell',
+  label: 'Row table',
+  category: 'content',
+  inputs: [
+    { name: 'rows', type: ['array', 'string'], of: 'object', required: true, description: 'The rows, or a ${…} hole naming a list of them in the bound data. Every row is drawn, in order. A hole that resolves to anything but a list draws an error panel, never the empty state.' },
+    { name: 'columns', type: 'array', of: 'object', required: true, description: 'The columns, in order: { path, label, format?, enum? }. path is a dotted path into one row (owner.name); label is a string or an inline translation map. format is text (the default, drawn as written), datetime (an instant in the viewer\'s display locale and time zone) or enum (the value\'s label from enum: { value: label }; a value the map does not name is drawn as written). A field the row lacks, null or empty draws "—".' },
+    { name: 'emptyLabel', type: ['string', 'object'], description: 'What the table says when there are no rows; "No rows to display" when omitted.' },
     API_BINDING_INPUT,
   ],
 });
