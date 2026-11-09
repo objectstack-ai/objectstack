@@ -400,7 +400,7 @@ describe('[ADR-0150 D8 R1] permission_set_package — only a system writer write
   it('a system update writing the column alone — the backfill\'s and the reviewed bind\'s write — lands as written', async () => {
     const { engine } = await sealed();
     const created: any = await engine.insert(GRANT, TABLES[GRANT](), SYS);
-    await engine.update(GRANT, { permission_set_package: BOUND }, { where: { id: created.id }, ...SYS } as never);
+    await engine.update(GRANT, { permission_set_package: BOUND }, { where: { id: created.id }, context: { isSystem: true } } as never);
     expect(await storedPackage(engine, created.id)).toBe(BOUND);
   });
 });
