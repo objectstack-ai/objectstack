@@ -1,6 +1,6 @@
 ---
-'@objectstack/platform-objects': minor
-'@objectstack/plugin-auth': minor
+'@objectstack/platform-objects': patch
+'@objectstack/plugin-auth': patch
 ---
 
 feat(auth): an AI service account is a `sys_user` row of kind `agent` that never signs in (ADR-0151 D1, D2)
