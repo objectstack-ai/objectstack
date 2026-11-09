@@ -16,7 +16,7 @@ export const entry: SemanticMigration = {
     + 'Rename the item and every reference to it in the same change; a letter-led name, '
     + 'namespace-prefixed or not, is unchanged.',
   reason:
-    'ADR-0150 D5 (accepted by merge, #31586): a by-name door reads a `_`-led segment as the '
+    'ADR-0150 D5: a by-name door reads a `_`-led segment as the '
     + 'router\'s own — `_env` addresses an environment item, and `_status`, `_activation` '
     + 'and `_drafts` are literals the router reads before any namespace. A namespace can '
     + 'never start with `_` (`^[a-z][a-z0-9_]{1,19}$`), but these ten name schemas admitted '
