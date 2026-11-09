@@ -49,7 +49,7 @@
  *     each column's `path` with the binding's own path reader
  *     (`selectElementApiPath`), formats `datetime` through the one date-display
  *     path (`formatDateTime`, `@object-ui/core`, the `datetime` cell's face),
- *     and draws a list it cannot read with the binding's error panel.
+ *     and draws a list it cannot read with the binding's error face.
  *
  * Types and arms: `@object-ui/types` `product-blocks.ts` /
  * `zod/product-blocks.zod.ts`.
@@ -60,12 +60,7 @@ import * as React from 'react';
 import { Link } from 'react-router-dom';
 import { Check, CheckCircle2, Circle, Copy, Plus } from 'lucide-react';
 import { ComponentRegistry, formatDateTime, getDisplayTimeZone, subscribeDisplayTimeZone } from '@object-ui/core';
-import {
-  ElementDataSourceErrorPanel,
-  SchemaRenderer,
-  selectElementApiPath,
-  useConfigBagEvaluator,
-} from '@object-ui/react';
+import { SchemaRenderer, selectElementApiPath, useConfigBagEvaluator } from '@object-ui/react';
 import {
   Badge,
   Button,
@@ -459,12 +454,20 @@ export function RowTableBlock({ schema, className }: BlockRendererProps) {
   React.useSyncExternalStore(subscribeDisplayTimeZone, getDisplayTimeZone, getDisplayTimeZone);
   const read = readRowTable(props);
   if (!read.ok) {
+    // The binding's own error face and title (`SchemaRenderer`'s
+    // `ElementApiDataSourcePanel`), drawn here because this block, not the
+    // binding, finds the list unreadable.
     return (
-      <ElementDataSourceErrorPanel
-        testId="row-table"
-        title={t('element.component.apiUnreadable', { defaultValue: 'This component’s API data source could not be read' })}
-        message={read.message}
-      />
+      <div
+        className={cn('my-2 rounded border border-red-500 bg-red-50 p-4 text-red-500', className)}
+        role="alert"
+        data-testid="row-table-datasource-error"
+      >
+        <p className="font-medium">
+          {t('element.component.apiUnreadable', { defaultValue: 'This component’s API data source could not be read' })}
+        </p>
+        <p className="mt-1 text-sm">{read.message}</p>
+      </div>
     );
   }
   const { rows, columns } = read;
