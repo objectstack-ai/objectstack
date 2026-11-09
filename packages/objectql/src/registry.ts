@@ -88,6 +88,7 @@ import {
   bareNameReason,
   bareNameTypeLabel,
   BARE_NAME_ONE_HOLDER_TYPES,
+  bareNameHoldersMeet,
   declaredBareNames,
   describeBareNameHolder,
   handlerOwnerPackageId,
@@ -4891,6 +4892,17 @@ export class SchemaRegistry {
   }
 
   /**
+   * [ADR-0150 D2/D9, child B] The namespace a package holder declares — its
+   * installed record's `manifest.namespace` — or `undefined`: no record, or
+   * none declared. What {@link bareNameHoldersMeet} compares for a type whose
+   * rule has narrowed to the namespace.
+   */
+  private bareNameHolderNamespace(packageId: string): string | undefined {
+    const namespace = this.getPackage(packageId)?.manifest?.namespace;
+    return typeof namespace === 'string' && namespace !== '' ? namespace : undefined;
+  }
+
+  /**
    * Every holder `incomingPackageId` would join by holding `(type, name)` —
    * the ONE predicate both doors ask ({@link refuseBareNameConflicts} at the
    * package door, the item seam in {@link registerItem}). Empty before the
@@ -4898,13 +4910,16 @@ export class SchemaRegistry {
    * a re-install or an upgrade of a package that came through the boot beside
    * another holder is not a new holder (module doc, "The cold boot"). A
    * built-in name is read only when `builtIns` (the package door), as the
-   * security catalog reads its own.
+   * security catalog reads its own. A package holder counts only when it
+   * meets the incoming package under {@link bareNameHoldersMeet}: for a type
+   * narrowed to the namespace, a holder of another namespace does not
+   * (`incomingNamespace`, the namespace the incoming package declares).
    */
   private bareNameHoldersOtherThan(
     type: BareNameOneHolderType,
     name: string,
     incomingPackageId: string,
-    opts: { builtIns: boolean },
+    opts: { builtIns: boolean; incomingNamespace: string | undefined },
   ): BareNameHolder[] {
     if (!this.bareNameHoldersSealed) return [];
     const packages = this.bareNamePackageHolders(type, name);
@@ -4912,6 +4927,7 @@ export class SchemaRegistry {
     const found = new Map<string, BareNameHolder>();
     if (opts.builtIns && BUILT_IN_BARE_NAMES[type].has(name)) found.set(bareNameHolderKey({ kind: 'built-in' }), { kind: 'built-in' });
     for (const packageId of packages) {
+      if (!bareNameHoldersMeet(type, opts.incomingNamespace, this.bareNameHolderNamespace(packageId))) continue;
       const holder: BareNameHolder = { kind: 'package', packageId };
       found.set(bareNameHolderKey(holder), holder);
     }
@@ -4933,12 +4949,13 @@ export class SchemaRegistry {
     if (selfId === undefined || !this.bareNameHoldersSealed) return;
     const conflicts: BareNameConflict[] = [];
     const seen = new Set<string>();
+    const incomingNamespace = typeof manifest.namespace === 'string' && manifest.namespace !== '' ? manifest.namespace : undefined;
     for (const { type, name } of declaredBareNames(manifest)) {
       // One package declaring one name twice is one holder.
       const key = `${type}|${name}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      for (const existingHolder of this.bareNameHoldersOtherThan(type, name, selfId, { builtIns: true })) {
+      for (const existingHolder of this.bareNameHoldersOtherThan(type, name, selfId, { builtIns: true, incomingNamespace })) {
         conflicts.push({
           type,
           name,
@@ -5002,7 +5019,10 @@ export class SchemaRegistry {
     if (this.bareNameHoldersSealed) {
       const conflicts: BareNameConflict[] = [];
       for (const name of unique) {
-        for (const existingHolder of this.bareNameHoldersOtherThan('function', name, packageId, { builtIns: true })) {
+        for (const existingHolder of this.bareNameHoldersOtherThan('function', name, packageId, {
+          builtIns: true,
+          incomingNamespace: this.bareNameHolderNamespace(packageId),
+        })) {
           conflicts.push({
             type: 'function', name, incomingPackageId: packageId, existingHolder,
             rename: this.bareNameRenameFor(packageId, name),
@@ -5026,7 +5046,9 @@ export class SchemaRegistry {
    * holder of a covered name. Answers every name the boot left held twice, as
    * the conflicts {@link BareNameConflictError} reports — the first-registered
    * holder as the existing one, each later one as an incoming one with its
-   * rename — and a package holding a built-in name. Sorted by type, then name,
+   * rename; for a type narrowed to the namespace, only holders that meet
+   * (`bareNameHoldersMeet`), so two namespaces' holders of one name are no
+   * clash — and a package holding a built-in name. Sorted by type, then name,
    * so two boots of one deployment report alike. Records and refuses nothing
    * else: what the boot does with the answer is
    * {@link sealBareNameHoldersAtColdBoot}'s mode.
@@ -5057,13 +5079,21 @@ export class SchemaRegistry {
           }
           continue;
         }
-        const [first, ...others] = packages;
-        for (const packageId of others) {
+        // Each later holder against the first earlier one it meets
+        // (`bareNameHoldersMeet`): for a type that has not narrowed, always the
+        // first-registered; for one narrowed to the namespace, the first of its
+        // own namespace, and none when every earlier holder declares another.
+        packages.forEach((packageId, index) => {
+          const namespace = this.bareNameHolderNamespace(packageId);
+          const first = packages
+            .slice(0, index)
+            .find((earlier) => bareNameHoldersMeet(type, namespace, this.bareNameHolderNamespace(earlier)));
+          if (first === undefined) return;
           conflicts.push({
             type, name, incomingPackageId: packageId, existingHolder: { kind: 'package', packageId: first },
             rename: this.bareNameRenameFor(packageId, name),
           });
-        }
+        });
       }
     }
     return conflicts;
@@ -7870,7 +7900,10 @@ export class SchemaRegistry {
     // never judged; nor is a type's overridable baseline (the email service's
     // built-in templates), which holds nothing and is refused nothing.
     if (packageId && isBareNameRegistryType(type) && holdsBareName(type, item) && !isOverridableBaseline(type, packageId)) {
-      const holders = this.bareNameHoldersOtherThan(type, baseName, packageId, { builtIns: false });
+      const holders = this.bareNameHoldersOtherThan(type, baseName, packageId, {
+        builtIns: false,
+        incomingNamespace: this.bareNameHolderNamespace(packageId),
+      });
       if (holders.length > 0) {
         const rename = this.bareNameRenameFor(packageId, baseName);
         throw new BareNameConflictError(
