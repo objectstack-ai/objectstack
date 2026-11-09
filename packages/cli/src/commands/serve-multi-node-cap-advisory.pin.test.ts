@@ -155,7 +155,35 @@ describe('os serve ↔ multi-node gate', () => {
     // desired count, identical in every replica, not a live membership count —
     // which is right for an advisory message about the operator's own
     // configuration, and is NOT sufficient for enforcement.
-    expect(MASKED_SERVE_SOURCE).toMatch(/checkMultiNodeAllowed\(\s*Number\(process\.env\.OS_CLUSTER_REPLICAS\)\s*\)/);
+    //
+    // The count is asked through the one reading of the declaration
+    // (`declaresMultiNode`, both spellings): a topology declared only as
+    // `OS_EXPECT_MULTI_NODE=true` carries no count, and asked with the bare
+    // `NaN` the gate read it as "not declared". ⛔ No second parse of that
+    // spelling here — the shared predicate is the only reader.
+    expect(MASKED_SERVE_SOURCE).toMatch(
+      /const __countUnknown =\s*declaresMultiNode\(process\.env\)\s*&&\s*!declaresMultiNode\(\{\s*OS_CLUSTER_REPLICAS:\s*process\.env\.OS_CLUSTER_REPLICAS\s*\}\);/,
+    );
+    expect(MASKED_SERVE_SOURCE).toMatch(
+      /const __requestedNodes = __countUnknown \? 2 : Number\(process\.env\.OS_CLUSTER_REPLICAS\);/,
+    );
+    expect(MASKED_SERVE_SOURCE).toMatch(/checkMultiNodeAllowed\(\s*__requestedNodes\s*\)/);
+    expect(MASKED_SERVE_SOURCE).not.toMatch(/process\.env\.OS_EXPECT_MULTI_NODE/);
+  });
+
+  it('tells the cap advisory whether the count the gate saw is one the operator wrote', () => {
+    // Both cases share one call: counted (`OS_CLUSTER_REPLICAS`, or nothing
+    // declared) keeps the counted wording byte for byte; uncounted
+    // (`OS_EXPECT_MULTI_NODE=true` alone, asked as 2) must never print that 2 as
+    // a declared count. The flag comes from the call site's own reading, so the
+    // formatter re-reads nothing — and the parameter is required, so no call can
+    // fall back to the counted wording by leaving it out.
+    expect(MASKED_SERVE_SOURCE).toMatch(
+      /formatMultiNodeCapAdvisory\(\s*__gate\s*,\s*\{\s*countDeclared:\s*!__countUnknown\s*\}\s*\)/,
+    );
+    expect(MASKED_SERVE_SOURCE).toMatch(
+      /export function formatMultiNodeCapAdvisory\(\s*verdict: MultiNodeGateVerdict,\s*declaration: \{ countDeclared: boolean \},\s*\)/,
+    );
   });
 
   it('types the dynamic import with the mirrored verdict, not an inline literal', () => {
