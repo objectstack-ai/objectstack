@@ -18,4 +18,8 @@ Metadata-protocol: none
 2. A package caller reads a name that only the environment's own item holds.
 3. A package caller reads a name whose one holder is a package it does not declare as a dependency.
 
-The fix is one line. For 1 and 3, declare the holding package in the reading package's `dependencies`, or name the package the read means with `?package=`. For 2, ship the item in the reading package or in a package it depends on. None of the four example apps in this repository hits any of the three.
+The fix is one line, and none of the four example apps in this repository needs it:
+
+- FROM a bare read of a name two packages ship TO the read that names the package it means (`?package=<id>`).
+- FROM a package caller reading the environment's own item TO the item shipped in the reading package, or in a package it depends on.
+- FROM a package caller reading a package it does not depend on TO that package declared in the reader's `dependencies`.
