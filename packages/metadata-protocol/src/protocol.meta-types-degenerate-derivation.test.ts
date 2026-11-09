@@ -91,6 +91,11 @@
  * a derivation chosen for convenience would not cover the served path at all —
  * that is precisely the gap #17500's `io: 'input'` pin deliberately left open.
  */
+// `@objectstack/lint` is reached through the save door's author-time gate, a
+// dynamic `import()` (`metadata-diagnostics.ts`). Paid here, at collection, so no
+// case's `testTimeout` window pays that first load
+// (`scripts/check-test-source-alias.mjs`, "The source reach").
+import '@objectstack/lint';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 // [#5619] The producer's OWN write-verb dispatch decisions, so the fake engine
