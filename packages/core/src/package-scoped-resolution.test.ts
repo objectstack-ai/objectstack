@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ENGINE_FUNCTION_TYPE,
   OVERRIDABLE_BASELINE_PACKAGES,
+  PackageScopedNameRefusedError,
   RUNTIME_COMPATIBILITY_PACKAGE_ID,
   packageScopedHolderSource,
   resolvePackageScopedHolders,
@@ -202,5 +203,21 @@ describe('the compatibility API\'s default package id is a caller with no packag
 
   it('only the caller side: an item stamped `__runtime__` is still a package holder', () => {
     expect(resolve([['__runtime__', 'r'], [A, 'a']], [])).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment' });
+  });
+});
+
+describe('the one refusal class every package-scoped by-name door throws (ADR-0150 D5)', () => {
+  it('carries the 409 RESOURCE_CONFLICT envelope under both status spellings, and the resolver\'s refusal and sentence', () => {
+    const refusal = resolve([[A, 'a'], [B, 'b']], []);
+    expect(refusal.status).toBe('refused');
+    if (refusal.status !== 'refused') return;
+    const err = new PackageScopedNameRefusedError(refusal);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.name).toBe('PackageScopedNameRefusedError');
+    expect(err.code).toBe('RESOURCE_CONFLICT');
+    expect(err.status).toBe(409);
+    expect(err.httpStatus).toBe(409);
+    expect(err.refusal).toBe(refusal);
+    expect(err.message).toBe(refusal.message);
   });
 });

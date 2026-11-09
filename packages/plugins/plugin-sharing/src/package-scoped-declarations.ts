@@ -67,6 +67,7 @@
  *    (`409 RESOURCE_CONFLICT`, ADR-0150 D5's status for ambiguity).
  */
 
+import { PackageScopedNameRefusedError } from '@objectstack/core';
 import {
   packageScopedRefusalMessage,
   resolvePackageScopedName,
@@ -222,20 +223,12 @@ export function servedDeclarations<T>(
 /**
  * A bare name of a declared sharing rule, queue or assignment rule that two or
  * more packages hold, read where a door needs ONE: the resolver's refusal,
- * with every candidate. `code` + `status` are the ADR-0112 envelope, the
- * status ADR-0150 D5 gives an ambiguous bare name (`409`), under the
- * conflict code this plugin's name guards already answer.
+ * with every candidate. It is `@objectstack/core`'s one class (`409
+ * RESOURCE_CONFLICT`, ADR-0150 D5), re-exported under its own name so every
+ * existing import keeps resolving — the same binding objectql's by-name
+ * readers throw, so one `instanceof` matches both.
  */
-export class PackageScopedNameRefusedError extends Error {
-  readonly code = 'RESOURCE_CONFLICT';
-  readonly status = 409;
-  readonly refusal: PackageScopedRefusal;
-  constructor(refusal: PackageScopedRefusal) {
-    super(refusal.message);
-    this.name = 'PackageScopedNameRefusedError';
-    this.refusal = refusal;
-  }
-}
+export { PackageScopedNameRefusedError };
 
 /**
  * The refusal a reader reports when it leaves a name unserved: once per type,

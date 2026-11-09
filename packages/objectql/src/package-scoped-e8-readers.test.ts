@@ -33,6 +33,9 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 import { SchemaRegistry } from './registry.js';
 import { MetadataFacade } from './metadata-facade.js';
 import { resolveThrownHttpError } from '@objectstack/types';
+import { PackageScopedNameRefusedError as CorePackageScopedNameRefusedError } from '@objectstack/core';
+import * as barrel from './index.js';
+import * as leanEntry from './core.js';
 import {
   PACKAGE_SCOPED_READ_TYPES,
   PackageScopedNameRefusedError,
@@ -132,6 +135,28 @@ describe('the refusal crosses a wire door as 409 RESOURCE_CONFLICT (ADR-0150 D5)
     expect(answer.message).toBe((refusal as { message: string }).message);
     expect(answer.message).toContain(A);
     expect(answer.message).toContain(B);
+  });
+});
+
+describe('the refusal class is @objectstack/core\'s, one binding on every objectql entry (#31852)', () => {
+  it('package-scoped-read, the barrel and the lean `./core` entry all export core\'s class itself', () => {
+    expect(PackageScopedNameRefusedError).toBe(CorePackageScopedNameRefusedError);
+    expect(barrel.PackageScopedNameRefusedError).toBe(CorePackageScopedNameRefusedError);
+    expect(leanEntry.PackageScopedNameRefusedError).toBe(CorePackageScopedNameRefusedError);
+  });
+
+  it('a lean consumer matches SchemaRegistry#getApp\'s refusal by class, not only by code and status', () => {
+    ship('app', 'home', A);
+    ship('app', 'home', B);
+    let thrown: unknown;
+    try {
+      registry.getApp('home');
+    } catch (err) {
+      thrown = err;
+    }
+    expect(registry).toBeInstanceOf(leanEntry.SchemaRegistry);
+    expect(thrown).toBeInstanceOf(leanEntry.PackageScopedNameRefusedError);
+    expect(thrown).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409, httpStatus: 409 });
   });
 });
 

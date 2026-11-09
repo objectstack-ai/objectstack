@@ -41,6 +41,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import { MCPServerPlugin } from './plugin.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
+import type { ToolRegistry, ToolExecutionResult } from './types.js';
+import type { AIToolDefinition, ToolCallPart } from '@objectstack/spec/contracts';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 // ---------------------------------------------------------------------------
@@ -452,6 +454,154 @@ describe('#8034 transport parity: one bridge, one tool surface', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// [#31836] One name, one tool: the AI tool registry and the native data tools
+// ---------------------------------------------------------------------------
+
+/**
+ * An AI tool registry double that carries what a licensed host's carries:
+ * names the native data tools also own (`list_objects`, `query_records`) and
+ * one no native tool has (`summarize_pipeline`). It records every call it is
+ * asked to execute, so a test can tell which source served a name.
+ */
+function makeCollidingRegistry(): ToolRegistry & { executed: string[] } {
+  const executed: string[] = [];
+  const tool = (name: string): AIToolDefinition => ({
+    name,
+    description: `the AI registry's own ${name}`,
+    parameters: { type: 'object', properties: {} },
+  });
+  return {
+    executed,
+    getAll: () => [tool('list_objects'), tool('query_records'), tool('summarize_pipeline')],
+    async execute(toolCall: ToolCallPart): Promise<ToolExecutionResult> {
+      executed.push(toolCall.toolName);
+      return {
+        type: 'tool-result',
+        toolCallId: toolCall.toolCallId,
+        toolName: toolCall.toolName,
+        output: { type: 'text', value: `registry ran ${toolCall.toolName}` },
+      } as ToolExecutionResult;
+    },
+  };
+}
+
+function quietLogger() {
+  return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+}
+
+describe('#31836 long-lived server: a name both the AI registry and the native data tools offer', () => {
+  /** One stdio connection per read; closed before the next, as the server takes one transport. */
+  async function overStdio<T>(runtime: MCPServerRuntime, read: (session: StdioSession) => Promise<T>): Promise<T> {
+    const session = await openStdio(runtime.server);
+    try {
+      await handshake(session);
+      return await read(session);
+    } finally {
+      await session.close();
+    }
+  }
+
+  async function listedTools(runtime: MCPServerRuntime): Promise<Array<{ name: string; description?: string; inputSchema?: unknown }>> {
+    const listed = await overStdio(runtime, (session) => session.rpc('tools/list'));
+    expect(listed.error).toBeUndefined();
+    return listed.result.tools;
+  }
+
+  async function callOverStdio(runtime: MCPServerRuntime, name: string): Promise<JsonRpcFrame> {
+    return overStdio(runtime, (session) => session.rpc('tools/call', { name, arguments: {} }));
+  }
+
+  /** The order `MCPServerPlugin.start` runs them in: the registry first. */
+  function registryFirst() {
+    const logger = quietLogger();
+    const registry = makeCollidingRegistry();
+    const bridge = makeBridge();
+    const runtime = new MCPServerRuntime({ name: 'collision', version: '1.0.0', logger });
+    runtime.bridgeTools(registry);
+    runtime.bridgeDataTools(bridge);
+    return { runtime, registry, bridge, logger };
+  }
+
+  it('boots, and tools/list names each tool once, when the registry bridged first', async () => {
+    // RED on main: `bridgeDataTools` threw "Tool list_objects is already registered".
+    const { runtime } = registryFirst();
+    const names = (await listedTools(runtime)).map((t) => t.name);
+
+    expect(new Set(names).size).toBe(names.length);
+    expect([...names].sort()).toEqual([...OBJECT_TOOLS, 'summarize_pipeline'].sort());
+  });
+
+  it('serves the NATIVE data tool under the shared name, and says so once at debug', async () => {
+    const { runtime, registry, bridge, logger } = registryFirst();
+
+    const called = await callOverStdio(runtime, 'list_objects');
+    expect(called.result.isError).toBeFalsy();
+    expect(bridge.calls).toContainEqual(['listObjects']);
+    expect(registry.executed).not.toContain('list_objects');
+
+    // One debug line per yielded name, naming the tool and the source it came from.
+    const yielded = logger.debug.mock.calls
+      .map((c) => String(c[0]))
+      .filter((line) => line.includes('ToolRegistry'));
+    expect(yielded).toHaveLength(2);
+    expect(yielded.find((line) => line.includes('"list_objects"'))).toBeDefined();
+    expect(yielded.find((line) => line.includes('"query_records"'))).toBeDefined();
+  });
+
+  it('gives the same answer when the data tools register first', async () => {
+    const logger = quietLogger();
+    const registry = makeCollidingRegistry();
+    const bridge = makeBridge();
+    const runtime = new MCPServerRuntime({ name: 'collision', version: '1.0.0', logger });
+    runtime.bridgeDataTools(bridge);
+    runtime.bridgeTools(registry);
+
+    const tools = await listedTools(runtime);
+    const names = tools.map((t) => t.name);
+    expect(new Set(names).size).toBe(names.length);
+    expect([...names].sort()).toEqual([...OBJECT_TOOLS, 'summarize_pipeline'].sort());
+
+    const called = await callOverStdio(runtime, 'list_objects');
+    expect(called.result.isError).toBeFalsy();
+    expect(bridge.calls).toContainEqual(['listObjects']);
+    expect(registry.executed).not.toContain('list_objects');
+    expect(
+      logger.debug.mock.calls.map((c) => String(c[0])).filter((line) => line.includes('ToolRegistry')),
+    ).toHaveLength(2);
+  });
+
+  it('resolves the shared name to the SAME tool HTTP serves for the same bridge', async () => {
+    const { runtime, bridge } = registryFirst();
+    const overStdio = (await listedTools(runtime)).find((t) => t.name === 'list_objects');
+
+    // HTTP builds its tool set per request from the bridge alone.
+    const http = new MCPServerRuntime({ name: 'collision', version: '1.0.0' });
+    const body = { jsonrpc: '2.0', id: 1, method: 'tools/list' };
+    const res = await http.handleHttpRequest(
+      new Request('http://localhost/api/v1/mcp', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+        body: JSON.stringify(body),
+      }),
+      { bridge, parsedBody: body },
+    );
+    const json: any = await res.json();
+    const overHttp = (json.result.tools as Array<{ name: string }>).find((t) => t.name === 'list_objects');
+
+    expect(overStdio).toBeDefined();
+    expect(overStdio).toEqual(overHttp);
+  });
+
+  it('CONTROL: a registry tool with no native namesake is still bridged and runs', async () => {
+    const { runtime, registry } = registryFirst();
+
+    const called = await callOverStdio(runtime, 'summarize_pipeline');
+    expect(called.result.isError).toBeFalsy();
+    expect(registry.executed).toEqual(['summarize_pipeline']);
+  });
+});
+
 describe('#8034 stdio transport: a tool actually runs', () => {
   it('tools/call reaches the bridge and returns its result over the wire', async () => {
     // `tools/list` answering while every call fails would be the same defect
@@ -623,6 +773,39 @@ describe('#8034 plugin composition: os serve stdio wiring', () => {
       expect(dataRead).toBeDefined();
       expect((dataRead as any[])[2].context.userId).toBe('usr_stdio');
       expect((dataRead as any[])[2].context.isSystem).toBe(false);
+    } finally {
+      await session.close();
+    }
+  });
+
+  // [#31836] The card's repro: a host whose AI service registry already
+  // carries `list_objects` and data tools failed the plugin's whole boot.
+  it('boots stdio when the AI tool registry already carries the data tool names', async () => {
+    process.env.OS_MCP_STDIO_API_KEY = 'osk_stdio_pin';
+    const registry = makeCollidingRegistry();
+    const ctx = mockContext({ metadata: fakeMetadata(), objectql: fakeObjectQL(), ai: { toolRegistry: registry } });
+
+    const plugin = new MCPServerPlugin({ autoStart: true });
+    await plugin.init(ctx as any);
+    const runtime = (ctx.registerService as any).mock.calls.find(
+      (c: any[]) => c[0] === 'mcp',
+    )[1] as MCPServerRuntime;
+    vi.spyOn(runtime, 'start').mockResolvedValue(undefined);
+    await plugin.start(ctx as any);
+
+    const session = await openStdio(runtime.server);
+    try {
+      await handshake(session);
+      const listed = await session.rpc('tools/list');
+      expect(listed.error).toBeUndefined();
+      const names = (listed.result.tools as Array<{ name: string }>).map((t) => t.name);
+      expect(new Set(names).size).toBe(names.length);
+      expect(names).toContain('list_objects');
+      expect(names).toContain('summarize_pipeline');
+
+      const called = await session.rpc('tools/call', { name: 'list_objects', arguments: {} });
+      expect(called.result.isError).toBeFalsy();
+      expect(registry.executed).not.toContain('list_objects');
     } finally {
       await session.close();
     }

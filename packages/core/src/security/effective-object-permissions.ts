@@ -40,6 +40,7 @@ import {
   type EnableLike,
 } from '@objectstack/spec/data';
 import { objectPermissionGrants, type EffectiveObjectPermission } from '@objectstack/spec/security';
+import { hasPlatformObjectPrefix } from '@objectstack/spec/system';
 
 /**
  * Does the `'*'` entry carry the super-user READ bypass?
@@ -534,6 +535,13 @@ export function seedSuperUserRestrictedObjects(
  * each one `403 EXTERNAL_WRITE_FORBIDDEN` whatever the permission sets say,
  * and such an object is always annotated, since the client's default-allow
  * path would offer every write. Without it, the answer is what it was.
+ *
+ * [#31629] A platform object (`sys_`, `cloud_`, `ai_`; `hasPlatformObjectPrefix`)
+ * is served without `restore` and `purge` ({@link RECYCLE_BIN_OPERATIONS}): the
+ * recycle bin takes no object in those namespaces (ADR-0148 D5), so its doors
+ * refuse there whatever `apiMethods` says. The derivation table is a pure
+ * function of `enable` and cannot see the object's name, so the refusal is
+ * folded here, the same way the external write gate is.
  */
 export function annotateEffectiveApiOperations(
   objects: Record<string, any>,
@@ -556,16 +564,21 @@ export function annotateEffectiveApiOperations(
     // the set; any other `enable` leaves the closure as it is.
     // [#30370] And only what the external write gate admits: a closed gate
     // refuses every write operation on the data plane.
+    // [#31629] And only what the recycle bin admits: a platform object has
+    // no bin, so its bin doors serve nothing there.
     const writeForbidden = isExternalWriteForbidden?.(obj) === true;
+    const noRecycleBin = hasPlatformObjectPrefix(obj);
     const served = closure.filter((operation) =>
       canServeApiOperation(enable, operation)
-      && !(writeForbidden && EXTERNAL_WRITE_GATED_OPERATIONS.has(operation)));
+      && !(writeForbidden && EXTERNAL_WRITE_GATED_OPERATIONS.has(operation))
+      && !(noRecycleBin && RECYCLE_BIN_OPERATIONS.has(operation)));
     // Annotate when the object tightens via `apiMethods`, when the export
     // axis removes `export` from an otherwise-open object (so the client
     // hides the Export button), OR when the door serves less than the closure
-    // (an API-disabled object, or [#30370] a closed external write gate). An
-    // unrestricted object with every operation still served needs no
-    // annotation — the client keeps its default-allow path.
+    // (an API-disabled object, [#30370] a closed external write gate, or
+    // [#31629] a platform object, which has no recycle bin). An unrestricted
+    // object with every operation still served needs no annotation — the
+    // client keeps its default-allow path.
     if (eff.mode === 'unrestricted' && userExportAllowed && served.length === closure.length) continue;
     acc.apiOperations = served;
   }
@@ -577,14 +590,23 @@ export function annotateEffectiveApiOperations(
  * refuses on an object whose gate is closed: the three primitives it judges
  * (`insert` is `create`), and every derived operation built on them —
  * `upsert` (create ∧ update), `bulk` (batched create / update / delete),
- * `import` (create ∨ update), and `restore` / `purge`, which never derive
- * today but write when they do. The read operations (`get`, `list`,
+ * `import` (create ∨ update), and `restore` / `purge`, the recycle bin's
+ * doors, which derive from `delete` (ADR-0148) and write a row back or remove
+ * one for good. The read operations (`get`, `list`,
  * `aggregate`, `history`, `search`, `export`) are untouched: the gate judges
  * writes only.
  */
 const EXTERNAL_WRITE_GATED_OPERATIONS: ReadonlySet<ApiOperation> = new Set<ApiOperation>([
   'create', 'update', 'delete', 'upsert', 'bulk', 'import', 'restore', 'purge',
 ]);
+
+/**
+ * [#31629] The recycle bin's two doors, `restore` and `purge`, which derive
+ * from `delete` (ADR-0148). The bin takes no object in the platform namespaces
+ * (ADR-0148 D5), so neither is served there: the doors refuse, and
+ * {@link annotateEffectiveApiOperations} withholds both.
+ */
+const RECYCLE_BIN_OPERATIONS: ReadonlySet<ApiOperation> = new Set<ApiOperation>(['restore', 'purge']);
 
 /**
  * [#30370] Re-clamp the map by the THIRD server-side enforcement layer

@@ -279,6 +279,74 @@
       "status": "live",
       "note": "objectui one-shot result reveal {title,description,acknowledge,format,fields}."
     },
+    "preflight": {
+      "status": "planned",
+      "verifiedAt": "2026-11-09",
+      "note": "PLANNED (spec card #31840; consumer #31808, the console half). One same-origin `GET` the param dialog sends before submit: `{ read: { url, method? }, path?, fields?, seed? }`. DECLARED and judged at parse today: `read.url` is held to the page element read's same-origin rule (packages/spec/src/ui/same-origin-api-read.ts, shared with page.zod.ts's `api` data source), its holes are closed to `${param.NAME}` / `${ctx.recordId}` / `${ctx.record.FIELD}`, `fields` is resultDialog's own row, and each seed must fill one declared param that has no other source and that no hole reads; refused on an action with no `params` and beside `execution: 'aggregate'`. READ by nothing yet: no param dialog sends the read, draws the panel or applies a seed until #31808 lands in the console's param-collection handlers and ActionParamDialog. Flip to `live` on the commit that lands that reader, citing it (the ui card owns the flip).",
+      "children": {
+        "read": {
+          "status": "planned",
+          "verifiedAt": "2026-11-09",
+          "note": "Planned with its container `preflight` (see that row): the one same-origin request the dialog sends.",
+          "children": {
+            "url": {
+              "status": "planned",
+              "verifiedAt": "2026-11-09",
+              "note": "Planned with its container: the same-origin API path, refused at parse unless it opens with a single `/` (the shared rule in packages/spec/src/ui/same-origin-api-read.ts), with holes closed to `${param.NAME}` / `${ctx.recordId}` / `${ctx.record.FIELD}`."
+            },
+            "method": {
+              "status": "planned",
+              "verifiedAt": "2026-11-09",
+              "note": "Planned with its container: `GET` alone, the only method a preflight is sent with."
+            }
+          }
+        },
+        "path": {
+          "status": "planned",
+          "verifiedAt": "2026-11-09",
+          "note": "Planned with its container `preflight`: the dotted path selecting the sub-tree of the answer the panel shows and the seeds read."
+        },
+        "fields": {
+          "status": "planned",
+          "verifiedAt": "2026-11-09",
+          "note": "Planned with its container `preflight`: the values the panel shows, in resultDialog.fields' own row and format set.",
+          "children": {
+            "path": {
+              "status": "planned",
+              "verifiedAt": "2026-11-09",
+              "note": "Planned with its container `preflight.fields`: the dot path, in the selected answer, of the value a row shows."
+            },
+            "label": {
+              "status": "planned",
+              "verifiedAt": "2026-11-09",
+              "note": "Planned with its container `preflight.fields`: the row's label."
+            },
+            "format": {
+              "status": "planned",
+              "verifiedAt": "2026-11-09",
+              "note": "Planned with its container `preflight.fields`: the row's display format, from resultDialog's format set."
+            }
+          }
+        },
+        "seed": {
+          "status": "planned",
+          "verifiedAt": "2026-11-09",
+          "note": "Planned with its container `preflight`: answer-to-param seeding, each entry filling one declared param that has no other source and that no hole reads.",
+          "children": {
+            "param": {
+              "status": "planned",
+              "verifiedAt": "2026-11-09",
+              "note": "Planned with its container `preflight.seed`: the declared param the value is written into, judged against the action's params at parse."
+            },
+            "path": {
+              "status": "planned",
+              "verifiedAt": "2026-11-09",
+              "note": "Planned with its container `preflight.seed`: the dotted path, in the selected answer, of the value written into the param."
+            }
+          }
+        }
+      }
+    },
     "visible": {
       "status": "live",
       "note": "objectui — CEL, fail-closed."
