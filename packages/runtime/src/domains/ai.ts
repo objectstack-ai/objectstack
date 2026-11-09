@@ -77,17 +77,11 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
         // AI service not registered
     }
 
-    // [#4058] A slot filled by a self-declared non-handler (`handlerReady:
-    // false`, ADR-0076 D12) is no AI capability, so it takes the same exits an
-    // empty slot takes. This is also strictly better than what such an occupant
-    // used to get: being truthy, it fell through to the `!routes` 503 below —
-    // which both reads as a fault and loses the `/ai/agents` empty-list
-    // courtesy the console depends on.
-    if (!isServiceServeable(aiService)) {
-        // [#7653] The gate before the courtesy and the 501: both of them are
-        // capability disclosures, and neither is owed to a caller who has not
-        // authenticated. This is the exit the defect lived behind.
-        if (denyAnonymous) return anonymousRefusal();
+    // [#31905] The answer for "this deployment serves no AI over HTTP",
+    // shared by the two exits that mean it: the unserveable slot just below
+    // and a route table that will never be published (further down). One
+    // answer, so the two cannot drift. Called only after the anonymous gate.
+    const aiUnavailable = (): HttpDispatcherResult => {
         // The console polls `GET /ai/agents` on every navigation to decide
         // whether to show AI affordances. Reporting that as an error turns
         // the normal "no AI service configured" state (the open-source
@@ -95,7 +89,7 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
         // error-log spam on every page. An empty list conveys the same
         // information without looking like a fault. Every other /ai/* route
         // answers 501 below — an anonymous caller having already been
-        // refused 401 at the gate above.
+        // refused 401 at the gate.
         //
         // The body is the declared envelope (#4053). `data` carries
         // `AiAgentsResponseSchema`'s `{ agents }` — a RELOCATION of the declared
@@ -120,6 +114,20 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
         // says the accurate thing now (REMEDY_DETAIL), so the override is gone
         // and this answer matches what discovery reports for the slot.
         return capabilityUnavailable(deps, 'ai');
+    };
+
+    // [#4058] A slot filled by a self-declared non-handler (`handlerReady:
+    // false`, ADR-0076 D12) is no AI capability, so it takes the same exits an
+    // empty slot takes. This is also strictly better than what such an occupant
+    // used to get: being truthy, it fell through to the `!routes` 503 below —
+    // which both reads as a fault and loses the `/ai/agents` empty-list
+    // courtesy the console depends on.
+    if (!isServiceServeable(aiService)) {
+        // [#7653] The gate before the courtesy and the 501: both of them are
+        // capability disclosures, and neither is owed to a caller who has not
+        // authenticated. This is the exit the defect lived behind.
+        if (denyAnonymous) return anonymousRefusal();
+        return aiUnavailable();
     }
 
     // The AI service exposes route definitions via buildAIRoutes.
@@ -154,6 +162,19 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
         // boot-race window would answer anonymous callers "AI is mounted, come
         // back in a moment" — the very disclosure this ordering exists to stop.
         if (denyAnonymous) return anonymousRefusal();
+        // [#31905] "Not published yet" and "never published" used to share the
+        // 503 below. A service registered with its route registration turned
+        // off (an unlicensed Enterprise image does exactly that) publishes no
+        // table for the life of the process, so the 503 told every client to
+        // retry forever. The two are told apart by the request kernel's boot
+        // phase, read here on every request and never cached: the AI plugin
+        // publishes its table in `start()`, and once `kernel:ready` has
+        // settled every `start()` and every ready handler has run, so a table
+        // still absent is final and the answer is the unserveable exit's.
+        // Fail-safe by construction: before ready, with boot-phase hooks
+        // withheld, or on a kernel that cannot answer, the window keeps its
+        // 503 — a real boot race is never answered "AI off".
+        if (deps.isRequestKernelReady(context)) return aiUnavailable();
         return { handled: true, response: deps.error('AI service routes not yet initialized', 503) };
     }
 

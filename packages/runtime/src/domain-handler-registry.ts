@@ -367,6 +367,13 @@ export interface DomainHandlerDeps {
      * (`__aiRoutes`); undefined until the plugin initializes it.
      */
     getRegisteredAiRoutes(context: HttpProtocolContext): Array<{ method: string; path: string; handler: (req: any) => Promise<any>; auth?: boolean }> | undefined;
+    /**
+     * Whether the kernel this request is served from — the one
+     * {@link getRegisteredAiRoutes} reads — has passed `kernel:ready`
+     * (`hasBootPhaseSettled('kernel:ready')`). `false` for a kernel that does
+     * not carry the reader, so an unknown kernel is never read as booted.
+     */
+    isRequestKernelReady(context: HttpProtocolContext): boolean;
 }
 
 /**
