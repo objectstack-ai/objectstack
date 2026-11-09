@@ -125,6 +125,20 @@ export type {
   PackageScopedRefusalReason,
 } from './package-scoped-resolver.js';
 
+// [#31673, ADR-0150 D4] The action engine's `(package, objectName, name)` key:
+// the declaration half — which package's action a bare name on an object means
+// to a caller, resolved by the resolver above over the items that own that
+// object — and the handler half, the coordinate a registered handler belongs
+// to. On this barrel only, for the same reason as the resolver.
+export {
+  resolveActionByPackage,
+  actionOwnerScopedRegistry,
+  actionHolderCoordinate,
+} from './action-package-addressing.js';
+export type { ActionPackageQuery } from './action-package-addressing.js';
+export { actionHandlerCoordinate, ENVIRONMENT_ACTION_COORDINATE, HOST_ACTION_COORDINATE } from './action-handler-coordinate.js';
+export type { ExecuteActionOptions } from './engine-actions.js';
+
 // [#15204 W2] Every `(type, name)` a manifest declares, read from the sources
 // the engine's registration seams read. Exported for the install-local door
 // (`@objectstack/cloud-connection`), which refuses a catalog-carrying package
