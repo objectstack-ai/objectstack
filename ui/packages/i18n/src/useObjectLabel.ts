@@ -221,6 +221,55 @@ export function useObjectLabel() {
       ? objectSuffixes(objectName, `_actions.${actionName}.${tail}`)
       : [`globalActions.${actionName}.${tail}`];
 
+  /**
+   * Fetch the `fields` node of an action's answer-showing block
+   * (`resultDialog` or `preflight`) WHOLE, with `returnObjects`. The node is
+   * keyed by the LITERAL field path from the action metadata, which may contain
+   * dots (`"user.email"`), so it is indexed directly and never resolved through
+   * a dotted i18next key. Undefined when no namespace carries an object node.
+   */
+  const readActionFieldsNode = (
+    objectName: string | undefined,
+    actionName: string,
+    block: 'resultDialog' | 'preflight',
+  ): Record<string, unknown> | undefined => {
+    try {
+      for (const ns of getAppNamespaces()) {
+        for (const suffix of actionSuffixes(objectName, actionName, `${block}.fields`)) {
+          const node = t(`${ns}.${suffix}`, {
+            returnObjects: true,
+            defaultValue: null,
+            [I18N_PROBE_FLAG]: true,
+          }) as unknown;
+          if (node && typeof node === 'object' && !Array.isArray(node)) {
+            return node as Record<string, unknown>;
+          }
+        }
+      }
+    } catch {
+      // Graceful degradation when i18n provider is not available
+    }
+    return undefined;
+  };
+
+  /**
+   * Overlay a `fields` node's strings onto the DECLARED rows only, each by its
+   * literal `path`: a non-empty string replaces that row's `label`, a row with
+   * none keeps its authored label (an inline per-locale map included), and a
+   * node entry naming no declared row adds nothing.
+   */
+  const overlayActionFieldLabels = <F extends { path: string; label?: unknown }>(
+    fields: F[] | undefined,
+    labels: Record<string, unknown> | undefined,
+  ): F[] | undefined =>
+    Array.isArray(fields)
+      ? fields.map((field) => {
+          if (!field || typeof field.path !== 'string') return field;
+          const label = labels?.[field.path];
+          return typeof label === 'string' && label.length > 0 ? { ...field, label } : field;
+        })
+      : fields;
+
   const fieldSuffixes = (objectName: string, fieldName: string): string[] => {
     const base = stripNamespace(objectName);
     return base !== objectName
@@ -708,38 +757,48 @@ export function useObjectLabel() {
         const resolved = resolve(suffixesFor(attr), spec[attr] ?? '');
         return resolved || spec[attr];
       };
-      const fieldsMap = ((): Record<string, unknown> | undefined => {
-        try {
-          for (const ns of getAppNamespaces()) {
-            for (const suffix of suffixesFor('fields')) {
-              const node = t(`${ns}.${suffix}`, {
-                returnObjects: true,
-                defaultValue: null,
-                [I18N_PROBE_FLAG]: true,
-              }) as unknown;
-              if (node && typeof node === 'object' && !Array.isArray(node)) {
-                return node as Record<string, unknown>;
-              }
-            }
-          }
-        } catch {
-          // Graceful degradation when i18n provider is not available
-        }
-        return undefined;
-      })();
-      const fields = Array.isArray(spec.fields)
-        ? spec.fields.map((field) => {
-            if (!field || typeof field.path !== 'string') return field;
-            const label = fieldsMap?.[field.path];
-            return typeof label === 'string' && label.length > 0 ? { ...field, label } : field;
-          })
-        : spec.fields;
+      const fields = overlayActionFieldLabels(
+        spec.fields,
+        readActionFieldsNode(objectName, actionName, 'resultDialog'),
+      );
       return {
         ...spec,
         title: textFor('title'),
         description: textFor('description'),
         acknowledge: textFor('acknowledge'),
         fields,
+      };
+    },
+
+    /**
+     * Resolve a translated copy of an action's `preflight` read (the panel
+     * the param dialog draws above the params), overlaying each declared
+     * `fields` row's label from the bundle.
+     * Convention: `{ns}.objects.{objectName}._actions.{actionName}.preflight.fields.{path}`;
+     * with no key object, `{ns}.globalActions.{actionName}.preflight.fields.{path}`
+     * — the key `@objectstack/spec`'s `resolveActionPreflight` reads.
+     *
+     * Like `actionResultDialog`'s `fields`, the node is keyed by the LITERAL
+     * field path and fetched whole. Only declared rows are overlaid: a bundle
+     * path no row declares adds nothing, and a row with no bundle string keeps
+     * its authored label, an inline per-locale map included (the panel picks
+     * the session's locale from it). Returns the spec itself when there is no
+     * spec or no action name.
+     */
+    actionPreflight: <T extends {
+      fields?: Array<{ path: string; label?: unknown; [key: string]: unknown }>;
+    }>(
+      objectName: string | undefined,
+      actionName: string | undefined,
+      spec: T | undefined,
+    ): T | undefined => {
+      if (!spec || !actionName || !Array.isArray(spec.fields)) return spec;
+      return {
+        ...spec,
+        fields: overlayActionFieldLabels(
+          spec.fields,
+          readActionFieldsNode(objectName, actionName, 'preflight'),
+        ),
       };
     },
 
