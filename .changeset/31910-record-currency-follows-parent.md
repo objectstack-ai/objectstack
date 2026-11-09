@@ -6,7 +6,7 @@ feat(spec): a `master_detail` child's record-mode amount may follow its parent's
 
 Clause-②: yes (widening)
 Metadata-protocol: added
-Skills-docs: follow-up owed — skills/objectstack-data/rules/field-types.md (teaches `currencyField` as a sibling `text` field only)
+Skills-docs: follow-up #31957 — skills/objectstack-data/rules/field-types.md
 
 ADR-0144 D2 and D6, as amended (ruling A recorded on the amendment, 「同意」): "`currencyField` may name `<master_detail field>.<parent code field>`, so a child follows its parent's currency by construction", and "A `summary` rolled up through that same master_detail is single-currency by construction, and is admitted in the parent's currency."
 

@@ -4505,14 +4505,21 @@ function recordCurrencyPathOf(field: unknown): { via: string; code: string } | u
  *
  * Resolution is against the stack's own `objects`, merged with its
  * `objectExtensions` by name; an object this stack does not declare is not
- * judged, and neither is a roll-up whose relationship field is neither
- * written nor the child's one relation back to the parent.
+ * judged, nor is a parent it knows only through an extension (whose owner's
+ * fields live elsewhere), and neither is a roll-up whose relationship field
+ * is neither written nor the child's one relation back to the parent.
  */
 function collectRecordCurrencyPathErrors(config: ObjectStackDefinition): string[] {
   const errors: string[] = [];
   const fieldsByObject = new Map<string, Record<string, unknown>>();
+  // The objects this stack DECLARES. A parent known only through an
+  // `objectExtensions` entry has its owner's fields elsewhere, so its merged
+  // map holds the extension's fields alone: judging a code field or a roll-up
+  // against it would refuse what the owner declares. Such a parent is skipped.
+  const declared = new Set<string>();
   for (const obj of config.objects ?? []) {
     if (!isRecord(obj) || !isRecord(obj.fields)) continue;
+    declared.add(obj.name);
     fieldsByObject.set(obj.name, { ...fieldsByObject.get(obj.name), ...obj.fields });
   }
   for (const ext of (config as { objectExtensions?: unknown }).objectExtensions as unknown[] ?? []) {
@@ -4535,7 +4542,7 @@ function collectRecordCurrencyPathErrors(config: ObjectStackDefinition): string[
       if (followed !== undefined) {
         const via = hasOwnKey(fields, followed.via) ? fields[followed.via] : undefined;
         const parentName = isRecord(via) && via.type === 'master_detail' && typeof via.reference === 'string' ? via.reference : undefined;
-        const parent = parentName === undefined ? undefined : fieldsByObject.get(parentName);
+        const parent = parentName === undefined || !declared.has(parentName) ? undefined : fieldsByObject.get(parentName);
         if (parentName !== undefined && parent !== undefined) {
           const where = `Object '${objectName}' field '${fieldName}' currencyConfig.currencyField`;
           const code = hasOwnKey(parent, followed.code) ? parent[followed.code] : undefined;
@@ -4559,6 +4566,7 @@ function collectRecordCurrencyPathErrors(config: ObjectStackDefinition): string[
 
       // (b) A roll-up through that very master_detail says it is in the parent's currency.
       if (!isRecord(field) || field.type !== 'summary' || !isRecord(field.summaryOperations)) continue;
+      if (!declared.has(objectName)) continue;
       const ops = field.summaryOperations;
       if (typeof ops.object !== 'string' || typeof ops.field !== 'string' || typeof ops.function !== 'string' || !summaryFunctionReadsField(ops.function)) continue;
       const child = fieldsByObject.get(ops.object);
@@ -4577,17 +4585,21 @@ function collectRecordCurrencyPathErrors(config: ObjectStackDefinition): string[
       if (relation !== amount.via) continue;
       // A path whose code the parent does not hold is (a)'s finding, told once at the amount.
       if (!isCodeField(hasOwnKey(fields, amount.code) ? fields[amount.code] : undefined)) continue;
-      const declared = isRecord(field.currencyConfig) ? field.currencyConfig : undefined;
-      if (declared?.currencyMode === 'record' && declared.currencyField === amount.code) continue;
+      const summaryCurrency = isRecord(field.currencyConfig) ? field.currencyConfig : undefined;
+      if (summaryCurrency?.currencyMode === 'record' && summaryCurrency.currencyField === amount.code) continue;
       const spelling = `\`currencyConfig: { currencyMode: 'record', currencyField: '${amount.code}' }\``;
       errors.push(
         `Object '${objectName}' field '${fieldName}' currencyConfig: the summary rolls up ${String(ops.function)}`
           + `(${ops.object}.${ops.field}) through the master_detail '${amount.via}', and '${ops.object}.${ops.field}' `
           + `follows this record's currency ('${amount.via}.${amount.code}'), so the total is in the currency `
           + `'${objectName}.${amount.code}' holds. `
-          + (declared?.currencyMode === 'record' && typeof declared.currencyField === 'string'
-            ? `It names '${String(declared.currencyField)}' instead, and would show in another currency. `
-            : 'It does not say so, and would show as a bare number. ')
+          + (summaryCurrency?.currencyMode === 'record' && typeof summaryCurrency.currencyField === 'string'
+            ? `It names '${String(summaryCurrency.currencyField)}' instead, and would show in another currency. `
+            : summaryCurrency?.currencyMode === 'fixed'
+              ? `It declares \`currencyMode: 'fixed'\`, and would show in that one currency whatever the parent's is. `
+              : summaryCurrency !== undefined
+                ? 'It declares `currencyMode: \'dynamic\'`, and would show in the tenant default currency whatever the parent\'s is. '
+                : 'It does not say so, and would show as a bare number. ')
           + `Declare ${spelling} on '${fieldName}'.`,
       );
     }

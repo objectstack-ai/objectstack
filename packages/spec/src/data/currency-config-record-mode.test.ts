@@ -207,27 +207,41 @@ function refusedOnce(r: { success: boolean; error?: { issues: Array<{ code: stri
   return r.error!.issues[0]!;
 }
 
-describe('`CurrencyConfigSchema`: the spelling of a `currencyField` path', () => {
-  it('admits `PARENT_FIELD.CODE_FIELD` under `record`', () => {
+describe('the spelling of a `currencyField` path is judged by the object, never by one config', () => {
+  const MALFORMED = ['a.b.c', 'sales_order.', '.currency_code', 'sales_order..currency_code', 'Sales_Order.currency_code', 'sales_order.currency-code'];
+
+  it('`CurrencyConfigSchema` admits `PARENT_FIELD.CODE_FIELD` under `record`', () => {
     const r = CurrencyConfigSchema.safeParse(FOLLOW);
     expect(r.success).toBe(true);
     if (!r.success) return;
     expect(r.data.currencyField).toBe('sales_order.currency_code');
   });
 
-  it('refuses a path of three segments: the ruling names one hop', () => {
-    const issue = refusedOnce(CurrencyConfigSchema.safeParse({ currencyMode: 'record', currencyField: 'a.b.c' }));
-    expect(issue.path).toEqual(['currencyField']);
-    expect(issue.message).toMatch(/^`currencyField` names `a\.b\.c`, a path of 3 segments, and a path is two\./);
+  it.each(MALFORMED)('a standalone config and a standalone field still parse `%s`, as before the amendment', (pointer) => {
+    const config = { currencyMode: 'record', currencyField: pointer };
+    expect(CurrencyConfigSchema.safeParse(config).success).toBe(true);
+    expect(FieldSchema.safeParse({ name: 'amount', type: 'currency', label: 'Amount', currencyConfig: config }).success).toBe(true);
   });
 
-  it.each(['sales_order.', '.currency_code', 'sales_order..currency_code', 'Sales_Order.currency_code', 'sales_order.currency-code'])(
-    'refuses the malformed path `%s`, at the key', (pointer) => {
-      const issue = refusedOnce(CurrencyConfigSchema.safeParse({ currencyMode: 'record', currencyField: pointer }));
-      expect(issue.path).toEqual(['currencyField']);
-      expect(issue.message.startsWith(`\`currencyField\` names \`${pointer}\``)).toBe(true);
-    },
-  );
+  it('the object refuses a path of three segments: the ruling names one hop', () => {
+    const issues = objectIssues(orderLine({
+      amount: { type: 'currency', label: 'Amount', currencyConfig: { currencyMode: 'record', currencyField: 'a.b.c' } },
+    }));
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.code).toBe('custom');
+    expect(issues[0]!.path).toEqual(['fields', 'amount', 'currencyConfig', 'currencyField']);
+    expect(issues[0]!.message).toMatch(/^`amount\.currencyConfig\.currencyField` names `a\.b\.c`, a path of 3 segments, and a path is two\./);
+  });
+
+  it.each(MALFORMED.slice(1))('the object refuses the malformed path `%s`, once, at the pointer', (pointer) => {
+    const issues = objectIssues(orderLine({
+      amount: { type: 'currency', label: 'Amount', currencyConfig: { currencyMode: 'record', currencyField: pointer } },
+    }));
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.path).toEqual(['fields', 'amount', 'currencyConfig', 'currencyField']);
+    expect(issues[0]!.message.startsWith(`\`amount.currencyConfig.currencyField\` names \`${pointer}\`, `)).toBe(true);
+    expect(issues[0]!.message).toContain('A `currencyField` path is `PARENT_FIELD.CODE_FIELD`');
+  });
 
   it('a path under `dynamic` meets the out-of-mode refusal only, as any pointer does', () => {
     const issue = refusedOnce(CurrencyConfigSchema.safeParse({ currencyMode: 'dynamic', currencyField: 'a.b.c' }));
@@ -271,15 +285,6 @@ describe('the object judges the first segment of a `currencyField` path', () => 
     expect(issues).toHaveLength(1);
     expect(issues[0]!.message).toMatch(/^`amount\.currencyConfig\.currencyField` names `order\.currency_code`, but object `order_line` declares no other field `order`\./);
     expect(issues[0]!.message).toContain('candidates: `sales_order.currency_code`');
-  });
-
-  it('a malformed path meets the config door once, and the object door does not judge it again', () => {
-    const issues = objectIssues(orderLine({
-      amount: { type: 'currency', label: 'Amount', currencyConfig: { currencyMode: 'record', currencyField: 'a.b.c' } },
-    }));
-    expect(issues).toHaveLength(1);
-    expect(issues[0]!.path).toEqual(['fields', 'amount', 'currencyConfig', 'currencyField']);
-    expect(issues[0]!.message).toMatch(/a path of 3 segments/);
   });
 
   it('a `summary` names the parent\'s code in one segment: a path stays refused there', () => {
@@ -414,6 +419,13 @@ describe('defineStack: the parent holds the code a path follows', () => {
   it('does not judge a path whose parent this stack does not declare', () => {
     expect(() => buildStack([region, orderLine()])).not.toThrow();
   });
+
+  it('does not judge a parent this stack knows only through an extension: its owner\'s fields live elsewhere', () => {
+    const extension = { extend: 'sales_order', fields: { notes: { type: 'textarea', label: 'Notes' } } };
+    expect(() => defineStack({
+      manifest: stackManifest, objects: [region, orderLine()], objectExtensions: [extension],
+    } as Parameters<typeof defineStack>[0])).not.toThrow();
+  });
 });
 
 describe('defineStack: a roll-up through that master_detail declares the parent\'s currency', () => {
@@ -431,6 +443,24 @@ describe('defineStack: a roll-up through that master_detail declares the parent\
       salesOrder({ currencyConfig: { currencyMode: 'record', currencyField: 'billing_currency' } }), region, orderLine(),
     ]);
     expect(finding).toContain("It names 'billing_currency' instead");
+  });
+
+  it('names the mode a roll-up declared instead, `fixed` and `dynamic` alike', () => {
+    const fixed = stackRefusal([
+      salesOrder({ currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' } }), region, orderLine(),
+    ]);
+    expect(fixed).toContain("It declares `currencyMode: 'fixed'`, and would show in that one currency");
+    expect(fixed).not.toContain('bare number');
+    const dynamic = stackRefusal([salesOrder({ currencyConfig: { currencyMode: 'dynamic' } }), region, orderLine()]);
+    expect(dynamic).toContain('would show in the tenant default currency');
+  });
+
+  it('does not judge a roll-up on a parent this stack knows only through an extension', () => {
+    const total = (salesOrder({ currencyConfig: undefined }).fields as Record<string, unknown>).total;
+    expect(() => defineStack({
+      manifest: stackManifest, objects: [region, orderLine()],
+      objectExtensions: [{ extend: 'sales_order', fields: { total } }],
+    } as Parameters<typeof defineStack>[0])).not.toThrow();
   });
 
   it('resolves an omitted relationshipField to the child\'s one relation back', () => {

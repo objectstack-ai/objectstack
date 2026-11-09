@@ -1995,6 +1995,9 @@ function refuseDishonestRecordCurrencyField(
   }
 }
 
+/** A field's machine name, the grammar each segment of a two-segment `currencyField` is held to. */
+const RECORD_CURRENCY_PATH_SEGMENT = /^[a-z_][a-z0-9_]*$/;
+
 /**
  * [ADR-0144 D2, amended 2026-11-09 by #31743] The half of a two-segment
  * `currencyField` (`PARENT_FIELD.CODE_FIELD`) that the amount's own object can
@@ -2008,6 +2011,11 @@ function refuseDishonestRecordCurrencyField(
  *
  * Refused here, at the pointer, each with its remedy:
  *
+ *  - a spelling other than two field machine names joined by one dot (three
+ *    or more segments, or an empty or non-snake_case one). Judged at this
+ *    door alone, never on `CurrencyConfigSchema`, so the surfaces that see
+ *    one config (a standalone `field`, the exported config schema, an
+ *    extension's fields) parse a dotted pointer as they did before;
  *  - a `summary` naming a path. The roll-up sits on the parent and is in the
  *    parent's currency (D6, amended), whose code field is the roll-up's own
  *    sibling, so it names that field in one segment;
@@ -2018,9 +2026,7 @@ function refuseDishonestRecordCurrencyField(
  * Segment 2 lives on the object segment 1 references, which this object does
  * not hold: `defineStack`'s cross-reference pass judges it where the stack
  * holds both (`collectRecordCurrencyPathErrors`, stack.zod.ts), and the
- * registry judges it at runtime registration. A pointer whose spelling the
- * config door already refused (more than two segments, a malformed segment)
- * is not judged again.
+ * registry judges it at runtime registration.
  */
 function refuseDishonestRecordCurrencyPath(
   objectName: string,
@@ -2032,9 +2038,35 @@ function refuseDishonestRecordCurrencyPath(
   ctx: z.RefinementCtx,
 ): void {
   const segments = target.split('.');
-  if (segments.length !== 2 || segments.some((s) => !/^[a-z_][a-z0-9_]*$/.test(s))) return;
-  const [via, code] = segments as [string, string];
   const at = `\`${name}.currencyConfig.currencyField\` names \`${target}\``;
+  // The spelling: exactly two field machine names. Judged here and not on
+  // `CurrencyConfigSchema`, so a standalone field, the exported config schema
+  // and an extension's fields accept a dotted pointer exactly as before the
+  // amendment, and this card refuses nothing they parsed (a widening only).
+  const shape =
+    'A `currencyField` path is `PARENT_FIELD.CODE_FIELD`: a `master_detail` field of this object, one dot, and the '
+    + 'code field on the parent object it references. It names one hop, so a child follows its own parent and no '
+    + 'further; to read a grandparent\'s code, give the parent its own code field and follow that.';
+  if (segments.length > 2) {
+    ctx.addIssue({
+      code: 'custom',
+      path,
+      message: `${at}, a path of ${segments.length} segments, and a path is two. ${shape}`,
+    });
+    return;
+  }
+  const bad = segments.filter((s) => !RECORD_CURRENCY_PATH_SEGMENT.test(s));
+  if (bad.length > 0) {
+    ctx.addIssue({
+      code: 'custom',
+      path,
+      message: `${at}, and `
+        + (bad.includes('') ? 'one of its two segments is empty' : `\`${bad[0]}\` is not a field's machine name (snake_case)`)
+        + `. ${shape}`,
+    });
+    return;
+  }
+  const [via, code] = segments as [string, string];
   if (field?.type === 'summary') {
     ctx.addIssue({
       code: 'custom',
