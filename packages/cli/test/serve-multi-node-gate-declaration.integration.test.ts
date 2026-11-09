@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 40 — spawns the real producer once per single-cause fixture: four `os serve` boots, one per declaration spelling and gate state; local card-container reading 29.04 s of test time (no CI reading yet), x 1.25, rounded up
 
 /**
  * `os serve` asks the multi-node gate about the topology the operator DECLARED,
