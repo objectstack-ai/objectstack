@@ -3120,6 +3120,14 @@ export default class Serve extends Command {
         // that is the instance `defineCluster()` consults (#13330).
         const __clusterModule = (await importFromHost(__clusterPkg)) as {
           checkMultiNodeAllowed: (requested?: number) => MultiNodeGateVerdict;
+          /**
+           * The ONE reading of "did the operator declare a multi-node
+           * topology" — both spellings, `OS_CLUSTER_REPLICAS>1` and
+           * `OS_EXPECT_MULTI_NODE=true` — owned by the split-brain guard and
+           * shared by every multi-replica reader. Required: it predates the
+           * gate's count parameter, so no app pins a service-cluster without it.
+           */
+          declaresMultiNode: (env: { OS_EXPECT_MULTI_NODE?: string; OS_CLUSTER_REPLICAS?: string }) => boolean;
           /** Optional: an app on a pre-#13330 `service-cluster` does not have it. */
           listClusterDrivers?: () => string[];
           // Optional: an app may pin an older service-cluster that predates
@@ -3128,7 +3136,7 @@ export default class Serve extends Command {
             importer: (specifier: string) => Promise<unknown>,
           ) => Promise<unknown>;
         };
-        const { checkMultiNodeAllowed, mountMultiNodeGateFromHost } = __clusterModule;
+        const { checkMultiNodeAllowed, declaresMultiNode, mountMultiNodeGateFromHost } = __clusterModule;
         // [#13537] Mount the distribution's gate on EVERY boot route, BEFORE
         // consulting it. Registration used to depend on one app config file
         // executing (the EE config calling `registerMultiNodeGate`), so the
@@ -3163,7 +3171,34 @@ export default class Serve extends Command {
         // `Number(undefined)` is `NaN`, which the gate normalizes to "not
         // declared" — normalization lives at the seam on purpose, so there is
         // deliberately no `?? 0` or pre-parse here.
-        const __gate = checkMultiNodeAllowed(Number(process.env.OS_CLUSTER_REPLICAS));
+        //
+        // ⛔ But the count is only ONE of the two spellings of the declaration.
+        // `OS_EXPECT_MULTI_NODE=true` declares multi-node with NO count, and
+        // asked with `NaN` the gate read that topology as "not declared": with
+        // no gate registered the boot then ran the remote driver multi-node,
+        // exactly what the fail-closed default exists to refuse — while the
+        // same deployment spelled `OS_CLUSTER_REPLICAS=2` was refused. So the
+        // topology is read through `declaresMultiNode` (the split-brain guard's
+        // reading, never a second parse of either spelling here), and the
+        // count spelling is asked on its own only to learn whether a count was
+        // given:
+        //   - not declared            → the raw count, as before (NaN / 0 / 1);
+        //   - declared WITH a count   → that count, as before;
+        //   - declared, count unknown → 2, the smallest count that IS
+        //     multi-node. The gate takes a desired count and has no
+        //     "declared, uncounted" input: `undefined` and every non-finite or
+        //     non-positive value mean "not declared", and 1 is single-node.
+        //     2 claims the least: a no-gate boot is refused as for any declared
+        //     topology, and a cap-aware gate is asked about the minimum it would
+        //     have to admit. Telemetry still reads `OS_CLUSTER_REPLICAS` itself,
+        //     so no `cluster_declared_nodes` series is invented from this 2,
+        //     and the cap advisory is told the count was not given, so it never
+        //     prints this 2 as a count the operator wrote.
+        const __countUnknown =
+          declaresMultiNode(process.env)
+          && !declaresMultiNode({ OS_CLUSTER_REPLICAS: process.env.OS_CLUSTER_REPLICAS });
+        const __requestedNodes = __countUnknown ? 2 : Number(process.env.OS_CLUSTER_REPLICAS);
+        const __gate = checkMultiNodeAllowed(__requestedNodes);
         // Held for BOTH branches below: an outright denial is as much an
         // operator-facing reading as a licensed overflow, and only one of the
         // two currently reaches a log line an operator is likely to still have.
@@ -3181,7 +3216,7 @@ export default class Serve extends Command {
           // Licensed-overflow advisory: the cluster IS entitled to run, it just
           // asked for more nodes than it paid for. Distinct from the denial
           // above, and deliberately not a downgrade.
-          const __capAdvisory = formatMultiNodeCapAdvisory(__gate);
+          const __capAdvisory = formatMultiNodeCapAdvisory(__gate, { countDeclared: !__countUnknown });
           if (__capAdvisory) console.warn(__capAdvisory);
           // Same host-anchored resolution as the gate above — the shipped
           // drivers (`-redis`, `-postgres`, …) are app-declared too.
@@ -7494,8 +7529,21 @@ export interface MultiNodeGateVerdict {
  * (licensed-overflow) case, keeping it `false` for an outright `allowed: false`
  * denial — that one is the unlicensed case and the call site already reports it
  * as a downgrade. Reading `refused > 0` instead would double-report it.
+ *
+ * `declaration.countDeclared` says whether the count the gate was asked about
+ * is one the operator WROTE (`OS_CLUSTER_REPLICAS`). It is `false` only when the
+ * topology was declared as `OS_EXPECT_MULTI_NODE=true` with no count, and the
+ * call site asked the gate about 2 nodes, the smallest multi-node count. That 2
+ * is the call site's, not the operator's, so the text then names the spelling
+ * the operator used and prints no declared count and no excess: a wrong number
+ * here is worse than no number. The call site passes the flag; this function
+ * never re-reads the environment. Required, so no caller can fall back to the
+ * counted wording by omission.
  */
-export function formatMultiNodeCapAdvisory(verdict: MultiNodeGateVerdict): string | null {
+export function formatMultiNodeCapAdvisory(
+  verdict: MultiNodeGateVerdict,
+  declaration: { countDeclared: boolean },
+): string | null {
   // `capped: true` is produced only together with a numeric `admitted` and a
   // positive `refused`. The extra narrowing is the type system asking for that
   // invariant in writing — not tolerance of an off-spec producer: a stale build
@@ -7507,8 +7555,18 @@ export function formatMultiNodeCapAdvisory(verdict: MultiNodeGateVerdict): strin
   const excess = verdict.refused;
   if (typeof admitted !== 'number' || excess <= 0) return null;
 
-  const declared = admitted + excess;
   const why = verdict.reason ? ` (${verdict.reason})` : '';
+  if (!declaration.countDeclared) {
+    return (
+      `[cluster] licensed node cap exceeded${why}: the licence admits ${admitted} node(s), `
+      + 'but OS_EXPECT_MULTI_NODE=true declares a multi-node topology without a replica count.\n'
+      + '[cluster] This cap is ADVISORY and is not enforced yet: nothing is refused, and every '
+      + 'replica will still join the cluster.\n'
+      + `[cluster] Run at most ${admitted} replica(s) (or set OS_CLUSTER_REPLICAS to the count you run), `
+      + 'or raise the licensed node limit.'
+    );
+  }
+  const declared = admitted + excess;
   return (
     `[cluster] licensed node cap exceeded${why}: the licence admits ${admitted} node(s), `
     + `but OS_CLUSTER_REPLICAS declares ${declared} — ${excess} beyond the cap.\n`
