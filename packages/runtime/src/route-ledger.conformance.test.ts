@@ -318,8 +318,11 @@ describe('address grammar ↔ route ledger (ADR-0150 D5, #31691)', () => {
         const [verb, rest] = [row.route.slice(0, row.route.indexOf(' ')), row.route.slice(row.route.indexOf(' ') + 1).split('?')[0]];
         return { verb, segments: rest.split('/').filter(Boolean) };
       })
-      .filter(({ segments }) => segments[0] === 'automation' && !segments.includes(':ns'));
+      // The domain root is left out: its `GET` (the retired flow list, #19543)
+      // is declined by the domain, so the host answers it, never this table.
+      .filter(({ segments }) => segments[0] === 'automation' && segments.length > 1 && !segments.includes(':ns'));
     expect(rows.length).toBeGreaterThan(20);
+    expect(automationRouteAllow([])).toEqual([]);
     const fill = (seg: string) => (seg.startsWith(':') ? `${seg.slice(1)}_1` : seg);
     const matches = (pattern: string[], path: string[]) =>
       pattern.length === path.length && pattern.every((seg, i) => seg.startsWith(':') || seg === path[i]);

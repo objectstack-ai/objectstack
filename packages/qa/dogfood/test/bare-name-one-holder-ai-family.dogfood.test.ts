@@ -245,6 +245,22 @@ describe('agent and skill names held per namespace, a tool name per deployment, 
     }
   });
 
+  // [ADR-0150 D5, G1 #31691] The address form of `?package=`: the qualified
+  // read `/meta/TYPE/:ns/NAME` serves each namespace's own agent and skill,
+  // where the bare read refuses naming both (the test above).
+  it('the qualified read `/meta/TYPE/:ns/NAME` serves each namespace\'s own agent and skill', async () => {
+    for (const [type, name] of [['agent', AGENT], ['skill', SKILL]] as const) {
+      for (const ns of ['alpha', 'beta'] as const) {
+        const r = await stack.apiAs(admin, 'GET', `/meta/${type}/${ns}/${name}`);
+        const body = (await r.json()) as any;
+        expect(r.status, JSON.stringify(body)).toBe(200);
+        const d = body?.data ?? body;
+        const item = d?.item ?? d;
+        expect([type, ns, item?._packageId, item?.label]).toEqual([type, ns, `com.qa.bare.${ns}`, `${ns} ${type}`]);
+      }
+    }
+  });
+
   it('MCP: each skill is listed under its own face, each face serves its own skill, and the bare name is refused naming both faces', async () => {
     const names = await promptNames();
     expect(names).toEqual(expect.arrayContaining([`alpha-${SKILL}`, `beta-${SKILL}`]));

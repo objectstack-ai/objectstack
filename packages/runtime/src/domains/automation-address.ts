@@ -273,15 +273,13 @@ export { ENVIRONMENT_ADDRESS_SEGMENT };
  * under another verb `405` with this `Allow` — the answer the transport gave
  * the same path before those mounts existed — instead of the transport
  * building its `Allow` from mounts that match the path only by their
- * parameters. Empty: no route has this shape.
+ * parameters. Empty: no route has this shape — and the domain root, whose
+ * retired `GET` the domain declines (#19543): its answer stays the host's.
  */
 export function automationRouteAllow(parts: readonly string[]): string[] {
     const allow = new Set<string>();
     const [a, b, c, d] = parts;
     switch (parts.length) {
-        case 0:
-            allow.add('POST');
-            break;
         case 1:
             for (const verb of ['GET', 'PUT', 'DELETE']) allow.add(verb);
             break;

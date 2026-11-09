@@ -35,6 +35,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_STATUS, LiteKernel } from '@objectstack/core';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import type { IHttpServer } from '@objectstack/spec/contracts';
+// The source reaches `import('@objectstack/metadata')`; its first load is paid at collection.
+import '@objectstack/metadata';
 
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 

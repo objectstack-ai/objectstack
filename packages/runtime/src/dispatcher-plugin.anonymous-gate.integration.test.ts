@@ -31,6 +31,8 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { LiteKernel, Plugin, PluginContext } from '@objectstack/core';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import type { IHttpServer } from '@objectstack/spec/contracts';
+// The source reaches `import('@objectstack/metadata')`; its first load is paid at collection.
+import '@objectstack/metadata';
 
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 
