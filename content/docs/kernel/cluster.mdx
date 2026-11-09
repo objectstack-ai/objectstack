@@ -375,16 +375,24 @@ channel's own doc comment:
   event is never published to peers; each replica emits its own when its own
   connection returns. `MetadataClusterBridgePlugin` re-reads every attached
   lane on it: lane 1 drops the metadata list caches
-  (`MetadataManager.resyncClusterPubSub()`), lane 3 re-converges every stored
-  datasource and every held pool
-  (`DatasourceAdminService.resyncDatasourceMutationPubSub()`), and lane 4
+  (`MetadataManager.resyncClusterPubSub()`), lane 2 re-converges the object
+  registry (`ObjectStackProtocolImplementation.resyncMetadataMutationPubSub()`),
+  lane 3 re-converges every stored datasource and every held pool
+  (`DatasourceAdminService.resyncDatasourceMutationPubSub()`), lane 4
   runs the connector reconcile
   (`AutomationEngine.resyncConnectorCredentialPubSub()`), and lane 5
   announces every settings namespace locally so each subscriber re-reads it
   (`SettingsService.resyncSettingsChangePubSub()`).
   `AuthzClusterBridgePlugin` advances the engine's write epoch, which retires
-  cached grants. **Lane 2 has no resync yet**: it converges per item on the
-  signals that are delivered, and fully at boot. A cache of your own
+  cached grants. Lane 2 reads `sys_metadata`'s active rows once (address and
+  checksum, never a body) and re-converges each item a lost signal could have
+  touched: a row whose checksum moved since the replica last converged on it,
+  an item it converged on that has no active row now, and an item a signal or
+  a local write named since. Each goes through the same applier a delivered
+  signal runs, from the replica's own re-read, so a row that is gone takes the
+  delete's heal walk. A read that fails is never a delete: when the row read
+  fails nothing changes, and an item whose own re-read fails is kept as the
+  replica holds it, logged once, and re-read on the next resync. A cache of your own
   subscribes with `onClusterResync(cluster, handler)` from
   `@objectstack/service-cluster`. On the `memory` driver that subscription is
   a no-op, because nothing there can lose a connection.

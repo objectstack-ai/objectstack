@@ -225,6 +225,7 @@ export interface EndpointResult {
 }
 
 import { generatePlaceholderEmail } from './placeholder-email.js';
+import { authSystemWriteContext, runAttributedToUser } from './auth-actor-attribution.js';
 import { revokeSessionsAndApiKeys, type ForcedResetRevocationOutcome } from './forced-reset-revocation.js';
 import { reconcileMembership, type MembershipPolicy } from './reconcile-membership.js';
 import { resolveDefaultOrgId } from './tenancy-service.js';
@@ -441,8 +442,13 @@ async function stampMustChangePassword(
   const engine = deps.getDataEngine();
   if (!engine) return false;
   try {
+    // The write authorizes as the system, exactly as before; the attribution
+    // seam (`authSystemWriteContext`) only adds the administrator the caller's
+    // scope names, so plugin-audit's mirror row for this field write records
+    // who issued the forced change instead of the system. Outside a scope it
+    // adds nothing.
     await engine.update('sys_user', { id: userId, must_change_password: value }, {
-      context: SYSTEM_CTX,
+      context: { ...SYSTEM_CTX, ...(await authSystemWriteContext()) },
     });
     if (value) deps.noteMustChangePasswordIssued();
     return true;
@@ -1148,9 +1154,15 @@ export async function runAdminSetUserPassword(
     return mapAuthApiError(error, 'set-user-password failed');
   }
 
-  const stamped = mustChangePassword
-    ? await stampMustChangePassword(deps, userId, true)
-    : await stampMustChangePassword(deps, userId, false);
+  // The flag write is credited to the administrator this route admitted (and,
+  // from an impersonation session, the administrator at the keyboard beside
+  // them), through the same attribution seam every identity write uses. This
+  // route drives the write itself, outside `AuthManager.handleRequest`, so it
+  // opens the seam with the actor already in hand. Attribution only: the route
+  // authorized the caller above, and the write still runs as the system.
+  const stamped = await runAttributedToUser(actor, () =>
+    stampMustChangePassword(deps, userId, mustChangePassword),
+  );
 
   // Revoked AFTER the new password is set, so a session the old password
   // opened cannot outlive the reset, and never before it: a revocation that

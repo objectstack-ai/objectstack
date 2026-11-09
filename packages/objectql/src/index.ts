@@ -201,11 +201,13 @@ export {
   namespacePackageOf,
   namespaceNameConflicts,
   namespaceNameConflictMessage,
+  residualNamespacePackageOf,
 } from './namespace-co-owner-names.js';
 export type {
   NamespaceNameConflict,
   NamespacePackage,
   NamespaceUniqueType,
+  ResidualItems,
 } from './namespace-co-owner-names.js';
 
 // [ADR-0130 D4] The residual-picklist refusal the `manifest` service throws: a

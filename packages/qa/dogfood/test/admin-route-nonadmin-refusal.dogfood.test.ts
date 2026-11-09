@@ -365,6 +365,19 @@ function expectationsFor(targetUserId: string): Record<string, RouteExpectation>
       body: { providerId: 'refusal-probe-oidc' },
       note: 'admin passes the gate and lands on 400 DOMAIN_VERIFICATION_DISABLED while SSO is off (#10859 — it answered 404 DOMAIN_VERIFICATION_FAILED before, out of step with the sibling above)',
     },
+    // #31666 — the SSO Providers form's groups claim, show and set: the same
+    // gate first, ahead of any body read. Neither delegates before reading the
+    // stored provider, so the admin lands on the unknown probe provider.
+    'POST /api/v1/auth/admin/sso/get-groups-claim': {
+      bucket: 'objectstack-gate',
+      body: { providerId: 'refusal-probe-groups-claim' },
+      note: 'admin passes the gate and lands on 404 RESOURCE_NOT_FOUND for the unknown provider',
+    },
+    'POST /api/v1/auth/admin/sso/set-groups-claim': {
+      bucket: 'objectstack-gate',
+      body: { providerId: 'refusal-probe-groups-claim', groupsClaim: 'groups' },
+      note: 'admin passes the gate and lands on 404 RESOURCE_NOT_FOUND for the unknown provider; nothing is written',
+    },
 
     // ── #9652: ban / unban moved from the vendor to an ObjectStack mount ────
     //
