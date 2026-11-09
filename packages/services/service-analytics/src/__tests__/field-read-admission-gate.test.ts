@@ -225,9 +225,14 @@ describe('[#20917] analytics — the field-level read gate at the door', () => {
     });
 
     it('judges only names the object\'s field list carries, and every name when that list is unavailable', async () => {
+      // The read gate leaves a name the list does not carry to the gate that
+      // owns it: since #31881 a hand-authored cube asks the related-column gate
+      // too, so the unknown column is refused 400 there, never a 403 here.
       const listed = makeService({ capabilities: nativeSqlOnly, getReadableFields: readable });
-      await listed.service.query({ cube: 'fr_authored', measures: ['count'], where: { 'owner.not_a_field': 'v' } } as never, CALLER);
-      expect(listed.executed).toHaveLength(1);
+      await expect(
+        listed.service.query({ cube: 'fr_authored', measures: ['count'], where: { 'owner.not_a_field': 'v' } } as never, CALLER),
+      ).rejects.toMatchObject({ code: 'INVALID_FIELD', status: 400, member: 'owner.not_a_field', object: OWNER, field: 'not_a_field' });
+      expect(listed.executed).toEqual([]);
 
       const unlisted = makeService({ capabilities, getReadableFields: readable, getObjectFieldNames: null });
       await expect(
