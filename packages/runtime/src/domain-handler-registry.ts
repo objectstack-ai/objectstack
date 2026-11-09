@@ -372,8 +372,12 @@ export interface DomainHandlerDeps {
      * {@link getRegisteredAiRoutes} reads — has passed `kernel:ready`
      * (`hasBootPhaseSettled('kernel:ready')`). `false` for a kernel that does
      * not carry the reader, so an unknown kernel is never read as booted.
+     *
+     * Optional, so an implementation of this exported interface written
+     * before it existed (a host's own deps, a test double) still compiles;
+     * a deps without it reads as "not ready", the same fail-safe answer.
      */
-    isRequestKernelReady(context: HttpProtocolContext): boolean;
+    isRequestKernelReady?(context: HttpProtocolContext): boolean;
 }
 
 /**

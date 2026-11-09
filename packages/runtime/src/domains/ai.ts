@@ -173,8 +173,9 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
         // still absent is final and the answer is the unserveable exit's.
         // Fail-safe by construction: before ready, with boot-phase hooks
         // withheld, or on a kernel that cannot answer, the window keeps its
-        // 503 — a real boot race is never answered "AI off".
-        if (deps.isRequestKernelReady(context)) return aiUnavailable();
+        // 503 — a real boot race is never answered "AI off". A deps that
+        // does not carry the seam reads as "not ready" for the same reason.
+        if (deps.isRequestKernelReady?.(context) === true) return aiUnavailable();
         return { handled: true, response: deps.error('AI service routes not yet initialized', 503) };
     }
 
