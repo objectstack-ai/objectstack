@@ -16,7 +16,8 @@
  *
  * Red line 2's refusal of a name two packages hold is held back for the
  * maintainer's ruling on a deployment sealed with such a clash (#31677; see
- * `FLOW_NAME_REFUSALS_ACTED_ON` in the engine), so its pins land with it.
+ * `FLOW_NAME_REFUSALS_ACTED_ON` in the engine), so its pins land with it —
+ * but never its report: the `held back` case pins the warning.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -85,6 +86,8 @@ function caller(name: string, child: string) {
 
 let registry: SchemaRegistry;
 let engine: AutomationEngine;
+/** The engine's own logger, so its warnings are readable. */
+let engineLogger: ReturnType<typeof silentLogger>;
 /** The loader's set: which package ships each flow name (the engine's `packagedFlowOwner`). */
 let loaderSet: Record<string, string>;
 /** The flows whose `mark` node ran, in order. */
@@ -110,7 +113,8 @@ beforeEach(() => {
     registry.logLevel = 'silent';
     loaderSet = {};
     ran = [];
-    engine = new AutomationEngine(silentLogger());
+    engineLogger = silentLogger();
+    engine = new AutomationEngine(engineLogger);
     const ctx = {
         logger: silentLogger(),
         getService(name: string) {
@@ -199,6 +203,36 @@ describe('red line 1 — resolution never loosens: a package caller is never ser
         const result = await engine.execute('welcome');
         expect(result.success).toBe(true);
         expect(ran).toEqual(['welcome']);
+    });
+});
+
+describe('red line 2, held back (#31677) — the act waits for the ruling, the report does not', () => {
+    it('a name two packages hold is warned once per (name, caller), naming every candidate', async () => {
+        install(A);
+        install(Q);
+        install(P, [A, Q]);
+        registry.registerItem('flow', { ...leaf('notify'), _packageId: A }, 'name' as never, A);
+        registry.registerItem('flow', { ...leaf('notify'), _packageId: Q }, 'name' as never, Q);
+        loaderSet.notify = A;
+        engine.registerFlow('notify', leaf('notify'));
+        ship(P, caller('process', 'notify'));
+
+        const heldBack = () =>
+            engineLogger.warn.mock.calls.filter((call: unknown[]) => String(call[0]).includes('#31677'));
+        expect((await engine.execute('notify')).success).toBe(true);
+        expect((await engine.execute('notify')).success).toBe(true);
+        expect((await engine.execute('process')).success).toBe(true);
+        expect((await engine.execute('process')).success).toBe(true);
+
+        const warned = heldBack();
+        expect(warned).toHaveLength(2);
+        expect(warned.map((call: unknown[]) => (call[1] as { callerPackageId: string | null }).callerPackageId))
+            .toEqual([null, P]);
+        for (const [message] of warned) {
+            expect(message).toContain('the flow precedence\'s pick still runs');
+            expect(message).toContain('com.acme.alpha');
+            expect(message).toContain('com.acme.stranger');
+        }
     });
 });
 

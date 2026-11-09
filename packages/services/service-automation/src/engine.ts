@@ -227,10 +227,11 @@ import { describeSubflowNoticeTrap, subflowNoticeTrap } from './subflow-notice-g
 // [ADR-0150 D3/D4] The one package-scoped resolver's answer, read through the
 // reader the host attaches (`setFlowNameResolver`), and the activation
 // projection keyed by `(package, name)`.
-import type {
-    PackageScopedRefusal,
-    PackageScopedRefusalReason,
-    PackageScopedResolution,
+import {
+    describePackageScopedHolder,
+    type PackageScopedRefusal,
+    type PackageScopedRefusalReason,
+    type PackageScopedResolution,
 } from '@objectstack/objectql';
 import { FlowActivationProjection } from './flow-activation-projection.js';
 import { describeRegionSuspendingCall, regionSuspendingCall } from './subflow-region-guard.js';
@@ -2598,9 +2599,11 @@ export type FlowNameResolver = (name: string, callerPackageId: string | null) =>
  * the engine only from a deployment that held the clash before phase 1, whose
  * cold boot seals it with a warning (`BARE_NAME_COLD_BOOT_MODE = 'warn'`).
  * Whether that clash is refused is the maintainer's ruling (#31677); until
- * then this seam leaves it exactly as it was before this reader existed, and
- * the ruling adds the two reasons here and the arming gate in
- * {@link AutomationEngine.registerFlow}.
+ * then this seam leaves the ACT exactly as it was before this reader existed,
+ * and the ruling adds the two reasons here and the arming gate in
+ * {@link AutomationEngine.registerFlow}. The REPORT is never held back: a
+ * held-back refusal is warned once per `(name, caller)`, naming every
+ * candidate ({@link AutomationEngine.reportHeldBackFlowRefusal}).
  */
 const FLOW_NAME_REFUSALS_ACTED_ON: ReadonlySet<PackageScopedRefusalReason> = new Set(['outside-closure']);
 
@@ -2821,6 +2824,11 @@ export class AutomationEngine implements IAutomationService {
      * knows, as before.
      */
     private flowNameResolver?: FlowNameResolver;
+    /**
+     * [ADR-0150 D3, #31677] The `(name, caller)` pairs whose held-back
+     * refusal has been warned — see {@link reportHeldBackFlowRefusal}.
+     */
+    private heldBackFlowRefusalsReported = new Set<string>();
     /** [#20790] The write-only flow credential channel — see {@link setFlowCredentialSource}. */
     private flowCredentialSource?: FlowCredentialSource;
     /** [#20281 stage ③] The connector sync executor — see {@link setConnectorPullSource}. */
@@ -5003,9 +5011,33 @@ export class AutomationEngine implements IAutomationService {
      */
     private flowNameRefusal(name: string, callerPackageId: string | null): PackageScopedRefusal | undefined {
         const resolution = this.flowNameResolver?.(name, callerPackageId);
-        return resolution?.status === 'refused' && FLOW_NAME_REFUSALS_ACTED_ON.has(resolution.reason)
-            ? resolution
-            : undefined;
+        if (resolution?.status !== 'refused') return undefined;
+        if (FLOW_NAME_REFUSALS_ACTED_ON.has(resolution.reason)) return resolution;
+        this.reportHeldBackFlowRefusal(resolution);
+        return undefined;
+    }
+
+    /**
+     * [ADR-0150 D3, #31677] A refusal the engine does not act on yet is still
+     * reported: warned once per `(name, caller)`, with the resolver's sentence
+     * naming every candidate and the fact that the flow precedence's pick
+     * still runs until the maintainer rules (#31677 Q1). Holding back the act
+     * is the ruling's to lift; the report never waits for it.
+     */
+    private reportHeldBackFlowRefusal(refusal: PackageScopedRefusal): void {
+        const key = JSON.stringify([refusal.name, refusal.callerPackageId]);
+        if (this.heldBackFlowRefusalsReported.has(key)) return;
+        this.heldBackFlowRefusalsReported.add(key);
+        this.logger.warn(
+            `[Automation] ${refusal.message} Until the maintainer rules on #31677 (Q1), this refusal is held back `
+                + 'and the flow precedence\'s pick still runs.',
+            {
+                flow: refusal.name,
+                callerPackageId: refusal.callerPackageId,
+                reason: refusal.reason,
+                candidates: refusal.candidates.map(describePackageScopedHolder),
+            },
+        );
     }
 
     /**
