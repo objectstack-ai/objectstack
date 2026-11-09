@@ -4386,6 +4386,33 @@ function lookupAutofillTypeMismatch(
 }
 
 /**
+ * The field map the stack's two-object cross-checks resolve against: each
+ * object's `fields` from the stack's own `objects`, merged with its
+ * `objectExtensions` entries by `extend`, plus `declared`, the names the stack
+ * DECLARES. An object known only through an extension has its owner's fields
+ * elsewhere, so its merged map holds the extension's fields alone; a check
+ * that judges another field's pointer INTO an object resolves only a
+ * `declared` one, or it would refuse what the owner declares.
+ */
+function stackObjectFields(config: ObjectStackDefinition): {
+  fieldsByObject: Map<string, Record<string, unknown>>;
+  declared: Set<string>;
+} {
+  const fieldsByObject = new Map<string, Record<string, unknown>>();
+  const declared = new Set<string>();
+  for (const obj of config.objects ?? []) {
+    if (!isRecord(obj) || !isRecord(obj.fields)) continue;
+    declared.add(obj.name);
+    fieldsByObject.set(obj.name, { ...fieldsByObject.get(obj.name), ...obj.fields });
+  }
+  for (const ext of (config as { objectExtensions?: unknown }).objectExtensions as unknown[] ?? []) {
+    if (!isRecord(ext) || typeof ext.extend !== 'string' || !isRecord(ext.fields)) continue;
+    fieldsByObject.set(ext.extend, { ...fieldsByObject.get(ext.extend), ...ext.fields });
+  }
+  return { fieldsByObject, declared };
+}
+
+/**
  * [#27945] Each `lookupAutofill` pair's `source` names a field of the object
  * the lookup references, which the picked record carries, and whose value the
  * pair's target can hold. A source the referenced object does not declare
@@ -4401,28 +4428,23 @@ function lookupAutofillTypeMismatch(
  * {@link lookupAutofillTypeMismatch}.
  *
  * Resolution is against the stack's own `objects`, merged with its
- * `objectExtensions` by name: a referenced object this stack does not declare
- * is not judged — an unresolved source is not a wrong one, the stance of
- * {@link collectHydratedInlineColumnErrors}. An undeclared source that is one
- * of the audit-provenance columns the platform injects (`created_at`, …) is
- * not judged either: every record carries it without a declaration.
+ * `objectExtensions` by name ({@link stackObjectFields}): a referenced object
+ * this stack does not declare is not judged — an unresolved source is not a
+ * wrong one, the stance of {@link collectHydratedInlineColumnErrors} — nor is
+ * one it knows only through an extension, whose owner's fields live
+ * elsewhere, so its merged map holds the extension's fields alone. An
+ * undeclared source that is one of the audit-provenance columns the platform
+ * injects (`created_at`, …) is not judged either: every record carries it
+ * without a declaration.
  */
 function collectLookupAutofillErrors(config: ObjectStackDefinition): string[] {
   const errors: string[] = [];
-  const fieldsByObject = new Map<string, Record<string, unknown>>();
-  for (const obj of config.objects ?? []) {
-    if (!isRecord(obj) || !isRecord(obj.fields)) continue;
-    fieldsByObject.set(obj.name, { ...fieldsByObject.get(obj.name), ...obj.fields });
-  }
-  for (const ext of (config as { objectExtensions?: unknown }).objectExtensions as unknown[] ?? []) {
-    if (!isRecord(ext) || typeof ext.extend !== 'string' || !isRecord(ext.fields)) continue;
-    fieldsByObject.set(ext.extend, { ...fieldsByObject.get(ext.extend), ...ext.fields });
-  }
+  const { fieldsByObject, declared } = stackObjectFields(config);
 
   for (const [objectName, fields] of fieldsByObject) {
     for (const [fieldName, field] of Object.entries(fields)) {
       if (!isRecord(field) || !Array.isArray(field.lookupAutofill) || typeof field.reference !== 'string') continue;
-      const referenced = fieldsByObject.get(field.reference);
+      const referenced = declared.has(field.reference) ? fieldsByObject.get(field.reference) : undefined;
       if (!referenced) continue;
       field.lookupAutofill.forEach((pair: unknown, i: number) => {
         if (!isRecord(pair) || typeof pair.source !== 'string') return;
@@ -4511,21 +4533,10 @@ function recordCurrencyPathOf(field: unknown): { via: string; code: string } | u
  */
 function collectRecordCurrencyPathErrors(config: ObjectStackDefinition): string[] {
   const errors: string[] = [];
-  const fieldsByObject = new Map<string, Record<string, unknown>>();
-  // The objects this stack DECLARES. A parent known only through an
-  // `objectExtensions` entry has its owner's fields elsewhere, so its merged
-  // map holds the extension's fields alone: judging a code field or a roll-up
-  // against it would refuse what the owner declares. Such a parent is skipped.
-  const declared = new Set<string>();
-  for (const obj of config.objects ?? []) {
-    if (!isRecord(obj) || !isRecord(obj.fields)) continue;
-    declared.add(obj.name);
-    fieldsByObject.set(obj.name, { ...fieldsByObject.get(obj.name), ...obj.fields });
-  }
-  for (const ext of (config as { objectExtensions?: unknown }).objectExtensions as unknown[] ?? []) {
-    if (!isRecord(ext) || typeof ext.extend !== 'string' || !isRecord(ext.fields)) continue;
-    fieldsByObject.set(ext.extend, { ...fieldsByObject.get(ext.extend), ...ext.fields });
-  }
+  // A parent known only through an `objectExtensions` entry has its owner's
+  // fields elsewhere: judging a code field or a roll-up against it would refuse
+  // what the owner declares. Such a parent is skipped (not in `declared`).
+  const { fieldsByObject, declared } = stackObjectFields(config);
   const codeTypes = [...VALUE_DOMAIN_FIELD_TYPES].map((t) => `\`${t}\``).join(' or ');
   const isCodeField = (f: unknown): boolean =>
     isRecord(f) && typeof f.type === 'string' && VALUE_DOMAIN_FIELD_TYPES.has(f.type) && f.valueDomain === 'iso_4217_currency';
