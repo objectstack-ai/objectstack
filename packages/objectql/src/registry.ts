@@ -9746,11 +9746,13 @@ export class SchemaRegistry {
    * never accepts a value — the fold drops whatever options it carried and
    * the record validator refuses the field.
    *
-   * ⛔ Leaves out a reference whose ONLY candidate is an environment-authored
-   * list (ADR-0150 D3 (a)): {@link findEnvironmentHeldPicklistReferences}
-   * names those, and the boot warns instead of refusing (epic seat ruling on
-   * the E6 card): the declared narrowing is a refused reference, not a
-   * refused boot.
+   * ⛔ Leaves out a reference the resolver refuses as held OUTSIDE the
+   * declaring package's dependency closure (ADR-0150 D3 (a), and a package
+   * holder it does not depend on — N1, ruled on #31678):
+   * {@link findOutsideClosurePicklistReferences} names those, and the boot
+   * warns instead of refusing (ruling N2 on the E6 card): the narrowing is a
+   * refused reference, not a refused boot. A name nothing holds, or one the
+   * closure holds more than once, still refuses the boot here.
    */
   findUnresolvedPicklistReferences(): UnresolvedPicklistReference[] {
     return this.auditPicklistReferences().unresolved;
@@ -9778,26 +9780,28 @@ export class SchemaRegistry {
   }
 
   /**
-   * [ADR-0150 D3 (a), child E6] The packaged fields whose picklist only an
-   * environment-authored list holds. The resolver refuses them
-   * (`outside-closure`, the environment its one candidate): the field is
-   * served with no options and the record validator refuses its values. The
-   * boot names each one (a warning carrying the refusal's sentence) and the
-   * D10 upgrade report lists them; it does not refuse the boot (epic seat
-   * ruling on the E6 card: the declared narrowing is a refused reference, not
-   * a refused boot).
+   * [ADR-0150 D3, child E6] The packaged fields whose picklist is held only
+   * OUTSIDE the declaring package's declared dependency closure: by an
+   * environment-authored list (D3 (a)), or by a package it does not depend
+   * on — a same-artifact sibling included (N1, ruled on #31678: the declared
+   * closure only). The resolver refuses them (`outside-closure`, naming every
+   * holder): the field is served with no options and the record validator
+   * refuses its values. The boot names each one (a warning carrying the
+   * refusal's sentence) and the D10 upgrade report lists them; it does not
+   * refuse the boot (ruling N2 on the E6 card: a refused reference, not a
+   * refused boot). The fix is the refusal's own: declare the dependency.
    */
-  findEnvironmentHeldPicklistReferences(): UnresolvedPicklistReference[] {
-    return this.auditPicklistReferences().environmentHeld;
+  findOutsideClosurePicklistReferences(): UnresolvedPicklistReference[] {
+    return this.auditPicklistReferences().outsideClosure;
   }
 
   /** The field half of the audit, split by the resolver's verdict (above). */
   private auditPicklistReferences(): {
     unresolved: UnresolvedPicklistReference[];
-    environmentHeld: UnresolvedPicklistReference[];
+    outsideClosure: UnresolvedPicklistReference[];
   } {
     const unresolved: UnresolvedPicklistReference[] = [];
-    const environmentHeld: UnresolvedPicklistReference[] = [];
+    const outsideClosure: UnresolvedPicklistReference[] = [];
     for (const [fqn, contributors] of this.objectContributors) {
       for (const contributor of contributors) {
         if (contributor.ownership === 'overlay' || isTenantAuthored(contributor.definition)) continue;
@@ -9805,30 +9809,27 @@ export class SchemaRegistry {
           const judged = this.judgePicklistReference(ref.picklist, ref.packageId);
           if (judged === 'resolved') continue;
           const entry = judged.refusal ? { ...ref, refusal: judged.refusal.message } : ref;
-          (judged.environmentOnly ? environmentHeld : unresolved).push(entry);
+          (judged.outsideClosure ? outsideClosure : unresolved).push(entry);
         }
       }
     }
-    return { unresolved, environmentHeld };
+    return { unresolved, outsideClosure };
   }
 
   /**
    * One reference, judged: `'resolved'` when the name reaches a list from
    * `callerPackageId`, else what it is — the refusal (when the resolver
-   * refused) and whether its only candidate is the environment's own list
-   * (D3 (a)).
+   * refused) and whether it refused because every holder is outside the
+   * caller's declared closure.
    */
   private judgePicklistReference(
     name: string,
     callerPackageId: string | undefined,
-  ): 'resolved' | { refusal?: PackageScopedRefusal; environmentOnly: boolean } {
+  ): 'resolved' | { refusal?: PackageScopedRefusal; outsideClosure: boolean } {
     const verdict = this.picklistReferenceVerdict(name, callerPackageId);
     if (verdict.status === 'resolved') return 'resolved';
-    if (verdict.status !== 'refused') return { environmentOnly: false };
-    const environmentOnly = verdict.reason === 'outside-closure'
-      && verdict.candidates.length === 1
-      && verdict.candidates[0].kind === 'environment';
-    return { refusal: verdict, environmentOnly };
+    if (verdict.status !== 'refused') return { outsideClosure: false };
+    return { refusal: verdict, outsideClosure: verdict.reason === 'outside-closure' };
   }
 
   /**

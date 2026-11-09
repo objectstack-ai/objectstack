@@ -1223,13 +1223,15 @@ export class ObjectQLPlugin implements Plugin {
             this.ql?.registry.findOrphanPicklistExtensions() ?? [],
         );
         if (unresolvedPicklists) throw unresolvedPicklists;
-        // [ADR-0150 D3 (a), child E6] A packaged reference whose ONLY holder
-        // is an environment-authored list is refused by the package-scoped
-        // resolver: the field is served with no options and the record
-        // validator refuses its values. That is the declared narrowing — a
-        // refused REFERENCE, never a refused boot — so it is named here, once
-        // per reference, in the resolver's own words, and the boot goes on.
-        for (const ref of this.ql?.registry.findEnvironmentHeldPicklistReferences() ?? []) {
+        // [ADR-0150 D3, child E6] A packaged reference whose every holder is
+        // outside its package's declared dependency closure — an
+        // environment-authored list (D3 (a)) or a package it does not depend
+        // on, a same-artifact sibling included (N1, ruled on #31678) — is
+        // refused by the package-scoped resolver: the field is served with no
+        // options and the record validator refuses its values. A refused
+        // REFERENCE, never a refused boot (ruling N2), so it is named here,
+        // once per reference, in the resolver's own words, and the boot goes on.
+        for (const ref of this.ql?.registry.findOutsideClosurePicklistReferences() ?? []) {
             ctx.logger.warn(
                 `[ObjectQLPlugin] Field '${ref.object}.${ref.field}' of package '${ref.packageId}' is served with no `
                 + `options and refuses every value: ${ref.refusal}`,
