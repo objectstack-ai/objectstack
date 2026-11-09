@@ -35,6 +35,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
+import { resolvePackageScopedName } from '@objectstack/objectql';
 import { bootShowcase } from './showcase-boot.js';
 
 const BASE = 'com.example.showcase';
@@ -104,6 +105,23 @@ function showcaseRig() {
         const email: any = await rig.stack!.kernel.getServiceAsync('email');
         return (await email.renderTemplate({ template: NAME, locale, data: { title: 'T' } }))?.subject;
     };
+    /**
+     * [ADR-0150 D3, epic #31527 child R2] The package-scoped resolver over the
+     * served registry, for a caller with no package (a package-less send): the
+     * holder it answers and the subject, or the status.
+     */
+    const resolved = async (member?: string) => {
+        const ql: any = await rig.stack!.kernel.getServiceAsync('objectql');
+        const r = resolvePackageScopedName<{ subject?: unknown }>(ql.registry, { type: 'email_template', name: NAME, member });
+        return r.status === 'resolved'
+            ? { status: r.status, holder: r.holder, subject: r.item?.subject }
+            : { status: r.status, ...(r.status === 'refused' ? { candidates: r.candidates } : {}) };
+    };
+    /** The dependent's own member, read naming the dependent. */
+    const dependentMember = async (member: string) => {
+        const ql: any = await rig.stack!.kernel.getServiceAsync('objectql');
+        return (ql.registry.getPackageScopedItem('email_template', NAME, DEPENDENT, member) as { subject?: unknown } | undefined)?.subject;
+    };
     const body = (locale: string, subject: string, extra: Record<string, unknown> = {}) => {
         const out: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(rig.shipped)) if (!k.startsWith('_')) out[k] = v;
@@ -141,7 +159,7 @@ function showcaseRig() {
         const doc = read.json?.data ?? read.json?.item ?? read.json;
         rig.shipped = doc?.item ?? doc;
     };
-    return { rig, boot, byName, layers, listed, executing, rendered, body, saveInto, publishInto, createDependent, ensurePair };
+    return { rig, boot, byName, layers, listed, executing, rendered, resolved, dependentMember, body, saveInto, publishInto, createDependent, ensurePair };
 }
 
 const BASE_EN = { status: 200, subject: SHIPPED_SUBJECT, locale: 'en-US', _packageId: BASE };
@@ -185,6 +203,16 @@ describe('[#28802] a dependent\'s email template locale the base does not ship s
         // Control: the base's own member is untouched on every read.
         expect(await r.byName('en-US', BASE)).toEqual(BASE_EN);
         expect(await r.byName('en-US')).toEqual(BASE_EN);
+    });
+
+    it('[ADR-0150 D3, R2] the dependent\'s `fr-FR` is an addition, no second holder: a package-less resolve of the name answers the base', async () => {
+        const BASE_HOLDER = { kind: 'package', packageId: BASE };
+        expect(await r.resolved()).toEqual({ status: 'resolved', holder: BASE_HOLDER, subject: SHIPPED_SUBJECT });
+        expect(await r.resolved('en-US')).toEqual({ status: 'resolved', holder: BASE_HOLDER, subject: SHIPPED_SUBJECT });
+        // The base's address serves no `fr-FR`, as the by-name read answers 404.
+        expect(await r.resolved('fr-FR')).toEqual({ status: 'not-found' });
+        // A member read naming the dependent still reaches the addition.
+        expect(await r.dependentMember('fr-FR')).toBe(DEPENDENT_SUBJECT);
     });
 
     it('[#28830] the layered read naming the base or no package stays 404 for the dependent\'s `fr-FR`; naming the dependent it answers', async () => {

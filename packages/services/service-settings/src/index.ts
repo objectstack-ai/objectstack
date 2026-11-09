@@ -6,6 +6,12 @@
  */
 
 export { SettingsService } from './settings-service.js';
+// The settings lane of the cluster bridge: a write on one replica reaches every
+// replica's `settings:changed` subscribers (an address on the wire, never a value).
+export {
+  SETTINGS_CHANGE_CLUSTER_CHANNEL,
+  type ClusterSettingsChangePayload,
+} from './settings-cluster-channel.js';
 export {
   type CryptoAdapter,
   NoopCryptoAdapter,

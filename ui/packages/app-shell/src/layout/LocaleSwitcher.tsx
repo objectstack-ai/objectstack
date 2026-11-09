@@ -5,8 +5,8 @@
  * Uses the i18n context to change language at runtime.
  *
  * The menu is not a list of its own (objectui#4039): it renders whatever the
- * i18n provider says is offerable — the app's own locale list ∩ what the
- * renderer can resolve. This file owns only the *labels*, because the native
+ * i18n provider says is offerable — the platform locale table ∩ the app's own
+ * locale list, as table tags (objectstack#30514). This file owns only the *labels*, because the native
  * names are the one piece of that no API response supplies:
  * `GET /api/v1/i18n/locales` returns descriptors whose `label` is the code
  * echoed back (`toLocaleDescriptors` in @objectstack/spec), so a server label
@@ -28,7 +28,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@object-ui/components';
-import { useObjectTranslation } from '@object-ui/i18n';
+import { resolveBuiltInLanguage, useObjectTranslation } from '@object-ui/i18n';
 import { PLATFORM_LOCALES } from '@objectstack/spec/system';
 import { confirmUnsavedLeave } from '../chrome/unsavedEdits.js';
 import { useLanguageSelection } from '../hooks/useUserLocale.js';
@@ -89,6 +89,11 @@ export function LocaleSwitcher() {
   // past on an app that only ships two.
   if (offerableLanguages === null) return null;
 
+  // The entries are table tags (`zh-Hans`); the session may be running in a
+  // stored spelling of one (`zh-CN`). Compare through the same resolution the
+  // provider builds the entries with, so that session ticks 简体中文.
+  const current = resolveBuiltInLanguage(language) ?? language;
+
   // objectui#13254 — a switch drops a page's unsaved edits: the console shell
   // remounts every page on a language change (`key={language}` in
   // `ConnectedShellInner`, which relabels the labels the server translates). So
@@ -117,7 +122,7 @@ export function LocaleSwitcher() {
             className="gap-2"
           >
             {localeLabel(code)}
-            {language === code && <span className="ml-auto text-xs">✓</span>}
+            {current === code && <span className="ml-auto text-xs">✓</span>}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

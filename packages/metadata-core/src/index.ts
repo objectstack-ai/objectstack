@@ -177,3 +177,12 @@ export * from './package-upgrade-verdict.js';
 // this is the one package all four declare; the id rule stays in
 // `@objectstack/spec/kernel`.
 export * from './customization-pair-lookup.js';
+
+// [ADR-0141, ADR-0150 D3 · epic #31527 child R2] A package's declared
+// dependency closure — the one walk the save door, the runtime authoring gate,
+// Studio's object pickers and the package-scoped resolution rule all read
+// (`resolvePackageClosure`, `packageDependencyClosure`,
+// `packageResolutionClosure`). Here because the rule's readers sit inside
+// objectql's lean entry, which `@objectstack/metadata-protocol` stays out of,
+// and every one of them already depends on this package.
+export * from './package-closure.js';

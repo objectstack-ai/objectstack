@@ -328,7 +328,7 @@ cache compare it on receipt.
 ### 6.2 The cluster-invalidation family
 
 Cross-node metadata invalidation is not one channel — it is a **family** of
-four independent PubSub lanes, late-bound by `MetadataClusterBridgePlugin`
+five independent PubSub lanes, late-bound by `MetadataClusterBridgePlugin`
 (`@objectstack/service-cluster`) at `kernel:ready`, one per state owner that
 goes stale when a shared record changes on a different node:
 
@@ -338,17 +338,20 @@ goes stale when a shared record changes on a different node:
 | 2 — ObjectQL object registry | `metadata.mutated` (`METADATA_MUTATION_CLUSTER_CHANNEL`, #13331) | `ClusterMetadataMutationPayload` | `@objectstack/metadata-protocol` | ObjectQL's OBJECT registry, from a `sys_metadata` re-read; then, from the same replay, the automation service's armed flows and its materialized connectors (a `connector` mutation that is not a draft, #28002), each from the replica's own re-read |
 | 3 — ObjectQL driver registry | `datasource.mutated` (`DATASOURCE_MUTATION_CLUSTER_CHANNEL`, #13805) | `ClusterDatasourceMutationPayload` | `@objectstack/service-datasource` | ObjectQL's DRIVER registry, from a shared datasource-record re-read |
 | 4 — declarative connector instances | `connector-credential.mutated` (`CONNECTOR_CREDENTIAL_MUTATION_CLUSTER_CHANNEL`, #27428) | `ClusterConnectorCredentialMutationPayload` (`{ originNode, ref }`) | `@objectstack/service-automation` | the automation service's materialized connectors, from a reconcile that re-reads the shared `sys_connector_credential` rows; published by the credential door (`PUT` / `DELETE /api/v1/automation/connectors/credential-refs/:ref`) after the row is written or cleared |
+| 5 — settings subscribers | `settings.changed` (`SETTINGS_CHANGE_CLUSTER_CHANNEL`, #31597) | `ClusterSettingsChangePayload` (`{ originNode, namespace, key, scope, action, at }`) | `@objectstack/service-settings` | every local `settings:changed` subscriber (auth posture, password / session / MFA policy, organization access policy, mail, SMS, storage, the AI provider), each re-reading the shared settings store; published by `SettingsService` after a row is written or cleared. Attaches only where several replicas are declared over the `redis` driver |
 
-Lanes 2 to 4 share one contract, stated once here rather than in each
+Lanes 2 to 5 share one contract, stated once here rather than in each
 channel's own doc comment:
 
 - **Address-only signal.** No message body ever rides these channels — the
   payload names only what changed (a metadata address, a datasource name,
-  or a connector credential reference), never the changed value.
+  a connector credential reference, or a settings namespace and key), never
+  the changed value.
 - **Receipt runs convergence, not trust.** A peer that receives a signal does
   not apply the payload as content; it re-reads its OWN copy of the source of
   truth (`sys_metadata` for lane 2, the shared datasource record for lane 3,
-  the shared credential rows for lane 4) and converges its local registry
+  the shared credential rows for lane 4, the shared settings store for
+  lane 5) and converges its local registry
   from that read. A duplicate or re-ordered
   delivery converges to the same state as a single one.
 - **`originNode` loopback suppression.** Every payload carries the publishing
@@ -376,7 +379,9 @@ channel's own doc comment:
   datasource and every held pool
   (`DatasourceAdminService.resyncDatasourceMutationPubSub()`), and lane 4
   runs the connector reconcile
-  (`AutomationEngine.resyncConnectorCredentialPubSub()`).
+  (`AutomationEngine.resyncConnectorCredentialPubSub()`), and lane 5
+  announces every settings namespace locally so each subscriber re-reads it
+  (`SettingsService.resyncSettingsChangePubSub()`).
   `AuthzClusterBridgePlugin` advances the engine's write epoch, which retires
   cached grants. **Lane 2 has no resync yet**: it converges per item on the
   signals that are delivered, and fully at boot. A cache of your own
@@ -384,9 +389,18 @@ channel's own doc comment:
   `@objectstack/service-cluster`. On the `memory` driver that subscription is
   a no-op, because nothing there can lose a connection.
 
-All four lanes skip their fan-out on the same condition — the in-process
+Lanes 1 to 4 skip their fan-out on the same condition — the in-process
 `memory` cluster driver, described for lane 1 immediately below, applies
-identically to lanes 2 to 4 (#14021).
+identically to lanes 2 to 4 (#14021). Lane 5 is narrower: it attaches only
+where the deployment declares several replicas (`OS_CLUSTER_REPLICAS` greater
+than 1, or `OS_EXPECT_MULTI_NODE=true`) over the `redis` driver
+(`declaresMultiReplicaOnRedis`, cloud#3814 R3), so a single node emits
+exactly the local `settings:changed` events it always did. It binds at
+`kernel:bootstrapped`, one phase after the others, because the settings
+service binds its engine at `kernel:ready` and a peer's change must not reach
+a subscriber before that. A received
+settings change is announced locally and never published again, so no
+replica echoes it.
 
 #### Lane 1 — `metadata.changed` (the metadata service cache)
 
@@ -685,9 +699,12 @@ const cluster = defineCluster({ driver: 'memory' })
 Under `os serve` the driver is selected from the environment instead:
 `OS_CLUSTER_DRIVER` (anything other than `memory` triggers a dynamic import of
 `@objectstack/service-cluster-<driver>`) and `OS_REDIS_URL` for the connection
-string. A distribution may register a multi-node gate; when it denies,
-`os serve` logs a warning and downgrades to the single-node in-memory cluster
-rather than failing.
+string. A distribution may register a multi-node gate; with no gate
+registered, a declared multi-node topology is denied. When the gate denies,
+`os serve` logs a warning and drops the remote driver for the in-memory one.
+That is a single-node downgrade only when no multi-node topology is declared:
+with one declared (`OS_CLUSTER_REPLICAS` > 1 or `OS_EXPECT_MULTI_NODE=true`),
+the split-brain guard below refuses the boot.
 
 A gate may instead admit **fewer** nodes than the deployment declares — a
 licensed node-cap overflow. That is a different verdict from a denial and is

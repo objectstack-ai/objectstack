@@ -14,7 +14,7 @@ import { assembleMetadataProtocol, isServedOverrideRowOf } from '@objectstack/me
 import { installedManifestsOf, isTenantAuthored, readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import type { MetadataAuthoringChannel } from '@objectstack/metadata-protocol';
 import { Plugin, PluginContext } from '@objectstack/core';
-import { resolveArtifactPackageEntries, artifactPackageId, readDeploymentOrgScopingEntitlement } from '@objectstack/core';
+import { resolveArtifactPackageEntries, artifactPackageId, declaredDependencyIds, readDeploymentOrgScopingEntitlement } from '@objectstack/core';
 // [ADR-0130 D4] The residual rule's decision half — which top-level items of a
 // multi-package stack no body declares, and the id they take. See
 // `unclaimedTopLevelObjects` below.
@@ -75,6 +75,7 @@ import { SecurityCatalogNameConflictError, findEnvironmentHeldSecurityCatalogNam
 // connector, an email template, an agent, a skill, a tool) — the cold boot's seal and its one switch
 // (`bare-name-one-holder.ts`, "The cold boot").
 import { sealBareNameHoldersAtColdBoot } from './registry.js';
+import { backfillActivationLedgerAtBoot } from './activation-ledger-backfill.js';
 import { BARE_NAME_COLD_BOOT_MODE } from './bare-name-one-holder.js';
 import { planPackageUpgrade, type UpgradeServedOverride } from './package-upgrade-environment.js';
 // [ADR-0029 D3] The registry's own refusal of a second owner — read, never
@@ -1026,6 +1027,13 @@ export class ObjectQLPlugin implements Plugin {
         // own; the door's word, `code` when it states none, is its origin.
         const residualOwnerId = residual?.ownerId ?? residualItems?.ownerId;
         if (residualOwnerId !== undefined) ql.recordResidualOwner(residualOwnerId, options?.source ?? 'code');
+        // [ADR-0130 D4, epic #31527 R2] …and what the residual's owner
+        // declares it depends on (the stack's own manifest): no package record
+        // carries it, so the one closure walk reads it here, and a residual
+        // reaches its declared dependencies through every reader of the walk.
+        if (residualOwnerId !== undefined) {
+          ql.registry.recordResidualOwnerDependencies(residualOwnerId, declaredDependencyIds((artifact as { manifest?: unknown })?.manifest ?? artifact));
+        }
         // [#24472] The boot reported every same-name pair it found
         // (`kernel:ready`, below); an artifact arriving later is judged once it
         // has registered, for the pairs naming one of its packages on either
@@ -1284,6 +1292,11 @@ export class ObjectQLPlugin implements Plugin {
         // hooks: there the doors never refuse.
         const registry = this.ql?.registry;
         if (registry) sealBareNameHoldersAtColdBoot(registry, BARE_NAME_COLD_BOOT_MODE, ctx.logger);
+        // [ADR-0150 D8 row R4] With the holders sealed, bind every activation
+        // ledger row that names no package to the one package that holds its
+        // item, and report the rows two packages hold (never guessed). Writes
+        // only `package_id`, so every later boot finds nothing new; never fatal.
+        await backfillActivationLedgerAtBoot(this.ql, registry, ctx.logger);
         // [ADR-0139 D5.2 / D5.3] A `controlled_by_parent` detail over a master
         // the engine composes no read over fails the boot, naming both and the
         // remedy. Judged HERE, not at `kernel:ready`: the object-scoped read

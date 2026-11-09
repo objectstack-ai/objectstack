@@ -41,7 +41,7 @@
  */
 
 import type { FormField } from '@object-ui/types';
-import { evalFieldPredicate, isBlankPredicateText, type FieldRulePredicate } from '@object-ui/core';
+import { evalFieldPredicate, isBlankPredicateText, isExpressionComputedField, type FieldRulePredicate } from '@object-ui/core';
 import { mapFieldTypeToFormType, buildValidationRules, fieldHelpText } from '@object-ui/fields';
 import { withHomeAmountSource } from '@object-ui/i18n';
 import { isCreateFormMode, isRequiredInForm } from './schemaDefaults';
@@ -354,6 +354,11 @@ export function fromObjectSchema(fieldName: string, ctx: SectionFieldsContext): 
     visibleWhen: field.visibleWhen,
     readonlyWhen: field.readonlyWhen,
     requiredWhen: field.requiredWhen,
+    // A stored field carrying an `expression` is computed by the engine on
+    // every write, so a typed value never stands (objectstack#31759): it draws
+    // its type's read face, and the edit submit omits it. The same stamp as
+    // `ObjectForm`'s generated fields.
+    ...(isExpressionComputedField(field) ? { readonly: true } : {}),
   } as FormField;
 }
 

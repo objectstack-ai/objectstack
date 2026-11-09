@@ -61,7 +61,7 @@ import { expandEmptyOperator, type EmptyOperatorExpansion, type ValueShapeFieldD
 import type { StrategyContext } from '@objectstack/spec/contracts';
 import type { DatasetScopedStrategyContext } from './strategies/types.js';
 import { invalidFilterError } from './strategies/filter-normalizer.js';
-import { sqlDialectFor, type AnalyticsSqlDialect } from './text-match-sql.js';
+import { noJsonFunctionReason, sqlDialectFor, type AnalyticsSqlDialect } from './text-match-sql.js';
 
 /**
  * The per-object question "what is this field's declared value shape?", read
@@ -124,7 +124,8 @@ export interface EmptyOperatorSqlRequest {
 
 /**
  * The `$empty` predicate for one field, or `null` when the dialect has no
- * construct for the field's row (the multi-value row on `'unknown'`). A `null`
+ * construct for the field's row (the multi-value row on `'unknown'` and
+ * `'mssql'`). A `null`
  * answer binds nothing, so the caller's parameter list stays aligned with the
  * placeholders it has emitted, and the caller REFUSES — it never reads `null`
  * as "no constraint".
@@ -162,7 +163,8 @@ export function emptyOperatorPredicateSql(req: EmptyOperatorSqlRequest): string 
  *
  * Refused in the `where` door's envelope (`INVALID_FILTER` / 400, message
  * kept — the caller wrote the filter) when the host cannot name the field's
- * declaration, or when a list-valued field meets the `'unknown'` dialect.
+ * declaration, or when a list-valued field meets a dialect with no JSON
+ * construct here (`'unknown'`, `'mssql'`).
  * Both refusals come before anything binds.
  */
 export function whereEmptyLeafSql(req: {
@@ -186,8 +188,9 @@ export function whereEmptyLeafSql(req: {
         `applied.`,
     );
   }
+  const dialect = sqlDialectFor(ctx, target.object);
   const sql = emptyOperatorPredicateSql({
-    dialect: sqlDialectFor(ctx, target.object),
+    dialect,
     column: req.column,
     expansion: expandEmptyOperator(shape),
     empty: req.empty,
@@ -196,8 +199,9 @@ export function whereEmptyLeafSql(req: {
   if (sql === null) {
     throw invalidFilterError(
       `[analytics] Operator "$empty" on field "${target.field}" of "${target.object}" targets a multi-value ` +
-        `field, whose empty list is tested with a JSON function that differs per SQL dialect, and the ` +
-        `dialect of this datasource is not known to the analytics host. It is refused rather than ` +
+        `field, whose empty list is tested with a JSON function that differs per SQL dialect, and ` +
+        `${noJsonFunctionReason(dialect, 'the dialect of this datasource is not known to the analytics host')}. ` +
+        `It is refused rather than ` +
         `guessed; "$null" answers "has no value" on every dialect. The filter was NOT applied.`,
     );
   }
