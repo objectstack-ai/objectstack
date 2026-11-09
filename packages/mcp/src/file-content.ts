@@ -199,8 +199,8 @@ function startCpuBudget(budgetMs: number): CpuBudget {
 /** The note an answer cut by the CPU budget carries. */
 function cpuBudgetNote(budgetMs: number, read: string): string {
   return (
-    `Reading stopped at the CPU-time budget for one file (${budgetMs} ms) after ${read}; `
-    + 'the text above is what was read. Download the file with the link for the rest.'
+    `Reading stopped at the CPU-time budget for one file (${budgetMs} ms) after ${read}, so the text is partial. `
+    + 'Download the file with the link for the rest.'
   );
 }
 

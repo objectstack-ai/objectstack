@@ -15,19 +15,56 @@
  * a crash; a refusal the bridge throws comes back as the coded tool error.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { crc32, deflateRawSync } from 'node:zlib';
 import { MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_DATA_WRITE } from '@objectstack/spec/ai';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
 import {
+  READ_FILE_CPU_BUDGET_MS_DEFAULT,
+  READ_FILE_CPU_BUDGET_MS_ENV,
   READ_FILE_DOCX_XML_MAX_BYTES,
   READ_FILE_IMAGE_MAX_BYTES,
   READ_FILE_MAX_BYTES,
+  READ_FILE_MAX_CONCURRENT_DEFAULT,
+  READ_FILE_MAX_CONCURRENT_ENV,
+  ReadFileExtractionBusyError,
+  configureReadFileExtraction,
+  extractFileContent,
+  resolveReadFileExtractionLimits,
   type McpFileBridge,
   type McpReadFile,
 } from './file-content.js';
 import { renderSkillMarkdown } from './skill-md.js';
+
+/**
+ * `unpdf` as it is, except that a test may hold every document open until it
+ * lets go ({@link holdPdfOpens}): how the concurrency pins keep extractions in
+ * flight without racing them. Unheld, every call passes straight through.
+ */
+const pdfGate = vi.hoisted(() => ({ held: undefined as Promise<void> | undefined }));
+vi.mock('unpdf', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('unpdf')>();
+  return {
+    ...actual,
+    getDocumentProxy: async (...args: Parameters<typeof actual.getDocumentProxy>) => {
+      if (pdfGate.held) await pdfGate.held;
+      return actual.getDocumentProxy(...args);
+    },
+  };
+});
+
+/** Hold every PDF open from now until the returned function is called. */
+function holdPdfOpens(): () => void {
+  let release!: () => void;
+  pdfGate.held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return () => {
+    pdfGate.held = undefined;
+    release();
+  };
+}
 
 const FILE_TOOLS = ['create_upload_link', 'read_file'];
 
@@ -144,6 +181,33 @@ function minimalPdf(text: string): Uint8Array {
   out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
   for (const o of offsets) out += `${String(o).padStart(10, '0')} 00000 n \n`;
   out += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return new Uint8Array(Buffer.from(out, 'latin1'));
+}
+
+/** A PDF with one page per entry of `texts`, each page drawing its text in Helvetica. */
+function multiPagePdf(texts: string[]): Uint8Array {
+  const objects: string[] = [];
+  objects[1] = '<< /Type /Catalog /Pages 2 0 R >>';
+  objects[3] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>';
+  const kids: string[] = [];
+  texts.forEach((text, i) => {
+    const pageId = 4 + i * 2;
+    const stream = `BT /F1 24 Tf 72 720 Td (${text}) Tj ET`;
+    kids.push(`${pageId} 0 R`);
+    objects[pageId] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${pageId + 1} 0 R /Resources << /Font << /F1 3 0 R >> >> >>`;
+    objects[pageId + 1] = `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`;
+  });
+  objects[2] = `<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${texts.length} >>`;
+  let out = '%PDF-1.4\n';
+  const offsets: number[] = [];
+  for (let i = 1; i < objects.length; i++) {
+    offsets[i] = out.length;
+    out += `${i} 0 obj\n${objects[i]}\nendobj\n`;
+  }
+  const xref = out.length;
+  out += `xref\n0 ${objects.length}\n0000000000 65535 f \n`;
+  for (let i = 1; i < objects.length; i++) out += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
+  out += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
   return new Uint8Array(Buffer.from(out, 'latin1'));
 }
 
@@ -416,5 +480,163 @@ describe('the skill teaches the file tools exactly where they register', () => {
   it('names neither for a host that does not', () => {
     const md = renderSkillMarkdown();
     for (const name of FILE_TOOLS) expect(md).not.toContain(name);
+  });
+});
+
+describe('read_file bounds PDF and Word extraction by the host\'s CPU budget and concurrency cap', () => {
+  let runtime: MCPServerRuntime;
+  const DEFAULTS = { cpuBudgetMs: READ_FILE_CPU_BUDGET_MS_DEFAULT, maxConcurrent: READ_FILE_MAX_CONCURRENT_DEFAULT };
+  beforeEach(() => {
+    runtime = new MCPServerRuntime({ name: 'file-tools', version: '0.0.0' });
+    configureReadFileExtraction(DEFAULTS);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    configureReadFileExtraction(DEFAULTS);
+  });
+
+  /**
+   * Process CPU time that advances `stepMs` on every read, so "the budget is
+   * spent" is decided by how many times the clock is read, never by how fast
+   * this machine is.
+   */
+  function steppingCpuClock(stepMs: number) {
+    let now = 0;
+    return vi.spyOn(process, 'cpuUsage').mockImplementation((previous?: NodeJS.CpuUsage) => {
+      now += stepMs * 1000;
+      return previous ? { user: now - previous.user - previous.system, system: 0 } : { user: now, system: 0 };
+    });
+  }
+
+  const PAGES = ['Page one opens', 'Page two follows', 'Page three closes'];
+
+  it('the two host variables: unset reads the defaults, a positive integer is taken, anything else fails naming the variable', () => {
+    expect(resolveReadFileExtractionLimits({})).toEqual(DEFAULTS);
+    expect(
+      resolveReadFileExtractionLimits({ [READ_FILE_CPU_BUDGET_MS_ENV]: ' 750 ', [READ_FILE_MAX_CONCURRENT_ENV]: '2' }),
+    ).toEqual({ cpuBudgetMs: 750, maxConcurrent: 2 });
+    for (const bad of ['0', '-5', '1.5', 'abc', '2s']) {
+      expect(() => resolveReadFileExtractionLimits({ [READ_FILE_CPU_BUDGET_MS_ENV]: bad })).toThrow(
+        `${READ_FILE_CPU_BUDGET_MS_ENV} must be a positive integer`,
+      );
+      expect(() => resolveReadFileExtractionLimits({ [READ_FILE_MAX_CONCURRENT_ENV]: bad })).toThrow(
+        `${READ_FILE_MAX_CONCURRENT_ENV} must be a positive integer`,
+      );
+    }
+  });
+
+  it('CONTROL: under the defaults a small PDF and a small Word document read in full, as before', async () => {
+    const bridge = fullBridge();
+    const pdf = multiPagePdf(PAGES);
+    bridge.next = { name: 'three.pdf', mimeType: 'application/pdf', size: pdf.length, bytes: pdf };
+    const fromPdf = await callTool(runtime, bridge, 'read_file', { objectName: 'claim', recordId: 'c1', field: 'policy' });
+    expect(fromPdf.isError).toBeUndefined();
+    expect(factsOf(fromPdf).truncated).toBeUndefined();
+    expect(factsOf(fromPdf).note).toBeUndefined();
+    expect(textOf(fromPdf.content[1])).toBe(PAGES.join('\n\n'));
+
+    const docx = zip({ 'word/document.xml': docxBody(['Claim summary', 'Water &amp; mould']) });
+    bridge.next = { name: 'summary.docx', mimeType: DOCX, size: docx.length, bytes: docx };
+    const fromDocx = await callTool(runtime, bridge, 'read_file', { objectName: 'claim', recordId: 'c1', field: 'policy' });
+    expect(factsOf(fromDocx).truncated).toBeUndefined();
+    expect(textOf(fromDocx.content[1])).toBe('Claim summary\nWater & mould');
+  });
+
+  it('a PDF out of CPU budget answers the pages read so far, truncated, with a note naming the budget and the link', async () => {
+    configureReadFileExtraction({ cpuBudgetMs: 1, maxConcurrent: 4 });
+    steppingCpuClock(1);
+    const bridge = fullBridge();
+    const pdf = multiPagePdf(PAGES);
+    bridge.next = { name: 'three.pdf', mimeType: 'application/pdf', size: pdf.length, bytes: pdf };
+    const result = await callTool(runtime, bridge, 'read_file', { objectName: 'claim', recordId: 'c1', field: 'policy' });
+    expect(result.isError).toBeUndefined();
+    expect(factsOf(result)).toMatchObject({ content: 'text', format: 'application/pdf', truncated: true });
+    expect(factsOf(result).note).toBe(
+      'Reading stopped at the CPU-time budget for one file (1 ms) after page 1 of 3, so the text is partial. '
+        + 'Download the file with the link for the rest.',
+    );
+    expect(factsOf(result).download).toBeTruthy();
+    expect(textOf(result.content[1])).toBe('Page one opens');
+  });
+
+  it('a Word document out of CPU budget answers the paragraphs read so far, stopping between paragraphs', async () => {
+    configureReadFileExtraction({ cpuBudgetMs: 1, maxConcurrent: 4 });
+    steppingCpuClock(1);
+    const bridge = fullBridge();
+    const paragraphs = Array.from({ length: 200 }, (_, i) => `P${i + 1}`);
+    const docx = zip({ 'word/document.xml': docxBody(paragraphs) });
+    bridge.next = { name: 'long.docx', mimeType: DOCX, size: docx.length, bytes: docx };
+    const result = await callTool(runtime, bridge, 'read_file', { objectName: 'claim', recordId: 'c1', field: 'policy' });
+    expect(factsOf(result)).toMatchObject({ content: 'text', format: DOCX, truncated: true });
+    expect(factsOf(result).note).toContain('CPU-time budget for one file (1 ms) after 64 paragraphs');
+    expect(textOf(result.content[1])).toBe(paragraphs.slice(0, 64).join('\n'));
+  });
+
+  it('one extraction over the process-wide cap is refused at once with a retryable SERVICE_UNAVAILABLE, never queued', async () => {
+    configureReadFileExtraction({ cpuBudgetMs: 3000, maxConcurrent: 2 });
+    const pdf = minimalPdf('Held open');
+    const release = holdPdfOpens();
+    const held = [
+      extractFileContent(pdf, 'application/pdf', 'a.pdf'),
+      extractFileContent(pdf, 'application/pdf', 'b.pdf'),
+    ];
+    try {
+      const bridge = fullBridge();
+      bridge.next = { name: 'policy.pdf', mimeType: 'application/pdf', size: pdf.length, bytes: pdf };
+      const refused = await callTool(runtime, bridge, 'read_file', { objectName: 'claim', recordId: 'c1', field: 'policy' });
+      expect(refused.isError).toBe(true);
+      expect(JSON.parse(textOf(refused.content[0])).error).toEqual({
+        code: 'SERVICE_UNAVAILABLE',
+        status: 503,
+        message: 'The server is already reading 2 files, the most it reads at once, so this file was not read. Try again in about 3 seconds.',
+        details: { retryAfterSeconds: 3 },
+      });
+      // A text file is no document extraction: the cap does not touch it.
+      bridge.next = { name: 'note.txt', mimeType: 'text/plain', size: 2, bytes: new Uint8Array(Buffer.from('ok')) };
+      const text = await callTool(runtime, bridge, 'read_file', { objectName: 'claim', recordId: 'c1', field: 'policy' });
+      expect(text.isError).toBeUndefined();
+    } finally {
+      release();
+    }
+    for (const done of await Promise.all(held)) expect(done).toMatchObject({ kind: 'text', text: 'Held open' });
+    // The held two finished, so their slots are free again.
+    await expect(extractFileContent(pdf, 'application/pdf', 'c.pdf')).resolves.toMatchObject({ kind: 'text' });
+  });
+
+  it('the cap counts every extraction in flight: N run, the N+1th is refused', async () => {
+    configureReadFileExtraction({ cpuBudgetMs: 1000, maxConcurrent: 3 });
+    const pdf = minimalPdf('Counted');
+    const docx = zip({ 'word/document.xml': docxBody(['Counted']) });
+    const release = holdPdfOpens();
+    const attempts = [1, 2, 3, 4].map((n) => extractFileContent(pdf, 'application/pdf', `${n}.pdf`).then(
+      (content) => ({ content }),
+      (error: unknown) => ({ error }),
+    ));
+    release();
+    const settled = await Promise.all(attempts);
+    expect(settled.slice(0, 3).every((s) => 'content' in s)).toBe(true);
+    expect(settled[3]).toEqual({ error: expect.any(ReadFileExtractionBusyError) });
+    // Word extraction holds a slot too, and is refused the same way when none is free.
+    configureReadFileExtraction({ cpuBudgetMs: 1000, maxConcurrent: 1 });
+    const holdOne = holdPdfOpens();
+    const pdfInFlight = extractFileContent(pdf, 'application/pdf', 'held.pdf');
+    await expect(extractFileContent(docx, DOCX, 'w.docx')).rejects.toBeInstanceOf(ReadFileExtractionBusyError);
+    holdOne();
+    await pdfInFlight;
+  });
+
+  it('an extraction that throws releases its slot', async () => {
+    configureReadFileExtraction({ cpuBudgetMs: 1000, maxConcurrent: 1 });
+    vi.spyOn(process, 'cpuUsage').mockImplementationOnce(() => {
+      throw new Error('clock unavailable');
+    });
+    const bridge = fullBridge();
+    const pdf = minimalPdf('After the throw');
+    bridge.next = { name: 'policy.pdf', mimeType: 'application/pdf', size: pdf.length, bytes: pdf };
+    const thrown = await callTool(runtime, bridge, 'read_file', { objectName: 'claim', recordId: 'c1', field: 'policy' });
+    expect(factsOf(thrown)).toMatchObject({ content: 'none', note: 'The file\'s content could not be read. Download it with the link instead.' });
+    const next = await callTool(runtime, bridge, 'read_file', { objectName: 'claim', recordId: 'c1', field: 'policy' });
+    expect(next.isError).toBeUndefined();
+    expect(textOf(next.content[1])).toBe('After the throw');
   });
 });
