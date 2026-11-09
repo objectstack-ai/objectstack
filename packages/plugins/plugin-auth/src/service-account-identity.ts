@@ -179,61 +179,68 @@ export async function refuseAgentAccountCredential(engine: any, account: unknown
   if (agent) await forbidden(AGENT_ACCOUNT_CREDENTIAL_REFUSAL);
 }
 
-function refuse(field: string, code: string, message: string): Error {
-  return validationFailure(message, [{ field, code, message }]);
+/** A `400 VALIDATION_FAILED` carrying one ADR-0114 field error. */
+function refuse(entry: { field: string; code: string; message: string }): Error {
+  return validationFailure(entry.message, [entry]);
 }
 
 /** Rule 3: the named owner exists and is a person, and is not the account itself. */
 async function assertOwnerIsAPerson(engine: any, ownerId: string, selfId: string | undefined): Promise<void> {
   if (selfId && ownerId === selfId) {
-    throw refuse(
-      'accountable_user_id',
-      'invalid_value',
-      'An AI service account cannot be its own accountable owner. Name the person accountable for it.',
-    );
+    throw refuse({
+      field: 'accountable_user_id',
+      code: 'invalid_value',
+      message:
+        'An AI service account cannot be its own accountable owner. Name the person accountable for it.',
+    });
   }
   const owner = await readUserRow(engine, ownerId);
   if (!owner) {
-    throw refuse(
-      'accountable_user_id',
-      'reference_not_found',
-      `The accountable owner '${ownerId}' of this AI service account does not exist. Name an existing person.`,
-    );
+    throw refuse({
+      field: 'accountable_user_id',
+      code: 'reference_not_found',
+      message:
+        `The accountable owner '${ownerId}' of this AI service account does not exist. Name an existing person.`,
+    });
   }
   if (isAgentAccountRow(owner)) {
-    throw refuse(
-      'accountable_user_id',
-      'invalid_value',
-      `The accountable owner '${ownerId}' is itself an AI service account. A person is accountable for an AI `
-        + 'service account; name one.',
-    );
+    throw refuse({
+      field: 'accountable_user_id',
+      code: 'invalid_value',
+      message:
+        `The accountable owner '${ownerId}' is itself an AI service account. A person is accountable for an AI `
+          + 'service account; name one.',
+    });
   }
 }
 
 const ownerRequired = (): Error =>
-  refuse(
-    'accountable_user_id',
-    'required',
-    'An AI service account needs an accountable owner: the person accountable for it. Name one.',
-  );
+  refuse({
+    field: 'accountable_user_id',
+    code: 'required',
+    message:
+      'An AI service account needs an accountable owner: the person accountable for it. Name one.',
+  });
 
 const ownerOnAPerson = (): Error =>
-  refuse(
-    'accountable_user_id',
-    'invalid_value',
-    'Only an AI service account has an accountable owner. A person\'s user record carries none.',
-  );
+  refuse({
+    field: 'accountable_user_id',
+    code: 'invalid_value',
+    message:
+      'Only an AI service account has an accountable owner. A person\'s user record carries none.',
+  });
 
 /** [D1 rules 1 and 3] An insert. */
 async function judgeInsert(engine: any, data: Record<string, unknown>): Promise<void> {
   const written = data.principal_kind;
   if (!isEmpty(written) && !ROW_PRINCIPAL_KINDS.includes(written as string)) {
-    throw refuse(
-      'principal_kind',
-      'invalid_value',
-      `A user is created as a person ('${HUMAN_PRINCIPAL_KIND}') or as an AI service account `
-        + `('${AGENT_PRINCIPAL_KIND}'), not '${String(written)}'.`,
-    );
+    throw refuse({
+      field: 'principal_kind',
+      code: 'invalid_value',
+      message:
+        `A user is created as a person ('${HUMAN_PRINCIPAL_KIND}') or as an AI service account `
+          + `('${AGENT_PRINCIPAL_KIND}'), not '${String(written)}'.`,
+    });
   }
   const owner = data.accountable_user_id;
   if (written === AGENT_PRINCIPAL_KIND) {
@@ -252,13 +259,14 @@ async function judgeUpdate(engine: any, data: Record<string, unknown>, previous:
     const written = data.principal_kind;
     const writtenKind = isEmpty(written) ? HUMAN_PRINCIPAL_KIND : written;
     if (writtenKind !== storedKind) {
-      throw refuse(
-        'principal_kind',
-        'invalid_value',
-        'A user\'s principal kind is set when the user is created and never changes: a person never becomes an '
-          + 'AI service account, and an AI service account never becomes a person. Register a new AI service '
-          + 'account instead.',
-      );
+      throw refuse({
+        field: 'principal_kind',
+        code: 'invalid_value',
+        message:
+          'A user\'s principal kind is set when the user is created and never changes: a person never becomes an '
+            + 'AI service account, and an AI service account never becomes a person. Register a new AI service '
+            + 'account instead.',
+      });
     }
   }
   if (!has(data, 'accountable_user_id')) return;
