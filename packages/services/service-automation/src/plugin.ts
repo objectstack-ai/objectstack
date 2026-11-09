@@ -1729,6 +1729,7 @@ export class AutomationServicePlugin implements Plugin {
             set: (request) => this.setConnectorCredential(ctx, request),
             clear: (request) => this.clearConnectorCredential(ctx, request),
             attachClusterPubSub: (pubsub, nodeId) => this.attachCredentialClusterPubSub(ctx, pubsub, nodeId),
+            resyncFromCluster: () => this.resyncCredentialClusterPubSub(ctx),
         });
 
         // [ADR-0015 D7] The connector credential source: a datasource that
@@ -4801,6 +4802,22 @@ export class AutomationServicePlugin implements Plugin {
         );
         this.credentialCluster = { pubsub, nodeId, unsubscribe };
         return () => this.detachCredentialClusterPubSub();
+    }
+
+    /**
+     * The `cluster.resync` answer for the credential lane: the reconcile a
+     * peer's signal runs, once, because which references changed during the
+     * outage is what the lost signals carried. A no-op until a transport is
+     * attached. A failure is the caller's to log (the bridge does).
+     */
+    private async resyncCredentialClusterPubSub(ctx: PluginContext): Promise<void> {
+        const cluster = this.credentialCluster;
+        if (!cluster) return;
+        ctx.logger.info(
+            `[Automation] the cluster connection returned after an outage; reconciling the connectors on node '${cluster.nodeId}' `
+                + 'in case a peer wrote a connector credential meanwhile.',
+        );
+        await this.materializeDeclaredConnectors(ctx, { fatal: false });
     }
 
     /** [#27428] Tear down the credential cluster wiring. Safe to call multiple times. */
