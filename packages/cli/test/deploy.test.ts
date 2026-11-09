@@ -25,7 +25,8 @@ import { EventEmitter } from 'node:events';
 
 const compileForDeploy = vi.fn<(artifactPath: string, options?: { stdoutToStderr?: boolean }) => number>();
 vi.mock('../src/utils/deploy-build.js', () => ({
-  compileForDeploy: (p: string, options?: { stdoutToStderr?: boolean }) => compileForDeploy(p, options),
+  // Forwarded only when given, so a call without them still reads as the one-argument call it is.
+  compileForDeploy: (p: string, options?: { stdoutToStderr?: boolean }) => (options === undefined ? compileForDeploy(p) : compileForDeploy(p, options)),
 }));
 // The terminal question (#30887): no terminal by default, as under CI.
 const canAskOnTerminal = vi.fn<() => boolean>(() => false);

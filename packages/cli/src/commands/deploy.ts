@@ -428,7 +428,7 @@ export default class Deploy extends Command {
 
     printStep('Building...');
     const artifactPath = resolvePath(process.cwd(), DEPLOY_ARTIFACT);
-    if (compileForDeploy(artifactPath, { stdoutToStderr: mode.json }) !== 0) {
+    if (compileForDeploy(artifactPath, ...(mode.json ? [{ stdoutToStderr: true }] : [])) !== 0) {
       const message = 'The build failed — fix the errors above, then run `os deploy` again. Nothing was installed.';
       printError(message);
       await finish(1, { result: 'failed', error: message });
