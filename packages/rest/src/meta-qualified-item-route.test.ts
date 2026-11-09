@@ -61,7 +61,7 @@ async function drive(path: string, params: Record<string, string>, query: Record
     const route = routes().find((r) => r.method === 'GET' && r.path === path);
     if (!route) throw new Error(`route not registered: GET ${path}`);
     const res = mockRes();
-    await route.handler({ params, query, headers: {}, body: {}, path: '/api/v1/meta/x' }, res);
+    await route.handler({ method: 'GET', params, query, headers: {}, body: {}, path: '/api/v1/meta/x' }, res);
     const body = res.json.mock.calls.at(-1)?.[0];
     return { status: res.statusCode as number, body };
 }
@@ -198,5 +198,31 @@ describe('a shareable namespace two packages share (ADR-0150 D2)', () => {
         const answer = await drive(QUALIFIED, { type: 'page', ns: 'sys', name: 'home' });
         expect(answer.status, JSON.stringify(answer.body)).toBe(200);
         expect(labelOf(answer)).toBe('sys_two page');
+    });
+
+    // [#21087] The guarded registrar's type-level read admission runs before
+    // this route's handler: a caller refused the type learns neither that the
+    // name exists nor who holds it. The runtime dispatcher answers the same.
+    const asCaller = (systemPermissions: string[]) => {
+        (rest as any).resolveExecCtx = async () => ({ userId: 'u_member', systemPermissions });
+    };
+
+    it('a caller refused the type: 403 PERMISSION_DENIED, never the 409 naming the holders', async () => {
+        installSys();
+        ship('datasource', 'warehouse', SYS_ONE);
+        ship('datasource', 'warehouse', SYS_TWO);
+        asCaller([]);
+        const answer = await drive(QUALIFIED, { type: 'datasource', ns: 'sys', name: 'warehouse' });
+        expect([answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([403, 'PERMISSION_DENIED']);
+        expect(JSON.stringify(answer.body)).not.toContain(SYS_ONE);
+    });
+
+    it('CONTROL — a caller the type admits: the 409 naming both', async () => {
+        installSys();
+        ship('datasource', 'warehouse', SYS_ONE);
+        ship('datasource', 'warehouse', SYS_TWO);
+        asCaller(['manage_platform_settings', 'manage_metadata']);
+        const answer = await drive(QUALIFIED, { type: 'datasource', ns: 'sys', name: 'warehouse' });
+        expect([answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
     });
 });

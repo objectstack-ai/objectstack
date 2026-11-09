@@ -214,4 +214,29 @@ describe('a shareable namespace two packages share (ADR-0150 D2)', () => {
         expect(answer.status, JSON.stringify(answer.body)).toBe(200);
         expect(labelOf(answer)).toBe('sys_two page');
     });
+
+    // [#21087] The type-level read admission judges the qualified path before
+    // its address is read, as `RestServer`'s guarded registrar does: a caller
+    // refused the type learns neither that the name exists nor who holds it.
+    const asCaller = (systemPermissions: string[]): any =>
+        ({ ...ctx(), executionContext: { userId: 'u_member', systemPermissions } });
+
+    it('a caller refused the type: 403 PERMISSION_DENIED, never the 409 naming the holders', async () => {
+        installSys();
+        ship('datasource', 'warehouse', SYS_ONE);
+        ship('datasource', 'warehouse', SYS_TWO);
+        const answer = await read('/datasource/sys/warehouse', undefined, asCaller([]));
+        expect([answer.status, answer.body?.error?.code], JSON.stringify(answer.body)).toEqual([403, 'PERMISSION_DENIED']);
+        expect(JSON.stringify(answer.body)).not.toContain(SYS_ONE);
+        const twoQualifiers = await read('/datasource/sys/warehouse', { package: SYS_ONE }, asCaller([]));
+        expect([twoQualifiers.status, twoQualifiers.body?.error?.code]).toEqual([403, 'PERMISSION_DENIED']);
+    });
+
+    it('CONTROL — a caller the type admits: the 409 naming both', async () => {
+        installSys();
+        ship('datasource', 'warehouse', SYS_ONE);
+        ship('datasource', 'warehouse', SYS_TWO);
+        const answer = await read('/datasource/sys/warehouse', undefined, asCaller(['manage_platform_settings', 'manage_metadata']));
+        expect([answer.status, answer.body?.error?.code], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+    });
 });

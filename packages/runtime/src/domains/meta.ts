@@ -1059,12 +1059,21 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     // names no qualified shape, so the qualified read is denied there before
     // its handler runs. Here the path stays three segments and the deny below
     // judges it the same way, before the address is read.
+    //
+    // Nor is a caller the type-level read admission refuses (#21087, below):
+    // `RestServer` asks it before any `/meta` handler runs, the qualified one
+    // included, so reading the address first would tell that caller what the
+    // admission withholds — that the name exists, and who holds it (a two-holder
+    // shareable namespace's 409) — or answer the two-qualifier 400 the other
+    // transport never reaches. The path stays three segments, and the
+    // admission answers it as `RestServer` does.
     const anonymous = shouldDenyAnonymous({
         userId: (_context.executionContext as any)?.userId,
         isSystem: (_context.executionContext as any)?.isSystem,
     });
     let environmentQualified = false;
     if (!anonymous && (!method || method.toUpperCase() === 'GET') && parts.length === 3
+        && !metaTypeReadRefusal('GET', parts[0], _context.executionContext)
         && parts[0] !== 'types' && !parts[0].startsWith('_')
         && !META_ITEM_SUBRESOURCE_SEGMENTS.includes(parts[2])) {
         const qualifierProtocol = await resolveProtocol(deps, _context);
