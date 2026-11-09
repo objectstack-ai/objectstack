@@ -38,7 +38,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PluginContext } from '@objectstack/core';
 import { SCHEDULED_WORK_ENV } from '@objectstack/types';
+import { runImport, type ExportFieldMeta, type ImportProtocolLike, type ImportRunSummary } from '@objectstack/core';
+import { ObjectQL } from '@objectstack/objectql';
+import { SqlDriver } from '@objectstack/driver-sql';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject, SysMetadataObject } from '@objectstack/metadata-core';
 import { collectJobsWithoutBody, scheduleAppArtifactJobs } from './app-artifact-handlers.js';
+// The source under test reaches `@objectstack/metadata` by dynamic import
+// (`app-plugin.ts`); paid here, at collection, not inside a case's clock.
+import '@objectstack/metadata';
 import { withScheduledWorkOn } from './scheduled-work.test-support.js';
 
 withScheduledWorkOn();
@@ -79,9 +87,10 @@ const result = (summary: Partial<Record<'total' | 'processed' | 'created' | 'upd
     summary: { total: pulled, processed: pulled, created: pulled, updated: 0, skipped: 0, errors: 0, ok: pulled, cancelled: false, ...summary },
 });
 
-function harness(opts: { automation?: unknown } = {}) {
+function harness(opts: { automation?: unknown; engine?: Record<string, unknown> } = {}) {
     const writes: Array<{ object: string; data: unknown; context: unknown }> = [];
     const ql = {
+        ...opts.engine,
         createContext: (context: unknown) => ({
             object: (object: string) => ({
                 insert: async (data: Record<string, unknown>) => {
@@ -414,5 +423,227 @@ describe('#20281 stage ③: an unreadable tenancy posture fails closed — and i
             if (prior === undefined) delete process.env[SCHEDULED_WORK_ENV];
             else process.env[SCHEDULED_WORK_ENV] = prior;
         }
+    });
+});
+
+/**
+ * A job that declares no `organization` pulls as the organization its writes
+ * are stamped with: the engine's own system-write decision
+ * (`ObjectQL#systemWriteOrganization`, ADR-0131 D9), asked once per run before
+ * the pull reads or writes. Only `derived` changes the context; every other
+ * decision, an engine that does not answer, and a probe that throws keep
+ * `{ isSystem: true }`. The `body` and `handler` forms are unchanged.
+ */
+describe('a pull of a job with no organization runs as the organization its writes are stamped with', () => {
+    withPosture('single');
+
+    const decide = (decision: unknown) => vi.fn(async () => decision);
+
+    it('derived: the pull context carries it, asked once per run', async () => {
+        const systemWriteOrganization = decide({ kind: 'derived', organizationId: 'org_one' });
+        const h = harness({ engine: { systemWriteOrganization } });
+        await h.schedule([PULL_JOB]);
+        expect(systemWriteOrganization).not.toHaveBeenCalled();
+
+        await h.run('orders_pull_hourly');
+        await h.run('orders_pull_hourly');
+        expect(h.pulls).toEqual([
+            { mapping: 'orders_pull', context: { isSystem: true, tenantId: 'org_one' } },
+            { mapping: 'orders_pull', context: { isSystem: true, tenantId: 'org_one' } },
+        ]);
+        expect(systemWriteOrganization).toHaveBeenCalledTimes(2);
+    });
+
+    it('CONTROL: a job that declares an organization runs as it, and the engine is not asked', async () => {
+        const systemWriteOrganization = decide({ kind: 'derived', organizationId: 'org_one' });
+        const h = harness({ engine: { systemWriteOrganization } });
+        await h.schedule([{ ...PULL_JOB, organization: 'org_a' }]);
+
+        await h.run('orders_pull_hourly');
+        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true, tenantId: 'org_a' } }]);
+        expect(systemWriteOrganization).not.toHaveBeenCalled();
+    });
+
+    for (const [label, decision] of [
+        ['refuse (several organizations)', { kind: 'refuse', reason: 'ambiguous-organization', organizationCount: 2 }],
+        ['refuse (no organization)', { kind: 'refuse', reason: 'no-organization', organizationCount: 0 }],
+        ['refuse (a walled posture)', { kind: 'refuse', reason: 'walled-posture' }],
+        ['no-organization-object', { kind: 'no-organization-object' }],
+    ] as const) {
+        it(`CONTROL: ${label} keeps today's context, and nothing is said`, async () => {
+            const h = harness({ engine: { systemWriteOrganization: decide(decision) } });
+            await h.schedule([PULL_JOB]);
+
+            expect(await h.run('orders_pull_hourly')).toEqual({ outcome: 'completed' });
+            expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true } }]);
+            expect(h.said('warn')).toEqual([]);
+        });
+    }
+
+    it('CONTROL: an engine that does not answer the question keeps today\'s context', async () => {
+        const h = harness();
+        await h.schedule([PULL_JOB]);
+
+        await h.run('orders_pull_hourly');
+        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true } }]);
+    });
+
+    it('a probe that throws is said once at warn, naming the job, and the run goes on with today\'s context', async () => {
+        const systemWriteOrganization = vi.fn(async () => { throw new Error('connection reset'); });
+        const h = harness({ engine: { systemWriteOrganization } });
+        await h.schedule([PULL_JOB]);
+
+        expect(await h.run('orders_pull_hourly')).toEqual({ outcome: 'completed' });
+        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true } }]);
+        const warns = h.logger.warn.mock.calls.filter((c) => String(c[0]).includes("'orders_pull_hourly'"));
+        expect(warns).toHaveLength(1);
+        expect(warns[0][1]).toMatchObject({ job: 'orders_pull_hourly', mapping: 'orders_pull', error: 'connection reset' });
+    });
+
+    it('CONTROL: a body job and a handler job with no organization keep { isSystem: true }, and the engine is not asked', async () => {
+        const systemWriteOrganization = decide({ kind: 'derived', organizationId: 'org_one' });
+        const h = harness({ engine: { systemWriteOrganization } });
+        const seen: unknown[] = [];
+        const body = { language: 'js', capabilities: ['api.write'], source: "await ctx.api.object('tick').insert({ name: 'tick' });" };
+        await h.schedule(
+            [{ name: 'plain_body', schedule: INTERVAL, body }, { name: 'plain_fn', schedule: INTERVAL, handler: 'sweep' }],
+            { functions: { sweep: async (jobCtx: { executionContext?: unknown }) => { seen.push(jobCtx.executionContext); } } },
+        );
+
+        await h.run('plain_body');
+        await h.run('plain_fn');
+        expect(h.writes.map((w) => w.context)).toEqual([{ isSystem: true }]);
+        expect(seen).toEqual([{ isSystem: true }]);
+        expect(systemWriteOrganization).not.toHaveBeenCalled();
+    });
+});
+
+/**
+ * The same, against the REAL engine: `ObjectQL` over a `SqlDriver`
+ * (better-sqlite3 `:memory:`), the real protocol and the real `runImport`. The
+ * `automation` service here runs the import step a connector pull runs
+ * (`connector-pull.ts`: `runImport` over the protocol, under the pull's
+ * `context`), with the pulled records in hand, so the pin reads the query the
+ * match lookup actually sends. Before this, a no-organization job's lookup was
+ * `where external_id = ?` (a scan per row under `single`, where the engine adds
+ * no tenant scope to a read, ADR-0131 D11), while its writes were stamped with
+ * the one organization anyway.
+ */
+describe('a no-organization job pull on a real engine: the match lookup carries the organization its writes carry', () => {
+    withPosture('single');
+
+    const ITEM = {
+        name: 'po_item_31823', label: 'Item',
+        fields: {
+            external_id: { name: 'external_id', type: 'text' as const, label: 'External id', unique: true },
+            title: { name: 'title', type: 'text' as const, label: 'Title' },
+        },
+    };
+    const ORG_OBJECT = { name: 'sys_organization', label: 'Organization', fields: { name: { name: 'name', type: 'text' as const, label: 'Name' } } };
+    const metaMap = new Map<string, ExportFieldMeta>([
+        ['external_id', { name: 'external_id', type: 'text' }],
+        ['title', { name: 'title', type: 'text' }],
+    ]);
+    const live: ObjectQL[] = [];
+    afterEach(async () => {
+        while (live.length) {
+            try { await live.pop()?.destroy(); } catch { /* noop */ }
+        }
+    });
+
+    interface Statement { sql: string; bindings: unknown[] }
+
+    async function boot(organizations: string[]) {
+        const engine = new ObjectQL();
+        live.push(engine);
+        engine.setTenancyPostureProvider(() => 'single');
+        const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
+        engine.registerDriver(driver, true);
+        await engine.init();
+        for (const o of [ITEM, ORG_OBJECT, SysMetadataObject, SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) {
+            if (!engine.registry.getObject(o.name)) engine.registry.registerObject(o as any);
+        }
+        await engine.syncSchemas();
+        // The install's organizations, planted through the driver (each its own
+        // owner, as the Default Organization row is): the engine only reads
+        // them, through its organization probe.
+        for (const id of organizations) await driver.create('sys_organization', { id, name: id, organization_id: id });
+        const knex = (driver as unknown as { knex: any }).knex;
+        const protocol = new ObjectStackProtocolImplementation(engine as any) as unknown as ImportProtocolLike;
+
+        const lookups: Statement[] = [];
+        knex.on('query', (q: Statement) => {
+            if (/^select \*/i.test(q.sql) && q.sql.includes(`\`${ITEM.name}\``) && q.sql.includes('`external_id` = ?')) {
+                lookups.push({ sql: q.sql, bindings: q.bindings });
+            }
+        });
+        const contexts: unknown[] = [];
+        const summaries: ImportRunSummary[] = [];
+        const automation = {
+            pullConnectorSource: vi.fn(async ({ context }: { mapping: string; context: Record<string, unknown> }) => {
+                contexts.push(context);
+                const summary = await runImport({
+                    p: protocol, objectName: ITEM.name, context, metaMap,
+                    rows: [{ external_id: 'E1', title: 'pulled' }, { external_id: 'E2', title: 'pulled' }],
+                    writeMode: 'upsert', matchFields: ['external_id'], dryRun: false, runAutomations: true,
+                    treatAsHistorical: false, trimWhitespace: true, createMissingOptions: false, skipBlankMatchKey: true,
+                });
+                summaries.push(summary);
+                return { ...result(), summary };
+            }),
+        };
+        const h = harness({ automation });
+        const schedule = (jobs: unknown[]) => scheduleAppArtifactJobs(
+            { logger: h.logger, getService: (n: string) => h.services[n] ?? (() => { throw new Error(`no ${n}`); })() } as unknown as PluginContext,
+            { id: APP_ID, version: '0.1.0', type: 'app', jobs, mappings: [MAPPING] },
+            { appId: APP_ID, ql: engine as any, source: 'Test' },
+        );
+        const stored = async () => (await knex(ITEM.name).select('external_id', 'organization_id').orderBy('external_id')) as Array<Record<string, unknown>>;
+        return { h, schedule, lookups, contexts, summaries, stored, engine };
+    }
+
+    it('one organization: the pull runs as it, its lookup carries it on the tenant column, and its writes are stamped with it', async () => {
+        const b = await boot(['org_one']);
+        await b.schedule([PULL_JOB]);
+
+        await b.h.run('orders_pull_hourly');
+        expect(b.contexts).toEqual([{ isSystem: true, tenantId: 'org_one' }]);
+        expect(b.lookups).toHaveLength(2);
+        for (const [i, key] of (['E1', 'E2'] as const).entries()) {
+            expect(b.lookups[i].sql).toMatch(/where `organization_id` = \? and `external_id` = \?/);
+            expect(b.lookups[i].bindings.slice(0, 2)).toEqual(['org_one', key]);
+        }
+        expect(b.summaries[0]).toMatchObject({ errors: 0, created: 2 });
+        expect(await b.stored()).toEqual([
+            { external_id: 'E1', organization_id: 'org_one' },
+            { external_id: 'E2', organization_id: 'org_one' },
+        ]);
+
+        // A second run matches the rows the first created: the same organization.
+        await b.h.run('orders_pull_hourly');
+        expect(b.summaries[1]).toMatchObject({ errors: 0, created: 0, updated: 2 });
+    });
+
+    it('CONTROL: a job that declares the organization reads and writes the same way, and the engine is not asked', async () => {
+        const b = await boot(['org_one']);
+        const asked = vi.spyOn(b.engine, 'systemWriteOrganization');
+        await b.schedule([{ ...PULL_JOB, organization: 'org_one' }]);
+
+        await b.h.run('orders_pull_hourly');
+        expect(b.contexts).toEqual([{ isSystem: true, tenantId: 'org_one' }]);
+        expect(b.lookups[0].bindings.slice(0, 2)).toEqual(['org_one', 'E1']);
+        expect(asked).not.toHaveBeenCalled();
+    });
+
+    it('CONTROL: two organizations: the pull runs with none, its lookup is the key alone, and its writes refuse as today', async () => {
+        const b = await boot(['org_one', 'org_two']);
+        await b.schedule([PULL_JOB]);
+
+        await b.h.run('orders_pull_hourly');
+        expect(b.contexts).toEqual([{ isSystem: true }]);
+        expect(b.lookups[0].sql).not.toContain('organization_id');
+        expect(b.summaries[0]).toMatchObject({ errors: 2, created: 0 });
+        expect(JSON.stringify(b.summaries[0].results)).toContain('ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED');
+        expect(await b.stored()).toEqual([]);
     });
 });

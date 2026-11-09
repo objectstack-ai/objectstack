@@ -21,8 +21,12 @@ export const frGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_assignment_rule.fields.criteria.label": "bfcca3fe6f93b90c",
   "objects.sys_assignment_rule.fields.description.label": "779a4342c8eb6707",
   "objects.sys_queue.fields.description.label": "779a4342c8eb6707",
+  "objects.sys_queue_member.fields.queue_package.help": "2057e8ad7a69bc3f",
+  "objects.sys_queue_member.fields.queue_package.label": "c9d3aa9107335996",
   "objects.sys_record_share.fields.source.label": "8fe786e8e29c8cec",
   "objects.sys_share_link.fields.audience.label": "6530e0148b77428f",
   "objects.sys_share_link.fields.audience.options.public": "2c35c3a6c016e6e1",
   "objects.sys_sharing_rule.fields.description.label": "779a4342c8eb6707",
+  "objects.sys_sharing_rule.fields.package_id.help": "81de9ff2f0ed555a",
+  "objects.sys_sharing_rule.fields.package_id.label": "aacf5e74a8641b2b",
 };

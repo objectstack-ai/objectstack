@@ -197,6 +197,15 @@ export interface McpToolCallContext {
   readonly arguments: Readonly<Record<string, unknown>>;
   /** Who the call runs as. */
   readonly principal: McpToolCallPrincipal;
+  /**
+   * [#31838] Present, and `false`, only for a call naming a tool the server
+   * holds none of (a name the grant did not register, or any other name). No
+   * handler runs: `next()` resolves to the answer the client gets, the
+   * SDK's own `Tool NAME not found` tool error, `arguments` is empty, and whatever the interceptor
+   * returns, the client gets that answer unchanged. Absent on every call to a
+   * registered tool.
+   */
+  readonly registered?: false;
 }
 
 /** The MCP `tools/call` result a tool answers with, and an interceptor may replace. */
@@ -232,6 +241,9 @@ export interface McpToolCallRefusal {
  *   returns it, or a replacement result.
  * - **Deny**: return a {@link McpToolCallRefusal} without calling `next()`.
  *   The tool never runs.
+ * - **A name nothing registered** ([#31838], `call.registered === false`):
+ *   observation only. No tool runs and the client gets the SDK's own
+ *   `not found` answer; a deny or a replacement is not served.
  *
  * A throw from the interceptor refuses the call too: it is answered as a tool
  * error, a coded throw with its `code` and `status`, as every MCP tool's own

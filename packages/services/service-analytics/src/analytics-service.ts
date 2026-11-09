@@ -93,6 +93,7 @@ import { AMOUNT_AGGREGATES, assertRecordCurrencyAggregatesGrouped } from './cube
 import type { AnalyticsStrategy, AnalyticsDriverCapabilities, StrategyContext, DatasetScopedStrategyContext, DatasetScope, DurationMeasureSpec, ReadScopeFilterJudge } from './strategies/types.js';
 import { NativeSQLStrategy } from './strategies/native-sql-strategy.js';
 import { ObjectQLStrategy, aggregateGroupKeys, aggregateObjectOf, resolveCubeFieldName } from './strategies/objectql-strategy.js';
+import { declaredCubeMemberKey } from './cube-member-key.js';
 // [#5669] The `where` source-field gate reads the filter tree through the SAME
 // pair the strategies compile it with, so "the field the gate saw" and "the
 // column that reached SQL" cannot be two different things.
@@ -402,16 +403,13 @@ function declaredMemberEntry(
           ];
   // `key` is spread LAST in every arm: it is the bag key this member RESOLVED
   // to, and a `key` property on the cube entry itself must not shadow it.
+  // [#31842] Which key a spelling names is `declaredCubeMemberKey`'s rule, the
+  // one both strategies' `lookupMember` read: a dotted member names a declared
+  // key only verbatim, behind the cube's own qualifier, or through a flat key
+  // over the same relationship path — never by its tail alone.
   for (const bag of bags) {
-    if (bag[member]) return { ...bag[member], key: member };
-    if (member.includes('.')) {
-      const [first, ...rest] = member.split('.');
-      const tail = rest.join('.');
-      if (first === cube.name && bag[tail]) return { ...bag[tail], key: tail };
-      if (bag[tail]) return { ...bag[tail], key: tail };
-      const flat = member.replace(/\./g, '_');
-      if (bag[flat]) return { ...bag[flat], key: flat };
-    }
+    const key = declaredCubeMemberKey(cube, bag, member);
+    if (key !== undefined) return { ...bag[key], key };
   }
   return undefined;
 }

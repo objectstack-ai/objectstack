@@ -18,5 +18,7 @@
  */
 
 export const deGeneratedSourceHashes: Readonly<Record<string, string>> = {
+  "objects.sys_user_permission_set.fields.permission_set_package.help": "4113fdb4710cddea",
+  "objects.sys_user_permission_set.fields.permission_set_package.label": "4b0224196e5cc035",
   "objects.sys_user_position.fields.position.label": "9a24c02e441eb0b4",
 };

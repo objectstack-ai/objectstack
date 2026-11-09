@@ -171,6 +171,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           admin: "Administrator"
         }
       },
+      package_id: {
+        label: "Package",
+        help: "The app a rule that came with an app belongs to. Filled in by the platform; empty for rules created here."
+      },
       customized: {
         label: "Angepasst",
         help: "Wird gesetzt, sobald Sie eine mit einer App gelieferte Regel bearbeiten, damit Ihre Änderungen bei einem App-Update erhalten bleiben."
@@ -321,6 +325,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       queue: {
         label: "Warteschlange",
         help: "Der Name der Warteschlange, zu der dieses Mitglied gehört."
+      },
+      queue_package: {
+        label: "Queue Package",
+        help: "The app the queue comes from. Filled in by the platform; empty for queues created here."
       },
       recipient_type: {
         label: "Mitgliedstyp",
