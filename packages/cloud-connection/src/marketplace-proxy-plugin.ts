@@ -299,7 +299,8 @@ export class MarketplaceProxyPlugin implements Plugin {
                             ctx.logger,
                         );
                         if (r2Resp) return r2Resp;
-                        // Fall through on miss / error to the cloud path.
+                        // Fall through on miss / error, or on a list query the
+                        // snapshot cannot evaluate, to the cloud path.
                     }
 
                     // Preserve the full /api/v1/marketplace/... path on cloud.
@@ -543,6 +544,24 @@ function catalogQueryFilters(query: CatalogListQuery, params: URLSearchParams): 
         || params.has('q') || params.has('limit') || params.has('offset');
 }
 
+/**
+ * The list query keys the public snapshot can answer: the ones
+ * {@link readCatalogListQuery} reads and {@link catalogRowMatches} and the
+ * pager evaluate. A list request carrying any other key is not
+ * snapshot-answerable — the snapshot would drop the key and answer as though
+ * it had matched — so it takes the cloud path, which receives the query
+ * string verbatim and answers it as the catalog does (a facet the cloud
+ * serves and this reader does not, `languages` for one, with its counts).
+ */
+const SNAPSHOT_EVALUATED_LIST_PARAMS: ReadonlySet<string> = new Set([
+    'q', 'limit', 'offset', 'maturity', ...CATALOG_FACETS.map((facet) => facet.param),
+]);
+
+/** Whether a list request carries a query key the snapshot does not evaluate. */
+function carriesSnapshotUnevaluatedListParam(params: URLSearchParams): boolean {
+    return [...params.keys()].some((name) => !SNAPSHOT_EVALUATED_LIST_PARAMS.has(name));
+}
+
 const listColumn = (value: unknown): readonly unknown[] => (Array.isArray(value) ? value : []);
 
 /**
@@ -593,6 +612,8 @@ function catalogRowMatches(row: any, query: CatalogListQuery): boolean {
  *
  * Returns `null` for any of:
  *   - path is not snapshot-backed (e.g. featured / categories / etc.)
+ *   - a list request carries a query key the snapshot does not evaluate
+ *     ({@link SNAPSHOT_EVALUATED_LIST_PARAMS}); the snapshot is not fetched
  *   - R2 returned 404 (snapshot not yet generated for this id)
  *   - network error fetching from R2
  *
@@ -609,6 +630,7 @@ async function tryPublicMarketplaceFetch(
 ): Promise<Response | null> {
     const key = publicMarketplaceKeyForApiPath(incomingUrl.pathname);
     if (!key) return null;
+    if (key === 'packages.json' && carriesSnapshotUnevaluatedListParam(incomingUrl.searchParams)) return null;
 
     const target = `${publicBaseUrl}/${key}`;
     let resp: Response;

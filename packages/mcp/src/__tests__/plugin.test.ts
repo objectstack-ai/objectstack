@@ -114,6 +114,17 @@ describe('MCPServerPlugin', () => {
       expect(ctx.logger.info).toHaveBeenCalledWith('[MCP] Plugin initialized');
     });
 
+    it('fails the boot naming the variable when a read_file extraction bound is malformed', async () => {
+      process.env.OS_MCP_READ_FILE_MAX_CONCURRENT = 'four';
+      const plugin = new MCPServerPlugin();
+      const ctx = createMockPluginContext();
+
+      await expect(plugin.init(ctx as any)).rejects.toThrow(
+        'OS_MCP_READ_FILE_MAX_CONCURRENT must be a positive integer; got "four"',
+      );
+      expect(ctx.registerService).not.toHaveBeenCalled();
+    });
+
     it('should respect MCP_SERVER_NAME env var', async () => {
       process.env.OS_MCP_SERVER_NAME = 'custom-name';
       const plugin = new MCPServerPlugin();

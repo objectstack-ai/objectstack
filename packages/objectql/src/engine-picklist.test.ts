@@ -100,10 +100,16 @@ const CORE = {
   objects: [account],
 };
 
-/** A second package: adds a value to the list and binds a second object to it. */
+/**
+ * A second package: adds a value to the list and binds a second object to it.
+ * It declares its dependency on CORE: a field's `picklist` resolves from its
+ * package's declared closure (ADR-0150 D3), so binding a field to another
+ * package's list takes the dependency.
+ */
 const HEALTH = {
   id: 'com.test.picklist.health',
   name: 'health',
+  dependencies: { 'com.test.picklist.core': '^1.0.0' },
   picklistExtensions: [HEALTHCARE_EXTENSION],
   objects: [lead],
 };
@@ -169,7 +175,10 @@ describe('picklist — the served shape', () => {
 describe('picklist — load order', () => {
   it('an object registered BEFORE its list still resolves once the list arrives', async () => {
     const engine = await bootEngine();
-    engine.registry.registerObject(account as any, 'com.test.early');
+    // The object is the list's own package's (a field's `picklist` resolves
+    // from its package's declared closure, ADR-0150 D3); only the ORDER is
+    // under test.
+    engine.registry.registerObject(account as any, 'com.test.core');
     // Read before the list exists: nothing to serve yet …
     expect((engine.registry.getObject('pk_account')!.fields.industry as any).options).toBeUndefined();
     // … then the list and an extension land, in the "wrong" order.
@@ -358,5 +367,117 @@ describe('picklist — a stale served copy never stands in for the list', () => 
     const folded: any = engine.registry.foldObjectExtendersOnto('pk_arr', body);
     expect(values(folded.fields[0])).toEqual(['technology', 'finance']);
     expect(folded.fields[1]).toBe(body.fields[1]);
+  });
+});
+
+/**
+ * [ADR-0150 D3/D4, child E6] A field's `picklist` resolves through the
+ * package-scoped resolver from the package that WROTE the reference: its own
+ * list, else the unique holder in its declared dependency closure (plus
+ * `sys`), else a refusal naming every candidate. Phase 1 keeps one holder per
+ * name, so what moves is the declared narrowing alone.
+ */
+describe('picklist — resolved from the package that writes the reference (ADR-0150 D3)', () => {
+  const ENV_LIST = { name: 'env_tier', label: 'Tier', options: [{ label: 'Gold', value: 'gold' }] };
+  const member = (picklist: string) => ({
+    name: 'pk_member',
+    label: 'Member',
+    fields: {
+      name: { name: 'name', label: 'Name', type: 'text' as const },
+      tier: { name: 'tier', label: 'Tier', type: 'select' as const, picklist },
+    },
+  });
+
+  it('D3 (a): a package field whose list only the environment holds is served with no options, and its values are refused', async () => {
+    const engine = await bootEngine();
+    // An environment-authored list: bound to no package (the bare slot).
+    engine.registry.registerItem('picklist', { ...ENV_LIST }, 'name');
+    engine.registerApp({ id: 'com.test.pkg', name: 'pkg', objects: [member('env_tier')] });
+
+    const field: any = engine.registry.getObject('pk_member')!.fields.tier;
+    expect(field.picklist).toBe('env_tier');
+    expect(field.options).toBeUndefined();
+    const verdict = engine.registry.picklistReferenceVerdict('env_tier', 'com.test.pkg');
+    expect(verdict).toMatchObject({ status: 'refused', reason: 'outside-closure', candidates: [{ kind: 'environment' }] });
+    const err = await refusal(engine.insert('pk_member', { name: 'M', tier: 'gold' }, sys));
+    expect(err.fields[0]).toMatchObject({ field: 'tier' });
+    // Named for the boot's warning (never a boot refusal), not as an unresolved reference.
+    expect(engine.registry.findUnresolvedPicklistReferences()).toEqual([]);
+    expect(engine.registry.findOutsideClosurePicklistReferences()).toEqual([
+      expect.objectContaining({ object: 'pk_member', field: 'tier', picklist: 'env_tier', packageId: 'com.test.pkg' }),
+    ]);
+  });
+
+  it('a package field whose list a package OUTSIDE its declared closure holds is refused, naming that package', async () => {
+    const engine = await bootEngine();
+    engine.registerApp({ id: 'com.test.lists', name: 'lists', picklists: [{ ...ENV_LIST }] });
+    engine.registerApp({ id: 'com.test.pkg', name: 'pkg', objects: [member('env_tier')] });
+
+    expect((engine.registry.getObject('pk_member')!.fields.tier as any).options).toBeUndefined();
+    // A refused reference, named for the boot's warning — never a boot refusal (N2).
+    expect(engine.registry.findUnresolvedPicklistReferences()).toEqual([]);
+    const [outside] = engine.registry.findOutsideClosurePicklistReferences();
+    expect(outside).toMatchObject({ object: 'pk_member', field: 'tier', packageId: 'com.test.pkg' });
+    expect(outside.refusal).toContain('package "com.test.lists"');
+  });
+
+  it('CONTROL — the same field, its package declaring the holder as a dependency, is served the list', async () => {
+    const engine = await bootEngine();
+    engine.registerApp({ id: 'com.test.lists', name: 'lists', picklists: [{ ...ENV_LIST }] });
+    engine.registerApp({
+      id: 'com.test.pkg', name: 'pkg', dependencies: { 'com.test.lists': '^1.0.0' }, objects: [member('env_tier')],
+    });
+    expect(values(engine.registry.getObject('pk_member')!.fields.tier)).toEqual(['gold']);
+    expect(engine.registry.findUnresolvedPicklistReferences()).toEqual([]);
+  });
+
+  it('CONTROL — a referrer with no package (a body only the environment writes) is served the environment\'s list, as before', async () => {
+    const engine = await bootEngine();
+    engine.registry.registerItem('picklist', { ...ENV_LIST }, 'name');
+    const body = member('env_tier');
+    // A body this registry never saw: no packaged layer wrote its reference.
+    const folded: any = engine.registry.foldObjectExtendersOnto('pk_member', body);
+    expect(values(folded.fields.tier)).toEqual(['gold']);
+    expect(engine.registry.resolvePicklistOptions('env_tier')!.map((o) => o.value)).toEqual(['gold']);
+  });
+
+  // [epic seat review on #31731] An owner and an extender in different
+  // packages both write the field's reference: neither is picked by fold
+  // order. The field is served only when every referrer reaches the same list.
+  it('two packages writing one field\'s reference: served no options unless BOTH reach the list (no fold-order pick)', async () => {
+    const engine = await bootEngine();
+    engine.registerApp({ id: 'com.test.lists', name: 'lists', picklists: [{ ...ENV_LIST }] });
+    // The owner does not depend on the list's package; the extender (folded LAST) does.
+    engine.registerApp({ id: 'com.test.pkg', name: 'pkg', objects: [member('env_tier')] });
+    engine.registerApp({
+      id: 'com.test.ext', name: 'ext', dependencies: { 'com.test.lists': '^1.0.0' },
+      objectExtensions: [{ extend: 'pk_member', fields: { tier: { name: 'tier', type: 'select', picklist: 'env_tier' } } }],
+    });
+    expect((engine.registry.getObject('pk_member')!.fields.tier as any).options).toBeUndefined();
+    expect(engine.registry.findOutsideClosurePicklistReferences()).toEqual([
+      expect.objectContaining({ object: 'pk_member', field: 'tier', packageId: 'com.test.pkg' }),
+    ]);
+  });
+
+  it('CONTROL — the same owner and extender, both depending on the list\'s package, are served the list', async () => {
+    const engine = await bootEngine();
+    engine.registerApp({ id: 'com.test.lists', name: 'lists', picklists: [{ ...ENV_LIST }] });
+    engine.registerApp({
+      id: 'com.test.pkg', name: 'pkg', dependencies: { 'com.test.lists': '^1.0.0' }, objects: [member('env_tier')],
+    });
+    engine.registerApp({
+      id: 'com.test.ext', name: 'ext', dependencies: { 'com.test.lists': '^1.0.0' },
+      objectExtensions: [{ extend: 'pk_member', fields: { tier: { name: 'tier', type: 'select', picklist: 'env_tier' } } }],
+    });
+    expect(values(engine.registry.getObject('pk_member')!.fields.tier)).toEqual(['gold']);
+    expect(engine.registry.findUnresolvedPicklistReferences()).toEqual([]);
+  });
+
+  it('a package\'s `picklistExtensions` target resolves caller-less: it extends the one holder\'s list, dependency or not', async () => {
+    const engine = await bootEngine();
+    engine.registerApp(CORE);
+    engine.registerApp({ id: 'com.test.addon', name: 'addon', picklistExtensions: [HEALTHCARE_EXTENSION] });
+    expect(values(engine.registry.getObject('pk_account')!.fields.industry)).toEqual(['technology', 'finance', 'healthcare']);
+    expect(engine.registry.findOrphanPicklistExtensions()).toEqual([]);
   });
 });

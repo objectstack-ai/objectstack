@@ -110,7 +110,9 @@
 import type { TenancyPosture } from '@objectstack/spec/security';
 import { SystemObjectName } from '@objectstack/spec/system';
 import {
+  DEFAULT_TENANT_FIELD,
   resolveSystemWriteOrganization,
+  resolveTenantFieldName,
   type SystemWriteOrganizationDecision,
   type SystemWriteRefusalReason,
 } from '@objectstack/core';
@@ -121,12 +123,6 @@ import {
  */
 export const ORGANIZATION_OBJECT = SystemObjectName.ORGANIZATION;
 
-/**
- * The tenant column the kernel injects into every tenant-scoped object
- * (`TENANT_SCOPE_FIELD_DEF`, `registry.ts`), and the fallback every layer
- * assumes when an object declares no `tenancy.tenantField`.
- */
-export const DEFAULT_TENANT_FIELD = 'organization_id';
 
 /**
  * The platform-namespace NAME SHAPE — `sys_` / `cloud_` / `ai_`.
@@ -183,55 +179,16 @@ export function isPlatformNamespaceObject(object: string): boolean {
 }
 
 /**
- * Resolve the column an object is tenant-scoped by, or `null` when it is not
- * tenant-scoped at all.
- *
- * ## ⭐ This is the one tenancy-scope predicate (ADR-0131 D9 / D13)
- *
- * It decides both of the engine's tenancy cuts for an object, read on the
- * registered schema — the authored one plus the columns `applySystemFields`
- * injects, which is the schema the engine actually holds: whether an
- * organization-less system insert is judged by the system-write rule
- * (`Engine.resolveSystemInsertOrganization`), and whether an elevated write's
- * tenant-audit stays live (`Engine.buildDriverOptions`). Non-null ⇒ in scope,
- * whatever the object's name. There is no per-table list beside it: the
- * #13491 ledger that once narrowed the audit by name retired with D13, so an
- * object leaves scope only by DECLARING it on its own schema
- * (`tenancy.enabled: false`, `systemFields.tenant: false`, no tenant field).
- *
- * Which platform-namespace objects that leaves outside, and the declaration
- * that puts each there, is derived — never restated here — by
- * `scripts/platform-object-tenancy-census.mjs` into
- * `scripts/platform-object-tenancy-census.json`, which
- * `scripts/check-platform-object-tenancy-census.mjs` holds to the tree. ⛔ Do
- * not quote its counts in this comment: a hand-written count here went stale
- * once already, with CI green.
- *
- * The twin of `SqlDriver.computeTenantField`, same precedence and same reading:
- * an explicit `tenancy.enabled: false` opt-out wins over any column-presence
- * heuristic (ADR-0066 / `isTenancyDisabled`), then a declared
- * `tenancy.tenantField` that the object really has, then the kernel-injected
- * `organization_id`. It is re-spelled rather than imported because the engine
- * must not depend on a driver — but it has to stay the same rule: a disagreement
- * here would mean the engine resolves an organization for a column the driver
- * does not scope by, or refuses a write the driver would have filed globally.
+ * The one tenancy-scope predicate (ADR-0131 D9 / D13), and the tenant column it
+ * falls back to. Both moved down to `@objectstack/core` so the import runner's
+ * match lookup, which runs below this package, asks the same rule rather than
+ * a copy of it (the relocation `resolveSystemWriteOrganization` made under
+ * ADR-0138 D4). These are the same bindings, re-exported unchanged; every
+ * existing import from this module or the package barrel keeps resolving to
+ * them. The rule's docblock lives with it, in `@objectstack/core`'s
+ * `security/tenant-field.ts`.
  */
-export function resolveTenantFieldName(schema: unknown): string | null {
-  const s = schema as
-    | { fields?: Record<string, unknown>; tenancy?: { enabled?: boolean; tenantField?: unknown } }
-    | null
-    | undefined;
-  if (s?.tenancy?.enabled === false) return null;
-  const fields = s?.fields;
-  if (!fields || typeof fields !== 'object') return null;
-  const declared = s?.tenancy?.tenantField;
-  if (typeof declared === 'string' && declared !== '' &&
-      Object.prototype.hasOwnProperty.call(fields, declared)) {
-    return declared;
-  }
-  if (Object.prototype.hasOwnProperty.call(fields, DEFAULT_TENANT_FIELD)) return DEFAULT_TENANT_FIELD;
-  return null;
-}
+export { DEFAULT_TENANT_FIELD, resolveTenantFieldName };
 
 /** Does this value count as an organization actually supplied? */
 export function carriesOrganization(value: unknown): boolean {

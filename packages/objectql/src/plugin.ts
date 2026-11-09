@@ -28,6 +28,9 @@ import { applyConversionsToStoredItem, expandViewContainer, isAggregatedViewCont
 // body's (see `registerUnclaimedTopLevelItems`).
 import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
 import { viewContainerNameRefusal } from './view-container-name-refusal.js';
+// [ADR-0150 D2, #31720] The residual as one holder of the stack's namespace,
+// for the namespace name rule (see the residual registration below).
+import { residualNamespacePackageOf } from './namespace-co-owner-names.js';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { applyProtection } from '@objectstack/spec/shared';
 // [#21777] The ONE "is this schema the remote's?" predicate, shared with `ObjectQL.syncSchemas`.
@@ -952,15 +955,38 @@ export class ObjectQLPlugin implements Plugin {
         // against the registry or against a list the artifact itself declares.
         // A refused install registers nothing.
         if (this.picklistVocabularySealed) {
-          const declared = new Set<string>();
-          for (const manifest of ordered) for (const name of collectManifestPicklistNames(manifest)) declared.add(name);
-          const known = (name: string) => declared.has(name) || ql.registry.resolvePicklistOptions(name) !== undefined;
-          const unresolved = ordered
-            .flatMap((manifest) => collectManifestPicklistReferences(manifest, artifactPackageId(manifest)))
-            .filter((ref) => !known(ref.picklist));
-          const orphans = ordered
-            .flatMap((manifest) => collectManifestPicklistExtensions(manifest, artifactPackageId(manifest)))
-            .filter((ext) => !known(ext.picklist));
+          // [ADR-0150 D3, child E6] A reference is reached the way the served
+          // field will reach it: from the package that writes it, through the
+          // package-scoped resolver, against a registry view holding the
+          // artifact's manifests — their declared dependencies and the lists
+          // each one declares. A list the reference's OWN manifest declares is
+          // its own; every other list, a sibling's in this artifact included,
+          // is R's to answer (epic seat review on #31731: no artifact-wide
+          // "declared somewhere" pass). A reference R refuses — the
+          // environment's own list included (D3 (a)) — is refused here,
+          // loudly, naming every candidate. An extension's target is a
+          // contribution, judged caller-less (epic seat ruling X on #31678;
+          // `SchemaRegistry.picklistContributions`).
+          const judge = <R extends { picklist: string; packageId: string | undefined }>(
+            ref: R,
+            own: ReadonlySet<string>,
+            caller: string | null | undefined,
+          ): R & { refusal?: string } | undefined => {
+            if (own.has(ref.picklist)) return undefined;
+            const verdict = ql.registry.picklistReferenceVerdict(ref.picklist, caller, ordered);
+            if (verdict.status === 'resolved') return undefined;
+            return verdict.status === 'refused' ? { ...ref, refusal: verdict.message } : ref;
+          };
+          const unresolved = ordered.flatMap((manifest) => {
+            const own = collectManifestPicklistNames(manifest);
+            return collectManifestPicklistReferences(manifest, artifactPackageId(manifest))
+              .flatMap((ref) => judge(ref, own, ref.packageId) ?? []);
+          });
+          const orphans = ordered.flatMap((manifest) => {
+            const own = collectManifestPicklistNames(manifest);
+            return collectManifestPicklistExtensions(manifest, artifactPackageId(manifest))
+              .flatMap((ext) => judge(ext, own, null) ?? []);
+          });
           const refusal = describeUnresolvedPicklistReferences(unresolved, orphans);
           if (refusal) throw refusal;
         }
@@ -995,6 +1021,9 @@ export class ObjectQLPlugin implements Plugin {
         // in the running kernel while the install door answered the refusal
         // and ledgered nothing. A single-package artifact is the one-body run
         // `registerApp` opens on its own, answered as before.
+        // [ADR-0150 D2, #31720] The residual as one holder of the stack's
+        // namespace — judged below, recorded once the artifact has registered.
+        const residualHolder = residualNamespacePackageOf(artifact, residualAnswer);
         ql.registry.restoringOnRefusal(() => {
           for (const { manifest, source } of entries as Array<{ manifest: any; source?: 'code' | 'marketplace' }>) {
             ql.registerApp(manifest, scope, source ?? options?.source);
@@ -1002,6 +1031,13 @@ export class ObjectQLPlugin implements Plugin {
               id: manifest.id || manifest.name
             });
           }
+          // [ADR-0150 D2, #31720] The residual is one more holder of the
+          // stack's namespace: refused, in the package door's envelope, when it
+          // declares an item of the covered types under a name another package
+          // of that namespace holds — judged here, once every body has
+          // installed and before anything of the residual registers, so a
+          // refusal puts back the whole artifact like any other in this run.
+          ql.registry.refuseResidualNamespaceNameConflicts(residualHolder);
           // [ADR-0130 D4] The residual's objects, AFTER every body — the order
           // the metadata door registers the same stack in — under the id the
           // residual rule names, through the registry verb a body's own objects
@@ -1034,6 +1070,10 @@ export class ObjectQLPlugin implements Plugin {
         if (residualOwnerId !== undefined) {
           ql.registry.recordResidualOwnerDependencies(residualOwnerId, declaredDependencyIds((artifact as { manifest?: unknown })?.manifest ?? artifact));
         }
+        // [ADR-0150 D2, #31720] …and the residual as a holder of its namespace,
+        // so a package registering after this stack is judged against it too.
+        // Recorded on the same terms: once the artifact has registered whole.
+        ql.registry.recordResidualNamespaceHolder(residualHolder);
         // [#24472] The boot reported every same-name pair it found
         // (`kernel:ready`, below); an artifact arriving later is judged once it
         // has registered, for the pairs naming one of its packages on either
@@ -1210,6 +1250,22 @@ export class ObjectQLPlugin implements Plugin {
             this.ql?.registry.findOrphanPicklistExtensions() ?? [],
         );
         if (unresolvedPicklists) throw unresolvedPicklists;
+        // [ADR-0150 D3, child E6] A packaged reference whose every holder is
+        // outside its package's declared dependency closure — an
+        // environment-authored list (D3 (a)) or a package it does not depend
+        // on, a same-artifact sibling included (N1, ruled on #31678) — is
+        // refused by the package-scoped resolver: the field is served with no
+        // options and the record validator refuses its values. A refused
+        // REFERENCE, never a refused boot (ruling N2), so it is named here,
+        // once per reference, in the resolver's own words, and the boot goes on.
+        for (const ref of this.ql?.registry.findOutsideClosurePicklistReferences() ?? []) {
+            ctx.logger.warn(
+                `[ObjectQLPlugin] Field '${ref.object}.${ref.field}' of package '${ref.packageId}' is served with no `
+                + `options and refuses every value: ${ref.refusal}`,
+                { object: ref.object, field: ref.field, packageId: ref.packageId, picklist: ref.picklist },
+            );
+        }
+
         this.picklistVocabularySealed = true;
         // [#24400] A top-level action bound by `objectName` to an object no
         // package registers fails the boot, naming the action, its package and

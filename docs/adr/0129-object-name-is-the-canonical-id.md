@@ -5,7 +5,11 @@ convoy with #12786). This ADR **records an already-enforced, platform-wide decis
 changes no shipped behavior. The contract below has been enforced since the parse path was
 closed by #4001 and is restated by Prime Directive #6 in `AGENTS.md` — what was missing was
 the decision record itself, and that absence is what produced the phantom citation this ADR
-closes (see § History).
+closes (see § History). · **Cross-referenced by
+[ADR-0150](./0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md)**
+(2026-11-09, [#31685](https://github.com/objectstack-ai/objectstack/issues/31685)): objects keep this
+record's literal prefix unchanged, and behavioural metadata is addressed by (package, name) instead
+of carrying it. See the dated note under D4.
 **Deciders**: ObjectStack maintainer (2026-08-29), recording a contract in force since #4001.
 **Relates to**: [ADR-0028](./0028-metadata-naming-and-namespace-isolation.md) (the **Deferred
 target model** pointing the opposite way — reconciled in D4 below),
@@ -81,6 +85,19 @@ multi-package ecosystem naming pain). The two records do not conflict: 0028 is a
 design, this ADR is the enforced present. **Until 0028's recorded re-open trigger fires,
 this ADR is the governing record of object naming.** If 0028 is ever adopted, the adopting
 work must supersede this record explicitly (Prime Directive #13) — never drift past it.
+
+> **Note (2026-11-09, [#31685](https://github.com/objectstack-ai/objectstack/issues/31685)) — ADR-0028
+> is re-opened for the behavioural tier only, and this record stays the governing record of object
+> naming.** [ADR-0150](./0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md)
+> (accepted by the maintainer's merge of #31586) supersedes ADR-0028 D1 and D3 in part, for the
+> behavioural and presentation types of its buckets 2–4. Objects are its bucket 1, with fields,
+> object extensions, views, capabilities, docs and an api's path: they keep the literal prefix, for
+> the reason D1 here gives (the name is the table name, read by consumers the platform does not
+> control; ADR-0150 D1). Nothing in D1–D3 changes. What ADR-0150 does not take is ruling C on #30798's
+> extension of D2's literal prefix to every package-authored name: phase 3 of that ruling (#30806),
+> which was to amend this record so, is withdrawn (maintainer ruling A 「转向包寻址」, recorded in
+> [#30806 comment 6721941146](https://github.com/objectstack-ai/objectstack/issues/30806#issuecomment-6721941146)).
+> A flow, an action, a page or a tool keeps a short name, and the platform carries its package.
 
 ---
 

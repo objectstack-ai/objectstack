@@ -135,7 +135,12 @@ async function boot(posture: Posture) {
   engines.push(engine);
 
   const services: Record<string, unknown> = {
-    manifest: { register: vi.fn() },
+    // [ADR-0150 D3, #31674] The manifest service registers the plugin's own
+    // permission sets into the engine registry under the plugin's package, as
+    // a booted kernel does, so a built-in position resolves them as its own.
+    manifest: { register: vi.fn((m: { id: string; permissions?: Array<Record<string, unknown>> }) => {
+      for (const ps of m.permissions ?? []) (engine as any).registry.registerItem('permission', structuredClone(ps), 'name', m.id);
+    }) },
     objectql: engine,
     // [ADR-0131 D3/D4] The stack-declared half of the catalog; the built-in
     // positions are the plugin's own declarations, in the engine registry.

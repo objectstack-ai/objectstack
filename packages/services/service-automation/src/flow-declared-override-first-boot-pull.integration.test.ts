@@ -297,6 +297,46 @@ describe('[#28717] a declared .custom flow override is armed from the first boot
 });
 
 /**
+ * [ADR-0150 D3, epic #31527 child E5] Which package a reference written in the
+ * armed body resolves from (`AutomationEngine.armedFlowPackage`, the caller
+ * package of a `subflow` / `map` name and of a `connector_action`'s
+ * `connectorId`). The loader's package only while the loader's OWN body is
+ * armed; the shipping package's declared `.custom` override is an
+ * environment-authored overlay, whose references resolve with no package
+ * (ADR-0150 D3: "It never resolves from the package the overlay customizes").
+ *
+ * Read on the real composition at both arming steps: the boot pull arms from
+ * the registry's list (the override as a stored row, with its binding), and
+ * `kernel:ready` re-arms from the protocol's view (the override served in the
+ * base's slot, stamped with the base's `_packageId`), so a stamp-reading
+ * answer would read the base at one step or the other.
+ */
+describe('[ADR-0150 D3, #31677] the armed body\'s package is the loader\'s only while the loader\'s own body is armed', () => {
+    const CASES: ReadonlyArray<readonly [string, readonly Row[], string | undefined]> = [
+        ['the loader\'s body alone', [], BASE],
+        ['a package-less stored row beside it (shadowed, the loader\'s body armed)', ['legacy'], BASE],
+        ['the declared .custom override', ['override'], undefined],
+        ['the declared override and a package-less row', ['override', 'legacy'], undefined],
+    ];
+    for (const [shape, rows, expected] of CASES) {
+        it(`${shape}: ${expected ?? 'no package'} at the boot pull and after kernel:ready`, async () => {
+            let atPull: { label?: string; pkg?: string } = {};
+            const { automation } = await measuredBoot(rows, async (_ql, engine) => {
+                atPull = {
+                    label: ((await engine.getFlow(FLOW)) as { label?: string } | null)?.label,
+                    pkg: engine.armedFlowPackage(FLOW),
+                };
+            });
+            const armedLabel = expected === undefined ? 'OVERRIDE' : 'BASE';
+            expect(automation.packagedFlowOwner(FLOW), 'control: the loader\'s set holds the name').toBe(BASE);
+            expect(atPull).toEqual({ label: armedLabel, pkg: expected });
+            expect(((await automation.getFlow(FLOW)) as { label?: string } | null)?.label).toBe(armedLabel);
+            expect(automation.armedFlowPackage(FLOW)).toBe(expected);
+        });
+    }
+});
+
+/**
  * [#31754, ADR-0150 D3] The collision line agrees with the engine on a real
  * cold boot. A second package shipping FLOW's bare name (a clash sealed before
  * phase 1) makes the engine's resolver refuse the name for a caller with no

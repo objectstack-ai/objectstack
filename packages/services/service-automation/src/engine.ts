@@ -2590,6 +2590,17 @@ export type PackagedFlowSource = (name: string) => string | undefined;
 export type FlowNameResolver = (name: string, callerPackageId: string | null) => PackageScopedResolution | undefined;
 
 /**
+ * [ADR-0150 D3, epic #31527 child E5] The same reader for the `connector` type:
+ * which declared connector instance the bare name `name` means for a caller of
+ * package `callerPackageId` (`null` for a caller with no package). The
+ * automation plugin attaches `resolvePackageScopedName` over the ObjectQL
+ * registry ({@link AutomationEngine.setConnectorNameResolver}); `undefined`
+ * means the host serves no registry to ask. ⛔ Never a second implementation
+ * of the rule.
+ */
+export type ConnectorNameResolver = (name: string, callerPackageId: string | null) => PackageScopedResolution | undefined;
+
+/**
  * [#28405] The stored body of flow `name` whose content identity is
  * `checksum` ({@link SuspendedRun.flowChecksum}), as the metadata history
  * keeps it — `null` when no version with that identity is stored. A host
@@ -2829,6 +2840,19 @@ export class AutomationEngine implements IAutomationService {
      * knows, as before.
      */
     private flowNameResolver?: FlowNameResolver;
+    /**
+     * [ADR-0150 D3, epic #31527 child E5] Where each armed body came from, keyed
+     * by the parsed body {@link registerFlow} stores — so {@link armedFlowPackage}
+     * reads the arm of exactly what `flows` holds under a name, and a withdrawn
+     * or replaced body takes its arm with it. Written at EVERY registration:
+     * the caller's classification when it hands one, else `runtime`.
+     */
+    private readonly flowArms = new WeakMap<object, FlowContender>();
+    /**
+     * [ADR-0150 D3] The reader that answers which declared connector instance a
+     * bare name means for a caller — see {@link setConnectorNameResolver}.
+     */
+    private connectorNameResolver?: ConnectorNameResolver;
     /** [#20790] The write-only flow credential channel — see {@link setFlowCredentialSource}. */
     private flowCredentialSource?: FlowCredentialSource;
     /** [#20281 stage ③] The connector sync executor — see {@link setConnectorPullSource}. */
@@ -4562,7 +4586,21 @@ export class AutomationEngine implements IAutomationService {
         return canonicalizeFlow.call(host, name, definition, options);
     }
 
-    registerFlow(name: string, definition: unknown): FlowParsed {
+    /**
+     * @param armedFrom [ADR-0150 D3, epic #31527 child E5] Where `definition`
+     *   comes from: the automation plugin's arming steps hand the precedence
+     *   winner's classification (`resolveFlowPrecedence`) — `package` for the
+     *   loader's own body, `override` for the shipping package's declared
+     *   `.custom` override, `runtime` for an environment-authored row. Absent,
+     *   the body is the caller's own — a write door's request body — and arms
+     *   as `runtime`, unless it IS the parsed body this engine armed (a door
+     *   putting back the definition it held), which keeps the arm it had.
+     *   {@link armedFlowPackage} reads it.
+     */
+    registerFlow(name: string, definition: unknown, armedFrom?: FlowContender): FlowParsed {
+        const arm: FlowContender = armedFrom
+            ?? (definition !== null && typeof definition === 'object' ? this.flowArms.get(definition) : undefined)
+            ?? { source: 'runtime' };
         // One canonicalization policy, shared with the stored-row migration so
         // the two can never disagree about what "canonical" means (#4454).
         // Execution takes the parsed shape (schema defaults materialized).
@@ -4607,6 +4645,7 @@ export class AutomationEngine implements IAutomationService {
         // history keys this version by. See {@link SuspendedRun.flowChecksum}.
         const checksum = flowContentChecksum(definition);
         if (checksum !== undefined) this.flowChecksums.set(parsed, checksum);
+        this.flowArms.set(parsed, arm);
         this.flows.set(name, parsed);
         // [#23316] Held now, so no longer refused — see {@link flowRefusals}.
         this.flowRefusals.delete(name);
@@ -5028,18 +5067,82 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * [ADR-0150 D3, epic #31527 child E5] Attach the reader that answers which
+     * declared connector instance a bare `connectorConfig.connectorId` means for
+     * the flow that names it ({@link connectorNameRefusal}). The automation
+     * plugin calls this at `init()`; with none attached, `connector_action`
+     * dispatches by name as before.
+     */
+    setConnectorNameResolver(resolver: ConnectorNameResolver | undefined): void {
+        this.connectorNameResolver = resolver;
+    }
+
+    /**
+     * [ADR-0150 D3, epic #31527 child E5] Why a `connector_action` in a run of
+     * `context`'s flow may not dispatch to the connector instance named
+     * `connectorId`, or `undefined` when it may.
+     *
+     * The name is resolved for the package that ships the calling flow
+     * ({@link flowCallerPackage}: a packaged flow names it from its package; an
+     * environment-authored flow, or a call outside a run, names it with no
+     * package). The engine holds ONE instance per name, materialized for the
+     * answer a caller with no package gets (the declared-connector reconcile,
+     * which already refuses a name two packages hold). So a package caller
+     * whose answer is a refusal — two holders in its closure, or holders only
+     * outside it, an environment-only instance included (ADR-0150 D3 (a)) — is
+     * refused with the resolver's own message, naming every candidate. Any
+     * other answer is the instance the engine serves: an environment item
+     * exists only for a name no package holds, so a package caller that
+     * resolves at all resolves to the one package holder the reconcile
+     * materialized. A name the registry holds nothing under (a connector a
+     * plugin registers in code), or a host with no resolver, dispatches by name
+     * as before. Read-only.
+     */
+    connectorNameRefusal(connectorId: string, context: AutomationContext | undefined): PackageScopedRefusal | undefined {
+        const callerPackageId = this.flowCallerPackage(context);
+        if (callerPackageId === null) return undefined;
+        const meant = this.connectorNameResolver?.(connectorId, callerPackageId);
+        return meant?.status === 'refused' ? meant : undefined;
+    }
+
+    /**
      * [ADR-0150 D3] The package a call of {@link execute} comes from: the
      * package that ships the flow whose run made the call — `context.flowName`,
      * which the engine stamps on every run's context
      * (`resolveRunContext`), so a `subflow` or `map` child carries its parent's
-     * name — or `null` for a caller outside a run, and for a run of a flow no
-     * package ships (an environment-authored flow resolves as a caller with no
-     * package, ADR-0150 D3).
+     * name — or `null` for a caller outside a run, and for a run whose armed
+     * body is not the package's own ({@link armedFlowPackage}): an
+     * environment-authored flow, or an environment override of a packaged
+     * flow, resolves as a caller with no package (ADR-0150 D3).
      */
     private flowCallerPackage(context: AutomationContext | undefined): string | null {
         const caller = context?.flowName;
         if (typeof caller !== 'string' || caller === '') return null;
-        return this.packagedFlowOwner(caller) ?? null;
+        return this.armedFlowPackage(caller) ?? null;
+    }
+
+    /**
+     * [ADR-0150 D3, epic #31527 child E5] The package whose OWN body is armed
+     * under the flow name `name`: the loader's package
+     * ({@link packagedFlowOwner}) when the registration the engine holds was
+     * armed from the loader's body (`package`, {@link registerFlow}'s
+     * `armedFrom`), else `undefined` — for the shipping package's declared
+     * `.custom` override, for an environment-authored (`runtime`) body, and
+     * for a name the engine does not hold.
+     *
+     * This is the package a reference written in the armed body resolves
+     * from. ADR-0150 D3: "A reference written in an environment-authored
+     * overlay (ADR-0005) is the environment's reference. It resolves as a
+     * caller with no package … It never resolves from the package the overlay
+     * customizes." So the loader's set alone (which answers by bare name, for
+     * whichever body is armed) is never this answer, and neither is a stamp
+     * on the body: the boot hydration and the protocol's served override
+     * both carry the base's `_packageId`. Read-only.
+     */
+    armedFlowPackage(name: string): string | undefined {
+        const armed = this.flows.get(name);
+        if (!armed || this.flowArms.get(armed)?.source !== 'package') return undefined;
+        return this.packagedFlowOwner(name);
     }
 
     /**

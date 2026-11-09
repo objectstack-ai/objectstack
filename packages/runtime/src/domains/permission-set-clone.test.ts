@@ -122,6 +122,10 @@ interface BootOptions {
 const SUITE_APP = 'com.acme.suite';
 const SUITE_MEMBER = 'com.acme.suite-crm';
 const SUITE_SET = { name: 'suite_reader', label: 'Suite Reader', objects: { sys_user: { allowRead: true } }, _packageId: SUITE_MEMBER };
+/** A set the member ships that grants on an object the MEMBER owns (`suite_lead`), not the App. */
+const SUITE_LEAD_SET = { name: 'suite_lead_reader', label: 'Suite Lead Reader', objects: { suite_lead: { allowRead: true } }, _packageId: SUITE_MEMBER };
+/** A writable package that declares the App but not the member: not the member's pair, outside its closure. */
+const SUITE_EXT = 'com.acme.suite-ext';
 
 function boot(opts: BootOptions = {}) {
     // ZERO `sys_permission_set` rows: every data read throws, so the door
@@ -130,6 +134,7 @@ function boot(opts: BootOptions = {}) {
     if (opts.appMember) {
         packages[SUITE_APP] = { manifest: { id: SUITE_APP, type: 'app', namespace: 'suite', version: '2.0.0' } };
         packages[SUITE_MEMBER] = { manifest: { id: SUITE_MEMBER, type: 'module', namespace: 'suitecrm', version: '2.0.0', dependencies: { [SUITE_APP]: '^2' } } };
+        packages[SUITE_EXT] = { manifest: { id: SUITE_EXT, type: 'module', namespace: 'suiteext', version: '1.0.0', dependencies: { [SUITE_APP]: '^2' } } };
         if (opts.legacyMemberPair) {
             packages[`${SUITE_MEMBER}.custom`] = { manifest: { id: `${SUITE_MEMBER}.custom`, namespace: 'suitecrm_custom', dependencies: { [SUITE_MEMBER]: '^2' } } };
         }
@@ -138,15 +143,18 @@ function boot(opts: BootOptions = {}) {
         manifests: new Set(opts.appMember ? ['crm', SUITE_APP, SUITE_MEMBER] : ['crm']),
         registry: {
             getPackage: (id: string) => packages[id],
-            getObject: (name: string) => (name === 'account' ? { name: 'account' } : name === 'sys_user' ? { name: 'sys_user' } : undefined),
-            getObjectOwner: (name: string) => (name === 'account' ? { packageId: 'crm' } : name === 'sys_user' ? { packageId: 'com.objectstack.platform' } : undefined),
+            // Read by the save gate's closure (`packageDependencyClosure`),
+            // which widens an App's pair by the App's members.
+            getAllPackages: () => Object.values(packages),
+            getObject: (name: string) => (name === 'account' ? { name: 'account' } : name === 'sys_user' ? { name: 'sys_user' } : name === 'suite_lead' && opts.appMember ? { name: 'suite_lead' } : undefined),
+            getObjectOwner: (name: string) => (name === 'account' ? { packageId: 'crm' } : name === 'sys_user' ? { packageId: 'com.objectstack.platform' } : name === 'suite_lead' && opts.appMember ? { packageId: SUITE_MEMBER } : undefined),
         },
         find: async (object: string) => { throw new Error(`the clone door read a ${object} row`); },
     };
     if (opts.catalogError) {
         bindTestSecurityCatalog(engine, () => { throw opts.catalogError; });
     } else if (!opts.unbound) {
-        bindTestSecurityCatalog(engine, opts.appMember ? { permissions: [...(CATALOG.permissions ?? []), SUITE_SET] } : CATALOG);
+        bindTestSecurityCatalog(engine, opts.appMember ? { permissions: [...(CATALOG.permissions ?? []), SUITE_SET, SUITE_LEAD_SET] } : CATALOG);
     }
     const saves: Saved[] = [];
     const ensures: string[] = [];
@@ -168,7 +176,10 @@ function boot(opts: BootOptions = {}) {
             const derived = pairOf(basePackageId, installedManifestsOf(engine.registry));
             const pairId = derived.ok ? derived.value : `${basePackageId}.custom`;
             const created = packages[pairId] === undefined;
-            if (created) packages[pairId] = { manifest: { id: pairId, dependencies: { [basePackageId]: '^1' } } };
+            // The pair declares the base's App — the base itself unless it is
+            // a member of one — as the real door writes it.
+            const app = pairId.slice(0, -'.custom'.length);
+            if (created) packages[pairId] = { manifest: { id: pairId, dependencies: { [app]: '^1' } } };
             return { basePackageId, packageId: pairId, namespace: 'crm_custom', dependencyRange: '^1', created, writable: true };
         };
     }
@@ -718,5 +729,33 @@ describe('[cloud#3814 D1] declared replicas on the Redis driver: the pair probed
         expect(statusOf(second)).toBe(200);
         expect(h.saves.map((s) => s.packageId)).toEqual([`${SUITE_APP}.custom`, `${SUITE_APP}.custom`]);
         expect((second as any).response.body.data.noticeCode).toBe('PERMISSION_SET_CLONE_IN_PACKAGE');
+    });
+});
+
+describe('an explicit `package` naming an App member\'s pair — the target rule reads the save gate\'s closure', () => {
+    it('a set the member ships, granting on an object the member owns, lands in the App\'s pair when the caller names it', async () => {
+        const h = boot({ appMember: true });
+        // The App's pair, made the way a default landing makes it.
+        const first = await clone(h, HOLDER(), SUITE_LEAD_SET.name, { name: 'first_lead_reader', label: 'First' });
+        expect(statusOf(first)).toBe(200);
+        expect(h.saves.map((s) => s.packageId)).toEqual([`${SUITE_APP}.custom`]);
+
+        const res = await clone(h, HOLDER(), SUITE_LEAD_SET.name, { name: 'my_lead_reader', label: 'My Lead Reader', package: `${SUITE_APP}.custom` });
+
+        expect(statusOf(res), JSON.stringify((res as any)?.response?.body)).toBe(200);
+        expect(h.saves.map((s) => s.packageId)).toEqual([`${SUITE_APP}.custom`, `${SUITE_APP}.custom`]);
+        expect(h.ensures).toEqual([SUITE_MEMBER]);
+    });
+
+    it('CONTROL — a writable package that declares the App but is not the member\'s pair stays refused 409 outside the closure: no ensure, no save', async () => {
+        const h = boot({ appMember: true });
+
+        const res = await clone(h, HOLDER(), SUITE_LEAD_SET.name, { name: 'ext_lead_reader', label: 'Ext Lead Reader', package: SUITE_EXT });
+
+        expect(statusOf(res)).toBe(409);
+        expect(codeOf(res)).toBe('RESOURCE_CONFLICT');
+        expect(String((res as any)?.response?.body?.error?.message)).toContain('[new_similar_target_outside_closure]');
+        expect(h.ensures).toEqual([]);
+        expect(h.saves).toHaveLength(0);
     });
 });

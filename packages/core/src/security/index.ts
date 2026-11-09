@@ -311,6 +311,11 @@ export {
   type SystemWriteRefusalReason,
 } from './system-write-organization.js';
 
+// [ADR-0131 D9 / D13] The tenancy-scope predicate, its fallback column and the
+// federated-schema test: the engine's (`@objectstack/objectql` re-exports these
+// same bindings) and the import runner's match lookup.
+export { DEFAULT_TENANT_FIELD, isFederatedObject, resolveTenantFieldName } from './tenant-field.js';
+
 // [ADR-0138 D4] The located refusal an anonymous request meets where it needs
 // an organization the deployment cannot resolve for it — a standard-catalog
 // code (`NOT_IMPLEMENTED`), naming the missing site binding (D5).
@@ -436,6 +441,11 @@ export {
   type SecurityCatalogSources,
   type SecurityCatalogEntry,
   type SecurityCatalogReader,
+  // ADR-0150 D3/D4/D7 — permission sets by (package, name), the resolver handed in.
+  resolveCatalogReference,
+  type SecurityCatalogPackageScopedRegistry,
+  type SecurityCatalogReferenceScope,
+  type SecurityCatalogResolution,
 } from './security-catalog.js';
 
 // ADR-0131 D3/D4/D10 — the junction rows turned into the `permissionSets` each

@@ -29,6 +29,7 @@ import {
     resolvePackageScopedName,
     type PackageScopedRefusal,
     type PackageScopedRegistry,
+    type PackageScopedResolution,
 } from '@objectstack/objectql';
 
 /** The registry, when it carries the slice the package-scoped resolver reads. */
@@ -58,4 +59,30 @@ export function refusedConnectorNames(
         if (resolved.status === 'refused') refused.set(name, resolved);
     }
     return refused;
+}
+
+/**
+ * [ADR-0150 D3] The engine's reader over the one package-scoped resolver for
+ * the `connector` type (`AutomationEngine.setConnectorNameResolver`): which
+ * declared connector instance a bare `connectorConfig.connectorId` means for a
+ * caller of package `callerPackageId` (`null`: no package).
+ *
+ * Resolved at QUESTION time, never at boot, like the flow reader. A
+ * composition with no ObjectQL, or whose registry offers none of the
+ * package-scoped reads, has no registry to ask: the answer is `undefined` and
+ * `connector_action` dispatches by name as before.
+ */
+export function connectorNameResolver(
+    ctx: { getService<T>(name: string): T },
+): (name: string, callerPackageId: string | null) => PackageScopedResolution | undefined {
+    return (name, callerPackageId) => {
+        let registry: PackageScopedRegistry | undefined;
+        try {
+            registry = packageScopedRegistryOf(ctx.getService<{ registry?: unknown }>('objectql')?.registry);
+        } catch {
+            return undefined;
+        }
+        if (!registry) return undefined;
+        return resolvePackageScopedName(registry, { type: 'connector', name, callerPackageId });
+    };
 }

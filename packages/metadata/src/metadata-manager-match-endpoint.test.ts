@@ -263,3 +263,53 @@ describe('#5089 — MetadataManager.matchEndpoint', () => {
     });
   });
 });
+
+/**
+ * [ADR-0150 D4, child E6] The index's item list keeps one slot per
+ * `(package, name)`, not per bare name: a bare-name map let one package's
+ * stored `api` item overwrite another package's same-named item before the
+ * matcher ever saw it. A package-less row under a name one package holds is
+ * that holder's customization and shares its slot (D4).
+ */
+describe('the endpoint index keeps one slot per (package, name) (ADR-0150 D4)', () => {
+  /** A store whose keyed read answers the given rows, in order, the way `sys_metadata` does. */
+  function storeOf(rows: Array<{ name: string; data: Record<string, unknown> }>): MetadataLoader {
+    return {
+      contract: { name: 'rows', protocol: 'datasource:', capabilities: { read: true, write: false } },
+      async load() { return { data: null }; },
+      async loadMany(type: string) { return type === 'api' ? rows.map((r) => r.data) : []; },
+      async loadManyKeyed(type: string) { return type === 'api' ? rows : []; },
+      async exists() { return false; },
+      async stat() { return null; },
+      async list() { return []; },
+    } as unknown as MetadataLoader;
+  }
+  const A_PATH = { method: 'GET', path: '/api/v1/apps/alpha/tasks' };
+  const B_PATH = { method: 'GET', path: '/api/v1/apps/beta/tasks' };
+
+  it('serves two packages\' same-named api items, each on its own route', async () => {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerLoader(storeOf([
+      { name: 'list_tasks', data: { ...endpoint({ path: A_PATH.path, target: 'a' }), packageId: 'com.acme.alpha' } },
+      { name: 'list_tasks', data: { ...endpoint({ path: B_PATH.path, target: 'b' }), packageId: 'com.acme.beta' } },
+    ]));
+    expect((await manager.matchEndpoint(A_PATH))?.endpoint.target).toBe('a');
+    expect((await manager.matchEndpoint(B_PATH))?.endpoint.target).toBe('b');
+  });
+
+  it('CONTROL — a package-less row under a name one package holds shares that holder\'s slot: the first one read keeps it', async () => {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerLoader(storeOf([
+      { name: 'list_tasks', data: { ...endpoint({ path: A_PATH.path, target: 'customized' }) } },
+      { name: 'list_tasks', data: { ...endpoint({ path: B_PATH.path, target: 'shipped' }), packageId: 'com.acme.alpha' } },
+    ]));
+    expect((await manager.matchEndpoint(A_PATH))?.endpoint.target).toBe('customized');
+    expect(await manager.matchEndpoint(B_PATH)).toBeUndefined();
+  });
+
+  it('CONTROL — an environment-authored row whose name no package holds is served', async () => {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerLoader(storeOf([{ name: 'list_tasks', data: endpoint({ path: A_PATH.path, target: 'env' }) }]));
+    expect((await manager.matchEndpoint(A_PATH))?.endpoint.target).toBe('env');
+  });
+});

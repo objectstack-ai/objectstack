@@ -30,7 +30,16 @@
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { SqlDriver } from './index.js';
-import { diffManagedIndexes, legacyUniqueReplacements, type PhysicalIndex } from './schema-drift.js';
+import {
+  diffManagedIndexes,
+  enforcedIndexKey,
+  hashShadowColumnFor,
+  legacyUniqueReplacements,
+  parseHashShadowKeyParts,
+  parseHashShadowRowScope,
+  type PhysicalIndex,
+} from './schema-drift.js';
+import { MYSQL_CELL, declareDialectCell } from './live-dialect-matrix.testkit.js';
 
 const LEDGER = 'sys_metadata_activation';
 const OLD = 'uniq_sys_metadata_activation_metadata_type_name';
@@ -232,5 +241,140 @@ describe('the widening arm — a real SQLite database built with the old key', (
     // …and the guard still keeps rows with no package to one per name.
     await k(LEDGER).insert({ id: 'd', metadata_type: 'flow', name: 'x', active: false });
     await expect(k(LEDGER).insert({ id: 'e', metadata_type: 'flow', name: 'x', active: true })).rejects.toThrow(/UNIQUE/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MariaDB's spelling of the package-less guard: a ROW-SCOPED hash shadow
+// ---------------------------------------------------------------------------
+
+/**
+ * MariaDB has no partial index and no functional key part, so `metadata-protocol`
+ * builds the guard as a UNIQUE key over an INVISIBLE generated column holding
+ * `CASE WHEN package_id IS NULL THEN <digest of metadata_type, name> END`. The
+ * expression below is the one MariaDB 11.8 stores (the separator literal is the
+ * 0x1f byte, spelled here as its escape).
+ */
+const MARIADB_GUARD_EXPR =
+  "case when `package_id` is null then unhex(sha2(concat(`metadata_type`,'\u001f',`name`),256)) end";
+const GUARD_SHADOW = hashShadowColumnFor(GUARD_NAME);
+/** The guard as `introspectIndexes` reads it on MariaDB after `resolveHashShadowKeys`. */
+const mariaGuard: PhysicalIndex = {
+  name: GUARD_NAME,
+  columns: [GUARD_SHADOW],
+  unique: true,
+  partial: true,
+  shadowKey: [
+    { column: 'metadata_type', nullSafe: false },
+    { column: 'name', nullSafe: false },
+  ],
+};
+
+describe('a row-scoped hash shadow (MariaDB package-less guard) — pure functions', () => {
+  it('names its scope column, and its key parts are the digest\'s alone — never the scope column', () => {
+    expect(parseHashShadowRowScope(MARIADB_GUARD_EXPR)).toBe('package_id');
+    expect(parseHashShadowKeyParts(MARIADB_GUARD_EXPR)).toEqual([
+      { column: 'metadata_type', nullSafe: false },
+      { column: 'name', nullSafe: false },
+    ]);
+    expect(enforcedIndexKey(mariaGuard).columns).toEqual(['metadata_type', 'name']);
+  });
+
+  it('an ordinary shadow has no scope, and its key parts read as before', () => {
+    const plainShadow = "unhex(sha2(concat(coalesce(`organization_id`,_utf8mb4'__global__'),0x1f,`v`),256))";
+    expect(parseHashShadowRowScope(plainShadow)).toBeNull();
+    expect(parseHashShadowKeyParts(plainShadow)).toEqual([
+      { column: 'organization_id', nullSafe: true },
+      { column: 'v', nullSafe: false },
+    ]);
+  });
+
+  it('counts as the widening arm\'s guard: the old two-part UNIQUE is one SAFE replace, and the guard draws no entry', () => {
+    const entries = diff([plain(OLD, ['metadata_type', 'name']), plain(NEW, ['metadata_type', 'package_id', 'name']), mariaGuard]);
+    expect(entries.map((e) => [e.op.type, e.category])).toEqual([['replace_unique_index', 'safe']]);
+    expect(entries[0].op).toMatchObject({ dropIndexNames: [OLD], createIndexName: NEW });
+  });
+
+  it('a shadow carrier that is NOT row-scoped is no guard: the old index stays KEPT', () => {
+    const unscoped: PhysicalIndex = { ...mariaGuard, partial: undefined };
+    expect(diff([plain(OLD, ['metadata_type', 'name']), plain(NEW, ['metadata_type', 'package_id', 'name']), unscoped])
+      .some((e) => e.op.type === 'replace_unique_index')).toBe(false);
+  });
+});
+
+declareDialectCell(MYSQL_CELL, 'activation ledger package-less guard on MariaDB (row-scoped shadow)', (cell) => {
+  describe('an upgraded MariaDB database: the old key retires safely, and the guard never shows', () => {
+    let driver: SqlDriver | undefined;
+    afterEach(async () => {
+      await driver?.disconnect();
+      driver = undefined;
+    });
+
+    const ledger = (indexes: any[]) => [{
+      name: LEDGER,
+      systemFields: { tenant: false },
+      fields: {
+        metadata_type: { type: 'text', required: true, maxLength: 100 },
+        name: { type: 'text', required: true, maxLength: 255 },
+        package_id: { type: 'text', maxLength: 255 },
+        active: { type: 'boolean' },
+      },
+      indexes,
+    }];
+
+    it('plan = one safe replace (no drop_index, no drop_column); apply; re-plan empty; reads never see the shadow', async (ctx) => {
+      driver = new SqlDriver(cell.config());
+      (driver as any).logger = { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() };
+      const k = (driver as any).knex;
+      const [[version]] = await k.raw('SELECT VERSION() AS v');
+      // MySQL keeps its functional key part (no shadow); this measurement is MariaDB's.
+      if (!/mariadb/i.test(String(version?.v))) ctx.skip();
+      await k.raw(`DROP TABLE IF EXISTS ${LEDGER}`);
+
+      await driver.initObjects(ledger([{ fields: ['metadata_type', 'name'], unique: 'global' }]) as any);
+      await driver.initObjects(ledger(ledgerIndexes) as any);
+      // The statement `metadata-protocol` runs on MariaDB
+      // (`buildActivationLedgerPackagelessMariaDbSql`), verbatim.
+      await k.raw(
+        `ALTER TABLE ${LEDGER} ADD COLUMN ${GUARD_SHADOW} VARBINARY(32) GENERATED ALWAYS AS (CASE WHEN package_id IS NULL ` +
+          `THEN unhex(sha2(concat(metadata_type, 0x1f, name), 256)) END) VIRTUAL INVISIBLE, ` +
+          `ADD UNIQUE KEY ${GUARD_NAME} (${GUARD_SHADOW})`,
+      );
+
+      const plan = (await driver.detectManagedDrift()).filter((e) => e.table === LEDGER);
+      expect(plan.map((e) => [e.op.type, e.category])).toEqual([['replace_unique_index', 'safe']]);
+      expect(plan[0].op).toMatchObject({ dropIndexNames: [OLD], createIndexName: NEW });
+
+      const { applied, skipped } = await driver.applyMigrationEntries(plan);
+      expect([applied.length, skipped]).toEqual([1, []]);
+      expect((await driver.detectManagedDrift()).filter((e) => e.table === LEDGER)).toEqual([]);
+
+      const [stats] = await k.raw(
+        'SELECT DISTINCT INDEX_NAME AS n FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?',
+        [LEDGER],
+      );
+      expect(stats.map((r: any) => r.n).sort()).toEqual(['PRIMARY', NEW, GUARD_NAME].sort());
+
+      await driver.create(LEDGER, { id: 'a', metadata_type: 'flow', name: 'x', active: false });
+      // A second row naming no package: refused by the guard.
+      await expect(driver.create(LEDGER, { id: 'b', metadata_type: 'flow', name: 'x', active: true }))
+        .rejects.toMatchObject({ code: 'ER_DUP_ENTRY', message: expect.stringContaining(GUARD_NAME) });
+      await driver.create(LEDGER, { id: 'c', metadata_type: 'flow', name: 'x', package_id: 'com.acme.alpha', active: false });
+      await driver.create(LEDGER, { id: 'd', metadata_type: 'flow', name: 'x', package_id: 'com.acme.beta', active: false });
+      await expect(
+        driver.create(LEDGER, { id: 'e', metadata_type: 'flow', name: 'x', package_id: 'com.acme.alpha', active: true }),
+      ).rejects.toMatchObject({ code: 'ER_DUP_ENTRY', message: expect.stringContaining(NEW) });
+
+      // The carrier column never reaches a read.
+      const rows = await driver.find(LEDGER, {});
+      expect(rows).toHaveLength(3);
+      for (const r of rows) expect(Object.keys(r)).not.toContain(GUARD_SHADOW);
+      const [star] = await k.raw(`SELECT * FROM ${LEDGER}`);
+      for (const r of star) expect(Object.keys(r)).not.toContain(GUARD_SHADOW);
+
+      // A second boot of this release leaves everything as it is.
+      await driver.initObjects(ledger(ledgerIndexes) as any);
+      expect((await driver.detectManagedDrift()).filter((e) => e.table === LEDGER)).toEqual([]);
+    });
   });
 });

@@ -1,6 +1,6 @@
 # ADR-0048: Cross-package metadata collision — package-id identity, namespace install gate, package-scoped resolution
 
-**Status**: Revised (2026-06-13) — supersedes the original *per-item collision detection* framing. The runtime guard shipped under the original proposal is **retained as a same-package authoring backstop**; the strategic direction for the app-marketplace era is revised below. · **Superseded in part by [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md)** (2026-10-31) — §3.3's sentence that a context-free read "is best-effort: it returns the first match": a read of a name a code package ships has an owner — that package, or the declared override its paired `<base>.custom` publishes — and a same-named item of a package outside that closure is served only under its own address (ADR-0146 D8); and §3.4's coexistence "by construction", for a base's dependency closure only: the paired `<base>.custom`'s item bearing a base item's name is a declared override or is refused at publish — declare or rename — and any other dependent package's item bearing a base item's name is refused at publish — rename; only the pair declares (ADR-0146 D2, ruled 2026-10-31 on #28364 and #28390). Packages with no dependency relation keep §3.3 and §3.4 as written; qualify-to-cross, the same-package overwrite and the 2026-10-08 addendum stand. · **Amended** (2026-11-07, [#30794](https://github.com/objectstack-ai/objectstack/issues/30794)): §3.5 — rename-on-install ships for **unmanaged** copies, through the one rename engine `duplicatePackage` applies; a managed install is never renamed and §3.2 stands for it as written. See the dated note under §3.5. · **Amended by [ADR-0150](./0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md)** (proposed 2026-11-08): the 2026-11-06 addendum's one-holder refusal retires type by type as each type's readers carry the package; it stays for platform-requested bare names and, as ruled (ADR-0150 Q2 = A, record [`6724050556`](https://github.com/objectstack-ai/objectstack/issues/31527#issuecomment-6724050556) on #31527), for positions. This line takes effect when ADR-0150 is accepted.
+**Status**: Revised (2026-06-13) — supersedes the original *per-item collision detection* framing. The runtime guard shipped under the original proposal is **retained as a same-package authoring backstop**; the strategic direction for the app-marketplace era is revised below. · **Superseded in part by [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md)** (2026-10-31) — §3.3's sentence that a context-free read "is best-effort: it returns the first match": a read of a name a code package ships has an owner — that package, or the declared override its paired `<base>.custom` publishes — and a same-named item of a package outside that closure is served only under its own address (ADR-0146 D8); and §3.4's coexistence "by construction", for a base's dependency closure only: the paired `<base>.custom`'s item bearing a base item's name is a declared override or is refused at publish — declare or rename — and any other dependent package's item bearing a base item's name is refused at publish — rename; only the pair declares (ADR-0146 D2, ruled 2026-10-31 on #28364 and #28390). Packages with no dependency relation keep §3.3 and §3.4 as written; qualify-to-cross, the same-package overwrite and the 2026-10-08 addendum stand. · **Amended** (2026-11-07, [#30794](https://github.com/objectstack-ai/objectstack/issues/30794)): §3.5 — rename-on-install ships for **unmanaged** copies, through the one rename engine `duplicatePackage` applies; a managed install is never renamed and §3.2 stands for it as written. See the dated note under §3.5. · **Amended by [ADR-0150](./0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md)** (proposed 2026-11-08): the 2026-11-06 addendum's one-holder refusal retires type by type as each type's readers carry the package; it stays for platform-requested bare names and, as ruled (ADR-0150 Q2 = A, record [`6724050556`](https://github.com/objectstack-ai/objectstack/issues/31527#issuecomment-6724050556) on #31527), for positions. This line takes effect when ADR-0150 is accepted. · **Amended** (2026-11-09, [#31685](https://github.com/objectstack-ai/objectstack/issues/31685)): §5's authoring-lint bullet, rewritten in place — since ADR-0150 child P ([#31669](https://github.com/objectstack-ai/objectstack/issues/31669)) the bare-name finding of `naming/namespace-prefix` judges only capabilities and positions, and the refusal #30806 phase 3 was to add is withdrawn. §3.4's lint sentence stands as written; see the dated note under §3.4.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0003](./0003-package-as-first-class-citizen.md) (package as first-class citizen), [ADR-0005](./0005-metadata-customization-overlay.md) (artifact vs runtime overlay precedence), [ADR-0008](./0008-metadata-repository-and-change-log.md) (metadata repository, `MetaRef` identity), [ADR-0010](./0010-metadata-protection-model.md) (package provenance / `_packageId` stamping)
 **Consumers**: `@objectstack/objectql` (`SchemaRegistry.registerItem`, `ObjectQL.registerApp`, install path), `@objectstack/console` / `objectui` (routing + metadata resolution), package authors, CLI/CI install path, the app marketplace registry.
@@ -290,6 +290,15 @@ package — stays covered by the `naming/namespace-prefix` lint in `os lint`.
 > action bound to an object. See
 > [Addendum (2026-11-06)](#addendum-2026-11-06-bare-names-resolved-without-a-package-hold-one-package--34-narrowed).
 
+> **Note (2026-11-09, [#31685](https://github.com/objectstack-ai/objectstack/issues/31685)) — the
+> lint sentence above still holds.** [ADR-0150](./0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md)
+> child P ([#31669](https://github.com/objectstack-ai/objectstack/issues/31669)) retired the
+> rule's bare-name finding for the types ADR-0150 D1 puts in buckets 2–4, and kept the finding
+> this section relies on (ADR-0150 D9): two items of one type that land on one registry key
+> inside one package — among its apps, pages, dashboards, flows, actions (per `objectName`),
+> reports and datasets (`DUPLICATE_KEYED_TYPES`, `packages/cli/src/commands/lint.ts`) — are
+> still reported. What the rule covers now is in §5.
+
 ### 3.5 Namespace rename-on-install is deferred (non-goal)
 
 Renaming a colliding namespace on install would require rewriting **every**
@@ -381,25 +390,34 @@ alias is optional and out of scope for the phases below.
 Status legend: **[done]** shipped · **[proposed]** not yet built ·
 **[deferred]** out of scope here.
 
-- **[done]** Authoring lint: `naming/namespace-prefix` in `os lint` warns on
-  every bare package-authored top-level name in every manifest collection of a
-  package that declares `manifest.namespace` (a package without one is not
-  judged), and gives the rename as its `fix` (ruling C on #30798, #30804). It
-  does not judge objects (`defineStack` refuses those), views (named for their
-  object), docs (`docs/namespace-prefix`), extensions, translation bundles,
-  fields, `functions`, or an item that declares `overrides`. A name carries the
-  namespace when it is the namespace itself (the namespace-named app per
-  ADR-0019), starts with `<ns>_`, is a dotted `<ns>.<short>` name, the
-  capability shape (maintainer ruling 2026-11-06T11:08Z, recorded in
-  [#30804 comment 6683456244](https://github.com/objectstack-ai/objectstack/issues/30804#issuecomment-6683456244)),
-  or starts with `sys_`. The permission set `guest_portal` is exempt, because
-  the public form doors request it by that bare name (ADR-0138; maintainer
-  ruling 2026-11-06T14:57Z, recorded in
-  [#30804 comment 6687835712](https://github.com/objectstack-ai/objectstack/issues/30804#issuecomment-6687835712);
-  `PLATFORM_REQUESTED_BARE_NAMES`). The rule also reports a name declared
-  twice in one package among its apps, pages, dashboards, flows, actions (per
-  `objectName`), reports and datasets. It is warning-only; the refusal is
-  phase 3 of the same ruling (#30806).
+- **[done]** Authoring lint: `naming/namespace-prefix` in `os lint` reports two
+  warning-only findings over the declarations of one package (amended in place
+  2026-11-09, [#31685](https://github.com/objectstack-ai/objectstack/issues/31685), after
+  ADR-0150 child P, [#31669](https://github.com/objectstack-ai/objectstack/issues/31669)).
+  - **The duplicate finding** (§3.4, kept by ADR-0150 D9): a name declared twice in one
+    package among its apps, pages, dashboards, flows, actions (per `objectName`), reports
+    and datasets (`DUPLICATE_KEYED_TYPES`). It asks for a distinct name, never for a prefix.
+  - **The bare-name finding** judges only the collections whose names keep the literal
+    prefix (`PREFIX_JUDGED_COLLECTIONS`): capabilities, spelled `NS.SHORT` (ADR-0150 D1
+    bucket 1; maintainer ruling 2026-11-06T11:08Z, recorded in
+    [#30804 comment 6683456244](https://github.com/objectstack-ai/objectstack/issues/30804#issuecomment-6683456244)),
+    and positions, one slot per name in the environment (ADR-0150 D7). It judges a package
+    that declares `manifest.namespace`, and gives the rename as its `fix`. A name carries
+    the namespace when it is the namespace itself, starts with `<ns>_`, is a dotted
+    `<ns>.<short>` name, or starts with `sys_`; an item that declares `overrides` is not
+    judged.
+  - **Every other type keeps its short name.** ADR-0150 identifies buckets 2–4 by
+    (package, name) (D1), so child P retired the warning that asked for `<ns>_<short>`
+    there (D9), and a name already prefixed stays valid. The permission set `guest_portal`,
+    exempted by ruling 2026-11-06T14:57Z
+    ([#30804 comment 6687835712](https://github.com/objectstack-ai/objectstack/issues/30804#issuecomment-6687835712);
+    `PLATFORM_REQUESTED_BARE_NAMES`), is no longer judged at all: permission sets are
+    bucket 2.
+  - **No refusal follows.** Phase 3 of ruling C on #30798 (#30806), which was to turn the
+    bare-name finding into a refusal at `defineStack` and the save door, is withdrawn
+    (maintainer ruling A 「转向包寻址」, recorded in
+    [#30806 comment 6721941146](https://github.com/objectstack-ai/objectstack/issues/30806#issuecomment-6721941146);
+    ADR-0150's status line).
 - **[done] Phase 1 — install-time namespace gate.** `NamespaceConflictError` +
   the gate in `SchemaRegistry.installPackage` (refuses a package whose
   `manifest.namespace` is already owned by a different installed package;

@@ -23,7 +23,7 @@ import { refuseUngrantedActivationWrite, FLOW_ACTIVATION_SUBJECT, readEffectiveT
 // [ADR-0131 D3 · D12 items 7–8] The walled refusal's one predicate: under a
 // wall the environment's metadata, flow definitions included, is the platform
 // operator's. The same verdict every `/meta` and `/packages` write door asks.
-import { walledCatalogWriteVerdict } from '@objectstack/metadata-core';
+import { installedManifestsOf, pairOf, walledCatalogWriteVerdict, type InstalledPackageSource } from '@objectstack/metadata-core';
 // [#19874] What the run-lifecycle refusal names as the remedy is read off the
 // SAME inputs the platform-admin derivation reads — the requested posture, the
 // wall predicate, the declared-administrator variable and the set name — so
@@ -2565,10 +2565,15 @@ type CloneLanding = { packageId: string } | { refused: HttpDispatcherResult };
  * accepted the copy: the engine's registration is the one validation of a
  * flow definition (strict parse — the name pattern among it — cycles, node
  * config keys, expressions), so a copy it refuses is refused before any pair
- * exists, with no second copy of that check here. A refusal that can only
- * come later — the ensured pair judged not writable, or the save refused —
- * leaves the pair in place: that is the pair's ordinary state (ensure is
- * idempotent and an empty pair is a valid one) and the next clone reuses it.
+ * exists, with no second copy of that check here. A pair that is already
+ * installed is judged by the target rule before the ensure is asked, so a
+ * landing the rule refuses creates no pair; a pair the ensure creates is one
+ * the rule admits (an App member's included — the rule is membership in the
+ * save gate's closure, `packageDependencyClosure`, which holds the App's
+ * members once the pair declares its App). A refusal that can only
+ * come later — the save refused — leaves the pair in place: that is the
+ * pair's ordinary state (ensure is idempotent and an empty pair is a valid
+ * one) and the next clone reuses it.
  */
 async function resolveCloneTarget(
     deps: DomainHandlerDeps,
@@ -2622,6 +2627,22 @@ async function resolveCloneTarget(
             // the pair here would register a package on this replica alone.
             const oneReplica = await multiReplicaPairCreationRefusal(deps, context, await deps.getObjectQL(context), owner, `Cloning ${subject}`);
             if (oneReplica) return { refused: { handled: true, response: deps.errorFromThrown(multiReplicaPackageChangeError(oneReplica)) } };
+            // Judge before creating: the pair the ensure derives (`pairOf`,
+            // the App's pair for an App member — ruling record 6691022506),
+            // when it is already installed, is judged BEFORE the ensure, so a
+            // refused landing creates nothing and its "Nothing was written"
+            // is literal. An absent pair is created by the ensure writable and
+            // declaring its App; the rule is membership in the save gate's
+            // closure (`packageDependencyClosure`, see
+            // `newSimilarTargetRefusal`), which for such a pair holds the
+            // App's members, `owner` among them — so a pair the ensure creates
+            // is never refused below.
+            const registry = ((await deps.getObjectQL(context)) as { registry?: InstalledPackageSource } | null | undefined)?.registry;
+            const derived = pairOf(owner, installedManifestsOf(registry));
+            if (derived.ok && registry?.getPackage?.(derived.value)) {
+                const existing = await judge(derived.value);
+                if ('refused' in existing) return existing;
+            }
             let pair: string;
             try {
                 pair = (await ensure.call(protocol, { basePackageId: owner })).packageId;

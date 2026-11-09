@@ -1,0 +1,13 @@
+---
+'@objectstack/runtime': patch
+---
+
+fix(runtime): cloning a flow or permission set shipped by a member of an installed App lands in the App's customization package instead of being refused by the door that created it
+
+Clause-②: yes (widening) — widened: `POST /api/v1/automation/:name/clone` with no `package`, for a flow a member of an installed App ships, and `POST /api/v1/automation/:name/clone` / `POST /api/v1/security/permission-sets/:name/clone` naming that App's customization package (`<app>.custom`) in `package`, now land the copy there (200) where they answered `409 RESOURCE_CONFLICT [new_similar_target_outside_closure]`. The "new similar" target rule is now membership in `packageDependencyClosure(target)`, the metadata save's own write scope: the source's package, and for a permission set each object's owner, must be in it. Beyond the target's own declared dependencies, that closure holds (i) for an App's customization package that declares its App, the App's members and each member's declared dependencies, transitively; (ii) for the permission-set objects check, the objects those packages own; (iii) for a target that declares a residual owner (a stack's top-level owner with no package record, ADR-0130 D4), that owner's declared dependencies. Every explicit `package` newly accepted is one the save into it already accepted; nothing outside that closure is accepted.
+Metadata-protocol: none
+
+- **Before.** A member's customization package is its App's (`<app>.custom`). The flow clone door's default landing ensured that package and then refused it, because the target rule asked the App's package to declare a dependency on the member, which it never does. The refusal said nothing was written, but the empty customization package had already been created. Naming `<app>.custom` explicitly was refused the same way on both clone doors, including for a permission set granting on an object the member owns.
+- **Now.** The copy lands in `<app>.custom`, by default or when named. The flow door also judges an already-installed customization package before it asks for one to be ensured, so a landing it refuses creates nothing.
+- **Still refused.** A writable package that declares only the App (not the member), or any other target whose save-gate closure does not hold the source's package or a granted object's owner, is refused `409` with nothing written. Flows and permission sets of packages that belong to no App land in their own pair as before.
+- **Who sees it.** An administrator who copies, in Studio or through the API, a flow or permission set that a module of an installed App ships.

@@ -150,6 +150,24 @@ export interface AuthEventAuditSurface {
     actor?: string;
     context?: Record<string, unknown>;
   }): Promise<unknown>;
+  /**
+   * [#31796] plugin-audit's credential-use writer (`credential-use-audit.ts`
+   * there), called by the MCP last-use stamper for a `skip_consent` OAuth
+   * client's use, the one OAuth use with no consent row whose stamp the ledger
+   * could recognise. Optional: a sink without it records no such row.
+   * `kind` and `objectName` are closed literals for the reason `action` is.
+   */
+  recordCredentialUse?(event: {
+    kind: 'oauth_access_token';
+    objectName: 'sys_oauth_application';
+    /** The client's `sys_oauth_application` row id. */
+    credentialId: string;
+    userId: string;
+    organizationId?: string;
+    clientId?: string;
+    /** The start of the use window, as an ISO instant. */
+    usedAt?: string;
+  }): Promise<unknown>;
 }
 
 /** The event this module hands the sink, before it becomes a ledger row. */

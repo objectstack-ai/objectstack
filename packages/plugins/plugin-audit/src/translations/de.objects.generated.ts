@@ -41,7 +41,8 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           platform_admin_standing_change: "Änderung des Plattform-Admin-Status",
           action_invocation: "Aktionsaufruf",
           package_uninstall: "Paket-Deinstallation",
-          package_unmanaged_import: "Package Unmanaged Import"
+          package_unmanaged_import: "Package Unmanaged Import",
+          credential_use: "Credential Use"
         }
       },
       user_id: {

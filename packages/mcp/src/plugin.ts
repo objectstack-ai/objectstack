@@ -52,6 +52,7 @@ import {
 } from './stdio-data-bridge.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
 import { CONNECT_AGENT_UI_BUNDLE } from './connect-ui.js';
+import { configureReadFileExtraction } from './file-content.js';
 
 /**
  * [#15348] Resolve the deployment's EFFECTIVE tenancy posture for the stdio
@@ -399,6 +400,11 @@ export class MCPServerPlugin implements Plugin {
       instructions: this.options.instructions,
       logger: ctx.logger,
     };
+
+    // [#31826] `read_file`'s two host bounds on PDF and Word extraction
+    // (`OS_MCP_READ_FILE_CPU_BUDGET_MS`, `OS_MCP_READ_FILE_MAX_CONCURRENT`),
+    // read once here: a malformed value fails the boot naming the variable.
+    configureReadFileExtraction();
 
     this.runtime = new MCPServerRuntime(config);
     ctx.registerService('mcp', this.runtime);

@@ -140,6 +140,17 @@ export type {
   PackageScopedRefusalReason,
 } from './package-scoped-resolver.js';
 
+// [#31680, ADR-0150 D3] Child E8: the by-name readers of the presentation and
+// AI types consult `(package, name)` through the resolver above — the types
+// wired, the read every reader shares, and the coded refusal it throws.
+export {
+  PACKAGE_SCOPED_READ_TYPES,
+  isPackageScopedReadType,
+  readPackageScopedItem,
+  PackageScopedNameRefusedError,
+} from './package-scoped-read.js';
+export type { PackageScopedReadType } from './package-scoped-read.js';
+
 // [#31673, ADR-0150 D4] The action engine's `(package, objectName, name)` key:
 // the declaration half — which package's action a bare name on an object means
 // to a caller, resolved by the resolver above over the items that own that
@@ -201,11 +212,13 @@ export {
   namespacePackageOf,
   namespaceNameConflicts,
   namespaceNameConflictMessage,
+  residualNamespacePackageOf,
 } from './namespace-co-owner-names.js';
 export type {
   NamespaceNameConflict,
   NamespacePackage,
   NamespaceUniqueType,
+  ResidualItems,
 } from './namespace-co-owner-names.js';
 
 // [ADR-0130 D4] The residual-picklist refusal the `manifest` service throws: a
