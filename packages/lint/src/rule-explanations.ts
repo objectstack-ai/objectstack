@@ -4975,7 +4975,7 @@ const MAPPING_TARGET_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
 
 const MAPPING_CONNECTOR_SOURCE_UNKNOWN_EXPLANATION: RuleExplanation = {
   rule: 'mapping-connector-source-unknown',
-  covers: 'what a mapping\'s connectorSource.connector may name',
+  covers: 'what a mapping\'s connector source may name',
   paragraphs: [
     'A mapping\'s `connectorSource.connector` names the connector a sync pulls its records from. ' +
       'The pull reads only a declared instance, a `connectors[]` entry, never a connector a plugin ' +
