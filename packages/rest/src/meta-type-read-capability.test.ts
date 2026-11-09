@@ -24,6 +24,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import '@objectstack/objectql';
 import { resolveAuthzContext } from '@objectstack/core';
 import { registerDatasourceAdminRoutes } from '@objectstack/service-datasource';
 import { PLATFORM_CAPABILITY_NAMES } from '@objectstack/spec/security';
@@ -140,6 +141,10 @@ function protocolDouble() {
         findReferencesToMeta: vi.fn(async () => ({ references: [{ type: 'object', name: 'wh_order', path: 'datasource', kind: 'object datasource' }] })),
         listDrafts: vi.fn(async () => ({ drafts: [] })),
         findData: vi.fn().mockResolvedValue([]),
+        // [ADR-0150 D5, #31691 G1] The qualified path's address reading: the
+        // namespace `crm` is installed, held by the package `crm`.
+        resolveMetaItemAddress: vi.fn((request: { segment: string }) =>
+            (request.segment === 'crm' ? { kind: 'namespace', namespace: 'crm', packageId: 'crm' } : undefined)),
     };
 }
 
@@ -184,9 +189,11 @@ function readShapes(rest: any): Array<{ label: string; path: string; query: Reco
 async function drive(rest: any, routePath: string, type: string, name: string, query: Record<string, string> = {}) {
     const route = rest.getRoutes().find((r: any) => r.method === 'GET' && r.path === routePath);
     if (!route) throw new Error(`GET ${routePath} is not registered`);
-    const concrete = routePath.replace(':type', type).replace(':name', name);
+    const concrete = routePath.replace(':type', type).replace(':ns', 'crm').replace(':name', name);
     const res = makeRes();
-    await route.handler({ method: 'GET', path: concrete, params: { type, name }, query, body: {}, headers: {} }, res);
+    // [#31691 G1] The qualified door `/:type/:ns/:name` names the installed namespace `crm`.
+    const params = routePath.includes(':ns') ? { type, ns: 'crm', name } : { type, name };
+    await route.handler({ method: 'GET', path: concrete, params, query, body: {}, headers: {} }, res);
     return res;
 }
 

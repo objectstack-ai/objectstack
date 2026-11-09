@@ -316,7 +316,21 @@ export type PackageScopedRefusalReason =
   /** two or more package holders in the environment, and the caller names no package */
   | 'ambiguous-in-environment'
   /** holders exist, and none is in the caller package's declared closure (plus `sys`) */
-  | 'outside-closure';
+  | 'outside-closure'
+  /**
+   * [ADR-0150 D5, child G1] the read names a package as its exact qualifier
+   * (`?package=X`, `/meta/:type/:ns/:name`), or the environment (`_env`), and
+   * it holds no item of the name; other holders do. `callerPackageId` is the
+   * package named, `null` for the environment.
+   */
+  | 'not-held-by-qualifier'
+  /**
+   * [ADR-0150 D2/D5, child G1] the read names a namespace (`/meta/:type/:ns/:name`)
+   * that two or more packages share (a shareable namespace: `base`, `system`,
+   * `sys`), and more than one of them holds the name. `callerPackageId` is
+   * `null`: the address names no one package.
+   */
+  | 'ambiguous-in-namespace';
 
 /** A resolution's answer. */
 export type PackageScopedResolution<T = unknown> =
@@ -469,6 +483,12 @@ export function packageScopedRefusalMessage(refusal: Omit<PackageScopedRefusal, 
     case 'outside-closure':
       return `${subject} is held outside the declared dependency closure of package "${refusal.callerPackageId}": ` +
         `${named}. Declare a dependency on the package that holds it (ADR-0141).`;
+    case 'not-held-by-qualifier':
+      return `${subject} is not held by ${refusal.callerPackageId === null ? 'the environment' : `package "${refusal.callerPackageId}"`}, ` +
+        `which the address names exactly (ADR-0150 D5): it is held by ${named}. Address it by its holder.`;
+    case 'ambiguous-in-namespace':
+      return `${subject} is held by ${refusal.candidates.length} packages that share the namespace the address names ` +
+        `(ADR-0150 D2): ${named}. Nothing picks one of them: address it by its package.`;
   }
 }
 

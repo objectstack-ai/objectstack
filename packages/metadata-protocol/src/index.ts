@@ -259,6 +259,10 @@ export type { MetadataHostEngine } from './host-engine.js';
 // "which packages are read-only" has ONE definition rather than two that drift.
 export { isWritablePackage, READ_ONLY_PACKAGE_SCOPES } from './package-writability.js';
 export { refuseNamespaceObjectNameClashes } from './protocol-save-door-refusals.js';
+// [ADR-0150 D5, epic #31527 child G1] The qualified by-name path's reading:
+// the sub-resource literals that keep their route (`/meta/:type/:name/history`),
+// and the address shape `resolveMetaItemAddress` answers. Both transports read them.
+export { META_ITEM_SUBRESOURCE_SEGMENTS, type MetaItemAddress } from './protocol-exact-qualifier.js';
 export type { PackageWritabilityEngine } from './package-writability.js';
 
 // [#28409, ADR-0146 D8 item 2] "Is this stored row the served override of base

@@ -39,6 +39,7 @@ import {
 } from './protocol-bundle-members.js';
 import { packagelessContentPackage } from './protocol-environment-rows.js';
 import type { ProtocolHost } from './protocol-host.js';
+import { admitExactQualifier, exactQualifierItem } from './protocol-exact-qualifier.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import {
     bundleMemberOf,
@@ -108,6 +109,16 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
         !request.packageId && typeof registry?.readsByPackage === 'function' && registry.readsByPackage(request.type)
             ? { item: registry.resolveItem(request.type, request.name, null, member) }
             : undefined;
+    // [ADR-0150 D5, epic #31527 child G1] A read that names a package
+    // (`?package=X`, and the qualified path `/meta/:type/:ns/:name` the doors
+    // translate to it) is the EXACT qualifier: X's item with its bound
+    // overlay, or a refusal naming every holder (`409 RESOURCE_CONFLICT`),
+    // never another package's item. Judged before any layer is read
+    // ({@link admitExactQualifier}); the answer the layers below reach is
+    // checked against it once they have ({@link exactQualifierItem}).
+    const exactAddress = await admitExactQualifier(host, {
+        type: request.type, name: request.name, packageId: request.packageId, member,
+    });
     let item: unknown;
     // [ADR-0131 D6] Environment → code: the environment's stored row,
     // else the code packages' definition. No organization's row is read —
@@ -636,6 +647,11 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // pre-existing ordering trade-off, not this issue's). Only when the
     // WHOLE chain resolved nothing does the degraded read change anything,
     // because only then would this method answer "no such item".
+    // [ADR-0150 D5, child G1] An exact read never serves another package's
+    // item: a layer above that answered one (the registry's first-composite
+    // tier, a by-name service read) is replaced by the admitted holder's.
+    if (exactAddress) item = exactQualifierItem(host, request, exactAddress, item, member);
+
     if (item === undefined && serviceDegraded?.degraded) {
         host.throwMetadataServiceUnavailable(serviceDegraded.errors);
     }
