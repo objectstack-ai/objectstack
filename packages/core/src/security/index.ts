@@ -177,6 +177,19 @@ export {
   type TenancyPostureSource,
 } from './api-key.js';
 
+// [#31821] Where a credential use came from: the client facts the
+// `credential_use` ledger row records, carried from the key-admission seam's
+// (and plugin-auth's OAuth) stamp write to plugin-audit's stamp hook.
+export {
+  credentialUseClientOf,
+  currentCredentialUseClient,
+  runWithCredentialUseClient,
+  userAgentOf,
+  type CredentialUseClient,
+  type CredentialUseClientAbsence,
+  type CredentialUseClientInput,
+} from './credential-use-client.js';
+
 // The one "does this user's ban hold" predicate: the key-admission seam and
 // plugin-auth's session-shaped refusals all ask it.
 export { isUserBanInForce, USER_BAN_FIELDS, type UserBanFields } from './user-ban.js';

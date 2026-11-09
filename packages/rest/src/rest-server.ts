@@ -3519,6 +3519,15 @@ export class RestServer {
                 // credential of its own admitted it here, and the key-management
                 // rule must not read it as a signed-in session.
                 onAdmission: forwardAgent ? undefined : (admission) => { admittedBy = admission.credential; },
+                // [#31821] The transport's own peer address, for the
+                // `credential_use` row an admitted API key writes. The auth
+                // service applies the deployment's trust rule to it and the
+                // headers; this door reads no forwarded header as an address.
+                transport: {
+                    remoteAddress: typeof req?.remoteAddress === 'string' && req.remoteAddress
+                        ? req.remoteAddress
+                        : undefined,
+                },
             });
             if (!base) return undefined;
 
