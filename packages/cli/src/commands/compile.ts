@@ -76,6 +76,9 @@ import { findViewContainerNameRefusals } from '../utils/view-container-names.js'
 // [ADR-0150 D2, child N] The package door's namespace name refusal — the same
 // call `os validate` makes at its step 2c-bis.
 import { findNamespaceNameRefusals } from '../utils/namespace-co-owner-names.js';
+// [ADR-0150 D6, child K] A namespace never equals an object name, both directions,
+// and no object is short-named `custom` — the spec's predicate over one artifact.
+import { findNamespaceObjectNameRefusals } from '../utils/namespace-object-names.js';
 // A field `picklist` that names no picklist the stack declares — the walk
 // `os validate` step 2d runs, over the same judge.
 import { judgePicklistReferences, picklistRefusalHeading, printPicklistReferenceNotices } from '../utils/picklist-references.js';
@@ -534,6 +537,26 @@ export default class Compile extends Command {
         printBulletList(
           namespaceNameRefusals.map((r) => r.message),
           { noun: 'namespace name refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
+      // 3a-quater. [ADR-0150 D6, child K] A namespace of this artifact equal
+      //     to one of its object names, or an object short-named `custom`, is
+      //     REFUSED, naming both spellings — the SAME call `os validate` makes
+      //     at its step 2c-ter. Ahead of every artifact write, like 3a.
+      const namespaceObjectRefusals = findNamespaceObjectNameRefusals(result.data as Record<string, unknown>);
+      if (namespaceObjectRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, errors: namespaceObjectRefusals, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
+          this.exit(1);
+        }
+        const n = namespaceObjectRefusals.length;
+        console.log('');
+        printError(`The server would refuse this stack at boot (${n} namespace${n > 1 ? 's' : ''} or object${n > 1 ? 's' : ''} that would name each other)`);
+        printBulletList(
+          namespaceObjectRefusals.map((r) => r.message),
+          { noun: 'namespace/object name refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
         );
         this.exit(1);
       }

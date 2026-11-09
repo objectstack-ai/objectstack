@@ -309,8 +309,8 @@ record means no file**, refused with the same `RECORD_NOT_FOUND`.
   service's maximum upload size before the link is spent. Sending a file's
   bytes through the MCP protocol itself is not supported yet.
 
-Reading a PDF or Word document's text runs inside the server process, and the
-process serves no other request while it does. Two host settings bound it, so
+Reading a PDF or Word document's text runs on a pool of worker threads, so the
+server keeps answering other requests while it does. Two host settings bound it, so
 one caller's files cannot hold the process for everyone else (a shared
 deployment sets its own values):
 

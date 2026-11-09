@@ -59,7 +59,7 @@
  * token that request spends `actions: write` on reaches that path and the
  * failed-jobs re-run below, and no other (`ops.mjs`, `REFUSED_PATH_FAMILIES`).
  * A `run_rerun_failed` is fenced on the run and read back HERE (the section
- * of that name below).
+ * of that name below), and a `pr_enqueue_front` on the pull and its queue.
  * The FIRST failure stops the run — later actions are NOT attempted, and the
  * summary says which — because a seat that dispatched five related writes
  * must be able to read exactly where the board was left. A 404 on a directed
@@ -161,6 +161,26 @@
  * would meet attempt 2 at the `once` fence anyway, and be refused there with
  * zero writes. Every read is an unpaced GET, and the one write is paced like
  * every write verb.
+ *
+ * ## The front-of-queue enqueue — `pr_enqueue_front`, fenced on the PULL and its QUEUE and read back
+ *
+ * The fences (`ENQUEUE_FRONT_FENCES` in `ops.mjs`: open, ready, the head,
+ * not Version Packages, no governed path, the human-merge line count, a
+ * queue read whole, no entry already jumped) are facts about the pull and the
+ * queue, so this file is where they are AUTHORITATIVE
+ * (`enqueueFrontPreflight`): the pull's own `GET /repos/{repo}/pulls/{n}`,
+ * its whole file list (every page, the governed slice through the register
+ * as the governed-review follow-up reads it), then its base's queue by
+ * GraphQL query (`MERGE_QUEUE_READ_QUERY`, unpaced: a query writes nothing)
+ * — the last reads before the mutation. A read that fails or a fence that
+ * fails stops the action with the mutation NOT SENT, zero writes, exit 5.
+ * The mutation sends the node id and the expected head (`expectedHeadOid`).
+ * GraphQL errors on it are a FAILED action naming the grant when the
+ * platform says "not accessible by integration". A 200 is an acceptance:
+ * `confirmEnqueueFront` re-reads the queue every `ENQUEUE_FRONT_POLL_MS` for
+ * up to `ENQUEUE_FRONT_WINDOW_MS` and lands only on `enqueueFrontReadBack`
+ * (the entry jumped, nothing ahead). Queued without the jump, or behind
+ * another, is FAILED at once and says the pull IS queued — ⛔ never re-sent.
  *
  * ## The hierarchy link — `sub_issue_add` / `sub_issue_remove`, fenced on the CARDS and read back
  *
@@ -548,8 +568,14 @@ import {
   OPS,
   PERMISSIONS,
   PR_LANDED_STATE,
+  MERGE_QUEUE_READ_QUERY,
   RERUN_FAILED_ATTEMPT,
   answerPlaceholder,
+  enqueueFrontFenceFailures,
+  enqueueFrontFenceText,
+  enqueueFrontLandedText,
+  enqueueFrontReadBack,
+  mergeQueueOf,
   failedJobNames,
   governedReviewRequests,
   rerunFailedFenceFailures,
@@ -992,6 +1018,73 @@ export async function confirmRerunFailed(req, answer, pre, payload, api, t, { sl
     await sleep(pollMs);
   }
   return { ok: false, why: `${platform} accepted, but ${last} ${windowMs} ms later — UNCONFIRMED: the re-run may still start; read the run before anything else, ⛔ do not re-send (a second send meets attempt ${want} at the once fence and is refused)` };
+}
+
+/** The front-of-queue enqueue's read-back window and poll interval (header): the queue is re-read until the entry shows. */
+export const ENQUEUE_FRONT_WINDOW_MS = 30_000;
+export const ENQUEUE_FRONT_POLL_MS = 3_000;
+
+/** The base's merge queue, read by GraphQL query — unpaced (`read`). `{ queue }`, or `{ fail }` — the sentence. Never throws. */
+async function readMergeQueue(repo, branch, api, t) {
+  const [owner, name] = repo.split('/');
+  const r = await rest(api, '/graphql', { method: 'POST', body: { query: MERGE_QUEUE_READ_QUERY, variables: { owner, name, branch } }, read: true }, t);
+  const errors = Array.isArray(r.json?.errors) && r.json.errors.length ? `: GraphQL ${r.json.errors.map((e) => e?.message ?? 'error').join('; ')}` : '';
+  const queue = r.status === 200 && !errors ? mergeQueueOf(r.json) : null;
+  if (!queue) return { fail: `POST /graphql mergeQueue(branch: ${branch}) -> HTTP ${r.status}${r.detail ? ` (${r.detail})` : ''}${errors}: the merge queue could not be read` };
+  return { queue };
+}
+
+/**
+ * The fences, AUTHORITATIVE (header: "The front-of-queue enqueue"): the pull's own GET, its whole file list (the
+ * governed slice through the register) and its base's queue — the last three reads before the mutation — judged
+ * against `ENQUEUE_FRONT_FENCES`. Returns `{ pull, queue }` to send, or `{ fail: why }` — the sentence the row
+ * prints, the mutation NOT SENT. Never throws on a status.
+ */
+export async function enqueueFrontPreflight(req, payload, api, t) {
+  const { pull: number, expectedHeadSha } = req.enqueueFront;
+  const p = await rest(api, `/repos/${payload.repo}/pulls/${number}`, {}, t);
+  if (p.status !== 200 || !p.json || typeof p.json !== 'object') return { fail: `${p.call} -> HTTP ${p.status}${p.detail ? ` (${p.detail})` : ''}: pull #${number} could not be read, so its fences were not judged — nothing sent` };
+  const read = await readPullFiles(payload.repo, number, api, t);
+  if (read.fail) return { fail: `pull #${number}'s whole file list could not be read (HTTP ${read.fail.status}), so its governed fence was not judged — nothing sent` };
+  const repoId = repoIdForSlug(payload.repo);
+  const governed = repoId ? governedPathsIn(pullPathsFrom(read.files).paths, repoId).flatMap((surface) => surface.files) : [];
+  const base = typeof p.json.base?.ref === 'string' ? p.json.base.ref : null;
+  if (base === null) return { fail: `pull #${number}'s base ref could not be read, so its queue was not judged — nothing sent` };
+  const q = await readMergeQueue(payload.repo, base, api, t);
+  if (q.fail) return { fail: `${q.fail}, so its fences were not judged — nothing sent` };
+  const failures = enqueueFrontFenceFailures({ pull: p.json, expectedHeadSha, governed, queue: q.queue });
+  if (failures.length) return { fail: `REFUSED at the relay's fence on pull #${number}, nothing sent — ${enqueueFrontFenceText(failures)}` };
+  return { pull: p.json, base, queue: q.queue };
+}
+
+/**
+ * Did the jump LAND? Judged by reading the queue back, never by the 200 (header): GraphQL errors are FAILED with
+ * nothing changed; otherwise the queue is re-read until `enqueueFrontReadBack` settles. Returns `{ ok, why, result }`.
+ * Never throws on a status.
+ */
+export async function confirmEnqueueFront(req, answer, pre, payload, api, t, { sleep, now, windowMs = ENQUEUE_FRONT_WINDOW_MS, pollMs = ENQUEUE_FRONT_POLL_MS } = {}) {
+  const { pull } = req.enqueueFront;
+  if (answer.status !== 200 || !answer.json || typeof answer.json !== 'object') return { ok: false, why: `HTTP ${answer.status}${answer.detail ? ` — ${answer.detail}` : ''}` };
+  if (Array.isArray(answer.json.errors) && answer.json.errors.length) {
+    const said = answer.json.errors.map((e) => e?.message ?? 'error').join('; ');
+    const grant = /not accessible by integration/i.test(said) ? ' — the App token lacks the jump: the maintainer grants the objectstack-fleet App `Merge queues: write` (and accepts it on the installation)' : '';
+    return { ok: false, why: `GraphQL: ${said}${grant}; nothing was enqueued by this answer — read the pull before anything else` };
+  }
+  const started = now();
+  let last = 'nothing was read back';
+  for (;;) {
+    const q = await readMergeQueue(payload.repo, pre.base, api, t);
+    if (q.fail) last = q.fail;
+    else {
+      const v = enqueueFrontReadBack({ pull, queue: q.queue });
+      if (v.ok) return { ok: true, why: '', result: enqueueFrontLandedText(v, q.queue.entries.length) };
+      if (!v.pending) return { ok: false, why: `HTTP 200 accepted, but ${v.why} — the pull stays queued where it is; ⛔ do not re-send (it rebuilds every group again), read the queue and ask the maintainer` };
+      last = v.why;
+    }
+    if (now() - started >= windowMs) break;
+    await sleep(pollMs);
+  }
+  return { ok: false, why: `HTTP 200 accepted, but ${last} ${windowMs} ms later — UNCONFIRMED: read the queue before anything else, ⛔ do not re-send` };
 }
 
 /** The hierarchy link's read-back window and poll interval (header): the parent's list is re-read until it settles. */
@@ -1470,11 +1563,12 @@ export function summaryText({ payload, sender, role, rows, stoppedAt = null, not
 // ⛔ Nothing here throws on an HTTP status; a refusal is an observation.
 // ---------------------------------------------------------------------------
 
-async function rest(api, path, { method = 'GET', body = null } = {}, deps = {}) {
+async function rest(api, path, { method = 'GET', body = null, read = false } = {}, deps = {}) {
   const fetchImpl = deps.fetch ?? globalThis.fetch;
   const token = deps.token ?? '';
   const paceDeps = deps.pace ?? {};
-  const paced = isWriteMethod(method);
+  // `read`: a GraphQL QUERY (the merge-queue read) is a POST that writes nothing — unpaced, like every GET.
+  const paced = !read && isWriteMethod(method);
   if (paced) await paceWrite({ token, kind: `fleet-write ${method}` }, paceDeps);
   let res;
   try {
@@ -1521,6 +1615,8 @@ async function graphqlVariables(req, payload, api, t) {
   if (g.pull !== undefined) {
     const pr = await rest(api, `/repos/${payload.repo}/pulls/${g.pull}`, {}, t);
     if (pr.status !== 200 || typeof pr.json?.node_id !== 'string') return unread(pr, "the pull's node id");
+    // The front-of-queue enqueue (header) sends the head its fences judged, so a push after them is the platform's refusal.
+    if (req.enqueueFront) return { variables: { id: pr.json.node_id, head: req.enqueueFront.expectedHeadSha } };
     return { variables: { id: pr.json.node_id } };
   }
   // transferIssue: the card on THIS repository — never a pull request, never one already moved — then the target.
@@ -1638,6 +1734,7 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
   const ub = { sleep: deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms))), now: deps.now ?? (() => Date.now()), ...(deps.updateBranch ?? {}) };
   const rr = { sleep: ub.sleep, now: ub.now, ...(deps.rerunFailed ?? {}) };
   const si = { sleep: ub.sleep, now: ub.now, ...(deps.subIssue ?? {}) };
+  const ef = { sleep: ub.sleep, now: ub.now, ...(deps.enqueueFront ?? {}) };
 
   const judged = validatePayload(raw);
   if (!judged.ok) {
@@ -1713,7 +1810,13 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
       }
       const req = filled.req;
       // The failed-jobs re-run and the mailbox branch delete (header): their fences, judged HERE on the reads before the write — refused, NOT SENT.
-      const pre = req.rerunFailed ? await rerunFailedPreflight(req, payload, api, t) : req.mailboxBranch ? await mailboxBranchPreflight(req, payload, api, t) : null;
+      const pre = req.rerunFailed
+        ? await rerunFailedPreflight(req, payload, api, t)
+        : req.enqueueFront
+          ? await enqueueFrontPreflight(req, payload, api, t)
+          : req.mailboxBranch
+            ? await mailboxBranchPreflight(req, payload, api, t)
+            : null;
       if (pre?.fail) {
         const why = scrub(pre.fail, [token]);
         rows.push({ action: i + 1, op: action.op, call: `${req.verb} ${req.path}`, status: 'not sent', result: `FAILED: ${why}` });
@@ -1820,13 +1923,15 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
         ? await confirmUpdateBranch(req, r, payload, api, t, ub)
         : req.rerunFailed
           ? await confirmRerunFailed(req, r, pre, payload, api, t, rr)
-          : req.mailboxBranch
-            ? await confirmMailboxBranch(req, r, payload, api, t)
-            : sub
-              ? await confirmSubIssue(req, r, sub, payload, api, t, si)
-              : adv || req.advisoryReport || req.advisoryCreate
-                ? confirmAdvisory(req, r, adv)
-                : requestLanded(req, r);
+          : req.enqueueFront
+            ? await confirmEnqueueFront(req, r, pre, payload, api, t, ef)
+            : req.mailboxBranch
+              ? await confirmMailboxBranch(req, r, payload, api, t)
+              : sub
+                ? await confirmSubIssue(req, r, sub, payload, api, t, si)
+                : adv || req.advisoryReport || req.advisoryCreate
+                  ? confirmAdvisory(req, r, adv)
+                  : requestLanded(req, r);
       const call = req.graphql ? `POST /graphql ${req.graphql.mutation}` : r.call;
       rows.push({ action: i + 1, op: action.op, call, status: r.status, result: landed.ok ? (landed.idempotent ? 'already absent (idempotent)' : scrub(landed.result ?? resultOf(req, r.json, r.status), [token])) : `FAILED: ${scrub(landed.why, [token])}` });
       if (!landed.ok) {
@@ -1901,6 +2006,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the governed-review follow-up: after pr_ready alone — a pr_create summons NOBODY and never reads the pull's files, because a human is asked only at the seat's hand-off (pr_request_reviewers after ACCEPT + a same-head PASS); after pr_ready the pull's file list is read in full, a Tier H hit requests review from every GOVERNED_APPROVERS account not already requested, assigned or reviewed — the pull's own author assigned instead, never requested; a Tier S or ungoverned diff sends nothing and says so; a workflow-only pull in split.repos is judged by the queue guard's reading, merge base → head, and requests only when it says H or cannot be read; an unreadable or truncated list, an unreadable pull or review list, or a refused write is a FAILED action": 36,
   // 17 → 21 with the head fence: a stale head, the embedded copy never trusted, a run naming no pull, a pull unread.
   "the run_rerun_failed: the five fences judged HERE on the run and its pull, read immediately before ONE bodiless POST — the pull's current head by its own GET, never the run's embedded copy, and a run naming no pull refused by name; each refused with the POST not sent and accepted on the measured run; a run, pull, baseline or fence that fails is zero writes; the 201 confirmed only by reading attempt 2 back with its failed jobs queued or in progress, naming their job ids; attempt 2 never seen, a failed job completed, or a job list unread is FAILED; no annotation": 21,
+  "the pr_enqueue_front: the pull's own GET, its whole file list and its base's queue read immediately before ONE enqueuePullRequest mutation with jump true and the expected head — open, ready, its head, not Version Packages, no governed path, at most the human-merge line count, a queue read whole with no jumped entry; each fence refused with the mutation not sent; GraphQL errors FAILED naming the missing grant; the 200 confirmed only by reading the queue back with the pull jumped and nothing ahead; queued without the jump or behind another is FAILED, never re-sent; the queue read unpaced; no annotation": 20,
   "the hierarchy link: sub_issue_add and sub_issue_remove read the parent's and the child's own answers, then the child's parent (add) or the parent's whole list (remove), immediately before ONE write whose body is the child's REST id from its own answer — never its number, never replace_parent; a pull, a transferred or unread card, a child under another parent, one the parent does not list, or a read that is neither answer is zero writes; a child already under this parent is a no-op landed on the list; the answer confirmed only when the parent's list reads the child back (or no longer does) inside the window; a refused write, a list that never settles or never reads whole is FAILED; no annotation, and the rows ride a stroke beside other ops": 20,
   "the advisory rows: advisory_report and advisory_create are ONE POST of their body each, landed on a 2xx carrying an id — a draft's reading state draft — that the row and a notice annotation name; advisory_collaborators_add, advisory_versions and advisory_state read the advisory first and send ONE PATCH — every existing login kept with the missing ones added, an all-present list a no-op, the versions entries alone, or the one state a legal transition reaches, the reopen and the publish among them — or nothing at all on a fence: an unread, other or wrong-state advisory, an illegal move, a list the versions may not replace or a publish whose versions are not set; each lands only when its answer shows the result, a publish only read back as published with the versions it was sent, and a landed publish alone is annotated with its id; ⛔ the marker in a report's or a draft's summary, description and packages and in every advisory answer's summary, description and vulnerabilities reaches no log line, row, step summary or annotation": 41,
   "the mailbox branch delete: the pull's own answer, the open pulls on its head and the ref read immediately before ONE DELETE of the ref under the App token — an open, unlabelled, other-headed or forked pull, an open pull on that head, a ref moved off the pull's head, or a read that does not answer is zero writes with every failing fence named; the DELETE lands only when the ref reads back absent, a ref already gone an idempotent landing and one still there FAILED; and mailbox-open's close stroke — comment, close, delete — leaves no branch, while a head outside claude/mailbox-* sends no DELETE": 7,
@@ -1910,8 +2016,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
 });
 // Raised 17 → 18 with the governed-review follow-up battery, 18 → 19 with the run_rerun_failed battery, 19 → 20 with the
 // hierarchy link battery, 20 → 21 with the advisory rows' battery, 21 → 22 with advisory_read's, 22 → 23 with the mailbox
-// branch delete's, 23 → 24 with the private-repository issue body's, 24 → 25 with advisory_list's: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 25;
+// branch delete's, 23 → 24 with the private-repository issue body's, 24 → 25 with advisory_list's, 25 → 26 with
+// pr_enqueue_front's: one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 26;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -2121,7 +2228,10 @@ export async function selfTest() {
       const bare = { verb: 'POST', path: '/graphql', graphql: { mutation: 'enablePullRequestAutoMerge', query: 'q', pull: 21 } };
       t('⛔ a pull mutation whose descriptor declares no landed state is never judged landed', requestLanded(bare, { status: 200, json: { data: { enablePullRequestAutoMerge: { pullRequest: { number: 21, autoMergeRequest: { mergeMethod: 'SQUASH' } } } } } }).ok, false);
       // The table half: every pull mutation the op table can issue carries its entry, and selects every field that entry reads.
-      const pullRows = Object.keys(OPS).flatMap((op) => OPS[op].requests({ op, pull: 21, issue: 21, comment_id: 1, target_repo: 'x', title: 't', body: 'b', head: 'h', base: 'main', labels: ['l'], assignees: ['u'], reviewers: ['r'], workflow: 'shard-timings-refresh.yml', ref: 'main', summary: 's', description: 'd', ghsa_id: 'GHSA-abcd-2345-wxyz', collaborators: ['u'], advisory_state: 'draft', packages: ['p'], versions: [{ package: 'p', vulnerable_version_range: '< 1.0.0', patched_versions: '1.0.0' }] }, REPO).filter((r) => r.graphql?.pull !== undefined).map((r) => [op, r.graphql]));
+      const pullRows = Object.keys(OPS).flatMap((op) => OPS[op].requests({ op, pull: 21, issue: 21, comment_id: 1, target_repo: 'x', title: 't', body: 'b', head: 'h', base: 'main', labels: ['l'], assignees: ['u'], reviewers: ['r'], workflow: 'shard-timings-refresh.yml', ref: 'main', summary: 's', description: 'd', ghsa_id: 'GHSA-abcd-2345-wxyz', collaborators: ['u'], advisory_state: 'draft', packages: ['p'], versions: [{ package: 'p', vulnerable_version_range: '< 1.0.0', patched_versions: '1.0.0' }] }, REPO).filter((r) => r.graphql?.pull !== undefined && !r.enqueueFront).map((r) => [op, r.graphql]));
+      // The one pull mutation judged by reading its QUEUE back (header: "The front-of-queue enqueue"): no landed entry.
+      const queueRows = Object.keys(OPS).flatMap((op) => OPS[op].requests({ op, pull: 21, issue: 21, comment_id: 1, target_repo: 'x', title: 't', body: 'b', head: 'h', base: 'main', labels: ['l'], assignees: ['u'], reviewers: ['r'], workflow: 'shard-timings-refresh.yml', ref: 'main', summary: 's', description: 'd', ghsa_id: 'GHSA-abcd-2345-wxyz', collaborators: ['u'], advisory_state: 'draft', packages: ['p'], versions: [{ package: 'p', vulnerable_version_range: '< 1.0.0', patched_versions: '1.0.0' }], expected_head_sha: 'a'.repeat(40) }, REPO).filter((r) => r.enqueueFront).map((r) => [op, r.graphql.landed ?? null]));
+      t('…and the one pull mutation judged by its queue read back instead, pr_enqueue_front, carries no PR_LANDED_STATE entry', queueRows, [['pr_enqueue_front', null]]);
       const selects = (query, field) => new RegExp(`\\b${field}\\b`).test(query.slice(query.indexOf('pullRequest {')));
       t('every pull mutation in the op table carries its PR_LANDED_STATE entry, and its query selects every field that entry reads', [pullRows.map(([op]) => op).sort(), pullRows.every(([op, g]) => g.landed === PR_LANDED_STATE[op] && g.landed.fields.every((f) => selects(g.query, f)))], [Object.keys(PR_LANDED_STATE).sort(), true]);
     }
@@ -2526,6 +2636,72 @@ export async function selfTest() {
       const beside = await run(base([{ op: 'run_rerun_failed', run_id: RUN }, { op: 'comment', issue: 1, body: 'x' }]), happy);
       const stringId = await run(base([{ op: 'run_rerun_failed', run_id: String(RUN) }]), happy);
       t('⛔ the validator is the executor\'s gate too: beside another action, or with run_id a string, refused with ZERO requests, exit 2', [[beside.exit, beside.seen.length], [stringId.exit, stringId.seen.length]], [[EXIT_REFUSED, 0], [EXIT_REFUSED, 0]]);
+    }
+
+    // ── the front-of-queue enqueue ──────────────────────────────────────────
+    battery("the pr_enqueue_front: the pull's own GET, its whole file list and its base's queue read immediately before ONE enqueuePullRequest mutation with jump true and the expected head — open, ready, its head, not Version Packages, no governed path, at most the human-merge line count, a queue read whole with no jumped entry; each fence refused with the mutation not sent; GraphQL errors FAILED naming the missing grant; the 200 confirmed only by reading the queue back with the pull jumped and nothing ahead; queued without the jump or behind another is FAILED, never re-sent; the queue read unpaced; no annotation");
+    {
+      const PULL = 3686;
+      const HEAD = '6f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c';
+      const MOVED = '0a1b2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3';
+      const PULL_GET = `GET /repos/${REPO}/pulls/${PULL}`;
+      const FILES = `GET /repos/${REPO}/pulls/${PULL}/files`;
+      const GQL = 'POST /graphql';
+      const pullAt = (patch = {}) => ({ status: 200, json: { number: PULL, node_id: 'PR_kwDOjump', state: 'open', draft: false, title: 'fix(objectos): case timeout', additions: 40, deletions: 6, head: { sha: HEAD, ref: 'claude/issue-3656-pin' }, base: { ref: 'main' }, ...patch } });
+      const filesOf = (...names) => ({ status: 200, json: names.map((filename) => ({ filename })) });
+      const entry = (number, position, jump = false) => ({ position, jump, state: 'AWAITING_CHECKS', pullRequest: { number } });
+      const queueOf = (nodes, hasNextPage = false) => ({ status: 200, json: { data: { repository: { mergeQueue: { entries: { totalCount: nodes.length, pageInfo: { hasNextPage }, nodes } } } } } });
+      const before = queueOf([entry(3730, 1), entry(3732, 2), entry(PULL, 3)]);
+      const after = queueOf([entry(PULL, 1, true), entry(3730, 2), entry(3732, 3)]);
+      const enqueued = { status: 200, json: { data: { enqueuePullRequest: { mergeQueueEntry: entry(PULL, 1, true) } } } };
+      const stroke = base([{ op: 'pr_enqueue_front', pull: PULL, expected_head_sha: HEAD }]);
+      const happy = { ...allowed, [PULL_GET]: pullAt(), [FILES]: filesOf('apps/objectos/test/mcp-build-sample-cleanup.e2e.test.ts'), [GQL]: [before, enqueued, after] };
+      let clock = 0;
+      const timing = { sleep: async (ms) => { clock += ms; }, now: () => clock };
+      const mutations = (seen) => seen.filter((s) => s.call === GQL && s.body?.query?.startsWith('mutation'));
+
+      const ok = await run(stroke, happy, timing);
+      t('⭐ every fence holds: the sender gate, the pull, its files and its base queue — then the node id, ONE mutation, the queue read back; exit 0', [ok.exit, ok.seen.map((s) => s.call)], [EXIT_OK, [PERM, PULL_GET, FILES, GQL, PULL_GET, GQL, GQL]], ok.logs.join(' | '));
+      t('…the queue read names the pull\'s base, and the mutation sends jump true, the node id and the expected head', [ok.seen[3].body.variables, mutations(ok.seen).map((m) => [m.body.query.includes('jump: true'), m.body.query.includes('expectedHeadOid: $head'), m.body.variables])], [{ owner: REPO.split('/')[0], name: REPO.split('/')[1], branch: 'main' }, [[true, true, { id: 'PR_kwDOjump', head: HEAD }]]]);
+      t('…the row lands on the read-back: the pull at the front, jumped, with the queue it read', [ok.rows[0]?.call, ok.rows[0]?.result], [`${GQL} enqueuePullRequest`, `#${PULL} at the front of the merge queue · position 1 · jump true · AWAITING_CHECKS · 3 entr(ies) queued`]);
+      t('…no annotation, and only the mutation was paced as a write: the two queue reads are unpaced', [ok.annotations, ok.pace ? readFileSync(ok.pace.file, 'utf8').trim().split('\n').filter(Boolean).length : null], [[], 1]);
+      // Each fence, refused HERE: the mutation is NOT SENT.
+      const fenced = async (answers) => {
+        const r = await run(stroke, { ...happy, ...answers });
+        return [r.exit, mutations(r.seen).length, r.rows[0]?.status, /REFUSED at the relay's fence/.test(r.rows[0]?.result ?? '')];
+      };
+      const refused = [EXIT_ACTION_FAILED, 0, 'not sent', true];
+      const named = async (answers, words) => (await run(stroke, { ...happy, ...answers })).rows[0]?.result.includes(words);
+      t('⛔ fence open, ready and head, refused HERE: a closed pull, a draft, a head pushed since the ACCEPT — the mutation never sent, the fence named', [await fenced({ [PULL_GET]: pullAt({ state: 'closed' }) }), await fenced({ [PULL_GET]: pullAt({ draft: true }) }), await fenced({ [PULL_GET]: pullAt({ head: { sha: MOVED, ref: 'claude/issue-3656-pin' } }) }), await named({ [PULL_GET]: pullAt({ head: { sha: MOVED, ref: 'x' } }) }, 'fence `head`: the relay read "head 0a1b2c3d4e, expected 6f1e2d3c4b"')], [refused, refused, refused, true]);
+      t('⛔ fence release, refused HERE: the Version Packages pull, by its changeset-release head and by its title', [await fenced({ [PULL_GET]: pullAt({ head: { sha: HEAD, ref: 'changeset-release/main' } }) }), await fenced({ [PULL_GET]: pullAt({ title: 'chore: version packages' }) })], [refused, refused]);
+      t('⛔ fence governed, refused HERE: a workflow file and AGENTS.md (Tier H), a .claude/** file (Tier S) — the path named', [await fenced({ [FILES]: filesOf('src/a.ts', '.github/workflows/ci.yml') }), await fenced({ [FILES]: filesOf('AGENTS.md') }), await fenced({ [FILES]: filesOf('.claude/agents/os-dev.md') }), await named({ [FILES]: filesOf('.github/workflows/ci.yml') }, '1 governed path(s): .github/workflows/ci.yml')], [refused, refused, refused, true]);
+      t('⛔ fence size, refused HERE: one line over the human-merge threshold; exactly at it passes', [await fenced({ [PULL_GET]: pullAt({ additions: 2990, deletions: 11 }) }), (await run(stroke, { ...happy, [PULL_GET]: pullAt({ additions: 2990, deletions: 10 }) }, timing)).exit], [refused, EXIT_OK]);
+      t('⛔ fence queue, refused HERE: a base with no merge queue, and an entry list read truncated', [await fenced({ [GQL]: { status: 200, json: { data: { repository: { mergeQueue: null } } } } }), await fenced({ [GQL]: queueOf([entry(3730, 1)], true) })], [refused, refused]);
+      t('⛔ fence one-jump, refused HERE: another pull already jumped and still queued, and this pull already jumped — one per repository', [await fenced({ [GQL]: queueOf([entry(3730, 1, true), entry(PULL, 2)]) }), await fenced({ [GQL]: queueOf([entry(PULL, 1, true)]) }), await named({ [GQL]: queueOf([entry(3730, 1, true)]) }, 'jumped: #3730')], [refused, refused, true]);
+      t('…a pull not yet queued may be jumped: an empty queue passes the fences', (await run(stroke, { ...happy, [GQL]: [queueOf([]), enqueued, queueOf([entry(PULL, 1, true)])] }, timing)).exit, EXIT_OK);
+      const unread = await run(stroke, { ...happy, [FILES]: { status: 502, json: { message: 'Bad Gateway' } } });
+      const qUnread = await run(stroke, { ...happy, [GQL]: { status: 200, json: { data: null, errors: [{ message: 'Something went wrong' }] } } });
+      t('⛔ an unread file list or queue leaves the fences unjudged: the mutation never sent, the read named', [[unread.exit, mutations(unread.seen).length, unread.rows[0]?.result.includes('whole file list could not be read')], [qUnread.exit, mutations(qUnread.seen).length, qUnread.rows[0]?.result.includes('the merge queue could not be read')]], [[EXIT_ACTION_FAILED, 0, true], [EXIT_ACTION_FAILED, 0, true]]);
+      // The answer and the read-back.
+      const denied = await run(stroke, { ...happy, [GQL]: [before, { status: 200, json: { data: { enqueuePullRequest: null }, errors: [{ message: 'Resource not accessible by integration' }] } }] });
+      t('⛔ GraphQL errors on the mutation (the grant missing) are a FAILED action naming the remedy, and nothing is read back after it', [denied.exit, denied.rows[0]?.result.includes('Merge queues: write'), denied.seen.filter((s) => s.call === GQL).length], [EXIT_ACTION_FAILED, true, 2]);
+      clock = 0;
+      const unjumped = await run(stroke, { ...happy, [GQL]: [before, enqueued, before] }, timing);
+      t('⛔ an answer that leaves the pull queued without the jump is FAILED at once — it IS queued, ⛔ never re-sent', [unjumped.exit, ['IS in the merge queue at position 3', 'jump false', 'do not re-send'].every((w) => unjumped.rows[0]?.result.includes(w)), mutations(unjumped.seen).length], [EXIT_ACTION_FAILED, true, 1]);
+      const behind = await run(stroke, { ...happy, [GQL]: [before, enqueued, queueOf([entry(3730, 1, true), entry(PULL, 2, true)])] }, timing);
+      t('⛔ an entry jumped but behind another is FAILED, naming the pull ahead', [behind.exit, behind.rows[0]?.result.includes('behind #3730')], [EXIT_ACTION_FAILED, true]);
+      clock = 0;
+      const late = await run(stroke, { ...happy, [GQL]: [before, enqueued, queueOf([entry(3730, 1), entry(3732, 2)]), after] }, timing);
+      t('an entry the queue lists on a later read lands, read again at the interval', [late.exit, clock], [EXIT_OK, ENQUEUE_FRONT_POLL_MS]);
+      clock = 0;
+      const never = await run(stroke, { ...happy, [GQL]: [before, enqueued, queueOf([entry(3730, 1)])] }, timing);
+      t('⛔ a read-back that never lists the pull is FAILED, UNCONFIRMED, after the window', [never.exit, never.rows[0]?.result.includes('UNCONFIRMED'), clock], [EXIT_ACTION_FAILED, true, ENQUEUE_FRONT_WINDOW_MS]);
+      // The pure pieces.
+      t('mergeQueueOf: no repository is null, no queue is present false, a truncated list is complete false', [mergeQueueOf({ data: {} }), mergeQueueOf({ data: { repository: { mergeQueue: null } } }), mergeQueueOf(queueOf([entry(1, 1)], true).json).complete], [null, { present: false, complete: true, entries: [] }, false]);
+      t('enqueueFrontReadBack reads the lowest position as the front, whatever the numbering base', [enqueueFrontReadBack({ pull: 5, queue: { present: true, entries: [{ number: 5, position: 0, jump: true }, { number: 6, position: 1, jump: false }] } }).ok, enqueueFrontReadBack({ pull: 5, queue: { present: true, entries: [{ number: 6, position: 0, jump: false }, { number: 5, position: 1, jump: true }] } }).ahead], [true, [6]]);
+      const beside = await run(base([{ op: 'pr_enqueue_front', pull: PULL, expected_head_sha: HEAD }, { op: 'comment', issue: 1, body: 'x' }]), happy);
+      const short = await run(base([{ op: 'pr_enqueue_front', pull: PULL, expected_head_sha: HEAD.slice(0, 7) }]), happy);
+      t('⛔ the validator is the executor\'s gate too: beside another action, or with a short head, refused with ZERO requests, exit 2', [[beside.exit, beside.seen.length], [short.exit, short.seen.length]], [[EXIT_REFUSED, 0], [EXIT_REFUSED, 0]]);
     }
 
     // ── the hierarchy link ──────────────────────────────────────────────────
@@ -3492,6 +3668,7 @@ export async function selfTest() {
       'ops behind a node-id read, a pull mutation landing only when its answer shows the state it asked for (armed or queued, off, ready, draft), a base sync confirmed by the head leaving its expected sha or measured as a no-op, an assignees leg sent to the number the create answered and landing only when its answer lists every login sent, ' +
       'a governed-review follow-up after pr_ready alone (the draft open summons nobody — a human is asked at the seat\'s hand-off) that reads the pull\'s whole file list and, on a Tier H hit alone, requests every GOVERNED_APPROVERS account not already covered (the author assigned instead), zero writes when covered and a FAILED action when the list cannot be read whole, a transfer gated on both repositories and landing only on its target, ' +
       "a failed-jobs re-run fenced on the run and its pull's own current head, read just before its one POST (zero writes on any fence), and landing only when attempt 2 reads back with its failed jobs queued or in progress, " +
+      "a front-of-queue enqueue fenced on the pull, its whole file list and its base's queue (one jumped pull per repository), read just before its one mutation, and landing only when the queue reads the pull back jumped with nothing ahead, " +
       "an issue-hierarchy link fenced on its two cards, sent as the child's REST id and landing only when the parent's list reads it back, " +
       "the payload read from the event file, five advisory rows — a report landed on the id it was given, a draft on its id reading state draft, collaborators, versions and a state fenced on the advisory's own read and landed on the PATCH answer, a publish only through the versions fence, read back with its versions and annotated with its id — " +
       'whose marker in a summary, a description and a vulnerability reached no log line, row, summary or annotation, ' +

@@ -7,15 +7,20 @@
  *
  * Pinned here: which references are judged (the load path's reading — the top
  * level when there is no `packages[]`, each body's own otherwise), what they
- * resolve against (every picklist the stack declares), and which of the two
- * verdicts an unresolved one gets (refused when the declaring package depends
- * on nothing outside the stack; an `info` notice when it does) — the same two
- * verdicts for a field and for an extension. Asserted by rule id, severity,
- * the field or extension named in `where`, the list named in `message` and the
- * `path` — never by the sentence around them.
+ * resolve against (a field's `picklist` from the package that declares it:
+ * its own list, then its declared dependency closure plus `sys`, ADR-0150 D3;
+ * an extension's `extend` with no caller), and which of the two verdicts an
+ * unresolved one gets (refused when the declaring package depends on nothing
+ * outside the stack; an `info` notice when it does) — the same two verdicts
+ * for a field and for an extension. Asserted by rule id, severity, the field
+ * or extension named in `where`, the list named in `message` and the `path` —
+ * never by the sentence around them, except where the sentence IS the
+ * contract: a refusal for a holder outside the closure carries the runtime's
+ * own (`packageScopedRefusalMessage`).
  */
 
 import { describe, expect, it } from 'vitest';
+import { packageScopedRefusalMessage } from '@objectstack/core';
 import { unclaimedTopLevel } from '@objectstack/metadata';
 import { unreferencedResidualPicklists } from '@objectstack/metadata/picklist-references';
 import {
@@ -180,6 +185,205 @@ describe('judgePicklistReferences — a `packages[]` stack', () => {
     });
     expect(refusals.map((r) => r.path)).toEqual(['packages[1].manifest.objects[0].fields.industry.picklist']);
     expect(notices.map((n) => n.path)).toEqual(['packages[2].manifest.objects[0].fields.industry.picklist']);
+  });
+});
+
+/**
+ * [ADR-0150 D3; maintainer ruling N1, record 6729820123] A field's `picklist`
+ * resolves from the package that declares the field: its own list, then the
+ * unique holder in its declared dependency closure plus `sys`, else refused
+ * naming every holder. A sibling of the same artifact is in that closure only
+ * when the declaring package's manifest names it — the runtime refuses the
+ * rest since E6 (the boot warns, the install judge refuses), and this door
+ * now says so first, in the runtime's sentence.
+ */
+describe('judgePicklistReferences — a field naming a sibling package\'s list (ADR-0150 D3)', () => {
+  const core = (extra: Record<string, unknown> = {}) =>
+    ({ manifest: { ...manifest('com.example.core'), picklists: [industry], ...extra } });
+  const orders = (extra: Record<string, unknown> = {}) =>
+    ({ manifest: { ...manifest('com.example.orders', extra), objects: [account('industry')] } });
+
+  it('refuses a sibling\'s list the declaring package does not depend on, in the runtime\'s sentence', () => {
+    const { refusals, notices } = judgePicklistReferences({ packages: [core(), orders()] });
+    expect(notices).toEqual([]);
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]).toMatchObject({
+      severity: 'error',
+      rule: PICKLIST_REFERENCE_UNKNOWN,
+      where: 'field "pk_account.industry"',
+      path: 'packages[1].manifest.objects[0].fields.industry.picklist',
+    });
+    expect(refusals[0].message).toBe(packageScopedRefusalMessage({
+      status: 'refused',
+      reason: 'outside-closure',
+      type: 'picklist',
+      name: 'industry',
+      callerPackageId: 'com.example.orders',
+      candidates: [{ kind: 'package', packageId: 'com.example.core' }],
+    }));
+    // The one-line fix: the dependency entry, on the package that declares the field.
+    expect(refusals[0].hint).toContain('`\'com.example.core\': \'^1.0.0\'`');
+    expect(refusals[0].hint).toContain('`dependencies` of package \'com.example.orders\'');
+  });
+
+  it('names every holder when two siblings hold the list and the declaring package depends on neither', () => {
+    const { refusals } = judgePicklistReferences({
+      packages: [core(), { manifest: { ...manifest('com.example.crm'), picklists: [industry] } }, orders()],
+    });
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0].message).toContain('package "com.example.core"; package "com.example.crm"');
+  });
+
+  it('REPORTS, never refuses, when the declaring package also depends on a package this stack does not carry', () => {
+    const { refusals, notices } = judgePicklistReferences({
+      packages: [core(), orders({ dependencies: { 'com.acme.crm': '^1.0.0' } })],
+    });
+    expect(refusals).toEqual([]);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({
+      severity: 'info',
+      rule: PICKLIST_REFERENCE_UNVERIFIED,
+      path: 'packages[1].manifest.objects[0].fields.industry.picklist',
+    });
+    expect(notices[0].message).toContain('\'industry\' is only in \'com.example.core\', undeclared');
+    expect(notices[0].message).toContain('\'com.acme.crm\'');
+    expect(notices[0].hint).toContain('declare a dependency on \'com.example.core\' in package \'com.example.orders\'');
+  });
+
+  it('keeps that notice one verdict line of at most 200 characters, at realistic name lengths', () => {
+    const list = { ...industry, name: 'opportunity_industry_segment' };
+    const { notices } = judgePicklistReferences({
+      packages: [
+        { manifest: { ...manifest('com.acmecorp.crm.sales.core'), picklists: [list] } },
+        {
+          manifest: {
+            ...manifest('com.acmecorp.crm.sales.pipeline', { dependencies: { 'com.acmecorp.erp.integration': '^2.0.0' } }),
+            objects: [{
+              name: 'crm_opportunity_line_item',
+              label: 'Line item',
+              fields: { industry_segment: { type: 'select', label: 'Segment', picklist: 'opportunity_industry_segment' } },
+            }],
+          },
+        },
+      ],
+    });
+    expect(notices).toHaveLength(1);
+    // `os explain picklist-reference-unverified` carries the why; the notice is the verdict.
+    expect(notices[0].message.length, notices[0].message).toBeLessThanOrEqual(200);
+  });
+
+  // An outside package can add a holder, never remove one: two holders the
+  // closure reaches are refused whatever the outside dependencies.
+  it('refuses two sibling holders the declaring package depends on both of, naming each — even with an outside dependency', () => {
+    const crm = { manifest: { ...manifest('com.example.crm'), picklists: [industry] } };
+    const both = { 'com.example.core': '^1.0.0', 'com.example.crm': '^1.0.0' };
+    for (const dependencies of [both, { ...both, 'com.acme.erp': '^1.0.0' }]) {
+      const { refusals, notices } = judgePicklistReferences({ packages: [core(), crm, orders({ dependencies })] });
+      expect(notices).toEqual([]);
+      expect(refusals).toHaveLength(1);
+      expect(refusals[0]).toMatchObject({
+        severity: 'error',
+        rule: PICKLIST_REFERENCE_UNKNOWN,
+        path: 'packages[2].manifest.objects[0].fields.industry.picklist',
+      });
+      expect(refusals[0].message).toBe(packageScopedRefusalMessage({
+        status: 'refused',
+        reason: 'ambiguous-in-closure',
+        type: 'picklist',
+        name: 'industry',
+        callerPackageId: 'com.example.orders',
+        candidates: [{ kind: 'package', packageId: 'com.example.core' }, { kind: 'package', packageId: 'com.example.crm' }],
+      }));
+    }
+  });
+
+  it('judges a field an `objectExtensions` entry adds from the EXTENDING package: a sibling\'s list it does not depend on is refused', () => {
+    const { refusals } = judgePicklistReferences({
+      packages: [
+        core({ objects: [{ name: 'pk_account', label: 'Account', fields: { name: { type: 'text', label: 'Name' } } }] }),
+        {
+          manifest: {
+            ...manifest('com.example.lists'),
+            picklists: [{ ...industry, name: 'segment' }],
+          },
+        },
+        {
+          manifest: {
+            ...manifest('com.example.orders', { dependencies: { 'com.example.core': '^1.0.0' } }),
+            objectExtensions: [{ extend: 'pk_account', fields: { segment: { type: 'select', label: 'Segment', picklist: 'segment' } } }],
+          },
+        },
+      ],
+    });
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]).toMatchObject({
+      rule: PICKLIST_REFERENCE_UNKNOWN,
+      where: 'field "pk_account.segment"',
+      path: 'packages[2].manifest.objectExtensions[0].fields.segment.picklist',
+    });
+    expect(refusals[0].message).toContain('package "com.example.orders"');
+    expect(refusals[0].message).toContain('package "com.example.lists"');
+  });
+
+  it('CONTROL: the sibling declared as a dependency resolves', () => {
+    expect(judgePicklistReferences({
+      packages: [core(), orders({ dependencies: { 'com.example.core': '^1.0.0' } })],
+    })).toEqual({ refusals: [], notices: [] });
+  });
+
+  it('CONTROL: a sibling reached through a declared dependency\'s own dependency resolves — the closure is transitive', () => {
+    expect(judgePicklistReferences({
+      packages: [
+        core(),
+        { manifest: { ...manifest('com.example.base', { dependencies: { 'com.example.core': '^1.0.0' } }) } },
+        orders({ dependencies: { 'com.example.base': '^1.0.0' } }),
+      ],
+    })).toEqual({ refusals: [], notices: [] });
+  });
+
+  it('CONTROL: the declaring package\'s own list resolves, whatever a sibling holds', () => {
+    expect(judgePicklistReferences({
+      packages: [core(), { manifest: { ...manifest('com.example.orders'), picklists: [industry], objects: [account('industry')] } }],
+    })).toEqual({ refusals: [], notices: [] });
+  });
+
+  it('CONTROL: a `sys` package\'s list resolves with no declared dependency — `sys` is in every closure', () => {
+    expect(judgePicklistReferences({
+      packages: [core({ namespace: 'sys' }), orders()],
+    })).toEqual({ refusals: [], notices: [] });
+  });
+
+  it('CONTROL: an extension of a sibling\'s list needs no dependency — its `extend` resolves with no caller', () => {
+    expect(judgePicklistReferences({
+      packages: [core(), { manifest: { ...manifest('com.example.orders'), picklistExtensions: [extension('industry')] } }],
+    })).toEqual({ refusals: [], notices: [] });
+  });
+
+  // Ruling X: the target resolves with no caller, so it needs ONE holder in
+  // the stack; two are refused, naming each — even with an outside dependency.
+  it('refuses an extension whose target two packages of the stack hold, naming each', () => {
+    const crm = { manifest: { ...manifest('com.example.crm'), picklists: [industry] } };
+    for (const extra of [{}, { dependencies: { 'com.acme.erp': '^1.0.0' } }]) {
+      const { refusals, notices } = judgePicklistReferences({
+        packages: [core(), crm, { manifest: { ...manifest('com.example.orders', extra), picklistExtensions: [extension('industry')] } }],
+      });
+      expect(notices).toEqual([]);
+      expect(refusals).toHaveLength(1);
+      expect(refusals[0]).toMatchObject({
+        severity: 'error',
+        rule: PICKLIST_REFERENCE_UNKNOWN,
+        where: 'picklist extension "industry"',
+        path: 'packages[2].manifest.picklistExtensions[0].extend',
+      });
+      expect(refusals[0].message).toBe(packageScopedRefusalMessage({
+        status: 'refused',
+        reason: 'ambiguous-in-environment',
+        type: 'picklist',
+        name: 'industry',
+        callerPackageId: null,
+        candidates: [{ kind: 'package', packageId: 'com.example.core' }, { kind: 'package', packageId: 'com.example.crm' }],
+      }));
+    }
   });
 });
 
@@ -447,9 +651,11 @@ describe('judgePicklistReferences — a composed stack\'s residual picklist that
 describe('picklistRefusalHeading — the text face\'s heading names what each rule refused', () => {
   const finding = (rule: string) => ({ severity: 'error' as const, rule, where: 'w', path: 'p', message: 'm', hint: 'h' });
 
-  it('CONTROL: reference refusals alone keep the heading they always had', () => {
+  // Forced edit (#31832): the heading names the closure refusal (ADR-0150 D3) beside the unknown name.
+  it('CONTROL: reference refusals alone are headed as references', () => {
     expect(picklistRefusalHeading([finding(PICKLIST_REFERENCE_UNKNOWN), finding(PICKLIST_REFERENCE_UNKNOWN)]))
-      .toBe('A picklist reference names a picklist this stack does not declare (2 references)');
+      .toBe('A picklist reference names a picklist this stack does not declare, or one only a package outside its '
+        + 'package\'s declared dependencies holds (2 references)');
   });
 
   it('a residual refusal is headed as the boot\'s refusal, not as a reference', () => {

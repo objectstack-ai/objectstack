@@ -69,7 +69,7 @@ import {
 // (`saveMetaItem` → `WRITABLE_PACKAGE_REQUIRED`). Imported, never re-spelled:
 // this defect existed precisely because the lifecycle routes had no copy of it,
 // and a second copy would be the next place it drifts.
-import { isWritablePackage, READ_ONLY_PACKAGE_SCOPES } from '@objectstack/metadata-protocol';
+import { isWritablePackage, READ_ONLY_PACKAGE_SCOPES, refuseNamespaceObjectNameClashes } from '@objectstack/metadata-protocol';
 // [ADR-0146 D3] The pair-shaped-id predicate the install primitive asks — asked
 // at `POST /packages` too, ahead of both its install limbs; and, the same way,
 // its [ADR-0029 D7] refusal of a runtime-created package's navigation contributions.
@@ -688,6 +688,25 @@ function customizeInPairRemedy(id: string, engine: unknown): string {
         + `then save the item there (?package=${pair.value}), declaring overrides: { package: '${id}', basedOn } `
         + `to replace an item '${id}' ships. A type that takes no override, or a locked item, is refused naming its `
         + 'route or the lock; a package that cannot have a pair is refused at that door, naming why.';
+}
+
+/**
+ * [ADR-0150 D6, child K] The objects a `POST /packages/:id/publish` would make
+ * live: those the metadata service holds under the package — the membership
+ * `publishPackage` collects (`packageId`, `package`, or the `_packageId`
+ * stamp). `[]` when the metadata service cannot list.
+ */
+async function packageObjectNames(metadataService: unknown, packageId: string): Promise<string[]> {
+    const list = (metadataService as { list?: (type: string) => Promise<unknown[]> } | null)?.list;
+    if (typeof list !== 'function') return [];
+    const objects = await list.call(metadataService, 'object');
+    const names: string[] = [];
+    for (const item of Array.isArray(objects) ? objects : []) {
+        const meta = item as { name?: unknown; packageId?: unknown; package?: unknown; _packageId?: unknown } | null;
+        if (!meta || (meta.packageId !== packageId && meta.package !== packageId && meta._packageId !== packageId)) continue;
+        if (typeof meta.name === 'string' && meta.name !== '') names.push(meta.name);
+    }
+    return names;
 }
 
 function requireWritablePackage(
@@ -2841,6 +2860,18 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const readOnly = requireWritablePackage(deps, qlService, id, 'publish'); if (readOnly) return readOnly;
             const metadataService = await deps.getService(_context, CoreServiceName.enum.metadata);
             if (metadataService && typeof (metadataService as any).publishPackage === 'function') {
+                // [ADR-0150 D6, child K] A namespace never equals an object
+                // name: every object this publish makes live is judged against
+                // the installed packages' namespaces and its own package's
+                // `NS_custom` BEFORE `publishPackage` runs — the protocol's
+                // publish doors' judge and envelope (`NAMESPACE_CONFLICT` /
+                // 422). The metadata service has no manifest, so the refusal is
+                // this door's, as `WRITABLE_PACKAGE_REQUIRED` above is.
+                try {
+                    refuseNamespaceObjectNameClashes(qlService, await packageObjectNames(metadataService, id), id);
+                } catch (e) {
+                    return { handled: true, response: deps.errorFromThrown(e, 422) };
+                }
                 const result = await (metadataService as any).publishPackage(id, body || {});
                 return { handled: true, response: deps.success(result) };
             }

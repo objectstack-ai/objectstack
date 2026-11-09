@@ -46,6 +46,20 @@ export interface AuthSession {
 }
 
 /**
+ * [#31821] The two facts a door holds about where a request came from, as it
+ * received them: the request's headers (lower-cased names) and the
+ * transport's own peer address (`IHttpRequest.remoteAddress`). Raw input to
+ * {@link IAuthService.resolveClientAddress}; ⛔ never read as an address by
+ * the door itself.
+ */
+export interface AuthRequestTransport {
+    /** Request headers, lower-cased as every adapter delivers them. */
+    headers?: Record<string, string | string[] | undefined>;
+    /** The transport's peer address. */
+    remoteAddress?: string;
+}
+
+/**
  * Authentication result returned by login/verify operations
  */
 export interface AuthResult {
@@ -308,6 +322,22 @@ export interface IAuthService {
     resolveApiKeyLifecyclePolicy?(): ApiKeyLifecyclePolicy;
 
     /**
+     * [#31821] The client address this deployment establishes for a request:
+     * the platform's one client-address trust rule applied with the
+     * deployment's `server.trustProxy`. Forwarded headers count only when
+     * `trustProxy` is declared; otherwise the transport's own peer address
+     * (`IHttpRequest.remoteAddress`); `undefined` when neither is available.
+     *
+     * A door hands over the two facts it holds and never reads a forwarded
+     * header itself, so the trust switch is read in one place. Synchronous,
+     * never throws, reads nothing but its argument and the configuration.
+     *
+     * @param transport - The request's headers and the transport's peer address
+     * @returns The established address, or `undefined` when none can be established
+     */
+    resolveClientAddress?(transport: AuthRequestTransport): string | undefined;
+
+    /**
      * Verify an OAuth 2.1 access token issued by this deployment's embedded
      * authorization server, for the MCP surface (#2698). Resolves to the
      * token's principal, or a falsy value when the token is
@@ -369,9 +399,17 @@ export interface IAuthService {
      * returns nothing, never throws and never makes the caller wait: the
      * record is the provider's own bookkeeping, settled off the request's
      * path, and its failure is never the call's failure.
+     *
+     * [#31821] `transport` is the admitted request's headers and the
+     * transport's peer address, as the door received them. The provider
+     * establishes the client address from them under its own trust rule
+     * ({@link resolveClientAddress}) and reads the user agent from the
+     * headers, so the use it records names where the call came from. A
+     * caller that omits it records a use with no client facts.
      */
     recordMcpAccessTokenUse?(
         principal: NonNullable<Awaited<ReturnType<NonNullable<IAuthService['verifyMcpAccessToken']>>>>,
+        transport?: AuthRequestTransport,
     ): void;
 
     /**

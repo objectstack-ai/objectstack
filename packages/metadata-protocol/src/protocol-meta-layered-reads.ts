@@ -41,7 +41,7 @@ import {
     storedRowDocument,
     withItemLockFamily,
 } from './item-lock.js';
-import { type MetadataDiagnostics, computeMetadataDiagnostics, withFormLayoutWarnings } from './metadata-diagnostics.js';
+import { type MetadataDiagnostics, computeMetadataDiagnostics, withViewLintWarnings } from './metadata-diagnostics.js';
 import { redactMetadataItem } from './metadata-redaction.js';
 import { overlayMemberWhere } from './migrations/overlay-index.js';
 import {
@@ -582,9 +582,11 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     // serves for each name the view spells). Warnings only, so `valid` stays
     // the schema's answer. This door has no execution face: it is the
     // `?layers=true` authoring read, the one Studio's item editor takes when
-    // no draft is pending, so the pass runs unconditionally here.
+    // no draft is pending, so the pass runs unconditionally here. [#31866]
+    // The list-view field warnings ({@link withListViewFieldWarnings}) ride
+    // the same pass, as `getMetaItem` serves them.
     const _diagnostics = effective !== null && typeof effective === 'object' && !Array.isArray(effective)
-        ? (await withFormLayoutWarnings(
+        ? (await withViewLintWarnings(
             request.type,
             { ...(effective as Record<string, unknown>), _diagnostics: schemaDiagnostics },
             (name) => host.engine?.registry?.getObject?.(name),

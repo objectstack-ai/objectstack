@@ -11,7 +11,7 @@ import {
   unmanagedInstallValueCarries,
 } from './kernel/unmanaged-install';
 import { PLURAL_TO_SINGULAR, pluralToSingular } from './meta-spelling/manifest-collection-spelling';
-import { validateObjectNamespacePrefix } from './kernel/namespace-prefix';
+import { findNamespaceObjectNameClashes, validateObjectNamespacePrefix } from './kernel/namespace-prefix';
 import { PLATFORM_CAPABILITY_TOKENS, RETIRED_PLATFORM_CAPABILITY_GUIDANCE } from './kernel/platform-capabilities';
 import { DatasourceSchema } from './data/datasource.zod';
 import { TranslationBundleSchema, TranslationConfigSchema } from './system/translation.zod';
@@ -2546,14 +2546,44 @@ export interface DefineStackOptions {
 function validateNamespacePrefix(config: ObjectStackDefinition): string[] {
   const errors: string[] = [];
   const ns = config.manifest?.namespace;
-  if (!ns || !config.objects) return errors;
-
-  // Single source of the per-object prefix rule — shared verbatim with the
-  // runtime publish enforcement in MetadataManager.publishPackage.
-  for (const obj of config.objects) {
-    const err = validateObjectNamespacePrefix(obj.name, ns);
-    if (err) errors.push(err);
+  if (ns && config.objects) {
+    // Single source of the per-object prefix rule — shared verbatim with the
+    // runtime publish enforcement in MetadataManager.publishPackage.
+    for (const obj of config.objects) {
+      const err = validateObjectNamespacePrefix(obj.name, ns);
+      if (err) errors.push(err);
+    }
   }
+
+  // [ADR-0150 D6, child K] …and a namespace never equals an object name, in
+  // either direction, and no object is short-named `custom` (`NS_custom`, the
+  // namespace the ADR-0146 paired package takes): P's predicate, the one the
+  // install door, the publish doors and `os validate` / `os build` ask, over
+  // every namespace and object this ONE artifact holds — its own manifest and
+  // top-level objects, and each `packages[]` body's. ⚠️ Bound: a declared
+  // dependency carries an id and a range, never a namespace, so packages
+  // outside this artifact are judged at install, not here.
+  const namespaces: Array<{ namespace: string; packageId?: string }> = [];
+  const objects: Array<{ name: string; namespace?: string; packageId?: string }> = [];
+  const hold = (body: Record<string, unknown> | undefined, list: unknown): void => {
+    const namespace = typeof body?.namespace === 'string' && body.namespace !== '' ? body.namespace : undefined;
+    const packageId = typeof body?.id === 'string' && body.id !== '' ? body.id : undefined;
+    if (namespace && !namespaces.some((n) => n.namespace === namespace)) {
+      namespaces.push({ namespace, ...(packageId ? { packageId } : {}) });
+    }
+    for (const obj of Array.isArray(list) ? list : []) {
+      const name = isRecord(obj) && typeof obj.name === 'string' && obj.name !== '' ? obj.name : undefined;
+      if (!name || objects.some((o) => o.name === name)) continue;
+      objects.push({ name, ...(namespace ? { namespace } : {}), ...(packageId ? { packageId } : {}) });
+    }
+  };
+  for (const entry of Array.isArray((config as { packages?: unknown }).packages)
+    ? (config as { packages: unknown[] }).packages : []) {
+    const body = isRecord(entry) && isRecord(entry.manifest) ? entry.manifest : undefined;
+    hold(body, body?.objects);
+  }
+  hold(config.manifest as Record<string, unknown> | undefined, config.objects);
+  for (const clash of findNamespaceObjectNameClashes({ namespaces, objects })) errors.push(clash.message);
   return errors;
 }
 
