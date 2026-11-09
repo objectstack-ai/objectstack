@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { ROUTER_ADDRESSABLE_NAME_MESSAGE, ROUTER_ADDRESSABLE_NAME_PATTERN } from '../kernel/address-grammar';
 import { FilterConditionSchema } from './filter.zod';
 import { DATE_RANGE_PRESETS } from './date-range-presets';
 import { DateGranularity } from './query.zod';
@@ -661,7 +662,7 @@ export const CubeSchema = lazySchema(() => strictObject(
     },
   },
   {
-    name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Cube name (snake_case)'),
+    name: z.string().regex(ROUTER_ADDRESSABLE_NAME_PATTERN, { message: ROUTER_ADDRESSABLE_NAME_MESSAGE }).describe('Cube name (snake_case)'),
     title: z.string().optional(),
     description: z.string().optional(),
 

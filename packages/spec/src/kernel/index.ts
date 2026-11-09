@@ -34,6 +34,10 @@ export * from './manifest.zod';
 // sys_metadata rows — ADR-0131 D6 retired the per-organization axis) and
 // ADR-0126's packaged-metadata model (clone + ledger disable).
 export * from './namespace-prefix';
+// [ADR-0150 D5] The by-name doors' address grammar: the namespace pattern, the
+// reserved `_env` segment, the router-reserved `_` prefix and the literals each
+// door serves at its namespace position.
+export * from './address-grammar';
 export * from './platform-capabilities';
 export * from './metadata-loader.zod';
 export * from './metadata-plugin.zod';

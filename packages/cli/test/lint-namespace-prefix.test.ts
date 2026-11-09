@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { normalizeStackInput } from '@objectstack/spec';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { ActionSchema } from '@objectstack/spec/ui';
-import { lintConfig, NAME_JUDGED_ELSEWHERE, PLATFORM_REQUESTED_BARE_NAMES } from '../src/commands/lint';
+import { lintConfig, PLATFORM_REQUESTED_BARE_NAMES, PREFIX_JUDGED_COLLECTIONS } from '../src/commands/lint';
 
 const RULE = 'naming/namespace-prefix';
 const prefixIssues = (config: any) => lintConfig(config).filter((i) => i.rule === RULE);
@@ -16,25 +16,24 @@ const bareIssues = (config: any) =>
 const dupIssues = (config: any) =>
   prefixIssues(config).filter((i) => i.message.includes('is declared more than once'));
 
-/** Every manifest collection the rule judges: the spec's map less the documented exemptions. */
-const JUDGED = Object.keys(PLURAL_TO_SINGULAR).filter(
-  (key) => !Object.prototype.hasOwnProperty.call(NAME_JUDGED_ELSEWHERE, key),
-);
+/** The manifest collections the bare-name finding judges since ADR-0150. */
+const JUDGED = Object.keys(PREFIX_JUDGED_COLLECTIONS);
+/** Every other manifest collection: short-named by default since ADR-0150 D9. */
+const SHORT = Object.keys(PLURAL_TO_SINGULAR).filter((key) => !JUDGED.includes(key));
 
-describe('lint — every package-authored name carries the package namespace (ruling C, phase 2)', () => {
-  it('judges every manifest collection the spec declares, less exactly three exemptions', () => {
-    // ⛔ A loop over an empty list passes every assertion below, so the set it
-    // runs over is pinned from both sides: the exemptions by name, the judged
-    // set by a floor and by the types the decision's audit named.
-    expect(Object.keys(NAME_JUDGED_ELSEWHERE).sort()).toEqual(['docs', 'objects', 'views']);
-    for (const reason of Object.values(NAME_JUDGED_ELSEWHERE)) expect(reason.length).toBeGreaterThan(20);
-    // 27, not 28: #31380 retired `ragPipelines` from `PLURAL_TO_SINGULAR`.
-    expect(JUDGED.length).toBeGreaterThanOrEqual(27);
-    expect(JUDGED).toEqual(expect.arrayContaining([
+describe('lint — the bare-name finding judges only names that keep the literal prefix (ADR-0150)', () => {
+  it('judges exactly capabilities and positions, each with a reason', () => {
+    // ⛔ A loop over an empty list passes every assertion below, so both sets
+    // are pinned: the judged one by name, the short one by a floor and by the
+    // bucket 2–4 types ADR-0150 D1 names.
+    expect(JUDGED.sort()).toEqual(['capabilities', 'positions']);
+    for (const reason of Object.values(PREFIX_JUDGED_COLLECTIONS)) expect(reason).toMatch(/ADR-0150 D[17]/);
+    expect(SHORT.length).toBeGreaterThanOrEqual(25);
+    expect(SHORT).toEqual(expect.arrayContaining([
       'apps', 'pages', 'dashboards', 'reports', 'datasets', 'actions', 'flows', 'jobs',
-      'positions', 'permissions', 'capabilities', 'sharingRules', 'queues', 'assignmentRules',
-      'apis', 'webhooks', 'agents', 'tools', 'skills', 'hooks', 'mappings', 'picklists',
-      'analyticsCubes', 'connectors', 'datasources', 'emailTemplates', 'books',
+      'permissions', 'sharingRules', 'queues', 'assignmentRules', 'apis', 'webhooks',
+      'agents', 'tools', 'skills', 'hooks', 'mappings', 'picklists', 'analyticsCubes',
+      'connectors', 'datasources', 'emailTemplates', 'books',
     ]));
   });
 
@@ -46,21 +45,26 @@ describe('lint — every package-authored name carries the package namespace (ru
     expect(issues[0].fix).toBe('crm_thing');
   });
 
-  it('the message states the contract and the rename, and no longer calls the prefix optional', () => {
-    const [issue] = prefixIssues({ manifest: { namespace: 'crm' }, flows: [{ name: 'onboard' }] });
-    expect(issue.message).toContain('Flow "onboard"');
-    expect(issue.message).toContain('"crm"');
-    expect(issue.message).toContain('rename it to "crm_onboard"');
-    expect(issue.message).not.toContain('optional convention');
+  it.each(SHORT)('says nothing about one short `%s` name (ADR-0150 D9 retired the warning)', (key) => {
+    expect(bareIssues({ manifest: { namespace: 'crm' }, [key]: [{ name: 'thing' }] })).toEqual([]);
   });
 
-  it('stays a warning — the refusal is phase 3, not this rule', () => {
+  it('the message states why the name keeps the prefix, and the rename', () => {
+    const [issue] = prefixIssues({ manifest: { namespace: 'crm' }, positions: [{ name: 'sales_rep' }] });
+    expect(issue.message).toContain('Position "sales_rep"');
+    expect(issue.message).toContain('"crm"');
+    expect(issue.message).toContain('ADR-0150 D7');
+    expect(issue.message).toContain('rename it to "crm_sales_rep"');
+    expect(issue.message).not.toContain('Every metadata name a package authors');
+  });
+
+  it('stays a warning', () => {
     const issues = prefixIssues({
       manifest: { namespace: 'crm' },
-      flows: [{ name: 'onboard' }],
+      positions: [{ name: 'sales_rep' }],
       pages: [{ name: 'home' }, { name: 'home' }],
     });
-    expect(issues).toHaveLength(4);
+    expect(issues).toHaveLength(2);
     expect(new Set(issues.map((i) => i.severity))).toEqual(new Set(['warning']));
   });
 
@@ -70,28 +74,29 @@ describe('lint — every package-authored name carries the package namespace (ru
     const normalized: any = normalizeStackInput({
       manifest: { namespace: 'crm' },
       flows: { onboard: { label: 'Onboard' } },
+      positions: [{ name: 'sales_rep' }],
       emailTemplates: [{ name: 'welcome' }],
     } as any);
-    expect(bareIssues(normalized).map((i) => i.fix).sort()).toEqual(['crm_onboard', 'crm_welcome']);
+    expect(bareIssues(normalized).map((i) => i.fix).sort()).toEqual(['crm_sales_rep']);
   });
 
   describe('exemptions — each one silent on its own', () => {
-    it('a name that already carries the prefix', () => {
+    it('a name that already carries the prefix, short-named types included (D9: nothing un-renames)', () => {
       expect(prefixIssues({
         manifest: { namespace: 'crm' },
         apps: [{ name: 'crm_sales' }],
         flows: [{ name: 'crm_onboard' }],
-        emailTemplates: [{ name: 'crm_welcome' }],
-        permissions: [{ name: 'crm_sales_rep' }],
+        positions: [{ name: 'crm_sales_rep' }],
+        capabilities: [{ name: 'crm_export' }],
       })).toEqual([]);
     });
 
-    it('a name that IS the namespace (the namespace-named app, ADR-0019)', () => {
-      expect(prefixIssues({ manifest: { namespace: 'crm' }, apps: [{ name: 'crm' }] })).toEqual([]);
+    it('a name that IS the namespace', () => {
+      expect(prefixIssues({ manifest: { namespace: 'crm' }, positions: [{ name: 'crm' }] })).toEqual([]);
     });
 
     it('a platform-reserved `sys_` name, as the object rule exempts it', () => {
-      expect(prefixIssues({ manifest: { namespace: 'crm' }, flows: [{ name: 'sys_cleanup' }] })).toEqual([]);
+      expect(prefixIssues({ manifest: { namespace: 'crm' }, positions: [{ name: 'sys_admin' }] })).toEqual([]);
     });
 
     it('a dot-namespaced name, the capability shape (`billing.refund`)', () => {
@@ -112,13 +117,6 @@ describe('lint — every package-authored name carries the package namespace (ru
         manifest: { namespace: 'crm' },
         permissions: [{ name: 'guest_portal', objects: {} }],
       })).toEqual([]);
-      // Its twins: the same spelling in ANOTHER collection, and a near-miss in
-      // the same one, are still bare.
-      expect(bareIssues({
-        manifest: { namespace: 'crm' },
-        flows: [{ name: 'guest_portal' }],
-        permissions: [{ name: 'guest_portal_plus', objects: {} }],
-      } as any).map((i) => i.fix).sort()).toEqual(['crm_guest_portal', 'crm_guest_portal_plus']);
     });
 
     it('objects — the object prefix is `defineStack`\'s error, not repeated here', () => {
@@ -128,60 +126,21 @@ describe('lint — every package-authored name carries the package namespace (ru
       })).toEqual([]);
     });
 
-    it('fields — keyed inside their object, so derived from it', () => {
-      expect(prefixIssues({
-        manifest: { namespace: 'crm' },
-        objects: [{ name: 'crm_lead', label: 'Lead', fields: { status: { type: 'text', label: 'Status' } } }],
-      })).toEqual([]);
-    });
-
-    it('views — a container is named for its object, a view item is `<object>.<key>`', () => {
-      expect(prefixIssues({
-        manifest: { namespace: 'crm' },
-        views: [
-          { name: 'crm_lead', object: 'crm_lead', list: { columns: ['status'] } },
-          { name: 'crm_lead.pipeline', object: 'crm_lead', viewKind: 'list', config: {} },
-        ],
-      })).toEqual([]);
-    });
-
-    it('object and picklist extensions — they name the item they extend', () => {
-      expect(prefixIssues({
-        manifest: { namespace: 'crm' },
-        objectExtensions: [{ extend: 'sys_user', fields: { region: { type: 'text' } } }],
-        picklistExtensions: [{ extend: 'industry', options: [{ value: 'space', label: 'Space' }] }],
-      })).toEqual([]);
-    });
-
-    it('translations — a bundle has no name of its own (stored as `<ns>_<locale>`)', () => {
-      expect(prefixIssues({
-        manifest: { namespace: 'crm' },
-        translations: [{ en: { objects: {} } }],
-      })).toEqual([]);
-    });
-
     it('docs — judged by the doc lint (`docs/namespace-prefix`), never twice', () => {
       expect(prefixIssues({ manifest: { namespace: 'crm' }, docs: [{ name: 'user_guide' }] })).toEqual([]);
-    });
-
-    it('functions — code handlers, not metadata items', () => {
-      expect(prefixIssues({
-        manifest: { namespace: 'crm' },
-        functions: [{ name: 'syncBilling', handler: 'syncBilling' }],
-      })).toEqual([]);
     });
 
     it('an override declaration (ADR-0146 D2) keeps the base package\'s name', () => {
       // It replaces the base package's item OF THE SAME NAME, so renaming it
       // would stop it overriding anything. Its twin without `overrides` warns.
-      const overriding = { name: 'home', overrides: { package: 'com.acme.crm' } };
-      expect(prefixIssues({ manifest: { namespace: 'acme' }, pages: [overriding] })).toEqual([]);
-      expect(bareIssues({ manifest: { namespace: 'acme' }, pages: [{ name: 'home' }] })).toHaveLength(1);
+      const overriding = { name: 'sales_rep', overrides: { package: 'com.acme.crm' } };
+      expect(prefixIssues({ manifest: { namespace: 'acme' }, positions: [overriding] })).toEqual([]);
+      expect(bareIssues({ manifest: { namespace: 'acme' }, positions: [{ name: 'sales_rep' }] })).toHaveLength(1);
     });
 
     it('a package that declares no namespace has nothing to prefix with', () => {
-      expect(prefixIssues({ flows: [{ name: 'onboard' }], pages: [{ name: 'home' }] })).toEqual([]);
-      expect(prefixIssues({ manifest: { id: 'com.acme.x' }, flows: [{ name: 'onboard' }] })).toEqual([]);
+      expect(prefixIssues({ positions: [{ name: 'sales_rep' }], capabilities: [{ name: 'export' }] })).toEqual([]);
+      expect(prefixIssues({ manifest: { id: 'com.acme.x' }, positions: [{ name: 'sales_rep' }] })).toEqual([]);
     });
   });
 });
@@ -210,15 +169,13 @@ describe('lint — intra-package duplicate-name finding (ADR-0048 §3.4)', () =>
     expect(issues[0].message).toContain('is declared more than once');
   });
 
-  it('a bare duplicate: both items get the rename, the duplicate asks for a distinct name', () => {
-    // Two items both renamed to one suggestion would still be a duplicate, so
-    // the duplicate finding carries no `fix` of its own.
+  it('a short duplicate: the duplicate finding alone, asking for a distinct name, never the prefix', () => {
+    // A short page name is the intended spelling since ADR-0150 (D9), so the
+    // only finding is the shadowing, and it carries no `fix` of its own.
     const config = { manifest: { namespace: 'crm' }, pages: [{ name: 'home' }, { name: 'home' }] };
-    expect(bareIssues(config).map((i) => [i.path, i.fix])).toEqual([
-      ['pages[0].name', 'crm_home'],
-      ['pages[1].name', 'crm_home'],
-    ]);
-    const [dup] = dupIssues(config);
+    expect(bareIssues(config)).toEqual([]);
+    const [dup, ...rest] = dupIssues(config);
+    expect(rest).toEqual([]);
     expect(dup.fix).toBeUndefined();
     expect(dup.message).not.toContain('crm_home');
   });
@@ -263,7 +220,7 @@ describe('lint — intra-package duplicate-name finding (ADR-0048 §3.4)', () =>
       datasets: [{ name: 'ds' }, { name: 'ds' }],
     };
     expect(dupIssues(config)).toHaveLength(7);
-    expect(bareIssues(config)).toHaveLength(14);
+    expect(bareIssues(config)).toHaveLength(0);
     expect(new Set(prefixIssues(config).map((i) => i.severity))).toEqual(new Set(['warning']));
   });
 
@@ -322,13 +279,9 @@ describe('lint — actions dedup on the composite engine key, not the bare name 
     );
     expect(actions).toHaveLength(15);
     expect(dupIssues({ manifest: { namespace: 'crm' }, actions })).toHaveLength(0);
-    // The names are bare, though: under the namespace contract each one owes
-    // the prefix, and the rename keeps the shared name across the objects.
-    const bare = bareIssues({ manifest: { namespace: 'crm' }, actions });
-    expect(bare).toHaveLength(15);
-    expect(new Set(bare.map((i) => i.fix))).toEqual(
-      new Set(['crm_log_call', 'crm_log_meeting', 'crm_schedule_meeting']),
-    );
+    // And the short names are the intended spelling (ADR-0150 D9): an action
+    // is addressed by (package, `objectName:name`), so nothing owes a prefix.
+    expect(bareIssues({ manifest: { namespace: 'crm' }, actions })).toEqual([]);
   });
 
   it('still warns when two actions genuinely share one objectName', () => {
@@ -384,11 +337,11 @@ describe('lint — actions dedup on the composite engine key, not the bare name 
     expect(issues[0].message).toContain('distinct `objectName`');
     expect(issues[0].message).toContain('DIFFERENT objects');
     expect(issues[0].message).toContain('objectName:name');
-    // Renaming stays on offer as the secondary remedy; the prefixed spelling
-    // is the bare-name finding's `fix`, on each of the two items.
+    // Renaming stays on offer as the secondary remedy; no prefixed spelling
+    // is offered anywhere (ADR-0150 D9).
     expect(issues[0].message).toContain('or rename one');
     expect(issues[0].fix).toBeUndefined();
-    expect(bareIssues(config).map((i) => i.fix)).toEqual(['crm_log_call', 'crm_log_call']);
+    expect(bareIssues(config)).toEqual([]);
   });
 
   it('holds through the real `os lint` seam (normalizeStackInput → lintConfig)', () => {
