@@ -35,6 +35,10 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
         label: "Источник",
         help: "Происхождение запроса — `flow:<flowName|nodeId>` для согласований, запускаемых узлом"
       },
+      process_package: {
+        label: "Source Package",
+        help: "The app the flow that opened this request comes from. Filled in by the platform; empty for flows created here."
+      },
       process_label: {
         label: "Поток",
         help: "Метка потока, открывшего этот запрос, в том виде, в каком она была при открытии"

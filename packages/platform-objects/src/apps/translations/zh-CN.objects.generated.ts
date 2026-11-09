@@ -2953,6 +2953,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "名称",
         help: "点分隔的 snake_case 标识（例如 auth.password_reset）"
       },
+      package_id: {
+        label: "Package",
+        help: "The app the template comes from. Filled in by the platform; empty for templates created here."
+      },
       label: {
         label: "标签",
         help: "在 Studio 中显示的人类可读名称"

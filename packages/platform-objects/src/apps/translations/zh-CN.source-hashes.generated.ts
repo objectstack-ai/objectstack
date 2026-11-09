@@ -20,6 +20,8 @@
 export const zhCNGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_email.fields.message_id.label": "14cd089a4062f4b1",
   "objects.sys_email_template.fields.id.label": "00b0385c9c152888",
+  "objects.sys_email_template.fields.package_id.help": "e1f8cc4d0105cedc",
+  "objects.sys_email_template.fields.package_id.label": "aacf5e74a8641b2b",
   "objects.sys_exchange_rate.fields.id.label": "00b0385c9c152888",
   "objects.sys_idp_group_mapping.fields.id.label": "00b0385c9c152888",
   "objects.sys_metadata.fields.bundle_member.help": "6912852b7523f266",

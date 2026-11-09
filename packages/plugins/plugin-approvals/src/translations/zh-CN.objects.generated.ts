@@ -35,6 +35,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "来源",
         help: "请求来源 —— 节点驱动的审批为 `flow:<flowName|nodeId>`"
       },
+      process_package: {
+        label: "Source Package",
+        help: "The app the flow that opened this request comes from. Filled in by the platform; empty for flows created here."
+      },
       process_label: {
         label: "流程",
         help: "打开此请求的流程标签，记录的是请求打开时的值"
