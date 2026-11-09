@@ -18,4 +18,8 @@
  */
 
 export const zhHantGeneratedSourceHashes: Readonly<Record<string, string>> = {
+  "objects.sys_queue_member.fields.queue_package.help": "2057e8ad7a69bc3f",
+  "objects.sys_queue_member.fields.queue_package.label": "c9d3aa9107335996",
+  "objects.sys_sharing_rule.fields.package_id.help": "81de9ff2f0ed555a",
+  "objects.sys_sharing_rule.fields.package_id.label": "aacf5e74a8641b2b",
 };

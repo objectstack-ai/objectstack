@@ -171,6 +171,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           admin: "管理者"
         }
       },
+      package_id: {
+        label: "Package",
+        help: "The app a rule that came with an app belongs to. Filled in by the platform; empty for rules created here."
+      },
       customized: {
         label: "カスタマイズ済み",
         help: "アプリ付属のルールを編集すると設定され、アプリ更新時も変更内容が保持されます。"
@@ -321,6 +325,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       queue: {
         label: "Queue",
         help: "The name of the queue this member belongs to."
+      },
+      queue_package: {
+        label: "Queue Package",
+        help: "The app the queue comes from. Filled in by the platform; empty for queues created here."
       },
       recipient_type: {
         label: "Member Type",

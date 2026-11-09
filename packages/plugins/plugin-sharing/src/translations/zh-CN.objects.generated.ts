@@ -171,6 +171,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           admin: "管理员"
         }
       },
+      package_id: {
+        label: "Package",
+        help: "The app a rule that came with an app belongs to. Filled in by the platform; empty for rules created here."
+      },
       customized: {
         label: "已定制",
         help: "当你修改了随应用安装的规则后置位，应用更新时你的改动会被保留。"
@@ -321,6 +325,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       queue: {
         label: "队列",
         help: "该成员所属队列的名称。"
+      },
+      queue_package: {
+        label: "Queue Package",
+        help: "The app the queue comes from. Filled in by the platform; empty for queues created here."
       },
       recipient_type: {
         label: "成员类型",

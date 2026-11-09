@@ -171,6 +171,10 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
           admin: "Администратор"
         }
       },
+      package_id: {
+        label: "Package",
+        help: "The app a rule that came with an app belongs to. Filled in by the platform; empty for rules created here."
+      },
       customized: {
         label: "Изменено",
         help: "Устанавливается, когда вы меняете правило, пришедшее с приложением, чтобы ваши изменения сохранились при его обновлении."
@@ -321,6 +325,10 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
       queue: {
         label: "Очередь",
         help: "Имя очереди, в которую входит этот участник."
+      },
+      queue_package: {
+        label: "Queue Package",
+        help: "The app the queue comes from. Filled in by the platform; empty for queues created here."
       },
       recipient_type: {
         label: "Тип участника",

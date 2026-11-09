@@ -171,6 +171,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           admin: "Administrador"
         }
       },
+      package_id: {
+        label: "Package",
+        help: "The app a rule that came with an app belongs to. Filled in by the platform; empty for rules created here."
+      },
       customized: {
         label: "Personalizado",
         help: "Se marca al editar una regla que vino con una app, para conservar tus cambios cuando la app se actualice."
@@ -321,6 +325,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       queue: {
         label: "Queue",
         help: "The name of the queue this member belongs to."
+      },
+      queue_package: {
+        label: "Queue Package",
+        help: "The app the queue comes from. Filled in by the platform; empty for queues created here."
       },
       recipient_type: {
         label: "Member Type",
