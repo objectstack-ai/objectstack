@@ -164,3 +164,33 @@ describe('os register — the prompt, the payload and the route agree about `nam
     expect(JSON.parse(String(init.body)).name).toBe('Flagged Name');
   });
 });
+
+describe('os register — the sign-up presents the invitation named by --invitation', () => {
+  beforeEach(() => {
+    answers = [];
+    asked = [];
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('sends --invitation as the body member invitationId, beside the declared three', async () => {
+    const fetchImpl = stubFetch();
+
+    const { threw } = await runRegister([
+      '--url', URL_FLAG, '--email', EMAIL, '--password', PASSWORD, '--name', 'Invitee',
+      '--invitation', 'aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY',
+    ]);
+
+    expect(threw).toBeUndefined();
+    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({
+      email: EMAIL,
+      password: PASSWORD,
+      name: 'Invitee',
+      invitationId: 'aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY',
+    });
+  });
+});

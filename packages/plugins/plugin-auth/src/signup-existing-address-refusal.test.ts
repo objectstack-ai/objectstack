@@ -193,11 +193,13 @@ async function seedPopulation(engine: ObjectQL): Promise<void> {
   );
 }
 
-async function seedPendingInvitation(engine: ObjectQL, email: string): Promise<void> {
+/** Seed a pending invitation and answer its id, which the sign-up presents. */
+async function seedPendingInvitation(engine: ObjectQL, email: string): Promise<string> {
+  const id = `inv_${Math.random().toString(36).slice(2, 10)}`;
   await engine.insert(
     'sys_invitation',
     {
-      id: `inv_${Math.random().toString(36).slice(2, 10)}`,
+      id,
       email: email.trim().toLowerCase(),
       status: 'pending',
       organization_id: 'org_15587',
@@ -207,6 +209,7 @@ async function seedPendingInvitation(engine: ObjectQL, email: string): Promise<v
     },
     SYSTEM,
   );
+  return id;
 }
 
 function makeManager(engine: ObjectQL, config: Record<string, unknown> = {}): AuthManager {
@@ -227,12 +230,12 @@ const EMAIL_DOMAIN_POSTURE = {
   },
 };
 
-function signUp(manager: AuthManager, email: string): Promise<Response> {
+function signUp(manager: AuthManager, email: string, invitationId?: string): Promise<Response> {
   return manager.handleRequest(
     new Request(`${AUTH}/sign-up/email`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', origin: BASE },
-      body: JSON.stringify({ email, password: PASSWORD, name: 'Someone' }),
+      body: JSON.stringify({ email, password: PASSWORD, name: 'Someone', invitationId }),
     }),
   );
 }
@@ -296,15 +299,16 @@ describe('[#15587] sign-up for an address that already exists is refused, not fa
     // measurement rather than a reading of vendor source.
     const shieldOffEngine = await bootEngine();
     await seedPopulation(shieldOffEngine);
-    await seedPendingInvitation(shieldOffEngine, EXISTING);
-    const shieldOff = await signUp(makeManager(shieldOffEngine), EXISTING);
+    const shieldOffInvitation = await seedPendingInvitation(shieldOffEngine, EXISTING);
+    const shieldOff = await signUp(makeManager(shieldOffEngine), EXISTING, shieldOffInvitation);
 
     const shieldOnEngine = await bootEngine();
     await seedPopulation(shieldOnEngine);
-    await seedPendingInvitation(shieldOnEngine, EXISTING);
+    const shieldOnInvitation = await seedPendingInvitation(shieldOnEngine, EXISTING);
     const shieldOn = await signUp(
       makeManager(shieldOnEngine, { emailAndPassword: { requireEmailVerification: true } }),
       EXISTING,
+      shieldOnInvitation,
     );
 
     // The vendor's own answer when the shield is off — unchanged by this card.
@@ -397,8 +401,8 @@ describe('[#15587] sign-up for an address that already exists is refused, not fa
   it('⑤ the two lanes are byte-identical — the refusal is built from better-auth\'s own constant, so vendor re-wording reds here', async () => {
     const vendorEngine = await bootEngine();
     await seedPopulation(vendorEngine);
-    await seedPendingInvitation(vendorEngine, EXISTING);
-    const vendorLane = await signUp(makeManager(vendorEngine), EXISTING);
+    const vendorInvitation = await seedPendingInvitation(vendorEngine, EXISTING);
+    const vendorLane = await signUp(makeManager(vendorEngine), EXISTING, vendorInvitation);
 
     const ourEngine = await bootEngine();
     await seedPopulation(ourEngine);
@@ -442,10 +446,10 @@ describe('[#15587] sign-up for an address that already exists is refused, not fa
     // the `invite_only` default.
     const engine = await bootEngine();
     await seedPopulation(engine);
-    await seedPendingInvitation(engine, EXISTING);
+    const invitationId = await seedPendingInvitation(engine, EXISTING);
     const manager = makeManager(engine, { emailAndPassword: { autoSignIn: false } });
 
-    const res = await signUp(manager, EXISTING);
+    const res = await signUp(manager, EXISTING, invitationId);
 
     expect(res.status, `autoSignIn:false lane was not refused: ${await res.clone().text()}`).toBe(422);
     expect(((await res.json()) as { code?: string }).code).toBe(ALREADY_EXISTS);

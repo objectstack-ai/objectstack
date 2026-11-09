@@ -587,6 +587,24 @@ function mayName(t: DelegatedTarget, side: 'next' | 'prev', column: string): boo
 const TARGET_USER_OBJECT = 'sys_user';
 
 /**
+ * [ADR-0131 D4] A permission set a direct-grant write is judged on: its
+ * catalog definition (`setRow`, `null` when there is none), its name, whether a
+ * refusal may name it ({@link mayName}), and — when no delegate can be shown to
+ * hold authority over it — why (`unresolved`).
+ */
+interface GrantSetJudgment {
+  setRow: any | null;
+  setName: string;
+  setNamed: boolean;
+  unresolved?: string;
+}
+
+/** The holder a direct-grant row names (`user_id`), or `null` when it names none. */
+function grantHolderOf(row: any): string | null {
+  return row?.user_id ? String(row.user_id) : null;
+}
+
+/**
  * [ADR-0090 D12; ruling on #26059, Q3] Does the gate judge a target user
  * through the caller's own read ({@link DelegatedAdminGate.callerReadsUser})?
  * Wherever that read can be asked at all: `sys_user` is registered on the
@@ -602,7 +620,8 @@ const TARGET_USER_OBJECT = 'sys_user';
  * `user_id`, and it holds for every target user the gate judges: the holder a
  * direct-grant write names (an insert, an update pointing the grant at another
  * user), the holder a stored grant keeps (a delete, an update that leaves
- * `user_id` as stored), and the user the explain doors ask about
+ * `user_id` as stored), the holder an update pointing the grant at another
+ * user takes it from, and the user the explain doors ask about
  * ({@link DelegatedAdminGate.scopesCoverUser}). Were it the column's shape,
  * the answer about one unreadable user would change with whether `user_id` is
  * still a writable lookup.
@@ -1287,6 +1306,27 @@ export class DelegatedAdminGate {
   }
 
   /**
+   * [ADR-0090 D12] The stored holder a direct-grant update takes the grant
+   * from when it points the grant at another user (`t.prev`'s `user_id`), as
+   * the gate judges it: its business units through the caller's own read
+   * ({@link targetUserUnits}), exactly as the holder the write names is
+   * judged, and whether a refusal may name it — only when the caller's own
+   * read returned it at its stored value ({@link mayName}). A pre-image naming
+   * no holder answers no holder and no units, and asks the read nothing.
+   */
+  private async storedHolderJudged(
+    context: any,
+    t: DelegatedTarget,
+  ): Promise<{ userId: string | null; units: Set<string>; named: boolean }> {
+    const userId = grantHolderOf(t.prev);
+    return {
+      userId,
+      units: userId ? await this.targetUserUnits(context, userId) : new Set<string>(),
+      named: mayName(t, 'prev', 'user_id'),
+    };
+  }
+
+  /**
    * Is position `positionName` inside the organization boundary? `null` when
    * every set it carries is; otherwise the first failure, naming the set.
    * A position the catalog does not hold cannot be shown inside, and is not.
@@ -1641,8 +1681,8 @@ export class DelegatedAdminGate {
     for (const t of targets) {
       const side = t.next ? 'next' : 'prev';
       const row = t.next ?? t.prev ?? {};
-      const { setRow, setName, unresolved, setNamed } = await this.directGrantSet(t, row);
-      const targetUserId = row.user_id ? String(row.user_id) : null;
+      const { setRow, setName, unresolved, setNamed, stored } = await this.directGrantSet(t, row);
+      const targetUserId = grantHolderOf(row);
       // A target user — one the write names, or one the grant stores — is first
       // asked of the caller's own read door ({@link targetUserUnits}): a user it
       // does not return is answered as a user that does not exist, which holds
@@ -1654,14 +1694,50 @@ export class DelegatedAdminGate {
       // [ruling of record 6649064874] Named only when the caller
       // wrote or reads it ({@link mayName}); the verdict is the stored row's.
       const userNamed = mayName(t, side, 'user_id');
+      // [ADR-0090 D12] An update that points a stored grant at another user
+      // touches two holders: the one it gives the grant to (above) and the one
+      // it takes the grant from — the pre-image's. Both must lie inside the
+      // subtree, so a delegate can neither capture nor evict a direct grant
+      // beyond it, as `assertAssignmentWrite` judges an assignment's pre-image
+      // beside its new value. The stored holder is judged exactly as the holder
+      // the write names: through the caller's own read ({@link targetUserUnits}),
+      // with the same reason, class, sentence and details, and named only when
+      // the caller reads it at its stored value ({@link mayName}). A pre-image
+      // naming no holder is one only a tenant admin may move, as an unanchored
+      // assignment is one only a tenant admin may modify.
+      const fromHolder = t.next && t.prev && grantHolderOf(t.prev) !== targetUserId
+        ? await this.storedHolderJudged(opCtx.context, t)
+        : null;
+      // [ADR-0090 D12] Likewise an update that re-names a stored grant takes
+      // the grant's own set away (`stored`, {@link directGrantSet}): that set is
+      // judged exactly as the removal of the grant judges it — the same
+      // reasons, sentences and details, the set named only when the caller
+      // reads it. Which set a refusal is about is the set its details name:
+      // `refusedSet` is set by the check of the LAST scope tried, the one whose
+      // failure {@link firstApprovalFailure} surfaces.
+      let refusedSet: GrantSetJudgment = { setRow, setName, setNamed };
+      const judgedOn = (judged: GrantSetJudgment, reason: string | ScopeViolation): string | ScopeViolation => {
+        refusedSet = judged;
+        return reason;
+      };
 
       const failure = this.firstApprovalFailure(held, (s) => {
+        refusedSet = { setRow, setName, setNamed };
         if (!s.scope.manageAssignments) return 'the scope does not grant manageAssignments';
         if (unresolved) return unresolved;
         if (!s.scope.assignablePermissionSets.includes(setName)) {
           return outsideScope(setNamed
             ? `permission set '${setName}' is not in the scope's allowlist`
             : "the grant's permission set is not in the scope's allowlist");
+        }
+        // The set the update takes away, judged as the removal judges it.
+        if (stored) {
+          if (stored.unresolved) return judgedOn(stored, stored.unresolved);
+          if (!s.scope.assignablePermissionSets.includes(stored.setName)) {
+            return judgedOn(stored, outsideScope(stored.setNamed
+              ? `permission set '${stored.setName}' is not in the scope's allowlist`
+              : "the grant's permission set is not in the scope's allowlist"));
+          }
         }
         if (!targetUserId) return 'the grant names no target user';
         // [ADR-0090 D12; ruling on #26059, Q3] A target user is inside the
@@ -1677,9 +1753,23 @@ export class DelegatedAdminGate {
             ? `target user '${targetUserId}' is outside the delegated subtree`
             : "the grant's target user is outside the delegated subtree");
         }
+        // The holder the update takes the grant from, judged as the one it
+        // gives it to: the same reason, sentence and details.
+        if (fromHolder) {
+          if (!fromHolder.userId) return 'the existing grant names no target user — only a tenant admin may move it';
+          if (![...fromHolder.units].some((bu) => s.subtree.has(bu))) {
+            return outsideScope(fromHolder.named
+              ? `target user '${fromHolder.userId}' is outside the delegated subtree`
+              : "the grant's target user is outside the delegated subtree");
+          }
+        }
         if (setRow) {
           const contained = this.assertScopeGrantContainment(setRow, held, true, setNamed ? undefined : "the grant's permission set");
           if (contained) return contained;
+        }
+        if (stored?.setRow) {
+          const contained = this.assertScopeGrantContainment(stored.setRow, held, true, stored.setNamed ? undefined : "the grant's permission set");
+          if (contained) return judgedOn(stored, contained);
         }
         return null;
       });
@@ -1687,7 +1777,11 @@ export class DelegatedAdminGate {
         throw refusalFor(
           failure,
           `delegated '${opCtx.operation}' on sys_user_permission_set rejected`,
-          { operation: opCtx.operation, object: opCtx.object, ...(setNamed ? { permissionSet: setName } : {}) },
+          {
+            operation: opCtx.operation,
+            object: opCtx.object,
+            ...(refusedSet.setNamed ? { permissionSet: refusedSet.setName } : {}),
+          },
         );
       }
     }
@@ -2088,23 +2182,40 @@ export class DelegatedAdminGate {
    *   still judged against the allowlist (the write is then refused 400 by the
    *   grant's own name refusal, `grant-permission-set-name.ts`); no
    *   `sys_permission_set` row and no `permission_set_id` is read.
+   * - **The set an update re-names the grant AWAY from** (`stored`) — the
+   *   stored grant's own set, judged too, exactly as the removal of that grant
+   *   judges it ({@link grantOwnSet}). [ADR-0090 D12] A re-name takes that set
+   *   away from its holder, so a delegate can neither capture nor evict a
+   *   direct grant beyond its scope: a grant it could not remove it cannot
+   *   re-name either.
    *
    * `setNamed` says whether a refusal may name the set ({@link mayName}): the
    * name the write points the grant at always (the caller's own); the grant's
-   * own name only when the caller's read returned it.
+   * own name — the one a keep-set update or a removal judges, and the one a
+   * re-name takes away — only when the caller's read returned it.
    */
   private async directGrantSet(
     t: DelegatedTarget,
     row: any,
-  ): Promise<{ setRow: any | null; setName: string; setNamed: boolean; unresolved?: string }> {
+  ): Promise<GrantSetJudgment & { stored?: GrantSetJudgment }> {
     const repointed = !!t.next && (!t.prev || grantSetNameOf(t.next) !== grantSetNameOf(t.prev));
     if (repointed) {
       const nextName = grantSetNameOf(t.next) ?? '';
       const setRow = nextName ? await this.catalogSet(nextName) : null;
-      return { setRow, setName: nextName, setNamed: true };
+      const stored = t.prev ? await this.grantOwnSet(grantSetNameOf(t.prev), mayName(t, 'prev', 'permission_set')) : null;
+      return { setRow, setName: nextName, setNamed: true, ...(stored ? { stored } : {}) };
     }
-    const setNamed = mayName(t, t.next ? 'next' : 'prev', 'permission_set');
-    const name = grantSetNameOf(row);
+    return this.grantOwnSet(grantSetNameOf(row), mayName(t, t.next ? 'next' : 'prev', 'permission_set'));
+  }
+
+  /**
+   * [ADR-0131 D4] A grant's own set, `name` (the name it stores, or the name a
+   * keep-set update supplies), as a delegated write on that grant judges it:
+   * read BY NAME in the security catalog. A grant naming nothing, or naming a
+   * set the catalog does not hold, is `unresolved` — fail closed. `setNamed`
+   * says whether a refusal may name it ({@link mayName}).
+   */
+  private async grantOwnSet(name: string | undefined, setNamed: boolean): Promise<GrantSetJudgment> {
     if (!name) {
       return {
         setRow: null,

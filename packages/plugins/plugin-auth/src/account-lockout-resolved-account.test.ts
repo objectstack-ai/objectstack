@@ -92,8 +92,8 @@ const post = (manager: AuthManager, path: string, body: unknown, remoteAddress?:
   );
 
 async function signUp(manager: AuthManager): Promise<void> {
-  inviteForAudienceGate(manager, EMAIL);
-  const res = await post(manager, '/sign-up/email', { email: EMAIL, password: PASSWORD, name: 'Holder' });
+  const invitationId = await inviteForAudienceGate(manager, EMAIL);
+  const res = await post(manager, '/sign-up/email', { email: EMAIL, password: PASSWORD, name: 'Holder', invitationId });
   expect(res.status, await res.clone().text()).toBe(200);
 }
 

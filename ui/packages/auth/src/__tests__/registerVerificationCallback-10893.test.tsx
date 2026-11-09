@@ -86,3 +86,32 @@ describe('RegisterForm → sign-up wire: the verification callback (objectui#108
     expect(Object.keys(signUpBodies[0])).not.toContain('callbackURL');
   });
 });
+
+describe('RegisterForm → sign-up wire: the invitation the registration presents', () => {
+  it('puts invitationId on the /sign-up/email body', async () => {
+    const { fetchFn, signUpBodies } = verificationGatedServer();
+    const onVerificationRequired = vi.fn();
+
+    await register(
+      <RegisterForm invitationId="inv_1" onVerificationRequired={onVerificationRequired} />,
+      fetchFn as unknown as typeof fetch,
+    );
+
+    await waitFor(() => expect(onVerificationRequired).toHaveBeenCalled());
+    expect(signUpBodies).toHaveLength(1);
+    expect(signUpBodies[0].invitationId).toBe('inv_1');
+  });
+
+  it('sends no invitationId when the form presents none', async () => {
+    const { fetchFn, signUpBodies } = verificationGatedServer();
+    const onVerificationRequired = vi.fn();
+
+    await register(
+      <RegisterForm onVerificationRequired={onVerificationRequired} />,
+      fetchFn as unknown as typeof fetch,
+    );
+
+    await waitFor(() => expect(onVerificationRequired).toHaveBeenCalled());
+    expect(Object.keys(signUpBodies[0])).not.toContain('invitationId');
+  });
+});

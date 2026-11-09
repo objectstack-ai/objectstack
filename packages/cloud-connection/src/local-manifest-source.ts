@@ -229,6 +229,34 @@ function expandHome(raw: string): string {
     return raw.startsWith('~') ? resolve(homedir(), raw.slice(1).replace(/^[/\\]/, '')) : resolve(raw);
 }
 
+/** The instance home `OS_HOME` names, as this package's state resolvers read it. */
+export interface OsHomeReading {
+    /** `OS_HOME`, trimmed, `~` expanded, made absolute. */
+    dir: string;
+    /**
+     * Whether {@link dir} is the ephemeral home of an `os dev --fresh` run, as
+     * that run announces on {@link FRESH_HOME_CHANNEL_ENV}: state under it
+     * adopts nothing from the working directory.
+     */
+    ephemeral: boolean;
+}
+
+/**
+ * The ONE reading of `OS_HOME` for the state this package keeps on disk — the
+ * install ledger ({@link resolveInstalledPackagesDir}) and the cloud binding
+ * credential (`resolveConnectionCredentialPath`) — so the two never disagree
+ * about which home an instance has. `null` when `OS_HOME` is unset or blank.
+ */
+export function readOsHome(env: NodeJS.ProcessEnv = process.env): OsHomeReading | null {
+    const home = env.OS_HOME?.trim();
+    if (!home) return null;
+    const dir = expandHome(home);
+    const fresh = env[FRESH_HOME_CHANNEL_ENV]?.trim();
+    // The channel counts only for the home it names: an inherited copy never
+    // speaks for another run's home.
+    return { dir, ephemeral: !!fresh && expandHome(fresh) === dir };
+}
+
 /**
  * The ONE answer to "where is this runtime's install ledger" — the runtime's
  * own default and `os doctor` both read it, so the two never look at two
@@ -261,17 +289,11 @@ function expandHome(raw: string): string {
 export function resolveInstalledPackagesDir(
     opts: { env?: NodeJS.ProcessEnv; cwd?: string } = {},
 ): InstalledPackagesLocation {
-    const env = opts.env ?? process.env;
     const legacy = resolve(opts.cwd ?? process.cwd(), DEFAULT_INSTALLED_PACKAGES_DIR);
-    const home = env.OS_HOME?.trim();
+    const home = readOsHome(opts.env);
     if (!home) return { dir: legacy, legacyDir: null };
-    const homeDir = expandHome(home);
-    const dir = join(homeDir, INSTALLED_PACKAGES_HOME_SUBDIR);
-    if (dir === legacy) return { dir, legacyDir: null };
-    const fresh = env[FRESH_HOME_CHANNEL_ENV]?.trim();
-    // The channel counts only for the home it names: an inherited copy never
-    // speaks for another run's home.
-    if (fresh && expandHome(fresh) === homeDir) return { dir, legacyDir: null };
+    const dir = join(home.dir, INSTALLED_PACKAGES_HOME_SUBDIR);
+    if (dir === legacy || home.ephemeral) return { dir, legacyDir: null };
     return { dir, legacyDir: legacy };
 }
 
