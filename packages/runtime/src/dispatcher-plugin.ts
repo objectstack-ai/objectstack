@@ -2126,6 +2126,31 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                         errorResponse(err, res);
                     }
                 });
+                // [ADR-0150 D5, epic child G1] The addressed record-scoped call,
+                // `/actions/:ns/:object/:action/:recordId` (and `_env` in the
+                // namespace position): the one addressed shape the three mounts
+                // above cannot match. Its 3-segment siblings
+                // (`/actions/:ns/:object/:action`, `/actions/:ns/global/:action`)
+                // reach the domain through the `:recordId` mount, whose rebuilt
+                // path is byte-identical; `handleActionsRequest` reads the
+                // namespace position.
+                server!.post(`${base}/actions/:ns/:object/:action/:recordId`, async (req: any, res: any) => {
+                    try {
+                        const { ns, object, action, recordId } = req.params;
+                        const result = await dispatcher.dispatch('POST', `/actions/${ns}/${object}/${action}/${recordId}`, deferRequestBody(req), req.query, { request: req });
+                        // A path whose first segment is no address (a literal,
+                        // or no installed namespace) is no route of this mount:
+                        // the domain declines it, and `sendResult` answers the
+                        // dispatcher's no-route 404. A catch-all host answers
+                        // the same since G1 (the domain declines every path past
+                        // three segments); before, this host answered the
+                        // transport's unmatched 404 and a catch-all host ran
+                        // the call with the tail ignored.
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
                 // [#24228] `POST` is the one verb these paths serve, and the only
                 // one mounted. Every other verb reaches the domain through the
                 // fallback seam, so its anonymous baseline — the FIRST statement
@@ -2138,6 +2163,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 domainDecidesEveryVerb('POST', `${base}/actions//:action`);
                 domainDecidesEveryVerb('POST', `${base}/actions/:object/:action`);
                 domainDecidesEveryVerb('POST', `${base}/actions/:object/:action/:recordId`);
+                domainDecidesEveryVerb('POST', `${base}/actions/:ns/:object/:action/:recordId`);
             };
 
             // ── Security catalog activation (ADR-0126 §3 regime C, ADR-0131 D3/D6) ──

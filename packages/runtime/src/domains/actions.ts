@@ -67,6 +67,7 @@ import {
 // reading cannot drift from the `/data` door's. ⛔ Never re-inline its arms.
 import { actionsDoorAnswerOf, earnedAnswerOf, staleSummaryAnswerLines, type SummaryRecomputeRefusal } from '@objectstack/types';
 import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
+import { readNamespacePositionSegment } from '@objectstack/spec/kernel';
 // [ADR-0029 D9.6] The ONE "does a code package ship this?" reading, which the
 // activation write below asks to name the ledger row's package.
 import { isCodeArtifactBody, isTenantAuthored } from '@objectstack/metadata-core';
@@ -191,6 +192,12 @@ async function handleActionActivationWrite(
     const postureRefusal = await refuseUngrantedActivationWrite(deps, context, ACTION_ACTIVATION_SUBJECT);
     if (postureRefusal) return postureRefusal;
 
+    // [ADR-0150 D5] A deeper path is no route of this door, and is declined
+    // AFTER the two gates above (a gate narrower than its route is a bypass),
+    // so the dispatcher answers its no-route `404 ROUTE_NOT_FOUND`. Before G1
+    // a mounted host answered the transport's unmatched 404 without reaching
+    // this domain, and a catch-all host got this door's shape 400 here.
+    if (parts.length > 3) return { handled: false };
     // The shape, refused with the shape named. `parts` is
     // `['_activation', object, action]` — the object segment is mandatory even
     // for an object-less action, which spells it `global` exactly as the
@@ -498,19 +505,10 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
             },
         };
     }
-    const parts = path.split('/').filter(Boolean);
+    let parts = path.split('/').filter(Boolean);
     if (parts.length < 1) {
         return { handled: true, response: deps.error('Path must be /actions/:object/:action', 400) };
     }
-    // A single segment is an OBJECT-LESS action (#3913): `POST /actions//log_call`
-    // is what an SDK that has no object to name emits, and `filter(Boolean)`
-    // already ate the empty segment. Route it at the canonical `'global'` key
-    // rather than 400-ing — before this it was the one global-action shape that
-    // could never work, and `/actions/global/log_call` only worked by accident
-    // (the literal path segment happened to match the registration key).
-    const objectName = parts.length > 1 ? parts[0] : actionExec.GLOBAL_ACTION_OBJECT_KEY;
-    const actionName = parts.length > 1 ? parts[1] : parts[0];
-    const recordIdFromPath = parts.length > 1 ? parts[2] : undefined;
 
     // Resolve project scope so the right project kernel's ObjectQL is
     // used (single-environment default when unset), then let the host
@@ -531,6 +529,68 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
     if (!ql || typeof ql.executeAction !== 'function') {
         return { handled: true, response: deps.error('Data engine not available', 503) };
     }
+
+    // [ADR-0150 D5, epic child G1] THE ADDRESS, read once, before every gate
+    // that reads the path: `/actions/:ns/:object/:action[/:recordId]`,
+    // `/actions/:ns/global/:action` and the same under `_env`. The segment in
+    // the namespace position is read in the router's order
+    // (`readNamespacePositionSegment`): a literal (`global`, `_activation`, the
+    // empty object-less segment) first, then `_env`, then an installed
+    // namespace (the registry's `getNamespaceOwners`), else the bare grammar,
+    // unchanged. An addressed path is then the bare path after its qualifier,
+    // and the declaration is the qualifier's alone (`addressQualifier`).
+    // No object is named like a namespace (ADR-0150 D6), so a bare
+    // `/actions/:object/:action/:recordId` never reads as addressed.
+    let addressQualifier: actionExec.ActionAddressQualifier | undefined;
+    {
+        const registry: any = ql?.registry;
+        const namespaceOwners = (ns: string): readonly string[] =>
+            (typeof registry?.getNamespaceOwners === 'function' ? registry.getNamespaceOwners(ns) ?? [] : []);
+        const reading = readNamespacePositionSegment('actions', parts[0], (ns) => namespaceOwners(ns).length > 0);
+        if (reading.reading === 'environment' || reading.reading === 'namespace') {
+            addressQualifier = reading.reading === 'environment'
+                ? { environment: true }
+                : { namespace: reading.namespace, namespaceOwners };
+            parts = parts.slice(1);
+            // An addressed path names an object (or `global`) and an action,
+            // and a record id at most: two or three segments after its
+            // qualifier, the shapes D5's table publishes. One segment is no
+            // shape of it (`/actions/:ns/:action` is not published: the
+            // object-less call is `/actions/:ns/global/:action`); more than
+            // three are declined below, as the bare arm declines them. The
+            // activation write is the environment's ledger door and names its
+            // action by `(object, name)`: it has no addressed form.
+            if (parts.length < 2 || parts[0] === ACTION_ACTIVATION_SEGMENT) {
+                return {
+                    handled: true,
+                    response: deps.error(
+                        'An addressed action path is /actions/:ns/:object/:action[/:recordId] or /actions/:ns/global/:action (ADR-0150 D5)',
+                        404,
+                    ),
+                };
+            }
+        }
+    }
+    // [ADR-0150 D5] The grammar ends at three segments, bare or after a
+    // qualifier: `/:object/:action/:recordId`. A longer path is no route, and
+    // is declined (`handled: false`), so the dispatcher answers its no-route
+    // `404 ROUTE_NOT_FOUND` on every host. Before G1 that was not one answer:
+    // the dispatcher mounted no four-segment `/actions` pattern, so a mounted
+    // host answered the transport's unmatched 404 without reaching this
+    // domain, while a catch-all host (`createHonoApp`) handed this domain the
+    // path, which read `parts[0..2]` and ran the call with the tail ignored
+    // (and a deeper `_activation` path got that door's shape 400). A deeper
+    // `_activation` path is declined by its own door, behind its two gates.
+    if (parts.length > 3 && parts[0] !== ACTION_ACTIVATION_SEGMENT) return { handled: false };
+    // A single segment is an OBJECT-LESS action (#3913): `POST /actions//log_call`
+    // is what an SDK that has no object to name emits, and `filter(Boolean)`
+    // already ate the empty segment. Route it at the canonical `'global'` key
+    // rather than 400-ing — before this it was the one global-action shape that
+    // could never work, and `/actions/global/log_call` only worked by accident
+    // (the literal path segment happened to match the registration key).
+    const objectName = parts.length > 1 ? parts[0] : actionExec.GLOBAL_ACTION_OBJECT_KEY;
+    const actionName = parts.length > 1 ? parts[1] : parts[0];
+    const recordIdFromPath = parts.length > 1 ? parts[2] : undefined;
 
     // [ADR-0126 §8 item 2] THE ACTIVATION WRITE DOOR — enable/disable one
     // packaged action, which is a `sys_metadata_activation` row and nothing
@@ -589,12 +649,26 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         // authored `action` rows) resolve here too, so a route whose action
         // never appears inside an object definition is gated and dispatched
         // like any other (#3915).
-        const declaration = await actionExec.resolveRouteActionDeclaration(deps, _context, {
-            ql,
-            objectName,
-            actionName,
-            envId: _context?.environmentId,
-        });
+        // [ADR-0150 D5, child G1] An addressed path resolves through the
+        // qualifier alone — the namespace's packages, or the environment —
+        // by the resolution the MCP `run_action` bridge's qualified call reads.
+        let declaration: actionExec.RouteActionDeclaration;
+        if (addressQualifier) {
+            try {
+                declaration = await actionExec.resolveAddressedRouteActionDeclaration(deps, _context, {
+                    ql, objectName, actionName, envId: _context?.environmentId, qualifier: addressQualifier,
+                });
+            } catch (err) {
+                return { handled: true, response: deps.errorFromThrown(err, 404) };
+            }
+        } else {
+            declaration = await actionExec.resolveRouteActionDeclaration(deps, _context, {
+                ql,
+                objectName,
+                actionName,
+                envId: _context?.environmentId,
+            });
+        }
         actionSchema = declaration?.obj;
         actionDef = declaration?.action;
         declarationPackageId = declaration?.packageId;

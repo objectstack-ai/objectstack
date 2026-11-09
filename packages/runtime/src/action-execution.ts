@@ -4499,8 +4499,9 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
             namespaceOwners: (ns) => (typeof registry?.getNamespaceOwners === 'function' ? registry.getNamespaceOwners(ns) : []),
         };
     }
+    const objectsListing = await readObjects?.();
     const resolved = await resolveActionByName(
-        deps, meta, name, input?.objectName, await readObjects?.(), await readActions?.(), qualifier,
+        deps, meta, name, input?.objectName, objectsListing, await readActions?.(), qualifier,
     );
     if (!resolved) {
         throw new Error(
@@ -4511,7 +4512,23 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     }
     // [ADR-0150 D4] Set only for a qualified call: the resolved holder's
     // package, whose handler the dispatch runs (the engine's package key).
-    const { action, objectName, obj, packageId } = resolved;
+    const { action, packageId } = resolved;
+    let { objectName, obj } = resolved;
+    // [ADR-0150 D5, child G1] A qualified call on an object that reached the
+    // holder's OBJECT-LESS declaration (`addressedActionHits`' fallback) keeps
+    // the caller's object as its subject, as the REST door keeps the routed
+    // one (`resolveAddressedRouteActionDeclaration`): every gate below judges
+    // that object, the record id is loaded from it, and the handler runs under
+    // it. So `run_action(name, { namespace, objectName, recordId })` and
+    // `POST /actions/:ns/:object/:action/:recordId` are the same call. The bare
+    // arm has no fallback (it answers not-found), so this never fires on it.
+    const askedObject = typeof input?.objectName === 'string' && input.objectName !== '' ? input.objectName : undefined;
+    if (qualifier && askedObject && !isObjectLessActionKey(askedObject) && isObjectLessActionKey(objectName)) {
+        objectName = askedObject;
+        obj = (objectsListing ?? []).find((o: any) => o?.name === askedObject)
+            ?? (typeof meta?.getObject === 'function' ? await meta.getObject(askedObject) : undefined)
+            ?? obj;
+    }
 
     // Fail-closed on system-object actions, PER ACTION (#27681): a `sys_*`
     // action passes only on its author's `ai.exposed` opt-in, and every gate
@@ -4906,10 +4923,14 @@ export async function resolveActionByName(deps: ActionExecutionDeps,
      * declarations answer; a namespace no installed package has is refused
      * by name. Omitted, the bare name resolves as below.
      */
-    qualifier?: { namespace: string; namespaceOwners: (namespace: string) => readonly string[] },
+    qualifier?: ActionAddressQualifier,
 ): Promise<{ action: any; objectName: string; obj: any; packageId?: string } | null> {
     const decls = await collectActionDeclarations(deps, meta, objects, actions);
-    if (qualifier) return resolveQualifiedActionDeclaration(decls, name, objectName, qualifier);
+    if (qualifier) {
+        return 'environment' in qualifier
+            ? resolveEnvironmentActionDeclaration(decls, name, objectName)
+            : resolveQualifiedActionDeclaration(decls, name, objectName, qualifier);
+    }
     if (objectName) {
         const hits = decls.filter((d) => d.objectName === objectName && d.action?.name === name);
         if (hits.length === 0) return null;
@@ -4934,6 +4955,17 @@ export async function resolveActionByName(deps: ActionExecutionDeps,
 }
 
 type ActionDeclarationRow = Awaited<ReturnType<typeof collectActionDeclarations>>[number];
+
+/**
+ * [ADR-0150 D5] The exact qualifier of a by-name action call: an installed
+ * namespace, mapped to its packages by `namespaceOwners` (the registry's
+ * `getNamespaceOwners`), or the environment (`_env`), whose own declarations
+ * alone answer. The MCP `run_action` bridge passes the first; the REST
+ * `/actions` door passes either ({@link resolveAddressedRouteActionDeclaration}).
+ */
+export type ActionAddressQualifier =
+    | { namespace: string; namespaceOwners: (namespace: string) => readonly string[] }
+    | { environment: true };
 
 /**
  * [ADR-0150 D3] One declaration among same-named declarations of ONE owner key
@@ -4998,30 +5030,64 @@ function resolveQualifiedActionDeclaration(
         );
     }
     const inNamespace = decls.filter((d) => d.action?.name === name && d.packageId !== undefined && owners.has(d.packageId));
+    return pickActionHolder(addressedActionHits(inNamespace, name, objectName, `namespace '${namespace}'`), name, true);
+}
+
+/**
+ * [ADR-0150 D5, child G1] `name` among the environment's own declarations
+ * (`_env`): no package's declaration is a candidate, in the same order as a
+ * namespace ({@link addressedActionHits}). Refused by name, `404`, when the
+ * environment declares none.
+ */
+function resolveEnvironmentActionDeclaration(
+    decls: readonly ActionDeclarationRow[],
+    name: string,
+    objectName: string | undefined,
+): { action: any; objectName: string; obj: any; packageId?: string } {
+    const own = decls.filter((d) => d.action?.name === name && d.packageId === undefined);
+    return pickActionHolder(addressedActionHits(own, name, objectName, 'the environment'), name, false);
+}
+
+/**
+ * [ADR-0150 D5] The declarations an addressed call reaches among `inScope`
+ * (one namespace's, or the environment's): bound to `objectName` first and
+ * object-less after — the order the engine reaches a handler in
+ * (`actionHandlerObjectKeys`) and the REST door's bare read admits a
+ * declaration in (`resolveRouteActionDeclaration`), so a qualified call
+ * reaches exactly what the bare call reaches, narrowed to its holder.
+ * Refused by name, `404`, when none answers; with no `objectName`, a name
+ * bound to several objects asks for one.
+ */
+function addressedActionHits(
+    inScope: readonly ActionDeclarationRow[],
+    name: string,
+    objectName: string | undefined,
+    where: string,
+): ActionDeclarationRow[] {
     let hits: ActionDeclarationRow[];
     if (objectName && !isObjectLessActionKey(objectName)) {
-        const bound = inNamespace.filter((d) => d.objectName === objectName);
-        hits = bound.length > 0 ? bound : inNamespace.filter((d) => isObjectLessActionKey(d.objectName));
+        const bound = inScope.filter((d) => d.objectName === objectName);
+        hits = bound.length > 0 ? bound : inScope.filter((d) => isObjectLessActionKey(d.objectName));
     } else if (objectName) {
-        hits = inNamespace.filter((d) => isObjectLessActionKey(d.objectName));
+        hits = inScope.filter((d) => isObjectLessActionKey(d.objectName));
     } else {
-        hits = inNamespace;
-        const where = [...new Set(hits.map((d) => d.objectName))];
-        if (where.length > 1) {
+        hits = [...inScope];
+        const objects = [...new Set(hits.map((d) => d.objectName))];
+        if (objects.length > 1) {
             throw new Error(
-                `Action '${name}' exists on multiple objects in namespace '${namespace}' (${where.join(', ')}); pass objectName to disambiguate`,
+                `Action '${name}' exists on multiple objects in ${where} (${objects.join(', ')}); pass objectName to disambiguate`,
             );
         }
     }
     if (hits.length === 0) {
         throw Object.assign(
             new Error(objectName
-                ? `Action '${name}' not found on object '${objectName}' in namespace '${namespace}'`
-                : `Action '${name}' not found in namespace '${namespace}'`),
+                ? `Action '${name}' not found on object '${objectName}' in ${where}`
+                : `Action '${name}' not found in ${where}`),
             { code: standardErrorCodeForHttpStatus(404), status: 404 },
         );
     }
-    return pickActionHolder(hits, name, true);
+    return hits;
 }
 
 /**
@@ -5824,6 +5890,87 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
     }
 
     return { action: undefined, obj, degraded, reason };
+}
+
+/**
+ * [commit e783e163d, #25120] One type's merged listing, as `GET /api/v1/meta/TYPE`
+ * reads it — or `undefined` when this host has no merged read to offer.
+ *
+ * The one place this package unwraps `getMetaItems`, shared by the MCP
+ * bridge's skill, object and action reads (`domains/mcp.ts`) and the REST
+ * `/actions` door's addressed call ({@link resolveAddressedRouteActionDeclaration}),
+ * so they cannot disagree about which answers they accept. Its three outcomes
+ * are the ones `readMergedSkillRows` (`domains/mcp.ts`) documents: `undefined` is STRUCTURAL absence (no
+ * protocol in the slot, or one without the list verb), and the caller answers
+ * from the metadata service exactly as before; a throw travels to the caller,
+ * ⛔ never a fallback to the un-merged read.
+ */
+export async function readMergedItems(
+    protocol: Pick<MetadataProtocol, 'getMetaItems'> | undefined | null,
+    type: 'skill' | 'object' | 'action' | 'dataset',
+): Promise<unknown[] | undefined> {
+    if (!protocol || typeof protocol.getMetaItems !== 'function') return undefined;
+    const answer = await protocol.getMetaItems({ type });
+    // The declared `GetMetaItemsResponse` is `{ type, items }`, and the two
+    // other `getMetaItems` consumers in this package read `res.items` the same
+    // way. The bare-array arm matches what `packages/mcp` accepts for the stdio
+    // half of this same read: the slot is filled by name from a host-owned
+    // registry, and the two surfaces answering one question must not disagree
+    // about the shape they accept.
+    return Array.isArray(answer)
+        ? (answer as unknown[])
+        : Array.isArray(answer?.items)
+            ? answer.items
+            : [];
+}
+
+/**
+ * [ADR-0150 D5, child G1] Resolve the declaration behind an ADDRESSED
+ * `/actions` route — `/actions/:ns/:object/:action` or
+ * `/actions/_env/:object/:action` — through the same resolution the MCP
+ * `run_action` bridge's qualified call reads ({@link resolveActionByName}
+ * with its qualifier), over the same declarations: the protocol's merged
+ * object and action listings, which withhold a disabled package's
+ * (#25139, #25297), or the metadata service's on a host with none.
+ *
+ * Answers like {@link resolveRouteActionDeclaration}: the declaration and the
+ * holder's package coordinate; a `refusal` naming every holder (a shareable
+ * namespace's co-owners, ADR-0150 D2); `degraded` when the metadata plane
+ * could not answer (ADR-0110 D3). A namespace no installed package has, and a
+ * name its holder does not declare, are thrown `404` by name.
+ */
+export async function resolveAddressedRouteActionDeclaration(deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    args: { ql: any; objectName: string; actionName: string; envId?: string; qualifier: ActionAddressQualifier },
+): Promise<RouteActionDeclaration> {
+    const { ql, objectName, actionName, envId, qualifier } = args;
+    let obj: any;
+    try {
+        obj =
+            (typeof ql?.getSchema === 'function' ? ql.getSchema(objectName) : undefined) ??
+            ql?.registry?.getObject?.(objectName);
+    } catch {
+        obj = undefined; // schema unresolved → handler-only action
+    }
+    try {
+        const protocol = await deps.resolveService(requestContext, 'protocol', envId);
+        const objects = await readMergedItems(protocol, 'object');
+        const actions = await readMergedItems(protocol, 'action');
+        const meta = objects !== undefined && actions !== undefined
+            ? undefined
+            : await deps.resolveService(requestContext, 'metadata', envId);
+        const resolved = await resolveActionByName(deps, meta, actionName, objectName, objects, actions, qualifier);
+        if (!resolved) return { action: undefined, obj };
+        return {
+            action: resolved.action,
+            obj: obj ?? resolved.obj,
+            ...(resolved.packageId !== undefined ? { packageId: resolved.packageId } : {}),
+        };
+    } catch (err: any) {
+        if (err instanceof PackageScopedNameRefusedError) return { action: undefined, obj, refusal: err.refusal };
+        if (err?.status === 404) throw err;
+        return { action: undefined, obj, degraded: true, reason: err?.message ?? String(err) };
+    }
 }
 
 /**
