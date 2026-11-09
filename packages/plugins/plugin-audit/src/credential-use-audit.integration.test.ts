@@ -212,6 +212,11 @@ describe('[#31796] an API key admitting a request leaves one credential_use row 
     const rows = (await credentialUseRows(audited.engine)).filter((r) => r.record_id === 'key_shape');
     expect(rows).toHaveLength(1);
     const [row] = rows;
+    const stored = JSON.stringify(row);
+    expect(stored).not.toContain(raw);
+    expect(stored).not.toContain(hashApiKey(raw));
+    expect(stored).not.toContain('s3cr3t');
+    expect(stored).not.toContain('osk_');
     expect(row).toMatchObject({
       action: 'credential_use',
       user_id: USER,
@@ -229,11 +234,6 @@ describe('[#31796] an API key admitting a request leaves one credential_use row 
       credential_id: 'key_shape',
       used_at: new Date(T0).toISOString(),
     });
-    const stored = JSON.stringify(row);
-    expect(stored).not.toContain(raw);
-    expect(stored).not.toContain(hashApiKey(raw));
-    expect(stored).not.toContain('s3cr3t');
-    expect(stored).not.toContain('osk_');
   });
 
   it('a second admission inside the window writes no row; the first after the window writes one', async () => {
@@ -316,9 +316,9 @@ describe('[#31796] CONTROL: the ledger changes no admission', () => {
     }
     expect(JSON.stringify(answers[0])).toBe(JSON.stringify(answers[1]));
     expect((answers[0][0] as { outcome: string }).outcome).toBe('admitted');
-    // The ledger row landed on the audited side only, and the stamp never failed.
-    expect((await credentialUseRows(audited.engine)).filter((r) => r.record_id === 'key_control')).toHaveLength(1);
+    // The ledger never made the stamp fail, and its row landed on the audited side.
     expect(errors.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('API key use NOT recorded'))).toEqual([]);
+    expect((await credentialUseRows(audited.engine)).filter((r) => r.record_id === 'key_control')).toHaveLength(1);
   });
 });
 
