@@ -1,0 +1,35 @@
+{
+  "number": 31716,
+  "kind": "issue",
+  "title": "objectql: the package-scoped resolver takes holders from a source other than SchemaRegistry, so engine functions resolve by their referrer's package (ADR-0150 child R2)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "enhancement",
+    "pm:dispatched",
+    "pm:epic",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T23:12:53Z",
+  "updated_at": "2026-11-09T00:35:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31716",
+  "body": "epic:#31527#1 · os-steve · session_01ADHkmP7o3uDTti21wLTfPf\n\nFiling gate: ④ coordination node: child R2 of the epic #31527, a seam R (#31575, merged in #31637 as 0ebb0801) owes, found by E6 #31678's readings before code (`/mnt/project-files/server-seat2/31678-readings.md`; the epic seat's rulings are in 6728478528). ⛔ Not a claim.\nRuling-ref: per-type table A (6723462584); division of labour A (6723571682): R is built by the epic seat, and R2 is R's continuation; ADR-0150 D4's row \"engine function registry: resolved in the package of the flow or action that names it (D3); a function is not a metadata type, so it follows its referrer\".\nBusiness reason: inherited from the parent #31527. A flow or action naming a function must get its own package's function, or the closure's unique one, or a refusal naming the candidates, by the same rule as every other by-name read. A second implementation of the rule is what R exists to prevent.\nReader: the epic seat builds it (`mode:thread`) and accepts it against the three red lines.\nDedupe (open AND closed): `resolvePackageScopedName function` (0 hits outside this epic), `engine function package referrer` (none on point).\nclass: d · type: Feature\nGrade: p1, inherited from the parent.\n\n## 维护者速读\n\n共享解析器 R 现在只认注册表里的元数据，引擎函数不在注册表里，所以接不进来。R2 给解析器加一个入口：持有者从别处传进来（引擎的函数表），规则和拒绝完全一样。只加入口和测试，不接任何读者。\n\n## What to build\n\n1. An entry on `package-scoped-resolver.ts` that runs D3's three steps over a holder set the caller supplies: `(packageId, item)` pairs from the engine's function map (`engine-hooks-and-functions.ts`). Same closure (`packageResolutionClosure`), same refusal shape and vocabulary, same baseline rule. `resolvePackageScopedName` becomes a call of it over the registry's holders, so the rule is written once.\n2. The engine function map keeps each function's registering package, so the holder set exists. The bare `functions: Map<name, entry>` stays readable while phase 1 holds (red line 3).\n3. If the maintainer rules A on N1 (`needs-user-decision` on #31678), this card also widens the closure with the caller's co-owners in the same release artifact (ADR-0130). That waits for the `Ruled:` line, and this card is amended then.\n4. Tests: every arm, the two red lines as ablated negative pins, and parity with `resolvePackageScopedName` over the same holders.\n\n## Surface\n\n- Expected file surface: objectql `package-scoped-resolver.ts` (+ test), `engine-hooks-and-functions.ts` (the package on each function entry).\n- Clause-②: no (new TypeScript exports only).\n- Narrowing: no. No reader is wired here. The follow-up child wires the function callers (service-automation `screen-nodes.ts`, `engine.ts`) after R2 lands.\n\n## Acceptance — the epic's three red lines\n\n- **Resolution never loosens.** No first-registered fallback, no environment-wide guess for a caller with a package, no silent pick.\n- **Ambiguity is reported, never guessed.** Every refusal names every candidate.\n- **Independently releasable.** Additive only: no reader switches here, and phase 1's one-holder refusal and its tests stay green.\n\nParent: #31527."
+}

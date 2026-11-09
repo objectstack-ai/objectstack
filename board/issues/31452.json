@@ -2,8 +2,8 @@
   "number": 31452,
   "kind": "issue",
   "title": "docs(adr): ADR-0011's identity-action census says one identity action is unassessed; sys_sso_provider.edit_sso_sign_in_options (#30967) makes it two",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T08:37:16Z",
-  "updated_at": "2026-11-08T17:04:14Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-08T21:33:27Z",
+  "closed_at": "2026-11-08T21:31:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31452",
   "body": "domain:server#6 · os-project-manager · session_01FEkQ5p3T5YWhLjurajudnQ\n\n## What is wrong\n\n`docs/adr/0011-actions-as-ai-tools.md` (identity-actions note, \"Not assessed\") says `sys_user.list_platform_admins` is \"the one identity action that postdates the assessment and is in no bucket above\", and the census line above it counts \"one more identity action, unassessed\".\n\nPR #31448 (#30967, items 1/2/4) adds a second identity action after the assessment: `sys_sso_provider.edit_sso_sign_in_options` (Setup → SSO Providers → Edit Sign-In Options), declared with no `ai` block, so human-only. Once it merges, the ADR's count and its \"the one\" sentence are false.\n\n## Expected\n\nThe \"Not assessed\" paragraph and the census line name both unassessed identity actions (human-only, no `ai` block, until a maintainer ruling assesses them), or a maintainer ruling assesses the new action into a bucket. No code change.\n\n## Where to start\n\n- `docs/adr/0011-actions-as-ai-tools.md`, the identity-actions note (~:365-382 on `main` at the time of filing).\n- `packages/platform-objects/src/identity/sys-sso-provider.object.ts`, action `edit_sso_sign_in_options` (lands with PR #31448).\n\n## Provenance\n\nContract review 6719336371 on PR #31448, ③ boundary flag (the dev report's \"ADR-0011 not edited, the new action is human-only\" leaves the ADR's count stale). Filed by the seat as its carrier. `docs/adr/**` is a governed surface (Tier H); this card waits for PR #31448 to merge."

@@ -1,0 +1,35 @@
+{
+  "number": 31676,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0150 keeps the scorer's prefix check on positions (review round 10)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T21:25:53Z",
+  "updated_at": "2026-11-08T22:10:48Z",
+  "closed_at": "2026-11-08T22:10:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-08T22:10:45Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31676",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XBsDxUffG35RvTHueTQ8ZGa)_\n\nRefs #31527\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：把 #31586 进入合并队列时尚未推送的最后一轮审查（6727093622：S19 和 N26–N29）补进已合并的 ADR-0150。只改这一个 ADR 文件的三行文字，不改代码。\n- 为什么改：S19 是实质修正：场景评分器的前缀检查对「职位」也要保留。职位在整个环境里同名只有一个槽位（D7），两个画廊应用的同名职位在安装时仍会冲突。其余是措辞：评分器保留检查的集合（view、doc、capability，capability 按 NS.SHORT 拼法）；评分器的交接「与 P 同时或在 P 之前」落地；技能文字改为「不再给 2–4 档的名字加前缀」；ADR-0048 §5 的 lint 条目和 §3.4 的 lint 句子挂到子卡 A。\n- 风险与回滚：只改文档，没有运行时风险。回滚即撤销这一个提交。\n- 先看：ADR-0150 D9 的「Narrowed to bucket 1 and positions」一句。\n- 两分钟验证：运行 pnpm check:adr-index 和 node scripts/check-adr-links.mjs，两条都应退出 0。\n- 需要你做的：审阅后合并。\n\n## What changes\n\n- `docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md`, 3 lines:\n  - D9: the scenario scorer's `bare-name` Build check and its build prompt are narrowed to bucket 1 types **and positions**. A position is one environment-wide slot (D7), so a bare position from two gallery apps still collides at install (S19). Of the collections the scorer walks, view, doc and capability keep the check, the capability by its `NS.SHORT` spelling, and an api item's name is bucket 2 (N26). The hand-off lands with or before P (N27). The skills stop prefixing bucket 2–4 names (N28).\n  - The plan's hand-off line matches D9.\n  - Child A's row names ADR-0048 §5's `[done]` lint bullet and §3.4's lint sentence, which go stale after P and the phase-3 withdrawal (N29).\n\n## Tests\n\nNone. This is a docs-only amendment (`skip-changeset`).\n\n## Acceptance notes\n\n- This is review round 10 of #31586 (record 6727093622 on #31586). It was prepared before #31586 entered the merge queue, held while it was queued, and is landed here on a fresh branch from `main` (5d1382a5).\n\n## Verification\n\nAt head bfc591fd:\n- every family from `dispatch-gates --commands` was run, with exit codes captured before any pipe;\n- all 21 derived commands exited 0;\n- `dispatch-gates --ran` answered: 21 run, 0 NOT-MEASURED.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FEkQ5psDxi37aZAzXB36TT\n\n<!-- signed: epic:#31527#1 · os-project-manager · session_01FEkQ5mLd7pR2PHjsPwiGkz -->\n"
+}

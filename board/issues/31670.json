@@ -1,0 +1,38 @@
+{
+  "number": 31670,
+  "kind": "issue",
+  "title": "objectql: refuse a (type, name) held twice inside one namespace for the uncovered bucket 2/3 types (ADR-0150 child N)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "enhancement",
+    "pm:blocking",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T21:23:08Z",
+  "updated_at": "2026-11-09T01:01:04Z",
+  "closed_at": "2026-11-09T00:58:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31670",
+  "body": "epic:#31527#1 · os-project-manager · session_01FEkQ5mLd7pR2PHjsPwiGkz\n\nFiling gate: ④ coordination node: child N of the epic #31527 (parent and per-layer children), as ADR-0150 (`docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md`, merged in #31586 at 5d1382a5)'s execution plan lists it. Hand-over card: filed undispatched as the epic seat signs off (maintainer 2026-11-08T16:34Z 「专题卡当前任务处理完，合并后就下班」). ⛔ Not a claim.\nRuling-ref: per-type table A (6723462584); epic A 「立专题」 (6723499113); division of labour A 「留核心，其余交车道」 (6723571682); D2 (6724570466); ADR-0150 accepted by merge (#31586, 2026-11-08T21:16Z).\nBusiness reason: inherited from the parent #31527. Behavioural metadata is addressed by (package, name), so two installed packages can each ship an item of the same name and every reader answers the right one, or refuses with the candidates, instead of silently taking the first match.\nReader: the next `domain:server` seat picks it from the queue (pm-dispatch selection) and accepts its PR against the red lines below.\nDedupe (open AND closed): `namespace co-owner unique` (4; top hits #31527(open) #25792(closed) #25403(closed), none on point: they are this epic, its parent #30806, or unrelated cards).\nclass: d · type: Feature\nGrade: p1, inherited from the parent (self-graded under 「定级你可以自己决定」).\n\n## 维护者速读\n\n同一个命名空间里如果有两个软件包，它们的行为元数据（页面、报表、队列等 12 类）不能重名，安装和 os validate 时拒绝。这样以后「命名空间 + 名字」永远只指向一个条目。第一方实测 0 处冲突。\n\n## What to build\n\nA `(type, name)` held twice inside one namespace is refused at install and `os validate` (D2, ruled 6724570466), on the ADR-0130 D3 object check, for the bucket 2/3 types phase 1 does not cover: sharing rule, queue, assignment rule, hook, job, app, page, dashboard, report, book, cube, tool. The refusal names both holders. Lands before G1 and G2, so a qualified address and a face always name one item.\n\n## Surface\n\n- Expected file surface: objectql `registry.ts` (`installPackage`), cli validate.\n- Clause-②: no.\n- Narrowing: yes (measured first-party: 0 of 297 HotCRM keys).\n\n## Acceptance — the epic's three red lines (every child shares them)\n\n- **Resolution never loosens.** No first-registered fallback, no environment-wide guess for a caller with a package, no silent pick.\n- **Ambiguity is reported, never guessed.** Every refusal and every migration report names every candidate.\n- **Independently releasable** (red line 3). The PR proves it with ADR-0150's four readings: (a) the phase-1 one-holder tests stay green; (b) bare-name behaviour (URLs, MCP, SDK) is unchanged for every name with one holder, except this card's declared narrowing; (c) any migration is re-runnable and never guesses; (d) its `Clause-②:` declaration and, where it changes the protocol, its ADR-0087 migration entry.\n- The epic seat is off duty after hand-over: the accepting lane seat checks these lines itself, and a narrowing beyond the declared one goes to the maintainer before landing.\n\nParent: #31527.\n"
+}

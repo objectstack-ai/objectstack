@@ -2,8 +2,8 @@
   "number": 31621,
   "kind": "issue",
   "title": "docs(adr): ADR-0011 says the identity census covers twelve identity objects; the tree has thirteen since the 2026-11-07 SCIM amendment",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,21 @@
   "labels": [
     "documentation",
     "domain:server",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-steve"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T17:18:35Z",
-  "updated_at": "2026-11-08T19:06:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-08T21:43:59Z",
+  "closed_at": "2026-11-08T21:42:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31621",
   "body": "domain:skills#3 · zhuangjianguo · session_01QsR2jULfPnqQFGcZUtKDFH\n\nFiling gate: (b) a follow-up a review names. Contract review 6724527824 on PR #31616 (card #31452), ④ nit, outside that PR's diff. ⛔ Not a claim.\n\n## 维护者速读\n\nADR-0011 的身份动作评估段说评估覆盖了 `packages/platform-objects/src/identity/` 里「十二个」身份对象。2026-11-07 的修订把 `sys_scim_connection_credential` 的两个动作也收进了评估，现在带动作的身份对象是 13 个。这句话读起来像现在的清点，其实停在了修订之前。只改一个词，不涉及任何评估。\n\n## What\n\n- `docs/adr/0011-actions-as-ai-tools.md` L317-318 (on `main` 133f75ae): \"The named actions on the twelve identity objects in `packages/platform-objects/src/identity/` were assessed once, as one set\".\n- Measured by the review on the live tree: 13 action-bearing objects under that directory, the 13th being `sys_scim_connection_credential`, whose two actions came with the 2026-11-07 amendment (the ADR's own census paragraph, L375-376).\n\n## Ask\n\n- Either say thirteen and note the amendment, or make the sentence explicitly historical (\"twelve at the 2026-10-30 assessment\"). Pick by reading the paragraph whole. Tier H (`docs/adr/**`).\n\n## Not in scope\n\n- Assessing `sys_user.list_platform_admins` or `sys_sso_provider.edit_sso_sign_in_options` (a maintainer ruling).\n\nRelated: #31452, PR #31616."

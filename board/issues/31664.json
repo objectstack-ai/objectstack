@@ -1,0 +1,34 @@
+{
+  "number": 31664,
+  "kind": "pull_request",
+  "title": "docs(permissions): the SSO page describes how IdP groups grant permission sets",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T21:01:10Z",
+  "updated_at": "2026-11-08T21:46:39Z",
+  "closed_at": "2026-11-08T21:46:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-08T21:46:37Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31664",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9NeNpMcmXafqTuBdcSgKZYa)_\n\nFixes #31658\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：SSO 文档页新增一节「Grant permission sets from IdP groups」，讲清 SSO 登录时 IdP 组如何按映射授予普通权限集；SCIM 凭据一节加一行回链（同一映射模型，两个来源）。\n- 为什么改：#31657 已上线 SSO 一半的组映射行为，运维文档还没写，管理员找不到怎么配。\n- 风险与回滚：纯文档，不发布任何包；回滚即 revert 本 PR。\n- 先看：`content/docs/permissions/sso.mdx`（新节，逐条对照 #31657 的代码与 changeset）、`content/docs/permissions/authentication.mdx`（一行回链）。\n- 两分钟验证：`pnpm check:doc-anchors`，预期两处新锚点链接都能解析、全绿。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n`content/docs/permissions/sso.mdx` gains one section, **Grant permission sets from IdP groups**, describing the SSO half of IdP group mapping that PR #31657 landed. Every statement was read from the merged code (`sso-group-projection.ts`, `idp-group-mapping-admin.ts`, the route-ledger notes) and #31657's changeset, not written from memory:\n\n- the groups claim is configured in the provider's own `mapping.extraFields.groups` (on `oidcConfig.mapping` / `samlConfig.mapping` at `POST /api/v1/auth/sso/register`); a string or a list; a provider whose mapping fills no `groups` signs in as before;\n- a mapping is saved through `POST /api/v1/auth/admin/scim/set-group-mapping` with `providerId` (exactly one of `connectionId` / `providerId`; exactly one of `groupExternalId` / `groupDisplayName`), removed through `delete-group-mapping`;\n- only an ordinary permission set inside the provider's organization is granted; the save refusals (`400 VALIDATION_FAILED` on `providerId` / `permissionSet`, `503` with SSO off or no security service);\n- grants follow the IdP at every sign-in, a sign-in with no groups claim removes that provider's own earlier grants, and a grant made by hand or through SCIM is never touched;\n- a failure is logged at `error` and never fails the sign-in.\n\nThe section links the SCIM credentials section of `content/docs/permissions/authentication.mdx`, and that section gains one back-link line (one mapping model, two sources). Rules only; no bypass narrative.\n\n## Tests\n\nDocs only: no test, no ablation (os-dev: docs are not ablated). The derived doc gates below are the verification.\n\n## Acceptance notes\n\n- **No SCIM group-mapping section exists to link.** The delta asked to link \"the SCIM page's group-mapping section\"; on `origin/main` no page under `content/docs/` describes the SCIM group mapping that PR #31443 landed (zero hits for `set-group-mapping`, `sys_idp_group_mapping`, `groupDisplayName` outside this diff). The link and back-link therefore use the existing **SCIM Connection Credentials** section, and the new SSO section carries the shared door's rules for both sources. Documenting the SCIM half's push-time behaviour is left out of this card's file surface.\n- **ADR-0152 is not linked**: it is not on `origin/main` (PR #31636 still open).\n- **The no-code Setup form cannot set the groups claim.** `register-sso-provider.ts` writes `oidcConfig.mapping` as `{ email, name }` only and no SAML mapping, so the page sends operators to the vendor's `/sso/register` for `extraFields`. Noted, not filed.\n- **Changeset:** `skip-changeset`. No package's `files[]` ships `content/docs/` (grep of every `package.json` under `packages/` and `apps/`), so the diff publishes nothing.\n\n## Verification\n\nHead: `a7bcac5c` (origin/main `8c9260f7`, which carries PR #31657, merged in; no rebase).\n\n<details><summary>Derived gates on the head</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` on `a7bcac5c` derived 45 commands (the same 45 as on the pre-merge head `af648c0e`); all 45 ran with exit 0 after the spec, lint and client-react closure was rebuilt for the merged tree, and `--ran` reconciled: 45 derived, 45 run, 0 NOT-MEASURED, 0 UNRUN. Among them `check:doc-anchors` (956 internal fragment links resolve, the two new ones included), `check:doc-authoring`, `check:doc-frontmatter`, `check:docs-single-h1`, `check:doc-route-spelling` (advisory, population clean) and `check:doc-security-posture`.\n\nOn the pre-merge head, `check:skill-examples` first exited 3 (PREREQUISITE NOT MET: `client-react` had no `.d.ts`); it ran green after that package was built, and green again on this head.\n</details>\n\n<details><summary>Lint</summary>\n\nNo package is touched (two `.mdx` pages only), so no package-scoped `pnpm lint` applies.\n</details>\n\n<details><summary>Merged behaviour read</summary>\n\n`sso-group-projection.ts`, `idp-group-mapping-admin.ts`, `scim-group-projection.ts`, `auth-manager-plugin-list.ts` and #31657's changeset are byte-identical between #31657's last head `70db6d06` and `origin/main` `8c9260f7` (`git diff --stat` empty), so the page describes what landed.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmSWdZY3vu8awytLsrR)_\n"
+}

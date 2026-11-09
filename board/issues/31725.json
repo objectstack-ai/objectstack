@@ -1,0 +1,38 @@
+{
+  "number": 31725,
+  "kind": "pull_request",
+  "title": "feat(service-automation): declared connector instances resolve by (package, name) through the shared resolver",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T00:15:08Z",
+  "updated_at": "2026-11-09T01:18:02Z",
+  "closed_at": "2026-11-09T01:18:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-09T01:18:00Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31725",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9B9qYj7GTyDGfaMgXwXx7rZ)_\n\nPart of #31677\n\nClause-②: no\nMetadata-protocol: none\nNarrowing: D3 (a) declared by the card, measured 0 here: no reader in this PR has a caller package (first-party package-caller reads wired: 0), so the closure-outside sub-case of #31527 comment 6728487836 measures 0, sibling-in-the-same-artifact included.\n\nPart of epic #31527 (ADR-0150 child E5), connectors only, per seat 3's split on the card (6728849524, epic seat 6728850663). Two remainders of #31677 stay open:\n\n- **Webhooks**: waits on the maintainer's ruling on names two packages held before phase 1 (the card's needs-user-decision, Q1). Its code is at `da3bc28e` on this branch's history and lands as its own draft PR after `Ruled:`.\n- **Email templates**: waits on R2 #31716, which stops the resolver from counting a dependent's added locale (#28802) as a second holder of the base's template name.\n\nCard thread `domain:server#3` · `os-steve` · `session_01ADHkmR4astMzES5UkW47jW`; claim 6728454873, file-surface amendment 6728498905.\n\n## 维护者速读\n\n- 改了什么：声明式连接器实例在物化时，按名字取哪一条声明，改为问 R 的共享解析器 `resolvePackageScopedName`（无包调用方）：先环境自建项，再全环境唯一的包持有者，否则拒绝并列出全部候选。\n- 为什么改：ADR-0150 把连接器改为按（软件包, 名称）寻址；以前两个包同名时只报「名字重复」，不点名是哪两个包。\n- 风险与回滚：阶段一的单持有者拒绝对 connector 仍然生效，今天不可能有两个包同名，所以每个名字的答案不变（service-automation 全量 3458 条全绿）。`@objectstack/objectql` 从开发依赖改为运行时依赖，无循环。回滚即还原本 PR。\n- 先看：`packages/services/service-automation/src/connector-package-scope.ts`，以及 `plugin.ts` 里 `reconcileDeclaredConnectors` 开头的拒绝循环。\n- 两分钟验证：`pnpm --filter @objectstack/service-automation exec vitest run src/connector-materialization.test.ts -t \"resolves by\"`，预期 2 条通过、其余跳过，其中两个包同名的用例断言启动失败、错误信息点名两个包、工厂从未被调用。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n`reconcileDeclaredConnectors` (service-automation, the declared-instance index the engine's `connectors` map is filled from) now asks the ONE package-scoped resolver (`resolvePackageScopedName`, `@objectstack/objectql`, R #31637) which declared connector instance a name means, before it materializes anything. The reconcile reads the whole environment's declaration and has no caller package, so it asks as a caller with no package (ADR-0150 D3): the environment's own item, else the unique package holder, else a refusal naming every candidate.\n\n| Reader on `main`, by symbol | Pick today | Caller package | After this PR |\n|:--|:--|:--|:--|\n| `reconcileDeclaredConnectors` desired map | a second entry refused as \"duplicate\", no candidates named | none | a name the resolver refuses is not materialized; `fail()` names every candidate (fatal at boot for a host-declared entry, soft for a stored one, as the duplicate check already was) |\n\nNot touched, and why:\n\n- `connector_action`'s `connectorConfig.connectorId` is the one reference here written inside a package (the flow's). `AutomationContext` (spec) names no flow package, so the node cannot ask as that package yet; per seat 3's ruling (Q3 A) it stays context-free here and is wired after E1 #31672. It keeps reading the engine's one-instance-per-name map, which this PR now fills through the resolver.\n- `findInertDeclaredConnectors` (an audit warning) picks no item.\n- Plugin-registered connectors (`engine.registerConnector`) are no registry items; the resolver answers not-found and they keep ADR-0097 §4's one-origin rule.\n- Stored references (`sys_connector_connection.connector_name`) are S3 #31684's.\n\n`@objectstack/objectql` moves from `devDependencies` to `dependencies` in service-automation (claim amendment 6728498905). No cycle: objectql's workspace closure (deps, devDeps and peers, 14 packages) does not contain service-automation. E1 #31672 makes the same move on the same lines; a trial merge of its branch onto this head is clean, and per the seat E1 lands first and this branch merges `origin/main` after it.\n\n## ADR-0150's four readings\n\n- **(a) phase-1 one-holder tests stay green.** objectql's four `registry-bare-name-one-holder*` suites plus `package-scoped-resolver.test.ts`: 187 passed; the four `bare-name-one-holder*` dogfood files are in the targeted run below. This PR does not touch objectql.\n- **(b) bare-name behaviour unchanged for every name with one holder.** The new suite pins the one-holder case on a real `SchemaRegistry` (the connector materializes with the holder's definition), and service-automation's full suite stays green. No URL, MCP or SDK surface moves.\n- **(c) no migration.** Nothing stored is read or written differently.\n- **(d)** `Clause-②: no`, `Metadata-protocol: none`; no ADR-0087 entry.\n\n## Tests\n\n`service-automation/src/connector-materialization.test.ts`, new describe \"a declared connector name resolves by (package, name)\": one holder materializes; two holders fail the boot naming both, and the provider factory is never called. The harness's `boot()` gains an optional `schemaRegistry` (a real registry in place of the double). No existing test changed.\n\nAblation (`scripts/ablation-replace.mjs`, mutation proved on disk, restored to the HEAD blob, `git diff HEAD` empty after; the suite imports `src`, so no `dist` leg; measured at `da3bc28e`, whose service-automation tree is byte-identical to this head): `refusedConnectorNames` records no refusal → 1 failed: the boot still fails on the older duplicate-name check, but `expected '[Automation] duplicate declarative co…' to contain 'connector instance \\'billing\\' is not…'`. The candidates are what the pin adds.\n\n## Verification (head 47f5d0c0)\n\n- `@objectstack/service-automation` test exit 0 (266 files, 3458 tests); typecheck exit 0; root `eslint --no-inline-config packages/services/service-automation` exit 0 (the package has no `lint` script). Run under `os-verify-lock`.\n- Targeted dogfood after `turbo run build --filter='@objectstack/dogfood^...'` (70/70): 19 files (the four phase-1 bare-name families, email template boot/materialization/locale files, connector install/restart/package-ref files, declarative MCP, webhook materialization), 96 tests passed.\n- Derived gates: `dispatch-gates --commands` derived 85 families at 47f5d0c0; all 85 run with `exit 0`; `--ran`: \"85 derived, 85 run, 0 NOT-MEASURED, 0 UNRUN\" (a derived zero, every row carrying its exit code).\n- `test:repo` not run locally (CI's `Test Core`); this diff touches no repo-project test.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmR4astMzES5UkW47jW\n"
+}

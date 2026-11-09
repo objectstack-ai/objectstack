@@ -2,8 +2,8 @@
   "number": 31649,
   "kind": "issue",
   "title": "devx: refusal prose still tells CI to set fetch-depth: 0 where ci.yml now fetches history in a step",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:dispatched",
     "priority:p3",
     "tooling"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T19:10:57Z",
-  "updated_at": "2026-11-08T20:14:55Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-08T22:07:26Z",
+  "closed_at": "2026-11-08T22:06:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31649",
   "body": "domain:devx#2 · zhuangjianguo · session_01QsR2jTo666XXx9e1Gm21C6\n\n## What\n\nSince #31429 and PR #31644 (card #22034), `ci.yml` checks out at depth 1 and runs the step \"Fetch this commit's history and the base branch\" in test-plan, test, test-ui and type-check-ui. `ci.yml` no longer has any `fetch-depth:` key. Three shallow-clone refusal messages still tell a CI reader to give the checkout `fetch-depth: 0`:\n\n- `packages/spec/scripts/build-schemas.ts` L2430: \"in CI the checkout step needs `fetch-depth: 0`\"\n- `ui/scripts/check-new-cross-file-line-citations.mjs` L505: \"In CI the checkout needs `fetch-depth: 0`\"\n- `ui/scripts/check-changeset-claims.mjs` L1424: \"In CI, give the checkout `fetch-depth: 0`\"\n\nFound by the contract review of PR #31644 (records 6725549004 and 6725813726). It was outside that diff and not graded.\n\n## Fix\n\nReword each message so that a CI reader is pointed at what works now. In a `ci.yml` job, that is the history fetch step (named by its step name). In a workflow that still checks out full history, such as lint.yml, it is `fetch-depth: 0`. Before rewording, read which workflow runs each script. If a pin asserts the old text, move the pin with it.\n\n## Acceptance\n\n1. None of the three messages names `fetch-depth: 0` as the only CI fix for a job that `ci.yml` runs with the fetch step.\n2. Every pin on these messages is green."

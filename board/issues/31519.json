@@ -2,8 +2,8 @@
   "number": 31519,
   "kind": "issue",
   "title": "ci(push): main's push run re-tests the exact tree the merge queue just passed (896 of 897 runs, ~260 runner-min each) — reuse the queue's verdict and keep the per-merge verdict the release gate reads",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:dispatched",
     "priority:p1",
     "tooling"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T12:46:07Z",
-  "updated_at": "2026-11-08T18:08:56Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-08T22:15:18Z",
+  "closed_at": "2026-11-08T21:31:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 10,
+  "comments": 12,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31519",
   "body": "coordinator#1 · os-steve · session_01ADHkmRWWb3MUYRQZiCKQcX\n\nFiling gate ③, a task the maintainer directed. This is recommendation 5 of the 2026-11-08 CI assessment (window 2026-11-01..07), its largest runner-time item. The maintainer answered it in the project thread, verbatim: 「同意，立卡」 · 「高优先」 (2026-11-08T12:30Z). ⛔ Not a claim.\n\n**Business reason.** About 470–520 runner-hours a day (≈13–15% of all `CI` + `Lint` runner time) go to re-testing trees the queue has already tested. Standard runners on a public repo are not billed, so the gain is capacity and a quieter Actions page, not money; it does nothing for PR latency. That is why it ranked after the latency items.\n\n**Reader who acts.** The `domain:devx` seat. Tier H (`ci.yml`, `release.yml`), and `AGENTS.md` is governed: `GOVERNED_APPROVERS`, plus the maintainer's approval for `ci.yml`.\n\n## Measured\n\n- The queue merges by SQUASH, so the commit `main` receives is the `merge_group` commit the queue tested. 896 of 897 `CI` push runs in the window ran on a SHA that already had a green `CI` `merge_group` run (8 of the 897 were cancelled).\n- Runner minutes per run (2026-11-06 sample, 30 successful runs per event): `CI` push 262, `merge_group` 201, `pull_request` 153.\n- The push run's Test Core is planned `--affected` against `github.event.before`, so it re-tests the packages that merge touched, the set the queue just ran. Since #31133 the queue also runs the three dogfood shards. What runs only on `main`: Temporal Conformance, Dogfood Verify CLI, UI Published Artifacts (~17 runner-min together).\n\n## Constraints the change must keep\n\n- **Every merge carries its own verdict on `main`** (#25373; `scripts/ci/scheduled-full-run.mjs`, \"EVERY PUSH RUN FINISHES\"). The 4-hourly schedule (#25771, ruling Q6 = C) relies on it.\n- **The release gate.** `FULL_BATTERY_EVENTS = ['schedule', 'push']` is closed on purpose. `release.yml` job `full-battery` (`--release-gate`) reads the nearest completed push or schedule run at or before the release commit. A push run that skips its tests must not read as a full-battery verdict unless the gate also learns to accept the same-SHA `merge_group` run.\n- `AGENTS.md` (required-contexts section) says `main`'s push and scheduled runs carry the full battery.\n- **Seeds and timings.** \"Save Turbo cache (main only)\" seeds the Actions cache that PR runs restore (#25452 is open on those seeds). `scripts/ci/select-shard-timings-run.mjs` reads push runs for shard timings.\n- `scripts/ci/scheduled-full-run.mjs --check-concurrency` checks the push concurrency key.\n- Out of scope: `Lint`'s push run. It is the only post-merge full run of the gate families the queue narrows, and it caught a `main` red that way on 2026-11-05.\n\n## Wanted\n\n1. A design note on this card first: how a push run proves \"the queue ran this exact tree green\" (precedent: `lint.yml`'s schedule-gate skips a scheduled run when a green push run covers the SHA); what it still runs (the three main-only jobs, the cache seed, anything the timings refresh needs); how the release gate, `FULL_BATTERY_EVENTS` and `AGENTS.md` read the result.\n2. Then one Tier H PR.\n3. ⛔ No required context removed. The 4-hourly schedule stays the full battery. No test skipped on a SHA the queue did not run green.\n\n## Acceptance\n\n- Over 7 days after landing, push runs with a green same-SHA queue run skip the duplicated jobs, and the rest run in full.\n- The release gate's self-test covers the borrowed-verdict path and the no-queue-run path.\n- Runner minutes per push run, before and after, on this card.\n\n**Size:** L. **Clause-②:** no. **Metadata-protocol:** none.\n\n## Dedupe\n\nSearch 2026-11-08 12:3xZ, open and closed: \"push run queue-covered\" 11 hits, \"FULL_BATTERY_EVENTS\" 0, \"push run merge_group same SHA\" 142, \"skip push CI main already green queue\" 3,845 (first pages read). Nearest: #25924 (closed; the hourly schedule re-ran an already-tested SHA, which produced `lint.yml`'s schedule-gate) and #25452 (open; the Turbo seeds' cache pool). Neither covers the push run. **New.**"

@@ -1,0 +1,35 @@
+{
+  "number": 31669,
+  "kind": "issue",
+  "title": "spec: package-scoped addressing — namespace on MCP action shapes, address grammar helpers, AI face derivation, retire the bare-name prefix lint and skills text (ADR-0150 child P)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:spec",
+    "enhancement",
+    "pm:blocking",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T21:22:38Z",
+  "updated_at": "2026-11-09T02:21:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31669",
+  "body": "epic:#31527#1 · os-project-manager · session_01FEkQ5mLd7pR2PHjsPwiGkz\n\nFiling gate: ④ coordination node: child P of the epic #31527 (parent and per-layer children), as ADR-0150 (`docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md`, merged in #31586 at 5d1382a5)'s execution plan lists it. Hand-over card: filed undispatched as the epic seat signs off (maintainer 2026-11-08T16:34Z 「专题卡当前任务处理完，合并后就下班」). ⛔ Not a claim.\nRuling-ref: per-type table A (6723462584); epic A 「立专题」 (6723499113); division of labour A 「留核心，其余交车道」 (6723571682); Q1/Q2 (6724050556); Q3 (6724530715); ADR-0150 accepted by merge (#31586, 2026-11-08T21:16Z).\nBusiness reason: inherited from the parent #31527. Behavioural metadata is addressed by (package, name), so two installed packages can each ship an item of the same name and every reader answers the right one, or refuses with the candidates, instead of silently taking the first match.\nReader: the next `domain:spec` seat picks it from the queue and accepts its PR against the red lines below.\nDedupe (open AND closed): `namespace segment address grammar` (12; top hits #29151(closed) #23072(closed) #28942(closed), none on point: they are this epic, its parent #30806, or unrelated cards).\nclass: d · type: Feature\nGrade: p1, inherited from the parent (self-graded under 「定级你可以自己决定」).\n\n## 维护者速读\n\n规格层的地基：给 MCP 动作加 namespace 字段、地址语法工具、AI 侧名字的推导规则（NS-NAME / OBJECT-ACTION），并撤掉「所有元数据名都要带前缀」的 lint 和技能文案。其余服务端子卡依赖它。\n\n## What to build\n\n- `namespace` on the MCP `run_action` / `list_actions` shapes (D5).\n- The address grammar helpers (D5), including the namespace-position literal constant in `spec/kernel` (the set of grammar literals a namespace may not spell) and the refusal of a `_`-led name of a bucket 2/3 type at `defineStack`, `os validate` and the save door.\n- The AI face derivation (D6, ruled Q1 = A): `NS-NAME` for tool, skill, agent and object-less action; `OBJECT-ACTION` for an object-bound action; an environment item keeps its bare `NAME`.\n- **K's predicate** rides this card (ruling 6723571682): the one predicate in `kernel/namespace-prefix.ts` that refuses a namespace equal to an object name in both directions, and an object short-named `custom` (Q3 = A, record 6724530715). K wires the doors.\n- Retire phase 2's `naming/namespace-prefix` bare-name warning for buckets 2–4 (the intra-package duplicate warning stays), and the authoring skills' and create-objectstack templates' instruction to prefix bucket 2–4 names (D9; #30804, #30805).\n\n## Surface\n\n- Expected file surface: spec (`ai/`, `api/`, `automation/`, `data/`, `integration/`, `security/`, `system/`, `kernel/`), cli `lint.ts`, `skills/`, create-objectstack templates.\n- Clause-②: yes.\n- Narrowing: yes: a `_`-led name of a bucket 2/3 type (measured first-party: 0); K's predicate is not wired to a door here.\n\n## Acceptance — the epic's three red lines (every child shares them)\n\n- **Resolution never loosens.** No first-registered fallback, no environment-wide guess for a caller with a package, no silent pick.\n- **Ambiguity is reported, never guessed.** Every refusal and every migration report names every candidate.\n- **Independently releasable** (red line 3). The PR proves it with ADR-0150's four readings: (a) the phase-1 one-holder tests stay green; (b) bare-name behaviour (URLs, MCP, SDK) is unchanged for every name with one holder, except this card's declared narrowing; (c) any migration is re-runnable and never guesses; (d) its `Clause-②:` declaration and, where it changes the protocol, its ADR-0087 migration entry.\n- The epic seat is off duty after hand-over: the accepting lane seat checks these lines itself, and a narrowing beyond the declared one goes to the maintainer before landing.\n\nParent: #31527.\n"
+}

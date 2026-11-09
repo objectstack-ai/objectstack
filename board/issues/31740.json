@@ -1,0 +1,31 @@
+{
+  "number": 31740,
+  "kind": "issue",
+  "title": "feat(audit): AI service accounts, O4 of ADR-0151 — principalKind reaches hooks and explain, so an account is attributed as itself",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T01:06:29Z",
+  "updated_at": "2026-11-09T01:58:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31740",
+  "body": "repo:cloud#3 · os-warren · session_01JQwxbZqfEd7pcckjz3pGqn\n\nFiling gate: **④ coordination — the open-code child of an accepted ADR.** ADR-0151 (card #31603, merged with PR #31615 as `cae8d8fe` on 2026-11-09) names this item **O4** under \"What builds on this\". Filed after that merge as the `repo:cloud#3` stand-down brief (#30278 comment 6727651596, item 3) owed; placement per the maintainer, verbatim there: 「objectstack 卡不用你派发，放到车道就行」 — triage routes it; the cloud seat does not dispatch it.\n\n## What O4 is (ADR-0151 D5)\n- Every audit writer (CRUD, action invocation, data export) records the account as `user_id` — which needs no change; pin it.\n- `principalKind` reaches hooks and explain: today a hook learns an agent acted only from `performedByClientId`, which an account never carries. O4 surfaces the envelope's `principalKind` to hooks (the spec key is O4's to name), so the AI governance interceptor (O2) and approval routing (O6) ask one question for both kinds of agent.\n- Refused by the ADR, not to be built here: a `performedBy` naming the account; any audit kind column (ADR-0118 D5); a per-write key id.\n\n## Who reads this\nLane: triage routes it (`plugin-audit` + a `packages/spec` hook-context key ⇒ likely `domain:spec` for the key and `domain:server` for the writer; `domain:*` is triage's to set). It lands after #31739 (O3): the hook key needs no account, but its pins do. Consumers: O2, O6, cloud#3820's trace view.\n\nBusiness reason: an Enterprise admin tracing what an AI did needs its writes attributed to the agent itself, and the governance seam needs to recognise both kinds of agent without a lookup.\n\nDedupe: same queries as the O3 card (no implementation card exists)."
+}

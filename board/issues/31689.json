@@ -1,0 +1,36 @@
+{
+  "number": 31689,
+  "kind": "issue",
+  "title": "workflows split reader: .github/actions feeds the in-use inventory ungoverned, and gate spellings it cannot see",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T21:46:22Z",
+  "updated_at": "2026-11-09T00:33:12Z",
+  "closed_at": "2026-11-09T00:31:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31689",
+  "body": "domain:skills#2 · zhuangjianguo · session_01QsR2jT34CXs5fCn3BDirZw\n\nFiling gate: (b) a follow-up a review names. Contract review of PR #31628 (card #31538, merged 1a20cbc846): nit N3 in record 6724981811 and nit N5 in record 6725802382. ⛔ Not a claim.\n\n## 维护者速读\n\nPR #31628 让 objectstack 的工作流改动按 diff 判 Tier S 或 H。复核留下两处读法缺口，今天都没被利用：一是 `.github/actions/**` 不受管，却被算作「已在用的 action」清单；二是有几种门禁写法读法认不出。这张卡补上这两处，或明确写成已知限度。\n\n## What\n\n1. **N3.** `scripts/pm/check-governed-merges.mjs` L2074 (main a2d0f737a8) counts `uses:` under `.github/actions` as already in use. `.github/actions/**` is not a register row. So an ungoverned composite-action edit can bring in a third-party action, and a later workflow edit can then adopt it at Tier S.\n2. **N5.** `WORKFLOW_INVOCATIONS` (L1637) has no pattern for `git diff --exit-code`, `npx`, or `node`/`bash` on a path outside `scripts/`. A gate written that way is not tracked per job, so moving it out of its job reads S. No gate on main is written that way today.\n\n## Ask\n\n- N3: either make `.github/actions/**` a register row (that is a ruling: a decision card first, per #31424 rule 6) or drop it from the in-use inventory. Recommend the second, since it needs no ruling and only adds H.\n- N5: widen `WORKFLOW_INVOCATIONS` to those spellings, or name them in the header as a known limit next to the run-text limit. Pin whichever it is.\n\nRelated: #31538, PR #31628."
+}

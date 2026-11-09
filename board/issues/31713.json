@@ -1,0 +1,33 @@
+{
+  "number": 31713,
+  "kind": "pull_request",
+  "title": "fix(pm): the workflows split stops reading .github/actions as in use, and tracks four more gate spellings",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T23:04:44Z",
+  "updated_at": "2026-11-09T00:31:51Z",
+  "closed_at": "2026-11-09T00:31:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-09T00:31:49Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31713",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbN7JTN49s6556pjxfDsENmW)_\n\nFixes #31689\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：工作流按 diff 判档的读法补两处缺口。一是「已在用的 action」清单只认 `.github/workflows/**`，不再认不受管的 `.github/actions/**`；二是门禁写法多认四种（`git diff --exit-code` / `--quiet`、`npx X`、`node` / `bash` / `sh` 跑任意路径的脚本），这类门禁被挪出原 job 时判 H。\n- 为什么改：PR #31628 的复核（N3、N5）指出，先在 `.github/actions/**` 里引入第三方 action、再让工作流采用它，会被判成 Tier S；以那几种写法写的门禁被挪走也认不出。今天都没被利用。\n- 风险与回滚：只会让更多工作流改动判 H，不会让任何改动从 H 变 S。重放 #31628 名单里的 13 个 Tier S 合并和近 40 个工作流合并，判档一个没变。回滚即 revert 本 PR。\n- 先看：`scripts/pm/check-governed-merges.mjs` 的 `WORKFLOW_INVOCATIONS`（新增三条模式）与 `readWorkflowDiff` 里清单那一行，再看 self-test 里 N3 / N5 两组新 pin。\n- 两分钟验证：`node scripts/pm/check-governed-merges.mjs --self-test`，预期 `618 assertions` 且退出 0。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- **N3.** `readWorkflowDiff` builds the \"already in use\" inventory from `.github/workflows/**` files only. `.github/actions/**` is not a register row, so an action used there alone no longer lets a workflow adopt it at Tier S. The listing argv is unchanged, because `check-governed-queue-guard.mjs` pins it as read once per run by its exact argv; the reader drops every path outside `.github/workflows/` before reading one. `.github/actions/**` is not made a register row (that is a ruling).\n- **N5.** `WORKFLOW_INVOCATIONS` gains three spellings, so the per-job loss rule tracks them:\n  - `git diff ... --exit-code` / `--quiet`, with its arguments kept in the token, since a narrowed pathspec is a narrowed gate;\n  - `npx X`, with the package's version dropped, since a version bump is not a lost gate;\n  - `node` / `bash` / `sh` on the first file path after them, with any path prefix, not only `scripts/`.\n- The header's C2 line says `.github/actions/**` vouches for nothing. The run-text known limit now lists the tracked spellings and names the ones still untracked (`python3 -c`, `/bin/bash x.sh`, an inline `test`, a bin that `pnpm exec` names).\n- No change to the six H-by-path files, the split repos, or any `.claude/**` or AGENTS.md text. A grep found no line there that says the inventory includes `.github/actions`.\n\n## Tests\n\n- `node scripts/pm/check-governed-merges.mjs --self-test`: 609 assertions before, 618 after, exit 0. The workflows split battery floor rises from 66 to 75. Floor 76 reds with \"registered 75 case(s), below its pinned floor of 76\".\n- New pins:\n  - `⛔ N3-a-workflow-adopting-an-action-used-only-under-github-actions-on-the-base-is-H`\n  - `N3-control-an-action-a-base-workflow-already-uses-is-S`\n  - six `⛔ N5-a-gate-spelled-TOKEN-moved-out-of-its-job-is-H` cases: `git diff --exit-code -- packages/spec/json-schema`, `git diff --quiet -- sdui.manifest.json`, `npx publint`, `npx @arethetypeswrong/cli`, `node ui/e2e/check-gate.mjs`, `bash tools/verify.sh`\n  - `N5-near-miss-an-npx-version-bump-and-a-dropped-dot-slash-are-S`\n- The existing fresh-token near-miss pin (`near-miss-a-new-job-with-a-fresh-name-and-its-own-if-is-S`) stays S.\n- The self-test's fake `git ls-tree` now honours its pathspecs, as git does, so the inventory's directory reading is under test.\n- One-time check in a scratch copy, not committed: with the old directory list and without the three new patterns, the 7 new H pins fail and nothing else does.\n- `check-governed-queue-guard.mjs --self-test` exits 0 (433 cases). `check-governed-prose`, `check-owed-reviews`, `check-half-states`, `check-skill-line-ratchet`, `ci-failure` and `post-stamped` `--self-test` each exit 0.\n\n## Acceptance notes\n\n- **Replay.** Old reader (main `e81636ce`) against new reader (this head), with each merge read against its first parent as `readWorkflowDiff` does:\n  - The 13 Tier S merges named in PR #31628 (#27115, #27709, #30714, #27018, #27122, #27400, #27571, #28089, #29326, #30869, #31086, #31133, #31138): 13 S before and 13 S after. The reasons are byte-identical, and the whole-PR tier is unchanged (#27400 and #31133 stay H through other Tier H paths).\n  - The last 40 first-parent merges touching `.github/workflows` before `1a20cbc846`: 16 S before and 16 S after, 0 verdicts or reasons changed. That window has 4 newer S merges (#31429, #31544, #31282, #31329) and misses #27018, which is older.\n- Deviation: the first commit dropped `.github/actions` from the `ls-tree` argv. That broke the queue guard's read-once pin (`the-inventory-of-the-merge-base-is-read-ONCE-per-run`), which sits outside this card's file surface. The second commit keeps the argv and filters in the reader instead. Dropping the directory from the argv as well is a one-line pin edit in `check-governed-queue-guard.mjs` for whoever owns that file. `dispatch-gates` does not derive that self-test for this diff.\n\n## Verification\n\n- Head `e60354d1a` (main merged at `204cc46e8`). `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 33 commands, and all 33 exited 0. `--ran` reconciled 33 derived, 33 run, 0 NOT-MEASURED, 0 UNRUN. `eslint scripts/pm/check-governed-merges.mjs` is clean.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jSxQuMCd6U7w4Rj8jd)_\n"
+}

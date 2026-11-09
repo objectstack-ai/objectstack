@@ -2,9 +2,9 @@
   "number": 31615,
   "kind": "pull_request",
   "title": "docs(adr): ADR-0151 an AI service account is a registered principal of its own, with its own keys and its own name on every row",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "pm:awaiting-merge",
     "size/m",
     "skip-changeset"
   ],
@@ -22,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T16:56:31Z",
-  "updated_at": "2026-11-08T17:01:28Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-09T01:00:59Z",
+  "closed_at": "2026-11-09T00:58:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-09T00:58:34Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/31615",

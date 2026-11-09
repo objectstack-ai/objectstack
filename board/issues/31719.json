@@ -1,0 +1,33 @@
+{
+  "number": 31719,
+  "kind": "issue",
+  "title": "cli: os serve asks the multi-node gate with OS_CLUSTER_REPLICAS only, so a topology declared by OS_EXPECT_MULTI_NODE=true boots multi-node with no gate (#31600 follow-up)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T23:34:21Z",
+  "updated_at": "2026-11-08T23:59:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31719",
+  "body": "domain:server#1 · os-steve · session_01ADHkmPF1skfu2kx89BEXZi\n\nFiling gate: ① product defect with a named seam and a measured reach (out-of-scope finding of #31600's os-dev-report 6728607050, confirmed by the contract review on PR #31718). ⛔ Not a claim.\nreach: `os start` on open core with `OS_EXPECT_MULTI_NODE=true` and `OS_CLUSTER_DRIVER=redis` booted the redis driver multi-node with no gate registered, measured on `fc4c3072` (main) and `c96d6e73` (PR #31718 head, with `OS_AUTH_SECRET` set); the same deployment declared as `OS_CLUSTER_REPLICAS=2` is denied by the gate.\nBusiness reason: `multi-node-gate.ts` states that a DECLARED multi-node topology with no gate registered is refused outright (#13537, fail closed). `declaresMultiNode` (`split-brain-guard.ts`) has two spellings of that declaration, and every other multi-replica reader (split-brain guard, #31624's cache planner, #31600's auth-secret refusal) honours both. The gate call honours one. An operator who declares replicas with the other spelling gets a multi-node boot the gate exists to refuse, and the two spellings answer differently for the same topology.\nReader: the next `domain:server` seat, from `pm:queue`.\nDedupe (open AND closed): `OS_EXPECT_MULTI_NODE gate` → #31600, #31602, #31601, #14116 (closed), #13609 (closed); none on point (#14116 is the sequencing decision for #13537's gate, not this spelling gap).\nclass: b · type: Bug\nGrade: p2. A gate refusal is skipped on one spelling; no data is wrong, and the split-brain guard still refuses a memory driver.\n\n## 维护者速读\n\n多节点门禁只看 `OS_CLUSTER_REPLICAS`。用 `OS_EXPECT_MULTI_NODE=true` 声明多副本时，门禁把它当成单节点放行，开源版就能不经门禁跑多节点。其他多副本检查都认这两种写法，只有门禁漏了一种。\n\n## What to build\n\n1. `packages/cli/src/commands/serve.ts` (the `checkMultiNodeAllowed(Number(process.env.OS_CLUSTER_REPLICAS))` call, near line 3166 on `fc4c3072`): a topology `declaresMultiNode(process.env)` reads as declared reaches the gate as declared. Use `declaresMultiNode` from `@objectstack/service-cluster`; ⛔ never a second reading of the two spellings. Measure what count the gate should receive when only `OS_EXPECT_MULTI_NODE=true` is set (the gate takes a desired count; \"declared, count unknown\" must not read as \"not declared\"), and say it in the PR.\n2. The refusal line already names both spellings (`OS_CLUSTER_REPLICAS>1 / OS_EXPECT_MULTI_NODE=true`); keep it.\n3. Tests: `OS_EXPECT_MULTI_NODE=true` + redis + no gate → refused, red on main, green after. CONTROL: single node unchanged; `OS_CLUSTER_REPLICAS=2` unchanged; a registered gate that admits the count still boots.\n\n## Surface\n\n- Expected file surface: `packages/cli/src/commands/serve.ts`, possibly `packages/services/service-cluster/src/multi-node-gate.ts` (only if the gate's input needs a \"declared, no count\" form), tests, root `.changeset/`.\n- Clause-②: no (narrowing): a boot that started on one spelling is refused, as it already is on the other.\n\nParent: #31600. Epic: #3814.\n\n<!-- signed: domain:server#1 · os-steve · session_01ADHkmPF1skfu2kx89BEXZi -->"
+}

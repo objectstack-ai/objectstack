@@ -1,0 +1,35 @@
+{
+  "number": 31667,
+  "kind": "pull_request",
+  "title": "fix(devx): point shallow-clone refusals at ci.yml's history fetch step",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T21:12:11Z",
+  "updated_at": "2026-11-08T22:06:10Z",
+  "closed_at": "2026-11-08T22:06:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-08T22:06:08Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31667",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbASbE5AXy68rApzP2nGVtXY)_\n\nFixes #31649\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:五个门禁脚本在浅克隆时的拒绝提示文案。原来只叫 CI 设 `fetch-depth: 0`,现在同时点名 ci.yml 的取历史步骤与 lint.yml 的全量检出。\n- 为什么改:ci.yml 读历史的作业已改为深度 1 检出加取历史步骤,旧提示会把 CI 读者引向错误的修法。\n- 风险与回滚:只改提示字符串与两处断言,退出码与逻辑不动;回滚即 revert 本 PR。\n- 先看:`packages/spec/scripts/build-schemas.ts` 的 remedy 串;`ui/scripts/check-changeset-presence.mjs` 的 SHALLOW 分支;`ui/scripts/__tests__/check-changeset-presence.test.ts` 的浅克隆用例。\n- 两分钟验证:`pnpm --dir ui exec vitest run scripts/__tests__/check-changeset-presence.test.ts`,预期全绿,且浅克隆用例断言了步骤名。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nOn main 532230f3, five shallow-clone refusal messages told a CI reader that the fix was `fetch-depth: 0`. That is no longer what works in a `ci.yml` job that reads history. Those jobs check out at depth 1 and run the step `Fetch this commit's history and the base branch` (test-plan, test, test-ui; type-check-ui joins them when #31644 lands). `lint.yml` still checks out with `fetch-depth: 0`.\n\nEach message's \"In CI\" clause now names both remedies: run that step before the gate (ci.yml), or give the checkout `fetch-depth: 0` (lint.yml). The local advice, exit codes and every other line are unchanged. No logic changes, and no workflow file is touched.\n\n| Script | Who runs it | Change |\n|:--|:--|:--|\n| `packages/spec/scripts/build-schemas.ts` (`resolveBaselineWithoutMergeBase` remedy) | spec's `build` in every job that builds spec (both kinds), and `check:authorable-surface` in lint.yml | both remedies named |\n| `ui/scripts/check-new-cross-file-line-citations.mjs` | no workflow step on main | both remedies named, generically |\n| `ui/scripts/check-changeset-claims.mjs` | no workflow step on main | both remedies named, generically |\n| `ui/scripts/check-changeset-overwrite.mjs` | same text, added by Claim amendment 6726615830 | same wording |\n| `ui/scripts/check-changeset-presence.mjs` | same text, added by Claim amendment 6726615830 | same wording |\n\n**About #31644:** the wording is conditional on the job's shape (\"in a job that runs the step, or a full checkout\"), so it holds whether #31644 has landed or not. It names no job, and type-check-ui is true under either branch of the sentence. `check-i18n-en-drift.mjs` carries the same text, but #31644 rewords it itself, so it is left alone here.\n\n**Changeset:** `skip-changeset`. These are repository scripts and tests. `packages/spec/scripts/` is not in `@objectstack/spec`'s `files[]`, and `ui/scripts/` is the ui workspace root, which is not a published package.\n\n## Tests\n\nThe pins move with the prose. Both still assert `fetch-depth: 0`, and each now also asserts the step name:\n\n- `packages/spec/scripts/build-schemas-check-mode.git-topology.test.ts`: \"a tree that carries no anchor of its own refuses\" asserts `Fetch this commit's history and the base branch`.\n- `ui/scripts/__tests__/check-changeset-presence.test.ts`: the depth-1 clone case asserts the same.\n\nNo pin asserted the old text of the other three messages. A grep of the tests for each old string returned no other hits.\n\n## Acceptance notes\n\n- Two nearby strings in `build-schemas.ts` were left alone because they are outside the card's surface and are not refusals. The `--update-base` shallow warning (\"Re-anchor from walkable history: `fetch-depth: 0` in CI\") belongs to a mode run locally. The `why` line (\"proved where history is walkable (`fetch-depth: 0`), which is this repository's own PR gate\") stays true, because lint.yml's `typecheck-source-gates` runs `check:authorable-surface` on a full checkout.\n- `check:new-line-citations` and `check:changeset-claims` are not run as a step by any workflow on main, so their \"In CI\" line can only describe the two job shapes.\n\n## Verification\n\nAll runs below are on head `243250a6`. The merge of main `8c9260f7` (head `e7396e12`) brought 31 files, none of them in this surface or its packages, so nothing was re-run.\n\n<details><summary>Dispatch gates: 66 derived, 65 run, 1 NOT MEASURED</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 66 commands. All exited 0 except one.\n- NOT MEASURED: `pnpm check:dual-build-cjs-loads` exited 3 (PREREQUISITE NOT MET: about 33 packages have no `dist/`). This worktree built only spec, formula, sdui-parser, lint and client, so CI's run is the evidence.\n- `node scripts/check-plugin-teardown-shape.mjs --self-test` first exited 3 because the shallow clone could not read its pinned fixture commit. After `git fetch --depth=1 origin 621a4876`, it exited 0 with 48 cases.\n- `pnpm check:query-options-erasure` hit the loop's 300 s timeout. Run alone, it exited 0.\n- `pnpm --dir ui exec vitest run scripts/` exited 0: 170 files passed and 2 skipped; 5021 tests passed and 2 skipped.\n- `pnpm check:pm-dispatch-gates` exited 0: 2205 fast-tier cases.\n- `dispatch-gates --ran`: 66 derived families accounted for (65 run, 1 NOT MEASURED).\n\n</details>\n\n<details><summary>Pins: red on main's text, green on the fix</summary>\n\n- Red leg: `git restore --source=532230f3` of `check-changeset-presence.mjs` and `build-schemas.ts`, tree only. \"names the shallow-clone case, which is how CI hits it\" fails (1 failed, 45 passed). \"a tree that carries no anchor of its own refuses\" fails (1 failed). Both files were then restored to HEAD, and `git diff HEAD` was empty.\n- Green: `build-schemas-check-mode.git-topology.test.ts` passed 17/17. The four ui gate suites (presence, claims, overwrite, citations) passed 4 files and 196 tests.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jQqimUnb4io8LpGcvH)_\n"
+}

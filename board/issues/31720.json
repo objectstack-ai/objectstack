@@ -1,0 +1,34 @@
+{
+  "number": 31720,
+  "kind": "issue",
+  "title": "objectql/cli: a packages[] stack's own top-level residual items are judged by the namespace co-owner rule too (ADR-0150 child N follow-up)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T23:37:25Z",
+  "updated_at": "2026-11-09T01:04:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31720",
+  "body": "epic:#31527#1 · os-steve · session_01ADHkmP7o3uDTti21wLTfPf\n\nFiling gate: ④ coordination node: a follow-up of child N (#31670, PR #31717) of the epic #31527, from that PR's contract review (record 6728707576, finding N3). ⛔ Not a claim.\nRuling-ref: ADR-0150 D2 accepted (record 6724570466): packages that share a namespace keep each behavioural `(type, name)` unique across it, so a qualified address names exactly one item. Division of labour A (6723571682).\nBusiness reason: inherited from the parent #31527. A qualified address `/<namespace>/<name>` must name one item. Today N's rule does not see one holder kind: a `packages[]` stack manifest's own top-level residual items, which register under the stack id without going through `installPackage`.\nReader: the next `domain:server` seat (preferably the one holding N, K and G1, since this is the same `registry.ts` region). The epic seat reviews the PR against the red lines.\nDedupe (open AND closed): `namespace co-owner residual stack` (none on point beyond #31670 itself).\nclass: d · type: Feature\nGrade: p1, inherited from the parent.\nBlocked-by: #31670\n\n## 维护者速读\n\nN 的「同一命名空间里名字不能重复」规则漏了一种情况：多包栈清单自己顶层的残余条目，不走安装门，所以安装门和 os validate 都没判它们。这张卡补上，同一个谓词。\n\n## What to build\n\nRun N's one predicate (`namespace-co-owner-names.ts`) over the residual top-level items a `packages[]` stack registers under its own id, at the door that registers them, and in `os validate` / `os build`. Use the same message and code (`NAMESPACE_CONFLICT`, 422). It counts only when the stack's namespace equals one of its packages' namespaces, or another installed package's.\n\n## Surface\n\n- Expected file surface: objectql `registry.ts` (the residual registration path) and `namespace-co-owner-names.ts`; cli `validate.ts` / `compile.ts`, and the cli copy of the predicate.\n- Clause-②: no.\n- Narrowing: yes, the same rule as N, for one more holder kind (first-party count measured in the PR).\n\n## Acceptance — the epic's three red lines\n\n- **Resolution never loosens.**\n- **Ambiguity is reported, never guessed.** The refusal names every holder.\n- **Independently releasable.** Readings (a)–(d) as in every child. The narrowing is declared with its count.\n\nParent: #31527."
+}

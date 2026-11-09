@@ -2,8 +2,8 @@
   "number": 31575,
   "kind": "issue",
   "title": "objectql: one shared package-scoped resolver for behavioural metadata (same package, then unique holder in the declared dependency closure, else refuse with candidates) and an exported dependency-closure helper — epic #31527 child R",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,21 +14,26 @@
     "area:devpath",
     "domain:server",
     "enhancement",
+    "pm:blocking",
     "pm:dispatched",
     "pm:epic",
     "priority:p1"
   ],
   "assignees": [
-    "os-project-manager"
+    "os-steve"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T15:49:53Z",
-  "updated_at": "2026-11-08T18:09:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-08T22:57:57Z",
+  "closed_at": "2026-11-08T22:37:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31575",
   "body": "epic:#31527#1 · os-project-manager · session_01FEkQ5mLd7pR2PHjsPwiGkz\n\nFiling gate: ④ coordination node: child R of the epic #31527 (parent and per-layer children). ⛔ Not a claim.\nRuling-ref: direction A 「转向包寻址」 (record 6721941146 on #30806); per-type table A (record 6723462584 on #31527); epic A 「立专题」 (record 6723499113); division of labour A 「留核心，其余交车道」 (record 6723571682): **R is built by the epic seat itself**.\nBusiness reason: inherited from the parent #31527. Every by-name reader of behavioural metadata (runtime indexes, REST, MCP, SDK, Studio) needs ONE answer to \"which package's item does this bare name mean\". Without one shared resolver each door would re-implement the rule and they would drift. That is the failure phase 1 found: first-registered wins in some readers, refusal in others.\nReader: the epic seat `epic:#31527#1` dispatches it (`mode:thread`) and reviews it against the two red lines below.\nDedupe (open AND closed): `dependency closure resolver` (434, none on point; nearest #31527 itself), `resolveWritePackageScope` (12, all closed and about the save door's write scope: #28240, #28574, #25805, #30168), `package-scoped resolver` (163, none on point; #21761/#21817 are closed lock-family findings), `dependencyClosure` (0).\nreach: no user-visible change by itself; the readers adopt it in children E and G.\nclass: d · type: Feature\nGrade: p1, inherited from the parent (self-graded under 「定级你可以自己决定」).\n\n## 维护者速读\n\n这是专题 #31527 的第 2 步 R，由专题席位自己做：写一个共享解析器，回答「这个裸名字指的是哪个软件包里的元数据」。规则按你的裁决：先找同一个包，再找它声明的依赖闭包里唯一的持有者，否则拒绝并列出候选。另外导出一个依赖闭包的帮助函数。这一步只加解析器和测试，不改任何现有读者，读者在 E、G 两步才换用它。\n\n## What to build\n\n1. **The resolver** — one function, in `packages/objectql/src` beside `bare-name-one-holder.ts`. Given `(type, name, callerPackage?)` and the registry's holders, it answers:\n   - the caller's own package holds it → that item;\n   - else exactly one holder in the caller's **declared dependency closure** (ADR-0141) → that item;\n   - else a **refusal** that lists every candidate package, reusing phase 1's vocabulary (`BareNameHolder`, `describeBareNameHolder`, `bareNameReason`) and shape (#30806 phase 1). Zero holders is a not-found, not a refusal.\n   - With no caller package (an external caller, a bare URL), it answers the unique holder in the environment and refuses with candidates otherwise; the doors map that to the card's `409`.\n   - The `sys` kernel package and `PLATFORM_REQUESTED_BARE_NAMES` (today the permission set `guest_portal`) resolve environment-wide with one holder, as the per-type ruling's Exceptions say.\n   - Environment-authored items (package null = the implicit environment package, bucket 4) and POSITION (environment-scoped) follow the ADR's text.\n2. **The closure helper** — an exported function that answers a package's declared dependency closure. Today none is exported; metadata-protocol's `resolveWritePackageScope` (called at `protocol-authoring-gate.ts`, the save door) is the nearest reuse. One implementation, used by both the save door and the resolver, so the two never disagree.\n3. **Tests** — every arm above, plus the two red lines as negative pins, each ablated (put the loosened behaviour back, show the pin red, restore).\n\n## Acceptance — the epic's three red lines (every child shares them)\n\n- **The resolver never loosens.** No first-registered fallback, no environment-wide guess when the caller has a package and its closure holds two candidates, no silent pick.\n- **Ambiguity is reported, never guessed.** Every refusal names every candidate package.\n- **Independently releasable** (red line 3, #31527 body). This card is additive only: no reader switches to the resolver here, phase 1's one-holder refusal and its tests stay green, and a release cut right after it behaves exactly as today.\n\n## Order and surface\n\n- Waits for the ADR (child D, this card's parent stage 2) to state the resolver's signature and the bucket-4 / POSITION arms. `Blocked-by:` is not set: dispatch starts once the ADR draft PR carries that section, so R can run beside the ADR's review (epic concurrency 2).\n- Lands before E (runtime indexes) and G (doors), which import it.\n- Expected file surface: `packages/objectql/src/` (new resolver module + tests), `packages/metadata-protocol/src/` (the closure helper and the save door switching to it). No door, index or stored reference changes here.\n- Clause-②: expected `no` (no published accept set widens; a new export of an internal package is checked at claim time against the package's built entry declaration).\n- Phase 1's backstop stays (decision 6); this card retires nothing.\n\nParent: #31527.\n"

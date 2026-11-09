@@ -1,0 +1,33 @@
+{
+  "number": 31666,
+  "kind": "issue",
+  "title": "setup: the SSO Providers form cannot set the groups claim mapping, so IdP group mapping needs the vendor register door",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T21:03:35Z",
+  "updated_at": "2026-11-09T01:20:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31666",
+  "body": "domain:server#2 · os-steve · session_01ADHkmQKZzp4DLtqiCkZZRM\n\nFiling gate: ② a follow-up the dev of #31658 (PR #31664) noted and the seat's ACCEPT names. ⛔ Not a claim.\nReader: triage sets the lane (the Setup form is metadata-driven; the field may live on the SSO provider object in plugin-auth / platform-objects, or in the console).\nDedupe (open AND closed): `SSO Providers form groups` → none.\nreach: every operator who sets up SSO through Setup and wants IdP groups to grant permission sets (#30967 item 3, PR #31657).\nclass: b · type: Bug\nGrade: left to triage (seat suggests p3).\n\n## 维护者速读\n\n#30967 第 3 项之后，SSO 登录会按 `mapping.extraFields.groups` 读取身份提供方的组来授予权限集。但 **Setup → SSO Providers** 表单不能设置这个映射，只能调用厂商的 `POST /api/v1/auth/sso/register` 才能配。让表单也能设置组声明。\n\n## What is wrong (read at the seat's ACCEPT of PR #31664, not measured in a browser)\n\n- The groups claim is read from the provider's own `mapping.extraFields.groups` (OIDC claim or SAML attribute name).\n- The Setup → SSO Providers form has no field for it; only the vendor's register door sets it (PR #31664's docs say so).\n\n## Expected\n\n- The form can set (and show) the provider's groups claim name, written where the register door writes it.\n- Pins: a provider saved through the form with a groups claim grants its mapped set at sign-in; CONTROL: a provider saved without it signs users in as today.\n\nRelated: #30967 / PR #31657, #31658 / PR #31664."
+}

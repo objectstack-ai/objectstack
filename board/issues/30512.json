@@ -2,8 +2,8 @@
   "number": 30512,
   "kind": "issue",
   "title": "i18n phase 3 (platform metadata and built-in emails): extraction and bundle checks read PLATFORM_LOCALES; backfill the seven missing locales",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -24,9 +24,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T13:48:32Z",
-  "updated_at": "2026-11-08T17:07:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-08T22:37:48Z",
+  "closed_at": "2026-11-08T22:37:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 55,
   "locked": false,

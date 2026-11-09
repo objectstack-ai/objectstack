@@ -20,11 +20,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T16:28:00Z",
-  "updated_at": "2026-11-08T17:00:30Z",
+  "updated_at": "2026-11-08T20:54:43Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31597",
   "body": "epic:#3814#1 · os-zhuang · session_01QUs3BrVu5TqwtmuhsjdEvM\nFiling gate: ③ maintainer-dispatched task (child of #3814). Maintainer, (2026-11-08, 16:25 UTC): 「继续，现在派第二批」 (gate 1 after the card 0 inventory, cloud#3868 comment 6723322368).\n\nParent: #3814 (rulings R0-R6 on comment 6722625146).\n\n## Problem (smoke, card 0)\n`settings:changed` is an in-process Set (`settings-service.ts:1304/1320`). Its subscribers rebuild the auth posture, password/session/MFA policy, org access policy, mail, SMS, storage adapter and AI provider. Under round-robin only the writing replica rebuilds: r1 set `require_email_verification=true` and refused sign-in, while **r2 still answered 200 after 95 s**. Peers keep the old configuration until restart, including security posture.\n\n## Do\n1. A fifth cluster lane (beside the four in `metadata-cluster-bridge-plugin.ts`): broadcast the changed namespace/key; receivers re-read the settings store and emit their local `settings:changed`, so every subscriber rebuilds from the DB (the DB stays the source of truth; the message carries no values or secrets).\n2. Join the F3a reconnect resync (re-read all namespaces) once F3a lands; if F3a is not merged yet, leave a clearly named hook.\n3. Tests: two kernels on a shared pubsub: a settings write on A changes B's auth posture within one second; single node emits exactly what it emits today.\n\n## Rules that bind every #3814 child (verbatim rulings on the parent)\nR1 peer round-robin. R2 Redis required for multi-replica only. R3 「同意：每张卡都只在\"声明多副本并接上 Redis 驱动\"时才生效」: the single-node default path is unchanged, multi-replica behaviour switches on only behind declared replicas>1 AND a connected Redis cluster driver, the split-brain guard is never weakened, and the deploy README \"multi-node unsupported\" line stays until the final gate.\n\n## Done when\nPR merged; a settings change on one replica is effective on every replica within seconds; single node unchanged."

@@ -1,0 +1,31 @@
+{
+  "number": 31723,
+  "kind": "issue",
+  "title": "service-cache: the shared cache's derived Redis connection has no error listener, so a Redis outage prints \"[ioredis] Unhandled error event\" with a stack per reconnect attempt (#31596 follow-up)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T23:46:08Z",
+  "updated_at": "2026-11-08T23:54:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31723",
+  "body": "domain:server#1 · os-steve · session_01ADHkmPF1skfu2kx89BEXZi\n\nFiling gate: ① product defect with a named seam and a measured reach (out-of-scope finding of #31596's os-dev-report 6728820009). ⛔ Not a claim.\nreach: on PR #31721's head, the redis black-hole test needed its own no-op `error` listener on the cache's `duplicate()` connection. Without one, every reconnect attempt during an outage logs `[ioredis] Unhandled error event` with a stack. The seam is `packages/services/service-cache/src/cache-service-plugin.ts:136` on `35a9c694` (`base.duplicate()`).\nBusiness reason: #31596 asks for every Redis client to log an outage once, with no credential in the line. PR #31721 does this for the cluster driver's command and subscriber connections, which feed one `ClusterDriverLiveness`. The shared cache derives a third connection, and that one still floods the log on every replica during an outage. The flood buries the one warning operators need, and ioredis' default line may carry connection details.\nReader: the next `domain:server` seat, from `pm:queue`, after PR #31721 merges (it uses #31721's `watchRedisConnection` and the driver's liveness).\nDedupe (open AND closed): `cache duplicate error listener redis` → #31596 only (the parent).\nclass: a · type: Bug\nGrade: p2. Log noise during an outage; nothing crashes and no cached value is wrong.\n\n## 维护者速读\n\nRedis 断线时，共享缓存另开的那条 Redis 连接没有挂错误监听，每次重连都打印一大段报错，把真正有用的那一条告警淹没了。挂上监听，并接到集群驱动的同一个连接状态里，让断线只记一次。\n\n## What to build\n\n1. The cache's derived connection attaches an `error` listener and reports to the cluster driver's liveness (`watchRedisConnection(derived, liveness, 'cache')` from `@objectstack/service-cluster-redis`, with the liveness read the way `readClusterDriverHealth` reads it). Then one outage still logs once across all three connections, and `cluster.resync` fires only when all three are back. If the liveness cannot be reached from the cache plugin, attach a listener that logs once per outage with `describeConnectionError`. ⛔ Never a silent swallow.\n2. Detach before the cache's own `quit()`, so a deliberate close is not reported as an outage.\n3. Tests: with the derived connection's server stopped, no `Unhandled error event`, and one warning. CONTROL: the memory driver and an in-process cache are unchanged.\n\n## Surface\n\n- Expected file surface: `packages/services/service-cache/src/cache-service-plugin.ts`, tests, root `.changeset/`.\n- Clause-②: no.\n\nParent: #31596. Epic: #3814.\n\n<!-- signed: domain:server#1 · os-steve · session_01ADHkmPF1skfu2kx89BEXZi -->"
+}

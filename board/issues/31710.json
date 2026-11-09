@@ -1,0 +1,33 @@
+{
+  "number": 31710,
+  "kind": "pull_request",
+  "title": "fix(pm): the relay reads the workflows split before requesting governed review",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T22:41:31Z",
+  "updated_at": "2026-11-08T23:20:14Z",
+  "closed_at": "2026-11-08T23:20:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-08T23:20:12Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31710",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9Ubb1jjPozVrxzWDNCBk6hHBED)_\n\nFixes #31690\n\n## 维护者速读\n\n- 改了什么：中继在 PR 转 ready 时，如果改动只碰 `.github/workflows/**`，会先用合并队列守卫同一套读法（合并基点到 head）判 Tier，判出 S 就不再请你和 hotlong 审。\n- 为什么改：#31538 之后 objectstack 的工作流 PR 可以是 Tier S，但中继只看路径，仍然给你发不需要的审阅请求。\n- 风险与回滚：读不到（无检出、缺提交、git 出错、读 compare 失败）、读出 H、混有其他受治理路径、或是 objectui/cloud 仓，一律照旧请审；回滚即 revert 这一个文件。\n- 先看：`scripts/pm/fleet-write/execute.mjs` 里的 `workflowSplitReadable`、`workflowReadingFor` 和 `requestGovernedReview` 新加的一段。\n- 两分钟验证：`node scripts/pm/fleet-write/execute.mjs --self-test`，看 312 个用例全过，其中 6 个新用例覆盖 S 不请、H 请、读不到请、混合请、objectui 请。\n- 需要你做的：无，席位审完按 TIER_DEFAULT 落地。\n\n## What changes\n\n- `governedReviewPlan` takes an optional `workflowDiff` and reads the tier through `applyWorkflowSplit`, imported from `check-governed-merges.mjs`. Without a reading the answer is byte-identical to the path-only plan.\n- `requestGovernedReview` (the `pr_ready` follow-up) reads the split only when `workflowSplitReadable` says so: every governed hit is the `workflows` row and the target is in its `split.repos`. `workflowReadingFor` then gets the merge base from `GET /repos/{repo}/compare/{base.sha}...{head.sha}`, checks that the checkout's `origin` is the target (`slugFromRemote`), fetches the merge base and head by sha at depth 1 when they are missing, and calls `readWorkflowDiff` with base = inventory base = merge base. This is the queue guard's `pull_request` leg. The reader is imported, not copied.\n- A reading that says S produces one row and no reviews read or requested. Every other outcome requests as before, and the verdict row names which case happened: `workflow split read (merge base … → head …): <file> S|H (reason)`, `workflow split UNREAD …: <reason> — fail closed, the path-only tier H stands`, or `workflow split not read: <another governed row | repo not in split.repos>`.\n- The CLI passes `checkoutGit(<repo root>)` as `deps.git`. Without that seam the run reads as \"no checkout\" and fails closed.\n\n## Why\n\nPR #31628 (ruling C on #31538) lets an objectstack workflow PR land as Tier S. The relay's governed-review follow-up still decided from paths alone, so it requested both approvers anyway. That was review flag B2 of contract review 6724981811.\n\n**The relay's checkout:** `fleet-write.yml` uses `actions/checkout@v7` with defaults: `main`, depth 1, `persist-credentials: false`. The pull's head and merge base are not in it. The run fetches those two commits anonymously (the repository is public) instead of deepening the checkout, so no workflow file is edited and this card's tier does not change.\n\n## Verification\n\nHead `49babaa0` (fix `1fd8b980`, plus a merge of `origin/main`).\n\n- `node scripts/pm/fleet-write/execute.mjs --self-test`: 306 → 312 cases, 25 batteries, exit 0. The governed-review battery floor goes from 30 to 36.\n- New pins: `tier-s-workflow-pull-requests-no-one`, `h-reading-workflow-pull-requests`, `unreadable-workflow-pull-requests` (covers no checkout, a commit the fetch cannot bring, git throwing, a fetch that throws, a checkout of another repository, and a refused compare), `mixed-workflow-pull-requests`, `objectui-workflow-pull-requests`, and the pure plan-with-a-reading case.\n- Ablation, run once and not kept: with `workflowSplitReadable` forced to `read: false`, the self-test exits 1 and the S, H and unreadable pins go red. The file was restored with `git checkout HEAD --`, and its hash matched the HEAD blob.\n- Live reading against real commits, from an empty `git init` checkout with the compare answered by the real API: #31544 (two workflow files) reads S on both files, with no review requested. #31559 reads H (a new `continue-on-error`). #31468 reads H (`fleet-write.yml`, Tier H by path). Each fetch took about 21 s from an empty repository.\n- Derived gates (`dispatch-gates --commands`, 36 families) all exit 0 at `1fd8b980`. `--ran` reconciliation: 36 derived, 36 run, 0 NOT-MEASURED.\n\nClause-②: no\nMetadata-protocol: none\n\nskip-changeset: `scripts/pm/**` only, no published package moves.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (untouched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes. (CI owns the repo-wide lint)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (no publish: skip-changeset)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (except the seat-required 维护者速读 section)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QsR2jTJ27J6P6KVq74iiqQ\n"
+}

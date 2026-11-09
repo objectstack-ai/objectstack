@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T07:51:42Z",
-  "updated_at": "2026-11-08T11:07:39Z",
+  "updated_at": "2026-11-09T01:27:54Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31433",
   "body": "qa#1 · zhuangjianguo · session_01QsR2jUARzLeR7GhKms8a5s\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/qa.md` and the `checklist-test` skill §4–§6 (⛔ not copied here). This is **`qa` seat 1**, the first holder; there was no previous post, so there is no predecessor brief and no inherited ledger.\n\n## Current PM — 🟢 zhuangjianguo\n\n- **Holder:** `zhuangjianguo` (`GET /user`) · `session_01QsR2jUARzLeR7GhKms8a5s` · seated 2026-11-08 (the post's creation time) on the maintainer's summons (`/pm-dispatch qa`).\n- **Patrol:** none. The maintainer ruled that the seat runs on their word, not on a schedule (see Standing orders), so no routine is created.\n- **Mailbox:** none opened (no sibling seat sends this seat work; the runners report back through their own session transcripts).\n- **Takeover:** `/pm-dispatch qa`, then read this post first.\n\n## Standing orders (maintainer, this seat's session, verbatim)\n\n- 「也不需要每周跑，一波开发完了，我会和你说」: the seat does NOT run the weekly cadence that `lanes/qa.md` and checklist-test §6 describe. A round starts when the maintainer says a development wave is done. The record selector stays `owed:weekly`, the title grammar's spelling.\n- 「首轮只跑 owed:weekly，按你推荐的来」: the first round runs the owed list only (73 items on 2026-11-08), not the other three routines.\n- 「可以开云卡」: runners may be dispatched as cloud sessions.\n- 「纳入，本轮一起跑，立卡交 skills 车道」: each round also runs the scenario library (`docs/qa/scenarios`, the `starter` cards, `--modes scratch --packages workspace`) beside the checklist owed list. The charter text change is the skills-lane card #31434.\n\n## Hot-file serial queue\n\n- None: this seat writes no code and opens no PR.\n\n## Notes\n\n- Write path: the relay (`issue-create.mjs`, `post-stamped.mjs`, `close-cards.mjs`). ⛔ No GitHub MCP writes.\n- Round 1 (refreshed 2026-11-08T11:07Z): checklist half closed, record #31486 (73/73 · 61 PASS / 7 PARTIAL / 4 FAIL / 1 BLOCKED), extracted #31488 #31490–#31498, gaps on #31499; open `qa-run` records 0. Scenario half: runner `session_01QsR2jT2gdWkjebLaZAv7qz` in flight.\n- Runner sizing that worked: one cloud session per slice of 16–23 items, about 40–90 min each, environment about a fifth of the wall clock.\n"

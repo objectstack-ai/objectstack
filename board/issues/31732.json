@@ -1,0 +1,31 @@
+{
+  "number": 31732,
+  "kind": "issue",
+  "title": "driver-mongodb: an upgraded database keeps the old (metadata_type, name) activation-ledger unique beside the widened key, so the first second-package row is refused (#31682 follow-up)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T00:34:06Z",
+  "updated_at": "2026-11-09T00:55:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31732",
+  "body": "domain:server#4 · os-steve · session_01ADHkmP8JJo4zF2sjTBRwnX\n\nFiling gate: ④ coordination node. This is a child of epic #31527 that carries the out-of-scope finding of #31682's os-dev-report 6729368753. The epic seat asked for it in its red-line review of PR #31727 (record 6729398713). ⛔ Not a claim.\nreach: NOT MEASURED live, because the container has no mongod. Read on `main`: `packages/drivers/driver-mongodb/src/mongodb-schema.ts` builds each declared unique by name (`idx_<fields>_unique`, through `nullDistinctUniqueOps`). Its only rebuild path is `rebuildLegacySparseUnique`, which handles a same-name pre-#29278 sparse unique. It has no arm that retires a differently named index whose key a declaration has since widened.\nBusiness reason: PR #31727 (S1) widens `sys_metadata_activation`'s declared unique from `(metadata_type, name)` to `(metadata_type, package_id, name)` (ADR-0150 D4, D8 row R4). driver-sql retires the old index as a safe `replace_unique_index`. On Mongo, a database synced before S1 keeps `idx_metadata_type_name_unique` beside the new index, and nothing drops it. Nothing fails today, because no writer stores a second package's row for a name. The first ADR-0150 E child that moves a type's ledger writer onto `(package, name)` would get `E11000` on Mongo for exactly the row the new key admits. Fresh Mongo databases are unaffected.\nReader: the next `domain:server` seat, after #31682's PR #31727 merges. ⛔ Must land before the first E child of #31527 that writes a second package's ledger row of the same name.\nDedupe (open AND closed): `mongo widened unique`, `driver-mongodb orphan index` and `mongodb unique index drop stale` return #31682 (the parent) and nothing on point.\nclass: b · type: Bug\nGrade: p1. It is on the #31527 critical path: it blocks the E children's writer moves on Mongo.\n\n## 维护者速读\n\n激活台账的唯一键从两段扩成三段后，旧的 Mongo 库里那条两段唯一索引不会被删掉。今天不会出错，因为还没有任何代码写入第二个包的同名行。但史诗后续子卡一旦开始按包写台账，Mongo 就会拒绝这一行。这张卡要在那之前把旧索引安全地换掉。\n\n## What to build\n\n1. In driver-mongodb's schema sync, when a declared global unique's key is an in-order proper superset of an existing unique this driver built, drop the narrower index once the wider one is confirmed present. Build it create-before-drop, mirroring driver-sql's widening arm from PR #31727 (`widenedUniqueReplacements` in `schema-drift.ts`). Never drop an index that a current declaration or a field-level unique still asks for. Never drop an index this driver did not name.\n2. One log line per index retired, naming the collection, the old key and the new key.\n3. Tests: index-ops unit pins in the style of `mongodb-unique-null-distinct.test.ts`. One case is an upgraded collection holding both, where the narrower index is retired. The CONTROL cases are a fresh collection (unchanged) and a still-declared narrower unique (kept). Mark the live mongod leg NOT MEASURED if no mongod is reachable.\n\n## Surface\n\n- Expected file surface: `packages/drivers/driver-mongodb/src/mongodb-schema.ts`, tests, root `.changeset/`.\n- Clause-②: no.\n\nParent: #31682. Part of #31527. Blocked-by #31682.\n\n<!-- signed: domain:server#4 · os-steve · session_01ADHkmP8JJo4zF2sjTBRwnX -->"
+}

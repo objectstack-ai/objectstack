@@ -1,0 +1,33 @@
+{
+  "number": 31715,
+  "kind": "issue",
+  "title": "cli/runtime: a server boot that syncs schema (OS_MIGRATE_AND_EXIT and the ordinary boot) takes the same schema-migration lock as os migrate apply (#31598 follow-up)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T23:12:47Z",
+  "updated_at": "2026-11-09T02:09:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31715",
+  "body": "domain:server#2 · os-steve · session_01ADHkmQKZzp4DLtqiCkZZRM\n\nFiling gate: ② follow-up of a dispatched card (#31598, PR #31714). ⛔ Not a claim.\nBusiness reason: #3814 card 0 saw `pg_type` collisions when several replicas start together. PR #31714 serializes `os migrate apply` (`bootSchemaStack`) only. A server boot still syncs the schema inside the kernel bootstrap (ObjectQLPlugin start → schema sync). `OS_MIGRATE_AND_EXIT=1` is that boot with an early exit (`packages/cli/src/commands/serve.ts` near the migrate-and-exit short-circuit). So N replicas, or N migrate-and-exit jobs, still run N concurrent DDL passes.\nReader: the next `domain:server` seat, from `pm:queue`.\nDedupe (open AND closed): `schema migration lock`, `OS_MIGRATE_AND_EXIT lock` → #31598 only (this card's parent).\nclass: b · type: Bug\nGrade: p1, same as #31598 (multi-replica correctness under #3814).\n\n## 维护者速读\n\n#31598 只给 `os migrate apply` 加了数据库迁移锁。服务器自己启动时也会同步表结构，`OS_MIGRATE_AND_EXIT=1` 走的正是这条启动路径，所以多副本同时启动仍会并发建表。这条路径需要拿同一把锁。\n\n## What to build\n\n1. The schema sync a server boot runs, including the `OS_MIGRATE_AND_EXIT=1` boot, takes the lock from `packages/cli/src/utils/schema-migration-lock.ts` (`acquireSchemaMigrationLock`, `SCHEMA_MIGRATION_LOCK_NAME`). Use the same name and key, never a second one: an old and a new migrator must exclude each other. Take it around the DDL and release it once the DDL is done, not at shutdown, so that a long-running server does not hold it.\n2. Locate where the boot's schema sync runs (objectql plugin start or the driver's sync), measure it, and say where the lock goes. If the boot path cannot reach the CLI module, move the lock to a package both can import. Keep one module; ⛔ never a copy.\n3. #3814 R3: the uncontended lock on a single node is the one accepted exception: one statement, no output, and output byte-identical to today. Quote #31598's card item 2 under its own heading in the PR body.\n4. Tests on live Postgres: three concurrent migrate-and-exit boots against one fresh database apply each table once. Red on main, then green. CONTROL: a single boot's output is unchanged.\n\n## Surface\n\n- Expected file surface: `packages/cli/src/commands/serve.ts` (only where the boot path needs it), the schema-sync caller in objectql or driver-sql, the lock module, tests, root `.changeset/`. ⛔ No `helm/`, which belongs to the cloud C2 card.\n- Clause-②: no.\n\nParent: #31598. Epic: #3814.\n\n<!-- signed: domain:server#2 · os-steve · session_01ADHkmQKZzp4DLtqiCkZZRM -->"
+}

@@ -1,0 +1,31 @@
+{
+  "number": 31734,
+  "kind": "issue",
+  "title": "spec: IOwnershipQueueService reads take the caller package, so a queue recipient resolves by D3 from its rule (ADR-0150, follow-up of E4)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T00:37:03Z",
+  "updated_at": "2026-11-09T00:57:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31734",
+  "body": "domain:server#3 · os-steve · session_01ADHkmQXLfvyB5R53VDm3Ka\n\nFiling gate: ④ coordination node: a follow-up of child E4 #31675 of the epic #31527 (ADR-0150), owed by E4's PR #31728 and accepted as an interim by the epic seat (PR review 6729421618). ⛔ Not a claim.\nBusiness reason: inherited from the parent #31527. A sharing rule shipped by package P that names a queue should reach P's queue, or the unique one in P's declared dependency closure, and be refused with the candidates otherwise (ADR-0150 D3). Today the queue contract carries no caller package, so after plugin-sharing's P-side check the queue still resolves environment-wide: a queue name that P's closure reaches once but an unrelated package also holds is refused. That is stricter than D3 (never looser), so nothing is served wrongly, but a valid rule can be refused once two packages share a queue name.\nReader: the `domain:spec` seat, then the `domain:server` seat that wires plugin-sharing's `ownership-queue-service.ts` to the new argument.\nDedupe (open AND closed): `IOwnershipQueueService caller package` (6; top hits #31675(open) #30251(closed) #28508(closed), none on point: #31675 is E4 itself; #30251 added `onFailedRead`; #28508 is older queue work).\nclass: d · type: Feature\nPart of #31527.\n\n## 维护者速读\n\n共享规则引用队列时，队列契约还不知道是哪个软件包在问，所以现在比规则要求的更严：两个包同名的队列会被拒绝。这张卡给队列契约加上调用方软件包参数，让它按统一规则解析。\n\n## What to build\n\n- `packages/spec`: the `IOwnershipQueueService` read methods (`expandMembers`, `isMember`, and any other read that takes a queue name) gain an optional caller-package argument. Its absence keeps today's environment-wide read.\n- plugin-sharing: a declared rule's queue recipient passes its rule's package, and the queue resolves through objectql's `resolvePackageScopedName` from that package (own package, then declared closure plus `sys`, else a refusal naming every candidate).\n- Clause-②: yes (widening) for the spec contract (an added optional argument); the plugin-sharing half narrows nothing beyond #31728's declared refusals.\n\n## Acceptance\n\n- The epic's three red lines (#31527): no first-registered fallback, every refusal names every candidate, independently releasable.\n- A pin: a rule in P naming queue `q`, where `q` is held by P's dependency D and also by an unrelated package U, resolves to D's queue (red on today's `main`)."
+}

@@ -2,8 +2,8 @@
   "number": 31603,
   "kind": "issue",
   "title": "[ADR] An AI service account: a headless agent gets its own principal, credentials and attribution (cloud#3820 O1)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "domain:cloud",
     "enhancement",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T16:31:28Z",
-  "updated_at": "2026-11-08T17:02:13Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-09T01:00:18Z",
+  "closed_at": "2026-11-09T00:58:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31603",
   "body": "repo:cloud#3 · os-zhuang · session_01QUs3BvRcDHXqRU4TSVE4u6\n\nFiling gate: ③ maintainer-dispatched task, child of objectstack-ai/cloud#3820 (EE AI employee console, p1). Maintainer, 2026-11-08 16:27 UTC, in the cloud#3820 PM thread: 「objectstack 可以先开工吗？」. The PM thread read this as \"start the open-source tasks that depend on nothing\", and O1, O2 and O5 are those tasks.\n\nParent: objectstack-ai/cloud#3820. Related: objectstack-ai/cloud#3844 D7 (each agent service identity that connects through MCP with an API key counts as one AI user). Implemented by O3 (the account itself) and O4 (attribution).\n\n## 维护者速读\n\n今天通过 MCP 用 API 密钥接入的 AI 被当成密钥主人本人，系统列不出它、数不清它，也没法单独停用或收窄权限。这份 ADR 定义「AI 服务账号」：AI 有自己的主体、专用凭据和审计归属。cloud 的 AI 清单、一键停用和 #3844 D7 的计费都认这个身份。开源侧只定义身份，不含任何许可逻辑。\n\n## Problem (read in code at objectstack 3c380253, not run)\n\n- ADR-0090 D10 gives an OAuth MCP caller `principalKind: 'agent'`, `onBehalfOf` and `performedBy.clientId` (`packages/spec/src/kernel/execution-context.zod.ts` around lines 265-315). `sys_audit_log.metadata.performed_by` records that client.\n- An API key is ruled a credential of its user (the note beside `performedBy` in the same file). An API-key MCP caller IS the user: no agent marker, nothing to list, count, narrow or disable separately.\n- `principalKind` already has a `service` member.\n\n## Do\n\nWrite the ADR (an amendment to ADR-0090 D10, or a new ADR that cites it). It decides:\n\n1. **What an AI service account is.** Recommended: a principal backed by a `sys_user` row of a distinct kind, with an accountable human owner. Permissions are permission sets, as for any principal, under D10's agent ceiling rules.\n2. **Its credentials.** Dedicated API keys (and, if wanted, OAuth `client_credentials`). A person's own key stays the person's.\n3. **Attribution.** A call through its credential carries `performedBy` naming the account (the sibling key the spec reserved beside `clientId`).\n4. **Lifecycle.** Create (who may), suspend and resume, revoke, last used. What the existing data audit records.\n5. **Options considered.** Explicit registration (recommended) against auto-discovery of any key seen on `/mcp`. Auto-discovery miscounts a person's own key as an agent and cannot narrow permissions in advance.\n6. **Non-goals.** No licence logic in open code. Seat counting and billing (cloud#3844 D7) and the EE consoles (cloud#3820) consume this identity in cloud.\n\nBefore writing, grep the ADRs for this surface (AGENTS.md rule for `docs/adr/`-governed territory): ADR-0090 D10, ADR-0118 D1/D5 (the two-valued `actor` column), and #28367 (agent forward credential).\n\n## Done when\n\nThe ADR is merged by the maintainer. O3 and O4 can then be filed against it.\n\n## Reader\n\nFiled and dispatched by a cloud seat; the card thread drafts the ADR PR and leaves it draft. The cloud#3820 PM thread answers premise questions.\n\nDedup: `repo:objectstack-ai/objectstack is:issue \"service account\"` gave 6 hits, none about agent identity. `performedBy api key` and `agent principal api key` gave #17022, #18374, #27908, #28367 and #28217, all closed; they cover OAuth agents and action audit, not a headless agent's own principal.\n\n## Duplicates\n\nSearched objectstack open issues for \"service account\" AI, MCP interceptor, OAuth client disable token, API key suspend (2026-11-08): no open card covers this.\n"

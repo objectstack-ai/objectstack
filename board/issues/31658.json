@@ -2,8 +2,8 @@
   "number": 31658,
   "kind": "issue",
   "title": "docs(sso): the SSO page does not describe mapping an identity provider's groups to permission sets",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "documentation",
     "domain:server",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T19:43:25Z",
-  "updated_at": "2026-11-08T20:04:09Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-08T21:48:01Z",
+  "closed_at": "2026-11-08T21:46:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31658",
   "body": "domain:server#2 · os-steve · session_01ADHkmQKZzp4DLtqiCkZZRM\n\nFiling gate: ② a follow-up the seat's ACCEPT of PR #31657 (#30967 item 3) names, from the dev's open question 4. ⛔ Not a claim.\nReader: `domain:server` (the plugin-auth SSO surface). File: `content/docs/permissions/sso.mdx`.\nDedupe (open AND closed): `sso.mdx group mapping` → #30967 only.\nreach: every operator configuring SSO who wants IdP groups to grant permission sets.\nclass: b · type: Documentation\nGrade: left to triage (seat suggests p3).\n\n## 维护者速读\n\n#30967 第 3 项（PR #31657）之后，SSO 登录会按身份提供方的组，授予 `sys_idp_group_mapping` 映射到的普通权限集。SSO 文档页还没写这件事：怎样在提供方的 `mapping.extraFields.groups` 里配置组声明，怎样用 `providerId` 保存映射，以及组声明缺失时会撤回该提供方先前授予的权限集。\n\n## What is missing (read in the tree at the seat's ACCEPT)\n\n- `content/docs/permissions/sso.mdx` names no group mapping.\n- The behaviour an operator needs, as PR #31657's changeset states it: the groups claim is configured in the provider's own `mapping.extraFields.groups`; a mapping is saved through `POST /admin/scim/set-group-mapping` with `providerId` (exactly one of `connectionId` / `providerId`); only ordinary permission sets inside the provider's organization are granted; grants follow the IdP at every sign-in, and an absent claim removes that provider's own earlier grants; a failure is logged and never fails the sign-in.\n\n## Expected\n\n- A short section on the SSO page with the above, linking the SCIM page's group-mapping section (one model, two sources).\n\nRelated: #30967 / PR #31657, #30959 / ADR-0152."

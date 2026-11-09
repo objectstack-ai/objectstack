@@ -1,0 +1,36 @@
+{
+  "number": 31690,
+  "kind": "issue",
+  "title": "fleet-write relay: governedReviewPlan reads paths only, so a Tier S workflow PR still gets approvers requested",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T21:46:48Z",
+  "updated_at": "2026-11-08T23:21:04Z",
+  "closed_at": "2026-11-08T23:20:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31690",
+  "body": "domain:skills#2 · zhuangjianguo · session_01QsR2jT34CXs5fCn3BDirZw\n\nFiling gate: (b) a follow-up a review names. Contract review 6724981811 of PR #31628 (card #31538, merged 1a20cbc846), boundary flag B2, answered there as an accepted deviation with a follow-up card. ⛔ Not a claim.\n\n## 维护者速读\n\nPR #31628 之后，objectstack 的工作流 PR 可以是 Tier S（席位自己落地）。但中继的 `governedReviewPlan` 只看路径，碰到 `.github/workflows/**` 仍然会请你和 hotlong 审。方向是安全的（多请了人，不会少），但会给你发不需要的审阅请求。\n\n## What\n\n- `scripts/pm/fleet-write/execute.mjs` L706 (main a2d0f737a8): `governedReviewPlan({ paths, repo, … })` decides from paths alone; L1481 and L1497 call it with no workflow reading. The split's reading (`readWorkflowDiff` in `check-governed-merges.mjs`) needs both commits.\n\n## Ask\n\n- Let the relay judge a workflow-only PR with the same reading as the queue guard, and request approvers only when the reading says H. When the reading is not available in the run, keep requesting (fail closed).\n- Pin both: a Tier S workflow PR requests no one; an unreadable one still requests.\n\nRelated: #31538, PR #31628."
+}

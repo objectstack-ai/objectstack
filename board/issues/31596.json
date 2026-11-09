@@ -13,18 +13,20 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T16:27:29Z",
-  "updated_at": "2026-11-08T17:51:35Z",
+  "updated_at": "2026-11-09T00:14:37Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31596",
   "body": "epic:#3814#1 · os-zhuang · session_01QUs3BrVu5TqwtmuhsjdEvM\nFiling gate: ③ maintainer-dispatched task (child of #3814). Maintainer, (2026-11-08, 16:25 UTC): 「继续，现在派第二批」 (gate 1 after the card 0 inventory, cloud#3868 comment 6723322368).\n\nParent: #3814 (rulings R0-R6 on comment 6722625146).\n\n## Problem (reproduced on the EE image by card 0)\nWith 2 replicas on the Redis cluster driver, stopping Redis made **every** replica exit 1 at its next 5-minute `approvals-sla-escalation` tick (r1 at +7 s, r2 at +114 s). Cause: the cron leader lock (`service-job` `cron-job-adapter.ts`, cluster lock `job:<name>`) calls `acquire` on the Redis driver, which throws `MaxRetriesPerRequestError` (ioredis lazyConnect, maxRetriesPerRequest 3); the fire runs as `void runScheduled(...)`, so the rejection is unhandled and the process dies. ioredis also logs `Unhandled error event` because `service-cluster-redis` attaches no `error` listener. Separately, a metadata publish during a 16 s blip was caught and logged (`metadata-manager.ts:3325`) and the event was **lost**: ioredis resubscribed all 4 lanes, but nothing resyncs what was missed. Until this lands, \"Redis required\" makes Redis a cluster-wide single point of failure.\n\n## Do\n1. A lock acquire/release failure skips that fire with one warning per outage (not per tick) and never rejects unhandled; the next tick tries again. Cover every cluster-lock caller on the EE boot path (cron, DbJobAdapter, anything else card 0 lists).\n2. `service-cluster-redis`: attach `error` listeners on every client (command + subscriber) and log once per outage with no credential in the line; expose driver health for the readiness card.\n3. On reconnect, emit one local \"cluster resync\" event; metadata, datasource, connector-credential and authz caches (and the settings/registry caches once their lanes exist) flush or re-read on it, so a publish lost during the blip converges.\n4. No process-wide `unhandledRejection` swallow: fix the callers. A last-resort logger is acceptable only if it does not change single-node crash semantics.\n5. Tests: a Redis driver stopped and restarted under a running kernel (real Redis or the driver's own fault seam): no exit, one warning, the next fire after reconnect runs, a publish during the outage reaches the peer after reconnect.\n\n## Rules that bind every #3814 child (verbatim rulings on the parent)\nR1 peer round-robin. R2 Redis required for multi-replica only. R3 「同意：每张卡都只在\"声明多副本并接上 Redis 驱动\"时才生效」: the single-node default path is unchanged, multi-replica behaviour switches on only behind declared replicas>1 AND a connected Redis cluster driver, the split-brain guard is never weakened, and the deploy README \"multi-node unsupported\" line stays until the final gate.\n\n## Done when\nPR merged; with Redis stopped, replicas keep serving DB-backed requests and stay up; after Redis returns, scheduled work resumes and caches converge without a restart; single node (memory driver) unchanged.\n\n## Reader\nDispatched by the #3814 PM thread to one card thread; reviewed and landed by that PM thread. Priority p1: on the HA critical path."

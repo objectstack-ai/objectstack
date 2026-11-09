@@ -20,12 +20,12 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T19:50:18Z",
-  "updated_at": "2026-11-08T19:56:01Z",
+  "updated_at": "2026-11-08T21:55:47Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31660",
-  "body": "domain:spec#2 · zhuangjianguo · session_01QsR2jUe9c6YdtNkrzUnMUd\n\nFiling gate: ④ a per-layer child of a coordination card: the Studio authoring half of #31587 (ADR-0149 D7 card 1). The spec seat ruled fork A on #31587 (claim amend 1, 6724438166): PR #31652 declares the keys but leaves `packages/spec/src/ui/dataset.form.ts`, the 10 `platform-objects` metadata-forms bundles and `ui/packages/app-shell/src/views/metadata-admin/metadata-form-zh-cn.ts` untouched. PR #31652 records the gap as four `omit` rows in `packages/spec/src/system/metadata-form-zod-reconciliation.test.ts` (dimensions/measures × `synonyms`/`description`), which this card removes.\n\nBlocked-by: #31587\n\n- **Business reason:** an admin building a dataset in Studio cannot give a measure its business synonyms (「营收」 → 收入, 销售额) or its plain-language definition; only code authors can. The dataset AI tools (#31589) answer worse for every dataset built in Studio.\n- **Reader:** `domain:spec` for `dataset.form.ts` and the reconciliation rows, with the form bundles and the `ui/` zh-CN mirror riding the same PR (the triage audit decides the lane).\n- **Done when:** the dataset form offers both row properties for dimensions and measures, the four `omit` rows are gone, and the form gate stays green.\n- **Dedupe (open and closed):** `dataset form synonyms`, `dataset.form.ts description`: 0 hits besides #31587."
+  "body": "domain:spec#2 · zhuangjianguo · session_01QsR2jUe9c6YdtNkrzUnMUd\n\nFiling gate: ④ a per-layer child of a coordination card: the Studio authoring half of #31587 (ADR-0149 D7 card 1). The spec seat ruled fork A on #31587 (claim amend 1, 6724438166): PR #31652 declares the keys but leaves `packages/spec/src/ui/dataset.form.ts`, the 10 `platform-objects` metadata-forms bundles and `ui/packages/app-shell/src/views/metadata-admin/metadata-form-zh-cn.ts` untouched. PR #31652 records the gap as four `omit` rows in `packages/spec/src/system/metadata-form-zod-reconciliation.test.ts` (dimensions/measures × `synonyms`/`description`), which this card removes.\n\nBlocked-by: #31587, #31589\n\n- **Business reason:** an admin building a dataset in Studio cannot give a measure its business synonyms (「营收」 → 收入, 销售额) or its plain-language definition; only code authors can. The dataset AI tools (#31589) answer worse for every dataset built in Studio.\n- **Reader:** `domain:spec` for `dataset.form.ts` and the reconciliation rows, with the form bundles and the `ui/` zh-CN mirror riding the same PR (the triage audit decides the lane).\n- **Done when:** the dataset form offers both row properties for dimensions and measures, the four `omit` rows are gone, and the form gate stays green.\n- **Dedupe (open and closed):** `dataset form synonyms`, `dataset.form.ts description`: 0 hits besides #31587.\n"
 }

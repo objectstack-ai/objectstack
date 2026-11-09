@@ -1,0 +1,31 @@
+{
+  "number": 31722,
+  "kind": "issue",
+  "title": "cluster: the metadata.mutated lane (lane 2) re-converges the ObjectQL registry on cluster.resync, so an object authored during a Redis outage is served by every replica without a restart (#31596 follow-up)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-08T23:45:07Z",
+  "updated_at": "2026-11-08T23:54:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31722",
+  "body": "domain:server#1 · os-steve · session_01ADHkmPF1skfu2kx89BEXZi\n\nFiling gate: ④ coordination node, a child of #3814 that carries the part of #31596 (F3a) its PR #31721 leaves out. ⛔ Not a claim.\nBusiness reason: #31596 is done when \"caches converge without a restart\" once Redis returns. PR #31721 adds the local `cluster.resync` event, and lanes 1, 3 and 4 and authz re-read on it. Lane 2 (`attachMetadataMutationPubSub()`, `metadata.mutated`) has no resync seam: `metadata-cluster-bridge-plugin.ts` on the PR head says \"Lane 2 has no resync seam yet\". Lane 2 is the one behind the data plane on the shipped EE shape (#13331). So an object authored through `PUT /api/v1/meta/*` while the store is unreachable loses its hint, and every other replica answers `OBJECT_NOT_FOUND` for it until restart.\nReader: seat `domain:server#1`, serial after #31596's PR #31721 merges. It touches the same bridge file as #31597, so it runs on the same seat, one after another.\nDedupe (open AND closed): `metadata.mutated resync` → 0 on point; `#13331` (closed) is the lane's original defect, which lane 2 fixed for delivered hints.\nclass: b · type: Bug\nGrade: p1, same as #31596 (#3814 HA critical path).\n\n## 维护者速读\n\nRedis 断线期间在某个副本上新建或修改的对象，恢复连接后别的副本仍然找不到，要重启才好。#31596 已经让其他三条缓存通道在重连时重读，这条负责对象注册表的通道还没有，这张卡补上。\n\n## What to build\n\n1. A resync seam on the metadata protocol lane's owner, registered with the bridge exactly as lanes 1, 3 and 4 register theirs in PR #31721 (`LaneResync`, called from `resyncLanes` on `onClusterResync`). On the event, the replica re-runs the ObjectQL registry write-through from its OWN `sys_metadata` read for every item a missed hint could have touched. Measure the cost of a full re-read against a per-type or since-timestamp re-read, and say which one you chose in the PR.\n2. ⛔ No value travels on the wire; the DB stays the source of truth. ⛔ A resync never deletes a registry entry it cannot re-read (a transient read failure is not a delete). Log it once and keep the entry.\n3. #3814 R3: the memory driver never emits the event, so the single-node path is unchanged. Pin that.\n4. Tests: two kernels on a shared pub/sub. Drop A's `metadata.mutated` hint (the driver's fault seam or a dropped publish), author an object on A, and emit `cluster.resync` on B. B then serves the object. This is red without the seam. CONTROL: single node unchanged; a delivered hint still converges per item.\n5. Update `content/docs/kernel/cluster.mdx` §6.2 so it no longer says lane 2 lacks the resync.\n\n## Surface\n\n- Expected file surface: `packages/services/service-cluster/src/metadata-cluster-bridge-plugin.ts`, the protocol lane's owner (where `attachMetadataMutationPubSub` lives), tests, `content/docs/kernel/cluster.mdx`, root `.changeset/`.\n- Clause-②: no.\n\nParent: #31596. Epic: #3814.\n\n<!-- signed: domain:server#1 · os-steve · session_01ADHkmPF1skfu2kx89BEXZi -->"
+}

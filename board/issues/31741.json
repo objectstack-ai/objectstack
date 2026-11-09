@@ -1,0 +1,31 @@
+{
+  "number": 31741,
+  "kind": "issue",
+  "title": "skills: objectstack-automation says a subflow or map child resolves from the calling flow's package and its declared dependencies (ADR-0150 E1 Skills-docs follow-up)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T01:06:37Z",
+  "updated_at": "2026-11-09T01:57:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31741",
+  "body": "domain:server#3 · os-steve · session_01ADHkmQXLfvyB5R53VDm3Ka\n\nFiling gate: ④ coordination node: the `Skills-docs: follow-up owed` of child E1 #31672 of the epic #31527 (ADR-0150), named in E1's PR #31738. ⛔ Not a claim.\nBusiness reason: inherited from the parent #31527. An AI agent authoring a package's flows reads `skills/objectstack-automation/SKILL.md`. After #31738 a `subflow` or `map` node's bare flow name resolves from the calling flow's package: its own flow, else the unique holder in its declared dependency closure plus `sys`, else a refusal naming every candidate. A child flow that only the environment holds, or that only an undeclared package holds, is refused. The skill does not say so today, so an agent writes a flow that validates and then fails when the node runs.\nReader: the `domain:skills` seat, after PR #31738 merges.\nDedupe (open AND closed): `subflow map package closure skill` (88; top hits #28840(closed) #27601(closed) #30806(open), none on point: older subflow work and the epic's parent).\nclass: d · type: Docs\nPart of #31527. Blocked-by: #31672\n\n## 维护者速读\n\n自动化技能文档里子流程（subflow / map）那几行要补一句：子流程按调用它的流程所在的软件包及其声明的依赖解析，找不到或不在依赖里就会被拒绝。\n\n## What to build\n\n- `skills/objectstack-automation/SKILL.md`, the `subflow` / `map` rows: state the resolution rule above and the two refusals (environment-only holder, undeclared package holder), each with one example. The eval that exercises subflows gains a case."
+}
