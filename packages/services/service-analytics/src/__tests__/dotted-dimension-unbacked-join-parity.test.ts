@@ -415,7 +415,7 @@ describe('[#31842] a dotted filter member whose tail names a declared member', (
     }
   });
 
-  it("CONTROL: a flat key 'supplier_region' over the related 'supplier.region' still answers that spelling", async () => {
+  it("a flat key 'supplier_region' over the related 'supplier.region' answers that spelling with the related column", async () => {
     const result = await filterDataset('native', FLAT_RELATED, { 'supplier.region': 'apac' });
     expect(rowsOf(result.rows)).toEqual([{ region: 'emea', total: 11 }]);
   });
