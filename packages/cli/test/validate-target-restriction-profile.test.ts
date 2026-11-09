@@ -16,12 +16,18 @@
  *    sandboxed hook, and `allowSandboxedJs: false` refuses that hook;
  *  - version drift is a warning on the payload, never a refusal, and not
  *    gated by `--strict`;
- *  - an invalid profile and a URL target are refused before the stack is read.
+ *  - an invalid profile and a non-http(s) URL target are refused before the
+ *    stack is read;
+ *  - an environment URL: the profile fetched from it judges exactly as the
+ *    same profile read from a file, and a 404, a non-JSON or schema-invalid
+ *    answer and an unreachable environment are each refused naming the URL.
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer, type Server } from 'node:http';
 import { createRequire } from 'node:module';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,6 +38,7 @@ import { RestrictionProfileNodeType } from '@objectstack/spec/system';
 import '@objectstack/objectql/core';
 import '@objectstack/plugin-security';
 import Validate from '../src/commands/validate';
+import { RESTRICTION_PROFILE_ROUTE } from '../src/utils/restriction-profile';
 import { defineStackSourceFromLiteral, linkSpec } from './helpers/define-stack-fixture.js';
 
 const CLI_ROOT = resolve(fileURLToPath(import.meta.url), '..', '..');
@@ -284,9 +291,78 @@ describe('os validate --target <restriction profile file>', () => {
     expect(String(payload.error)).toMatch(/not a valid restriction profile .*allowCode/);
   }, 60_000);
 
-  it('a URL target is refused, naming the file form as the remedy', async () => {
-    const r = await run([config, '--json', '--target', 'https://env.example.com']);
+  it('a target URL that is not http(s) is refused before the stack is read, naming the file form as the remedy', async () => {
+    const r = await run([config, '--json', '--target', 'file:///env/restriction-profile.json']);
     expect(r.code, r.stdout).toBe(1);
+    expect(json(r).valid).toBe(false);
     expect(String(json(r).error)).toContain('os validate --target ./restriction-profile.json');
+  }, 60_000);
+});
+
+/**
+ * `--target <environment URL>`, against a local stub environment that answers
+ * `GET RESTRICTION_PROFILE_ROUTE` with whatever the case sets — never a real
+ * environment.
+ */
+describe('os validate --target <environment URL>', () => {
+  let server: Server;
+  let origin = '';
+  let answer = { status: 200, type: 'application/json', body: '' };
+  const serve = (status: number, body: unknown, type = 'application/json') => {
+    answer = { status, type, body: typeof body === 'string' ? body : JSON.stringify(body) };
+  };
+
+  beforeAll(async () => {
+    server = createServer((req, res) => {
+      const ours = req.method === 'GET' && req.url === RESTRICTION_PROFILE_ROUTE;
+      res.writeHead(ours ? answer.status : 404, { 'content-type': answer.type });
+      res.end(ours ? answer.body : '');
+    });
+    await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+    origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+  afterAll(async () => {
+    await new Promise<void>((done) => server.close(() => done()));
+  });
+
+  it('judges exactly as the same profile read from a file: the same exit, verdict and rows', async () => {
+    for (const [name, value] of [['url-open', OPEN], ['url-no-code', { ...OPEN, allowCode: false }]] as const) {
+      const fromFile = await run([config, '--json', '--target', profileFile(name, value)]);
+      serve(200, { success: true, data: value });
+      const fromUrl = await run([config, '--json', '--target', origin]);
+      expect(fromUrl.code, fromUrl.stdout).toBe(fromFile.code);
+      expect(json(fromUrl).valid).toBe(json(fromFile).valid);
+      expect(json(fromUrl).errors).toEqual(json(fromFile).errors);
+    }
+  }, 60_000);
+
+  it('the text face names the URL the profile was fetched from', async () => {
+    serve(200, { success: true, data: OPEN });
+    const r = await run([config, '--target', origin]);
+    expect(r.code, r.stdout).toBe(0);
+    expect(r.stdout).toContain(`${origin}${RESTRICTION_PROFILE_ROUTE}`);
+  }, 60_000);
+
+  it.each([
+    ['a 404 RESOURCE_NOT_FOUND', () => serve(404, { success: false, error: { code: 'RESOURCE_NOT_FOUND' } }), 'answered HTTP 404 RESOURCE_NOT_FOUND'],
+    ['a non-JSON answer', () => serve(200, 'not json', 'text/plain'), 'did not answer JSON'],
+    ['a schema-invalid profile', () => serve(200, { success: true, data: { ...OPEN, allowCode: 'no' } }), 'answered an invalid restriction profile'],
+  ])('%s is refused before the stack is judged, naming the URL — never read as "no restriction"', async (_name, arrange, problem) => {
+    arrange();
+    const r = await run([config, '--json', '--target', origin]);
+    expect(r.code, r.stdout).toBe(1);
+    expect(json(r).valid).toBe(false);
+    expect(String(json(r).error)).toContain(`${origin}${RESTRICTION_PROFILE_ROUTE} ${problem}`);
+  }, 60_000);
+
+  it('an environment it cannot reach is refused, naming the URL', async () => {
+    const closed = createServer();
+    await new Promise<void>((done) => closed.listen(0, '127.0.0.1', done));
+    const port = (closed.address() as AddressInfo).port;
+    await new Promise<void>((done) => closed.close(() => done()));
+    const r = await run([config, '--json', '--target', `http://127.0.0.1:${port}`]);
+    expect(r.code, r.stdout).toBe(1);
+    expect(json(r).valid).toBe(false);
+    expect(String(json(r).error)).toContain(`http://127.0.0.1:${port}${RESTRICTION_PROFILE_ROUTE} could not be reached`);
   }, 60_000);
 });

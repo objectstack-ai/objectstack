@@ -118,7 +118,8 @@ export default class Validate extends Command {
     json: Flags.boolean({ description: 'Output results as JSON' }),
     target: Flags.string({
       description:
-        'Also judge the stack against a target environment\'s restriction profile (a JSON file): refuse what '
+        'Also judge the stack against a target environment\'s restriction profile (a JSON file, or the '
+        + 'environment\'s http(s) URL, fetched from its published route): refuse what '
         + 'it forbids, warn when the local @objectstack/spec / @objectstack/skills version differs from the target\'s',
     }),
   };
@@ -292,16 +293,17 @@ export default class Validate extends Command {
 
     try {
       // 0. `--target`: read the target environment's restriction profile FIRST,
-      //    before the stack — an unreadable or invalid profile is refused
+      //    before the stack — a file, or an environment URL the profile is
+      //    fetched from. An unreadable, unreachable or invalid profile is refused
       //    (thrown into the catch-all: `--json` gets `error`, exit 1) whatever
       //    the stack holds, so no run ever judges against half a profile. No
       //    `--target`, no profile: nothing below that reads it runs, and the
       //    command is exactly what it was.
       let targetProfile: ParsedRestrictionProfile | undefined;
       if (flags.target !== undefined) {
-        const loadedProfile = loadRestrictionProfile(flags.target);
+        const loadedProfile = await loadRestrictionProfile(flags.target);
         targetProfile = loadedProfile.profile;
-        if (!flags.json) printKV('Target profile', loadedProfile.file);
+        if (!flags.json) printKV('Target profile', loadedProfile.source);
       }
 
       // 1. Load configuration
