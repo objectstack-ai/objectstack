@@ -192,10 +192,11 @@ async function handleActionActivationWrite(
     const postureRefusal = await refuseUngrantedActivationWrite(deps, context, ACTION_ACTIVATION_SUBJECT);
     if (postureRefusal) return postureRefusal;
 
-    // [ADR-0150 D5] A deeper path is no route of this door: it reaches the
-    // domain only through the addressed call's four-segment mount, and is
-    // declined there AFTER the two gates above (a gate narrower than its route
-    // is a bypass), so the transport answers it as the path nothing serves.
+    // [ADR-0150 D5] A deeper path is no route of this door, and is declined
+    // AFTER the two gates above (a gate narrower than its route is a bypass),
+    // so the dispatcher answers its no-route `404 ROUTE_NOT_FOUND`. Before G1
+    // a mounted host answered the transport's unmatched 404 without reaching
+    // this domain, and a catch-all host got this door's shape 400 here.
     if (parts.length > 3) return { handled: false };
     // The shape, refused with the shape named. `parts` is
     // `['_activation', object, action]` — the object segment is mandatory even
@@ -551,9 +552,15 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
                 ? { environment: true }
                 : { namespace: reading.namespace, namespaceOwners };
             parts = parts.slice(1);
-            // The activation write is the environment's ledger door and names
-            // its action by `(object, name)`: it has no addressed form.
-            if (parts.length < 1 || parts[0] === ACTION_ACTIVATION_SEGMENT) {
+            // An addressed path names an object (or `global`) and an action,
+            // and a record id at most: two or three segments after its
+            // qualifier, the shapes D5's table publishes. One segment is no
+            // shape of it (`/actions/:ns/:action` is not published: the
+            // object-less call is `/actions/:ns/global/:action`); more than
+            // three are declined below, as the bare arm declines them. The
+            // activation write is the environment's ledger door and names its
+            // action by `(object, name)`: it has no addressed form.
+            if (parts.length < 2 || parts[0] === ACTION_ACTIVATION_SEGMENT) {
                 return {
                     handled: true,
                     response: deps.error(
@@ -564,14 +571,17 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
             }
         }
     }
-    // [ADR-0150 D5] Four segments are a route only when the first is an
-    // address: the bare grammar ends at `/:object/:action/:recordId`. A
-    // four-segment path whose first segment is a literal or no installed
-    // namespace reaches this domain only through the addressed call's mount,
-    // and is no route of it — declined, so each transport answers it as the
-    // path nothing serves it answered before that mount existed. A deeper
-    // `_activation` path is declined by its own door, behind its gates.
-    if (!addressQualifier && parts.length > 3 && parts[0] !== ACTION_ACTIVATION_SEGMENT) return { handled: false };
+    // [ADR-0150 D5] The grammar ends at three segments, bare or after a
+    // qualifier: `/:object/:action/:recordId`. A longer path is no route, and
+    // is declined (`handled: false`), so the dispatcher answers its no-route
+    // `404 ROUTE_NOT_FOUND` on every host. Before G1 that was not one answer:
+    // the dispatcher mounted no four-segment `/actions` pattern, so a mounted
+    // host answered the transport's unmatched 404 without reaching this
+    // domain, while a catch-all host (`createHonoApp`) handed this domain the
+    // path, which read `parts[0..2]` and ran the call with the tail ignored
+    // (and a deeper `_activation` path got that door's shape 400). A deeper
+    // `_activation` path is declined by its own door, behind its two gates.
+    if (parts.length > 3 && parts[0] !== ACTION_ACTIVATION_SEGMENT) return { handled: false };
     // A single segment is an OBJECT-LESS action (#3913): `POST /actions//log_call`
     // is what an SDK that has no object to name emits, and `filter(Boolean)`
     // already ate the empty segment. Route it at the canonical `'global'` key

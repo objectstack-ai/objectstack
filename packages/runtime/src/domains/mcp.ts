@@ -485,7 +485,7 @@ async function readMergedSkillRows(
     protocol: McpMergedMetadataRead | undefined | null,
     getMeta: () => Promise<any>,
 ): Promise<unknown[]> {
-    const items = await readMergedItems(protocol, 'skill');
+    const items = await actionExec.readMergedItems(protocol, 'skill');
     if (items === undefined) {
         const meta: any = await getMeta();
         return (await meta?.list?.('skill')) ?? [];
@@ -511,36 +511,6 @@ function packageNamespaceOf(engine: any, packageId: string | undefined): string 
     return typeof namespace === 'string' && namespace !== '' ? namespace : undefined;
 }
 
-/**
- * [commit e783e163d, #25120] One type's merged listing, as `GET /api/v1/meta/TYPE`
- * reads it — or `undefined` when this host has no merged read to offer.
- *
- * The one place this file unwraps `getMetaItems`, shared by the skill read
- * above and the object and action reads in {@link buildMcpBridge}, so they
- * cannot disagree about which answers they accept. Its three outcomes are the ones
- * {@link readMergedSkillRows} documents: `undefined` is STRUCTURAL absence (no
- * protocol in the slot, or one without the list verb), and the caller answers
- * from the metadata service exactly as before; a throw travels to the caller,
- * ⛔ never a fallback to the un-merged read.
- */
-async function readMergedItems(
-    protocol: McpMergedMetadataRead | undefined | null,
-    type: 'skill' | 'object' | 'action' | 'dataset',
-): Promise<unknown[] | undefined> {
-    if (!protocol || typeof protocol.getMetaItems !== 'function') return undefined;
-    const answer = await protocol.getMetaItems({ type });
-    // The declared `GetMetaItemsResponse` is `{ type, items }`, and the two
-    // other `getMetaItems` consumers in this package read `res.items` the same
-    // way. The bare-array arm matches what `packages/mcp` accepts for the stdio
-    // half of this same read: the slot is filled by name from a host-owned
-    // registry, and the two surfaces answering one question must not disagree
-    // about the shape they accept.
-    return Array.isArray(answer)
-        ? (answer as unknown[])
-        : Array.isArray(answer?.items)
-            ? answer.items
-            : [];
-}
 
 /**
  * [commit e783e163d] Report #6504's completeness verdict for the skill prompt surface.
@@ -642,7 +612,7 @@ export function buildMcpBridge(
     // unmapped in `ServiceSlotContracts`), so naming {@link McpMergedMetadataRead}
     // here is what keeps any verb, spelt any way, from being reached through
     // this handle. ⛔ Still `| undefined` and still every member optional:
-    // {@link readMergedItems} keeps its own `typeof protocol.getMetaItems !==
+    // `actionExec.readMergedItems` keeps its own `typeof protocol.getMetaItems !==
     // 'function'` probe, because a host may occupy the slot with a partial
     // object.
     const getProtocol = async (): Promise<McpMergedMetadataRead | undefined> =>
@@ -669,11 +639,11 @@ export function buildMcpBridge(
      * sync.
      *
      * `undefined` = no merged read on this host (structural absence, see
-     * {@link readMergedItems}): `list_objects` and `describe_object` then read
+     * `actionExec.readMergedItems`): `list_objects` and `describe_object` then read
      * the metadata service, exactly as before.
      */
     const readMergedObjects = async (): Promise<any[] | undefined> =>
-        (await readMergedItems(await getProtocol(), 'object')) as any[] | undefined;
+        (await actionExec.readMergedItems(await getProtocol(), 'object')) as any[] | undefined;
 
     /**
      * The one object `describe_object` describes and `validate_expression`
@@ -712,7 +682,7 @@ export function buildMcpBridge(
      * metadata service, exactly as before.
      */
     const readServedActions = async (): Promise<any[] | undefined> =>
-        (await readMergedItems(await getProtocol(), 'action')) as any[] | undefined;
+        (await actionExec.readMergedItems(await getProtocol(), 'action')) as any[] | undefined;
 
     // [ADR-0150 D6] The engine the skill read last resolved (`listSkills`).
     let skillEngine: any;
@@ -1229,7 +1199,7 @@ function datasetToolMembers(
     const envId = context.environmentId;
     const loadDatasets = async (): Promise<readonly unknown[]> => {
         const protocol = await getProtocol();
-        const items = (await readMergedItems(protocol, 'dataset')) ?? [];
+        const items = (await actionExec.readMergedItems(protocol, 'dataset')) ?? [];
         const translated = await translateMetaList(
             {
                 resolveI18nService: async () => {

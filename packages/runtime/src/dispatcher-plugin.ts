@@ -2191,7 +2191,11 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                         // A path whose first segment is no address (a literal,
                         // or no installed namespace) is no route of this mount:
                         // the domain declines it, and `sendResult` answers the
-                        // dispatcher's no-route 404, as on a catch-all host.
+                        // dispatcher's no-route 404. A catch-all host answers
+                        // the same since G1 (the domain declines every path past
+                        // three segments); before, this host answered the
+                        // transport's unmatched 404 and a catch-all host ran
+                        // the call with the tail ignored.
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);

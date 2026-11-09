@@ -4499,8 +4499,9 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
             namespaceOwners: (ns) => (typeof registry?.getNamespaceOwners === 'function' ? registry.getNamespaceOwners(ns) : []),
         };
     }
+    const objectsListing = await readObjects?.();
     const resolved = await resolveActionByName(
-        deps, meta, name, input?.objectName, await readObjects?.(), await readActions?.(), qualifier,
+        deps, meta, name, input?.objectName, objectsListing, await readActions?.(), qualifier,
     );
     if (!resolved) {
         throw new Error(
@@ -4511,7 +4512,23 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     }
     // [ADR-0150 D4] Set only for a qualified call: the resolved holder's
     // package, whose handler the dispatch runs (the engine's package key).
-    const { action, objectName, obj, packageId } = resolved;
+    const { action, packageId } = resolved;
+    let { objectName, obj } = resolved;
+    // [ADR-0150 D5, child G1] A qualified call on an object that reached the
+    // holder's OBJECT-LESS declaration (`addressedActionHits`' fallback) keeps
+    // the caller's object as its subject, as the REST door keeps the routed
+    // one (`resolveAddressedRouteActionDeclaration`): every gate below judges
+    // that object, the record id is loaded from it, and the handler runs under
+    // it. So `run_action(name, { namespace, objectName, recordId })` and
+    // `POST /actions/:ns/:object/:action/:recordId` are the same call. The bare
+    // arm has no fallback (it answers not-found), so this never fires on it.
+    const askedObject = typeof input?.objectName === 'string' && input.objectName !== '' ? input.objectName : undefined;
+    if (qualifier && askedObject && !isObjectLessActionKey(askedObject) && isObjectLessActionKey(objectName)) {
+        objectName = askedObject;
+        obj = (objectsListing ?? []).find((o: any) => o?.name === askedObject)
+            ?? (typeof meta?.getObject === 'function' ? await meta.getObject(askedObject) : undefined)
+            ?? obj;
+    }
 
     // Fail-closed on system-object actions, PER ACTION (#27681): a `sys_*`
     // action passes only on its author's `ai.exposed` opt-in, and every gate
@@ -5875,11 +5892,36 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
     return { action: undefined, obj, degraded, reason };
 }
 
-/** One type's merged listing, as `GET /meta/:type` serves it; `undefined` on a host with no list verb. */
-async function readMergedListing(protocol: any, type: 'object' | 'action'): Promise<readonly any[] | undefined> {
+/**
+ * [commit e783e163d, #25120] One type's merged listing, as `GET /api/v1/meta/TYPE`
+ * reads it — or `undefined` when this host has no merged read to offer.
+ *
+ * The one place this package unwraps `getMetaItems`, shared by the MCP
+ * bridge's skill, object and action reads (`domains/mcp.ts`) and the REST
+ * `/actions` door's addressed call ({@link resolveAddressedRouteActionDeclaration}),
+ * so they cannot disagree about which answers they accept. Its three outcomes
+ * are the ones `readMergedSkillRows` (`domains/mcp.ts`) documents: `undefined` is STRUCTURAL absence (no
+ * protocol in the slot, or one without the list verb), and the caller answers
+ * from the metadata service exactly as before; a throw travels to the caller,
+ * ⛔ never a fallback to the un-merged read.
+ */
+export async function readMergedItems(
+    protocol: Pick<MetadataProtocol, 'getMetaItems'> | undefined | null,
+    type: 'skill' | 'object' | 'action' | 'dataset',
+): Promise<unknown[] | undefined> {
     if (!protocol || typeof protocol.getMetaItems !== 'function') return undefined;
-    const answer: any = await protocol.getMetaItems({ type });
-    return Array.isArray(answer) ? answer : Array.isArray(answer?.items) ? answer.items : [];
+    const answer = await protocol.getMetaItems({ type });
+    // The declared `GetMetaItemsResponse` is `{ type, items }`, and the two
+    // other `getMetaItems` consumers in this package read `res.items` the same
+    // way. The bare-array arm matches what `packages/mcp` accepts for the stdio
+    // half of this same read: the slot is filled by name from a host-owned
+    // registry, and the two surfaces answering one question must not disagree
+    // about the shape they accept.
+    return Array.isArray(answer)
+        ? (answer as unknown[])
+        : Array.isArray(answer?.items)
+            ? answer.items
+            : [];
 }
 
 /**
@@ -5912,8 +5954,8 @@ export async function resolveAddressedRouteActionDeclaration(deps: ActionExecuti
     }
     try {
         const protocol = await deps.resolveService(requestContext, 'protocol', envId);
-        const objects = await readMergedListing(protocol, 'object');
-        const actions = await readMergedListing(protocol, 'action');
+        const objects = await readMergedItems(protocol, 'object');
+        const actions = await readMergedItems(protocol, 'action');
         const meta = objects !== undefined && actions !== undefined
             ? undefined
             : await deps.resolveService(requestContext, 'metadata', envId);
