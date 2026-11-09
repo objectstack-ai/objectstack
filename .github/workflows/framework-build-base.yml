@@ -220,7 +220,7 @@ jobs:
             echo "$REF already exists at $DIGEST; nothing to build."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           elif [ "$REPLACE" != true ]; then
-            echo "::error::$REF is published at $DIGEST, and rebuild: true would move it to a new digest. To replace it on purpose, dispatch again with rebuild: true and replace_published: true; then rewrite every downstream pin (cloud: scripts/framework-base-image.sh write, then commit .objectstack-base-image)."
+            echo "::error::$REF is published at $DIGEST, and rebuild: true would move it to a new digest. To replace it on purpose, dispatch again with rebuild: true and replace_published: true; then rewrite every downstream pin (in the cloud repository: run framework-base-image.sh write from its scripts directory, then commit .objectstack-base-image)."
             exit 1
           else
             echo "$REF is published at $DIGEST; replace_published: true, so it is rebuilt and the tag moves. The old digest stays served under its digest tag."
