@@ -309,6 +309,21 @@ record means no file**, refused with the same `RECORD_NOT_FOUND`.
   service's maximum upload size before the link is spent. Sending a file's
   bytes through the MCP protocol itself is not supported yet.
 
+Reading a PDF or Word document's text runs inside the server process, and the
+process serves no other request while it does. Two host settings bound it, so
+one caller's files cannot hold the process for everyone else (a shared
+deployment sets its own values):
+
+| Variable | Default | What it bounds |
+|:--|:--|:--|
+| `OS_MCP_READ_FILE_CPU_BUDGET_MS` | `2000` | The CPU time one PDF or Word extraction may use, in milliseconds. It is checked between PDF pages and between Word paragraphs, never mid-page. When it runs out, `read_file` answers the text read so far with `truncated: true` and a note naming the budget; the rest is in the download link the answer already carries. |
+| `OS_MCP_READ_FILE_MAX_CONCURRENT` | `4` | How many PDF and Word extractions may run at once in the process. One more is refused at once, never queued: `SERVICE_UNAVAILABLE` (503), with `details.retryAfterSeconds` saying how long to wait before trying again. Text files and images are not counted. |
+
+The defaults keep a self-hosted deployment reading files as before: a 9 MiB,
+200-page PDF dense in drawing operators measured about 300 to 650 ms of CPU, well
+inside the budget. Both are read once when the server starts; a value that is
+not a positive whole number stops the start with a message naming the variable.
+
 The tools are a fixed ~10-tool **spine** with the object name as a *parameter*
 (`query_records(objectName, …)`), not one tool per object — so the list stays
 usable on an app with hundreds of objects. Which objects and actions that spine

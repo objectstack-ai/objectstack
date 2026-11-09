@@ -7,9 +7,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import {
     ACTIVATION_LEDGER_PACKAGELESS_INDEX_NAME,
+    ACTIVATION_LEDGER_PACKAGELESS_SHADOW_COLUMN,
     ACTIVATION_LEDGER_TABLE,
     buildActivationLedgerPackagelessDuplicateProbeSql,
     buildActivationLedgerPackagelessIndexSql,
+    buildActivationLedgerPackagelessMariaDbKeySql,
+    buildActivationLedgerPackagelessMariaDbSql,
     ensureActivationLedgerPackagelessIndex,
 } from './activation-ledger-packageless-index.js';
 import type { IndexExec } from './partial-index-probe.js';
@@ -153,7 +156,7 @@ describe('the MySQL-family arms (statement and verdict)', () => {
             .toEqual({ status: 'created' });
     });
 
-    it('a dialect with neither form (MariaDB) is unsupported, reported at error, and names what still guards', async () => {
+    it('a server with no form at all (MySQL before 8.0.13, version unreadable) is unsupported, reported at error, and names what still guards', async () => {
         const exec: IndexExec = async (sql) => {
             if (sql.startsWith('CREATE')) throw new Error("You have an error in your SQL syntax; check the manual near '(CASE WHEN'");
             return presentTable(sql);
@@ -233,5 +236,76 @@ describe('[#21418] a bound sentinel reaches no carrier this migration writes', (
         expect(result.status).toBe('failed');
         expect(log.error).toHaveBeenCalled();
         expect(carriers(result, log)).not.toContain(SENTINEL);
+    });
+});
+
+describe('the MariaDB arm (INVISIBLE generated carrier + UNIQUE key)', () => {
+    /** A MariaDB the presence probe finds the table on, answering VERSION() as MariaDB 11.8 does. */
+    const mariadb = (onDdl: (sql: string) => unknown) => {
+        const seen: string[] = [];
+        const exec: IndexExec = async (sql: string) => {
+            seen.push(sql);
+            if (/information_schema|sqlite_master|to_regclass|WHERE 1 = 0/i.test(sql)) return [[{ present: 1 }]];
+            if (/^SELECT VERSION\(\)/.test(sql)) return [[{ version: '11.8.9-MariaDB-ubu2404' }]];
+            return onDdl(sql);
+        };
+        return { exec, seen };
+    };
+    const ddl = (seen: string[]) => seen.filter((q) => /^(ALTER|CREATE)/.test(q));
+
+    it('the carrier is named as driver-sql names a hash shadow (index name + __hash), so its differ owns it', () => {
+        expect(ACTIVATION_LEDGER_PACKAGELESS_SHADOW_COLUMN).toBe(`${ACTIVATION_LEDGER_PACKAGELESS_INDEX_NAME}__hash`);
+    });
+
+    it('one ALTER adds the INVISIBLE column (the digest, NULL for a packaged row) and the UNIQUE key over it', () => {
+        expect(buildActivationLedgerPackagelessMariaDbSql()).toBe(
+            `ALTER TABLE ${ACTIVATION_LEDGER_TABLE} ADD COLUMN ${ACTIVATION_LEDGER_PACKAGELESS_SHADOW_COLUMN} VARBINARY(32) ` +
+                'GENERATED ALWAYS AS (CASE WHEN package_id IS NULL THEN unhex(sha2(concat(metadata_type, 0x1f, name), 256)) END) ' +
+                'VIRTUAL INVISIBLE, ' +
+                `ADD UNIQUE KEY ${ACTIVATION_LEDGER_PACKAGELESS_INDEX_NAME} (${ACTIVATION_LEDGER_PACKAGELESS_SHADOW_COLUMN})`,
+        );
+    });
+
+    it('MariaDB takes that form, never the MySQL functional statement it refuses', async () => {
+        const { exec, seen } = mariadb(() => [[]]);
+        const log = { warn: vi.fn(), error: vi.fn() };
+        expect(await ensureActivationLedgerPackagelessIndex(exec, log, { client: 'mysql2' })).toEqual({ status: 'created' });
+        expect(ddl(seen)).toEqual([buildActivationLedgerPackagelessMariaDbSql()]);
+        expect(log.error).not.toHaveBeenCalled();
+    });
+
+    it('a second boot (ER_DUP_FIELDNAME) re-keys the standing column, and a key already there (ER_DUP_KEYNAME) is the index in place', async () => {
+        const { exec, seen } = mariadb((sql) => {
+            if (sql.includes('ADD COLUMN')) throw Object.assign(new Error("Duplicate column name 'x'"), { errno: 1060, code: 'ER_DUP_FIELDNAME' });
+            throw Object.assign(new Error("Duplicate key name 'x'"), { errno: 1061, code: 'ER_DUP_KEYNAME' });
+        });
+        expect(await ensureActivationLedgerPackagelessIndex(exec, { warn: vi.fn(), error: vi.fn() }, { client: 'mysql2' }))
+            .toEqual({ status: 'created' });
+        expect(ddl(seen)).toEqual([buildActivationLedgerPackagelessMariaDbSql(), buildActivationLedgerPackagelessMariaDbKeySql()]);
+    });
+
+    it('existing duplicates (ER_DUP_ENTRY) are a conflict: reported at error with the listing query, nothing deleted', async () => {
+        const { exec, seen } = mariadb((sql) => {
+            if (/^ALTER/.test(sql)) throw Object.assign(new Error("Duplicate entry 'x' for key 'uniq_sys_metadata_activation_packageless'"), { errno: 1062, code: 'ER_DUP_ENTRY' });
+            return [[{ duplicate_keys: 1, duplicate_rows: 2 }]];
+        });
+        const log = { warn: vi.fn(), error: vi.fn() };
+        const result = await ensureActivationLedgerPackagelessIndex(exec, log, { client: 'mysql2' });
+        expect(result.status).toBe('conflict');
+        expect(String(log.error.mock.calls[0]?.[0] ?? '')).toContain(buildActivationLedgerPackagelessDuplicateProbeSql());
+        expect(seen.some((q) => /^DELETE|DROP/i.test(q))).toBe(false);
+    });
+
+    it('MySQL still takes its functional key part (VERSION() without MariaDB)', async () => {
+        const seen: string[] = [];
+        const exec: IndexExec = async (sql) => {
+            seen.push(sql);
+            if (/information_schema|WHERE 1 = 0/i.test(sql)) return [[{ present: 1 }]];
+            if (/^SELECT VERSION\(\)/.test(sql)) return [[{ version: '8.4.3' }]];
+            return [[]];
+        };
+        expect(await ensureActivationLedgerPackagelessIndex(exec, { warn: vi.fn(), error: vi.fn() }, { client: 'mysql2' }))
+            .toEqual({ status: 'created' });
+        expect(ddl(seen)).toEqual([buildActivationLedgerPackagelessIndexSql('mysql2')]);
     });
 });

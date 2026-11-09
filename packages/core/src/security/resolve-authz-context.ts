@@ -84,7 +84,7 @@ import {
   type OrganizationReach,
 } from './organization-reach.js';
 import { derivePosture } from './posture-ladder.js';
-import { securityCatalogReaderOf, type SecurityCatalogReader } from './security-catalog.js';
+import { securityCatalogReaderOf, type SecurityCatalogEntry, type SecurityCatalogReader } from './security-catalog.js';
 import { resolveSystemWriteOrganization, type SystemWriteOrganizationDecision } from './system-write-organization.js';
 import { METADATA_ACTIVATION_TABLE } from '../utils/metadata-activation-store.js';
 
@@ -1410,19 +1410,36 @@ interface CatalogSetBody {
  * [ADR-0131 D3/D4] The body of the permission set `name` names, read from its
  * catalog definition — or `undefined` when the catalog holds no set of that
  * name (or no catalog is bound), which confers nothing.
+ *
+ * [ADR-0150 D7] `position` is the position whose `permissionSets` names it:
+ * the set then resolves from the package that declared the position (D3), and
+ * a name that rule refuses confers nothing. Omitted, the name is a stored
+ * grant's, resolved as a caller with no package.
  */
 async function catalogSetBody(
   catalog: SecurityCatalogReader | undefined,
   name: string,
+  position?: SecurityCatalogEntry,
 ): Promise<CatalogSetBody | undefined> {
   if (!catalog) return undefined;
-  const entry = await catalog.resolve('permission', name);
+  const entry = await catalog.resolve('permission', name, position ? { position } : undefined);
   if (!entry) return undefined;
   return {
     name: entry.name,
     systemPermissions: entry.definition.systemPermissions,
     tabPermissions: entry.definition.tabPermissions,
   };
+}
+
+/** What {@link positionBoundSetNames} reads: each position's set names, and the position each was read from. */
+interface PositionBindings {
+  /** The sets each position's definition names, in declared order. */
+  named: Map<string, string[]>;
+  /**
+   * [ADR-0150 D7] The catalog entry of each position read — what each of its
+   * sets resolves from ({@link catalogSetBody}'s `position`).
+   */
+  entries: Map<string, SecurityCatalogEntry>;
 }
 
 /**
@@ -1436,13 +1453,16 @@ async function catalogSetBody(
 async function positionBoundSetNames(
   catalog: SecurityCatalogReader | undefined,
   positions: readonly string[],
-): Promise<Map<string, string[]>> {
+): Promise<PositionBindings> {
   const named = new Map<string, string[]>();
-  if (!catalog) return named;
+  const entries = new Map<string, SecurityCatalogEntry>();
+  if (!catalog) return { named, entries };
   for (const positionName of positions) {
-    named.set(positionName, positionSetNamesOf((await catalog.resolve('position', positionName))?.definition));
+    const entry = await catalog.resolve('position', positionName);
+    if (entry) entries.set(positionName, entry);
+    named.set(positionName, positionSetNamesOf(entry?.definition));
   }
-  return named;
+  return { named, entries };
 }
 
 /**
@@ -1555,14 +1575,14 @@ export async function readPositionGrantsInForce(
 ): Promise<{ inForce: Map<string, string[]>; disabledPositions: Set<string> }> {
   const names = [...new Set(positions.filter((n) => typeof n === 'string' && n !== ''))];
   const catalog = securityCatalogReaderOf(ql);
-  const namedByPosition = await positionBoundSetNames(catalog, names);
+  const { named: namedByPosition, entries: positionEntries } = await positionBoundSetNames(catalog, names);
   const disabled = await readDisabledCatalogNames(ql, names, [...namedByPosition.values()].flat());
   const inForce = setsInForceByPosition(names, namedByPosition, disabled);
   for (const [positionName, setNames] of inForce) {
     const held: string[] = [];
     for (const setName of setNames) {
       if (held.includes(setName)) continue;
-      if (await catalogSetBody(catalog, setName)) held.push(setName);
+      if (await catalogSetBody(catalog, setName, positionEntries.get(positionName))) held.push(setName);
     }
     inForce.set(positionName, held);
   }
@@ -1790,7 +1810,8 @@ async function resolveGuestAnchorGrants(
 ): Promise<GuestAnchorGrants | undefined> {
   if (!ql || typeof ql.find !== 'function') return undefined;
   const catalog = securityCatalogReaderOf(ql);
-  const bound = (await positionBoundSetNames(catalog, [GUEST_POSITION])).get(GUEST_POSITION) ?? [];
+  const guestBindings = await positionBoundSetNames(catalog, [GUEST_POSITION]);
+  const bound = guestBindings.named.get(GUEST_POSITION) ?? [];
   if (bound.length === 0) return undefined;
 
   const organization = await resolveGuestOrganization(ql, tenancyPosture);
@@ -1806,7 +1827,7 @@ async function resolveGuestAnchorGrants(
   const bodies: CatalogSetBody[] = [];
   for (const name of bound) {
     if (disabled.permissions.has(name)) continue;
-    const body = await catalogSetBody(catalog, name);
+    const body = await catalogSetBody(catalog, name, guestBindings.entries.get(GUEST_POSITION));
     if (body && !bodies.some((b) => b.name === body.name)) bodies.push(body);
   }
   foldCatalogSetBodies(grants, bodies);
@@ -2148,22 +2169,27 @@ export async function resolveUserAuthzGrants(
   //     effect, a membership-derived role (`org_owner`) included.
   const readPositionLedger = async (): Promise<{
     namedByPosition: Map<string, string[]>;
+    positionEntries: Map<string, SecurityCatalogEntry>;
     disabled: { positions: Set<string>; permissions: Set<string> };
   }> => {
     if (grants.positions.length === 0) {
-      return { namedByPosition: new Map(), disabled: { positions: new Set(), permissions: new Set() } };
+      return {
+        namedByPosition: new Map(),
+        positionEntries: new Map(),
+        disabled: { positions: new Set(), permissions: new Set() },
+      };
     }
     // The definitions first (in-process), so the ONE ledger read can ask about
     // every position and every set this resolution may grant.
-    const namedByPosition = await positionBoundSetNames(catalog, grants.positions);
+    const { named: namedByPosition, entries: positionEntries } = await positionBoundSetNames(catalog, grants.positions);
     const disabled = await readDisabledCatalogNames(
       ql,
       grants.positions,
       [...ledgerSetNames, ...[...namedByPosition.values()].flat()],
     );
-    return { namedByPosition, disabled };
+    return { namedByPosition, positionEntries, disabled };
   };
-  const [defaultOrganizationId, { namedByPosition, disabled }] = await Promise.all([
+  const [defaultOrganizationId, { namedByPosition, positionEntries, disabled }] = await Promise.all([
     anchorReadsDefaultOrganization ? memoisedDefaultOrganizationId(ql) : Promise.resolve(undefined),
     readPositionLedger(),
   ]);
@@ -2175,15 +2201,19 @@ export async function resolveUserAuthzGrants(
   const applyingGrants = upsRows.filter(
     (r) => grantAppliesInTenant(grantOrganizationOf(r), tenantId) || anchorsPlatformStanding(r),
   );
-  // Position-bound sets (§6a), by name, in the order the held positions name them.
-  const boundSetNames: string[] = [];
+  // Position-bound sets (§6a), in the order the held positions name them —
+  // each with the position that names it, since [ADR-0150 D7] a set resolves
+  // from the package that declared its position.
+  const boundSets: Array<{ setName: string; positionName: string }> = [];
   let hasPlatformAdminGrant = false;
   if (disabled.positions.size > 0) {
     grants.positions = grants.positions.filter((n) => !disabled.positions.has(n));
   }
   for (const [positionName, setNames] of setsInForceByPosition(grants.positions, namedByPosition, disabled)) {
     for (const setName of setNames) {
-      if (!boundSetNames.includes(setName)) boundSetNames.push(setName);
+      if (!boundSets.some((b) => b.setName === setName && b.positionName === positionName)) {
+        boundSets.push({ setName, positionName });
+      }
       // [ADR-0090 D5] The `everyone` anchor's bindings are the default ones.
       recordOrigin(setName, positionName === 'everyone'
         ? { kind: 'default' }
@@ -2234,8 +2264,12 @@ export async function resolveUserAuthzGrants(
       hasPlatformAdminGrant = true;
     }
   }
-  for (const name of boundSetNames) {
-    const body = await catalogSetBody(catalog, name);
+  for (const { setName: name, positionName } of boundSets) {
+    // Asked per naming position, never once per name: a reference one
+    // position's package cannot resolve (ADR-0150 D3) must not withhold the
+    // set another position names in a scope that resolves it.
+    if (takenNames.has(name)) continue;
+    const body = await catalogSetBody(catalog, name, positionEntries.get(positionName));
     if (!body) continue;
     take(body, !disabled.permissions.has(name));
   }
