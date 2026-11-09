@@ -903,9 +903,12 @@ export interface ServeRun {
    */
   port: number | undefined;
   /**
-   * The child's own exit code when it EXITED on its own before `waitFor`
-   * matched — a boot that refused and exited — and `null` when `runServe`
-   * stopped it (a signal sets no code). Read only after the child is gone.
+   * The child's `exitCode` once it is gone. Meaningful only for a child that
+   * EXITED on its own before `waitFor` matched — a boot that refused and
+   * exited — whose own code this is. For a child `runServe` stopped it is the
+   * child's answer to the SIGTERM: `null` when the signal killed it, but a
+   * child that handles SIGTERM and exits reports its own code (0 included),
+   * so a caller that stopped the child must not read this as a verdict.
    */
   exitCode: number | null;
 }

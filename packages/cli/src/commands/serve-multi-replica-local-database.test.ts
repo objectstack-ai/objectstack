@@ -91,6 +91,10 @@ describe('multiReplicaLocalDatabaseRefusal — a database local to each replica 
     ['the dev SQLite default (fallback)', () => fallback(undefined, undefined, true)],
     ['a wasm-sqlite:// URL (fallback, sqlite-wasm)', () => fallback('wasm-sqlite:///srv/os/app.db')],
     ['libSQL over a file: URL (fallback)', () => fallback('file:/srv/os/app.db', 'turso')],
+    ["SQLite's :memory: (standalone)", () => standalone(':memory:')],
+    ["libSQL over :memory: (fallback)", () => fallback(':memory:', 'turso')],
+    ['a relative file:./ URL (standalone)', () => standalone('file:./data/app.db')],
+    ['libSQL over a relative file:./ URL (standalone)', () => standalone('file:./data/app.db', 'turso')],
   ])('%s', (_label, primary) => {
     const refusal = multiReplicaLocalDatabaseRefusal(primary());
     expect(refusal).toBeDefined();
@@ -112,6 +116,10 @@ describe('multiReplicaLocalDatabaseRefusal — a database every replica reaches 
     ['mysql (standalone)', () => standalone('mysql://u:p@db:3306/app')],
     ['mongodb (standalone)', () => standalone('mongodb://db:27017/app')],
     ['a libsql:// server URL (fallback)', () => fallback('libsql://app-org.turso.io')],
+    ['libSQL over a wss:// server URL (standalone)', () => standalone('wss://app-org.turso.io', 'turso')],
+    ['libSQL over an http:// server URL (standalone)', () => standalone('http://127.0.0.1:8080', 'turso')],
+    ['libSQL over a wss:// server URL (fallback)', () => fallback('wss://app-org.turso.io', 'turso')],
+    ['libSQL over an http:// server URL (fallback)', () => fallback('http://127.0.0.1:8080', 'turso')],
     ['postgres (fallback)', () => fallback('postgres://u:p@db:5432/app')],
   ])('%s', (_label, primary) => {
     expect(multiReplicaLocalDatabaseRefusal(primary())).toBeUndefined();

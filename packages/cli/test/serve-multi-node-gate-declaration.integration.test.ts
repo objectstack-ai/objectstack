@@ -29,10 +29,16 @@
  *   3. CONTROL, `OS_CLUSTER_REPLICAS=2` + redis + no gate → refused exactly as
  *      before the fix.
  *   4. CONTROL, `OS_EXPECT_MULTI_NODE=true` + redis + a REGISTERED gate that
- *      admits whatever it is asked → no denial, and the boot walks on to the
- *      local-database refusal of the second `describe`. The gate prints the
- *      count it was asked, so the case also reads the count the fix chose for
- *      "declared, count unknown" (2).
+ *      admits whatever it is asked → no denial, and neither the guard nor the
+ *      local-database refusal stops the boot. The gate prints the count it was
+ *      asked, so the case also reads the count the fix chose for "declared,
+ *      count unknown" (2). It no longer asserts a COMPLETED boot: several
+ *      replicas declared over redis now refuse a database local to each one,
+ *      so the case boots over the same shared (unreachable) database as cases
+ *      1 and 3, and with no database server behind it the boot stops later,
+ *      at the first plugin that reads data (measured: the auth plugin's start,
+ *      "No driver available for object 'sys_organization'"). This suite runs
+ *      no database server every replica could share.
  *
  * ## The fixture
  *
@@ -46,9 +52,10 @@
  * composed driver is honestly in-process, the split-brain guard refuses every
  * declared topology that reaches it; case 4 therefore sets
  * `OS_ALLOW_MEMORY_CLUSTER_MULTINODE=true` (the guard's own escape hatch) so
- * that an admitted topology is not refused by the guard either. Cases 1 and 3
- * boot over a shared (unreachable) database rather than the fixture's SQLite,
- * so the refusal they read is the guard's and not the local-database one.
+ * that an admitted topology is not refused by the guard either. Cases 1, 3
+ * and 4 boot over a shared (unreachable) database rather than the fixture's
+ * SQLite, so the refusal they read, or rule out, is the guard's and not the
+ * local-database one.
  *
  * ## Several replicas over a database local to each one (second `describe`)
  *
@@ -195,7 +202,7 @@ function writeApp(prefix: string, gate: boolean): string {
 }
 
 /**
- * The primary database the two no-gate refusal cases boot over: one all
+ * The primary database the declared cases (1, 3 and 4) boot over: one all
  * replicas would share. Several replicas declared over redis refuse a database
  * local to each one (SQLite, this fixture's default) before the boot reaches
  * the split-brain guard — the second `describe` pins that refusal — so a case
@@ -265,7 +272,8 @@ describe('os serve → multi-node gate reads both spellings of the declaration',
   }, BOOT_TIMEOUT);
 
   it('CONTROL: a registered gate admits OS_EXPECT_MULTI_NODE=true — asked about 2 nodes, no denial', async () => {
-    const { out, booted } = await boot('expect-gate', true, {
+    const { out } = await boot('expect-gate', true, {
+      ...SHARED_DATABASE_ENV,
       OS_EXPECT_MULTI_NODE: 'true',
       // The composed driver is in-process by construction (see the header).
       OS_ALLOW_MEMORY_CLUSTER_MULTINODE: 'true',
@@ -275,13 +283,11 @@ describe('os serve → multi-node gate reads both spellings of the declaration',
     // count was not given — and admitted.
     expect(out).toContain(`${GATE_ASKED} 2`);
     expect(out).not.toContain(GATE_DENIAL);
-    // Admitted, the boot walks on to the next refusal a declared topology
-    // meets: the fixture's database is SQLite, local to each replica. A
-    // completed declared boot needs a database server every replica shares,
-    // which this suite does not run.
-    expect(out).toContain(LOCAL_DATABASE_REFUSAL);
+    // Over a shared database the boot passes the local-database refusal and
+    // the split-brain guard (whose plugin init runs before any plugin starts).
+    // It is not asked to complete: see the header.
+    expect(out).not.toContain(LOCAL_DATABASE_REFUSAL);
     expect(out).not.toContain(GUARD_REFUSAL);
-    expect(booted).toBe(false);
   }, BOOT_TIMEOUT);
 });
 
