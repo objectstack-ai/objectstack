@@ -2135,6 +2135,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
             label: "映射：姓名 claim",
             helpText: "可选。映射到显示名称的 claim。默认为 “name”。",
             placeholder: "name"
+          },
+          mapGroups: {
+            label: "映射：组 claim",
+            helpText: "可选。携带用户所属组的 claim，例如 “groups”。每次登录都会授予映射到这些组的权限集。留空则不映射任何组。",
+            placeholder: "groups"
           }
         }
       },
@@ -2165,6 +2170,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
             label: "NameID 格式",
             helpText: "可选。请求的 SAML NameID 格式。默认为 IdP 配置的格式。",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+          },
+          mapGroups: {
+            label: "映射：组属性",
+            helpText: "可选。携带用户所属组的断言属性。每次登录都会授予映射到这些组的权限集。留空则不映射任何组。",
+            placeholder: "groups"
           }
         }
       },
@@ -2193,6 +2203,35 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       edit_sso_sign_in_options: {
         label: "编辑登录选项",
         successMessage: "登录选项已保存"
+      },
+      show_sso_groups_claim: {
+        label: "查看组 claim",
+        resultDialog: {
+          title: "组 claim",
+          description: "此提供方在每次登录时读取用户所属组的 OIDC claim 或 SAML 属性。为空表示该提供方不映射任何组。可通过“编辑组 claim”修改。",
+          acknowledge: "完成",
+          fields: {
+            groupsClaim: "组 claim"
+          }
+        }
+      },
+      edit_sso_groups_claim: {
+        label: "编辑组 claim",
+        params: {
+          groupsClaim: {
+            label: "组 claim",
+            helpText: "携带用户所属组的 OIDC claim 或 SAML 属性。每次登录都会授予映射到这些组的权限集。留空即移除：该提供方将不再映射任何组。",
+            placeholder: "groups"
+          }
+        },
+        resultDialog: {
+          title: "组 claim 已保存",
+          description: "此提供方此后每次登录时读取的组 claim。为空表示不映射任何组。",
+          acknowledge: "完成",
+          fields: {
+            groupsClaim: "组 claim"
+          }
+        }
       }
     }
   },

@@ -288,9 +288,18 @@ describe('auth route ledger hygiene', () => {
       // below holds it to the same proof as the other twelve — better-auth
       // publishes no manager endpoint at all.
       'POST /api/v1/auth/admin/set-user-manager',
+      // [#31666] The groups-claim show and edit of the SSO Providers form, on
+      // this pin's own terms: `auth-plugin.ts` mounts both itself (a
+      // `rawApp.post` on the `${basePath}/admin/sso/get-groups-claim` and
+      // `${basePath}/admin/sso/set-groups-claim` templates, ahead of the
+      // catch-all), and the `live.has(route)` loop below holds them to the same
+      // proof — `@better-auth/sso` serves no groups-claim endpoint. The set row
+      // sorts below, after request-domain-verification.
+      'POST /api/v1/auth/admin/sso/get-groups-claim',
       'POST /api/v1/auth/admin/sso/register',
       'POST /api/v1/auth/admin/sso/register-saml',
       'POST /api/v1/auth/admin/sso/request-domain-verification',
+      'POST /api/v1/auth/admin/sso/set-groups-claim',
       'POST /api/v1/auth/admin/sso/verify-domain',
       'POST /api/v1/auth/admin/unlock-user',
       'POST /api/v1/auth/authorized-clients/withdraw',
