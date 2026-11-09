@@ -66,10 +66,41 @@
  *
  * Without a scope, nothing is kept beyond the request in flight, as before.
  *
+ * ## Reading again after the page's own action
+ *
+ * A mounted reader asks once per binding. The bus above cannot ask it again:
+ * an endpoint names no object, and the bus's unknown-scope change is declared
+ * from every surface of the app, so a reader that read again on it would read
+ * again on every unrelated write. The page that ran the action is the scope
+ * that knows its own data changed. A host that runs a page's actions mounts
+ * {@link ElementApiRereadScope} around the page with a signal from {@link
+ * createElementApiReread}, and calls `reread()` after an action on that page
+ * succeeds; every reader below reads again, and no reader outside it does.
+ *
+ *  - The answer on screen stays while the new read is in flight: the element
+ *    never falls back to its loading state, and whatever it holds (a row's
+ *    button in the middle of its own run) stays mounted.
+ *  - The new answer replaces it in place; a failed read draws the binding's
+ *    error face, never the answer from before the write.
+ *  - A read asked after `reread()` never joins a request that was already in
+ *    flight when it was called: that request may have been answered before the
+ *    write landed. Readers that ask after it share one request, as before.
+ *
+ * Without a re-read scope a reader asks once per binding, as before.
+ *
  * @module
  */
 
-import { createContext, createElement, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  createElement,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
 import { ElementApiDataSourceSchema, type ElementApiDataSource } from '@objectstack/spec/ui';
 import { SchemaRendererContext, type ApiFetch } from '../context/SchemaRendererContext.js';
 import { isConfigBag } from '../utils/configBag.js';
@@ -159,6 +190,22 @@ export function selectElementApiPath(
 const IN_FLIGHT = new Map<string, Promise<unknown>>();
 
 /**
+ * Bumped by every `reread()` of every {@link ElementApiReread}, before its
+ * readers are told. A request asked in an earlier epoch is neither joined nor
+ * handed out again from an open, because it may have been answered before the
+ * write the re-read follows.
+ */
+let rereadEpoch = 0;
+
+/** The epoch each request was asked in. */
+const REQUEST_EPOCH = new WeakMap<Promise<unknown>, number>();
+
+/** Was `read` asked after the latest re-read? */
+function askedThisEpoch(read: Promise<unknown>): boolean {
+  return REQUEST_EPOCH.get(read) === rereadEpoch;
+}
+
+/**
  * The open a read is asked in (objectui#13323): its name, and the reads asked
  * in it, by URL. {@link ElementApiOpenScope} provides it; {@link
  * readElementApi} takes it.
@@ -208,11 +255,16 @@ export function useElementApiOpen(): ElementApiOpen | null {
  * Given the `open` the caller is in, a read that open has already asked for
  * the URL is returned instead, settled or not, unless it failed
  * (objectui#13323).
+ *
+ * Neither is shared across a re-read: a read asked before the latest
+ * `reread()` of any {@link ElementApiReread} is not joined and not handed out
+ * again, so the caller reaches the network.
  */
 export function readElementApi(url: string, doFetch: ApiFetch, open?: ElementApiOpen | null): Promise<unknown> {
   const kept = open?.reads.get(url);
-  if (open && kept?.open === open.open) return kept.read;
-  const read = IN_FLIGHT.get(url) ?? requestElementApi(url, doFetch);
+  if (open && kept?.open === open.open && askedThisEpoch(kept.read)) return kept.read;
+  const pending = IN_FLIGHT.get(url);
+  const read = pending && askedThisEpoch(pending) ? pending : requestElementApi(url, doFetch);
   if (open) keepRead(open, url, read);
   return read;
 }
@@ -230,7 +282,7 @@ function keepRead(open: ElementApiOpen, url: string, read: Promise<unknown>): vo
 }
 
 function requestElementApi(url: string, doFetch: ApiFetch): Promise<unknown> {
-  const request = doFetch(url, {
+  const request: Promise<unknown> = doFetch(url, {
     method: 'GET',
     headers: { Accept: 'application/json' },
     credentials: 'include',
@@ -244,11 +296,61 @@ function requestElementApi(url: string, doFetch: ApiFetch): Promise<unknown> {
       }
     })
     .finally(() => {
-      IN_FLIGHT.delete(url);
+      // A request from an earlier epoch may have been replaced by a newer one.
+      if (IN_FLIGHT.get(url) === request) IN_FLIGHT.delete(url);
     });
+  REQUEST_EPOCH.set(request, rereadEpoch);
   IN_FLIGHT.set(url, request);
   return request;
 }
+
+/**
+ * A page's re-read signal: `reread()` asks every reader below the {@link
+ * ElementApiRereadScope} that holds it to read again (see "Reading again after
+ * the page's own action" above). Create one per page mount and keep it for
+ * the page's life.
+ */
+export interface ElementApiReread {
+  /** Ask every reader below the scope to read again. */
+  reread(): void;
+  /** How many re-reads were asked: the readers key their read on it. */
+  generation(): number;
+  /** Subscribe to `reread()`. Returns the unsubscribe function. */
+  subscribe(listener: () => void): () => void;
+}
+
+/** Create a page's re-read signal; see {@link ElementApiReread}. */
+export function createElementApiReread(): ElementApiReread {
+  let generation = 0;
+  const listeners = new Set<() => void>();
+  return {
+    reread() {
+      rereadEpoch += 1;
+      generation += 1;
+      for (const listener of Array.from(listeners)) listener();
+    },
+    generation: () => generation,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+}
+
+const ElementApiRereadContext = createContext<ElementApiReread | null>(null);
+
+/**
+ * Make the readers below read again whenever `reread` is asked to. The host
+ * owns the signal and decides when its page's data changed.
+ */
+export function ElementApiRereadScope({ reread, children }: { reread: ElementApiReread; children?: ReactNode }) {
+  return createElement(ElementApiRereadContext.Provider, { value: reread }, children);
+}
+
+const NO_REREAD_SUBSCRIBE = (): (() => void) => () => {};
+const NO_REREAD_GENERATION = (): number => 0;
 
 /**
  * Resolve a node's API binding: read its endpoint and select its `path`.
@@ -262,6 +364,14 @@ export function useElementApiDataSource(schema: unknown): UseElementApiDataSourc
   const scope = useElementApiOpen();
   const open = scope?.open;
   const reads = scope?.reads;
+  // The page's re-read signal: a new generation is a new read of the same
+  // binding, with the answer it replaces kept on screen until it lands.
+  const reread = useContext(ElementApiRereadContext);
+  const generation = useSyncExternalStore(
+    reread ? reread.subscribe : NO_REREAD_SUBSCRIBE,
+    reread ? reread.generation : NO_REREAD_GENERATION,
+    reread ? reread.generation : NO_REREAD_GENERATION,
+  );
   const raw = isConfigBag(schema) ? schema.dataSource : undefined;
   // Keyed on the binding's CONTENT, never on its identity (AGENTS.md #10): a
   // re-render that hands over an equal binding is the same read.
@@ -277,6 +387,8 @@ export function useElementApiDataSource(schema: unknown): UseElementApiDataSourc
   // The settled answer carries its own key instead of being cleared when the
   // binding changes, so the effect never sets state synchronously; an answer
   // whose key no longer matches reads as `loading` (useElementDataSource's rule).
+  // The re-read generation is not part of the key: a re-read keeps the answer
+  // it replaces on screen until its own answer lands.
   const [settled, setSettled] = useState<
     { key: string; ok: true; data: unknown } | { key: string; ok: false; error: string } | null
   >(null);
@@ -316,7 +428,7 @@ export function useElementApiDataSource(schema: unknown): UseElementApiDataSourc
     };
     // `open` is left out on purpose: see the comment on the read above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url, path, requestKey, doFetch, reads]);
+  }, [url, path, requestKey, doFetch, reads, generation]);
 
   if (judged.status === 'absent') return { status: 'absent' };
   if (judged.status === 'refused') return { status: 'refused', error: judged.error };
