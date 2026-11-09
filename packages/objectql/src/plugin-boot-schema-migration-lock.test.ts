@@ -16,7 +16,7 @@
  * ## How this file sees the lock
  *
  * Through the statements it sends: the default driver here is a stub whose
- * `getKnex()` answers a recording Postgres-dialect knex, and whose `syncSchema`
+ * `dialectName` is `postgres` and whose `getKnex()` answers a recording knex, and whose `syncSchema`
  * writes into the same log. So the order of the lock, the DDL and the unlock
  * is read off one sequence. The live half (concurrent boots on a real
  * database) is `packages/cli/src/utils/schema-migration-lock.integration.test.ts`.
@@ -34,8 +34,10 @@ interface StubOptions {
   uncontended?: boolean;
   /** The driver's `schemaDdlDeferred` reading. */
   deferred?: boolean;
-  /** `undefined` ⇒ no `getKnex` at all (a memory / non-SQL driver). */
+  /** The driver's `dialectName`; `undefined` ⇒ neither it nor `getKnex` (a memory / non-SQL driver). */
   dialect?: string;
+  /** `getKnex()` throws, as the Turso remote transport's does. */
+  knexRefused?: boolean;
 }
 
 /** A default driver whose knex and DDL write into one ordered log. */
@@ -43,7 +45,6 @@ function makeStub(opts: StubOptions = {}) {
   const log: string[] = [];
   const knex = {
     client: {
-      dialect: opts.dialect,
       async acquireRawConnection() { log.push('connection:open'); return {}; },
       async destroyRawConnection() { log.push('connection:close'); },
     },
@@ -66,7 +67,16 @@ function makeStub(opts: StubOptions = {}) {
     async findOne() { return null; },
     async count() { return 0; },
   };
-  if (opts.dialect !== undefined) driver.getKnex = () => knex;
+  if (opts.dialect !== undefined) {
+    driver.dialectName = opts.dialect;
+    driver.getKnex = () => {
+      if (opts.knexRefused) {
+        log.push('getKnex:refused');
+        throw new Error('Handing out the Knex instance (`getKnex()`) is not supported by this transport');
+      }
+      return knex;
+    };
+  }
   if (opts.deferred !== undefined) driver.schemaDdlDeferred = opts.deferred;
   return { driver, log };
 }
@@ -116,7 +126,7 @@ const isLockStatement = (line: string) => line.includes('advisory');
 
 describe('the boot schema sync takes the schema-migration lock (#31715)', () => {
   it('⭐ locks before the first DDL, unlocks after the last, and closes its own session', async () => {
-    const { log, error } = await boot({ dialect: 'postgresql' });
+    const { log, error } = await boot({ dialect: 'postgres' });
     expect(error).toBeUndefined();
     const syncs = log.flatMap((line, i) => (line.startsWith('syncSchema:') ? [i] : []));
     expect(log.filter((line) => line === `syncSchema:${OBJECT}`).length).toBeGreaterThan(0);
@@ -129,13 +139,13 @@ describe('the boot schema sync takes the schema-migration lock (#31715)', () => 
   });
 
   it('uncontended: ONE lock statement, and nothing logged about it (single-node output unchanged)', async () => {
-    const { log, warns } = await boot({ dialect: 'postgresql' });
+    const { log, warns } = await boot({ dialect: 'postgres' });
     expect(log.filter(isLockStatement)).toEqual([LOCK, UNLOCK]);
     expect(warns.filter((w) => /schema migration/i.test(w))).toEqual([]);
   });
 
   it('contended: says ONCE that it waits, then syncs only once it holds the lock', async () => {
-    const { log, warns, error } = await boot({ dialect: 'postgresql', uncontended: false });
+    const { log, warns, error } = await boot({ dialect: 'postgres', uncontended: false });
     expect(error).toBeUndefined();
     expect(warns.filter((w) => /Another schema migration is running on the default datasource's database/.test(w))).toHaveLength(1);
     const waitedAt = log.indexOf('select pg_advisory_lock(?::bigint)');
@@ -144,25 +154,33 @@ describe('the boot schema sync takes the schema-migration lock (#31715)', () => 
   });
 
   it('a boot that fails between the phases still lets go of the lock', async () => {
-    const { log, error } = await boot({ dialect: 'postgresql', failAfterPhase1: true });
+    const { log, error } = await boot({ dialect: 'postgres', failAfterPhase1: true });
     expect(error).toBeDefined();
     expect(log.indexOf(UNLOCK)).toBeGreaterThan(log.indexOf('phase2:throws'));
     expect(log).toContain('connection:close');
   });
 
   it('no lock where this boot runs no DDL: skipSchemaSync, or a default driver holding its DDL back', async () => {
-    const skipped = await boot({ dialect: 'postgresql', skipSchemaSync: true });
+    const skipped = await boot({ dialect: 'postgres', skipSchemaSync: true });
     expect(skipped.log.filter(isLockStatement)).toEqual([]);
-    const deferred = await boot({ dialect: 'postgresql', deferred: true });
+    const deferred = await boot({ dialect: 'postgres', deferred: true });
     expect(deferred.log.filter(isLockStatement)).toEqual([]);
     expect(deferred.log).not.toContain('connection:open');
   });
 
   it('control — a driver that is neither Postgres nor MySQL gets no statement, and the boot syncs as before', async () => {
-    const sqlite = await boot({ dialect: 'sqlite3' });
+    const sqlite = await boot({ dialect: 'sqlite' });
     expect(sqlite.log).not.toContain('connection:open');
     expect(sqlite.log).toContain(`syncSchema:${OBJECT}`);
     const memory = await boot({});
     expect(memory.log).toContain(`syncSchema:${OBJECT}`);
+  });
+
+  it('[#31715] a SQLite-dialect driver whose getKnex() THROWS (Turso remote) is never asked for Knex — no lock, no throw, the boot syncs', async () => {
+    const remote = await boot({ dialect: 'sqlite', knexRefused: true });
+    expect(remote.error).toBeUndefined();
+    expect(remote.log).not.toContain('getKnex:refused');
+    expect(remote.log).not.toContain('connection:open');
+    expect(remote.log).toContain(`syncSchema:${OBJECT}`);
   });
 });

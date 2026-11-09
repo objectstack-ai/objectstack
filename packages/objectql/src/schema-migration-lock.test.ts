@@ -44,7 +44,6 @@ function fakeDriver(
   const shape = (row: unknown) => (dialect === 'mysql' ? [[row], []] : { rows: [row] });
   const knex = {
     client: {
-      dialect,
       acquireRawConnection: vi.fn(async () => { opened.push(connection); return connection; }),
       destroyRawConnection: vi.fn(async (c: unknown) => { destroyed.push(c); }),
     },
@@ -57,7 +56,8 @@ function fakeDriver(
       },
     }),
   };
-  return { driver: { getKnex: () => knex }, statements, opened, destroyed, connection };
+  const getKnex = vi.fn(() => knex);
+  return { driver: { dialectName: dialect, getKnex }, getKnex, statements, opened, destroyed, connection };
 }
 
 const DB = 'postgres://db.internal:5432/app';
@@ -74,14 +74,32 @@ describe('the lock key', () => {
 });
 
 describe('a database the lock does not apply to runs nothing', () => {
-  it.each(['sqlite3', 'mssql', 'oracle', undefined])('dialect %s: null, no connection opened, no line printed', async (dialect) => {
+  it.each(['sqlite', 'mssql', 'oracle', 'unknown', undefined])('dialectName %s: null, Knex never asked for, no connection opened, no line printed', async (dialect) => {
     const f = fakeDriver(String(dialect), () => ({}));
-    if (dialect === undefined) (f.driver.getKnex() as { client: { dialect?: string } }).client.dialect = undefined;
+    if (dialect === undefined) delete (f.driver as { dialectName?: unknown }).dialectName;
     const warn = vi.fn();
     await expect(acquireSchemaMigrationLock(f.driver, { database: DB, warn })).resolves.toBeNull();
+    expect(f.getKnex).not.toHaveBeenCalled();
     expect(f.opened).toEqual([]);
     expect(f.statements).toEqual([]);
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('[#31715] a SQLite-dialect face whose getKnex() THROWS (the Turso remote transport) answers null and never calls it', async () => {
+    const getKnex = vi.fn(() => { throw new Error('Handing out the Knex instance (`getKnex()`) is not supported'); });
+    await expect(acquireSchemaMigrationLock({ dialectName: 'sqlite', getKnex }, { database: DB, warn: vi.fn() }))
+      .resolves.toBeNull();
+    expect(getKnex).not.toHaveBeenCalled();
+  });
+
+  it('⛔ a Postgres or MySQL driver whose getKnex() throws fails LOUDLY — the error is never swallowed into "no lock"', async () => {
+    for (const dialectName of ['postgres', 'mysql']) {
+      const refused = new Error(`${dialectName}: Knex cannot be handed out`);
+      await expect(acquireSchemaMigrationLock(
+        { dialectName, getKnex: () => { throw refused; } },
+        { database: DB, warn: vi.fn() },
+      )).rejects.toBe(refused);
+    }
   });
 
   it('a driver with no knex (memory, mongo) answers null', async () => {
@@ -92,7 +110,7 @@ describe('a database the lock does not apply to runs nothing', () => {
 
 describe('Postgres', () => {
   it('uncontended: one try-lock on a connection of its own, and NOT ONE line printed', async () => {
-    const f = fakeDriver('postgresql', () => ({ locked: true }));
+    const f = fakeDriver('postgres', () => ({ locked: true }));
     const warn = vi.fn();
     const lock = await acquireSchemaMigrationLock(f.driver, { database: DB, warn });
     expect(lock).not.toBeNull();
@@ -104,7 +122,7 @@ describe('Postgres', () => {
   });
 
   it('release unlocks on the SAME session the lock was taken on, then closes it — once', async () => {
-    const f = fakeDriver('postgresql', () => ({ locked: true }));
+    const f = fakeDriver('postgres', () => ({ locked: true }));
     const lock = await acquireSchemaMigrationLock(f.driver, { database: DB, warn: vi.fn() });
     await lock!.release();
     await lock!.release();
@@ -117,7 +135,7 @@ describe('Postgres', () => {
   });
 
   it('contended: ONE line naming the database, then a wait bounded by lock_timeout', async () => {
-    const f = fakeDriver('postgresql', (sql) => (sql.startsWith('select pg_try') ? { locked: false } : {}));
+    const f = fakeDriver('postgres', (sql) => (sql.startsWith('select pg_try') ? { locked: false } : {}));
     const warn = vi.fn();
     const lock = await acquireSchemaMigrationLock(f.driver, { database: DB, warn, waitMs: 5_000 });
     expect(lock).not.toBeNull();
@@ -132,14 +150,14 @@ describe('Postgres', () => {
   });
 
   it('the default bound is SCHEMA_MIGRATION_LOCK_WAIT_MS', async () => {
-    const f = fakeDriver('postgresql', (sql) => (sql.startsWith('select pg_try') ? { locked: false } : {}));
+    const f = fakeDriver('postgres', (sql) => (sql.startsWith('select pg_try') ? { locked: false } : {}));
     await acquireSchemaMigrationLock(f.driver, { database: DB, warn: vi.fn() });
     expect(f.statements[1].sql).toBe(`set lock_timeout = ${SCHEMA_MIGRATION_LOCK_WAIT_MS}`);
   });
 
   it('⛔ a wait that runs out REFUSES, naming the database — never proceeds unlocked — and closes the session', async () => {
     const timedOut = Object.assign(new Error('canceling statement due to lock timeout'), { code: '55P03' });
-    const f = fakeDriver('postgresql', (sql) => {
+    const f = fakeDriver('postgres', (sql) => {
       if (sql.startsWith('select pg_try')) return { locked: false };
       if (sql.startsWith('select pg_advisory_lock')) return timedOut;
       return {};
@@ -156,7 +174,7 @@ describe('Postgres', () => {
 
   it('any other failure of the wait is handed on as it is, the session closed', async () => {
     const other = Object.assign(new Error('connection reset'), { code: 'ECONNRESET' });
-    const f = fakeDriver('postgresql', (sql) => {
+    const f = fakeDriver('postgres', (sql) => {
       if (sql.startsWith('select pg_try')) return { locked: false };
       if (sql.startsWith('select pg_advisory_lock')) return other;
       return {};

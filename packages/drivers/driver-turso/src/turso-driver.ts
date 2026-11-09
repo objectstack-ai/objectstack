@@ -1108,8 +1108,10 @@ export const REMOTE_FACE_ANSWERS = {
   registerObjectMetadata: 'remote',
   // Deferred DDL: arming is refused, so nothing is ever deferred here, and the
   // four inherited members answer that truthfully without reaching Knex
-  // (`schemaDdlDeferred` reads `false`, so the engine's boot takes the
-  // schema-migration lock, which answers `null` on a non-Knex face, #31715).
+  // (`schemaDdlDeferred` reads `false`, so the engine's boot asks for the
+  // schema-migration lock, #31715; the lock reads `dialectName`, `'sqlite'`
+  // here, and answers `null` WITHOUT calling `getKnex()`, which this face
+  // refuses by throwing).
   setDeferredDdl: 'refused',
   schemaDdlDeferred: 'inherited',
   deferredSchemaObjectCount: 'inherited',

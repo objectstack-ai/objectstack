@@ -53,7 +53,6 @@ export const SCHEMA_MIGRATION_LOCK_WAIT_MS = 10 * 60_000;
 /** The slice of knex the lock uses, typed structurally. */
 interface LockKnex {
   client: {
-    dialect?: string;
     acquireRawConnection(): Promise<unknown>;
     destroyRawConnection(connection: unknown): Promise<void>;
   };
@@ -74,8 +73,9 @@ function lockRow(result: unknown): Record<string, unknown> | undefined {
 
 /**
  * Take the schema-migration lock on `driver`'s database (#31598): Postgres
- * `pg_advisory_lock`, MySQL `GET_LOCK`. Every other dialect answers `null` and
- * runs no statement — SQLite (and the Turso / WASM drivers on it) serializes
+ * `pg_advisory_lock`, MySQL `GET_LOCK`, by the driver's `dialectName`. Every
+ * other dialect, and a driver that names none, answers `null`, runs no
+ * statement and never asks the driver for its Knex — SQLite (and the Turso / WASM drivers on it) serializes
  * writers in the database file itself, and the CLI's primary database is never
  * MSSQL or Oracle (`resolveStandaloneDatabase` refuses their URL schemes).
  *
@@ -96,10 +96,17 @@ export async function acquireSchemaMigrationLock(
   driver: unknown,
   opts: { database: string; warn: (line: string) => void; waitMs?: number },
 ): Promise<SchemaMigrationLock | null> {
-  const knex = (driver as { getKnex?: () => LockKnex } | null)?.getKnex?.();
-  const dialect = knex?.client?.dialect;
-  if (!knex || (dialect !== 'postgresql' && dialect !== 'mysql')) return null;
-  const pg = dialect === 'postgresql';
+  // [#31715] The dialect is the driver's own answer (`SqlDriver#dialectName`,
+  // its one public "which SQL do I speak"), read BEFORE the driver is asked
+  // for its Knex: a face that refuses to hand out Knex (the Turso remote
+  // transport) throws from `getKnex()` rather than answering `undefined`, and
+  // a dialect this lock does not cover must never reach that call. A Postgres
+  // or MySQL driver whose Knex cannot be handed out still throws here, loudly.
+  const dialect = (driver as { dialectName?: unknown } | null)?.dialectName;
+  if (dialect !== 'postgres' && dialect !== 'mysql') return null;
+  const knex = (driver as { getKnex?: () => LockKnex }).getKnex?.();
+  if (!knex) return null;
+  const pg = dialect === 'postgres';
   const waitMs = opts.waitMs ?? SCHEMA_MIGRATION_LOCK_WAIT_MS;
   const connection = await knex.client.acquireRawConnection();
   const run = async (sql: string, bindings: readonly unknown[]): Promise<Record<string, unknown> | undefined> =>
