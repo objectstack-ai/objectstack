@@ -265,10 +265,12 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
         // [#28519] 51 → 52: `cancelText` (the dismiss button label of the
         // action's confirm or param dialog) joined the accepted set, and the
         // sample names it.
-        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(52);
+        // [#31840] 52 → 53: `preflight` (the same-origin read the param dialog
+        // shows before submit) joined the accepted set, and the sample names it.
+        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(53);
         // A sample an author would actually address, and the one #17500's
         // repeater titles need a node to sit on.
-        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages', 'requiresMembershipReach', 'disabledReason', 'pressed', 'submitText', 'cancelText', 'overrides']) {
+        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages', 'requiresMembershipReach', 'disabledReason', 'pressed', 'submitText', 'cancelText', 'overrides', 'preflight']) {
             expect(Object.keys(properties)).toContain(key);
         }
     });
