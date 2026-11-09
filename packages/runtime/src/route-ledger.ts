@@ -301,7 +301,7 @@ export const NON_DISPATCH_MOUNT_PREFIXES = [
 /**
  * The ledger.
  *
- * CENSUS (generated): this list holds 127 rows.
+ * CENSUS (generated): this list holds 128 rows.
  *
  * ⛔ THAT NUMBER IS WRITTEN BY A TOOL — never by hand.
  * `pnpm check:route-ledger-census` counts the rows below and fails when the two
@@ -695,6 +695,8 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   { route: 'GET /meta/types', domain: '/meta', disposition: 'server-only', note: 'richer types listing consumed by Studio tooling directly; client uses GET /meta' },
   { route: 'GET /meta/:type', domain: '/meta', disposition: 'sdk', client: 'meta.getItems' },
   { route: 'GET /meta/:type/:name', domain: '/meta', disposition: 'sdk', client: 'meta.getItem' },
+  { route: 'GET /meta/:type/:ns/:name', domain: '/meta', disposition: 'server-only',
+    note: '[ADR-0150 D5] The qualified by-name read: `GET /meta/:type/:name` with its holder named exactly — an installed namespace (the read is `?package=` the namespace\'s holder, the exact qualifier: its item with its bound overlay, or 409 `RESOURCE_CONFLICT` naming every holder) or `_env` (the environment\'s own item, or 409). Read once at the top of `domains/meta.ts`, before every gate, and answered by the item read itself; GET only. D5\'s order: a sub-resource literal in the last position keeps its route (`/meta/app/crm/published` is the app `crm`\'s published read, D5: a literal first; an item so named is reached by `?package=`), then `_env`, then an installed namespace, else the path answers what it did (404 `ROUTE_NOT_FOUND`); `?package=` beside it is refused 400. server-only: the SDK reaches the same item by `meta.getItem(type, name, { packageId })`. Pinned in `domains/meta-qualified-item-read.test.ts`' },
   { route: 'PUT /meta/:type/:name', domain: '/meta', disposition: 'sdk', client: 'meta.saveItem',
     note: 'Gated on `manage_metadata` (ADR-0066 D1) — the dispatcher transport of the REST save door. The gate is the shared `metaWriteCapabilityVerdict` (`@objectstack/metadata-core`); the write names no organization and lands environment-wide (ADR-0131 D6), so the org-scoped `manage_org_presentation` admission retired with it; refusals answer 403 `PERMISSION_DENIED`, this transport\'s pinned spelling' },
   { route: 'GET /meta/:type/:name/published', domain: '/meta', disposition: 'sdk', client: 'meta.getPublished',

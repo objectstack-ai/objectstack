@@ -52,6 +52,7 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
+import '@objectstack/metadata';
 import { HttpDispatcher } from './http-dispatcher.js';
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 import { ROUTE_LEDGER, LEGACY_CHAIN_PREFIXES, NON_DISPATCH_MOUNT_PREFIXES } from './route-ledger.js';
@@ -256,5 +257,36 @@ describe('route ledger hygiene', () => {
     // demands an explicit, reviewed decision.
     const gaps = ROUTE_LEDGER.filter((e) => e.disposition === 'gap').length;
     expect(gaps).toBeLessThanOrEqual(0);
+  });
+});
+
+/**
+ * [ADR-0150 D5, epic #31527 child G1] The address grammar's literal segments
+ * (`NAMESPACE_POSITION_LITERALS`, `spec/kernel/address-grammar.ts`) are
+ * MEASURED off this ledger: for each door, the literal segments its rows serve
+ * where the qualified form puts the namespace. The install gate refuses a
+ * namespace spelling one of them (`NAMESPACE_REFUSED_LITERALS`, objectql
+ * `installPackage`), so a route that adds a literal there without the spec
+ * constant learning it would let a package take a namespace its qualified
+ * addresses could never reach. This pins the two together, in both directions.
+ * `:`-led segments are parameters, and `_env` is the environment segment
+ * (`ENVIRONMENT_ADDRESS_SEGMENT`), read before a namespace but never a literal
+ * of the grammar.
+ */
+describe('address grammar ↔ route ledger (ADR-0150 D5, #31691)', () => {
+  it('every door\'s namespace-position literals are exactly the literal segments the ledger serves there', async () => {
+    const { NAMESPACE_POSITION_LITERALS, ENVIRONMENT_ADDRESS_SEGMENT } = await import('@objectstack/spec/kernel');
+    for (const [door, position] of Object.entries(NAMESPACE_POSITION_LITERALS)) {
+      const prefix = `${position.prefix}/`;
+      const served = new Set<string>();
+      for (const row of ROUTE_LEDGER) {
+        const path = row.route.slice(row.route.indexOf(' ') + 1).split('?')[0];
+        if (!path.startsWith(prefix)) continue;
+        const segment = path.slice(prefix.length).split('/')[0];
+        if (segment.startsWith(':') || segment === ENVIRONMENT_ADDRESS_SEGMENT) continue;
+        served.add(segment);
+      }
+      expect([...served].sort(), `door ${door} (${position.prefix})`).toEqual([...position.literals].sort());
+    }
   });
 });

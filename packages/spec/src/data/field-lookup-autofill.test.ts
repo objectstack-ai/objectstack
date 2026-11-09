@@ -96,10 +96,10 @@ const build = (stack: unknown) => defineStack(stack as Parameters<typeof defineS
 type Refusal = { code?: string; status?: number; issues?: unknown[] };
 
 /** The stack's one cross-reference finding, at the pair's source. */
-function sourceRefusedAt(objects: unknown[], index: number): string {
+function sourceRefusedAt(objects: unknown[], index: number, rest: Record<string, unknown> = {}): string {
   let refusal: Refusal | undefined;
   try {
-    build({ manifest, objects });
+    build({ manifest, objects, ...rest });
   } catch (error) {
     refusal = error as Refusal;
   }
@@ -209,6 +209,25 @@ describe('`lookupAutofill` — source half (defineStack cross-reference)', () =>
   it('does not judge a referenced object the stack does not declare, nor an injected audit column', () => {
     expect(() => build({ manifest, objects: [category, region, line([{ target: 'notes', source: 'anything' }])] })).not.toThrow();
     expect(() => build(stackOf([{ target: 'notes', source: 'created_at' }]))).not.toThrow();
+  });
+
+  it('does not judge a referenced object the stack knows only through an `objectExtensions` entry', () => {
+    // The owner declares `crm_product` elsewhere; this stack only adds a field to it. A source the
+    // owner declares (`list_price`) is not in the extension, and a pick still fills it at runtime.
+    const objectExtensions = [{ extend: 'crm_product', fields: { warranty_note: { type: 'text', label: 'Warranty' } } }];
+    expect(() => build({ manifest, objects: [category, region, line(HOTCRM_PAIRS)], objectExtensions })).not.toThrow();
+    expect(() => build({ manifest, objects: [category, region, line([{ target: 'notes', source: 'anything' }])], objectExtensions })).not.toThrow();
+  });
+
+  it('still judges a referenced object the stack declares and also extends, against the merged fields', () => {
+    const objectExtensions = [{ extend: 'crm_product', fields: { warranty_note: { type: 'text', label: 'Warranty' } } }];
+    const objects = (pairs: unknown) => [category, region, product(), line(pairs)];
+    // A field the extension adds and one the declaration carries both resolve.
+    expect(() => build({ manifest, objects: objects([{ target: 'notes', source: 'warranty_note' }, { target: 'unit_price', source: 'list_price' }]), objectExtensions })).not.toThrow();
+    expect(sourceRefusedAt(objects([{ target: 'unit_price', source: 'price' }]), 0, { objectExtensions }))
+      .toContain("'price' is not a field of 'crm_product'");
+    expect(sourceRefusedAt(objects([{ target: 'is_taxable', source: 'warranty_note' }]), 0, { objectExtensions }))
+      .toContain("the target cannot hold the source's value (`text` → `boolean`)");
   });
 
   it('refuses a source the referenced object does not declare', () => {

@@ -48,7 +48,9 @@
  *             clamp(ceil(P / D), 1, min(16, files)). P is the selection's
  *             predicted ms; D is the whole suite's predicted ms divided by the
  *             roster, computed on every run from the committed timings, never a
- *             literal: no planned leg is denser than a full-battery leg. Bin j
+ *             literal: the bins average at most D, a full-battery leg's own
+ *             mean, unless the file count caps N (a file heavier than D, which
+ *             no split divides). Bin j
  *             runs on slot j, its files passed to vitest by exact path. A file
  *             is never split across bins, so a file two projects collect
  *             runs in both of them on one leg.
@@ -56,8 +58,13 @@
  *             the ones the selector selects only because the package graph
  *             cannot place them, run together on slot 1, and the rest is
  *             packed as above into slots 2..N+1, N at most the roster less
- *             one. The lane is the selector's verdict on this very run, never
- *             a list kept beside it. A full plan has no lane: its sixteen
+ *             one, so when that cap binds the bins average at most
+ *             roster / (roster - 1) of D (the rest never weighs more than the
+ *             whole suite). The lane itself is NOT
+ *             sized to D: it weighs what the always-on set predicts, and
+ *             `plan` prints a `::warning::` when that passes D, the sign that
+ *             slot 1 has become the run's slowest leg. The lane is the
+ *             selector's verdict on this very run, never a list kept beside it. A full plan has no lane: its sixteen
  *             sequencer legs already run everything (ruling 6739581615).
  *
  * ## Paths that are filters of each other
@@ -433,6 +440,12 @@ async function main(argv) {
     plan.bins.forEach((bin, i) =>
       console.log(`  slot ${i + 1}: ${bin.length} file(s)${plan.lane && i === 0 ? `, the always-on lane (${s(plan.laneMs)} predicted)` : ''}`),
     );
+    if (plan.lane && plan.laneMs > plan.densityMs) {
+      console.log(
+        `::warning title=Test UI always-on lane::the always-on lane on slot 1 predicts ${s(plan.laneMs)}, more than the ${s(plan.densityMs)} ` +
+          'a full-battery leg averages, so it is this run\'s slowest leg. The lane is sized by the selector\'s always-on verdict, not by the plan; it still runs every file it holds.',
+      );
+    }
     if (lane !== null) {
       const placed = new Set(plan.bins.flat().map((spec) => spec.path));
       const uncollected = lane.filter((p) => !placed.has(p));

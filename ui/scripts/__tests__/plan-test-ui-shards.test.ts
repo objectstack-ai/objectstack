@@ -151,7 +151,7 @@ describe('the count rule: N = clamp(ceil(P / D), 1, min(roster, files))', () => 
     expect(planRun({ all, selected: pick(2), dataset: heavyOne, slots: 16 }).shards).toEqual([1, 2]);
   });
 
-  it('no planned leg is denser than a full-battery leg, on the committed dataset', () => {
+  it('N follows the count rule on the committed dataset, so the bins average at most D', () => {
     const paths = Object.keys(DATASET.files).length;
     expect(paths).toBeGreaterThan(0);
     const { specs } = suite(600, 11);
@@ -363,6 +363,29 @@ describe('the command line', () => {
     const files = cli('files', '--plan', out, '--slot', String(plan.shards[0]));
     expect(files.status, files.err).toBe(0);
     expect(files.out.split('\n').filter(Boolean)).toEqual([...new Set(slotBin(plan, plan.shards[0]).map((s) => s.path))]);
+  });
+
+  it('warns, never refuses, when the always-on lane predicts more than D (contract review 6745712800, F1)', () => {
+    // Forty unmeasured files weigh the median m each, so D = 40m / 16 = 2.5m:
+    // a lane of two is under D, a lane of three is over it.
+    const all = path.join(scratch, 'all.json');
+    const sel = path.join(scratch, 'sel-warn.json');
+    fs.writeFileSync(all, JSON.stringify(list(40)));
+    fs.writeFileSync(sel, JSON.stringify(list(40).slice(0, 8)));
+    const laneOf = (n: number) => {
+      const file = path.join(scratch, `lane-${n}.txt`);
+      fs.writeFileSync(file, list(40).slice(0, n).map((e) => `${path.relative(UI_ROOT, e.file)}\n`).join(''));
+      return file;
+    };
+    const under = cli('plan', '--all', all, '--selected', sel, '--lane', laneOf(2), '--out', path.join(scratch, 'under.json'));
+    expect(under.status, under.err).toBe(0);
+    expect(under.out).not.toContain('::warning');
+    const over = cli('plan', '--all', all, '--selected', sel, '--lane', laneOf(3), '--out', path.join(scratch, 'over.json'));
+    expect(over.status, over.err).toBe(0);
+    const plan = readPlan(path.join(scratch, 'over.json'));
+    expect(plan.laneMs).toBeGreaterThan(plan.densityMs);
+    expect(over.out).toMatch(/^::warning title=Test UI always-on lane::the always-on lane on slot 1 predicts \d+ s, more than the \d+ s a full-battery leg averages/m);
+    expect(slotBin(plan, 1)).toHaveLength(3);
   });
 
   it('plans the lane from --lane, names it, and `files` gives slot 1 the lane', () => {
