@@ -90,7 +90,7 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-09 at `afae2d9ba`.
+Measured on 2026-11-09 at `7e0d97dea`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
