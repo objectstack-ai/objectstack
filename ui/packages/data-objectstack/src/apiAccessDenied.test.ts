@@ -222,6 +222,19 @@ describe('ObjectStackDataSource.find — the raw $expand/$search branch carries 
     });
   });
 
+  it('the client path hands a refused field through on `details` too (objectstack#31893)', async () => {
+    const body = { error: "Unknown field 'cost_total'", code: 'INVALID_FIELD', field: 'cost_total', object: 'ai_traces' };
+    // `@objectstack/client`'s throw for a flat body: `details` is the whole body.
+    const thrown = Object.assign(clientError(body.error, 400, 'INVALID_FIELD'), { details: body });
+    const ds = makeDS(vi.fn().mockRejectedValue(thrown));
+
+    await expect(ds.find('ai_traces')).rejects.toMatchObject({
+      code: 'INVALID_FIELD',
+      httpStatus: 400,
+      details: { field: 'cost_total' },
+    });
+  });
+
   // objectstack#31893 — the list names the column a `400 INVALID_FIELD` refused
   // from `details.field`. The client path keeps the whole flat body there; this
   // branch has to as well, or a view with a lookup column loses the field.
