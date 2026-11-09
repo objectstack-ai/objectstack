@@ -249,7 +249,6 @@ Legal metadata authors get wrong; most are caught by `objectstack build`:
    'current_user.id' } }`), then write `{{ v }}`.
 
 2. **`create_record`'s `outputVariable` holds the created RECORD, not its id.**
-   Reference a field explicitly.
    ❌ `fields: { ref: { dialect: 'cel', source: 'newRec' } }` → writes the whole record object
    ✅ `source: 'newRec.id'`
 
@@ -298,7 +297,7 @@ Legal metadata authors get wrong; most are caught by `objectstack build`:
 
 ---
 
-→ State Machines & Approvals: [references/state-machines-and-approvals.md](./references/state-machines-and-approvals.md).
+→ State Machines & Approvals: [references/state-machines-and-approvals.md](./references/state-machines-and-approvals.md) — its state-introspection route is `GET /api/v1/meta/object/:name/state/:field?from=:state`.
 
 ---
 
@@ -388,12 +387,11 @@ node `config`**:
 
 ### Trigger Configuration — on the `start` node
 
-The start node alone (a flow also owns `label`, `type`, `nodes`, `edges`):
+This is the start node alone, not a whole flow (a flow also
+owns `label`, `type`, `nodes` and the `edges` `FlowSchema` requires):
 
-<!-- os:check -->
 ```typescript
-import type { FlowNode } from '@objectstack/spec/automation';
-const start: FlowNode = {
+{
   id: 'start',
   type: 'start',
   label: 'On Case Escalated',
@@ -403,7 +401,7 @@ const start: FlowNode = {
     // gates whether the flow launches on the event
     condition: "previous.status != 'escalated' && record.status == 'escalated'",
   },
-};
+}
 ```
 
 > **Prefer `record-after-*`** unless you must modify or reject the record;
