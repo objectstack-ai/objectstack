@@ -97,8 +97,6 @@ let failMemberReads = false;
 
 type FindArgs = Parameters<ObjectQL['find']>;
 type InsertArgs = Parameters<ObjectQL['insert']>;
-type UpdateArgs = Parameters<ObjectQL['update']>;
-type DeleteArgs = Parameters<ObjectQL['delete']>;
 
 const dataEngine = () => ({
   find: (object: string, query?: unknown, options?: unknown) => {
@@ -107,9 +105,9 @@ const dataEngine = () => ({
   },
   insert: (object: string, data: Record<string, unknown>, options?: unknown) =>
     engine.insert(object, data, options as InsertArgs[2]),
-  update: (object: string, data: Record<string, unknown>, options?: unknown) =>
-    engine.update(object, data, options as UpdateArgs[2]),
-  delete: (object: string, options?: unknown) => engine.delete(object, options as DeleteArgs[1]),
+  // The real engine's own write methods: no looser stand-in.
+  update: engine.update.bind(engine),
+  delete: engine.delete.bind(engine),
 });
 
 const deps = (): ServiceAccountDoorDeps & ServiceAccountLifecycleDeps => ({
