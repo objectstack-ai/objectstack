@@ -67,12 +67,12 @@ operation: when any applicable policy declares `check`, only those decide
 (OR-combined); else each applicable `using` stands in. A non-blank `check` on a
 `select`/`delete` policy is refused. Default deny, among the policies that
 apply: a row none admits is denied, an unevaluable policy fails closed; when
-none applies the policies restrict nothing (the tenant wall still applies) — an
+none applies the policies restrict nothing — an
 `update`/`delete` target with no write-class `using` is bounded by the caller's
 `select` policies.
 
 ```typescript
-// in a permission set
+// in a permission set (definePermissionSet)
 rowLevelSecurity: [
   {
     name: 'own_records',
@@ -113,9 +113,7 @@ The compiler resolves these
 
 ## Membership keys — a `current_user.KEY` set the roster object declares
 
-Rows keyed on a **named record** (an account, a supplier):
-declare the set on the **roster** object whose rows
-define it, not one policy per record.
+Declare the set on the **roster** object, not one policy per record.
 
 <!-- os:check -->
 ```typescript
@@ -169,12 +167,12 @@ rowLevelSecurity: [
   sharing rule whose `sharedWith: { type: 'queue', value: '<queue name>' }`
   reaches an ownership queue's members (SKILL.md § Ownership queues).
 - A package's rule reads `value` as its package's queue, else the one
-  holder in its declared `dependencies` closure plus `sys`, else, if none
-  declares it, an org's `sys_queue` row. Else it grants no one new, warned
+  holder in its declared `dependencies` closure plus `sys`, else (none
+  declares it) an org's `sys_queue` row. Else it grants no one new, warned
   `RESOURCE_CONFLICT`: `outside-closure` (only a non-dependency
   `com.acme.billing` or an environment item holds `support`),
-  `ambiguous-in-closure` (two dependencies do; `ambiguous-in-environment` if
-  a non-dependency does too).
+  `ambiguous-in-closure` (two dependencies do), `ambiguous-in-environment`
+  (the one it reaches and a non-dependency do).
 
 ## Positions grant only what they name; portal users are `external`
 
@@ -186,7 +184,7 @@ rowLevelSecurity: [
   membership tier (closed list `owner`, `admin`, `delegated_admin`, `member`,
   `external`, one per member —
   https://objectstack.ai/docs/permissions/authentication#membership-tiers-are-a-closed-list).
-  The `everyone` baseline (`isDefault` sets) does not reach it, it sees no
+  The `everyone` baseline does not reach it, it sees no
   member directory and holds no business unit, and every org-wide default is
   owner-only for it: rows reach it **only** through the explicit grants above.
 
@@ -217,6 +215,7 @@ fields: {
 - **Locks, never grants.** On unmatched rows the entry is absent; another held
   set's `editable: true` still wins (most-permissive merge).
 - Docs: https://objectstack.ai/docs/permissions/field-level-security#row-conditioned-edit-locks-when
+  and the recipe https://objectstack.ai/docs/permissions/access-recipes#data-lock-fields-for-a-position-once-a-record-reaches-a-stage
 
 ## Sensitive fields — `secret` type + `requiredPermissions`
 
