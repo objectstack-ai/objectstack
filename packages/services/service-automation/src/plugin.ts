@@ -71,7 +71,7 @@ import {
 } from './connector-credentials.js';
 import { CONNECTOR_CREDENTIAL_SOURCE_SERVICE } from '@objectstack/types';
 import { createConnectorCredentialSource } from './connector-credential-source.js';
-import { packageScopedRegistryOf, refusedConnectorNames } from './connector-package-scope.js';
+import { connectorNameResolver, packageScopedRegistryOf, refusedConnectorNames } from './connector-package-scope.js';
 import type { PackageScopedRefusal, PackageScopedRegistry } from '@objectstack/objectql';
 import { createConnectorRequestSigner } from './request-signing/index.js';
 import { ConnectorConnectionStore, type ConnectorConnectionRecord } from './connector-connections.js';
@@ -1797,6 +1797,11 @@ export class AutomationServicePlugin implements Plugin {
         // package or of none, is the one package-scoped resolver's answer over
         // the ObjectQL registry, read at question time. See `flowNameResolver`.
         this.engine.setFlowNameResolver(flowNameResolver(ctx));
+
+        // [ADR-0150 D3, epic #31527 child E5] Which declared connector instance
+        // a flow's bare `connectorConfig.connectorId` means is the same
+        // resolver's answer for the flow's package. See `connectorNameResolver`.
+        this.engine.setConnectorNameResolver(connectorNameResolver(ctx));
 
         // [#28405] A waiting run resumes on the flow body it started on, read
         // back from the metadata history once the flow was republished. See

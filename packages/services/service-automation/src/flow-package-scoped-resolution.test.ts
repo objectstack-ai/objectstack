@@ -22,6 +22,7 @@ import { AutomationEngine } from './engine.js';
 import type { NodeExecutor } from './engine.js';
 import { installBuiltinNodes } from './builtin/index.js';
 import { flowNameResolver } from './plugin.js';
+import { connectorNameResolver } from './connector-package-scope.js';
 import { InMemoryFlowActivationStore } from './flow-activation-store.js';
 import { FlowActivationProjection } from './flow-activation-projection.js';
 import { resolveFlowPrecedence } from './flow-precedence.js';
@@ -493,5 +494,129 @@ describe('[#31754] the collision line for a name two packages hold says neither 
                 'by arrival order, and shadowing 1 other definition(s). Only the armed definition dispatches. ' +
                 'Rename one of them.',
         );
+    });
+});
+
+// ── [epic #31527 child E5] connector_action names its connector from the flow's package ──
+
+/** A declared connector instance `name` in the registry: package `packageId`'s, or the environment's. */
+function declareConnector(name: string, packageId?: string) {
+    const item = { name, label: name, type: 'api', authentication: { type: 'none' }, actions: [{ key: 'ping', label: 'Ping' }] };
+    if (packageId) registry.registerItem('connector', { ...item, _packageId: packageId }, 'name' as never, packageId);
+    else registry.registerItem('connector', { ...item, _provenance: 'org' }, 'name' as never);
+}
+
+/** The engine's one live instance under `name`; `pings` records each dispatch to it. */
+let pings: string[];
+function liveConnector(name: string) {
+    engine.registerConnector(
+        { name, label: name, type: 'api', authentication: { type: 'none' }, actions: [{ key: 'ping', label: 'Ping' }] } as never,
+        { ping: async () => { pings.push(name); return { ok: true }; } },
+    );
+}
+
+/** start → connector_action(connectorId.ping) → end. */
+function dispatcher(name: string, connectorId: string) {
+    return {
+        name,
+        label: name,
+        type: 'autolaunched',
+        nodes: [
+            { id: 'start', type: 'start', label: 'Start', config: {} },
+            { id: 'call', type: 'connector_action', label: 'Ping', connectorConfig: { connectorId, actionId: 'ping', input: {} } },
+            { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [
+            { id: 'e1', source: 'start', target: 'call' },
+            { id: 'e2', source: 'call', target: 'end' },
+        ],
+    };
+}
+
+describe('ADR-0150 D3 — a connector_action names its connector from the calling flow\'s package (epic #31527 child E5)', () => {
+    beforeEach(() => {
+        pings = [];
+        const ctx = { getService(name: string) { if (name === 'objectql') return { registry }; throw new Error(`no ${name}`); } };
+        engine.setConnectorNameResolver(connectorNameResolver(ctx as never));
+    });
+
+    it("dispatches to the caller package's own instance, as before", async () => {
+        install(P);
+        declareConnector('billing', P);
+        liveConnector('billing');
+        ship(P, dispatcher('charge', 'billing'));
+        const result = await engine.execute('charge');
+        expect(result.success, String(result.error)).toBe(true);
+        expect(pings).toEqual(['billing']);
+    });
+
+    it('dispatches to the one holder in its declared dependency closure', async () => {
+        install(A);
+        install(P, [A]);
+        declareConnector('billing', A);
+        liveConnector('billing');
+        ship(P, dispatcher('charge', 'billing'));
+        const result = await engine.execute('charge');
+        expect(result.success, String(result.error)).toBe(true);
+        expect(pings).toEqual(['billing']);
+    });
+
+    it('an environment-authored flow dispatches to the one package holder (a caller with no package)', async () => {
+        install(A);
+        declareConnector('billing', A);
+        liveConnector('billing');
+        author(dispatcher('my_charge', 'billing'));
+        const result = await engine.execute('my_charge');
+        expect(result.success, String(result.error)).toBe(true);
+        expect(pings).toEqual(['billing']);
+    });
+
+    it('a connector a plugin registers in code is no registry item, and still dispatches', async () => {
+        install(P);
+        liveConnector('slack');
+        ship(P, dispatcher('notify', 'slack'));
+        const result = await engine.execute('notify');
+        expect(result.success, String(result.error)).toBe(true);
+        expect(pings).toEqual(['slack']);
+    });
+
+    it('red line 1 — a packaged flow is never served an instance held only outside its closure: refused naming the holder, nothing dispatched', async () => {
+        install(Q);
+        install(P);
+        declareConnector('billing', Q);
+        liveConnector('billing');
+        ship(P, dispatcher('charge', 'billing'));
+        const result = await engine.execute('charge');
+        expect(result.success).toBe(false);
+        expect(String(result.error)).toContain("connector_action 'call'");
+        expect(String(result.error)).toContain(Q);
+        expect(pings).toEqual([]);
+    });
+
+    it('ADR-0150 D3 (a) — a packaged flow never resolves to an environment-only instance: refused, nothing dispatched', async () => {
+        install(P);
+        declareConnector('billing');
+        liveConnector('billing');
+        ship(P, dispatcher('charge', 'billing'));
+        const result = await engine.execute('charge');
+        expect(result.success).toBe(false);
+        expect(String(result.error)).toContain("connector_action 'call'");
+        expect(String(result.error)).toContain('environment');
+        expect(pings).toEqual([]);
+    });
+
+    it('red line 2 — two holders in its closure: refused naming both, never the first listed', async () => {
+        install(A);
+        install(Q);
+        install(P, [A, Q]);
+        declareConnector('billing', A);
+        declareConnector('billing', Q);
+        liveConnector('billing');
+        ship(P, dispatcher('charge', 'billing'));
+        const result = await engine.execute('charge');
+        expect(result.success).toBe(false);
+        expect(String(result.error)).toContain(A);
+        expect(String(result.error)).toContain(Q);
+        expect(pings).toEqual([]);
     });
 });

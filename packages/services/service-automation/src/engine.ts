@@ -2584,6 +2584,17 @@ export type PackagedFlowSource = (name: string) => string | undefined;
 export type FlowNameResolver = (name: string, callerPackageId: string | null) => PackageScopedResolution | undefined;
 
 /**
+ * [ADR-0150 D3, epic #31527 child E5] The same reader for the `connector` type:
+ * which declared connector instance the bare name `name` means for a caller of
+ * package `callerPackageId` (`null` for a caller with no package). The
+ * automation plugin attaches `resolvePackageScopedName` over the ObjectQL
+ * registry ({@link AutomationEngine.setConnectorNameResolver}); `undefined`
+ * means the host serves no registry to ask. ⛔ Never a second implementation
+ * of the rule.
+ */
+export type ConnectorNameResolver = (name: string, callerPackageId: string | null) => PackageScopedResolution | undefined;
+
+/**
  * [#28405] The stored body of flow `name` whose content identity is
  * `checksum` ({@link SuspendedRun.flowChecksum}), as the metadata history
  * keeps it — `null` when no version with that identity is stored. A host
@@ -2823,6 +2834,11 @@ export class AutomationEngine implements IAutomationService {
      * knows, as before.
      */
     private flowNameResolver?: FlowNameResolver;
+    /**
+     * [ADR-0150 D3] The reader that answers which declared connector instance a
+     * bare name means for a caller — see {@link setConnectorNameResolver}.
+     */
+    private connectorNameResolver?: ConnectorNameResolver;
     /** [#20790] The write-only flow credential channel — see {@link setFlowCredentialSource}. */
     private flowCredentialSource?: FlowCredentialSource;
     /** [#20281 stage ③] The connector sync executor — see {@link setConnectorPullSource}. */
@@ -5019,6 +5035,45 @@ export class AutomationEngine implements IAutomationService {
     private flowNameRefusal(name: string, callerPackageId: string | null): PackageScopedRefusal | undefined {
         const resolution = this.flowNameResolver?.(name, callerPackageId);
         return resolution?.status === 'refused' ? resolution : undefined;
+    }
+
+    /**
+     * [ADR-0150 D3, epic #31527 child E5] Attach the reader that answers which
+     * declared connector instance a bare `connectorConfig.connectorId` means for
+     * the flow that names it ({@link connectorNameRefusal}). The automation
+     * plugin calls this at `init()`; with none attached, `connector_action`
+     * dispatches by name as before.
+     */
+    setConnectorNameResolver(resolver: ConnectorNameResolver | undefined): void {
+        this.connectorNameResolver = resolver;
+    }
+
+    /**
+     * [ADR-0150 D3, epic #31527 child E5] Why a `connector_action` in a run of
+     * `context`'s flow may not dispatch to the connector instance named
+     * `connectorId`, or `undefined` when it may.
+     *
+     * The name is resolved for the package that ships the calling flow
+     * ({@link flowCallerPackage}: a packaged flow names it from its package; an
+     * environment-authored flow, or a call outside a run, names it with no
+     * package). The engine holds ONE instance per name, materialized for the
+     * answer a caller with no package gets (the declared-connector reconcile,
+     * which already refuses a name two packages hold). So a package caller
+     * whose answer is a refusal — two holders in its closure, or holders only
+     * outside it, an environment-only instance included (ADR-0150 D3 (a)) — is
+     * refused with the resolver's own message, naming every candidate. Any
+     * other answer is the instance the engine serves: an environment item
+     * exists only for a name no package holds, so a package caller that
+     * resolves at all resolves to the one package holder the reconcile
+     * materialized. A name the registry holds nothing under (a connector a
+     * plugin registers in code), or a host with no resolver, dispatches by name
+     * as before. Read-only.
+     */
+    connectorNameRefusal(connectorId: string, context: AutomationContext | undefined): PackageScopedRefusal | undefined {
+        const callerPackageId = this.flowCallerPackage(context);
+        if (callerPackageId === null) return undefined;
+        const meant = this.connectorNameResolver?.(connectorId, callerPackageId);
+        return meant?.status === 'refused' ? meant : undefined;
     }
 
     /**
