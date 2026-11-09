@@ -39,7 +39,7 @@ describe('aiSettingsManifest', () => {
     expect(parsed.version).toBe(1);
   });
 
-  it('exposes provider select with memory + gateway + SDK + OpenAI-compatible presets', () => {
+  it('exposes provider select with gateway + SDK + OpenAI-compatible presets', () => {
     const provider = (aiSettingsManifest.specifiers as any[]).find(
       (s) => s.key === 'provider' && s.type === 'select',
     );
@@ -52,12 +52,12 @@ describe('aiSettingsManifest', () => {
       'deepseek',
       'gateway',
       'google',
-      'memory',
       'openai',
       'openrouter',
       'siliconflow',
     ]);
-    expect(provider.default).toBe('memory');
+    // #31960: no default — an unset provider reads as unset, not as a provider.
+    expect(provider.default).toBeUndefined();
   });
 
   it('marks every per-provider api key field as encrypted password input', () => {
@@ -86,10 +86,10 @@ const runTestEmbedder = (values: Record<string, unknown>) =>
   aiTestEmbedderActionHandler({ namespace: 'ai', actionId: 'test_embedder', values, ctx: {} });
 
 describe('aiTestActionHandler', () => {
-  it('returns warning for memory provider (no external call to validate)', async () => {
+  it('no longer answers memory as a provider (#31960): it fails like any provider with no key', async () => {
     const r = await runTest({ provider: 'memory' });
-    expect(r.ok).toBe(true);
-    expect(r.severity).toBe('warning');
+    expect(r.ok).toBe(false);
+    expect(r.severity).toBe('error');
   });
 
   it('rejects gateway provider without gateway_model', async () => {
@@ -161,10 +161,8 @@ describe('aiSettingsManifest — temperature declares a window, not a grid (#655
   });
 
   it('write door: accepts 0.15 — the refusal that forced the ruling — and still 0.7', async () => {
-    // `temperature` is `visible: "${data.provider !== 'memory'}"` and the
-    // default provider is `memory`, so the patch carries a real provider (and
-    // its required key) — otherwise the TOUCH/visible contract skips the
-    // specifier entirely and this test would be green for the wrong reason.
+    // The patch carries a real provider (and its required key), as the
+    // console's form does once a provider is chosen.
     const svc = new SettingsService({ env: {}, crypto: new ConfidentialTestAdapter() });
     svc.registerManifest(aiSettingsManifest);
     await expect(

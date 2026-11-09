@@ -33,11 +33,17 @@ const manifest = {
   order: 30,
   specifiers: [
     // ── Provider selection ────────────────────────────────────────
+    //
+    // [#31960] No `default` and no `memory` option. An unset provider reads as
+    // unset: a default here is what the page shows as the chosen provider, and
+    // `memory` (the echo adapter) is one the AI runtime does not honour as AI,
+    // so presenting or saving it told an administrator AI was configured while
+    // it was disabled. Whether AI is disabled is the AI runtime's own decision;
+    // it states it on this page itself (`registerLiveStatus`), never derived here.
     { type: 'group', id: 'provider', label: 'Provider', required: false,
-      description: 'Choose the LLM backend. Memory mode echoes input — useful for tests but never for production.' },
-    { type: 'select', key: 'provider', label: 'Provider', required: true, default: 'memory',
+      description: 'Choose the LLM backend.' },
+    { type: 'select', key: 'provider', label: 'Provider', required: true,
       options: [
-        { value: 'memory', label: 'Memory (echo — testing only)' },
         { value: 'gateway', label: 'Vercel AI Gateway' },
         { value: 'openai', label: 'OpenAI' },
         { value: 'anthropic', label: 'Anthropic' },
@@ -184,23 +190,19 @@ const manifest = {
 
     // ── Generation defaults ──────────────────────────────────────
     { type: 'group', id: 'defaults', label: 'Generation defaults', required: false,
-      description: 'Applied when an agent or chat request does not specify its own value.',
-      visible: "${data.provider !== 'memory'}" },
+      description: 'Applied when an agent or chat request does not specify its own value.' },
     // No `step` on purpose (#6550 ruling): since #6199 a declared `step` binds
     // as a value constraint on both doors, and temperature's true domain is
     // continuous on [0, 2] — a 0.1 grid refused legal values like `0.15`.
     // `min`/`max` stay: the window IS the true domain, so it binds honestly.
     { type: 'slider', key: 'temperature', label: 'Temperature',
       required: false, default: 0.7, min: 0, max: 2,
-      description: '0 = deterministic, 2 = highly creative.',
-      visible: "${data.provider !== 'memory'}" },
+      description: '0 = deterministic, 2 = highly creative.' },
     { type: 'number', key: 'max_tokens', label: 'Max output tokens',
       required: false, default: 4096, min: 1, max: 1048576,
-      description: 'Hard cap on tokens generated per response.',
-      visible: "${data.provider !== 'memory'}" },
+      description: 'Hard cap on tokens generated per response.' },
     { type: 'number', key: 'request_timeout_ms', label: 'Request timeout (ms)',
-      required: false, default: 60000, min: 1000, max: 600000,
-      visible: "${data.provider !== 'memory'}" },
+      required: false, default: 60000, min: 1000, max: 600000 },
 
     // ── Conversation titles ──────────────────────────────────────
     // After the first assistant turn lands, service-ai fires a one-shot
@@ -208,19 +210,17 @@ const manifest = {
     // PATCHes it onto the conversation. Without this every row in the
     // sidebar shows "New conversation" + a truncated preview.
     { type: 'group', id: 'titles', label: 'Conversation titles', required: false,
-      description: 'Auto-generate a short summary title for new conversations.',
-      visible: "${data.provider !== 'memory'}" },
+      description: 'Auto-generate a short summary title for new conversations.' },
     { type: 'toggle', key: 'title_generation_enabled', label: 'Auto-summarize conversation titles',
       required: false, default: true,
       description:
         'When on, the LLM is asked to produce a short title after the first assistant ' +
         'reply. Disable to save tokens, or leave the title blank to let users name ' +
-        'conversations manually.',
-      visible: "${data.provider !== 'memory'}" },
+        'conversations manually.' },
     { type: 'number', key: 'title_max_length', label: 'Title max length (chars)',
       required: false, default: 16, min: 8, max: 80,
       description: 'Hard cap on the generated title. Anything longer is truncated server-side.',
-      visible: "${data.provider !== 'memory' && data.title_generation_enabled !== false}" },
+      visible: "${data.title_generation_enabled !== false}" },
 
     // ── Observability ────────────────────────────────────────────
     { type: 'group', id: 'observability', label: 'Observability', required: false },
@@ -379,15 +379,18 @@ export const aiTestActionHandler: SettingsActionHandler = async ({ values, paylo
   // operators can validate edits before hitting "Save".
   const overrides = extractOverrides(payload);
   const merged: Record<string, unknown> = { ...values, ...overrides };
-  const provider = String(merged.provider ?? 'memory');
   values = merged;
-  if (provider === 'memory') {
+  // [#31960] An absent provider is "not configured", never a provider: the
+  // stub used to read it as `memory` and answer a success the AI runtime does
+  // not honour. Same answer shape as `ai/test_embedder` for `none`.
+  if (merged.provider === null || typeof merged.provider === 'undefined' || String(merged.provider).trim() === '') {
     return {
-      ok: true,
+      ok: false,
       severity: 'warning',
-      message: 'Memory provider is an echo stub — no external call to validate. Switch to a real provider for production.',
+      message: 'No AI provider is configured. Pick a provider and fill in its fields to test the connection.',
     };
   }
+  const provider = String(merged.provider);
   if (provider === 'gateway') {
     if (!values.gateway_model) {
       return { ok: false, severity: 'error', message: 'Gateway model is required (e.g. openai/gpt-4o).' };

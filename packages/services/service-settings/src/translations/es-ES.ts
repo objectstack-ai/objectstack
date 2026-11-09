@@ -420,7 +420,7 @@ export const esES: PlatformTranslationData = {
         'los servicios de IA y de conocimiento de la plataforma.',
       groups: {
         provider: { title: 'Proveedor',
-          description: 'Elige el backend de LLM. El modo Memory repite la entrada: útil para pruebas, nunca para producción.' },
+          description: 'Elige el backend de LLM.' },
         gateway: { title: 'Vercel AI Gateway',
           description: 'Enrutador multiproveedor. El modelo se escribe provider/model, p. ej. openai/gpt-4o.' },
         openai: { title: 'OpenAI' },
@@ -444,7 +444,6 @@ export const esES: PlatformTranslationData = {
         provider: {
           label: 'Proveedor',
           options: {
-            memory: 'Memory (eco — solo pruebas)',
             gateway: 'Vercel AI Gateway',
             openai: 'OpenAI',
             anthropic: 'Anthropic',
