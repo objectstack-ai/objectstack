@@ -110,6 +110,15 @@ export interface ScimRequestScope {
    * row are never placed here, so no write context can carry them.
    */
   connectionId?: string;
+  /**
+   * [#31829] The organization the verified credential row belongs to (its
+   * `organization_id`, written at mint), recorded beside `connectionId` by the
+   * same call and under the same first-verified-wins rule. Read after the
+   * vendor answers, so a refused request's `scim_refused` row lands in the
+   * organization whose connection it names. Absent when the bearer verified as
+   * none or the row names no organization.
+   */
+  organizationId?: string;
 }
 
 /** Is the current async chain inside an authenticated SCIM protocol request? */
@@ -130,6 +139,7 @@ export function recordScimRequestConnection<T extends ScimBearerVerification | n
   const scope = scimRequestScope.getStore();
   if (scope?.scim === true && verification && scope.connectionId === undefined) {
     scope.connectionId = verification.connection.id;
+    if (verification.connection.organizationId) scope.organizationId = verification.connection.organizationId;
   }
   return verification;
 }
@@ -267,7 +277,13 @@ export async function mintScimConnectionCredential(
  * types at runtime).
  */
 export interface ScimBearerVerification {
-  connection: { id: string; provisioningDomainId: string };
+  /**
+   * `organizationId` ([#31829]) is the credential row's own `organization_id`,
+   * read in the one probe the verifier already makes. The vendor copies only
+   * `id` and `provisioningDomainId` from here, so it never reaches the vendor's
+   * principal; `recordScimRequestConnection` keeps it on the request scope.
+   */
+  connection: { id: string; provisioningDomainId: string; organizationId?: string };
   credentialId: string;
   scopes: readonly ScimScope[];
   expiresAt?: Date;
@@ -319,10 +335,12 @@ export async function verifyScimBearerToken(
   const connectionId = String((row as { connection_id?: unknown }).connection_id ?? '');
   if (!connectionId) return null;
   const domain = (row as { provisioning_domain_id?: unknown }).provisioning_domain_id;
+  const organization = (row as { organization_id?: unknown }).organization_id;
   return {
     connection: {
       id: connectionId,
       provisioningDomainId: domain ? String(domain) : connectionId,
+      ...(typeof organization === 'string' && organization !== '' ? { organizationId: organization } : {}),
     },
     credentialId: String((row as { id?: unknown }).id),
     scopes: SCIM_ALL_SCOPES,

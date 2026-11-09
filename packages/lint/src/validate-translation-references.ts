@@ -1420,7 +1420,8 @@ function buildUniverse(stack: AnyRec): Universe {
   //
   // ⛔ A name-only fold is wrong here for a reason peculiar to this rung: the
   // stored RECORD is itself read downstream — `checkActionEntry` judges
-  // `params.<name>`, `outcomeMessages.<outcome>`, `resultDialog.fields.<path>`
+  // `params.<name>`, `outcomeMessages.<outcome>`, `resultDialog.fields.<path>`,
+  // `preflight.fields.<path>`
   // and the dialog's own leaves off it — so folding a bare name would resolve
   // the action key and then report every one of those children as an orphan.
   //
@@ -2023,7 +2024,8 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
 
         // _actions.<name>[.params.<name>[.options.<value>] | .outcomeMessages.<outcome>
         //                 | .resultDialog.(title|description|acknowledge)
-        //                 | .resultDialog.fields.<path>] — see `checkActionEntry`
+        //                 | .resultDialog.fields.<path>
+        //                 | .preflight.fields.<path>] — see `checkActionEntry`
         for (const [actionName, rawAction] of Object.entries(asRecord(rawNode._actions))) {
           const actionPath = `${objPath}._actions.${actionName}`;
           const action = facts.actions.get(actionName);
@@ -2626,6 +2628,7 @@ interface ActionEntryContext {
  *   | `outcomeMessages.<outcome>`         | the action's `outcomeMessages` keys  | `resolveActionOutcomeMessages`  |
  *   | `resultDialog.fields.<path>`        | `resultDialog.fields[].path`         | `resolveActionResultDialog`     |
  *   | `resultDialog.title` / `.description` / `.acknowledge` | the action's `resultDialog`, present at all | `resolveActionResultDialog` |
+ *   | `preflight.fields.<path>`           | `preflight.fields[].path`            | `resolveActionPreflight`        |
  *   | `submitText`                        | a non-empty `params` (the param dialog) | `translateAction`            |
  *   | `cancelText`                        | `confirmText` or a non-empty `params` (either dialog) | `translateAction` |
  *
@@ -2654,6 +2657,7 @@ function checkActionEntry(findings: TranslationRefFinding[], ctx: ActionEntryCon
   checkActionOutcomeMessages(findings, ctx);
   checkActionResultDialogLeaves(findings, ctx);
   checkActionResultDialogFields(findings, ctx);
+  checkActionPreflightFields(findings, ctx);
   checkActionSubmitText(findings, ctx);
   checkActionCancelText(findings, ctx);
 }
@@ -3044,6 +3048,49 @@ function checkActionResultDialogFields(findings: TranslationRefFinding[], ctx: A
             `\`resultDialog\` declares no \`fields\` (it renders the whole response as JSON), ` +
             `so nothing reads this label.`,
       hint: `Match the key to a declared field's literal \`path\` (dots included), or drop it.`,
+    });
+  }
+}
+
+/**
+ * [#31885] `preflight.fields.<path>` — keyed by the LITERAL `path` of a field
+ * the action's `preflight.fields[]` declares, the `resultDialog.fields` rule
+ * on the preflight panel (dots included: `"verdict.summary"` is one key).
+ *
+ * `resolveActionPreflight` maps over the declared `fields[]` and looks each
+ * one's label up by its `path`; it reads nothing when the action declares no
+ * `preflight`, or a preflight with no `fields` (the panel then shows the
+ * selected answer as JSON). A key naming any other path is never read.
+ */
+function checkActionPreflightFields(findings: TranslationRefFinding[], ctx: ActionEntryContext): void {
+  const rawPreflight = isRec(ctx.rawAction) ? ctx.rawAction.preflight : undefined;
+  const rawPaths = Object.keys(asRecord(isRec(rawPreflight) ? rawPreflight.fields : undefined));
+  if (rawPaths.length === 0) return;
+
+  const preflight = isRec(ctx.action.preflight) ? ctx.action.preflight : undefined;
+  const declared = new Set<string>();
+  for (const field of preflight && Array.isArray(preflight.fields) ? preflight.fields : []) {
+    if (isRec(field) && typeof field.path === 'string') declared.add(field.path);
+  }
+
+  for (const fieldPath of rawPaths) {
+    if (declared.has(fieldPath)) continue;
+    findings.push({
+      severity: TRANSLATION_TARGET_UNKNOWN_SEVERITY,
+      rule: TRANSLATION_TARGET_UNKNOWN,
+      where: `${ctx.where} · preflight field "${fieldPath}"`,
+      path: `${ctx.path}.preflight.fields${memberPath(fieldPath)}`,
+      message: !preflight
+        ? `Translations are keyed to preflight field "${fieldPath}", but ${ctx.subject} declares ` +
+          `no \`preflight\`, so nothing reads this label.`
+        : declared.size > 0
+          ? `Translations are keyed to preflight field "${fieldPath}", which ${ctx.subject}'s ` +
+            `\`preflight.fields\` does not declare, so this label is never shown.` +
+            suggest(fieldPath, declared)
+          : `Translations are keyed to preflight field "${fieldPath}", but ${ctx.subject}'s ` +
+            `\`preflight\` declares no \`fields\` (its panel shows the answer as JSON), ` +
+            `so nothing reads this label.`,
+      hint: `Match the key to a declared preflight field's literal \`path\` (dots included), or drop it.`,
     });
   }
 }
