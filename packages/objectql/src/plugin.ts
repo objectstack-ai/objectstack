@@ -2397,33 +2397,6 @@ export class ObjectQLPlugin implements Plugin {
   }
 
   /**
-   * Install every registered object's schema with its driver — the ONE seam
-   * `start()` uses for that, on both the syncing and the DDL-free path.
-   *
-   * `skipSchemaSync` / `OS_SKIP_SCHEMA_SYNC=1` opts a deployment out of **DDL**,
-   * not out of telling the driver what its objects look like. Those were the
-   * same thing until now: {@link syncRegisteredSchemas} is the only caller of
-   * `syncSchema()`, and a SQL driver builds its per-object coercion registries
-   * (JSON, boolean, numeric, date/datetime/time, auto_number, and the
-   * tenant-isolation column) as the first step of that DDL call. So a boot that
-   * skipped it came up with those registries EMPTY and every value written
-   * afterwards encoded by whatever the underlying client does with a bare JS
-   * value.
-   *
-   * On Postgres that is a live data-correctness defect, not a slow path: an
-   * array value on a `json` field reaches node-postgres, which renders it as a
-   * Postgres ARRAY LITERAL — `22P02 invalid input syntax for type json`, a 500
-   * on every write — **except `[]`, whose literal `{}` is valid JSON**, so an
-   * empty array is accepted and silently stored as an empty OBJECT. A bare
-   * string 500s for the same reason (`x` is not JSON text; `"x"` is). SQLite
-   * hides all of it behind a dialect-local bind-safety net, which is why the
-   * SQLite/Turso suites never saw it.
-   *
-   * The split is the same ruling #7737 made for federated objects (commit 199ec4712) —
-   * that flag is about DDL, and a binding that is DDL-free must not ride on it
-   * — applied to the managed ones.
-   */
-  /**
    * [#31715] The schema-migration lock ({@link acquireSchemaMigrationLock}) for
    * the boot's schema sync — the same lock, under the same name and key, that
    * `os migrate apply` takes, so a server boot, an `OS_MIGRATE_AND_EXIT=1` job
@@ -2460,6 +2433,33 @@ export class ObjectQLPlugin implements Plugin {
     });
   }
 
+  /**
+   * Install every registered object's schema with its driver — the ONE seam
+   * `start()` uses for that, on both the syncing and the DDL-free path.
+   *
+   * `skipSchemaSync` / `OS_SKIP_SCHEMA_SYNC=1` opts a deployment out of **DDL**,
+   * not out of telling the driver what its objects look like. Those were the
+   * same thing until now: {@link syncRegisteredSchemas} is the only caller of
+   * `syncSchema()`, and a SQL driver builds its per-object coercion registries
+   * (JSON, boolean, numeric, date/datetime/time, auto_number, and the
+   * tenant-isolation column) as the first step of that DDL call. So a boot that
+   * skipped it came up with those registries EMPTY and every value written
+   * afterwards encoded by whatever the underlying client does with a bare JS
+   * value.
+   *
+   * On Postgres that is a live data-correctness defect, not a slow path: an
+   * array value on a `json` field reaches node-postgres, which renders it as a
+   * Postgres ARRAY LITERAL — `22P02 invalid input syntax for type json`, a 500
+   * on every write — **except `[]`, whose literal `{}` is valid JSON**, so an
+   * empty array is accepted and silently stored as an empty OBJECT. A bare
+   * string 500s for the same reason (`x` is not JSON text; `"x"` is). SQLite
+   * hides all of it behind a dialect-local bind-safety net, which is why the
+   * SQLite/Turso suites never saw it.
+   *
+   * The split is the same ruling #7737 made for federated objects (commit 199ec4712) —
+   * that flag is about DDL, and a binding that is DDL-free must not ride on it
+   * — applied to the managed ones.
+   */
   private async installRegisteredSchemas(ctx: PluginContext): Promise<void> {
     if (!this.skipSchemaSync) {
       await this.syncRegisteredSchemas(ctx);
