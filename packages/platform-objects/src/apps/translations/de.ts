@@ -105,6 +105,7 @@ export const de: TranslationData = {
         nav_settings_ai: { label: 'KI und Embedder' },
         nav_settings_knowledge: { label: 'Wissen' },
         nav_settings_lifecycle: { label: 'Datenlebenszyklus' },
+        nav_recycle_bin: { label: 'Papierkorb' },
         nav_notification_preferences: { label: 'Benachrichtigungseinstellungen' },
         nav_notification_templates: { label: 'Benachrichtigungsvorlagen' },
 
