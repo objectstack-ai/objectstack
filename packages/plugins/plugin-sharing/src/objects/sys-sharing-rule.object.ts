@@ -282,6 +282,22 @@ export const SysSharingRule = ObjectSchema.create({
       group: 'System',
     }),
 
+    // [ADR-0150 D8 row R5] The package that holds the declared rule a managed
+    // row (`managed_by` package or platform) carries the name of, beside the
+    // name (ADR-0126 §4: two facts, two columns). Backfilled at boot from the
+    // rule's one package holder (`stored-declaration-package-backfill.ts`); an
+    // organization's own rule (`managed_by` admin) is never asked and stays
+    // empty, as does a name no single package holds. Nothing reads it yet and
+    // no writer stamps it. Width: the package-id class (`sys_metadata.package_id`).
+    package_id: Field.text({
+      label: 'Package',
+      required: false,
+      readonly: true,
+      maxLength: 255,
+      description: 'The app a rule that came with an app belongs to. Filled in by the platform; empty for rules created here.',
+      group: 'System',
+    }),
+
     customized: Field.boolean({
       label: 'Customized',
       required: false,

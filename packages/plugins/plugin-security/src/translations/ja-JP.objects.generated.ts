@@ -40,6 +40,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "組織",
         help: "この付与が属する組織。"
       },
+      permission_set_package: {
+        label: "Permission Set Package",
+        help: "The app the permission set comes from. Filled in by the platform; empty when the set was created here, or when more than one app provides a set of that name."
+      },
       granted_by: {
         label: "付与者",
         help: "この権限セットを付与したユーザー。"

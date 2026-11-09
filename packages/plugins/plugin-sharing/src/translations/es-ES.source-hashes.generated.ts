@@ -30,6 +30,8 @@ export const esESGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_queue_member.description": "0a13fcf2729233d6",
   "objects.sys_queue_member.fields.queue.help": "2fe880a3e213f85f",
   "objects.sys_queue_member.fields.queue.label": "87d4b808a85ea103",
+  "objects.sys_queue_member.fields.queue_package.help": "2057e8ad7a69bc3f",
+  "objects.sys_queue_member.fields.queue_package.label": "c9d3aa9107335996",
   "objects.sys_queue_member.fields.recipient_id.help": "c7c7b9abcdbd2862",
   "objects.sys_queue_member.fields.recipient_id.label": "28df6ed83bf1854a",
   "objects.sys_queue_member.fields.recipient_type.help": "2ae5686284ebe563",
@@ -37,4 +39,6 @@ export const esESGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_queue_member.label": "671a45ea261c0e92",
   "objects.sys_queue_member.pluralLabel": "46715e86f5231603",
   "objects.sys_share_link.fields.token.label": "6e8de3393d2cee54",
+  "objects.sys_sharing_rule.fields.package_id.help": "81de9ff2f0ed555a",
+  "objects.sys_sharing_rule.fields.package_id.label": "aacf5e74a8641b2b",
 };
