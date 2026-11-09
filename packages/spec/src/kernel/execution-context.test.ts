@@ -250,6 +250,16 @@ describe('ExecutionContextSchema.permissionSetAddresses — granted sets by (pac
     ]);
   });
 
+  it('refuses an empty packageId, at the packageId — a holder is a package id or null, never \'\'', () => {
+    const parsed = ExecutionContextSchema.safeParse({
+      permissionSetAddresses: [{ packageId: '', name: 'sales_rep' }],
+    });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues.map((i) => [i.code, i.path.join('.')])).toEqual([
+      ['too_small', 'permissionSetAddresses.0.packageId'],
+    ]);
+  });
+
   it('leaves permissions untouched: still defaults to [] and is not derived from the addresses', () => {
     expect(ExecutionContextSchema.parse({}).permissions).toEqual([]);
     const ctx = ExecutionContextSchema.parse({
