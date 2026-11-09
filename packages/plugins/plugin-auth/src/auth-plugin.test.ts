@@ -380,7 +380,19 @@ describe('AuthPlugin', () => {
       // Should NOT throw
     });
 
-    it('should auto-detect baseUrl from http-server port when port differs', async () => {
+    it('should auto-detect baseUrl from http-server port when the host-defaulted port differs', async () => {
+      // The host filled `baseUrl` from its own loopback fallback (port 3000)
+      // and marked it so; a CONFIGURED base URL is kept as written (#31904).
+      const localHookCapture = createHookCapture();
+      const localPlugin = new AuthPlugin({
+        secret: 'test-secret-at-least-32-chars-long',
+        baseUrl: 'http://localhost:3000',
+        baseUrlDefaulted: true,
+      });
+      mockContext.hook = localHookCapture.hookFn;
+      (mockContext.registerService as any).mockClear();
+      await localPlugin.init(mockContext);
+
       const mockRawApp = { all: vi.fn(), get: vi.fn(), post: vi.fn() };
       const mockHttpServer = {
         post: vi.fn(), get: vi.fn(), put: vi.fn(), delete: vi.fn(),
@@ -394,12 +406,12 @@ describe('AuthPlugin', () => {
         throw new Error(`Service not found: ${name}`);
       });
 
-      // AuthPlugin configured with default port 3000, but server will be on 3002
+      // Host-defaulted base URL on port 3000, but server will be on 3002
       const registeredAuthManager = (mockContext.registerService as any).mock.calls[0][1];
       const setRuntimeSpy = vi.spyOn(registeredAuthManager, 'setRuntimeBaseUrl');
 
-      await authPlugin.start(mockContext);
-      await hookCapture.trigger('kernel:ready');
+      await localPlugin.start(mockContext);
+      await localHookCapture.trigger('kernel:ready');
 
       expect(setRuntimeSpy).toHaveBeenCalledWith('http://localhost:3002');
       expect(mockContext.logger.info).toHaveBeenCalledWith(
