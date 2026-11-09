@@ -258,6 +258,7 @@ export type { MetadataHostEngine } from './host-engine.js';
 // `@objectstack/runtime` (`PATCH /:id/disable`, `DELETE /:id`) both ask it, so
 // "which packages are read-only" has ONE definition rather than two that drift.
 export { isWritablePackage, READ_ONLY_PACKAGE_SCOPES } from './package-writability.js';
+export { refuseNamespaceObjectNameClashes } from './protocol-save-door-refusals.js';
 export type { PackageWritabilityEngine } from './package-writability.js';
 
 // [#28409, ADR-0146 D8 item 2] "Is this stored row the served override of base
