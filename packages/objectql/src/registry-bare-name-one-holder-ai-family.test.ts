@@ -8,15 +8,15 @@
  * `registry-bare-name-one-holder.test.ts`,
  * `registry-bare-name-one-holder-request-family.test.ts` and
  * `registry-bare-name-one-holder-flow-family.test.ts`; this file holds the same
- * matrix for the last two, and what is particular to them:
+ * matrix for the last two, and for a `tool`, which joined after them in its
+ * own change (#31414: every reader of a tool names it with no package), and
+ * what is particular to them:
  *
- *  - both are registry types, judged at the engine's package door and the
- *    registry's item seam exactly as a picklist is; neither is bundled;
- *  - a `tool` shares a stack beside them and is NOT covered (ruling
- *    6688041914's nine types do not name it): two packages' same-named tools
- *    still install after the seal (CONTROL);
- *  - an agent and a skill are two types: one package's agent and another's
- *    skill under one name never meet (CONTROL).
+ *  - all three are registry types, judged at the engine's package door and the
+ *    registry's item seam exactly as a picklist is; none is bundled;
+ *  - an agent, a skill and a tool are three types: one package's item of one
+ *    and another's of another under one name never meet (CONTROL);
+ *  - two packages' tools under different names both install (CONTROL).
  *
  * Every refusal is asserted by its ADR-0112 envelope (`code` + `status`), the
  * two holders it names and the rename it carries.
@@ -55,12 +55,12 @@ type Refusal = Error & {
   conflicts?: Conflict[];
 };
 
-type AiType = 'agent' | 'skill';
-const TYPES: AiType[] = ['agent', 'skill'];
-const COLLECTION: Record<AiType | 'tool', string> = { agent: 'agents', skill: 'skills', tool: 'tools' };
+type AiType = 'agent' | 'skill' | 'tool';
+const TYPES: AiType[] = ['agent', 'skill', 'tool'];
+const COLLECTION: Record<AiType, string> = { agent: 'agents', skill: 'skills', tool: 'tools' };
 
 /** A body each type's schema accepts, marked with `tag` in its `label`. */
-const body = (type: AiType | 'tool', name: string, tag: string, extra: Record<string, unknown> = {}): Record<string, unknown> => {
+const body = (type: AiType, name: string, tag: string, extra: Record<string, unknown> = {}): Record<string, unknown> => {
   switch (type) {
     case 'agent':
       return { name, label: `${tag} agent`, role: `${tag} role`, instructions: `${tag} agent instructions`, ...extra };
@@ -85,10 +85,10 @@ const itemObject = (ns: string) => ({
  * service — whose namespace is its id's last segment, so the rename a refusal
  * carries is `<last segment>_<name>`.
  */
-const pkg = (id: string, decl: Partial<Record<AiType | 'tool', string[]>> = {}, extra: Record<string, unknown> = {}) => {
+const pkg = (id: string, decl: Partial<Record<AiType, string[]>> = {}, extra: Record<string, unknown> = {}) => {
   const ns = id.split('.').pop()!;
   const out: Record<string, unknown> = { id, name: ns, namespace: ns, version: '1.0.0', type: 'app', objects: [itemObject(ns)], ...extra };
-  for (const type of [...TYPES, 'tool'] as const) {
+  for (const type of TYPES) {
     const names = decl[type];
     if (names) out[COLLECTION[type]] = [...((extra[COLLECTION[type]] as unknown[]) ?? []), ...names.map((n) => body(type, n, ns))];
   }
@@ -156,12 +156,13 @@ function expectRefusal(err: Refusal | undefined, incoming: string, holder: Holde
 }
 
 describe('the covered types, in family order', () => {
-  it('the two join the list last, after the flow family; the registry types are every covered type but the function', () => {
+  it('the AI family joins after the flow family, and a tool after it, last; the registry types are every covered type but the function', () => {
     expect(BARE_NAME_ONE_HOLDER_TYPES).toEqual([
       'picklist', 'mapping', 'dataset',
       'api', 'action', 'function',
       'flow', 'webhook', 'connector', 'email_template',
       'agent', 'skill',
+      'tool',
     ]);
     expect(BARE_NAME_REGISTRY_TYPES).toEqual(BARE_NAME_ONE_HOLDER_TYPES.filter((t) => t !== 'function'));
     for (const type of TYPES) {
@@ -171,13 +172,13 @@ describe('the covered types, in family order', () => {
     }
   });
 
-  it('a manifest declares each of the two by its collection, nested plugins included; a tool declares nothing', () => {
+  it('a manifest declares each of the three by its collection, nested plugins included', () => {
     const declared = declaredBareNames({
       id: 'com.acme.alpha',
       agents: [body('agent', 'a1', 'a')], skills: [body('skill', 's1', 'a')], tools: [body('tool', 't1', 'a')],
-      plugins: [{ name: 'inner', skills: [body('skill', 's2', 'a')] }],
+      plugins: [{ name: 'inner', skills: [body('skill', 's2', 'a')], tools: [body('tool', 't2', 'a')] }],
     });
-    expect(declared.map((d) => `${d.type}/${d.name}`)).toEqual(['agent/a1', 'skill/s1', 'skill/s2']);
+    expect(declared.map((d) => `${d.type}/${d.name}`)).toEqual(['agent/a1', 'skill/s1', 'tool/t1', 'skill/s2', 'tool/t2']);
   });
 });
 
@@ -287,17 +288,31 @@ describe.each(TYPES)('%s — after the cold boot, a second package declaring a n
 });
 
 describe('what the AI family leaves alone', () => {
-  it('CONTROL — two packages\' tools under one name both install after the seal: a tool is not covered', async () => {
+  it('CONTROL — two packages\' tools under different names both install after the seal, and each serves its own', async () => {
     const { registry, register } = await boot();
-    expect(await register(pkg('com.acme.alpha', { tool: ['shared_tool'] }))).toBeUndefined();
-    expect(await register(pkg('com.acme.beta', { tool: ['shared_tool'] }))).toBeUndefined();
+    expect(await register(pkg('com.acme.alpha', { tool: ['alpha_tool'] }))).toBeUndefined();
+    expect(await register(pkg('com.acme.beta', { tool: ['beta_tool'] }))).toBeUndefined();
     expect(registry.getPackage('com.acme.beta')).toBeDefined();
+    expect(marker(registry.getItem('tool', 'alpha_tool'))).toBe('alpha tool');
+    expect(marker(registry.getItem('tool', 'beta_tool'))).toBe('beta tool');
   });
 
   it('CONTROL — one package\'s agent and another\'s skill under one name are two types, never one conflict', async () => {
     const { register } = await boot();
     expect(await register(pkg('com.acme.alpha', { agent: ['shared_ai'] }))).toBeUndefined();
     expect(await register(pkg('com.acme.beta', { skill: ['shared_ai'] }))).toBeUndefined();
+  });
+
+  it('CONTROL — a tool under the name another package\'s skill or agent holds is another type, never one conflict', async () => {
+    const { register } = await boot();
+    expect(await register(pkg('com.acme.alpha', { skill: ['shared_ai'], agent: ['shared_ai'] }))).toBeUndefined();
+    expect(await register(pkg('com.acme.beta', { tool: ['shared_ai'] }))).toBeUndefined();
+  });
+
+  it('CONTROL — one package declaring a skill and a tool under one name installs: one holder', async () => {
+    const { register } = await boot();
+    expect(await register(pkg('com.acme.alpha', { skill: ['shared_ai'], tool: ['shared_ai'] }))).toBeUndefined();
+    expect(await register(pkg('com.acme.alpha', { skill: ['shared_ai'], tool: ['shared_ai'] }))).toBeUndefined();
   });
 });
 
@@ -312,6 +327,7 @@ describe('the refusal\'s reason names the consumers of the types it lists', () =
       /^An agent and a skill each hold one name per deployment: `\/meta\/agent\/NAME` serves one agent per name and an MCP client fetches a skill's prompt by its name, /,
     );
     expect(bareNameReason(['skill'])).toMatch(/^A skill holds one name per deployment: an MCP client fetches a skill's prompt by its name, /);
+    expect(bareNameReason(['tool'])).toMatch(/^A tool holds one name per deployment: a skill's `tools` and an MCP client name a tool, /);
   });
 
   it('a built-in name is refused to a package at the package door, naming the platform', async () => {

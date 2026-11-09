@@ -87,7 +87,7 @@ export type BareNameRegistryType =
   | 'picklist' | 'mapping' | 'dataset'
   | 'api' | 'action'
   | 'flow' | 'webhook' | 'connector' | 'email_template'
-  | 'agent' | 'skill';
+  | 'agent' | 'skill' | 'tool';
 
 /**
  * A type phase 1 covers: a registry type, or `function` — the engine's
@@ -117,6 +117,8 @@ export const BARE_NAME_ONE_HOLDER_TYPES: readonly BareNameOneHolderType[] = Obje
   // the AI family
   'agent',
   'skill',
+  // joined after the AI family, in its own change (#31414)
+  'tool',
 ]);
 
 /** Is `type` one of the types phase 1 covers? */
@@ -151,6 +153,7 @@ export const OVERRIDABLE_BASELINE_PACKAGES: Readonly<Record<BareNameOneHolderTyp
   email_template: new Set<string>(['com.objectstack.service.email']),
   agent: new Set<string>(),
   skill: new Set<string>(),
+  tool: new Set<string>(),
 });
 
 /**

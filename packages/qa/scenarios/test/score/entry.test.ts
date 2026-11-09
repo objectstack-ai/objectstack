@@ -6,9 +6,11 @@
  * the loader's, read off the real `crm_account_with_contacts` card.
  */
 
+import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { PLURAL_TO_SINGULAR } from '@objectstack/spec/meta-spelling';
 import { describe, expect, it } from 'vitest';
 
 import { formatRefusal, loadScenarioFile, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
@@ -18,6 +20,7 @@ import { gradeCardAnswer, gradeCardOperation, gradeItemNames, scoreCardArtifact 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CARD_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/crm_account_with_contacts.json');
 const AREAS_DIR = resolve(HERE, '../../../../../docs/qa/platform-checklist/areas');
+const ADR_0150 = resolve(HERE, '../../../../../docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md');
 
 function load(): LoadedScenario {
   const { card, refusals } = loadScenarioFile(CARD_FILE, { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
@@ -132,23 +135,71 @@ describe('scoreCardArtifact', () => {
   });
 });
 
-describe('the every-item-prefixed rule', () => {
-  it('reports each non-object item named without the card namespace prefix as a failing check of its own', () => {
-    const crm = load();
+/** The `Types` cell of ADR-0150 D1's row headed `label`, split on its ` · ` separators. */
+function d1TypesCell(label: string): string[] {
+  const row = readFileSync(ADR_0150, 'utf8')
+    .split('\n')
+    .find((line) => line.startsWith(`| **${label}** |`));
+  if (!row) throw new Error(`ADR-0150 D1 has no row headed "${label}"`);
+  return row.split('|')[2]!.trim().split(' · ');
+}
+
+/** The metadata type a cell segment names: its leading backticked word, or none when the segment opens with prose. */
+const segmentType = (segment: string): string | undefined => /^`([a-z_]+)`/.exec(segment)?.[1];
+
+describe('the literal-prefix rule (ADR-0150 bucket 1 and positions)', () => {
+  const crm = load();
+  const objects = [{ name: 'account', fields: { name: { type: 'text' } } }]; // objects are not judged here: defineStack refuses a bare one
+
+  it('passes a bare name of a bucket 2-4 type: a flow, an action, a tool, a job, a dashboard, a permission set, an api', () => {
     const s = scoreCardArtifact(crm, {
-      objects: [{ name: 'account', fields: { name: { type: 'text' } } }], // objects are not judged here: defineStack refuses a bare one
-      apps: [{ name: 'democrm_app' }],
-      permissions: [{ name: 'sdr', objects: {} }, { name: 'democrm_partner_user', objects: {} }],
-      views: [{ name: 'all_accounts' }],
+      objects,
+      flows: [{ name: 'notify_owner' }],
+      actions: [{ name: 'close_won' }],
+      tools: [{ name: 'lookup_account' }],
+      jobs: [{ name: 'nightly_rollup' }],
+      dashboards: [{ name: 'overview' }],
+      permissions: [{ name: 'sdr', objects: {} }],
+      apis: [{ name: 'account_summary', path: '/democrm/summary' }],
+    });
+    expect(s.naming).toEqual([]);
+  });
+
+  it('fails a bare position, view and doc, and a capability not spelled NS.SHORT, as one counted check each', () => {
+    const s = scoreCardArtifact(crm, {
+      objects,
+      positions: [{ name: 'sales_manager' }, { name: 'democrm_sales_rep' }],
+      views: [{ name: 'all_accounts' }, { name: 'democrm_my_accounts' }],
+      docs: [{ name: 'guide' }],
+      capabilities: [{ name: 'export_data' }, { name: 'democrm_export_data' }, { name: 'democrm.refund' }],
     });
     expect(s.naming).toEqual([
-      { check: 'bare-name:permission:sdr', pass: false, detail: 'a gallery app names every item `democrm_<short>`; this permission is `sdr`' },
-      { check: 'bare-name:view:all_accounts', pass: false, detail: 'a gallery app names every item `democrm_<short>`; this view is `all_accounts`' },
+      { check: 'bare-name:position:sales_manager', pass: false, detail: 'a gallery app names each position `democrm_<short>`; this position is `sales_manager`' },
+      { check: 'bare-name:capability:export_data', pass: false, detail: 'a gallery app names each capability `democrm.<short>`; this capability is `export_data`' },
+      { check: 'bare-name:capability:democrm_export_data', pass: false, detail: 'a gallery app names each capability `democrm.<short>`; this capability is `democrm_export_data`' },
+      { check: 'bare-name:view:all_accounts', pass: false, detail: 'a gallery app names each view `democrm_<short>`; this view is `all_accounts`' },
+      { check: 'bare-name:doc:guide', pass: false, detail: 'a gallery app names each doc `democrm_<short>`; this doc is `guide`' },
     ]);
-    // Counted: the two findings are in the total and not in passed.
-    const clean = scoreCardArtifact(crm, { objects: [{ name: 'account', fields: { name: { type: 'text' } } }], apps: [{ name: 'democrm_app' }] });
+    // Counted: the five findings are in the total and not in passed.
+    const clean = scoreCardArtifact(crm, { objects });
     expect(clean.naming).toEqual([]);
-    expect([s.total - clean.total, s.passed - clean.passed]).toEqual([2, 0]);
+    expect([s.total - clean.total, s.passed - clean.passed]).toEqual([5, 0]);
+  });
+
+  it("judges exactly the walked types ADR-0150 D1's bucket 1 and position rows name, and fails when those rows change", () => {
+    const bucket1 = d1TypesCell('1 — global literal prefix, unchanged');
+    const position = d1TypesCell('position (ruled separately)');
+    // The restatement in scenario-naming.ts is these two rows; a change to either is a change to the rule.
+    expect(bucket1.map(segmentType)).toEqual(['object', 'field', 'object_extension', 'view', 'capability', 'doc', undefined]);
+    expect(bucket1.filter((seg) => segmentType(seg) === undefined)).toEqual(["an api's `path` (globally unique)"]);
+    expect(bucket1.find((seg) => segmentType(seg) === 'capability')).toContain('`NS.SHORT`');
+    expect(position.map(segmentType)).toEqual(['position']);
+    // Behaviour: one bare item in every manifest collection; the judged types are the rows' types the manifest walks, objects aside.
+    const named = new Set([...bucket1, ...position].map(segmentType).filter((t): t is string => t !== undefined));
+    const artifact = Object.fromEntries(Object.keys(PLURAL_TO_SINGULAR).filter((key) => key !== 'objects').map((key) => [key, [{ name: 'bare' }]]));
+    const judged = gradeItemNames(artifact, 'democrm').map((c) => c.check.split(':')[1]);
+    expect(judged.sort()).toEqual(Object.values(PLURAL_TO_SINGULAR).filter((t) => t !== 'object' && named.has(t)).sort());
+    expect(judged).toEqual(['capability', 'doc', 'position', 'view']);
   });
 
   it('judges a multi-package artifact whose collections live only under packages[]', () => {
@@ -163,14 +214,12 @@ describe('the every-item-prefixed rule', () => {
             version: '1.0.0',
             type: 'app',
             dependencies: { 'com.example.democrm.core': '1.0.0' },
-            dashboards: [
-              { name: 'overview', label: 'Overview', widgets: [] },
-              { name: 'democrm_pipeline', label: 'Pipeline', widgets: [] },
-            ],
+            dashboards: [{ name: 'overview', label: 'Overview', widgets: [] }],
+            views: [{ name: 'all_accounts' }, { name: 'democrm_pipeline' }],
           },
         },
       ],
     };
-    expect(gradeItemNames(artifact, 'democrm').map((c) => c.check)).toEqual(['bare-name:dashboard:overview']);
+    expect(gradeItemNames(artifact, 'democrm').map((c) => c.check)).toEqual(['bare-name:view:all_accounts']);
   });
 });

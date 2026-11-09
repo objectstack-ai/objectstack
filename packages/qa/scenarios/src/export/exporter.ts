@@ -51,6 +51,7 @@ import type { Recording } from '../runner/driver.js';
 import { modeDir } from '../runner/orchestrate.js';
 import { readArtifact } from '../runner/project.js';
 import { renderScorecard, type CardScorecard } from '../runner/scorecard.js';
+import { APP_LAYOUT } from './contract.js';
 import { GALLERY_GUARD, type GalleryGuard } from './generic.js';
 import { parseIndex, serializeIndex, type GalleryApp, type GalleryIndex } from './manifest.js';
 import { judgeRecord, type PassJudgement } from './pass.js';
@@ -59,17 +60,8 @@ import type { CaptureScreenshots, PlannedShot, SkippedShot } from './screenshots
 import { projectFrameworkVersion, readAuthoredSource } from './source.js';
 import { buildTranscript, mergeRecordings, renderTranscript } from './transcript.js';
 
-/** The files of one exported app, relative to `apps/<id>/`. */
-export const APP_LAYOUT = {
-  readme: 'README.md',
-  source: 'source',
-  runRecord: 'run-record.json',
-  scorecardJson: 'scorecard.json',
-  scorecardMd: 'scorecard.md',
-  transcriptJson: 'transcript.json',
-  transcriptMd: 'transcript.md',
-  screenshots: 'screenshots',
-} as const;
+/** The files of one exported app, relative to `apps/<id>/` (`contract.ts`, which the check reads too). */
+export { APP_LAYOUT };
 
 /**
  * The run's scratch project, where the runner CLI scaffolds it: under the
