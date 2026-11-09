@@ -279,6 +279,11 @@
       "status": "live",
       "note": "objectui one-shot result reveal {title,description,acknowledge,format,fields}."
     },
+    "preflight": {
+      "status": "planned",
+      "verifiedAt": "2026-11-09",
+      "note": "PLANNED (spec card #31840; consumer #31808, the console half). One same-origin `GET` the param dialog sends before submit: `{ read: { url, method? }, path?, fields?, seed? }`. DECLARED and judged at parse today: `read.url` is held to the page element read's same-origin rule (packages/spec/src/ui/same-origin-api-read.ts, shared with page.zod.ts's `api` data source), its holes are closed to `${param.NAME}` / `${ctx.recordId}` / `${ctx.record.FIELD}`, `fields` is resultDialog's own row, and each seed must fill one declared param that has no other source and that no hole reads; refused on an action with no `params` and beside `execution: 'aggregate'`. READ by nothing yet: no param dialog sends the read, draws the panel or applies a seed until #31808 lands in the console's param-collection handlers and ActionParamDialog. Flip to `live` on the commit that lands that reader, citing it (the ui card owns the flip)."
+    },
     "visible": {
       "status": "live",
       "note": "objectui — CEL, fail-closed."
