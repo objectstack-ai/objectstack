@@ -52,11 +52,10 @@ POST   /api/v1/batch                  # Cross-object atomic batch
 ```
 
 There is no `/bulk` route and no `GET .../aggregate` route — batch writes go
-through the `batch` endpoints, aggregation through the `query` one.
+through the `batch` endpoints.
 
 > **Key rule:** If your object defines `apiMethods`, only those operations (and
-> what derives from them) are exposed; `[]` means deny-all. The authorable
-> values are the six primitives — see **API Methods (Operations)**.
+> what derives from them) are exposed; `[]` means deny-all.
 
 ### Metadata API (`/meta`)
 
@@ -237,7 +236,6 @@ for `authRequired: false`.
 - Always use **plural nouns** for collection paths (`accounts`, not `account`).
 - Use **snake_case** for multi-word paths (`project_tasks`, not `projectTasks`).
 - Use **verbs** only for actions, not for CRUD (`/close`, `/approve`).
-- Always prefix with `/api/v1/` for versioning.
 
 ---
 
@@ -268,8 +266,8 @@ eight extra verbs are never declared in `apiMethods`:
 | `import` | `create` ∨ `update` (writeMode-precise) | `POST /data/{object}/import` |
 | `export` | `list` | `GET /data/{object}/export` |
 
-`history` (from `get` ∧ `trackHistory`) gates only. `restore` / `purge` never
-derive: the recycle bin has no restore or purge door yet. Declaring any
+`history` (from `get` ∧ `trackHistory`) gates only. `restore` / `purge` derive
+from `delete` and open the recycle-bin doors (pitfall 2). Declaring any
 derived verb in `apiMethods` is stripped at parse with a FROM → TO warning.
 
 `POST /data/{object}/import` takes `mapping` as `{ Column: field }` or as
@@ -305,7 +303,7 @@ The **HttpDispatcher** is the central request router; it answers:
 
 ## Realtime Subscriptions
 
-Realtime contracts are pointer-style — read the spec source for exact shapes:
+Realtime contracts live in the spec source:
 
 - `node_modules/@objectstack/spec/src/api/realtime.zod.ts` — `TransportProtocol`
   (`websocket` | `sse` | `polling`), `SubscriptionSchema` (`id`, `events[]`,
@@ -327,10 +325,8 @@ own auth keys.
 There is no nested `auth` block on an endpoint, and no `name` / `request` /
 `response` field: auth is the flat `public` + `permissions` pair on
 `RestApiEndpointSchema`, and declarative `ApiEndpointSchema` endpoints (and the
-dispatcher) use `authRequired: boolean` (default `true`) — setting it `false`
-obliges you to arm a `rateLimit` (ADR-0121 D6 — see **Declarative Endpoints →
-`authRequired` and the D6 pairing** above). Rate-limit policies themselves are
-shaped by `RateLimitConfigSchema`:
+dispatcher) use `authRequired: boolean` (default `true`; `false` owes an armed
+`rateLimit`, D6 above). Rate-limit policies are shaped by `RateLimitConfigSchema`:
 
 <!-- os:check -->
 ```typescript
@@ -390,9 +386,7 @@ keys mean the run produced none — never invent an empty.
    return flat `{ error, code }` bodies instead (e.g. `CONCURRENT_UPDATE` →
    409, `VALIDATION_FAILED` → 400) — do not assume every error arrives in the
    `success: false` envelope.
-3. **Apply least-privilege auth.** Every endpoint should declare its required
-   permissions explicitly.
-4. **Design idempotent writes deliberately.** No upsert route is generated, so
+3. **Design idempotent writes deliberately.** No upsert route is generated, so
    an external integration queries by its unique external ID and branches to
    create or update — group those writes through
    `POST /api/v1/data/{object}/batch`.
@@ -408,10 +402,16 @@ keys mean the run produced none — never invent an empty.
    read. Sending neither skips the check; a mismatch answers **409
    `CONCURRENT_UPDATE`**; the quoted-empty entity-tag (`""`) is refused **400
    `VALIDATION_FAILED`**, not treated as omitted.
-2. **Treating `DELETE` as final or as restorable.** A by-id delete keeps a
-   business object's rows in the recycle bin (`sys_recycle_bin`, 30 days by
-   default; not `multi: true` deletes, platform rows or rows deleted before the
-   bin existed); nothing lists or restores it over the API yet. No soft-delete.
+2. **Treating `DELETE` as final.** A by-id delete keeps a business object's
+   rows in the recycle bin (`sys_recycle_bin`, 30 days by default; not
+   `multi: true` deletes, platform rows or rows deleted before the bin existed)
+   and answers `recycleBinEntryId`. Under `/api/v1/data/{object}/recycle-bin`:
+   `POST /:entryId/restore` (`allowRestoreOwnDeleted` for your own deletes,
+   `manageRecycleBin` for others'); `GET` lists, `DELETE /:entryId` purges,
+   `DELETE` empties (`manageRecycleBin`). A refused restore answers `409`
+   `RESTORE_UNIQUE_VALUE_TAKEN`, `RESTORE_PARENT_PURGED`,
+   `RESTORE_PARENT_IN_RECYCLE_BIN` (restore that parent's entry first) or
+   `RESTORE_PACKAGE_UNINSTALLED`, and keeps the entry. No soft-delete.
 
 ---
 

@@ -444,10 +444,6 @@ const READERS: Record<string, Row> = {
     why: 'names the `queue` metadata TYPE in the namespace name rule\'s type list (ADR-0150 D2); it reads no row and no column',
   },
   'assignment-rules.ts#<module> :: queue': { disposition: 'not-a-read', why: VOCABULARY },
-  'package-scoped-resolver.ts#<module> :: queue': {
-    disposition: 'not-a-read',
-    why: 'the metadata TYPE `queue` (ADR-0150 D1 bucket 2) in the list of types addressed by package, not the column; it reads no row',
-  },
   'assignment-rules.ts#carriesQueueColumn :: resolveInjectedColumnProvenance()': {
     disposition: 'excludes',
     why: 'an object whose queue column is unprovisioned (federated) evaluates no assignment rule',

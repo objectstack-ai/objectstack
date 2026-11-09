@@ -100,16 +100,24 @@ export { findPackageHeldSecurityCatalogNames } from './registry.js';
 // metadata: the caller package's own item, else the unique holder in its
 // declared dependency closure (plus `sys`), else a refusal naming every
 // candidate. Exported for the readers epic #31527's later children switch to
-// it (runtime indexes, doors, stored references); no reader calls it yet. On
-// this barrel only: it reads `@objectstack/metadata-protocol`'s closure, which
-// the lean `./core` entry never imports (ADR-0076 D2).
+// it (runtime indexes, doors, stored references); no reader calls it yet.
+// [#31716, child R2] The rule is `@objectstack/core`'s and the closure walk
+// `@objectstack/metadata-core`'s, both inside the lean `./core` entry's
+// admitted set (ADR-0076 D2); this module is objectql's two adapters over
+// them (the registry's holders, the engine's function holders) and re-exports
+// the rest under the names R published.
 export {
   resolvePackageScopedName,
+  resolvePackageScopedFunction,
+  resolvePackageScopedHolders,
+  packageScopedHolderSource,
   packageResolutionClosure,
   packageScopedRefusalMessage,
   describePackageScopedHolder,
   isPackageScopedType,
+  isPackageScopedResolvableType,
   isPlatformRequestedBareName,
+  ENGINE_FUNCTION_TYPE,
   PACKAGE_SCOPED_TYPES,
   PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE,
   KERNEL_NAMESPACE,
@@ -118,6 +126,13 @@ export type {
   PackageScopedType,
   PackageScopedHolder,
   PackageScopedQuery,
+  PackageScopedHoldersQuery,
+  PackageScopedHolderSource,
+  PackageScopedResolvableType,
+  PackageClosureRegistry,
+  PackageResolutionClosureOf,
+  PackageScopedFunctionQuery,
+  PackageScopedFunctionEngine,
   PackageScopedRegistry,
   PackageScopedResolution,
   PackageScopedResolutionStep,

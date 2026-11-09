@@ -515,3 +515,38 @@ describe('[#20987] an unknown dialect: the native strategy declines a JSON-store
     });
   });
 });
+
+/**
+ * [#31626] SQL Server is a named dialect (#31394), and neither this package
+ * nor `@objectstack/core`'s `jsonMembershipPredicate` states a JSON membership
+ * construct for it, so a membership test on a JSON-stored field is refused
+ * there as on `'unknown'` — with the dialect named in the reason rather than
+ * called "not known". The read scope is the compiler the `/analytics/sql` echo
+ * reaches on a federated SQL Server object. Envelopes unchanged.
+ */
+describe('[#31626] membership on a JSON-stored field, SQL Server: refused naming the dialect', () => {
+  for (const op of ['$contains', '$notContains'] as const) {
+    it(`read scope ${op}: READ_SCOPE_COMPILE_FAILED / 500, and the reason names "mssql"`, async () => {
+      const err = await refusalOf(() =>
+        compileScopedFilterToSql({ tags: { [op]: 'u1' } }, 't', { dialect: 'mssql', declaredValueShape: (field) => SHAPES[field] }),
+      );
+      expect(err.code).toBe('READ_SCOPE_COMPILE_FAILED');
+      expect(err.status).toBe(500);
+      expect(err.message).toContain('"mssql"');
+    });
+
+    it(`native where ${op}: INVALID_FILTER / 400, and the reason names "mssql"`, async () => {
+      const ctx = {
+        getCube: (name: string) => (name === OBJECT ? CUBE : undefined),
+        declaredValueShape: (object: string, field: string) => (object === OBJECT ? SHAPES[field] : undefined),
+        sqlDialect: () => 'mssql',
+        queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false }),
+        executeRawSql: async () => [],
+      } as unknown as StrategyContext;
+      const err = await refusalOf(() => new NativeSQLStrategy().generateSql(query({ owners: { [op]: 'u1' } }), ctx));
+      expect(err.code).toBe('INVALID_FILTER');
+      expect(err.status).toBe(400);
+      expect(err.message).toContain('"mssql"');
+    });
+  }
+});
