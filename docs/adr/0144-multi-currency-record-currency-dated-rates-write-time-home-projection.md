@@ -286,15 +286,17 @@ a parent's code field, while the finding answers a metadata save that changes wh
   #27191's card body draft the rate pointer as optional (`rateField?`). This record corrects that to required. Only the
   spelling of the two pointers is #27191's ([Open item](#open-items) 1).
 
-*Note (2026-11-09):* re-pointing a stored amount's code field is a destructive change. D5 stores each conversion "with
-the rate used", and a stored home amount changes only through "an explicit recompute operation". An amount's value is
-a bare number (ADR-0104 D1), so a metadata save that points a `record`-mode amount's `currencyField` (D2) at another
-code converts nothing: every stored row keeps its number and is read in the currency the new pointer holds, and any
-stored home amount and rate stay converted from the code the old pointer gave. The Phase 3a destructive gate of the
-metadata save (`packages/metadata-protocol/src/protocol-write-face.ts#detectDestructiveObjectChanges`) raises the
-finding `currency_field_repointed` when an `object` save changes a stored amount's non-blank pointer to another
-non-blank pointer, in all four directions between a sibling code field and the two-segment `master_detail` path of the
-D2 amendment. Pointers compare as written, so the same pointer saved again raises nothing. The save is refused before
+*Note (2026-11-09):* re-pointing a stored amount's code field is a destructive change. D5 converts at write and stores
+the result "with the rate used". A stored home amount changes only when a write of its row projects again (one that
+touches the amount, its code, its document date or the two projected fields) or through "an explicit recompute
+operation", and a metadata save is neither. An amount's value is a bare number (ADR-0104 D1), so a metadata save that
+points a `record`-mode amount's `currencyField` (D2) at another code converts nothing: every stored row keeps its
+number and is read in the currency the new pointer holds, and any stored home amount and rate stay converted from the
+code the old pointer gave. The Phase 3a destructive gate of the metadata save
+(`packages/metadata-protocol/src/protocol-write-face.ts#detectDestructiveObjectChanges`) raises the finding
+`currency_field_repointed` when an `object` save changes a stored amount's non-blank pointer to another non-blank
+pointer, in all four directions between a sibling code field and the two-segment `master_detail` path of the D2
+amendment. Pointers compare as written, so the same pointer saved again raises nothing. The save is refused before
 anything is written, 409 `DESTRUCTIVE_CHANGE` with the finding in its `issues`, unless the caller sets `force`
 (`?force=true` on the metadata `PUT`; a door that accepts no `force` names its own way in the message,
 `packages/metadata-protocol/src/protocol-write-face.ts#destructiveChangeRemedy`). The finding has its own code. It is
@@ -302,10 +304,13 @@ the sibling of `currency_mode_to_record` ([Open item](#open-items) 13), not a `f
 when a field's `type` changes. Like its sibling, it reads no row, fires only where a previous version of the object
 exists, and is lifted by the same `force`. The message names the remedies that exist. For a sibling pointer, rows
 whose new code is blank take the code backfill of Open item 13, `os migrate record-currency-codes` or, with no shell,
-`POST /api/v1/meta/_migrate-record-currency-codes`. A path pointer has no backfill, since the child stores no code.
-When the amount declares `homeAmount` before and after the save, the stored home amounts are re-derived by
-`os migrate recompute-home-amounts`, the explicit recompute of the third bullet, a shell command with no REST door.
-When the save drops `homeAmount`, the message says nothing re-rates them. Landed by #31949 in PR #31969 (`33ab84f9`).
+`POST /api/v1/meta/_migrate-record-currency-codes`. A path pointer has no backfill, since the child stores no code;
+that edge stays open as Open item 14. When the amount declares `homeAmount` before and after the save, the message
+names `os migrate recompute-home-amounts`, the explicit recompute operation of the third bullet and a shell command
+with no REST door, to re-derive the stored home amounts from the new code. That holds for a sibling pointer. For a
+path pointer, the recompute on `main` reads the pointer as a column of the child's own row, finds it blank and skips
+every row as `code_blank`, until #31911 resolves the parent's code there. When the save drops `homeAmount`, the
+message says nothing re-rates them. Landed by #31949 in PR #31969 (`33ab84f9`).
 
 ### D6 — Q4: raw aggregates over a record-mode field refuse, and consolidation reads the home field (letter A)
 
@@ -682,6 +687,11 @@ Where a source leans one way, the lean is quoted here, not adopted. This record 
     forbids and which a `dynamic` tenant currency, having no history, could not answer. **Interim, not the answer:**
     until #30675 lands, a cloud-managed tenant's backfill is run by platform operations on request, with `--org`. This
     item stays open on its B half until that card lands.
+    *Note (2026-11-09):* the B half has landed. #30675 closed as completed with PR #30809 (`0cba0ce2`), and
+    `POST /api/v1/meta/_migrate-record-currency-codes` is on `main`
+    (`packages/rest/src/meta-record-currency-backfill-route.ts`): scoped to the caller's current organization, a
+    preview unless `apply: true`, behind the `metadata.endpoints.maintenance` switch. The interim above has ended, and
+    the item is settled.
 14. **Edges of a child that follows its parent's currency** (#31911, #31910; opened 2026-11-09 by the amendment of
     D2 and D6). Ruling A and the lock under D2 do not decide three edges:
     - **A child row that moves to another parent** whose code differs. The lock binds the parent's code field, not
