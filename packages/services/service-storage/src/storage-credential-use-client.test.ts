@@ -18,6 +18,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { currentCredentialUseClient, hashApiKey } from '@objectstack/core';
+import { assertEngineFindOnePredicate } from '@objectstack/objectql';
 import type { IHttpRequest, IStorageService } from '@objectstack/spec/contracts';
 
 const captured = vi.hoisted(() => ({ args: undefined as unknown[] | undefined }));
@@ -60,6 +61,7 @@ function compose(opts: { gateActive: boolean }) {
       return typeof q.limit === 'number' ? rows.slice(0, q.limit) : rows;
     },
     async findOne(object: string, q: { where?: Record<string, unknown> } = {}) {
+      assertEngineFindOnePredicate(object, q);
       return (await this.find(object, q))[0] ?? null;
     },
     // The key's use stamp: what plugin-audit's hook reads, read here.
