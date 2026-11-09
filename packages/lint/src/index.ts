@@ -791,6 +791,15 @@ export {
 } from './validate-mapping-target-fields.js';
 export type { MappingTargetFieldFinding } from './validate-mapping-target-fields.js';
 
+// A mapping's `connectorSource.connector` must name a declared `connectors[]`
+// entry whose provider a pull reads through (rest or openapi).
+export {
+  validateMappingConnectorSources,
+  MAPPING_CONNECTOR_SOURCE_UNKNOWN,
+  CONNECTOR_SOURCE_PROVIDERS,
+} from './validate-mapping-connector-source.js';
+export type { MappingConnectorSourceFinding } from './validate-mapping-connector-source.js';
+
 // The two reusable seams the rule above is written on, exported because the
 // queued siblings (#14148 widget filter keys + sortBy, #14107 list-view field
 // positions) must reuse ONE mechanism rather than growing a second hop-walker
