@@ -24,6 +24,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import '@objectstack/metadata';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { HttpDispatcher } from '../http-dispatcher.js';

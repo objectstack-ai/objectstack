@@ -52,6 +52,7 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
+import '@objectstack/metadata';
 import { HttpDispatcher } from './http-dispatcher.js';
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 import { ROUTE_LEDGER, LEGACY_CHAIN_PREFIXES, NON_DISPATCH_MOUNT_PREFIXES } from './route-ledger.js';

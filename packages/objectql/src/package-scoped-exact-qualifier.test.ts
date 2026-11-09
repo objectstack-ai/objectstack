@@ -23,6 +23,7 @@ import './__fixtures__/lint-root-preload.testkit.js';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { resolveThrownHttpError } from '@objectstack/types';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { SchemaRegistry } from './registry.js';
 import { PackageScopedNameRefusedError } from './package-scoped-read.js';
 
@@ -46,11 +47,20 @@ const envItem = (type: string, name: string) =>
   registry.registerItem(type, { name, label: `env ${type}`, _provenance: 'org' }, 'name' as never);
 const labelOf = (answer: unknown) => (answer as { item?: { label?: string } } | undefined)?.item?.label;
 
+// The engine double: equality and `$in`, and nothing else — any other
+// operator or combinator is refused loudly rather than read as a field.
 const matches = (row: Record<string, unknown>, where: Record<string, unknown> | undefined) =>
-  Object.entries(where ?? {}).every(([k, v]) =>
-    v !== null && typeof v === 'object' && Array.isArray((v as { $in?: unknown[] }).$in)
-      ? (v as { $in: unknown[] }).$in.includes(row[k])
-      : (row[k] ?? null) === v);
+  Object.entries(where ?? {}).every(([k, v]) => {
+    if (k.startsWith('$')) throw new Error(`engine double: logical operator ${k} is not implemented`);
+    if (v !== null && typeof v === 'object') {
+      const ops = Object.keys(v);
+      if (ops.length !== 1 || ops[0] !== '$in' || !Array.isArray((v as { $in?: unknown }).$in)) {
+        throw new Error(`engine double: operator ${ops.join(', ')} is not implemented`);
+      }
+      return (v as { $in: unknown[] }).$in.includes(row[k]);
+    }
+    return (row[k] ?? null) === v;
+  });
 
 async function refusalOf(read: () => unknown): Promise<PackageScopedNameRefusedError> {
   try {
@@ -65,11 +75,17 @@ async function refusalOf(read: () => unknown): Promise<PackageScopedNameRefusedE
 beforeEach(() => {
   rows = [];
   registry = new SchemaRegistry({ multiTenant: false });
-  const pick = (opts?: { where?: Record<string, unknown> }) => rows.filter((r) => matches(r, opts?.where));
+  const pick = (opts?: { where?: Record<string, unknown>; limit?: number }) => {
+    const hits = rows.filter((r) => matches(r, opts?.where));
+    return typeof opts?.limit === 'number' ? hits.slice(0, opts.limit) : hits;
+  };
   const engine = {
     registry,
-    find: vi.fn(async (_object: string, opts?: { where?: Record<string, unknown> }) => pick(opts)),
-    findOne: vi.fn(async (_object: string, opts?: { where?: Record<string, unknown> }) => pick(opts)[0] ?? null),
+    find: vi.fn(async (_object: string, opts?: { where?: Record<string, unknown>; limit?: number }) => pick(opts)),
+    findOne: vi.fn(async (object: string, opts?: { where?: Record<string, unknown> }) => {
+      assertEngineFindOnePredicate(object, opts as never);
+      return pick(opts)[0] ?? null;
+    }),
     insert: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),

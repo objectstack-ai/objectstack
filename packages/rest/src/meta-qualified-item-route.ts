@@ -21,13 +21,14 @@
  * before this one, so the route manager's first match is the literal
  * (`/meta/app/crm/history` is the app `crm`'s history; ruling Q1 on #31691);
  * a last segment that is a literal of a type with no such route answers what
- * it answered before this route existed, `404 ROUTE_NOT_FOUND`. So does a
- * middle segment that is neither `_env` nor an installed namespace. A
+ * it answered before this route existed: the host's unmatched answer,
+ * `404 ENDPOINT_NOT_FOUND` "Not found". So does a middle segment that is
+ * neither `_env` nor an installed namespace. A
  * qualified path that also sends `?package=` names two addresses and is
  * refused `400`.
  */
 
-import { META_ITEM_SUBRESOURCE_SEGMENTS, type MetaItemAddress } from '@objectstack/metadata-protocol';
+import { sendError } from '@objectstack/types';
 import { handleRouteError } from './error-response.js';
 import type { MetaRouteScope } from './meta-collection-routes.js';
 import type { MetaItemReadHandler } from './meta-item-read-routes.js';
@@ -39,15 +40,24 @@ export interface MetaQualifiedItemRouteHost {
     resolveProtocol: RestServer['resolveProtocol'];
 }
 
+/**
+ * How the protocol reads the middle segment (`MetaItemAddress` in
+ * `@objectstack/metadata-protocol`, spelled structurally: this package reaches
+ * the protocol as a service, never as an import).
+ */
+type MetaItemAddress =
+    | { readonly kind: 'environment' }
+    | { readonly kind: 'namespace'; readonly namespace: string; readonly packageId: string };
+
 /** The protocol reads this route asks, feature-detected. */
 interface QualifiedAddressProtocol {
     resolveMetaItemAddress?(request: { type: string; segment: string; name: string }): MetaItemAddress | undefined;
     admitEnvironmentQualifier?(request: { type: string; name: string; member?: string }): void;
 }
 
-function routeNotFound(res: any, req: any): void {
-    const route = `GET ${String(req?.path ?? '')}`;
-    res.status(404).json({ success: false, error: { code: 'ROUTE_NOT_FOUND', message: `Route Not Found: ${route}` } });
+/** What the host answered this path before the route existed: its unmatched 404. */
+function routeNotFound(res: any): void {
+    sendError(res, 404, 'ENDPOINT_NOT_FOUND', 'Not found');
 }
 
 /** A copy of `req` addressed as the bare item read, with `params` and `query` replaced. */
@@ -72,23 +82,18 @@ export function registerMetaQualifiedItemRoute(
         handler: async (req: any, res: any) => {
             try {
                 const { ns: segment, ...params } = (req.params ?? {}) as Record<string, string>;
-                if (META_ITEM_SUBRESOURCE_SEGMENTS.includes(params.name)) return routeNotFound(res, req);
                 const environmentId = isScoped ? req.params?.environmentId : undefined;
                 const p = await this.resolveProtocol(environmentId, req) as unknown as QualifiedAddressProtocol;
                 const address = typeof p?.resolveMetaItemAddress === 'function'
                     ? p.resolveMetaItemAddress({ type: params.type, segment, name: params.name })
                     : undefined;
-                if (!address) return routeNotFound(res, req);
+                if (!address) return routeNotFound(res);
                 const query = { ...((req.query ?? {}) as Record<string, unknown>) };
                 // Two qualifiers on one read name two addresses; neither is picked.
                 if (query.package !== undefined) {
-                    res.status(400).json({
-                        error: {
-                            code: 'VALIDATION_ERROR',
-                            message: `The path names its ${address.kind === 'environment' ? 'environment' : `namespace '${segment}'`} `
-                                + 'as the exact qualifier, so `?package=` cannot name another one. Send one of the two (ADR-0150 D5).',
-                        },
-                    });
+                    sendError(res, 400, 'VALIDATION_ERROR',
+                        `The path names its ${address.kind === 'environment' ? 'environment' : `namespace '${segment}'`} `
+                        + 'as the exact qualifier, so `?package=` cannot name another one. Send one of the two (ADR-0150 D5).');
                     return;
                 }
                 if (address.kind === 'namespace') {

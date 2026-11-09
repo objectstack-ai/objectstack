@@ -4009,8 +4009,7 @@ export class ObjectStackProtocolImplementation implements
      * {@link META_ITEM_SUBRESOURCE_SEGMENTS}, which keeps its route.
      */
     resolveMetaItemAddress(request: { type: string; segment: string; name: string }): MetaItemAddress | undefined {
-        const address = resolveMetaItemAddress(protocolHost(this), canonicalizeMetaRequestType(request));
-        return address;
+        return resolveMetaItemAddress(protocolHost(this), request);
     }
 
     /**
@@ -4022,7 +4021,7 @@ export class ObjectStackProtocolImplementation implements
      * @throws {PackageScopedNameRefusedError} `409 RESOURCE_CONFLICT`.
      */
     admitEnvironmentQualifier(request: { type: string; name: string; member?: string }): void {
-        admitEnvironmentQualifier(protocolHost(this), canonicalizeMetaRequestType(request));
+        return admitEnvironmentQualifier(protocolHost(this), request);
     }
 
     /**

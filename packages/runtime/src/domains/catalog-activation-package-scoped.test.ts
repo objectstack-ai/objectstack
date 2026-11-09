@@ -21,7 +21,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import '@objectstack/metadata';
 import { PackageScopedNameRefusedError } from '@objectstack/core';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
 
@@ -64,15 +66,22 @@ function boot() {
                 : []),
         },
         async find(object: string, options: any) {
-            return (tables[object] ?? []).filter((r) =>
-                Object.entries(options?.where ?? {}).every(([k, v]) => (r[k] ?? null) === v));
+            // Equality only; an operator or combinator is refused, never read as a field.
+            const hits = (tables[object] ?? []).filter((r) =>
+                Object.entries(options?.where ?? {}).every(([k, v]) => {
+                    if (k.startsWith('$')) throw new Error(`engine double: logical operator ${k} is not implemented`);
+                    if (v !== null && typeof v === 'object') throw new Error(`engine double: operator on ${k} is not implemented`);
+                    return (r[k] ?? null) === v;
+                }));
+            return typeof options?.limit === 'number' ? hits.slice(0, options.limit) : hits;
         },
         async insert(object: string, data: Row) {
             writes.push(data);
             (tables[object] ??= []).push({ id: `act_${writes.length}`, ...data });
             return data;
         },
-        async update(_object: string, data: Row) {
+        async update(_object: string, data: Row, options?: any) {
+            assertEngineUpdateDispatch(data as never, options);
             writes.push(data);
             return data;
         },

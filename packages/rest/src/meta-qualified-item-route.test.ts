@@ -136,11 +136,11 @@ describe('GET /meta/:type/:ns/:name', () => {
         expect([answer.status, answer.body?.error?.code]).toEqual([400, 'VALIDATION_ERROR']);
     });
 
-    it('CONTROL — no installed namespace, or a sub-resource literal last: 404 ROUTE_NOT_FOUND, as before', async () => {
+    it('CONTROL — no installed namespace, or a sub-resource literal last: the host\'s unmatched 404, as before', async () => {
         ship('page', 'home', A);
         expect((await drive(QUALIFIED, { type: 'page', ns: 'nowhere', name: 'home' })).status).toBe(404);
         const literal = await drive(QUALIFIED, { type: 'page', ns: 'alpha', name: 'tree' });
-        expect([literal.status, literal.body?.error?.code]).toEqual([404, 'ROUTE_NOT_FOUND']);
+        expect([literal.status, literal.body?.error?.code]).toEqual([404, 'ENDPOINT_NOT_FOUND']);
     });
 });
 

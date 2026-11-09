@@ -24,6 +24,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import '@objectstack/objectql';
 import { resolveAuthzContext } from '@objectstack/core';
 import { registerDatasourceAdminRoutes } from '@objectstack/service-datasource';
 import { PLATFORM_CAPABILITY_NAMES } from '@objectstack/spec/security';

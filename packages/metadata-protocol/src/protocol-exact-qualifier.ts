@@ -37,6 +37,7 @@ import {
 } from '@objectstack/core';
 import { ENVIRONMENT_ADDRESS_SEGMENT, readNamespacePositionSegment } from '@objectstack/spec/kernel';
 import { installedManifestsOfEngine } from './installed-manifests.js';
+import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import type { ProtocolHost } from './protocol-host.js';
 
 /** The registry reads the exact qualifier asks. */
@@ -196,8 +197,8 @@ interface NamespaceCatalogue {
 
 /**
  * Read the middle segment of `GET /meta/:type/:segment/:name` in D5's order:
- * a sub-resource literal in the last position keeps its route (the caller
- * checks {@link META_ITEM_SUBRESOURCE_SEGMENTS} first); then `_env`; then an
+ * a sub-resource literal in the last position keeps its route
+ * ({@link META_ITEM_SUBRESOURCE_SEGMENTS}: no address); then `_env`; then an
  * installed namespace; else `undefined` — no qualified address, and the path
  * answers what it answers today.
  *
@@ -210,6 +211,10 @@ export function resolveMetaItemAddress(
     host: Pick<ProtocolHost, 'engine'>,
     request: { type: string; segment: string; name: string },
 ): MetaItemAddress | undefined {
+    // The door hands the type it was asked; fold it once, here.
+    request = canonicalizeMetaRequestType(request);
+    // A sub-resource literal last keeps its route (ruling Q1): never an address.
+    if (META_ITEM_SUBRESOURCE_SEGMENTS.includes(request.name)) return undefined;
     if (request.segment === ENVIRONMENT_ADDRESS_SEGMENT) return { kind: 'environment' };
     const registry = (host.engine as { registry?: Partial<NamespaceCatalogue> } | undefined)?.registry;
     if (typeof registry?.getNamespaceOwners !== 'function') return undefined;
@@ -239,6 +244,7 @@ export function admitEnvironmentQualifier(
     host: Pick<ProtocolHost, 'engine'>,
     request: { type: string; name: string; member?: string },
 ): void {
+    request = canonicalizeMetaRequestType(request);
     const registry = exactQualifierRegistry(host);
     if (!registry || !registry.readsByPackage(request.type)) return;
     if (registry.getEnvironmentScopedItem(request.type, request.name, request.member) !== undefined) return;

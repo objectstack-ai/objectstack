@@ -2957,6 +2957,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/objectql/src/package-scoped-exact-qualifier.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/objectql/src/plugin-governance-scoped-metadata.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -5008,6 +5013,11 @@
     },
     {
       "file": "packages/runtime/src/domains/catalog-activation-door.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/catalog-activation-package-scoped.test.ts",
       "verb": "update",
       "pinned": 1
     },

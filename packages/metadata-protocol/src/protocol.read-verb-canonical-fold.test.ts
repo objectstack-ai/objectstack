@@ -58,6 +58,7 @@
  * the signal to re-pick the fixtures, not to delete the assertion.
  */
 import { describe, expect, it } from 'vitest';
+import '@objectstack/lint';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { maskComments } from '../../../scripts/js-comment-mask.mjs';
