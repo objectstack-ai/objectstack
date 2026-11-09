@@ -176,7 +176,9 @@ spine, by `Book.name`: `books.{book}.label` / `.description`, and `groups.{group
 each group's stable `key`, never its position — `books.crm_manual.groups.getting_started.label`;
 the pages themselves localize through `doc.translations`, and the inline `translations` map a
 book once carried stays retired), `metadataForms`, `settingsCommon`; `reports`, `positions` and
-`permissions` hold `label` + `description` by name, and a joined report's block headings sit at
+`permissions` hold `label` + `description` by name, so do `datasets` and each dataset member at
+`datasets.{dataset}.{dimensions,measures}.{member}` (a member's `synonyms` have no key: one
+authored list carries every language), and a joined report's block headings sit at
 `reports.{report}.blocks.{block_name}.{label,description}`, keyed by the block's required `name`.
 Two keys sit deeper than their group's `label`: a `page:tabs` item at
 `pages.{page}.components.{tabs_id}.items.{value}.label` (by the item's `value`; an item without

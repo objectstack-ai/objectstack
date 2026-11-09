@@ -685,9 +685,12 @@ const cluster = defineCluster({ driver: 'memory' })
 Under `os serve` the driver is selected from the environment instead:
 `OS_CLUSTER_DRIVER` (anything other than `memory` triggers a dynamic import of
 `@objectstack/service-cluster-<driver>`) and `OS_REDIS_URL` for the connection
-string. A distribution may register a multi-node gate; when it denies,
-`os serve` logs a warning and downgrades to the single-node in-memory cluster
-rather than failing.
+string. A distribution may register a multi-node gate; with no gate
+registered, a declared multi-node topology is denied. When the gate denies,
+`os serve` logs a warning and drops the remote driver for the in-memory one.
+That is a single-node downgrade only when no multi-node topology is declared:
+with one declared (`OS_CLUSTER_REPLICAS` > 1 or `OS_EXPECT_MULTI_NODE=true`),
+the split-brain guard below refuses the boot.
 
 A gate may instead admit **fewer** nodes than the deployment declares — a
 licensed node-cap overflow. That is a different verdict from a denial and is

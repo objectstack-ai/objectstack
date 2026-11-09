@@ -217,7 +217,9 @@ function selfTest() {
     check(`${label} ⇒ refused naming '${needle}' (got ${JSON.stringify(message)})`, message !== null && message.includes(needle) && message.includes(`job '${job}'`));
   };
   const workflow = (body) => `on: push\njobs:\n${body}`;
-  const matrixJob = (id, shardLine, extra = '') => `  ${id}:\n    runs-on: ubuntu-latest\n${extra}    strategy:\n      fail-fast: false\n      matrix:\n        ${shardLine}\n    steps:\n      - run: echo\n`;
+  // The strategy spells ci.yml's sharded jobs' `fail-fast` (merge-queue only, #31517), so the
+  // reader is exercised over an expression line between `strategy:` and `matrix:`.
+  const matrixJob = (id, shardLine, extra = '') => `  ${id}:\n    runs-on: ubuntu-latest\n${extra}    strategy:\n      fail-fast: \${{ github.event_name == 'merge_group' }}\n      matrix:\n        ${shardLine}\n    steps:\n      - run: echo\n`;
 
   battery('the live ci.yml');
   const live = readFileSync(join(REPO_ROOT, CI_WORKFLOW), 'utf8');
