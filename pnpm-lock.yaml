@@ -2801,6 +2801,9 @@ importers:
       '@objectstack/metadata-protocol':
         specifier: workspace:*
         version: link:../../metadata-protocol
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
       '@objectstack/platform-objects':
         specifier: workspace:*
         version: link:../../platform-objects
@@ -2817,9 +2820,6 @@ importers:
       '@objectstack/driver-sql':
         specifier: workspace:*
         version: link:../../drivers/driver-sql
-      '@objectstack/objectql':
-        specifier: workspace:*
-        version: link:../../objectql
       '@objectstack/plugin-audit':
         specifier: workspace:*
         version: link:../../plugins/plugin-audit
@@ -4619,6 +4619,9 @@ importers:
       '@object-ui/types':
         specifier: workspace:*
         version: link:../types
+      '@objectstack/formula':
+        specifier: workspace:^
+        version: link:../../../packages/formula
       '@objectstack/spec':
         specifier: workspace:^
         version: link:../../../packages/spec

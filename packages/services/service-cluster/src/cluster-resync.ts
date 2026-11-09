@@ -16,10 +16,19 @@
  * holds cross-node state subscribes and flushes or re-reads on it, so a write
  * whose hint was lost during the outage converges without a restart.
  *
- * The same transitions answer "is the shared store reachable right now?" for a
- * readiness probe ({@link readClusterDriverHealth}), and they are where the
- * outage is logged: ONE warning when it starts, one info line when it ends —
- * never a line per failed command, and never a credential.
+ * The same transitions are where the outage is logged — ONE warning when it
+ * starts, one info line when it ends, never a line per failed command and
+ * never a credential — and {@link readClusterDriverHealth} reads them back.
+ *
+ * ## Passive reading vs. active probe
+ *
+ * {@link readClusterDriverHealth} is PASSIVE: it reports what the driver's
+ * connections last said (`error` / `close` / `ready`), costs nothing, and
+ * sends nothing to the store. It cannot see a black-holed store whose socket
+ * never errors. `probeClusterDriverHealth()` (`driver-health.ts`, #31601) is
+ * the ACTIVE check `/ready` uses: a bounded `PING` against the store, which
+ * does see that case. Its `ClusterDriverHealth` (`reachable`, `reason`) is a
+ * different shape from this module's {@link ClusterDriverLivenessHealth}.
  *
  * ## The single-node path is untouched
  *
@@ -66,7 +75,7 @@ export type ClusterResyncHandler = (event: ClusterResyncEvent) => void | Promise
  * watches is ready, and `down` from the first connection failure until every
  * failed connection is ready again.
  */
-export interface ClusterDriverHealth {
+export interface ClusterDriverLivenessHealth {
     readonly driver: string;
     readonly nodeId: string;
     readonly state: 'unknown' | 'up' | 'down';
@@ -114,7 +123,7 @@ export class ClusterDriverLiveness {
     private readonly handlers = new Set<ClusterResyncHandler>();
     /** Sources currently failed. Non-empty ⇔ `down`. */
     private readonly downSources = new Set<string>();
-    private state: ClusterDriverHealth['state'] = 'unknown';
+    private state: ClusterDriverLivenessHealth['state'] = 'unknown';
     private since: number;
     private outages = 0;
     private outageStartedAt = 0;
@@ -178,7 +187,7 @@ export class ClusterDriverLiveness {
     }
 
     /** The current reading. */
-    health(): ClusterDriverHealth {
+    health(): ClusterDriverLivenessHealth {
         return {
             driver: this.driver,
             nodeId: this.nodeId,
@@ -292,6 +301,6 @@ export function onClusterResync(cluster: unknown, handler: ClusterResyncHandler)
  * `cluster`'s driver connection health, or `undefined` when its driver offers
  * none (the in-process `memory` driver). Read it per probe: it is a snapshot.
  */
-export function readClusterDriverHealth(cluster: unknown): ClusterDriverHealth | undefined {
+export function readClusterDriverHealth(cluster: unknown): ClusterDriverLivenessHealth | undefined {
     return readLiveness(cluster)?.health();
 }

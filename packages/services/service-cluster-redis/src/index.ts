@@ -127,9 +127,10 @@ function redisDriverFactory(config: DriverFactoryConfig) {
     // (`client.duplicate()`) and writes under `<keyPrefix>cache:`; this facade
     // keeps owning `client` and is the only one that closes it.
     offerClusterDriverConnection(facade, { driver: 'redis', client, keyPrefix });
-    // Offer the liveness: `readClusterDriverHealth(cluster)` for a readiness
-    // probe, `onClusterResync(cluster, …)` for every cache holding cross-node
-    // state.
+    // Offer the liveness: `readClusterDriverHealth(cluster)` for a passive
+    // reading of the connection state (the active store probe is
+    // `probeClusterDriverHealth()`), `onClusterResync(cluster, …)` for every
+    // cache holding cross-node state.
     offerClusterDriverLiveness(facade, liveness);
 
     // Wrap close() so we also tear down the publisher client if we own it.

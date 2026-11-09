@@ -443,6 +443,11 @@ const es = {
     currencyHome: {
       convertedAt: 'Convertido al tipo {{rate}} del {{date}}',
       homeCurrency: 'En la moneda base (tipo 1)',
+      preview: '≈ {{amount}} al tipo {{rate}} el {{date}}',
+      previewSame: '≈ {{amount}} (moneda principal)',
+      awaitingRate: 'No hay tipo de {{currency}} en o antes del {{date}}: no se puede guardar hasta que se añada uno',
+      awaitingDate: 'Indique la fecha del documento para ver el importe en la moneda principal',
+      rateUnreadable: 'Se convierte a la moneda principal al guardar',
     },
     boolean: {
       offBadge: "{{label}} — Desactivado",

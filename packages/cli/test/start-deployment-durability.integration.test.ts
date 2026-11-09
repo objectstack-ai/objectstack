@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 40 — three refusals that exit before any server starts, then two real `os start` boots (one on explicit settings; one on the defaults, which also signs up an owner, creates a member and reads the notice as each); the file read 27.6 s on a shared local box (no CI reading yet) x 1.25, rounded up to the next 10 s
+// test-budget: 40 — six starts that exit before any server answers (three image refusals; the multi-replica refusal, its pass and its memory-driver control), then two real `os start` boots (one on explicit settings; one on the defaults, which also signs up an owner, creates a member and reads the notice as each); the file read 27.6 s on a shared local box (no CI reading yet) x 1.25, rounded up to the next 10 s, and 26.9 s with the three multi-replica starts added
 
 /**
  * #30120, ruling A3 (record 6634240777) — the official image refuses to start
@@ -28,6 +28,12 @@
  *     `GET /api/settings/deployment/notice` with the files the block named, a
  *     member is refused `403`, and neither the public auth config nor the
  *     runtime config carries any of it.
+ *
+ * And, beside the image's refusal (#31600): a start that declares several
+ * replicas over the redis cluster driver and sets no `OS_AUTH_SECRET` exits 1
+ * on one line naming it, before it generates a secret; with the secret set it
+ * passes, and replicas declared over the memory driver still generate one.
+ * The single-node default keeps generating its own: leg 3 reads that file.
  *
  * The hide's audit row and the route's other refusals are pinned beside the
  * routes (`service-settings` `deployment-notice.routes.test.ts`).
@@ -106,6 +112,10 @@ function baseEnv(home: string, over: Record<string, string | undefined> = {}): R
     AUTH_SECRET: undefined,
     BETTER_AUTH_SECRET: undefined,
     OS_CLUSTER_DRIVER: undefined,
+    OS_EXPECT_MULTI_NODE: undefined,
+    OS_CLUSTER_REPLICAS: undefined,
+    OS_ALLOW_MEMORY_CLUSTER_MULTINODE: undefined,
+    OS_REDIS_URL: undefined,
     OS_MODE: undefined,
     OS_PORT: undefined,
     PORT: undefined,
@@ -290,6 +300,59 @@ describe('#30120 — with the image switch on, a start missing its settings refu
     expect(run.status, out).toBe(1);
     expect(out).toContain('is not a switch value');
   });
+});
+
+// ---------------------------------------------------------------------------
+// 1b — several replicas declared over the redis cluster driver: no secret of its own
+// ---------------------------------------------------------------------------
+
+describe('#31600 — a declared multi-replica start on the redis cluster driver mints no sign-in secret of its own', () => {
+  // The data key is set on every leg, so the only thing each leg varies is the
+  // sign-in secret and the topology. No leg needs a Redis: the door is asked in
+  // `os start` itself, before the `serve` child composes any cluster driver.
+  // Each leg is one synchronous `os start`, bounded by the spawn's own 120 s;
+  // the two that reach the `serve` child read ~4 s locally, past vitest's
+  // default 5 s per test on a loaded runner, so the leg carries the spawn's bound.
+  const SPAWN_TIMEOUT_MS = 120_000;
+  const LEG_TIMEOUT_MS = SPAWN_TIMEOUT_MS + 10_000;
+  const start = (over: Record<string, string | undefined>) => {
+    const home = tmp('os-31600-home-');
+    const cwd = tmp('os-31600-cwd-');
+    const run = spawnSync(process.execPath, [CLI, 'start', '--port', KERNEL_ASSIGNED_PORT], {
+      cwd,
+      env: childEnv({ ...baseEnv(home, { OS_SECRET_KEY: secret(), ...over }), NODE_ENV: undefined }),
+      encoding: 'utf8',
+      timeout: SPAWN_TIMEOUT_MS,
+    });
+    const minted = [...filesUnder(home), ...filesUnder(cwd)].filter((f) => /(^|\/)auth-secret$/.test(f));
+    return { run, minted, out: `${run.stdout}\n${run.stderr}` };
+  };
+  const REFUSAL = /^\[auth\] Refusing to start: several replicas are declared \(OS_EXPECT_MULTI_NODE \/ OS_CLUSTER_REPLICAS>1\) over the redis cluster driver, but OS_AUTH_SECRET is not set/m;
+
+  it('OS_AUTH_SECRET unset: exit 1 on the one line, before any secret is written', () => {
+    const { run, minted, out } = start({ OS_CLUSTER_REPLICAS: '3', OS_CLUSTER_DRIVER: 'redis' });
+    expect(run.status, out).toBe(1);
+    expect(run.stderr).toMatch(REFUSAL);
+    expect(run.stderr).toContain('e.g. OS_AUTH_SECRET=$(openssl rand -hex 32)');
+    expect(out).not.toMatch(READY);
+    expect(minted, out).toEqual([]);
+  }, LEG_TIMEOUT_MS);
+
+  it('OS_AUTH_SECRET set: this door passes, and nothing is minted', () => {
+    const { minted, out } = start({ OS_EXPECT_MULTI_NODE: 'true', OS_CLUSTER_DRIVER: 'redis', OS_AUTH_SECRET: secret() });
+    expect(out).not.toMatch(REFUSAL);
+    // The banner is printed after the door: the start went on to its child.
+    expect(out).toMatch(/Database/);
+    expect(minted, out).toEqual([]);
+  }, LEG_TIMEOUT_MS);
+
+  it('CONTROL: replicas declared over the memory driver mint a secret exactly as before', () => {
+    // The child then meets the split-brain guard, today's refusal for this
+    // topology; the secret is minted in `os start` before that, as it always was.
+    const { minted, out } = start({ OS_CLUSTER_REPLICAS: '3', OS_CLUSTER_DRIVER: 'memory' });
+    expect(out).not.toMatch(REFUSAL);
+    expect(minted, out).toEqual([join('.objectstack', 'auth-secret')]);
+  }, LEG_TIMEOUT_MS);
 });
 
 // ---------------------------------------------------------------------------
