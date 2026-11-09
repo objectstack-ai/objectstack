@@ -48,8 +48,11 @@ export const InvoiceDocumentPage = definePage({
           type: 'record:details',
           properties: {
             sections: [
-              { name: 'invoice', label: 'Invoice', columns: 2, fields: ['name', 'status', 'account', 'contact', 'issued_on', 'paid_on'] },
-              { name: 'amounts', label: 'Amounts', columns: 2, fields: ['tax_rate', 'total'] },
+              { name: 'invoice', label: 'Invoice', columns: 2, fields: ['name', 'status', 'account', 'contact', 'issued_on', 'paid_on', 'currency_code', 'invoice_date'] },
+              // The invoice's own currency and the home-currency figure it was
+              // converted to on `invoice_date` (ADR-0144). `amount_home` draws
+              // read-only with its "Converted at RATE on DATE" hint.
+              { name: 'amounts', label: 'Amounts', columns: 2, fields: ['tax_rate', 'total', 'amount', 'amount_home', 'amount_rate'] },
             ],
           },
         },
