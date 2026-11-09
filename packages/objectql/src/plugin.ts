@@ -28,6 +28,9 @@ import { applyConversionsToStoredItem, expandViewContainer, isAggregatedViewCont
 // body's (see `registerUnclaimedTopLevelItems`).
 import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
 import { viewContainerNameRefusal } from './view-container-name-refusal.js';
+// [ADR-0150 D2, #31720] The residual as one holder of the stack's namespace,
+// for the namespace name rule (see the residual registration below).
+import { residualNamespacePackageOf } from './namespace-co-owner-names.js';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { applyProtection } from '@objectstack/spec/shared';
 // [#21777] The ONE "is this schema the remote's?" predicate, shared with `ObjectQL.syncSchemas`.
@@ -995,6 +998,9 @@ export class ObjectQLPlugin implements Plugin {
         // in the running kernel while the install door answered the refusal
         // and ledgered nothing. A single-package artifact is the one-body run
         // `registerApp` opens on its own, answered as before.
+        // [ADR-0150 D2, #31720] The residual as one holder of the stack's
+        // namespace — judged below, recorded once the artifact has registered.
+        const residualHolder = residualNamespacePackageOf(artifact, residualAnswer);
         ql.registry.restoringOnRefusal(() => {
           for (const { manifest, source } of entries as Array<{ manifest: any; source?: 'code' | 'marketplace' }>) {
             ql.registerApp(manifest, scope, source ?? options?.source);
@@ -1002,6 +1008,13 @@ export class ObjectQLPlugin implements Plugin {
               id: manifest.id || manifest.name
             });
           }
+          // [ADR-0150 D2, #31720] The residual is one more holder of the
+          // stack's namespace: refused, in the package door's envelope, when it
+          // declares an item of the covered types under a name another package
+          // of that namespace holds — judged here, once every body has
+          // installed and before anything of the residual registers, so a
+          // refusal puts back the whole artifact like any other in this run.
+          ql.registry.refuseResidualNamespaceNameConflicts(residualHolder);
           // [ADR-0130 D4] The residual's objects, AFTER every body — the order
           // the metadata door registers the same stack in — under the id the
           // residual rule names, through the registry verb a body's own objects
@@ -1034,6 +1047,10 @@ export class ObjectQLPlugin implements Plugin {
         if (residualOwnerId !== undefined) {
           ql.registry.recordResidualOwnerDependencies(residualOwnerId, declaredDependencyIds((artifact as { manifest?: unknown })?.manifest ?? artifact));
         }
+        // [ADR-0150 D2, #31720] …and the residual as a holder of its namespace,
+        // so a package registering after this stack is judged against it too.
+        // Recorded on the same terms: once the artifact has registered whole.
+        ql.registry.recordResidualNamespaceHolder(residualHolder);
         // [#24472] The boot reported every same-name pair it found
         // (`kernel:ready`, below); an artifact arriving later is judged once it
         // has registered, for the pairs naming one of its packages on either

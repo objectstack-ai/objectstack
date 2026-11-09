@@ -9233,7 +9233,46 @@ export class SchemaRegistry {
    * @throws {NamespaceNameConflictError} ADR-0112 envelope, naming every holder.
    */
   private refuseNamespaceNameConflicts(manifest: ObjectStackManifest): void {
-    const incoming = namespacePackageOf(manifest);
+    this.refuseNamespaceHolderConflicts(namespacePackageOf(manifest));
+  }
+
+  /**
+   * [ADR-0150 D2, #31720] The same refusal for a `packages[]` stack's
+   * RESIDUAL — the top-level items no package body declares, which the
+   * `manifest` service registers under the residual's owner id after every
+   * body and never through {@link installPackage}. `residual` is that holder
+   * as the predicate sees it (`residualNamespacePackageOf`): the owner id, the
+   * stack's own `manifest.namespace`, its covered items. Judged against the
+   * installed packages of that namespace — the stack's own bodies included,
+   * once they have installed — exactly as a package is, in the same envelope.
+   * `undefined` (no residual, or none of the covered types) refuses nothing.
+   */
+  refuseResidualNamespaceNameConflicts(residual: NamespacePackage | undefined): void {
+    this.refuseNamespaceHolderConflicts(residual);
+  }
+
+  /**
+   * [#31720] Record a registered residual as a holder of its namespace, so a
+   * package (or another stack's residual) registering AFTER it is judged
+   * against it too: the residual has no package record for the walk below to
+   * read. Called once the stack has registered whole — a refused one records
+   * nothing — and keyed by the residual's owner id, so the same stack
+   * registering again replaces its own entry. `undefined` records nothing.
+   */
+  recordResidualNamespaceHolder(residual: NamespacePackage | undefined): void {
+    if (residual === undefined || !isNamespaceJudged(residual.namespace)) return;
+    this.residualNamespaceHolders.set(residual.packageId, residual);
+  }
+
+  /** The residual holders {@link recordResidualNamespaceHolder} recorded, by owner id. */
+  private readonly residualNamespaceHolders = new Map<string, NamespacePackage>();
+
+  /**
+   * The one walk both refusals above share: `incoming` against every installed
+   * package record of its namespace and every recorded residual holder of it,
+   * read through the same predicate, thrown in one envelope.
+   */
+  private refuseNamespaceHolderConflicts(incoming: NamespacePackage | undefined): void {
     if (incoming === undefined || !isNamespaceJudged(incoming.namespace) || incoming.names.length === 0) return;
     const sitting: NamespacePackage[] = [];
     for (const record of this.metadata.get('package')?.values() ?? []) {
@@ -9241,6 +9280,9 @@ export class SchemaRegistry {
       if (recorded?.namespace !== incoming.namespace) continue;
       const holder = namespacePackageOf(recorded);
       if (holder !== undefined) sitting.push(holder);
+    }
+    for (const residual of this.residualNamespaceHolders.values()) {
+      if (residual.namespace === incoming.namespace) sitting.push(residual);
     }
     const conflicts = namespaceNameConflicts(incoming, sitting);
     if (conflicts.length > 0) throw new NamespaceNameConflictError(conflicts);
@@ -9297,6 +9339,11 @@ export class SchemaRegistry {
     this.forgetDefaultRecordPageClaims(id);
     // …and its bare names of the covered types.
     this.forgetBareNameClaims(id);
+    // [#31720] …and the namespace names a stack's residual holds under this
+    // id: the residual's items are registered under their owner id, so
+    // `unregisterItemsByPackage(id)` above has just withdrawn them (the
+    // owner id is one of the stack's own bodies in the `preserve` shape).
+    this.residualNamespaceHolders.delete(id);
     // [#30581] …and the navigation entries it put into other packages' apps:
     // with no row left, the fold's disabled check cannot withhold them.
     this.setPackageNavContributions(id, []);
