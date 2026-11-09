@@ -34,6 +34,18 @@
  *    and the Setup doors that switch or guard them, which belong to no
  *    package (ADR-0150 D3, "a caller with no package").
  *
+ * ## A read from inside a package (`callerPackageId`)
+ *
+ * A reference a package WRITES — a declared sharing rule's queue recipient —
+ * is read from that package (ADR-0150 D3), not from the environment: the
+ * reader passes the package as `callerPackageId`, and the resolver answers
+ * the package's own item, else the unique holder in its declared dependency
+ * closure plus `sys`, else a refusal naming every candidate. That answer is
+ * final: one listed holder is no shortcut there, since the one item listed
+ * may be outside the package's reach. The population still bounds it: a
+ * resolved item the listing would hide (its package is disabled) serves
+ * nothing, as an unlisted name serves nothing.
+ *
  * A registry that cannot answer `(package, name)` — one with no
  * package-scoped slice (`packageScopedHoldersOf` and its two readers), such
  * as the kernel `metadata` service the declared sharing rules fall back to on
@@ -114,21 +126,43 @@ function listingRefusal(type: SharingDeclarationType, name: string, holders: rea
   return { ...base, message: packageScopedRefusalMessage(base) };
 }
 
+/** A caller package id, or `null` for a caller with no package (the resolver's own reading). */
+function callerPackageOf(callerPackageId: string | null | undefined): string | null {
+  return typeof callerPackageId === 'string' && callerPackageId !== '' ? callerPackageId : null;
+}
+
+/** Does the listing hide `item` — is its package disabled (the filter `listItems` applies)? */
+function hiddenByListing(registry: unknown, item: unknown): boolean {
+  const isDisabled = (registry as { isPackageDisabled?: (id?: string) => boolean } | null | undefined)?.isPackageDisabled;
+  if (typeof isDisabled !== 'function') return false;
+  const owner = (item as { _packageId?: unknown } | null | undefined)?._packageId;
+  return isDisabled.call(registry, typeof owner === 'string' ? owner : undefined);
+}
+
 /**
  * Resolve the bare `name` of a declared `type` among `listed` — the items
- * `listItems(type)` (or the fallback source) lists — as the module doc says:
- * one listed item answers itself, two or more are asked of
- * {@link resolvePackageScopedName} when `registry` can answer it, and
- * refused otherwise.
+ * `listItems(type)` (or the fallback source) lists — as the module doc says.
+ * With no caller package: one listed item answers itself, two or more are
+ * asked of {@link resolvePackageScopedName} when `registry` can answer it,
+ * and refused otherwise. With `callerPackageId` and a registry that can
+ * answer it: the resolver's answer from that package, bounded by the listing.
  */
 export function resolveDeclaredName<T>(
   registry: unknown,
   type: SharingDeclarationType,
   name: string,
   listed: readonly T[],
+  callerPackageId?: string | null,
 ): DeclaredNameAnswer<T> {
   const matches = listed.filter((item) => nameOf(item) === name);
   if (matches.length === 0) return { status: 'not-found' };
+  const caller = callerPackageOf(callerPackageId);
+  if (caller !== null && isPackageScopedRegistry(registry)) {
+    const fromPackage = resolvePackageScopedName<T>(registry, { type, name, callerPackageId: caller });
+    if (fromPackage.status === 'refused') return { status: 'refused', refusal: fromPackage };
+    if (fromPackage.status === 'not-found' || hiddenByListing(registry, fromPackage.item)) return { status: 'not-found' };
+    return { status: 'resolved', item: fromPackage.item };
+  }
   const holders = [...new Set(matches.map(declaredPackageIdOf))];
   if (matches.length === 1) return { status: 'resolved', item: matches[0] };
   if (!isPackageScopedRegistry(registry)) {

@@ -38,6 +38,17 @@
  *
  * A read that FAILS is not absence. What the expander answers then is the
  * caller's to say, per call — see {@link OwnershipQueueFailedReadAnswer}.
+ *
+ * ## Who is asking: the caller package
+ *
+ * Two installed packages may each declare a queue of one name (ADR-0150 D1:
+ * a queue is addressed by `(package, name)`). A read that names a queue from
+ * inside a package — a declared sharing rule's queue recipient — passes that
+ * package as `callerPackageId`, and the name resolves from it (ADR-0150 D3):
+ * the package's own queue, else the unique holder in its declared dependency
+ * closure plus `sys`, else a refusal naming every candidate. Omitted, the read
+ * is environment-wide, as it was before the key existed: one declared holder
+ * answers, two or more are refused. See {@link OwnershipQueueCallerPackage}.
  */
 
 import type { QueueMemberType } from '../security/queue.zod.js';
@@ -90,6 +101,29 @@ export type QueueExpansionPurpose = 'access' | 'addressing';
  */
 export type OwnershipQueueFailedReadAnswer = 'nobody' | 'refuse';
 
+/**
+ * The package a queue name is read from — the `callerPackageId` option of
+ * {@link IOwnershipQueueService.resolveQueue},
+ * {@link IOwnershipQueueService.expandMembers} and
+ * {@link IOwnershipQueueService.isMember} (ADR-0150 D3).
+ *
+ * - A package id: the name resolves from that package — its own declared
+ *   queue, else the unique holder in its declared dependency closure plus
+ *   `sys`. Two holders in that reach, a holder only outside it, or only an
+ *   environment-authored item, is a refusal naming every candidate: the name
+ *   resolves nowhere (`null` / `[]` / `false`), and under
+ *   `onFailedRead: 'refuse'` the call rejects with that refusal.
+ * - Omitted, `null` or `''`: a caller with no package, the environment-wide
+ *   read every caller made before the key existed.
+ *
+ * A name no package declares is an organization's `sys_queue` row under
+ * either answer. Optional, so an implementation written before it still
+ * satisfies the contract; such an implementation reads environment-wide,
+ * which is stricter than D3, never looser: a name two packages declare is
+ * refused there even when the caller's closure reaches only one of them.
+ */
+export type OwnershipQueueCallerPackage = string | null;
+
 /** One member specification: a recipient kind and the value that kind takes in a sharing rule. */
 export interface QueueMemberSpec {
   type: QueueMemberType;
@@ -122,8 +156,18 @@ export interface ResolvedQueue {
  * activation ledger resolves nowhere.
  */
 export interface IOwnershipQueueService {
-  /** The queue named `name` in `organizationId`, or `null` when it resolves nowhere. */
-  resolveQueue(name: string, organizationId: string | null): Promise<ResolvedQueue | null>;
+  /**
+   * The queue named `name` in `organizationId`, or `null` when it resolves
+   * nowhere. `callerPackageId` names the package the name is read from
+   * ({@link OwnershipQueueCallerPackage}); omitted, the read is
+   * environment-wide. The options argument is optional, so a two-argument
+   * call is today's.
+   */
+  resolveQueue(
+    name: string,
+    organizationId: string | null,
+    options?: { callerPackageId?: OwnershipQueueCallerPackage },
+  ): Promise<ResolvedQueue | null>;
 
   /**
    * The queue's members in `organizationId`: the union of each member
@@ -143,11 +187,19 @@ export interface IOwnershipQueueService {
    * rejects with a failure naming the read. An empty queue is still `[]`.
    * See {@link OwnershipQueueFailedReadAnswer} for the tables and for which
    * ADR-0142 consumer takes which answer; it is independent of `purpose`.
+   *
+   * `callerPackageId` names the package the name is read from
+   * ({@link OwnershipQueueCallerPackage}); omitted, the read is
+   * environment-wide. A third axis, independent of the other two.
    */
   expandMembers(
     name: string,
     organizationId: string | null,
-    options?: { purpose?: QueueExpansionPurpose; onFailedRead?: OwnershipQueueFailedReadAnswer },
+    options?: {
+      purpose?: QueueExpansionPurpose;
+      onFailedRead?: OwnershipQueueFailedReadAnswer;
+      callerPackageId?: OwnershipQueueCallerPackage;
+    },
   ): Promise<string[]>;
 
   /**
@@ -166,13 +218,15 @@ export interface IOwnershipQueueService {
    * answers `true` as soon as a read that succeeded reaches `userId`, even
    * beside a failed read, and rejects only when no successful read reaches
    * `userId` and one failed.
+   * `callerPackageId` is {@link expandMembers}' key with the same meaning
+   * ({@link OwnershipQueueCallerPackage}).
    * The options argument is optional, so a three-argument call is today's.
    */
   isMember(
     userId: string,
     name: string,
     organizationId: string | null,
-    options?: { onFailedRead?: OwnershipQueueFailedReadAnswer },
+    options?: { onFailedRead?: OwnershipQueueFailedReadAnswer; callerPackageId?: OwnershipQueueCallerPackage },
   ): Promise<boolean>;
 
   /**
