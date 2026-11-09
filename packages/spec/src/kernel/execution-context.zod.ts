@@ -414,11 +414,12 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
    * same order and contents as before; this field sits beside it and changes
    * nothing about it. No reader consumes this field yet.
    *
-   * Optional with NO default: absent means the context was resolved without
-   * addresses, and every consumer behaves exactly as it does without the key.
+   * Optional with NO default: a context resolved without addresses parses
+   * without the key, and since no reader consumes it yet, its absence changes
+   * no answer anywhere. It is not an access gate.
    * Server-constructed only, never client-supplied.
    */
-  permissionSetAddresses: z.array(PermissionSetAddressSchema).optional().describe('The permission sets the principal was granted, each as its (packageId, name) address (ADR-0150 D3). Filled only from a resolved (package, name), never from a guessed holder; a name the resolution rule refuses never appears. `permissions` stays the display and compatibility field, same order and contents. Optional with no default: absent means every consumer behaves as without the key. No reader consumes it yet. Server-constructed only, never client-supplied.'),
+  permissionSetAddresses: z.array(PermissionSetAddressSchema).optional().describe('The permission sets the principal was granted, each as its (packageId, name) address (ADR-0150 D3). Filled only from a resolved (package, name), never from a guessed holder; a name the resolution rule refuses never appears. `permissions` stays the display and compatibility field, same order and contents. Optional with no default: a context resolved without addresses parses without the key, and since no reader consumes it yet its absence changes no answer. Not an access gate. Server-constructed only, never client-supplied.'),
 
   /**
    * Aggregated system permissions (union of `PermissionSet.systemPermissions`
