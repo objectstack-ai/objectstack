@@ -62,7 +62,8 @@
  *     verbatim scope, and it is pointed at rather than restated here.
  *   - INDEPENDENTLY REPRODUCIBLE. Anyone can audit a ceiling without running
  *     this script: `ceil($(wc -c < file) / 4)` — on a stamped SKILL.md, first
- *     subtract its release-stamp line's bytes (the one exclusion below).
+ *     subtract its release-stamp line's bytes, and on a body-pinned file its
+ *     pin values' bytes (the two exclusions below).
  *     A tokenizer's count can only be checked by re-running the tokenizer.
  *
  * ~4 bytes per token is the standard rule of thumb for BPE over English prose
@@ -74,7 +75,9 @@
  * the catalog ever turns substantially non-Latin, the convention needs
  * revisiting rather than the ceilings.
  *
- * ONE EXCLUSION — the release stamp's whole line. Maintainer ruling: decision
+ * TWO EXCLUSIONS, ONE RULE: bytes the version script writes are not priced.
+ *
+ * FIRST EXCLUSION — the release stamp's whole line. Maintainer ruling: decision
  * record 6139629628, item 2 (A2′), ruled by the maintainer's 「同意」; the
  * record's text, verbatim: "counts authored content only: the frontmatter
  * `version:` line that the release bot rewrites is excluded from the count …
@@ -91,11 +94,11 @@
  * them by deleting text, so a file at zero headroom went red on a Version
  * Packages PR alone. The whole line is therefore not priced, on every tree and
  * at every stamp width: a stamped file's count is the count of everything ELSE
- * in it, and it cannot move when only the stamp does. Nothing else moves — a
- * version-shaped string anywhere else in a file (prose, a `version:` line in a
- * code block), every other frontmatter line (the `compatibility:` pins
- * included), and every byte of a file the version script does not stamp are
- * priced as before. Which line it is comes from the stamp WRITER, never a
+ * in it, and it cannot move when only the stamp does. Nothing else moves but
+ * the second exclusion below — a version-shaped string anywhere else in a file
+ * (prose, a `version:` line in a code block), every other frontmatter line (the
+ * `compatibility:` pins included), and every byte of a file the version script
+ * does not stamp are priced as before. Which line it is comes from the stamp WRITER, never a
  * second parser here: `stampLine()` has that script's `deriveFrontmatter`
  * restamp the file with a probe value and takes the one line it rewrote; which
  * files carry a stamp is that script's `stampedSkillPaths()`.
@@ -109,6 +112,32 @@
  * line is its stamp (pinned in the self-test):
  *
  *   ceil(($(wc -c < FILE) - $(grep -m1 -E '^[[:space:]]+version:' FILE | wc -c)) / 4)
+ *
+ * SECOND EXCLUSION — the body pin VALUES. Maintainer ruling on #31115, letter
+ * B (maintainer 「31115 … 同意」, 2026-11-09, recorded in triage comment
+ * 6730018726): the same `--fix` now rewrites the exact versions a skill BODY
+ * names — the install pins of a starter package.json
+ * (`"@objectstack/spec": "18.3.0"`) and prose that does not read as history —
+ * and the token ratchet "stops pricing writer-rewritten body pin values,
+ * generalising the frontmatter stamp-line rule". The trap is the stamp's:
+ * `18.9.0` -> `18.10.0` is one more byte per pin, five pins in
+ * `references/bootstrap.md`, which sat at 1 token of headroom. What is left
+ * unpriced is the VALUE only, never its line: the package name, the quotes and
+ * a `^`/`~` range are authored and stay priced, and so is every version in a
+ * sentence that reads as history (the writer leaves those alone). Which bytes
+ * comes from the WRITER again: `bodyPinValues()` has that script's
+ * `deriveBodyVersions` rewrite the file with a probe value and counts what it
+ * replaced; which files carry body pins is that script's `bodyPinnedPaths()`,
+ * the list the release guard reads too.
+ *
+ * Re-pinned, never loosened (`BODY_PIN_REPIN`): on its basis tree the one
+ * body-pinned file carried five `18.3.0` values, 30 bytes, and its count fell
+ * 1350 -> 1342, so its row was lowered by the same 8 and its headroom is what
+ * it was. Hand audit of a body-pinned file whose writer-owned versions are all
+ * install pins (true of every such file today, pinned in the self-test):
+ *
+ *   ceil(($(wc -c < FILE) - $(grep -oE '"@objectstack/[a-z0-9-]+"[[:space:]]*:[[:space:]]*"[~^]?[0-9][^"]*"' FILE \
+ *     | sed -E 's/.*"[~^]?([^"]*)"$/\1/' | tr -d '\n' | wc -c)) / 4)
  *
  * and of every other file, `ceil($(wc -c < FILE) / 4)`.
  *
@@ -240,7 +269,9 @@ import { generatedExceptionFor } from './pm/check-governed-merges.mjs';
 // The stamp's WRITER and the stamped set, from the script that owns the stamp —
 // see "ONE EXCLUSION" in the header. Its reader is imported only to cross-check
 // the writer's answer in the self-test.
-import { deriveFrontmatter, extractMetadataVersion, stampedSkillPaths } from './check-skill-compatibility-version.mjs';
+import {
+  bodyPinnedPaths, deriveBodyVersions, deriveFrontmatter, extractBodyVersions, extractMetadataVersion, stampedSkillPaths,
+} from './check-skill-compatibility-version.mjs';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const REPO_ROOT = resolve(HERE, '..');
@@ -314,6 +345,17 @@ export const CEILING_BASIS = {
  * Every SKILL.md row in {@link CEILINGS} carries the matching `-> ` line.
  */
 export const STAMP_LINE_REPIN = Object.freeze({ basis: 'd4aaeaf0e', stamp: '17.7.0', tokens: 5 });
+
+/**
+ * The body-pin re-pin (#31115, ruling B; "SECOND EXCLUSION" in the header): the
+ * tree it was measured on, the one body-pinned file there, its pins and their
+ * value, and what leaving those values unpriced took off that file's count —
+ * and therefore off its row, so its headroom did not move. Five `18.3.0`
+ * values are 30 bytes: 5398 -> 5368, ceil 1350 -> 1342.
+ */
+export const BODY_PIN_REPIN = Object.freeze({
+  basis: 'f2abd476', file: 'skills/objectstack-platform/references/bootstrap.md', pins: 5, value: '18.3.0', tokens: 8,
+});
 
 // ── The 2026-08-31 app-repo-principles raise, shared by five rows below ─────
 //
@@ -1228,7 +1270,9 @@ export const CEILINGS = new Map([
   // 6682024726); raise path the 2026-10-27 ruling 「A:先削重复,余额按实测提高」
   // (ruling record 6513306068).
   ['skills/objectstack-data/references/seeds.md', 1747],
-  ['skills/objectstack-platform/references/bootstrap.md', 1351],
+  // 1351 -> 1343: the body-pin values left the count (#31115, ruling B; see
+  // BODY_PIN_REPIN); the file's count fell by the same 8, headroom unchanged.
+  ['skills/objectstack-platform/references/bootstrap.md', 1343],
   // 3108 -> 3287: `os deploy`, the managed-package dev loop — when to deploy
   // rather than publish a release, its entry points, how it picks the
   // environment, its flags, and how to read its exit 1 (refusal before any
@@ -1344,6 +1388,45 @@ export function countTokens(text) {
 const writerAnswering = (version) => ({ get: () => ({ version }) });
 const STAMP_PROBE = writerAnswering('unpriced-stamp-probe');
 
+/** The probe the body writer is handed: every package answers with one value no release carries. */
+const BODY_PIN_PROBE_VALUE = 'body-pin-probe';
+const BODY_PIN_PROBE = writerAnswering(BODY_PIN_PROBE_VALUE);
+
+/**
+ * The body pin values of a file — the version values the body writer
+ * (`deriveBodyVersions`, the `--fix` leg of the version script) rewrites —
+ * as their count and their UTF-8 bytes. See "SECOND EXCLUSION".
+ *
+ * Read off the writer's own output, never a second parser: on each line the
+ * probe moved, the bytes it replaced are the old line's bytes less the new
+ * line's, plus one probe's bytes for each value it wrote. The writer keeps the
+ * line count, so lines pair by index.
+ *
+ * @param {string} text
+ * @returns {{count: number, bytes: number}}
+ */
+export function bodyPinValues(text) {
+  const before = text.split('\n');
+  const after = deriveBodyVersions(text, BODY_PIN_PROBE).text.split('\n');
+  if (after.length !== before.length) {
+    throw new Error(
+      `check-skills-token-ratchet: the body writer turned ${before.length} lines into ${after.length} for one probe, `
+        + 'so which bytes are pin values has no line-by-line answer — refusing to guess which bytes to leave unpriced.',
+    );
+  }
+  const probes = (line) => line.split(BODY_PIN_PROBE_VALUE).length - 1;
+  const probeBytes = Buffer.byteLength(BODY_PIN_PROBE_VALUE, 'utf8');
+  let count = 0;
+  let bytes = 0;
+  before.forEach((line, i) => {
+    if (line === after[i]) return;
+    const wrote = probes(after[i]) - probes(line);
+    count += wrote;
+    bytes += Buffer.byteLength(line, 'utf8') - Buffer.byteLength(after[i], 'utf8') + wrote * probeBytes;
+  });
+  return { count, bytes };
+}
+
 /**
  * The release-stamp line of a file — the one line the stamp writer
  * (`deriveFrontmatter`, the `--fix` leg of the version script) rewrites — or
@@ -1368,18 +1451,21 @@ export function stampLine(text) {
 
 /**
  * The count the gate judges: `countTokens`, less the whole release-stamp line
- * (and its newline) when the file is one the version script stamps. Every
- * other file prices byte-for-byte as `countTokens`.
+ * (and its newline) when the file is one the version script stamps, and less
+ * its body pin values when it is one whose body the version script writes.
+ * Every other file prices byte-for-byte as `countTokens`.
  *
  * @param {string} text
- * @param {{stamped?: boolean}} [options] is this file in `stampedSkillPaths()`?
+ * @param {{stamped?: boolean, bodyPinned?: boolean}} [options] is this file in
+ *   `stampedSkillPaths()`, and in `bodyPinnedPaths()`?
  * @returns {number}
  */
-export function pricedTokens(text, { stamped = false } = {}) {
+export function pricedTokens(text, { stamped = false, bodyPinned = false } = {}) {
   if (text.length === 0) return 0;
   const stamp = stamped ? stampLine(text) : null;
-  const unpriced = stamp ? Buffer.byteLength(`${stamp.line}\n`, 'utf8') : 0;
-  return Math.ceil((Buffer.byteLength(text, 'utf8') - unpriced) / 4);
+  const stampBytes = stamp ? Buffer.byteLength(`${stamp.line}\n`, 'utf8') : 0;
+  const pinBytes = bodyPinned ? bodyPinValues(text).bytes : 0;
+  return Math.ceil((Buffer.byteLength(text, 'utf8') - stampBytes - pinBytes) / 4);
 }
 
 /**
@@ -1576,6 +1662,7 @@ export function reportLines(rows) {
 function run() {
   const covered = [...new Set([...discoverBundleFiles(), ...CEILINGS.keys()])].sort();
   const stampedSet = new Set(stampedSkillPaths());
+  const bodyPinnedSet = new Set(bodyPinnedPaths());
   const rows = [];
   let failed = 0;
 
@@ -1589,12 +1676,18 @@ function run() {
       continue;
     }
     const stamped = stampedSet.has(rel);
-    const tokens = pricedTokens(text, { stamped });
+    const bodyPinned = bodyPinnedSet.has(rel);
+    const tokens = pricedTokens(text, { stamped, bodyPinned });
     const stamp = stamped ? stampLine(text) : null;
-    const note = stamp
+    const pins = bodyPinned ? bodyPinValues(text) : null;
+    const note = (stamp
       ? ` Its release-stamp line (\`${stamp.line.trim()}\`, ${Buffer.byteLength(`${stamp.line}\n`, 'utf8')} bytes) `
         + 'is written by the version script, not an author, and is not priced.'
-      : '';
+      : '')
+      + (pins && pins.count > 0
+        ? ` Its ${pins.count} body pin value(s) (${pins.bytes} bytes) are written by the version script, not an author, `
+          + 'and are not priced.'
+        : '');
     const ceiling = CEILINGS.get(rel);
     const generated = generatorOwning(rel);
     rows.push({ rel, tokens, ceiling, generated });
@@ -1719,6 +1812,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the header\'s hand audit reproduces every real stamped count': 1,
   'real bundle: each stamped file reads exactly the re-pin below its basis-stamp count, nothing else moves': 1,
   'the stamp-line re-pin is recorded': 1,
+  'the unpriced body bytes are exactly the version values the writer owns, never a range, name or history version': 1,
+  'a body pin change of any width moves no count (18.3.0 -> 18.10.0-next.12)': 1,
+  'one authored byte over a zero-headroom body-pinned ceiling is red at every pin width': 1,
+  'a file the version script does not body-pin is priced whole': 1,
+  'on every real body-pinned file the unpriced bytes are exactly the non-history versions the reader finds': 1,
+  'the header\'s hand audit reproduces every real body-pinned count': 1,
+  'the body-pin re-pin is recorded': 1,
   'the catalog is discovered from disk': 1,
   'every discovered file lives under a published skill directory': 1,
   'a discovered file with no ceiling is RED': 1,
@@ -1787,7 +1887,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // the literal above, so the roster falls below this number; the table
 // cross-check in the floor block is the other half, and names WHICH label
 // collided.
-const SELF_TEST_BATTERY_FLOOR = 97;
+const SELF_TEST_BATTERY_FLOOR = 104;
 
 function selfTest() {
   const rel = 'skills/objectstack-ui/SKILL.md';
@@ -1887,6 +1987,30 @@ function selfTest() {
     return countTokens(atBasisStamp(text)) - priced(text) !== STAMP_LINE_REPIN.tokens;
   });
 
+  // The body-pin fixtures ("SECOND EXCLUSION" in the header): two install pins
+  // the writer owns (one with a range), a history sentence it leaves alone, and
+  // padding so the basis spelling is a whole number of tokens priced either way.
+  const pinBody = (v) => '# Bootstrap\n\n```json\n{\n  "@objectstack/spec": "' + v + '",\n  "@objectstack/cli": "^' + v
+    + '"\n}\n```\n\nRemoved in @objectstack/spec 16.0.0.\n';
+  const pinPad = '.'.repeat((4 - (Buffer.byteLength(pinBody(BODY_PIN_REPIN.value), 'utf8') % 4)) % 4);
+  const pinFixture = (v, extra = '') => `${pinBody(v)}${pinPad}${extra}`;
+  const pinPriced = (text) => pricedTokens(text, { bodyPinned: true });
+  const pinZeroHeadroom = pinPriced(pinFixture(BODY_PIN_REPIN.value));
+  const bodyOnDisk = new Set(bodyPinnedPaths());
+  const realBodyPinned = discovered.filter((p) => bodyOnDisk.has(p))
+    .map((p) => ({ p, text: readFileSync(join(REPO_ROOT, p), 'utf8') }));
+  const readerBytes = (text) => extractBodyVersions(text).filter((v) => !v.history)
+    .reduce((n, v) => n + Buffer.byteLength(v.version, 'utf8'), 0);
+  const pinValueMisses = realBodyPinned.filter(({ text }) => bodyPinValues(text).bytes !== readerBytes(text)).map(({ p }) => p);
+  // The header's grep | sed | tr | wc, in JS, on files whose owned versions are all install pins.
+  const pinHandAudit = (text) => {
+    const values = [...text.matchAll(/"@objectstack\/[a-z0-9-]+"\s*:\s*"[~^]?([0-9][^"]*)"/g)].map((m) => m[1]);
+    return Math.ceil((Buffer.byteLength(text, 'utf8') - Buffer.byteLength(values.join(''), 'utf8')) / 4);
+  };
+  const allInstall = ({ text }) => extractBodyVersions(text).filter((v) => !v.history).every((v) => v.shape === 'install');
+  const pinHandAuditMisses = realBodyPinned.filter((f) => !allInstall(f) || pinHandAudit(f.text) !== pinPriced(f.text))
+    .map(({ p }) => p);
+
   const cases = [
     // ── ratchet semantics ────────────────────────────────────────────────
     ['under the ceiling -> green', verdict(rel, 25000, 25154).ok, true],
@@ -1959,6 +2083,21 @@ function selfTest() {
     // Same reason as the basis pins below: nothing else reads these, so a record
     // drifting from the rows it explains would do so in silence.
     ['the stamp-line re-pin is recorded', { ...STAMP_LINE_REPIN }, { basis: 'd4aaeaf0e', stamp: '17.7.0', tokens: 5 }],
+
+    // ── the body pin values (#31115, ruling B) ───────────────────────────
+    ['the unpriced body bytes are exactly the version values the writer owns, never a range, name or history version',
+      bodyPinValues(pinFixture(BODY_PIN_REPIN.value)), { count: 2, bytes: 2 * Buffer.byteLength(BODY_PIN_REPIN.value, 'utf8') }],
+    ['a body pin change of any width moves no count (18.3.0 -> 18.10.0-next.12)',
+      [...new Set([BODY_PIN_REPIN.value, ...stampWidths].map((v) => pinPriced(pinFixture(v))))], [pinZeroHeadroom]],
+    ['one authored byte over a zero-headroom body-pinned ceiling is red at every pin width',
+      stampWidths.map((v) => verdict(rel, pinPriced(pinFixture(v, 'x')), pinZeroHeadroom).ok), stampWidths.map(() => false)],
+    ['a file the version script does not body-pin is priced whole',
+      pricedTokens(pinFixture(BODY_PIN_REPIN.value), { bodyPinned: false }), countTokens(pinFixture(BODY_PIN_REPIN.value))],
+    ['on every real body-pinned file the unpriced bytes are exactly the non-history versions the reader finds',
+      [realBodyPinned.length > 0, pinValueMisses], [true, []]],
+    ['the header\'s hand audit reproduces every real body-pinned count', pinHandAuditMisses, []],
+    ['the body-pin re-pin is recorded', { ...BODY_PIN_REPIN },
+      { basis: 'f2abd476', file: 'skills/objectstack-platform/references/bootstrap.md', pins: 5, value: '18.3.0', tokens: 8 }],
 
     // ── enumeration, never a hand list ───────────────────────────────────
     ['the catalog is discovered from disk', discovered.length > 0, true],

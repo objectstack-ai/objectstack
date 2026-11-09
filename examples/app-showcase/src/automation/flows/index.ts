@@ -4,6 +4,7 @@ import { defineFlow } from '@objectstack/spec';
 import { DynamicApprovalFlow } from './dynamic-approval.flow';
 import { ApproverBindingsFlow } from './approver-bindings.flow';
 import { RecalcEstimatesFlow, RecalcTaskEstimateFlow } from './recalc-estimate.flow';
+import { ExchangeRateSyncFlow } from './exchange-rate-sync.flow';
 
 /**
  * Task Completed → Notify — an autolaunched, record-triggered flow that fires
@@ -2167,4 +2168,6 @@ export const allFlows = [
   // `showcase_recalc_estimates_api` endpoint (src/system/apis/).
   RecalcEstimatesFlow,
   RecalcTaskEstimateFlow,
+  // Multi-currency: the rates-feed template (loaded, switched off).
+  ExchangeRateSyncFlow,
 ];

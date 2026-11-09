@@ -463,16 +463,20 @@ export async function hydrateFlowActivations(this: Pick<FlowDefinitionsHost, 'fl
     const rows = await this.flowActivationStore.list();
     const disabled: string[] = [];
     for (const row of rows) {
+        // [ADR-0150 D4] The row's own package goes into the projection with
+        // the name, so it switches off that package's flow of the name and no
+        // other (`FlowActivationProjection.has`).
         if (row.active) {
-            this.flowLedgerDisabled.delete(row.name);
+            this.flowLedgerDisabled.delete(row.name, row.packageId);
             continue;
         }
-        this.flowLedgerDisabled.add(row.name);
+        this.flowLedgerDisabled.add(row.name, row.packageId);
         // Only a flow this engine actually holds can be unbound; a row for
         // a flow this deployment does not ship is kept in the projection
         // (it costs one string, and the flow may be registered later by a
-        // hot reload) but has nothing to disarm now.
-        if (this.flows.has(row.name)) {
+        // hot reload) but has nothing to disarm now — nor has a row of
+        // another package than the one that ships the name now.
+        if (this.flows.has(row.name) && this.flowLedgerDisabled.has(row.name)) {
             this.deactivateFlowTrigger(row.name);
             disabled.push(row.name);
         }
@@ -569,8 +573,12 @@ export async function toggleFlow(this: Pick<FlowDefinitionsHost, 'flows' | 'refu
         );
     }
 
-    if (enabled) this.flowLedgerDisabled.delete(name);
-    else this.flowLedgerDisabled.add(name);
+    // [ADR-0150 D4] Under the same `(package, name)` the durable row names. A
+    // row that named no package bound to this one holder, and the write above
+    // is now that holder's row, so it goes too.
+    this.flowLedgerDisabled.delete(name);
+    if (enabled) this.flowLedgerDisabled.delete(name, packageOwner);
+    else this.flowLedgerDisabled.add(name, packageOwner);
 
     this.logger.info(`Flow '${name}' ${enabled ? 'enabled' : 'disabled'}`);
     // A disabled flow should stop receiving trigger events; a re-enabled one
