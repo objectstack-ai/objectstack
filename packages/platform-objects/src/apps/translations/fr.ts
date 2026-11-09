@@ -105,6 +105,7 @@ export const fr: TranslationData = {
         nav_settings_ai: { label: 'IA et Embedder' },
         nav_settings_knowledge: { label: 'Connaissances' },
         nav_settings_lifecycle: { label: 'Cycle de vie des données' },
+        nav_recycle_bin: { label: 'Corbeille' },
         nav_notification_preferences: { label: 'Préférences de notification' },
         nav_notification_templates: { label: 'Modèles de notification' },
 
