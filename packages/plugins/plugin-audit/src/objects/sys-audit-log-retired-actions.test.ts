@@ -117,6 +117,13 @@ const ACTIONS_WITH_WRITERS: ReadonlyArray<readonly [action: string, writer: stri
       + 'called by cloud-connection/src/marketplace-install-local-plugin.ts (installUnmanaged, the unmanaged '
       + 'branch both install doors reach) once per copy it attempted (#30964)',
   ],
+  [
+    'scim_refused',
+    'plugin-audit/src/scim-refusal-audit.ts — createScimRefusalAuditWriter on the `audit` slot; called by '
+      + 'plugin-auth/src/auth-manager-request-routing.ts (handleRequest, the SCIM arm every /scim/v2/* request '
+      + 'passes) through plugin-auth/src/scim-refusal-audit.ts for each request answered 400 or above, '
+      + 'bounded per connection (#31829)',
+  ],
 ];
 
 /** Option values declared by the `action` select field. */

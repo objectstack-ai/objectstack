@@ -32,6 +32,7 @@ import { createAuthEventAuditSink } from './auth-event-audit.js';
 import { createActionInvocationAuditWriter } from './action-invocation-audit.js';
 import { createDataExportAuditWriter } from './data-export-audit.js';
 import { createPackageLifecycleAuditWriter } from './package-lifecycle-audit.js';
+import { createScimRefusalAuditWriter } from './scim-refusal-audit.js';
 import { installCommentAccessHooks, installCommentReadVisibility } from './comment-access-hooks.js';
 import {
   COMMENT_REACTION_REMOVE_ROUTE,
@@ -335,6 +336,11 @@ export class AuditPlugin implements Plugin {
     // (`package-lifecycle-audit.ts`). [#30964] The install-local door's
     // unmanaged branch hands the same writer one `package_unmanaged_import`
     // event per copy it attempted, landed or not.
+    //
+    // [#31829] And the SCIM refusal writer (`recordScimRefusal`): plugin-auth's
+    // SCIM door hands it one event per refused `/scim/v2/*` request its bound
+    // admitted, so a connection's errors leave `scim_refused` rows
+    // (`scim-refusal-audit.ts`).
     const getLedgerEngine = (): IDataEngine | undefined => {
       try {
         return ctx.getService<IDataEngine>('objectql');
@@ -353,6 +359,7 @@ export class AuditPlugin implements Plugin {
       ...createActionInvocationAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger }),
       ...createDataExportAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger }),
       ...createPackageLifecycleAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger }),
+      ...createScimRefusalAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger }),
     });
 
     // ADR-0029 D8 — contribute this plugin's object translations to the i18n

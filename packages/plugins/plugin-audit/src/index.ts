@@ -50,6 +50,20 @@ export {
   PACKAGE_UNINSTALL_AUDIT_ACTION,
   PACKAGE_UNMANAGED_IMPORT_AUDIT_ACTION,
 } from './package-lifecycle-audit.js';
+// [#31829] The `scim_refused` row writer plugin-auth's SCIM door reaches
+// through the `audit` slot.
+export {
+  buildScimRefusalAuditRow,
+  createScimRefusalAuditWriter,
+  SCIM_REFUSED_AUDIT_ACTION,
+  UNKNOWN_SCIM_CONNECTION,
+} from './scim-refusal-audit.js';
+export type {
+  ScimPresentedCredential,
+  ScimRefusalAuditEvent,
+  ScimRefusalAuditWriter,
+  ScimRefusalAuditWriterOptions,
+} from './scim-refusal-audit.js';
 export type {
   PackageLifecycleAuditAction,
   PackageLifecycleAuditEvent,

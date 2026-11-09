@@ -150,6 +150,42 @@ export interface AuthEventAuditSurface {
     actor?: string;
     context?: Record<string, unknown>;
   }): Promise<unknown>;
+  /**
+   * [#31829] A SCIM protocol request the door refused (`scim-refusal-audit.ts`).
+   * OPTIONAL: an `audit` service without the member writes no such row, and
+   * the SCIM answer is the same either way.
+   */
+  recordScimRefusal?(event: ScimRefusalAuditEventInput): Promise<unknown>;
+}
+
+/**
+ * [#31829] One refused SCIM request, as plugin-auth hands it to the `audit`
+ * slot: what was asked and how it was answered, never what was sent. No
+ * request body, no bearer, no digest and no attribute value has a field here.
+ */
+export interface ScimRefusalAuditEventInput {
+  /** The connection the bearer verified as; absent when it verified as none (a 401). */
+  connectionId?: string;
+  /**
+   * On a request whose bearer verified as no connection: which kind of
+   * credential it presented — `scim_bearer` (one carrying the minted SCIM
+   * prefix), `other`, or `none`. Nothing of the credential itself is kept.
+   */
+  presentedCredential?: 'scim_bearer' | 'other' | 'none';
+  /** The SCIM resource type the request addressed (`Users`, `Groups`, …), or `?`. */
+  resource: string;
+  /** The HTTP method, or `?` for one outside the SCIM verbs. */
+  method: string;
+  /** The status the door answered. */
+  status: number;
+  /** The SCIM error's `scimType` (`uniqueness`, `invalidSyntax`, …), when it carried one. */
+  scimType?: string;
+  /** The refusal's machine code, when the answer carried one. */
+  errorCode?: string;
+  /** The client address, by the rule every auth row's address is established by. */
+  ipAddress?: string;
+  /** Refusals of the same key the bound dropped since the last row written for it. */
+  suppressed?: number;
 }
 
 /** The event this module hands the sink, before it becomes a ledger row. */

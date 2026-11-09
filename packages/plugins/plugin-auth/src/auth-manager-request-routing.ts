@@ -68,6 +68,7 @@ import { SESSION_ERASURE_PATHS } from './session-tombstone.js';
 import { envelopeVendorAdminRefusal } from './vendor-admin-refusal-envelope.js';
 import { OAUTH_REVOKE_PATH } from './mcp-token-revocation.js';
 import { ssoCallbackOf } from './sso-oidc-refusal-cause.js';
+import type { ScimRequestScope } from './scim-connection-service.js';
 
 /**
  * The `AuthManager` members the functions below read — every one of them, and
@@ -78,6 +79,7 @@ import { ssoCallbackOf } from './sso-oidc-refusal-cause.js';
  * why `routeOwnership` and `routeOwnershipFor` are accessors.
  */
 export interface RequestRoutingHost {
+  readonly config: AuthManager['config'];
   routeOwnership: AuthManager['routeOwnership'];
   routeOwnershipFor: AuthManager['routeOwnershipFor'];
   betterAuthEndpointPath: AuthManager['betterAuthEndpointPath'];
@@ -90,7 +92,7 @@ export interface RequestRoutingHost {
 }
 
 /** The body of `AuthManager#handleRequest`; the method's docblock there is its contract. */
-export async function handleRequest(this: Pick<RequestRoutingHost, 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoCallback'>, request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
+export async function handleRequest(this: Pick<RequestRoutingHost, 'config' | 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoCallback'>, request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
   // ADR-0069 D7 — the client address this request's sign-in audit stamps,
   // established ONCE, here, by the same trust rule the D5 allow-list judges
   // with (`resolveClientAddress`). Read before any rewrite below, and carried
@@ -232,10 +234,35 @@ export async function handleRequest(this: Pick<RequestRoutingHost, 'betterAuthEn
   // so it is exactly as narrow as before — SCIM protocol requests only; the
   // non-SCIM flows keep their sequential posture, which the scoping note
   // records as load-bearing. Pinned by `scim-transaction-scope.test.ts`.
+  //
+  // [#31829] The same arm is where a REFUSED SCIM request is observed: it sees
+  // the vendor's final answer, and the scope object opened here is the one the
+  // bearer verifier filled with the connection. An answer of 400 or above is
+  // handed to the `audit` slot's `recordScimRefusal`, bounded and after the
+  // response (`scim-refusal-audit.ts`); the answer itself is unchanged.
   const runRequest = isScimProtocolPath(endpointPath)
     ? async (): Promise<Response> => {
         const { scimRequestScope } = await import('./scim-connection-service.js');
-        return scimRequestScope.run({ scim: true }, runHandler);
+        const scope: ScimRequestScope = { scim: true };
+        const scimResponse = await scimRequestScope.run(scope, runHandler);
+        if (scimResponse.status >= 400) {
+          const { observeScimRefusal } = await import('./scim-refusal-audit.js');
+          observeScimRefusal(
+            this.config.getAuditSink?.(),
+            scimResponse,
+            {
+              endpointPath,
+              method: request.method,
+              status: scimResponse.status,
+              ...(scope.connectionId
+                ? { connectionId: scope.connectionId }
+                : { authorization: request.headers.get('authorization') }),
+              ...(clientAddress ? { clientAddress } : {}),
+            },
+            (line) => this.config.logger?.warn(line),
+          );
+        }
+        return scimResponse;
       }
     : ssoCallback !== undefined
       ? (): Promise<Response> => this.runSsoCallback(ssoCallback, runHandler)

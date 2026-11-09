@@ -414,6 +414,21 @@ export const SysAuditLog = ObjectSchema.create({
     // deployment-level row), and its shipped surfaces are the unfiltered
     // `recent` and `all_events` views above.
     //
+    // [#31829] `scim_refused` joins the enum WRITER-FIRST. Its writer is
+    // `scim-refusal-audit.ts` (`createScimRefusalAuditWriter`, on the `audit`
+    // slot), called by plugin-auth's SCIM door for each `/scim/v2/*` request it
+    // answered 400 or above, bounded per connection: one row naming the
+    // connection (`actor` `svc:scim:CONNECTION_ID` and
+    // `metadata.scim_connection_id`, or `unknown` when the bearer verified as
+    // none), the resource and method, the status, the SCIM `scimType` or the
+    // machine code, and the client address — never the body, the bearer or an
+    // attribute value. It names no record and no organization (a
+    // deployment-level row). Its shipped surfaces are the unfiltered `recent`
+    // and `all_events` views above. ⛔ It is deliberately NOT added to the
+    // `auth_events` filter: that view answers 「who signed in, out, or failed
+    // to」 by `user_id`, and a SCIM refusal names no user — an identity
+    // provider's provisioning call is not a sign-in.
+    //
     // Each option carries a label (#27855): the list, the detail and the System
     // Overview "Audit Events by Action" chart (whose dimension resolves through
     // these options) read it, where the bare-array shorthand made the label the
@@ -436,6 +451,7 @@ export const SysAuditLog = ObjectSchema.create({
           { label: 'Action Invocation', value: 'action_invocation' },
           { label: 'Package Uninstall', value: 'package_uninstall' },
           { label: 'Package Unmanaged Import', value: 'package_unmanaged_import' },
+          { label: 'SCIM Refused', value: 'scim_refused' },
         ],
         label: 'Action',
         required: true,
