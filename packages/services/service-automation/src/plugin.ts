@@ -2249,7 +2249,7 @@ export class AutomationServicePlugin implements Plugin {
                 const def = entry.definition as { name?: string };
                 if (!def?.name) continue;
                 try {
-                    this.engine.registerFlow(entry.name, def as never);
+                    this.engine.registerFlow(entry.name, def as never, entry.contender);
                     this.syncedFlowNames.add(entry.name);
                     // The receipt, so the shadowed contender is observable at all.
                     if (entry.shadowing) this.engine.recordFlowShadowing(entry.shadowing);
@@ -5399,7 +5399,7 @@ export class AutomationServicePlugin implements Plugin {
                 continue;
             }
             try {
-                this.engine.registerFlow(entry.name, entry.definition as never);
+                this.engine.registerFlow(entry.name, entry.definition as never, entry.contender);
                 resynced++;
             } catch (err) {
                 // #5048 — see ./thrown-cause-diagnostics.ts.
@@ -5475,7 +5475,7 @@ export class AutomationServicePlugin implements Plugin {
         // re-binding the body the boot pull armed is safe.
         for (const entry of this.resolveFlowContenders(ctx, defs)) {
             try {
-                this.engine.registerFlow(entry.name, entry.definition as never);
+                this.engine.registerFlow(entry.name, entry.definition as never, entry.contender);
                 this.syncedFlowNames.add(entry.name);
                 bound++;
             } catch (err) {
@@ -5660,7 +5660,7 @@ export class AutomationServicePlugin implements Plugin {
             const held = await engine.getFlow(name);
             if (held && holdsFlowDefinition(engine, name, held, entry.definition)) continue;
             try {
-                engine.registerFlow(name, entry.definition as never);
+                engine.registerFlow(name, entry.definition as never, entry.contender);
                 this.mutationArmedFlows.set(name, stableStringify(entry.definition));
                 armed.push(name);
             } catch (err) {

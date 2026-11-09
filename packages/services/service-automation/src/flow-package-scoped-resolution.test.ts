@@ -96,11 +96,15 @@ let ran: string[];
 
 const install = (id: string, deps: string[] = []) => registry.installPackage(manifest(id, deps), 'code');
 
-/** Package `packageId` ships flow `body`: in its registry slot, the loader's set and the engine. */
+/**
+ * Package `packageId` ships flow `body`: in its registry slot, the loader's set
+ * and the engine — armed from the loader's own body, as the automation
+ * plugin's arming steps record it (`registerFlow`'s `armedFrom`).
+ */
 function ship(packageId: string, body: { name: string }) {
     registry.registerItem('flow', { ...body, _packageId: packageId }, 'name' as never, packageId);
     loaderSet[body.name] = packageId;
-    engine.registerFlow(body.name, body);
+    engine.registerFlow(body.name, body, { source: 'package', packageId });
 }
 
 /** The environment authored flow `body`: a package-less row in the bare slot, and the engine. */
@@ -645,6 +649,8 @@ describe('ADR-0150 D3 — a connector_action names its connector from the callin
         await kernel.bootstrap();
         try {
             const booted = kernel.getService('automation') as AutomationEngine;
+            // P's own body of `charge`, armed as the plugin's arming steps arm it.
+            booted.registerFlow('charge', dispatcher('charge', 'billing'), { source: 'package', packageId: P });
             const refusal = booted.connectorNameRefusal('billing', { flowName: 'charge' } as never);
             expect(refusal?.status).toBe('refused');
             expect(refusal?.message).toContain(Q);
@@ -653,5 +659,109 @@ describe('ADR-0150 D3 — a connector_action names its connector from the callin
         } finally {
             await kernel.shutdown();
         }
+    });
+});
+
+// ── [epic #31527 child E5, epic review R1] the armed body decides the caller package ──
+
+/**
+ * ADR-0150 D3, the paragraph after (a)–(d): "A reference written in an
+ * environment-authored overlay (ADR-0005) is the environment's reference. It
+ * resolves as a caller with no package … It never resolves from the package
+ * the overlay customizes." So a run of P's flow NAME whose armed body is an
+ * environment override names its `connectorId` and its `subflow` with no
+ * package — as on main before E1 — while P's own body still names them from P.
+ *
+ * Each body is armed the way the automation plugin arms it: classified by
+ * `resolveFlowPrecedence` (the winner's `contender`) and handed to
+ * `registerFlow` as `armedFrom`. Three override shapes: a package-less stored
+ * row, the `.custom` pair's declared override as the boot pull's registry list
+ * carries it (its stored binding), and the same override as the protocol's
+ * view serves it at `kernel:ready` (no binding; the base's `_packageId`).
+ */
+describe('ADR-0150 D3 — an environment override of a packaged flow names its references with no package (epic #31527 child E5, R1)', () => {
+    const PAIR = `${P}.custom`;
+    const declared = { overrides: { package: P, basedOn: '1.0.0' } };
+    const SHAPES: ReadonlyArray<readonly [string, (body: { name: string }) => unknown]> = [
+        ['a package-less environment row', (body) => bindStoredRow({ ...body, _provenance: 'org' }, null)],
+        ['the .custom declared override (stored row, boot pull)', (body) => bindStoredRow({ ...body, ...declared, _provenance: 'org' }, PAIR)],
+        [
+            'the .custom declared override (served envelope, kernel:ready)',
+            (body) => ({ ...body, ...declared, _packageId: P, _packageVersion: '1.0.0', _provenance: 'package' }),
+        ],
+    ];
+    /** P's own body, as the loader ships it. */
+    const loaderBody = (body: { name: string }) => ({ ...body, _packageId: P, _packageVersion: '1.0.0', _provenance: 'package' });
+
+    /** P ships `body`'s name; the engine arms `armed` for it the way the plugin does. */
+    function armOverName(body: { name: string }, armed: unknown) {
+        install(P);
+        registry.registerItem('flow', { ...body, _packageId: P }, 'name' as never, P);
+        loaderSet[body.name] = P;
+        const [winner] = resolveFlowPrecedence([armed], undefined, (name) => engine.packagedFlowOwner(name), installedManifestsOf(registry));
+        engine.registerFlow(winner.name, winner.definition as never, winner.contender);
+        return winner.contender;
+    }
+
+    beforeEach(() => {
+        pings = [];
+        const ctx = { getService(name: string) { if (name === 'objectql') return { registry }; throw new Error(`no ${name}`); } };
+        engine.setConnectorNameResolver(connectorNameResolver(ctx as never));
+    });
+
+    for (const [shape, overlay] of SHAPES) {
+        it(`connectorId — ${shape}: an environment-only instance is reached, as a caller with no package`, async () => {
+            declareConnector('billing');
+            liveConnector('billing');
+            const arm = armOverName(dispatcher('charge', 'billing'), overlay(dispatcher('charge', 'billing')));
+            expect(arm.source).not.toBe('package');
+            expect(engine.armedFlowPackage('charge')).toBeUndefined();
+            const result = await engine.execute('charge');
+            expect(result.success, String(result.error)).toBe(true);
+            expect(pings).toEqual(['billing']);
+        });
+
+        it(`subflow — ${shape}: an environment-only flow is reached, as a caller with no package`, async () => {
+            author(leaf('welcome'));
+            armOverName(caller('process', 'welcome'), overlay(caller('process', 'welcome')));
+            expect(engine.armedFlowPackage('process')).toBeUndefined();
+            const result = await engine.execute('process');
+            expect(result.success, String(result.error)).toBe(true);
+            expect(ran).toEqual(['welcome']);
+        });
+    }
+
+    it("CONTROL: P's own body (a package arm) still names its connectorId from P — the environment-only instance is refused", async () => {
+        declareConnector('billing');
+        liveConnector('billing');
+        const arm = armOverName(dispatcher('charge', 'billing'), loaderBody(dispatcher('charge', 'billing')));
+        expect(arm).toEqual({ source: 'package', packageId: P });
+        expect(engine.armedFlowPackage('charge')).toBe(P);
+        const result = await engine.execute('charge');
+        expect(result.success).toBe(false);
+        expect(String(result.error)).toContain('environment');
+        expect(pings).toEqual([]);
+    });
+
+    it("CONTROL: P's own body (a package arm) still names its subflow from P — the environment-only flow is refused", async () => {
+        author(leaf('welcome'));
+        armOverName(caller('process', 'welcome'), loaderBody(caller('process', 'welcome')));
+        expect(engine.armedFlowPackage('process')).toBe(P);
+        const result = await engine.execute('process');
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('the environment (an item authored in this environment, bound to no package)');
+        expect(ran).toEqual([]);
+    });
+
+    it('a write door\'s body (no arm handed) is the environment\'s; the body the engine held keeps its arm when put back', async () => {
+        install(P);
+        ship(P, leaf('notify'));
+        expect(engine.armedFlowPackage('notify')).toBe(P);
+        const held = await engine.getFlow('notify');
+        engine.registerFlow('notify', leaf('notify'));
+        expect(engine.armedFlowPackage('notify')).toBeUndefined();
+        engine.registerFlow('notify', held);
+        expect(engine.armedFlowPackage('notify')).toBe(P);
+        expect(engine.armedFlowPackage('never_registered')).toBeUndefined();
     });
 });
