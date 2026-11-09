@@ -4327,6 +4327,17 @@ const en = {
     lookupHelpText: 'No reference object is configured for this parameter, so the record picker is unavailable. Enter a record id, or ask an administrator to fix the action parameter.',
     unresolvedParam: 'This parameter cannot be shown: the field it is backed by is missing from the object metadata, so the control it needs cannot be built. Ask an administrator to fix the action definition.',
     carryOverHint: 'Carried over unchanged (read-only)',
+    // The declared preflight read (objectstack#31808): its panel above the
+    // params, and the hint on a param it fills.
+    preflight: {
+      heading: 'Before you confirm',
+      waiting: 'Fill in {{fields}} to see what this action will do.',
+      loading: 'Checking with the server…',
+      unbound: 'This check needs a value this record does not have, so it was not sent. The values it fills stay empty.',
+      refused: 'This check is declared incorrectly, so it was not sent. The values it fills stay empty. Ask an administrator to fix the action definition.',
+      failed: 'This check could not be completed. The values it fills stay empty. Close this dialog and try again.',
+      seededHint: 'Filled in by the check (read-only)',
+    },
     cancel: 'Cancel',
     confirm: 'Confirm',
     uploading: 'Uploading…',

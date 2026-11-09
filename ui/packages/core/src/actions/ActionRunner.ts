@@ -332,6 +332,16 @@ export interface ActionDef {
    */
   resultDialog?: ResultDialogSpec;
   /**
+   * Preflight read (spec `ActionSchema.preflight`, objectstack#31840): one
+   * same-origin `GET` the param dialog sends before submit, whose answer it
+   * shows above the params and seeds params from. Derived from the contract,
+   * never restated. The runner does not send it: it hands the param-collection
+   * handler the filler that interpolates its `read.url`
+   * (`ParamCollectionHandler`'s `interpolateRead`), and the console's dialog
+   * reads it (objectstack#31808).
+   */
+  preflight?: SpecActionInput['preflight'];
+  /**
    * The one handler slot: script name/expression for `type: 'script'`, URL for
    * `'url'`, flow name for `'flow'`, modal/page for `'modal'`, endpoint for
    * `'api'`, FormView name for `'form'`.
@@ -747,13 +757,30 @@ export type NavigationHandler = (url: string, options?: {
  * after a refused run is a cancel, reported exactly as a cancel before any
  * run. A handler that never calls `run` keeps the old contract: the runner
  * dispatches once with the values it resolves.
+ *
+ * `interpolateRead` fills the holes of the action's `preflight.read.url`
+ * (objectstack#31808) with the dialog's current values: `${param.NAME}` from
+ * `values`, `${ctx.*}` from the scope the runner's own targets read
+ * (`buildInterpolationContext`), each value percent-encoded. A header
+ * dispatch carries no row, so `ctx.record` is the runner context's record
+ * there, the record the page shows. It answers `null` when a hole has no value
+ * (or names a scope the grammar does not know): the dialog then sends nothing,
+ * because a read with a blank segment asks a different question than the one
+ * declared.
  */
 export type ParamCollectionHandler = (
   params: ActionParamDef[],
   action?: ActionDef,
   interpolate?: (text: string) => string,
   run?: (values: Record<string, any>) => Promise<ActionResult>,
+  interpolateRead?: PreflightReadFiller,
 ) => Promise<Record<string, any> | null>;
+
+/**
+ * Fills a `preflight.read.url` template with the dialog's values, or answers
+ * `null` when any hole is left without a value. See `ParamCollectionHandler`.
+ */
+export type PreflightReadFiller = (template: string, values: Record<string, unknown>) => string | null;
 
 /**
  * The contract's own result-dialog block, and one entry of its field list.
@@ -1761,6 +1788,7 @@ export class ActionRunner {
             dialogCopy.action,
             this.dialogCopyFiller(action),
             run,
+            this.preflightReadFiller(action),
           );
           if (lastRun) {
             const last = await lastRun;
@@ -2090,6 +2118,39 @@ export class ActionRunner {
    * `confirmText` to `description` reads the same — and one with none keeps
    * its `${…}` reading through `templateEvaluatorFor` (objectui#12967).
    */
+  /**
+   * The filler the param dialog interpolates `preflight.read.url` with
+   * (`ParamCollectionHandler`'s `interpolateRead`, objectstack#31808): the
+   * runner's one `${scope.path}` grammar over `param` (the dialog's current
+   * values) and `ctx` (this dispatch's interpolation scope), percent-encoded as
+   * a target is. `ctx.record` is the dispatch's row when it carries one
+   * (`buildInterpolationContext`), else the runner context's record — a record
+   * page's header dispatch carries no row, and the record it acts on is the one
+   * the page shows. A hole with no value, or one naming a scope the grammar
+   * does not know, answers `null`: the dialog sends nothing rather than a read
+   * with a blank segment.
+   */
+  private preflightReadFiller(action: ActionDef): PreflightReadFiller {
+    return (template, values) => {
+      const ctx = this.buildInterpolationContext(action);
+      const pageRecord = this.context.record;
+      if (ctx.record === undefined && pageRecord && typeof pageRecord === 'object' && !Array.isArray(pageRecord)) {
+        ctx.record = pageRecord;
+      }
+      let unbound = false;
+      const filled = substituteScopeTokens(
+        template,
+        { param: values, ctx },
+        encodeURIComponent,
+        () => { unbound = true; },
+      );
+      // A token the grammar did not match (an unknown scope, an unterminated
+      // `${`) is left as written; sent, it would be a literal `${` in the path.
+      if (unbound || filled.includes('${')) return null;
+      return filled;
+    };
+  }
+
   private dialogCopyFiller(action: ActionDef): (text: string) => string {
     const templates = this.templateEvaluatorFor(action);
     return (text: string) => fillTransitionalCopy(
@@ -3359,17 +3420,25 @@ function dialogCopyOf(
  * written. A path that resolves to nothing becomes `''`. `encode` is the only
  * thing a caller varies, and it belongs to the SINK, not to the dialect: a URL
  * position percent-encodes each value, a toast inserts it as text.
+ *
+ * `onMissing` hears each token that resolved to nothing (or to `''`). Only the
+ * preflight read asks (`preflightReadFiller`): it sends no read with a blank
+ * hole, where a target keeps the `''` the other callers have always had.
  */
 function substituteScopeTokens(
   template: string,
   scopes: Record<string, unknown>,
   encode: (value: string) => string,
+  onMissing?: () => void,
 ): string {
   if (typeof template !== 'string' || template.indexOf('${') === -1) return template;
   const pattern = new RegExp(`\\$\\{(${Object.keys(scopes).join('|')})\\.([\\w.]+)\\}`, 'g');
   return template.replace(pattern, (_match, scope: string, path: string) => {
     const value = readPath(scopes[scope], path);
-    if (value == null) return '';
+    if (value == null || value === '') {
+      onMissing?.();
+      return '';
+    }
     return encode(String(value));
   });
 }

@@ -280,68 +280,68 @@
       "note": "objectui one-shot result reveal {title,description,acknowledge,format,fields}."
     },
     "preflight": {
-      "status": "planned",
+      "status": "live",
       "verifiedAt": "2026-11-09",
-      "note": "PLANNED (spec card #31840; consumer #31808, the console half). One same-origin `GET` the param dialog sends before submit: `{ read: { url, method? }, path?, fields?, seed? }`. DECLARED and judged at parse today: `read.url` is held to the page element read's same-origin rule (packages/spec/src/ui/same-origin-api-read.ts, shared with page.zod.ts's `api` data source), its holes are closed to `${param.NAME}` / `${ctx.recordId}` / `${ctx.record.FIELD}`, `fields` is resultDialog's own row, and each seed must fill one declared param that has no other source and that no hole reads; refused on an action with no `params` and beside `execution: 'aggregate'`. READ by nothing yet: no param dialog sends the read, draws the panel or applies a seed until #31808 lands in the console's param-collection handlers and ActionParamDialog. Flip to `live` on the commit that lands that reader, citing it (the ui card owns the flip).",
+      "note": "LIVE (spec card #31840; reader #31808). One same-origin `GET` the param dialog sends before submit: `{ read: { url, method? }, path?, fields?, seed? }`. READ by the console's two param-collection handlers (ui/packages/app-shell/src/hooks/useConsoleActionRuntime.tsx, ui/packages/app-shell/src/views/RecordDetailView.tsx), which hand the block to `resolveParamDialogCompanion` (ui/packages/app-shell/src/views/actionDialogCompanion.ts); it re-judges the stored block with `ActionSchema` and `ActionParamDialog` (ui/packages/app-shell/src/views/ActionParamDialog.tsx) sends the read once every `${param.NAME}` hole has a value, with `read.url` filled by the runner (`ActionRunner.preflightReadFiller`, ui/packages/core/src/actions/ActionRunner.ts; `ctx.record` is the page's record on a header dispatch) and re-checked with `isSameOriginApiTarget`. It draws the answer at `path` above the params (each `fields` row through the result dialog's `ResultField`), applies each `seed` only from the current URL's answer, draws a seeded param read-only and submits it verbatim; a refused, unbound or failed read leaves the seeds empty. The four declared action renderers forward the key. Open gap: `fields[].label` has no translation-bundle walker or overlay yet (#31885), so a label draws as authored (an inline per-locale map is resolved).",
       "children": {
         "read": {
-          "status": "planned",
+          "status": "live",
           "verifiedAt": "2026-11-09",
-          "note": "Planned with its container `preflight` (see that row): the one same-origin request the dialog sends.",
+          "note": "Live with its container `preflight` (see that row): the one same-origin request the dialog sends.",
           "children": {
             "url": {
-              "status": "planned",
+              "status": "live",
               "verifiedAt": "2026-11-09",
-              "note": "Planned with its container: the same-origin API path, refused at parse unless it opens with a single `/` (the shared rule in packages/spec/src/ui/same-origin-api-read.ts), with holes closed to `${param.NAME}` / `${ctx.recordId}` / `${ctx.record.FIELD}`."
+              "note": "Live with its container: the same-origin API path, refused at parse unless it opens with a single `/` (the shared rule in packages/spec/src/ui/same-origin-api-read.ts), with holes closed to `${param.NAME}` / `${ctx.recordId}` / `${ctx.record.FIELD}`."
             },
             "method": {
-              "status": "planned",
+              "status": "live",
               "verifiedAt": "2026-11-09",
-              "note": "Planned with its container: `GET` alone, the only method a preflight is sent with."
+              "note": "Live with its container: `GET` alone, the only method a preflight is sent with."
             }
           }
         },
         "path": {
-          "status": "planned",
+          "status": "live",
           "verifiedAt": "2026-11-09",
-          "note": "Planned with its container `preflight`: the dotted path selecting the sub-tree of the answer the panel shows and the seeds read."
+          "note": "Live with its container `preflight`: the dotted path selecting the sub-tree of the answer the panel shows and the seeds read."
         },
         "fields": {
-          "status": "planned",
+          "status": "live",
           "verifiedAt": "2026-11-09",
-          "note": "Planned with its container `preflight`: the values the panel shows, in resultDialog.fields' own row and format set.",
+          "note": "Live with its container `preflight`: the values the panel shows, in resultDialog.fields' own row and format set.",
           "children": {
             "path": {
-              "status": "planned",
+              "status": "live",
               "verifiedAt": "2026-11-09",
-              "note": "Planned with its container `preflight.fields`: the dot path, in the selected answer, of the value a row shows."
+              "note": "Live with its container `preflight.fields`: the dot path, in the selected answer, of the value a row shows."
             },
             "label": {
-              "status": "planned",
+              "status": "live",
               "verifiedAt": "2026-11-09",
-              "note": "Planned with its container `preflight.fields`: the row's label."
+              "note": "Live with its container `preflight.fields`: the row's label."
             },
             "format": {
-              "status": "planned",
+              "status": "live",
               "verifiedAt": "2026-11-09",
-              "note": "Planned with its container `preflight.fields`: the row's display format, from resultDialog's format set."
+              "note": "Live with its container `preflight.fields`: the row's display format, from resultDialog's format set."
             }
           }
         },
         "seed": {
-          "status": "planned",
+          "status": "live",
           "verifiedAt": "2026-11-09",
-          "note": "Planned with its container `preflight`: answer-to-param seeding, each entry filling one declared param that has no other source and that no hole reads.",
+          "note": "Live with its container `preflight`: answer-to-param seeding, each entry filling one declared param that has no other source and that no hole reads.",
           "children": {
             "param": {
-              "status": "planned",
+              "status": "live",
               "verifiedAt": "2026-11-09",
-              "note": "Planned with its container `preflight.seed`: the declared param the value is written into, judged against the action's params at parse."
+              "note": "Live with its container `preflight.seed`: the declared param the value is written into, judged against the action's params at parse."
             },
             "path": {
-              "status": "planned",
+              "status": "live",
               "verifiedAt": "2026-11-09",
-              "note": "Planned with its container `preflight.seed`: the dotted path, in the selected answer, of the value written into the param."
+              "note": "Live with its container `preflight.seed`: the dotted path, in the selected answer, of the value written into the param."
             }
           }
         }

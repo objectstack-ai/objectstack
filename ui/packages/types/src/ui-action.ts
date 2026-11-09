@@ -867,6 +867,15 @@ export interface UIActionSchema {
    */
   resultDialog?: SpecAction['resultDialog'];
 
+  /**
+   * Preflight read for the action's param dialog (objectstack#31840): one
+   * same-origin `GET` sent before submit, its answer shown above the params
+   * and seeded into the params it names. The four declared action renderers
+   * forward it, so a dialog opened from any of them sends the read
+   * (objectstack#31808). Derived from the contract, as `resultDialog` is.
+   */
+  preflight?: SpecAction['preflight'];
+
   // === Conditional ===
 
   /** Expression controlling visibility (e.g., "status === 'draft'") */
