@@ -93,6 +93,9 @@ function makeSharedStore() {
     };
 }
 
+/** The last entry of `list` (the lib target predates `Array#at`). */
+const lastOf = <T>(list: readonly T[]): T | undefined => list[list.length - 1];
+
 /**
  * One "replica": a stub engine over the SHARED store with its OWN registry,
  * wrapped by its own protocol instance. Registry verbs record their calls —
@@ -110,7 +113,7 @@ function makeReplica(store: ReturnType<typeof makeSharedStore>) {
      * for no column subset), so the resync's one active-row read still answers.
      */
     const readFault: { mode?: 'all' | 'items' } = {};
-    const failRead = (table: string, opts?: { fields?: unknown }) => {
+    const failRead = (table: string, opts?: Record<string, unknown>) => {
         if (table !== 'sys_metadata' || !readFault.mode) return;
         if (readFault.mode === 'items' && opts?.fields !== undefined) return;
         throw new Error('sys_metadata read failed: connection reset');
@@ -547,7 +550,7 @@ describe('[#31722] cluster.resync — the peer re-converges what a lost hint wou
         const report = await peer.protocol.resyncMetadataMutationPubSub();
         expect(report).toMatchObject({ rows: 2, converged: 1, unchanged: 1 });
         expect(peer.registeredObjects).toEqual(['gadget', 'widget', 'gadget', 'widget', 'gadget']);
-        expect(peer.registeredLabels.at(-1)).toBe('Gadget renamed');
+        expect(lastOf(peer.registeredLabels)).toBe('Gadget renamed');
     });
 
     it('a lost delete takes the delete’s heal walk on the peer', async () => {
@@ -589,14 +592,14 @@ describe('[#31722] cluster.resync — the peer re-converges what a lost hint wou
         await vi.waitFor(() => expect(peer.registeredLabels).toEqual(['One']));
         await peer.protocol.resyncMetadataMutationPubSub();
         await save(writer, 'gadget', 'Two');
-        await vi.waitFor(() => expect(peer.registeredLabels.at(-1)).toBe('Two'));
+        await vi.waitFor(() => expect(lastOf(peer.registeredLabels)).toBe('Two'));
 
         outage.down = true;
         await save(writer, 'gadget', 'One');
         outage.down = false;
 
         await peer.protocol.resyncMetadataMutationPubSub();
-        expect(peer.registeredLabels.at(-1)).toBe('One');
+        expect(lastOf(peer.registeredLabels)).toBe('One');
     });
 
     it('a local write on the peer is re-read too, so a peer’s lost revert of it converges', async () => {
@@ -606,14 +609,14 @@ describe('[#31722] cluster.resync — the peer re-converges what a lost hint wou
         await peer.protocol.resyncMetadataMutationPubSub();
         // The peer's own save: its registry holds 'Two' from its own door.
         await save(peer, 'gadget', 'Two');
-        expect(peer.registeredLabels.at(-1)).toBe('Two');
+        expect(lastOf(peer.registeredLabels)).toBe('Two');
 
         outage.down = true;
         await save(writer, 'gadget', 'One');
         outage.down = false;
 
         await peer.protocol.resyncMetadataMutationPubSub();
-        expect(peer.registeredLabels.at(-1)).toBe('One');
+        expect(lastOf(peer.registeredLabels)).toBe('One');
     });
 
     it('a failed active-row read rejects and keeps every entry; the next resync converges', async () => {
