@@ -45,7 +45,7 @@ import { makeMemoryDriver } from './__tests__/settings-door.testkit.js';
 import { LEAN_ORGANIZATION_SOURCE, withEngineRegistry } from './__tests__/settings-organization.testkit.js';
 
 const OWNER_PACKAGE = 'com.objectstack.test.settings-cluster-lane';
-const ADMIN = { enforced: true, permissions: ['manage_platform_settings'], userId: 'usr_admin' } as const;
+const ADMIN = { enforced: true, permissions: ['manage_platform_settings', 'setup.access', 'setup.write'], userId: 'usr_admin' };
 
 /** A probe namespace whose value is a string we can look for on the wire. */
 const PROBE_MANIFEST = {
