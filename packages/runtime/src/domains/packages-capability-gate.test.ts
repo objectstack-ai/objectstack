@@ -34,7 +34,11 @@
  * "the target function never ran" is an assertion, not an inference.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { MULTI_REPLICA_PACKAGE_CHANGE_REFUSED } from '@objectstack/service-cluster';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
 // ── caller contexts ──────────────────────────────────────────────────────────
@@ -54,7 +58,7 @@ const authed = (caps: string[] = [], tenantId?: string) =>
 const system = (tenantId?: string) => ctx({ isSystem: true, ...(tenantId ? { tenantId } : {}) });
 
 // ── fake kernel ──────────────────────────────────────────────────────────────
-function make(overrides: { protocol?: any; metadata?: any; registry?: any } = {}) {
+function make(overrides: { protocol?: any; metadata?: any; registry?: any; cluster?: any } = {}) {
     const registry = overrides.registry ?? {
         getAllPackages: vi.fn().mockReturnValue([{ id: 'com.example.pkg-a', status: 'active' }]),
         getPackage: vi.fn().mockReturnValue({ id: 'com.example.pkg-a', manifest: { id: 'com.example.pkg-a', name: 'A' } }),
@@ -71,7 +75,8 @@ function make(overrides: { protocol?: any; metadata?: any; registry?: any } = {}
                 name === 'objectql' ? objectql
                     : name === 'protocol' ? (overrides.protocol ?? null)
                         : name === 'metadata' ? (overrides.metadata ?? null)
-                            : null,
+                            : name === 'cluster' ? (overrides.cluster ?? null)
+                                : null,
         },
     };
     return { dispatcher: new HttpDispatcher(kernel), registry };
@@ -410,4 +415,130 @@ describe('/packages — the write cohort and the read cohort do not collapse int
         expect(read.response?.status).toBe(403);
         expect(protocol.getMetaItems).not.toHaveBeenCalled();
     });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 6. [cloud#3814 D1] Declared replicas on the Redis driver — every package
+//    change is refused, before anything is written
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe('[cloud#3814 D1] /packages — declared replicas on the Redis driver refuse every runtime package change', () => {
+    /** The doors that change the package registry or the per-replica enable/disable state. */
+    const PACKAGE_DOORS = [
+        'POST /packages (install)',
+        'PATCH /:id/enable',
+        'PATCH /:id/disable',
+        'POST /:id/duplicate',
+        'POST /:id/ensure-customization',
+        'PATCH /:id (manifest)',
+        'DELETE /:id',
+    ];
+    const packageDoors = WRITE_ROUTES.filter((wc) => PACKAGE_DOORS.includes(wc.name));
+    /** Metadata writes to the shared store: every replica reads them, so they are not refused. */
+    const metadataDoors = WRITE_ROUTES.filter((wc) => !PACKAGE_DOORS.includes(wc.name));
+
+    const ENV = ['OS_CLUSTER_REPLICAS', 'OS_EXPECT_MULTI_NODE', 'OS_ALLOW_MEMORY_CLUSTER_MULTINODE', 'OS_HOME'] as const;
+    const prior: Partial<Record<(typeof ENV)[number], string | undefined>> = {};
+    let home: string;
+    beforeEach(() => {
+        for (const k of ENV) { prior[k] = process.env[k]; delete process.env[k]; }
+        // enable/disable keep their state under OS_HOME when the host registers no store.
+        home = mkdtempSync(join(tmpdir(), 'os-packages-multi-replica-'));
+        process.env.OS_HOME = home;
+    });
+    afterEach(() => {
+        for (const k of ENV) {
+            if (prior[k] === undefined) delete process.env[k];
+            else process.env[k] = prior[k];
+        }
+        rmSync(home, { recursive: true, force: true });
+    });
+
+    /** Every write a package door can make, on the registry and the protocol doubles. */
+    const WRITERS = {
+        registry: ['installPackage', 'enablePackage', 'disablePackage', 'uninstallPackage', 'updatePackageManifest'],
+        protocol: ['duplicatePackage', 'ensureCustomizationPackage', 'updatePackage', 'deletePackage'],
+    } as const;
+
+    const DECLARATIONS = [
+        ['OS_CLUSTER_REPLICAS=3', { OS_CLUSTER_REPLICAS: '3' }],
+        ['OS_EXPECT_MULTI_NODE=true', { OS_EXPECT_MULTI_NODE: 'true' }],
+    ] as const;
+
+    it('the doors this describe pins are all the package doors of the write gate\'s table', () => {
+        expect(packageDoors.map((wc) => wc.name)).toEqual(PACKAGE_DOORS);
+    });
+
+    for (const [label, env] of DECLARATIONS) {
+        for (const wc of packageDoors) {
+            it(`${label} on redis: ${wc.name} answers 409 ${MULTI_REPLICA_PACKAGE_CHANGE_REFUSED} with the recipe, and writes nothing`, async () => {
+                Object.assign(process.env, env);
+                const protocol = fullProtocol();
+                const { dispatcher, registry } = make({ protocol, cluster: { driver: 'redis' } });
+                const r = await dispatcher.handlePackages(wc.path, wc.method, wc.body ?? {}, wc.query ?? {}, authed(['manage_metadata'], wc.tenantId));
+                expect(r.response?.status).toBe(409);
+                expect(r.response?.body?.error?.code).toBe(MULTI_REPLICA_PACKAGE_CHANGE_REFUSED);
+                const message = String(r.response?.body?.error?.message);
+                expect(message).toContain('maintenance window');
+                expect(message).toContain('restart every replica');
+                for (const name of WRITERS.registry) expect(registry[name], name).not.toHaveBeenCalled();
+                for (const name of WRITERS.protocol) expect(protocol[name], name).not.toHaveBeenCalled();
+                // No package-state file either.
+                expect(readdirSync(home)).toEqual([]);
+            });
+        }
+    }
+
+    it('an isSystem caller is refused too: the change would still reach one replica', async () => {
+        process.env.OS_CLUSTER_REPLICAS = '3';
+        const protocol = fullProtocol();
+        const { dispatcher, registry } = make({ protocol, cluster: { driver: 'redis' } });
+        const r = await dispatcher.handlePackages('/pkg-a/disable', 'PATCH', {}, {}, system());
+        expect(r.response?.status).toBe(409);
+        expect(registry.disablePackage).not.toHaveBeenCalled();
+    });
+
+    it('the capability gate still answers first: a caller without manage_metadata gets 403, not the 409', async () => {
+        process.env.OS_CLUSTER_REPLICAS = '3';
+        const { dispatcher } = make({ protocol: fullProtocol(), cluster: { driver: 'redis' } });
+        const r = await dispatcher.handlePackages('/pkg-a/enable', 'PATCH', {}, {}, authed([]));
+        expect(r.response?.status).toBe(403);
+    });
+
+    const CONTROLS: Array<[string, Record<string, string>, unknown]> = [
+        ['a single node on redis', {}, { driver: 'redis' }],
+        ['OS_CLUSTER_REPLICAS=1 on redis', { OS_CLUSTER_REPLICAS: '1' }, { driver: 'redis' }],
+        ['declared replicas on the in-process driver (escape hatch)', { OS_CLUSTER_REPLICAS: '3', OS_ALLOW_MEMORY_CLUSTER_MULTINODE: 'true' }, { driver: 'memory' }],
+        ['declared replicas with no cluster service composed', { OS_CLUSTER_REPLICAS: '3' }, undefined],
+    ];
+    for (const [label, env, cluster] of CONTROLS) {
+        for (const wc of packageDoors) {
+            it(`CONTROL — ${label}: ${wc.name} runs as before`, async () => {
+                Object.assign(process.env, env);
+                const protocol = fullProtocol();
+                const { dispatcher, registry } = make({ protocol, cluster });
+                const r = await dispatcher.handlePackages(wc.path, wc.method, wc.body ?? {}, wc.query ?? {}, authed(['manage_metadata'], wc.tenantId));
+                expect(r.response?.status).not.toBe(409);
+                expect(wc.target(protocol, registry)).toHaveBeenCalled();
+            });
+        }
+    }
+
+    it('CONTROL — the same single node writes the enable/disable state file the refusal leaves unwritten', async () => {
+        const { dispatcher } = make({ protocol: fullProtocol(), cluster: { driver: 'redis' } });
+        const r = await dispatcher.handlePackages('/pkg-a/disable', 'PATCH', {}, {}, authed(['manage_metadata']));
+        expect(r.response?.status).toBe(200);
+        expect(readdirSync(home)).toEqual(['package-state']);
+    });
+
+    for (const wc of metadataDoors) {
+        it(`unchanged — ${wc.name} is a shared metadata write and is not refused under declared replicas on redis`, async () => {
+            process.env.OS_CLUSTER_REPLICAS = '3';
+            const protocol = fullProtocol();
+            const { dispatcher, registry } = make({ protocol, cluster: { driver: 'redis' } });
+            const r = await dispatcher.handlePackages(wc.path, wc.method, wc.body ?? {}, wc.query ?? {}, authed(['manage_metadata'], wc.tenantId));
+            expect(r.response?.status).not.toBe(409);
+            expect(wc.target(protocol, registry)).toHaveBeenCalled();
+        });
+    }
 });

@@ -35,11 +35,12 @@
 
 // Pays `@objectstack/metadata`'s first load at collection, never inside a clocked case.
 import '@objectstack/metadata';
-import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ObjectQL } from '@objectstack/objectql';
+import { MULTI_REPLICA_PACKAGE_CHANGE_REFUSED } from '@objectstack/service-cluster';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysMetadata, SysMetadataHistoryObject, SysMetadataAuditObject } from '@objectstack/platform-objects/metadata';
@@ -110,7 +111,7 @@ interface Answer {
  * protocol refuses (an illegal machine name among it) throws the way the real
  * engine throws. The default rig's engine is a map that accepts anything.
  */
-async function boot(options: { parse?: boolean; baseScope?: 'system' | 'cloud' } = {}) {
+async function boot(options: { parse?: boolean; baseScope?: 'system' | 'cloud'; clusterDriver?: string } = {}) {
     const engine = new ObjectQL();
     liveEngines.push(engine);
     engine.registerDriver(new SqlDriver({
@@ -153,6 +154,7 @@ async function boot(options: { parse?: boolean; baseScope?: 'system' | 'cloud' }
         objectql: engine,
         automation: { handlerReady: true, registerFlow, unregisterFlow, getFlow },
     };
+    if (options.clusterDriver !== undefined) named.cluster = { driver: options.clusterDriver };
     const get = (name: string) => named[name] ?? null;
     const kernel: any = { context: { getService: get }, getService: get, getServiceAsync: async (name: string) => get(name) };
     const dispatcher = new HttpDispatcher(kernel);
@@ -472,4 +474,78 @@ describe('[#28149] the contract: the ledger row names the schemas this suite par
         expect(refused.body.error.fields).toMatchObject([{ field: 'status', code: 'unknown_field' }]);
         expect(await rig.rows('ext_status')).toEqual([]);
     }, 60_000);
+});
+
+describe('[cloud#3814 D1] declared replicas on the Redis driver: a clone that would create the pair is refused', () => {
+    const ENV = ['OS_CLUSTER_REPLICAS', 'OS_EXPECT_MULTI_NODE'] as const;
+    const prior: Partial<Record<(typeof ENV)[number], string | undefined>> = {};
+    beforeEach(() => { for (const k of ENV) { prior[k] = process.env[k]; delete process.env[k]; } });
+    afterEach(() => {
+        for (const k of ENV) {
+            if (prior[k] === undefined) delete process.env[k];
+            else process.env[k] = prior[k];
+        }
+    });
+
+    for (const [label, key, value] of [['OS_CLUSTER_REPLICAS=3', 'OS_CLUSTER_REPLICAS', '3'], ['OS_EXPECT_MULTI_NODE=true', 'OS_EXPECT_MULTI_NODE', 'true']] as const) {
+        it(`${label}: the default landing needs a pair this replica lacks — 409 ${MULTI_REPLICA_PACKAGE_CHANGE_REFUSED}, no package, no row, no registered copy`, async () => {
+            const rig = await boot({ clusterDriver: 'redis' });
+            process.env[key] = value;
+
+            const answer = await rig.clone(SOURCE, { name: 'acme_lead_followup', label: 'Lead follow-up (ACME)' });
+
+            expect(answer.status, JSON.stringify(answer.body)).toBe(409);
+            expect(answer.code).toBe(MULTI_REPLICA_PACKAGE_CHANGE_REFUSED);
+            expect(String(answer.body?.error?.message)).toContain(`'${PAIR}'`);
+            expect(String(answer.body?.error?.message)).toContain('restart every replica');
+            expect(rig.installed()).not.toContain(PAIR);
+            expect(rig.published).toEqual([]);
+            expect(await rig.rows('acme_lead_followup')).toEqual([]);
+            // The engine accepted the copy before the landing was asked; the
+            // refused landing withdrew it (the door's own undo).
+            expect(rig.flows.has('acme_lead_followup')).toBe(false);
+        }, 60_000);
+    }
+
+    it('a pair this replica already serves is reused: 200, the copy lands there and no package is created', async () => {
+        const rig = await boot({ clusterDriver: 'redis' });
+        const first = await rig.clone(SOURCE, { name: 'acme_lead_followup', label: 'First copy' });
+        expect(first.status, JSON.stringify(first.body)).toBe(200);
+        const pairsBefore = rig.published.length;
+        process.env.OS_CLUSTER_REPLICAS = '3';
+
+        const second = await rig.clone(SOURCE, { name: 'acme_lead_followup_two', label: 'Second copy' });
+
+        expect(second.status, JSON.stringify(second.body)).toBe(200);
+        expect(second.data.packageId).toBe(PAIR);
+        expect(rig.published.length).toBe(pairsBefore);
+        expect((await rig.rows('acme_lead_followup_two')).map((r) => r.package_id)).toEqual([PAIR]);
+    }, 60_000);
+
+    it('an explicit writable target creates no package and is not refused', async () => {
+        const rig = await boot({ clusterDriver: 'redis' });
+        process.env.OS_CLUSTER_REPLICAS = '3';
+
+        const answer = await rig.clone(SOURCE, { name: 'ext_lead_followup', label: 'Lead follow-up (ext)', package: EXT.id });
+
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(answer.data.packageId).toBe(EXT.id);
+        expect(rig.installed()).not.toContain(PAIR);
+    }, 60_000);
+
+    for (const [label, env, driver] of [
+        ['a single node on redis', {}, 'redis'],
+        ['declared replicas on the in-process driver', { OS_CLUSTER_REPLICAS: '3' }, 'memory'],
+    ] as const) {
+        it(`CONTROL — ${label}: the default landing ensures the pair, as before`, async () => {
+            const rig = await boot({ clusterDriver: driver });
+            Object.assign(process.env, env);
+
+            const answer = await rig.clone(SOURCE, { name: 'acme_lead_followup', label: 'Lead follow-up (ACME)' });
+
+            expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+            expect(answer.data.packageId).toBe(PAIR);
+            expect(rig.installed()).toContain(PAIR);
+        }, 60_000);
+    }
 });
