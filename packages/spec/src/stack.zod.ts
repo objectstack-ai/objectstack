@@ -4491,6 +4491,30 @@ function recordCurrencyPathOf(field: unknown): { via: string; code: string } | u
 }
 
 /**
+ * Why a child amount that follows no parent cannot be the subject of a
+ * `record` roll-up, and what to declare instead: the end of the refusal
+ * {@link collectRecordCurrencyPathErrors} (c) prints.
+ */
+function unfollowedAmountReason(childObject: string, childField: string, def: unknown): string {
+  const named = `'${childObject}.${childField}'`;
+  const config = isRecord(def) && isRecord(def.currencyConfig) ? def.currencyConfig : undefined;
+  if (config?.currencyMode === 'record' && typeof config.currencyField === 'string') {
+    return `${named} is in each '${childObject}' record's own currency (the code in '${config.currencyField}'), so the `
+      + 'roll-up would add amounts in several currencies. Make the child amount follow this record '
+      + '(`currencyField: \'MASTER_DETAIL_FIELD.CODE_FIELD\'`), or roll up a stored home-currency amount of the child '
+      + 'instead and declare that currency.';
+  }
+  if (config?.currencyMode === 'fixed' && typeof config.defaultCurrency === 'string') {
+    return `${named} is fixed to ${config.defaultCurrency}, so the total is in ${config.defaultCurrency} whatever this `
+      + `record's code holds. Declare \`currencyConfig: { currencyMode: 'fixed', defaultCurrency: '${config.defaultCurrency}' }\` `
+      + 'on the summary instead.';
+  }
+  return `${named} declares no currency that follows this record, so the total is not in the currency this record's `
+    + 'code holds. Delete `currencyConfig` on the summary, or declare `currencyMode: \'fixed\'` if every amount it reads '
+    + 'is in one currency.';
+}
+
+/**
  * [ADR-0144 D2 and D6, amended 2026-11-09 by #31743, ruling A recorded in
  * 6739066323] The two halves of a child that follows its parent's currency
  * that need both objects, judged where the stack holds both — the
@@ -4517,19 +4541,29 @@ function recordCurrencyPathOf(field: unknown): { via: string; code: string } | u
  * parent's money as a bare number; one naming another code field would show
  * it in the wrong currency.
  *
- * Judged only where the declaration is new: (b) asks about roll-ups over a
- * child amount that follows through a path, a shape no stack could carry
- * before this amendment, so nothing that resolved before is refused here. A
- * roll-up through any OTHER relation over such a child, and every roll-up
- * over a child amount with its own code field, keep D6's first bullet, which
- * the registry enforces at runtime registration; this pass does not repeat
- * it.
+ * (c) A `summary` (`sum`, `min`, `max`, `avg`) declaring
+ * `currencyMode: 'record'` that is NOT that admitted roll-up is refused: the
+ * child amount it reads follows no parent (its own code field, a `fixed`
+ * code, or none), follows another object's currency, or follows this one
+ * through a `master_detail` other than the relation the roll-up is written
+ * through. The amended D6 note admits the roll-up "only through that very
+ * `master_detail` field"; every other roll-up keeps D6's first bullet, so a
+ * `record` declaration there names a currency the total is not in. This is
+ * the narrowing of the spec seat's claim amend 1 on #31958 (record
+ * 6746006322); the half one object can see (a `count` roll-up, `dynamic`, a
+ * `record` roll-up with no child amount) is the object door's
+ * (`refuseUnadmittedSummaryCurrency`, `data/object.zod.ts`). A roll-up that
+ * declares `fixed`, or no `currencyConfig`, over a child amount with its own
+ * code field is not judged here: D6's first bullet refuses it at runtime
+ * registration, and this pass does not repeat it.
  *
  * Resolution is against the stack's own `objects`, merged with its
  * `objectExtensions` by name; an object this stack does not declare is not
  * judged, nor is a parent it knows only through an extension (whose owner's
- * fields live elsewhere), and neither is a roll-up whose relationship field
- * is neither written nor the child's one relation back to the parent.
+ * fields live elsewhere), nor, for (c), a child it knows only through an
+ * extension or a child field it does not hold; and neither is a roll-up whose
+ * relationship field is neither written nor the child's one relation back to
+ * the parent.
  */
 function collectRecordCurrencyPathErrors(config: ObjectStackDefinition): string[] {
   const errors: string[] = [];
@@ -4582,10 +4616,36 @@ function collectRecordCurrencyPathErrors(config: ObjectStackDefinition): string[
       if (typeof ops.object !== 'string' || typeof ops.field !== 'string' || typeof ops.function !== 'string' || !summaryFunctionReadsField(ops.function)) continue;
       const child = fieldsByObject.get(ops.object);
       if (child === undefined) continue;
-      const amount = recordCurrencyPathOf(hasOwnKey(child, ops.field) ? child[ops.field] : undefined);
-      if (amount === undefined) continue;
+      const summaryCurrency = isRecord(field.currencyConfig) ? field.currencyConfig : undefined;
+      // (c) A `record` roll-up that is NOT the admitted one (#31958): judged only
+      // against a child this stack declares and a child field it holds, so an
+      // unresolved or extension-only child is skipped, as (a) and (b) skip one.
+      const childField = hasOwnKey(child, ops.field) ? child[ops.field] : undefined;
+      const judgeRecord = summaryCurrency?.currencyMode === 'record' && declared.has(ops.object) && childField !== undefined;
+      const refuseRecord = (why: string): void => {
+        errors.push(
+          `Object '${objectName}' field '${fieldName}' currencyConfig: \`currencyMode: 'record'\` on a summary is admitted `
+            + `only for a roll-up through a master_detail whose child amounts follow this record's currency through that `
+            + `very field (\`currencyField: 'MASTER_DETAIL_FIELD.CODE_FIELD'\` on the child amount). This summary rolls up `
+            + `${String(ops.function)}(${ops.object}.${ops.field}), and ${why}`,
+        );
+      };
+      const amount = recordCurrencyPathOf(childField);
+      if (amount === undefined) {
+        if (judgeRecord) refuseRecord(unfollowedAmountReason(ops.object, ops.field, childField));
+        continue;
+      }
       const amountVia = child[amount.via];
-      if (!isRecord(amountVia) || amountVia.type !== 'master_detail' || amountVia.reference !== objectName) continue;
+      if (!isRecord(amountVia) || amountVia.type !== 'master_detail' || amountVia.reference !== objectName) {
+        if (judgeRecord && isRecord(amountVia) && amountVia.type === 'master_detail' && typeof amountVia.reference === 'string') {
+          refuseRecord(
+            `'${ops.object}.${ops.field}' follows the currency of '${amountVia.reference}' through '${amount.via}', not `
+              + `this record's, so the total is in no currency '${objectName}' holds. Delete \`currencyConfig\` on `
+              + `'${fieldName}', or declare \`currencyMode: 'fixed'\` if every amount is in one currency.`,
+          );
+        }
+        continue;
+      }
       const backRelations = Object.keys(child).filter((k) => {
         const f = child[k];
         return isRecord(f) && (f.type === 'lookup' || f.type === 'master_detail') && f.reference === objectName;
@@ -4593,10 +4653,21 @@ function collectRecordCurrencyPathErrors(config: ObjectStackDefinition): string[
       const relation = typeof ops.relationshipField === 'string'
         ? ops.relationshipField
         : backRelations.length === 1 ? backRelations[0] : undefined;
-      if (relation !== amount.via) continue;
+      if (relation !== amount.via) {
+        // A relation this pass cannot resolve (no `relationshipField`, several
+        // relations back) is skipped; a written other one is refused.
+        if (judgeRecord && relation !== undefined) {
+          refuseRecord(
+            `it rolls up through '${relation}', while '${ops.object}.${ops.field}' follows its parent's currency through `
+              + `'${amount.via}': the rows it totals hang off this record through another relation, so each may be in `
+              + `another parent's currency. Roll up through \`relationshipField: '${amount.via}'\`, or delete `
+              + `\`currencyConfig\` on '${fieldName}'.`,
+          );
+        }
+        continue;
+      }
       // A path whose code the parent does not hold is (a)'s finding, told once at the amount.
       if (!isCodeField(hasOwnKey(fields, amount.code) ? fields[amount.code] : undefined)) continue;
-      const summaryCurrency = isRecord(field.currencyConfig) ? field.currencyConfig : undefined;
       if (summaryCurrency?.currencyMode === 'record' && summaryCurrency.currencyField === amount.code) continue;
       const spelling = `\`currencyConfig: { currencyMode: 'record', currencyField: '${amount.code}' }\``;
       errors.push(
