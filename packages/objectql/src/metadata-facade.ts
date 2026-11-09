@@ -5,6 +5,7 @@ import {
   canonicalMetadataServiceType,
 } from '@objectstack/core';
 import { SchemaRegistry } from './registry.js';
+import { PackageScopedNameRefusedError } from './package-scoped-read.js';
 
 /**
  * Is this (already canonical) type the object metadata type?
@@ -225,15 +226,20 @@ export class MetadataFacade {
    * path can only corrupt — so there is none, and no replacement envelope key
    * either (any key chosen would just collide with the next authorable field).
    *
-   * `currentPackageId` (ADR-0048) opts into package-scoped resolution: when two
-   * installed packages ship an item of the same `type`/`name`, the registry
-   * prefers the one owned by `currentPackageId` (composite key
-   * `${packageId}:${name}`) before falling back to first-match. Omit it for the
-   * legacy context-free lookup.
+   * `currentPackageId` (ADR-0048) is the caller's package. [ADR-0150 D3,
+   * #31680 child E8] For a type whose by-name readers consult
+   * `(package, name)` (`PACKAGE_SCOPED_READ_TYPES`) the read is the one
+   * package-scoped resolver's (`SchemaRegistry.resolveItem`): the caller's own
+   * item, else the unique holder in its declared closure; with no package, the
+   * environment's own item, else the unique package holder; a name that is
+   * ambiguous, or held only where the caller may not reach, is refused naming
+   * every candidate. Every other type keeps `getItem`'s prefer-local read.
+   *
+   * @throws {PackageScopedNameRefusedError} when the resolver refuses.
    */
   async get(type: string, name: string, currentPackageId?: string): Promise<any> {
     // [#7378 row 2] Read the store `register` wrote: the canonical type.
-    return this.registry.getItem(canonicalMetadataServiceType(type), name, currentPackageId);
+    return this.registry.resolveItem(canonicalMetadataServiceType(type), name, currentPackageId);
   }
 
   /**
@@ -241,9 +247,15 @@ export class MetadataFacade {
    * resolution. ([#7519] Historically documented as "with metadata wrapper" —
    * there is no wrapper; {@link get} returns the same stored document. This
    * member survives as the sync, scope-free variant.)
+   *
+   * [ADR-0150 D3, #31680 child E8] Scope-free is a caller with no package: a
+   * type of `PACKAGE_SCOPED_READ_TYPES` resolves environment-wide through the
+   * one package-scoped resolver, and a name two packages hold is refused.
+   *
+   * @throws {PackageScopedNameRefusedError} when the resolver refuses.
    */
   getEntry(type: string, name: string): any {
-    return this.registry.getItem(canonicalMetadataServiceType(type), name);
+    return this.registry.resolveItem(canonicalMetadataServiceType(type), name);
   }
 
   /**
@@ -285,9 +297,19 @@ export class MetadataFacade {
 
   /**
    * Check if a metadata item exists
+   *
+   * [ADR-0150 D3, #31680 child E8] Read as {@link getEntry} reads it. A name
+   * the package-scoped resolver refuses exists: its holders are a fact, and
+   * no item is served for it here.
    */
   async exists(type: string, name: string): Promise<boolean> {
-    const item = this.registry.getItem(canonicalMetadataServiceType(type), name);
+    let item: unknown;
+    try {
+      item = this.registry.resolveItem(canonicalMetadataServiceType(type), name);
+    } catch (err) {
+      if (err instanceof PackageScopedNameRefusedError) return true;
+      throw err;
+    }
     return item !== undefined && item !== null;
   }
 
