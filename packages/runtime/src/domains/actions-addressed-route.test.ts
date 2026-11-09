@@ -25,6 +25,7 @@ const HR = 'com.hr.pkg';
 
 function dispatcherWith(objects: any[], standalone: any[], namespaceOf: Record<string, string> = { [CRM]: 'crm', [HR]: 'hr' }) {
     const ran: Array<{ obj: string; key: string; packageId?: string }> = [];
+    const subjects: Array<{ obj: string; record?: any; recordId?: string }> = [];
     const ql: any = {
         getSchema: (n: string) => objects.find((o) => o.name === n),
         registry: {
@@ -38,8 +39,9 @@ function dispatcherWith(objects: any[], standalone: any[], namespaceOf: Record<s
         insert: vi.fn(),
         update: vi.fn(),
         delete: vi.fn(),
-        executeAction: vi.fn(async (obj: string, key: string, _ctx: any, opts?: { packageId?: string }) => {
+        executeAction: vi.fn(async (obj: string, key: string, actionCtx: any, opts?: { packageId?: string }) => {
             ran.push({ obj, key, ...(opts?.packageId !== undefined ? { packageId: opts.packageId } : {}) });
+            subjects.push({ obj, record: actionCtx?.record, recordId: actionCtx?.recordId });
             return { ran: opts?.packageId ?? 'unqualified' };
         }),
         listRegisteredActions: () => [
@@ -74,8 +76,14 @@ function dispatcherWith(objects: any[], standalone: any[], namespaceOf: Record<s
         return { status: response?.status ?? 200, body: response?.body };
     };
     const declined = async (path: string) => (await dispatcher.handleActions(path, 'POST', {}, ctx()))?.handled === false;
+    // What a catch-all host (`createHonoApp`) does with any `/api/v1/*` path:
+    // hand it to `dispatch()` and answer what comes back.
+    const dispatch = async (path: string) => {
+        const answered = await dispatcher.dispatch('POST', path, {}, {}, { request: new Request(`http://host/api/v1${path}`, { method: 'POST' }) }, '/api/v1');
+        return { handled: answered?.handled, status: answered?.response?.status, body: answered?.response?.body as any };
+    };
     const bridge = dispatcher.buildMcpBridge(ctx());
-    return { post, declined, bridge, ran };
+    return { post, declined, dispatch, bridge, ran, subjects, ql };
 }
 
 const act = (name: string, pkg: string | undefined, extra: Record<string, unknown> = {}) => ({
@@ -179,6 +187,38 @@ describe('POST /actions/_env/... — the environment named exactly', () => {
     });
 });
 
+describe('an addressed path is two or three segments after its qualifier', () => {
+    it('one segment is no shape of it: the door\'s shape 404, nothing run', async () => {
+        const { post, ran } = dispatcherWith([], [act('log_call', CRM)]);
+        const answer = await post('/crm/log_call');
+        expect(answer.status).toBe(404);
+        expect(messageOf(answer)).toContain('/actions/:ns/:object/:action[/:recordId]');
+        expect(ran).toEqual([]);
+    });
+
+    it('CONTROL — the object-less call spelled as published, /actions/:ns/global/:action, is served', async () => {
+        const { post, ran } = dispatcherWith([], [act('log_call', CRM)]);
+        const answer = await post('/crm/global/log_call');
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(ran).toEqual([{ obj: 'global', key: 'log_call', packageId: CRM }]);
+    });
+
+    it('more than three are declined, as the bare arm declines them, nothing run', async () => {
+        const { declined, ran } = dispatcherWith([], [act('close', CRM, { objectName: 'task' })]);
+        expect(await declined('/crm/task/close/r1/extra')).toBe(true);
+        expect(await declined('/_env/task/close/r1/extra')).toBe(true);
+        expect(ran).toEqual([]);
+    });
+
+    it('CONTROL — three segments after the qualifier are served', async () => {
+        const task = { name: 'task', fields: { name: { type: 'text' } }, actions: [] };
+        const { post, ran } = dispatcherWith([task], [act('close', CRM, { objectName: 'task' })]);
+        const answer = await post('/crm/task/close/r1');
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(ran).toEqual([{ obj: 'task', key: 'close', packageId: CRM }]);
+    });
+});
+
 describe('a four-segment path whose first segment is no address is no route', () => {
     it('declined (`handled: false`), never served by the bare grammar: a literal, or no installed namespace', async () => {
         const { declined, ran } = dispatcherWith([], [act('close', CRM, { objectName: 'task' })]);
@@ -193,6 +233,27 @@ describe('a four-segment path whose first segment is no address is no route', ()
     it('CONTROL — an addressed four-segment path is served', async () => {
         const { declined } = dispatcherWith([], [act('close', CRM, { objectName: 'task' })]);
         expect(await declined('/crm/task/close/r1')).toBe(false);
+    });
+
+    it('on a catch-all host it is declined at `dispatch()` — the seam `createHonoApp` hands every path — nothing run; on base the call RAN with the tail ignored', async () => {
+        // `createHonoApp` answers a declined dispatch with its own 404
+        // (`toResponse`'s last line, `RESOURCE_NOT_FOUND` "Not Found"); a
+        // mounted host answers the dispatcher's `ROUTE_NOT_FOUND` (the
+        // every-verb integration and the dogfood door pin it). Both 404.
+        const task = { name: 'task', fields: { name: { type: 'text' } }, actions: [] };
+        const { dispatch, ran } = dispatcherWith([task], [act('close', CRM, { objectName: 'task' })]);
+        for (const path of ['/actions/task/close/rec_1/extra', '/actions/crm/task/close/rec_1/extra']) {
+            expect((await dispatch(path)).handled, path).toBe(false);
+        }
+        expect(ran).toEqual([]);
+    });
+
+    it('CONTROL — the same host serves the three-segment bare call', async () => {
+        const task = { name: 'task', fields: { name: { type: 'text' } }, actions: [] };
+        const { dispatch, ran } = dispatcherWith([task], [act('close', CRM, { objectName: 'task' })]);
+        const answer = await dispatch('/actions/task/close/r1');
+        expect(answer.status ?? 200, JSON.stringify(answer.body)).toBe(200);
+        expect(ran).toEqual([{ obj: 'task', key: 'close' }]);
     });
 });
 
@@ -214,6 +275,27 @@ describe('carry-in: an addressed call on an object falls back to the holder\'s o
         const out = await bridge.runAction('log_call', { namespace: 'crm', objectName: 'lead' });
         expect(out.ok).toBe(true);
         expect(ran.map((r) => r.packageId)).toEqual([CRM]);
+    });
+
+    it('the same CALL on both doors, with a record id: the subject object is the caller\'s, and its record is loaded and handed on', async () => {
+        const rest = fixture();
+        const viaRest = await rest.post('/crm/lead/log_call/r1');
+        expect(viaRest.status, JSON.stringify(viaRest.body)).toBe(200);
+        const mcp = fixture();
+        const viaMcp = await mcp.bridge.runAction('log_call', { namespace: 'crm', objectName: 'lead', recordId: 'r1' });
+        expect(viaMcp.ok, JSON.stringify(viaMcp)).toBe(true);
+        for (const door of [rest, mcp]) {
+            expect(door.ran).toEqual([{ obj: 'lead', key: 'log_call', packageId: CRM }]);
+            expect(door.subjects).toHaveLength(1);
+            expect(door.subjects[0]?.obj).toBe('lead');
+            expect(door.subjects[0]?.record).toEqual({ id: 'r1' });
+        }
+        // The record was read from the caller's object on both doors.
+        const readFrom = (ql: any) => [...ql.find.mock.calls, ...ql.findOne.mock.calls].map((c: any[]) => c[0]);
+        for (const door of [rest, mcp]) {
+            expect(readFrom(door.ql)).toContain('lead');
+            expect(readFrom(door.ql)).not.toContain('global');
+        }
     });
 
     it('CONTROL — MCP bare run_action(log_call, { objectName: lead }) answers as it did: not found', async () => {
