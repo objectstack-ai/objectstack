@@ -30,12 +30,12 @@ import type { MarketplacePackageVersion } from './marketplaceApi.js';
 import {
   CARD_LANGUAGE_LIMIT,
   readShippedLanguages,
-  usePercentFormatter,
+  useCoverageFormatter,
   type ShippedLanguage,
 } from './shippedLanguages.js';
 
-function languageText(language: ShippedLanguage, formatPercent: (percent: number) => string): string {
-  return language.percent === null ? language.label : `${language.label} ${formatPercent(language.percent)}`;
+function languageText(language: ShippedLanguage, formatCoverage: (percent: number) => string): string {
+  return language.percent === null ? language.label : `${language.label} ${formatCoverage(language.percent)}`;
 }
 
 /**
@@ -45,7 +45,7 @@ function languageText(language: ShippedLanguage, formatPercent: (percent: number
  */
 export function CardLanguagesLine({ version }: { version: MarketplacePackageVersion | null | undefined }) {
   const { t } = useObjectTranslation();
-  const formatPercent = usePercentFormatter();
+  const formatCoverage = useCoverageFormatter();
   const shipped = readShippedLanguages(version);
   if (shipped.kind === 'unserved') return null;
   if (shipped.kind === 'unknown') {
@@ -56,7 +56,7 @@ export function CardLanguagesLine({ version }: { version: MarketplacePackageVers
       </p>
     );
   }
-  const all = shipped.languages.map((language) => languageText(language, formatPercent));
+  const all = shipped.languages.map((language) => languageText(language, formatCoverage));
   const shown = all.slice(0, CARD_LANGUAGE_LIMIT);
   const extra = all.length - shown.length;
   const full = all.join(' · ');
@@ -84,7 +84,7 @@ export function CardLanguagesLine({ version }: { version: MarketplacePackageVers
  */
 export function DetailLanguagesGroup({ version }: { version: MarketplacePackageVersion | null | undefined }) {
   const { t } = useObjectTranslation();
-  const formatPercent = usePercentFormatter();
+  const formatCoverage = useCoverageFormatter();
   const shipped = readShippedLanguages(version);
   if (shipped.kind === 'unserved') return null;
   const label = t('marketplace.facet.languages');
@@ -108,7 +108,7 @@ export function DetailLanguagesGroup({ version }: { version: MarketplacePackageV
             data-testid={`marketplace-detail-language-${language.code}`}
             title={language.code}
           >
-            {languageText(language, formatPercent)}
+            {languageText(language, formatCoverage)}
             {language.isDefault && (
               <span className="ml-1 text-muted-foreground">{t('marketplace.languages.default')}</span>
             )}

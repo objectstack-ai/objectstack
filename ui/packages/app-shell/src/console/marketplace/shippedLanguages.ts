@@ -72,7 +72,7 @@ export function readShippedLanguages(
  * `60 %` in German — so no pack carries a format string of its own. The
  * locale is `useDisplayLocale()`, as the page's dates are, never a tag of its own.
  */
-export function usePercentFormatter(): (percent: number) => string {
+export function useCoverageFormatter(): (percent: number) => string {
   const format = new Intl.NumberFormat(useDisplayLocale(), { style: 'percent', maximumFractionDigits: 1 });
   return (percent) => format.format(percent / 100);
 }
