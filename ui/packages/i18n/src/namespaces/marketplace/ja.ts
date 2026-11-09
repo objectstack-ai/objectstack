@@ -216,6 +216,7 @@ const ja = {
       businessFunction: '業務機能',
       industry: '業界',
       solutionType: '種類',
+      languages: '言語',
     },
     businessFunction: {
       sales: '営業',
@@ -249,6 +250,11 @@ const ja = {
     },
     maturity: {
       beta: 'ベータ',
+    },
+    languages: {
+      none: '言語情報なし',
+      more: 'ほか {{extra}} 言語',
+      default: '（既定）',
     },
     relativeTime: {
       today: "今日",

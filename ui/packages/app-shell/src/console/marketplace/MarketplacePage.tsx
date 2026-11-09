@@ -63,6 +63,7 @@ import { ConnectorCredentialsStep } from './ConnectorCredentialsStep.js';
 import { packagesHref } from '../../views/metadata-admin/packageSource.js';
 import { MarketplaceNamespaceGate } from './MarketplaceNamespaceGate.js';
 import { MarketplaceFacetFilters } from './MarketplaceFacetFilters.js';
+import { CardLanguagesLine } from './MarketplaceLanguages.js';
 import {
   EMPTY_FACET_SELECTION,
   NO_SERVED_FACETS,
@@ -975,6 +976,10 @@ function MarketplacePageBody() {
                   <p className="text-sm text-muted-foreground line-clamp-2">
                     {loc.description || t('marketplace.noDescription')}
                   </p>
+                  {/* The languages the latest version ships, with coverage
+                      (`MarketplaceLanguages.tsx`); nothing on a catalog that
+                      does not serve them. */}
+                  <CardLanguagesLine version={pkg.latest_version} />
                   <div className="flex items-center gap-2 mt-auto pt-2 flex-wrap">
                     {/* objectui#11760 — a local install this runtime refused to
                         load at startup (the listing's `notLoaded` marker) is not
