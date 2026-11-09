@@ -2135,6 +2135,11 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
             label: "매핑: 이름 클레임",
             helpText: "선택 사항입니다. 표시 이름에 매핑되는 클레임입니다. 기본값은 \"name\"입니다.",
             placeholder: "name"
+          },
+          mapGroups: {
+            label: "매핑: 그룹 클레임",
+            helpText: "선택 사항입니다. 사용자의 그룹을 담는 클레임입니다(예: \"groups\"). 로그인할 때마다 해당 그룹에 매핑된 권한 집합이 부여됩니다. 비워 두면 그룹을 매핑하지 않습니다.",
+            placeholder: "groups"
           }
         }
       },
@@ -2165,6 +2170,11 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
             label: "NameID 형식",
             helpText: "선택 사항입니다. 요청할 SAML NameID 형식입니다. 기본값은 IdP에 구성된 형식입니다.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+          },
+          mapGroups: {
+            label: "매핑: 그룹 속성",
+            helpText: "선택 사항입니다. 사용자의 그룹을 담는 어설션 속성입니다. 로그인할 때마다 해당 그룹에 매핑된 권한 집합이 부여됩니다. 비워 두면 그룹을 매핑하지 않습니다.",
+            placeholder: "groups"
           }
         }
       },
@@ -2193,6 +2203,35 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       edit_sso_sign_in_options: {
         label: "로그인 옵션 편집",
         successMessage: "로그인 옵션 저장됨"
+      },
+      show_sso_groups_claim: {
+        label: "그룹 클레임 보기",
+        resultDialog: {
+          title: "그룹 클레임",
+          description: "이 공급자가 로그인할 때마다 사용자의 그룹을 읽는 OIDC 클레임 또는 SAML 속성입니다. 비어 있으면 이 공급자는 그룹을 매핑하지 않습니다. \"그룹 클레임 편집\"으로 변경하세요.",
+          acknowledge: "완료",
+          fields: {
+            groupsClaim: "그룹 클레임"
+          }
+        }
+      },
+      edit_sso_groups_claim: {
+        label: "그룹 클레임 편집",
+        params: {
+          groupsClaim: {
+            label: "그룹 클레임",
+            helpText: "사용자의 그룹을 담는 OIDC 클레임 또는 SAML 속성입니다. 로그인할 때마다 해당 그룹에 매핑된 권한 집합이 부여됩니다. 비워 두면 제거되며, 이 공급자는 더 이상 그룹을 매핑하지 않습니다.",
+            placeholder: "groups"
+          }
+        },
+        resultDialog: {
+          title: "그룹 클레임이 저장됨",
+          description: "이 공급자가 이제 로그인할 때마다 읽는 그룹 클레임입니다. 비어 있으면 그룹을 매핑하지 않습니다.",
+          acknowledge: "완료",
+          fields: {
+            groupsClaim: "그룹 클레임"
+          }
+        }
       }
     }
   },

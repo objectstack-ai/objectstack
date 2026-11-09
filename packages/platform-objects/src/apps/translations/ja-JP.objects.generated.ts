@@ -2135,6 +2135,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
             label: "マッピング: 名前クレーム",
             helpText: "任意。表示名にマッピングするクレーム。既定値は「name」。",
             placeholder: "name"
+          },
+          mapGroups: {
+            label: "マッピング: グループクレーム",
+            helpText: "任意。ユーザーのグループを含むクレーム（例:「groups」）。サインインのたびに、それらのグループにマッピングされた権限セットが付与されます。空欄の場合、グループはマッピングされません。",
+            placeholder: "groups"
           }
         }
       },
@@ -2165,6 +2170,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
             label: "NameID フォーマット",
             helpText: "任意。要求する SAML NameID フォーマット。既定では IdP に設定されたフォーマットを使用します。",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+          },
+          mapGroups: {
+            label: "マッピング: グループ属性",
+            helpText: "任意。ユーザーのグループを含むアサーション属性。サインインのたびに、それらのグループにマッピングされた権限セットが付与されます。空欄の場合、グループはマッピングされません。",
+            placeholder: "groups"
           }
         }
       },
@@ -2193,6 +2203,35 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       edit_sso_sign_in_options: {
         label: "サインインオプションを編集",
         successMessage: "サインインオプションを保存しました"
+      },
+      show_sso_groups_claim: {
+        label: "グループクレームを表示",
+        resultDialog: {
+          title: "グループクレーム",
+          description: "このプロバイダーがサインインのたびにユーザーのグループを読み取る OIDC クレームまたは SAML 属性です。空の場合、このプロバイダーはグループをマッピングしません。「グループクレームを編集」で変更できます。",
+          acknowledge: "完了",
+          fields: {
+            groupsClaim: "グループクレーム"
+          }
+        }
+      },
+      edit_sso_groups_claim: {
+        label: "グループクレームを編集",
+        params: {
+          groupsClaim: {
+            label: "グループクレーム",
+            helpText: "ユーザーのグループを含む OIDC クレームまたは SAML 属性です。サインインのたびに、それらのグループにマッピングされた権限セットが付与されます。空欄にすると削除され、このプロバイダーはグループをマッピングしなくなります。",
+            placeholder: "groups"
+          }
+        },
+        resultDialog: {
+          title: "グループクレームを保存しました",
+          description: "このプロバイダーが今後サインインのたびに読み取るグループクレームです。空の場合、グループはマッピングされません。",
+          acknowledge: "完了",
+          fields: {
+            groupsClaim: "グループクレーム"
+          }
+        }
       }
     }
   },

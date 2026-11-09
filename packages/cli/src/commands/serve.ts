@@ -2474,8 +2474,10 @@ export default class Serve extends Command {
      * #21501 — the compiled artifact a CONFIG boot loaded as its app bundle,
      * as the ready banner displays it; set only when one did. A non-host
      * config's standalone stack serves its metadata from that bundle, so the
-     * banner's `Artifact:` row names it; a host config (its `plugins` hold
-     * code) boots its own module and the row stays `Config:`.
+     * banner's `Artifact:` row names it; so does a host config's dev boot
+     * whose wrap carries the dev artifact door's file (#31761). Any other
+     * host-config boot (its `plugins` hold code) serves its own module and
+     * the row stays `Config:`.
      */
     let configBootBundle: string | undefined;
 
@@ -3560,6 +3562,9 @@ export default class Serve extends Command {
       // points except by the AppPlugin append below, and an AppPlugin is not a
       // MetadataPlugin.
       let devArtifactDoor: any;
+      // The file `devArtifactDoor` reads — set exactly when the door is
+      // constructed, so the wrap below can read the SAME file (#31761).
+      let devArtifactDoorPath: string | undefined;
       if (isDev && flags.server && !hasMetadataPlugin(plugins)) {
         try {
           const { resolveDefaultArtifactPath } = await import('@objectstack/runtime');
@@ -3657,6 +3662,7 @@ export default class Serve extends Command {
                 artifactWatch: true,
                 artifactSource: { mode: 'local-file', path: hmrArtifactPath },
               });
+              devArtifactDoorPath = hmrArtifactPath;
             }
           }
         } catch (e: any) {
@@ -3721,20 +3727,68 @@ export default class Serve extends Command {
       // produced. Appending is kept so both boot paths (config-derived wrap
       // here, `createStandaloneStack`'s own AppPlugin) share one plugin
       // order and one story in the boot logs.
+      // A config whose code found no app bundle to land on is reported, never
+      // dropped (#4095) — on both routes below that graft it.
+      const warnOrphanedRuntimeMembers = (graft: ReturnType<typeof graftAuthoredRuntimeMembers>): void => {
+        if (graft.orphaned.length === 0) return;
+        console.warn(chalk.yellow(
+          `  ⚠ ${relativeConfig} exports ${graft.orphaned.join(' / ')} but no app bundle claimed `
+          + `${graft.orphaned.length === 1 ? 'it' : 'them'}`
+          + `${graft.reason === 'ambiguous-app-plugin'
+            ? ' — several apps are registered and the config declares no manifest.id to match'
+            : ' — no registered app bundle has a matching manifest.id'}`
+          + '. Action handlers registered there will NOT be reachable (they 404 at dispatch).',
+        ));
+      };
       if (!hasAppPluginAlready && configHasMetadata) {
         try {
-            const { AppPlugin } = await import('@objectstack/runtime');
+            const { AppPlugin, loadArtifactBundle } = await import('@objectstack/runtime');
+            // ── With the dev artifact door composed, the wrap carries the
+            // door's FILE, not the config module (#31761) ──────────────────
+            // The door reads `dist/objectstack.json`; a wrap over the module
+            // registered a second copy over it — and won the cold boot for every
+            // type it registers last. Measured on an `os dev --no-compile` boot
+            // of a host config over an artifact older than its sources:
+            // `/meta/view` and `GET /forms/:slug` answered the edited module,
+            // `/meta/object` the artifact, and the supervisor's "this boot
+            // serves the STALE build" warning was true of neither. The blank
+            // scaffold is a host config (its `plugins[]` holds connector
+            // instances), so that was every fresh project. One source per boot:
+            // the wrap reads the door's file, exactly as `createStandaloneStack`
+            // composes a non-host config (door + `AppPlugin` over the same
+            // artifact), and the module contributes only the members a JSON
+            // artifact cannot carry — the same graft as the `hasAppPluginAlready`
+            // branch below. With the default compile both are one evaluation of
+            // the same module, so nothing served changes; with `--no-compile`
+            // the boot serves the artifact, as the warning says.
+            //
+            // An artifact that does not load (malformed, unreadable) leaves the
+            // module as the wrap's bundle, as before — `loadArtifactBundle`
+            // has already said why, and the door, reading the same bytes,
+            // registers nothing either.
+            const artifactBundle = devArtifactDoor && devArtifactDoorPath
+              ? await loadArtifactBundle(devArtifactDoorPath, { tag: '[serve]', unwrapEnvelope: true })
+              : null;
             // The registrar is DECLARED by this composition, never inferred by
             // AppPlugin — see the `devArtifactDoor` block above. Default
             // (`'app-plugin'`) whenever no artifact door composes, which is
             // every non-dev boot of a host config — including every boot that
             // composes `hostConfigMetadataDoor`, which reads no artifact and
             // so registers none of the stack.
-            plugins = [...plugins, new AppPlugin(
-              config,
+            const wrap = new AppPlugin(
+              artifactBundle ?? config,
               undefined,
               devArtifactDoor ? { securityMetadataRegistrar: 'artifact-door' } : {},
-            )];
+            );
+            plugins = [...plugins, wrap];
+            if (artifactBundle && devArtifactDoorPath) {
+              // Grafted onto THIS wrap only: the host's own `plugins[]` may hold
+              // other apps, and the module's code belongs to the bundle it was
+              // compiled into.
+              warnOrphanedRuntimeMembers(graftAuthoredRuntimeMembers([wrap], config));
+              // The ready banner names the file the metadata came from (#21501).
+              configBootBundle = path.relative(process.cwd(), devArtifactDoorPath) || devArtifactDoorPath;
+            }
         } catch (e: any) {
             // Non-fatal — the platform still boots, just without this app's
             // metadata. But it must SAY so: this catch was silent, and the two
@@ -3760,17 +3814,7 @@ export default class Serve extends Command {
         // Success is silent: on the config-boot path this is now the normal
         // route by which handlers reach the engine, and the observable proof is
         // that the actions dispatch.
-        const graft = graftAuthoredRuntimeMembers(plugins, config);
-        if (graft.orphaned.length > 0) {
-          console.warn(chalk.yellow(
-            `  ⚠ ${relativeConfig} exports ${graft.orphaned.join(' / ')} but no app bundle claimed `
-            + `${graft.orphaned.length === 1 ? 'it' : 'them'}`
-            + `${graft.reason === 'ambiguous-app-plugin'
-              ? ' — several apps are registered and the config declares no manifest.id to match'
-              : ' — no registered app bundle has a matching manifest.id'}`
-            + '. Action handlers registered there will NOT be reachable (they 404 at dispatch).',
-          ));
-        }
+        warnOrphanedRuntimeMembers(graftAuthoredRuntimeMembers(plugins, config));
       }
 
       // 3b. Auto-register I18nServicePlugin if config contains translations/i18n
@@ -7813,10 +7857,11 @@ export function describeRegisteredDriver(
  *   row rather than name a nonexistent file or risk leaking a secret.
  * - Neither set → the config-boot path, which names what that boot actually
  *   loaded as the app (#21501): `configBootBundle` set — a non-host config
- *   whose standalone stack served a compiled artifact as its bundle — reports
- *   THAT file as `bundleSource`; otherwise (a host config, whose `plugins` hold
- *   code and which boots its own module, or a config whose artifact was absent)
- *   report `relativeConfig`. No row names a file the boot did not load.
+ *   whose standalone stack served a compiled artifact as its bundle, or a host
+ *   config whose dev boot wrapped the dev artifact door's file (#31761) —
+ *   reports THAT file as `bundleSource`; otherwise (a host config booting its
+ *   own module, or a config whose artifact was absent) report
+ *   `relativeConfig`. No row names a file the boot did not load.
  */
 export function resolveBannerConfigRow(opts: {
   relativeConfig: string;

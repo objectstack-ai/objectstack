@@ -296,3 +296,169 @@ describe('DbJobAdapter — interval schedules are leader-elected (#13686)', () =
     expect(await db.listJobs()).toEqual(['nightly_report']);
   });
 });
+
+/**
+ * A lock that honours its lease the way the in-memory cluster driver does
+ * (`service-cluster` `MemoryLock`): granted for `ttlMs`, auto-released when the
+ * lease lapses, never renewed by the holder. It is what a single `os serve`
+ * hands `CronJobAdapter` — and the reason that adapter's lock stops excluding a
+ * second fire of the same job once a run outlasts the lease.
+ */
+function leasedLock() {
+  const held = new Map<string, symbol>();
+  const acquire = vi.fn(async (key: string, opts?: { ttlMs?: number; waitMs?: number }) => {
+    if (held.has(key)) return null;
+    const lease = Symbol(key);
+    held.set(key, lease);
+    const lapse = setTimeout(() => { if (held.get(key) === lease) held.delete(key); }, opts?.ttlMs ?? 15_000);
+    return {
+      release: vi.fn(async () => {
+        clearTimeout(lapse);
+        if (held.get(key) === lease) held.delete(key);
+      }),
+    };
+  });
+  return { lock: { acquire }, acquire, held };
+}
+
+describe('DbJobAdapter — a scheduled fire never starts while the same job is still in flight (#31811)', () => {
+  /** A pull on a 30 s interval — the shape measured overlapping itself four times. */
+  const PULL_TICK = 30_000;
+  const PULL: JobSchedule = { type: 'interval', intervalMs: PULL_TICK };
+
+  /** A handler that stays in flight until the test lets it finish. */
+  function longRun() {
+    let finish!: () => void;
+    const done = new Promise<void>((resolve) => { finish = resolve; });
+    const handler = vi.fn(async () => { await done; });
+    return { handler, finish: () => finish() };
+  }
+
+  const makeLogger = () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() });
+  const skippedTicks = (logger: ReturnType<typeof makeLogger>) =>
+    logger.warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('still in flight'));
+  const runningRows = (engine: ReturnType<typeof makeFakeEngine>, job: string) =>
+    engine.rows('sys_job_run').filter((r) => r.job_name === job && r.status === 'running');
+
+  it('one node, a run that outlasts the cluster lease: later ticks skip, logged, instead of starting a second run', async () => {
+    vi.useFakeTimers();
+    const engine = makeFakeEngine();
+    const logger = makeLogger();
+    const fence = leasedLock();
+    const cron = new CronJobAdapter({ cluster: { lock: fence.lock }, logger });
+    const db = track(new DbJobAdapter({ engine, cron, logger }));
+    const run = longRun();
+    await db.schedule('crm_pull', PULL, run.handler);
+    const firstFireAt = new Date(Date.now() + PULL_TICK).toISOString();
+
+    // Ten ticks; the 60 s lease of the first fire lapsed eight ticks ago.
+    await vi.advanceTimersByTimeAsync(PULL_TICK * 10);
+
+    expect(run.handler, 'one run in flight, not one per tick past the lease').toHaveBeenCalledTimes(1);
+    expect(runningRows(engine, 'crm_pull')).toHaveLength(1);
+    // The skip happens before the cluster lock is asked: one acquire, the first fire's.
+    expect(fence.acquire).toHaveBeenCalledTimes(1);
+    const skips = skippedTicks(logger);
+    expect(skips, 'every skipped tick says so, once').toHaveLength(9);
+    expect(skips[0]).toContain('"crm_pull"');
+    expect(skips[0], 'the warning names the run still in flight by its start').toContain(firstFireAt);
+
+    run.finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(runningRows(engine, 'crm_pull')).toHaveLength(0);
+
+    // The latch is per run, not a lockout: the next tick fires again.
+    await vi.advanceTimersByTimeAsync(PULL_TICK);
+    expect(run.handler).toHaveBeenCalledTimes(2);
+  });
+
+  it('no cron adapter assembled: the inner timer skips a tick while its own run is in flight, too', async () => {
+    vi.useFakeTimers();
+    const engine = makeFakeEngine();
+    const logger = makeLogger();
+    const db = track(new DbJobAdapter({ engine, logger }));
+    const run = longRun();
+    await db.schedule('crm_pull', PULL, run.handler);
+
+    await vi.advanceTimersByTimeAsync(PULL_TICK * 4);
+
+    expect(run.handler).toHaveBeenCalledTimes(1);
+    expect(runningRows(engine, 'crm_pull')).toHaveLength(1);
+    const skips = skippedTicks(logger);
+    expect(skips).toHaveLength(3);
+    expect(skips[0]).toContain('"crm_pull"');
+
+    run.finish();
+    await vi.advanceTimersByTimeAsync(PULL_TICK);
+    expect(run.handler).toHaveBeenCalledTimes(2);
+  });
+
+  it('CONTROL — a run that finishes inside its interval fires on every tick, with no skip logged', async () => {
+    vi.useFakeTimers();
+    const engine = makeFakeEngine();
+    const logger = makeLogger();
+    const cron = new CronJobAdapter({ cluster: { lock: leasedLock().lock }, logger });
+    const db = track(new DbJobAdapter({ engine, cron, logger }));
+    const handler = vi.fn(async () => { await new Promise((r) => setTimeout(r, PULL_TICK / 2)); });
+    await db.schedule('crm_pull', PULL, handler);
+
+    await vi.advanceTimersByTimeAsync(PULL_TICK * 5 + PULL_TICK / 2);
+
+    expect(handler).toHaveBeenCalledTimes(5);
+    expect(engine.rows('sys_job_run').map((r) => r.status)).toEqual(Array(5).fill('success'));
+    expect(skippedTicks(logger)).toEqual([]);
+  });
+
+  it('a manual trigger() is not gated: an operator asking THIS node to run the job runs it, scheduled run in flight or not', async () => {
+    vi.useFakeTimers();
+    const engine = makeFakeEngine();
+    const logger = makeLogger();
+    const cron = new CronJobAdapter({ cluster: { lock: leasedLock().lock }, logger });
+    const db = track(new DbJobAdapter({ engine, cron, logger }));
+    const run = longRun();
+    await db.schedule('crm_pull', PULL, run.handler);
+
+    await vi.advanceTimersByTimeAsync(PULL_TICK);
+    expect(run.handler).toHaveBeenCalledTimes(1);
+
+    const manual = db.trigger('crm_pull');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(run.handler).toHaveBeenCalledTimes(2);
+    expect(runningRows(engine, 'crm_pull')).toHaveLength(2);
+
+    run.finish();
+    await manual;
+  });
+
+  it('CONTROL — a cron job fired at the seam runs once per fire when each fire has finished', async () => {
+    const engine = makeFakeEngine();
+    const logger = makeLogger();
+    const cron = new CronJobAdapter({ cluster: { lock: leasedLock().lock }, logger });
+    const db = track(new DbJobAdapter({ engine, cron, logger }));
+    const handler = vi.fn(async () => {});
+    // Feb 30: never fires by itself, so the seam below is the only driver.
+    await db.schedule('nightly_report', { type: 'cron', expression: '0 0 30 2 *' }, handler);
+
+    await (cron as any).runScheduled('nightly_report');
+    await (cron as any).runScheduled('nightly_report');
+    await (cron as any).runScheduled('nightly_report');
+
+    expect(handler).toHaveBeenCalledTimes(3);
+    expect(skippedTicks(logger)).toEqual([]);
+  });
+
+  it('CONTROL — a once job fires once at its deadline, with no skip logged', async () => {
+    vi.useFakeTimers();
+    const engine = makeFakeEngine();
+    const logger = makeLogger();
+    const cron = new CronJobAdapter({ cluster: { lock: leasedLock().lock }, logger });
+    const db = track(new DbJobAdapter({ engine, cron, logger }));
+    const handler = vi.fn(async () => {});
+    await db.schedule('wake_up', { type: 'once', at: new Date(Date.now() + PULL_TICK).toISOString() }, handler);
+
+    await vi.advanceTimersByTimeAsync(PULL_TICK * 3);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(skippedTicks(logger)).toEqual([]);
+  });
+});

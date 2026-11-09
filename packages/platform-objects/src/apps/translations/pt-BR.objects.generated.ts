@@ -2135,6 +2135,11 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
             label: "Mapear: declaração de nome",
             helpText: "Opcional. Declaração mapeada para o nome de exibição. O padrão é \"name\".",
             placeholder: "name"
+          },
+          mapGroups: {
+            label: "Mapear: declaração de grupos",
+            helpText: "Opcional. Declaração que contém os grupos do usuário, por exemplo \"groups\". Cada login concede os conjuntos de permissões mapeados para esses grupos. Deixe em branco para não mapear grupos.",
+            placeholder: "groups"
           }
         }
       },
@@ -2165,6 +2170,11 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
             label: "Formato do NameID",
             helpText: "Opcional. Formato de NameID SAML solicitado. O padrão é o formato configurado no IdP.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+          },
+          mapGroups: {
+            label: "Mapear: atributo de grupos",
+            helpText: "Opcional. Atributo da asserção que contém os grupos do usuário. Cada login concede os conjuntos de permissões mapeados para esses grupos. Deixe em branco para não mapear grupos.",
+            placeholder: "groups"
           }
         }
       },
@@ -2193,6 +2203,35 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       edit_sso_sign_in_options: {
         label: "Editar opções de login",
         successMessage: "Opções de login salvas"
+      },
+      show_sso_groups_claim: {
+        label: "Mostrar declaração de grupos",
+        resultDialog: {
+          title: "Declaração de grupos",
+          description: "A declaração OIDC ou o atributo SAML de onde este provedor lê os grupos do usuário a cada login. Vazio significa que o provedor não mapeia grupos. Altere com \"Editar declaração de grupos\".",
+          acknowledge: "Concluído",
+          fields: {
+            groupsClaim: "Declaração de grupos"
+          }
+        }
+      },
+      edit_sso_groups_claim: {
+        label: "Editar declaração de grupos",
+        params: {
+          groupsClaim: {
+            label: "Declaração de grupos",
+            helpText: "A declaração OIDC ou o atributo SAML que contém os grupos do usuário. Cada login concede os conjuntos de permissões mapeados para esses grupos. Deixe em branco para removê-la: o provedor deixa de mapear grupos.",
+            placeholder: "groups"
+          }
+        },
+        resultDialog: {
+          title: "Declaração de grupos salva",
+          description: "A declaração de grupos que este provedor lê agora a cada login. Vazio significa que nenhum grupo é mapeado.",
+          acknowledge: "Concluído",
+          fields: {
+            groupsClaim: "Declaração de grupos"
+          }
+        }
       }
     }
   },
