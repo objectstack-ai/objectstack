@@ -60,7 +60,7 @@ import { signUpCaptchaFailedMessage, signUpRefusalMessages } from './signUpRefus
 import { decideSignUpOffer, isInvitationRedirect, needsBootstrapProbe } from './signUpOffer.js';
 import { useBootstrapStatus } from './bootstrapStatus.js';
 import { ServerUnreachable } from './LoginPage.js';
-import { InvitationGoneNotice, invitationArrivalCopy, useInvitationArrival } from './invitationArrival.js';
+import { InvitationGoneNotice, invitationArrivalCopy, invitationIdOf, useInvitationArrival } from './invitationArrival.js';
 import { useInvitationSignUpJoin } from './invitationSignUpJoin.js';
 import { resolveRootUrl } from '../organizations/resolveHomeUrl.js';
 import { hasSignInLanguagePick, saveSignInLanguagePick } from '../../hooks/useUserLocale.js';
@@ -304,6 +304,9 @@ export function RegisterPage() {
           navigate('/');
         }}
         onVerificationRequired={(email) => setPendingEmail(email)}
+        // The sign-up presents the invitation its link names: under
+        // `invite_only` the server admits a sign-up only by it.
+        invitationId={invitationIdOf(redirect) ?? undefined}
         loginUrl={loginUrl}
         // #25886 — an invitee is told to register the invited address: the
         // invitation is accepted only by the account that carries it. #26473 —

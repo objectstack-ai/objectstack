@@ -607,13 +607,11 @@ export class S3StorageAdapter implements IStorageService {
   async uploadChunk(uploadId: string, partNumber: number, data: Buffer): Promise<string> {
     const client = await this.getClient();
     const s3 = await this.s3Mod();
-    // We need the key — store the relationship elsewhere or pass via metadata.
-    // For the S3 adapter, `uploadId` is the S3-native UploadId. The key is
-    // tracked in the StorageMetadataStore (sys_upload_session.key).
-    // Here we retrieve it from session state; the plugin ensures the correct
-    // key is passed. However, the IStorageService contract doesn't include key
-    // in uploadChunk — so we work around by storing the mapping in a WeakMap
-    // keyed by uploadId. For a robust implementation we'll add a lookup:
+    // S3 addresses a part by key AND UploadId, but the IStorageService
+    // contract carries the UploadId alone. The durable record of the key is
+    // `sys_upload_session.key`; the storage routes hand it down through
+    // `setUploadKey` before every chunk and completion call, on whichever
+    // process serves the request.
     const key = this._uploadKeys?.get(uploadId);
     if (!key) {
       throw new Error('S3StorageAdapter: key not found for uploadId. Call setUploadKey() before uploadChunk().');
@@ -672,10 +670,16 @@ export class S3StorageAdapter implements IStorageService {
   private _uploadKeys: Map<string, string> = new Map();
 
   /**
-   * Register the storage key for a multipart upload session. Must be called
-   * by the StorageServicePlugin after `initiateChunkedUpload()` returns so
-   * that subsequent `uploadChunk` / `completeChunkedUpload` calls can resolve
-   * the S3 key without it being part of the IStorageService contract signature.
+   * Register the storage key (the CALLER key, unprefixed) for a multipart
+   * upload, so `uploadChunk` / `completeChunkedUpload` / `abortChunkedUpload`
+   * can address it without the key being part of the IStorageService contract
+   * signature.
+   *
+   * This map is a per-process hand-off, never the record: the storage routes
+   * call this (through the swappable proxy, which forwards it) with
+   * `sys_upload_session.key` before every chunk and completion call, and the
+   * upload-session reap guard does the same before an abort, so a request
+   * served by a process that never saw the upload start still finds its key.
    */
   setUploadKey(uploadId: string, key: string): void {
     this._uploadKeys.set(uploadId, key);

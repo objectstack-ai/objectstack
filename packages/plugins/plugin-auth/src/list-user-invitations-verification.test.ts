@@ -177,8 +177,8 @@ const get = (manager: AuthManager, path: string, cookie?: string) =>
  * UNVERIFIED — asserted, because that is the whole population of this suite.
  */
 const signUp = async (manager: AuthManager, engine: MemoryEngine, email: string) => {
-  inviteForAudienceGate(engine, email);
-  const res = await post(manager, '/sign-up/email', { email, password: PASSWORD, name: email });
+  const invitationId = await inviteForAudienceGate(engine, email);
+  const res = await post(manager, '/sign-up/email', { email, password: PASSWORD, name: email, invitationId });
   expect(res.status, await res.clone().text()).toBe(200);
   const user = (engine.tables.get('sys_user') ?? []).find((u) => u.email === email);
   expect(user, `sign-up did not create ${email}`).toBeDefined();

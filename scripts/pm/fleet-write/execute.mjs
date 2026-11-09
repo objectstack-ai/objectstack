@@ -389,6 +389,16 @@
  * not sent, and the stroke stops there as on any failure: silence here is the
  * defect this follow-up exists to close, so it is never a quiet skip.
  *
+ * The `workflows` row's split: when EVERY governed hit is that row and the
+ * target is in its `split.repos` (`workflowSplitReadable`), the follow-up
+ * reads the queue guard's own measure — `readWorkflowDiff`, imported, merge
+ * base → head (`workflowReadingFor`: the compare answers the merge base, the
+ * checkout must be the target by its origin, the two commits are fetched by
+ * sha at depth 1 when missing) — and a reading that says S requests nobody.
+ * ⛔ Fail closed: no checkout, a commit missing, git throwing, an unread
+ * compare, an H reading, a mixed pull or a repository outside `split.repos`
+ * requests exactly as the path-only plan, and the verdict row says which.
+ *
  * ## The step summary — what a person reads back
  *
  * `$GITHUB_STEP_SUMMARY` gets one table per run: request id · sender and its
@@ -437,13 +447,14 @@
  *       rule ⑤ batch could not be recorded; zero writes in that second case.
  */
 
+import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../../invoked-as.mjs';
 // The register and the approver list, READ — never restated here (the ops.mjs header, "The governed-review follow-up").
-import { GOVERNED_TIER_H, GOVERNED_TIER_S, governedPathsIn, landingTierOf, pullPathsFrom, repoIdForSlug } from '../check-governed-merges.mjs';
+import { applyWorkflowSplit, GOVERNED_TIER_H, GOVERNED_TIER_S, governedPathsIn, landingTierOf, pullPathsFrom, readWorkflowDiff, repoIdForSlug, slugFromRemote } from '../check-governed-merges.mjs';
 import { GOVERNED_APPROVERS } from '../check-governed-queue-guard.mjs';
 import { scrub } from '../fleet-token.mjs';
 import { classifyHttp } from '../label-write.mjs';
@@ -701,12 +712,16 @@ export function reviewedLogins(json) {
  *   toRequest  on a Tier H hit, the approvers not covered and not the pull's author;
  *   toAssign   on a Tier H hit, the author when it is an uncovered approver (a request naming it is a 422).
  *
+ * `workflowDiff` is the queue guard's own reading (`readWorkflowDiff`, see `workflowReadingFor`), handed to
+ * `applyWorkflowSplit`: only a MEASURED reading can move the `workflows` row to S, and only in its `split.repos`;
+ * null — every path-only call — keeps that row H, so the answer is byte-identical to the path-only plan.
+ *
  * Logins are matched as GitHub matches them, case-insensitively; the answer keeps `approvers`' own spelling and order.
  */
-export function governedReviewPlan({ paths, repo, author = null, requested = [], assigned = [], reviewed = [], approvers = GOVERNED_APPROVERS } = {}) {
+export function governedReviewPlan({ paths, repo, author = null, requested = [], assigned = [], reviewed = [], approvers = GOVERNED_APPROVERS, workflowDiff = null } = {}) {
   const repoId = repoIdForSlug(repo);
   const matched = repoId ? governedPathsIn(Array.isArray(paths) ? paths : [], repoId) : [];
-  const tier = matched.length === 0 ? null : landingTierOf(matched);
+  const tier = matched.length === 0 ? null : landingTierOf(applyWorkflowSplit(matched, repoId, workflowDiff));
   const lower = (list) => (Array.isArray(list) ? list : []).map((l) => String(l).toLowerCase());
   const have = new Set([...lower(requested), ...lower(assigned), ...lower(reviewed)]);
   const list = Array.isArray(approvers) ? approvers : [];
@@ -726,6 +741,86 @@ export function governedReviewText(plan, { repo, files, approvers = GOVERNED_APP
   const sending = [plan.toRequest.length ? `requesting ${named(plan.toRequest)}` : '', plan.toAssign.length ? `assigning the author ${named(plan.toAssign)} (a request naming the author is a 422)` : ''].filter(Boolean).join(' and ');
   if (!sending) return `governed review: Tier H (${hits}) — ${named(approvers)} already requested, assigned or reviewed; nothing to send`;
   return `governed review: Tier H (${hits}) — ${plan.covered.length ? `${named(plan.covered)} already covered; ` : ''}${sending}`;
+}
+
+/**
+ * Whether the `workflows` split may be READ for this plan (header: "The governed-review follow-up"): a Tier H plan
+ * whose EVERY governed hit is a row with `split` naming this repository. Pure. `{ read: true }`, or `{ read: false,
+ * why }` — the words the verdict row adds, so the log says which case kept the path-only H. ⛔ Any other governed
+ * hit (Tier S or H) keeps the plan exactly as the path-only reading answers: a mixed pull is never split here.
+ */
+export function workflowSplitReadable(plan) {
+  const hits = Array.isArray(plan?.matched) ? plan.matched : [];
+  const splitRows = hits.filter((s) => s?.split);
+  if (plan?.tier !== GOVERNED_TIER_H || splitRows.length === 0) return { read: false, why: null };
+  const others = hits.filter((s) => !s?.split);
+  if (others.length > 0) return { read: false, why: `another governed row is hit too (${others.map((s) => `\`${s.glob}\``).join(', ')}), so the path-only tier stands` };
+  const outside = splitRows.filter((s) => !s.split.repos.includes(plan.repoId));
+  if (outside.length > 0) return { read: false, why: `${plan.repoId} is not in the row's split.repos (${outside[0].split.repos.join(', ')}), so the path-only tier stands` };
+  return { read: true, why: null };
+}
+
+const FULL_SHA = /^[0-9a-f]{40}$/;
+const GIT_FETCH_TIMEOUT_MS = 120_000;
+
+/**
+ * The workflow reading for ONE pull, merge base → head, the queue guard's `pull_request` leg (`readWorkflowDiff`
+ * imported, ⛔ no second reader): `GET /repos/{repo}/compare/{base.sha}...{head.sha}` answers the merge base; the
+ * checkout must be `repo` by its `origin` (`slugFromRemote`); the two commits are fetched by sha at depth 1 when the
+ * checkout lacks them (the relay checks out `main` at depth 1, anonymously — the repository is public), then
+ * verified present; the diff is read with the merge base as base AND inventory base. `git(argv)` returns stdout and
+ * throws — the seam; null is "no checkout". ⛔ Fail closed: every failure answers `{ measured: false, reason }`,
+ * which `applyWorkflowSplit` reads as Tier H. Never throws.
+ */
+export async function workflowReadingFor({ repo, paths, pr, api, t, git = null }) {
+  const unmeasured = (reason, extra = {}) => ({ measured: false, reason, base: null, head: null, files: [], ...extra });
+  if (typeof git !== 'function') return unmeasured('no checkout was handed to this run, so the workflow diff cannot be read');
+  const head = pr?.head?.sha;
+  const tip = pr?.base?.sha;
+  if (!FULL_SHA.test(String(head)) || !FULL_SHA.test(String(tip))) return unmeasured("the pull's head or base sha could not be read off its answer");
+  const cmp = await rest(api, `/repos/${repo}/compare/${tip}...${head}`, {}, t);
+  const mergeBase = cmp.json?.merge_base_commit?.sha;
+  if (cmp.status !== 200 || !FULL_SHA.test(String(mergeBase))) return unmeasured(`${cmp.call} -> HTTP ${cmp.status}${cmp.detail ? ` (${cmp.detail})` : ''}: the merge base could not be read`, { head });
+  const first = (error) => String(error?.stderr || error?.message || error).trim().split('\n')[0];
+  try {
+    const origin = slugFromRemote(git(['remote', 'get-url', 'origin']));
+    if (!origin || origin.toLowerCase() !== String(repo).toLowerCase()) return unmeasured(`the checkout is ${origin ?? 'an unparsed origin'}, not ${repo}, so it cannot vouch for this pull's commits`, { base: mergeBase, head });
+  } catch (error) {
+    return unmeasured(`git could not read the checkout's origin (${first(error)})`, { base: mergeBase, head });
+  }
+  const has = (sha) => {
+    try {
+      git(['cat-file', '-e', `${sha}^{commit}`]);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const missing = [...new Set([mergeBase, head])].filter((sha) => !has(sha));
+  if (missing.length > 0) {
+    try {
+      git(['fetch', '--no-tags', '--depth=1', 'origin', ...missing]);
+    } catch (error) {
+      return unmeasured(`git could not fetch ${missing.map((s) => s.slice(0, 12)).join(', ')} (${first(error)})`, { base: mergeBase, head });
+    }
+    const still = missing.filter((sha) => !has(sha));
+    if (still.length > 0) return unmeasured(`the checkout still lacks ${still.map((s) => s.slice(0, 12)).join(', ')} after the fetch`, { base: mergeBase, head });
+  }
+  return readWorkflowDiff({ paths, base: mergeBase, head, inventoryBase: mergeBase, git });
+}
+
+/** The words a reading adds to the verdict row: what was read, or why nothing was — so the log says which happened. Pure. */
+export function workflowReadingText(reading) {
+  if (!reading) return '';
+  const range = reading.base && reading.head ? ` (merge base ${String(reading.base).slice(0, 12)} → head ${String(reading.head).slice(0, 12)})` : '';
+  if (reading.measured !== true) return ` · workflow split UNREAD${range}: ${reading.reason} — fail closed, the path-only tier H stands`;
+  const files = (Array.isArray(reading.files) ? reading.files : []).map((f) => `\`${f.path}\` ${f.tier}${f.tier === GOVERNED_TIER_H && f.reasons?.[0] ? ` (${f.reasons[0]})` : ''}`);
+  return ` · workflow split read${range}: ${files.join(', ')}`;
+}
+
+/** The CLI's git seam: argv against the relay's own checkout, stdout back, a throw on any failure (header). */
+export function checkoutGit(root) {
+  return (argv) => execFileSync('git', argv, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'], timeout: argv[0] === 'fetch' ? GIT_FETCH_TIMEOUT_MS : 30_000 });
 }
 
 /**
@@ -1466,7 +1561,7 @@ async function readPullFiles(repo, pull, api, t) {
  * — one row per verdict and per write pushed onto `rows`. Returns `{ ok: true }` or `{ fail: why }`, the sentence
  * the caller records as the action's failure. Never throws on a status.
  */
-async function requestGovernedReview({ index, op, pull, payload, api, t, log, rows }) {
+async function requestGovernedReview({ index, op, pull, payload, api, t, log, rows, git = null }) {
   const repo = payload.repo;
   const token = t.token ?? '';
   const FILES = `GET /repos/${repo}/pulls/${pull}/files`;
@@ -1490,12 +1585,28 @@ async function requestGovernedReview({ index, op, pull, payload, api, t, log, ro
   if (pr.status !== 200 || !pr.json || typeof pr.json !== 'object') {
     return failed(pr.call, pr.status, `${pr.call} -> HTTP ${pr.status}${pr.detail ? ` (${pr.detail})` : ''}: the pull could not be re-read, so who is already requested, assigned or its author is unknown and no review was requested — its diff hits a Tier H surface; read it on the board and request by hand`);
   }
+  // The `workflows` split (header): read only when every governed hit is that row in its split.repos; a reading
+  // that says S sends nothing, and every other outcome — unread, H, not readable here — requests as the path-only plan.
+  const readable = workflowSplitReadable(plan);
+  let reading = null;
+  let readingWords = readable.why ? ` · workflow split not read: ${readable.why}` : '';
+  if (readable.read) {
+    reading = await workflowReadingFor({ repo, paths, pr: pr.json, api, t, git });
+    readingWords = scrub(workflowReadingText(reading), [token]);
+    plan = governedReviewPlan({ paths, repo, workflowDiff: reading });
+    if (plan.tier !== GOVERNED_TIER_H) {
+      const text = `${governedReviewText(plan, { repo, files: read.files.length })}${readingWords}`;
+      rows.push({ action: index, op, call: FILES, status: 200, result: text });
+      log(`  · action ${index} ${op}: ${text}${renamed}`);
+      return { ok: true };
+    }
+  }
   const reviews = await rest(api, `/repos/${repo}/pulls/${pull}/reviews?per_page=100`, {}, t);
   if (reviews.status !== 200 || !Array.isArray(reviews.json)) {
     return failed(`GET /repos/${repo}/pulls/${pull}/reviews`, reviews.status, `${reviews.call} -> HTTP ${reviews.status}${reviews.detail ? ` (${reviews.detail})` : ''}: the pull's reviews could not be read, so who has already reviewed is unknown and no review was requested — its diff hits a Tier H surface; read it on the board and request by hand`);
   }
-  plan = governedReviewPlan({ paths, repo, author: pr.json.user?.login ?? null, requested: reviewerLogins(pr.json), assigned: assigneeLogins(pr.json), reviewed: reviewedLogins(reviews.json) });
-  const verdict = governedReviewText(plan, { repo, files: read.files.length });
+  plan = governedReviewPlan({ paths, repo, author: pr.json.user?.login ?? null, requested: reviewerLogins(pr.json), assigned: assigneeLogins(pr.json), reviewed: reviewedLogins(reviews.json), workflowDiff: reading });
+  const verdict = `${governedReviewText(plan, { repo, files: read.files.length })}${readingWords}`;
   rows.push({ action: index, op, call: FILES, status: 200, result: verdict });
   log(`  · action ${index} ${op}: ${verdict}${renamed}`);
   for (const req of governedReviewRequests(repo, pull, { reviewers: plan.toRequest, assignees: plan.toAssign })) {
@@ -1514,7 +1625,8 @@ async function requestGovernedReview({ index, op, pull, payload, api, t, log, ro
  * the notes this run emitted, in order; never throws on a status.
  *
  * @param {{ payload: unknown, sender: string, token: string, api?: string }} input
- * @param {{ fetch?: Function, pace?: object, log?: Function }} [deps]
+ * @param {{ fetch?: Function, pace?: object, log?: Function, git?: Function }} [deps] — `git` the checkout seam the
+ *   governed-review follow-up reads the `workflows` split through (`checkoutGit`; absent = no checkout, fail closed)
  */
 export async function executeFleetWrite({ payload: raw, sender, token, api = DEFAULT_API } = {}, deps = {}) {
   const lines = [];
@@ -1743,7 +1855,7 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
         rows.push({ action: i + 1, op: action.op, call: 'GET …/pulls/{number}/files', status: 'not sent', result: `FAILED: ${scrub(why, [token])}` });
         followed = { fail: why };
       } else {
-        followed = await requestGovernedReview({ index: i + 1, op: action.op, pull, payload, api, t, log, rows });
+        followed = await requestGovernedReview({ index: i + 1, op: action.op, pull, payload, api, t, log, rows, git: deps.git ?? null });
       }
       if (followed.fail) {
         stoppedAt = { action: i + 1, op: action.op, why: scrub(followed.fail, [token]) };
@@ -1784,7 +1896,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the release.yml refresh: ONE POST to its dispatch endpoint carrying { ref: main, inputs: { refresh_version_pr: "true" } } under the App token, landing as accepted; force, false, absent, a string or any other input refused with ZERO requests, exit 2': 9,
   "the batch gap on the runner: a stroke carrying DEFAULT_BATCH_THRESHOLD or more content-creating actions is announced as ONE rule ⑤ batch before its first write — on an injected clock every write through the last content-creating one leaves a full DEFAULT_BATCH_GAP_MS after the one before, and the pacing is exactly what the seat budgets; below the threshold, after the batch and on a landing stroke rule ①'s gap; a stroke the job cannot hold refused with ZERO requests; an announcement the log cannot record refused before the first write": 10,
   // 29 → 30 as the follow-up left the draft open: three pr_create NEGATIVE pins (no read, no request, no assignee) replace the create-side runs.
-  "the governed-review follow-up: after pr_ready alone — a pr_create summons NOBODY and never reads the pull's files, because a human is asked only at the seat's hand-off (pr_request_reviewers after ACCEPT + a same-head PASS); after pr_ready the pull's file list is read in full, a Tier H hit requests review from every GOVERNED_APPROVERS account not already requested, assigned or reviewed — the pull's own author assigned instead, never requested; a Tier S or ungoverned diff sends nothing and says so; an unreadable or truncated list, an unreadable pull or review list, or a refused write is a FAILED action": 30,
+  // 30 → 36 with the workflows split read on the relay: the plan with a reading, a Tier S workflow pull requesting no one, an H reading,
+  // six unreadable readings in one case, a mixed pull and an objectui workflow pull — every one but S requesting as the path-only plan.
+  "the governed-review follow-up: after pr_ready alone — a pr_create summons NOBODY and never reads the pull's files, because a human is asked only at the seat's hand-off (pr_request_reviewers after ACCEPT + a same-head PASS); after pr_ready the pull's file list is read in full, a Tier H hit requests review from every GOVERNED_APPROVERS account not already requested, assigned or reviewed — the pull's own author assigned instead, never requested; a Tier S or ungoverned diff sends nothing and says so; a workflow-only pull in split.repos is judged by the queue guard's reading, merge base → head, and requests only when it says H or cannot be read; an unreadable or truncated list, an unreadable pull or review list, or a refused write is a FAILED action": 36,
   // 17 → 21 with the head fence: a stale head, the embedded copy never trusted, a run naming no pull, a pull unread.
   "the run_rerun_failed: the five fences judged HERE on the run and its pull, read immediately before ONE bodiless POST — the pull's current head by its own GET, never the run's embedded copy, and a run naming no pull refused by name; each refused with the POST not sent and accepted on the measured run; a run, pull, baseline or fence that fails is zero writes; the 201 confirmed only by reading attempt 2 back with its failed jobs queued or in progress, naming their job ids; attempt 2 never seen, a failed job completed, or a job list unread is FAILED; no annotation": 21,
   "the hierarchy link: sub_issue_add and sub_issue_remove read the parent's and the child's own answers, then the child's parent (add) or the parent's whole list (remove), immediately before ONE write whose body is the child's REST id from its own answer — never its number, never replace_parent; a pull, a transferred or unread card, a child under another parent, one the parent does not list, or a read that is neither answer is zero writes; a child already under this parent is a no-op landed on the list; the answer confirmed only when the parent's list reads the child back (or no longer does) inside the window; a refused write, a list that never settles or never reads whole is FAILED; no annotation, and the rows ride a stroke beside other ops": 20,
@@ -2106,7 +2220,7 @@ export async function selfTest() {
     }
 
     // ── the governed-review follow-up ───────────────────────────────────────
-    battery("the governed-review follow-up: after pr_ready alone — a pr_create summons NOBODY and never reads the pull's files, because a human is asked only at the seat's hand-off (pr_request_reviewers after ACCEPT + a same-head PASS); after pr_ready the pull's file list is read in full, a Tier H hit requests review from every GOVERNED_APPROVERS account not already requested, assigned or reviewed — the pull's own author assigned instead, never requested; a Tier S or ungoverned diff sends nothing and says so; an unreadable or truncated list, an unreadable pull or review list, or a refused write is a FAILED action");
+    battery("the governed-review follow-up: after pr_ready alone — a pr_create summons NOBODY and never reads the pull's files, because a human is asked only at the seat's hand-off (pr_request_reviewers after ACCEPT + a same-head PASS); after pr_ready the pull's file list is read in full, a Tier H hit requests review from every GOVERNED_APPROVERS account not already requested, assigned or reviewed — the pull's own author assigned instead, never requested; a Tier S or ungoverned diff sends nothing and says so; a workflow-only pull in split.repos is judged by the queue guard's reading, merge base → head, and requests only when it says H or cannot be read; an unreadable or truncated list, an unreadable pull or review list, or a refused write is a FAILED action");
     {
       const PULLS = `POST /repos/${REPO}/pulls`;
       const N = 25050;
@@ -2186,6 +2300,68 @@ export async function selfTest() {
       const noPull = await run(ready(), { ...allowed, ...tierH, [PULL]: [pullOf(), { status: 503, json: { message: 'down' } }] });
       const noReviews = await run(ready(), { ...allowed, ...tierH, [REVIEWS]: { status: 503, json: { message: 'down' } } });
       t('an unreadable pull or review list on a Tier H hit is FAILED naming the read — never a request sent blind, never a quiet skip', [noPull.exit, noPull.rows[1]?.result.includes('could not be re-read'), noReviews.exit, noReviews.rows[1]?.result.includes('reviews could not be read'), [...noPull.seen, ...noReviews.seen].some((s) => s.call === REQUEST)], [EXIT_ACTION_FAILED, true, EXIT_ACTION_FAILED, true, false]);
+      // The `workflows` split (#31538's ruling C on the relay): the queue guard's own reading, merge base → head, through an injected git seam.
+      const WF = '.github/workflows/ci.yml';
+      const WF_BASE = ['name: CI', 'on:', '  pull_request:', 'jobs:', '  build:', '    name: Build Core', '    runs-on: ubuntu-latest', '    timeout-minutes: 20', '    steps:', '      - uses: actions/checkout@v4', '      - run: pnpm build', ''].join('\n');
+      const [MB, TIP, HEAD_S, HEAD_H] = ['d', 'e', '5', '6'].map((c) => c.repeat(40));
+      const wfTrees = new Map([[MB, { [WF]: WF_BASE }], [TIP, { [WF]: WF_BASE }], [HEAD_S, { [WF]: WF_BASE.replace('timeout-minutes: 20', 'timeout-minutes: 30') }], [HEAD_H, { [WF]: WF_BASE.replace('jobs:\n', 'permissions:\n  contents: write\njobs:\n') }]]);
+      const COMPARE = (head) => `GET /repos/${REPO}/compare/${TIP}...${head}`;
+      const wfPull = (head) => ({ status: 200, json: { ...pullOf().json, head: { sha: head }, base: { sha: TIP } } });
+      const wfAnswers = (head, extra = {}) => ({ ...allowed, ...readied, [PULL]: wfPull(head), [FILES]: files(WF), [REVIEWS]: reviewsBy(), [REQUEST]: requestedAnswer([A1, A2]), [COMPARE(head)]: { status: 200, json: { merge_base_commit: { sha: MB } } }, ...extra });
+      // The checkout: `present` the commits it holds, `fetchable` what a fetch brings; `throwOn` an argv[0] that throws.
+      const fakeGit = (calls, { present = [], fetchable = [...wfTrees.keys()], remote = `https://github.com/${REPO}`, throwOn = null } = {}) => {
+        const held = new Set(present);
+        return (argv) => {
+          calls.push(argv.join(' '));
+          if (argv[0] === throwOn) throw new Error(`fatal: ${throwOn} refused`);
+          if (argv[0] === 'remote') return `${remote}\n`;
+          if (argv[0] === 'cat-file') {
+            if (!held.has(argv[2].replace('^{commit}', ''))) throw new Error('fatal: Not a valid object name');
+            return '';
+          }
+          if (argv[0] === 'fetch') {
+            for (const sha of argv.slice(4)) if (fetchable.includes(sha)) held.add(sha);
+            return '';
+          }
+          if (argv[0] === 'ls-tree') {
+            const tree = held.has(argv[3]) ? wfTrees.get(argv[3]) : null;
+            if (!tree) throw new Error(`fatal: not a tree object: ${argv[3]}`);
+            const dirs = argv.slice(5).map((d) => (d.endsWith('/') ? d : `${d}/`));
+            return Object.keys(tree).filter((p) => dirs.some((d) => p.startsWith(d))).join('\n');
+          }
+          if (argv[0] === 'show') {
+            const at = argv[1].indexOf(':');
+            const text = wfTrees.get(argv[1].slice(0, at))?.[argv[1].slice(at + 1)];
+            if (text === undefined) throw new Error(`fatal: path does not exist: ${argv[1]}`);
+            return text;
+          }
+          throw new Error(`unexpected git ${argv.join(' ')}`);
+        };
+      };
+      const sRead = { measured: true, reason: null, base: MB, head: HEAD_S, files: [{ path: WF, tier: GOVERNED_TIER_S, reasons: [] }] };
+      t('the plan with a reading: a MEASURED S reading moves the workflows row to S; no reading, or an unmeasured one, keeps the path-only H', [governedReviewPlan({ paths: [WF], repo: REPO, workflowDiff: sRead }).tier, governedReviewPlan({ paths: [WF], repo: REPO }).tier, governedReviewPlan({ paths: [WF], repo: REPO, workflowDiff: { measured: false, reason: 'x', files: [] } }).tier], [GOVERNED_TIER_S, GOVERNED_TIER_H, GOVERNED_TIER_H]);
+      const sCalls = [];
+      const wfS = await run(ready(), wfAnswers(HEAD_S), { git: fakeGit(sCalls, { present: [TIP] }) });
+      t('⭐ tier-s-workflow-pull-requests-no-one: a workflow-only pull whose reading (merge base → head) says S — the compare read, the two missing commits fetched by sha at depth 1, NO reviews read, NO request, exit 0, the row naming the reading', [wfS.exit, writes(wfS.seen).map((s) => s.call), wfS.seen.some((s) => s.call === REVIEWS), wfS.seen.filter((s) => s.call === COMPARE(HEAD_S)).length, sCalls.filter((c) => c.startsWith('fetch')), wfS.rows[1]?.result], [EXIT_OK, [GRAPHQL], false, 1, [`fetch --no-tags --depth=1 origin ${MB} ${HEAD_S}`], `governed review: Tier S (\`.github/workflows/**\`×1) lands on a seat's review of record — no review requested · workflow split read (merge base ${MB.slice(0, 12)} → head ${HEAD_S.slice(0, 12)}): \`${WF}\` S`], wfS.logs.join(' | '));
+      const wfH = await run(ready(), wfAnswers(HEAD_H), { git: fakeGit([], { present: [MB, HEAD_H] }) });
+      t('⭐ h-reading-workflow-pull-requests: a reading that says H (a permissions block added) requests both approvers, and the row names the reason', [wfH.exit, writes(wfH.seen).slice(1).map((s) => [s.call, s.body]), wfH.rows[1]?.result.includes(`\`${WF}\` H (a \`permissions:\` block added, changed or removed)`)], [EXIT_OK, [[REQUEST, { reviewers: [A1, A2] }]], true], wfH.rows[1]?.result);
+      const unreadable = {
+        'no checkout': await run(ready(), wfAnswers(HEAD_S)),
+        'a commit the fetch cannot bring': await run(ready(), wfAnswers(HEAD_S), { git: fakeGit([], { fetchable: [MB] }) }),
+        'git throwing': await run(ready(), wfAnswers(HEAD_S), { git: fakeGit([], { throwOn: 'remote' }) }),
+        'a fetch that throws': await run(ready(), wfAnswers(HEAD_S), { git: fakeGit([], { throwOn: 'fetch' }) }),
+        'a checkout of another repository': await run(ready(), wfAnswers(HEAD_S), { git: fakeGit([], { remote: 'https://github.com/objectstack-ai/objectui.git' }) }),
+        'a refused compare': await run(ready(), wfAnswers(HEAD_S, { [COMPARE(HEAD_S)]: { status: 404, json: { message: 'Not Found' } } }), { git: fakeGit([], { present: [MB, HEAD_S] }) }),
+      };
+      t('⛔ unreadable-workflow-pull-requests: no checkout, a commit missing after the fetch, git throwing, a fetch that throws, a checkout of another repository or a refused compare — each requests BOTH approvers exactly as today, and its row says UNREAD with the fail-closed words', Object.entries(unreadable).map(([k, r]) => [k, r.exit, writes(r.seen).map((s) => s.call), r.rows[1]?.result.includes('workflow split UNREAD') && r.rows[1]?.result.includes('fail closed, the path-only tier H stands')]), Object.keys(unreadable).map((k) => [k, EXIT_OK, [GRAPHQL, REQUEST], true]), Object.values(unreadable).map((r) => r.rows[1]?.result).join(' | '));
+      const mixedCalls = [];
+      const mixed = await run(ready(), wfAnswers(HEAD_S, { [FILES]: files(WF, '.claude/agents/os-dev.md') }), { git: fakeGit(mixedCalls, { present: [MB, HEAD_S] }) });
+      t('⛔ mixed-workflow-pull-requests: a workflow edit beside another governed row (.claude/**) is never split — no compare, no git, both requested, the row naming the other row', [mixed.exit, mixed.seen.some((s) => s.call.includes('/compare/')), mixedCalls.length, writes(mixed.seen).map((s) => s.call), mixed.rows[1]?.result.endsWith('· workflow split not read: another governed row is hit too (`.claude/**`), so the path-only tier stands')], [EXIT_OK, false, 0, [GRAPHQL, REQUEST], true], mixed.rows[1]?.result);
+      const UI = 'objectstack-ai/objectui';
+      const uiN = (p) => p.replace(REPO, UI);
+      const uiCalls = [];
+      const ui = await run({ ...ready(), repo: UI }, { [uiN(PERM)]: allowed[PERM], ...readied, [uiN(PULL)]: wfPull(HEAD_S), [uiN(FILES)]: files(WF), [uiN(REVIEWS)]: reviewsBy(), [uiN(REQUEST)]: requestedAnswer([A1, A2]) }, { git: fakeGit(uiCalls, { present: [MB, HEAD_S] }) });
+      t('⛔ objectui-workflow-pull-requests: a workflow pull on a repository outside split.repos (objectui; cloud alike) is not read — no compare, no git, both requested, the row naming split.repos', [ui.exit, ui.seen.some((s) => s.call.includes('/compare/')), uiCalls.length, writes(ui.seen).map((s) => s.call), ui.rows[1]?.result.endsWith('· workflow split not read: objectui is not in the row\'s split.repos (objectstack), so the path-only tier stands')], [EXIT_OK, false, 0, [GRAPHQL, uiN(REQUEST)], true], ui.rows[1]?.result);
       t('no annotation is emitted for the follow-up — pr_ready is not an annotated op', [both.annotations, authored.logs.some((l) => l.startsWith('::notice'))], [[], false]);
     }
 
@@ -3403,7 +3579,8 @@ export async function main(argv) {
   const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? '';
   const sender = process.env[SENDER_ENV] ?? '';
   const api = String(process.env.OS_FLEET_API_URL ?? '').trim().replace(/\/+$/, '') || DEFAULT_API;
-  const result = await executeFleetWrite({ payload, sender, token, api }, { log: (l) => (isRefusalLine(l) ? console.error(l) : console.log(l)) });
+  const git = checkoutGit(fileURLToPath(new URL('../../..', import.meta.url)));
+  const result = await executeFleetWrite({ payload, sender, token, api }, { git, log: (l) => (isRefusalLine(l) ? console.error(l) : console.log(l)) });
   const summaryFile = process.env.GITHUB_STEP_SUMMARY;
   if (summaryFile) {
     try {
