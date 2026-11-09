@@ -20,7 +20,7 @@ Metadata-protocol: narrowed
 1. `?package=X` on `GET /meta/:type/:name` for an app, page, dashboard, report, book, analytics cube, tool, skill or agent that `X` does not hold was served another package's item (the first registered). It is now `409 RESOURCE_CONFLICT` naming the holders. A customization pair counts as holding its base's items and its own added members.
 2. On the runtime dispatcher, a bare read of a name two packages hold fell through to the by-name metadata service read after the protocol refused it. It is now the protocol's `409 RESOURCE_CONFLICT`, as on the REST transport.
 3. `POST /security/_activation/:type/:name` answered a sharing rule or queue name two packages declare `503 SERVICE_UNAVAILABLE` ("could not be read"), and switched off the first-listed of two assignment rules. Both are now `409 RESOURCE_CONFLICT` with every candidate in `details.candidates`, and nothing is written.
-4. A package whose namespace is `actions`, `connectors`, `global`, `hooks`, `oauth` or `trigger` is refused at install, `422 NAMESPACE_CONFLICT`: the router reads those segments as routes before any namespace.
+4. A NEW install of a package whose namespace is `actions`, `connectors`, `global`, `hooks`, `oauth` or `trigger` is refused, `422 NAMESPACE_CONFLICT`: the router reads those segments as routes before any namespace. A package already installed under one of them keeps booting: the boot registers it as before, with one warning naming the package, and a reload or upgrade of it under its own id is not a new install. Its items are read with `?package=<its id>`, since its namespace cannot be a qualified address.
 
 Also: a `PUT`, `POST` or `DELETE` on a path of the qualified read's shape (`/meta/:type/:x/:y`, no route for that verb) now answers `405 METHOD_NOT_ALLOWED` with `Allow: GET, HEAD` where it answered 404, because the shape now has a GET route.
 
@@ -29,4 +29,4 @@ The fix for each:
 - FROM `?package=X` for a name X does not hold TO the package that holds it (the refusal names it), or the qualified path `/meta/:type/<its namespace>/:name`.
 - FROM a bare read of a two-holder name TO `?package=<id>` or `/meta/:type/<namespace>/:name`.
 - FROM switching a two-holder declared name TO renaming one of them; the ledger addresses an item by name.
-- FROM a namespace spelling an address literal TO any other namespace.
+- FROM a namespace spelling an address literal TO any other namespace. An installed package under one keeps working until it is renamed; renaming it gives it the qualified path.

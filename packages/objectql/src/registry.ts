@@ -4874,6 +4874,24 @@ export class SchemaRegistry {
    */
   private bareNameHoldersSealed = false;
 
+  /** The packages already warned that their namespace spells an address literal. */
+  private readonly addressLiteralNamespaceWarned = new Set<string>();
+
+  /**
+   * [ADR-0150 D5, child G1] Warn, once per package, that an installed
+   * package's namespace spells an address-grammar literal: it keeps booting,
+   * its items are read with `?package=<id>`, and the remedy is a rename.
+   */
+  private warnAddressLiteralNamespaceOnce(packageId: string, refusal: string): void {
+    if (this.addressLiteralNamespaceWarned.has(packageId)) return;
+    this.addressLiteralNamespaceWarned.add(packageId);
+    console.warn(
+      `[Registry] Package '${packageId}' is installed under a namespace the address grammar reads as a route. `
+        + `${refusal} It keeps booting: its items are read with \`?package=${packageId}\`, and a new install `
+        + `of this namespace is refused. Renaming the namespace gives the package its qualified address.`,
+    );
+  }
+
   /** Has the cold boot sealed the bare-name holders (the doors now refuse)? */
   get bareNameHoldersAreSealed(): boolean {
     return this.bareNameHoldersSealed;
@@ -9171,12 +9189,26 @@ export class SchemaRegistry {
     // [ADR-0150 D5, child G1] A namespace never spells a literal segment of
     // the REST address grammar: the router reads the literal first, so the
     // package's qualified addresses would reach another door. Ahead of every
-    // mutation, at every install, boot included, with no `collisionPolicy`
-    // downgrade, like the checks above.
+    // mutation, with no `collisionPolicy` downgrade — for a NEW install only.
+    //
+    // A package already installed under such a namespace keeps booting: no
+    // release before this rule refused one, and what the literal costs it is
+    // its qualified path alone, which never existed before the rule did. Two
+    // readings name it, the bare-name rule's (`refuseBareNameConflicts`): until
+    // the cold boot seals the holders, every package registering is one the
+    // deployment already holds; after it, a package already registered under
+    // its own id is a reload, a re-install or an upgrade (the namespace gate's
+    // same-package reading above). Either is warned once and installs; it is
+    // read by `?package=`.
     {
       const literalRefusal = validateNamespaceNotAddressLiteral(manifest.namespace);
       if (literalRefusal) {
-        throw new NamespaceAddressLiteralError(manifest.namespace as string, literalRefusal, selfId ?? manifest.id);
+        const packageId = selfId ?? manifest.id;
+        const alreadyHeld = !this.bareNameHoldersSealed || this.getPackage(packageId) !== undefined;
+        if (!alreadyHeld) {
+          throw new NamespaceAddressLiteralError(manifest.namespace as string, literalRefusal, packageId);
+        }
+        this.warnAddressLiteralNamespaceOnce(packageId, literalRefusal);
       }
     }
 

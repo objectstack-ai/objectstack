@@ -14,10 +14,15 @@
  * in the sentence, and the refused package left uninstalled. The CONTROLs pin
  * what stays accepted: a namespace that only starts with a literal, and the
  * `_`-led literals no namespace can spell anyway.
+ *
+ * Only a NEW install is refused: a package the deployment already holds under
+ * such a namespace — registered by the cold boot, before the holders are
+ * sealed, or registered again under its own id after — keeps booting, warned
+ * once, and is read with `?package=`.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
-import { ObjectKernel } from '@objectstack/core';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ObjectKernel, type Plugin } from '@objectstack/core';
 import { NAMESPACE_REFUSED_LITERALS } from '@objectstack/spec/kernel';
 import { ObjectQLPlugin } from './plugin.js';
 import type { ObjectQL } from './engine.js';
@@ -97,5 +102,66 @@ describe('install door — what stays accepted', () => {
     const { ql, register } = await boot();
     expect((await register(body(ALPHA, 'crm_hooks')))?.message).toBeUndefined();
     expect(ql.registry.getPackage(ALPHA)).toBeDefined();
+  });
+});
+
+describe('a package already installed under such a namespace keeps booting', () => {
+  /** Boot a kernel whose own boot registers `manifest`, as an installed package's AppPlugin does at `init()`. */
+  async function bootHolding(manifest: Record<string, unknown>) {
+    const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
+    kernels.push(kernel);
+    await kernel.use(new ObjectQLPlugin());
+    const installed: Plugin = {
+      name: 'installed-package',
+      version: '1.0.0',
+      init: async (ctx) => {
+        await ctx.getService<{ register(m: unknown): void | Promise<void> }>('manifest').register({ packages: [{ manifest }] });
+      },
+    };
+    await kernel.use(installed);
+    await kernel.bootstrap();
+    return kernel;
+  }
+
+  it('the boot registers it: it installs, owns its namespace and is warned once, naming `?package=`', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const kernel = await bootHolding(body(ALPHA, 'hooks'));
+      const ql = kernel.getService<ObjectQL>('objectql');
+      expect(ql.registry.bareNameHoldersAreSealed).toBe(true);
+      expect(ql.registry.getPackage(ALPHA)).toBeDefined();
+      expect(ql.registry.getNamespaceOwner('hooks')).toBe(ALPHA);
+      const warned = warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes(`Package '${ALPHA}' is installed under a namespace`));
+      expect(warned).toHaveLength(1);
+      expect(warned[0]).toContain(`?package=${ALPHA}`);
+      expect(warned[0]).toContain("Namespace 'hooks' spells a literal segment");
+
+      // A reload after the seal — the same id registered again — is no new
+      // install: it installs, and the warning is not repeated.
+      const svc = kernel.getService('manifest') as { register(m: unknown): void | Promise<void> };
+      await expect(Promise.resolve(svc.register({ packages: [{ manifest: { ...body(ALPHA, 'hooks'), version: '1.0.1' } }] }))).resolves.not.toThrow();
+      expect(ql.registry.getPackage(ALPHA)?.manifest?.version).toBe('1.0.1');
+      expect(warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes(`Package '${ALPHA}' is installed under a namespace`))).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('CONTROL — after that boot, ANOTHER package installing under a literal namespace is still refused', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const kernel = await bootHolding(body(ALPHA, 'hooks'));
+      const svc = kernel.getService('manifest') as { register(m: unknown): void | Promise<void> };
+      let err: Refusal | undefined;
+      try {
+        await svc.register({ packages: [{ manifest: body('com.acme.beta', 'trigger') }] });
+      } catch (e) {
+        err = e as Refusal;
+      }
+      expect([err?.code, err?.status], err?.message).toEqual(['NAMESPACE_CONFLICT', 422]);
+      expect(kernel.getService<ObjectQL>('objectql').registry.getPackage('com.acme.beta')).toBeUndefined();
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

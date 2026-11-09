@@ -188,6 +188,23 @@ describe('anonymous parity with `RestServer` — the qualified read names no pub
     });
 });
 
+describe('a package already installed under an address-literal namespace (ADR-0150 D5)', () => {
+    it('keeps booting and is read by `?package=` (BASE before the fix: the boot\'s install refused it 422)', async () => {
+        const HOOKS = 'com.acme.hooks';
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            // This registry is never sealed: every install is the cold boot's.
+            registry.installPackage({ id: HOOKS, name: HOOKS, version: '1.0.0', type: 'app', namespace: 'hooks' } as never, 'code');
+        } finally {
+            warn.mockRestore();
+        }
+        ship('page', 'home', HOOKS);
+        const answer = await read('/page/home', { package: HOOKS });
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(labelOf(answer)).toBe('hooks page');
+    });
+});
+
 describe('a shareable namespace two packages share (ADR-0150 D2)', () => {
     const SYS_ONE = 'com.acme.sys_one';
     const SYS_TWO = 'com.acme.sys_two';
