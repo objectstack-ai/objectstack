@@ -894,6 +894,8 @@ const zhHant = {
     loadErrorUnauthorizedMessage: '登入狀態已過期或已退出。請重新登入後檢視這些記錄。',
     loadErrorRejectedTitle: '該檢視的查詢被拒絕',
     loadErrorRejectedMessage: '伺服器無法處理該檢視的篩選條件或查詢引數。清除篩選條件通常即可恢復;如果檢視本身就是這樣儲存的,需要管理員修正。',
+    loadErrorUnknownColumnMessage: '列“{{column}}”顯示欄位“{{field}}”,但{{object}}沒有這個欄位。需要管理員修正或移除該檢視中的這一列。',
+    loadErrorUnknownFieldMessage: '該檢視的查詢引用了欄位“{{field}}”,但{{object}}沒有這個欄位。清除篩選條件通常即可恢復;如果檢視本身就是這樣儲存的,需要管理員修正。',
     loadErrorApiDisabledTitle: '該物件未開放 API 訪問',
     loadErrorApiDisabledMessage: '此頁面無法載入記錄,因為該物件未通過 API 開放。這是物件自身的設定,而不是權限問題 —— 需要管理員為其啟用 API 訪問,此頁面才能正常工作。',
     retry: '重試',

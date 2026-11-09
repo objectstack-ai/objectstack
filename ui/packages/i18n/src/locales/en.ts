@@ -1148,6 +1148,8 @@ const en = {
     loadErrorUnauthorizedMessage: 'Your session has expired or you are signed out. Sign in again to view these records.',
     loadErrorRejectedTitle: 'This view’s query was rejected',
     loadErrorRejectedMessage: 'The server could not process this view’s filter or query options. Clearing the filters usually fixes it; if the view is saved this way, an administrator needs to correct it.',
+    loadErrorUnknownColumnMessage: 'The column “{{column}}” shows the field “{{field}}”, which {{object}} does not have. An administrator needs to correct or remove the column in this view.',
+    loadErrorUnknownFieldMessage: 'This view’s query names the field “{{field}}”, which {{object}} does not have. Clearing the filters usually fixes it; if the view is saved this way, an administrator needs to correct it.',
     loadErrorApiDisabledTitle: 'This object isn’t available through the API',
     loadErrorApiDisabledMessage: 'This page can’t load its records because the object is not exposed through the API. That is a setting on the object itself, not a permission — an administrator has to enable API access for it before this page can work.',
     retry: 'Retry',

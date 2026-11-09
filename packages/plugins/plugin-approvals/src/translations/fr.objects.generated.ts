@@ -35,6 +35,10 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         label: "Source",
         help: "Origine de la demande — `flow:<flowName|nodeId>` pour les approbations pilotées par un nœud"
       },
+      process_package: {
+        label: "Source Package",
+        help: "The app the flow that opened this request comes from. Filled in by the platform; empty for flows created here."
+      },
       process_label: {
         label: "Flux",
         help: "Libellé du flux qui a ouvert cette demande, tel qu’il était à son ouverture"

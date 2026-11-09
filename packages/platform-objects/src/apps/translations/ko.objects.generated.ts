@@ -2953,6 +2953,10 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         label: "이름",
         help: "점으로 구분한 snake_case 식별자(예: auth.password_reset)"
       },
+      package_id: {
+        label: "Package",
+        help: "The app the template comes from. Filled in by the platform; empty for templates created here."
+      },
       label: {
         label: "레이블",
         help: "Studio에 표시되는 사람이 읽을 수 있는 이름"

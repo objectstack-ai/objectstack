@@ -2953,6 +2953,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Nombre",
         help: "Identificador snake_case con puntos (p. ej. auth.password_reset)."
       },
+      package_id: {
+        label: "Package",
+        help: "The app the template comes from. Filled in by the platform; empty for templates created here."
+      },
       label: {
         label: "Nombre visible",
         help: "Nombre legible que se muestra en Studio."

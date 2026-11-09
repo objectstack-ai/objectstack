@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 280 |
-| Object name statically decidable | 198 |
-| Object name chosen at run time | 82 |
-| Against a tenancy-enabled object | 192 |
+| Write call sites | 284 |
+| Object name statically decidable | 201 |
+| Object name chosen at run time | 83 |
+| Against a tenancy-enabled object | 195 |
 | Against an object declaring tenancy off | 6 |
-| Threading a tenant context | 213 |
+| Threading a tenant context | 217 |
 | Provably carrying none | 10 |
 | …and decidably tenancy-enabled | 3 |
 | Options argument unreadable | 57 |
 | …and decidably tenancy-enabled | 30 |
-| Threading a decidably elevated context | 157 |
+| Threading a decidably elevated context | 161 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 113 |
 
@@ -90,12 +90,12 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-09 at `4e6c24cf7`.
+Measured on 2026-11-09 at `6ae0dd203`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1088 |
-| engine-shaped types recognised | 120 |
+| tracked non-test sources scanned | 1094 |
+| engine-shaped types recognised | 123 |
 | declared objects in the registry | 133 |
 | same-named calls subtracted as non-engine | 253 |
 
@@ -116,6 +116,7 @@ Measured on 2026-11-09 at `4e6c24cf7`.
 | `packages/plugins/plugin-approvals/src/backfill-platform-row-organizations.ts` | `update` | `objectPlan.object` | undecidable | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-approvals/src/display-label-backfill.ts` | `update` | `sys_approval_action` | enabled | elevated | 1 |
 | `packages/plugins/plugin-approvals/src/display-label-backfill.ts` | `update` | `sys_approval_request` | enabled | elevated | 1 |
+| `packages/plugins/plugin-approvals/src/stored-process-package-backfill.ts` | `update` | `sys_approval_request` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/action-invocation-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/activity-changed-fields-backfill.ts` | `update` | `sys_activity` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/auth-event-audit.ts` | `insert` | `sys_audit_log` | enabled | options unreadable | 1 |
@@ -187,6 +188,7 @@ Measured on 2026-11-09 at `4e6c24cf7`.
 | `packages/plugins/plugin-email/src/attachment-reclaim.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-email/src/email-plugin.ts` | `insert` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-email/src/email-plugin.ts` | `update` | `object` | undecidable | elevated | 1 |
+| `packages/plugins/plugin-email/src/stored-template-package-backfill.ts` | `update` | `sys_email_template` | enabled | elevated | 1 |
 | `packages/plugins/plugin-pinyin-search/src/boot-reconcile.ts` | `update` | `DATA_MIGRATION_FLAG_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-pinyin-search/src/companion-projection.ts` | `update` | `schema.name` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/auto-org-admin-grant.ts` | `delete` | `object` | undecidable | elevated | 1 |
@@ -229,8 +231,10 @@ Measured on 2026-11-09 at `4e6c24cf7`.
 | `packages/services/service-automation/src/flow-credential-channel.ts` | `update` | `sys_flow_credential` | enabled | elevated | 2 |
 | `packages/services/service-automation/src/flow-credential-migration.ts` | `insert` | `DATA_MIGRATION_FLAG_OBJECT` | undecidable | elevated | 1 |
 | `packages/services/service-automation/src/flow-credential-migration.ts` | `update` | `DATA_MIGRATION_FLAG_OBJECT` | undecidable | elevated | 1 |
+| `packages/services/service-automation/src/flow-dispatch-key-package-backfill.ts` | `insert` | `sys_flow_dispatch` | enabled | elevated | 1 |
 | `packages/services/service-automation/src/flow-dispatch-store.ts` | `insert` | `sys_flow_dispatch` | enabled | elevated | 1 |
 | `packages/services/service-automation/src/flow-dispatch-store.ts` | `update` | `sys_flow_dispatch` | enabled | elevated | 1 |
+| `packages/services/service-automation/src/stored-reference-package-backfill.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/services/service-automation/src/suspended-run-store.ts` | `delete` | `sys_automation_run` | enabled | elevated | 3 |
 | `packages/services/service-automation/src/suspended-run-store.ts` | `insert` | `sys_automation_run` | enabled | elevated | 2 |
 | `packages/services/service-automation/src/suspended-run-store.ts` | `update` | `sys_automation_run` | enabled | elevated | 2 |

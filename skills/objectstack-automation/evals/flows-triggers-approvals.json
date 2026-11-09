@@ -369,6 +369,26 @@
           "acme.crm:notify_owner"
         ]
       }
+    },
+    {
+      "id": 21,
+      "prompt": "Our package `acme.helpdesk` should route every new `helpdesk_ticket` into the `crm_support_intake` queue that the installed package `acme.crm` declares, round-robin. Write the assignment rule and anything else the package needs.",
+      "expected_output": "A `defineAssignmentRule` on `helpdesk_ticket` with an entry `assignTo: { type: 'queue', value: 'crm_support_intake' }` and `strategy: 'round_robin'`, plus `acme.helpdesk`'s manifest declaring `dependencies: { 'acme.crm': '^1.0.0' }` (any range). A packaged rule's queue resolves to its own package's queue, else the one holder in its declared dependency closure plus `sys`; without the dependency the name is refused (`outside-closure`, naming `acme.crm`) and every ticket is written ownerless, in no queue, with a server-log warning. No copy of the queue into `acme.helpdesk` or the environment, no package-qualified queue name, and no `beforeInsert` hook picking an owner.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "defineAssignmentRule",
+          "type: 'queue'",
+          "value: 'crm_support_intake'",
+          "dependencies",
+          "'acme.crm'"
+        ],
+        "must_not_contain": [
+          "dependencies: {}",
+          "acme.crm/crm_support_intake",
+          "acme.crm:crm_support_intake"
+        ]
+      }
     }
   ]
 }

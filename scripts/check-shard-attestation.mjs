@@ -247,7 +247,7 @@ import { readShardMatrix, shardTotal } from './ci-shard-matrix.mjs';
 const ARTIFACT_PREFIX = 'shard-attest-';
 
 /** The gate jobs that carry a branch-protection-required context. */
-const REQUIRED_GATE_JOBS = ['test-gate', 'dogfood-gate'];
+const REQUIRED_GATE_JOBS = ['test-gate', 'dogfood-gate', 'test-ui-gate'];
 
 /**
  * A push run that BORROWED the merge queue's verdict (#31519, ci.yml's
@@ -1114,6 +1114,9 @@ export async function scanWorkflow(root) {
 
   const gates = new Map();
   const claimed = new Map();
+  /** Each gate's download patterns, and the artifact names its legs upload (one per roster shard). */
+  const downloads = new Map();
+  const uploads = new Map();
   for (const [id, job] of Object.entries(jobs)) {
     if (!jobInvokes(job, '--verify')) continue;
     const text = runTextOf(job);
@@ -1137,6 +1140,8 @@ export async function scanWorkflow(root) {
     if (patterns.length === 0) {
       problems.push(`gate '${id}' never downloads the shard attestations it claims to count.`);
     }
+    downloads.set(id, patterns);
+    uploads.set(id, []);
 
     // #22606 / #22653: the legs `shardsNeedingCancelCause` can ever ask about —
     // every MATRIX leg (a partially attested one asks per unattested shard)
@@ -1294,8 +1299,30 @@ export async function scanWorkflow(root) {
             `'${ARTIFACT_PREFIX}${leg.job}-<shard>-of-${leg.total}'.`,
         );
       }
-      if (!patterns.some((p) => p.endsWith('*') && declaredName.startsWith(p.slice(0, -1)))) {
-        problems.push(`gate '${id}' downloads pattern(s) ${JSON.stringify(patterns)}, none of which matches '${declaredName}'.`);
+      // Every shard's EXPANDED name, matched the way download-artifact
+      // matches a pattern (#31914): a prefix test passed `shard-attest-test-*`
+      // for Test Core while that pattern also downloads `shard-attest-test-ui-*`.
+      const names = Array.from({ length: leg.total }, (_, i) => expandMatrixShardName(declaredName, i + 1) ?? declaredName);
+      uploads.get(id).push(...names.map((name) => ({ leg: leg.job, name })));
+      const unmatched = names.filter((name) => !patterns.some((p) => artifactPatternMatches(p, name)));
+      if (unmatched.length > 0) {
+        problems.push(`gate '${id}' downloads pattern(s) ${JSON.stringify(patterns)}, none of which matches '${unmatched[0]}' ('${declaredName}').`);
+      }
+    }
+  }
+  // A gate that downloads ANOTHER gate's credentials reads them as unexpected
+  // and goes red on a run where both lanes ran (#31914: `shard-attest-test-*`
+  // is a prefix of `shard-attest-test-ui-*`). Each pattern must match its own
+  // gate's legs only.
+  for (const [id, patterns] of downloads) {
+    for (const [other, named] of uploads) {
+      if (other === id) continue;
+      const caught = named.find(({ name }) => patterns.some((p) => artifactPatternMatches(p, name)));
+      if (caught) {
+        problems.push(
+          `gate '${id}' downloads pattern(s) ${JSON.stringify(patterns)}, which also match '${caught.name}', a credential of '${caught.leg}' that ` +
+            `gate '${other}' counts — '${id}' would read it as an unexpected attestation and go red on any run where both ran (#31914).`,
+        );
       }
     }
   }
@@ -1322,6 +1349,33 @@ export async function scanWorkflow(root) {
   // absence of a problem — #6589's misclassification produced problems that
   // named neither the classifier nor the flag.
   return { problems, gates: gates.size, legs, attesters: claimed.size, gateIds: [...gates.keys()], attesterIds: [...claimed.keys()] };
+}
+
+/**
+ * Does an `actions/download-artifact` `pattern:` match this artifact name?
+ * The action matches with minimatch; artifact names hold no `/`, so the
+ * subset read here is the whole of it for them: `*`, `?` and a `[...]` class
+ * (`!` or `^` negating). Anything else is a literal character. Pure.
+ *
+ * @param {string} pattern
+ * @param {string} name
+ */
+export function artifactPatternMatches(pattern, name) {
+  let source = '';
+  for (let i = 0; i < pattern.length; i += 1) {
+    const c = pattern[i];
+    if (c === '*') source += '.*';
+    else if (c === '?') source += '.';
+    else if (c === '[' && pattern.indexOf(']', i + 2) !== -1) {
+      const close = pattern.indexOf(']', i + 2);
+      let body = pattern.slice(i + 1, close);
+      const negate = body.startsWith('!') || body.startsWith('^');
+      if (negate) body = body.slice(1);
+      source += `[${negate ? '^' : ''}${body.replace(/[\\\]]/g, '\\$&')}]`;
+      i = close;
+    } else source += c.replace(/[.+^${}()|\\[\]]/g, '\\$&');
+  }
+  return new RegExp(`^${source}$`).test(name);
 }
 
 // ── Reading a cancelled shard's cause off the platform (#22606, #22653) ─────
@@ -2794,9 +2848,33 @@ async function selfTest() {
       'a step appended after the credential ⇒ red',
     );
     assert(
-      (await fixture('unmatchable download pattern', (s) => s.replace('          pattern: shard-attest-test-*', '          pattern: shard-attest-nothing-*'))).problems.some((p) => p.includes('none of which matches')),
+      (await fixture('unmatchable download pattern', (s) => s.replace('          pattern: shard-attest-test-[0-9]*', '          pattern: shard-attest-nothing-*'))).problems.some((p) => p.includes('none of which matches')),
       'a gate whose download pattern cannot match its legs ⇒ red',
     );
+    // #31914: Test Core's pattern before the Test UI legs attested. As a
+    // prefix it matches `shard-attest-test-ui-*` too, so test-gate would read
+    // Test UI's credentials as unexpected on every run where both ran.
+    const collided = await fixture('a pattern that reaches another gate', (s) => s.replace('          pattern: shard-attest-test-[0-9]*', '          pattern: shard-attest-test-*'));
+    assert(
+      collided.problems.some((p) => p.includes("gate 'test-gate'") && p.includes('shard-attest-test-ui-1-of-16') && p.includes("gate 'test-ui-gate' counts")),
+      "#31914: a gate whose download pattern also matches another gate's credentials ⇒ red, naming both gates",
+    );
+    assert(
+      (await fixture('a class pattern that misses one shard', (s) => s.replace('          pattern: shard-attest-test-[0-9]*', '          pattern: shard-attest-test-[1-7]*'))).problems.some((p) =>
+        p.includes(`'shard-attest-test-8-of-${N}'`),
+      ),
+      '#31914: every shard of the roster is matched by its expanded name, so a pattern that misses one shard ⇒ red',
+    );
+    for (const [pattern, name, want] of [
+      ['shard-attest-test-*', 'shard-attest-test-ui-3-of-16', true],
+      ['shard-attest-test-[0-9]*', 'shard-attest-test-ui-3-of-16', false],
+      ['shard-attest-test-[0-9]*', 'shard-attest-test-3-of-8', true],
+      ['shard-attest-test-?-of-8', 'shard-attest-test-3-of-8', true],
+      ['shard-attest-test-[!0-9]*', 'shard-attest-test-3-of-8', false],
+      ['shard-attest-a.b', 'shard-attest-aXb', false],
+    ]) {
+      assert(artifactPatternMatches(pattern, name) === want, `#31914: download pattern ${pattern} ${want ? 'matches' : 'does not match'} ${name}, as minimatch reads it`);
+    }
     const EMIT_GUARD = `      - name: Attest this shard ran and passed\n        if: ${SEED_ONLY_CREDENTIAL_IF}\n        run: |\n          node scripts/check-shard-attestation.mjs --emit \\\n            --job test`;
     const UPLOAD_GUARD = `      - name: Publish this shard's attestation\n        if: ${SEED_ONLY_CREDENTIAL_IF}\n        uses: actions/upload-artifact@`;
     assert(

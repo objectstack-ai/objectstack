@@ -41,11 +41,20 @@ import { createPlatformMcpServer } from './request-params.js';
 import { protocolStdout } from './protocol-stdout.js';
 import { renderSkillMarkdown, type RenderSkillOptions } from './skill-md.js';
 import {
+  duplicateSkillFaceMessage,
   listSkillPrompts,
+  lookupSkillPrompt,
   registerSkillPrompts,
+  skillPromptFaces,
+  skillPromptListEntry,
+  skillPromptRefusalError,
   skillPromptResult,
   type McpSkillBridge,
+  type SkillPrompt,
 } from './skill-prompts.js';
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { describePackageScopedHolder } from '@objectstack/core';
+import { deriveAiFaceName } from '@objectstack/spec/ai';
 import { z } from 'zod';
 
 /**
@@ -543,7 +552,7 @@ export interface McpMergedMetadataRead {
    * in the registry this read consults and has no copy in the metadata
    * service, is served by name the way the REST read serves it.
    */
-  getMetaItem?(request: { type: string; name: string }): Promise<unknown>;
+  getMetaItem?(request: { type: string; name: string; packageId?: string }): Promise<unknown>;
 }
 
 /**
@@ -736,6 +745,12 @@ async function readAgentByName(
   metadataService: IMetadataService,
   protocol: McpMergedMetadataRead | undefined,
   name: string,
+  /**
+   * [ADR-0150 D5/D6] The package a face named: the protocol's exact
+   * qualifier (`?package=`), that package's agent or nothing. Omitted, the
+   * bare name resolves for a caller with no package (ADR-0150 D3).
+   */
+  packageId?: string,
 ): Promise<DiagnosedRead> {
   const read = agentReadOf(protocol);
   if (!read?.getMetaItem) {
@@ -743,7 +758,7 @@ async function readAgentByName(
   }
   let envelope: unknown;
   try {
-    envelope = await read.getMetaItem({ type: 'agent', name });
+    envelope = await read.getMetaItem({ type: 'agent', name, ...(packageId ? { packageId } : {}) });
   } catch (err) {
     if ((err as { code?: unknown } | null)?.code === METADATA_UNAVAILABLE_CODE) {
       return { data: undefined, degraded: true, errors: [err instanceof Error ? err.message : String(err)] };
@@ -810,13 +825,25 @@ export async function buildAgentPromptResult(
   args: { agentName?: unknown; objectName?: unknown; recordId?: unknown; viewName?: unknown },
   logger?: Logger,
   protocol?: McpMergedMetadataRead,
+  /**
+   * [ADR-0150 D6] The agents the roster read, each with its face. An
+   * `agentName` that is a face reads that one agent, by its package; a face
+   * two agents derive is refused, naming both. Any other `agentName` is a bare
+   * name, read for a caller with no package as before (ADR-0150 D3: the
+   * environment's own agent, else the one package holder, else the read's
+   * refusal naming each).
+   */
+  agents?: readonly AgentFace[],
 ): Promise<AgentPromptResult> {
   const agentName = String(args.agentName ?? '');
   if (!agentName) {
     return promptError('Error: agentName argument is required');
   }
 
-  const read = await readAgentByName(metadataService, protocol, agentName);
+  const faced = (agents ?? []).filter((agent) => agent.face === agentName);
+  if (faced.length > 1) throw duplicateAgentFaceError(agentName, faced);
+  const target = faced[0];
+  const read = await readAgentByName(metadataService, protocol, target?.name ?? agentName, target?.packageId);
 
   if (read.data === undefined || read.data === null) {
     if (read.degraded) {
@@ -869,9 +896,101 @@ export async function buildAgentPromptResult(
  *   the #6055 discipline) and its argument names no agent.
  */
 type AgentRoster =
-  | { state: 'agents'; names: string[] }
+  | { state: 'agents'; agents: AgentFace[] }
   | { state: 'none' }
   | { state: 'unknown'; errors: string[] };
+
+/**
+ * [ADR-0150 D6] One agent as the `agent_prompt` argument names it: its face
+ * (`deriveAiFaceName` over its address — `NS-NAME` for a package's agent, the
+ * bare name for an environment-authored one), its name and its package.
+ */
+export interface AgentFace {
+  face: string;
+  name: string;
+  packageId?: string;
+}
+
+/** How a refusal names one agent: its name and its holder. */
+function describeAgentHolder(agent: AgentFace): string {
+  return `agent "${agent.name}" of ${describePackageScopedHolder(
+    agent.packageId ? { kind: 'package', packageId: agent.packageId } : { kind: 'environment' },
+  )}`;
+}
+
+/** The sentence a duplicate agent face answers: every agent that derives it, and the author's fix. */
+function duplicateAgentFaceMessage(face: string, agents: readonly AgentFace[]): string {
+  return `The agent name "${face}" is derived for ${agents.length} agents: `
+    + `${agents.map(describeAgentHolder).join('; ')}. An agent name names one agent, so none of them is `
+    + 'served under it: rename one of the agents so their names differ.';
+}
+
+/**
+ * [ADR-0150 D6, Q3] A duplicate face is refused at the get, naming every
+ * agent: `-32602` with the ADR-0112 code and status of a name in conflict.
+ */
+function duplicateAgentFaceError(face: string, agents: readonly AgentFace[]): McpError {
+  return new McpError(ErrorCode.InvalidParams, duplicateAgentFaceMessage(face, agents), {
+    code: 'RESOURCE_CONFLICT',
+    status: 409,
+    candidates: agents.map((agent) => describeAgentHolder(agent)),
+  });
+}
+
+/** [ADR-0150 D6] Agents grouped by face, in roster order. */
+function groupByFace(agents: readonly AgentFace[]): Map<string, AgentFace[]> {
+  const byFace = new Map<string, AgentFace[]>();
+  for (const agent of agents) {
+    const holders = byFace.get(agent.face);
+    if (holders) holders.push(agent);
+    else byFace.set(agent.face, [agent]);
+  }
+  return byFace;
+}
+
+type PromptDispatcher = (request: unknown, extra: unknown) => Promise<unknown>;
+
+/**
+ * [ADR-0150 D5] Route a `prompts/get` for a bare skill name ahead of the SDK's
+ * handler on the long-lived server, which answers registered names only.
+ *
+ * A name in `registered` (a face, `agent_prompt`) goes to the SDK unchanged.
+ * Any other name is looked up as the HTTP transport looks it up
+ * ({@link lookupSkillPrompt}): the one skill a bare name means is served, a
+ * bare name two packages hold is refused naming each face, and anything else
+ * goes to the SDK, which answers it not found as before.
+ *
+ * The SDK keeps its handlers in the protocol's `_requestHandlers` map, the
+ * seam `createPlatformMcpServer` (request-params.ts) already wraps; there is
+ * no public hook. The handler exists once a prompt is registered, which the
+ * caller has done.
+ */
+function routeBareSkillPromptNames(
+  server: McpServer,
+  registered: ReadonlySet<string>,
+  listSkills: () => Promise<SkillPrompt[]>,
+): void {
+  const handlers = (server.server as unknown as { _requestHandlers?: unknown })._requestHandlers;
+  if (!(handlers instanceof Map)) {
+    throw new Error(
+      'routeBareSkillPromptNames: the MCP SDK no longer keeps its request handlers where this server reads '
+        + 'them, so a bare skill name could not be routed to its prompt. Re-read the SDK Protocol request path '
+        + 'and move this seam.',
+    );
+  }
+  const map = handlers as Map<string, PromptDispatcher>;
+  const sdkGet = map.get('prompts/get');
+  if (!sdkGet) return;
+  map.set('prompts/get', async (request, extra) => {
+    const wanted = (request as { params?: { name?: unknown } } | null | undefined)?.params?.name;
+    if (typeof wanted === 'string' && !registered.has(wanted)) {
+      const lookup = lookupSkillPrompt(await listSkills(), wanted);
+      if (lookup.status === 'refused') throw skillPromptRefusalError(lookup);
+      if (lookup.status === 'found') return skillPromptResult(lookup.prompt);
+    }
+    return sdkGet(request, extra);
+  });
+}
 
 /**
  * [#28940] Read which agents this boot holds, for the `agent_prompt`
@@ -893,6 +1012,7 @@ type AgentRoster =
 async function readAgentRoster(
   metadataService: IMetadataService,
   mergedRead: McpMergedMetadataRead | undefined,
+  packageNamespace?: (packageId: string) => string | undefined,
 ): Promise<AgentRoster> {
   let read: DiagnosedListRead;
   try {
@@ -900,10 +1020,18 @@ async function readAgentRoster(
   } catch (err) {
     return { state: 'unknown', errors: [err instanceof Error ? err.message : String(err)] };
   }
-  const names = read.items
-    .map((item) => (item as { name?: unknown } | null | undefined)?.name)
-    .filter((name): name is string => typeof name === 'string' && name.length > 0);
-  if (names.length > 0) return { state: 'agents', names };
+  // [ADR-0150 D6] Each agent with its face, derived from its holder's
+  // namespace and its name by spec's one derivation.
+  const agents: AgentFace[] = [];
+  for (const item of read.items) {
+    const row = item as { name?: unknown; _packageId?: unknown } | null | undefined;
+    const name = row?.name;
+    if (typeof name !== 'string' || name.length === 0) continue;
+    const packageId = typeof row?._packageId === 'string' && row._packageId !== '' ? row._packageId : undefined;
+    const namespace = packageId ? packageNamespace?.(packageId) : undefined;
+    agents.push({ face: deriveAiFaceName({ name, namespace }), name, ...(packageId ? { packageId } : {}) });
+  }
+  if (agents.length > 0) return { state: 'agents', agents };
   if (read.degraded) return { state: 'unknown', errors: read.errors };
   return { state: 'none' };
 }
@@ -1939,6 +2067,12 @@ export class MCPServerRuntime {
   async bridgePrompts(
     metadataService: IMetadataService,
     mergedRead?: McpMergedMetadataRead,
+    /**
+     * [ADR-0150 D6] The manifest namespace of an installed package, by its id:
+     * what a package-held skill's prompt name and agent's name are derived
+     * from (`NS-NAME`). Omitted, every face is the item's bare name.
+     */
+    packageNamespace?: (packageId: string) => string | undefined,
   ): Promise<void> {
     const logger = this.config.logger;
 
@@ -1957,7 +2091,8 @@ export class MCPServerRuntime {
     // metadata service otherwise: one decision ({@link agentReadOf}) that the
     // get below takes too.
     const agentRead = agentReadOf(mergedRead);
-    const roster = await readAgentRoster(metadataService, agentRead);
+    const roster = await readAgentRoster(metadataService, agentRead, packageNamespace);
+    const agents = roster.state === 'agents' ? roster.agents : [];
     if (roster.state === 'none') {
       logger?.info(
         '[MCP] agent_prompt not advertised — this boot registers no agent, so nothing could answer it. '
@@ -1973,6 +2108,12 @@ export class MCPServerRuntime {
           { errors: roster.errors },
         );
       }
+      // [ADR-0150 D6, Q3] A face two agents derive is refused at every get
+      // (`buildAgentPromptResult`); said once here, naming both, so the author
+      // learns it at boot rather than from a client.
+      for (const [face, holders] of groupByFace(agents)) {
+        if (holders.length > 1) logger?.warn(`[MCP] ${duplicateAgentFaceMessage(face, holders)}`);
+      }
       // A dynamic prompt that loads the named agent at call time.
       this.mcpServer.registerPrompt(
         'agent_prompt',
@@ -1982,8 +2123,11 @@ export class MCPServerRuntime {
           argsSchema: {
             // [#28940] Examples come from the roster, never a fixed pair: see
             // {@link agentNameArgumentDescription}.
+            // [ADR-0150 D6] The examples are faces: the names a get resolves
+            // to one agent. The bare name an agent had before keeps working
+            // while one holder has it.
             agentName: z.string().describe(
-              agentNameArgumentDescription(roster.state === 'agents' ? roster.names : []),
+              agentNameArgumentDescription([...new Set(agents.map((agent) => agent.face))]),
             ),
             objectName: z.string().optional().describe('Current object the user is viewing'),
             recordId: z.string().optional().describe('Currently selected record ID'),
@@ -1994,7 +2138,8 @@ export class MCPServerRuntime {
           // [#6055] Outage vs. miss lives in the builder — see
           // {@link buildAgentPromptResult}. [#31514] The agent is read through
           // the protocol's by-name read where `agentRead` is the protocol.
-          buildAgentPromptResult(metadataService, args, logger, agentRead),
+          // [ADR-0150 D6] …and by face, against the roster read above.
+          buildAgentPromptResult(metadataService, args, logger, agentRead, agents),
       );
 
       logger?.info('[MCP] Agent prompts bridged');
@@ -2022,6 +2167,7 @@ export class MCPServerRuntime {
     // request and self-heals — the line says which one the reader is looking at.
     let skillListVerdict: { degraded: boolean; errors: string[] } = { degraded: false, errors: [] };
     const skillBridge: McpSkillBridge = {
+      ...(packageNamespace ? { packageNamespace } : {}),
       listSkills: async () => {
         // The verdict of the READ, recorded as the read happens. `listSkills`
         // is also the per-call re-read behind each registered prompt's body, so
@@ -2065,29 +2211,56 @@ export class MCPServerRuntime {
       );
     }
 
+    // [ADR-0150 D6] One prompt per FACE, never per skill name: two packages'
+    // skills of one name are two faces (`NS-NAME`). A face two skills derive
+    // is registered once, as the refusal every get of it answers, and said
+    // here, naming both; neither skill is served under it, and neither is
+    // dropped from the list.
     let bridged = 0;
-    for (const skill of skills) {
-      if (skill.name === 'agent_prompt') {
+    const registeredNames = new Set<string>(roster.state === 'none' ? [] : ['agent_prompt']);
+    for (const entry of skillPromptFaces(skills)) {
+      if (entry.face === 'agent_prompt') {
         // The one reserved name on this surface. Never silently dropped: the
         // author is told which skill collided and what it costs them.
         logger?.warn(
-          `[MCP] Skill "${skill.name}" is not exposed as a prompt — that name is reserved by the built-in agent prompt. Rename the skill to make its instructions reachable over MCP.`,
+          `[MCP] Skill "${entry.face}" is not exposed as a prompt — that name is reserved by the built-in agent prompt. Rename the skill to make its instructions reachable over MCP.`,
         );
         continue;
       }
+      if (entry.prompts.length > 1) logger?.warn(`[MCP] ${duplicateSkillFaceMessage(entry)}`);
+      const listed = skillPromptListEntry(entry);
       this.mcpServer.registerPrompt(
-        skill.name,
+        entry.face,
         {
-          ...(skill.title ? { title: skill.title } : {}),
-          ...(skill.description ? { description: skill.description } : {}),
+          ...(listed.title ? { title: listed.title } : {}),
+          ...(listed.description ? { description: listed.description } : {}),
         },
         async () => {
           // Re-read at call time so an edited skill serves fresh instructions.
-          const current = (await listSkillPrompts(skillBridge)).find((s) => s.name === skill.name);
-          return skillPromptResult(current ?? skill);
+          const lookup = lookupSkillPrompt(await listSkillPrompts(skillBridge), entry.face);
+          if (lookup.status === 'refused') throw skillPromptRefusalError(lookup);
+          if (lookup.status === 'found') return skillPromptResult(lookup.prompt);
+          // Gone since the snapshot: the snapshot's one skill, as before.
+          if (entry.prompts.length === 1) return skillPromptResult(entry.prompts[0]);
+          throw skillPromptRefusalError({
+            status: 'refused',
+            message: duplicateSkillFaceMessage(entry),
+            candidates: entry.prompts.map((p) => p.face),
+          });
         },
       );
+      registeredNames.add(entry.face);
       bridged++;
+    }
+
+    // [ADR-0150 D5] The bare skill name a client fetched a package's skill by
+    // before faces were derived keeps answering while one holder has it, and a
+    // bare name two packages hold is refused naming both faces — the get the
+    // HTTP transport serves (`lookupSkillPrompt`). The SDK owns this server's
+    // `prompts/get` and answers only registered names, so the bare name is
+    // routed ahead of it, never registered: the list names faces only.
+    if (skills.some((skill: SkillPrompt) => skill.face !== skill.name)) {
+      routeBareSkillPromptNames(this.mcpServer, registeredNames, () => listSkillPrompts(skillBridge));
     }
 
     logger?.info(`[MCP] Bridged ${bridged} skill prompts`);

@@ -144,6 +144,7 @@ export class LiteKernel extends ObjectKernelBase {
             // delivered — the registries are still filling during init(), so a
             // boot gate has nowhere earlier to run (#5170).
             await this.triggerHookOrThrow('kernel:ready');
+            this.kernelReadySettled = true;
             // "All synchronous bootstrap has settled" anchor, strictly after
             // every kernel:ready handler has settled and before any HTTP socket
             // opens. Carries reconcile/backfill/audit work. NOTE: does not
