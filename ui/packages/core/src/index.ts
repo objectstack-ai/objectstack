@@ -75,6 +75,10 @@ export * from './utils/external-write-refusal.js';
 // for why a second copy was not an option. `@object-ui/fields` re-exports every
 // name, so its published surface is unchanged.
 export * from './utils/retired-field-types.js';
+// The computed-by-expression predicate (objectstack#31759): a field carrying an
+// `expression` is computed, whatever its type, so no write surface offers it a
+// value. Read by the form, grid, detail and import gates.
+export * from './utils/expression-computed-field.js';
 export * from './utils/unmaterialized-fields.js';
 // [#5729] The consumer half of objectstack#10235's ruling: the SERVED
 // per-column sortability projection, and the one spelling of its contract

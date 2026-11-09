@@ -1271,6 +1271,7 @@ const pt = {
     copyToClipboard: "Copiar para área de transferência",
     copied: "Copiado!",
     deleteConfirmation: "Tem certeza de que deseja excluir este registro? Isso não pode ser desfeito.",
+    deleteConfirmQuestion: "Tem certeza de que deseja excluir este registro?",
     deleted: "Registro excluído",
     editRecord: "Editar registro",
     viewAll: "Ver tudo",
@@ -2577,6 +2578,10 @@ const pt = {
       bulkDeleteConfirm_one: "Excluir {{count}} registro selecionado? Isso não pode ser desfeito.",
       bulkDeleteConfirm_many: "Excluir {{count}} de registros selecionados? Isso não pode ser desfeito.",
       bulkDeleteConfirm_other: "Excluir {{count}} registros selecionados? Isso não pode ser desfeito.",
+      bulkDeleteQuestion: "Excluir {{count}} registros selecionados?",
+      bulkDeleteQuestion_one: "Excluir {{count}} registro selecionado?",
+      bulkDeleteQuestion_many: "Excluir {{count}} de registros selecionados?",
+      bulkDeleteQuestion_other: "Excluir {{count}} registros selecionados?",
       duplicateViewName: "Já existe uma exibição com esse nome.",
       viewTypeGrid: "Grade",
       viewTypeGridDesc: "Tabela de registros no estilo planilha.",
@@ -3577,12 +3582,31 @@ const pt = {
     undoFailed: "Não foi possível desfazer a alteração de navegação",
     updateFailed: "Não foi possível atualizar a navegação",
   },
+  // ADR-0148 — why a recycle-bin restore was refused, one sentence per code the
+  // restore door answers (`recycleBinRestoreRefusalText` in @object-ui/core).
+  recycleBin: {
+    refusal: {
+      uniqueValueTaken: "Não é possível restaurar: outro registro agora tem o mesmo valor de {{field}}. Altere esse registro primeiro e depois restaure.",
+      parentPurged: "Não é possível restaurar: o registro pai ({{parent}}) foi excluído permanentemente.",
+      packageUninstalled: "Não é possível restaurar: o pacote que fornecia {{object}} foi desinstalado.",
+      parentInRecycleBin: "Ainda não é possível restaurar: o registro pai ({{parent}}) também está na lixeira. Restaure-o primeiro.",
+      notFound: "Este registro não está mais na lixeira. Ele pode ter sido excluído permanentemente.",
+      permissionDenied: "Você não tem permissão para restaurar este registro.",
+      notAvailable: "A lixeira não está disponível nesta implantação.",
+    },
+  },
   objectActions: {
     deleteSuccess: "{{label}} excluído com sucesso",
     deletedNamed: "{{label}} \"{{name}}\" excluído",
     deleteFailed: "Não foi possível excluir {{label}}",
     noRecordId: "Nenhum ID de registro fornecido",
     deleteConfirm: "Excluir este registro? Isso não pode ser desfeito.",
+    // ADR-0148 — a business object's delete goes to the recycle bin: the
+    // question alone, promising neither permanence nor recovery.
+    deleteConfirmQuestion: "Excluir este registro?",
+    restoredNamed: '{{label}} "{{name}}" restaurado',
+    restoreSuccess: "{{label}} restaurado com sucesso",
+    restoreFailed: "Não foi possível restaurar {{label}}",
     deleteConfirmTitle: "Excluir {{label}} \"{{name}}\"?",
     bulkDeleteConfirmTitle: "Excluir {{count}} registros de {{label}}?",
     bulkDeleteConfirmTitle_one: "Excluir {{count}} registro de {{label}}?",

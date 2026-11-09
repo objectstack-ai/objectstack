@@ -65,7 +65,7 @@ const RECORD_ID = 'rec-lead-1';
 
 type Pack = {
   detail: { delete: string; moreActions: string };
-  objectActions: { deleteConfirm: string; deleteCascade: string };
+  objectActions: { deleteConfirmQuestion: string; deleteCascade: string };
 };
 const EN = builtInLocales.en as unknown as Pack;
 const fill = (template: string, vars: Record<string, string>) =>
@@ -172,17 +172,17 @@ describe('record page Delete names the cascade objects (objectstack#28472)', () 
   it('a served list of one object adds one line naming its label', async () => {
     const dialog = await openDeleteConfirm(['crm_campaign_member']);
     expect(body(dialog)).toBe(
-      `${EN.objectActions.deleteConfirm} ${fill(EN.objectActions.deleteCascade, { objects: 'Campaign Member' })}`,
+      `${EN.objectActions.deleteConfirmQuestion} ${fill(EN.objectActions.deleteCascade, { objects: 'Campaign Member' })}`,
     );
   });
 
   it('a served empty list adds nothing', async () => {
     const dialog = await openDeleteConfirm([]);
-    expect(body(dialog)).toBe(EN.objectActions.deleteConfirm);
+    expect(body(dialog)).toBe(EN.objectActions.deleteConfirmQuestion);
   });
 
   it('no served list adds nothing and keeps today\'s text', async () => {
     const dialog = await openDeleteConfirm(undefined);
-    expect(body(dialog)).toBe(EN.objectActions.deleteConfirm);
+    expect(body(dialog)).toBe(EN.objectActions.deleteConfirmQuestion);
   });
 });

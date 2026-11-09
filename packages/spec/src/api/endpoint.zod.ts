@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { ROUTER_ADDRESSABLE_NAME_MESSAGE, ROUTER_ADDRESSABLE_NAME_PATTERN } from '../kernel/address-grammar';
 import { HttpMethod, RateLimitConfigSchema } from '../shared/http.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { strictObject } from '../shared/strict-object';
@@ -155,7 +156,7 @@ export const ApiEndpointSchema = strictObject({
   },
 }, {
   /** Identity */
-  name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Unique endpoint ID'),
+  name: z.string().regex(ROUTER_ADDRESSABLE_NAME_PATTERN, { message: ROUTER_ADDRESSABLE_NAME_MESSAGE }).describe('Unique endpoint ID'),
   path: z.string().regex(/^\//).describe(
     'URL Path — must be inside this stack\'s endpoint carve-out: '
     + '`/api/v1/apps/<manifest.namespace>/<subpath>` with a non-empty subpath (ADR-0121 D1), '

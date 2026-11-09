@@ -7,9 +7,10 @@
  */
 
 /**
- * objectstack-ai/objectstack#27823 — a record delete is permanent (the platform
- * has no recycle bin), so every one-record delete question says so, and the
- * success toast can name the record.
+ * objectstack-ai/objectstack#27823 — a platform object's delete is permanent
+ * (it never enters the recycle bin, ADR-0148 D4), so its one-record delete
+ * questions say so, and the success toast can name the record. A business
+ * object's question-only copy is pinned in `recycle-bin-delete-copy-30239`.
  *
  * The batch question (`console.objectView.bulkDeleteConfirm`) already carried
  * the pack's "this cannot be undone" sentence. The pin is that both one-record

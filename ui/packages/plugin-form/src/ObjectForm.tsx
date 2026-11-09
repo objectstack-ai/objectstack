@@ -19,6 +19,7 @@ import { SchemaRenderer, useSafeFieldLabel } from '@object-ui/react';
 import { pickLocalized, useObjectTranslation, useLocalization, withHomeAmountSource } from '@object-ui/i18n';
 import { useRecordInvalidation } from './recordInvalidation';
 import { mapFieldTypeToFormType, buildValidationRules, formatFileSize, fieldHelpText } from '@object-ui/fields';
+import { isExpressionComputedField } from '@object-ui/core';
 import { useIsMobile, toast } from '@object-ui/components';
 import { resolveSuccessNavigate } from './successBehavior';
 import { resolveSubmitRedirect, submitRedirectScope } from './submitRedirect';
@@ -1127,6 +1128,17 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
         // Read-only fields for computed types
         if (field.type === 'formula' || field.type === 'summary' || field.type === 'auto_number') {
           formField.disabled = true;
+        }
+
+        // A stored field carrying an `expression` is computed by the engine on
+        // every write, so a typed value never stands (objectstack#31759). It
+        // draws its type's READ face (`readonly`, not `disabled`, which is a
+        // greyed input), and the edit submit omits read-only fields, so the
+        // save no longer sends a value the engine would replace. The same stamp
+        // as `fromObjectSchema` in `sectionFields.ts`, the authored-section
+        // producer.
+        if (isExpressionComputedField(field)) {
+          formField.readonly = true;
         }
 
         // Conditional visibility is the spec's `visibleWhen`, carried above.

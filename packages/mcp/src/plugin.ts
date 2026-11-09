@@ -46,6 +46,7 @@ import {
   serveStoredMetadataRow,
   stdioObjectView,
   type StdioObjectReads,
+  type StdioDatasetToolsService,
   type StdioProtocolObjectReads,
   type StoredHashDigest,
 } from './stdio-data-bridge.js';
@@ -176,6 +177,21 @@ function resolveStdioApiKeyLifecycle(ctx: PluginContext): ApiKeyLifecyclePolicyS
     authService = undefined;
   }
   return apiKeyLifecyclePolicySourceOf(authService);
+}
+
+/**
+ * [ADR-0149 D2] The `analytics` service when it serves the dataset executor
+ * (`datasetTools`), else `undefined`: no analytics service (it loads opt-in),
+ * or one without the executor. A lookup that throws is "not served".
+ */
+function datasetToolsService(ctx: PluginContext): StdioDatasetToolsService | undefined {
+  let service: Partial<StdioDatasetToolsService> | undefined;
+  try {
+    service = ctx.getService<Partial<StdioDatasetToolsService>>('analytics');
+  } catch {
+    return undefined;
+  }
+  return service && typeof service.datasetTools === 'function' ? (service as StdioDatasetToolsService) : undefined;
 }
 
 /** The status the REST and dispatcher faces answer a held principal with. */
@@ -748,6 +764,10 @@ export class MCPServerPlugin implements Plugin {
           resolvePrincipal,
           security: securityReads,
           keyedDigest: storedHashDigest,
+          // [ADR-0149 D2] Read here, in `start()`: every plugin's services are
+          // registered during `init()`, so an absence now is final (ADR-0116),
+          // and the tools must be registered before the transport attaches.
+          datasetTools: datasetToolsService(ctx),
         });
       } else {
         // Functional degradation, said once and naming the remedy: two of the

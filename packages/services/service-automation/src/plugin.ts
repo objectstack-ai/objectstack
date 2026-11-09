@@ -5327,11 +5327,20 @@ export class AutomationServicePlugin implements Plugin {
      */
     private resolveFlowContenders(ctx: PluginContext, items: readonly unknown[]) {
         const engine = this.engine;
+        // [ADR-0150 D3] The same reader `init()` attaches to the engine
+        // (`setFlowNameResolver`), asked for a caller with no package — the
+        // question `registerFlow` asks — so the collision warning says a name
+        // is refused exactly when the engine refuses it.
+        const resolver = flowNameResolver(ctx);
         return resolveFlowPrecedence(
             items,
             ctx.logger,
             engine ? (name) => engine.packagedFlowOwner(name) : undefined,
             installedManifestsOf(objectqlRegistryOf(ctx)),
+            (name) => {
+                const resolution = resolver(name, null);
+                return resolution?.status === 'refused' ? resolution.message : undefined;
+            },
         );
     }
 

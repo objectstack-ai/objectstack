@@ -216,8 +216,10 @@ Remember it once with
 — and the `d` key in `os dev`, which runs it — then deploys there with no URL or
 key to type: it builds, prints the runtime's upgrade plan from a dry run,
 installs the build inline, and reports the app live once the running kernel has
-loaded it (`hotLoaded`). `os package install` uses the same runtime when `-u` /
-`-t` are not given. `os environments use-runtime --forget`, or an
+loaded it (`hotLoaded`). An undeclared rename or a risky type change stops it
+before anything is written, and on a terminal it asks whether to deploy anyway;
+`os deploy --dry-run` prints the plan and installs nothing. `os package install`
+uses the same runtime when `-u` / `-t` are not given. `os environments use-runtime --forget`, or an
 `os environments switch <id>` recorded for your `os cloud login` control plane,
 makes ObjectOS Cloud the target again.
 

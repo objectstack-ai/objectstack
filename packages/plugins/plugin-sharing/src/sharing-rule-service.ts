@@ -56,6 +56,7 @@ import { resolvePackageScopedName, type PackageScopedRefusal } from '@objectstac
 import {
   PackageScopedNameRefusedError,
   isPackageScopedRegistry,
+  listedHoldersView,
   reportRefusedDeclaration,
 } from './package-scoped-declarations.js';
 import { listShareableObjects, type ShareableObject, type ShareableObjectsEngine } from './shareable-objects.js';
@@ -1847,8 +1848,11 @@ export class SharingRuleService implements ISharingRuleService {
     if (rule.recipient_type === 'queue') {
       const queues = this.ownershipQueues?.();
       if (!queues) return false;
-      await this.assertQueueRecipientReachable(rule);
-      return queues.isMember(userId, rule.recipient_id, rule.organization_id ?? null, { onFailedRead: 'refuse' });
+      const callerPackageId = await this.queueRecipientCaller(rule);
+      return queues.isMember(userId, rule.recipient_id, rule.organization_id ?? null, {
+        onFailedRead: 'refuse',
+        ...(callerPackageId ? { callerPackageId } : {}),
+      });
     }
     return (await this.expandRecipient(rule, pass)).includes(userId);
   }
@@ -2293,8 +2297,11 @@ export class SharingRuleService implements ISharingRuleService {
       // grants and warns (#29362), as for a team or position recipient.
       const queues = this.ownershipQueues?.();
       if (!queues) return [];
-      await this.assertQueueRecipientReachable(rule);
-      return queues.expandMembers(rule.recipient_id, rule.organization_id ?? null, { onFailedRead: 'refuse' });
+      const callerPackageId = await this.queueRecipientCaller(rule);
+      return queues.expandMembers(rule.recipient_id, rule.organization_id ?? null, {
+        onFailedRead: 'refuse',
+        ...(callerPackageId ? { callerPackageId } : {}),
+      });
     }
     return [];
   }
@@ -2312,25 +2319,54 @@ export class SharingRuleService implements ISharingRuleService {
    * A refusal throws, like the queue service's own refusals under
    * `onFailedRead: 'refuse'`: each recompute's caller keeps the rule's grants
    * and says so, rather than revoking them on an answer nobody could pick.
-   * The queue service still resolves the name environment-wide after this
-   * (its contract carries no caller package), so a name two packages hold is
-   * refused there even when P's closure reaches only one of them — refused,
-   * never guessed.
+   *
+   * Otherwise it answers P, the caller package the queue read passes on
+   * (`callerPackageId`, the contract's `OwnershipQueueCallerPackage`), so the
+   * queue service resolves the name from P too: a name P's closure reaches
+   * once resolves to that holder even when an unrelated package also declares
+   * it. `null` for an organization-authored rule, or where no registry can
+   * answer `(package, name)`: the read is environment-wide, as before. The
+   * check stays ahead of the read on purpose: a queue service written before
+   * the key reads environment-wide and would otherwise serve a holder outside
+   * P's reach — stricter after the check, never looser.
    */
-  private async assertQueueRecipientReachable(rule: SharingRuleRow): Promise<void> {
-    if (!isDeclaredSharingRule(rule)) return;
+  private async queueRecipientCaller(rule: SharingRuleRow): Promise<string | null> {
+    if (!isDeclaredSharingRule(rule)) return null;
     const registry = (this.engine as { registry?: unknown }).registry;
-    if (!isPackageScopedRegistry(registry)) return;
+    if (!isPackageScopedRegistry(registry)) return null;
     const declared = await this.declaredRuleNamed(rule.name);
-    if (!declared?.packageId) return;
-    const resolution = resolvePackageScopedName(registry, {
+    if (!declared?.packageId) return null;
+    // Over the holders the listing serves: a disabled package holds nothing
+    // here, so P whose one reachable holder is disabled is refused, naming
+    // every holder still served as outside its closure (never served the
+    // disabled one, never an unrelated one).
+    const resolution = resolvePackageScopedName(listedHoldersView(registry), {
       type: 'queue',
       name: rule.recipient_id,
       callerPackageId: declared.packageId,
     });
-    if (resolution.status !== 'refused') return;
+    if (resolution.status !== 'refused') return declared.packageId;
     reportRefusedDeclaration(this.logger, this.queueRecipientRefusalsReported, resolution);
     throw new PackageScopedNameRefusedError(resolution);
+  }
+
+  /**
+   * [ADR-0150 D3] The package a rule's queue recipient is read from: the
+   * declared rule's package, or `null` (an organization-authored rule, a name
+   * no declaration answers, or a registry that cannot answer `(package,
+   * name)`). For a look-through that only asks what the queue holds — never a
+   * read that grants: those go through {@link queueRecipientCaller}, which
+   * also refuses a recipient outside the package's reach.
+   */
+  async queueRecipientPackageOf(rule: SharingRuleRow): Promise<string | null> {
+    if (rule.recipient_type !== 'queue' || !isDeclaredSharingRule(rule)) return null;
+    if (!isPackageScopedRegistry((this.engine as { registry?: unknown }).registry)) return null;
+    try {
+      return (await this.declaredRuleNamed(rule.name))?.packageId ?? null;
+    } catch (err) {
+      if (err instanceof PackageScopedNameRefusedError) return null; // a rule name two packages declare is served to nobody
+      throw err;
+    }
   }
 
   /**

@@ -41,7 +41,7 @@ describe('recordDelete.confirmCopy names the cascade (objectstack#28472)', () =>
       { record: ROW },
     );
     expect(copy.message).toBe(
-      'objectActions.deleteConfirm objectActions.deleteCascade {"objects":"Campaign Member"}',
+      'objectActions.deleteConfirmQuestion objectActions.deleteCascade {"objects":"Campaign Member"}',
     );
   });
 
@@ -59,20 +59,20 @@ describe('recordDelete.confirmCopy names the cascade (objectstack#28472)', () =>
       { count: 2 },
     );
     expect(copy.message).toBe(
-      'console.objectView.bulkDeleteConfirm {"count":2} objectActions.deleteCascade {"objects":"Campaign Member"}',
+      'console.objectView.bulkDeleteQuestion {"count":2} objectActions.deleteCascade {"objects":"Campaign Member"}',
     );
   });
 
   it('an empty list adds nothing: the body is the plain question', () => {
     const copy = recordDelete.confirmCopy({ ...deps, cascadeLabels: [] }, { record: ROW });
-    expect(copy.message).toBe('objectActions.deleteConfirm');
+    expect(copy.message).toBe('objectActions.deleteConfirmQuestion');
   });
 
   it('no list adds nothing and keeps the copy exactly as before', () => {
     const withKey = recordDelete.confirmCopy({ ...deps, cascadeLabels: undefined }, { record: ROW });
     const without = recordDelete.confirmCopy(deps, { record: ROW });
     expect(withKey).toEqual(without);
-    expect(without.message).toBe('objectActions.deleteConfirm');
+    expect(without.message).toBe('objectActions.deleteConfirmQuestion');
   });
 });
 
