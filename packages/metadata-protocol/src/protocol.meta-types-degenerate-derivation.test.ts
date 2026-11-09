@@ -91,6 +91,11 @@
  * a derivation chosen for convenience would not cover the served path at all —
  * that is precisely the gap #17500's `io: 'input'` pin deliberately left open.
  */
+// `@objectstack/lint` is reached through the save door's author-time gate, a
+// dynamic `import()` (`metadata-diagnostics.ts`). Paid here, at collection, so no
+// case's `testTimeout` window pays that first load
+// (`scripts/check-test-source-alias.mjs`, "The source reach").
+import '@objectstack/lint';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 // [#5619] The producer's OWN write-verb dispatch decisions, so the fake engine
@@ -265,10 +270,12 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
         // [#28519] 51 → 52: `cancelText` (the dismiss button label of the
         // action's confirm or param dialog) joined the accepted set, and the
         // sample names it.
-        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(52);
+        // [#31840] 52 → 53: `preflight` (the same-origin read the param dialog
+        // shows before submit) joined the accepted set, and the sample names it.
+        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(53);
         // A sample an author would actually address, and the one #17500's
         // repeater titles need a node to sit on.
-        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages', 'requiresMembershipReach', 'disabledReason', 'pressed', 'submitText', 'cancelText', 'overrides']) {
+        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages', 'requiresMembershipReach', 'disabledReason', 'pressed', 'submitText', 'cancelText', 'overrides', 'preflight']) {
             expect(Object.keys(properties)).toContain(key);
         }
     });

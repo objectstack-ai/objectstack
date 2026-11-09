@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 278 |
+| Write call sites | 280 |
 | Object name statically decidable | 198 |
-| Object name chosen at run time | 80 |
+| Object name chosen at run time | 82 |
 | Against a tenancy-enabled object | 192 |
 | Against an object declaring tenancy off | 6 |
-| Threading a tenant context | 211 |
+| Threading a tenant context | 213 |
 | Provably carrying none | 10 |
 | …and decidably tenancy-enabled | 3 |
 | Options argument unreadable | 57 |
 | …and decidably tenancy-enabled | 30 |
-| Threading a decidably elevated context | 155 |
+| Threading a decidably elevated context | 157 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 113 |
 
@@ -90,12 +90,12 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-09 at `7e0d97dea`.
+Measured on 2026-11-09 at `4e6c24cf7`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1085 |
-| engine-shaped types recognised | 118 |
+| tracked non-test sources scanned | 1088 |
+| engine-shaped types recognised | 120 |
 | declared objects in the registry | 133 |
 | same-named calls subtracted as non-engine | 253 |
 
@@ -195,6 +195,7 @@ Measured on 2026-11-09 at `7e0d97dea`.
 | `packages/plugins/plugin-security/src/claim-seed-ownership.ts` | `update` | `schema.name` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/cleanup-package-permissions.ts` | `delete` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/invitation-placement.ts` | `insert` | `sys_user_position` | enabled | elevated | 1 |
+| `packages/plugins/plugin-security/src/stored-permission-set-package-backfill.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `delete` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `insert` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `update` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 4 |
@@ -211,6 +212,7 @@ Measured on 2026-11-09 at `7e0d97dea`.
 | `packages/plugins/plugin-sharing/src/sharing-service.ts` | `delete` | `sys_record_share` | enabled | elevated | 2 |
 | `packages/plugins/plugin-sharing/src/sharing-service.ts` | `insert` | `sys_record_share` | enabled | elevated | 1 |
 | `packages/plugins/plugin-sharing/src/sharing-service.ts` | `update` | `sys_record_share` | enabled | elevated | 1 |
+| `packages/plugins/plugin-sharing/src/stored-declaration-package-backfill.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-webhooks/src/migrate-webhook-secrets.ts` | `update` | `subscriptionsObject` | undecidable | options unreadable | 1 |
 | `packages/services/service-automation/src/builtin/crud-nodes.ts` | `delete` | `objectName` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-automation/src/builtin/crud-nodes.ts` | `insert` | `objectName` | undecidable | context, elevation undecidable | 1 |

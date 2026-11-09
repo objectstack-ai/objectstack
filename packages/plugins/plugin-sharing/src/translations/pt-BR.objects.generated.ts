@@ -171,6 +171,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           admin: "Administrador"
         }
       },
+      package_id: {
+        label: "Package",
+        help: "The app a rule that came with an app belongs to. Filled in by the platform; empty for rules created here."
+      },
       customized: {
         label: "Personalizada",
         help: "Marcado quando você edita uma regra que veio com um aplicativo, para que suas alterações sejam mantidas quando o aplicativo for atualizado."
@@ -321,6 +325,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       queue: {
         label: "Fila",
         help: "O nome da fila à qual este membro pertence."
+      },
+      queue_package: {
+        label: "Queue Package",
+        help: "The app the queue comes from. Filled in by the platform; empty for queues created here."
       },
       recipient_type: {
         label: "Tipo de membro",

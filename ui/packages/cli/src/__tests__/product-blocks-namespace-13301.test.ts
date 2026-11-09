@@ -27,7 +27,8 @@ import { validateAuthoredDocument } from '../utils/authoring-face.js';
 import { KNOWN_SCHEMA_TYPES } from '../utils/known-schema-types.js';
 import { validate } from '../commands/validate.js';
 
-const HOME_BLOCKS = ['hero', 'stat', 'usage-bar', 'checklist', 'tile-grid'] as const;
+// `row-table` (#31856) joined the five, registered the same way.
+const HOME_BLOCKS = ['hero', 'stat', 'usage-bar', 'checklist', 'tile-grid', 'row-table'] as const;
 
 /** Is `type` unclaimed by every arm of the validator's root union? */
 function refusedAtType(type: string): boolean {

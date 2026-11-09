@@ -40,6 +40,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         label: "Organisation",
         help: "Die Organisation, zu der diese Gewährung gehört."
       },
+      permission_set_package: {
+        label: "Permission Set Package",
+        help: "The app the permission set comes from. Filled in by the platform; empty when the set was created here, or when more than one app provides a set of that name."
+      },
       granted_by: {
         label: "Gewährt von",
         help: "Der Benutzer, der diesen Berechtigungssatz gewährt hat."

@@ -20,11 +20,15 @@
 export const deGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_assignment_rule.fields.name.label": "5274417ff1ccaf01",
   "objects.sys_queue.fields.name.label": "5274417ff1ccaf01",
+  "objects.sys_queue_member.fields.queue_package.help": "2057e8ad7a69bc3f",
+  "objects.sys_queue_member.fields.queue_package.label": "c9d3aa9107335996",
   "objects.sys_queue_member.fields.recipient_type.options.position": "9a24c02e441eb0b4",
   "objects.sys_queue_member.fields.recipient_type.options.team": "42b87165ac826b2b",
   "objects.sys_record_share.fields.recipient_type.options.position": "9a24c02e441eb0b4",
   "objects.sys_share_link.fields.token.label": "6e8de3393d2cee54",
   "objects.sys_sharing_rule.fields.name.label": "5274417ff1ccaf01",
+  "objects.sys_sharing_rule.fields.package_id.help": "81de9ff2f0ed555a",
+  "objects.sys_sharing_rule.fields.package_id.label": "aacf5e74a8641b2b",
   "objects.sys_sharing_rule.fields.recipient_type.options.position": "9a24c02e441eb0b4",
   "objects.sys_sharing_rule.fields.recipient_type.options.team": "42b87165ac826b2b",
 };

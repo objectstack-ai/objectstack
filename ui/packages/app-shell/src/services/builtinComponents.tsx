@@ -29,6 +29,8 @@ import { CONNECTOR_CONNECTIONS_REF } from '../views/setup/connectorConnections.j
 import { PositionHoldersPage } from '../views/setup/PositionHoldersPage.js';
 import { PermissionSetAssignmentPage } from '../views/setup/PermissionSetAssignmentPage.js';
 import { PERMISSION_SET_ASSIGNMENT_REF, POSITION_HOLDERS_REF } from '../views/setup/peopleAssignments.js';
+import { RecycleBinPage } from '../views/setup/RecycleBinPage.js';
+import { RECYCLE_BIN_REF } from '../views/setup/recycleBin.js';
 import {
   isAggregatedViewContainer,
   viewDisplayType,
@@ -203,6 +205,20 @@ registerAppComponent({
   label: 'Permission Set Assignment',
   source: '@object-ui/app-shell',
   component: PermissionSetAssignmentPage,
+});
+
+/**
+ * Setup → Configuration → Recycle bin (ADR-0148, objectstack#30239): the
+ * deleted records of each object whose bin the caller manages, to restore one
+ * or empty the bin. The entry naming this ref is `@objectstack/platform-objects`'
+ * Setup navigation contribution, beside the `sys_recycle_bin` store it
+ * registers; the shell declares no entry and no route for it.
+ */
+registerAppComponent({
+  ref: RECYCLE_BIN_REF,
+  label: 'Recycle Bin',
+  source: '@object-ui/app-shell',
+  component: RecycleBinPage,
 });
 
 /* -------------------------------------------------------------------------- */

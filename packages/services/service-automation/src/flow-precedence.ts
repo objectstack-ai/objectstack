@@ -109,6 +109,13 @@ export interface FlowPrecedenceWinner {
     name: string;
     /** The body to register — the winner under ADR-0005 precedence. */
     definition: unknown;
+    /**
+     * [ADR-0150 D3, epic #31527 child E5] Where that body comes from, for
+     * EVERY name — one contender included — so the engine records the arm
+     * (`registerFlow`'s `armedFrom`) and `armedFlowPackage` answers the
+     * package only for the loader's own body.
+     */
+    contender: FlowContender;
     /** Present only when this name had more than one contender. */
     shadowing?: FlowShadowingRecord;
 }
@@ -159,6 +166,25 @@ function classifyContender(item: unknown, owner: string | undefined, installed: 
         const binding = storedRowBindingOf(item);
         if (isServedOverrideRowOf({ type: 'flow', package_id: binding, metadata: item }, owner, installed)) {
             return { source: 'override', packageId: binding as string };
+        }
+        // [ADR-0150 D3, epic #31527 child E5] The same override as the
+        // protocol's view serves it (the `kernel:ready` bind, the re-sync and
+        // the mutation sync read that view): no stored binding, and stamped
+        // with the base's own envelope (`_packageId` = the base) beside the
+        // declaration it was saved with — measured on the real composition,
+        // `flow-declared-override-first-boot-pull.integration.test.ts`.
+        // Without this that body passes `isCodeArtifactBody` below as the
+        // loader's own. The read-side reading the protocol's
+        // `servedOverrideBaseOf` makes: the base's envelope, AND the predicate
+        // above holding for the row the pair would store it as. A package-less
+        // row declaring the same thing carries no envelope and stays `runtime`.
+        const pair = pairOf(owner, installed);
+        if (
+            pair.ok
+            && packageId === owner
+            && isServedOverrideRowOf({ type: 'flow', package_id: pair.value, metadata: item }, owner, installed)
+        ) {
+            return { source: 'override', packageId: pair.value };
         }
     }
     if (owner !== undefined && isCodeArtifactBody(item)) {
@@ -309,7 +335,9 @@ function undeclaredRemedy(owner: string | undefined, installed: InstalledManifes
  * [#20864] Which contender is `package` is the loader's set's answer, asked
  * ONCE per contested name so every contender of that name is judged against
  * one answer — see {@link describeFlowContender}. A name with one contender
- * asks nothing: precedence decides nothing there.
+ * is classified too, though precedence decides nothing there: the winner
+ * carries its `contender`, which the engine records as the arm (ADR-0150 D3,
+ * epic #31527 child E5).
  *
  * [#20913] ONE decision for BOTH boot steps. The automation plugin resolves
  * the boot pull's registry list and the `kernel:ready` / `metadata:reloaded`
@@ -355,12 +383,13 @@ export function resolveFlowPrecedence(
     const winners: FlowPrecedenceWinner[] = [];
     for (const name of order) {
         const members = groups.get(name)!;
+        const owner = loaderSetOwner(packagedFlowOwner, name);
         if (members.length === 1) {
-            winners.push({ name, definition: members[0].definition });
+            const definition = members[0].definition;
+            winners.push({ name, definition, contender: classifyContender(definition, owner, installed) });
             continue;
         }
 
-        const owner = loaderSetOwner(packagedFlowOwner, name);
         const group = members.map((member) => ({
             ...member,
             contender: classifyContender(member.definition, owner, installed),
@@ -391,7 +420,7 @@ export function resolveFlowPrecedence(
         const overrideOverOwnBase = armed.contender.source === 'override'
             && shadowed.every((contender) => contender.source === 'package' && contender.packageId === owner);
         if (overrideOverOwnBase) {
-            winners.push({ name, definition: armed.definition });
+            winners.push({ name, definition: armed.definition, contender: armed.contender });
             continue;
         }
         // [#20913] Say WHY this one is armed, per case — the cases are
@@ -430,6 +459,7 @@ export function resolveFlowPrecedence(
             winners.push({
                 name,
                 definition: armed.definition,
+                contender: armed.contender,
                 shadowing: { name, armed: armed.contender, shadowed },
             });
             continue;
@@ -449,6 +479,7 @@ export function resolveFlowPrecedence(
         winners.push({
             name,
             definition: armed.definition,
+            contender: armed.contender,
             shadowing: { name, armed: armed.contender, shadowed },
         });
     }

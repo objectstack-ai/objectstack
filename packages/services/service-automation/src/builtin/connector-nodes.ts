@@ -62,6 +62,15 @@ export function registerConnectorNodes(engine: AutomationEngine, ctx: PluginCont
                 );
             }
 
+            // [ADR-0150 D3, epic #31527 child E5] A packaged flow names its
+            // connector from its package: refused (every candidate named) when
+            // the name does not resolve for that package — never dispatched on
+            // a guess.
+            const nameRefusal = engine.connectorNameRefusal(cfg.connectorId, context);
+            if (nameRefusal) {
+                return refuseNode(`connector_action '${node.id}': ${nameRefusal.message}`);
+            }
+
             const handler = engine.resolveConnectorAction(cfg.connectorId, cfg.actionId);
             if (!handler) {
                 // A degraded declarative instance (#3017) is registered but has no
