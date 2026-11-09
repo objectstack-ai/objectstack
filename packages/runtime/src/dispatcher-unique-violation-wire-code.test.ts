@@ -47,6 +47,9 @@ import { HttpDispatcher } from './http-dispatcher.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 import { bindTestSecurityCatalog } from './security/security-catalog.testkit.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
+// Paid at collection, not inside a clocked case: the dispatcher's package domain
+// reaches it through a dynamic import (check:test-source-alias).
+import '@objectstack/metadata';
 
 const PREFIX = '/api/v1';
 /** `registry.registerObject` requires a package id (see the sibling real-stack tests). */
