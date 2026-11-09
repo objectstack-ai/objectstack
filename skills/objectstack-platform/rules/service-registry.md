@@ -4,7 +4,7 @@ Guide for registering and consuming services via the kernel DI container.
 
 ## Service Registry API
 
-The `PluginContext` provides three core methods:
+The `PluginContext` provides four core methods:
 
 ```typescript
 // Register a service
@@ -219,7 +219,7 @@ throws — so consumers break either way.
 ```typescript
 async start(ctx: PluginContext) {
   const realtime = ctx.getService('realtime');  // ❌ Throws if not available
-  realtime.publish('event', data);
+  await realtime.publish({ type: 'event', payload: data, timestamp: new Date().toISOString() });
 }
 ```
 
@@ -229,7 +229,7 @@ async start(ctx: PluginContext) {
 async start(ctx: PluginContext) {
   try {
     const realtime = ctx.getService('realtime');
-    realtime.publish('event', data);
+    await realtime.publish({ type: 'event', payload: data, timestamp: new Date().toISOString() });
   } catch {
     ctx.logger.debug('Realtime service not available');  // ✅ Graceful fallback
   }
