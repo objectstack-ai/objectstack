@@ -8,7 +8,8 @@
  *
  * The turns are built from wire parts through `uiMessageToChatMessage`, so the
  * lift (`detectAnswerSource`) and the draw are pinned together, the way a
- * streamed or reloaded conversation reaches the chat.
+ * streamed or reloaded conversation reaches the chat. The fixture is cloud
+ * service-ai's `ResultSource` as `resultSourceBlock()` serves it.
  */
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -24,15 +25,17 @@ const SENTINEL = 'PAYLOAD_SENTINEL_31868';
 
 const SOURCE = {
   object: 'crm_opportunity',
-  label: 'Opportunity',
-  filter: { stage: 'open', amount: { $gt: 1000 }, is_won: false },
+  label: 'Opportunities',
+  filter: { stage: 'open', amount: { $gt: 1000 }, is_won: false, account: { owner: 'u7' } },
   scope: 'visible_to_you',
-  groupBy: ['owner', { field: 'closed_at', dateGranularity: 'quarter' }],
+  groupBy: ['owner', 'region'],
   aggregations: [{ function: 'sum', field: 'amount' }, { function: 'count' }],
   orderBy: [{ field: 'amount', order: 'desc' }],
   limit: 50,
+  related: ['account.owner'],
+  latestPer: { groupBy: 'owner', orderField: 'closed_at' },
+  records: 7,
   line: 'Summed the amount of 7 open opportunities',
-  records: Array.from({ length: 7 }, (_, i) => ({ id: `r${i + 1}`, label: `Deal ${i + 1}` })),
 };
 
 /** The service-ai wire form: the tool's JSON inside a `{ type: 'text', value }` wrapper. */
@@ -67,12 +70,12 @@ describe('objectstack#31868 — detectAnswerSource lifts the source block alone'
     const lifted = detectAnswerSource(wrapped({ rows: [SENTINEL], source: { ...SOURCE, secret: SENTINEL } }));
     expect(lifted).toEqual({
       object: 'crm_opportunity',
-      label: 'Opportunity',
+      label: 'Opportunities',
       filter: SOURCE.filter,
       scope: 'visible_to_you',
-      groupBy: [{ field: 'owner' }, { field: 'closed_at', dateGranularity: 'quarter' }],
+      groupBy: ['owner', 'region'],
       aggregations: [{ function: 'sum', field: 'amount' }, { function: 'count' }],
-      records: SOURCE.records,
+      records: 7,
     });
     expect(JSON.stringify(lifted)).not.toContain(SENTINEL);
   });
@@ -85,9 +88,11 @@ describe('objectstack#31868 — detectAnswerSource lifts the source block alone'
 
   it('a declared member that is not its shape drops the whole block', () => {
     expect(detectAnswerSource(wrapped({ source: { ...SOURCE, aggregations: 'sum(amount)' } }))).toBeUndefined();
-    expect(detectAnswerSource(wrapped({ source: { ...SOURCE, groupBy: [42] } }))).toBeUndefined();
+    expect(detectAnswerSource(wrapped({ source: { ...SOURCE, groupBy: [{ field: 'owner' }] } }))).toBeUndefined();
     expect(detectAnswerSource(wrapped({ source: { ...SOURCE, records: [{ id: 'r1' }] } }))).toBeUndefined();
+    expect(detectAnswerSource(wrapped({ source: { ...SOURCE, records: -1 } }))).toBeUndefined();
     expect(detectAnswerSource(wrapped({ source: { ...SOURCE, filter: 'stage = open' } }))).toBeUndefined();
+    expect(detectAnswerSource(wrapped({ source: { ...SOURCE, filter: [['stage', '=', 'open']] } }))).toBeUndefined();
   });
 });
 
@@ -102,38 +107,41 @@ describe('objectstack#31868 — the "How this was computed" block', () => {
     expect(screen.queryByTestId('answer-source-section')).toBeNull();
   });
 
-  it('expanding it shows the object, filter, grouping, aggregations, records and scope', () => {
+  it('expanding it shows the object, filter, grouping, aggregations, record count and scope', () => {
     renderTurn([withSource()]);
     openBlock();
     const section = screen.getByTestId('answer-source-section');
-    expect(section).toHaveTextContent('Opportunity');
+    expect(section).toHaveTextContent('Opportunities');
 
     const rows = within(screen.getByTestId('answer-source-filter')).getAllByRole('listitem');
     expect(rows.map((r) => r.textContent)).toEqual([
       'stage Equals open',
       'AND amount Greater than 1000',
       'AND is_won Equals False',
+      // A condition on a lookup's record reads under the dotted path.
+      'AND account.owner Equals u7',
     ]);
 
-    expect(section).toHaveTextContent('Grouped byowner, closed_at');
+    expect(section).toHaveTextContent('Grouped byowner, region');
     expect(section).toHaveTextContent('Sum amount');
     expect(section).toHaveTextContent('Count');
-    // Five record labels, then the rest as a count.
-    expect(screen.getByTestId('answer-source-records')).toHaveTextContent(
-      /^Deal 1, Deal 2, Deal 3, Deal 4, Deal 5 and 2 more$/,
-    );
+    expect(screen.getByTestId('answer-source-records')).toHaveTextContent(/^7$/);
     expect(screen.getByTestId('answer-source-scope')).toHaveTextContent('Only records visible to you');
-    // Left out on purpose: the order, the limit and the model-facing line.
+    // Left out on purpose: the order, the limit, the related paths, the
+    // latest-per cut and the model-facing line.
     expect(section).not.toHaveTextContent('desc');
+    expect(section).not.toHaveTextContent('50');
+    expect(section).not.toHaveTextContent('closed_at');
     expect(section).not.toHaveTextContent('Summed the amount');
   });
 
-  it('a filter that does not lower to flat rows is drawn as served', () => {
+  it('a filter that does not lower to flat rows is drawn as served, and an unknown count draws no row', () => {
     const nested = { $or: [{ stage: 'open' }, { $and: [{ amount: { $gt: 1 } }] }] };
     renderTurn([toolPart('t1', 'query_records', wrapped({ source: { object: 'crm_opportunity', filter: nested } }))]);
     openBlock();
     expect(screen.queryByTestId('answer-source-filter')).toBeNull();
     expect(screen.getByTestId('answer-source-filter-served')).toHaveTextContent(JSON.stringify(nested));
+    expect(screen.queryByTestId('answer-source-records')).toBeNull();
   });
 
   it('an OR group draws its rows joined by OR, and no filter reads All records', () => {
@@ -184,7 +192,7 @@ describe('objectstack#31868 — the "How this was computed" block', () => {
       </I18nProvider>,
     );
     fireEvent.click(await screen.findByRole('button', { name: '计算方式' }));
-    expect(screen.getByTestId('answer-source-records')).toHaveTextContent('另有 2 条');
+    expect(screen.getByTestId('answer-source-section')).toHaveTextContent('记录7');
     expect(screen.getByTestId('answer-source-scope')).toHaveTextContent('仅包含你可见的记录');
   });
 });

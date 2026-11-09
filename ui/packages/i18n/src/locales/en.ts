@@ -5042,8 +5042,6 @@ const en = {
       groupedBy: 'Grouped by',
       aggregations: 'Aggregations',
       records: 'Records',
-      moreRecords_one: 'and {{count}} more',
-      moreRecords_other: 'and {{count}} more',
       visibleToYou: 'Only records visible to you',
     },
     tool: {

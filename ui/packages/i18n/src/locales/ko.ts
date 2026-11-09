@@ -4184,8 +4184,6 @@ const ko = {
       groupedBy: '그룹 기준',
       aggregations: '집계',
       records: '레코드',
-      moreRecords_one: '외 {{count}}개',
-      moreRecords_other: '외 {{count}}개',
       visibleToYou: '내가 볼 수 있는 레코드만',
     },
     tool: {

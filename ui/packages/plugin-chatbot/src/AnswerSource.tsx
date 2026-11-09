@@ -9,8 +9,8 @@
 /**
  * "How this was computed": one collapsed block per answer turn that draws the
  * `source` block each data tool answered beside its result (object, filter,
- * grouping, aggregations, records, and whose records were read), so a reader
- * can check an answer's number.
+ * grouping, aggregations, how many records, and whose records were read), so
+ * a reader can check an answer's number.
  *
  * The block receives only the lifted `AnswerSource` copies
  * (`detectAnswerSource`), never a tool's `result` or `args`, so nothing else
@@ -26,9 +26,6 @@ import {
 import { builtinAggregateLabels, useObjectTranslation, useSafeTranslate } from '@object-ui/i18n';
 import { CalculatorIcon, ChevronDownIcon } from 'lucide-react';
 import type { AnswerSource } from './mapMessages';
-
-/** How many record labels a section names before "and N more". */
-const SHOWN_RECORDS = 5;
 
 /** The scope value the block states in words; any other value draws nothing. */
 const SCOPE_VISIBLE_TO_YOU = 'visible_to_you';
@@ -106,15 +103,35 @@ const isScalar = (v: unknown): v is Scalar =>
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
   Boolean(v) && typeof v === 'object' && !Array.isArray(v);
 
-/** One `field: comparand` entry as a row, or `null` when it does not lower. */
-function lowerCondition(field: string, comparand: unknown): FilterRow | null {
+/**
+ * One `field: comparand` entry as rows, or `null` when it does not lower. A
+ * comparand whose keys are all field names is a condition on a lookup's
+ * record (`{ project: { client: ID } }` reads `project.client`), lowered
+ * under the dotted path.
+ */
+function lowerCondition(field: string, comparand: unknown): FilterRow[] | null {
   if (field.startsWith('$')) return null;
-  if (comparand === null) return { field, operator: 'is_null', values: [] };
-  if (isScalar(comparand)) return { field, operator: 'equals', values: [comparand] };
+  if (comparand === null) return [{ field, operator: 'is_null', values: [] }];
+  if (isScalar(comparand)) return [{ field, operator: 'equals', values: [comparand] }];
   if (!isPlainObject(comparand)) return null;
   const entries = Object.entries(comparand);
+  if (entries.length === 0) return null;
+  if (entries.every(([key]) => !key.startsWith('$'))) {
+    const rows: FilterRow[] = [];
+    for (const [sub, value] of entries) {
+      const lowered = lowerCondition(`${field}.${sub}`, value);
+      if (!lowered) return null;
+      rows.push(...lowered);
+    }
+    return rows;
+  }
   if (entries.length !== 1) return null;
-  const [op, value] = entries[0];
+  const row = lowerOperator(field, entries[0][0], entries[0][1]);
+  return row ? [row] : null;
+}
+
+/** One `{ $op: value }` comparand as a row, or `null` when the table does not name the operator. */
+function lowerOperator(field: string, op: string, value: unknown): FilterRow | null {
   const presence = PRESENCE_OPERATORS[op];
   if (presence) {
     return typeof value === 'boolean'
@@ -140,9 +157,9 @@ function lowerCondition(field: string, comparand: unknown): FilterRow | null {
 function lowerConditions(node: Record<string, unknown>): FilterRow[] | null {
   const rows: FilterRow[] = [];
   for (const [field, comparand] of Object.entries(node)) {
-    const row = lowerCondition(field, comparand);
-    if (!row) return null;
-    rows.push(row);
+    const lowered = lowerCondition(field, comparand);
+    if (!lowered) return null;
+    rows.push(...lowered);
   }
   return rows;
 }
@@ -155,7 +172,7 @@ function lowerConditions(node: Record<string, unknown>): FilterRow[] | null {
  * filter as served instead of guessing at its meaning.
  */
 function lowerSourceFilter(
-  filter: AnswerSource['filter'],
+  filter: Record<string, unknown>,
 ): { logic: 'and' | 'or'; rows: FilterRow[] } | null {
   if (!isPlainObject(filter)) return null;
   const keys = Object.keys(filter);
@@ -208,8 +225,6 @@ function AnswerSourceSection({ source }: { source: AnswerSource }) {
   const joiner = lowered?.logic === 'or'
     ? t('filterBuilder.or', { defaultValue: 'OR' })
     : t('filterBuilder.and', { defaultValue: 'AND' });
-  const records = source.records ?? [];
-  const rest = records.length - SHOWN_RECORDS;
 
   return (
     <dl className="space-y-1.5" data-testid="answer-source-section" data-object={source.object}>
@@ -247,7 +262,7 @@ function AnswerSourceSection({ source }: { source: AnswerSource }) {
       </AnswerSourceRow>
       {source.groupBy.length > 0 ? (
         <AnswerSourceRow label={t('chatbot.answerSource.groupedBy', { defaultValue: 'Grouped by' })}>
-          {source.groupBy.map((g) => g.field).join(', ')}
+          {source.groupBy.join(', ')}
         </AnswerSourceRow>
       ) : null}
       {source.aggregations.length > 0 ? (
@@ -264,14 +279,9 @@ function AnswerSourceSection({ source }: { source: AnswerSource }) {
           </ul>
         </AnswerSourceRow>
       ) : null}
-      {records.length > 0 ? (
+      {source.records !== undefined ? (
         <AnswerSourceRow label={t('chatbot.answerSource.records', { defaultValue: 'Records' })}>
-          <span data-testid="answer-source-records">
-            {records.slice(0, SHOWN_RECORDS).map((r) => r.label).join(', ')}
-            {rest > 0
-              ? ` ${t('chatbot.answerSource.moreRecords', { count: rest, defaultValue: 'and {{count}} more' })}`
-              : null}
-          </span>
+          <span data-testid="answer-source-records">{source.records}</span>
         </AnswerSourceRow>
       ) : null}
       {source.scope === SCOPE_VISIBLE_TO_YOU ? (

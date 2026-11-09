@@ -4262,9 +4262,6 @@ const fr = {
       groupedBy: 'Regroupé par',
       aggregations: 'Agrégations',
       records: 'Enregistrements',
-      moreRecords_one: 'et {{count}} autre',
-      moreRecords_many: 'et {{count}} autres',
-      moreRecords_other: 'et {{count}} autres',
       visibleToYou: 'Uniquement les enregistrements que vous pouvez voir',
     },
     tool: {

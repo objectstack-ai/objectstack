@@ -4395,8 +4395,6 @@ const zhHant = {
       groupedBy: '分組依據',
       aggregations: '彙總',
       records: '記錄',
-      moreRecords_one: '另有 {{count}} 條',
-      moreRecords_other: '另有 {{count}} 條',
       visibleToYou: '僅包含你可見的記錄',
     },
     tool: {

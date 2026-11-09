@@ -486,6 +486,8 @@ Tool messages represent results from tool invocations during AI streaming. They 
 
 By default, `ChatbotEnhanced` renders tool invocations as a compact agent activity summary. Repeated calls are grouped, raw tool names are hidden, and reasoning text is not shown. Use `processVisibility="debug"` for developer/admin views that need the full reasoning panel, raw tool names, parameters, and results. Use `processVisibility="hidden"` to suppress non-interactive activity entirely; approval and draft-review actions remain visible.
 
+In every mode, an answer whose data tools returned a `source` block ends with one collapsed "How this was computed" block: per tool, the object, the filter, the grouping, the aggregations, how many records the figures cover, and whether only the reader's visible records were read. It draws that block alone, never the rest of the tool payload.
+
 Each step is named by the locale pack's `chatbot.tool.<tool_name>` entry, a
 short sentence in the user's language ("List the existing objects"). A tool
 the pack has no entry for falls back to its name, title-cased.

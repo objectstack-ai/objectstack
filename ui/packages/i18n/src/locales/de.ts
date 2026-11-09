@@ -4185,8 +4185,6 @@ const de = {
       groupedBy: 'Gruppiert nach',
       aggregations: 'Aggregationen',
       records: 'Datensätze',
-      moreRecords_one: 'und {{count}} weiterer',
-      moreRecords_other: 'und {{count}} weitere',
       visibleToYou: 'Nur Datensätze, die Sie sehen können',
     },
     tool: {

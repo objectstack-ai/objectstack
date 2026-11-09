@@ -4506,12 +4506,6 @@ const ar = {
       groupedBy: 'مجمّعة حسب',
       aggregations: 'التجميعات',
       records: 'السجلات',
-      moreRecords_zero: 'و{{count}} غيرها',
-      moreRecords_one: 'و{{count}} غيرها',
-      moreRecords_two: 'و{{count}} غيرها',
-      moreRecords_few: 'و{{count}} غيرها',
-      moreRecords_many: 'و{{count}} غيرها',
-      moreRecords_other: 'و{{count}} غيرها',
       visibleToYou: 'فقط السجلات التي يمكنك رؤيتها',
     },
     tool: {

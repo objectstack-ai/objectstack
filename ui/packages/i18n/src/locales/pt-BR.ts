@@ -4261,9 +4261,6 @@ const pt = {
       groupedBy: 'Agrupado por',
       aggregations: 'Agregações',
       records: 'Registros',
-      moreRecords_one: 'e mais {{count}}',
-      moreRecords_many: 'e mais {{count}}',
-      moreRecords_other: 'e mais {{count}}',
       visibleToYou: 'Somente os registros que você pode ver',
     },
     tool: {

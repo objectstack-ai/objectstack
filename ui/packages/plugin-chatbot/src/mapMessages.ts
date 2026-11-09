@@ -871,31 +871,31 @@ export function detectRecordWrite(result: unknown): RecordWrite | undefined {
 /**
  * The `source` block a data tool answers beside its result (`query_records`,
  * `query_data`, `get_record`, `aggregate_data`, `visualize_data`): the object,
- * filter, grouping, aggregations and records the answer was computed from,
- * composed by the tool and never typed by the model. The chat draws it as the
- * turn's "How this was computed" block.
+ * filter, grouping, aggregations and record count the answer was computed
+ * from, composed by the tool and never typed by the model. The chat draws it
+ * as the turn's "How this was computed" block.
  *
+ * Read as cloud service-ai's `ResultSource` (`resultSourceBlock()`) serves it.
  * Local until the spec declares the object-query source beside
  * `DatasetProvenanceSchema` (`@objectstack/spec/ai`, ADR-0149 D3); this type
- * then becomes that one. `groupBy` and `aggregations` are read in the spec
- * query's own vocabulary (`GroupByNode`, `AggregationNode`), since the block
- * echoes the query the tool ran.
+ * then becomes that one. Members the block does not draw (`orderBy`, `limit`,
+ * `related`, `latestPer`, `line`) are not lifted.
  */
 export interface AnswerSource {
-  /** The object's API name. */
+  /** The object's machine name. */
   object: string;
-  /** The object's label, as the producer served it. */
+  /** The object's label as the producer served it; absent when it named none. */
   label?: string;
-  /** The filter the tool applied, as served; the renderer lowers it to rows when it can. */
-  filter?: Record<string, unknown> | unknown[];
-  /** Whose records were read; `visible_to_you` is the one the block names. */
+  /** The `where` the engine accepted, in the query dialect (`FilterCondition`); absent when empty. */
+  filter?: Record<string, unknown>;
+  /** Whose records were read; `visible_to_you` is the one value served. */
   scope?: string;
-  /** The grouping fields, in order. */
-  groupBy: Array<{ field: string; dateGranularity?: string }>;
-  /** The aggregations, in order; `function` is drawn through the report's words when the spec names it. */
+  /** The grouping field names, in order. */
+  groupBy: string[];
+  /** The aggregations, in order; `field` is absent for a bare `count`. */
   aggregations: Array<{ function: string; field?: string }>;
-  /** The records the answer names, in order. */
-  records?: Array<{ id?: string; label: string }>;
+  /** How many records the figures cover; absent when the producer did not know. */
+  records?: number;
 }
 
 /** One member's reading: `undefined` when absent, `false` when present but not the shape. */
@@ -906,22 +906,14 @@ const nonEmpty = (v: unknown): string | undefined => {
   return t.length > 0 ? t : undefined;
 };
 
-function readSourceGroupBy(raw: unknown): MemberReading<AnswerSource['groupBy']> {
+function readSourceGroupBy(raw: unknown): MemberReading<string[]> {
   if (raw === undefined) return undefined;
-  const list = Array.isArray(raw) ? raw : [raw];
-  const out: AnswerSource['groupBy'] = [];
-  for (const entry of list) {
-    const bare = nonEmpty(entry);
-    if (bare) {
-      out.push({ field: bare });
-      continue;
-    }
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
-    const e = entry as Record<string, unknown>;
-    const field = nonEmpty(e.field);
+  if (!Array.isArray(raw)) return false;
+  const out: string[] = [];
+  for (const entry of raw) {
+    const field = nonEmpty(entry);
     if (!field) return false;
-    const dateGranularity = nonEmpty(e.dateGranularity);
-    out.push({ field, ...(dateGranularity ? { dateGranularity } : {}) });
+    out.push(field);
   }
   return out;
 }
@@ -935,34 +927,25 @@ function readSourceAggregations(raw: unknown): MemberReading<AnswerSource['aggre
     const e = entry as Record<string, unknown>;
     const fn = nonEmpty(e.function);
     if (!fn) return false;
+    if (e.field !== undefined && !nonEmpty(e.field)) return false;
     const field = nonEmpty(e.field);
     out.push({ function: fn, ...(field ? { field } : {}) });
   }
   return out;
 }
 
-function readSourceRecords(raw: unknown): MemberReading<NonNullable<AnswerSource['records']>> {
+function readSourceRecords(raw: unknown): MemberReading<number> {
   if (raw === undefined) return undefined;
-  if (!Array.isArray(raw)) return false;
-  const out: NonNullable<AnswerSource['records']> = [];
-  for (const entry of raw) {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
-    const e = entry as Record<string, unknown>;
-    const label = nonEmpty(e.label);
-    if (!label) return false;
-    const id = nonEmpty(e.id);
-    out.push({ ...(id ? { id } : {}), label });
-  }
-  return out;
+  return typeof raw === 'number' && Number.isInteger(raw) && raw >= 0 ? raw : false;
 }
 
 /**
  * Lift a data tool result's `source` block, member by member, so the member
  * face can draw it and nothing else of the payload. Keys the block does not
- * declare are left behind; a block without `object`, or with a declared member
- * that is not its shape, is no block at all, so a producer that drifts is seen
- * as a missing block rather than drawn half-right. Each member has its own
- * reader above, so pinning a member's served shape is a change to that reader.
+ * draw are left behind; a block without `object`, or with a drawn member that
+ * is not its shape, is no block at all, so a producer that drifts is seen as a
+ * missing block rather than drawn half-right. Each member has its own reader
+ * above, so a change to one member's served shape is a change to that reader.
  */
 export function detectAnswerSource(result: unknown): AnswerSource | undefined {
   const raw = parseResultEnvelope(result)?.source;
@@ -973,7 +956,9 @@ export function detectAnswerSource(result: unknown): AnswerSource | undefined {
   if (o.label !== undefined && !nonEmpty(o.label)) return undefined;
   if (o.scope !== undefined && !nonEmpty(o.scope)) return undefined;
   const filter = o.filter;
-  if (filter !== undefined && (filter === null || typeof filter !== 'object')) return undefined;
+  if (filter !== undefined && (!filter || typeof filter !== 'object' || Array.isArray(filter))) {
+    return undefined;
+  }
   const groupBy = readSourceGroupBy(o.groupBy);
   const aggregations = readSourceAggregations(o.aggregations);
   const records = readSourceRecords(o.records);
@@ -981,11 +966,11 @@ export function detectAnswerSource(result: unknown): AnswerSource | undefined {
   return {
     object,
     ...(nonEmpty(o.label) ? { label: nonEmpty(o.label) } : {}),
-    ...(filter !== undefined ? { filter: filter as AnswerSource['filter'] } : {}),
+    ...(filter !== undefined ? { filter: filter as Record<string, unknown> } : {}),
     ...(nonEmpty(o.scope) ? { scope: nonEmpty(o.scope) } : {}),
     groupBy: groupBy ?? [],
     aggregations: aggregations ?? [],
-    ...(records ? { records } : {}),
+    ...(records !== undefined ? { records } : {}),
   };
 }
 

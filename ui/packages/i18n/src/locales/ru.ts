@@ -4356,10 +4356,6 @@ const ru = {
       groupedBy: 'Группировка по',
       aggregations: 'Агрегаты',
       records: 'Записи',
-      moreRecords_one: 'и ещё {{count}}',
-      moreRecords_few: 'и ещё {{count}}',
-      moreRecords_many: 'и ещё {{count}}',
-      moreRecords_other: 'и ещё {{count}}',
       visibleToYou: 'Только записи, которые вам доступны',
     },
     tool: {

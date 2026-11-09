@@ -4395,8 +4395,6 @@ const zh = {
       groupedBy: '分组依据',
       aggregations: '汇总',
       records: '记录',
-      moreRecords_one: '另有 {{count}} 条',
-      moreRecords_other: '另有 {{count}} 条',
       visibleToYou: '仅包含你可见的记录',
     },
     tool: {

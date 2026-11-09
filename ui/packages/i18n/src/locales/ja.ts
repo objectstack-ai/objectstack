@@ -4187,8 +4187,6 @@ const ja = {
       groupedBy: 'グループ化',
       aggregations: '集計',
       records: 'レコード',
-      moreRecords_one: 'ほか {{count}} 件',
-      moreRecords_other: 'ほか {{count}} 件',
       visibleToYou: 'あなたが閲覧できるレコードのみ',
     },
     tool: {

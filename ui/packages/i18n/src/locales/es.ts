@@ -4266,9 +4266,6 @@ const es = {
       groupedBy: 'Agrupado por',
       aggregations: 'Agregaciones',
       records: 'Registros',
-      moreRecords_one: 'y {{count}} más',
-      moreRecords_many: 'y {{count}} más',
-      moreRecords_other: 'y {{count}} más',
       visibleToYou: 'Solo los registros que puede ver',
     },
     tool: {
