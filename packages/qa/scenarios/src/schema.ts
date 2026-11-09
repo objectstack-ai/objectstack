@@ -517,9 +517,9 @@ export const SCENARIO_NAMESPACE_PREFIX = 'demo';
 
 /**
  * The namespace a card's app lives in, wherever it is built, scored or
- * exported: `demo` + the card's code (`democrm`). Every item the app declares
- * is named `<namespace>_<short>`, and the card's own names (`account`) are read
- * relative to it (ruling A on #30292).
+ * exported: `demo` + the card's code (`democrm`). Its objects, views, docs and
+ * positions are named `<namespace>_<short>`, and the card's own names (`account`)
+ * are read relative to it (ruling A on #30292).
  */
 export function scenarioNamespace(card: { code: string }): string {
   return `${SCENARIO_NAMESPACE_PREFIX}${card.code}`;
