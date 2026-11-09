@@ -787,6 +787,7 @@ export function useObjectLabel() {
      */
     actionPreflight: <T extends {
       fields?: Array<{ path: string; label?: unknown; [key: string]: unknown }>;
+      [key: string]: unknown;
     }>(
       objectName: string | undefined,
       actionName: string | undefined,
