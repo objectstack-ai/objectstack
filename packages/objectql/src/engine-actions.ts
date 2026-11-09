@@ -34,8 +34,7 @@
 import type { ActionActivationRow, ActionActivationStore, ActionActivationWriteOptions } from './action-activation.js';
 import type { ObjectQL } from './engine.js';
 import { standaloneActionOwnerKey } from './action-governance.js';
-import { actionHandlerCoordinate, ENVIRONMENT_ACTION_COORDINATE } from './action-handler-coordinate.js';
-import { handlerOwnerPackageId } from './bare-name-one-holder.js';
+import { actionHandlerCoordinate, ENVIRONMENT_ACTION_COORDINATE, isSharedHandlerCoordinate } from './action-handler-coordinate.js';
 
 /**
  * One registered action handler. [#30065] `override` marks a declared action
@@ -54,19 +53,8 @@ export interface ActionHandlerEntry {
 }
 
 /**
- * [ADR-0150 D4, #31673] Is `owner` a plugin's, not a package's (`app:<id>`)
- * nor the environment's (none, or the authored-action resync's
- * `metadata-service`)?
- */
-function isPluginHandlerOwner(owner: string | undefined): owner is string {
-  return owner !== undefined
-    && actionHandlerCoordinate(owner) !== ENVIRONMENT_ACTION_COORDINATE
-    && handlerOwnerPackageId(owner) === owner;
-}
-
-/**
  * [ADR-0150 D2/D5, #31673] A call naming package P reached no handler of P's
- * own under the key, and two or more plugin handlers hold it: the refusal
+ * own under the key, and two or more shared handlers (host code, plugins) hold it: the refusal
  * names every owner and picks none. `RESOURCE_CONFLICT` / 409, the standard
  * catalog's member for an ambiguity the environment's state causes (the
  * declaration door's own answer); no code minted. ⛔ Unexported, like the
@@ -76,14 +64,14 @@ class ActionHandlerAmbiguityError extends Error {
   readonly code = 'RESOURCE_CONFLICT';
   readonly status = 409;
   readonly httpStatus = 409;
-  /** Every plugin owner holding a handler under the key, in registration order of their slots. */
+  /** Every owner holding a shared handler under the key, in slot order. */
   readonly owners: readonly string[];
 
   constructor(key: string, packageId: string, owners: readonly string[]) {
     super(
       `Action handler '${key}' is ambiguous for package '${packageId}': it registers none of its own, and `
-      + `${owners.length} plugins register one (${owners.map((o) => `'${o}'`).join(', ')}). Refusing rather than `
-      + 'running one of them. Register the handler from the package that declares the action, or from one plugin.',
+      + `${owners.length} shared handlers are registered (${owners.map((o) => `'${o}'`).join(', ')}). Refusing rather than `
+      + 'running one of them. Register the handler from the package that declares the action, or from one owner.',
     );
     this.name = 'ActionHandlerAmbiguityError';
     this.owners = owners;
@@ -267,45 +255,73 @@ export class ActionsFacet {
 
   /**
    * [ADR-0150 D4, #31673] The handler a call naming package `packageId` runs
-   * under `key`: that package's own; else, when exactly ONE plugin-registered
-   * handler is held under the key, that one. A declaration's `target` is
-   * commonly bound by platform plugin code, so that handler is the one the
-   * declaration reaches, not a pick. Plugin-registered means a plugin owner:
-   * never a package's (`app:<id>`, {@link handlerOwnerPackageId}), and never
-   * the environment's slot (no owner, or the authored-action resync's
-   * `metadata-service`), whose handlers belong to the environment's own
-   * declarations. Two or more plugin handlers are refused naming every owner
-   * ({@link ActionHandlerAmbiguityError}, 409 `RESOURCE_CONFLICT`), never
-   * reported as absence; none is `undefined` (the caller's "not found").
-   * ⛔ Never another holder's handler, and never a pick between candidates:
-   * that is the guess ADR-0150's red lines refuse.
+   * under `key`: that package's own; else, when exactly ONE shared handler is
+   * held under the key, that one. Shared means host code (registered with no
+   * owner, the documented way a package's target-bound actions are bound) or
+   * a plugin ({@link isSharedHandlerCoordinate}); never a package's
+   * (`app:<id>`) and never the environment's slot (the authored-action
+   * resync's `metadata-service`), whose handlers belong to another holder's
+   * declarations (review 6729714225 item 2, 6729902179 F1). Two or more shared
+   * handlers are refused naming every owner ({@link ActionHandlerAmbiguityError},
+   * 409 `RESOURCE_CONFLICT`), never reported as absence (review item 1); none
+   * is `undefined` (the caller's "not found"). ⛔ Never another holder's
+   * handler, and never a pick between candidates.
    */
   static packageScopedHandler(this: Pick<ActionsHost, 'packageActions'>, key: string, packageId: string): ActionHandlerEntry | undefined {
+    return ActionsFacet.packageScopedReach.call(this, key, packageId)?.entry;
+  }
+
+  /** {@link packageScopedHandler}, with the coordinate whose slot holds the entry. */
+  static packageScopedReach(this: Pick<ActionsHost, 'packageActions'>, key: string, packageId: string): { entry: ActionHandlerEntry; coordinate: string } | undefined {
     const own = this.packageActions.get(packageId)?.get(key);
-    if (own !== undefined) return own;
-    const pluginBound: ActionHandlerEntry[] = [];
+    if (own !== undefined) return { entry: own, coordinate: packageId };
+    const shared: Array<{ entry: ActionHandlerEntry; coordinate: string }> = [];
     for (const [coordinate, slot] of this.packageActions) {
-      if (coordinate === ENVIRONMENT_ACTION_COORDINATE) continue;
       const entry = slot.get(key);
-      if (entry !== undefined && isPluginHandlerOwner(entry.package)) pluginBound.push(entry);
+      if (entry !== undefined && isSharedHandlerCoordinate(coordinate, entry.package)) shared.push({ entry, coordinate });
     }
-    if (pluginBound.length > 1) {
-      throw new ActionHandlerAmbiguityError(key, packageId, pluginBound.map((entry) => entry.package as string));
+    if (shared.length > 1) {
+      throw new ActionHandlerAmbiguityError(key, packageId, shared.map(({ entry }) => entry.package ?? '(host code, no owner)'));
     }
-    return pluginBound[0];
+    return shared[0];
   }
 
   /** The body of `ObjectQL#listRegisteredActions`; the method's docblock there is its contract. */
-  static listRegisteredActions(this: Pick<ActionsHost, 'actions'>): Array<{ objectName: string; actionName: string; package?: string }> {
-    const out: Array<{ objectName: string; actionName: string; package?: string }> = [];
-    for (const [key, entry] of this.actions.entries()) {
+  static listRegisteredActions(this: Pick<ActionsHost, 'actions' | 'packageActions'>, options?: ExecuteActionOptions): Array<{ objectName: string; actionName: string; package?: string; coordinate?: string }> {
+    const out: Array<{ objectName: string; actionName: string; package?: string; coordinate?: string }> = [];
+    const entries: Iterable<[string, ActionHandlerEntry, string?]> = options?.packageId === undefined
+      ? this.actions.entries()
+      : ActionsFacet.packageScopedEntries.call(this, options.packageId);
+    for (const [key, entry, coordinate] of entries) {
       const sep = key.indexOf(':');
       if (sep < 0) continue;
       out.push({
         objectName: key.slice(0, sep),
         actionName: key.slice(sep + 1),
         ...(entry.package ? { package: entry.package } : {}),
+        ...(coordinate !== undefined ? { coordinate } : {}),
       });
+    }
+    return out;
+  }
+
+  /**
+   * [#31673, review 6729902179 F2] Every key a call naming `packageId`
+   * dispatches, with the entry {@link packageScopedHandler} runs for it. A key
+   * whose dispatch is refused as ambiguous is left out: no handler runs there.
+   */
+  static packageScopedEntries(this: Pick<ActionsHost, 'packageActions'>, packageId: string): Array<[string, ActionHandlerEntry, string]> {
+    const keys = new Set<string>();
+    for (const slot of this.packageActions.values()) for (const key of slot.keys()) keys.add(key);
+    const out: Array<[string, ActionHandlerEntry, string]> = [];
+    for (const key of keys) {
+      let reach: { entry: ActionHandlerEntry; coordinate: string } | undefined;
+      try {
+        reach = ActionsFacet.packageScopedReach.call(this, key, packageId);
+      } catch {
+        continue;
+      }
+      if (reach !== undefined) out.push([key, reach.entry, reach.coordinate]);
     }
     return out;
   }

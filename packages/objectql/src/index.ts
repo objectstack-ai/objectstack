@@ -136,7 +136,7 @@ export {
   actionHolderCoordinate,
 } from './action-package-addressing.js';
 export type { ActionPackageQuery } from './action-package-addressing.js';
-export { actionHandlerCoordinate, ENVIRONMENT_ACTION_COORDINATE } from './action-handler-coordinate.js';
+export { actionHandlerCoordinate, ENVIRONMENT_ACTION_COORDINATE, HOST_ACTION_COORDINATE } from './action-handler-coordinate.js';
 export type { ExecuteActionOptions } from './engine-actions.js';
 
 // [#15204 W2] Every `(type, name)` a manifest declares, read from the sources

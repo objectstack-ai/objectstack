@@ -23,7 +23,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectQL, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
-import { executeRegisteredAction, resolveRouteActionDeclaration, type ActionExecutionDeps } from './action-execution.js';
+import { actionHandlerOwnerRefusal, executeRegisteredAction, resolveRouteActionDeclaration, type ActionExecutionDeps } from './action-execution.js';
 
 const A = 'com.acme.alpha';
 const B = 'com.acme.beta';
@@ -150,6 +150,40 @@ describe('ADR-0150 D5 — the handler half of a package caller\'s dispatch', () 
         engine.registerAction(OBJECT, 'approve', () => 'environment', 'metadata-service');
         const declaration = await resolve(A);
         expect(await executeRegisteredAction(deps, engine, OBJECT, ['approve'], {}, declaration.packageId)).toEqual({ dispatched: false });
+    });
+});
+
+describe('ADR-0150 D4 — the owner gate judges the handler the package call runs (review 6729902179 F2)', () => {
+    /** B's `approve_all` dispatches to B's own `approve` handler and asks a capability the caller lacks. */
+    const setUp = () => {
+        install(A);
+        install(B);
+        install(P, [A]);
+        ship(P);
+        engine.registry.registerItem('action', {
+            name: 'approve_all', label: 'Approve all', type: 'script', objectName: OBJECT, target: 'approve', requiredPermissions: ['approve_everything'],
+            body: { language: 'js', source: 'return 1;', capabilities: [] },
+        } as never, 'name' as never, B);
+        bind(P);
+        bind(B);
+    };
+    const gate = async (packageId?: string) => {
+        const declaration = await resolve(packageId === undefined ? undefined : P);
+        return actionHandlerOwnerRefusal(deps, { request: {} } as any, {
+            ql: engine, action: declaration.action, objectName: OBJECT, candidates: ['approve'],
+            ec: { isSystem: false, permissions: [], positions: [] },
+            ...(packageId !== undefined ? { packageId } : {}),
+        });
+    };
+
+    it('a package call that runs its own handler is not gated by another package\'s declaration reaching the same key', async () => {
+        setUp();
+        expect(await gate(P)).toBeUndefined();
+    });
+
+    it('control: the unqualified call, which runs the last registration (B\'s), is still gated by B\'s declaration', async () => {
+        setUp();
+        expect(await gate()).toMatchObject({ status: 403 });
     });
 });
 

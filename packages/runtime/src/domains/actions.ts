@@ -709,6 +709,7 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
             ec: _context?.executionContext,
             envId: _context?.environmentId,
             obj: actionSchema,
+            ...(declarationPackageId !== undefined ? { packageId: declarationPackageId } : {}),
         });
         if (ownerRefusal) {
             return {

@@ -18,7 +18,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { SchemaRegistry } from './registry.js';
 import { resolveActionByPackage, actionHolderCoordinate } from './action-package-addressing.js';
-import { actionHandlerCoordinate, ENVIRONMENT_ACTION_COORDINATE } from './action-handler-coordinate.js';
+import { actionHandlerCoordinate, ENVIRONMENT_ACTION_COORDINATE, HOST_ACTION_COORDINATE } from './action-handler-coordinate.js';
 import { resolvePackageScopedName, type PackageScopedResolution } from './package-scoped-resolver.js';
 
 const A = 'com.acme.alpha';
@@ -167,8 +167,10 @@ describe('ADR-0150 D4 — the coordinate a handler is registered under', () => {
     expect(actionHandlerCoordinate('com.objectstack.plugin.auth')).toBe('com.objectstack.plugin.auth');
   });
 
-  it('reads no owner, and the authored-action resync, as the environment\'s slot', () => {
-    for (const owner of [undefined, '', 'metadata-service']) expect(actionHandlerCoordinate(owner)).toBe(ENVIRONMENT_ACTION_COORDINATE);
+  it('reads the authored-action resync as the environment\'s slot, and no owner as host code\'s — two slots', () => {
+    expect(actionHandlerCoordinate('metadata-service')).toBe(ENVIRONMENT_ACTION_COORDINATE);
+    for (const owner of [undefined, '']) expect(actionHandlerCoordinate(owner)).toBe(HOST_ACTION_COORDINATE);
+    expect(HOST_ACTION_COORDINATE).not.toBe(ENVIRONMENT_ACTION_COORDINATE);
   });
 
   it('an environment holder resolves to the environment\'s coordinate', () => {

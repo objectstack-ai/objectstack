@@ -1115,10 +1115,16 @@ export class ObjectQL implements IObjectQLEngine {
    * boot reconciliation reads this to list handlers no declaration covers —
    * which since D3 are refused at dispatch, so having the inventory is what
    * makes that refusal a checklist instead of a support ticket.
+   *
+   * [ADR-0150 D4, #31673] With `options.packageId`, the handlers a call naming
+   * that package dispatches (`executeAction`'s package-keyed answer), one per
+   * key, each with the `coordinate` whose slot holds it, so a reader gating
+   * that call judges the handler it runs. Without it,
+   * the unqualified slot, as before.
    */
-  listRegisteredActions(): Array<{ objectName: string; actionName: string; package?: string }> {
+  listRegisteredActions(options?: ExecuteActionOptions): Array<{ objectName: string; actionName: string; package?: string; coordinate?: string }> {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).
-    return ActionsFacet.listRegisteredActions.call(actionsHost.of(this));
+    return ActionsFacet.listRegisteredActions.call(actionsHost.of(this), options);
   }
 
   /**

@@ -5314,17 +5314,28 @@ export async function actionHandlerOwnerRefusal(deps: ActionExecutionDeps,
         envId?: string;
         /** The routed object's definition, as the door resolved it. */
         obj?: any;
+        /**
+         * [ADR-0150 D4, #31673, review 6729902179 F2] The package coordinate
+         * the dispatch names ({@link executeRegisteredAction}'s `packageId`):
+         * the handler judged is the one that call runs, read from the engine's
+         * package-keyed listing. Omitted: the unqualified slot, as before.
+         */
+        packageId?: string;
     },
 ): Promise<ActionHandlerOwnerRefusal | undefined> {
-    const { ql, action, objectName, candidates, ec, envId, obj } = args;
+    const { ql, action, objectName, candidates, ec, envId, obj, packageId } = args;
     if (!dispatchesThroughHandlerRegistry(action)) return undefined;
     if (!ql || typeof ql.listRegisteredActions !== 'function') return undefined;
 
     const registered = new Set<string>();
     const packageOf = new Map<string, string | undefined>();
-    for (const row of ql.listRegisteredActions() as Array<{ objectName: string; actionName: string; package?: string }>) {
+    const coordinateOf = new Map<string, string | undefined>();
+    const listing = (packageId === undefined ? ql.listRegisteredActions() : ql.listRegisteredActions({ packageId })) as
+        Array<{ objectName: string; actionName: string; package?: string; coordinate?: string }>;
+    for (const row of listing) {
         registered.add(`${row.objectName}:${row.actionName}`);
         packageOf.set(`${row.objectName}:${row.actionName}`, row.package);
+        coordinateOf.set(`${row.objectName}:${row.actionName}`, row.coordinate);
     }
     const entry = reachedHandlerEntry(registered, objectName, candidates);
     if (!entry) return undefined;
@@ -5360,10 +5371,28 @@ export async function actionHandlerOwnerRefusal(deps: ActionExecutionDeps,
         };
     }
 
+    // [ADR-0150 D4, #31673, review 6729902179 F2] A call naming its package
+    // runs a package's own handler (its slot, `app:<id>`, or an override bound
+    // at that package's coordinate): a declaration KNOWN to belong to another
+    // package (its `_packageId` stamp) reaches a different handler under the
+    // same key and owns none of this one. A declaration whose package is not
+    // known, and every declaration reaching a shared handler (host code, a
+    // plugin), still owns it, as on the unqualified path.
+    const dispatchedOwner = packageOf.get(entry);
+    const dispatchedPackage = packageId !== undefined && typeof dispatchedOwner === 'string' && dispatchedOwner.startsWith('app:')
+        ? coordinateOf.get(entry)
+        : undefined;
+    const ownsDispatched = (row: { action: any }): boolean => {
+        if (dispatchedPackage === undefined) return true;
+        const declared: unknown = row.action?._packageId;
+        return typeof declared !== 'string' || declared === '' || declared === dispatchedPackage;
+    };
+
     const owners = new Map<string, { action: any; objectName: string }[]>();
     for (const row of population) {
         const identity = `${row.objectName}:${row.action.name}`;
         if (identity === invokedIdentity) continue;
+        if (!ownsDispatched(row)) continue;
         if (!dispatchesThroughHandlerRegistry(row.action)) continue;
         if (reachedHandlerEntry(registered, row.objectName, resolveActionHandlerKeys(row.action)) !== entry) continue;
         const copies = owners.get(identity) ?? [];
