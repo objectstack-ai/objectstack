@@ -6360,8 +6360,8 @@
         {
           "revision": 1,
           "date": "2026-11-09",
-          "change": "initial: the showcase invoice became the multi-currency example (#27197)",
-          "ref": "#27197"
+          "change": "initial: the showcase invoice became the multi-currency example (#27197); verified live in the same PR, clause table in its body",
+          "ref": "#31757"
         }
       ]
     }
