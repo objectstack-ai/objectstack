@@ -88,6 +88,18 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Acceso a IA",
         help: "Indica si este usuario dispone de una plaza de IA. La plaza otorga la capacidad `ai_seat`, que da acceso a los asistentes de IA de la aplicación (build y ask). El número de usuarios que pueden tenerla está limitado por las plazas que incluye su licencia."
       },
+      principal_kind: {
+        label: "Tipo de principal",
+        help: "Indica si este usuario es una persona o una cuenta de servicio de IA. Una cuenta de servicio de IA nunca inicia sesión y actúa solo mediante sus propias claves de API. Se fija al crear el usuario y no cambia nunca.",
+        options: {
+          human: "Persona",
+          agent: "Cuenta de servicio de IA"
+        }
+      },
+      accountable_user_id: {
+        label: "Responsable",
+        help: "En una cuenta de servicio de IA, la persona responsable de ella. Vacío en una persona. Los permisos del responsable nunca pasan a la cuenta."
+      },
       image: {
         label: "Imagen de perfil"
       },

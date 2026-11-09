@@ -83,6 +83,14 @@ export const MANAGED_EXTENSION_FIELDS: Readonly<Record<string, ReadonlySet<strin
     // Generically editable since the 2026-09-03 ruling: see the editable map
     // below.
     'locale',
+    // ADR-0151 D1 — the AI service account's kind and its accountable owner.
+    // better-auth neither reads nor writes either (not `additionalFields`, for
+    // the `ai_access` reason above); declared so D7 proves better-auth's user
+    // schema owns neither name at the pinned version. Never generically
+    // editable: the kind is fixed at creation, the owner moves only through
+    // the change-owner door (`service-account-identity.ts`).
+    'principal_kind',
+    'accountable_user_id',
   ]),
   sys_organization: new Set([
     // ADR-0069 D3 — the toggle-era per-org MFA column. Retired: an
