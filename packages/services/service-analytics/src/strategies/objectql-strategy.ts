@@ -58,7 +58,7 @@ import {
 // [#21365] `windowClauseSql` is the same rule for the row window: one spelling
 // of an offset-only window per dialect, shared with the native face.
 // [#25907] `orderClauseSql` likewise for the order and its NULL placement.
-import { aggregateOfMeasure, orderClauseSql, windowClauseSql } from './native-sql-strategy.js';
+import { aggregateOfMeasure, orderClauseSql, windowClauseSql, windowTopSql } from './native-sql-strategy.js';
 
 /**
  * [#10861 / commit 399ecad58] Where a member in the cross-object envelope's inventory
@@ -1046,7 +1046,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       }
     }
 
-    let sql = `SELECT ${selectParts.join(', ')} FROM "${tableName}"`;
+    // [#31626] On SQL Server a lone limit is the `TOP (n)` after `SELECT` that
+    // driver-sql's find path runs (`windowTopSql`, below with the rest).
+    const dialect = sqlDialectFor(ctx, tableName);
+    let sql = `SELECT ${windowTopSql(query.limit, query.offset, dialect)}${selectParts.join(', ')} FROM "${tableName}"`;
     if (joinClauses.length > 0) sql += ' ' + joinClauses.join(' ');
     if (whereParts.length > 0) {
       sql += ` WHERE ${whereParts.join(' AND ')}`;
@@ -1062,10 +1065,15 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // the echoed `sql` and `/analytics/sql` print a window the dialect runs.
     // [#25907] The order renders through its `orderClauseSql`, so the echo
     // states the NULL placement this face applies (`applyOrdering`: last, in
-    // both directions) where the dialect has a spelling for it.
-    const dialect = sqlDialectFor(ctx, tableName);
-    sql += orderClauseSql(query.order, dialect);
-    sql += windowClauseSql(query.limit, query.offset, dialect);
+    // both directions) where the dialect has a spelling for it. [#31626] On
+    // SQL Server the window is `@objectstack/core`'s `mssqlWindow`, the one
+    // driver-sql's find path runs: `ORDER BY (SELECT NULL)` when this echo
+    // states no order and an offset applies, then `OFFSET … ROWS FETCH NEXT …
+    // ROWS ONLY`; it printed `LIMIT n OFFSET m` before, which SQL Server does
+    // not parse.
+    const orderSql = orderClauseSql(query.order, dialect);
+    sql += orderSql;
+    sql += windowClauseSql(query.limit, query.offset, dialect, orderSql !== '');
 
     return { sql, params };
   }

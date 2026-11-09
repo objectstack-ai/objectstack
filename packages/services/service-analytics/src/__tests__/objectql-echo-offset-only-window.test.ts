@@ -245,3 +245,198 @@ for (const cell of CELLS) {
     },
   );
 }
+
+// ── [#31626] SQL Server ─────────────────────────────────────────────────────
+
+/**
+ * [#31626] The echo's window on SQL Server is the one driver-sql's find path
+ * runs.
+ *
+ * A dashboard over a federated SQL Server object runs the engine aggregate —
+ * `NativeSQLStrategy.canHandle` declines an object with an `external` binding
+ * (ADR-0062 D6) — so `/analytics/sql` is where this package prints a SQL
+ * Server statement. Measured on `main` `0105a687` through the plugin's own
+ * composition over a `SqlDriver` on knex's `mssql` client: the echo printed
+ * `… GROUP BY region LIMIT 10 OFFSET 5`, and `… LIMIT 9223372036854775807
+ * OFFSET 5` for an offset alone. SQL Server parses neither.
+ *
+ * The window's rules now live once, in `@objectstack/core` (`mssqlWindow`),
+ * and driver-sql's find path decides with the same function. The expected
+ * window here is therefore not restated: it is read off the statement a real
+ * `SqlDriver` sends for the same `limit` / `offset` (its knex client is
+ * stubbed below the compiler, so it compiles as for a server and sends
+ * nothing), with its bound values written in and its case folded. Only the
+ * ORDER BY keys differ between the two statements, and they are cut from both.
+ *
+ * With `OS_TEST_MSSQL_URL` set, the echo is also run on that server and must
+ * answer the rows of the window it prints; without it the cell is a named skip.
+ */
+describe('[#31626] SQL Server: the echo prints the window driver-sql\'s find path runs', () => {
+  /** The statement driver-sql's find sends for a window, bound values written in, lower-cased. */
+  const driverStatement = async (window: { limit?: number; offset?: number; ordered: boolean }): Promise<string> => {
+    const d = new SqlDriver({ client: 'mssql', connection: {}, schemaMode: 'external' } as never);
+    d.registerExternalObject({ name: 't', fields: { note: { type: 'text' } }, external: { remoteName: 'Orders' } } as never);
+    const client = (d.getKnex() as unknown as { client: Record<string, unknown> }).client;
+    const sent: string[] = [];
+    client.acquireConnection = async () => ({});
+    client.releaseConnection = async () => {};
+    client._query = async (_conn: unknown, obj: { sql: string; bindings?: unknown[]; response?: unknown }) => {
+      sent.push(obj.sql.replace(/@p(\d+)/g, (_m, i: string) => String((obj.bindings ?? [])[Number(i)])));
+      obj.response = [];
+      return obj;
+    };
+    client.processResponse = () => [];
+    await d.find(
+      't',
+      {
+        fields: ['note'],
+        ...(window.limit !== undefined ? { limit: window.limit } : {}),
+        ...(window.offset !== undefined ? { offset: window.offset } : {}),
+        ...(window.ordered ? { orderBy: [{ field: 'note', order: 'asc' }] } : {}),
+      } as never,
+      { bypassTenantAudit: true } as never,
+    );
+    return sent.at(-1)!.toLowerCase();
+  };
+
+  /** The window half of a driver statement: `top (n) ` and the tail after the table, its order key cut. */
+  const driverWindow = (sql: string) => ({
+    top: /^select (top \(\d+\) )?/.exec(sql)![1] ?? '',
+    tail: sql.slice(sql.indexOf(' from [orders]') + ' from [orders]'.length).replace(' order by [note] asc', ''),
+  });
+
+  /** The same two halves of an echoed statement, lower-cased, its order key cut. */
+  const echoWindow = (sql: string) => {
+    const lower = sql.toLowerCase();
+    return {
+      top: /^select (top \(\d+\) )?/.exec(lower)![1] ?? '',
+      tail: lower.slice(lower.indexOf(' group by note') + ' group by note'.length).replace(' order by "note" asc', ''),
+    };
+  };
+
+  const echo = async (window: { limit?: number; offset?: number; ordered: boolean }, dialect: string) => {
+    const ctx = {
+      getCube: (name: string) => (name === CUBE ? CUBES[0] : undefined),
+      queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
+      sqlDialect: () => dialect,
+    } as unknown as StrategyContext;
+    const query = {
+      cube: CUBE,
+      measures: ['amount_sum'],
+      dimensions: ['note'],
+      ...(window.ordered ? { order: { note: 'asc' } } : {}),
+      ...(window.limit !== undefined ? { limit: window.limit } : {}),
+      ...(window.offset !== undefined ? { offset: window.offset } : {}),
+    };
+    return (await new ObjectQLStrategy().generateSql(query as never, ctx)).sql;
+  };
+
+  const WINDOWS: ReadonlyArray<{ limit?: number; offset?: number; ordered: boolean }> = [
+    { ordered: false },
+    { limit: 10, ordered: false },
+    { limit: 0, ordered: false },
+    { offset: 5, ordered: false },
+    { offset: 0, ordered: false },
+    { limit: 10, offset: 5, ordered: false },
+    { limit: 10, offset: 0, ordered: false },
+    { limit: 0, offset: 5, ordered: false },
+    { limit: 10, offset: 5, ordered: true },
+    { offset: 5, ordered: true },
+    { limit: 10, ordered: true },
+  ];
+
+  for (const window of WINDOWS) {
+    it(`${JSON.stringify(window)}: the echo's window is the driver's`, async () => {
+      const expected = driverWindow(await driverStatement(window));
+      expect(echoWindow(await echo(window, 'mssql'))).toEqual(expected);
+    });
+  }
+
+  it('the measured row: `limit 10, offset 5` with no order prints SQL Server\'s own window, never a LIMIT', async () => {
+    const sql = await echo({ limit: 10, offset: 5, ordered: false }, 'mssql');
+    expect(sql.endsWith(' GROUP BY note ORDER BY (SELECT NULL) OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY'), sql).toBe(true);
+    expect(sql).not.toMatch(/LIMIT/);
+  });
+
+  it('CONTROL: sqlite, postgres and mysql echo the window they echoed before, with nothing after SELECT', async () => {
+    const before: Record<string, string> = {
+      sqlite: ' GROUP BY note ORDER BY "note" ASC NULLS LAST LIMIT -1 OFFSET 5',
+      postgres: ' GROUP BY note ORDER BY "note" ASC NULLS LAST OFFSET 5',
+      mysql: ' GROUP BY note ORDER BY "note" ASC LIMIT 18446744073709551615 OFFSET 5',
+    };
+    for (const [dialect, tail] of Object.entries(before)) {
+      const offsetOnly = await echo({ offset: 5, ordered: true }, dialect);
+      expect(offsetOnly.endsWith(tail), `${dialect}: ${offsetOnly}`).toBe(true);
+      expect(offsetOnly.startsWith('SELECT note AS '), dialect).toBe(true);
+      expect((await echo({ limit: 10, offset: 5, ordered: false }, dialect)).endsWith(' GROUP BY note LIMIT 10 OFFSET 5'), dialect).toBe(true);
+      expect((await echo({ limit: 0, ordered: false }, dialect)).endsWith(' GROUP BY note LIMIT 0'), dialect).toBe(true);
+    }
+  });
+
+  /** `mssql://user:password@host:port/database?encrypt=…&trustServerCertificate=…` → tedious's connection object. */
+  const mssqlConnection = (url: string): Record<string, unknown> => {
+    const u = new URL(url);
+    const flag = (name: string, fallback: boolean) => (u.searchParams.has(name) ? u.searchParams.get(name) === 'true' : fallback);
+    return {
+      server: u.hostname,
+      port: u.port ? Number(u.port) : 1433,
+      user: decodeURIComponent(u.username),
+      password: decodeURIComponent(u.password),
+      database: decodeURIComponent(u.pathname.replace(/^\//, '')) || 'master',
+      options: { encrypt: flag('encrypt', false), trustServerCertificate: flag('trustServerCertificate', true) },
+    };
+  };
+
+  const url = process.env.OS_TEST_MSSQL_URL;
+  describe.skipIf(!url)(`live SQL Server: the echoed statement runs and answers its window${url ? '' : ' (skipped: set OS_TEST_MSSQL_URL to run this cell)'}`, { timeout: 120_000 }, () => {
+    const table = `os_31626_window_${process.pid}`;
+    let driver: SqlDriver;
+    const liveCube = { ...CUBES[0], name: 'live', sql: table } as unknown as Cube;
+
+    beforeAll(async () => {
+      driver = new SqlDriver({ client: 'mssql', connection: mssqlConnection(url!), schemaMode: 'external' } as never);
+      const knex = driver.getKnex();
+      await knex.raw(`IF OBJECT_ID(N'${table}') IS NOT NULL DROP TABLE [${table}]`);
+      await knex.raw(`CREATE TABLE [${table}] ([id] nvarchar(64) NOT NULL PRIMARY KEY, [note] nvarchar(64) NULL, [amount] int NULL)`);
+      for (const row of DEALS) await knex(table).insert({ ...row });
+    });
+
+    afterAll(async () => {
+      await driver?.getKnex().raw(`IF OBJECT_ID(N'${table}') IS NOT NULL DROP TABLE [${table}]`).catch(() => {});
+      await driver?.disconnect?.();
+    });
+
+    const live = async (window: { limit?: number; offset?: number; ordered: boolean }) => {
+      const ctx = {
+        getCube: (name: string) => (name === 'live' ? liveCube : undefined),
+        queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
+        sqlDialect: () => 'mssql',
+      } as unknown as StrategyContext;
+      const query = {
+        cube: 'live',
+        measures: ['amount_sum'],
+        dimensions: ['note'],
+        ...(window.ordered ? { order: { note: 'asc' } } : {}),
+        ...(window.limit !== undefined ? { limit: window.limit } : {}),
+        ...(window.offset !== undefined ? { offset: window.offset } : {}),
+      };
+      const { sql, params } = await new ObjectQLStrategy().generateSql(query as never, ctx);
+      expect(params).toEqual([]);
+      return (await driver.execute(sql)) as Row[];
+    };
+
+    it('ordered windows answer the groups the window names', async () => {
+      // Groups in note order: w 7, x 15, y 20, z 1.
+      expect(tuples(await live({ offset: 1, ordered: true }), ['note', 'amount_sum'])).toEqual(AFTER_FIRST);
+      expect(tuples(await live({ limit: 2, offset: 1, ordered: true }), ['note', 'amount_sum'])).toEqual([['x', 15], ['y', 20]]);
+      expect(tuples(await live({ limit: 2, ordered: true }), ['note', 'amount_sum'])).toEqual([['w', 7], ['x', 15]]);
+    });
+
+    it('an unordered offset runs (ordered by `(SELECT NULL)`), and `limit 0` is no rows', async () => {
+      expect(await live({ limit: 2, offset: 1, ordered: false })).toHaveLength(2);
+      expect(await live({ offset: 3, ordered: false })).toHaveLength(1);
+      expect(await live({ limit: 0, offset: 1, ordered: false })).toEqual([]);
+      expect(await live({ limit: 0, ordered: false })).toEqual([]);
+    });
+  });
+});

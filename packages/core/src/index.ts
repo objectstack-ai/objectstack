@@ -90,6 +90,10 @@ export * from './utils/json-membership-sql.js';
 // reason `json-membership-sql` above was: the analytics compilers need the same
 // arms and depend on no driver.
 export * from './utils/text-match-sql.js';
+// [#31626] SQL Server's row window (`TOP` / `ORDER BY (SELECT NULL)` / `OFFSET
+// … FETCH`), moved from `driver-sql` for the same reason: the analytics echo
+// prints the window the driver runs.
+export * from './utils/mssql-window-sql.js';
 // [#20889] What an aggregate ANSWERS and its `'number'` presenter, moved from
 // `driver-sql` so the analytics native-SQL face presents with the same rule.
 export * from './utils/aggregate-answer.js';
