@@ -39,6 +39,7 @@
     "ui/Action:overrides",
     "ui/Action:params",
     "ui/Action:patch",
+    "ui/Action:preflight",
     "ui/Action:pressed",
     "ui/Action:recordIdField",
     "ui/Action:recordIdParam",
