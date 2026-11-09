@@ -178,64 +178,46 @@ function getViewLabel(view: any, viewPath: string): { label?: unknown; path: str
 }
 
 /**
- * `naming/namespace-prefix` — the package-namespace naming contract (ruling C
- * on #30798, phase 2), over the declarations of ONE package.
+ * `naming/namespace-prefix` — two authoring-hygiene findings over the
+ * declarations of ONE package.
  *
- * ## The contract it states
+ * ## The bare-name finding: only the names that keep the literal prefix
  *
- * Every metadata name a package authors at the top level carries that
- * package's `manifest.namespace` — `crm_send_email`, not `send_email` — the
- * rule ADR-0129 already holds object names to. Most runtime consumers of a
- * non-object name (the kernel `metadata` service, object-less action
- * dispatch, AI tool names, function handlers, picklists, email templates,
- * webhooks, …) resolve it with no package context, so two installed packages
- * that hold one bare name resolve to one of them, usually silently and in
- * install order. ADR-0048 §3.4's "two distinct packages coexist on the same
- * bare name by construction" rests on every caller carrying its package id,
- * and most do not. The prefix makes that clash impossible to author.
+ * ADR-0150 (accepted by merge, #31586) reversed phase 2 of ruling C on
+ * #30798 for behavioural metadata. A flow, an action, a page, a tool and
+ * every other bucket 2–4 type is identified by (package, name) and addressed
+ * by an optional namespace segment (D5), so a short name such as
+ * `send_email` is the intended spelling. Child P retired the warning that
+ * asked for `crm_send_email` (D9). A name that already carries the prefix is
+ * just a name and stays valid; ⛔ nothing here asks for it to be un-prefixed.
  *
- * This is phase 2 of the ruling, and it WARNS: the refusal at `defineStack`,
- * `os validate` and the save door is phase 3 (#30806). Until then
- * `severity: 'warning'` is the whole enforcement, and ⛔ it is not promoted to
- * an error here.
+ * What still keeps the literal prefix is judged here, and only that: the
+ * collections {@link PREFIX_JUDGED_COLLECTIONS} lists, each with its reason.
+ * Objects and docs keep the prefix too, refused as errors elsewhere
+ * (`validateNamespacePrefix`, ADR-0129; the doc lint, ADR-0046). A view is
+ * derived from its object. A metadata type added to the stack later is NOT
+ * judged unless it is added to that list with a reason: since ADR-0150 a
+ * short name is the default.
  *
- * ## Which names it judges
- *
- * Every collection the spec's manifest-collection map declares
- * (`PLURAL_TO_SINGULAR`, the one list of "which metadata collections exist at
- * stack level"), so a metadata type added to the stack is judged the day it
- * lands, with no edit here. Three of its keys are judged elsewhere or carry a
- * derived name; {@link NAME_JUDGED_ELSEWHERE} says why for each. The stack
- * keys the map does not carry are out by construction, and each holds a name
- * the package does not choose freely: `objectExtensions` and
- * `picklistExtensions` name the item they extend, a translation bundle has no
- * name of its own (it is stored as `<ns>_<locale>`), fields are keyed inside
- * their object, and `functions` are code handlers, not metadata items.
- *
- * A name carries the namespace when it IS the namespace (the namespace-named
- * app, ADR-0019), starts with `<ns>_` or `<ns>.` (the dotted capability
- * shape, `billing.refund`), or starts with the platform-reserved `sys_` — the
- * exemption the object rule (`validateObjectNamespacePrefix`) grants;
- * `carriesPackageNamespace` is that one predicate, shared with
- * `os generate` so a scaffold is never written in a spelling this rule
- * reports. An item that declares `overrides` (ADR-0146 D2) replaces the base
- * package's item OF THE SAME NAME, so its name is the base's and is not
+ * A name carries the namespace when it IS the namespace, starts with `<ns>_`
+ * or `<ns>.` (the dotted capability shape, `billing.refund`), or starts with
+ * the platform-reserved `sys_` — `carriesPackageNamespace`, shared with
+ * `os generate`. An item that declares `overrides` (ADR-0146 D2) replaces the
+ * base package's item OF THE SAME NAME, so its name is the base's and is not
  * judged. A package that declares no namespace has nothing to prefix with and
- * is not judged: the object rule's posture, which does not invent a prefix on
- * the author's behalf either. A name the PLATFORM requests by its bare
- * spelling ({@link PLATFORM_REQUESTED_BARE_NAMES}) is not judged either: a
- * package declares it to plug into that door, and the prefixed spelling would
- * unplug it.
+ * is not judged. A name the platform requests by its bare spelling
+ * ({@link PLATFORM_REQUESTED_BARE_NAMES}) is never judged either.
+ *
+ * It WARNS. ⛔ It is not promoted to an error here.
  *
  * ## The duplicate finding, which stays
  *
  * Two items of one type that land on ONE registry key inside ONE package
  * shadow each other (last write wins) — the authoring-hygiene case ADR-0048
- * §3.4 leaves to this rule, judged independently of the prefix: a prefixed
- * name declared twice is still a duplicate. It no longer suggests the
- * prefixed spelling as its rename. The bare-name finding on the same items
- * carries that, and two items both renamed to one suggestion would still be
- * a duplicate, so it asks for a distinct name instead.
+ * §3.4 leaves to this rule, and ADR-0150 D9 keeps. It is judged independently
+ * of the prefix, for every type in `DUPLICATE_KEYED_TYPES`: a prefixed name
+ * declared twice is still a duplicate, and so is a short one. It asks for a
+ * distinct name, never for the prefixed spelling.
  *
  * ⚠️ [#17821] "Within one package" is the CALLER'S to establish, and this
  * function judges exactly the stack it is handed. It used to be neither: the
@@ -264,13 +246,16 @@ function namespacePrefixIssues(stack: any, pathPrefix = ''): LintIssue[] {
   const ns: string | undefined = typeof declared === 'string' && declared ? declared : undefined;
 
   for (const key of Object.keys(PLURAL_TO_SINGULAR)) {
-    if (Object.prototype.hasOwnProperty.call(NAME_JUDGED_ELSEWHERE, key)) continue;
-    const items: any[] = Array.isArray(stack[key]) ? stack[key] : [];
-    if (items.length === 0) continue;
-    const label = metadataTypeLabel(key);
+    const prefixReason = Object.prototype.hasOwnProperty.call(PREFIX_JUDGED_COLLECTIONS, key)
+      ? PREFIX_JUDGED_COLLECTIONS[key]
+      : undefined;
     const duplicates = Object.prototype.hasOwnProperty.call(DUPLICATE_KEYED_TYPES, key)
       ? DUPLICATE_KEYED_TYPES[key]
       : undefined;
+    if (!prefixReason && !duplicates) continue;
+    const items: any[] = Array.isArray(stack[key]) ? stack[key] : [];
+    if (items.length === 0) continue;
+    const label = metadataTypeLabel(key);
     // First occurrence of each registry key → its index, so a later duplicate
     // can point back at the original declaration.
     const firstSeen = new Map<string, number>();
@@ -281,7 +266,8 @@ function namespacePrefixIssues(stack: any, pathPrefix = ''): LintIssue[] {
       if (typeof name !== 'string' || !name) continue;
 
       if (
-        ns
+        prefixReason
+        && ns
         && !isOverrideDeclaration(item)
         && !carriesPackageNamespace(name, ns)
         && !isPlatformRequestedBareName(key, name)
@@ -291,10 +277,8 @@ function namespacePrefixIssues(stack: any, pathPrefix = ''): LintIssue[] {
           severity: 'warning',
           rule: 'naming/namespace-prefix',
           message:
-            `${label} "${name}" does not carry the package namespace "${ns}". Every metadata ` +
-            `name a package authors starts with its namespace, as object names do, so that no ` +
-            `two installed packages can hold the same name — rename it to "${renamed}" and ` +
-            `update every reference that spells it.`,
+            `${label} "${name}" does not carry the package namespace "${ns}". ${prefixReason} — ` +
+            `rename it to "${renamed}" and update every reference that spells it.`,
           path: `${pathPrefix}${key}[${i}].name`,
           fix: renamed,
         });
@@ -341,25 +325,27 @@ function namespacePrefixIssues(stack: any, pathPrefix = ''): LintIssue[] {
 }
 
 /**
- * The manifest collections whose names `naming/namespace-prefix` does NOT
- * judge, each with its reason. Every other key of `PLURAL_TO_SINGULAR` is
- * judged; a key lands here only with a reason that names where its name is
- * judged instead, or what it is derived from.
+ * The manifest collections whose bare names `naming/namespace-prefix` judges,
+ * each with the reason its name keeps the literal namespace prefix — the
+ * sentence the finding states. Every other collection is short-named by
+ * default since ADR-0150 (D1, D9); a key lands here only with a reason the
+ * ADR gives.
  */
-export const NAME_JUDGED_ELSEWHERE: Readonly<Record<string, string>> = Object.freeze({
-  objects:
-    'refused as an error by `defineStack` and `os validate` (`validateNamespacePrefix`, ADR-0129)',
-  views:
-    'derived from the bound object: a view container is filed under its object, and a view ' +
-    'item is named `<object>.<key>`',
-  docs: 'refused as an error by the doc lint (`docs/namespace-prefix`, ADR-0046)',
+export const PREFIX_JUDGED_COLLECTIONS: Readonly<Record<string, string>> = Object.freeze({
+  capabilities:
+    'A capability keeps the literal namespace prefix, spelled `NS.SHORT`: ADR-0150 D1 keeps it ' +
+    'in bucket 1 with objects (ruling 6683456244)',
+  positions:
+    'A position is one slot per name in the environment, and a second package that ships a name ' +
+    'another holder has is refused at install (ADR-0150 D7), so the prefix keeps a package\'s ' +
+    'positions from colliding with another\'s',
 });
 
 /**
  * Bare names the PLATFORM requests by spelling, per collection: a package
- * declares one to plug into the door that asks for it, so it must keep the
- * bare spelling, and `naming/namespace-prefix` does not judge it. Exported so
- * the phase-3 refusal (#30806) reads the same list.
+ * declares one to plug into the door that asks for it, so it keeps the bare
+ * spelling and resolves with one holder (ADR-0150 D3, "Exceptions"), and
+ * `naming/namespace-prefix` never judges it.
  *
  *  - `permissions` → `guest_portal`: the public form doors' submit context
  *    requests the permission set of exactly this name

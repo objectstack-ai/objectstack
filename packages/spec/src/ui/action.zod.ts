@@ -57,6 +57,15 @@ import { ON_SUCCESS_EXECUTORS, onSuccessBesideExecutorRefusal } from './action-o
 import { refuseDeclarativeUpdateContradictions, type DeclarativeUpdateSurface } from './action-declarative-update';
 import { CONFIRM_BESIDE_PARAMS_REFUSAL, declaresConfirmBesideParams } from './action-confirm-beside-params';
 import { navigationTargetRefusal } from './navigation-target';
+// [#31840] The same-origin read rule an action's `preflight` reads under — the
+// one a page element's `api` data source reads under too (`page.zod.ts`). An
+// import-free leaf, so it cannot close a cycle back to `ui/`.
+import {
+  API_READ_NO_CREDENTIALS,
+  API_RESPONSE_PATH_RE,
+  SAME_ORIGIN_API_PATH_RE,
+  sameOriginApiPathRefusal,
+} from './same-origin-api-read';
 
 /**
  * Semantic near-misses — a different **word** for the same intent, usually
@@ -819,6 +828,34 @@ const ActionAiCategorySchema = z.enum([
 const ACTION_HISTORY =
   'Until this shape was closed these were dropped silently — the action still registered '
   + 'and still ran, without whatever the key was meant to configure or gate.';
+
+/**
+ * The display formats of a value an action shows from a server answer — the
+ * one set `resultDialog` (its dialog-level default and each field's override)
+ * and `preflight.fields` share, so the param dialog's preflight panel and the
+ * one-shot result dialog draw from one vocabulary. The renderer contract of
+ * each member is on `resultDialog`.
+ */
+const ACTION_ANSWER_FIELD_FORMATS = ['qrcode', 'code-list', 'secret', 'text', 'json'] as const;
+
+/**
+ * One row of the fields an action shows from a server answer: a dot `path`
+ * into the answer, an optional `label`, an optional `format` override.
+ * `resultDialog.fields` and `preflight.fields` are built from this one row
+ * (#31840), so the row's keys, aliases and format set cannot drift between
+ * them; each caller names its own surface and what `path` is read against.
+ */
+function actionAnswerFieldRow(surface: string, pathDescription: string) {
+  return strictObject({
+    surface,
+    history: ACTION_HISTORY,
+    aliases: { key: 'path', field: 'path', name: 'path', title: 'label', display: 'format', render: 'format' },
+  }, {
+    path: z.string().describe(pathDescription),
+    label: I18nLabelSchema.optional(),
+    format: z.enum(ACTION_ANSWER_FIELD_FORMATS).optional().describe('Per-field format override.'),
+  });
+}
 
 export const ActionAiSchema = strictObject({
   surface: "this action's AI exposure block",
@@ -1694,17 +1731,136 @@ const actionObject = () => strictObject({
     title: I18nLabelSchema.optional(),
     description: I18nLabelSchema.optional(),
     acknowledge: I18nLabelSchema.optional().describe('Acknowledge button label, e.g. "I have saved this"'),
-    format: z.enum(['qrcode', 'code-list', 'secret', 'text', 'json']).optional().describe('Default format for fields without their own format. Defaults to json when omitted.'),
-    fields: z.array(strictObject({
-      surface: 'this result dialog field',
-      history: ACTION_HISTORY,
-      aliases: { key: 'path', field: 'path', name: 'path', title: 'label', display: 'format', render: 'format' },
-    }, {
-      path: z.string().describe('Dot path into result.data (e.g. "totpURI", "client.client_secret").'),
-      label: I18nLabelSchema.optional(),
-      format: z.enum(['qrcode', 'code-list', 'secret', 'text', 'json']).optional().describe('Per-field format override.'),
-    })).optional().describe('Which fields from result.data to render. Omit to dump full JSON.'),
+    format: z.enum(ACTION_ANSWER_FIELD_FORMATS).optional().describe('Default format for fields without their own format. Defaults to json when omitted.'),
+    fields: z.array(actionAnswerFieldRow(
+      'this result dialog field',
+      'Dot path into result.data (e.g. "totpURI", "client.client_secret").',
+    )).optional().describe('Which fields from result.data to render. Omit to dump full JSON.'),
   }).optional().describe('Render API response in a one-shot reveal dialog (suppresses successMessage when set).'),
+  /**
+   * [#31840] Preflight read — one same-origin `GET` the param dialog sends
+   * before submit, whose answer it shows above the params and from which it
+   * may fill params the user does not type.
+   *
+   * ```ts
+   * preflight: {
+   *   read: { url: '/api/v1/cloud/packages/${ctx.recordId}/upgrade-plan?version=${param.version}' },
+   *   path: 'data',
+   *   fields: [{ path: 'findings', label: 'Schema findings', format: 'json' }],
+   *   seed: [{ param: 'confirm_schema_upgrade', path: 'verdict.findingSet' }],
+   * }
+   * ```
+   *
+   * ## The read
+   *
+   * `read.url` is held to the page element read's same-origin rule, imported
+   * from `./same-origin-api-read.ts` rather than restated: it opens with a
+   * single `/`, and a scheme, `//host`, a backslash read as a slash, a space or
+   * control character, and a relative path are refused at parse, with the class
+   * named. `method` admits `GET` alone. No credential is written: the console
+   * reads with its own signed-in fetch, so `headers`, `auth`, `token`,
+   * `credentials`, `authorization` and `apiKey` are refused with that guidance.
+   *
+   * Holes are the action runner's `${SCOPE.PATH}` grammar (objectui
+   * `ActionRunner.ts`, `substituteScopeTokens`; each value
+   * `encodeURIComponent`-ed), CLOSED here to `${param.NAME}`, `${ctx.recordId}`
+   * and `${ctx.record.FIELD}`. A `${param.NAME}` names a declared param. There
+   * is no answer before the read, so `${result.*}` is refused; every other hole
+   * the runner's `ctx` would resolve is refused too, because the read is
+   * answered by this deployment's own API with the user's own session.
+   *
+   * ## What the dialog draws, and what it seeds
+   *
+   * `path` selects the sub-tree of the answer (`data` in a `{ success, data }`
+   * envelope); omitted, the whole answer. `fields` picks what to show, in
+   * `resultDialog.fields`' own row and format set; omitted, the selected answer
+   * is shown as JSON. There is no `title`: the console draws the panel under a
+   * generic translated heading.
+   *
+   * Each `seed` entry writes the value at its `path` (read in the selected
+   * sub-tree) into the named param. A seeded param is the answer's to fill, not
+   * the user's: it declares no `defaultValue`, `defaultFromRow` or `carryOver`,
+   * it is seeded once, and no hole of the read reads it (the read would then
+   * depend on its own answer). Mark it `required` to hold Confirm until the
+   * read has answered.
+   *
+   * ## Where it is accepted
+   *
+   * Only on an action whose dialog the console opens to collect `params` — a
+   * non-empty `params`, the rule `submitText` follows — and not beside
+   * `execution: 'aggregate'`: the grid's bulk dialog has no single row to read,
+   * and no console surface draws a preflight there. Widening is cheaper than
+   * retiring.
+   *
+   * A preflight is UX, not authorization: the action's own endpoint must still
+   * judge whatever a seeded param carries.
+   */
+  preflight: strictObject({
+    surface: 'this preflight read',
+    history: ACTION_HISTORY,
+    aliases: {
+      response: 'path', select: 'path', dataPath: 'path', responsePath: 'path',
+      fetch: 'read', request: 'read',
+      show: 'fields', reveal: 'fields',
+      prefill: 'seed', fill: 'seed', seeds: 'seed',
+    },
+    guidance: {
+      url: 'Set the URL inside the read block: `read: { url }`.',
+      method: 'Set the method inside the read block: `read: { url, method }`.',
+      write: 'A preflight only reads: it declares `read` and no `write`. The action itself is the write.',
+      title: 'A preflight declares no `title`: the console draws its panel under a generic translated '
+        + 'heading. Delete this key, and say what the read shows in the action\'s `description`.',
+      headers: API_READ_NO_CREDENTIALS,
+      credentials: API_READ_NO_CREDENTIALS,
+      auth: API_READ_NO_CREDENTIALS,
+      authorization: API_READ_NO_CREDENTIALS,
+      token: API_READ_NO_CREDENTIALS,
+      apiKey: API_READ_NO_CREDENTIALS,
+    },
+  }, {
+    read: strictObject({
+      surface: 'the `read` request of this preflight',
+      history: ACTION_HISTORY,
+      aliases: { href: 'url', endpoint: 'url', path: 'url', verb: 'method' },
+      guidance: {
+        headers: API_READ_NO_CREDENTIALS,
+        credentials: API_READ_NO_CREDENTIALS,
+        auth: API_READ_NO_CREDENTIALS,
+        authorization: API_READ_NO_CREDENTIALS,
+        token: API_READ_NO_CREDENTIALS,
+        apiKey: API_READ_NO_CREDENTIALS,
+        params: 'Write query parameters into the path itself: '
+          + '`read: { url: \'/api/v1/x?id=${param.id}\' }`.',
+        body: 'The preflight read is a `GET` and sends no body.',
+      },
+    }, {
+      url: z.string()
+        .regex(SAME_ORIGIN_API_PATH_RE, { error: (issue) => preflightReadUrlRefusal(issue.input) })
+        .describe('Same-origin API path the preflight reads — it opens with a single `/`, e.g. `/api/v1/cloud/packages/${ctx.recordId}/upgrade-plan?version=${param.version}`. Holes are `${param.NAME}` (a declared param), `${ctx.recordId}` and `${ctx.record.FIELD}`, each value percent-encoded; any other hole, `${result.*}` included, is refused. An absolute URL of any scheme, a protocol-relative `//host`, a backslash read as a slash, a space or control character, and a relative path are refused at parse. No credential is written here: the console reads the endpoint with its own signed-in fetch.'),
+      method: z.literal('GET', {
+        error: () => 'The preflight read is sent as `GET`: it reads the endpoint and changes nothing, '
+          + 'so no other method is honoured. Omit `method` or write `\'GET\'`.',
+      }).optional().describe('HTTP method of the read — `GET`, the only method a preflight is sent with'),
+    }).describe('The read request — the same-origin endpoint the preflight reads'),
+    path: z.string()
+      .regex(API_RESPONSE_PATH_RE, { error: () => preflightResponsePathRefusal('`preflight.path`') })
+      .optional()
+      .describe('Dotted path selecting the sub-tree of the answer the preflight shows and seeds from, e.g. `data` in a `{ success, data }` envelope; omitted, the whole answer'),
+    fields: z.array(actionAnswerFieldRow(
+      'this preflight field',
+      'Dot path into the selected answer (e.g. "findings", "verdict.summary").',
+    )).optional().describe('Which values of the selected answer the panel shows, in `resultDialog.fields`\' row and format set. Omit to show the selected answer as JSON.'),
+    seed: z.array(strictObject({
+      surface: 'this preflight seed',
+      history: ACTION_HISTORY,
+      aliases: { name: 'param', field: 'param', target: 'param', to: 'param', from: 'path', source: 'path', value: 'path' },
+    }, {
+      param: z.string().describe('Name of the declared param the value is written into. The param is filled by the answer, not typed: it declares no `defaultValue`, `defaultFromRow` or `carryOver`, and no hole of the read reads it.'),
+      path: z.string()
+        .regex(API_RESPONSE_PATH_RE, { error: () => preflightResponsePathRefusal('`path` of a preflight seed') })
+        .describe('Dotted path, in the selected answer, of the value written into the param, e.g. `verdict.findingSet`'),
+    })).optional().describe('Answer-to-param seeding: each entry writes the value at `path` in the selected answer into the named param, which the dialog draws read-only and submits as shown. Each param is seeded once.'),
+  }).optional().describe('Preflight read for the action\'s param dialog: `{ read: { url }, path?, fields?, seed? }` sends one same-origin `GET` (holes `${param.NAME}`, `${ctx.recordId}`, `${ctx.record.FIELD}`) before submit, shows the selected answer above the params and fills the `seed` params from it. Only on an action with a non-empty `params`, and not beside `execution: \'aggregate\'`. UX, not authorization: the action\'s endpoint still judges what it receives.'),
   
   /** Access */
   /**
@@ -2243,6 +2399,213 @@ function refuseIdentityAssignmentBodyWrite(
   }
 }
 
+/**
+ * [#31840] The refusal `preflight.read.url` raises when the same-origin rule
+ * refuses it. A URL opening with a hole (`${ctx.origin}/…`, `${ctx.apiBase}/…`)
+ * falls in the shared rule's `relative` class; it is named on its own here,
+ * because the author wrote it on purpose and the fix is to drop the hole, not
+ * to add a slash.
+ */
+function preflightReadUrlRefusal(input: unknown): string | undefined {
+  if (typeof input === 'string' && input.startsWith('${')) {
+    return '`preflight.read.url` of an action must open with `/`, and this value opens with a `${…}` '
+      + 'hole, so what the browser fetches is decided by the hole\'s value, not by the declaration. The '
+      + 'console reads the endpoint on this deployment\'s own origin with its own signed-in fetch, so no '
+      + 'origin or API base is written: write the endpoint\'s path, such as '
+      + '`/api/v1/cloud/packages/${ctx.recordId}/upgrade-plan`, and put holes after the leading `/`.';
+  }
+  return sameOriginApiPathRefusal(input, '`preflight.read.url` of an action');
+}
+
+/** The refusal a preflight's dotted answer path raises — `preflight.path` or a seed's `path`. */
+function preflightResponsePathRefusal(subject: string): string {
+  return subject + ' is a dotted path into the answer of the preflight read, such as '
+    + '`verdict.findingSet`: segments of letters, digits, `_` or `-` joined by single dots — no '
+    + 'brackets, no leading `$`, no slashes.';
+}
+
+/** Every `${…}` hole in a template, closed by the first `}` — the runner's token shape. */
+const PREFLIGHT_HOLE_RE = /\$\{([^}]*)\}/g;
+
+/**
+ * The CLOSED hole set of `preflight.read.url`, over the runner's
+ * `${SCOPE.PATH}` grammar (PATH is `[\w.]+` there): a declared param, the
+ * record id, one field of the record. `null` = a hole outside the set.
+ */
+function preflightHoleParam(body: string): { param: string } | { ctx: true } | null {
+  const param = /^param\.(\w+)$/.exec(body);
+  if (param) return { param: param[1] };
+  if (body === 'ctx.recordId' || /^ctx\.record\.\w+$/.test(body)) return { ctx: true };
+  return null;
+}
+
+/** The request-body key a param is collected under: `name`, else `field`. */
+function actionParamName(p: { name?: unknown; field?: unknown }): string | undefined {
+  if (typeof p.name === 'string' && p.name.length > 0) return p.name;
+  if (typeof p.field === 'string' && p.field.length > 0) return p.field;
+  return undefined;
+}
+
+/**
+ * [#31840] The cross-key refusals of `preflight` — everything the key's own
+ * shape cannot see, because it needs the action's `params` or `execution`:
+ *
+ * - no non-empty `params` (no param dialog opens, so the read is never sent —
+ *   the rule `submitText` follows);
+ * - beside `execution: 'aggregate'` (the grid's bulk dialog has no single row
+ *   to read, and no console surface draws a preflight there);
+ * - a hole outside the closed set, an unterminated `${`, or a `${param.NAME}`
+ *   naming no declared param;
+ * - a `seed.param` naming no declared param, a param seeded twice, a seeded
+ *   param that declares `defaultValue`, `defaultFromRow` or `carryOver`, and a
+ *   seeded param a hole reads (a cycle: the read would need its own answer).
+ *
+ * Each issue carries the path of the slot to fix. A refinement does not
+ * project into the JSON Schema (`dropped-refinements.baseline.json`); the
+ * URL's same-origin rule, which can, is the `read.url` regex.
+ */
+function refusePreflightContradictions(
+  data: {
+    preflight?: {
+      read: { url: string };
+      seed?: ReadonlyArray<{ param: string; path: string }>;
+    };
+    params?: unknown;
+    execution?: string;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  const preflight = data.preflight;
+  if (!preflight) return;
+  const params = Array.isArray(data.params)
+    ? (data.params as ReadonlyArray<Record<string, unknown>>)
+    : [];
+
+  if (params.length === 0) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['preflight'],
+      message: '`preflight` is read by the dialog an action opens to collect its `params`, and this '
+        + 'action declares no `params`, so no such dialog opens and the read is never sent. Declare '
+        + 'the `params` the dialog collects, or drop `preflight`.',
+    });
+  }
+  if (data.execution === 'aggregate') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['preflight'],
+      message: '`preflight` is not accepted beside `execution: \'aggregate\'`: that action is dispatched '
+        + 'once for a whole grid selection, and the bulk dialog that collects its params has no single '
+        + 'record to read, so no console surface draws a preflight there. Drop `preflight`, or declare '
+        + 'the action for a single record (`execution: \'perRecord\'`, or omit `execution`).',
+    });
+  }
+
+  const declared = new Map<string, Record<string, unknown>>();
+  for (const p of params) {
+    const name = actionParamName(p);
+    if (name !== undefined && !declared.has(name)) declared.set(name, p);
+  }
+
+  // Holes of the read. A URL the same-origin rule already refused carries its
+  // own issue at `read.url`; judging its holes too would answer one mistake twice.
+  const url = preflight.read.url;
+  const holeParams = new Set<string>();
+  const holes = SAME_ORIGIN_API_PATH_RE.test(url) ? [...url.matchAll(PREFLIGHT_HOLE_RE)] : [];
+  for (const match of holes) {
+    const body = match[1];
+    const hole = preflightHoleParam(body);
+    if (hole === null) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['preflight', 'read', 'url'],
+        message: body.startsWith('result.')
+          ? '`preflight.read.url` cannot read `${' + body + '}`: the preflight is sent BEFORE the action '
+            + 'runs, so there is no result yet. Its holes are `${param.NAME}` (a declared param), '
+            + '`${ctx.recordId}` and `${ctx.record.FIELD}`.'
+          : '`preflight.read.url` holds the hole `${' + body + '}`, which is not one a preflight reads. Its '
+            + 'holes are `${param.NAME}` (a declared param), `${ctx.recordId}` and `${ctx.record.FIELD}`, '
+            + 'each value percent-encoded into the path. Write the path on this deployment\'s own origin; '
+            + 'the console reads it with its own signed-in fetch.',
+      });
+      continue;
+    }
+    if ('param' in hole) {
+      holeParams.add(hole.param);
+      if (params.length > 0 && !declared.has(hole.param)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['preflight', 'read', 'url'],
+          message: '`preflight.read.url` reads `${param.' + hole.param + '}`, and this action declares no '
+            + 'param named `' + hole.param + '`, so the hole would read nothing. Name a param the dialog '
+            + 'collects, or declare it in `params`.',
+        });
+      }
+    }
+  }
+  if (SAME_ORIGIN_API_PATH_RE.test(url) && url.replace(PREFLIGHT_HOLE_RE, '').includes('${')) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['preflight', 'read', 'url'],
+      message: '`preflight.read.url` opens a `${` hole it never closes with `}`, so the console would send '
+        + 'it as written. Close the hole, or percent-encode a literal `$` (`%24`).',
+    });
+  }
+
+  // Seeds.
+  const seeded = new Set<string>();
+  (preflight.seed ?? []).forEach((entry, i) => {
+    const path = ['preflight', 'seed', i, 'param'];
+    const name = entry.param;
+    if (params.length > 0 && !declared.has(name)) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: 'A preflight seed writes into `' + name + '`, and this action declares no param of that '
+          + 'name, so the answer would fill nothing. Name a param the dialog collects, or declare it in '
+          + '`params`.',
+      });
+      return;
+    }
+    if (seeded.has(name)) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: 'The param `' + name + '` is seeded twice by this preflight, so which answer value it '
+          + 'submits would depend on the order the console applies them. Seed each param once.',
+      });
+      return;
+    }
+    seeded.add(name);
+    const p = declared.get(name);
+    if (p) {
+      const conflicts = [
+        p.defaultValue !== undefined ? '`defaultValue`' : undefined,
+        p.defaultFromRow === true ? '`defaultFromRow`' : undefined,
+        p.carryOver === true ? '`carryOver`' : undefined,
+      ].filter((k): k is string => k !== undefined);
+      if (conflicts.length > 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path,
+          message: 'The param `' + name + '` is seeded by this preflight and also declares '
+            + conflicts.join(' and ') + ', so two sources would fill one value. A seeded param is the '
+            + 'answer\'s to fill: drop ' + conflicts.join(' and ') + ' from the param, or drop the seed.',
+        });
+      }
+    }
+    if (holeParams.has(name)) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: 'The param `' + name + '` is seeded by this preflight and read by a hole of its '
+          + '`read.url`, so the read would need its own answer before it is sent. Seed a param the read '
+          + 'does not read, or drop the hole.',
+      });
+    }
+  });
+}
+
 export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
   // Require `target` for types that reference an external resource
   if (TARGET_REQUIRED_TYPES.has(data.type) && !data.target) {
@@ -2526,6 +2889,7 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
 }).superRefine(refuseDeclarativeUpdateContradictions(ACTION_DECLARATIVE_UPDATE))
   .superRefine(refuseInertOutcomeMessages)
   .superRefine(refuseIdentityAssignmentBodyWrite)
+  .superRefine(refusePreflightContradictions)
   // Grade gate first, feature gate last: `requiresFeature` composes onto
   // whatever `visible` it finds, so this order keeps `features.*` the final
   // term — the convention the platform-objects feature-gate guard reads. One

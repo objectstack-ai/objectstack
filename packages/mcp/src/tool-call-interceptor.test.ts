@@ -29,7 +29,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { z } from 'zod';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { MCP_OAUTH_SCOPE_METADATA_WRITE } from '@objectstack/spec/ai';
+import { MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_METADATA_WRITE } from '@objectstack/spec/ai';
 import type { AIToolDefinition, ToolCallPart, ToolExecutionContext } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 
@@ -816,5 +816,169 @@ describe('[#31605] a tool a plugin registers on the runtime\'s server is routed 
     client = await connectLongLived(runtime);
     await stdioCall(client, 'new_name', {});
     expect(recorded.seen.map((c) => c.toolName)).toEqual(['new_name']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. A call for a name nothing registered
+// ---------------------------------------------------------------------------
+
+describe('[#31838] a tools/call for a name the server registered no tool of reaches the interceptor, answered as before', () => {
+  let runtime: MCPServerRuntime;
+  let client: Client | undefined;
+  beforeEach(() => { runtime = new MCPServerRuntime({ name: 'interceptor-unregistered', version: '0.0.0' }); });
+  afterEach(async () => { await client?.close(); client = undefined; });
+
+  /**
+   * The raw HTTP answer (status, content type and body text) to a `tools/call`
+   * of `name` under a `data:read` grant, which registers the read tools only.
+   * A fixed JSON-RPC id, so two answers compare byte for byte.
+   */
+  async function readOnlyHttpCall(bridge: unknown, name: string, args: Record<string, unknown>) {
+    const body = { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name, arguments: args } };
+    const res = await runtime.handleHttpRequest(
+      new Request('http://localhost/api/v1/mcp', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+        body: JSON.stringify(body),
+      }),
+      {
+        bridge: bridge as McpDataBridge,
+        parsedBody: body,
+        toolOptions: { grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ] },
+        caller: AGENT_CALLER,
+      },
+    );
+    return { status: res.status, type: res.headers.get('content-type'), text: await res.text() };
+  }
+
+  const WRITE = { objectName: 'task', data: { title: 'call Ana' } };
+
+  it('HTTP, a read-only grant calling a write tool: the interceptor is told once (principal, name, registered: false); the answer is byte-identical; nothing ran', async () => {
+    const bridge = makeBridge();
+    const before = await readOnlyHttpCall(bridge, 'create_record', WRITE);
+    expect(JSON.parse(before.text).result).toEqual({ content: [{ type: 'text', text: 'MCP error -32602: Tool create_record not found' }], isError: true });
+
+    const recorded = allowing();
+    runtime.setToolInterceptor(recorded.interceptor);
+    const after = await readOnlyHttpCall(bridge, 'create_record', WRITE);
+
+    expect(after).toEqual(before);
+    expect(recorded.seen).toEqual([{
+      door: 'mcp',
+      transport: 'http',
+      toolName: 'create_record',
+      arguments: {},
+      principal: AGENT_PRINCIPAL,
+      registered: false,
+    }]);
+    expect(Object.isFrozen(recorded.seen[0])).toBe(true);
+    expect(bridge.calls.filter((c) => c[0] === 'create')).toEqual([]);
+  });
+
+  it('next() resolves to the SDK\'s own answer, frozen; deny, replace and a throw are observed and never served', async () => {
+    const warnings: string[] = [];
+    const logger = { info: () => {}, debug: () => {}, error: () => {}, warn: (m: string) => { warnings.push(m); } };
+    runtime = new MCPServerRuntime({ name: 'interceptor-unregistered', version: '0.0.0', logger: logger as never });
+    const bridge = makeBridge();
+    const before = await readOnlyHttpCall(bridge, 'create_record', WRITE);
+    const nextAnswers: McpToolCallResult[] = [];
+    const verdicts: McpToolInterceptor[] = [
+      async (_call, next) => { nextAnswers.push(await next()); return next(); },
+      denying().interceptor,
+      replacing().interceptor,
+      async () => { throw Object.assign(new Error(`saw ${JSON.stringify(WRITE)}`), { code: 'HOST_AUDIT_DOWN' }); },
+      () => Promise.reject(new TypeError('rejected')),
+    ];
+    for (const interceptor of verdicts) {
+      runtime.setToolInterceptor(interceptor);
+      expect(await readOnlyHttpCall(bridge, 'create_record', WRITE)).toEqual(before);
+    }
+    expect(nextAnswers).toEqual([JSON.parse(before.text).result]);
+    expect(Object.isFrozen(nextAnswers[0])).toBe(true);
+    // The throw and the rejection: one line each, naming the tool and the
+    // failure's kind, never the call's arguments.
+    expect(warnings).toHaveLength(2);
+    expect(warnings[0]).toContain('(HOST_AUDIT_DOWN)');
+    expect(warnings[1]).toContain('(TypeError)');
+    for (const line of warnings) {
+      expect(line).toContain('"create_record"');
+      expect(line).not.toContain('call Ana');
+    }
+    expect(bridge.calls.filter((c) => c[0] === 'create')).toEqual([]);
+  });
+
+  it('stdio: any name nothing registered is told once; the answer is the one served with no interceptor', async () => {
+    const bridge = makeBridge();
+    runtime.bridgeDataTools(bridge);
+    setRuntimeStdioPrincipal(runtime, async () => STDIO_EC);
+    client = await connectLongLived(runtime);
+    const before = await stdioCall(client, 'drop_database', { really: true });
+    expect(before).toEqual({ content: [{ type: 'text', text: 'MCP error -32602: Tool drop_database not found' }], isError: true });
+
+    const recorded = allowing();
+    runtime.setToolInterceptor(recorded.interceptor);
+    expect(await stdioCall(client, 'drop_database', { really: true })).toEqual(before);
+    expect(recorded.seen).toEqual([{
+      door: 'mcp',
+      transport: 'stdio',
+      toolName: 'drop_database',
+      arguments: {},
+      principal: STDIO_PRINCIPAL,
+      registered: false,
+    }]);
+  });
+
+  it('"registered" is read from the SDK\'s live registry at the call: a tool removed after it registered is told as unregistered', async () => {
+    const ran: string[] = [];
+    runtime.server.registerTool('plugin_keep', { description: 'kept' }, async () => {
+      ran.push('keep');
+      return { content: [{ type: 'text' as const, text: 'kept' }] };
+    });
+    const dropped = runtime.server.registerTool('plugin_drop', { description: 'dropped' }, async () => {
+      ran.push('drop');
+      return { content: [{ type: 'text' as const, text: 'dropped' }] };
+    });
+    const recorded = allowing();
+    runtime.setToolInterceptor(recorded.interceptor);
+    client = await connectLongLived(runtime);
+
+    expect(textOf(await stdioCall(client, 'plugin_drop', {}))).toBe('dropped');
+    dropped.remove();
+    expect(await stdioCall(client, 'plugin_drop', {})).toEqual({
+      content: [{ type: 'text', text: 'MCP error -32602: Tool plugin_drop not found' }],
+      isError: true,
+    });
+    expect(textOf(await stdioCall(client, 'plugin_keep', {}))).toBe('kept');
+
+    expect(ran).toEqual(['drop', 'keep']);
+    expect(recorded.seen.map((c) => [c.toolName, c.registered])).toEqual([
+      ['plugin_drop', undefined],
+      ['plugin_drop', false],
+      ['plugin_keep', undefined],
+    ]);
+  });
+
+  it('CONTROL: a call to a registered tool is told as before, with no `registered` member', async () => {
+    const bridge = makeBridge();
+    const recorded = allowing();
+    runtime.setToolInterceptor(recorded.interceptor);
+    const answer = await httpCall(runtime, bridge, 'create_record', WRITE, { caller: AGENT_CALLER });
+    expect(answer.isError).toBeFalsy();
+    expect(recorded.seen).toHaveLength(1);
+    expect('registered' in recorded.seen[0]!).toBe(false);
+  });
+
+  it('CONTROL: with no interceptor installed, an unregistered call resolves no principal and answers as before', async () => {
+    const bridge = makeBridge();
+    runtime.bridgeDataTools(bridge);
+    let resolutions = 0;
+    setRuntimeStdioPrincipal(runtime, async () => { resolutions += 1; return STDIO_EC; });
+    client = await connectLongLived(runtime);
+    expect(await stdioCall(client, 'drop_database', {})).toEqual({
+      content: [{ type: 'text', text: 'MCP error -32602: Tool drop_database not found' }],
+      isError: true,
+    });
+    expect(resolutions).toBe(0);
   });
 });

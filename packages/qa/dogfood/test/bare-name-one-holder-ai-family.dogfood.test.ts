@@ -2,8 +2,8 @@
 //
 // [#30803] One name, one package holder for an agent and a skill — the AI
 // family, the series' last (maintainer ruling C on #30798, phase 1; ADR-0048
-// §3.4 narrowed, P1.9; `packages/objectql/src/bare-name-one-holder.ts`), on a
-// booted showcase. The data, request and flow families' booted pins are
+// §3.4 narrowed, P1.9; `packages/objectql/src/bare-name-one-holder.ts`) — and
+// [#31414] for a tool, which joined after it (P1.10), on a booted showcase. The data, request and flow families' booted pins are
 // `bare-name-one-holder.dogfood.test.ts`,
 // `bare-name-one-holder-request-family.dogfood.test.ts` and
 // `bare-name-one-holder-flow-family.dogfood.test.ts`.
@@ -13,18 +13,20 @@
 // drives the rule at the doors a deployment reaches:
 //
 //   - the cold boot of a deployment that already holds the clash — two
-//     `AppPlugin` packages, `alpha` and `beta`, shipping one agent and one
-//     skill under the same names — boots, and logs ONE bare-name warning line
-//     naming both, both packages and the rename for each; the readers keep
-//     serving the first-registered package's item, as before: `/meta/agent/NAME`
-//     and the skill an MCP client's `prompts/get` resolves;
+//     `AppPlugin` packages, `alpha` and `beta`, shipping one agent, one skill
+//     and one tool under the same names — boots, and logs ONE bare-name
+//     warning line naming all three, both packages and the rename for each;
+//     the skill an MCP client's `prompts/get` resolves stays the
+//     first-registered package's (the merged list), and [#31680, ADR-0150 D3]
+//     the by-name read that names no package — `/meta/agent/NAME`,
+//     `/meta/skill/NAME`, `/meta/tool/NAME` — refuses `409 RESOURCE_CONFLICT`
+//     naming both holders, where it served the first registered; the read
+//     that names the package (`?package=`) serves each package's own;
 //   - `POST /marketplace/install-local` of a third package declaring the held
-//     agent name, and of a fourth declaring the held skill name, is 422
-//     PLUGIN_REGISTER_FAILED naming both holders and the rename, and installs
-//     nothing;
-//   - CONTROL: a package declaring fresh agent and skill names installs — and
-//     so does its tool under the name both boot packages' tools share: a tool
-//     is not covered.
+//     agent name, of a fourth declaring the held skill name, and of a fifth
+//     declaring the held tool name, is 422 PLUGIN_REGISTER_FAILED naming both
+//     holders and the rename, and installs nothing;
+//   - CONTROL: a package declaring fresh agent, skill and tool names installs.
 
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -98,7 +100,7 @@ function levelOf(line: string): string | undefined {
 const codeOf = (body: any) =>
   (body?.error && typeof body.error === 'object' ? body.error.code : undefined) ?? body?.code ?? null;
 
-describe('one package holder per agent and skill name, on a booted showcase', () => {
+describe('one package holder per agent, skill and tool name, on a booted showcase', () => {
   let stack: VerifyStack;
   let admin: string;
   let storageDir: string;
@@ -120,6 +122,29 @@ describe('one package holder per agent and skill name, on a booted showcase', ()
   /** The package whose item `GET /meta/TYPE/NAME` serves. */
   const metaPackage = async (type: string, name: string): Promise<string | undefined> => {
     const r = await stack.apiAs(admin, 'GET', `/meta/${type}/${name}`);
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as any;
+    const d = body?.data ?? body;
+    return d?._packageId ?? d?.item?._packageId;
+  };
+
+  /**
+   * [#31680, ADR-0150 D3] The by-name read that names no package, of a name two
+   * packages hold: refused `409 RESOURCE_CONFLICT`, naming both holders.
+   */
+  const expectMetaRefused = async (type: string, name: string) => {
+    const r = await stack.apiAs(admin, 'GET', `/meta/${type}/${name}`);
+    const body = (await r.json()) as any;
+    expect([r.status, codeOf(body)], JSON.stringify(body)).toEqual([409, 'RESOURCE_CONFLICT']);
+    // The meta door's error envelope: `{ error: <sentence>, code }`.
+    const message = String(typeof body?.error === 'string' ? body.error : body?.error?.message ?? body?.message ?? '');
+    expect(message).toContain('com.qa.bare.alpha');
+    expect(message).toContain('com.qa.bare.beta');
+  };
+
+  /** The package whose item `GET /meta/TYPE/NAME?package=PKG` serves. */
+  const metaPackageAt = async (type: string, name: string, pkg: string): Promise<string | undefined> => {
+    const r = await stack.apiAs(admin, 'GET', `/meta/${type}/${name}?package=${pkg}`);
     expect(r.status).toBe(200);
     const body = (await r.json()) as any;
     const d = body?.data ?? body;
@@ -155,23 +180,28 @@ describe('one package holder per agent and skill name, on a booted showcase', ()
     if (storageDir) rmSync(storageDir, { recursive: true, force: true });
   });
 
-  it('the cold boot of a deployment holding the clash boots, and warns once naming the agent and the skill, both packages and the rename for each', async () => {
+  it('the cold boot of a deployment holding the clash boots, and warns once naming the agent, the skill and the tool, both packages and the rename for each', async () => {
     const warnings = bootLines.filter((l) => l.includes('Bare-name conflict at boot'));
     expect(warnings, 'one warning line').toHaveLength(1);
     const line = warnings[0]!;
     expect(levelOf(line)).toBe('WARN');
     expect(line).toContain(`the agent "${AGENT}"`);
     expect(line).toContain(`the skill "${SKILL}"`);
-    for (const name of [AGENT, SKILL]) expect(line, `the rename of ${name}`).toContain(`"beta_${name}"`);
+    expect(line).toContain(`the tool "${TOOL}"`);
+    for (const name of [AGENT, SKILL, TOOL]) expect(line, `the rename of ${name}`).toContain(`"beta_${name}"`);
     expect(line).toContain('package "com.qa.bare.alpha"');
     expect(line).toContain('package "com.qa.bare.beta"');
-    // A tool is not covered: never named.
-    expect(line).not.toContain(TOOL);
     expect(await packageIds(), 'both packages booted').toEqual(expect.arrayContaining(['com.qa.bare.alpha', 'com.qa.bare.beta']));
-    // Unchanged by the rule: the readers keep serving the first-registered package's item.
-    expect(await metaPackage('agent', AGENT)).toBe('com.qa.bare.alpha');
-    expect(await metaPackage('skill', SKILL)).toBe('com.qa.bare.alpha');
+    // Unchanged by the rule: the skill prompt is the first-registered package's.
     expect(await skillPromptTitle(SKILL)).toBe('alpha skill');
+    // [#31680, ADR-0150 D3] The by-name read that names no package refuses the
+    // held name naming both holders (it served the first registered); the read
+    // that names the package serves that package's own.
+    for (const [type, name] of [['agent', AGENT], ['skill', SKILL], ['tool', TOOL]] as const) {
+      await expectMetaRefused(type, name);
+      expect(await metaPackageAt(type, name, 'com.qa.bare.alpha')).toBe('com.qa.bare.alpha');
+      expect(await metaPackageAt(type, name, 'com.qa.bare.beta')).toBe('com.qa.bare.beta');
+    }
   });
 
   it('install-local of a third package declaring a held agent name is 422 PLUGIN_REGISTER_FAILED naming both holders and the rename; nothing is installed', async () => {
@@ -184,7 +214,7 @@ describe('one package holder per agent and skill name, on a booted showcase', ()
     expect(message).toContain('com.qa.bare.beta');
     expect(message).toContain(`"gamma_${AGENT}"`);
     expect(await packageIds(), 'the package list is unchanged').toEqual(before);
-    expect(await metaPackage('agent', AGENT)).toBe('com.qa.bare.alpha');
+    await expectMetaRefused('agent', AGENT);
   });
 
   it('install-local of a package declaring a held skill name is refused the same way; the skill prompt is untouched', async () => {
@@ -200,15 +230,29 @@ describe('one package holder per agent and skill name, on a booted showcase', ()
     expect(await skillPromptTitle(SKILL)).toBe('alpha skill');
   });
 
-  it('CONTROL — install-local of a package declaring fresh agent and skill names, and the shared tool name, installs', async () => {
+  it('install-local of a package declaring a held tool name is refused the same way; /meta/tool/NAME is untouched', async () => {
+    const before = await packageIds();
+    const { status, body } = await installLocal(inline('zeta', { tools: [tool('zeta')] }));
+    expect([status, codeOf(body)], JSON.stringify(body)).toEqual([422, 'PLUGIN_REGISTER_FAILED']);
+    const message = String(body?.error?.message ?? '');
+    expect(message).toContain(`the tool "${TOOL}"`);
+    expect(message).toContain('com.qa.bare.alpha');
+    expect(message).toContain('com.qa.bare.beta');
+    expect(message).toContain(`"zeta_${TOOL}"`);
+    expect(await packageIds(), 'the package list is unchanged').toEqual(before);
+    await expectMetaRefused('tool', TOOL);
+  });
+
+  it('CONTROL — install-local of a package declaring fresh agent, skill and tool names installs', async () => {
     const { status, body } = await installLocal(inline('epsilon', {
       agents: [agent('epsilon', 'epsilon_agent')],
       skills: [skill('epsilon', 'epsilon_skill')],
-      tools: [tool('epsilon')],
+      tools: [tool('epsilon', 'epsilon_tool')],
     }));
     expect(status, JSON.stringify(body)).toBeLessThan(300);
     expect(await packageIds()).toContain('com.qa.bare.epsilon');
     expect(await metaPackage('agent', 'epsilon_agent')).toBe('com.qa.bare.epsilon');
     expect(await skillPromptTitle('epsilon_skill')).toBe('epsilon skill');
+    expect(await metaPackage('tool', 'epsilon_tool')).toBe('com.qa.bare.epsilon');
   });
 });

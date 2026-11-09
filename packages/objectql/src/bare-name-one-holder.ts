@@ -11,7 +11,8 @@
  * under #30803: the data family first, then the request family (`api`, the
  * object-less `action`, the engine's function registry), then the flow family
  * (`flow`, `webhook`, `connector`, `email_template`), and last the AI family
- * (`agent`, `skill`), which closes the series.
+ * (`agent`, `skill`), which closed the series. `tool` joined after it, in its
+ * own change under #31414, once its readers were measured.
  *
  * ## The rule
  *
@@ -60,7 +61,12 @@
  *  - `skill` — an MCP client's `prompts/get` of a skill keeps the
  *    FIRST-registered package's skill (`listSkillPrompts` keeps the first
  *    row per name and drops the other), and `/meta/skill/NAME` serves the
- *    same one.
+ *    same one;
+ *  - `tool` — `/meta/tool/NAME` serves the FIRST-registered package's tool,
+ *    and every reference to a tool carries its bare name alone: a skill's
+ *    `tools` list admits only a snake_case name, an AI tool definition and a
+ *    tool call carry a name and no package, and an MCP server registers one
+ *    tool per name.
  *
  * Every one of them flips with registration order, and none says so (the
  * object-less action's handler bind warns that it replaces one, and names
@@ -143,57 +149,37 @@
  */
 
 import type { ObjectStackManifest } from '@objectstack/spec/kernel';
-import { artifactPackageId } from '@objectstack/core';
+import {
+  artifactPackageId,
+  BARE_NAME_ONE_HOLDER_TYPES,
+  OVERRIDABLE_BASELINE_PACKAGES,
+  isBareNameOneHolderType,
+  isOverridableBaseline,
+  describeBareNameHolder,
+  type BareNameHolder,
+  type BareNameOneHolderType,
+  type BareNameRegistryType,
+} from '@objectstack/core';
 import { isObjectLessActionKey, standaloneActionOwnerKey } from './action-governance.js';
 
-/**
- * A covered type the registry stores — its items reach the engine's package
- * door and the registry's item seam, keyed as the registry keys them.
- */
-export type BareNameRegistryType =
-  | 'picklist' | 'mapping' | 'dataset'
-  | 'api' | 'action'
-  | 'flow' | 'webhook' | 'connector' | 'email_template'
-  | 'agent' | 'skill';
-
-/**
- * A covered type: a registry type, or `function` — the engine's function
- * registry, which a package reaches through the hook binder's bind alone.
- */
-export type BareNameOneHolderType = BareNameRegistryType | 'function';
-
-/**
- * Every covered type, in the order a refusal and a cold boot list them: one
- * family after another, each in the order its change named them.
- */
-export const BARE_NAME_ONE_HOLDER_TYPES: readonly BareNameOneHolderType[] = Object.freeze([
-  // the data family
-  'picklist',
-  'mapping',
-  'dataset',
-  // the request family
-  'api',
-  'action',
-  'function',
-  // the flow family
-  'flow',
-  'webhook',
-  'connector',
-  'email_template',
-  // the AI family
-  'agent',
-  'skill',
-]);
+// [epic #31527 child R2] The holder vocabulary — the covered types, the
+// overridable baselines and the holder spelling — lives in `@objectstack/core`
+// (`package-scoped-resolution.ts`) beside the package-scoped resolution rule
+// that is written in it, so every reader of either reads one copy. Re-exported
+// here under the same names; the rule it serves is this module's.
+export type { BareNameRegistryType, BareNameOneHolderType, BareNameHolder } from '@objectstack/core';
+export {
+  BARE_NAME_ONE_HOLDER_TYPES,
+  OVERRIDABLE_BASELINE_PACKAGES,
+  isBareNameOneHolderType,
+  isOverridableBaseline,
+  describeBareNameHolder,
+};
 
 /** The covered registry types, in the order a refusal lists them. */
 export const BARE_NAME_REGISTRY_TYPES: readonly BareNameRegistryType[] = Object.freeze(
   BARE_NAME_ONE_HOLDER_TYPES.filter((type): type is BareNameRegistryType => type !== 'function'),
 );
-
-/** Is `type` one of the covered types? */
-export function isBareNameOneHolderType(type: unknown): type is BareNameOneHolderType {
-  return typeof type === 'string' && (BARE_NAME_ONE_HOLDER_TYPES as readonly string[]).includes(type);
-}
 
 /** Is `type` a covered type the registry stores (as the registry keys it)? */
 export function isBareNameRegistryType(type: unknown): type is BareNameRegistryType {
@@ -227,6 +213,7 @@ const COLLECTION_KEY: Readonly<Record<BareNameRegistryType, string>> = Object.fr
   email_template: 'emailTemplates',
   agent: 'agents',
   skill: 'skills',
+  tool: 'tools',
 });
 
 /**
@@ -248,44 +235,8 @@ export const BUILT_IN_BARE_NAMES: Readonly<Record<BareNameOneHolderType, Readonl
   email_template: new Set<string>(),
   agent: new Set<string>(),
   skill: new Set<string>(),
+  tool: new Set<string>(),
 });
-
-/**
- * Per covered type, the packages whose items are an OVERRIDABLE BASELINE
- * (module doc, "The holders"): the platform's copies, which that type's one
- * consumer serves any other package's same-named item over, by contract. Such
- * a package neither holds a name of that type nor is refused one — at the
- * package door, the item seam and the cold boot alike.
- *
- * `email_template`: the email service declares the built-in auth templates
- * under its own package id (`EmailServicePlugin.init`, `@objectstack/plugin-email`),
- * and its template loader picks any other package's `(name, locale)` member
- * before the built-in's (`BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID` there — the
- * same spelling, held together by the flow family's booted dogfood pin: an
- * app overriding a built-in template installs only while the two agree).
- */
-export const OVERRIDABLE_BASELINE_PACKAGES: Readonly<Record<BareNameOneHolderType, ReadonlySet<string>>> = Object.freeze({
-  picklist: new Set<string>(),
-  mapping: new Set<string>(),
-  dataset: new Set<string>(),
-  api: new Set<string>(),
-  action: new Set<string>(),
-  function: new Set<string>(),
-  flow: new Set<string>(),
-  webhook: new Set<string>(),
-  connector: new Set<string>(),
-  email_template: new Set<string>(['com.objectstack.service.email']),
-  agent: new Set<string>(),
-  skill: new Set<string>(),
-});
-
-/**
- * Is `packageId`'s item of `type` an overridable baseline
- * ({@link OVERRIDABLE_BASELINE_PACKAGES}) — never a holder, never judged?
- */
-export function isOverridableBaseline(type: BareNameOneHolderType, packageId: string | undefined): boolean {
-  return packageId !== undefined && OVERRIDABLE_BASELINE_PACKAGES[type].has(packageId);
-}
 
 /**
  * The prefix the runtime binds a package's handlers under
@@ -318,11 +269,6 @@ export type BareNameColdBootMode = 'warn' | 'refuse';
  * holder after the boot in either mode.
  */
 export const BARE_NAME_COLD_BOOT_MODE: BareNameColdBootMode = 'warn';
-
-/** Who holds a covered name (module doc, "The holders"). */
-export type BareNameHolder =
-  | { readonly kind: 'package'; readonly packageId: string }
-  | { readonly kind: 'built-in' };
 
 /** One `(type, name)` a package declares. */
 export interface DeclaredBareName {
@@ -403,6 +349,7 @@ const CONSUMER_CLAUSE: Readonly<Record<BareNameOneHolderType, string>> = Object.
   email_template: 'a send names its email template',
   agent: '`/meta/agent/NAME` serves one agent per name',
   skill: 'an MCP client fetches a skill\'s prompt by its name',
+  tool: 'a skill\'s `tools` and an MCP client name a tool',
 });
 
 /** The noun a reason names a covered type by. */
@@ -419,6 +366,7 @@ const TYPE_NOUN: Readonly<Record<BareNameOneHolderType, string>> = Object.freeze
   email_template: 'an email template',
   agent: 'an agent',
   skill: 'a skill',
+  tool: 'a tool',
 });
 
 const joinList = (parts: readonly string[]): string =>
@@ -439,13 +387,6 @@ export function bareNameReason(types: readonly BareNameOneHolderType[] = BARE_NA
     `deployment: ${joinList(listed.map((t) => CONSUMER_CLAUSE[t]))}, with no package to tell two definitions ` +
     'apart, so with two holders every caller is served the same one, chosen by registration order.'
   );
-}
-
-/** How a refusal names a holder. */
-export function describeBareNameHolder(holder: BareNameHolder): string {
-  return holder.kind === 'package'
-    ? `package "${holder.packageId}"`
-    : 'the platform, as a built-in name no package can declare';
 }
 
 /** A stable identity for de-duplicating holders. */

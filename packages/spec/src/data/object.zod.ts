@@ -81,8 +81,8 @@ export const LEGACY_API_METHOD_GUIDANCE: Record<LegacyApiMethod, string> = {
   aggregate: "declare ['list'] — `aggregate` derives from list",
   history: "declare ['get'] with `enable.trackHistory: true` — `history` derives from get ∧ trackHistory",
   search: "declare ['list'] (with `searchable` not false) — `search` derives from list ∧ searchable",
-  restore: "delete the value — `restore` never derives (`enable.trash` was retired because no runtime ever read it); it returns only with a real recycle bin, and that soft-delete work is parked",
-  purge: "delete the value — `purge` never derives (`enable.trash` was retired because no runtime ever read it)",
+  restore: "declare ['delete'] — `restore` derives from delete: it is the recycle bin's restore door (ADR-0148), served on a business object only, because a platform object (`sys_`, `cloud_`, `ai_`) has no bin",
+  purge: "declare ['delete'] — `purge` derives from delete: it is the recycle bin's purge door (ADR-0148), served on a business object only, because a platform object (`sys_`, `cloud_`, `ai_`) has no bin",
   import: "declare ['create'] and/or ['update'] — `import` derives from create ∨ update (writeMode-precise at the gate)",
   export: "declare ['list'] — `export` derives from list",
 };
@@ -169,12 +169,14 @@ export function stripLegacyApiMethods(
 const CAPABILITIES_RETIRED_KEY_GUIDANCE: Record<string, string> = {
   trash:
     '`enable.trash` was removed from @objectstack/spec in the 16.x line (' +
-    'ADR-0049) — it never had a runtime consumer: every delete has always been a ' +
-    'hard delete, and a default-true flag promising a recycle bin was a false ' +
+    'ADR-0049) — it never had a runtime consumer: every delete was then a hard ' +
+    'delete, and a default-true flag promising a recycle bin was a false ' +
     'affordance (authors wrote `trash: false` believing they were opting out of a ' +
-    'soft-delete that never ran). Delete the key. For recoverability use per-field ' +
-    '`trackHistory` (audit trail) or a `lifecycle` policy; soft delete is parked, ' +
-    'and if built returns as a live enforced flag (ADR-0049 prune-or-build). ' +
+    'soft-delete that never ran). Delete the key. The recycle bin that shipped ' +
+    'later (ADR-0148) has no flag: it takes every by-id delete of a business ' +
+    'object, and none of a platform object (`sys_`, `cloud_`, `ai_`), whose ' +
+    'deletes stay permanent. For history use per-field `trackHistory` (audit ' +
+    'trail), and for retention a `lifecycle` policy. ' +
     'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.',
   mru:
     '`enable.mru` was removed from @objectstack/spec in the 16.x line (' +
@@ -1664,9 +1666,12 @@ const UNKNOWN_KEY_GUIDANCE: Record<string, string> = {
     'layout derives from `fieldGroups` + `Field.group`.',
   softDelete:
     '`softDelete` was removed from the spec in 16.0 (ADR-0049 ' +
-    'enforce-or-remove) — there is no soft-delete/recycle-bin runtime, so it ' +
-    'stored nothing and implied restore semantics that do not exist. Deletes ' +
-    'are hard deletes; remove the key.',
+    'enforce-or-remove) — no soft-delete runtime read it then, so it stored ' +
+    'nothing and implied restore semantics that did not exist. Remove the key: ' +
+    'the recycle bin that shipped later (ADR-0148) has no per-object switch. It ' +
+    'takes every by-id delete of a business object, which can then be restored ' +
+    'or purged; a platform object (`sys_`, `cloud_`, `ai_`) has no bin, so its ' +
+    'deletes are permanent.',
   versioning:
     '`versioning` was removed from the spec in 16.0 (ADR-0049) — no ' +
     'record-versioning engine ever read it (it snapshotted no history). Use ' +

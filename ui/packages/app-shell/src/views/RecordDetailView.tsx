@@ -60,6 +60,7 @@ import { modalTargetRefusalMessage } from '../utils/modalTargetDiagnostics.js';
 import { actionContextOrg } from '../utils/actionContextOrg.js';
 import { matchAppBySegment, resolveHostAppSegment } from '../utils/appRoute.js';
 import { hostInConsolePath } from '../utils/hostInConsolePath.js';
+import { recycleBinRefusalLabelsOf, recycleBinRestoreOf } from '../utils/recycleBinRestore.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
 import { apiActionRefusalResult } from '../utils/flowResponse.js';
 import { findDeclaredApiAction, isSameOriginApiTarget, readApiActionDoorSuccess, sendApiActionThroughDoor } from '../utils/apiActionDoor.js';
@@ -4700,10 +4701,35 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
               destructive: true,
             }))
           ) return;
+          // ADR-0148 — the toast offers Undo when the delete wrote a
+          // recycle-bin entry and the caller may restore its own deletes on
+          // the object; the undo restores the entry and comes back here.
+          const restore = recycleBinRestoreOf(dataSource, objectName!, perms.effectiveObjects);
+          const baseAppUrl = appName ? `/apps/${appName}` : '';
+          const recordUrl = `${location.pathname}${location.search}`;
           try {
-            await dataSource.delete(objectName!, pureRecordId!);
-            toast.success(recordDelete.successText(deleteDeps, deleteTarget));
-            const baseAppUrl = appName ? `/apps/${appName}` : '';
+            let entryId: string | undefined;
+            if (restore) {
+              await dataSource.delete(objectName!, pureRecordId!, {
+                onRecycleBinEntry: (id: string) => {
+                  entryId = id;
+                },
+              });
+            } else {
+              await dataSource.delete(objectName!, pureRecordId!);
+            }
+            recordDelete.successToast(
+              {
+                ...deleteDeps,
+                toast,
+                restore,
+                refusalLabels: recycleBinRefusalLabelsOf(objectName!, objectDef, (name) =>
+                  servedObjectLabel(objects.find((o: any) => o.name === name) ?? { name }, language, objectLabel, name)),
+              },
+              deleteTarget,
+              entryId,
+              () => navigate(recordUrl),
+            );
             navigate(`${baseAppUrl}/${objectName}`, { replace: true });
           } catch (err: any) {
             // A delete the object's external datasource does not admit

@@ -31,9 +31,12 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SecurityPlugin } from '@objectstack/plugin-security';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
-import { authIdentityObjects } from './manifest.js';
+import { authIdentityObjects, authObjectExtensions } from './manifest.js';
+import { SysSecret } from '@objectstack/platform-objects';
+import type { CryptoHandle, ICryptoProvider } from '@objectstack/spec/contracts';
 import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-guard.js';
 import { runDeleteIdpGroupMapping, runSetIdpGroupMapping, type IdpGroupMappingAdminDeps } from './idp-group-mapping-admin.js';
+import { createEngineSsoProviderConfigReader, runSetSsoGroupsClaim, runShowSsoGroupsClaim } from './register-sso-provider.js';
 import type { OrganizationBoundaryJudge } from './scim-group-projection.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 import { sqliteEnginePool, type BootedSqliteEngine } from './__tests__/sqlite-engine-pool.testkit.js';
@@ -559,16 +562,42 @@ async function bootGroupEngine(): Promise<BootedSqliteEngine> {
   const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
   engine.registerDriver(driver, true);
   await engine.init();
-  for (const object of [...authIdentityObjects, sysUserPermissionSet]) {
-    engine.registry.registerObject(object as never, '@objectstack/plugin-auth');
+  for (const object of [...authIdentityObjects, sysUserPermissionSet, SysSecret]) {
+    engine.registry.registerObject(withAuthExtensions(object) as never, '@objectstack/plugin-auth');
   }
   await engine.syncSchemas();
+  // The OIDC client secret's encrypted channel, as the host composes it: a provider
+  // write through the vendor (`/sso/update-provider`) lifts the secret onto
+  // `oidc_client_secret` (`sso-client-secret.ts`), which needs the column and a
+  // crypto provider. Rows these cases insert keep it in the blob (an un-migrated row).
+  engine.setCryptoProvider(base64Crypto());
   await engine.insert('sys_organization', { id: DEFAULT_ORG, name: 'Default Organization', slug: 'default' }, SYSTEM);
   await engine.insert('sys_organization', { id: GROUP_ORG, name: 'Acme', slug: 'acme' }, SYSTEM);
   // [ADR-0131 D3/D4] `admin_full_access` is a catalog definition the guard resolves a grant's set name to.
   bindTestSecurityCatalog(engine, { permissions: [{ name: ADMIN_FULL_ACCESS }] });
   registerLastAdminGuard(engine as unknown as LastAdminGuardEngine, { packageId: 'test.last-admin-guard' });
   return { engine, driver };
+}
+
+/** An object with the fields plugin-auth's manifest adds to it (`authObjectExtensions`). */
+function withAuthExtensions(object: { name?: string; fields?: Record<string, unknown> }): unknown {
+  const extension = authObjectExtensions.find((e) => e.extend === object.name);
+  return extension ? { ...object, fields: { ...object.fields, ...extension.fields } } : object;
+}
+
+/** A stand-in `ICryptoProvider`: base64 is enough to round-trip the secret column. */
+function base64Crypto(): ICryptoProvider {
+  let n = 0;
+  return {
+    async encrypt(plain: string): Promise<CryptoHandle> {
+      n += 1;
+      return { id: `sec_${n}`, kmsKeyId: 'local', alg: 'test-b64', version: 1, ciphertext: Buffer.from(plain, 'utf8').toString('base64') };
+    },
+    async decrypt(handle: CryptoHandle): Promise<string> { return Buffer.from(handle.ciphertext, 'base64').toString('utf8'); },
+    async rotateKey(handle: CryptoHandle): Promise<CryptoHandle> { return { ...handle, version: handle.version + 1 }; },
+    digest(plain: string): string { return `d:${plain.length}`; },
+    async keyedDigest(plain: string): Promise<string> { return `k:${plain.length}`; },
+  };
 }
 
 /** The catalog the security service judges against; a case may redefine a set after its mapping is saved. */
@@ -834,5 +863,123 @@ describe('an SSO sign-in grants the permission set its IdP group is mapped to', 
     const orphan = await saveGroupMapping(rp, { providerId: PROVIDER_ID, groupDisplayName: 'Acme Sales', permissionSet: SALES });
     expect(orphan.body).toMatchObject({ error: { code: 'VALIDATION_FAILED', fields: [{ field: 'providerId', code: 'rule_violation' }] } });
     expect(await rp.engine.find('sys_idp_group_mapping', {}, SYSTEM)).toEqual([]);
+  });
+});
+
+// ── The groups claim, set through the SSO Providers form ────────────────────
+//
+// The form's save path for an existing provider is the `edit_sso_groups_claim`
+// action's bridge (`runSetSsoGroupsClaim`), which writes through the vendor's
+// own `/sso/update-provider`; its show path is `show_sso_groups_claim`'s
+// (`runShowSsoGroupsClaim`). Both run here against the real `AuthManager`,
+// the real `sso()` plugin and the SQLite engine of the group cases above, so
+// what the form stores is the row the vendor stores and what a sign-in grants
+// is the #30967 item 3 projection's own answer.
+
+describe('the SSO Providers form sets the groups claim a sign-in grants from, and clears it', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const configWith = (mapping: Record<string, unknown>) => JSON.stringify({
+    issuer: IDP,
+    clientId: CLIENT_ID,
+    clientSecret: CLIENT_SECRET,
+    authorizationEndpoint: `${IDP}/authorize`,
+    tokenEndpoint: `${IDP}/token`,
+    jwksEndpoint: `${IDP}/jwks`,
+    discoveryEndpoint: `${IDP}/.well-known/openid-configuration`,
+    pkce: true,
+    scopes: ['openid', 'email', 'profile'],
+    mapping,
+  });
+  /** The mapping the register door stores for a provider with a groups claim (`makeGroupRp`'s row). */
+  const DOOR_MAPPING = { email: 'email', name: 'name', extraFields: { groups: 'groups' } };
+  const PLAIN_MAPPING = { email: 'email', name: 'name' };
+
+  /** The form's caller: an owner of the provider's organization (the vendor's provider-access check), by bearer. */
+  async function formCaller(rp: GroupRp): Promise<string> {
+    await rp.engine.insert('sys_member', { user_id: 'usr_admin', organization_id: GROUP_ORG, role: 'owner' }, SYSTEM);
+    const ctx = await ((await rp.manager.getAuthInstance()) as any).$context;
+    return (await ctx.internalAdapter.createSession('usr_admin')).token as string;
+  }
+  const formRequest = (path: string, token: string, body: Record<string, unknown>) =>
+    new Request(`${AUTH}/admin/sso/${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: BASE, authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    });
+  const readerOf = (rp: GroupRp) => createEngineSsoProviderConfigReader(() => rp.engine as never);
+  async function saveClaim(rp: GroupRp, token: string, groupsClaim: string) {
+    const res = await runSetSsoGroupsClaim((req) => rp.manager.handleRequest(req), formRequest('set-groups-claim', token, { providerId: PROVIDER_ID, groupsClaim }), readerOf(rp));
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    return res.body.data!.groupsClaim;
+  }
+  async function storedConfig(rp: GroupRp): Promise<Record<string, unknown>> {
+    const stored = await readerOf(rp)(PROVIDER_ID);
+    return JSON.parse(String(stored!.oidcConfig));
+  }
+  /** The stored config apart from the mapping and the client secret (the vendor's write lifts it to its encrypted column). */
+  const withoutMapping = ({ mapping: _mapping, clientSecret: _secret, ...rest }: Record<string, unknown>) => rest;
+
+  it('a claim saved through the form is stored as the register door stores it, and a sign-in grants its mapped set', async () => {
+    const rp = await makeGroupRp({ provider: { oidc_config: configWith(PLAIN_MAPPING) } });
+    const token = await formCaller(rp);
+    savedMappingId(await saveGroupMapping(rp, { providerId: PROVIDER_ID, groupDisplayName: 'Acme Sales', permissionSet: SALES }));
+    const before = await storedConfig(rp);
+
+    expect(await saveClaim(rp, token, 'groups')).toBe('groups');
+    const after = await storedConfig(rp);
+    expect(after.mapping).toEqual(DOOR_MAPPING);
+    expect(withoutMapping(after)).toEqual(withoutMapping(before));
+
+    const { userId } = await signInWithClaims(rp, { groups: ['Acme Everyone', 'Acme Sales'] });
+    expect(await grantsOf(rp, userId)).toEqual([projectedSales]);
+    expect(rp.error).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: a provider saved without the claim signs users in as today — nothing granted, nothing written, nothing logged', async () => {
+    const rp = await makeGroupRp({ provider: { oidc_config: configWith(PLAIN_MAPPING) } });
+    const token = await formCaller(rp);
+    savedMappingId(await saveGroupMapping(rp, { providerId: PROVIDER_ID, groupDisplayName: 'Acme Sales', permissionSet: SALES }));
+    expect(await saveClaim(rp, token, '')).toBeNull();
+    expect((await storedConfig(rp)).mapping).toEqual(PLAIN_MAPPING);
+
+    const writes = observeGrantWrites(rp);
+    const { userId } = await signInWithClaims(rp, { groups: ['Acme Sales'] });
+    expect(writes).toEqual([]);
+    expect(await grantsOf(rp, userId)).toEqual([]);
+    expect(rp.error).not.toHaveBeenCalled();
+    expect(rp.warn).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: the form shows the claim of a provider the register door wrote; clearing it there signs users in as a provider saved without it', async () => {
+    const rp = await makeGroupRp();
+    const token = await formCaller(rp);
+    savedMappingId(await saveGroupMapping(rp, { providerId: PROVIDER_ID, groupDisplayName: 'Acme Sales', permissionSet: SALES }));
+    const shown = await runShowSsoGroupsClaim(formRequest('get-groups-claim', token, { providerId: PROVIDER_ID }), readerOf(rp));
+    expect(shown.body).toEqual({ success: true, data: { providerId: PROVIDER_ID, groupsClaim: 'groups' } });
+
+    expect(await saveClaim(rp, token, '')).toBeNull();
+    expect((await storedConfig(rp)).mapping).toEqual(PLAIN_MAPPING);
+    const writes = observeGrantWrites(rp);
+    const { userId } = await signInWithClaims(rp, { groups: ['Acme Sales'] });
+    expect(writes).toEqual([]);
+    expect(await grantsOf(rp, userId)).toEqual([]);
+  });
+
+  it('round trip: every other mapping member is kept verbatim, on a register-door row and on a row this action changed', async () => {
+    const rich = { email: 'upn', name: 'display_name', image: 'picture', extraFields: { department: 'dept', groups: 'groups' } };
+    const rp = await makeGroupRp({ provider: { oidc_config: configWith(rich) } });
+    const token = await formCaller(rp);
+    const before = await storedConfig(rp);
+
+    expect(await saveClaim(rp, token, 'memberOf')).toBe('memberOf');
+    const changed = await storedConfig(rp);
+    expect(changed.mapping).toEqual({ ...rich, extraFields: { department: 'dept', groups: 'memberOf' } });
+    expect(withoutMapping(changed)).toEqual(withoutMapping(before));
+
+    expect(await saveClaim(rp, token, '')).toBeNull();
+    const cleared = await storedConfig(rp);
+    expect(cleared.mapping).toEqual({ email: 'upn', name: 'display_name', image: 'picture', extraFields: { department: 'dept' } });
+    expect(withoutMapping(cleared)).toEqual(withoutMapping(before));
   });
 });

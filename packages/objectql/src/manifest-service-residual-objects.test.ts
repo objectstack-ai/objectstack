@@ -41,6 +41,7 @@ import { OWNERSHIP_QUEUE_SERVICE, type IMetadataService } from '@objectstack/spe
 import { ObjectQLPlugin } from './plugin.js';
 import type { ObjectQL } from './engine.js';
 import { viewContainerNameRefusal } from './view-container-name-refusal.js';
+import { packageResolutionClosure } from '@objectstack/metadata-core';
 
 type ManifestService = { register(m: unknown): void | Promise<void> };
 
@@ -215,9 +216,13 @@ describe('ADR-0130 D4 — the manifest service registers the residual\'s objects
     expect(acmePackageIds(ql)).toEqual([]);
   });
 
+  // [ADR-0150 D3, child E6; N1 ruled on #31678: the declared dependency
+  // closure only] The residual names the body that holds the list among its
+  // dependencies — forced edit: a same-artifact sibling it does not depend on
+  // is outside its closure, and its list is refused.
   it('a residual object whose field names a picklist a BODY declares is served with that list', async () => {
     const { kernel } = await boot(registering('app', [
-      residualStack(noteObj(statusField), {}, { picklists: [statusList()] }),
+      residualStack(noteObj(statusField), { manifest: { ...app, id: RELEASE_ID, dependencies: { [SERVICE_ID]: '^2.4.0' } } }, { picklists: [statusList()] }),
     ]));
     const ql = engineOf(kernel);
     expect(ql.registry.getObjectOwner('acme_note')?.packageId).toBe(RELEASE_ID);
@@ -721,5 +726,36 @@ describe('ADR-0130 D4 — a residual picklist that no object field names', () =>
     const { kernel } = await boot(registering('app', [payload({ manifest: app, objects: [noteObj()], picklists: [unusedList()] })]));
     expect(kernel.getState()).toBe('running');
     expect(engineOf(kernel).registry.resolvePicklistOptions('acme_unused')?.map((o) => o.value)).toEqual(['a']);
+  });
+});
+
+describe('[ADR-0130 D4, epic #31527 R2] the residual owner\'s declared dependencies reach the one closure walk', () => {
+  it('records what the stack\'s manifest declares, adds no package record, and the walk reads it', async () => {
+    const stack = residualStack();
+    (stack as { manifest: Record<string, unknown> }).manifest.dependencies = { [SERVICE_ID]: '^2.0.0' };
+    const { kernel } = await boot(registering('test.residual-deps', [stack]));
+    const ql = engineOf(kernel);
+    expect(ql.registry.residualOwnerDependenciesOf(RELEASE_ID)).toEqual([SERVICE_ID]);
+    expect(ql.registry.getPackage(RELEASE_ID)).toBeUndefined();
+    expect(acmePackageIds(ql)).not.toContain(RELEASE_ID);
+    expect(packageResolutionClosure(ql.registry, RELEASE_ID).has(SERVICE_ID)).toBe(true);
+  });
+
+  // [ADR-0150 D3] The install judge reads the closure through a view that
+  // overlays the pending artifact's manifests; that view must hand the walk the
+  // registered residual owner's dependencies too, or a package that reaches a
+  // list only THROUGH the residual owner is refused at install.
+  it('after start(), a package depending on the residual owner reaches the list its dependency holds', async () => {
+    const stack = residualStack(noteObj(), {}, { picklists: [statusList()] });
+    (stack as { manifest: Record<string, unknown> }).manifest.dependencies = { [SERVICE_ID]: '^2.0.0' };
+    const { kernel } = await boot(registering('test.residual-deps', [stack]));
+    const late = payload({
+      manifest: { id: 'com.example.late', name: 'late', namespace: 'late', version: '1.0.0', type: 'app', dependencies: { [RELEASE_ID]: '^1.0.0' } },
+      objects: [{ name: 'late_ticket', label: 'Ticket', sharingModel: 'private', fields: statusField }],
+    });
+    await (kernel.getService('manifest') as ManifestService).register(late);
+    const ql = engineOf(kernel);
+    expect(ql.registry.getObjectOwner('late_ticket')?.packageId).toBe('com.example.late');
+    expect(ql.registry.resolvePicklistOptions('acme_status', 'com.example.late')?.map((o) => o.value)).toEqual(['open']);
   });
 });

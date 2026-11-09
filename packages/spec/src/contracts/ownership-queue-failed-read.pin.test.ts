@@ -26,6 +26,7 @@ import { describe, it, expect } from 'vitest';
 
 import type {
   IOwnershipQueueService,
+  OwnershipQueueCallerPackage,
   OwnershipQueueFailedReadAnswer,
   QueueExpansionPurpose,
 } from './ownership-queue-service';
@@ -42,8 +43,8 @@ export type _AnswerIsExactlyTwoValues = Assert<Eq<OwnershipQueueFailedReadAnswer
 export type _ExpandReadsTheAnswerType = Assert<Eq<ExpandOptions['onFailedRead'], OwnershipQueueFailedReadAnswer | undefined>>;
 export type _IsMemberReadsTheAnswerType = Assert<Eq<IsMemberOptions['onFailedRead'], OwnershipQueueFailedReadAnswer | undefined>>;
 export type _PurposeUnchanged = Assert<Eq<ExpandOptions['purpose'], QueueExpansionPurpose | undefined>>;
-export type _ExpandOptionKeys = Assert<Eq<keyof ExpandOptions, 'purpose' | 'onFailedRead'>>;
-export type _IsMemberOptionKeys = Assert<Eq<keyof IsMemberOptions, 'onFailedRead'>>;
+export type _ExpandOptionKeys = Assert<Eq<keyof ExpandOptions, 'purpose' | 'onFailedRead' | 'callerPackageId'>>;
+export type _IsMemberOptionKeys = Assert<Eq<keyof IsMemberOptions, 'onFailedRead' | 'callerPackageId'>>;
 /** The axes stay apart: no failed-read answer is a purpose, and no purpose is a failed-read answer. */
 export type _AxesDisjoint = Assert<Eq<Extract<OwnershipQueueFailedReadAnswer, QueueExpansionPurpose>, never>>;
 
@@ -80,5 +81,50 @@ async function callShapes(svc: IOwnershipQueueService): Promise<unknown[]> {
 describe('IOwnershipQueueService onFailedRead (#30251)', () => {
   it('every call shape compiles against an implementation written before the key, and answers as it did', async () => {
     expect(await callShapes(legacy)).toEqual([[], [], [], [], [], [], false, false, [], false, false, []]);
+  });
+});
+
+/**
+ * [ADR-0150 D3] `callerPackageId` on the three reads that take a queue name
+ * ({@link OwnershipQueueCallerPackage}). Pinned at the type level, as above:
+ *
+ *  1. **A widening, not a narrowing.** Every call without the key compiles as
+ *     before, and so does an implementation written before it (the `legacy`
+ *     double above, which takes no such key).
+ *  2. **One value type on all three reads**, exactly `string | null`.
+ *  3. **Only the reads that take a queue name.** `queuesOf` and `hasAnyQueue`
+ *     name no queue, so they take no caller package.
+ *
+ * ⛔ Not pinned: how an implementation resolves from the package — that is the
+ * producer half (`@objectstack/plugin-sharing`).
+ */
+type ResolveOptions = NonNullable<Parameters<IOwnershipQueueService['resolveQueue']>[2]>;
+
+export type _CallerPackageIsStringOrNull = Assert<Eq<OwnershipQueueCallerPackage, string | null>>;
+export type _ResolveOptionKeys = Assert<Eq<keyof ResolveOptions, 'callerPackageId'>>;
+export type _ResolveReadsTheCallerType = Assert<Eq<ResolveOptions['callerPackageId'], OwnershipQueueCallerPackage | undefined>>;
+export type _ExpandReadsTheCallerType = Assert<Eq<ExpandOptions['callerPackageId'], OwnershipQueueCallerPackage | undefined>>;
+export type _IsMemberReadsTheCallerType = Assert<Eq<IsMemberOptions['callerPackageId'], OwnershipQueueCallerPackage | undefined>>;
+export type _QueuesOfNamesNoQueue = Assert<Eq<Parameters<IOwnershipQueueService['queuesOf']>['length'], 2>>;
+
+async function callerPackageShapes(svc: IOwnershipQueueService): Promise<unknown[]> {
+  return [
+    await svc.resolveQueue('q', 'org_a'),
+    await svc.resolveQueue('q', 'org_a', { callerPackageId: 'com.acme.crm' }),
+    await svc.resolveQueue('q', null, { callerPackageId: null }),
+    await svc.expandMembers('q', 'org_a', { callerPackageId: 'com.acme.crm' }),
+    await svc.expandMembers('q', 'org_a', { purpose: 'addressing', onFailedRead: 'refuse', callerPackageId: 'com.acme.crm' }),
+    await svc.isMember('u', 'q', 'org_a', { callerPackageId: 'com.acme.crm' }),
+    await svc.isMember('u', 'q', 'org_a', { onFailedRead: 'refuse', callerPackageId: null }),
+    // @ts-expect-error — a caller package is an id, not a package object
+    await svc.expandMembers('q', 'org_a', { callerPackageId: { id: 'com.acme.crm' } }),
+    // @ts-expect-error — `resolveQueue` takes no failed-read answer
+    await svc.resolveQueue('q', 'org_a', { onFailedRead: 'refuse' }),
+  ];
+}
+
+describe('IOwnershipQueueService callerPackageId (ADR-0150 D3)', () => {
+  it('every call shape compiles against an implementation written before the key, and answers as it did', async () => {
+    expect(await callerPackageShapes(legacy)).toEqual([null, null, null, [], [], false, false, [], null]);
   });
 });

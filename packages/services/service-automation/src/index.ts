@@ -74,6 +74,10 @@ export type {
     // method is barrel-reachable, so a host building a custom composition
     // needs the name to hand it the loader's set.
     PackagedFlowSource,
+    // [ADR-0150 D3] The reader `AutomationEngine.setFlowNameResolver` takes —
+    // barrel-reachable through that method, for a host composing its own
+    // registry over the one package-scoped resolver.
+    FlowNameResolver,
     // [#28405] The reader `AutomationEngine.setFlowHistorySource` takes —
     // barrel-reachable through that method, for a host composing its own
     // metadata history.
@@ -100,6 +104,7 @@ export type {
 // test) collapses contenders the same deterministic way instead of inventing a
 // second precedence.
 export { resolveFlowPrecedence, describeFlowContender, renderFlowContender } from './flow-precedence.js';
+export type { FlowNameRefusalReader } from './flow-precedence.js';
 export type { FlowPrecedenceWinner } from './flow-precedence.js';
 
 // Per-run summary (#4354): the fold that turns a run's step log into

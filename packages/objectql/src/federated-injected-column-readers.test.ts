@@ -30,7 +30,9 @@
  *     field, and so how it reaches an injected lookup: `referenceCarrierOf`,
  *     `referenceTargetOf`;
  *  3. the tenant-column resolver, `resolveTenantFieldName`, and the constant
- *     it resolves to, `DEFAULT_TENANT_FIELD`;
+ *     it resolves to, `DEFAULT_TENANT_FIELD` (both, and `isFederatedObject`,
+ *     are defined in `@objectstack/core` and re-exported here, so their
+ *     definitions are outside this scan and only their readers are in it);
  *  4. every spelling of an injected column's NAME: a string literal, an object
  *     literal key, or a `SystemFieldName` member. The names are not listed
  *     here. They are `injectedSystemColumnDefs` (`@objectstack/spec/data`)
@@ -444,10 +446,6 @@ const READERS: Record<string, Row> = {
     why: 'names the `queue` metadata TYPE in the namespace name rule\'s type list (ADR-0150 D2); it reads no row and no column',
   },
   'assignment-rules.ts#<module> :: queue': { disposition: 'not-a-read', why: VOCABULARY },
-  'package-scoped-resolver.ts#<module> :: queue': {
-    disposition: 'not-a-read',
-    why: 'the metadata TYPE `queue` (ADR-0150 D1 bucket 2) in the list of types addressed by package, not the column; it reads no row',
-  },
   'assignment-rules.ts#carriesQueueColumn :: resolveInjectedColumnProvenance()': {
     disposition: 'excludes',
     why: 'an object whose queue column is unprovisioned (federated) evaluates no assignment rule',
@@ -523,17 +521,9 @@ const READERS: Record<string, Row> = {
       "leaves the column out of an update's static-readonly schema view where the wall's seam judges it; " +
       'it reads a registered definition and the payload in hand, never storage',
   },
-  'tenancy/system-write-organization.ts#<module> :: organization_id': {
-    disposition: 'not-a-read',
-    why: 'the declaration of the default tenant column name',
-  },
   'tenancy/system-write-organization.ts#buildRefusalMessage :: organization_id': {
     disposition: 'not-a-read',
     why: 'names the column in refusal text',
-  },
-  'tenancy/system-write-organization.ts#resolveTenantFieldName :: organization_id': {
-    disposition: 'definition',
-    why: 'the tenant-column resolver every tenant reader above asks; it reads a schema, never a row',
   },
   'federated-object.ts#isFederatedUnprovisionedInjectedColumn :: isFederatedObject()': {
     disposition: 'definition',

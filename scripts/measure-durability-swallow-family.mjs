@@ -330,6 +330,7 @@ const WRITE_SHAPED_CALLEES = new Map([
   ['persistActionInvocationAuditRow', 'gate-vocabulary'],
   ['persistDataExportAuditRow', 'gate-vocabulary'],
   ['persistPackageLifecycleAuditRow', 'gate-vocabulary'],
+  ['persistCredentialUseAuditRow', 'gate-vocabulary'],
   ['deleteMetaItemFromLoader', 'gate-vocabulary'],
   ['persistPackageCommitRow', 'gate-vocabulary'],
   ['persistSeedTenancyReceiptRow', 'gate-vocabulary'],
@@ -546,15 +547,19 @@ const RESOLUTION_CONTROLS = [
       + 'two apart — which is the whole reason this family reads the resolver instead of the output.',
   },
   {
-    file: 'packages/objectql/src/engine.ts',
+    file: 'packages/objectql/src/engine-delete-and-aggregate.ts',
     callee: 'delete',
-    fromClass: 'ObjectQL',
-    resolvesIn: 'ObjectQL',
+    fromClass: 'DeleteAndAggregateFacet',
+    resolvesIn: 'DeleteAndAggregateFacet',
     why:
-      'The same collision on the sharpest name in the vocabulary. `delete` is the callee the AWAITED '
-      + 'discriminator exists to police, and `ObjectRepository.delete` is a different method from '
-      + '`ObjectQL.delete`; resolving one into the other is exactly the "invents a write" failure the '
-      + '`sameFileCallee` rule was written for, arriving one layer further in.',
+      'The sharpest name in the vocabulary: `delete` is the callee the AWAITED discriminator exists to '
+      + 'police. Its one `this.delete(...)` re-entry (the after-abort unit re-running the delete) moved '
+      + 'out of `ObjectQL` in `engine.ts` with the body that holds it, into the facet module, where '
+      + '`this` is the facet host and its `delete` is the class\'s stub, which calls the facet\'s own '
+      + '`delete`. So the hop must land in `DeleteAndAggregateFacet`, the body the stub reaches, and in '
+      + 'no other. The cross-class collision in `engine.ts` (`ObjectRepository` and `ScopedContext` '
+      + 'declaring a method of an `ObjectQL` name) stays pinned by the `update` and `transaction` '
+      + 'controls beside this one.',
   },
   {
     file: 'packages/objectql/src/engine.ts',

@@ -26,6 +26,16 @@ import { request, expect, type APIRequestContext } from '@playwright/test';
  * admin: the better-auth cookie for the API origin and the Bearer token the
  * console adapter reads from the APP origin's localStorage. It is returned,
  * never written to disk, so no path has to be rooted.
+ *
+ * ⛔ Every request context this module builds names its `storageState`. Inside
+ * `@playwright/test`, a request context created without one inherits the
+ * config's `use.storageState`, which is the global setup's ADMIN session
+ * cookie (measured: `playwright.request.newContext()` and the imported
+ * `request.newContext()` both start with that cookie). A member's Bearer sent
+ * from such a context is a request signed in as two accounts, which the server
+ * refuses since objectstack#31469 (`CREDENTIALS_NAME_DIFFERENT_ACCOUNTS`; a data
+ * route answers its own 401). So the sign-in starts from an empty state, and a
+ * spec acting as the member over the API uses {@link memberRequestContext}.
  */
 const APP = process.env.LIVE_APP_URL || 'http://localhost:5180';
 const API = process.env.LIVE_API_URL || 'http://localhost:3000';
@@ -68,7 +78,8 @@ export async function signInMember(admin: APIRequestContext, permissionSet: stri
     ).toBe('USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL');
   }
 
-  const ctx = await request.newContext();
+  // An empty state, not the inherited admin cookie: the sign-in names the member only.
+  const ctx = await request.newContext({ storageState: { cookies: [], origins: [] } });
   try {
     const res = await ctx.post(`${API}/api/v1/auth/sign-in/email`, {
       data: { email, password: MEMBER_PASSWORD },
@@ -89,4 +100,17 @@ export async function signInMember(admin: APIRequestContext, permissionSet: stri
   } finally {
     await ctx.dispose();
   }
+}
+
+/**
+ * A request context that acts as `member` and as no one else: the member's own
+ * session cookie and its Bearer token (objectstack#31827). Its `storageState`
+ * is named so the config's admin cookie is not inherited (see the module
+ * comment). The caller disposes it.
+ */
+export async function memberRequestContext(member: LiveMember): Promise<APIRequestContext> {
+  return request.newContext({
+    storageState: { cookies: member.storageState.cookies, origins: [] },
+    extraHTTPHeaders: { Authorization: `Bearer ${member.token}` },
+  });
 }

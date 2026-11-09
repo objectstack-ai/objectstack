@@ -26,7 +26,10 @@ import { tmpdir } from 'node:os';
 // `@objectstack/runtime` (a lazy `import()` inside the plugin). Its first load
 // is paid here, at module top — never inside a clocked `it`.
 import '@objectstack/runtime';
+import { ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core';
+import { ObjectQLPlugin } from '@objectstack/objectql';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
+import { INSTALL_RENAME_PLANNER_SERVICE, type InstallRenamePlanner } from './marketplace-install-declared-renames.js';
 import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 
 type Handler = (c: any) => Promise<any>;
@@ -154,9 +157,12 @@ async function mount(options: {
             if (!(name in services)) throw new Error(`no ${name}`);
             return services[name];
         },
+        // [#31801] What init() registers (the door, the rename planner), read back through getService.
+        registerService: (name: string, service: unknown) => { services[name] = service; },
         logger,
     };
     const plugin = new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: dir });
+    await plugin.init(ctx as any);
     await plugin.start(ctx as any);
     await hooks.get('kernel:ready')?.();
     const install = rawApp.routes.get('POST /api/v1/marketplace/install-local')!;
@@ -172,7 +178,9 @@ async function mount(options: {
         options.driver.carryDeclaredRenames.mockClear();
         options.driver.planDeclaredRenames.mockClear();
     }
-    return { install, register, syncSchemas, logger, order };
+    /** [#31801] The read-only planner, resolved by name the way a kernel consumer resolves it. */
+    const planner = (): InstallRenamePlanner => ctx.getService(INSTALL_RENAME_PLANNER_SERVICE);
+    return { install, register, syncSchemas, logger, order, planner };
 }
 
 const ledgerFiles = (): Record<string, string> =>
@@ -371,5 +379,141 @@ describe('a failure after the carry leaves the installed version serving its col
         expect(driver.log).toEqual(['carry acme_lead', 'reverse acme_lead account_name→company']);
         expect([...driver.tables.acme_lead!]).toEqual(['id', 'company']);
         expect(ledgerFiles()).toEqual(before);
+    });
+});
+
+describe('the declared-rename planner service answers what the door does for the same versions, and writes nothing (#31801)', () => {
+    /** What a write would move: the driver's tables, its write members, the engine's register and DDL, the ledger. */
+    const snapshot = (driver: ReturnType<typeof fakeDriver> | undefined) => ({
+        tables: driver ? Object.fromEntries(Object.entries(driver.tables).map(([t, cols]) => [t, [...cols]])) : {},
+        ledger: ledgerFiles(),
+    });
+    const wroteNothing = (
+        door: Awaited<ReturnType<typeof mount>>,
+        driver: ReturnType<typeof fakeDriver> | undefined,
+        before: ReturnType<typeof snapshot>,
+    ) => {
+        expect(snapshot(driver)).toEqual(before);
+        if (driver) {
+            expect(driver.carryDeclaredRenames).not.toHaveBeenCalled();
+            expect(driver.reverseDeclaredRenames).not.toHaveBeenCalled();
+        }
+        expect(door.register).not.toHaveBeenCalled();
+        expect(door.syncSchemas).not.toHaveBeenCalled();
+    };
+
+    it('a carry: the planner names the column the door then carries (`renamesCarried`), and the planner call wrote nothing', async () => {
+        const driver = fakeDriver({ acme_lead: new Set(['id', 'company']) });
+        const door = await mount({ installed: V1, driver, served: { acme_lead: lead({ company: { type: 'text' } }) } });
+        const before = snapshot(driver);
+
+        const plan = await door.planner().plan({ manifestId: VENDOR, incoming: V2, installed: V1 });
+
+        expect(plan).toEqual({
+            carries: [{ object: 'acme_lead', table: 'acme_lead', from: 'company', to: 'account_name' }],
+            refusals: [],
+        });
+        // The driver was asked exactly as the door asks it, and read only.
+        expect(driver.planDeclaredRenames).toHaveBeenCalledTimes(1);
+        expect(driver.planDeclaredRenames.mock.calls[0]![2]).toEqual({ liveKeys: ['account_name'] });
+        wroteNothing(door, driver, before);
+
+        const res = await door.install(makeC({ manifest: V2 }));
+        expect(res.status).toBe(200);
+        expect(res.payload.data.renamesCarried).toEqual(plan.carries);
+    });
+
+    it('a fresh install (`installed: null`) over a table that still holds the old column: the same carry as the door', async () => {
+        const driver = fakeDriver({ acme_lead: new Set(['id', 'company']) });
+        const door = await mount({ driver });
+        const before = snapshot(driver);
+        const plan = await door.planner().plan({ manifestId: VENDOR, incoming: V2, installed: null });
+        wroteNothing(door, driver, before);
+        const res = await door.install(makeC({ manifest: V2 }));
+        expect(res.status).toBe(200);
+        expect(res.payload.data.renamesCarried).toEqual(plan.carries);
+        expect(plan.carries).toHaveLength(1);
+    });
+
+    const ext = (version: string, fields: Row) => ({
+        id: 'com.acme.ext', namespace: 'acmeext', version, objectExtensions: [{ extend: 'acme_lead', fields }],
+    });
+    const refusalCases: Array<{
+        reason: string;
+        tables?: Record<string, Set<string>>;
+        driverOpts?: Parameters<typeof fakeDriver>[1];
+        installed: Row;
+        incoming: Row;
+        served?: Record<string, Row>;
+    }> = [
+        { reason: 'both_columns', tables: { acme_lead: new Set(['id', 'company', 'account_name']) }, driverOpts: { refuse: 'account_name' }, installed: V1, incoming: V2 },
+        {
+            reason: 'destructive_type',
+            tables: { acme_lead: new Set(['id', 'company']) },
+            installed: V1,
+            incoming: vendorBody('2.0.0', [lead({ account_name: { type: 'formula', expression: '1', renamedFrom: ['company'] } })]),
+        },
+        {
+            reason: 'outside_package',
+            tables: { acme_lead: new Set(['id', 'company', 'nickname']) },
+            installed: ext('1.0.0', { nickname: { type: 'text' } }),
+            incoming: ext('2.0.0', { nickname: { type: 'text' }, client: { type: 'text', renamedFrom: ['company'] } }),
+            served: { acme_lead: lead({ nickname: { type: 'text' } }) },
+        },
+        { reason: 'transport', installed: V1, incoming: V2 },
+    ];
+    for (const c of refusalCases) {
+        it(`a refusal (\`${c.reason}\`): the planner's refusals are the door's 422 \`details.refusals\`, word for word`, async () => {
+            const driver = c.tables ? fakeDriver(c.tables, c.driverOpts) : undefined;
+            const door = await mount({ installed: c.installed, driver, served: c.served });
+            const before = snapshot(driver);
+
+            const plan = await door.planner().plan({ manifestId: c.incoming.id, incoming: c.incoming, installed: c.installed });
+
+            expect(plan.carries).toEqual([]);
+            expect(plan.refusals).toEqual([expect.objectContaining({ reason: c.reason })]);
+            wroteNothing(door, driver, before);
+
+            const res = await door.install(makeC({ manifest: c.incoming }));
+            expect(res.status).toBe(422);
+            expect(res.payload.error.details.refusals).toEqual(plan.refusals);
+        });
+    }
+
+    it('a table that cannot be read rejects the call (the door\'s 503), never "nothing to carry"', async () => {
+        const driver = fakeDriver({ acme_lead: new Set(['id', 'company']) }, { planThrows: true });
+        const door = await mount({ installed: V1, driver });
+        const before = snapshot(driver);
+        await expect(door.planner().plan({ manifestId: VENDOR, incoming: V2, installed: V1 })).rejects.toThrow('ECONNREFUSED');
+        wroteNothing(door, driver, before);
+        const res = await door.install(makeC({ manifest: V2 }));
+        expect(res.status).toBe(503);
+    });
+
+    it('a consumer plugin on a real ObjectKernel resolves the planner by name and is answered by the engine it boots with', async () => {
+        const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false } as never);
+        let planner: InstallRenamePlanner | undefined;
+        // A plugin outside cloud-connection, as the hosted runtime's reading is.
+        const consumer: Plugin = {
+            name: 'test.install-rename-planner-consumer',
+            init: async () => undefined,
+            start: async (ctx: PluginContext) => { planner = ctx.getService<InstallRenamePlanner>(INSTALL_RENAME_PLANNER_SERVICE); },
+        };
+        try {
+            await kernel.use(new ObjectQLPlugin());
+            await kernel.use(new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: dir }));
+            await kernel.use(consumer);
+            await kernel.bootstrap();
+            expect(typeof planner?.plan).toBe('function');
+            // No declared-rename members on this engine's driver: a pending
+            // rename is the door's `transport` refusal, read from the engine.
+            const plan = await planner!.plan({ manifestId: VENDOR, incoming: V2, installed: V1 });
+            expect(plan.carries).toEqual([]);
+            expect(plan.refusals).toEqual([expect.objectContaining({ object: 'acme_lead', field: 'account_name', reason: 'transport' })]);
+            // Nothing is installed: the ledger directory holds no entry.
+            expect(ledgerFiles()).toEqual({});
+        } finally {
+            if (kernel.getState() === 'running') await kernel.shutdown();
+        }
     });
 });

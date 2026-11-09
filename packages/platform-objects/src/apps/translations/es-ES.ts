@@ -94,6 +94,7 @@ export const esES: TranslationData = {
         nav_settings_ai: { label: 'IA y Embedder' },
         nav_settings_knowledge: { label: 'Conocimiento' },
         nav_settings_lifecycle: { label: 'Ciclo de vida de los datos' },
+        nav_recycle_bin: { label: 'Papelera' },
         nav_notification_preferences: { label: 'Preferencias de Notificación' },
         nav_notification_templates: { label: 'Plantillas de Notificación' },
 

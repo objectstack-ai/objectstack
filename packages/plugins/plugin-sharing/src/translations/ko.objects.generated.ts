@@ -171,6 +171,10 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
           admin: "관리자"
         }
       },
+      package_id: {
+        label: "Package",
+        help: "The app a rule that came with an app belongs to. Filled in by the platform; empty for rules created here."
+      },
       customized: {
         label: "사용자 지정됨",
         help: "앱과 함께 제공된 규칙을 편집하면 설정되어, 앱을 업데이트해도 변경 내용이 유지됩니다."
@@ -321,6 +325,10 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       queue: {
         label: "대기열",
         help: "이 구성원이 속한 대기열의 이름입니다."
+      },
+      queue_package: {
+        label: "Queue Package",
+        help: "The app the queue comes from. Filled in by the platform; empty for queues created here."
       },
       recipient_type: {
         label: "구성원 유형",

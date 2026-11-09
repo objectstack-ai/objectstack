@@ -1156,6 +1156,44 @@ export const SysUser = ObjectSchema.create({
         'How many users can hold one is limited by the seats your license includes.',
     }),
 
+    // ── Principal kind (ADR-0151 D1) ─────────────────────────────
+    // `agent` marks an AI service account: a registered principal of its own
+    // that never signs in and acts only through its own API keys. The kind is
+    // written in the insert that creates the row and never changes, for any
+    // caller (`service-account-identity.ts` in plugin-auth holds both rules,
+    // and refuses every session and sign-in credential for an `agent` row).
+    // An absent value reads as `human`, so every existing row keeps its
+    // meaning. Owned by objectql (better-auth is oblivious to this column —
+    // like `ai_access`).
+    principal_kind: Field.select({
+      label: 'Principal Kind',
+      required: false,
+      readonly: true, // ADR-0092 — born with the row, immutable (ADR-0151 D1)
+      group: 'System',
+      defaultValue: 'human',
+      options: [
+        { label: 'Person', value: 'human' },
+        { label: 'AI Service Account', value: 'agent' },
+      ],
+      description:
+        'Whether this user is a person or an AI service account. An AI service account never signs in and ' +
+        'acts only through its own API keys. Set when the user is created; it never changes.',
+    }),
+
+    // The person accountable for an AI service account (ADR-0151 D1): required
+    // on an `agent` row, absent on a `human` row, always a person. Their grants
+    // never flow to the account and never bound it — accountability, not
+    // authority.
+    accountable_user_id: Field.lookup('sys_user', {
+      label: 'Accountable Owner',
+      required: false,
+      readonly: true, // ADR-0092 — set at registration; changed only by an administrator's change-owner act
+      group: 'System',
+      description:
+        'For an AI service account, the person accountable for it. Empty for a person. The owner\'s own ' +
+        'permissions never pass to the account.',
+    }),
+
     // ── Profile ──────────────────────────────────────────────────
     image: Field.url({
       label: 'Profile Image',

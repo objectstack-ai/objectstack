@@ -9,9 +9,9 @@
 /**
  * @object-ui/types/zod - Product-page block Zod Validators
  *
- * The arms for the five product-neutral blocks `@object-ui/app-shell` registers
- * for pages a product composes as metadata (objectui#12197): `hero`, `stat`,
- * `usage-bar`, `checklist` and `tile-grid`
+ * The arms for the product-neutral blocks `@object-ui/app-shell` registers
+ * for pages a product composes as metadata: `hero`, `stat`, `usage-bar`,
+ * `checklist` and `tile-grid` (objectui#12197), and `row-table` (#31856)
  * (`console/blocks/productBlocks.tsx`). The TypeScript twin is
  * `../product-blocks.ts`.
  *
@@ -211,6 +211,76 @@ export const TileGridBlockSchema = BaseSchema.extend({
 });
 
 /**
+ * A column's dotted `path` into one row: segments of letters, digits, `_` or
+ * `-` joined by single dots, a numeric segment indexing a list. The grammar of
+ * the binding's own `path`, which the renderer walks with the same reader
+ * (`selectElementApiPath`, `@object-ui/react`).
+ */
+const ROW_PATH_RE = /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/;
+
+/**
+ * One `row-table` column. `path` / `label` / `format` are `resultDialog.fields`'
+ * vocabulary (`@objectstack/spec` `ActionSchema`), with `text` shared and
+ * `datetime` and `enum` this block's own members.
+ */
+export const RowTableColumnSchema = z
+  .strictObject({
+    path: z
+      .string()
+      .regex(ROW_PATH_RE, {
+        error: () =>
+          'A `row-table` column `path` is a dotted path into one row, such as `owner.name` or `steps.0.at`: '
+          + 'segments of letters, digits, `_` or `-` joined by single dots — no brackets, no `${…}`, no slashes.',
+      })
+      .describe('Dotted path into one row, e.g. `owner.name`.'),
+    label: label('The column heading.'),
+    format: z
+      .enum(['text', 'datetime', 'enum'])
+      .optional()
+      .describe(
+        'How the column draws its value: `text` as written (the default), `datetime` as an instant in the '
+        + 'viewer\'s display locale and time zone, `enum` through the column\'s `enum` label map.',
+      ),
+    enum: z
+      .record(z.string(), label('The label drawn for this value.'))
+      .optional()
+      .describe('For `format: \'enum\'`: the label drawn for each value. A value the map does not name is drawn as written.'),
+  })
+  .superRefine((column, ctx) => {
+    if (column.format === 'enum' && column.enum === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['enum'],
+        message: 'A column with `format: \'enum\'` declares its `enum` label map: `{ value: label }`.',
+      });
+    }
+    if (column.format !== 'enum' && column.enum !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['enum'],
+        message: '`enum` is read only by a column with `format: \'enum\'`: set that format, or drop `enum`.',
+      });
+    }
+  });
+
+/** `row-table` — the rows a bound list holds, as a table. */
+export const RowTableBlockSchema = BaseSchema.extend({
+  type: z.literal('row-table'),
+  properties: z
+    .strictObject({
+      rows: z
+        .union([z.array(z.record(z.string(), z.unknown())), expressionHole('a list of rows')])
+        .describe('The rows, or a hole naming a list of them in the bound `data`. Every row is drawn.'),
+      columns: z.array(RowTableColumnSchema).min(1).describe('The columns, in order.'),
+      emptyLabel: label('What the table says when there are no rows.').optional(),
+    })
+    .describe('The `row-table` props bag.'),
+  dataSource: apiBinding(),
+  body: retirementTombstone(neitherChannel('row-table', 'its rows')),
+  children: retirementTombstone(neitherChannel('row-table', 'its rows')),
+});
+
+/**
  * Union of the product-block arms — the category member `AnyComponentSchema`
  * lists (objectui#12197).
  */
@@ -220,6 +290,7 @@ const ProductBlockComponentSchemaInferred = z.discriminatedUnion('type', [
   UsageBarBlockSchema,
   ChecklistBlockSchema,
   TileGridBlockSchema,
+  RowTableBlockSchema,
 ]);
 
 /**

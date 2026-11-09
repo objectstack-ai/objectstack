@@ -65,6 +65,7 @@ describe('reference-integrity suite — membership', () => {
       // after the dataset member: both resolve field names written on a
       // collection other than the object itself.
       'validateMappingTargetFields',
+      'validateMappingConnectorSources',
       'validateNavAccess',
       'validateNavTargetRefs',
       // [#17063] `validateViewPageRefs` sat HERE, beside the nav twin that asks

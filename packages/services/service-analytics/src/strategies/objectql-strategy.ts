@@ -44,6 +44,7 @@ import { textMatchPredicateSql, sqlDialectFor, type AnalyticsSqlDialect } from '
 import { resolveAnalyticsDateRangeString } from '@objectstack/core';
 import { explicitDateRangeWindow } from '../date-range-array-arm.js';
 import { scopedMeasureFilter } from '../scoped-measure-key.js';
+import { declaredCubeMemberKey } from '../cube-member-key.js';
 import {
   rebucketCrossObject,
   RECOMBINABLE_METHODS,
@@ -58,7 +59,7 @@ import {
 // [#21365] `windowClauseSql` is the same rule for the row window: one spelling
 // of an offset-only window per dialect, shared with the native face.
 // [#25907] `orderClauseSql` likewise for the order and its NULL placement.
-import { aggregateOfMeasure, orderClauseSql, windowClauseSql } from './native-sql-strategy.js';
+import { aggregateOfMeasure, orderClauseSql, windowClauseSql, windowTopSql } from './native-sql-strategy.js';
 
 /**
  * [#10861 / commit 399ecad58] Where a member in the cross-object envelope's inventory
@@ -266,9 +267,9 @@ function pushGroupKey(groupBy: AggregateGroupKey[], item: AggregateGroupKey): vo
 }
 
 /**
- * The member `member` resolves to in `cube`'s `kind` bag: its own key, a
- * `<cube>.`-qualified or other dotted spelling of a key, the key with its dots
- * flattened, or (for a dotted dimension) a synthetic relation traversal.
+ * The member `member` resolves to in `cube`'s `kind` bag: the declared key it
+ * names ({@link declaredCubeMemberKey}, the one rule the door's gates read too),
+ * or (for a dotted dimension that names none) a synthetic relation traversal.
  * Module-level because it reads only the cube; `ObjectQLStrategy.lookupMember`
  * is this function.
  */
@@ -278,18 +279,9 @@ function lookupCubeMember(
   kind: 'dimension' | 'measure',
 ): { sql: string; type?: string } | undefined {
   const bag = kind === 'dimension' ? cube.dimensions : cube.measures;
-  if (bag[member]) return bag[member];
-  if (member.includes('.')) {
-    const [first, ...rest] = member.split('.');
-    const tail = rest.join('.');
-    if (first === cube.name && bag[tail]) return bag[tail];
-    if (bag[tail]) return bag[tail];
-    const flat = member.replace(/\./g, '_');
-    if (bag[flat]) return bag[flat];
-    if (kind === 'dimension') return { sql: member, type: 'string' };
-  } else if (bag[member]) {
-    return bag[member];
-  }
+  const key = declaredCubeMemberKey(cube, bag, member);
+  if (key !== undefined) return bag[key];
+  if (kind === 'dimension' && member.includes('.')) return { sql: member, type: 'string' };
   return undefined;
 }
 
@@ -307,7 +299,9 @@ export function resolveCubeFieldName(cube: Cube, member: string, kind: 'dimensio
     const measure = lookupCubeMember(cube, member, 'measure');
     if (measure) return measure.sql.replace(/^\$/, '');
   }
-  return member.includes('.') ? member.split('.')[1] : member;
+  // [#31842] Undeclared: the member itself. A dotted one is a relationship
+  // path, never its second segment read as a base column.
+  return member;
 }
 
 /** The object an aggregate over `cube` runs on; `ObjectQLStrategy.extractObjectName` is this function. */
@@ -1046,7 +1040,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       }
     }
 
-    let sql = `SELECT ${selectParts.join(', ')} FROM "${tableName}"`;
+    // [#31626] On SQL Server a lone limit is the `TOP (n)` after `SELECT` that
+    // driver-sql's find path runs (`windowTopSql`, below with the rest).
+    const dialect = sqlDialectFor(ctx, tableName);
+    let sql = `SELECT ${windowTopSql(query.limit, query.offset, dialect)}${selectParts.join(', ')} FROM "${tableName}"`;
     if (joinClauses.length > 0) sql += ' ' + joinClauses.join(' ');
     if (whereParts.length > 0) {
       sql += ` WHERE ${whereParts.join(' AND ')}`;
@@ -1062,10 +1059,15 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // the echoed `sql` and `/analytics/sql` print a window the dialect runs.
     // [#25907] The order renders through its `orderClauseSql`, so the echo
     // states the NULL placement this face applies (`applyOrdering`: last, in
-    // both directions) where the dialect has a spelling for it.
-    const dialect = sqlDialectFor(ctx, tableName);
-    sql += orderClauseSql(query.order, dialect);
-    sql += windowClauseSql(query.limit, query.offset, dialect);
+    // both directions) where the dialect has a spelling for it. [#31626] On
+    // SQL Server the window is `@objectstack/core`'s `mssqlWindow`, the one
+    // driver-sql's find path runs: `ORDER BY (SELECT NULL)` when this echo
+    // states no order and an offset applies, then `OFFSET … ROWS FETCH NEXT …
+    // ROWS ONLY`; it printed `LIMIT n OFFSET m` before, which SQL Server does
+    // not parse.
+    const orderSql = orderClauseSql(query.order, dialect);
+    sql += orderSql;
+    sql += windowClauseSql(query.limit, query.offset, dialect, orderSql !== '');
 
     return { sql, params };
   }

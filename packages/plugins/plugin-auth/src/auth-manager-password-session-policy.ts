@@ -45,6 +45,7 @@
 
 import type { AuthManager } from './auth-manager.js';
 import type { AuthGate } from '@objectstack/core';
+import { authSystemWriteContext } from './auth-actor-attribution.js';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
 import { effectiveMfaLevel, effectiveSessionLimits } from './organization-access-policy.js';
 
@@ -65,7 +66,7 @@ export interface PasswordSessionPolicyHost {
   anyOrganizationRequiresMfa: AuthManager['anyOrganizationRequiresMfa'];
   getDataEngine: AuthManager['getDataEngine'];
   getOrganizationAccessPolicy: AuthManager['getOrganizationAccessPolicy'];
-  isMfaAdministrator: AuthManager['isMfaAdministrator'];
+  isOrganizationAdministrator: AuthManager['isOrganizationAdministrator'];
   judgeSessionScoping: AuthManager['judgeSessionScoping'];
   isTwoFactorEnabled: AuthManager['isTwoFactorEnabled'];
   logDurabilityDegradation: AuthManager['logDurabilityDegradation'];
@@ -151,7 +152,7 @@ export function refreshOrgMfaCacheIfStale(this: Pick<PasswordSessionPolicyHost, 
 
 /** The body of `AuthManager#resolveUserAuthGates`; the method's docblock there is its contract. */
 export async function resolveUserAuthGates(
-  this: Pick<PasswordSessionPolicyHost, '_mustChangeCache' | '_orgMfaCache' | 'config' | 'getDataEngine' | 'getOrganizationAccessPolicy' | 'isMfaAdministrator' | 'isTwoFactorEnabled' | 'noteMfaRequirementWithoutEnrollment' | 'refreshMustChangeCacheIfStale' | 'refreshOrgMfaCacheIfStale'>,
+  this: Pick<PasswordSessionPolicyHost, '_mustChangeCache' | '_orgMfaCache' | 'config' | 'getDataEngine' | 'getOrganizationAccessPolicy' | 'isOrganizationAdministrator' | 'isTwoFactorEnabled' | 'noteMfaRequirementWithoutEnrollment' | 'refreshMustChangeCacheIfStale' | 'refreshOrgMfaCacheIfStale'>,
   userId: string,
   options: { organizationId?: string } = {},
 ): Promise<AuthGate[]> {
@@ -233,7 +234,7 @@ export async function resolveUserAuthGates(
     // `administrators` holds ADR-0090 D12's three kinds and lets everyone else
     // through; asked only for an unenrolled user, the one it can hold.
     const mfaRequired =
-      level === 'everyone' || (level === 'administrators' && unenrolled && (await this.isMfaAdministrator(userId, activeOrgId)));
+      level === 'everyone' || (level === 'administrators' && unenrolled && (await this.isOrganizationAdministrator(userId, activeOrgId)));
     if (mfaRequired && unenrolled && !this.isTwoFactorEnabled()) {
       this.noteMfaRequirementWithoutEnrollment();
     } else if (mfaRequired && unenrolled) {
@@ -267,12 +268,21 @@ export async function stampPasswordChangedAt(this: Pick<PasswordSessionPolicyHos
   if (!engine || !userId) return;
   try {
     const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
+    // The stamp is credited to the account's own holder when this request's
+    // session names them (a `/change-password`, impersonation included):
+    // the attribution seam's answer, attribution only, so the write still
+    // authorizes as the system. A request whose session names nobody, or
+    // somebody else (a token-carrying `/reset-password` sent beside another
+    // account's cookie), stays the system's: the holder of that session did
+    // not change this account's password.
+    const attribution = await authSystemWriteContext();
+    const context = attribution.attributedUserId === userId ? { ...SYSTEM_CTX, ...attribution } : SYSTEM_CTX;
     // #2766 V1 — a completed password change also satisfies any pending
     // admin-issued force-change flag, so clear it in the same write.
     await engine.update(
       'sys_user',
       { id: userId, password_changed_at: new Date(), must_change_password: false },
-      { context: SYSTEM_CTX } as any,
+      { context } as any,
     );
   } catch (e) {
     // Never break a valid password change — the new password IS set.

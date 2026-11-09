@@ -247,3 +247,14 @@ describe('[#20445] refusals — READ_SCOPE_COMPILE_FAILED / 500, the module’s 
     expect(err.code).not.toBe('INVALID_FILTER');
   });
 });
+
+describe('[#31626] a multi-value `$empty` read scope on SQL Server: refused naming the dialect', () => {
+  it('READ_SCOPE_COMPILE_FAILED / 500, and the reason names "mssql"; the scalar rows still compile there', () => {
+    const options: ReadScopeCompileOptions = { dialect: 'mssql', declaredValueShape: (field) => SHAPES[field] };
+    const err = refusalOf(() => compileScopedFilterToSql({ owners: { $empty: true } }, ALIAS, options));
+    expect(err.code).toBe('READ_SCOPE_COMPILE_FAILED');
+    expect(err.status).toBe(500);
+    expect(err.message).toContain('"mssql"');
+    expect(() => compileScopedFilterToSql({ name: { $empty: true }, amount: { $empty: false } }, ALIAS, options)).not.toThrow();
+  });
+});

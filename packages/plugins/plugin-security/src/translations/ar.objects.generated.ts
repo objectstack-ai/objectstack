@@ -40,6 +40,10 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         label: "المؤسسة",
         help: "المؤسسة التي ينتمي إليها هذا المنح."
       },
+      permission_set_package: {
+        label: "Permission Set Package",
+        help: "The app the permission set comes from. Filled in by the platform; empty when the set was created here, or when more than one app provides a set of that name."
+      },
       granted_by: {
         label: "مَن منحه",
         help: "المستخدم الذي منح مجموعة الأذونات هذه."

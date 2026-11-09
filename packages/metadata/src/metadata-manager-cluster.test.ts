@@ -511,3 +511,57 @@ describe('MetadataManager — default `memory` cluster driver does not cross OS 
         }
     });
 });
+
+describe('MetadataManager — resyncClusterPubSub() converges a hint lost in a cluster outage', () => {
+    const view = (name: string, title: string) => ({ name, title, object: 'account' });
+
+    /** `makeCluster()` over a bus that drops every publish while `down` — the at-most-once loss. */
+    function makeLossyCluster() {
+        const bus = new TestPubSub();
+        const state = { down: false };
+        const publish = bus.publish.bind(bus);
+        bus.publish = (async (channel: string, payload: unknown) => {
+            if (state.down) return;
+            await publish(channel, payload);
+        }) as typeof bus.publish;
+        const store = new SharedStoreLoader();
+        const a = new MetadataManager({ formats: ['json'], loaders: [store] });
+        const b = new MetadataManager({ formats: ['json'], loaders: [store] });
+        a.attachClusterPubSub(bus, 'node-A');
+        b.attachClusterPubSub(bus, 'node-B');
+        return { store, a, b, state };
+    }
+
+    it('a peer write whose hint was lost stays invisible until the resync, then list() re-reads it', async () => {
+        const { store, a, b, state } = makeLossyCluster();
+        await store.save('view', 'v_existing', view('v_existing', 'existing'));
+        expect(viewNames(await b.list('view'))).toEqual(['v_existing']);
+
+        state.down = true;
+        await a.register('view', 'v_new', view('v_new', 'new'));
+        state.down = false;
+        // The loss: B still serves its pre-write list (the 30s TTL has not lapsed).
+        expect(viewNames(await b.list('view'))).toEqual(['v_existing']);
+
+        b.resyncClusterPubSub();
+        expect(cachedTypes(b)).toEqual([]);
+        expect(viewNames(await b.list('view'))).toEqual(['v_existing', 'v_new']);
+    });
+
+    it('keeps registerInMemory() artefacts, which no loader can restore', async () => {
+        const { b } = makeLossyCluster();
+        b.registerInMemory('datasource', 'code_ds', { name: 'code_ds', origin: 'code' });
+        await b.list('datasource');
+        b.resyncClusterPubSub();
+        expect(await b.get('datasource', 'code_ds')).toEqual({ name: 'code_ds', origin: 'code' });
+    });
+
+    it('CONTROL — no transport attached (single node): resync drops nothing', async () => {
+        const store = new SharedStoreLoader();
+        const solo = new MetadataManager({ formats: ['json'], loaders: [store] });
+        await store.save('view', 'v1', view('v1', 'one'));
+        await solo.list('view');
+        solo.resyncClusterPubSub();
+        expect(cachedTypes(solo)).toEqual(['view']);
+    });
+});

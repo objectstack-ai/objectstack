@@ -53,6 +53,7 @@ import { registerGrantHolderMembershipRefusal } from './grant-holder-membership-
 import { registerGrantPermissionSetNameHooks } from './grant-permission-set-name.js';
 import { registerAgentCeilingGrantRefusal } from './agent-ceiling-grant-refusal.js';
 import { reportCatalogReferences } from './catalog-reference-report.js';
+import { backfillStoredPermissionSetPackagesAtBoot } from './stored-permission-set-package-backfill.js';
 import {
   reportAccessUpgrade,
   SHARING_RULES_SERVICE,
@@ -338,6 +339,18 @@ export function registerStartHooks(
   // would judge a catalog that is still being filled. See `catalog-reference-report.ts`.
   if (typeof (ctx as any).hook === 'function') {
     (ctx as any).hook('kernel:bootstrapped', async (): Promise<void> => {
+      // [ADR-0150 D8 rows R1, R3] Grants and audience-binding suggestions
+      // gain the package that holds the permission set they name, from its one
+      // package holder; the ambiguous set is reported, never bound. Runs
+      // once the bare-name holders are sealed, and never fails the boot. See
+      // `stored-permission-set-package-backfill.ts`.
+      try {
+        await backfillStoredPermissionSetPackagesAtBoot(ql as any, (ql as any)?.registry, ctx.logger);
+      } catch (e) {
+        ctx.logger.warn('[security] the permission-set package backfill did not run — it is tried again at the next boot', {
+          error: (e as Error)?.message,
+        });
+      }
       try {
         await reportCatalogReferences(ql as any, {
           catalog: createSecurityCatalogReader({ registry: (ql as any).registry, metadata: this.metadata }),

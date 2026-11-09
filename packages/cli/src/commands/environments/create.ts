@@ -22,8 +22,9 @@ import { recordCloudActiveEnvironmentId } from '../../utils/active-environment.j
  * session where it targets the server, else `cloud.json`'s (the order is
  * written once, there).
  *
- * On success, optionally activates the new environment for the current session
- * and persists `activeEnvironmentId` into `~/.objectstack/credentials.json`
+ * On success, optionally activates the new environment for later CLI calls:
+ * the `/activate` call confirms access and writes no server state, and the
+ * CLI persists `activeEnvironmentId` into `~/.objectstack/credentials.json`
  * (unless `--no-activate` is passed, or the create ran on `cloud.json`'s
  * session, whose server is not the one `credentials.json` names). When the
  * control plane it just talked to IS the one `~/.objectstack/cloud.json`
@@ -121,7 +122,7 @@ export default class EnvironmentsCreate extends Command {
           await client.environments.activate(res.environment.id);
 
           // Cloud store first, for the reason `os environments switch` writes
-          // it first: the server session is already switched by the call above,
+          // it first: the server has already confirmed access in the call above,
           // so the publish-side record must not be lost to a failure in the
           // runtime store below (a user who only ran `os cloud login` has no
           // `credentials.json` at all). The url gate inside the helper decides

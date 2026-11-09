@@ -74,10 +74,9 @@ src/docs/crm_user_guide.md      ✅  package namespace is "crm"
 src/docs/user_guide.md          ❌  bare name — lint error (docs/namespace-prefix)
 ```
 
-Docs have their own rule id, but the contract is the one `os lint`'s
-`naming/namespace-prefix` warning applies to every other package-authored
-name: each one carries its package namespace, so that no two installed
-packages hold the same name. The runtime does not rely on the prefix to
+Docs have their own rule id. Like object names, doc names keep the literal
+package-namespace prefix (ADR-0150 D1), while flows, pages and other
+behavioural names stay short. The runtime does not rely on the prefix to
 keep docs apart, however: per **ADR-0048**, doc resolution is
 **package-scoped**. Packaged items are stored under a
 composite `<packageId>:<name>` registry key, and each retains its

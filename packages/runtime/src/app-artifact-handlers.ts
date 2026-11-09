@@ -96,7 +96,9 @@
  * under `group` (an undeclared job runs with no organization, said once at
  * `warn`), not required under `single`. Each run's execution context is
  * `{ isSystem: true, tenantId: <organization> }`, or `{ isSystem: true }` for a
- * job that declares none ({@link jobExecutionContext}).
+ * job that declares none ({@link jobExecutionContext}) — except a `pull`, which
+ * runs as the organization its writes would be stamped with where the engine
+ * can derive one ({@link resolveJobPullOrganization}).
  *
  * A job's identity is its package coordinate — the package's id and the job's
  * name together, as the metadata registry keys it (`<packageId>:<name>`;
@@ -128,7 +130,7 @@
  * runtime module and passes no such option: its handler hooks bind unchanged.
  */
 
-import type { PluginContext } from '@objectstack/core';
+import type { PluginContext, SystemWriteOrganizationDecision } from '@objectstack/core';
 import type {
     ConnectorSourcePullResult,
     IAutomationService,
@@ -538,6 +540,58 @@ export function jobExecutionContext(organization: string | undefined): { isSyste
 }
 
 /**
+ * The engine face {@link resolveJobPullOrganization} asks:
+ * `ObjectQL#systemWriteOrganization`, the decision the engine's own
+ * system-context insert makes (ADR-0131 D9).
+ */
+interface SystemWriteOrganizationSource {
+    systemWriteOrganization(): Promise<SystemWriteOrganizationDecision>;
+}
+
+/**
+ * The organization a job's `pull` runs as, resolved ONCE per run, before the
+ * pull reads or writes anything.
+ *
+ * A job that declares an `organization` runs as it, unchanged. A job that
+ * declares none runs its pull as the organization its writes would be stamped
+ * with anyway: every write of that pull is a system-context insert or update
+ * the engine resolves through `resolveSystemWriteOrganization` (ADR-0131 D9),
+ * so the engine is asked that same decision up front
+ * ({@link SystemWriteOrganizationSource}) — never a second derivation, never a
+ * "first organization", never an env default. Only `derived` (the `single`
+ * posture, exactly one organization) changes anything: the pull then carries
+ * that organization, and the import runner's match lookup scopes by it — one
+ * index probe per row instead of a scan of the target table.
+ *
+ * Every other decision keeps today's context, `{ isSystem: true }`: under a
+ * wall, or with zero or several organizations, the WRITE stays the one that
+ * refuses, with its own located message; `no-organization-object` has nothing
+ * to carry. An engine that does not answer the question (an embedding's own
+ * engine) keeps today's context too.
+ *
+ * Not a write and not a gate: a probe that throws is said once, at `warn`,
+ * naming the job, and the run goes on with today's context — the writes then
+ * meet the same probe and answer for it.
+ */
+async function resolveJobPullOrganization(
+    ql: unknown,
+    declared: string | undefined,
+    onProbeFailure: (err: unknown) => void,
+): Promise<string | undefined> {
+    if (declared !== undefined) return declared;
+    const source = ql as Partial<SystemWriteOrganizationSource> | null | undefined;
+    if (typeof source?.systemWriteOrganization !== 'function') return undefined;
+    let decision: SystemWriteOrganizationDecision;
+    try {
+        decision = await source.systemWriteOrganization();
+    } catch (err) {
+        onProbeFailure(err);
+        return undefined;
+    }
+    return decision?.kind === 'derived' ? decision.organizationId : undefined;
+}
+
+/**
  * The run outcome of a pull that RESOLVED, mapped once here rather than left to
  * each author: rows the import runner refused make the run `degraded` — it ran
  * to completion and part (or all) of its work did not happen, and a retry
@@ -721,8 +775,11 @@ export interface AppArtifactJobScheduling {
  *
  * Every form runs as {@link jobExecutionContext} of the job's organization —
  * the body's `ctx.api`, the handler's `executionContext`, the pull's
- * `context`. Under `group`, the jobs that declare none are named once at
- * `warn`: they are armed, and a tenant-scoped write they make is refused.
+ * `context`. A pull of a job that declares none runs as the organization its
+ * writes would be stamped with, where the engine derives one
+ * ({@link resolveJobPullOrganization}); otherwise as none. Under `group`, the
+ * jobs that declare none are named once at `warn`: they are armed, and a
+ * tenant-scoped write they make is refused.
  *
  * The schedule is lowered to the boundary tier (`toBoundaryJobSchedule`), and
  * the job's `retryPolicy` / `timeoutMs` are threaded to the adapter. For a body
@@ -932,7 +989,15 @@ export async function scheduleAppArtifactJobs(
                         + '`pullConnectorSource` — nothing was pulled',
                     );
                 }
-                const result = await service.pullConnectorSource({ mapping, context: jobExecutionContext(organization) });
+                // [#31823] Resolved once per run, before the pull reads or writes:
+                // a job with no organization pulls as the one its writes are
+                // stamped with, where the engine derives one.
+                const runAs = await resolveJobPullOrganization(ql, organization, (err) => logger.warn(
+                    `${tag} job '${jobName}' declares no organization, and the organization its pull's writes would be `
+                    + 'stamped with could not be resolved — the pull runs with none, and its match lookup reads by the key alone',
+                    { appId, job: jobName, mapping, error: err instanceof Error ? err.message : String(err) },
+                ));
+                const result = await service.pullConnectorSource({ mapping, context: jobExecutionContext(runAs) });
                 return pullRunOutcomeOf(result);
             };
             form = 'pull';

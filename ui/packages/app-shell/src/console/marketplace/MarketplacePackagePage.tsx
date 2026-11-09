@@ -116,6 +116,7 @@ import type { SuggestedBinding } from '../../services/suggestedBindingsApi.js';
 import { errorCodeIs } from '@object-ui/types';
 import { MarketplaceNamespaceGate } from './MarketplaceNamespaceGate.js';
 import { effectiveSolutionType, readListingTaxonomy } from './marketplaceTaxonomy.js';
+import { DetailLanguagesGroup } from './MarketplaceLanguages.js';
 
 /**
  * Whether a cloud install lands in the environment this console renders, read
@@ -1391,6 +1392,8 @@ function MarketplacePackagePageBody() {
   const pkg = data.package;
   const loc = localizePackage(pkg as any, language);
   const latestVersion = pkg.latest_version?.version ?? data.versions[0]?.version ?? null;
+  // The version that string names: its languages are the ones the page draws.
+  const latestServedVersion = pkg.latest_version ?? data.versions[0] ?? null;
   // PD4 (ADR-0025 §3.11): code-bearing packages must disclose + be acknowledged.
   const containsCode = !!pkg.latest_version?.contains_code;
   // ADR-0010 version lifecycle: installed cloud env is on an OLDER version than
@@ -1628,6 +1631,8 @@ function MarketplacePackagePageBody() {
                 ))}
               </div>
             ))}
+            {/* Every language the latest version ships, with coverage. */}
+            <DetailLanguagesGroup version={latestServedVersion} />
           </div>
           {localNotLoadedReason}
           {loc.description && (

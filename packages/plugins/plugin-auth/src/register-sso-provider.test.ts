@@ -4,7 +4,15 @@ import { Hono } from 'hono';
 import { betterAuth } from 'better-auth';
 import { memoryAdapter } from 'better-auth/adapters/memory';
 import { sso } from '@better-auth/sso';
-import { runRegisterSamlProviderFromForm, runRegisterSsoProviderFromForm } from './register-sso-provider';
+import {
+  groupsClaimOfMapping,
+  mappingWithGroupsClaim,
+  runRegisterSamlProviderFromForm,
+  runRegisterSsoProviderFromForm,
+  runSetSsoGroupsClaim,
+  runShowSsoGroupsClaim,
+  type StoredSsoProviderConfigs,
+} from './register-sso-provider';
 import { AuthPlugin } from './auth-plugin';
 import type { PluginContext } from '@objectstack/core';
 
@@ -287,6 +295,34 @@ describe('Register SAML Provider through the REAL route — the INSTALLED @bette
     expect(db.ssoProvider).toHaveLength(storedBefore);
   });
 
+  it('a groups attribute on the form is stored where the register door stores it: mapping.extraFields.groups', async () => {
+    const res = await post({ ...COMPLETE_FORM, providerId: 'acme-saml-groups', mapGroups: ' memberOf ' });
+    expect(res.status, await res.clone().text()).toBe(200);
+    // The register door, handed the same mapping directly.
+    const door = await app.request(`${ORIGIN}${BASE}/sso/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: ORIGIN, cookie },
+      body: JSON.stringify({
+        providerId: 'acme-saml-door',
+        issuer: COMPLETE_FORM.issuer,
+        domain: COMPLETE_FORM.domain,
+        samlConfig: {
+          entryPoint: COMPLETE_FORM.entryPoint,
+          cert: COMPLETE_FORM.cert,
+          idpMetadata: { entityID: COMPLETE_FORM.issuer },
+          spMetadata: { entityID: 'door-sp' },
+          mapping: { extraFields: { groups: 'memberOf' } },
+        },
+      }),
+    });
+    expect(door.status, await door.clone().text()).toBe(200);
+    const mappingOf = (providerId: string) => JSON.parse(db.ssoProvider.find((p) => p.providerId === providerId).samlConfig).mapping;
+    expect(mappingOf('acme-saml-groups')).toEqual({ extraFields: { groups: 'memberOf' } });
+    expect(mappingOf('acme-saml-groups')).toEqual(mappingOf('acme-saml-door'));
+    // CONTROL: the form without it stores no mapping, as before.
+    expect(JSON.parse(db.ssoProvider.find((p) => p.providerId === 'acme-saml').samlConfig).mapping).toBeUndefined();
+  });
+
   // A SAML EntityID is a URI, and many IdPs publish a URN. The bridge sends the
   // form's Entity ID both as the top-level `issuer` and as
   // `idpMetadata.entityID`, and the vendor's register body types `issuer` as
@@ -321,5 +357,179 @@ describe('Register SAML Provider through the REAL route — the INSTALLED @bette
     expect(signIn.status, JSON.stringify(started)).toBe(200);
     expect(started.redirect).toBe(true);
     expect(started.url.startsWith(`${COMPLETE_FORM.entryPoint}?SAMLRequest=`)).toBe(true);
+  });
+});
+
+describe('the groups claim on the register forms: mapping.extraFields.groups, where the register door keeps it', () => {
+  const captureOidc = async (form: Record<string, unknown>) => {
+    let dispatched: any = null;
+    const handle = vi.fn(async (req: Request) => {
+      if (req.url.endsWith('/get-session')) return new Response('null', { status: 200 });
+      dispatched = await req.clone().json();
+      return new Response(JSON.stringify({ providerId: 'acme' }), { status: 200 });
+    });
+    const res = await runRegisterSsoProviderFromForm(handle, makeOidcReq(form));
+    expect(res.status).toBe(200);
+    return dispatched;
+  };
+
+  it('the OIDC form sends its groups claim beside the email and name claims', async () => {
+    const sent = await captureOidc({ ...OIDC_FORM, mapGroups: ' groups ' });
+    expect(sent.oidcConfig.mapping).toEqual({ email: 'email', name: 'name', extraFields: { groups: 'groups' } });
+  });
+
+  it('CONTROL: an OIDC form without it sends the mapping it sent before', async () => {
+    for (const mapGroups of [undefined, '', '   ']) {
+      const sent = await captureOidc({ ...OIDC_FORM, ...(mapGroups === undefined ? {} : { mapGroups }) });
+      expect(sent.oidcConfig.mapping).toEqual({ email: 'email', name: 'name' });
+    }
+  });
+
+  it('the OIDC body with a groups claim clears the INSTALLED vendor schema (reaches the session gate)', async () => {
+    const res = await runRegisterSsoProviderFromForm(makeRealAuthHandler(), makeOidcReq({ ...OIDC_FORM, mapGroups: 'groups' }));
+    expect(res.body.error?.message ?? '').not.toMatch(/Unrecognized key|Invalid/);
+    expect(res.status).toBe(401);
+  });
+
+  it('the SAML form sends its groups attribute as the mapping; without it, no mapping', async () => {
+    const sentFor = async (extra: Record<string, unknown>) => {
+      let dispatched: any = null;
+      const handle = vi.fn(async (req: Request) => {
+        if (req.url.endsWith('/get-session')) return new Response('null', { status: 200 });
+        dispatched = await req.clone().json();
+        return new Response(JSON.stringify({ providerId: 'p' }), { status: 200 });
+      });
+      await runRegisterSamlProviderFromForm(handle, makeReq({ providerId: 'p', issuer: 'https://idp.acme.com/entity', domain: 'acme.com', entryPoint: 'https://idp.acme.com/sso', cert: 'c', ...extra }));
+      return dispatched.samlConfig;
+    };
+    expect((await sentFor({ mapGroups: 'memberOf' })).mapping).toEqual({ extraFields: { groups: 'memberOf' } });
+    expect('mapping' in (await sentFor({}))).toBe(false);
+  });
+});
+
+describe('the groups-claim bridges: show it, set it, clear it, and answer nothing but the claim', () => {
+  const CLIENT_SECRET = 'SECRET-VALUE-NEVER-ANSWERED';
+  const CERT = 'CERT-BODY-NEVER-ANSWERED';
+  const OIDC_STORED = {
+    issuer: 'https://idp.acme.com',
+    clientId: 'cid',
+    clientSecret: CLIENT_SECRET,
+    tokenEndpoint: 'https://idp.acme.com/token',
+    mapping: { email: 'upn', name: 'display_name', image: 'picture', extraFields: { department: 'dept', groups: 'groups' } },
+  };
+  const SAML_STORED = {
+    entryPoint: 'https://idp.acme.com/sso',
+    cert: CERT,
+    privateKey: CLIENT_SECRET,
+    mapping: { email: 'mail', firstName: 'givenName' },
+  };
+
+  /** A stand-in for the stored row: reads hand back the blob as JSON text; update-provider writes the mapping into it. */
+  const storeOf = (configs: Record<string, StoredSsoProviderConfigs>) => {
+    const read = vi.fn(async (providerId: string) => configs[providerId] ?? null);
+    const sent: any[] = [];
+    const handle = vi.fn(async (req: Request) => {
+      const body = await req.clone().json();
+      sent.push({ url: req.url, body });
+      const row = configs[body.providerId];
+      const key = body.samlConfig ? 'samlConfig' : 'oidcConfig';
+      const current = JSON.parse(String(row[key]));
+      row[key] = JSON.stringify({ ...current, mapping: body[key].mapping });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+    return { read, handle, sent };
+  };
+  const call = (path: string, body: Record<string, unknown>) =>
+    new Request(`http://localhost:3000/api/v1/auth/admin/sso/${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'http://localhost:3000' },
+      body: JSON.stringify(body),
+    });
+
+  it('mappingWithGroupsClaim changes only the groups member and drops an emptied extraFields', () => {
+    const before = { email: 'upn', extraFields: { department: 'dept' } };
+    expect(mappingWithGroupsClaim(before, 'memberOf')).toEqual({ email: 'upn', extraFields: { department: 'dept', groups: 'memberOf' } });
+    expect(before).toEqual({ email: 'upn', extraFields: { department: 'dept' } });
+    expect(mappingWithGroupsClaim({ email: 'upn', extraFields: { groups: 'g' } }, '')).toEqual({ email: 'upn' });
+    expect(mappingWithGroupsClaim(undefined, '')).toEqual({});
+    expect(groupsClaimOfMapping({ extraFields: { groups: 'g' } })).toBe('g');
+    expect(groupsClaimOfMapping({ extraFields: {} })).toBeNull();
+  });
+
+  it('show answers the claim of a provider the register door wrote, and null for one that maps none', async () => {
+    const { read } = storeOf({
+      okta: { oidcConfig: JSON.stringify(OIDC_STORED), samlConfig: null },
+      plain: { oidcConfig: JSON.stringify({ clientId: 'cid', mapping: { email: 'email', name: 'name' } }), samlConfig: null },
+      saml: { oidcConfig: null, samlConfig: JSON.stringify({ ...SAML_STORED, mapping: { extraFields: { groups: 'memberOf' } } }) },
+    });
+    expect((await runShowSsoGroupsClaim(call('get-groups-claim', { providerId: 'okta' }), read)).body).toEqual({ success: true, data: { providerId: 'okta', groupsClaim: 'groups' } });
+    expect((await runShowSsoGroupsClaim(call('get-groups-claim', { providerId: 'plain' }), read)).body).toEqual({ success: true, data: { providerId: 'plain', groupsClaim: null } });
+    expect((await runShowSsoGroupsClaim(call('get-groups-claim', { providerId: 'saml' }), read)).body).toEqual({ success: true, data: { providerId: 'saml', groupsClaim: 'memberOf' } });
+  });
+
+  it('set sends update-provider the stored mapping with only the groups member changed (OIDC and SAML)', async () => {
+    const { read, handle, sent } = storeOf({
+      okta: { oidcConfig: JSON.stringify(OIDC_STORED), samlConfig: null },
+      saml: { oidcConfig: null, samlConfig: JSON.stringify(SAML_STORED) },
+    });
+    const oidc = await runSetSsoGroupsClaim(handle, call('set-groups-claim', { providerId: 'okta', groupsClaim: ' memberOf ' }), read);
+    expect(oidc.body).toEqual({ success: true, data: { providerId: 'okta', groupsClaim: 'memberOf' } });
+    expect(sent[0].url).toBe('http://localhost:3000/api/v1/auth/sso/update-provider');
+    expect(sent[0].body).toEqual({
+      providerId: 'okta',
+      oidcConfig: { mapping: { ...OIDC_STORED.mapping, extraFields: { department: 'dept', groups: 'memberOf' } } },
+    });
+
+    const saml = await runSetSsoGroupsClaim(handle, call('set-groups-claim', { providerId: 'saml', groupsClaim: 'memberOf' }), read);
+    expect(saml.body).toEqual({ success: true, data: { providerId: 'saml', groupsClaim: 'memberOf' } });
+    expect(sent[1].body).toEqual({ providerId: 'saml', samlConfig: { mapping: { ...SAML_STORED.mapping, extraFields: { groups: 'memberOf' } } } });
+  });
+
+  it('a blank claim removes it and keeps every other member as stored', async () => {
+    const { read, handle, sent } = storeOf({ okta: { oidcConfig: JSON.stringify(OIDC_STORED), samlConfig: null } });
+    for (const groupsClaim of ['', '  ', undefined, null]) {
+      const res = await runSetSsoGroupsClaim(handle, call('set-groups-claim', { providerId: 'okta', ...(groupsClaim === undefined ? {} : { groupsClaim }) }), read);
+      expect(res.body).toEqual({ success: true, data: { providerId: 'okta', groupsClaim: null } });
+    }
+    expect(sent.at(-1).body.oidcConfig.mapping).toEqual({ email: 'upn', name: 'display_name', image: 'picture', extraFields: { department: 'dept' } });
+  });
+
+  it('an unknown provider is 404 RESOURCE_NOT_FOUND and nothing is written; a non-text claim is 400', async () => {
+    const { read, handle } = storeOf({ okta: { oidcConfig: JSON.stringify(OIDC_STORED), samlConfig: null } });
+    const unknown = await runSetSsoGroupsClaim(handle, call('set-groups-claim', { providerId: 'nobody', groupsClaim: 'g' }), read);
+    expect(unknown.status).toBe(404);
+    expect(unknown.body.error?.code).toBe('RESOURCE_NOT_FOUND');
+    const shown = await runShowSsoGroupsClaim(call('get-groups-claim', { providerId: 'nobody' }), read);
+    expect(shown.status).toBe(404);
+    expect(shown.body.error?.code).toBe('RESOURCE_NOT_FOUND');
+    const notText = await runSetSsoGroupsClaim(handle, call('set-groups-claim', { providerId: 'okta', groupsClaim: ['g'] }), read);
+    expect(notText.status).toBe(400);
+    expect(notText.body.error?.code).toBe('INVALID_REQUEST');
+    expect(handle).not.toHaveBeenCalled();
+  });
+
+  it('no answer carries another member of the stored configuration: not on show, not on set, not on a vendor refusal', async () => {
+    const { read, handle } = storeOf({
+      okta: { oidcConfig: JSON.stringify(OIDC_STORED), samlConfig: null },
+      saml: { oidcConfig: null, samlConfig: JSON.stringify(SAML_STORED) },
+    });
+    const answers: unknown[] = [];
+    for (const providerId of ['okta', 'saml']) {
+      answers.push((await runShowSsoGroupsClaim(call('get-groups-claim', { providerId }), read)).body);
+      answers.push((await runSetSsoGroupsClaim(handle, call('set-groups-claim', { providerId, groupsClaim: 'g' }), read)).body);
+    }
+    // A refusal whose own body describes the stored configuration.
+    const refusing = vi.fn(async () => new Response(JSON.stringify({ message: `bad config: ${CLIENT_SECRET} ${CERT}`, code: 'BAD_REQUEST' }), { status: 400 }));
+    const refused = await runSetSsoGroupsClaim(refusing, call('set-groups-claim', { providerId: 'okta', groupsClaim: 'g' }), read);
+    expect(refused.status).toBe(400);
+    expect(refused.body.error?.code).toBe('VALIDATION_ERROR');
+    answers.push(refused.body);
+
+    for (const answer of answers) {
+      const text = JSON.stringify(answer);
+      for (const leaked of [CLIENT_SECRET, CERT, 'cid', 'https://idp.acme.com', 'dept', 'upn']) expect(text).not.toContain(leaked);
+      const data = (answer as { data?: Record<string, unknown> }).data;
+      if (data) expect(Object.keys(data).sort()).toEqual(['groupsClaim', 'providerId']);
+    }
   });
 });

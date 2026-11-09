@@ -366,6 +366,23 @@ function redactServedDocument(
 }
 
 /**
+ * [ADR-0150 D4, child E6] The package a stored or registered item carries:
+ * its stored envelope's `packageId` (flat or under the publish envelope), else
+ * the registry's `_packageId` stamp on the body; `undefined` for an item bound
+ * to no package (the `sys_metadata` provenance sentinel included).
+ */
+function indexedItemPackageId(item: unknown): string | undefined {
+  const peeled = peelStoredEnvelope(item);
+  const fromEnvelope = (peeled.envelope as { packageId?: unknown }).packageId;
+  const body = peeled.body as { _packageId?: unknown } | null | undefined;
+  const stamped = body && typeof body === 'object' ? body._packageId : undefined;
+  for (const candidate of [fromEnvelope, stamped]) {
+    if (typeof candidate === 'string' && candidate !== '' && candidate !== 'sys_metadata') return candidate;
+  }
+  return undefined;
+}
+
+/**
  * Main metadata manager class.
  * Implements IMetadataService contract for unified metadata management.
  */
@@ -612,7 +629,7 @@ export class MetadataManager implements IMetadataService {
     //      `notifyWatchers` without a cache mutation of their own.
     //      Double invalidation is idempotent, so the overlap is free.
     this.endpointMatcher = new EndpointMatcher({
-      listApiItems: () => this.listForIndex(MetadataManager.ENDPOINT_METADATA_TYPE),
+      listApiItems: () => this.listForIndex(MetadataManager.ENDPOINT_METADATA_TYPE, { byPackage: true }),
       logger: this.logger,
     });
     this.subscribe(MetadataManager.ENDPOINT_METADATA_TYPE, () => this.endpointMatcher.invalidate());
@@ -1186,23 +1203,33 @@ export class MetadataManager implements IMetadataService {
     type: string,
     items: Map<string, unknown>
   ): Promise<void> {
-    if (typeof loader.loadManyKeyed === 'function') {
-      const keyed = await loader.loadManyKeyed(type);
-      for (const entry of keyed) {
-        if (!entry || typeof entry.name !== 'string' || entry.name === '') continue;
-        if (items.has(entry.name)) continue;
-        items.set(entry.name, entry.data);
-      }
-      return;
+    for (const entry of await this.loaderEntries(loader, type)) {
+      if (items.has(entry.name)) continue;
+      items.set(entry.name, entry.data);
     }
+  }
 
-    const loaderItems = await loader.loadMany(type);
-    for (const item of loaderItems) {
-      const itemAny = item as { name?: unknown } | null;
-      if (itemAny && typeof itemAny.name === 'string' && !items.has(itemAny.name)) {
-        items.set(itemAny.name, item);
+  /**
+   * Every named item one loader holds for `type`, in the loader's order, each
+   * with its key: {@link MetadataLoader.loadManyKeyed} where the loader offers
+   * it, else `loadMany` keyed by each body's own `name` (the pre-#14205
+   * reading, for loaders that cannot produce keys). An item with no key is
+   * left out, as {@link admitLoaderItems} always left it.
+   */
+  private async loaderEntries(loader: MetadataLoader, type: string): Promise<Array<{ name: string; data: unknown }>> {
+    const entries: Array<{ name: string; data: unknown }> = [];
+    if (typeof loader.loadManyKeyed === 'function') {
+      for (const entry of await loader.loadManyKeyed(type)) {
+        if (!entry || typeof entry.name !== 'string' || entry.name === '') continue;
+        entries.push({ name: entry.name, data: entry.data });
       }
+      return entries;
     }
+    for (const item of await loader.loadMany(type)) {
+      const itemAny = item as { name?: unknown } | null;
+      if (itemAny && typeof itemAny.name === 'string' && itemAny.name !== '') entries.push({ name: itemAny.name, data: item });
+    }
+    return entries;
   }
 
   private async readListUncached(type: string): Promise<ListReadResult> {
@@ -1403,7 +1430,8 @@ export class MetadataManager implements IMetadataService {
    * driver behind a real `DatabaseLoader` makes `matchEndpoint` reject rather
    * than answer a 404-shaped `undefined`.)
    */
-  private async listForIndex(type: string): Promise<unknown[]> {
+  private async listForIndex(type: string, options?: { byPackage?: boolean }): Promise<unknown[]> {
+    if (options?.byPackage) return this.listForPackageScopedIndex(type);
     const items = new Map<string, unknown>();
 
     const typeStore = this.registry.get(type);
@@ -1419,6 +1447,60 @@ export class MetadataManager implements IMetadataService {
     }
 
     return Array.from(items.values());
+  }
+
+  /**
+   * [ADR-0150 D4, child E6] {@link listForIndex} for an index whose items are
+   * addressed by `(package, name)` — the `api` endpoint index. Same sources,
+   * same precedence (the in-memory registry first, then each loader in turn,
+   * the first entry of a slot kept) and the same refusal to swallow a failed
+   * read; what changes is the SLOT. A bare-name `Map` lets one package's item
+   * overwrite another package's same-named item before the matcher ever sees
+   * it, so each slot is `(package, name)` instead:
+   *
+   *  - an item that carries its package (`packageId` on its stored envelope, or
+   *    the registry's `_packageId` stamp) fills that package's slot;
+   *  - an item that carries none, under a name exactly one package holds here,
+   *    is that holder's customization (ADR-0150 D4: a package-less row bearing
+   *    a package-held name is never a second item), so it shares the holder's
+   *    slot and the precedence above decides between them, as the bare-name
+   *    map did;
+   *  - an item that carries none, under a name no package holds, is the
+   *    environment's own (D1 bucket 4) and fills the environment's slot.
+   *
+   * While phase 1 keeps one package holder per `api` name, every slot holds
+   * what the bare-name map held, so the index answers what it answered. No
+   * name is resolved here: a request carries no caller package, and the
+   * matcher keys its routes by METHOD + path (bucket 1).
+   */
+  private async listForPackageScopedIndex(type: string): Promise<unknown[]> {
+    const entries: Array<{ name: string; data: unknown }> = [];
+    const typeStore = this.registry.get(type);
+    if (typeStore) {
+      for (const [name, data] of typeStore) entries.push({ name, data });
+    }
+    for (const loader of this.loaders.values()) {
+      // No try/catch, on purpose — see {@link listForIndex}.
+      entries.push(...(await this.loaderEntries(loader, type)));
+    }
+
+    const holders = new Map<string, Set<string>>();
+    for (const { name, data } of entries) {
+      const packageId = indexedItemPackageId(data);
+      if (packageId === undefined) continue;
+      let held = holders.get(name);
+      if (!held) holders.set(name, (held = new Set()));
+      held.add(packageId);
+    }
+
+    const slots = new Map<string, unknown>();
+    for (const { name, data } of entries) {
+      const held = holders.get(name);
+      const slotPackage = indexedItemPackageId(data) ?? (held?.size === 1 ? [...held][0] : '');
+      const slot = `${slotPackage}\u0000${name}`;
+      if (!slots.has(slot)) slots.set(slot, data);
+    }
+    return Array.from(slots.values());
   }
 
   /**
@@ -2197,7 +2279,9 @@ export class MetadataManager implements IMetadataService {
     if (packageEndpointNames.size === 0 && packageFlowNames.size === 0) return [];
 
     const bodies = (items: unknown[]) => items.map((item) => peelStoredEnvelope(item).body);
-    const endpoints = bodies(await this.listForIndex(MetadataManager.ENDPOINT_METADATA_TYPE)) as AnonymousFlowDoorCandidate[];
+    const endpoints = bodies(
+      await this.listForIndex(MetadataManager.ENDPOINT_METADATA_TYPE, { byPackage: true }),
+    ) as AnonymousFlowDoorCandidate[];
     const flows = bodies(await this.listForIndex(MetadataManager.FLOW_METADATA_TYPE)) as ElevatedFlowCandidate[];
 
     const errors: Array<{ type: string; name: string; message: string }> = [];
@@ -3431,6 +3515,36 @@ export class MetadataManager implements IMetadataService {
       channel: MetadataManager.CLUSTER_CHANNEL,
     });
     return () => this.detachClusterPubSub();
+  }
+
+  /**
+   * The `cluster.resync` answer for this lane: the cluster driver's connection
+   * came back after an outage, during which any `metadata.changed` a peer
+   * published was lost (the bus is at-most-once). Called by
+   * `MetadataClusterBridgePlugin` in `@objectstack/service-cluster` on the
+   * driver's local `cluster.resync` event; a no-op until a transport is
+   * attached.
+   *
+   * The receipt of a nameless event, for every type this manager holds a
+   * list for: {@link invalidateForForeignWrite} with no name drops the list
+   * cache (and the endpoint index), so the next `list()` re-reads the loaders
+   * — where a write the lost hint announced already is. Registry ENTRIES are
+   * kept, for the reason that method gives: which names a peer wrote is
+   * exactly what the lost hints carried, and dropping a whole type store would
+   * evict `registerInMemory()` artefacts no loader can restore.
+   */
+  resyncClusterPubSub(): void {
+    if (!this.clusterPubSub) return;
+    const types = new Set<string>([
+      ...this.listCache.keys(),
+      ...this.inflightListReads.keys(),
+      MetadataManager.ENDPOINT_METADATA_TYPE,
+    ]);
+    for (const type of types) this.invalidateForForeignWrite(type);
+    this.logger.info('MetadataManager resynced after a cluster outage: list caches dropped', {
+      nodeId: this.clusterNodeId,
+      types: types.size,
+    });
   }
 
   /** Tear down cluster wiring. Safe to call multiple times. */

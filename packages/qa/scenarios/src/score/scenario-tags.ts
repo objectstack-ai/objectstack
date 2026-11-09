@@ -888,7 +888,7 @@ export interface ScenarioArtifactScore {
   shape: ScoreResult;
   tags: TagVerdict[];
   agentActions: CheckResult[];
-  /** One failing check per bare non-object item name ({@link gradeItemNames}); empty when no namespace was given. */
+  /** One failing check per bare view, doc, capability or position name ({@link gradeItemNames}); empty when no namespace was given. */
   naming: CheckResult[];
   /** Checks passed across `expect`, the scored tags, the agent actions and the naming rule. */
   passed: number;

@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { ROUTER_ADDRESSABLE_NAME_MESSAGE, ROUTER_ADDRESSABLE_NAME_PATTERN } from '../kernel/address-grammar';
 import { ConnectorAuthConfigSchema, ConnectorInstanceAuthSchema } from '../shared/connector-auth.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { acceptRetiredDefaultResidue, retiredKey } from '../shared/retired-key';
@@ -188,7 +189,9 @@ import { findConnectorUrlCredentials, type ConnectorUrlCredential } from './conn
 // registry; and no engine ran a strategy, a direction, a batch, a watermark, a
 // conflict policy or a delete policy. The defaults read as configured policy
 // and did nothing: `latest_wins` resolved no conflict, and `soft_delete` named
-// a mode the platform does not have — every delete is a hard delete.
+// a delete mode no sync engine ran. (The recycle bin that shipped later,
+// ADR-0148, keeps a by-id delete of a business object restorable; it is not a
+// sync delete policy, and a platform object's delete is still permanent.)
 //
 // The capability is mainstream, so it was ruled ENFORCE rather than RETIRE —
 // but not on the connector. Every mainstream platform binds a sync definition
@@ -970,7 +973,7 @@ const connectorBaseShape = (authored = false) => ({
   /**
    * Machine name (snake_case)
    */
-  name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Unique connector identifier'),
+  name: z.string().regex(ROUTER_ADDRESSABLE_NAME_PATTERN, { message: ROUTER_ADDRESSABLE_NAME_MESSAGE }).describe('Unique connector identifier'),
   
   /**
    * Human-readable label

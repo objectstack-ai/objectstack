@@ -224,6 +224,11 @@ import {
     refuseCustomerAuthoredToggle,
 } from './subflow-guards.js';
 import { describeSubflowNoticeTrap, subflowNoticeTrap } from './subflow-notice-guard.js';
+// [ADR-0150 D3/D4] The one package-scoped resolver's answer, read through the
+// reader the host attaches (`setFlowNameResolver`), and the activation
+// projection keyed by `(package, name)`.
+import type { PackageScopedRefusal, PackageScopedResolution } from '@objectstack/objectql';
+import { FlowActivationProjection } from './flow-activation-projection.js';
 import { describeRegionSuspendingCall, regionSuspendingCall } from './subflow-region-guard.js';
 // [#25222] The consumed-suspension restore's bodies: journaling a consumed
 // suspension, resolving its witnesses, and restoring, peeking at or inspecting
@@ -2568,6 +2573,28 @@ export interface FlowContender {
 export type PackagedFlowSource = (name: string) => string | undefined;
 
 /**
+ * [ADR-0150 D3] A reader over the ONE package-scoped resolver: which item the
+ * bare flow name `name` means for a caller of package `callerPackageId`
+ * (`null` for a caller with no package). The automation plugin attaches
+ * `resolvePackageScopedName` from `@objectstack/objectql` over the ObjectQL
+ * registry ({@link AutomationEngine.setFlowNameResolver}); `undefined` means
+ * the host serves no registry to ask, and the engine's own flow map answers as
+ * before. ⛔ Never a second implementation of the rule.
+ */
+export type FlowNameResolver = (name: string, callerPackageId: string | null) => PackageScopedResolution | undefined;
+
+/**
+ * [ADR-0150 D3, epic #31527 child E5] The same reader for the `connector` type:
+ * which declared connector instance the bare name `name` means for a caller of
+ * package `callerPackageId` (`null` for a caller with no package). The
+ * automation plugin attaches `resolvePackageScopedName` over the ObjectQL
+ * registry ({@link AutomationEngine.setConnectorNameResolver}); `undefined`
+ * means the host serves no registry to ask. ⛔ Never a second implementation
+ * of the rule.
+ */
+export type ConnectorNameResolver = (name: string, callerPackageId: string | null) => PackageScopedResolution | undefined;
+
+/**
  * [#28405] The stored body of flow `name` whose content identity is
  * `checksum` ({@link SuspendedRun.flowChecksum}), as the metadata history
  * keeps it — `null` when no version with that identity is stored. A host
@@ -2616,6 +2643,13 @@ export interface ConnectorCredentialDoor {
      * {@link AutomationEngine.attachConnectorCredentialPubSub}.
      */
     attachClusterPubSub(pubsub: IPubSub, nodeId: string): () => void;
+    /**
+     * The `cluster.resync` answer: reconcile from the shared rows after a
+     * cluster outage lost peer writes — see
+     * {@link AutomationEngine.resyncConnectorCredentialPubSub}. Optional, so a
+     * door written before it still attaches; without it a resync does nothing.
+     */
+    resyncFromCluster?(): Promise<void>;
 }
 
 /**
@@ -2759,7 +2793,26 @@ export class AutomationEngine implements IAutomationService {
      * boot read is required anyway, `execute()` consults its result rather
      * than issuing a datasource read on every single flow run.
      */
-    private flowLedgerDisabled = new Set<string>();
+    // [ADR-0150 D4] Keyed by `(package, name)`: a row switches off the flow of
+    // the package it names, read against the package that ships the name
+    // today — see {@link FlowActivationProjection}.
+    private flowLedgerDisabled = new FlowActivationProjection({
+        holderOf: (name) => this.packagedFlowOwner(name),
+        // A package still holds `name` when the resolver reaches that
+        // package's OWN flow for it; no resolver, no answer: stale.
+        stillHolds: (name, packageId) => {
+            const resolution = this.flowNameResolver?.(name, packageId);
+            return resolution?.status === 'resolved' && resolution.via === 'own';
+        },
+        reportStale: ({ name, rowPackageId, holderPackageId }) =>
+            this.logger.warn(
+                `[Automation] The flow "${name}" is switched off by an activation row of package "${rowPackageId}", `
+                    + `which no longer holds that name; package "${holderPackageId}" ships it today. The row still `
+                    + 'switches the flow off. To keep it off or turn it on, switch the flow again: that writes '
+                    + `package "${holderPackageId}"'s own row.`,
+                { flow: name, rowPackageId, holderPackageId },
+            ),
+    });
     /**
      * The durable ledger behind {@link flowLedgerDisabled}. `null` until a host
      * attaches one via {@link setFlowActivationStore} — an engine with no
@@ -2774,6 +2827,26 @@ export class AutomationEngine implements IAutomationService {
      * no flow a managed package loaded.
      */
     private packagedFlowSource?: PackagedFlowSource;
+    /**
+     * [ADR-0150 D3] The reader that answers which item a bare flow name means
+     * for a caller — see {@link setFlowNameResolver}. `undefined` until a host
+     * attaches one; with none, the engine's own flow map is the only holder it
+     * knows, as before.
+     */
+    private flowNameResolver?: FlowNameResolver;
+    /**
+     * [ADR-0150 D3, epic #31527 child E5] Where each armed body came from, keyed
+     * by the parsed body {@link registerFlow} stores — so {@link armedFlowPackage}
+     * reads the arm of exactly what `flows` holds under a name, and a withdrawn
+     * or replaced body takes its arm with it. Written at EVERY registration:
+     * the caller's classification when it hands one, else `runtime`.
+     */
+    private readonly flowArms = new WeakMap<object, FlowContender>();
+    /**
+     * [ADR-0150 D3] The reader that answers which declared connector instance a
+     * bare name means for a caller — see {@link setConnectorNameResolver}.
+     */
+    private connectorNameResolver?: ConnectorNameResolver;
     /** [#20790] The write-only flow credential channel — see {@link setFlowCredentialSource}. */
     private flowCredentialSource?: FlowCredentialSource;
     /** [#20281 stage ③] The connector sync executor — see {@link setConnectorPullSource}. */
@@ -4507,7 +4580,21 @@ export class AutomationEngine implements IAutomationService {
         return canonicalizeFlow.call(host, name, definition, options);
     }
 
-    registerFlow(name: string, definition: unknown): FlowParsed {
+    /**
+     * @param armedFrom [ADR-0150 D3, epic #31527 child E5] Where `definition`
+     *   comes from: the automation plugin's arming steps hand the precedence
+     *   winner's classification (`resolveFlowPrecedence`) — `package` for the
+     *   loader's own body, `override` for the shipping package's declared
+     *   `.custom` override, `runtime` for an environment-authored row. Absent,
+     *   the body is the caller's own — a write door's request body — and arms
+     *   as `runtime`, unless it IS the parsed body this engine armed (a door
+     *   putting back the definition it held), which keeps the arm it had.
+     *   {@link armedFlowPackage} reads it.
+     */
+    registerFlow(name: string, definition: unknown, armedFrom?: FlowContender): FlowParsed {
+        const arm: FlowContender = armedFrom
+            ?? (definition !== null && typeof definition === 'object' ? this.flowArms.get(definition) : undefined)
+            ?? { source: 'runtime' };
         // One canonicalization policy, shared with the stored-row migration so
         // the two can never disagree about what "canonical" means (#4454).
         // Execution takes the parsed shape (schema defaults materialized).
@@ -4531,6 +4618,13 @@ export class AutomationEngine implements IAutomationService {
             if (refusal) throw new Error(refusal.message);
         }
 
+        // [ADR-0150 D3/D4, #31677 Q1] The engine arms one flow per bare name, so
+        // a name the resolver cannot answer for a caller with no package — two
+        // packages hold it — is refused here, naming every holder, before
+        // anything is armed. ⛔ Never an arming by package id or by arrival.
+        const nameRefusal = this.flowNameRefusal(name, null);
+        if (nameRefusal) throw new Error(nameRefusal.message);
+
         // Version history management
         const history = this.flowVersionHistory.get(name) ?? [];
         history.push({
@@ -4545,6 +4639,7 @@ export class AutomationEngine implements IAutomationService {
         // history keys this version by. See {@link SuspendedRun.flowChecksum}.
         const checksum = flowContentChecksum(definition);
         if (checksum !== undefined) this.flowChecksums.set(parsed, checksum);
+        this.flowArms.set(parsed, arm);
         this.flows.set(name, parsed);
         // [#23316] Held now, so no longer refused — see {@link flowRefusals}.
         this.flowRefusals.delete(name);
@@ -4927,6 +5022,124 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * [ADR-0150 D3] Attach the reader over the one package-scoped resolver
+     * ({@link FlowNameResolver}). The automation plugin calls this at `init()`
+     * with a reader that asks the ObjectQL registry at question time, never at
+     * boot, for {@link setPackagedFlowSource}'s reason.
+     *
+     * Two seams read it, and only these two:
+     *
+     *  - {@link registerFlow} asks it for a caller with no package before it
+     *    arms a name, so a name two packages hold is refused, naming both,
+     *    instead of arming one of them — a deployment sealed at its cold boot
+     *    with a clash that predates phase 1 included (#31677 Q1, ruled A).
+     *    The engine keeps one armed slot per bare name, and nothing picks
+     *    between two holders.
+     *  - {@link execute} asks it for the caller's package: the package that
+     *    ships the flow whose run names the child (a `subflow` or `map` node's
+     *    `flowName`, carried on the run's context as `flowName`), or no
+     *    package for a door, a trigger or any caller outside a run. A refusal
+     *    is the answer, naming every candidate; nothing is executed.
+     *
+     * A name the registry holds nothing under (a flow registered straight into
+     * the engine) has one holder, the engine's own flow map, and resolves to
+     * it as before.
+     */
+    setFlowNameResolver(resolver: FlowNameResolver | undefined): void {
+        this.flowNameResolver = resolver;
+    }
+
+    /**
+     * [ADR-0150 D3] The resolver's refusal of the bare flow name `name` for a
+     * caller of package `callerPackageId` (`null`: no package), or `undefined`
+     * when the name resolves, names nothing in the registry, or no resolver is
+     * attached. Read-only; records nothing.
+     */
+    private flowNameRefusal(name: string, callerPackageId: string | null): PackageScopedRefusal | undefined {
+        const resolution = this.flowNameResolver?.(name, callerPackageId);
+        return resolution?.status === 'refused' ? resolution : undefined;
+    }
+
+    /**
+     * [ADR-0150 D3, epic #31527 child E5] Attach the reader that answers which
+     * declared connector instance a bare `connectorConfig.connectorId` means for
+     * the flow that names it ({@link connectorNameRefusal}). The automation
+     * plugin calls this at `init()`; with none attached, `connector_action`
+     * dispatches by name as before.
+     */
+    setConnectorNameResolver(resolver: ConnectorNameResolver | undefined): void {
+        this.connectorNameResolver = resolver;
+    }
+
+    /**
+     * [ADR-0150 D3, epic #31527 child E5] Why a `connector_action` in a run of
+     * `context`'s flow may not dispatch to the connector instance named
+     * `connectorId`, or `undefined` when it may.
+     *
+     * The name is resolved for the package that ships the calling flow
+     * ({@link flowCallerPackage}: a packaged flow names it from its package; an
+     * environment-authored flow, or a call outside a run, names it with no
+     * package). The engine holds ONE instance per name, materialized for the
+     * answer a caller with no package gets (the declared-connector reconcile,
+     * which already refuses a name two packages hold). So a package caller
+     * whose answer is a refusal — two holders in its closure, or holders only
+     * outside it, an environment-only instance included (ADR-0150 D3 (a)) — is
+     * refused with the resolver's own message, naming every candidate. Any
+     * other answer is the instance the engine serves: an environment item
+     * exists only for a name no package holds, so a package caller that
+     * resolves at all resolves to the one package holder the reconcile
+     * materialized. A name the registry holds nothing under (a connector a
+     * plugin registers in code), or a host with no resolver, dispatches by name
+     * as before. Read-only.
+     */
+    connectorNameRefusal(connectorId: string, context: AutomationContext | undefined): PackageScopedRefusal | undefined {
+        const callerPackageId = this.flowCallerPackage(context);
+        if (callerPackageId === null) return undefined;
+        const meant = this.connectorNameResolver?.(connectorId, callerPackageId);
+        return meant?.status === 'refused' ? meant : undefined;
+    }
+
+    /**
+     * [ADR-0150 D3] The package a call of {@link execute} comes from: the
+     * package that ships the flow whose run made the call — `context.flowName`,
+     * which the engine stamps on every run's context
+     * (`resolveRunContext`), so a `subflow` or `map` child carries its parent's
+     * name — or `null` for a caller outside a run, and for a run whose armed
+     * body is not the package's own ({@link armedFlowPackage}): an
+     * environment-authored flow, or an environment override of a packaged
+     * flow, resolves as a caller with no package (ADR-0150 D3).
+     */
+    private flowCallerPackage(context: AutomationContext | undefined): string | null {
+        const caller = context?.flowName;
+        if (typeof caller !== 'string' || caller === '') return null;
+        return this.armedFlowPackage(caller) ?? null;
+    }
+
+    /**
+     * [ADR-0150 D3, epic #31527 child E5] The package whose OWN body is armed
+     * under the flow name `name`: the loader's package
+     * ({@link packagedFlowOwner}) when the registration the engine holds was
+     * armed from the loader's body (`package`, {@link registerFlow}'s
+     * `armedFrom`), else `undefined` — for the shipping package's declared
+     * `.custom` override, for an environment-authored (`runtime`) body, and
+     * for a name the engine does not hold.
+     *
+     * This is the package a reference written in the armed body resolves
+     * from. ADR-0150 D3: "A reference written in an environment-authored
+     * overlay (ADR-0005) is the environment's reference. It resolves as a
+     * caller with no package … It never resolves from the package the overlay
+     * customizes." So the loader's set alone (which answers by bare name, for
+     * whichever body is armed) is never this answer, and neither is a stamp
+     * on the body: the boot hydration and the protocol's served override
+     * both carry the base's `_packageId`. Read-only.
+     */
+    armedFlowPackage(name: string): string | undefined {
+        const armed = this.flows.get(name);
+        if (!armed || this.flowArms.get(armed)?.source !== 'package') return undefined;
+        return this.packagedFlowOwner(name);
+    }
+
+    /**
      * [#20790] Attach the write-only flow credential channel. The automation
      * plugin calls this at `init()`, before any flow is registered. With none
      * attached (a bare engine) every credential is the literal its definition
@@ -5023,6 +5236,19 @@ export class AutomationEngine implements IAutomationService {
      */
     attachConnectorCredentialPubSub(pubsub: IPubSub, nodeId: string): () => void {
         return this.requireConnectorCredentialDoor('attachConnectorCredentialPubSub()').attachClusterPubSub(pubsub, nodeId);
+    }
+
+    /**
+     * The `cluster.resync` answer for lane 4: the cluster driver's connection
+     * came back after an outage, during which any `connector-credential.mutated`
+     * a peer published was lost (the bus is at-most-once). Called by
+     * `MetadataClusterBridgePlugin` on the driver's local `cluster.resync`
+     * event. Runs the reconcile a received signal runs — it re-reads the shared
+     * credential rows, so every instance naming a reference that changed during
+     * the outage re-materializes. A no-op until a transport is attached.
+     */
+    async resyncConnectorCredentialPubSub(): Promise<void> {
+        await this.requireConnectorCredentialDoor('resyncConnectorCredentialPubSub()').resyncFromCluster?.();
     }
 
     /** [#27237] `IAutomationService.listConnectorCredentialRefs` — references and states, never a value. */
@@ -6130,6 +6356,13 @@ export class AutomationEngine implements IAutomationService {
 
     async execute(flowName: string, context?: AutomationContext): Promise<AutomationResult> {
         const startTime = Date.now();
+        // [ADR-0150 D3] The bare name resolves for the caller's package first:
+        // a run of package P's flow reaches P's own flow, else the one holder
+        // in P's declared dependency closure; anything else is refused with
+        // every candidate named, and nothing runs. Never dispatched, so no
+        // `status`, for the reason the disabled exit below states.
+        const nameRefusal = this.flowNameRefusal(flowName, this.flowCallerPackage(context));
+        if (nameRefusal) return { success: false, error: nameRefusal.message };
         const flow = this.flows.get(flowName);
 
         if (!flow) {

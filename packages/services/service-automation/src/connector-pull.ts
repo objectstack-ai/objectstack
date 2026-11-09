@@ -219,8 +219,33 @@ function shapeOf(value: unknown): string {
 /**
  * Pull one `mapping`'s `connectorSource` and write what it returns. Throws
  * {@link ConnectorPullError} on every refusal, before anything is written.
+ *
+ * Every failed pull also logs ONE `warn` line naming the mapping and the
+ * reason, then rethrows unchanged. A scheduled pull's caller is the job
+ * runner, whose only record is the failed job run's `error`; without this
+ * line a binding that can never pull failed on every tick and nothing in the
+ * process log said so. `warn`, not `error`: nothing was written, so nothing
+ * claims to be persisted that is not (AGENTS.md, degradation log levels), and
+ * the caller still receives the failure.
  */
 export async function pullConnectorSource(
+    deps: ConnectorPullDeps,
+    opts: ConnectorPullOptions,
+): Promise<ConnectorPullResult> {
+    try {
+        return await pullOnce(deps, opts);
+    } catch (err) {
+        const reason = err instanceof ConnectorPullError ? err.reason : 'failed';
+        const message = err instanceof Error ? err.message : String(err);
+        deps.logger.warn(
+            `[Automation] connector pull of mapping "${opts.mapping}" failed (${reason}): ${message}`,
+            { mapping: opts.mapping, reason },
+        );
+        throw err;
+    }
+}
+
+async function pullOnce(
     deps: ConnectorPullDeps,
     opts: ConnectorPullOptions,
 ): Promise<ConnectorPullResult> {
@@ -459,8 +484,20 @@ export async function pullConnectorSource(
         treatAsHistorical: false,
         trimWhitespace,
         createMissingOptions: false,
-        skipBlankMatchKey: false,
+        // [#31810] Never create a record whose match key is blank: a source that
+        // stopped sending the key field would otherwise re-create every changed
+        // record with an empty key on each pull. The runner skips such a row;
+        // the pull then counts it as an error (below).
+        skipBlankMatchKey: true,
     });
+    const refused = refuseBlankMatchKeys(summary, mappingName, matchFields);
+    if (refused.count > 0) {
+        logger.warn(
+            `[Automation] connector pull: mapping "${mappingName}" — ${refused.count} pulled record(s) carry no value for `
+            + `upsertKey ${matchFields.join(' + ')} and were not written; check that ${connector}.${action} still sends `
+            + 'the field fieldMapping copies onto it',
+        );
+    }
 
     return {
         mapping: mappingName,
@@ -469,6 +506,41 @@ export async function pullConnectorSource(
         action,
         ...(watermark ? { watermark } : {}),
         pulled: records.length,
-        summary,
+        summary: refused.summary,
+    };
+}
+
+/**
+ * [#31810] A pulled record whose match key is blank is a row ERROR on a pull,
+ * not the import door's quiet skip: an uploaded file is read by the person who
+ * chose `skipBlankMatchKey`, while a pull runs unattended, and its run outcome
+ * is read from `errors` alone (a skip leaves the run `completed`). So each
+ * `BLANK_MATCH_KEY` skip the runner reports is rewritten as a failed row, and
+ * the tallies move with it. The import door's own blank-key behaviour is
+ * untouched — this is the pull's reading of the runner's report.
+ */
+function refuseBlankMatchKeys(
+    summary: ImportRunSummary,
+    mappingName: string,
+    matchFields: string[],
+): { summary: ImportRunSummary; count: number } {
+    let count = 0;
+    const results = summary.results.map((r) => {
+        if (r.action !== 'skipped' || r.code !== 'BLANK_MATCH_KEY') return r;
+        count++;
+        // The runner's row, its `row` and its code kept: the verdict is the
+        // runner's, only its reading (skip → failure) is the pull's.
+        return {
+            ...r,
+            ok: false,
+            action: 'failed' as const,
+            error: `Mapping "${mappingName}": the pulled record has no value for upsertKey ${matchFields.join(' + ')}, `
+                + 'so it was not written — a pull never creates a record it cannot match again',
+        };
+    });
+    if (count === 0) return { summary, count };
+    return {
+        summary: { ...summary, results, skipped: summary.skipped - count, errors: summary.errors + count },
+        count,
     };
 }

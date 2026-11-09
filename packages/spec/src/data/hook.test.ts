@@ -87,7 +87,7 @@ describe('HookSchema', () => {
     });
 
     it('should accept valid snake_case names', () => {
-      const validNames = ['validate_email', 'set_default_values', 'before_save_hook', '_system_hook'];
+      const validNames = ['validate_email', 'set_default_values', 'before_save_hook'];
 
       validNames.forEach(name => {
         expect(() => HookSchema.parse({

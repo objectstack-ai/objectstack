@@ -208,8 +208,8 @@ const DIALECT_ALIASES: Partial<Record<SqlDialect, Record<string, CanonicalSqlTyp
  *
  * `RAW(16)` is the conventional Oracle column for a UUID / GUID (`SYS_GUID()`
  * returns one), so it maps to `uuid`; every other width is `binary`. The
- * field pairings over it are `'lossy'` on oracle, not exact: see
- * {@link DIALECT_LOSSY_RULES}.
+ * reference pairings over it are exact; a `text` field over it is `'lossy'`
+ * on oracle: see {@link DIALECT_LOSSY_RULES}.
  *
  * `undefined` for any other spelling — the caller then strips parameters and
  * reads the alias tables as for every dialect.
@@ -427,13 +427,20 @@ export function suggestFieldTypeForSqlType(rawType: string, dialect?: SqlDialect
  * — never exact, never suggested — so a draft carries a `// REVIEW:` marker
  * and validation warns instead of passing silently or failing:
  *
- * - `demoteExact` — the canonical type's EXACT pairings, which this dialect
- *   can only half-serve, answer `'lossy'` here.
- *   `oracle` / `uuid`: a `RAW(16)` column reads back as a UUID string, but the
- *   driver binds a string comparand or write value as text, and Oracle refuses
- *   text against RAW. A field over it (a `lookup` keyed by a `SYS_GUID()`
- *   column included) displays correctly and cannot yet be filtered or written
- *   by its value. Binding through `HEXTORAW` is #31390.
+ * - `demoteExact` — the EXACT pairings of the canonical type named here,
+ *   which this dialect can only half-serve, answer `'lossy'` here.
+ *   `oracle` / `uuid` → `text`: the SQL driver reads a `RAW(16)` column as a
+ *   lower-case hyphenated UUID string, and binds a comparison comparand, a
+ *   written value and a by-id key for it as `HEXTORAW(?)` over that string's
+ *   hex digits (#31390). A reference field over it — a `lookup` or
+ *   `master_detail` keyed by a `SYS_GUID()` column, a `user` — is filtered,
+ *   written and resolved by the very string it reads, so those pairings stay
+ *   exact. A `text` field is still half-served: its pattern operators
+ *   (`$contains`, `$startsWith`, `$like`, …) are not bound through
+ *   `HEXTORAW`, so they match the column as the text Oracle converts a
+ *   `RAW` to (its 32 hex digits, upper case, no hyphens), not as the string
+ *   it reads; a fragment of that string with a hyphen, or in the case it is
+ *   read in, answers no row instead of a refusal.
  * - `addLossy` — field types the base row answers `false` for, which this
  *   dialect's column can carry with loss.
  *   `mssql` / `text`: SQL Server (before its 2025 `json` type) keeps JSON in
@@ -446,12 +453,12 @@ export function suggestFieldTypeForSqlType(rawType: string, dialect?: SqlDialect
  *   column shape the driver relies on (#31327).
  */
 interface DialectLossyRule {
-  readonly demoteExact?: true;
+  readonly demoteExact?: readonly FieldType[];
   readonly addLossy?: readonly FieldType[];
 }
 
 const DIALECT_LOSSY_RULES: Partial<Record<SqlDialect, Partial<Record<CanonicalSqlType, DialectLossyRule>>>> = {
-  oracle: { uuid: { demoteExact: true } },
+  oracle: { uuid: { demoteExact: ['text'] } },
   mssql: { text: { addLossy: ['json', 'tags', 'multiselect'] } },
 };
 
@@ -468,7 +475,7 @@ export function isCompatible(
   const canonical = canonicalizeSqlType(rawType, dialect);
   const entry = CANONICAL_TO_FIELD[canonical];
   const rule = dialect ? DIALECT_LOSSY_RULES[dialect]?.[canonical] : undefined;
-  if (entry.exact.includes(fieldType)) return rule?.demoteExact ? 'lossy' : true;
+  if (entry.exact.includes(fieldType)) return rule?.demoteExact?.includes(fieldType) ? 'lossy' : true;
   if (entry.lossy.includes(fieldType) || rule?.addLossy?.includes(fieldType)) return 'lossy';
   // Unknown remote types are permissive-but-lossy against text/json only,
   // already encoded in CANONICAL_TO_FIELD.unknown.

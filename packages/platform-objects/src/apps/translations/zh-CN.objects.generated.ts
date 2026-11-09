@@ -88,6 +88,18 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "AI 访问权限",
         help: "该用户是否占用一个 AI 席位。席位授予 `ai_seat` 能力，可使用应用内的 AI 助手（build 和 ask）。可占用席位的用户数受许可证所含席位数限制。"
       },
+      principal_kind: {
+        label: "主体类型",
+        help: "该用户是人员还是 AI 服务账号。AI 服务账号从不登录，只通过它自己的 API 密钥操作。在创建用户时设定，之后不会改变。",
+        options: {
+          human: "人员",
+          agent: "AI 服务账号"
+        }
+      },
+      accountable_user_id: {
+        label: "负责人",
+        help: "对于 AI 服务账号，指对它负责的人员。人员的此项为空。负责人自己的权限不会传给该账号。"
+      },
       image: {
         label: "头像"
       },
@@ -2123,6 +2135,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
             label: "映射：姓名 claim",
             helpText: "可选。映射到显示名称的 claim。默认为 “name”。",
             placeholder: "name"
+          },
+          mapGroups: {
+            label: "映射：组 claim",
+            helpText: "可选。携带用户所属组的 claim，例如 “groups”。每次登录都会授予映射到这些组的权限集。留空则不映射任何组。",
+            placeholder: "groups"
           }
         }
       },
@@ -2153,6 +2170,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
             label: "NameID 格式",
             helpText: "可选。请求的 SAML NameID 格式。默认为 IdP 配置的格式。",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+          },
+          mapGroups: {
+            label: "映射：组属性",
+            helpText: "可选。携带用户所属组的断言属性。每次登录都会授予映射到这些组的权限集。留空则不映射任何组。",
+            placeholder: "groups"
           }
         }
       },
@@ -2181,6 +2203,35 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       edit_sso_sign_in_options: {
         label: "编辑登录选项",
         successMessage: "登录选项已保存"
+      },
+      show_sso_groups_claim: {
+        label: "查看组 claim",
+        resultDialog: {
+          title: "组 claim",
+          description: "此提供方在每次登录时读取用户所属组的 OIDC claim 或 SAML 属性。为空表示该提供方不映射任何组。可通过“编辑组 claim”修改。",
+          acknowledge: "完成",
+          fields: {
+            groupsClaim: "组 claim"
+          }
+        }
+      },
+      edit_sso_groups_claim: {
+        label: "编辑组 claim",
+        params: {
+          groupsClaim: {
+            label: "组 claim",
+            helpText: "携带用户所属组的 OIDC claim 或 SAML 属性。每次登录都会授予映射到这些组的权限集。留空即移除：该提供方将不再映射任何组。",
+            placeholder: "groups"
+          }
+        },
+        resultDialog: {
+          title: "组 claim 已保存",
+          description: "此提供方此后每次登录时读取的组 claim。为空表示不映射任何组。",
+          acknowledge: "完成",
+          fields: {
+            groupsClaim: "组 claim"
+          }
+        }
       }
     }
   },

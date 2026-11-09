@@ -91,6 +91,7 @@ import { MFA_REQUIREMENT_LEVELS, readMfaRequirementLevel } from './organization-
 import { registerMfaRequiredEnrollmentPredicate } from './mfa-required-enrollment-predicate.js';
 import { registerPersonalViewHooks } from './personal-view-hooks.js';
 import { registerUserPreferenceHooks } from './user-preference-hooks.js';
+import { registerServiceAccountRowGuard } from './service-account-identity.js';
 import { personalViewCallerResolver, registerPersonalViewRoutes, PERSONAL_VIEW_REMOVE_ROUTE, type PersonalViewEngine } from './personal-view-routes.js';
 import { registerMembershipEndedSessionTrigger } from './membership-ended-session.js';
 import { registerMemberRoleCanonicalization } from './member-role-canonical.js';
@@ -100,7 +101,7 @@ import { registerExternalMembershipGuard } from './external-membership.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { MANAGED_EXTENSION_EDITABLE_FIELDS } from './managed-extension-fields.js';
 import { runSetInitialPassword } from './set-initial-password.js';
-import { runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runVerifyDomain, type AuthRequestHandler } from './register-sso-provider.js';
+import { createEngineSsoProviderConfigReader, runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runSetSsoGroupsClaim, runShowSsoGroupsClaim, runVerifyDomain, type AuthRequestHandler, type SsoProviderConfigEngine } from './register-sso-provider.js';
 import { runResendVerificationEmail } from './send-verification-email.js';
 import { runSysSessionRevoke, sysSessionRevokeDepsFor } from './sys-session-revoke.js';
 import { oneAccountReadFaultAtMount, oneAccountRefusalAtMount } from './one-account-per-request.js';
@@ -2010,6 +2011,14 @@ export class AuthPlugin implements Plugin {
         // priority 6, judging the canonical spelling the hook above wrote.
         registerExternalMembershipGuard(engine, {
           packageId: 'com.objectstack.plugin-auth.external-membership',
+        });
+        // [ADR-0151 D1] A user's principal kind is fixed when the row is
+        // created, and an AI service account names a person accountable for
+        // it — for every writer, the system included, ahead of every other
+        // `sys_user` hook (priority 4). See service-account-identity.ts.
+        registerServiceAccountRowGuard(engine, {
+          packageId: 'com.objectstack.plugin-auth.service-account-row',
+          logger: ctx.logger,
         });
         registerIdentityWriteGuard(engine, {
           packageId: 'com.objectstack.plugin-auth.identity-write-guard',
@@ -4901,6 +4910,43 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] sso/verify-domain bridge failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // The provider's groups claim (`mapping.extraFields.groups`, the member an
+    // SSO sign-in reads its IdP groups from): show it, and set or clear it, for
+    // the `sys_sso_provider` "Show Groups Claim" / "Edit Groups Claim" actions.
+    // Both read the stored blob through the system read seam and answer only
+    // the claim name; the set bridge writes through the vendor's own
+    // /sso/update-provider (`register-sso-provider.ts`). Same ADR-0068 D4
+    // platform-admin gate as the other `/admin/sso/*` bridges, judged first.
+    const readSsoProviderConfigs = createEngineSsoProviderConfigReader(
+      () => this.authManager!.getDataEngine() as unknown as SsoProviderConfigEngine | undefined,
+    );
+    rawApp.post(`${basePath}/admin/sso/get-groups-claim`, async (c: any) => {
+      try {
+        const gated = await gateAdmin(c);
+        if (gated instanceof Response) return gated;
+        const { status, body } = await runShowSsoGroupsClaim(c.req.raw, readSsoProviderConfigs);
+        return c.json(body, status as any);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] sso/get-groups-claim bridge failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    rawApp.post(`${basePath}/admin/sso/set-groups-claim`, async (c: any) => {
+      try {
+        const gated = await gateAdmin(c);
+        if (gated instanceof Response) return gated;
+        const { status, body } = await runSetSsoGroupsClaim(handleWithTransportOf(c), c.req.raw, readSsoProviderConfigs);
+        return c.json(body, status as any);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] sso/set-groups-claim bridge failed', err);
         return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
       }
     });

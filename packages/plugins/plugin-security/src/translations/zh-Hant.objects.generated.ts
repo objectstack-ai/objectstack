@@ -40,6 +40,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "組織",
         help: "此授權所屬的組織。"
       },
+      permission_set_package: {
+        label: "權限集所屬應用",
+        help: "該權限集來自哪個應用。由平台填寫；權限集是在這裡建立的，或有多個應用提供同名權限集時為空。"
+      },
       granted_by: {
         label: "授予者",
         help: "授予此權限集的使用者。"

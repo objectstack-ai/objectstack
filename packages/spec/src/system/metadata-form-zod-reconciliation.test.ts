@@ -430,6 +430,16 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'pressed',
     why: "planned, not yet rendered — the reader's pressed-state predicate is validated at parse (CEL only, no boolean literal) and judged at the authoring doors in the `record` scope, but no action surface draws the pressed face until the console's header buttons read it. A form control offered today would let an author write a predicate nothing shows",
   },
+  // #31840 — an action's preflight read lands spec-first the same way:
+  // `planned` in the liveness ledger, sent by no param dialog until the console
+  // card (#31808) draws the panel and applies the seeds.
+  {
+    kind: 'omit',
+    type: 'action',
+    path: ROOT_PATH,
+    key: 'preflight',
+    why: "planned, not yet read — the same-origin `GET`, its closed hole set and its answer-to-param seeds are validated at parse (each hole and seed judged against the action's declared params), but no param dialog sends the read, shows the answer or fills a param until the console's param dialog reads it. A form control offered today would let an author declare a read nothing sends",
+  },
 
   // #27945 — a lookup's pick autofill lands spec-first the same way: `planned`
   // in the liveness ledger, read by no form or grid until the ui card's lookup
@@ -708,38 +718,6 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     path: ROOT_PATH,
     key: 'overrides',
     why: 'declared, not enforced yet — liveness verdict `planned`: the override declaration (ADR-0146 D2) parses, is stored and travels through export, but no door admits or serves it until the write gate and the effective read land. Studio writes it when it saves a customization into `<base>.custom`; a hand-filled control is not how it is authored',
-  },
-  // ADR-0149 D1 — a dataset member's business vocabulary lands spec-first:
-  // `planned` in the liveness ledger, read by no matcher, compiler or catalogue
-  // until card #31589. The dataset form is left as it is by the seat's ruling
-  // (claim amend 1 on #31587, fork 5 = A); the Studio authoring is its own card.
-  {
-    kind: 'omit',
-    type: 'dataset',
-    path: 'dimensions',
-    key: 'synonyms',
-    why: "planned, not yet read — liveness verdict `planned` (ADR-0149 D1/D6): a member's `synonyms` are bounded and checked for collisions across the dataset at parse, but nothing matches a question against them until the dataset AI tools' term matcher lands (card #31589). Its Studio authoring is a follow-up of its own; a form control offered today would let an author write words nothing matches yet",
-  },
-  {
-    kind: 'omit',
-    type: 'dataset',
-    path: 'dimensions',
-    key: 'description',
-    why: "planned, not yet read — liveness verdict `planned` (ADR-0149 D1/D6): a member's `description` is bounded at parse and overlaid by the translation resolver, but no Cube member, `getMeta` or dataset tool catalogue publishes it until the compiler write and the catalogue land (card #31589). Its Studio authoring is a follow-up of its own; a form control offered today would let an author write a definition nobody reads yet",
-  },
-  {
-    kind: 'omit',
-    type: 'dataset',
-    path: 'measures',
-    key: 'synonyms',
-    why: "planned, not yet read — liveness verdict `planned` (ADR-0149 D1/D6): a member's `synonyms` are bounded and checked for collisions across the dataset at parse, but nothing matches a question against them until the dataset AI tools' term matcher lands (card #31589). Its Studio authoring is a follow-up of its own; a form control offered today would let an author write words nothing matches yet",
-  },
-  {
-    kind: 'omit',
-    type: 'dataset',
-    path: 'measures',
-    key: 'description',
-    why: "planned, not yet read — liveness verdict `planned` (ADR-0149 D1/D6): a member's `description` is bounded at parse and overlaid by the translation resolver, but no Cube member, `getMeta` or dataset tool catalogue publishes it until the compiler write and the catalogue land (card #31589). Its Studio authoring is a follow-up of its own; a form control offered today would let an author write a definition nobody reads yet",
   },
   {
     kind: 'omit',

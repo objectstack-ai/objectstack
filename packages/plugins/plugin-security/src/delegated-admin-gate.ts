@@ -55,7 +55,14 @@
  * here instead, as the user it acts for.
  */
 
-import { isGrantActive, securityCatalogReaderOf, type SecurityCatalogReader } from '@objectstack/core';
+import {
+  isGrantActive,
+  resolveCatalogReference,
+  securityCatalogReaderOf,
+  type SecurityCatalogEntry,
+  type SecurityCatalogReader,
+  type SecurityCatalogReferenceScope,
+} from '@objectstack/core';
 import { declaredHttpStatus } from '@objectstack/types';
 import type { AdminScope, AdminScopeParsed, PermissionSet } from '@objectstack/spec/security';
 import {
@@ -659,7 +666,11 @@ function judgesTargetUserThroughCallerRead(ql: any): boolean {
  *   `scope: 'org'` in the security catalog (a name no declaration carries is
  *   not an organization capability).
  *
- * A set the catalog does not hold cannot be shown inside, and is not.
+ * A set the catalog does not hold cannot be shown inside, and is not. Nor
+ * can one a position names that the position cannot resolve: `scope` names
+ * that position, and the set resolves from the package that declared it
+ * (ADR-0150 D3/D7) — a name that rule refuses grants a holder nothing, and the
+ * reason carries the refusal with every candidate.
  *
  * Exported so a second save door that distributes permission sets judges them by
  * THIS predicate and never by a copy of its list: plugin-auth's identity-provider
@@ -668,11 +679,16 @@ function judgesTargetUserThroughCallerRead(ql: any): boolean {
 export async function organizationBoundaryFailure(
   catalog: SecurityCatalogReader | undefined,
   setName: string,
+  scope?: SecurityCatalogReferenceScope,
 ): Promise<string | null> {
   if (ORGANIZATION_BOUNDARY_DENYLIST.has(setName)) {
     return `permission set '${setName}', which is outside the organization boundary by name (platform and organization administration and the agent ceilings are never assigned by an organization administrator)`;
   }
-  const entry = catalog ? await catalog.resolve('permission', setName) : undefined;
+  const answer = catalog ? await resolveCatalogReference(catalog, 'permission', setName, scope) : undefined;
+  if (answer?.status === 'refused') {
+    return `permission set '${setName}', which the position cannot resolve, so it cannot be shown to be inside the organization boundary: ${answer.message}`;
+  }
+  const entry = answer?.status === 'resolved' ? answer.entry : undefined;
   if (!catalog || !entry) {
     return `permission set '${setName}', which is not in the security catalog, so it cannot be shown to be inside the organization boundary`;
   }
@@ -1339,8 +1355,8 @@ export class DelegatedAdminGate {
     if (carried === null) {
       return { reason: `position '${positionName}' is not in the security catalog, so it cannot be shown to be inside the organization boundary` };
     }
-    for (const setName of carried) {
-      const reason = await this.organizationBoundaryFailure(setName);
+    for (const setName of carried.names) {
+      const reason = await this.organizationBoundaryFailure(setName, { position: carried.position });
       if (reason) return { reason: `position '${positionName}' carries ${reason}`, permissionSet: setName };
     }
     return null;
@@ -1356,9 +1372,13 @@ export class DelegatedAdminGate {
    * (`AuthzStoreUnavailableError`) and the write is refused with it.
    *
    * The one answer to "which sets does this position carry" for both branches:
-   * the delegated walk ({@link setsBoundToPosition}) reads it too.
+   * the delegated walk ({@link setsBoundToPosition}) reads it too. It answers
+   * the position's catalog entry beside the names, because [ADR-0150 D7] each
+   * name resolves from the package that declared the position.
    */
-  private async setsCarriedByPosition(positionName: string): Promise<string[] | null> {
+  private async setsCarriedByPosition(
+    positionName: string,
+  ): Promise<{ position: SecurityCatalogEntry; names: string[] } | null> {
     const catalog = this.catalog();
     if (!catalog) return null;
     const position = await catalog.resolve('position', positionName);
@@ -1366,12 +1386,12 @@ export class DelegatedAdminGate {
     const listed = Array.isArray(position.definition.permissionSets)
       ? (position.definition.permissionSets as unknown[]).filter((n): n is string => typeof n === 'string' && n !== '')
       : [];
-    return [...new Set(listed)];
+    return { position, names: [...new Set(listed)] };
   }
 
   /** [ADR-0090 D12] {@link organizationBoundaryFailure}, against this gate's catalog. */
-  private organizationBoundaryFailure(setName: string): Promise<string | null> {
-    return organizationBoundaryFailure(this.catalog(), setName);
+  private organizationBoundaryFailure(setName: string, scope?: SecurityCatalogReferenceScope): Promise<string | null> {
+    return organizationBoundaryFailure(this.catalog(), setName, scope);
   }
 
   /** Is business unit `id` a unit of `organizationId`? Fail-closed on an unreadable unit. */
@@ -2157,10 +2177,14 @@ export class DelegatedAdminGate {
   private async setsBoundToPosition(positionName: string): Promise<BoundSet[]> {
     const catalog = this.catalog();
     if (!catalog || !positionName) return [];
-    const names = (await this.setsCarriedByPosition(positionName)) ?? [];
+    const carried = await this.setsCarriedByPosition(positionName);
+    if (!carried) return [];
     const out: BoundSet[] = [];
-    for (const name of names) {
-      const set = await catalog.resolve('permission', name);
+    for (const name of carried.names) {
+      // [ADR-0150 D7] Resolved from the position's package: a name it cannot
+      // resolve grants nothing, so it is returned with no `adminScope`, like a
+      // name the catalog does not hold (refuses more, never less).
+      const set = await catalog.resolve('permission', name, { position: carried.position });
       out.push({ name, ...(set?.definition.adminScope ? { adminScope: set.definition.adminScope } : {}) });
     }
     return out;

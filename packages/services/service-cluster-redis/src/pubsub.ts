@@ -8,7 +8,8 @@ import type {
     SubscribeOptions,
     Unsubscribe,
 } from '@objectstack/spec/contracts';
-import { duplicateForPubSub } from './client.js';
+import { ClusterDriverLiveness } from '@objectstack/service-cluster';
+import { duplicateForPubSub, watchRedisConnection } from './client.js';
 
 /**
  * Wire-format envelope sent over Redis. Adds `fromNode` and
@@ -31,6 +32,13 @@ export interface RedisPubSubOptions {
     keyPrefix?: string;
     /** Error sink for subscriber handler exceptions. */
     onError?: (err: unknown, channel: string) => void;
+    /**
+     * The driver's connection liveness, which the subscriber connection reports
+     * to (source `'subscriber'`). The driver factory passes its own; a pub/sub
+     * composed by hand gets one of its own, so its subscriber still has an
+     * `error` listener and logs an outage once.
+     */
+    liveness?: ClusterDriverLiveness;
 }
 
 /**
@@ -56,6 +64,7 @@ export class RedisPubSub implements IPubSub {
     private readonly keyPrefix: string;
     private readonly onError: (err: unknown, channel: string) => void;
     private readonly subs = new Map<string, Set<PubSubHandler<unknown>>>();
+    private readonly unwatchSubscriber: () => void;
     private closed = false;
 
     constructor(opts: RedisPubSubOptions) {
@@ -72,6 +81,11 @@ export class RedisPubSub implements IPubSub {
         this.subscriber.on('message', (raw: string, data: string) => {
             this.dispatch(raw, data);
         });
+        this.unwatchSubscriber = watchRedisConnection(
+            this.subscriber,
+            opts.liveness ?? new ClusterDriverLiveness({ driver: 'redis', nodeId: this.nodeId ?? 'node' }),
+            'subscriber',
+        );
     }
 
     /**
@@ -140,6 +154,8 @@ export class RedisPubSub implements IPubSub {
         if (this.closed) return;
         this.closed = true;
         this.subs.clear();
+        // Stop reporting first: the close `quit()` causes is not an outage.
+        this.unwatchSubscriber();
         try { await this.subscriber.quit(); } catch { /* swallow */ }
         // We don't quit `publisher` — caller owns it.
     }

@@ -40,6 +40,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Organización",
         help: "La organización a la que pertenece esta asignación."
       },
+      permission_set_package: {
+        label: "Permission Set Package",
+        help: "The app the permission set comes from. Filled in by the platform; empty when the set was created here, or when more than one app provides a set of that name."
+      },
       granted_by: {
         label: "Concedido por",
         help: "Usuario que concedió este conjunto de permisos."

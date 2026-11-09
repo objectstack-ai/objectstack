@@ -176,8 +176,13 @@ const REFUSED_AT_TYPE = 0;
  * objectui#13449: minus `ui:html`, the namespaced twin of the raw-HTML `html`
  * node type, retired from the registry with its renderer; the armed bare `html`
  * left with its arm, which became a refusal, so it moved nothing here.
+ * #31856: plus `app-shell:row-table`, the sixth console product block's
+ * namespaced twin, registered the way objectui#13301 registers the five and
+ * refused at `type` for the same reason: the bare `row-table` is the one
+ * authorable key, and its arm landed with it. A named stopgap raise of that
+ * one key; any other rise is still a regression.
  */
-const NAMESPACED_REFUSED_AT_TYPE = 306;
+const NAMESPACED_REFUSED_AT_TYPE = 307;
 
 /** The bare registry keys — the population the card measured. */
 const BARE_KEYS = KNOWN_SCHEMA_TYPES.filter((key) => !key.includes(':'));
