@@ -138,11 +138,28 @@ export function mergePicklistOptions(contributions: readonly PicklistContributio
   return merged;
 }
 
-function resolveField(field: unknown, resolve: (picklist: string) => readonly PicklistOptionLike[] | undefined): unknown {
+/**
+ * How a served body asks for one field's list: the picklist name, and the
+ * field that names it (its key in a name-keyed `fields`, or an array entry's
+ * `name`). The field is what tells the registry WHO wrote the reference, so
+ * the name resolves from that author's package (ADR-0150 D3, child E6).
+ */
+export type PicklistFieldResolver = (
+  picklist: string,
+  field: string | undefined,
+) => readonly PicklistOptionLike[] | undefined;
+
+/** An array-spelled field's `name`, when it carries one. */
+function fieldNameOf(field: unknown): string | undefined {
+  const name = field && typeof field === 'object' ? (field as { name?: unknown }).name : undefined;
+  return typeof name === 'string' && name !== '' ? name : undefined;
+}
+
+function resolveField(field: unknown, fieldName: string | undefined, resolve: PicklistFieldResolver): unknown {
   if (!field || typeof field !== 'object') return field;
   const picklist = (field as { picklist?: unknown }).picklist;
   if (typeof picklist !== 'string' || picklist.length === 0) return field;
-  const options = resolve(picklist);
+  const options = resolve(picklist, fieldName);
   if (options) {
     const resolved = options.map((o) => ({ ...o }));
     // Marked as derived unless the body brought `options` of its own: a field
@@ -169,7 +186,7 @@ function resolveField(field: unknown, resolve: (picklist: string) => readonly Pi
  */
 export function resolvePicklistFieldsOnto<T>(
   body: T,
-  resolve: (picklist: string) => readonly PicklistOptionLike[] | undefined,
+  resolve: PicklistFieldResolver,
 ): T {
   if (!body || typeof body !== 'object') return body;
   const fields = (body as { fields?: unknown }).fields;
@@ -178,13 +195,31 @@ export function resolvePicklistFieldsOnto<T>(
     !!f && typeof f === 'object' && typeof (f as { picklist?: unknown }).picklist === 'string';
   if (Array.isArray(fields)) {
     if (!fields.some(bound)) return body;
-    return { ...(body as object), fields: fields.map((f) => resolveField(f, resolve)) } as T;
+    return {
+      ...(body as object),
+      fields: fields.map((f) => resolveField(f, fieldNameOf(f), resolve)),
+    } as T;
   }
   const entries = Object.entries(fields as Record<string, unknown>);
   if (!entries.some(([, f]) => bound(f))) return body;
   const next: Record<string, unknown> = {};
-  for (const [name, f] of entries) next[name] = resolveField(f, resolve);
+  for (const [name, f] of entries) next[name] = resolveField(f, name, resolve);
   return { ...(body as object), fields: next } as T;
+}
+
+/**
+ * A field's picklist reference that resolves to no list from its package —
+ * nothing holds the name, or the package-scoped resolver refused it
+ * (ADR-0150 D3: `refusal` is that refusal's own sentence, every candidate
+ * named, carried verbatim).
+ */
+export type UnresolvedPicklistReference = PicklistReference & { readonly refusal?: string };
+
+/** A `picklistExtensions` entry whose target resolves to no list from its package (as above). */
+export type UnresolvedPicklistExtension = OrphanPicklistExtension & { readonly refusal?: string };
+
+function refusalSuffix(refusal: string | undefined): string {
+  return refusal ? ` (${refusal})` : '';
 }
 
 /**
@@ -198,16 +233,18 @@ export function resolvePicklistFieldsOnto<T>(
  * arrives, and the values an author added would silently go nowhere.
  */
 export function describeUnresolvedPicklistReferences(
-  unresolved: readonly PicklistReference[],
-  orphanExtensions: readonly OrphanPicklistExtension[] = [],
+  unresolved: readonly UnresolvedPicklistReference[],
+  orphanExtensions: readonly UnresolvedPicklistExtension[] = [],
 ): PicklistMetadataError | undefined {
   if (unresolved.length === 0 && orphanExtensions.length === 0) return undefined;
   const lines = [
     ...unresolved.map(
-      (r) => `field '${r.object}.${r.field}' (${describePackage(r.packageId)}) references picklist '${r.picklist}'`,
+      (r) => `field '${r.object}.${r.field}' (${describePackage(r.packageId)}) references picklist '${r.picklist}'`
+        + refusalSuffix(r.refusal),
     ),
     ...orphanExtensions.map(
-      (e) => `a \`picklistExtensions\` entry (${describePackage(e.packageId)}) extends picklist '${e.picklist}'`,
+      (e) => `a \`picklistExtensions\` entry (${describePackage(e.packageId)}) extends picklist '${e.picklist}'`
+        + refusalSuffix(e.refusal),
     ),
   ];
   return picklistMetadataError(
