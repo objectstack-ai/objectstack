@@ -171,6 +171,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           admin: "Admin"
         }
       },
+      package_id: {
+        label: "Package",
+        help: "The app a rule that came with an app belongs to. Filled in by the platform; empty for rules created here."
+      },
       customized: {
         label: "Customized",
         help: "Set once you edit a rule that came with an app, so your changes are kept when the app is updated."
@@ -321,6 +325,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       queue: {
         label: "Queue",
         help: "The name of the queue this member belongs to."
+      },
+      queue_package: {
+        label: "Queue Package",
+        help: "The app the queue comes from. Filled in by the platform; empty for queues created here."
       },
       recipient_type: {
         label: "Member Type",

@@ -171,6 +171,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
           admin: "管理員"
         }
       },
+      package_id: {
+        label: "所屬應用",
+        help: "隨應用安裝的規則屬於哪個應用。由平台填寫；在這裡建立的規則為空。"
+      },
       customized: {
         label: "已自訂",
         help: "當你編輯隨應用程式安裝的規則後就會設定，應用程式更新時會保留你的變更。"
@@ -321,6 +325,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       queue: {
         label: "佇列",
         help: "此成員所屬佇列的名稱。"
+      },
+      queue_package: {
+        label: "佇列所屬應用",
+        help: "該佇列來自哪個應用。由平台填寫；在這裡建立的佇列為空。"
       },
       recipient_type: {
         label: "成員類型",
