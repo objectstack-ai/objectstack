@@ -25,7 +25,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { bindSecurityCatalogReader, type SecurityCatalogReader } from '@objectstack/core';
+import { bindSecurityCatalogReader, currentCredentialUseClient, hashApiKey, type SecurityCatalogReader } from '@objectstack/core';
 import { SysSecret } from '@objectstack/platform-objects';
 import {
   SysAccount, SysApiKey, SysJwks, SysOauthAccessToken, SysOauthApplication, SysOauthConsent, SysSession,
@@ -406,5 +406,77 @@ describe('[#30209] the shareable-objects door — answers', () => {
     const answer = await d.call({ bearer: 'admin' });
     expect(envelope(answer)).toEqual(['INTERNAL_ERROR', 500]);
     expect(answer.body.data).toBeUndefined();
+  });
+});
+
+/** [#31898] A data engine that knows one API key, and records the client facts its use stamp runs with. */
+function keyEngine31898(key: string, owner: string, stamps: unknown[]) {
+  const keyHash = hashApiKey(key);
+  return {
+    find: async (object: string, q: any = {}) =>
+      object === 'sys_api_key' && q?.where?.key === keyHash
+        ? [{ id: 'key_31898', key: keyHash, user_id: owner, revoked: false, scopes: '[]', expires_at: '2999-01-01T00:00:00Z' }]
+        : object === 'sys_user' && (q?.where?.id === owner || q?.where?.id?.$in?.includes?.(owner))
+          ? [{ id: owner }]
+          : [],
+    findOne: async () => null,
+    update: async () => {
+      stamps.push(currentCredentialUseClient() ?? null);
+      return {};
+    },
+  };
+}
+
+/** [#31898] The auth service's trust rule, recording what each door handed it. */
+function trustRule31898(handed: Array<{ headers?: Record<string, unknown>; remoteAddress?: string }>) {
+  return (transport: { headers?: Record<string, unknown>; remoteAddress?: string }) => {
+    handed.push(transport);
+    return '203.0.113.7';
+  };
+}
+
+const REQUEST_31898 = {
+  headers: { 'user-agent': 'ci-agent/3.1', 'x-forwarded-for': '198.51.100.9' },
+  remoteAddress: '10.0.0.5',
+};
+
+/**
+ * [#31898] The door hands where the request came from to the key's use stamp:
+ * the transport's peer and the headers go to the auth service's trust rule, and
+ * the address it establishes is what the `credential_use` row records, with the
+ * user agent. The door reads no forwarded header itself.
+ */
+describe('[#31898] the shareable-objects door hands its client facts to the key\'s use stamp', () => {
+  it('the stamp runs with the address the trust rule established from the peer, and the user agent', async () => {
+    const stamps: unknown[] = [];
+    const handed: Array<{ headers?: Record<string, unknown>; remoteAddress?: string }> = [];
+    const handlers = new Map<string, (req: unknown, res: unknown) => Promise<void>>();
+    const http = {
+      get: (path: string, handler: (req: unknown, res: unknown) => Promise<void>) => handlers.set(path, handler),
+      post: vi.fn(), put: vi.fn(), patch: vi.fn(), delete: vi.fn(), use: vi.fn(),
+    };
+    const KEY_31898 = 'osk_shareable_objects_31898';
+    registerShareableObjectsRoutes(http as never, {
+      getEngine: () => keyEngine31898(KEY_31898, 'u_key_31898', stamps),
+      getAuth: () => ({ api: { getSession: async () => null }, resolveClientAddress: trustRule31898(handed) }) as never,
+      tenancy: undefined,
+      listShareableObjects: () => [],
+    });
+    const res = { status: () => res, json: () => undefined, header: () => res, send: () => undefined };
+    await handlers.get(SHAREABLE_OBJECTS_ROUTE)!(
+      {
+        params: {},
+        query: {},
+        headers: { ...REQUEST_31898.headers, 'x-api-key': KEY_31898 },
+        remoteAddress: REQUEST_31898.remoteAddress,
+        method: 'GET',
+        path: SHAREABLE_OBJECTS_ROUTE,
+      },
+      res,
+    );
+    expect(handed).toHaveLength(1);
+    expect(handed[0].remoteAddress).toBe('10.0.0.5');
+    expect(handed[0].headers?.['x-forwarded-for'], 'handed over raw: the auth service decides whether it counts').toBe('198.51.100.9');
+    expect(stamps).toEqual([{ ipAddress: '203.0.113.7', userAgent: 'ci-agent/3.1' }]);
   });
 });
