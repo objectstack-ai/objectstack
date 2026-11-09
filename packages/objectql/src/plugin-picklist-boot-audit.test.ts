@@ -162,7 +162,7 @@ describe('the picklist boot audit — a list only the environment holds (ADR-015
     await kernel.bootstrap();
     const ql = kernel.getService<ObjectQL>('objectql');
     expect(servedValues(ql, 'pb_account', 'industry')).toEqual([]);
-    expect(ql.registry.findEnvironmentHeldPicklistReferences()).toEqual([
+    expect(ql.registry.findOutsideClosurePicklistReferences()).toEqual([
       expect.objectContaining({ object: 'pb_account', field: 'industry', packageId: 'com.test.boot.app' }),
     ]);
   });
@@ -184,6 +184,24 @@ describe('the picklist boot audit — a list only the environment holds (ADR-015
     const manifest = kernel.getService<ManifestService>('manifest');
     await manifest.register({ id: 'com.test.late', name: 'late', dependencies: { 'com.test.boot.lists': '^1.0.0' }, objects: [ACCOUNT] });
     expect(servedValues(kernel.getService<ObjectQL>('objectql'), 'pb_account', 'industry')).toEqual(['technology']);
+  });
+
+  // [N1 ruled on #31678; ruling N2] A package holder outside the declared
+  // closure is refused the same way: the boot warns, it never fails.
+  it('boots when the list is held by a package the field\'s package does not depend on, serving no options', async () => {
+    const { kernel, use } = kernelWith(
+      new ObjectQLPlugin(),
+      registering('lists', [{ id: 'com.test.boot.lists', name: 'lists', picklists: [ENV_LIST] }]),
+      registering('app', [{ id: 'com.test.boot.app', name: 'app', objects: [ACCOUNT] }]),
+    );
+    await use();
+    await kernel.bootstrap();
+    const ql = kernel.getService<ObjectQL>('objectql');
+    expect(servedValues(ql, 'pb_account', 'industry')).toEqual([]);
+    expect(ql.registry.findUnresolvedPicklistReferences()).toEqual([]);
+    expect(ql.registry.findOutsideClosurePicklistReferences()).toEqual([
+      expect.objectContaining({ object: 'pb_account', field: 'industry', packageId: 'com.test.boot.app' }),
+    ]);
   });
 });
 

@@ -215,9 +215,13 @@ describe('ADR-0130 D4 — the manifest service registers the residual\'s objects
     expect(acmePackageIds(ql)).toEqual([]);
   });
 
+  // [ADR-0150 D3, child E6; N1 ruled on #31678: the declared dependency
+  // closure only] The residual names the body that holds the list among its
+  // dependencies — forced edit: a same-artifact sibling it does not depend on
+  // is outside its closure, and its list is refused.
   it('a residual object whose field names a picklist a BODY declares is served with that list', async () => {
     const { kernel } = await boot(registering('app', [
-      residualStack(noteObj(statusField), {}, { picklists: [statusList()] }),
+      residualStack(noteObj(statusField), { dependencies: { [SERVICE_ID]: '^2.4.0' } }, { picklists: [statusList()] }),
     ]));
     const ql = engineOf(kernel);
     expect(ql.registry.getObjectOwner('acme_note')?.packageId).toBe(RELEASE_ID);

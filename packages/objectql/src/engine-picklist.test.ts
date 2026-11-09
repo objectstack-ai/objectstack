@@ -403,7 +403,7 @@ describe('picklist — resolved from the package that writes the reference (ADR-
     expect(err.fields[0]).toMatchObject({ field: 'tier' });
     // Named for the boot's warning (never a boot refusal), not as an unresolved reference.
     expect(engine.registry.findUnresolvedPicklistReferences()).toEqual([]);
-    expect(engine.registry.findEnvironmentHeldPicklistReferences()).toEqual([
+    expect(engine.registry.findOutsideClosurePicklistReferences()).toEqual([
       expect.objectContaining({ object: 'pk_member', field: 'tier', picklist: 'env_tier', packageId: 'com.test.pkg' }),
     ]);
   });
@@ -414,9 +414,11 @@ describe('picklist — resolved from the package that writes the reference (ADR-
     engine.registerApp({ id: 'com.test.pkg', name: 'pkg', objects: [member('env_tier')] });
 
     expect((engine.registry.getObject('pk_member')!.fields.tier as any).options).toBeUndefined();
-    const [unresolved] = engine.registry.findUnresolvedPicklistReferences();
-    expect(unresolved).toMatchObject({ object: 'pk_member', field: 'tier', packageId: 'com.test.pkg' });
-    expect(unresolved.refusal).toContain('package "com.test.lists"');
+    // A refused reference, named for the boot's warning — never a boot refusal (N2).
+    expect(engine.registry.findUnresolvedPicklistReferences()).toEqual([]);
+    const [outside] = engine.registry.findOutsideClosurePicklistReferences();
+    expect(outside).toMatchObject({ object: 'pk_member', field: 'tier', packageId: 'com.test.pkg' });
+    expect(outside.refusal).toContain('package "com.test.lists"');
   });
 
   it('CONTROL — the same field, its package declaring the holder as a dependency, is served the list', async () => {
@@ -452,7 +454,7 @@ describe('picklist — resolved from the package that writes the reference (ADR-
       objectExtensions: [{ extend: 'pk_member', fields: { tier: { name: 'tier', type: 'select', picklist: 'env_tier' } } }],
     });
     expect((engine.registry.getObject('pk_member')!.fields.tier as any).options).toBeUndefined();
-    expect(engine.registry.findUnresolvedPicklistReferences()).toEqual([
+    expect(engine.registry.findOutsideClosurePicklistReferences()).toEqual([
       expect.objectContaining({ object: 'pk_member', field: 'tier', packageId: 'com.test.pkg' }),
     ]);
   });
