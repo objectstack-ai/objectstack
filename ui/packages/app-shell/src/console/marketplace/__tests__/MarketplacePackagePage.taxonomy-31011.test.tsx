@@ -154,3 +154,59 @@ describe('Details — the marketplace taxonomy (objectstack#31011)', () => {
     expect(screen.queryByText('retail')).toBeNull();
   });
 });
+
+/**
+ * The package page's languages group (objectstack#31462), in the taxonomy
+ * strip: every language the latest version ships, the default first and
+ * marked, each with its coverage; "No language information" for a version
+ * measured before the control plane measured languages; nothing when the
+ * catalog serves neither key.
+ */
+describe('Details — the languages an app ships (objectstack#31462)', () => {
+  const version = (extra: Record<string, unknown>) => ({ latest_version: { id: 'ver_crm_1', version: '1.0.0', ...extra } });
+
+  it('lists every language, the default first and marked, each with its coverage', async () => {
+    await renderDetail(version({
+      supported_locales: ['zh-CN', 'en', 'ja-JP', 'de', 'th'],
+      locale_coverage: {
+        default_locale: 'zh-CN',
+        expected_keys: 120,
+        locales: [
+          { locale: 'zh-CN', translated: 120, coverage_percent: 100 },
+          { locale: 'en', translated: 114, coverage_percent: 95 },
+          { locale: 'ja-JP', translated: 72, coverage_percent: 60 },
+          { locale: 'de', translated: 30, coverage_percent: 25 },
+          { locale: 'th', translated: 3, coverage_percent: 2.5 },
+        ],
+      },
+    }));
+
+    const group = screen.getByRole('group', { name: L.facet.languages });
+    expect(group).toHaveAttribute('data-state', 'listed');
+    expect(within(group).getAllByTestId(/^marketplace-detail-language-/).map((b) => b.textContent)).toEqual([
+      `简体中文 100%${L.languages.default}`,
+      'English 95%',
+      '日本語 60%',
+      'Deutsch 25%',
+      'ไทย 2.5%',
+    ]);
+    // The served code stays on the badge, so a reader can see what was declared.
+    expect(screen.getByTestId('marketplace-detail-language-zh-CN')).toHaveAttribute('title', 'zh-CN');
+  });
+
+  it('a version published before the measurement reads "No language information", never "English only"', async () => {
+    await renderDetail(version({ supported_locales: null, locale_coverage: null }));
+
+    const group = screen.getByRole('group', { name: L.facet.languages });
+    expect(group).toHaveAttribute('data-state', 'unknown');
+    expect(group).toHaveTextContent(L.languages.none);
+    expect(group).not.toHaveTextContent('English');
+  });
+
+  it('CONTROL: a catalog that serves neither key draws no languages group', async () => {
+    await renderDetail({});
+
+    expect(screen.queryByRole('group', { name: L.facet.languages })).toBeNull();
+    expect(screen.queryByText(L.languages.none)).toBeNull();
+  });
+});

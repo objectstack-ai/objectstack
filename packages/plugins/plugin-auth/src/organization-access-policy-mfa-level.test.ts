@@ -28,6 +28,7 @@ vi.mock('@objectstack/core', async (importOriginal) => {
 });
 
 import { assertEngineFindOnePredicate } from '@objectstack/objectql';
+import type { IAuthService } from '@objectstack/spec/contracts';
 import { AuthManager } from './auth-manager';
 
 const SECRET = 'test-secret-at-least-32-chars-long';
@@ -122,6 +123,39 @@ describe('two organizations, each held to its own level', () => {
     const m = manager({ [ORG_A]: 'everyone', [ORG_B]: 'off' }, { deployment: 'administrators' });
     expect(await held(m, 'org_admin', ORG_B)).toBe(true);
     expect(await held(m, 'plain', ORG_B)).toBe(false);
+    expect(await held(m, 'plain', ORG_A)).toBe(true);
+  });
+});
+
+describe('the published administrator reading agrees with the MFA gate', () => {
+  /** The member a caller outside plugin-auth reaches through the `auth` service. */
+  const published = (m: AuthManager): Pick<IAuthService, 'isOrganizationAdministrator'> => m;
+
+  it('answers what the gate answers for the three kinds and a plain member', async () => {
+    POSTURES[`platform@${ORG_A}`] = { posture: 'PLATFORM_ADMIN' };
+    POSTURES[`org_admin@${ORG_A}`] = { posture: 'TENANT_ADMIN' };
+    POSTURES[`delegate@${ORG_A}`] = { posture: 'MEMBER', permissions: ['bu_admin'] };
+    POSTURES[`plain@${ORG_A}`] = { posture: 'MEMBER' };
+    const m = manager({ [ORG_A]: 'administrators' }, { delegated: new Set(['delegate']) });
+    const expected: Record<string, boolean> = { platform: true, org_admin: true, delegate: true, plain: false };
+    for (const [userId, admin] of Object.entries(expected)) {
+      const answer = await published(m).isOrganizationAdministrator!(userId, ORG_A);
+      expect({ userId, answer }).toEqual({ userId, answer: admin });
+      expect({ userId, answer }).toEqual({ userId, answer: await held(m, userId, ORG_A) });
+    }
+  });
+
+  it('counts a user whose delegated grant cannot be read as an administrator, as the gate does', async () => {
+    const m = manager({ [ORG_A]: 'administrators' });
+    m.setOrganizationAccessPolicySource({
+      read: async () => ({ mfa_required: 'administrators' }),
+      anyOrganizationRequiresMfa: async () => true,
+      isDelegatedAdministrator: async () => {
+        throw new Error('catalog unreadable');
+      },
+    });
+    (m as any)._orgMfaCache = { value: true, at: Date.now() };
+    expect(await published(m).isOrganizationAdministrator!('plain', ORG_A)).toBe(true);
     expect(await held(m, 'plain', ORG_A)).toBe(true);
   });
 });

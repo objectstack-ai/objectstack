@@ -232,6 +232,7 @@ const ar = {
       businessFunction: 'الوظيفة التجارية',
       industry: 'القطاع',
       solutionType: 'النوع',
+      languages: 'اللغات',
     },
     businessFunction: {
       sales: 'المبيعات',
@@ -265,6 +266,11 @@ const ar = {
     },
     maturity: {
       beta: 'تجريبي',
+    },
+    languages: {
+      none: 'لا تتوفر معلومات عن اللغات',
+      more: 'المزيد: {{extra}}',
+      default: '(افتراضية)',
     },
     relativeTime: {
       today: "اليوم",

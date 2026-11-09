@@ -558,7 +558,19 @@ export const CEILINGS = new Map([
   // metadata lives in the public skills … The private corpus's rules of that
   // kind move there". The raise path is the standing 2026-10-27 ruling (ruling
   // record 6513306068), quoted verbatim and untranslated in the PR body.
-  ['skills/objectstack-automation/SKILL.md', 6527],
+  // 6527 -> 6568 (card #31741, the ADR-0150 E1 skills follow-up): the
+  // `subflow` / `map` rows teach how a child's bare `config.flowName`
+  // resolves from the calling flow's package (own flow, else the one holder
+  // in its `dependencies` closure plus `sys`) and the three run-time refusals.
+  // Raise path the standing ruling 「A:先削重复,余额按实测提高」 (ruling record
+  // 6513306068, letter B). PAID DOWN FIRST — nine restatements cut, each
+  // keeping its other home (listed in the PR body and the changeset). Arithmetic
+  // in priced bytes (stamp line excluded), against `main`'s 26108 (headroom 0):
+  // the rows add 581, the cuts remove 417, so the LANDED priced text is 26272
+  // bytes -> ceil(26272 / 4) = 6568; the ceiling moves +41, the measured
+  // remainder only. Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-automation/SKILL.md) - 20) / 4) == ceil(26272 / 4)
+  ['skills/objectstack-automation/SKILL.md', 6568],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
@@ -931,8 +943,22 @@ export const CEILINGS = new Map([
   // `origin/main` the file was 14783 bytes (3696 tokens, headroom 2); the
   // LANDED file is 15069 bytes -> 3768 tokens, ceiling +70, pinned AT the
   // measurement, zero headroom.
-  //   ceil($(wc -c < skills/objectstack-data/rules/security.md) / 4) == ceil(15069 / 4)
-  ['skills/objectstack-data/rules/security.md', 3768],
+  // 3768 -> 3959 (card #31819, the Skills-docs follow-up of ADR-0150 E3): a
+  // package's position reads each `permissionSets` name as its package's set,
+  // else the one holder in its declared `dependencies` closure plus `sys`;
+  // else refused `outside-closure` (a non-dependency or the environment holds
+  // it) or `ambiguous-in-closure` (two reachable holders), logged by the boot's
+  // catalog reference report, granting nothing through that name; the callers
+  // that still resolve environment-wide. Same standing ruling, decision card
+  // 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, tap A, verbatim
+  // and untranslated: 「A:先削重复,余额按实测提高」 (record 6513306068). PAID
+  // DOWN FIRST: the `secret` paragraph's fail-closed sentence, kept as
+  // "fail-closed (ADR-0100)" in `rules/field-types.md`; 86 bytes. On
+  // `origin/main` the file was 15056 bytes (3764 tokens, headroom 4); the
+  // LANDED file is 15834 bytes -> 3959 tokens, ceiling +191, pinned AT the
+  // measurement, zero headroom.
+  //   ceil($(wc -c < skills/objectstack-data/rules/security.md) / 4) == ceil(15834 / 4)
+  ['skills/objectstack-data/rules/security.md', 3959],
   // 3024 -> 3109 (2026-08-31 app-repo-principles raise, see the block above).
   // Severity Levels listed the three values and left the CHOICE unstated: a
   // block rests on a judgement a person made, so a machine-inferred signal — a
