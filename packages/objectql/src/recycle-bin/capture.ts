@@ -25,6 +25,19 @@
  *   4. {@link RecycleBinWrittenEntry.compensate}, when the root row's removal
  *      throws and no transaction covered the entry: the entry is removed, so a
  *      failed delete leaves no entry for a row that is still live.
+ *   5. {@link RecycleBinWrittenEntry.withdraw}, when the driver answers that it
+ *      removed nothing (`false`, or an off-contract count of `0`: the row was
+ *      already gone, filtered out, or lost a race): the entry is removed with
+ *      the driver options of this unit of work, inside its transaction when one
+ *      covers the bin. Nothing throws, so no rollback would take the entry, and
+ *      an entry for a deletion that did not happen is a ghost an admin sees.
+ *
+ * The entry is written BEFORE the root row is removed, and withdrawn after a
+ * removal that removed nothing, rather than written only once the removal is
+ * confirmed: with no transaction, a write after the removal that failed would
+ * leave a removed row with no entry to undo it, and nothing could compensate
+ * that. Written first, a bin that cannot take the entry refuses the delete
+ * before the row goes.
  *
  * ## Which deletes enter the bin (v1, seat ruling on #30237 Q6)
  *
@@ -156,6 +169,13 @@ export interface RecycleBinWrittenEntry {
    * replaces the delete's own error.
    */
   compensate(): Promise<void>;
+  /**
+   * Remove the entry when the root row's removal answered that it removed
+   * nothing. Always removes, inside the covering transaction when there is
+   * one: no rollback follows a removal that did not throw. A failure to remove
+   * it is logged at `error` and never changes the delete's answer.
+   */
+  withdraw(): Promise<void>;
 }
 
 /**
@@ -252,27 +272,34 @@ export class RecycleBinCapture {
     const host = this.host;
     const object = this.object;
     const recordId = this.id;
+    /** Remove the entry; `outcome` says, in the logged text, why it goes. */
+    const remove = async (outcome: 'failed' | 'removed nothing'): Promise<void> => {
+      if (id === undefined) {
+        host.logger.error(`[recycle-bin] the delete ${outcome} and its entry cannot be removed: the driver returned no entry id`, undefined, {
+          object, id: recordId,
+        });
+        return;
+      }
+      try {
+        await driver.delete(RECYCLE_BIN_OBJECT, id, options);
+      } catch (error) {
+        // The driver's fault, bound values stripped: it may quote the row.
+        const redacted = redactBoundStatement(error);
+        host.logger.error(
+          `[recycle-bin] the delete ${outcome} and removing its entry failed too; the entry names a record that is still live`,
+          redacted instanceof Error ? redacted : undefined,
+          { object, id: recordId, entry: id },
+        );
+      }
+    };
     return {
       id,
       async compensate(): Promise<void> {
         if (covered) return;
-        if (id === undefined) {
-          host.logger.error('[recycle-bin] the delete failed and its entry cannot be removed: the driver returned no entry id', undefined, {
-            object, id: recordId,
-          });
-          return;
-        }
-        try {
-          await driver.delete(RECYCLE_BIN_OBJECT, id, options);
-        } catch (error) {
-          // The driver's fault, bound values stripped: it may quote the row.
-          const redacted = redactBoundStatement(error);
-          host.logger.error(
-            '[recycle-bin] the delete failed and removing its entry failed too; the entry names a record that is still live',
-            redacted instanceof Error ? redacted : undefined,
-            { object, id: recordId, entry: id },
-          );
-        }
+        await remove('failed');
+      },
+      async withdraw(): Promise<void> {
+        await remove('removed nothing');
       },
     };
   }

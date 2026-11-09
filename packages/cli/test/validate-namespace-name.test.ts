@@ -63,18 +63,31 @@ function payloadOf(run: Run, label: string): Record<string, any> {
 const ALPHA = 'com.example.nsn-alpha';
 const BETA = 'com.example.nsn-beta';
 
-/** A two-package artifact; `betaNs` is the second package's namespace. */
+/**
+ * A two-package artifact; `betaNs` is the second package's namespace. Inside
+ * one namespace both packages hold the page `nsn_home` and the tool
+ * `nsn_lookup`. Across two namespaces only the page is shared: a tool is also
+ * phase 1's bare-name one-holder type, which refuses one tool name held by two
+ * packages environment-wide, so a shared tool there would be that rule's
+ * refusal, not this one's CONTROL.
+ */
 function packagesStack(betaNs: string): Record<string, unknown> {
-  const pkg = (id: string, ns: string, tag: string) => ({
+  const pkg = (id: string, ns: string, tag: string, tool: string) => ({
     id,
     name: tag,
     version: '1.0.0',
     type: 'app',
     namespace: ns,
     pages: [{ name: 'nsn_home', label: `${tag} home`, type: 'app', regions: [] }],
-    tools: [{ name: 'nsn_lookup', label: `${tag} lookup`, description: 'Looks a record up', parameters: {} }],
+    tools: [{ name: tool, label: `${tag} lookup`, description: 'Looks a record up', parameters: {} }],
   });
-  return { packages: [{ manifest: pkg(ALPHA, 'nsn', 'nsn_alpha') }, { manifest: pkg(BETA, betaNs, 'nsn_beta') }] };
+  const betaTool = betaNs === 'nsn' ? 'nsn_lookup' : `${betaNs}_lookup`;
+  return {
+    packages: [
+      { manifest: pkg(ALPHA, 'nsn', 'nsn_alpha', 'nsn_lookup') },
+      { manifest: pkg(BETA, betaNs, 'nsn_beta', betaTool) },
+    ],
+  };
 }
 
 /** What the package door throws for the same artifact, driven the way the load path drives it. */
@@ -143,7 +156,7 @@ describe('ADR-0150 child N — os validate and os build refuse what the package 
     expect(existsSync(join(dir, ARTIFACT)), 'os build wrote an artifact the package door refuses').toBe(false);
   }, SPAWN_TIMEOUT_MS);
 
-  it('CONTROL — the same names in two namespaces validate', async () => {
+  it('CONTROL — the same page name in two namespaces validates', async () => {
     const run = await runCli(['validate', '--json'], dirs['two-namespaces']);
     const payload = payloadOf(run, 'two-namespaces --json');
     expect(payload.valid, JSON.stringify(payload.errors)).toBe(true);
