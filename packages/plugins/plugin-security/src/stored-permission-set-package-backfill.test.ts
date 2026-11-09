@@ -419,11 +419,36 @@ describe('the write seam stamps the package column on every write that names a s
     const registry = Object.assign(standInRegistry(), { bareNameHoldersAreSealed: sealed });
     expect(registerPermissionSetPackageStamp({
       registry,
+      getSchema: engine.getSchema.bind(engine),
       registerHook: engine.registerHook.bind(engine),
       unregisterHooksByPackage: engine.unregisterHooksByPackage.bind(engine),
     })).toBe(true);
     return engine;
   }
+
+  it('a table registered without the column is never touched: no key is written, so no write is refused as an unknown field', () => {
+    const handlers: Array<{ event: string; object: unknown; run: (ctx: any) => void }> = [];
+    const declared = new Set<string>();
+    const registry = Object.assign(standInRegistry(), { bareNameHoldersAreSealed: true });
+    registerPermissionSetPackageStamp({
+      registry,
+      getSchema: (object: string) => ({ name: object, fields: declared.has(object) ? { [GRANTS.packageColumn]: {} } : { permission_set: {} } }),
+      registerHook: (event, run, options) => { handlers.push({ event, object: options?.object, run }); },
+    });
+    const insert = handlers.find((h) => h.event === 'beforeInsert' && h.object === GRANTS.object)!;
+    const update = handlers.find((h) => h.event === 'beforeUpdate' && h.object === GRANTS.object)!;
+    const write = (h: typeof insert, data: Record<string, unknown>, previous?: Record<string, unknown>) => {
+      h.run({ object: GRANTS.object, input: { data }, previous, session: {} });
+      return data;
+    };
+    expect(write(insert, { permission_set: ONE_HOLDER })).toEqual({ permission_set: ONE_HOLDER });
+    expect(write(update, { permission_set: ONE_HOLDER }, { permission_set: TWO_HOLDERS })).toEqual({ permission_set: ONE_HOLDER });
+    // Declared: the same writes are stamped; a null answer adds no key it did not have to replace.
+    declared.add(GRANTS.object);
+    expect(write(insert, { permission_set: ONE_HOLDER })).toEqual({ permission_set: ONE_HOLDER, [GRANTS.packageColumn]: CRM });
+    expect(write(insert, { permission_set: TWO_HOLDERS })).toEqual({ permission_set: TWO_HOLDERS });
+    expect(write(insert, { permission_set: TWO_HOLDERS, [GRANTS.packageColumn]: HR })).toEqual({ permission_set: TWO_HOLDERS, [GRANTS.packageColumn]: null });
+  });
 
   it('R1: an insert takes the one package holder; a refused, environment or unheld name stays null', async () => {
     const engine = await stamped();

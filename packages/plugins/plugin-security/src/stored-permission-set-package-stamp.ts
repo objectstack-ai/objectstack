@@ -37,6 +37,16 @@
  * and the boot backfill binds it once the holders are sealed. A registry
  * without the holder reads (a test stand-in) stamps nothing either.
  *
+ * ## Where the column is not declared
+ *
+ * A composition may register either table without the column (a host's own
+ * definition, a test rig's minimal one). There the seam does not touch the
+ * payload at all: writing an undeclared key would turn every write of the
+ * table into an unknown-field refusal. The column is read from the object's
+ * registered schema on each write, so a table that gains it is stamped from
+ * then on. A null answer writes the key only to replace a value the writer
+ * sent; otherwise the column is left to its default.
+ *
  * ## What a write keeps
  *
  * - **An insert** is stamped from its name, whoever writes it: a value the
@@ -65,6 +75,7 @@ const HOOK_PRIORITY = 40;
 
 interface StampEngine {
   registry?: unknown;
+  getSchema?: (object: string) => unknown;
   registerHook?: (
     event: string,
     handler: (ctx: any) => void | Promise<void>,
@@ -95,6 +106,25 @@ function stampFor(engine: StampEngine, name: string, caller: string | null): str
   return holder.kind === 'package' ? holder.packageId : null;
 }
 
+/** Whether the object as registered declares the package column (module doc, "Where the column is not declared"). */
+function declaresColumn(engine: StampEngine, reference: StoredPermissionSetReference): boolean {
+  if (typeof engine.getSchema !== 'function') return false;
+  let schema: unknown;
+  try {
+    schema = engine.getSchema(reference.object);
+  } catch {
+    return false;
+  }
+  const fields = isPlainRecord(schema) ? schema.fields : undefined;
+  return isPlainRecord(fields) && hasOwn(fields, reference.packageColumn);
+}
+
+/** Write the answer; a null one only where it replaces a value the writer sent (module doc). */
+function stamp(data: Record<string, unknown>, column: string, value: string | null): void {
+  if (value === null && !hasOwn(data, column)) return;
+  data[column] = value;
+}
+
 /** The package that wrote the reference: R3's `package_id`, `null` for R1 (module doc). */
 function writerOf(reference: StoredPermissionSetReference, row: Record<string, unknown>): string | null {
   return reference.callerColumn ? named(row[reference.callerColumn]) : null;
@@ -106,8 +136,8 @@ function onInsert(engine: StampEngine, reference: StoredPermissionSetReference, 
   const data = ctx?.input?.data;
   if (!isPlainRecord(data)) return;
   const name = named(data[reference.nameColumn]);
-  if (name === null) return;
-  data[reference.packageColumn] = stampFor(engine, name, writerOf(reference, data));
+  if (name === null || !declaresColumn(engine, reference)) return;
+  stamp(data, reference.packageColumn, stampFor(engine, name, writerOf(reference, data)));
 }
 
 /** `beforeUpdate`: one dispatch per matched row, `previous` bound (module doc). */
@@ -120,9 +150,10 @@ function onUpdate(engine: StampEngine, reference: StoredPermissionSetReference, 
     && named(data[reference.nameColumn]) !== named(previous[reference.nameColumn]);
   const touchesWriter = reference.callerColumn !== undefined && hasOwn(data, reference.callerColumn)
     && named(data[reference.callerColumn]) !== named(previous[reference.callerColumn]);
-  if (!touchesName && !touchesWriter) return;
+  if ((!touchesName && !touchesWriter) || !declaresColumn(engine, reference)) return;
   const after = { ...previous, ...data };
   const name = named(after[reference.nameColumn]);
+  // A rename always writes the key: the old package must not survive it.
   data[reference.packageColumn] = name === null ? null : stampFor(engine, name, writerOf(reference, after));
 }
 
