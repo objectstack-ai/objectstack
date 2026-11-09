@@ -1,5 +1,5 @@
 ---
-'@objectstack/core': patch
+'@objectstack/core': minor
 '@objectstack/platform-objects': patch
 '@objectstack/objectql': patch
 '@objectstack/driver-sql': patch
@@ -7,7 +7,7 @@
 
 feat(core): the activation ledger is keyed by `(metadata_type, package_id, name)`, and rows that name no package take their one holder
 
-Clause-②: no
+Clause-②: yes (widening) — `@objectstack/core` exports `backfillActivationLedgerPackages` and the `ActivationLedgerHolder`, `ActivationLedgerUnboundRow`, `ActivationLedgerBackfillReport` and `ActivationLedgerBackfillOptions` types from its root; nothing is removed or renamed, and every door and name-keyed reader answers as before.
 Metadata-protocol: none
 
 `sys_metadata_activation` (the switch an administrator throws to turn a packaged flow, action, permission set, sharing rule, webhook, queue or assignment rule off) is now unique on `(metadata_type, package_id, name)` instead of `(metadata_type, name)` (ADR-0150 D4, D8 row R4). Two packages may each hold a row for an item of the same name; one package may not hold two.
