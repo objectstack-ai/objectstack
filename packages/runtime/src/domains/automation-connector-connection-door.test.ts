@@ -367,7 +367,7 @@ describe('ADR-0143 D5 — connector connection door: begin and revoke refuse a d
 
     it('an AI service account is refused on begin and on revoke by its own kind, not as an agent acting for a person', async () => {
         expect(ACCOUNT_KEY().executionContext).toMatchObject({ userId: 'u_agent', principalKind: 'agent', systemPermissions: [] });
-        expect(ACCOUNT_KEY().executionContext.onBehalfOf).toBeUndefined();
+        expect(ACCOUNT_KEY().executionContext?.onBehalfOf).toBeUndefined();
         expect(connectorConnectionDelegatedCaller(ACCOUNT_KEY())).toBe('agent_account');
         for (const verb of ['POST', 'DELETE'] as const) {
             const h = boot();
