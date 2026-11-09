@@ -132,6 +132,7 @@ type FaceAnswer = { rows: Record<string, unknown>[] } | { refused: { status: num
 let engine: ObjectQL;
 let service: AnalyticsService;
 let restRoute: any;
+let protocol: { getMetaItems: ReturnType<typeof vi.fn> } & Record<string, unknown>;
 
 const byKey = (rows: Record<string, unknown>[]) =>
   [...rows].map((r) => JSON.stringify(Object.keys(r).sort().map((k) => [k, r[k]]))).sort();
@@ -197,7 +198,7 @@ beforeAll(async () => {
   await new AnalyticsServicePlugin().init(ctx as never);
   service = registered.analytics as AnalyticsService;
 
-  const protocol = {
+  protocol = {
     getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
     getMetaTypes: vi.fn().mockResolvedValue([]),
     getMetaItems: vi.fn().mockImplementation(async () => SAVED.map((d) => ({ ...d }))),
@@ -274,5 +275,28 @@ describe('[ADR-0149 D4] query_dataset returns the rows the REST door and the ser
     const admin = await tools.listDatasets({}, callers.u_admin);
     expect(admin.datasets.map((d) => d.name)).toEqual(['deal_metrics', 'locked_metrics']);
     expect(admin.datasets[0].membersWithheld).toBeUndefined();
+  });
+});
+
+describe('a FAILED saved-dataset read is answered alike by the REST door and query_dataset', () => {
+  // A read that threw is a server-side fault, not an absent dataset: neither
+  // face may answer it as `404 NOT_FOUND`, and both answer it the same way.
+  it('both answer 503 SERVICE_UNAVAILABLE, neither 404', async () => {
+    const outage = new Error('the metadata store is unreachable');
+    const selection = { measures: ['revenue'] };
+
+    protocol.getMetaItems.mockRejectedValueOnce(outage);
+    const rest = await faces.rest('u_me', selection);
+
+    const tools = service.datasetTools({ loadDatasets: async () => { throw outage; } });
+    let chatTool: FaceAnswer | undefined;
+    try {
+      await tools.execute({ toolName: 'query_dataset', input: { datasetName: DATASET.name, selection } }, callers.u_me);
+    } catch (e) {
+      chatTool = { refused: refusalOf(e) };
+    }
+
+    expect(rest).toEqual({ refused: { status: 503, code: 'SERVICE_UNAVAILABLE' } });
+    expect(chatTool).toEqual(rest);
   });
 });
