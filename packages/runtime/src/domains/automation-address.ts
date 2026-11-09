@@ -119,6 +119,15 @@ function readSegment(door: AddressDoor, segment: string, registry: AutomationAdd
     return undefined;
 }
 
+/** A connector segment as its door decodes it; an escape that does not decode stays raw (it names nothing). */
+function decodedSegment(segment: string): string {
+    try {
+        return decodeURIComponent(segment);
+    } catch {
+        return segment;
+    }
+}
+
 /**
  * Read the address of an `/automation` path (segments after `/automation`).
  * See the module note: the grammar's literals first, then `_env`, then an
@@ -140,7 +149,7 @@ export function readAutomationAddress(parts: readonly string[], registry: Automa
         if (parts.length !== 4 || parts[3] !== 'connection') return bare;
         const qualifier = readSegment('connectors', parts[1], registry);
         return qualifier
-            ? { parts: ['connectors', parts[2], 'connection'], qualifier, item: { type: 'connector', name: parts[2] } }
+            ? { parts: ['connectors', parts[2], 'connection'], qualifier, item: { type: 'connector', name: decodedSegment(parts[2]) } }
             : bare;
     }
     // A first segment with no name after it is no address.

@@ -289,4 +289,20 @@ describe('address grammar ↔ route ledger (ADR-0150 D5, #31691)', () => {
       expect([...served].sort(), `door ${door} (${position.prefix})`).toEqual([...position.literals].sort());
     }
   });
+
+  // Seat ruling Q1 = A: a sub-resource literal in a flow door's name position
+  // keeps its bare route (`/automation/crm/runs` is the runs of the flow
+  // `crm`). The set the domain reads (`AUTOMATION_FLOW_SUBRESOURCE_SEGMENTS`)
+  // is exactly the segments the ledger's `/automation/:name/<segment>` rows
+  // serve, so a sub-resource a new row adds joins it.
+  it('the flow doors\' sub-resource literals are exactly the segments the ledger serves after `/automation/:name`', async () => {
+    const { AUTOMATION_FLOW_SUBRESOURCE_SEGMENTS } = await import('./domains/automation-address.js');
+    const served = new Set<string>();
+    for (const row of ROUTE_LEDGER) {
+      const path = row.route.slice(row.route.indexOf(' ') + 1).split('?')[0];
+      const match = /^\/automation\/:name\/([^/:]+)/.exec(path);
+      if (match) served.add(match[1]);
+    }
+    expect([...served].sort()).toEqual([...AUTOMATION_FLOW_SUBRESOURCE_SEGMENTS].sort());
+  });
 });

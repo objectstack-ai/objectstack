@@ -2029,6 +2029,56 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                         errorResponse(err, res);
                     }
                 });
+
+                // [ADR-0150 D5, epic child G1] The addressed shapes: a flow named
+                // by an installed namespace or `_env` in front of its name, the
+                // legacy trigger's `trigger/:ns/:name`, and a connector
+                // instance's connection under a namespace. Registered AFTER every
+                // bare mount above, so a path both spell is the bare mount's; each
+                // mount rebuilds the path it matched, so the domain receives the
+                // path the caller sent either way and reads the namespace
+                // position itself (`domains/automation-address.ts`). A path whose
+                // segment there is no address (a literal, a sub-resource name, no
+                // installed namespace) is the bare grammar's: served as before, or
+                // declined by the domain and answered the dispatcher's no-route
+                // 404. Flow segments are forwarded as the bare mounts forward
+                // theirs; the connector's name is re-encoded as its bare mount's is.
+                const addressedAutomationRoutes: ReadonlyArray<{
+                    verb: 'get' | 'post' | 'put' | 'delete'; pattern: string; readsBody: boolean; encode?: boolean;
+                }> = [
+                    { verb: 'get', pattern: '/automation/:ns/:name', readsBody: false },
+                    { verb: 'put', pattern: '/automation/:ns/:name', readsBody: true },
+                    { verb: 'delete', pattern: '/automation/:ns/:name', readsBody: false },
+                    { verb: 'post', pattern: '/automation/:ns/:name/trigger', readsBody: true },
+                    { verb: 'post', pattern: '/automation/:ns/:name/toggle', readsBody: true },
+                    { verb: 'post', pattern: '/automation/:ns/:name/clone', readsBody: true },
+                    { verb: 'get', pattern: '/automation/:ns/:name/runs', readsBody: false },
+                    { verb: 'get', pattern: '/automation/:ns/:name/runs/:runId', readsBody: false },
+                    { verb: 'post', pattern: '/automation/:ns/:name/runs/:runId/resume', readsBody: true },
+                    { verb: 'post', pattern: '/automation/:ns/:name/runs/:runId/cancel', readsBody: true },
+                    { verb: 'post', pattern: '/automation/:ns/:name/runs/:runId/restore-suspension', readsBody: true },
+                    { verb: 'get', pattern: '/automation/:ns/:name/runs/:runId/screen', readsBody: false },
+                    { verb: 'post', pattern: '/automation/trigger/:ns/:name', readsBody: true },
+                    { verb: 'get', pattern: '/automation/connectors/:ns/:name/connection', readsBody: false, encode: true },
+                    { verb: 'post', pattern: '/automation/connectors/:ns/:name/connection', readsBody: true, encode: true },
+                    { verb: 'delete', pattern: '/automation/connectors/:ns/:name/connection', readsBody: false, encode: true },
+                ];
+                for (const { verb, pattern, readsBody, encode } of addressedAutomationRoutes) {
+                    server![verb](`${base}${pattern}`, async (req: any, res: any) => {
+                        try {
+                            const path = pattern.replace(/:([A-Za-z]+)/g, (_m, key: string) => {
+                                const value = String(req.params[key]);
+                                return encode ? encodeURIComponent(value) : value;
+                            });
+                            const result = await dispatcher.dispatch(
+                                verb.toUpperCase(), path, readsBody ? deferRequestBody(req) : undefined, req.query, { request: req },
+                            );
+                            sendResult(result, res);
+                        } catch (err: any) {
+                            errorResponse(err, res);
+                        }
+                    });
+                }
             };
 
             // ── AI / Assistants ─────────────────────────────────────────
