@@ -961,6 +961,15 @@ export const STANDING_KEY_EXCLUSIONS: Readonly<Record<string, Readonly<Record<st
       + 'from the configured-and-verified email pair — never from this flag. Emptying it costs the '
       + 'holder their AI seat, which is an ADR-0086 capability question with an in-product remedy, '
       + 'not a break-glass one.',
+    principal_kind:
+      '[ADR-0151 D1/D3] An AI service account (`agent`) confers no administrator standing, so the '
+      + 'only write that could cost standing is one moving a person\'s row to `agent`. None is '
+      + 'expressible: the kind is set at insert and any change is refused for every caller, '
+      + '`isSystem` included (`service-account-identity.ts`), before this guard is asked.',
+    principalKind:
+      'The camel-cased spelling of `principal_kind` the resolver also reads (a driver may hand the '
+      + 'row back camel-cased). Its reason is the same: the kind is immutable for every caller, so '
+      + 'no write moves a person\'s row to `agent`.',
   },
 };
 

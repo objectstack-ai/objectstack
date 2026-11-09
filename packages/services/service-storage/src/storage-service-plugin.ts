@@ -1340,6 +1340,8 @@ function bindRecordFileAccess(
         ...(grants.posture ? { posture: grants.posture } : {}),
         ...(grants.audience ? { audience: grants.audience } : {}),
         ...(grants.email ? { email: grants.email } : {}),
+        // [ADR-0151 D3] An AI service account reads as the agent it is.
+        ...(grants.principalKind ? { principalKind: grants.principalKind } : {}),
       };
     },
     getDownloadTtl: () => DEFAULT_DOWNLOAD_TTL,
