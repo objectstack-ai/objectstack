@@ -61,6 +61,7 @@ import {
 } from '@objectstack/spec/api';
 import { resolveItemLock, withItemLockFamily } from './item-lock.js';
 import type { ItemAddress } from './item-lock.js';
+import { isFederatedObject } from '@objectstack/core';
 import { itemDiscriminator } from '@objectstack/metadata-core';
 import { externalBindingDatasourceRefusal, resolveInjectedSystemColumns, SeedSchema } from '@objectstack/spec/data';
 import { METADATA_ITEM_NAME_PATTERN } from '@objectstack/spec/shared';
@@ -729,7 +730,7 @@ export async function objectsBoundExternallyTo(
     const storedNames = new Set(stored.map((entry) => entry.name));
     const take = (name: string, obj: unknown) => {
         const o = obj as { datasource?: unknown; external?: unknown } | null | undefined;
-        if (o?.datasource === datasource && o.external !== undefined && o.external !== null) bound.set(name, o.external);
+        if (o?.datasource === datasource && isFederatedObject(o)) bound.set(name, o.external);
     };
     for (const entry of stored) take(entry.name, entry.data);
     const registry = this.engine.registry;

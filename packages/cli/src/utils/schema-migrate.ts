@@ -57,7 +57,7 @@ import type {
 } from '@objectstack/driver-sql';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import { ORGANIZATION_OWNERSHIP_MIGRATION_ID, StorageNameMapping } from '@objectstack/spec/system';
-import { isDevelopmentBoot } from '@objectstack/core';
+import { isDevelopmentBoot, isFederatedObject } from '@objectstack/core';
 import {
   doctorNodeEnv,
   provenanceOf,
@@ -785,7 +785,7 @@ function findDeclaredDatasourceDrivers(
   if (!Array.isArray(objects) || typeof engine?.getDriverForObject !== 'function') return [];
   const found = new Map<string, SqlDriverLike>();
   for (const obj of objects as Array<{ name?: unknown; external?: unknown }>) {
-    if (obj?.external != null || typeof obj?.name !== 'string') continue;
+    if (isFederatedObject(obj) || typeof obj?.name !== 'string') continue;
     const driver = engine.getDriverForObject(obj.name);
     const name = driver?.name;
     if (typeof name !== 'string' || !connected.has(name) || found.has(name) || planned.includes(driver)) continue;
