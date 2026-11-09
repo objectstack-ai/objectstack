@@ -1,7 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The schema-migration lock `bootSchemaStack` takes on an applying boot
+ * The schema-migration lock `bootSchemaStack` takes on an applying boot and
+ * `ObjectQLPlugin.start()` takes around a boot's schema sync
  * (`acquireSchemaMigrationLock`), at the seams a real database cannot stage on
  * demand: every statement each dialect runs, the one line a contended wait
  * prints, the refusal when the wait runs out, and the session it all rides on.
@@ -9,8 +10,8 @@
  * The two promises the single-node path is held to (R3's one accepted
  * exception: an uncontended lock call, output unchanged) are the first two
  * describes — an uncontended lock prints nothing, and SQLite runs nothing at
- * all. Two concurrent migrators against a live Postgres are
- * `schema-migration-lock.integration.test.ts`'s.
+ * all. Concurrent migrators and boots against a live Postgres are
+ * `packages/cli/src/utils/schema-migration-lock.integration.test.ts`'s.
  */
 
 import { describe, expect, it, vi } from 'vitest';

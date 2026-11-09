@@ -845,3 +845,14 @@ export {
   organizationMemberStanding,
 } from './assignment-rules.js';
 export type { OrganizationMemberStanding } from './assignment-rules.js';
+
+// [#31715] The schema-migration lock: `ObjectQLPlugin.start()` takes it around
+// the boot's schema sync, and `@objectstack/cli` takes the same one on
+// `os migrate apply` — one name and one key, so the two exclude each other.
+export {
+  acquireSchemaMigrationLock,
+  SCHEMA_MIGRATION_LOCK_NAME,
+  SCHEMA_MIGRATION_LOCK_WAIT_MS,
+  SCHEMA_MIGRATION_PG_LOCK_KEY,
+} from './schema-migration-lock.js';
+export type { SchemaMigrationLock } from './schema-migration-lock.js';
