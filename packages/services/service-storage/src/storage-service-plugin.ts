@@ -57,7 +57,9 @@ import {
   NoopMetricsRegistry,
   type MetricsRegistry,
 } from '@objectstack/observability';
+import { composedClusterDriver } from '@objectstack/service-cluster';
 import { LocalStorageAdapter } from './local-storage-adapter.js';
+import { MULTI_REPLICA_LOCAL_STORAGE_REFUSAL, refusesUnsharedLocalRoot } from './multi-replica-local-root.js';
 import type { LocalStorageAdapterOptions } from './local-storage-adapter.js';
 import { S3StorageAdapter } from './s3-storage-adapter.js';
 import type { S3StorageAdapterOptions } from './s3-storage-adapter.js';
@@ -809,6 +811,22 @@ export class StorageServicePlugin implements Plugin {
               keyPrefix: this.options.s3?.keyPrefix ?? null,
             });
             if (!needsStorageSwap(this.target, nextTarget)) return;
+            // cloud#3814: several replicas declared over the redis cluster
+            // driver may not move onto an unshared local root — the boot
+            // refuses that root (the `kernel:ready` hook below), and a settings
+            // change must not reach it either. The current adapter keeps
+            // serving; the change is not applied.
+            if (refusesUnsharedLocalRoot({
+              kind: nextTarget.kind,
+              env: process.env,
+              clusterDriver: composedClusterDriver(ctx),
+            })) {
+              ctx.logger.error(
+                `${MULTI_REPLICA_LOCAL_STORAGE_REFUSAL} The storage settings change was NOT applied: the current `
+                + 'adapter keeps serving.',
+              );
+              return;
+            }
 
             const next = await this.buildAdapterFromValues(values);
             this.pendingSwapMovesStore = movesStorageLocation(this.target, nextTarget);
@@ -972,6 +990,24 @@ export class StorageServicePlugin implements Plugin {
             + 'restart after repairing the settings service, or pass `bindToSettings: false` to '
             + 'make the static configuration deliberate.',
         );
+      }
+    });
+
+    // ── cloud#3814: no unshared local root under declared replicas ─────
+    // Registered after the hook above, so it runs after `applySettings` has
+    // settled: the adapter in use is decided there, not in `init()` — a
+    // deployment whose `storage` settings (or `OS_STORAGE_ADAPTER=s3`) select
+    // S3 is constructed local and swapped at that hook. `this.target` is the
+    // adapter that will serve. Thrown from `kernel:ready`, the refusal fails
+    // the boot before any socket opens. A single node, any other cluster
+    // driver, the S3 adapter and a declared shared root boot as before.
+    ctx.hook('kernel:ready', async () => {
+      if (refusesUnsharedLocalRoot({
+        kind: this.target?.kind ?? 'local',
+        env: process.env,
+        clusterDriver: composedClusterDriver(ctx),
+      })) {
+        throw new Error(MULTI_REPLICA_LOCAL_STORAGE_REFUSAL);
       }
     });
   }
