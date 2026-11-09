@@ -327,3 +327,24 @@ describe('[#31605] the stdio principal reaches the bridged AI tools and the tool
     expect(resolveAuthzContextMock.mock.calls.length - before).toBe(2);
   });
 });
+
+describe('[#31821] the stdio door tells the key-admission seam it has no client address', () => {
+  const originalEnv = { ...process.env };
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    process.env.OS_MCP_STDIO_API_KEY = 'osk_test';
+    resolveAuthzContextMock.mockClear();
+  });
+  afterEach(() => {
+    process.env = { ...originalEnv };
+  });
+
+  it('every resolution hands `client: { transport: \'stdio\' }`, so the credential_use row records why it has no address', async () => {
+    const { ctx } = createHarness();
+    const getRecord = await startStdio(ctx);
+    await getRecord('crm_account', 'r_1');
+    const calls = resolveAuthzContextMock.mock.calls as unknown as Array<[Record<string, unknown>]>;
+    expect(calls.length).toBeGreaterThan(0);
+    for (const [input] of calls) expect(input.client).toEqual({ transport: 'stdio' });
+  });
+});

@@ -42,7 +42,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           action_invocation: "动作调用",
           package_uninstall: "卸载软件包",
           package_unmanaged_import: "Package Unmanaged Import",
-          credential_use: "Credential Use"
+          credential_use: "Credential Use",
+          scim_refused: "SCIM Refused"
         }
       },
       user_id: {

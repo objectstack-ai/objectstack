@@ -295,6 +295,10 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
     // and every reader of the admission (the API-key gate, the key-management
     // rule) must read it as the agent it is, never as a signed-in session.
     onAdmission: forwardAgent ? undefined : opts.onAdmission,
+    // [#31821] The transport's own peer address, for the `credential_use` row an
+    // admitted API key writes. The auth service applies the trust rule to it and
+    // the headers; this door reads no forwarded header as an address.
+    transport: { remoteAddress: remoteAddressOf(opts.request) },
   });
 
   // [#31211] Verifying a token is not admitting the call. Only now, after the
@@ -302,8 +306,32 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
   // before this line), is the call admitted, so only now is it recorded as a
   // use of the token's grant: once, with the very object the verifier
   // answered. A refused call never reaches this line, so it records nothing.
-  if (verifiedTokenPrincipal) authService?.recordMcpAccessTokenUse?.(verifiedTokenPrincipal);
+  // [#31821] With the request's headers and peer address, so the use names where
+  // the call came from: the auth service establishes the address under its own
+  // trust rule.
+  if (verifiedTokenPrincipal) {
+    const remoteAddress = remoteAddressOf(opts.request);
+    authService?.recordMcpAccessTokenUse?.(verifiedTokenPrincipal, {
+      headers: headerRecordOf(headers),
+      ...(remoteAddress ? { remoteAddress } : {}),
+    });
+  }
   return context;
+}
+
+/** [#31821] The transport's peer address (`IHttpRequest.remoteAddress`), when the request carries one. */
+function remoteAddressOf(request: any): string | undefined {
+  const address = request?.remoteAddress;
+  return typeof address === 'string' && address ? address : undefined;
+}
+
+/** [#31821] Web `Headers` as the plain lower-cased record the auth service's trust rule reads. */
+function headerRecordOf(headers: Headers): Record<string, string> {
+  const out: Record<string, string> = {};
+  headers.forEach((value, name) => {
+    out[name.toLowerCase()] = value;
+  });
+  return out;
 }
 
 /**

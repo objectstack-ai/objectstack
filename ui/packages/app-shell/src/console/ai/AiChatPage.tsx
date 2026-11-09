@@ -170,6 +170,25 @@ async function appOfObject(objectName: string): Promise<string> {
   return 'setup';
 }
 
+/**
+ * objectstack#31869 — the console address of the list a chat list link names:
+ * `/apps/APP/OBJECT`, plus `view` and the Filter panel conditions under the
+ * list route's own `uf__filter` param when the link carried them. Built from
+ * the parsed values, so nothing of the href's own query string is forwarded.
+ */
+export function listLinkTarget(
+  app: string,
+  target: { objectName: string; view?: string; filter?: { logic: 'and' | 'or'; conditions: unknown[] } },
+): string {
+  const params = new URLSearchParams();
+  if (target.view) params.set('view', target.view);
+  if (target.filter) {
+    params.set('uf__filter', JSON.stringify({ logic: target.filter.logic, conditions: target.filter.conditions }));
+  }
+  const query = params.toString();
+  return `/apps/${encodeURIComponent(app)}/${encodeURIComponent(target.objectName)}${query ? `?${query}` : ''}`;
+}
+
 function partString(part: HydratedUIMessagePart, key: string): string | undefined {
   const value = part[key];
   return typeof value === 'string' && value.length > 0 ? value : undefined;
@@ -1746,6 +1765,21 @@ export function ChatPane({
     [navigate],
   );
 
+  // objectstack#31869 — a `/list/OBJECT` link in an answer opens that list.
+  // The address is BUILT here from the parsed values, never copied from the
+  // href: the view by name, and the Filter panel conditions under the list
+  // route's own param (`uf__filter`, `LIST_FILTER_PARAM` in
+  // `views/userFilterUrlState.ts`, spelled out so this chunk does not load
+  // that module). The list page then judges the conditions itself: a field
+  // this reader cannot read refuses the whole filter, with a notice.
+  const openList = useCallback(
+    async (target: { objectName: string; view?: string; filter?: { logic: 'and' | 'or'; conditions: unknown[] } }) => {
+      const app = await appOfObject(target.objectName);
+      navigate(listLinkTarget(app, target));
+    },
+    [navigate],
+  );
+
   // cloud#3565 — 打开完整表单 on a record-write card. A create opens the New
   // form with the card's values in the ROUTER STATE of this navigation, never
   // the query string: a chat draft carries contact details, and a URL is
@@ -2657,6 +2691,7 @@ export function ChatPane({
         builderHandoffOpenLabel={t('console.ai.builderHandoffOpen')}
         builderHandoffSupersededTitle={t('console.ai.builderHandoffSuperseded')}
         onOpenRecord={openRecord}
+        onOpenList={openList}
         // cloud#3565 — the record-write card's three buttons and its states.
         onOpenRecordForm={openRecordForm}
         recordWriteCreateTitle={(objectLabel) => t('console.ai.recordWriteCreateTitle', { object: objectLabel })}

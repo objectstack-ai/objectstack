@@ -436,11 +436,21 @@ export function withPublishVerdict(
         message: issue.message,
         code: issue.rule,
     }));
-    return {
+    // [#31866] A read warning the publish now refuses (same path, same words:
+    // the read's `list-view-field-unknown` pass and the gate run one rule) is
+    // reported once, as the refusal.
+    const findingKey = (entry: { path: string; message: string }) => JSON.stringify([entry.path, entry.message]);
+    const refused = new Set(refusals.map(findingKey));
+    const verdict: MetadataDiagnostics = {
         ...diagnostics,
         valid: false,
         errors: [...(diagnostics?.errors ?? []), ...refusals],
     };
+    const kept = diagnostics?.warnings?.filter((warning) => !refused.has(findingKey(warning)));
+    if (!kept || kept.length === diagnostics?.warnings?.length) return verdict;
+    if (kept.length > 0) return { ...verdict, warnings: kept };
+    delete verdict.warnings;
+    return verdict;
 }
 
 // ---------------------------------------------------------------------------
@@ -559,6 +569,110 @@ export async function withFormLayoutWarnings<T>(
         warnings: [...(prior?.warnings ?? []), ...warnings],
     };
     return { ...served, _diagnostics: diagnostics } as T;
+}
+
+// ---------------------------------------------------------------------------
+// [#31866] The lint's `list-view-field-unknown` on a served view's
+// `_diagnostics`: the list-view counterpart of the form pass above
+// ---------------------------------------------------------------------------
+//
+// A list view column naming a field its object lacks is Zod-valid, so a view
+// that never passed a write door (a plugin's code-registered view, a stored
+// row whose object later lost the field) read `valid: true` with nothing
+// else. The list then opened on a refused query (`400 INVALID_FIELD` on the
+// projection) and nothing named the column. `validateListViewFieldRefs`
+// (`@objectstack/lint`) is the rule that says so; this pass runs it on the
+// body the read serves and puts each `list-view-field-unknown` finding in
+// `_diagnostics.warnings`, in the rule's own words: one spelling, no second
+// rule. Every list-view shape the rule walks is judged: a list `ViewItem`
+// (`config`), the flattened list overlay, a container's `list` and its
+// `listViews`.
+//
+// A WARNING on the read, as the form pass: `valid` stays the schema's answer,
+// and the entry is the spec's `{ path, message }` (no `code`). The write
+// doors are unchanged: an active save and a publish already run the same
+// rule through the reference-integrity suite and refuse the finding (`error`
+// tier there), and the draft read already carries that refusal as an error
+// (`withPublishVerdict`). So a finding is added here only where no error
+// already sits at its path, and a publish refusal drops the warning it
+// repeats (see `withPublishVerdict`): one finding, one entry.
+//
+// The universe is the one the form pass uses (the door's own `getObject`, for
+// the object names the body spells); handed no options, the rule skips a list
+// view whose object it cannot resolve, so an unresolved binding gets no false
+// warning.
+
+/** The names this pass reads from `@objectstack/lint`. */
+interface ListViewFieldLint {
+    validateListViewFieldRefs: (stack: Record<string, unknown>) => ReadonlyArray<{ rule: string; path: string; message: string }>;
+    /** The rule id served on the read: `list-view-field-unknown`. */
+    servedRule: string;
+}
+
+let listViewFieldLint: Promise<ListViewFieldLint | undefined> | undefined;
+
+function loadListViewFieldLint(): Promise<ListViewFieldLint | undefined> {
+    listViewFieldLint ??= import('@objectstack/lint').then(
+        (lint) => ({
+            validateListViewFieldRefs: lint.validateListViewFieldRefs,
+            servedRule: lint.LIST_VIEW_FIELD_UNKNOWN,
+        }),
+        () => undefined,
+    );
+    return listViewFieldLint;
+}
+
+/**
+ * Add the lint's `list-view-field-unknown` warnings to a served view's
+ * `_diagnostics`. Returns `served` itself when there is nothing to add.
+ *
+ * `getObject` is the door's own object lookup; an object it does not answer
+ * is not judged. A finding at a path the served `_diagnostics` already
+ * reports as an error is not repeated.
+ */
+export async function withListViewFieldWarnings<T>(
+    type: string,
+    served: T,
+    getObject: ((name: string) => unknown) | undefined,
+): Promise<T> {
+    if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'view' || !isRec(served) || !getObject) return served;
+    const lint = await loadListViewFieldLint();
+    if (!lint) return served;
+    const objects: Rec[] = [];
+    for (const name of spelledObjectNames(served, new Set())) {
+        const object = getObject(name);
+        if (isRec(object)) objects.push({ ...object, name });
+    }
+    if (objects.length === 0) return served;
+    const prior = served._diagnostics as MetadataDiagnostics | undefined;
+    const reported = new Set((prior?.errors ?? []).map((error) => error.path));
+    const name = typeof served.name === 'string' ? served.name : '';
+    const warnings = lint.validateListViewFieldRefs({ objects, views: [served] })
+        .filter((finding) => finding.rule === lint.servedRule)
+        .map((finding) => ({
+            path: itemRelativeIssuePath('view', name, finding.path),
+            message: finding.message,
+        }))
+        .filter((warning) => !reported.has(warning.path));
+    if (warnings.length === 0) return served;
+    const diagnostics: MetadataDiagnostics = {
+        ...(prior ?? { valid: true }),
+        warnings: [...(prior?.warnings ?? []), ...warnings],
+    };
+    return { ...served, _diagnostics: diagnostics } as T;
+}
+
+/**
+ * The two lint passes a served view's read runs, in order: the form layout
+ * ({@link withFormLayoutWarnings}) and the list-view field references
+ * ({@link withListViewFieldWarnings}).
+ */
+export async function withViewLintWarnings<T>(
+    type: string,
+    served: T,
+    getObject: ((name: string) => unknown) | undefined,
+): Promise<T> {
+    return withListViewFieldWarnings(type, await withFormLayoutWarnings(type, served, getObject), getObject);
 }
 
 // ---------------------------------------------------------------------------

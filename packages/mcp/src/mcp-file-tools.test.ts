@@ -16,6 +16,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { crc32, deflateRawSync } from 'node:zlib';
 import { MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_DATA_WRITE } from '@objectstack/spec/ai';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
@@ -35,6 +37,11 @@ import {
   type McpFileBridge,
   type McpReadFile,
 } from './file-content.js';
+import {
+  configureExtractionWorkerEntry,
+  extractionWorkerPoolStats,
+  type ExtractionWorkerEntry,
+} from './file-extraction-pool.js';
 import { renderSkillMarkdown } from './skill-md.js';
 
 /**
@@ -641,5 +648,245 @@ describe('read_file bounds PDF and Word extraction by the host\'s CPU budget and
     const next = await callTool(runtime, bridge, 'read_file', { objectName: 'claim', recordId: 'c1', field: 'policy' });
     expect(next.isError).toBeUndefined();
     expect(textOf(next.content[1])).toBe('After the throw');
+  });
+});
+
+/**
+ * [#31828] The same `read_file` answers, read on the extraction worker pool:
+ * the request thread keeps running while a heavy PDF is read; a worker past
+ * its wall-clock ceiling is terminated, the pages it sent back are the
+ * answer, and the next call gets a fresh worker; a crashed worker fails only
+ * its own call; the over-cap refusal is decided on the request thread as
+ * before; and where no worker can start, the in-process answer is the same.
+ *
+ * Under vitest the pool's own module is the TypeScript source, which has no
+ * built worker beside it, so every describe above this one runs the
+ * in-process path (the phase-1 pins, unedited). Here the pool is pointed at
+ * the worker's source, started through the repo's `tsx` loader.
+ */
+describe('read_file extracts PDF and Word text on a worker pool, off the request thread', { timeout: 60_000 }, () => {
+  const SOURCE_WORKER: ExtractionWorkerEntry = {
+    url: new URL('./file-extraction-worker.ts', import.meta.url),
+    execArgv: ['--import', pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href],
+  };
+  const DEFAULTS = { cpuBudgetMs: READ_FILE_CPU_BUDGET_MS_DEFAULT, maxConcurrent: READ_FILE_MAX_CONCURRENT_DEFAULT };
+  let runtime: MCPServerRuntime;
+  beforeEach(() => {
+    runtime = new MCPServerRuntime({ name: 'file-tools', version: '0.0.0' });
+    configureReadFileExtraction(DEFAULTS);
+    configureExtractionWorkerEntry(SOURCE_WORKER);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    configureExtractionWorkerEntry(undefined);
+    configureReadFileExtraction(DEFAULTS);
+  });
+
+  /** A PDF whose pages each say `Page N text`, plus `drawOps(N)` path operators (what makes a page slow to read). */
+  function heavyPdf(pages: number, drawOps: (page: number) => number): Uint8Array {
+    const objects: string[] = [];
+    objects[1] = '<< /Type /Catalog /Pages 2 0 R >>';
+    objects[3] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>';
+    const kids: string[] = [];
+    for (let i = 0; i < pages; i++) {
+      const pageId = 4 + i * 2;
+      const draw: string[] = [];
+      for (let k = 0; k < drawOps(i + 1); k++) draw.push(`${(k * 7) % 600} ${(k * 13) % 780} m ${(k * 11) % 600} ${(k * 17) % 780} l S`);
+      const stream = `BT /F1 12 Tf 72 720 Td (Page ${i + 1} text) Tj ET\n${draw.join('\n')}`;
+      kids.push(`${pageId} 0 R`);
+      objects[pageId] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${pageId + 1} 0 R /Resources << /Font << /F1 3 0 R >> >> >>`;
+      objects[pageId + 1] = `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`;
+    }
+    objects[2] = `<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${pages} >>`;
+    let out = '%PDF-1.4\n';
+    const offsets: number[] = [];
+    for (let i = 1; i < objects.length; i++) {
+      offsets[i] = out.length;
+      out += `${i} 0 obj\n${objects[i]}\nendobj\n`;
+    }
+    const xref = out.length;
+    out += `xref\n0 ${objects.length}\n0000000000 65535 f \n`;
+    for (let i = 1; i < objects.length; i++) out += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
+    out += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+    return new Uint8Array(Buffer.from(out, 'latin1'));
+  }
+  const pageTexts = (n: number) => Array.from({ length: n }, (_, i) => `Page ${i + 1} text`);
+
+  async function readFile(bridge: ReturnType<typeof fullBridge>, file: Partial<McpReadFile>) {
+    bridge.next = file;
+    return callTool(runtime, bridge, 'read_file', { objectName: 'claim', recordId: 'c1', field: 'policy' });
+  }
+
+  it('CONTROL: a small PDF and a small Word document read in full on a worker, the same answer the in-process path gives', async () => {
+    const bridge = fullBridge();
+    const pdf = multiPagePdf(['Page one opens', 'Page two follows', 'Page three closes']);
+    const docx = zip({ 'word/document.xml': docxBody(['Claim summary', 'Water &amp; mould']) });
+    const pdfFile = { name: 'three.pdf', mimeType: 'application/pdf', size: pdf.length, bytes: pdf };
+    const docxFile = { name: 'summary.docx', mimeType: DOCX, size: docx.length, bytes: docx };
+
+    const onWorker = [await readFile(bridge, pdfFile), await readFile(bridge, docxFile)];
+    expect(extractionWorkerPoolStats().started).toBeGreaterThanOrEqual(1);
+    expect(textOf(onWorker[0].content[1])).toBe('Page one opens\n\nPage two follows\n\nPage three closes');
+    expect(factsOf(onWorker[0]).truncated).toBeUndefined();
+    expect(textOf(onWorker[1].content[1])).toBe('Claim summary\nWater & mould');
+
+    // The in-process path: under vitest the built entry is not beside the
+    // pool's source, so no worker starts, said once at warn with the reason.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    configureExtractionWorkerEntry(undefined);
+    const inProcess = [await readFile(bridge, pdfFile), await readFile(bridge, docxFile)];
+    expect(inProcess).toEqual(onWorker);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain('not a built .js or .cjs file');
+    expect(String(warn.mock.calls[0][0])).toContain('The CPU budget and the cap on extractions in flight still apply.');
+  });
+
+  it('an entry that fails before it is ready falls back to in-process, said once, and answers the same', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    configureExtractionWorkerEntry({ url: new URL('data:text/javascript,throw new Error("no extraction here")') });
+    const bridge = fullBridge();
+    const pdf = minimalPdf('Read in-process');
+    const first = await readFile(bridge, { name: 'a.pdf', mimeType: 'application/pdf', size: pdf.length, bytes: pdf });
+    const second = await readFile(bridge, { name: 'a.pdf', mimeType: 'application/pdf', size: pdf.length, bytes: pdf });
+    expect(textOf(first.content[1])).toBe('Read in-process');
+    expect(second).toEqual(first);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain('no extraction here');
+  });
+
+  it('the request thread keeps ticking while a heavy PDF is read', async () => {
+    const pdf = heavyPdf(120, () => 2250);
+    const bridge = fullBridge();
+    const file = { name: 'heavy.pdf', mimeType: 'application/pdf', size: pdf.length, bytes: pdf };
+    await readFile(bridge, file); // warm: the worker starts and loads unpdf
+    let ticks = 0;
+    const interval = setInterval(() => {
+      ticks++;
+    }, 1);
+    const started = performance.now();
+    const result = await readFile(bridge, file);
+    const wallMs = performance.now() - started;
+    clearInterval(interval);
+    expect(textOf(result.content[1])).toBe(pageTexts(120).join('\n\n'));
+    expect(factsOf(result).truncated).toBeUndefined();
+    // In-process this count is 0 (pdf.js never yields a macrotask while it
+    // reads). On the pool a 1 ms timer fires through the read: at least one
+    // tick per 4 ms of wall time, and at least 20.
+    expect({ ticks, enough: ticks >= 20 && ticks >= wallMs / 4 }).toMatchObject({ enough: true });
+  });
+
+  it('out of CPU budget on the worker: the pages read so far, truncated, with the budget note, as in-process', async () => {
+    configureReadFileExtraction({ cpuBudgetMs: 30, maxConcurrent: 4 });
+    const pdf = heavyPdf(120, () => 2250);
+    const bridge = fullBridge();
+    const file = { name: 'heavy.pdf', mimeType: 'application/pdf', size: pdf.length, bytes: pdf };
+    await readFile(bridge, minimalPdfFile()); // warm, so unpdf's load is not charged here
+    const result = await readFile(bridge, file);
+    const facts = factsOf(result);
+    expect(facts).toMatchObject({ content: 'text', format: 'application/pdf', truncated: true });
+    const read = /^Reading stopped at the CPU-time budget for one file \(30 ms\) after page (\d+) of 120, so the text is partial\. Download the file with the link for the rest\.$/.exec(facts.note);
+    expect(read).not.toBeNull();
+    const pages = Number(read![1]);
+    expect(pages).toBeGreaterThanOrEqual(1);
+    expect(pages).toBeLessThan(120);
+    expect(textOf(result.content[1])).toBe(pageTexts(pages).join('\n\n'));
+    expect(facts.download).toBeTruthy();
+
+    const paragraphs = Array.from({ length: 60_000 }, (_, i) => `Paragraph ${i + 1}`);
+    const docx = zip({ 'word/document.xml': docxBody(paragraphs) });
+    const word = await readFile(bridge, { name: 'long.docx', mimeType: DOCX, size: docx.length, bytes: docx });
+    const wordFacts = factsOf(word);
+    expect(wordFacts).toMatchObject({ content: 'text', format: DOCX, truncated: true });
+    const count = Number(/after (\d+) paragraphs, so the text is partial/.exec(wordFacts.note)?.[1]);
+    expect(count % 64).toBe(0);
+    expect(count).toBeLessThan(paragraphs.length);
+    // The length cap still applies to what was read.
+    expect(textOf(word.content[1])).toBe(paragraphs.slice(0, count).join('\n').slice(0, 100_000));
+  });
+
+  function minimalPdfFile(text = 'Small') {
+    const pdf = minimalPdf(text);
+    return { name: 'small.pdf', mimeType: 'application/pdf', size: pdf.length, bytes: pdf };
+  }
+
+  it('a worker past its wall-clock ceiling is terminated: the pages it sent back are the answer, and the next call gets a fresh worker', async () => {
+    // Ceiling = 5 x 40 ms. Page 2 alone takes far longer, and a page is never
+    // cut by the budget (it is checked between pages), so only the ceiling
+    // can stop this read.
+    configureReadFileExtraction({ cpuBudgetMs: 40, maxConcurrent: 1 });
+    const bridge = fullBridge();
+    await readFile(bridge, minimalPdfFile()); // warm the one worker
+    expect(extractionWorkerPoolStats()).toEqual({ started: 1, idle: 1 });
+    const pdf = heavyPdf(3, (page) => (page === 2 ? 600_000 : 0));
+    const stopped = await readFile(bridge, { name: 'stuck.pdf', mimeType: 'application/pdf', size: pdf.length, bytes: pdf });
+    expect(stopped.isError).toBeUndefined();
+    expect(factsOf(stopped)).toMatchObject({
+      content: 'text',
+      format: 'application/pdf',
+      truncated: true,
+      note: 'Reading stopped at the CPU-time budget for one file (40 ms) after page 1 of 3, so the text is partial. '
+        + 'Download the file with the link for the rest.',
+    });
+    expect(textOf(stopped.content[1])).toBe('Page 1 text');
+    // The overrun worker is gone, not back in the pool.
+    expect(extractionWorkerPoolStats()).toEqual({ started: 1, idle: 0 });
+
+    const next = await readFile(bridge, minimalPdfFile('Served next'));
+    expect(textOf(next.content[1])).toBe('Served next');
+    expect(extractionWorkerPoolStats()).toEqual({ started: 2, idle: 1 });
+  });
+
+  it('a worker that crashes fails only its own call, with the could-not-read answer, and is replaced', async () => {
+    // A stand-in worker: it crashes on a file whose first byte is "X", and
+    // otherwise answers the bytes as text, so the pool's own handling is what
+    // is pinned.
+    const standIn = [
+      "import { parentPort } from 'node:worker_threads';",
+      "parentPort.on('message', (job) => {",
+      '  if (job.bytes[0] === 88) process.exit(7);',
+      "  parentPort.postMessage({ type: 'done', result: { kind: 'text', format: 'application/pdf', text: new TextDecoder().decode(job.bytes), truncated: false } });",
+      '});',
+      "parentPort.postMessage({ type: 'ready' });",
+    ].join('\n');
+    configureExtractionWorkerEntry({ url: new URL(`data:text/javascript,${encodeURIComponent(standIn)}`) });
+    configureReadFileExtraction({ cpuBudgetMs: 1000, maxConcurrent: 1 });
+    const bridge = fullBridge();
+    const crash = new Uint8Array(Buffer.from('X marks the crash'));
+    const crashed = await readFile(bridge, { name: 'boom.pdf', mimeType: 'application/pdf', size: crash.length, bytes: crash });
+    expect(factsOf(crashed)).toMatchObject({
+      content: 'none',
+      note: 'The file\'s content could not be read. Download it with the link instead.',
+    });
+    expect(extractionWorkerPoolStats()).toEqual({ started: 1, idle: 0 });
+    const fine = new Uint8Array(Buffer.from('fine'));
+    const next = await readFile(bridge, { name: 'fine.pdf', mimeType: 'application/pdf', size: fine.length, bytes: fine });
+    expect(textOf(next.content[1])).toBe('fine');
+    expect(extractionWorkerPoolStats()).toEqual({ started: 2, idle: 1 });
+  });
+
+  it('over the cap is refused on the request thread, at once, with the same retryable answer, while workers read', async () => {
+    configureReadFileExtraction({ cpuBudgetMs: 3000, maxConcurrent: 2 });
+    const pdf = heavyPdf(40, () => 2250);
+    const inFlight = [
+      extractFileContent(pdf, 'application/pdf', 'a.pdf'),
+      extractFileContent(pdf, 'application/pdf', 'b.pdf'),
+    ];
+    try {
+      const bridge = fullBridge();
+      const refused = await readFile(bridge, { name: 'c.pdf', mimeType: 'application/pdf', size: pdf.length, bytes: pdf });
+      expect(refused.isError).toBe(true);
+      expect(JSON.parse(textOf(refused.content[0])).error).toEqual({
+        code: 'SERVICE_UNAVAILABLE',
+        status: 503,
+        message: 'The server is already reading 2 files, the most it reads at once, so this file was not read. Try again in about 3 seconds.',
+        details: { retryAfterSeconds: 3 },
+      });
+    } finally {
+      await Promise.allSettled(inFlight);
+    }
+    for (const done of await Promise.all(inFlight)) expect(done).toMatchObject({ kind: 'text', text: pageTexts(40).join('\n\n') });
+    // Both slots are free again, and the two workers wait in the pool.
+    expect(extractionWorkerPoolStats()).toEqual({ started: 2, idle: 2 });
+    await expect(extractFileContent(minimalPdf('Free'), 'application/pdf', 'd.pdf')).resolves.toMatchObject({ text: 'Free' });
   });
 });

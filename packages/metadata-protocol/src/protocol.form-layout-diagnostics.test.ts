@@ -32,7 +32,13 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FORM_FIELD_UNKNOWN, FORM_SECTION_GROUP_UNKNOWN, validateFormLayout } from '@objectstack/lint';
+import {
+    FORM_FIELD_UNKNOWN,
+    FORM_SECTION_GROUP_UNKNOWN,
+    LIST_VIEW_FIELD_UNKNOWN,
+    validateFormLayout,
+    validateListViewFieldRefs,
+} from '@objectstack/lint';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
@@ -508,5 +514,211 @@ describe('the layered read of a form view carries the same form-layout warnings 
         await protocol.publishMetaItem({ type: 'view', name: item.name, packageId: PKG } as any);
 
         expect(await readLayeredDiagnostics(protocol, item.name)).toEqual({ valid: true });
+    });
+});
+
+// ---------------------------------------------------------------------------
+// #31866 — the list-view counterpart: `list-view-field-unknown` on the read.
+//
+// Measured on `origin/main` `a57a007d` before the fix, on this harness: a
+// code-registered list view whose column names a field its object lacks (a
+// list `ViewItem`, the flattened list overlay, and a container's `list` and
+// `listViews`) read `_diagnostics: { valid: true }` on `getMetaItem` (with and
+// without `packageId`) and on `getMetaItemLayered`, while a form view's bad
+// field warned on all three. The write doors already judged it: an active
+// save and a publish of a stored list view answered `422 INVALID_METADATA`
+// carrying `list-view-field-unknown`, and the draft read carried that refusal
+// as an error. Those stay as they were and are pinned here beside the read.
+// ---------------------------------------------------------------------------
+
+/** The card's object: it declares `total_cost`; the shipped view named `cost_total`. */
+const aiTraces = {
+    name: 'ai_traces',
+    label: 'AI Trace',
+    fields: {
+        model: { type: 'text', label: 'Model' },
+        total_cost: { type: 'number', label: 'Total cost' },
+    },
+};
+
+/** A list `ViewItem`, columns under `config`. */
+function listItem(name: string, object: string, columns: string[]) {
+    return {
+        name,
+        object,
+        viewKind: 'list',
+        isDefault: true,
+        config: { type: 'grid', data: { provider: 'object', object }, columns: columns.map((field) => ({ field })) },
+    };
+}
+
+/** The card's view as a plugin ships it: a container with a default list and a `by_model` list view. */
+const aiTracesContainer = {
+    name: 'ai_traces',
+    object: 'ai_traces',
+    list: { type: 'grid', columns: [{ field: 'model' }, { field: 'cost_total' }] },
+    listViews: { by_model: { type: 'grid', columns: [{ field: 'model' }, { field: 'cost_total' }] } },
+};
+
+/** The rule's own findings for a view, from the rule itself — the one spelling. */
+function listViewFindings(view: Record<string, unknown>, object: Record<string, unknown>) {
+    return validateListViewFieldRefs({ objects: [object], views: [view] }).filter((f) => f.rule === LIST_VIEW_FIELD_UNKNOWN);
+}
+
+/** The stub engine, its registry also serving `ai_traces` and the given code-registered views. */
+function makeListViewEngine(codeViews: Record<string, Record<string, unknown>> = {}) {
+    const stub = makeStubEngine();
+    const objects: Record<string, Record<string, unknown>> = { task: servedTask, ai_traces: aiTraces };
+    stub.engine.registry.getObject = (name: string) => objects[name];
+    stub.engine.registry.listItems = (type: string) => (type === 'object' ? Object.values(objects) : []);
+    stub.engine.registry.getItem = (type: string, name: string) => (type === 'view' ? codeViews[name] : undefined);
+    return { ...stub, objects };
+}
+
+async function readAllThree(protocol: ObjectStackProtocolImplementation, name: string) {
+    const active: any = await protocol.getMetaItem({ type: 'view', name } as any);
+    const scoped: any = await protocol.getMetaItem({ type: 'view', name, packageId: PKG } as any);
+    const layered: any = await protocol.getMetaItemLayered({ type: 'view', name } as any);
+    return [active.item._diagnostics, scoped.item._diagnostics, layered._diagnostics] as Diagnostics[];
+}
+
+describe('a list view column naming a field its object lacks reads with the lint warning (#31866)', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    });
+    afterEach(() => {
+        warn.mockRestore();
+    });
+
+    it('the card\'s view (cost_total on ai_traces) warns on the single, package-scoped and layered reads, valid unchanged', async () => {
+        const { engine } = makeListViewEngine({ ai_traces: aiTracesContainer });
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const expected = listViewFindings(aiTracesContainer, aiTraces);
+        expect(expected).toHaveLength(2);
+        expect(expected.every((f) => f.message.includes('"cost_total"'))).toBe(true);
+
+        const want = {
+            valid: true,
+            warnings: [
+                { path: 'list.columns.1.field', message: expected[0].message },
+                { path: 'listViews.by_model.columns.1.field', message: expected[1].message },
+            ],
+        };
+        for (const diagnostics of await readAllThree(protocol, 'ai_traces')) expect(diagnostics).toEqual(want);
+    });
+
+    it('a list ViewItem and the flattened list overlay are judged on the same reads, located at their own column', async () => {
+        const item = listItem('ai_traces.list', 'ai_traces', ['model', 'cost_total']);
+        const overlay = {
+            name: 'ai_traces.overlay',
+            object: 'ai_traces',
+            viewKind: 'list',
+            type: 'grid',
+            data: { provider: 'object', object: 'ai_traces' },
+            columns: [{ field: 'cost_total' }],
+        };
+        const { engine } = makeListViewEngine({ [item.name]: item, [overlay.name]: overlay });
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const itemWant = { valid: true, warnings: [{ path: 'config.columns.1.field', message: listViewFindings(item, aiTraces)[0].message }] };
+        for (const diagnostics of await readAllThree(protocol, item.name)) expect(diagnostics).toEqual(itemWant);
+        const overlayWant = { valid: true, warnings: [{ path: 'columns.0.field', message: listViewFindings(overlay, aiTraces)[0].message }] };
+        for (const diagnostics of await readAllThree(protocol, overlay.name)) expect(diagnostics).toEqual(overlayWant);
+    });
+
+    it('a stored list view whose object later lost the field warns on its active and layered reads', async () => {
+        const { engine, objects } = makeListViewEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const item = listItem('ai_traces.list', 'ai_traces', ['model', 'total_cost']);
+
+        await (protocol as any).saveMetaItem({ type: 'view', name: item.name, item, packageId: PKG, mode: 'draft' });
+        expect(await protocol.publishMetaItem({ type: 'view', name: item.name, packageId: PKG } as any)).toMatchObject({ success: true });
+        expect(await readDiagnostics(protocol, item.name, 'active')).toEqual({ valid: true });
+
+        // The object drops `total_cost` (renamed by a later release of its package).
+        const renamed = { ...aiTraces, fields: { model: aiTraces.fields.model, cost: aiTraces.fields.total_cost } };
+        objects.ai_traces = renamed;
+        const want = { valid: true, warnings: [{ path: 'config.columns.1.field', message: listViewFindings(item, renamed)[0].message }] };
+        expect(await readDiagnostics(protocol, item.name, 'active')).toEqual(want);
+        expect(await readLayeredDiagnostics(protocol, item.name)).toEqual(want);
+    });
+
+    it('a user filter field the ADR-0047 reference check already reports as an error is not repeated as a warning', async () => {
+        const overlay = {
+            name: 'ai_traces.filtered',
+            object: 'ai_traces',
+            viewKind: 'list',
+            type: 'grid',
+            data: { provider: 'object', object: 'ai_traces' },
+            columns: [{ field: 'model' }],
+            userFilters: { element: 'dropdown', fields: [{ field: 'cost_total' }] },
+        };
+        expect(listViewFindings(overlay, aiTraces).map((f) => f.path)).toEqual(['views[0].userFilters.fields[0].field']);
+        const { engine } = makeListViewEngine({ [overlay.name]: overlay });
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const read: any = await protocol.getMetaItem({ type: 'view', name: overlay.name } as any);
+        expect(read.item._diagnostics).toEqual({
+            valid: false,
+            errors: [{ path: 'userFilters.fields.0.field', message: expect.stringContaining('"cost_total"'), code: 'reference_not_found' }],
+        });
+    });
+
+    it('save and publish keep refusing the column (422 INVALID_METADATA), and the draft read reports it once, as that refusal', async () => {
+        const { engine } = makeListViewEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const item = listItem('ai_traces.list', 'ai_traces', ['model', 'cost_total']);
+        const [finding] = listViewFindings(item, aiTraces);
+
+        const activeSave = await (protocol as any).saveMetaItem({ type: 'view', name: item.name, item, packageId: PKG }).catch((e: any) => e);
+        expect(activeSave).toMatchObject({ code: 'INVALID_METADATA', status: 422 });
+        expect(activeSave.issues).toEqual([expect.objectContaining({ rule: LIST_VIEW_FIELD_UNKNOWN, message: finding.message, severity: 'error' })]);
+
+        const draft: any = await (protocol as any).saveMetaItem({ type: 'view', name: item.name, item, packageId: PKG, mode: 'draft' });
+        expect(draft).toMatchObject({ success: true, state: 'draft' });
+        expect(await readDiagnostics(protocol, item.name, 'draft')).toEqual({
+            valid: false,
+            errors: [{ path: 'config.columns.1.field', message: finding.message, code: LIST_VIEW_FIELD_UNKNOWN }],
+        });
+
+        const publish = await protocol.publishMetaItem({ type: 'view', name: item.name, packageId: PKG } as any).catch((e: any) => e);
+        expect(publish).toMatchObject({ code: 'INVALID_METADATA', status: 422 });
+    });
+
+    it('control: a list view naming only fields the served object has (an extension field among them) reads { valid: true }', async () => {
+        const good = listItem('task.list', 'task', ['title', 'status', 'region__c']);
+        const container = { name: 'ai_traces', object: 'ai_traces', list: { type: 'grid', columns: [{ field: 'model' }, { field: 'total_cost' }] } };
+        const { engine } = makeListViewEngine({ [good.name]: good, ai_traces: container });
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        for (const name of [good.name, container.name]) {
+            for (const diagnostics of await readAllThree(protocol, name)) expect(diagnostics).toEqual({ valid: true });
+        }
+    });
+
+    it('control: a list view whose object the door cannot resolve gets no warning', async () => {
+        const ghost = listItem('ghost.list', 'ghost', ['no_such_field']);
+        const { engine } = makeListViewEngine({ [ghost.name]: ghost });
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        for (const diagnostics of await readAllThree(protocol, ghost.name)) expect(diagnostics).toEqual({ valid: true });
+    });
+
+    it('control: a container\'s form warnings are unchanged beside a valid list', async () => {
+        const container = {
+            name: 'task',
+            object: 'task',
+            list: { type: 'grid', columns: [{ field: 'title' }, { field: 'region__c' }] },
+            formViews: { edit: { type: 'simple', sections: [{ name: 'main', fields: ['no_such_field', 'title'] }] } },
+        };
+        const { engine } = makeListViewEngine({ task: container });
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const formOnly = lintFindings({ name: container.name, object: container.object, formViews: container.formViews })
+            .filter((f) => f.rule === FORM_FIELD_UNKNOWN);
+        expect(formOnly).toHaveLength(1);
+        const want = { valid: true, warnings: [{ path: 'formViews.edit.sections.0.fields.0', message: formOnly[0].message }] };
+        for (const diagnostics of await readAllThree(protocol, container.name)) expect(diagnostics).toEqual(want);
     });
 });

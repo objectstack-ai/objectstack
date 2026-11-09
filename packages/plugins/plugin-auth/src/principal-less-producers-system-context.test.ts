@@ -190,7 +190,7 @@ describe('SCIM bearer verification — the credential probe carries the system o
     seen.length = 0;
 
     const verified = await verifyScimBearerToken(engine as never, SECRET, TOKEN);
-    expect(verified?.connection).toEqual({ id: 'conn-pin', provisioningDomainId: 'conn-pin' });
+    expect(verified?.connection).toEqual({ id: 'conn-pin', provisioningDomainId: 'conn-pin', organizationId: 'org_scim_8b' });
 
     const ops = onObject(seen, SCIM_CREDENTIAL_OBJECT);
     expect(ops.map((o) => o.operation)).toEqual(['findOne']);

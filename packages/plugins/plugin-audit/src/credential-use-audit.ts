@@ -70,16 +70,32 @@
  * key prefix. The row is built from the named columns above and nothing else,
  * so a column a credential row gains later never reaches it.
  *
- * ⚠️ Not on the row yet: the source address and the user agent
- * (`ip_address` / `user_agent` stay null). Neither stamp point holds them: the
- * key seam reads only the request headers, without the transport's peer
- * address or the `server.trustProxy` rule that decides which address to
- * believe, and the OAuth stamp is handed the verified principal alone. A
- * forwarded-address header read without that rule is caller input, so it is
- * not recorded.
+ * ## Where the use came from (#31821)
+ *
+ *  - `ip_address`: the address the deployment established for the request
+ *    under its client-address trust rule (forwarded headers only under
+ *    `server.trustProxy`, otherwise the transport's peer address), applied by
+ *    the `auth` service, never a header read here;
+ *  - `user_agent`: the request's `User-Agent`, as presented.
+ *
+ * Both are the facts of the use the stamp recorded, which is the first use in
+ * the stamp's window. They reach this writer through the client-facts scope the
+ * stamp opens around its own write (`@objectstack/core`
+ * `credential-use-client.ts`); a `skip_consent` client's use carries them on
+ * its event. When there is no address the row says why, as
+ * `metadata.ip_address_absent`, and never guesses one:
+ *
+ *  - `stdio`: the stdio transport has no network peer;
+ *  - `undetermined`: the trust rule established no address;
+ *  - `not_supplied`: the door that admitted the credential handed no facts, or
+ *    the stamp ran outside any scope;
+ *  - `unrecordable`: the established value does not fit the ledger's address
+ *    column, so it is not stored at all rather than stored cut short or lost
+ *    with the row.
  */
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
+import { currentCredentialUseClient, type CredentialUseClient } from '@objectstack/core';
 import { isMissingTableError } from '@objectstack/types';
 import { auditFailureCauseKey, auditFailureCauseSummary, createFieldPresenceProbe } from './audit-writers.js';
 import type { AuthEventAuditLogger } from './auth-event-audit.js';
@@ -193,6 +209,33 @@ export interface CredentialUseEvent {
   clientId?: string;
   /** The stamp's value: the start of the use window. */
   usedAt?: string;
+  /**
+   * [#31821] Where the use came from. Absent: the row records no user agent
+   * and the address as `not_supplied`.
+   */
+  client?: CredentialUseClient;
+}
+
+/**
+ * The widest text `sys_audit_log.ip_address` holds (its `maxLength`): the
+ * longest textual IPv6 address with an embedded IPv4 one.
+ */
+const IP_ADDRESS_MAX_LENGTH = 45;
+
+/** Why a row's `ip_address` is null (`metadata.ip_address_absent`). */
+export type CredentialUseAddressAbsence = NonNullable<CredentialUseClient['ipAddressAbsent']> | 'unrecordable';
+
+/** The row's `ip_address`, `user_agent` and, when the address is null, why. */
+function clientColumnsOf(client: CredentialUseClient | undefined): {
+  ipAddress: string | null;
+  userAgent: string | null;
+  absent?: CredentialUseAddressAbsence;
+} {
+  const userAgent = nonEmpty(client?.userAgent) ?? null;
+  const ipAddress = nonEmpty(client?.ipAddress);
+  if (!ipAddress) return { ipAddress: null, userAgent, absent: client?.ipAddressAbsent ?? 'not_supplied' };
+  if (ipAddress.length > IP_ADDRESS_MAX_LENGTH) return { ipAddress: null, userAgent, absent: 'unrecordable' };
+  return { ipAddress, userAgent };
 }
 
 function instantString(v: unknown): string | undefined {
@@ -253,11 +296,13 @@ export function buildCredentialUseAuditRow(
   event: CredentialUseEvent,
   objectHasField: (objectName: string, field: string) => boolean = () => true,
 ): Record<string, unknown> {
+  const client = clientColumnsOf(event.client);
   const metadata: Record<string, unknown> = {
     credential_kind: event.kind,
     credential_id: event.credentialId,
     used_at: event.usedAt ?? null,
     ...(event.kind === 'oauth_access_token' ? { client_id: event.clientId ?? null } : {}),
+    ...(client.absent ? { ip_address_absent: client.absent } : {}),
   };
   const row: Record<string, unknown> = {
     action: CREDENTIAL_USE_AUDIT_ACTION,
@@ -266,9 +311,9 @@ export function buildCredentialUseAuditRow(
     record_id: event.credentialId,
     old_value: null,
     new_value: null,
-    // Not established at either stamp point (module note).
-    ip_address: null,
-    user_agent: null,
+    // The first use in the stamp's window (module note).
+    ip_address: client.ipAddress,
+    user_agent: client.userAgent,
     tenant_id: event.organizationId ?? null,
     metadata: safeStringify(metadata),
   };
@@ -418,7 +463,11 @@ export function installCredentialUseAudit(
     } catch {
       return;
     }
-    if (event) await writer.recordCredentialUse(event);
+    if (!event) return;
+    // [#31821] The facts of the use this stamp records: the scope the stamp
+    // opened around its own write, or none (the row then says `not_supplied`).
+    const client = currentCredentialUseClient();
+    await writer.recordCredentialUse(client ? { ...event, client } : event);
   };
   engine.registerHook('afterUpdate', onStamp, {
     object: [...CREDENTIAL_USE_STAMP_OBJECTS],
