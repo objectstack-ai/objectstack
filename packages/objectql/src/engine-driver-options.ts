@@ -246,7 +246,7 @@ export function mergeDriverOptionsIntoHookView(
  *    vanish for authenticated org-context reads while anonymous reads still
  *    see them (#3249).
  *
- * 2. **`external != null`** — a federated object (ADR-0015), whose schema
+ * 2. **`isFederatedObject`** — a federated object (ADR-0015), whose schema
  *    is owned by the REMOTE database (#7738). The driver turns `tenantId`
  *    into `organization_id = :tenant`, and
  *    against a remote table that carries no such column that is a SQL error

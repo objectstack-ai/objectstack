@@ -34,6 +34,19 @@
  * `load` through {@link assignmentExpressionRefusals}, the paths this module
  * evaluates them by.
  *
+ * ## Which queue a name means
+ *
+ * [ADR-0150 D3] A declared rule is written inside a package, so the queue it
+ * names is read from that package: the queue service is passed the package
+ * the rule's registry item is registered under (`_packageId`, the registry's
+ * stamp) as `callerPackageId`, and answers the package's own queue, else the
+ * one holder in its declared dependencies (plus `sys`), else a refusal naming
+ * every candidate. The rule never picks a holder itself: the one resolver is
+ * the queue service's (`IOwnershipQueueService`), and a refused name reads as
+ * a queue that does not resolve (the row is written ownerless, in no queue).
+ * An organization's authored rule, and a declared rule no package ships, is
+ * read with no package: environment-wide, as before the key existed.
+ *
  * ## As which identity
  *
  * A platform step, not app automation: every read — the queue's members, a
@@ -142,6 +155,12 @@ interface ActiveRule {
   name: string;
   object: string;
   entries: RuleEntry[];
+  /**
+   * [ADR-0150 D3] The package that ships the declared rule — the package its
+   * queue names are read from — or `null` for an organization's authored rule
+   * and a declared rule no package ships (read environment-wide).
+   */
+  packageId: string | null;
 }
 
 /** One evaluation's memo: least-loaded counts and user-target standings, never older than the insert that asked. */
@@ -169,6 +188,11 @@ function expressionOf(v: unknown): { dialect: string; source: string } | undefin
   return undefined;
 }
 
+/** The package a declared rule's registry item is registered under (`_packageId`, the registry's stamp), or `null`. */
+function declaredPackageOf(item: Record<string, unknown>): string | null {
+  return typeof item._packageId === 'string' && item._packageId !== '' ? item._packageId : null;
+}
+
 function ruleOf(item: unknown): ActiveRule | null {
   if (!isRecord(item) || typeof item.name !== 'string' || typeof item.object !== 'string') return null;
   if (item.active === false) return null;
@@ -186,7 +210,7 @@ function ruleOf(item: unknown): ActiveRule | null {
       ...(expressionOf(e.load) ? { load: expressionOf(e.load)!.source } : {}),
     });
   }
-  return entries.length > 0 ? { name: item.name, object: item.object, entries } : null;
+  return entries.length > 0 ? { name: item.name, object: item.object, entries, packageId: declaredPackageOf(item) } : null;
 }
 
 /**
@@ -197,7 +221,7 @@ function ruleOf(item: unknown): ActiveRule | null {
 function authoredRuleOf(row: Record<string, unknown>): ActiveRule | null {
   const name = present(row.name);
   if (!name) return null;
-  return ruleOf({
+  const rule = ruleOf({
     name,
     object: row.object_name,
     entries: [{
@@ -208,6 +232,8 @@ function authoredRuleOf(row: Record<string, unknown>): ActiveRule | null {
       load: row.load,
     }],
   });
+  // An organization's row belongs to no package, whatever columns it carries.
+  return rule ? { ...rule, packageId: null } : null;
 }
 
 function sortOrderOf(row: Record<string, unknown>): number {
@@ -485,16 +511,23 @@ export class AssignmentRuleEvaluator {
       this.warnOnce(`no-service::${rule.name}`, `[assignment] rule '${rule.name}' routes into a queue, but no ownership-queue service is registered — the row is written ownerless`, { rule: rule.name });
       return;
     }
+    // [ADR-0150 D3] The name is read from the rule's package; no package, no
+    // key — the environment-wide read, exactly as before the key existed.
+    const fromPackage = rule.packageId ? { callerPackageId: rule.packageId } : undefined;
     let resolved: unknown;
     try {
-      resolved = await queues.resolveQueue(queueName, organizationId);
+      resolved = fromPackage
+        ? await queues.resolveQueue(queueName, organizationId, fromPackage)
+        : await queues.resolveQueue(queueName, organizationId);
     } catch (err: any) {
-      this.host.logger?.warn?.('[assignment] the queue could not be resolved — the row is written as it stood', { rule: rule.name, queue: queueName, organization: organizationId, error: err?.message });
+      this.host.logger?.warn?.('[assignment] the queue could not be resolved — the row is written as it stood', { rule: rule.name, queue: queueName, organization: organizationId, package: rule.packageId, error: err?.message });
       return;
     }
     if (!resolved) {
-      this.warnOnce(`unresolved::${rule.name}::${queueName}::${organizationId}`, `[assignment] rule '${rule.name}' routes into queue '${queueName}', which does not resolve in organization '${organizationId}' — the row is written ownerless, in no queue. Declare the queue, or author it in that organization.`, {
-        rule: rule.name, queue: queueName, organization: organizationId,
+      this.warnOnce(`unresolved::${rule.name}::${queueName}::${organizationId}`, `[assignment] rule '${rule.name}' routes into queue '${queueName}', which does not resolve in organization '${organizationId}'`
+        + (rule.packageId ? ` from the rule's package '${rule.packageId}' (its own queue, else the one holder among its dependencies)` : '')
+        + ` — the row is written ownerless, in no queue. Declare the queue, or author it in that organization.`, {
+        rule: rule.name, queue: queueName, organization: organizationId, package: rule.packageId,
       });
       return;
     }
@@ -504,7 +537,9 @@ export class AssignmentRuleEvaluator {
 
     let members: string[];
     try {
-      members = await queues.expandMembers(queueName, organizationId);
+      members = fromPackage
+        ? await queues.expandMembers(queueName, organizationId, fromPackage)
+        : await queues.expandMembers(queueName, organizationId);
     } catch (err: any) {
       this.host.logger?.warn?.('[assignment] the queue\'s members could not be read — the row parks in the queue', { rule: rule.name, queue: queueName, error: err?.message });
       return;

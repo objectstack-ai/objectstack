@@ -2,7 +2,8 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { ObjectKernel, isAuthzStoreUnavailableError, isServiceNotRegisteredError } from '@objectstack/core';
+import { ObjectKernel, currentCredentialUseClient, isAuthzStoreUnavailableError, isServiceNotRegisteredError } from '@objectstack/core';
+import { resolveClientAddress } from '@objectstack/plugin-auth/client-address';
 
 import { resolveExecutionContext } from './resolve-execution-context.js';
 import { hashApiKey } from './api-key.js';
@@ -1062,5 +1063,85 @@ describe('[#31211] a verified MCP token is recorded as used only once this door 
     const ctx = await resolveExecutionContext(mcpOpts(recQl({ id: 'u_rec' }), { verifyMcpAccessToken: async () => VERIFIED() }));
     expect(ctx.principalKind).toBe('agent');
     expect(ctx.userId).toBe('u_rec');
+  });
+});
+
+/**
+ * [#31821] This door hands over what it holds about where the request came
+ * from, so the `credential_use` row names it: the transport's peer address and
+ * the headers, to the auth service, which applies the deployment's trust rule.
+ * The door reads no forwarded header as an address itself.
+ *
+ * The auth service here applies the REAL rule (`resolveClientAddress`, the
+ * function `AuthManager.resolveClientAddress` delegates to) with a declared
+ * `trustProxy`; the facts are read where plugin-audit reads them, inside the
+ * key's stamp write (`currentCredentialUseClient`).
+ */
+describe('[#31821] the dispatcher door hands the client facts to the credential\'s stamp', () => {
+  const PEER = '203.0.113.7';
+  const FORWARDED = '198.51.100.9';
+  const UA = 'ci-agent/3.1 (+31821)';
+  const RAW = 'osk_31821_dispatcher_key';
+
+  function keyQl() {
+    const facts: unknown[] = [];
+    const ql = makeQl([{ id: 'k_31821', key: hashApiKey(RAW), revoked: false, user_id: 'u_31821' }]) as any;
+    ql.update = async () => {
+      facts.push(currentCredentialUseClient() ?? null);
+      return {};
+    };
+    return { ql, facts };
+  }
+  const ruleAuth = (trustProxy: boolean) => ({
+    resolveClientAddress: (transport: { headers?: Record<string, string | string[] | undefined>; remoteAddress?: string }) =>
+      resolveClientAddress({ ...transport, trustProxy }),
+  });
+
+  it.each([
+    [false, PEER],
+    [true, FORWARDED],
+  ])('an API key, trustProxy %s: the stamp runs with address %s and the request\'s user agent', async (trustProxy, expected) => {
+    const { ql, facts } = keyQl();
+    const ctx = await resolveExecutionContext({
+      getService: async (name: string) => (name === 'auth' ? ruleAuth(trustProxy) : undefined),
+      getQl: async () => ql,
+      request: { headers: { 'x-api-key': RAW, 'user-agent': UA, 'x-forwarded-for': FORWARDED }, remoteAddress: PEER },
+    } as any);
+    expect(ctx.userId).toBe('u_31821');
+    expect(facts).toEqual([{ ipAddress: expected, userAgent: UA }]);
+  });
+
+  it('a transport with no peer address and no trusted header: the stamp records the address as undetermined', async () => {
+    const { ql, facts } = keyQl();
+    await resolveExecutionContext({
+      getService: async (name: string) => (name === 'auth' ? ruleAuth(false) : undefined),
+      getQl: async () => ql,
+      request: { headers: { 'x-api-key': RAW, 'x-forwarded-for': FORWARDED } },
+    } as any);
+    expect(facts).toEqual([{ ipAddress: null, userAgent: null, ipAddressAbsent: 'undetermined' }]);
+  });
+
+  it('a verified MCP token is recorded with the request\'s headers and peer address', async () => {
+    const verified = { userId: 'u_rec', scopes: ['data:read'], clientId: 'agent-client-1' };
+    const recorded: unknown[][] = [];
+    const auth = {
+      verifyMcpAccessToken: async () => verified,
+      recordMcpAccessTokenUse: (...args: unknown[]) => {
+        recorded.push(args);
+      },
+    };
+    const ql = { async find(object: string) { return object === 'sys_user' ? [{ id: 'u_rec' }] : []; } };
+    await resolveExecutionContext({
+      acceptOAuthAccessToken: true,
+      getService: async (name: string) => (name === 'auth' ? auth : undefined),
+      getQl: async () => ql,
+      request: { headers: { authorization: 'Bearer a.b.c', 'user-agent': UA, 'x-forwarded-for': FORWARDED }, remoteAddress: PEER },
+    } as any);
+    expect(recorded).toHaveLength(1);
+    const [principal, transport] = recorded[0] as [unknown, { headers: Record<string, string>; remoteAddress?: string }];
+    expect(principal).toBe(verified);
+    expect(transport.remoteAddress).toBe(PEER);
+    expect(transport.headers['user-agent']).toBe(UA);
+    expect(transport.headers['x-forwarded-for'], 'handed over raw: the auth service decides whether it counts').toBe(FORWARDED);
   });
 });

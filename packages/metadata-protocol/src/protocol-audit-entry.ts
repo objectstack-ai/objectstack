@@ -75,11 +75,13 @@ function withPendingAudit<E extends Error>(err: E, audit: MetadataAuditEntry): E
  * land silently; a runtime fallback would have put an unreachable value in a
  * documented closed set. The compiler is the enforcement.
  */
-type PreflightViolationCode = 'NAMESPACE_PREFIX' | 'STORED_TYPE_NOT_CANONICAL';
+type PreflightViolationCode = 'NAMESPACE_PREFIX' | 'NAMESPACE_CONFLICT' | 'STORED_TYPE_NOT_CANONICAL';
 
 const PREFLIGHT_AUDIT_CODE: Record<PreflightViolationCode, string> = {
     // adr0112-ok: D6b — persisted audit column, its own lowercase vocabulary
     NAMESPACE_PREFIX: 'namespace_prefix',
+    // adr0112-ok: D6b — persisted audit column, its own lowercase vocabulary
+    NAMESPACE_CONFLICT: 'namespace_conflict',
     // adr0112-ok: D6b — persisted audit column, its own lowercase vocabulary
     STORED_TYPE_NOT_CANONICAL: 'stored_type_not_canonical',
 };

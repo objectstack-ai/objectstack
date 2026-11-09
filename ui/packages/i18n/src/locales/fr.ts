@@ -2517,6 +2517,7 @@ const fr = {
       cannotEditMetaView: "Cette vue est intégrée et définie dans le code — elle ne peut pas être modifiée.",
       resetView: "Revenir à la vue",
       resetViewTitle: "Rétablit les filtres, la recherche, le tri, le regroupement, la disposition des colonnes, les champs masqués, la densité, la disposition, la couleur de ligne, les numéros de ligne et l’édition en ligne propres à cette vue. Les vues épinglées, les favoris et le mode d’ouverture des enregistrements ne changent pas. Seule votre liste change.",
+      linkFilterRefused: 'Le filtre de ce lien n’a pas été appliqué. Il cite un champ sur lequel vous ne pouvez pas filtrer ici, la liste affiche donc la vue sans ce filtre.',
       personalized: "Personnalisée",
       personalizedHeading: "Votre liste diffère de cette vue par",
       personalizedParts: {

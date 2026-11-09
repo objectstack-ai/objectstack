@@ -2,7 +2,7 @@
 
 import { Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
-import { objectNotFoundError } from '@objectstack/core';
+import { isFederatedObject, objectNotFoundError } from '@objectstack/core';
 import { keysetWalk } from '@objectstack/types';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import type { ManagedDriftEntry } from '@objectstack/driver-sql';
@@ -350,7 +350,7 @@ export default class MigrateUnmappedColumns extends Command {
       // it to. The read goes to that driver, and the document names it.
       const objectDriver = stack.drivers.find((d) => d === bound) ?? null;
       const outside =
-        declared.external != null
+        isFederatedObject(declared)
           ? 'it is federated (no managed table)'
           : !bound
             ? 'it is bound to no driver'

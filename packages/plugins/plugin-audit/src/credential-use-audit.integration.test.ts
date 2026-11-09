@@ -38,6 +38,7 @@ import {
   resolveApiKeyAdmission,
   resolveAuthzContext,
   resolveRequestExecutionContext,
+  runWithCredentialUseClient,
   API_KEY_LAST_USED_STAMP_INTERVAL_MS,
 } from '@objectstack/core';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
@@ -233,6 +234,8 @@ describe('[#31796] an API key admitting a request leaves one credential_use row 
       credential_kind: 'api_key',
       credential_id: 'key_shape',
       used_at: new Date(T0).toISOString(),
+      // [#31821] The storage door hands no client facts.
+      ip_address_absent: 'not_supplied',
     });
   });
 
@@ -369,6 +372,8 @@ describe('[#31796] an OAuth access token\'s use leaves one credential_use row pe
       credential_id: 'consent_a',
       used_at: new Date(HOUR_10).toISOString(),
       client_id: 'client_31796',
+      // [#31821] Stamped outside any client-facts scope.
+      ip_address_absent: 'not_supplied',
     });
 
     // The next hour's stamp: one more row.
@@ -418,6 +423,186 @@ describe('[#31796] an OAuth access token\'s use leaves one credential_use row pe
       credential_id: 'app_31796',
       used_at: new Date(HOUR_10).toISOString(),
       client_id: 'client_skip_31796',
+      // [#31821] The hand-off carried no client facts.
+      ip_address_absent: 'not_supplied',
     });
+  });
+});
+
+/**
+ * [#31821] Where the use came from: the row's `ip_address` and `user_agent`,
+ * and, when there is no address, why (`metadata.ip_address_absent`).
+ *
+ * The address is the auth service's answer (`IAuthService.resolveClientAddress`,
+ * the deployment's trust rule, pinned with the real rule on the dispatcher and
+ * in plugin-auth). Here the auth service is a double that records what the door
+ * handed it and answers a fixed address, so what is pinned is the carriage:
+ * door facts → the stamp's scope → this row.
+ */
+describe('[#31821] the credential_use row records where the use came from', () => {
+  const PEER = '203.0.113.7';
+  const UA = 'ci-agent/3.1 (+31821)';
+
+  /** An auth service that establishes `address`, remembering every transport it was handed. */
+  function addressAuthority(address: string | undefined) {
+    const handed: Array<{ headers?: Record<string, unknown>; remoteAddress?: string }> = [];
+    return {
+      handed,
+      service: {
+        resolveClientAddress: (transport: { headers?: Record<string, unknown>; remoteAddress?: string }) => {
+          handed.push(transport);
+          return address;
+        },
+      },
+    };
+  }
+
+  /** The composition REST and the dispatcher call, with the facts the door hands over. */
+  const compose = (
+    engine: ObjectQL,
+    raw: string,
+    opts: { anonymous: 'fail-closed' | 'guest'; authService: unknown; remoteAddress?: string; transport?: boolean },
+  ) =>
+    resolveRequestExecutionContext({
+      headers: new Headers({ authorization: `Bearer ${raw}`, 'user-agent': UA, 'x-forwarded-for': '198.51.100.99' }),
+      ql: unprovisionedReads(engine),
+      authService: opts.authService as never,
+      tenancy: undefined,
+      anonymous: opts.anonymous,
+      authGate: opts.anonymous === 'guest' ? 'withhold' : 'resolved',
+      credentials: 'api-key-and-session',
+      sessionApi: 'optional',
+      session: 'request',
+      localization: 'withhold',
+      requestLocale: undefined,
+      accessToken: opts.anonymous === 'guest' ? 'carry' : 'withhold',
+      oauth: undefined,
+      onAdmission: undefined,
+      ...(opts.transport === false ? {} : { transport: { remoteAddress: opts.remoteAddress } }),
+    });
+
+  const rowOf = async (id: string): Promise<Row> => {
+    const rows = (await credentialUseRows(audited.engine)).filter((r) => r.record_id === id);
+    expect(rows, `credential_use rows for ${id}`).toHaveLength(1);
+    return rows[0];
+  };
+
+  it.each([
+    ['rest', 'fail-closed'],
+    ['mcp', 'guest'],
+  ] as const)('the %s composition: the row carries the address the auth service established and the user agent', async (door, anonymous) => {
+    const id = `key_client_${door}`;
+    const raw = await mintKey(audited.engine, id);
+    const authority = addressAuthority(PEER);
+    const ctx = await compose(audited.engine, raw, { anonymous, authService: authority.service, remoteAddress: '10.0.0.5' });
+    expect(ctx?.userId).toBe(USER);
+
+    // The door handed the auth service the peer address and the headers; it
+    // read no forwarded header itself.
+    expect(authority.handed).toHaveLength(1);
+    expect(authority.handed[0].remoteAddress).toBe('10.0.0.5');
+    expect(authority.handed[0].headers?.['x-forwarded-for']).toBe('198.51.100.99');
+
+    const row = await rowOf(id);
+    // CONTROL first: no credential material on the row, the presented header included.
+    const stored = JSON.stringify(row);
+    for (const secret of [raw, hashApiKey(raw), 's3cr3t', 'osk_', 'Bearer']) expect(stored).not.toContain(secret);
+    expect(row).toMatchObject({ ip_address: PEER, user_agent: UA });
+    expect(metadataOf(row)).not.toHaveProperty('ip_address_absent');
+  });
+
+  it('the stdio transport: no address and no user agent, with the reason `stdio`', async () => {
+    const raw = await mintKey(audited.engine, 'key_client_stdio');
+    const authz = await resolveAuthzContext({
+      ql: unprovisionedReads(audited.engine),
+      headers: { 'x-api-key': raw },
+      tenancyPosture: undefined,
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
+      client: { transport: 'stdio' },
+    });
+    expect(authz.userId).toBe(USER);
+    const row = await rowOf('key_client_stdio');
+    expect(row.ip_address ?? null).toBeNull();
+    expect(row.user_agent ?? null).toBeNull();
+    expect(metadataOf(row).ip_address_absent).toBe('stdio');
+  });
+
+  it('a door that hands no facts: no address, with the reason `not_supplied`; the user agent is still read', async () => {
+    const raw = await mintKey(audited.engine, 'key_client_unwired');
+    const authority = addressAuthority(PEER);
+    await compose(audited.engine, raw, { anonymous: 'fail-closed', authService: authority.service, transport: false });
+    expect(authority.handed, 'no facts handed, so nothing is asked').toHaveLength(0);
+    const row = await rowOf('key_client_unwired');
+    expect(row.ip_address ?? null).toBeNull();
+    expect(row.user_agent).toBe(UA);
+    expect(metadataOf(row).ip_address_absent).toBe('not_supplied');
+  });
+
+  it('the trust rule establishes no address: no address, with the reason `undetermined`', async () => {
+    const raw = await mintKey(audited.engine, 'key_client_undetermined');
+    await compose(audited.engine, raw, { anonymous: 'fail-closed', authService: addressAuthority(undefined).service });
+    const row = await rowOf('key_client_undetermined');
+    expect(row.ip_address ?? null).toBeNull();
+    expect(metadataOf(row).ip_address_absent).toBe('undetermined');
+  });
+
+  it('an established value wider than the address column is not stored, with the reason `unrecordable`', async () => {
+    const raw = await mintKey(audited.engine, 'key_client_wide');
+    await compose(audited.engine, raw, { anonymous: 'fail-closed', authService: addressAuthority('x'.repeat(46)).service });
+    const row = await rowOf('key_client_wide');
+    expect(row.ip_address ?? null).toBeNull();
+    expect(row.user_agent).toBe(UA);
+    expect(metadataOf(row).ip_address_absent).toBe('unrecordable');
+  });
+
+  it('a stamp written outside any scope records `not_supplied`, never a guess', async () => {
+    await mintKey(audited.engine, 'key_client_bare');
+    await audited.engine.update('sys_api_key', { id: 'key_client_bare', last_used_at: new Date(T0).toISOString() }, SYS);
+    const row = await rowOf('key_client_bare');
+    expect(row.ip_address ?? null).toBeNull();
+    expect(row.user_agent ?? null).toBeNull();
+    expect(metadataOf(row).ip_address_absent).toBe('not_supplied');
+  });
+
+  it('an OAuth consent stamp written inside the use\'s scope records its facts', async () => {
+    await audited.engine.insert(
+      'sys_oauth_consent',
+      { id: 'consent_client', client_id: 'client_31821', user_id: USER, reference_id: ORG, scopes: '["data:read"]' },
+      SYS,
+    );
+    await runWithCredentialUseClient({ ipAddress: PEER, userAgent: UA }, () =>
+      audited.engine.update('sys_oauth_consent', { id: 'consent_client', last_used_at: new Date(T0) }, SYS),
+    );
+    const row = await rowOf('consent_client');
+    expect(row).toMatchObject({ ip_address: PEER, user_agent: UA, object_name: 'sys_oauth_consent' });
+  });
+
+  it('a skip_consent client\'s use carries its facts on the hand-off', async () => {
+    const audit = audited.kernel.getService<CredentialUseAuditWriter>('audit');
+    await audit.recordCredentialUse({
+      kind: 'oauth_access_token',
+      objectName: 'sys_oauth_application',
+      credentialId: 'app_31821',
+      userId: USER,
+      clientId: 'client_skip_31821',
+      client: { ipAddress: PEER, userAgent: UA },
+    });
+    const row = await rowOf('app_31821');
+    expect(row).toMatchObject({ ip_address: PEER, user_agent: UA });
+  });
+
+  it('CONTROL: the throttle is unchanged; a second use in the window from another address writes no row, and the row keeps the first use\'s facts', async () => {
+    const raw = await mintKey(audited.engine, 'key_client_window');
+    await compose(audited.engine, raw, { anonymous: 'fail-closed', authService: addressAuthority(PEER).service });
+    vi.setSystemTime(T0 + 10 * MINUTE);
+    await compose(audited.engine, raw, { anonymous: 'fail-closed', authService: addressAuthority('192.0.2.200').service });
+    const row = await rowOf('key_client_window');
+    expect(row.ip_address).toBe(PEER);
+
+    vi.setSystemTime(T0 + API_KEY_LAST_USED_STAMP_INTERVAL_MS + MINUTE);
+    await compose(audited.engine, raw, { anonymous: 'fail-closed', authService: addressAuthority('192.0.2.200').service });
+    const rows = (await credentialUseRows(audited.engine)).filter((r) => r.record_id === 'key_client_window');
+    expect(rows.map((r) => r.ip_address).sort()).toEqual(['192.0.2.200', PEER].sort());
   });
 });

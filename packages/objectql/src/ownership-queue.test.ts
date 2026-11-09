@@ -15,6 +15,8 @@ import { QUEUE_FIELD_DEF } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 import { applySystemFields, objectQueueColumnRefusal } from './registry.js';
 import { OWNERSHIP_QUEUE_SOURCE_SLOT, assignmentExpressionRefusals, describeMissingOwnershipQueueService, nextMember } from './assignment-rules.js';
+import { resolvePackageScopedName, type PackageScopedRefusal, type PackageScopedRegistry } from './package-scoped-resolver.js';
+import type { SchemaRegistry } from './registry.js';
 
 type Row = Record<string, unknown>;
 
@@ -464,6 +466,156 @@ describe('[ADR-0142 D5] the assignment seam', () => {
     const row = await insert({ subject: 'A' });
     expect(row).toMatchObject({ queue: 'support' });
     expect(row.owner_id ?? null).toBeNull();
+  });
+});
+
+// ─── ADR-0150 D3: a declared rule's queue is read from the rule's package ──
+
+describe('[ADR-0150 D3] a declared rule reads its queue name from the package that ships the rule', () => {
+  const P = 'com.acme.p';
+  const D = 'com.acme.d';
+  const U = 'com.acme.u';
+  /** Who staffs each holder's `support` queue in org_a. */
+  const STAFF: Record<string, string[]> = { [D]: ['u_d'], [U]: ['u_u'], [P]: ['u_p'] };
+
+  let engine: ObjectQL;
+  let d: ReturnType<typeof makeDriver>;
+  let warn: ReturnType<typeof vi.spyOn>;
+  /** Every read the seam made of the queue service: [method, name, organization, options]. */
+  let asked: unknown[][];
+  /** Every refusal the queue service answered a read with. */
+  let refusals: PackageScopedRefusal[];
+
+  const manifest = (id: string, deps: string[] = []) => ({
+    id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop(),
+    ...(deps.length > 0 ? { dependencies: Object.fromEntries(deps.map((dep) => [dep, '^1.0.0'])) } : {}),
+  }) as never;
+  const queue = (name: string) => ({ name, label: name, members: [] });
+  const rule = { name: 'ticket_intake', label: 'Intake', object: 'ticket', active: true, entries: [{ name: 'all', assignTo: { type: 'queue', value: 'support' }, strategy: 'round_robin' }] };
+
+  /**
+   * The ownership-queue service's D3 read, standing in for
+   * `@objectstack/plugin-sharing`'s (which depends on this package, so this
+   * suite cannot construct it): the ONE resolver, `resolvePackageScopedName`,
+   * over the holders the listing serves — a disabled package's left out, as
+   * plugin-sharing's `listedHoldersView` does — and a refused name read as
+   * nowhere (`null` / `[]`), the contract's answer for the `nobody` reader.
+   */
+  function d3Queues(registry: SchemaRegistry) {
+    const listed = {
+      getPackage: (id: string) => registry.getPackage(id),
+      getAllPackages: () => registry.getAllPackages(),
+      packageScopedHoldersOf: (type: string, name: string) =>
+        registry.packageScopedHoldersOf(type, name).filter((id) => !registry.isPackageDisabled(id)),
+      getPackageScopedItem: (type: string, name: string, packageId: string, member?: string) => registry.getPackageScopedItem(type, name, packageId, member),
+      getEnvironmentScopedItem: (type: string, name: string, member?: string) => registry.getEnvironmentScopedItem(type, name, member),
+    } as PackageScopedRegistry;
+    const holderOf = (name: string, options?: { callerPackageId?: string | null }): string | null => {
+      const resolution = resolvePackageScopedName(listed, { type: 'queue', name, callerPackageId: options?.callerPackageId || null });
+      if (resolution.status === 'refused') {
+        refusals.push(resolution);
+        return null;
+      }
+      return resolution.status === 'resolved' ? (resolution.holder.kind === 'package' ? resolution.holder.packageId : 'environment') : null;
+    };
+    return {
+      resolveQueue: async (name: string, org: string | null, options?: { callerPackageId?: string | null }) => {
+        asked.push(['resolveQueue', name, org, options]);
+        const holder = holderOf(name, options);
+        return holder && org === 'org_a' ? { name, label: name, source: 'declared', organizationId: null, members: [], packageId: holder } : null;
+      },
+      expandMembers: async (name: string, org: string | null, options?: { callerPackageId?: string | null }) => {
+        asked.push(['expandMembers', name, org, options]);
+        const holder = holderOf(name, options);
+        return holder && org === 'org_a' ? [...(STAFF[holder] ?? [])] : [];
+      },
+    };
+  }
+
+  /** Install the packages (`[id, deps]`, in order), declare `support` in each holder, and the rule in `rulePackage`. */
+  async function boot(packages: Array<[string, string[]]>, holders: string[], rulePackage: string | null) {
+    engine = new ObjectQL();
+    d = makeDriver();
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+    engine.registry.registerObject(TICKET as any, 'pkg');
+    engine.registry.registerObject(CURSOR as any, 'plugin-sharing');
+    for (const [id, deps] of packages) engine.registry.installPackage(manifest(id, deps), 'code');
+    for (const holder of holders) engine.registry.registerItem('queue', { ...queue('support'), _packageId: holder }, 'name', holder);
+    if (rulePackage) engine.registry.registerItem('assignment_rule', { ...rule, _packageId: rulePackage }, 'name', rulePackage);
+    else engine.registry.registerItem('assignment_rule', { ...rule }, 'name');
+    asked = [];
+    refusals = [];
+    (engine as any)[OWNERSHIP_QUEUE_SOURCE_SLOT] = () => d3Queues(engine.registry);
+    warn = vi.spyOn((engine as any).logger, 'warn');
+  }
+
+  const insert = () => engine.insert('ticket', { subject: 'A', organization_id: 'org_a' }, { context: SYS });
+
+  it('a rule in P naming `support`, held by P\'s dependency D and by unrelated U, routes to D\'s queue', async () => {
+    await boot([[D, []], [U, []], [P, [D]]], [D, U], P);
+    const row = await insert();
+    expect(row).toMatchObject({ queue: 'support', owner_id: 'u_d' });
+    expect(asked).toEqual([
+      ['resolveQueue', 'support', 'org_a', { callerPackageId: P }],
+      ['expandMembers', 'support', 'org_a', { callerPackageId: P }],
+    ]);
+    expect(refusals).toEqual([]);
+  });
+
+  it('two holders in P\'s closure: refused, naming both — the row is written ownerless, in no queue', async () => {
+    await boot([[D, []], [U, []], [P, [D, U]]], [D, U], P);
+    const row = await insert();
+    expect(row.owner_id ?? null).toBeNull();
+    expect(row.queue ?? null).toBeNull();
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]).toMatchObject({
+      reason: 'ambiguous-in-closure',
+      callerPackageId: P,
+      candidates: [{ kind: 'package', packageId: D }, { kind: 'package', packageId: U }],
+    });
+    const hit = warn.mock.calls.find((c: unknown[]) => /does not resolve in organization 'org_a' from the rule's package 'com\.acme\.p'/.test(String(c[0])));
+    expect(hit, 'the seam says the name did not resolve from the rule\'s package').toBeTruthy();
+    expect(hit![1]).toMatchObject({ rule: 'ticket_intake', queue: 'support', package: P });
+  });
+
+  it('D disabled, unrelated U holding `support`: refused as outside P\'s closure, naming U — U\'s members are never served', async () => {
+    await boot([[D, []], [U, []], [P, [D]]], [D, U], P);
+    engine.registry.disablePackage(D);
+    const row = await insert();
+    expect(row.owner_id ?? null).toBeNull();
+    expect(row.queue ?? null).toBeNull();
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]).toMatchObject({
+      reason: 'outside-closure',
+      callerPackageId: P,
+      candidates: [{ kind: 'package', packageId: U }],
+    });
+  });
+
+  it('CONTROL — a declared rule no package ships reads environment-wide, as before: the same two holders are refused, naming both', async () => {
+    await boot([[D, []], [U, []], [P, [D]]], [D, U], null);
+    const row = await insert();
+    expect(row.owner_id ?? null).toBeNull();
+    expect(row.queue ?? null).toBeNull();
+    expect(asked).toEqual([['resolveQueue', 'support', 'org_a', undefined]]);
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]).toMatchObject({
+      reason: 'ambiguous-in-environment',
+      candidates: [{ kind: 'package', packageId: D }, { kind: 'package', packageId: U }],
+    });
+  });
+
+  it('CONTROL — an organization\'s own rule belongs to no package: it reads environment-wide, whatever the declared rules carry', async () => {
+    await boot([[D, []], [P, [D]]], [D], P);
+    engine.registry.registerObject(AUTHORED_RULE as any, 'plugin-sharing');
+    d.storeFor('sys_assignment_rule').set('ar1', {
+      id: 'ar1', name: 'org_intake', object_name: 'ticket', organization_id: 'org_a', sort_order: 1,
+      recipient_type: 'queue', recipient_id: 'support', strategy: 'round_robin', active: true,
+    });
+    const row = await insert();
+    expect(row).toMatchObject({ queue: 'support', owner_id: 'u_d' });
+    expect(asked[0]).toEqual(['resolveQueue', 'support', 'org_a', undefined]);
   });
 });
 

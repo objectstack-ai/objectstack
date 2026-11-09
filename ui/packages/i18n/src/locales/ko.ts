@@ -2459,6 +2459,7 @@ const ko = {
       cannotEditMetaView: "이 보기는 코드에 정의된 기본 제공 보기이므로 변경할 수 없습니다.",
       resetView: "보기 설정으로 되돌리기",
       resetViewTitle: "이 보기 자체의 필터, 검색, 정렬, 그룹, 열 배치, 숨긴 필드, 밀도, 레이아웃, 행 색상, 행 번호, 인라인 편집으로 되돌립니다. 고정한 보기, 즐겨찾기, 레코드 열기 방식은 그대로 유지됩니다. 본인의 목록만 변경됩니다.",
+      linkFilterRefused: '이 링크의 필터가 적용되지 않았습니다. 여기서 필터링할 수 없는 필드가 포함되어 있어 뷰를 그대로 표시합니다.',
       personalized: "개인 설정됨",
       personalizedHeading: "이 보기와 다른 항목",
       personalizedParts: {
