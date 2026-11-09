@@ -4410,21 +4410,22 @@ describe('ApprovalService — a queue approver asks the queue service to refuse 
   }
 });
 
-// [ADR-0150 D3] An approval step is declared inside its flow, so the queue a
-// `queue` approver names is read from the package that ships the flow — the
-// automation engine's `packagedFlowOwner` — passed to the queue service as
-// `callerPackageId`. The double stands in for `@objectstack/plugin-sharing`'s
+// [ADR-0150 D3] An approval step is written in the flow body the engine runs,
+// so the queue a `queue` approver names is read from that body's package — the
+// automation engine's `armedFlowPackage`: the shipping package for its own
+// body, none for an environment-authored override of it — passed to the queue
+// service as `callerPackageId`. The double stands in for `@objectstack/plugin-sharing`'s
 // service (not a dependency of this package): the ONE resolver,
 // `resolvePackageScopedName`, over the holders the listing serves (a disabled
 // package's left out, as plugin-sharing's `listedHoldersView` does), and under
 // `onFailedRead: 'refuse'` a refused name rejects with the refusal, as the
 // contract says.
-describe('ApprovalService — a queue approver reads its queue name from the package that ships the flow (ADR-0150 D3)', () => {
+describe('ApprovalService — a queue approver reads its queue name from the package of the flow body that runs (ADR-0150 D3)', () => {
   const P = 'com.acme.p';
   const D = 'com.acme.d';
   const U = 'com.acme.u';
-  /** Who staffs each holder's `support` queue in t1. */
-  const STAFF: Record<string, string[]> = { [D]: ['u_d'], [U]: ['u_u'] };
+  /** Who staffs each holder's `support` queue in t1 (`environment`: the item authored in the environment). */
+  const STAFF: Record<string, string[]> = { [D]: ['u_d'], [U]: ['u_u'], environment: ['u_env'] };
 
   const manifest = (id: string, deps: string[] = []) => ({
     id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop(),
@@ -4439,7 +4440,13 @@ describe('ApprovalService — a queue approver reads its queue name from the pac
     return registry;
   };
 
-  const setup = (registry: SchemaRegistry, flowPackage: string | undefined) => {
+  /**
+   * `flowPackage`: the package that ships `deal_approval`. `overridden`: the
+   * body armed under the name is an environment-authored override of it (a
+   * declared `.custom` override), so the engine answers no package for the
+   * body that runs while `packagedFlowOwner` still names the shipping one.
+   */
+  const setup = (registry: SchemaRegistry, flowPackage: string | undefined, overridden = false) => {
     const engine = makeFakeEngine();
     const asked: unknown[] = [];
     const refusals: PackageScopedRefusal[] = [];
@@ -4467,12 +4474,15 @@ describe('ApprovalService — a queue approver reads its queue name from the pac
             }
             return [];
           }
-          if (resolution.status !== 'resolved' || resolution.holder.kind !== 'package' || org !== 't1') return [];
-          return [...(STAFF[resolution.holder.packageId] ?? [])];
+          if (resolution.status !== 'resolved' || org !== 't1') return [];
+          return [...(STAFF[resolution.holder.kind === 'package' ? resolution.holder.packageId : resolution.holder.kind] ?? [])];
         },
       }),
     });
-    svc.attachAutomation({ packagedFlowOwner: (flow: string) => (flow === 'deal_approval' ? flowPackage : undefined) } as any);
+    svc.attachAutomation({
+      packagedFlowOwner: (flow: string) => (flow === 'deal_approval' ? flowPackage : undefined),
+      armedFlowPackage: (flow: string) => (flow === 'deal_approval' && !overridden ? flowPackage : undefined),
+    } as any);
     return { engine, svc, asked, refusals };
   };
   const queueNode = (configExtra: Record<string, any> = {}) => ({
@@ -4496,6 +4506,16 @@ describe('ApprovalService — a queue approver reads its queue name from the pac
     expect((refusal as Error).message).toContain(D);
     expect((refusal as Error).message).toContain(U);
     expect((refusal as any).cause).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+    // A refused name is not a failed read: worded as the refusal, with its remedy, and not retryable.
+    const message = (refusal as Error).message;
+    expect(message).toContain("approver 'queue:support' could not be expanded in organization 't1', because its name was refused (ADR-0150 D3, ambiguous-in-closure)");
+    expect(message).toContain(
+      `Running the flow again changes nothing until the name resolves from package '${P}': declare a dependency on the `
+      + `package whose queue it means, enable that package if it is disabled, or ship the queue in package '${P}'.`,
+    );
+    expect(message).not.toContain('a read behind it failed');
+    expect(message).not.toContain('once the directory can be read');
+    expect(refusal).toMatchObject({ retryable: false });
     expect(refusals).toHaveLength(1);
     expect(refusals[0]).toMatchObject({
       reason: 'ambiguous-in-closure',
@@ -4517,11 +4537,41 @@ describe('ApprovalService — a queue approver reads its queue name from the pac
     expect(engine._tables['sys_approval_request'] ?? []).toEqual([]);
   });
 
+  it('an environment-authored override of P\'s flow reads environment-wide, as on main: its step reaches the environment\'s queue P cannot reach', async () => {
+    const registry = registryOf([[P, []]], []);
+    registry.registerItem('queue', { name: 'support', label: 'Support', members: [] }, 'name');
+    // CONTROL: from P the name is refused outside P's closure — so a step read from P would not open.
+    expect(resolvePackageScopedName(registry as never, { type: 'queue', name: 'support', callerPackageId: P }))
+      .toMatchObject({ status: 'refused', reason: 'outside-closure' });
+    const { engine, svc, asked, refusals } = setup(registry, P, true);
+    const req = await svc.openNodeRequest(queueNode(), CTX) as any;
+    expect(req.pending_approvers).toEqual(['u_env']);
+    expect(asked).toEqual([['support', 't1', { purpose: 'addressing', onFailedRead: 'refuse' }]]);
+    expect(refusals).toEqual([]);
+
+    // The decide-time tally of a request opened before the slate snapshot reads the same body's package.
+    const tallied = await svc.openNodeRequest({
+      ...queueNode({ approvers: [{ type: 'user', value: 'u2' }, { type: 'queue', value: 'support' }], behavior: 'unanimous' }),
+      recordId: 'opp2', runId: 'run_2', record: { id: 'opp2', amount: 100 },
+    }, CTX) as any;
+    const row = engine._tables['sys_approval_request'].find((r: any) => r.id === tallied.id)!;
+    const config = JSON.parse(row.node_config_json);
+    delete config.__approverGroups;
+    row.node_config_json = JSON.stringify(config);
+    const decided = await svc.decideNode(tallied.id, { decision: 'approve', actorId: 'u2' }, SYS);
+    expect(decided.finalized).toBe(false);
+    expect(asked.at(-1)).toEqual(['support', 't1', { purpose: 'addressing', onFailedRead: 'refuse' }]);
+    expect(engine._tables['sys_approval_request'].find((r: any) => r.id === tallied.id)!.pending_approvers).toBe('u_env');
+    expect(refusals).toEqual([]);
+  });
+
   it('CONTROL — a flow authored in this deployment reads environment-wide, as before: the same two holders are refused, naming both', async () => {
     const { svc, asked, refusals } = setup(registryOf([[D, []], [U, []], [P, [D]]], [D, U]), undefined);
     const refusal = await svc.openNodeRequest(queueNode(), CTX).then(() => null, (e: unknown) => e);
     expect(refusal).toBeInstanceOf(ApproverDirectoryUnreadableError);
     expect(asked).toEqual([['support', 't1', { purpose: 'addressing', onFailedRead: 'refuse' }]]);
+    expect((refusal as Error).message).toContain('because its name was refused (ADR-0150 D3, ambiguous-in-environment)');
+    expect((refusal as Error).message).not.toContain('once the directory can be read');
     expect(refusals[0]).toMatchObject({
       reason: 'ambiguous-in-environment',
       candidates: [{ kind: 'package', packageId: D }, { kind: 'package', packageId: U }],

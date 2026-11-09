@@ -77,6 +77,7 @@ import {
   vetOrganizationClaim,
   withoutOperationPrivateKeys,
 } from '@objectstack/core';
+import type { PackageScopedRefusal } from '@objectstack/core';
 import type { TenancyPosture } from '@objectstack/spec/security';
 import {
   filterApproversWhoCanRead,
@@ -226,17 +227,19 @@ export interface ApprovalResumeSurface {
   /** Flow definition lookup, used to derive step-progress display data. */
   getFlow?(name: string): Promise<any | null>;
   /**
-   * [ADR-0150 D3] The package that ships the flow `name`, per the loader's
-   * set, or `undefined` for a flow authored in this deployment. Read by
-   * {@link ApprovalService.flowPackageOf}: an approval step is declared inside
-   * its flow, so the queue an approver names is read from that package.
+   * [ADR-0150 D3] The package whose own body the engine runs for the flow
+   * `name` — the shipping package when the armed body is the loader's, and
+   * `undefined` for a declared `.custom` override, a stored or runtime body,
+   * and a flow authored in this deployment. Read by
+   * {@link ApprovalService.flowPackageOf}: an approval step is written in the
+   * body that runs, so the queue an approver names is read from that body's
+   * package, and an environment-authored override's step from no package.
    *
-   * ⚠️ Declares a method `AutomationEngine` ALREADY implements publicly
-   * (`packagedFlowOwner`, the one the engine's own subflow addressing reads);
-   * it widens no engine surface. Optional: absent, every step reads its queue
-   * names environment-wide, as before.
+   * ⚠️ Declares the method `AutomationEngine` implements
+   * (`armedFlowPackage`). Optional: absent, every step reads its queue names
+   * environment-wide, as before.
    */
-  packagedFlowOwner?(name: string): string | undefined;
+  armedFlowPackage?(name: string): string | undefined;
   /**
    * Terminally cancel a suspended run (ADR-0044). Used when a recall lands
    * during a revision window — the run is paused at the revise-window node,
@@ -1266,6 +1269,35 @@ function crossOrgFilterReadFailure(directoryOrg: unknown, organizationId: unknow
 }
 
 /**
+ * [ADR-0150 D3] The resolver's refusal a rejection carries, when the
+ * rejection is a refused package-scoped name (the queue service's
+ * `PackageScopedNameRefusedError`, read by its shape: this package does not
+ * depend on the plugin that throws it).
+ */
+function packageScopedRefusalOf(err: unknown): PackageScopedRefusal | undefined {
+  const refusal = (err as { refusal?: Partial<PackageScopedRefusal> } | null | undefined)?.refusal;
+  return refusal?.status === 'refused' && typeof refusal.message === 'string' && typeof refusal.reason === 'string'
+    ? refusal as PackageScopedRefusal
+    : undefined;
+}
+
+/**
+ * [ADR-0150 D3] What makes a refused queue name resolve, for the package the
+ * step was read from — the refusal's own remedy, said for a step.
+ */
+function refusalRemedy(refusal: PackageScopedRefusal): string {
+  const from = refusal.callerPackageId;
+  if (!from) {
+    return 'Running the flow again changes nothing until the name resolves: leave one holder of it in this '
+      + 'environment, or name the queue from a step in a package that declares a dependency on the package '
+      + 'whose queue it means.';
+  }
+  return `Running the flow again changes nothing until the name resolves from package '${from}': declare a `
+    + `dependency on the package whose queue it means, enable that package if it is disabled, or ship the queue `
+    + `in package '${from}'.`;
+}
+
+/**
  * [ADR-0142 D6 as amended; ruling record 6599731698 on #29604, letter B] The
  * approval node refuses to open because a directory read behind one of its
  * approvers failed ({@link DIRECTORY_REFUSING_APPROVER_TYPES}).
@@ -1279,8 +1311,12 @@ function crossOrgFilterReadFailure(directoryOrg: unknown, organizationId: unknow
  */
 export class ApproverDirectoryUnreadableError extends Error {
   override readonly name = 'ApproverDirectoryUnreadableError';
-  /** The run can be re-triggered once the directory reads again. */
-  readonly retryable = true;
+  /**
+   * The run can be re-triggered once the directory reads again. `false` when
+   * the cause is an ADR-0150 D3 refusal of the name: a re-run is refused the
+   * same way until the remedy the message names is applied.
+   */
+  readonly retryable: boolean;
   /** The approver whose directory read failed: its type and value as authored. */
   readonly approverType: string;
   readonly approverValue: string;
@@ -1301,13 +1337,24 @@ export class ApproverDirectoryUnreadableError extends Error {
       : `approver 'expression' (resolveAs '${input.type}', value '${input.value}')`;
     const inOrg = input.organizationId ? ` in organization '${input.organizationId}'` : '';
     const read = input.failedRead.trim();
+    const refusal = packageScopedRefusalOf(input.cause);
+    const notOpened = 'The approval node does not open: ';
+    const routedPast = ' would be routed past, so the request is not opened on the rest of the slate, on the '
+      + 'declared fallbackApprovers or on the organization\'s administrators, and is not auto-approved, whatever '
+      + 'the node\'s onEmptyApprovers says.';
     super(
-      `APPROVER_DIRECTORY_UNREADABLE: ${approver} could not be expanded${inOrg}, because a read behind it failed: `
-      + `${read}${/[.!?]$/.test(read) ? '' : '.'} The approval node does not open: the people who could not be `
-      + `read would be routed past, so the request is not opened on the rest of the slate, on the declared `
-      + `fallbackApprovers or on the organization's administrators, and is not auto-approved, whatever the node's `
-      + `onEmptyApprovers says. Run the flow again once the directory can be read.`,
+      refusal
+        // [ADR-0150 D3] A refused name is not a failed read: running the flow
+        // again reads the same holders and is refused again. Its remedy is
+        // the refusal's own.
+        ? `APPROVER_DIRECTORY_UNREADABLE: ${approver} could not be expanded${inOrg}, because its name was refused `
+          + `(ADR-0150 D3, ${refusal.reason}): ${refusal.message} ${notOpened}the people of whichever queue was `
+          + `meant${routedPast} ${refusalRemedy(refusal)}`
+        : `APPROVER_DIRECTORY_UNREADABLE: ${approver} could not be expanded${inOrg}, because a read behind it failed: `
+          + `${read}${/[.!?]$/.test(read) ? '' : '.'} ${notOpened}the people who could not be read${routedPast} `
+          + `Run the flow again once the directory can be read.`,
     );
+    this.retryable = refusal === undefined;
     if (input.cause !== undefined) Object.assign(this, { cause: input.cause });
     this.approverType = input.type;
     this.approverValue = String(input.value);
@@ -3601,14 +3648,18 @@ export class ApprovalService implements IApprovalService {
 
   /**
    * [ADR-0150 D3] The package the approval step of flow `flowName` is
-   * declared in: the package that ships the flow, as the automation engine
-   * answers it (`packagedFlowOwner`, the reader its own subflow addressing
-   * takes the caller's package from), or `null` for a flow authored in this
-   * deployment, a request with no flow, and an engine that cannot say.
+   * written in: the package of the body the engine runs for the flow, as the
+   * engine answers it (`armedFlowPackage`) — the shipping package for its own
+   * body, and `null` for a declared `.custom` override or any other
+   * environment-authored body (a reference in an overlay is the
+   * environment's, never the package's it customizes), a flow authored in
+   * this deployment, a request with no flow, and an engine that cannot say.
+   * ⛔ Not `packagedFlowOwner`: it names the package that ships the NAME,
+   * whichever body is armed under it.
    */
   private flowPackageOf(flowName: string | null | undefined): string | null {
-    if (!flowName || typeof this.automation?.packagedFlowOwner !== 'function') return null;
-    const owner = this.automation.packagedFlowOwner(flowName);
+    if (!flowName || typeof this.automation?.armedFlowPackage !== 'function') return null;
+    const owner = this.automation.armedFlowPackage(flowName);
     return typeof owner === 'string' && owner !== '' ? owner : null;
   }
 

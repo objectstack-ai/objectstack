@@ -100,6 +100,13 @@ export interface FlowPrecedenceWinner {
     definition: unknown;
     /** Present only when this name had more than one contender. */
     shadowing?: FlowShadowingRecord;
+    /**
+     * [ADR-0150 D3] What the winner is, by the same classification the
+     * receipt's `armed` records, for every name — one contender or several.
+     * The caller hands it to `AutomationEngine.registerFlow`, so the engine
+     * knows whose body it runs (`armedFlowPackage`).
+     */
+    armedFrom: FlowContender;
 }
 
 /**
@@ -157,6 +164,32 @@ function classifyContender(item: unknown, owner: string | undefined, installed: 
         source: 'runtime',
         ...(typeof packageId === 'string' && packageId ? { packageId } : {}),
     };
+}
+
+/**
+ * [ADR-0150 D3] What a name's ONLY contender is, for its winner's `armedFrom`:
+ * {@link classifyContender}'s answer, except that a body the protocol's view
+ * serves in the shipping package's slot as that package's declared override
+ * is the `override` it is.
+ *
+ * The view serves the override (ADR-0146 D9 item 1) as one entry in place of
+ * the loader's body, with the package's envelope on it — measured on a real
+ * kernel: `_packageId` the base, `_provenance: 'package'` — and the stored
+ * row's binding ({@link storedRowBindingOf}) does not travel on that copy, so
+ * the classification reads it as the loader's body. What the copy keeps is
+ * its own declaration, `overrides.package` = the owner: the view serves a body
+ * in the owner's slot only after the one served-override predicate admitted
+ * its row by the row's column, and the loader's own body declares no override
+ * of its own package. ⛔ Only this narrows: a body that does not declare it
+ * stays as classified. Two or more contenders are judged on the registry's
+ * entries, which keep their binding, by the precedence below.
+ */
+function armedContender(item: unknown, contender: FlowContender, owner: string | undefined, installed: InstalledManifestLookup): FlowContender {
+    if (contender.source !== 'package' || owner === undefined) return contender;
+    const declared = (item as { overrides?: { package?: unknown } } | null | undefined)?.overrides?.package;
+    if (declared !== owner) return contender;
+    const pair = pairOf(owner, installed);
+    return { source: 'override', ...(pair.ok ? { packageId: pair.value } : {}) };
 }
 
 /**
@@ -295,9 +328,9 @@ function undeclaredRemedy(owner: string | undefined, installed: InstalledManifes
  * a body's own claim.
  *
  * [#20864] Which contender is `package` is the loader's set's answer, asked
- * ONCE per contested name so every contender of that name is judged against
- * one answer — see {@link describeFlowContender}. A name with one contender
- * asks nothing: precedence decides nothing there.
+ * ONCE per name so every contender of that name is judged against one answer
+ * — see {@link describeFlowContender}. A name with one contender is classified
+ * too, for the winner's `armedFrom` alone: precedence decides nothing there.
  *
  * [#20913] ONE decision for BOTH boot steps. The automation plugin resolves
  * the boot pull's registry list and the `kernel:ready` / `metadata:reloaded`
@@ -337,12 +370,17 @@ export function resolveFlowPrecedence(
     const winners: FlowPrecedenceWinner[] = [];
     for (const name of order) {
         const members = groups.get(name)!;
+        const owner = loaderSetOwner(packagedFlowOwner, name);
         if (members.length === 1) {
-            winners.push({ name, definition: members[0].definition });
+            const only = members[0].definition;
+            winners.push({
+                name,
+                definition: only,
+                armedFrom: armedContender(only, classifyContender(only, owner, installed), owner, installed),
+            });
             continue;
         }
 
-        const owner = loaderSetOwner(packagedFlowOwner, name);
         const group = members.map((member) => ({
             ...member,
             contender: classifyContender(member.definition, owner, installed),
@@ -373,7 +411,7 @@ export function resolveFlowPrecedence(
         const overrideOverOwnBase = armed.contender.source === 'override'
             && shadowed.every((contender) => contender.source === 'package' && contender.packageId === owner);
         if (overrideOverOwnBase) {
-            winners.push({ name, definition: armed.definition });
+            winners.push({ name, definition: armed.definition, armedFrom: armed.contender });
             continue;
         }
         // [#20913] Say WHY this one is armed, per case — the cases are
@@ -407,6 +445,7 @@ export function resolveFlowPrecedence(
             name,
             definition: armed.definition,
             shadowing: { name, armed: armed.contender, shadowed },
+            armedFrom: armed.contender,
         });
     }
     return winners;
