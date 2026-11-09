@@ -41,7 +41,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           platform_admin_standing_change: "平台管理员权限变更",
           action_invocation: "动作调用",
           package_uninstall: "卸载软件包",
-          package_unmanaged_import: "Package Unmanaged Import"
+          package_unmanaged_import: "Package Unmanaged Import",
+          scim_refused: "SCIM Refused"
         }
       },
       user_id: {

@@ -41,7 +41,8 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
           platform_admin_standing_change: "Изменение статуса администратора платформы",
           action_invocation: "Вызов действия",
           package_uninstall: "Удаление пакета",
-          package_unmanaged_import: "Package Unmanaged Import"
+          package_unmanaged_import: "Package Unmanaged Import",
+          scim_refused: "SCIM Refused"
         }
       },
       user_id: {

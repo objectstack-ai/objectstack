@@ -41,7 +41,8 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
           platform_admin_standing_change: "تغيير صلاحية مسؤول المنصّة",
           action_invocation: "استدعاء إجراء",
           package_uninstall: "إلغاء تثبيت حزمة",
-          package_unmanaged_import: "Package Unmanaged Import"
+          package_unmanaged_import: "Package Unmanaged Import",
+          scim_refused: "SCIM Refused"
         }
       },
       user_id: {

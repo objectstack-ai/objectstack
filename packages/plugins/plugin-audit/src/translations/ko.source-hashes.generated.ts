@@ -20,4 +20,5 @@
 export const koGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_activity.fields.url.label": "2203b0b9f72534f7",
   "objects.sys_audit_log.fields.action.options.package_unmanaged_import": "676d7ce8c9d1fda4",
+  "objects.sys_audit_log.fields.action.options.scim_refused": "2f27dc90233914f7",
 };

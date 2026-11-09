@@ -41,7 +41,8 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
           platform_admin_standing_change: "플랫폼 관리자 권한 변경",
           action_invocation: "작업 호출",
           package_uninstall: "패키지 제거",
-          package_unmanaged_import: "Package Unmanaged Import"
+          package_unmanaged_import: "Package Unmanaged Import",
+          scim_refused: "SCIM Refused"
         }
       },
       user_id: {

@@ -41,7 +41,8 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
           platform_admin_standing_change: "Changement de statut d’administrateur de plateforme",
           action_invocation: "Appel d’action",
           package_uninstall: "Désinstallation de package",
-          package_unmanaged_import: "Package Unmanaged Import"
+          package_unmanaged_import: "Package Unmanaged Import",
+          scim_refused: "SCIM Refused"
         }
       },
       user_id: {

@@ -41,7 +41,8 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           platform_admin_standing_change: "Alteração do status de administrador da plataforma",
           action_invocation: "Invocação de ação",
           package_uninstall: "Desinstalação de pacote",
-          package_unmanaged_import: "Package Unmanaged Import"
+          package_unmanaged_import: "Package Unmanaged Import",
+          scim_refused: "SCIM Refused"
         }
       },
       user_id: {
