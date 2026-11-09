@@ -16,8 +16,8 @@ dead-end.
 
 <!-- os:check -->
 ```typescript
-import type { ValidationRule } from '@objectstack/spec/data';
-const rule: ValidationRule = {
+import type { StateMachineValidation } from '@objectstack/spec/data';
+const rule: StateMachineValidation = {
   type: 'state_machine',
   name: 'case_lifecycle',
   label: 'Case Lifecycle',
@@ -300,8 +300,7 @@ slate — guard genuinely-optional inputs explicitly, e.g.
 }
 ```
 
-The full "previous approver picks the next step's approvers" loop, end to end
-(the shipped `showcase_dynamic_approval` flow in the showcase app is this shape):
+The full "previous approver picks the next step's approvers" loop, end to end:
 
 <!-- os:check -->
 ```typescript
