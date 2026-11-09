@@ -131,3 +131,17 @@ describe('isFieldInlineEditable', () => {
     expect(isFieldInlineEditable({})).toBe(true);
   });
 });
+
+describe('isFieldInlineEditable: a field carrying an expression (objectstack#31759)', () => {
+  it('is never an editable cell, whatever its type, bare string or envelope', () => {
+    expect(isFieldInlineEditable({ type: 'currency', expression: 'record.quantity * record.unit_price' } as never)).toBe(false);
+    expect(isFieldInlineEditable({ type: 'number', expression: { dialect: 'cel', source: 'record.a + 1' } } as never)).toBe(false);
+    expect(isFieldInlineEditable({ expression: 'record.a' } as never)).toBe(false);
+  });
+
+  it('CONTROL: the same currency field without an expression stays editable, a formula stays locked', () => {
+    expect(isFieldInlineEditable({ type: 'currency' })).toBe(true);
+    expect(isFieldInlineEditable({ type: 'currency', expression: '' } as never)).toBe(true);
+    expect(isFieldInlineEditable({ type: 'formula' })).toBe(false);
+  });
+});
