@@ -28,8 +28,8 @@ import {
     type MetadataDiagnostics,
     computeViewReferenceDiagnostics,
     decorateMetadataItem,
-    withFormLayoutWarnings,
     withPublishVerdict,
+    withViewLintWarnings,
 } from './metadata-diagnostics.js';
 import { noPendingDraftError } from './protocol-authoring-refusals.js';
 import {
@@ -126,12 +126,14 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // [#29196] A served VIEW's `_diagnostics` also carries the lint's
     // `form-field-unknown` warnings ({@link withFormLayoutWarnings}), judged
     // against the object the registry serves for each name the view spells.
+    // [#31866] …and its list views' `list-view-field-unknown` warnings
+    // ({@link withListViewFieldWarnings}), against the same objects.
     // Applied at every served exit of this read, the draft ones included; a
     // warning, so `valid` is left as the schema answered it. The execution
     // face serves no `_diagnostics`.
-    const serveFormLayout = <T>(served: T): Promise<T> => (execution
+    const serveViewLint = <T>(served: T): Promise<T> => (execution
         ? Promise.resolve(served)
-        : withFormLayoutWarnings(request.type, served, (name) => host.engine?.registry?.getObject?.(name)));
+        : withViewLintWarnings(request.type, served, (name) => host.engine?.registry?.getObject?.(name)));
     // [#26707] A served DRAFT is decorated as above and then told what its
     // publish would refuse: the runtime gate's verdict on the stored draft
     // body ({@link draftPublishVerdict}), folded into `_diagnostics`
@@ -140,7 +142,7 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // promotion does — never the governed, converted or redacted copy this
     // read serves. The execution face serves no `_diagnostics`.
     const serveDraft = async <T>(resolved: T, row: { metadata?: unknown; package_id?: string | null }): Promise<T> => {
-        const served = await serveFormLayout(serveItem(resolved));
+        const served = await serveViewLint(serveItem(resolved));
         if (execution || !served || typeof served !== 'object') return served;
         const issues = await host.draftPublishVerdict({
             type: request.type,
@@ -438,7 +440,7 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
         return {
             type: request.type,
             name: request.name,
-            item: servedDraftRow ? await serveDraft(governedDraft, servedDraftRow) : await serveFormLayout(serveItem(governedDraft)),
+            item: servedDraftRow ? await serveDraft(governedDraft, servedDraftRow) : await serveViewLint(serveItem(governedDraft)),
             // [#22114] The draft row's version token — the one a draft save
             // (`?mode=draft`) at this address accepts as `If-Match`.
             // [#22877] The member's own row's, as a save of that member's
@@ -722,9 +724,10 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
             }
         } catch { /* reference diagnostics are best-effort */ }
     }
-    // [#29196] …and the lint's form-layout warnings, after the reference
-    // merge above (which rebuilds `_diagnostics` from its errors alone).
-    decorated = await serveFormLayout(decorated);
+    // [#29196] …and the lint's form-layout warnings, [#31866] and list-view
+    // field warnings, after the reference merge above (which rebuilds
+    // `_diagnostics` from its errors alone).
+    decorated = await serveViewLint(decorated);
     // ADR-0010 — surface lock/provenance flags so Studio can render
     // the correct affordances without a second round trip. [#21670] They
     // report the write doors' verdicts — see {@link servedLockState}.
