@@ -144,6 +144,7 @@ import { apiKeyManagementCredentialRefusal } from '@objectstack/core';
 // `label()` map is built from it), never a second spelling here.
 import { declaresOptions } from '@objectstack/formula';
 import type { McpDataBridge, McpObjectSummary } from './mcp-http-tools.js';
+import type { ListDatasetsOutput, QueryDatasetOutput } from '@objectstack/spec/ai';
 import { metaItemsArray, type McpObjectView } from './mcp-server-runtime.js';
 import {
   diagnoseObjectListRead,
@@ -232,6 +233,33 @@ export interface StdioDataBridgeDeps {
    * means none: the stored content-hash columns are then not served at all.
    */
   keyedDigest?: () => StoredHashDigest | undefined;
+  /**
+   * [ADR-0149 D2] The `analytics` service when it serves the dataset executor
+   * ({@link StdioDatasetToolsService}), resolved by the host once its services
+   * are registered. Present ⇒ the bridge carries `listDatasets` /
+   * `queryDataset` / `datasetToolDefinitions`; absent ⇒ none of them, and no
+   * dataset tool registers.
+   */
+  datasetTools?: StdioDatasetToolsService;
+}
+
+/**
+ * [ADR-0149 D2] The face of the `analytics` service the dataset tools call:
+ * `datasetTools(deps)` binds the service-analytics executor to the service
+ * itself. Named structurally so this package stays free of analytics code
+ * (ADR-0149 D2: "the MCP tool layer stays free of analytics code"). Every
+ * method refuses by throwing an ADR-0112 coded error.
+ */
+export interface StdioDatasetToolsService {
+  datasetTools(deps: {
+    loadDatasets: (context: unknown) => Promise<readonly unknown[]>;
+    diagnoseDelegation?: (object: string, context: unknown) => Promise<{ narrowed: boolean; statement?: string } | undefined>;
+    maxQueryLimit?: number;
+  }): {
+    readonly definitions: ReadonlyArray<{ name: string; description: string }>;
+    listDatasets(input: unknown, context?: unknown): Promise<ListDatasetsOutput>;
+    queryDataset(input: unknown, context?: unknown): Promise<QueryDatasetOutput>;
+  };
 }
 
 /** The keyed-digest primitive the stored content-hash columns are served through. */
@@ -1291,6 +1319,29 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       return answer;
     },
   };
+
+  // [ADR-0149 D2] The dataset members, only where the host handed the
+  // analytics service's executor over. The saved datasets come from the
+  // protocol's merged listing (the read the REST door resolves `datasetName`
+  // from), or the metadata service on a host with none; a throwing read is
+  // left to throw, and the executor answers it as a degraded read. The stdio
+  // bridge has no delegation probe (an API key is not delegated), so none is
+  // passed, as `query_records` here carries none.
+  if (deps.datasetTools) {
+    const service = deps.datasetTools;
+    const loadDatasets = async (): Promise<readonly unknown[]> => {
+      const merged = protocol?.();
+      if (merged && typeof merged.getMetaItems === 'function') {
+        return metaItemsArray(await merged.getMetaItems({ type: 'dataset' }));
+      }
+      return (await metadataService.list('dataset')) ?? [];
+    };
+    const executor = (maxQueryLimit?: number) =>
+      service.datasetTools({ loadDatasets, ...(maxQueryLimit !== undefined ? { maxQueryLimit } : {}) });
+    bridge.listDatasets = async (input) => executor().listDatasets(input, await resolvePrincipal());
+    bridge.queryDataset = async (input, opts) => executor(opts.maxRows).queryDataset(input, await resolvePrincipal());
+    bridge.datasetToolDefinitions = () => executor().definitions;
+  }
 
   if (typeof engine.aggregate === 'function') {
     bridge.aggregate = async (object, opts) => {
