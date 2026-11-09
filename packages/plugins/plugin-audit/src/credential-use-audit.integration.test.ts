@@ -504,11 +504,11 @@ describe('[#31821] the credential_use row records where the use came from', () =
     expect(authority.handed[0].headers?.['x-forwarded-for']).toBe('198.51.100.99');
 
     const row = await rowOf(id);
-    expect(row).toMatchObject({ ip_address: PEER, user_agent: UA });
-    expect(metadataOf(row)).not.toHaveProperty('ip_address_absent');
-    // CONTROL: no credential material on the row, the presented header included.
+    // CONTROL first: no credential material on the row, the presented header included.
     const stored = JSON.stringify(row);
     for (const secret of [raw, hashApiKey(raw), 's3cr3t', 'osk_', 'Bearer']) expect(stored).not.toContain(secret);
+    expect(row).toMatchObject({ ip_address: PEER, user_agent: UA });
+    expect(metadataOf(row)).not.toHaveProperty('ip_address_absent');
   });
 
   it('the stdio transport: no address and no user agent, with the reason `stdio`', async () => {
