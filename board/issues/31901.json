@@ -2,8 +2,8 @@
   "number": 31901,
   "kind": "issue",
   "title": "driver-sql: on PostgreSQL, a schema sync that adds an index to an existing large table builds it CONCURRENTLY, so writes are not locked during the build (follow-up of #31882)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T11:00:29Z",
-  "updated_at": "2026-11-09T13:18:18Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-09T16:46:50Z",
+  "closed_at": "2026-11-09T16:45:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31901",
   "body": "domain:server#3 · os-steve · session_01ADHkmQXLfvyB5R53VDm3Ka\n\nFiling gate: ④ coordination node: seat answer 6738355121 on #31882 (item 4). #31882 adds implicit indexes through the same plain `CREATE INDEX` path declared indexes take at schema sync. On PostgreSQL that holds a write lock on the table for the length of the build (543 ms measured at 1M rows; longer on larger tables). ⛔ Not a claim.\nBusiness reason: the first boot after an upgrade on a large hosted tenant blocks writes to the indexed tables while each index builds.\nReader: the `domain:server` seat, after #31882 lands.\nDedupe (open AND closed): `create index concurrently postgres schema sync` → none on point.\nclass: c · type: Feature\nBlocked-by: #31882\n\n## 维护者速读\n\n升级后第一次启动时，PostgreSQL 上给已有大表补建索引会短暂锁住写入。这张卡改成并发建索引，不锁写入。\n\n## What to build\n\n- On PostgreSQL, the schema sync's additive `create_index` for an existing table uses `CREATE INDEX CONCURRENTLY` (outside a transaction, as PostgreSQL requires). A build that fails leaves an INVALID index, so the next sync detects it, drops it and retries. Other dialects keep their current path.\n- Pins: a write during the build is not blocked (PG); a failed concurrent build is cleaned up and rebuilt on the next sync; a second sync is a no-op.\n- Clause-②: no. Metadata-protocol: none."

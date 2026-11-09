@@ -1,0 +1,33 @@
+{
+  "number": 31958,
+  "kind": "issue",
+  "title": "spec(currency): `currencyConfig` on a `summary` outside the ADR-0144 admitted roll-up parses and is inert",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T15:16:24Z",
+  "updated_at": "2026-11-09T19:07:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31958",
+  "body": "domain:spec#2 · zhuangjianguo · session_01QsR2jUe9c6YdtNkrzUnMUd\n\nFiling gate: ②, a finding from a card build: the #31910 os-dev report (6743591282, out-of-scope finding, class c), checked by the seat on `main`. ⛔ Not a claim.\n\n- **Business reason:** an author can write `currencyConfig` on a `summary` field (in any mode, on a `count`, or over a child amount that has its own code), and the spec accepts it, but nothing reads it. The roll-up still answers in whatever the engine computes, so the author believes a currency rule holds when it doesn't.\n- **What `main` does** (`ObjectSchema.safeParse` probe at `c385d903`, by the dev): a summary's `currencyConfig` parses and is inert. After #31910, the spec judges only the one admitted shape: a sum/min/max/avg `summary` through the master_detail that a path-following child amount names. Every other `currencyConfig` on a `summary` is still accepted silently.\n- **Ask:** decide, with a recorded ruling, whether `currencyConfig` on a `summary` outside the admitted shape is refused (a narrowing, which owes the Clause-② review and a migration note) or stays accepted and documented as inert. The liveness ledger rows `field/currencyConfig` and `field/summaryOperations` are undrilled containers, so a refusal would also drill them.\n- **Related:** #31910 / PR #31956 (the admitted shape), #31911 (the objectql reader), ADR-0144 D6.\n- **Dedupe words:** summary currencyConfig inert, roll-up currency declaration, count currency. No open card matches.\n"
+}

@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repo": "objectstack-ai/objectstack",
-  "generated_at": "2026-11-09T14:19:59.948Z",
+  "generated_at": "2026-11-09T20:17:37.826Z",
   "walk_phase": "incremental",
   "walk": {
     "open_set": {
@@ -11,8 +11,8 @@
     },
     "delta": {
       "complete": true,
-      "cursor": "2026-11-09T14:04:09.004Z",
-      "since": "2026-11-09T08:09:56.075Z",
+      "cursor": "2026-11-09T20:01:44.163Z",
+      "since": "2026-11-09T14:04:09.004Z",
       "slice": 300
     },
     "history": {
@@ -20,28 +20,28 @@
       "cursor": "2026-09-23T20:24:00Z"
     }
   },
-  "since": "2026-11-09T08:09:56.075Z",
-  "since_reason": "incremental from the previous run's next_since (2026-11-09T08:09:56.075Z)",
-  "next_since": "2026-11-09T14:04:09.004Z",
+  "since": "2026-11-09T14:04:09.004Z",
+  "since_reason": "incremental from the previous run's next_since (2026-11-09T14:04:09.004Z)",
+  "next_since": "2026-11-09T20:01:44.163Z",
   "resume": null,
   "counts": {
-    "issues_open": 228,
-    "issues_closed": 14015,
+    "issues_open": 217,
+    "issues_closed": 14036,
     "issues_transferred": 5,
-    "pulls_open": 40,
-    "pulls_closed": 15551,
-    "records": 29839
+    "pulls_open": 31,
+    "pulls_closed": 15576,
+    "records": 29865
   },
   "board": {
-    "open_issues_count": 199,
-    "open_pull_requests": 35,
-    "read_at": "2026-11-09T14:19:59.128Z"
+    "open_issues_count": 179,
+    "open_pull_requests": 26,
+    "read_at": "2026-11-09T20:17:32.560Z"
   },
   "count_check": {
     "verdict": "surplus",
     "reason": null,
-    "expected": 164,
-    "archived": 228,
+    "expected": 153,
+    "archived": 217,
     "shortfall": 0,
     "surplus": 2,
     "gone_ledger": 62,
@@ -52,10 +52,10 @@
     "pending_since": null,
     "reason": null
   },
-  "requests": 336,
+  "requests": 183,
   "run": {
-    "numbers_read": 163,
-    "files_written": 307,
+    "numbers_read": 80,
+    "files_written": 153,
     "walk_complete": true,
     "open_set_completed_here": false,
     "delta_ran": false,
@@ -65,20 +65,15 @@
     "reconcile": {
       "first": {
         "verdict": "surplus",
-        "expected": 164,
-        "archived": 228,
+        "expected": 153,
+        "archived": 217,
         "shortfall": 0,
         "surplus": 2
       },
-      "listed": 199,
-      "candidates": 8,
+      "listed": 179,
+      "candidates": 7,
       "left": 0,
-      "reread": [
-        {
-          "number": 31952,
-          "state": "open"
-        }
-      ],
+      "reread": [],
       "transferred": [],
       "destroyed": [
         {
@@ -114,7 +109,7 @@
       ],
       "blank_pages_reasked": 0,
       "reason": null,
-      "wrote": 1,
+      "wrote": 0,
       "cut_short": false
     }
   }

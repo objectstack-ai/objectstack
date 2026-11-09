@@ -2,8 +2,8 @@
   "number": 31904,
   "kind": "issue",
   "title": "plugin-auth rewrites a configured `http://localhost` base URL to `http://localhost:<PORT>` behind a reverse proxy, so copied invitation links point at the unpublished app port",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bob",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T11:12:56Z",
-  "updated_at": "2026-11-09T14:03:00Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-09T15:12:37Z",
+  "closed_at": "2026-11-09T15:11:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31904",
   "body": "## Edition\n\nObjectOS Enterprise (licensed, self-managed). The defect is in the open framework (`plugin-auth`), so Community self-hosts behind a proxy hit it too.\n\n## Version\n\nEE image 4.3.1 (`ghcr.io/objectstack-ai/objectos-ee@sha256:679eb7525e1ab3bfc732fc46433543ab388ba0cabc3157616e6bd2350210f658`, framework pin `63b86b38`). The same code is on `main` today (`packages/plugins/plugin-auth/src/auth-plugin.ts`, the `kernel:ready` hook, `configuredIsLocalhost`).\n\n## What happened / What you expected\n\nThe EE Compose kit runs the app on `PORT=3000` inside the container, behind Caddy on `:80`, and sets `OS_AUTH_URL=http://localhost` (the documented default for `install.sh --url`). In **Setup → Invitations → Copy Invite Link**, the link is:\n\n```\nhttp://localhost:3000/_console/accept-invitation/<id>\n```\n\nPort 3000 is not published, so the link does not open. Expected `http://localhost/_console/accept-invitation/<id>`, the origin the operator configured and the browser uses.\n\nControl: with `OS_AUTH_URL=http://127.0.0.1` on the same deployment (restart only), the copied link is `http://127.0.0.1/_console/accept-invitation/<id>`, and the full invitee flow works in the browser: open link → Create an account and join → Accept invitation → the admin's Users list shows the member.\n\n## Cause\n\nOn `kernel:ready`, `AuthPlugin` compares the configured base URL with `http://localhost:<bound port>`. When the configured origin starts with `http://localhost` and differs, it calls `authManager.setRuntimeBaseUrl('http://localhost:<port>')`:\n\n```ts\nconst configuredIsLocalhost = configuredOrigin.startsWith('http://localhost');\nif (configuredIsLocalhost && configuredOrigin !== actualUrl) {\n  this.authManager.setRuntimeBaseUrl(actualUrl);\n```\n\nThat dev-mode port correction cannot tell \"the dev server bound another port\" from \"an operator set the public origin, and a proxy fronts the app\". `http://localhost` (implicit :80) is an explicit public origin here. `getConsolePageUrl` builds from that base, so the copied invite link and anything else built there are affected: invitation mail, sign-in and password-reset URLs in mail. Sign-in itself is not affected, because the trusted origins still come from `OS_AUTH_URL`.\n\n## Steps\n\n1. On a clean Linux host, run `deploy/install.sh --image <4.3.1 digest> --url http://localhost --admin-email admin@example.test` (cloud `apps/objectos-ee/deploy`).\n2. Sign in at `http://localhost`. Go to Setup → Invitations → Invite User → `alice@example.test` → Confirm.\n3. Open the invitation and choose Copy Invite Link. The dialog shows `http://localhost:3000/_console/accept-invitation/…`.\n\n## Suggested direction\n\nApply the port auto-correction only when no base URL was configured explicitly, that is when neither `OS_AUTH_URL` nor `OS_BASE_URL` (nor the `baseUrl` option) is set. An explicit value is the public origin and should be kept, as the comment already intends for non-localhost hosts.\n\n## Impact\n\nLow for production deployments on a real domain, which are not rewritten. It affects trials on `--url http://localhost`, the kit's default, and any localhost-fronted proxy setup. Found during the clean-host install run for objectstack-ai/cloud#3582."

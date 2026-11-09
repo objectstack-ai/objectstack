@@ -2,8 +2,8 @@
   "number": 31891,
   "kind": "issue",
   "title": "ui: a page element bound to an `api` data source never reads again after an action on the page succeeds, so the page keeps showing the state from before the write",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T10:00:53Z",
-  "updated_at": "2026-11-09T13:36:52Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-09T15:55:19Z",
+  "closed_at": "2026-11-09T15:53:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31891",
   "body": "repo:cloud#2 · os-warren · session_01JQwxbWTyRFQwYN1hZXbCHL\n\nFiling gate: ① a measured gap with a consumer. The cloud#4086 card thread found it while building the AI workforce page's \"Turn off\" and \"Turn back on\" buttons (cloud#3820 item 2). That page is a list of rows over one page `api` binding, with an `action:button` on each row that calls a POST door. After a successful click the rows do not change, so cloud's stopgap is a success toast that says \"reopen the page\". The seat confirmed the reading on objectstack main `ef4af737`.\n\nDedupe: no objectstack issue names a re-read of `ElementApiDataSource` after a write. #31808 and #31840 (a server read inside an action's param dialog, before submit) are a different seam. #31856 (a table element over an `api` binding) would inherit this gap.\n\n## What the code does\n\n- `ui/packages/react/src/element-data-source/useElementApiDataSource.ts:284-319`: the reader's effect re-runs only when `[url, path, requestKey, doFetch, reads]` change. No data-change signal re-runs it.\n- `useElementApiDataSource.ts:190`: `ElementApiOpenScope` subscribes to `subscribeDataChanges` and clears the cached reads. Nothing asks the readers that are already mounted to read again, so the cleared cache only helps a reader that mounts later.\n- `ui/packages/react/src/data-invalidation.ts:59`: `notifyDataChanged` is the bus that list and record readers use through `useDataInvalidation`. The `api` binding reader is not one of them.\n- `ui/packages/app-shell/src/console/ConsoleShell.tsx:110-124`: the console's `ActionProvider` gets no `onRefresh`. Whether `runtime.apiHandler` declares a change on the bus after a successful POST has not been measured.\n\n## What done looks like\n\n1. Measure first: after a successful `api`, `flow` or `script` action on a page, which changes reach `notifyDataChanged`? List each path, with file:line.\n2. A mounted `api`-bound element reads again after a successful action on the same page. A failed action, or one the user cancelled, does not trigger a read. Do not re-read on every unrelated change in the app, because an endpoint names no object. Scope it to the page, or to an explicit `refreshAfter` on the action, whichever the measurement supports. Name the choice in the PR.\n3. Tests: a page with one `api` binding and a row button. After a successful click, one more GET is made and the new answer renders. A failed click makes no GET. Add an ablation that removes the trigger and watch the first test go red.\n4. Once this lands, cloud drops the \"reopen the page\" toast from the AI workforce page (cloud#4086), and the cloud seat files that change.\n\nReader: domain:ui. Consumer: the cloud lane (cloud#4086, and later every console page built on an `api` binding). Suggested grade: p3."

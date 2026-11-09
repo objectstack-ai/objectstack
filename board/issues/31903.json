@@ -2,7 +2,7 @@
   "number": 31903,
   "kind": "pull_request",
   "title": "feat(service-automation, plugin-approvals, plugin-email, trigger-schedule): automation stored references gain a package column, and a dispatch key names its flow's package (ADR-0150 D8 S3)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -23,10 +23,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T11:10:46Z",
-  "updated_at": "2026-11-09T13:44:50Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-09T14:43:11Z",
+  "closed_at": "2026-11-09T14:43:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-09T14:43:09Z",
   "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/31903",

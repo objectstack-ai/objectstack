@@ -1,0 +1,35 @@
+{
+  "number": 31975,
+  "kind": "pull_request",
+  "title": "ci(test-ui): state what bounds a planned leg, and warn when the lane passes D",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T18:59:41Z",
+  "updated_at": "2026-11-09T19:44:12Z",
+  "closed_at": "2026-11-09T19:44:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-09T19:44:10Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31975",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9Ubb2LA2JnEAZZtpjjP7Vho5eB)_\n\nFixes #31965\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么:** 本 PR 修 #31962 合同评审记录 6745712800 的两个 nit。\n  - F1：`ci.yml` 中 `test-ui-plan` 的头注释原说「每一路都不比全量的一路更密」。这句对常驻通道不成立，现在改成实际成立的说法。规划器在通道的预测秒数超过 D 时打一条 `::warning::`。\n  - F2：wiring 测试按 vitest 文件名过滤器的规则（不分大小写的子串）把每一路的参数还原成文件，并新增一对 `x.test.ts` / `X.test.tsx` 夹具钉住这条规则。\n- **为什么改:** 门禁的注释只能说真话。另外，今后若出现互为子串的测试路径，wiring 测试不应误报红。\n- **风险与回滚:** 任何一路跑的文件都不变。警告只打提示，不拒绝、不变红；今天的通道是 1,731 s，低于 D = 1,856 s，所以今天不会出现。回滚就是 revert，不用改设置。\n- **先看:** `ui/scripts/plan-test-ui-shards.mjs` 的警告；`ui/scripts/__tests__/select-affected-tests-wiring.test.ts` 的 `PAIR` 夹具和 `ranBy()`。\n- **两分钟验证:** `cd ui && pnpm exec vitest run scripts/__tests__/plan-test-ui-shards.test.ts scripts/__tests__/select-affected-tests-wiring.test.ts`\n- **需要你做的:** 无设置变更。`ci.yml` 只改了注释，分级以席位核定为准。\n\n## What changes\n\n- **The `test-ui-plan` header in `.github/workflows/ci.yml`** (a comment only). It used to say \"so no planned leg is denser than a full-battery leg\". It now says what holds:\n  - the bins average at most D, a full-battery leg's own mean;\n  - that can fail only when a cap binds:\n    - the 15 bin slots, which bounds the average at 16/15 of D, because the rest never weighs more than the whole suite;\n    - or a file heavier than D, which no split divides;\n  - the lane is not sized to D: it weighs what the always-on set predicts, and the planner warns when that passes D.\n\n  No job graph, permission, name or step changes.\n- **`ui/scripts/plan-test-ui-shards.mjs`:**\n  - When an affected plan's lane predicts more than D, `plan` prints `::warning title=Test UI always-on lane::…` naming both figures. It is a warning, never a refusal, and the plan is unchanged.\n  - The header's two density sentences now say the same thing as `ci.yml`.\n- **`ui/scripts/__tests__/plan-test-ui-shards.test.ts`:**\n  - A new case runs the CLI with a lane under D (no warning) and a lane over D (the warning, with the plan still written and its lane intact).\n  - One test title changes from \"no planned leg is denser than a full-battery leg\" to what its body asserts, the count rule. The body itself is unchanged.\n- **`ui/scripts/__tests__/select-affected-tests-wiring.test.ts`:**\n  - `ranBy()` expands each leg's positionals over the stand-in collection the way vitest's filename filter matches: a case-insensitive substring of the path relative to the ui root. The lane check and the \"each selected file exactly once\" check now compare files rather than argv.\n  - The stand-in `vitest list` also matches case-insensitively now.\n  - A `PAIR` fixture is added to the collection and the selector's verdict: `x.test.ts` and `X.test.tsx`, a filter pair with a case-only difference. The selector keeps one filter for the pair and lists both files as always-on.\n  - The pull_request case also pins that the lane leg's argv carries `x.test.ts` and not `X.test.tsx`.\n\n### Was the warning noise?\n\nNo. On today's tree it does not fire for any measured selection:\n\n| Selection | Lane predicted-s | D |\n|---|---:|---:|\n| Empty diff | 1,731 | 1,856 |\n| `apps/console` change | 1,587 | 1,856 |\n| `plugin-kanban` change | 1,327 | 1,856 |\n\nIt fires only once the always-on set outgrows a full-battery leg, which is exactly when slot 1 becomes the run's slowest leg.\n\n## Proof\n\n- **Red without the fix:** with the `PAIR` fixture added but the comparisons as on `main` (raw argv), the wiring test reds \"a pull_request plans the selected files into N slots…\": `expected [ …(511) ] to deeply equal [ …(512) ]`. The lane leg's argv carries the pair's shorter path alone. On this branch the test is green.\n- **Ablations:**\n\n  | Ablation | Result |\n  |---|---|\n  | `matches()` made case-sensitive | 7 wiring cases red |\n  | The planner's warning branch disabled | the new planner case red |\n\n- **Tests:** `plan-test-ui-shards.test.ts` 26 pass; `select-affected-tests-wiring.test.ts` 16 pass.\n\n## Verification\n\n<details><summary>Gates</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --ran F`: **61 derived, 61 run, 0 NOT-MEASURED, 0 UNRUN**, all exit 0.\n  - A full `turbo run build` came first, as the leg does.\n  - `pnpm --dir ui exec vitest run scripts/` (under `os-verify-lock`): 171 files passed and 2 skipped; 5,062 tests passed and 2 skipped.\n  - `check:dts-closure`, `check:dual-build-cjs-loads` and `check:lean-entry-closure`: exit 0.\n- Not derived, but run anyway: `ui` `check:entry-guard`, `eslint` on the three touched ui files, and `ui` `type-check:scripts`. All exit 0.\n- `origin/main` was fetched right before opening; nothing new had landed (branch at `main` 0cd594b3 + 1 commit), and no parallel fix exists.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jRTxrGvDHBnw3zNx6L)_\n"
+}

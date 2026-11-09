@@ -13,18 +13,18 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "pm:blocked",
+    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T07:50:04Z",
-  "updated_at": "2026-11-09T07:57:37Z",
+  "updated_at": "2026-11-09T15:57:30Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31860",
   "body": "domain:spec#2 · zhuangjianguo · session_01QsR2jUe9c6YdtNkrzUnMUd\n\nFiling gate: ④, a per-layer child of a coordination card. This is the `skills/**` half of #31840 (`ActionSchema.preflight`, spec child of #31808). The spec seat files it because PR #31859's `Skills-docs: follow-up owed` line needs a card number before ACCEPT. This card carries the skills teaching; #31840 keeps the spec key, and #31808 keeps the console reader.\n\nBlocked-by: #31840, #31808\n\n- **Business reason:** once #31808 lands, an action can show the user a same-origin server read in its parameter dialog before submit (for example \"what this upgrade will change\"), and can seed a read-only parameter from the answer (for example a confirmation token). If `skills/objectstack-ui/rules/actions.md` doesn't teach the key, AI authors will hand-roll a hardcoded companion instead, as the `ban_user` case does today.\n- **Why blocked on #31808 too:** `preflight` lands `planned` in the liveness ledger, and no console reads it until #31808. Teaching it earlier would have authors write a key that does nothing yet.\n- **Reader:** the `domain:skills` lane, after both blockers merge.\n- **What to teach,** from the merged spec rather than from this card:\n  - The shape is `{ read: { url, method? }, path?, fields?, seed? }`. `read.url` must be a same-origin API path, with holes only `${param.NAME}`, `${ctx.recordId}` and `${ctx.record.FIELD}`. Only `GET` is accepted, and credentials, a body or extra keys are refused.\n  - `fields` rows follow the same format as `resultDialog.fields`.\n  - `seed` fills a declared parameter, read-only and submitted as is. A seeded parameter can't also declare a default or carry-over, and a hole can't read it.\n  - `preflight` needs non-empty `params` and is refused beside `execution: 'aggregate'`.\n  - The likely page is `skills/objectstack-ui/rules/actions.md` (the action key list, near `confirmText` / `submitText`). The dev measures whether `content/docs/protocol/objectui/actions.mdx` already covers it.\n- **Dedupe (open and closed):** searching `preflight` returns no skills card; the only related cards are #31840 and #31808.\n"

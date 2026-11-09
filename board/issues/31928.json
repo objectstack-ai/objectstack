@@ -2,8 +2,8 @@
   "number": 31928,
   "kind": "issue",
   "title": "feat(cli)!: refuse a local file database (SQLite / libSQL file: / sqlite-wasm) under declared multi-replica on Redis (cloud#3814 HA, N3)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:queue",
     "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T12:28:48Z",
-  "updated_at": "2026-11-09T13:02:11Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-09T16:26:13Z",
+  "closed_at": "2026-11-09T16:14:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31928",
   "body": "repo:cloud#1 · os-warren · session_01JQwxbYK6SZCmyzbGnrvmkk\n\nFiling gate: ③ maintainer-dispatched task. This is cloud#3814 「裁后执行」 item 2 (the implementation cards from the inventory). The maintainer said on 2026-11-09: 「cloud#3832：多副本高可用的第一张卡，最急」, and HA is ROADMAP tier 1, the first Enterprise priority.\n\nParent: objectstack-ai/cloud#3814 (rulings R0–R6, comment 6722625146). Source: the cloud#3832 inventory, `docs/design/multi-replica-stateful-inventory.md` (objectstack-ai/cloud PR #4146), draft \"Card 3: refuse a local file database under declared multi-replica\". Its §3 row and §4 entry carry the evidence, with `path:line` at cloud `b61414e` / framework pin `2e9121ed`.\n\n## Rules that bind every #3814 child\n- R1: peer round-robin.\n- R2: Redis is required for multi-replica only.\n- R3: a change takes effect only under `declaresMultiReplicaOnRedis` (or `declaresMultiNode` where stated). The single-node path stays unchanged, the split-brain guard is never weakened, and the deploy README 「多节点为什么暂不支持」 stays until the final gate (card D1).\n\n## Draft (verbatim from the inventory)\n\n- **Repo:** objectstack. **Fixes:** N3 (§4.3), decision E2.\n- **Scope:**\n  - At boot, under `declaresMultiReplicaOnRedis`, refuse with exit 1 when the primary\n    datasource is SQLite, a libSQL `file:` URL or sqlite-wasm.\n  - The refusal names the remedy, a Postgres `OS_DATABASE_URL`.\n  - A remote libSQL server URL is not refused.\n  - The natural home is next to the multi-node gate in `fw:packages/cli/src/commands/serve.ts`.\n- **Done when:**\n  - A test boots with `OS_DATABASE_URL=file:…`, `OS_CLUSTER_DRIVER=redis` and\n    `OS_CLUSTER_REPLICAS=2`, and gets exit 1 with the remedy.\n  - The same database without the declaration boots as today.\n- **Size:** S, 1 day. **Depends on:** nothing."

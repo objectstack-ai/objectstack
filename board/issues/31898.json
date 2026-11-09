@@ -2,8 +2,8 @@
   "number": 31898,
   "kind": "issue",
   "title": "audit: every door that admits an API key hands its client facts to the credential-use row, so no door writes ip_address_absent not_supplied (follow-up of #31821)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T10:43:36Z",
-  "updated_at": "2026-11-09T13:01:42Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-09T17:55:56Z",
+  "closed_at": "2026-11-09T17:53:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31898",
   "body": "domain:server#3 · os-steve · session_01ADHkmQXLfvyB5R53VDm3Ka\n\nFiling gate: ④ coordination node: the out-of-scope list of #31821 (PR #31897, report 6738006761). Seat ruling Q2 A there: three doors (REST, the runtime dispatcher with its `/mcp` face, and stdio) hand over their client facts, and every other door that admits an API key writes `ip_address: null` with `metadata.ip_address_absent: 'not_supplied'`. ⛔ Not a claim.\nBusiness reason: a `credential_use` row from these doors cannot say where a key was used from, so a leaked key used through them looks the same as normal use. That is the gap cloud#3665's SIEM stream asks to close.\nReader: the `domain:server` seat, after PR #31897 merges.\nDedupe (open AND closed): `credential_use not_supplied door client address` → #31821 only, not on point.\nclass: c · type: Feature\nBlocked-by: #31821\n\n## 维护者速读\n\n凭据使用审计行在 REST、MCP 等三个入口上已经记下客户端地址，其余 13 个入口还写「未提供」。这张卡让它们都交出地址。最好在一个共用的放行入口里做一次，而不是逐个入口改。\n\n## What to build\n\n- **Root fix first.** In step 0, measure whether these doors can reach one shared admission seam that already holds the request (for example a single helper every key-admitting route calls), so the client facts are handed over once, not thirteen times. If there is such a seam, wire it and route these doors through it. Wire door by door only where no seam fits, and say why for each.\n- Doors measured on #31897's head `df1a1a1a`:\n  - `packages/services/service-storage/src/storage-service-plugin.ts` (calls `resolveApiKeyAdmission` directly)\n  - `packages/services/service-settings/src/settings-service-plugin.ts`\n  - `packages/plugins/plugin-sharing/src/shareable-objects-routes.ts`\n  - `packages/plugins/plugin-sharing/src/sharing-plugin.ts`\n  - `packages/plugins/plugin-webhooks/src/redeliver-entitlement.ts`\n  - `packages/services/service-messaging/src/preference-options-routes.ts`\n  - `packages/plugins/plugin-hono-server/src/current-user-endpoints.ts`\n  - `packages/plugins/plugin-auth/src/auth-plugin.ts` (two call sites)\n  - `packages/cloud-connection/src/cloud-connection-plugin.ts`\n  - `packages/cloud-connection/src/marketplace-install-local-plugin.ts`\n  - `packages/cloud-connection/src/runtime-config-plugin.ts`\n  - `packages/services/service-datasource/src/admin-routes.ts`\n  - `packages/services/service-print/src/print-routes.ts`\n- The address comes only from the one trust rule (`IAuthService.resolveClientAddress`). ⛔ No door reads a forwarded header itself.\n- Once every door hands its facts over, decide in the PR whether `transport` on `RequestExecutionContextInput` becomes required (#31821's open question 2).\n- Pins: one row per wired door carries the address; a census test fails when a new key-admitting door hands no facts.\n- Clause-②: no. Metadata-protocol: none."

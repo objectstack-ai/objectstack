@@ -1,0 +1,36 @@
+{
+  "number": 31972,
+  "kind": "pull_request",
+  "title": "fix(spec): stop refusing a lookupAutofill source on an object the stack only extends",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T18:37:50Z",
+  "updated_at": "2026-11-09T19:44:12Z",
+  "closed_at": "2026-11-09T19:44:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-09T19:44:10Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31972",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9Ubb91tQNNYe2mJDXB8piaNMUq)_\n\nFixes #31964\n\nClause-②: yes (widening)\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:`defineStack` / `os validate` 的 `lookupAutofill` 交叉校验,不再拒绝一个只通过 `objectExtensions` 认识的被引用对象上的 source 字段;本栈自己声明又扩展的对象照旧按合并后的字段判。\n- 为什么改:扩展包给别人的对象加字段时,校验只看得到扩展里的那几个字段,把属主包声明的字段(如 `crm_product.list_price`)误判成「不存在」,合法的元数据过不了构建,运行时其实照常回填。\n- 风险与回滚:只放宽误拒,不新增拒绝;两个校验器改为共用一个取字段表的小函数,币种路径校验的行为逐字不变(其 pin 全绿)。回滚即 revert 本 PR。\n- 先看:`packages/spec/src/stack.zod.ts` 的 `stackObjectFields` 与 `collectLookupAutofillErrors` 里 `declared.has(field.reference)` 那一行;再看 `packages/spec/src/data/field-lookup-autofill.test.ts` 新增两条 pin。\n- 两分钟验证:`pnpm --filter @objectstack/spec exec vitest run src/data/field-lookup-autofill.test.ts src/data/currency-config-record-mode.test.ts`,预期 2 个文件 69 条全绿。\n- 需要你做的:无,席位落地(契约复审档由席位出具)。\n\nTriage lane line (comment 6745990991): \"**Lane:** `domain:spec`. The stack `lookupAutofill` cross-check falsely refuses a source the stack knows only through an `objectExtensions` entry. That widens a wrongly narrow acceptance set back to intent, so it is a protocol fix (#31424 rule 2). p3.\"\n\nSkills-docs: none — `skills/objectstack-data/rules/field-types.md` says the source is \"a declared, non-`internal` field of `reference`\", which stays true: the owning package declares it.\n\n## What changes\n\n- `collectLookupAutofillErrors` resolves a lookup's `reference` only when the stack declares that object in `objects`. An object the stack knows only through an `objectExtensions` entry has its owner's fields elsewhere, so its merged map held the extension's fields alone and refused every source the owner declares. It is now skipped, as an object the stack does not mention at all already was.\n- An object the stack declares and also extends is still judged against the merged map (declared fields plus extension fields), so an undeclared, `internal` or type-mismatched source there keeps its refusal.\n- This mirrors the `declared` set that PR #31956 put in `collectRecordCurrencyPathErrors`. Both collectors now build their field map and `declared` set through one private helper, `stackObjectFields`, so the two cannot drift apart again. The currency collector's behaviour is byte-for-byte the same (same loops, same order); its pins stay green.\n- Changeset: `@objectstack/spec` patch. `Metadata-protocol: none` because no authorable key, value or type changes; a false refusal at the stack cross-check is lifted. That follows the extension-field precedents `.changeset/30303-fls-key-extension-fields.md` and `.changeset/30383-field-path-rules-extension-fields.md` (widening, `none`, patch).\n\n## Tests\n\n- Two pins added to the existing source-half `describe` in `packages/spec/src/data/field-lookup-autofill.test.ts`:\n  - an extension-only reference is not judged (an owner-declared source and an unknown source both accepted);\n  - a declared-and-extended reference is still judged: an extension-added source resolves, an unknown source is refused, and a type mismatch on the extension-added field is refused.\n- Red before the fix: `1 failed | 19 passed (20)`, the extension-only pin throwing `StackCrossReferenceError`.\n- Ablation (fix committed first, `scripts/ablation-replace.mjs`, anchor 1 → 0): reverting the `declared.has(...)` guard turns the extension-only pin red (`1 failed | 19 passed`); restore proven by blob == HEAD and empty `git diff HEAD`.\n\n## Acceptance notes\n\n- No consumer fixture outside `packages/spec` asserts this refusal (`git grep` for the refusal text and for `lookupAutofill` in tests: zero hits that build a stack).\n- `check:dual-build-cjs-loads` needs a whole-workspace build locally (exit 3, PREREQUISITE NOT MET, nothing measured); CI runs it.\n\n## Verification\n\n<details><summary>Local readings at head 72190560 (fix 25516cbe, then a merge of origin/main; spec rebuilt, check:generated and both collectors' pins re-run green on 72190560)</summary>\n\n- `pnpm --filter @objectstack/spec build`: exit 0.\n- `pnpm --filter @objectstack/spec typecheck`: exit 0.\n- `pnpm --filter @objectstack/spec check:generated`: exit 0.\n- `pnpm --filter @objectstack/spec test` (at 25516cbe): Test Files 829 passed (829), Tests 26242 passed, 1 todo.\n- Consumers (at 25516cbe; built closure `@objectstack/cli^...` + `@objectstack/lint^...`, 63 tasks): `@objectstack/cli` 12 test files touching `objectExtensions` (validate, build, export): 183 passed; `@objectstack/lint` full: 198 files, 8381 passed.\n- Derived gate sweep (`dispatch-gates --commands`, 89 commands): 88 run, 88 exit 0; 1 NOT-MEASURED (`check:dual-build-cjs-loads`, exit 3 prerequisite); `dispatch-gates --ran` reconciles 89 of 89 (taken at 25516cbe; the merge brought no change to the three touched files).\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jQse77ZZw6vE2KdUSb)_\n"
+}

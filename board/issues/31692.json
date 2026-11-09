@@ -2,8 +2,8 @@
   "number": 31692,
   "kind": "issue",
   "title": "mcp: run_action and list_actions take a namespace, and skill, agent and action face names follow the ruled derivation with a duplicate refusal (ADR-0150 child G2)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,7 +15,6 @@
     "domain:server",
     "enhancement",
     "pm:blocking",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T21:50:09Z",
-  "updated_at": "2026-11-09T13:13:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-09T15:24:28Z",
+  "closed_at": "2026-11-09T15:23:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31692",
   "body": "epic:#31527#1 · os-steve · session_01ADHkmP7o3uDTti21wLTfPf\n\nFiling gate: ④ coordination node: child G2 of the epic #31527 (parent and per-layer children), as ADR-0150 (`docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md`, merged in #31586 at 5d1382a5)'s execution plan lists it. Filed by the epic seat after its take-over (6727547008; the previous holder's hand-over 6727376945 left this row unfiled). ⛔ Not a claim.\nRuling-ref: per-type table A (6723462584); epic A 「立专题」 (6723499113); division of labour A 「留核心，其余交车道」 (6723571682); Q1/Q2 (6724050556); Q3 (6724530715); D2 (6724570466); ADR-0150 accepted by merge (#31586).\nBusiness reason: inherited from the parent #31527. Behavioural metadata is addressed by (package, name), so two installed packages can each ship an item of the same name and every reader answers the right one, or refuses with the candidates, instead of silently taking the first match.\nReader: the next `domain:server` seat picks it from the queue once every `Blocked-by:` below is closed; the epic seat reviews its PR against the red lines below (ruling 6723571682).\nDedupe (open AND closed): `run_action namespace MCP face` (16; top hits #31669(open) #31527(open) #30806(open), none on point: they are this epic's spec child P, this epic, or its parent).\nclass: d · type: Feature\nGrade: p1, inherited from the parent (self-graded under 「定级你可以自己决定」).\nBlocked-by: #31575\nBlocked-by: #31670\nBlocked-by: #31681\nBlocked-by: #31669\n\n## 维护者速读\n\nMCP 的 run_action / list_actions 增加 namespace 参数；技能、智能体和动作在 AI 面上的名字按已裁定的规则拼写（NS-NAME，对象动作为 OBJECT-ACTION），重名时拒绝并点名。\n\n## What to build\n\nMCP `run_action` / `list_actions` take `namespace` (P's shapes) and resolve through R's resolver (D3). Skill, agent and action face names are derived by D6 as ruled (Q1 = A: `NS-NAME`; an object-bound action `OBJECT-ACTION`; past 64 characters cut to 55 plus a hyphen and 8 hex of a hash of the full identity), from P's derivation function. The face list refuses duplicates and names both items (Q3 rider). `agent_prompt` reads by package on the protocol read (E8, #31514).\n\n## Surface\n\n- Expected file surface: mcp (`packages/mcp`).\n- Clause-②: yes (additive: an optional `namespace` input, and face names derived from the identity).\n- Narrowing: no: N and K land first, so two items can share a face only by a hash collision, which the refusal names.\n\n## Acceptance — the epic's three red lines (every child shares them)\n\n- **Resolution never loosens.** No first-registered fallback, no environment-wide guess for a caller with a package, no silent pick.\n- **Ambiguity is reported, never guessed.** Every refusal and every migration report names every candidate.\n- **Independently releasable** (red line 3). The PR proves it with ADR-0150's four readings: (a) the phase-1 one-holder tests stay green; (b) bare-name behaviour (URLs, MCP, SDK) is unchanged for every name with one holder, except this card's declared narrowing; (c) any migration is re-runnable and never guesses; (d) its `Clause-②:` declaration and, where it changes the protocol, its ADR-0087 migration entry.\n- The epic seat accepts the PR against these lines; a narrowing beyond the declared one goes to the maintainer (`needs-user-decision`) before landing.\n\nParent: #31527."

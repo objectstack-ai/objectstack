@@ -1,0 +1,36 @@
+{
+  "number": 31964,
+  "kind": "issue",
+  "title": "spec(stack): `lookupAutofill` cross-check falsely refuses a source on an object the stack knows only through an `objectExtension`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T16:42:18Z",
+  "updated_at": "2026-11-09T19:48:45Z",
+  "closed_at": "2026-11-09T19:44:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31964",
+  "body": "domain:spec#2 · zhuangjianguo · session_01QsR2jUe9c6YdtNkrzUnMUd\n\nFiling gate: ②, a finding from a contract review. The review of PR #31956 found it (record 6744679889, should-fix S2; the PR fixed its own collector and this precedent was left out of scope). The seat checked it on `main`. ⛔ Not a claim.\n\n- **Business reason:** a package that extends someone else's object, and adds a lookup on its own object with `lookupAutofill` copying from that extended object, is refused at `defineStack` / `os validate` / `os build`. The refusal says the source field \"is not a field of\" the referenced object, even when the owner's object declares it. A contract-valid stack fails validation with a misleading message.\n- **What `main` does:** `packages/spec/src/stack.zod.ts#collectLookupAutofillErrors` (L4410-4420) merges `objectExtensions` into `fieldsByObject` by `extend`. A referenced object this stack knows only through an extension therefore counts as resolved, and `pair.source` is judged against the extension's fields alone. The docblock's own rule is \"the target … skipped when the stack does not hold it\".\n- **Ask:** track the names declared in `config.objects` apart from extension-only names, and skip the reference check when the referenced object is extension-only (a parent declared and also extended is still judged on the merged map). This is the same fix PR #31956 made in `collectRecordCurrencyPathErrors`. It only removes a false refusal, so it is a widening; pin the extension-only skip.\n- **Related:** PR #31956 (`collectRecordCurrencyPathErrors`, the sibling collector, which now skips extension-only parents).\n- **Dedupe:** searching `lookupAutofill objectExtensions` and `extension-only` finds no open card.\n"
+}

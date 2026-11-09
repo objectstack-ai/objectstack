@@ -1,0 +1,30 @@
+{
+  "number": 31963,
+  "kind": "issue",
+  "title": "cloud-connection: an unmanaged grant of an organization's private package copies nothing (404 CLOUD_FETCH_FAILED); pass the grant's manifest inline",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T16:28:26Z",
+  "updated_at": "2026-11-09T16:54:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31963",
+  "body": "epic:#3600#1 · hotlong · session_01Q4EjjPXwX1YfHyKJUh4agu\n\nFiling-gate category: ① product defect, measured. `reach:` measured once through the public door `POST /api/v1/cloud-connection/install` on a hosted composition (`run-stack.sh --prod-like --seed`, framework pin `a15b544d`) by the `repo:cloud` lane. Evidence: objectstack-ai/cloud#3624 report https://github.com/objectstack-ai/cloud/issues/3624#issuecomment-6742780820, artefact `measure-3624-private.txt`. Epic context: objectstack-ai/cloud#3600.\n\n## Problem\n\nUnder ruling A (cloud#3624, 6686728844), an organization installs one of its own **private (unlisted)** packages into a hosted environment as `unmanaged`.\n1. The control plane grants the install.\n2. The environment's copy then answers **404 `CLOUD_FETCH_FAILED`**, so nothing is copied.\n\nA marketplace-listed package copies fine (cloud PR objectstack-ai/cloud#4175).\n\n## Carrier (on `main` today)\n\n- `packages/cloud-connection/src/cloud-connection-plugin.ts`, `copyOnUnmanagedGrant`: the doc comment states \"a `data.manifest` in the answer is never read\". The request to the install-local door sends only `packageId`, `versionId`, `installMode` and `seedSampleData`.\n- `packages/cloud-connection/src/marketplace-install-local-plugin.ts`: the cloud-fetch branch fetches the manifest itself. It tries the public R2 path first (public packages only), then `/api/v1/marketplace/packages/:id/versions/:v/manifest` with `OS_CLOUD_API_KEY`. That key is shared by every hosted environment, and the catalog does not serve an organization's private manifest to it.\n- The same door already has an inline branch: `body.manifest`.\n\n## Ask (option A of the lane report; option B is refused)\n\n`copyOnUnmanagedGrant` passes the grant's `data.manifest` to the door inline, so the copy uses exactly the version the control plane authorized. Cloud already answers `data.manifest` on an unmanaged grant.\n\nConstraints the PR must state and test:\n1. **The grant governs the copy.** On the inline branch the door takes the package id from the manifest's declared id. The copy must refuse (fail closed, nothing written, audited like the existing grant refusals) when the manifest's id differs from the granted `packageId`, or its version differs from the granted `version` / `version_id`.\n2. **No check is skipped.** Everything the cloud-fetch branch judges must still be judged on the inline branch:\n   - the `installModes` gate (`INSTALL_MODE_NOT_PERMITTED`);\n   - the ADR-0087 engines handshake;\n   - the ADR-0141 dependency check;\n   - the #30794 target-namespace handling;\n   - `seedSampleData`;\n   - the #31481 audit rows.\n3. **No new door.** The inline manifest comes only from the control plane's grant answer, inside `copyOnUnmanagedGrant`. No public caller gains a way to hand an environment a manifest it was not granted.\n4. **Fallback.** A grant answer without `data.manifest` (an older control plane) keeps today's cloud-fetch behaviour.\n\nOption B (cloud widens the manifest route to the shared service key for non-listed packages) is refused by the lane on security grounds: that key would serve any organization's private manifest to any environment.\n\n## Business reason\n\nWho benefits: an organization that keeps its own app in a private package and installs a copy into its environments. This is also the path for gallery apps if they ship as unlisted entries (the `unlisted` visibility under analysis for the scenario gallery). Without the fix, an unmanaged install of any non-public package fails on hosted cloud after the grant succeeded, and objectstack-ai/cloud#3624 cannot close.\n\n## Reader and dedupe\n\n- Reader: the `domain:server` lane seat, from `pm:queue`. When it lands and cloud's `.objectstack-sha` passes it, the `repo:cloud` lane re-measures objectstack-ai/cloud#3624 end to end.\n- Dedupe, all in `objectstack-ai/objectstack` issues:\n  - `copyOnUnmanagedGrant`: 1 hit, #31481, closed, a different defect (audit of refusals);\n  - `CLOUD_FETCH_FAILED`: 2 hits, both closed and unrelated (#9246, #21489);\n  - `\"unmanaged\" manifest inline`: 31 hits, none for this defect.\n- Priority p2, the same as objectstack-ai/cloud#3624. No spec surface changes.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -13,18 +13,18 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:blocked",
+    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T13:49:51Z",
-  "updated_at": "2026-11-09T13:59:28Z",
+  "updated_at": "2026-11-09T14:57:57Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31944",
   "body": "domain:server#2 · os-steve · session_01ADHkmQKZzp4DLtqiCkZZRM\n\nFiling gate: ① a product defect with a named seam and a measured reach. It is an out-of-scope finding of #31881 (PR #31943, report issuecomment-6741636494). ⛔ Not a claim.\n\n## 维护者速读\n\n- 问题：在手写的分析立方上，原生 SQL 策略下，如果点号成员的第一段并不是对象声明的关系字段（如 `where: { 'nope.region': 'x' }`），查询会生成 SQL 后以 500 数据库错误失败；编译后的数据集路径会把同样的输入拒绝为 400。\n- 影响：用户和 AI 写错一个关系名，收到的是 500，看不出是自己写错了。\n- 需要你做的：无，由车道处理。\n\n## Reach (measured on `80c4c9a2` and on PR #31943's head `5be116d2`)\n\n- `AnalyticsService.query` on a hand-authored cube, native strategy, `where { 'nope.region': 'x' }` where the cube's object has no field `nope`: the hop resolver's alias tier names an object `nope` that the field probe cannot answer for, so the related-column gate (#28558, widened to cubes by #31881) stands down, and the query fails `DATABASE_ERROR` / 500.\n- A compiled dataset refuses the same input 400 through `assertDimensionJoinsBacked` (its `include` allowlist), which a hand-authored cube does not have.\n\n## Work\n\n1. A new rule on the cube path: a dotted member whose hop names no relationship field of the object it leaves is refused `INVALID_FIELD` / 400, naming the member and the hop, before any strategy compiles. It is its own rule, not a widening of the related-column gate. It stands down where the base object's field list cannot be read, as the other source-field gates do.\n2. Tests: `nope.region` as a `where` leaf, a dimension and a windowed time dimension answers 400 on the native strategy, RED on main. A declared relationship hop (`supplier.region`) still joins. Settle the engine-aggregate face's answer in the same sentence.\n\nOut of scope: a cube whose `sql` is a statement, not an object name. It has no declared field list to judge against (recorded on #31881).\n\nDedupe: \"hand-authored cube unknown relationship hop\", \"unknown hop DATABASE_ERROR analytics\", \"relationship hop not declared cube 500\": none on point.\nBlocked-by: #31881"
