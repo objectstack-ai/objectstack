@@ -4076,7 +4076,9 @@ async function mainHandDocs(tm, argv) {
 //  - R4, an exported name. A name `engine.ts` declares and already exports
 //    (`ScopedContext`) is imported from `./engine.js` (lever (a) of ruling
 //    6591753301), and the header's import paragraph says so; no export list
-//    widens, and a routed module refuses.
+//    widens, and a routed module refuses unless its `./engine.js` line
+//    already imports the name in a form that serves the read (then nothing
+//    is imported).
 //  - R8, definite-assignment wiring (`--members constructor`). The
 //    constructor moves as a method does, into its section's facet as
 //    `construct` (taking only the parameters its body reads), and its stub
@@ -4299,12 +4301,39 @@ function staticsRegionOf(text) {
 /** Is a facet module on the statics route (`ObjectQLStatics` imported AS `ObjectQL`)? */
 const routesStatics = (text) => new RegExp(`^import \\{[^}]*\\b${STATICS_NAME} as ${CLASS_NAME}\\b[^}]*\\} from '\\./engine\\.js';$`, 'm').test(text);
 
-/** The one `./engine.js` line of a written module off the route, and the pair R10 turns it into. */
-const unroutedEngineImport = () => `import type { ${CLASS_NAME} } from './engine.js';`;
-const routedEngineImports = () => importPair('./engine.js', new Map([
+/**
+ * The `./engine.js` run of a written module, the statics route's pair, and
+ * the run R10 writes on either side of it. Off the route the first pass
+ * writes the class as a type-only name beside the module's other plain
+ * `./engine.js` names (`InsertManyRowOutcome`, `dependsOnPinned`); on it, the
+ * pair in its place beside the same names. Both are `importPair`'s form.
+ */
+const ROUTE_PAIR = [
   [`${STATICS_NAME} as ${CLASS_NAME}`, { value: true }],
   [`${CLASS_NAME} as ${CLASS_TYPE_ALIAS}`, { value: false }],
-])).join('\n');
+];
+const unroutedEngineImport = (others = new Map()) => importPair('./engine.js', new Map([...others, [CLASS_NAME, { value: false }]])).join('\n');
+const routedEngineImports = (others = new Map()) => importPair('./engine.js', new Map([...others, ...ROUTE_PAIR])).join('\n');
+
+/**
+ * A module's `./engine.js` run as `importPair` uses (`name` or `imported as
+ * local` -> { value }), its span, and its names other than `skip`; null when
+ * it has none or a binding that is not a named one.
+ */
+function engineRunOf(tm, file, text, skip) {
+  const decls = importDeclsOf(tm, file, text).filter((d) => d.specifier === './engine.js');
+  if (decls.length === 0) return null;
+  const uses = new Map();
+  for (const d of decls) {
+    for (const [local, b] of d.bindings) {
+      if (b.form !== 'named') return null;
+      uses.set(b.imported === local ? local : `${b.imported} as ${local}`, { value: b.value });
+    }
+  }
+  const others = new Map([...uses].filter(([k]) => !skip.includes(k)));
+  const plain = [...others.keys()].every((k) => !k.includes(' as '));
+  return { start: decls[0].start, end: decls.at(-1).end, text: text.slice(decls[0].start, decls.at(-1).end), uses, others, plain };
+}
 
 /** The identifiers named `name` in a module's code (comments are not code), outside its import declarations and the `skip` regions. */
 function codeIdentifiersNamed(tm, file, text, name, skip = []) {
@@ -4362,9 +4391,9 @@ const staticsParaAt = (text) => {
  */
 function rerouteModule(tm, file, text) {
   if (routesStatics(text)) refuse(`${file}: already on the statics route`);
-  const engineDecls = importDeclsOf(tm, file, text).filter((d) => d.specifier === './engine.js');
-  if (engineDecls.length !== 1 || text.slice(engineDecls[0].start, engineDecls[0].end) !== unroutedEngineImport()) {
-    refuse(`${file}: its \`./engine.js\` import is not the one \`${unroutedEngineImport()}\` a module off the statics route carries: this pass reroutes only that shape`);
+  const run = engineRunOf(tm, file, text, [CLASS_NAME]);
+  if (!run || run.uses.get(CLASS_NAME)?.value !== false || !run.plain || run.text !== unroutedEngineImport(run.others)) {
+    refuse(`${file}: its \`./engine.js\` import is not the one a module off the statics route carries (\`${CLASS_NAME}\` type-only beside plain names, as the first pass writes it): this pass reroutes only that shape`);
   }
   const iface = interfaceRegionOf(text, hostNameOf(file));
   if (!iface || iface.classType !== CLASS_NAME) refuse(`${file}: it has no host interface typed by \`${CLASS_NAME}\`: this pass reroutes a module with a host only`);
@@ -4381,7 +4410,7 @@ function rerouteModule(tm, file, text) {
     .replace(new RegExp(`: ${CLASS_NAME}\\['`, 'g'), `: ${CLASS_TYPE_ALIAS}['`)
     .replace(`readonly ${FACADE_MEMBER}: ${CLASS_NAME};`, `readonly ${FACADE_MEMBER}: ${CLASS_TYPE_ALIAS};`);
   const out = applyOrderedEdits(text, [
-    { start: engineDecls[0].start, end: engineDecls[0].end, text: routedEngineImports() },
+    { start: run.start, end: run.end, text: routedEngineImports(run.others) },
     { start: iface.start, end: iface.end, text: ifaceText },
   ]);
   return withCyclePara(out.replace(para.plain, para.routed), file);
@@ -4395,9 +4424,10 @@ function rerouteModule(tm, file, text) {
  * host interface. Returns the text, or null after a failure.
  */
 function unrouteModule(tm, file, text, fail) {
-  const engineDecls = importDeclsOf(tm, file, text).filter((d) => d.specifier === './engine.js');
-  const span = engineDecls.length > 0 ? text.slice(engineDecls[0].start, engineDecls.at(-1).end) : '';
-  if (engineDecls.length !== 2 || span !== routedEngineImports()) { fail(`${file}: its \`./engine.js\` lines are not the statics route's pair as R10 writes it`); return null; }
+  const run = engineRunOf(tm, file, text, ROUTE_PAIR.map(([k]) => k));
+  if (!run || ROUTE_PAIR.some(([k, u]) => run.uses.get(k)?.value !== u.value) || !run.plain || run.text !== routedEngineImports(run.others)) {
+    fail(`${file}: its \`./engine.js\` lines are not the statics route's pair as R10 writes it`); return null;
+  }
   const iface = interfaceRegionOf(text, hostNameOf(file));
   if (!iface || iface.classType !== CLASS_TYPE_ALIAS) { fail(`${file}: its host interface is not typed by \`${CLASS_TYPE_ALIAS}\``); return null; }
   if (codeIdentifiersNamed(tm, file, text, CLASS_TYPE_ALIAS, [[iface.start, iface.end]]).length > 0) { fail(`${file}: its code names \`${CLASS_TYPE_ALIAS}\` outside its host interface`); return null; }
@@ -4408,7 +4438,7 @@ function unrouteModule(tm, file, text, fail) {
     .replace(new RegExp(`: ${CLASS_TYPE_ALIAS}\\['`, 'g'), `: ${CLASS_NAME}['`)
     .replace(`readonly ${FACADE_MEMBER}: ${CLASS_TYPE_ALIAS};`, `readonly ${FACADE_MEMBER}: ${CLASS_NAME};`);
   return applyOrderedEdits(text, [
-    { start: engineDecls[0].start, end: engineDecls.at(-1).end, text: unroutedEngineImport() },
+    { start: run.start, end: run.end, text: unroutedEngineImport(run.others) },
     { start: iface.start, end: iface.end, text: ifaceText },
     { start: at, end: at + para.routed.length, text: para.plain },
   ]);
@@ -4584,7 +4614,10 @@ function planMembers(tm, text, moduleTexts, names, { anchors = SECTION_ANCHORS, 
         // R4 (#30020): a name `engine.ts` already exports is imported from it
         // (lever (a) of ruling 6591753301); no export list widens.
         if (n !== CLASS_NAME && ctx.scope.exported.has(n) && ctx.scope.bindings.get(n)?.kind === 'local') {
-          if (routed) refuse(`${r.name} reads ${n}, a name ${HOST_BASENAME} exports, and ${file} takes the statics route: this pass does not import into a routed module's \`./engine.js\` line`);
+          // A routed module's `./engine.js` line is the statics pair's: a name it
+          // already imports there, in a form that serves the read, needs no edit.
+          const held = routed ? engineRunOf(tm, file, mod, [])?.uses.get(n) : null;
+          if (routed && !(held && (held.value || !use.value))) refuse(`${r.name} reads ${n}, a name ${HOST_BASENAME} exports, and ${file} takes the statics route: this pass does not import into a routed module's \`./engine.js\` line`);
           continue;
         }
         refuse(`${r.name} reads ${n}, a top-level name of ${HOST_BASENAME}: this pass does not widen the generated export lists`);
@@ -4740,6 +4773,9 @@ function moduleImportEdits(tm, file, mod, scope, movers, skipClass) {
     // R4: the names `engine.ts` already exports, onto the module's `./engine.js` lines.
     for (const [n, use] of r.moduleRefs) {
       if (n === skipClass) continue;
+      // Already on the module's `./engine.js` line in a form that serves the read: no edit.
+      const held = decls.find((d) => d.specifier === './engine.js' && d.bindings.get(n)?.form === 'named' && d.bindings.get(n).imported === n)?.bindings.get(n);
+      if (held && (held.value || !use.value)) continue;
       const slot = adds.get('./engine.js') ?? new Map();
       const prev = slot.get(n);
       slot.set(n, { form: 'named', imported: n, value: Boolean(prev && prev.value) || use.value });
@@ -5671,7 +5707,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'identity port, computed keys and exported names (fourth pass, #30020)': 23,
   'hand-series host slots (fifth pass, #30020)': 17,
   'constructor and definite-assignment wiring (fourth pass, #30020 R8)': 17,
-  'statics route for a written module (fourth pass, #30020 R10)': 18,
+  'statics route for a written module (fourth pass, #30020 R10)': 21,
   'scoped members, instance identity port and symbol keys (second pass, #30020 S1)': 25,
 });
 const SELF_TEST_BATTERY_FLOOR = 5;
@@ -6814,7 +6850,7 @@ async function selfTest() {
     };
     check('a head without the statics paragraph fails', fails([['engine-identity.ts', idm.replace(`\n *\n${STATICS_PARA}`, '')]], /statics paragraph/));
     check('a head whose `./engine.js` lines are not the routed pair fails',
-      fails([['engine-identity.ts', idm.replace(`import type { ObjectQL as ObjectQLClass } from './engine.js';`, `import type { ObjectQL as ObjectQLClass, Scoped } from './engine.js';`)]], /routed pair|statics route's pair/));
+      fails([['engine-identity.ts', idm.replace(`import type { ObjectQL as ObjectQLClass } from './engine.js';`, `import { ObjectQL as ObjectQLClass } from './engine.js';`)]], /routed pair|statics route's pair/));
     check('a host interface member left typed by the class itself fails',
       fails([['engine-identity.ts', idm.replace("  readonly count: ObjectQLClass['count'];", "  readonly count: ObjectQL['count'];")]]));
     {
@@ -6833,8 +6869,27 @@ async function selfTest() {
     {
       const r4 = generateMembers(tm, input, mods, planMembers(tm, input, mods, ['identity'], opts));
       const r4Mods = new Map([...mods, ...r4.modules]);
-      check('a module whose `./engine.js` import is not the one type-only line refuses the route',
-        /not the one/.test(refusalOf(() => planMembers(tm, r4.host, r4Mods, ['staticReader'], opts))));
+      // E5's shape (`engine-insert.ts`): other plain `./engine.js` names beside the type-only class.
+      const r4Idm = r4.modules.get('engine-identity.ts') ?? '';
+      const r4Run = engineRunOf(tm, 'engine-identity.ts', r4Idm, [CLASS_NAME]);
+      const r4Refusal = refusalOf(() => rerouteModule(tm, 'engine-identity.ts', r4Idm));
+      const r4Routed = r4Refusal ? '' : rerouteModule(tm, 'engine-identity.ts', r4Idm);
+      check('a module whose `./engine.js` line carries other plain names beside the type-only class is rerouted, keeping them beside the pair',
+        !r4Refusal && r4Run && r4Run.others.size > 0 && r4Run.text === unroutedEngineImport(r4Run.others) &&
+        engineLines(r4Routed) === routedEngineImports(r4Run.others) && routesStatics(r4Routed), r4Refusal || engineLines(r4Routed));
+      check('R10 undoes that reroute to the module it read, other names and all',
+        !r4Refusal && unrouteModule(tm, 'engine-identity.ts', r4Routed, () => {}) === r4Idm);
+      // staticReader made to read `Scoped`, which the rerouted module already imports.
+      const scopedHost = r4.host.replace('    return n + ObjectQL.SECRET + this.count + (self ? 1 : 0);', '    return n + ObjectQL.SECRET + this.count + (self ? 1 : 0) + new Scoped(0, this).n;');
+      let scopedMod = '';
+      const scopedRefusal = refusalOf(() => {
+        scopedMod = generateMembers(tm, scopedHost, r4Mods, planMembers(tm, scopedHost, r4Mods, ['staticReader'], opts)).modules.get('engine-identity.ts') ?? '';
+      });
+      check('R4 of a name a routed module already imports on its `./engine.js` line needs no edit there',
+        !scopedRefusal && scopedHost !== r4.host && scopedMod.includes('new Scoped(0, this.facade).n') && engineLines(scopedMod) === routedEngineImports(r4Run.others),
+        scopedRefusal || engineLines(scopedMod));
+      check('a module whose `./engine.js` import is not as the first pass writes it refuses the route',
+        /not the one/.test(refusalOf(() => planMembers(tm, input, new Map([...mods, ['engine-identity.ts', baseIdm.replace(unroutedEngineImport(), unroutedEngineImport().replace('{ ', '{'))]]), ['staticReader'], opts))));
     }
     check('a module already on the route is not rerouted', refused(() => rerouteModule(tm, 'engine-lifecycle.ts', routedLife)));
   }

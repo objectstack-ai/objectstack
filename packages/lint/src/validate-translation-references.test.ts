@@ -3882,6 +3882,40 @@ describe('validateTranslationReferences — keyed children of an action entry (#
         target: '/api/v1/mint',
         resultDialog: { fields: [{ path: 'token' }] },
       },
+      // [#31885] A preflight panel with declared fields, bound and object-less,
+      // and a bound one that declares none (its panel shows the answer as JSON).
+      {
+        name: 'upgrade_env',
+        label: 'Upgrade',
+        objectName: 'crm_env',
+        type: 'api',
+        target: '/api/v1/upgrade',
+        params: [{ name: 'version', label: 'Version', type: 'text' }],
+        preflight: {
+          read: { url: '/api/v1/upgrade-plan?version=${param.version}' },
+          fields: [{ path: 'verdict.summary', label: 'Verdict' }, { path: 'findings' }],
+        },
+      },
+      {
+        name: 'bare_upgrade_env',
+        label: 'Upgrade (bare)',
+        objectName: 'crm_env',
+        type: 'api',
+        target: '/api/v1/upgrade',
+        params: [{ name: 'version', label: 'Version', type: 'text' }],
+        preflight: { read: { url: '/api/v1/upgrade-plan?version=${param.version}' } },
+      },
+      {
+        name: 'upgrade_pkg',
+        label: 'Upgrade package',
+        type: 'api',
+        target: '/api/v1/upgrade',
+        params: [{ name: 'version', label: 'Version', type: 'text' }],
+        preflight: {
+          read: { url: '/api/v1/upgrade-plan?version=${param.version}' },
+          fields: [{ path: 'findings', label: 'Findings' }],
+        },
+      },
     ],
     translations: [{ 'zh-CN': bundle }],
   });
@@ -4116,6 +4150,63 @@ describe('validateTranslationReferences — keyed children of an action entry (#
   });
 
   /**
+   * [#31885] `preflight.fields.<path>` — the `resultDialog.fields` rule on the
+   * preflight panel: keyed by a declared field's literal `path`, read by
+   * `resolveActionPreflight` for those fields only.
+   */
+  describe('preflight.fields.<path>', () => {
+    it('refuses a preflight field `_actions.<name>` does not declare, quoting a dotted path as ONE key', () => {
+      const findings = validateTranslationReferences(
+        actionStack(
+          onEnv({
+            upgrade_env: { preflight: { fields: { 'verdict.summary': '结论', findings: '变更', 'verdict.ghost': '幽灵' } } },
+          }),
+        ),
+      );
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.upgrade_env.preflight.fields["verdict.ghost"]`],
+      ]);
+    });
+
+    it('refuses a preflight field `globalActions.<name>` does not declare', () => {
+      const findings = validateTranslationReferences(
+        actionStack({ globalActions: { upgrade_pkg: { preflight: { fields: { findings: '变更', ghost_path: '幽灵' } } } } }),
+      );
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${GLOBAL}.upgrade_pkg.preflight.fields.ghost_path`],
+      ]);
+    });
+
+    it('accepts every declared preflight field at both addresses (the control)', () => {
+      expect(
+        validateTranslationReferences(
+          actionStack({
+            ...onEnv({ upgrade_env: { preflight: { fields: { 'verdict.summary': '结论', findings: '变更' } } } }),
+            globalActions: { upgrade_pkg: { preflight: { fields: { findings: '变更' } } } },
+          }),
+        ),
+      ).toEqual([]);
+    });
+
+    it('refuses a preflight field on an action with no `preflight`, and on a preflight with no `fields`', () => {
+      const findings = validateTranslationReferences(
+        actionStack(
+          onEnv({
+            plain_env: { preflight: { fields: { findings: '变更' } } },
+            bare_upgrade_env: { preflight: { fields: { findings: '变更' } } },
+          }),
+        ),
+      );
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.plain_env.preflight.fields.findings`],
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.bare_upgrade_env.preflight.fields.findings`],
+      ]);
+      expect(findings[0].message).toContain('declares no `preflight`');
+      expect(findings[1].message).toContain('declares no `fields`');
+    });
+  });
+
+  /**
    * The action-entry twin of the #13835 object-branch pin above: every key the
    * action translation shape declares — down into `params.<name>.*` and
    * `resultDialog.*` — classified, and every `reference-checked` claim backed
@@ -4145,11 +4236,12 @@ describe('validateTranslationReferences — keyed children of an action entry (#
         ...Object.keys(entry),
         ...Object.keys(objectShapeOf(entry.params)).map((k) => `params.*.${k}`),
         ...Object.keys(objectShapeOf(entry.resultDialog)).map((k) => `resultDialog.${k}`),
+        ...Object.keys(objectShapeOf(entry.preflight)).map((k) => `preflight.${k}`),
       ].sort();
     };
 
     type Address = 'bound' | 'global';
-    type Host = 'outcome' | 'dialog' | 'noDialog' | 'noParams' | 'noPreRunDialog';
+    type Host = 'outcome' | 'dialog' | 'noDialog' | 'noParams' | 'noPreRunDialog' | 'preflight';
     /**
      * Which declared action a ghost is written under, per address. `noDialog`
      * names an action that declares no `resultDialog`: the dialog's leaves
@@ -4166,6 +4258,8 @@ describe('validateTranslationReferences — keyed children of an action entry (#
       // [#28519] An action with neither `confirmText` nor `params` opens no
       // dialog before it runs, so its `cancelText` has no button to land on.
       noPreRunDialog: { bound: 'plain_env', global: 'mint_token' },
+      // [#31885] An action whose `preflight` declares `fields`.
+      preflight: { bound: 'upgrade_env', global: 'upgrade_pkg' },
     };
     type Coverage =
       | { kind: 'reference-checked'; host: Host; ghost: Record<string, unknown>; suffix: string; rule: string }
@@ -4247,6 +4341,17 @@ describe('validateTranslationReferences — keyed children of an action entry (#
         suffix: '.resultDialog.fields.ghost_path',
         rule: TRANSLATION_TARGET_UNKNOWN,
       },
+      preflight: {
+        kind: 'container',
+        why: 'a fixed-key node; its one keyed child `preflight.fields` is judged below',
+      },
+      'preflight.fields': {
+        kind: 'reference-checked',
+        host: 'preflight',
+        ghost: { preflight: { fields: { ghost_path: 'x' } } },
+        suffix: '.preflight.fields.ghost_path',
+        rule: TRANSLATION_TARGET_UNKNOWN,
+      },
     };
 
     // The global action needs a param with inline options for the options ghost.
@@ -4299,6 +4404,7 @@ describe('validateTranslationReferences — keyed children of an action entry (#
             params: { mode: { label: 'x', helpText: 'x', placeholder: 'x', options: { soft: 'x' } } },
           },
           [dialog]: { resultDialog: { title: 'x', description: 'x', acknowledge: 'x', fields: { token: 'x' } } },
+          [HOST.preflight[address]]: { preflight: { fields: { findings: 'x' } } },
         };
       };
       expect(

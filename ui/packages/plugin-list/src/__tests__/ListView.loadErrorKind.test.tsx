@@ -281,3 +281,121 @@ describe('ListView – a load error the server answered shows its code and sente
     expect(panel.querySelector('[data-testid="list-error-code"]')).toBeNull();
   });
 });
+
+/**
+ * objectstack#31893 — a `400 INVALID_FIELD` names the refused field, and the
+ * column that asked for it. The reported view (cloud#4074) has a column
+ * `cost_total` over `ai_traces`, whose field is `total_cost`; the panel said
+ * only "This view's query was rejected".
+ *
+ * The field is read from the answer's structured `details.field`, which both
+ * list read paths carry: `@objectstack/client` keeps the flat body on
+ * `details`, and the adapter's raw `$expand`/`$search` branch does the same
+ * (pinned in `@object-ui/data-objectstack`'s `apiAccessDenied.test.ts`). The
+ * server's sentence is never read for it.
+ */
+describe('ListView – a refused field is named, with its column (objectstack#31893)', () => {
+  const SENTENCE = "Unknown field 'cost_total' on object 'ai_traces'. Did you mean 'total_cost'?";
+  const BODY = { error: SENTENCE, code: 'INVALID_FIELD', field: 'cost_total', object: 'ai_traces' };
+  const OBJECT = {
+    name: 'ai_traces',
+    label: 'AI trace',
+    fields: {
+      name: { name: 'name', type: 'text', label: 'Name' },
+      total_cost: { name: 'total_cost', type: 'currency', label: 'Total cost' },
+    },
+  };
+
+  /** `@objectstack/client`'s throw: code, httpStatus, and the flat body on `details`. */
+  function clientPathError(body: Record<string, unknown> = BODY) {
+    return Object.assign(new Error(String(body.error)), {
+      code: body.code, httpStatus: 400, details: body,
+    });
+  }
+
+  /** The adapter's raw `$expand`/`$search` throw: status, code, httpStatus, `details`. */
+  function rawPathError(body: Record<string, unknown> = BODY) {
+    return Object.assign(new Error(String(body.error)), {
+      status: 400, code: body.code, httpStatus: 400, details: body,
+    });
+  }
+
+  function mount(error: unknown, columns: unknown[], props: Record<string, unknown> = {}) {
+    const ds = {
+      find: vi.fn().mockRejectedValue(error),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async () => OBJECT),
+    };
+    const view = { type: 'list-view', objectName: 'ai_traces', columns } as unknown as ListViewSchema;
+    return render(
+      <SchemaRendererProvider dataSource={ds as any}>
+        <ListView schema={view} dataSource={ds as any} {...props} />
+      </SchemaRendererProvider>,
+    );
+  }
+
+  const REPORTED_COLUMNS = [{ field: 'name' }, { field: 'cost_total', label: 'Cost total' }];
+
+  it('the cost_total repro (client path) names the column by its label, the field and the object', async () => {
+    const { container } = mount(clientPathError(), REPORTED_COLUMNS);
+    const panel = await errorState(container);
+    expect(panel.getAttribute('data-error-kind')).toBe('rejected');
+    expect(panel.textContent).toContain('The column “Cost total” shows the field “cost_total”');
+    expect(panel.textContent).toContain('AI trace');
+    // The panel is the console's own sentence, not the server's.
+    expect(panel.textContent).not.toContain(SENTENCE);
+    // Retry stays: a 400 keeps the button, as every rejected panel does.
+    expect(container.querySelector('[data-testid="list-error-retry"]')).not.toBeNull();
+  });
+
+  it('the cost_total repro (raw $expand/$search path shape) reads the same', async () => {
+    const { container } = mount(rawPathError(), REPORTED_COLUMNS);
+    const panel = await errorState(container);
+    expect(panel.textContent).toContain('The column “Cost total” shows the field “cost_total”');
+  });
+
+  it('a column with no authored label is named by its field', async () => {
+    const { container } = mount(clientPathError(), ['name', 'cost_total']);
+    const panel = await errorState(container);
+    expect(panel.textContent).toContain('The column “cost_total” shows the field “cost_total”');
+  });
+
+  it('a refused field that is not a column is named alone, with the filter remedy', async () => {
+    const body = { ...BODY, field: 'stage', error: "Query parameter 'filter' filters on 'stage'" };
+    const { container } = mount(clientPathError(body), REPORTED_COLUMNS);
+    const panel = await errorState(container);
+    expect(panel.textContent).toContain('This view’s query names the field “stage”');
+    expect(panel.textContent).toMatch(/Clearing the filters/);
+    expect(panel.textContent).not.toMatch(/The column/);
+  });
+
+  it('CONTROL: another 400 keeps the generic rejected copy, even with a field in its body', async () => {
+    const body = { error: 'Malformed filter', code: 'INVALID_FILTER', field: 'cost_total' };
+    const { container } = mount(clientPathError(body), REPORTED_COLUMNS);
+    const panel = await errorState(container);
+    expect(panel.getAttribute('data-error-kind')).toBe('rejected');
+    expect(panel.textContent).toContain('could not process this view’s filter or query options');
+    expect(panel.textContent).not.toContain('cost_total');
+  });
+
+  it('CONTROL: an INVALID_FIELD that names no field keeps the generic rejected copy', async () => {
+    const body = { error: SENTENCE, code: 'INVALID_FIELD', object: 'ai_traces' };
+    const { container } = mount(clientPathError(body), REPORTED_COLUMNS);
+    const panel = await errorState(container);
+    expect(panel.getAttribute('data-error-kind')).toBe('rejected');
+    expect(panel.textContent).toContain('could not process this view’s filter or query options');
+    // The sentence names the field, and is still never read for it.
+    expect(panel.textContent).not.toContain('Cost total');
+  });
+
+  it('CONTROL: with a search term, an INVALID_FIELD keeps the search path (the server’s sentence)', async () => {
+    const { container } = mount(clientPathError(), REPORTED_COLUMNS, { initialSearchTerm: 'Dune' });
+    const panel = await errorState(container);
+    expect(panel.getAttribute('data-error-kind')).toBe('rejected');
+    expect(panel.textContent).toContain(SENTENCE);
+    expect(panel.textContent).not.toMatch(/The column/);
+  });
+});

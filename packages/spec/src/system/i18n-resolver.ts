@@ -50,7 +50,8 @@
  *
  *   globalActions.<action_name>.label / .description / .confirmText /
  *     .successMessage / .disabledReason / .submitText / .cancelText /
- *     .outcomeMessages.<outcome> / .params.<param_name>.* / .resultDialog.*
+ *     .outcomeMessages.<outcome> / .params.<param_name>.* / .resultDialog.* /
+ *     .preflight.fields.<path>
  *
  * That is the declaration `TranslationDataSchema.globalActions` makes: global
  * translations are for object-less actions. A `globalActions` entry that names
@@ -254,6 +255,8 @@ export interface ActionLike {
   objectName?: string;
   /** Post-success reveal dialog (see `Action.resultDialog` in ui/action.zod). */
   resultDialog?: ResultDialogLike;
+  /** Param-dialog preflight read (see `Action.preflight` in ui/action.zod). */
+  preflight?: PreflightLike;
 }
 
 /**
@@ -294,6 +297,15 @@ export interface ResultDialogLike {
   title?: string;
   description?: string;
   acknowledge?: string;
+  fields?: Array<{ path: string; label?: string; [key: string]: unknown }>;
+  [key: string]: unknown;
+}
+
+/**
+ * Minimal preflight shape consumed by `resolveActionPreflight` — the panel's
+ * `fields` rows, the same `{ path, label? }` row `resultDialog.fields` carries.
+ */
+export interface PreflightLike {
   fields?: Array<{ path: string; label?: string; [key: string]: unknown }>;
   [key: string]: unknown;
 }
@@ -953,6 +965,44 @@ export function resolveActionResultDialog<T extends ResultDialogLike>(
     ...(acknowledge !== undefined ? { acknowledge } : {}),
     ...(fields !== undefined ? { fields } : {}),
   };
+}
+
+/**
+ * Resolve a translated copy of an action's `preflight`, overlaying each
+ * declared field's `label` from `…preflight.fields.<path>` (keyed by the
+ * literal field path, indexed directly and never split on `.`), exactly as
+ * {@link resolveActionResultDialog} overlays `resultDialog.fields`. Returns the
+ * original spec untouched (same reference) when the action has no `preflight`
+ * or it declares no `fields` — the panel then shows the answer as JSON and
+ * reads no label; otherwise a shallow copy with translated labels merged in.
+ */
+export function resolveActionPreflight<T extends PreflightLike>(
+  bundle: TranslationBundle | undefined,
+  action: ActionLike & { preflight?: T },
+  opts?: ResolveOptions,
+): T | undefined {
+  const spec = action.preflight;
+  if (!spec || !Array.isArray(spec.fields)) return spec;
+  const fields = spec.fields.map((field) => {
+    if (!field || typeof field.path !== 'string') return field;
+    const label = lookupActionPreflightFieldLabel(bundle, action, field.path, opts) ?? field.label;
+    return label !== undefined ? { ...field, label } : field;
+  });
+  return { ...spec, fields };
+}
+
+function lookupActionPreflightFieldLabel(
+  bundle: TranslationBundle | undefined,
+  action: ActionLike,
+  path: string,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const value = actionTranslationNode(pickData(bundle, code), action)?.preflight?.fields?.[path];
+    if (typeof value === 'string' && value.length > 0) return value;
+  }
+  return undefined;
 }
 
 /**
@@ -1748,8 +1798,8 @@ export function translateView<T extends ViewLike>(
  * `label`, `description`, `confirmText`, `successMessage`, `disabledReason`,
  * `submitText` (for an action that declares `params`), `cancelText` (for an
  * action that declares `confirmText` or `params`), each declared
- * `outcomeMessages` entry, the `params[]` copy and the `resultDialog` copy
- * with translated values when available. The
+ * `outcomeMessages` entry, the `params[]` copy, the `resultDialog` copy and
+ * the `preflight` panel's field labels with translated values when available. The
  * original document is not mutated; a shallow copy is returned.
  *
  * ## Why `description` and `params` are overlaid HERE
@@ -1800,6 +1850,9 @@ export function translateAction<T extends ActionLike>(
     : action.cancelText;
   const outcomeMessages = resolveActionOutcomeMessages(bundle, action, opts);
   const resultDialog = resolveActionResultDialog(bundle, action, opts);
+  // [#31885] The preflight panel's field labels, overlaid like the result
+  // dialog's: only for the fields the action declares.
+  const preflight = resolveActionPreflight(bundle, action, opts);
   const params = translateActionParams(action, bundle, opts);
   return {
     ...action,
@@ -1812,6 +1865,7 @@ export function translateAction<T extends ActionLike>(
     ...(cancelText !== undefined ? { cancelText } : {}),
     ...(outcomeMessages !== action.outcomeMessages ? { outcomeMessages } : {}),
     ...(resultDialog !== undefined ? { resultDialog } : {}),
+    ...(preflight !== action.preflight ? { preflight } : {}),
     ...(params !== action.params ? { params } : {}),
   };
 }
