@@ -44,6 +44,7 @@ import {
   ListAiPendingActionsRequestSchema,
   ListAiPendingActionsResponseSchema,
   ApproveAiPendingActionResponseSchema,
+  AiPendingActionStatusSchema,
   RejectAiPendingActionResponseSchema,
   AiChatResponseSchema,
   AiCompleteRequestSchema,
@@ -435,6 +436,11 @@ describe('ObjectStack Protocol', () => {
     // caller reading only `res.ok` reports a failed write as a success.
     expect(ApproveAiPendingActionResponseSchema.safeParse({ status: 'executed', result: { id: 'a_1' } }).success).toBe(true);
     expect(ApproveAiPendingActionResponseSchema.safeParse({ status: 'failed', error: 'row locked' }).success).toBe(true);
+    // A write a host policy holds for an approver outside the conversation is
+    // `held`, a 200 where nothing was written, never `executed`.
+    expect(ApproveAiPendingActionResponseSchema.safeParse({ status: 'held', result: { code: 'AI_WRITE_HELD' } }).success).toBe(true);
+    expect(AiPendingActionStatusSchema.safeParse('held').success).toBe(true);
+    expect(ListAiPendingActionsRequestSchema.safeParse({ status: 'held' }).success).toBe(true);
     expect(
       ApproveAiPendingActionResponseSchema.safeParse({ status: 'rejected' }).success,
       'approve never yields "rejected" — that is the other route',
