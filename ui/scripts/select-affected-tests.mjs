@@ -5,13 +5,21 @@
  * select-affected-tests -- the test files a pull request or merge-queue run
  * owes, under the two-speed doctrine (objectui#12214, objectstack#22998).
  *
- *   node scripts/select-affected-tests.mjs --base <sha> --out <file>
+ *   node scripts/select-affected-tests.mjs --base <sha> --out <file> [--lane-out <file>]
  *   node scripts/select-affected-tests.mjs --base <sha> --explain
  *
  * The LAST line on stdout is the verdict, one of:
  *
  *   mode=full       run the whole suite (`pnpm test --shard=N/16`)
  *   mode=affected   run the vitest filters written to `--out`, one per line
+ *
+ * On `mode=affected`, `--lane-out` also writes the ALWAYS-ON test files (item 2
+ * below), one ui-relative path per line: the tests this change selects only
+ * because the package graph cannot place them. They are Test UI's always-on
+ * lane, its slot 1 (`plan-test-ui-shards.mjs`, objectstack#31914). The lane is
+ * this verdict's own set, computed on every run, never a list kept beside it:
+ * a test joins the lane exactly when this file cannot place it, so the two
+ * cannot drift. A `mode=full` verdict writes no lane: the whole suite has none.
  *
  * Exit 0 means a verdict was reached -- either one. Any other exit means the
  * question could not be answered, and `ci.yml` treats that as `mode=full`: a
@@ -1123,9 +1131,10 @@ function readFlag(argv, flag) {
 function main(argv) {
   const base = readFlag(argv, '--base');
   const out = readFlag(argv, '--out');
+  const laneOut = readFlag(argv, '--lane-out');
   const explain = argv.includes('--explain');
-  if (!base || (!out && !explain)) {
-    console.error('usage: select-affected-tests.mjs --base <sha> (--out <file> | --explain)');
+  if (!base || (!out && !explain) || (argv.includes('--lane-out') && !laneOut)) {
+    console.error('usage: select-affected-tests.mjs --base <sha> (--out <file> [--lane-out <file>] | --explain)');
     return 2;
   }
   const changed = changedFiles(REPO_ROOT, base);
@@ -1158,6 +1167,7 @@ function main(argv) {
     return 2;
   }
   if (out) fs.writeFileSync(out, `${verdict.filters.join('\n')}\n`);
+  if (laneOut) fs.writeFileSync(laneOut, verdict.alwaysOn.map((a) => `${a.file}\n`).join(''));
   console.log('mode=affected');
   return 0;
 }
