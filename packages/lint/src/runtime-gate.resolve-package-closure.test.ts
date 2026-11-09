@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import { resolvePackageClosure } from './runtime-gate.js';
 import * as runtimeEntry from './runtime.js';
+import * as metadataCore from '@objectstack/metadata-core';
 
 type Pkg = { manifest?: unknown };
 
@@ -61,5 +62,12 @@ describe('resolvePackageClosure (#28240)', () => {
 
   it('is named on the narrow runtime entry the server reaches lint through', () => {
     expect(runtimeEntry.resolvePackageClosure).toBe(resolvePackageClosure);
+  });
+});
+
+describe('resolvePackageClosure is the one walk (epic #31527 child R2)', () => {
+  it('is `@objectstack/metadata-core`\'s own function, re-exported: lint computes no second closure', () => {
+    expect(resolvePackageClosure).toBe(metadataCore.resolvePackageClosure);
+    expect(runtimeEntry.resolvePackageClosure).toBe(metadataCore.resolvePackageClosure);
   });
 });

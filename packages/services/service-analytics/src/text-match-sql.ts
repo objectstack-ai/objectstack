@@ -194,6 +194,21 @@ export function asAcceptedSqlDialect(name: string | undefined | null): AcceptedS
 }
 
 /**
+ * [#31626] Why a dialect has no JSON function in this package, as the clause a
+ * refusal ends its reason with: `whenUnknown` — the text each refusal has always
+ * given — for `'unknown'`, and the dialect by name otherwise. SQL Server is a
+ * named dialect (#31394) for which no JSON membership or empty-list construct is
+ * stated (`@objectstack/core`'s `jsonMembershipPredicate` has none), and a
+ * refusal that said its dialect "is not known" sent the reader to the host's
+ * dialect wiring, which was right.
+ */
+export function noJsonFunctionReason(dialect: AnalyticsSqlDialect, whenUnknown: string): string {
+  return dialect === 'unknown'
+    ? whenUnknown
+    : `this analytics host emits no such function for the datasource's dialect, "${dialect}"`;
+}
+
+/**
  * The dialect of the datasource backing `objectName`, read off the context's
  * `sqlDialect` hook — `'unknown'` when the host wired none.
  *
