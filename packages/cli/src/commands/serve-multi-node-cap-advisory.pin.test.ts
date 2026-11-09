@@ -162,10 +162,28 @@ describe('os serve ↔ multi-node gate', () => {
     // `NaN` the gate read it as "not declared". ⛔ No second parse of that
     // spelling here — the shared predicate is the only reader.
     expect(MASKED_SERVE_SOURCE).toMatch(
-      /const __requestedNodes =\s*declaresMultiNode\(process\.env\)\s*&&\s*!declaresMultiNode\(\{\s*OS_CLUSTER_REPLICAS:\s*process\.env\.OS_CLUSTER_REPLICAS\s*\}\)\s*\?\s*2\s*:\s*Number\(process\.env\.OS_CLUSTER_REPLICAS\);/,
+      /const __countUnknown =\s*declaresMultiNode\(process\.env\)\s*&&\s*!declaresMultiNode\(\{\s*OS_CLUSTER_REPLICAS:\s*process\.env\.OS_CLUSTER_REPLICAS\s*\}\);/,
+    );
+    expect(MASKED_SERVE_SOURCE).toMatch(
+      /const __requestedNodes = __countUnknown \? 2 : Number\(process\.env\.OS_CLUSTER_REPLICAS\);/,
     );
     expect(MASKED_SERVE_SOURCE).toMatch(/checkMultiNodeAllowed\(\s*__requestedNodes\s*\)/);
     expect(MASKED_SERVE_SOURCE).not.toMatch(/process\.env\.OS_EXPECT_MULTI_NODE/);
+  });
+
+  it('tells the cap advisory whether the count the gate saw is one the operator wrote', () => {
+    // Both cases share one call: counted (`OS_CLUSTER_REPLICAS`, or nothing
+    // declared) keeps the counted wording byte for byte; uncounted
+    // (`OS_EXPECT_MULTI_NODE=true` alone, asked as 2) must never print that 2 as
+    // a declared count. The flag comes from the call site's own reading, so the
+    // formatter re-reads nothing — and the parameter is required, so no call can
+    // fall back to the counted wording by leaving it out.
+    expect(MASKED_SERVE_SOURCE).toMatch(
+      /formatMultiNodeCapAdvisory\(\s*__gate\s*,\s*\{\s*countDeclared:\s*!__countUnknown\s*\}\s*\)/,
+    );
+    expect(MASKED_SERVE_SOURCE).toMatch(
+      /export function formatMultiNodeCapAdvisory\(\s*verdict: MultiNodeGateVerdict,\s*declaration: \{ countDeclared: boolean \},\s*\)/,
+    );
   });
 
   it('types the dynamic import with the mirrored verdict, not an inline literal', () => {

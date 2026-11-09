@@ -6,7 +6,7 @@ fix(cli)!: `os serve` asks the multi-node gate about a topology declared by `OS_
 
 Clause-②: no (narrowing)
 Metadata-protocol: none
-Skills-docs: none — `skills/**` names neither spelling of the multi-node declaration. `content/docs/kernel/cluster.mdx` already teaches both spellings as the declaration and that `os serve` passes the declared `OS_CLUSTER_REPLICAS` count to the gate, which stays true; that page's older "downgrades … rather than failing" sentence is noted on the PR, outside this diff.
+Skills-docs: `skills/**` names neither spelling of the multi-node declaration. `content/docs/kernel/cluster.mdx` already teaches both spellings as the declaration; its sentence that a gate denial "downgrades … rather than failing" is corrected in this diff: with a declared topology the split-brain guard refuses the boot.
 
 <!-- adr-0087: not-required (no-migration-prescription) No schema key, export, type or stored shape changes. The narrowing is a boot refusal keyed to environment variables an operator sets, so there is nothing for a metadata migration to rewrite and no tombstone. -->
 
@@ -22,3 +22,5 @@ FROM a multi-replica deployment that sets `OS_EXPECT_MULTI_NODE=true` over a rem
 - drop `OS_EXPECT_MULTI_NODE` (and keep `OS_CLUSTER_REPLICAS` unset or 1) to run single-node.
 
 A single-node boot, a boot declared as `OS_CLUSTER_REPLICAS`, and a boot whose registered gate admits the topology are unchanged.
+
+When a gate that caps the node count admits fewer nodes than that 2, the licensed-cap advisory no longer prints a replica count the operator did not write. It names `OS_EXPECT_MULTI_NODE=true`, says what the licence admits, says the cap is advisory and every replica still joins, and asks the operator to run at most that many replicas (or set `OS_CLUSTER_REPLICAS`) or raise the limit. The advisory for a count declared as `OS_CLUSTER_REPLICAS` is unchanged.

@@ -37,17 +37,25 @@ const VERDICTS = {
   denied: { allowed: false, reason: 'no clustering entitlement', admitted: 0, refused: 5, capped: false },
 } satisfies Record<string, MultiNodeGateVerdict>;
 
+/** The operator wrote `OS_CLUSTER_REPLICAS`: the count the gate saw is theirs. */
+const COUNTED = { countDeclared: true };
+/** `OS_EXPECT_MULTI_NODE=true` with no count: `serve` asked the gate about 2 nodes. */
+const UNCOUNTED = { countDeclared: false };
+
+/** An uncounted declaration under a cap of 1: the gate was asked about 2. */
+const UNCOUNTED_OVER_CAP = { allowed: true, admitted: 1, refused: 1, capped: true } satisfies MultiNodeGateVerdict;
+
 describe('formatMultiNodeCapAdvisory', () => {
   it('says nothing when no cap is configured', () => {
-    expect(formatMultiNodeCapAdvisory(VERDICTS.uncapped)).toBeNull();
+    expect(formatMultiNodeCapAdvisory(VERDICTS.uncapped, COUNTED)).toBeNull();
   });
 
   it('says nothing when a cap is configured and the declared topology fits', () => {
-    expect(formatMultiNodeCapAdvisory(VERDICTS.withinCap)).toBeNull();
+    expect(formatMultiNodeCapAdvisory(VERDICTS.withinCap, COUNTED)).toBeNull();
   });
 
   it('warns on a licensed overflow, naming both numbers', () => {
-    expect(formatMultiNodeCapAdvisory(VERDICTS.overflow)).toBe(
+    expect(formatMultiNodeCapAdvisory(VERDICTS.overflow, COUNTED)).toBe(
       '[cluster] licensed node cap exceeded: the licence admits 3 node(s), '
       + 'but OS_CLUSTER_REPLICAS declares 5 — 2 beyond the cap.\n'
       + '[cluster] This cap is ADVISORY and is not enforced yet: nothing is refused, '
@@ -57,7 +65,7 @@ describe('formatMultiNodeCapAdvisory', () => {
   });
 
   it('⚠️ never claims replicas were refused — nothing is refused today', () => {
-    const text = formatMultiNodeCapAdvisory(VERDICTS.overflow) ?? '';
+    const text = formatMultiNodeCapAdvisory(VERDICTS.overflow, COUNTED) ?? '';
 
     // The false sentences, in the shapes they would plausibly be written.
     expect(text).not.toMatch(/\d+\s+(replicas?\s+)?(were\s+|was\s+|are\s+)?refused/i);
@@ -72,7 +80,7 @@ describe('formatMultiNodeCapAdvisory', () => {
   });
 
   it('names the declared count, the admitted count and the remedy', () => {
-    const text = formatMultiNodeCapAdvisory(VERDICTS.overflow) ?? '';
+    const text = formatMultiNodeCapAdvisory(VERDICTS.overflow, COUNTED) ?? '';
     expect(text).toContain('admits 3');
     expect(text).toContain('declares 5');
     expect(text).toContain('2 beyond the cap');
@@ -85,7 +93,7 @@ describe('formatMultiNodeCapAdvisory', () => {
     // unlicensed case cannot be conflated with the licensed-overflow one. The
     // call site already prints its own downgrade warning; a second message here
     // would report one event twice, and would call a full denial a partial cap.
-    expect(formatMultiNodeCapAdvisory(VERDICTS.denied)).toBeNull();
+    expect(formatMultiNodeCapAdvisory(VERDICTS.denied, COUNTED)).toBeNull();
   });
 
   it('surfaces the gate reason when the cap carries one', () => {
@@ -95,12 +103,12 @@ describe('formatMultiNodeCapAdvisory', () => {
       admitted: 3,
       refused: 2,
       capped: true,
-    });
+    }, COUNTED);
     expect(text).toContain('(plan: team (3 nodes))');
   });
 
   it('scales with the numbers rather than hard-coding the 3/5 case', () => {
-    const text = formatMultiNodeCapAdvisory({ allowed: true, admitted: 10, refused: 7, capped: true }) ?? '';
+    const text = formatMultiNodeCapAdvisory({ allowed: true, admitted: 10, refused: 7, capped: true }, COUNTED) ?? '';
     expect(text).toContain('admits 10');
     expect(text).toContain('declares 17');
     expect(text).toContain('7 beyond the cap');
@@ -111,7 +119,44 @@ describe('formatMultiNodeCapAdvisory', () => {
     // a numeric `admitted`), so this pins the choice rather than a behaviour:
     // faced with a stale or foreign build, silence beats a warning with an
     // invented count in it.
-    expect(formatMultiNodeCapAdvisory({ allowed: true, refused: 2, capped: true })).toBeNull();
-    expect(formatMultiNodeCapAdvisory({ allowed: true, admitted: 3, refused: 0, capped: true })).toBeNull();
+    expect(formatMultiNodeCapAdvisory({ allowed: true, refused: 2, capped: true }, COUNTED)).toBeNull();
+    expect(formatMultiNodeCapAdvisory({ allowed: true, admitted: 3, refused: 0, capped: true }, COUNTED)).toBeNull();
+  });
+
+  it('names OS_EXPECT_MULTI_NODE and prints no count when the operator gave none', () => {
+    expect(formatMultiNodeCapAdvisory(UNCOUNTED_OVER_CAP, UNCOUNTED)).toBe(
+      '[cluster] licensed node cap exceeded: the licence admits 1 node(s), '
+      + 'but OS_EXPECT_MULTI_NODE=true declares a multi-node topology without a replica count.\n'
+      + '[cluster] This cap is ADVISORY and is not enforced yet: nothing is refused, '
+      + 'and every replica will still join the cluster.\n'
+      + '[cluster] Run at most 1 replica(s) (or set OS_CLUSTER_REPLICAS to the count you run), '
+      + 'or raise the licensed node limit.',
+    );
+  });
+
+  it('⚠️ never prints the 2 serve asked about as a declared count, nor an excess', () => {
+    const text = formatMultiNodeCapAdvisory(UNCOUNTED_OVER_CAP, UNCOUNTED) ?? '';
+    expect(text).not.toBe('');
+    expect(text).not.toMatch(/declares\s+\d/);
+    expect(text).not.toMatch(/beyond the cap/);
+    expect(text).not.toMatch(/all\s+\d+\s+replicas/);
+    expect(text).not.toMatch(/Reduce OS_CLUSTER_REPLICAS/);
+    expect(text).toMatch(/still join/);
+  });
+
+  it('the same verdict with a counted declaration keeps the counted wording', () => {
+    expect(formatMultiNodeCapAdvisory(UNCOUNTED_OVER_CAP, COUNTED)).toBe(
+      '[cluster] licensed node cap exceeded: the licence admits 1 node(s), '
+      + 'but OS_CLUSTER_REPLICAS declares 2 — 1 beyond the cap.\n'
+      + '[cluster] This cap is ADVISORY and is not enforced yet: nothing is refused, '
+      + 'and all 2 replicas will still join the cluster.\n'
+      + '[cluster] Reduce OS_CLUSTER_REPLICAS to 1, or raise the licensed node limit.',
+    );
+  });
+
+  it('an uncounted declaration stays silent wherever the counted one does', () => {
+    expect(formatMultiNodeCapAdvisory(VERDICTS.uncapped, UNCOUNTED)).toBeNull();
+    expect(formatMultiNodeCapAdvisory(VERDICTS.denied, UNCOUNTED)).toBeNull();
+    expect(formatMultiNodeCapAdvisory({ allowed: true, admitted: 2, refused: 0, capped: false }, UNCOUNTED)).toBeNull();
   });
 });
