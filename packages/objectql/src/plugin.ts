@@ -955,15 +955,38 @@ export class ObjectQLPlugin implements Plugin {
         // against the registry or against a list the artifact itself declares.
         // A refused install registers nothing.
         if (this.picklistVocabularySealed) {
-          const declared = new Set<string>();
-          for (const manifest of ordered) for (const name of collectManifestPicklistNames(manifest)) declared.add(name);
-          const known = (name: string) => declared.has(name) || ql.registry.resolvePicklistOptions(name) !== undefined;
-          const unresolved = ordered
-            .flatMap((manifest) => collectManifestPicklistReferences(manifest, artifactPackageId(manifest)))
-            .filter((ref) => !known(ref.picklist));
-          const orphans = ordered
-            .flatMap((manifest) => collectManifestPicklistExtensions(manifest, artifactPackageId(manifest)))
-            .filter((ext) => !known(ext.picklist));
+          // [ADR-0150 D3, child E6] A reference is reached the way the served
+          // field will reach it: from the package that writes it, through the
+          // package-scoped resolver, against a registry view holding the
+          // artifact's manifests — their declared dependencies and the lists
+          // each one declares. A list the reference's OWN manifest declares is
+          // its own; every other list, a sibling's in this artifact included,
+          // is R's to answer (epic seat review on #31731: no artifact-wide
+          // "declared somewhere" pass). A reference R refuses — the
+          // environment's own list included (D3 (a)) — is refused here,
+          // loudly, naming every candidate. An extension's target is a
+          // contribution, judged caller-less (epic seat ruling X on #31678;
+          // `SchemaRegistry.picklistContributions`).
+          const judge = <R extends { picklist: string; packageId: string | undefined }>(
+            ref: R,
+            own: ReadonlySet<string>,
+            caller: string | null | undefined,
+          ): R & { refusal?: string } | undefined => {
+            if (own.has(ref.picklist)) return undefined;
+            const verdict = ql.registry.picklistReferenceVerdict(ref.picklist, caller, ordered);
+            if (verdict.status === 'resolved') return undefined;
+            return verdict.status === 'refused' ? { ...ref, refusal: verdict.message } : ref;
+          };
+          const unresolved = ordered.flatMap((manifest) => {
+            const own = collectManifestPicklistNames(manifest);
+            return collectManifestPicklistReferences(manifest, artifactPackageId(manifest))
+              .flatMap((ref) => judge(ref, own, ref.packageId) ?? []);
+          });
+          const orphans = ordered.flatMap((manifest) => {
+            const own = collectManifestPicklistNames(manifest);
+            return collectManifestPicklistExtensions(manifest, artifactPackageId(manifest))
+              .flatMap((ext) => judge(ext, own, null) ?? []);
+          });
           const refusal = describeUnresolvedPicklistReferences(unresolved, orphans);
           if (refusal) throw refusal;
         }
@@ -1227,6 +1250,22 @@ export class ObjectQLPlugin implements Plugin {
             this.ql?.registry.findOrphanPicklistExtensions() ?? [],
         );
         if (unresolvedPicklists) throw unresolvedPicklists;
+        // [ADR-0150 D3, child E6] A packaged reference whose every holder is
+        // outside its package's declared dependency closure — an
+        // environment-authored list (D3 (a)) or a package it does not depend
+        // on, a same-artifact sibling included (N1, ruled on #31678) — is
+        // refused by the package-scoped resolver: the field is served with no
+        // options and the record validator refuses its values. A refused
+        // REFERENCE, never a refused boot (ruling N2), so it is named here,
+        // once per reference, in the resolver's own words, and the boot goes on.
+        for (const ref of this.ql?.registry.findOutsideClosurePicklistReferences() ?? []) {
+            ctx.logger.warn(
+                `[ObjectQLPlugin] Field '${ref.object}.${ref.field}' of package '${ref.packageId}' is served with no `
+                + `options and refuses every value: ${ref.refusal}`,
+                { object: ref.object, field: ref.field, packageId: ref.packageId, picklist: ref.picklist },
+            );
+        }
+
         this.picklistVocabularySealed = true;
         // [#24400] A top-level action bound by `objectName` to an object no
         // package registers fails the boot, naming the action, its package and
