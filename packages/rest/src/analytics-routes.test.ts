@@ -2,6 +2,11 @@
 
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { RestServer } from './rest-server';
+// The server under test reaches `@objectstack/objectql` only through a dynamic
+// import inside a handler (`meta-object-state-routes.ts`), so the first case to
+// call one would pay that module graph's load inside its clocked window. This
+// module-top import pays it during collection instead.
+import '@objectstack/objectql';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
