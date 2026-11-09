@@ -18,7 +18,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_audit_log: {
     label: "Audit Log",
     pluralLabel: "Audit Logs",
-    description: "Immutable audit trail for platform events",
+    description: "Audit trail of platform events. Rows are written only by the platform and are read-only through the data API and in Setup.",
     fields: {
       created_at: {
         label: "Timestamp"

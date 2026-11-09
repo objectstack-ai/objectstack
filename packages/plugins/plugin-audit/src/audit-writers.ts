@@ -220,8 +220,9 @@ export interface AuditWriterOptions {
  * Subscribes to the ObjectQL engine's wildcard `before*` / `after*` lifecycle
  * events and writes:
  *
- *  - `sys_audit_log` rows — immutable, compliance-grade entries with
- *    field-level `old_value` / `new_value` diffs.
+ *  - `sys_audit_log` rows — compliance-grade entries with field-level
+ *    `old_value` / `new_value` diffs. The platform writes them, and they are
+ *    read-only through the data API and in Setup.
  *  - `sys_activity` rows — denormalized, human-readable summaries shown
  *    in the dashboard recent-activity feed and per-record timelines.
  *
@@ -248,7 +249,7 @@ export interface AuditWriterOptions {
  *  2. Operational telemetry / plumbing (ADR-0057) — platform-internal
  *     event/log/queue objects with a `telemetry`/`transient`/`event`
  *     lifecycle class. These are NOT user-attributable, compliance-relevant
- *     changes; mirroring every one of them into the immutable audit ledger
+ *     changes; mirroring every one of them into the audit ledger
  *     *and* the activity feed is the dominant source of unbounded growth (a
  *     single 20s scheduled flow fanned out to ~21 audit+activity rows/tick,
  *     ~76% of all row growth — see the lifecycle-retention ADR). Until the

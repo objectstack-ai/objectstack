@@ -18,7 +18,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
   sys_audit_log: {
     label: "Journal d’audit",
     pluralLabel: "Journaux d’audit",
-    description: "Piste d’audit immuable des événements de la plateforme",
+    description: "Piste d’audit des événements de la plateforme. Seule la plateforme en écrit les entrées, qui sont en lecture seule via l’API de données et dans Configuration.",
     fields: {
       created_at: {
         label: "Horodatage"
