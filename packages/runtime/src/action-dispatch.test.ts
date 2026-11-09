@@ -160,7 +160,7 @@ describe('dispatchAction answers what the REST /actions door answers', () => {
         }
         const refused = await makeRig([gated]).viaHost(MEMBER_EC, 'gated_ping');
         expect(refused.status).toBe(403);
-        expect(refused.body.error.code).toBe('PERMISSION_DENIED');
+        expect(refused.body.error!.code).toBe('PERMISSION_DENIED');
         const admitted = await makeRig([gated]).viaHost(HOLDER_EC, 'gated_ping');
         expect(admitted).toMatchObject({ status: 200, body: { success: true, data: { ran: 'script' } } });
     });
@@ -190,7 +190,7 @@ describe('dispatchAction answers what the REST /actions door answers', () => {
         const rig = makeRig([gated]);
         const unknown = await rig.viaHost(HOLDER_EC, 'gated_ping', { namespace: 'nobody' });
         expect(unknown.status).toBe(404);
-        expect(unknown.body.error.code).toBe('RESOURCE_NOT_FOUND');
+        expect(unknown.body.error!.code).toBe('RESOURCE_NOT_FOUND');
         expect(rig.ran()).toBe(0);
     });
 
@@ -230,7 +230,7 @@ describe('dispatchAction answers what the REST /actions door answers', () => {
             const ai = await rig.viaHost(MEMBER_EC, 'plain', { posture: 'ai' });
             const mcp = await makeRig([plain]).viaMcp(MEMBER_EC, 'plain');
             expect(ai.status).toBe(400);
-            expect({ status: ai.status, code: ai.body.error.code, message: ai.body.error.message })
+            expect({ status: ai.status, code: ai.body.error!.code, message: ai.body.error!.message })
                 .toEqual({ status: mcp.status, code: (mcp as any).code, message: (mcp as any).message });
             expect(rig.ran()).toBe(0);
         });
@@ -239,7 +239,7 @@ describe('dispatchAction answers what the REST /actions door answers', () => {
             const rig = makeRig([confirmed]);
             const refused = await rig.viaHost(MEMBER_EC, 'confirmed', { posture: 'ai' });
             expect(refused.status).toBe(428);
-            expect(refused.body.error.code).toBe('ACTION_CONFIRMATION_REQUIRED');
+            expect(refused.body.error!.code).toBe('ACTION_CONFIRMATION_REQUIRED');
             expect(rig.ran()).toBe(0);
             expect((await rig.viaHost(MEMBER_EC, 'confirmed', { posture: 'ai', confirm: true })).status).toBe(200);
             expect((await makeRig([confirmed]).viaHost(MEMBER_EC, 'confirmed')).status).toBe(200);
