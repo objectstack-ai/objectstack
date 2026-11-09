@@ -88,6 +88,18 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         label: "Accès IA",
         help: "Indique si cet utilisateur dispose d’un siège IA. Un siège accorde la capacité `ai_seat`, qui ouvre les assistants IA dans l’application (créer et demander). Le nombre d’utilisateurs pouvant en détenir un est limité par les sièges inclus dans votre licence."
       },
+      principal_kind: {
+        label: "Type de principal",
+        help: "Indique si cet utilisateur est une personne ou un compte de service IA. Un compte de service IA ne se connecte jamais et n’agit qu’au moyen de ses propres clés d’API. Défini à la création de l’utilisateur ; ne change jamais.",
+        options: {
+          human: "Personne",
+          agent: "Compte de service IA"
+        }
+      },
+      accountable_user_id: {
+        label: "Responsable",
+        help: "Pour un compte de service IA, la personne qui en est responsable. Vide pour une personne. Les autorisations propres du responsable ne passent jamais au compte."
+      },
       image: {
         label: "Photo de profil"
       },

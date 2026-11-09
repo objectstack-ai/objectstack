@@ -65,6 +65,7 @@ import { ensureDefaultOrganizationExists } from './default-organization-invarian
 import { authIdentityManifest } from './manifest.js';
 import { registerPersonalViewHooks } from './personal-view-hooks.js';
 import { registerUserPreferenceHooks } from './user-preference-hooks.js';
+import { registerServiceAccountRowGuard } from './service-account-identity.js';
 
 /** The kernel plugin name of {@link IdentityObjectsPlugin}. */
 export const IDENTITY_OBJECTS_PLUGIN_NAME = 'com.objectstack.auth.identity-objects';
@@ -124,10 +125,13 @@ export class IdentityObjectsPlugin implements Plugin {
    * plugin keeps it. A failure throws and fails the boot, never warn-only.
    */
   async start(ctx: PluginContext): Promise<void> {
-    // The manifest above registers `sys_personal_view` and `sys_user_preference`;
-    // their write rules travel with them, exactly as `AuthPlugin` registers them.
+    // The manifest above registers `sys_personal_view`, `sys_user_preference`
+    // and `sys_user`; their write rules travel with them, exactly as
+    // `AuthPlugin` registers them (`sys_user`'s: ADR-0151 D1, the principal
+    // kind fixed at creation and an AI service account's accountable owner).
     const engine = ctx.getService<{ registerHook?: unknown }>('objectql');
     if (engine && typeof engine.registerHook === 'function') {
+      registerServiceAccountRowGuard(engine, { packageId: `${IDENTITY_OBJECTS_PLUGIN_NAME}.service-account-row` });
       registerPersonalViewHooks(engine, { packageId: `${IDENTITY_OBJECTS_PLUGIN_NAME}.personal-view` });
       registerUserPreferenceHooks(engine, { packageId: `${IDENTITY_OBJECTS_PLUGIN_NAME}.user-preference` });
     }

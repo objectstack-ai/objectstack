@@ -392,12 +392,18 @@ describe('the oracle dialect (ADR-0015 §4.6)', () => {
 
   it('reads RAW(16) as a UUID and every other RAW width as binary', () => {
     expect(canonicalizeSqlType('RAW(16)', 'oracle')).toBe('uuid');
-    // Read as a UUID string, but the driver cannot yet filter or write it by
-    // that string, so every pairing over it is flagged for review on oracle.
-    for (const field of ['text', 'lookup', 'master_detail', 'user'] as const) {
-      expect(isCompatible('RAW(16)', field, 'oracle'), field).toBe('lossy');
+    // The driver filters, writes and keys a RAW(16) column by the UUID string
+    // it reads (HEXTORAW), so a reference field over it is exact on oracle...
+    for (const field of ['lookup', 'master_detail', 'user'] as const) {
+      expect(isCompatible('RAW(16)', field, 'oracle'), field).toBe(true);
     }
+    // ...and a text field stays flagged for review: its pattern operators
+    // match the column's hex text, not the string it reads.
+    expect(isCompatible('RAW(16)', 'text', 'oracle')).toBe('lossy');
     expect(suggestFieldTypeForSqlType('RAW(16)', 'oracle')).toBe('text');
+    // The demotion names its field types; a type the uuid row does not pair
+    // exactly is not promoted by it.
+    expect(isCompatible('RAW(16)', 'number', 'oracle')).toBe(false);
     // Other dialects' uuid columns keep their exact pairings.
     expect(isCompatible('uuid', 'lookup', 'postgres')).toBe(true);
     expect(canonicalizeSqlType('RAW(32)', 'oracle')).toBe('binary');

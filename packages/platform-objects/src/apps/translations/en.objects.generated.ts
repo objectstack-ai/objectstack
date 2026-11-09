@@ -88,6 +88,18 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "AI Access",
         help: "Whether this user holds an AI seat. A seat grants the `ai_seat` capability, which opens the AI assistants in the app (build and ask). How many users can hold one is limited by the seats your license includes."
       },
+      principal_kind: {
+        label: "Principal Kind",
+        help: "Whether this user is a person or an AI service account. An AI service account never signs in and acts only through its own API keys. Set when the user is created; it never changes.",
+        options: {
+          human: "Person",
+          agent: "AI Service Account"
+        }
+      },
+      accountable_user_id: {
+        label: "Accountable Owner",
+        help: "For an AI service account, the person accountable for it. Empty for a person. The owner's own permissions never pass to the account."
+      },
       image: {
         label: "Profile Image"
       },
