@@ -38,6 +38,23 @@ export {
 } from './dataset-executor.js';
 export type { DatasetSelection, CompareTo } from './dataset-executor.js';
 export { compileScopedFilterToSql } from './read-scope-sql.js';
+export type { DatasetCatalogAdmission } from './analytics-service.js';
+
+// Dataset AI tools (ADR-0149 D2–D4)
+export {
+  createDatasetTools,
+  getDatasetToolDefinitions,
+  DATASET_TOOL_DEFAULT_MAX_ROWS,
+} from './dataset-tools.js';
+export type {
+  DatasetTools,
+  DatasetToolsDeps,
+  DatasetToolCall,
+  DatasetToolSource,
+  DatasetToolDelegationProbe,
+} from './dataset-tools.js';
+export { matchDatasetTerms } from './dataset-term-matcher.js';
+export type { MatchableMember } from './dataset-term-matcher.js';
 
 // Strategies
 export { NativeSQLStrategy } from './strategies/native-sql-strategy.js';

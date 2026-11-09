@@ -39,7 +39,7 @@ import { driverSupportsTransactions } from '@objectstack/spec/data';
 import type { HookContext } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { STORED_METADATA_TYPE_READ_GATE_OBJECTS, storedMetadataTypeReadGate } from './stored-metadata-type-read-gate.js';
-import { createLogger } from '@objectstack/core';
+import { createLogger, packageScopedHolderSource, type PackageScopedHolderSource } from '@objectstack/core';
 import { hookStoppedRefusal } from './summary-errors.js';
 import { startSummaryRefreshOnEnable } from './summary-enable-refresh.js';
 import { HookTargetRebindError } from './hook-target-rebind-errors.js';
@@ -53,6 +53,7 @@ import {
   assertValidHookExcludeObjects, assertValidHookObject, assertValidUnscopedMultiWriteFlag, hookMatchesObject,
 } from './engine-top-level.js';
 import type { FunctionEntry, FunctionRegistrationOptions, HookEntry, HookHandler } from './engine-top-level.js';
+import { handlerOwnerPackageId } from './bare-name-one-holder.js';
 import type { ObjectQL } from './engine.js';
 
 /**
@@ -71,6 +72,7 @@ export interface HooksAndFunctionsHost {
   /** The engine itself: a moved body reads `this.facade` where the method read a bare `this` (#30020). */
   readonly facade: ObjectQL;
   readonly functions: ObjectQL['functions'];
+  readonly functionHolders: ObjectQL['functionHolders'];
   getDriver: ObjectQL['getDriver'];
   readonly hooks: ObjectQL['hooks'];
   isClosedUnitHandle: ObjectQL['isClosedUnitHandle'];
@@ -245,12 +247,22 @@ export class HooksAndFunctionsFacet {
   }
 
   /** The body of `ObjectQL#registerFunction`; the method's docblock there is its contract. */
-  static registerFunction(this: Pick<HooksAndFunctionsHost, 'functions' | 'logger'>, name: string, handler: HookHandler, packageIdOrOptions?: string | FunctionRegistrationOptions): void {
+  static registerFunction(this: Pick<HooksAndFunctionsHost, 'functions' | 'functionHolders' | 'logger'>, name: string, handler: HookHandler, packageIdOrOptions?: string | FunctionRegistrationOptions): void {
     if (!name || typeof handler !== 'function') return;
     const opts: FunctionRegistrationOptions =
       typeof packageIdOrOptions === 'string' ? { packageId: packageIdOrOptions } : (packageIdOrOptions ?? {});
     const { packageId, effect } = opts;
-    this.functions.set(name, { handler, packageId, ...(effect ? { effect } : {}) });
+    const entry: FunctionEntry = { handler, packageId, ...(effect ? { effect } : {}) };
+    this.functions.set(name, entry);
+    // [ADR-0150 D4, #31716] The holder set beside the bare map: the entry
+    // under its package (the owner `app:<id>` read as the id, as phase 1's
+    // claims read it), or under `null` for an owner-less registration. A
+    // second package's function of the same name is a second holder here,
+    // never a replacement; the bare map above still keeps the last one.
+    const holder = packageId ? handlerOwnerPackageId(packageId) : null;
+    let holders = this.functionHolders.get(name);
+    if (!holders) this.functionHolders.set(name, holders = new Map());
+    holders.set(holder, entry);
     this.logger.debug('Registered function', { name, packageId, effect });
   }
 
@@ -265,7 +277,7 @@ export class HooksAndFunctionsFacet {
   }
 
   /** The body of `ObjectQL#unregisterFunctionsByPackage`; the method's docblock there is its contract. */
-  static unregisterFunctionsByPackage(this: Pick<HooksAndFunctionsHost, 'functions' | 'logger'>, packageId: string): number {
+  static unregisterFunctionsByPackage(this: Pick<HooksAndFunctionsHost, 'functions' | 'functionHolders' | 'logger'>, packageId: string): number {
     if (!packageId) return 0;
     let removed = 0;
     for (const [name, entry] of this.functions.entries()) {
@@ -274,10 +286,33 @@ export class HooksAndFunctionsFacet {
         removed += 1;
       }
     }
+    // [ADR-0150 D4, #31716] The same registrations leave the holder set,
+    // including one the bare map had already replaced with another
+    // package's. The count stays the bare map's.
+    for (const [name, holders] of this.functionHolders) {
+      for (const [holder, entry] of holders) if (entry.packageId === packageId) holders.delete(holder);
+      if (holders.size === 0) this.functionHolders.delete(name);
+    }
     if (removed > 0) {
       this.logger.debug('Unregistered functions by package', { packageId, removed });
     }
     return removed;
+  }
+
+  /** The body of `ObjectQL#functionHoldersOf`; the method's docblock there is its contract. */
+  static functionHoldersOf(this: Pick<HooksAndFunctionsHost, 'functionHolders'>, name: string): PackageScopedHolderSource<Readonly<FunctionEntry>> {
+    // A snapshot: a registration after this call is not in it. An owner-less
+    // registration is the platform's (code a plugin or the host registers),
+    // never an item authored in the environment (epic seat ruling 6729484996).
+    const holdings = [...(this.functionHolders.get(name) ?? [])];
+    const platform = holdings.find(([packageId]) => packageId === null)?.[1];
+    const packages = packageScopedHolderSource<Readonly<FunctionEntry>>(holdings.filter(([packageId]) => packageId !== null));
+    return Object.freeze({
+      packageHolders: packages.packageHolders,
+      packageItem: packages.packageItem,
+      environmentItem: () => undefined,
+      platformItem: () => platform,
+    });
   }
 
   /** The body of `ObjectQL#bindHooks`; the method's docblock there is its contract. */

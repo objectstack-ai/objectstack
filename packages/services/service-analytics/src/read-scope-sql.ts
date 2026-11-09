@@ -32,7 +32,7 @@ import type { RegisteredErrorCode } from '@objectstack/spec/api';
 import type { EngineFilterJudgement, EngineFilterJudgementOptions } from '@objectstack/spec/contracts';
 import type { ReadScopeFilterJudge } from './strategies/types.js';
 import { type LikeShape } from './like-pattern.js';
-import { textMatchPredicateSql, normalizeSqlDialect } from './text-match-sql.js';
+import { textMatchPredicateSql, normalizeSqlDialect, noJsonFunctionReason } from './text-match-sql.js';
 import { containsMembershipSql, isJsonStoredShape } from './contains-membership-sql.js';
 import { emptyOperatorPredicateSql } from './empty-operator-sql.js';
 import { textOperatorPolarity } from './non-text-column.js';
@@ -1590,8 +1590,9 @@ function membershipMatch(
   opts: ReadScopeCompileOptions,
 ): string | null {
   if (!isJsonStoredShape(opts.declaredValueShape?.(field))) return null;
+  const dialect = normalizeSqlDialect(opts.dialect);
   const sql = containsMembershipSql({
-    dialect: normalizeSqlDialect(opts.dialect),
+    dialect,
     column: col,
     value: val,
     negate: op === '$notContains',
@@ -1600,7 +1601,8 @@ function membershipMatch(
   if (sql === null) {
     throw readScopeCompileError(
       `[read-scope-sql] "${op}" on "${field}" is a membership test on a multi-valued or JSON-stored field, whose ` +
-        `JSON function differs per SQL dialect, and the dialect of this datasource is not known — refusing to ` +
+        `JSON function differs per SQL dialect, and ` +
+        `${noJsonFunctionReason(dialect, 'the dialect of this datasource is not known')} — refusing to ` +
         `build read scope (fail-closed) rather than reading the stored JSON text as a substring.`,
     );
   }
@@ -2355,8 +2357,9 @@ function compileEmptyOperator(
         `is whoever BUILT this read scope, or the host's field metadata — never the caller of this query.`,
     );
   }
+  const dialect = normalizeSqlDialect(opts.dialect);
   const sql = emptyOperatorPredicateSql({
-    dialect: normalizeSqlDialect(opts.dialect),
+    dialect,
     column: col,
     expansion: expandEmptyOperator(shape),
     empty,
@@ -2365,7 +2368,8 @@ function compileEmptyOperator(
   if (sql === null) {
     throw readScopeCompileError(
       `[read-scope-sql] "$empty" on "${field}" is a multi-value field, whose empty list is tested with a ` +
-        `JSON function that differs per SQL dialect, and the dialect of this datasource is not known — ` +
+        `JSON function that differs per SQL dialect, and ` +
+        `${noJsonFunctionReason(dialect, 'the dialect of this datasource is not known')} — ` +
         `refusing to build read scope (fail-closed) rather than guessing the construct.`,
     );
   }

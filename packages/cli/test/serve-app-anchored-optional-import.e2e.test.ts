@@ -193,6 +193,7 @@ const DRIVER_MARK = '[fixture] app-local @objectstack/service-cluster-redis load
 const FAKE_CLUSTER = `
 console.error(${JSON.stringify(CLUSTER_MARK)});
 export function checkMultiNodeAllowed() { return { allowed: true }; }
+export function declaresMultiNode() { return false; }
 `;
 
 /**

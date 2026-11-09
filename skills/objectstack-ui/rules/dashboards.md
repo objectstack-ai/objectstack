@@ -9,9 +9,8 @@
 ## Dashboards
 
 Dashboards are a grid of widgets (`columns` × `rowHeight`) sharing a
-`dateRange` scrubber and `globalFilters`. Each widget **binds a `dataset`** and
-selects named `dimensions` + `values`, picks a chart `type`, and sets a
-`layout: {x,y,w,h}` (ADR-0021).
+`dateRange` scrubber and `globalFilters`. Each widget binds a `dataset`
+(below), picks a chart `type`, and sets a `layout: {x,y,w,h}` (ADR-0021).
 
 ### Widget Types
 
@@ -181,8 +180,7 @@ export const SalesDashboard: Dashboard = {
       compareTo: { kind: 'previousPeriod' },
     },
 
-    // Chart widget with comparison overlay. The date axis is a dataset
-    // dimension whose monthly bucketing lives on the dataset (`dateGranularity`).
+    // Chart widget with comparison overlay.
     {
       id: 'revenue_vs_last_year', type: 'line',
       title: 'Revenue — This Year vs Last',
@@ -229,8 +227,7 @@ const widgets: DashboardWidget[] = [
 Set `compareTo` on any data-bound widget to add a second query against a
 shifted time window.
 
-`compareTo` is `{ kind, dimension? }` — the same shape the analytics executor
-reads (`DatasetSelection.compareTo`).
+`compareTo` is `{ kind, dimension? }`.
 
 | Key | Value | Behaviour |
 |:--|:--|:--|
@@ -296,8 +293,13 @@ import { defineDataset, type DashboardWidget } from '@objectstack/spec/ui';
 defineDataset({
   name: 'crm_contract_metrics', label: 'Contract Metrics', object: 'contract',
   dimensions: [{ name: 'signed_date', field: 'signed_date', type: 'date', dateGranularity: 'month' }],
-  measures: [{ name: 'signed_count', aggregate: 'count' }],
+  measures: [{ name: 'signed_count', aggregate: 'count', synonyms: ['签约数', 'deals signed'],
+    description: 'Contracts signed in the period, drafts excluded.' }],
 });
+// Member `synonyms` (ADR-0149 D1): the words a question uses for it, every
+// language in one list; matched, never translated; none may equal another
+// member's name, label or synonym. `description`: a business definition,
+// never a prompt; translated like `label`.
 // A money measure may set `currency` (ISO 4217, e.g. `'USD'`). Chain:
 // measure `currency` → the field's `defaultCurrency` (`fixed` only) →
 // tenant `localization.currency`; omit it for counts. A
@@ -329,7 +331,7 @@ const signedByMonth: DashboardWidget = { id: 'signed_by_month', type: 'line',
   to the label above, and resolves `select`/`lookup` dimension values to their
   option label / related-record name. Measures carry their `label` + `format`
   (e.g. `$0,0`) so KPIs and legends read "Total Spent / $616,000", not
-  "spent_sum / 616000". Authors do not format dimension/measure values by hand.
+  "spent_sum / 616000".
 * **Combines with `compareTo`** — the comparison query is issued with the same
   granularity, so the muted overlay aligns bucket-for-bucket.
 * **Rule of thumb** — `day` for ≤30d windows, `week` for ~90d, `month` for
@@ -389,8 +391,7 @@ records, click a row to open one, or "Open in list →" for the full list page.
 ```typescript
 import { defineReport } from '@objectstack/spec/ui';
 
-// ADR-0021: a report binds a `dataset` and selects `rows` (dimensions) +
-// `values` (measures) BY NAME. The `crm_opportunity_metrics` dataset defines the
+// ADR-0021: the `crm_opportunity_metrics` dataset defines the
 // object, the `amount_sum` measure, and the `forecast_category` + `close_date`
 // (dateGranularity: 'quarter') dimensions — see Guides → Analytics Datasets.
 export const PipelineCoverageReport = defineReport({
