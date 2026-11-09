@@ -3433,6 +3433,36 @@ export class MetadataManager implements IMetadataService {
     return () => this.detachClusterPubSub();
   }
 
+  /**
+   * The `cluster.resync` answer for this lane: the cluster driver's connection
+   * came back after an outage, during which any `metadata.changed` a peer
+   * published was lost (the bus is at-most-once). Called by
+   * `MetadataClusterBridgePlugin` in `@objectstack/service-cluster` on the
+   * driver's local `cluster.resync` event; a no-op until a transport is
+   * attached.
+   *
+   * The receipt of a nameless event, for every type this manager holds a
+   * list for: {@link invalidateForForeignWrite} with no name drops the list
+   * cache (and the endpoint index), so the next `list()` re-reads the loaders
+   * — where a write the lost hint announced already is. Registry ENTRIES are
+   * kept, for the reason that method gives: which names a peer wrote is
+   * exactly what the lost hints carried, and dropping a whole type store would
+   * evict `registerInMemory()` artefacts no loader can restore.
+   */
+  resyncClusterPubSub(): void {
+    if (!this.clusterPubSub) return;
+    const types = new Set<string>([
+      ...this.listCache.keys(),
+      ...this.inflightListReads.keys(),
+      MetadataManager.ENDPOINT_METADATA_TYPE,
+    ]);
+    for (const type of types) this.invalidateForForeignWrite(type);
+    this.logger.info('MetadataManager resynced after a cluster outage: list caches dropped', {
+      nodeId: this.clusterNodeId,
+      types: types.size,
+    });
+  }
+
   /** Tear down cluster wiring. Safe to call multiple times. */
   detachClusterPubSub(): void {
     if (this.clusterUnsubscribe) {
