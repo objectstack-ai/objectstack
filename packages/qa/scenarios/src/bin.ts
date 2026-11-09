@@ -18,6 +18,9 @@
  * file (`tsup.config.ts` turns the import into one of the built `dist/cli.js`):
  * its graph (the scorer's objectql and plugin-sharing among it) takes about a
  * second warm and several cold, which `help` and `version` must not pay.
+ * `export-gallery --check DIR` (the gallery check, `export/check-cli.ts`) is
+ * imported the same way, from the built `dist/export-check.js`. The export
+ * itself is not offered here: it reads a checkout's run records and cards.
  */
 
 import { readFileSync } from 'node:fs';
@@ -30,6 +33,9 @@ Commands:
   run [flags]   run the scenario cards end to end and write one run record per card
                 (the flags of run-scenarios: --only, --modes, --driver, --cards, --out, …;
                 see the package README, "Running from npm")
+  export-gallery --check DIR
+                check a gallery tree (index.json, apps/) as a PR on objectstack-ai/gallery
+                must pass: one line per finding, exit 1 on any
   help          print this text
   version       print the package version
 
@@ -52,6 +58,7 @@ function packageVersion(): string {
 export async function runCli(argv: readonly string[], io: CliIo = consoleIo): Promise<number> {
   const [command, ...rest] = argv;
   if (command === 'run') return (await import('./runner/cli.js')).main(rest);
+  if (command === 'export-gallery') return (await import('./export/check-cli.js')).mainCheck(rest, { io });
   if (command === 'help' || command === '--help' || command === '-h') {
     io.out(USAGE);
     return 0;

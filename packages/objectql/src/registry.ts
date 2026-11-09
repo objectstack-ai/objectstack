@@ -47,6 +47,9 @@ import {
   // installed?" asks it, over this registry's installed manifests.
   pairsOf,
   installedManifestsOf,
+  // [ADR-0150 D3, #28802] The one closure walk: a dependent's bundle addition
+  // under a dependency's name is no holder of that name for a bare read.
+  packageDependencyClosure,
 } from '@objectstack/metadata-core';
 // [ADR-0029 D9.2a] `scalarOverridesPackagedBase` is the #8284 comparison, imported rather
 // than re-spelled: the object FOLD asks the same question one layer down (has
@@ -7735,7 +7738,7 @@ export class SchemaRegistry {
 
     // One name, one package holder for the bare-name registry types (a
     // picklist, a mapping, a dataset, an API, an object-less action, a flow, a
-    // webhook, a connector, an email template, an agent, a skill) — the item seam
+    // webhook, a connector, an email template, an agent, a skill, a tool) — the item seam
     // (`bare-name-one-holder.ts`; ADR-0048 §3.4 narrowed). Once the cold boot
     // has sealed the holders, a package registering one under a name another
     // package holds — and that it does not hold itself — is refused BEFORE
@@ -8368,8 +8371,23 @@ export class SchemaRegistry {
    * Every package, overridable baselines included: the resolver ranks them
    * (`package-scoped-resolver.ts`). An object is not addressed by package
    * (ADR-0150 D1 bucket 1) and answers `[]`.
+   *
+   * [#28802, epic #31527 child R2] A bundle ADDITION holds no name: a
+   * package whose members of a bundled type's name are all members another
+   * holder in its declared dependency closure does not hold (a dependent's
+   * locale its base does not ship, which the write gate admits and which
+   * stays under the dependent) adds to that holder's bundle, so it is no
+   * second holder of the name for a bare read. The addition is still the
+   * dependent's member: {@link getPackageScopedItem} naming the dependent
+   * reads it. A package holding a member its dependency also holds is a
+   * holder (a clash, refused by the resolver, never folded away).
+   *
+   * @param callerPackageId - The package a bare read is made from. Its own
+   *   holding stays in the set even when it is an addition, so its step 1
+   *   (its own item, ADR-0150 D3) answers as before: the addition only stops
+   *   counting toward OTHER callers' ambiguity (epic seat review 6729484996).
    */
-  packageScopedHoldersOf(type: string, name: string): string[] {
+  packageScopedHoldersOf(type: string, name: string, callerPackageId?: string | null): string[] {
     const collection = this.metadata.get(type);
     if (!collection) return [];
     const composite = this.compositeHoldersOf(collection, name);
@@ -8379,7 +8397,42 @@ export class SchemaRegistry {
       const bound = this.overlaySlotBinding(item, name, collection, compositeSet);
       if (typeof bound === 'string') holders.add(bound);
     }
-    return [...holders];
+    const disc = ITEM_KEY_DISCRIMINATORS[type];
+    if (!disc || holders.size < 2) return [...holders];
+    const membersOf = new Map<string, Set<string>>();
+    for (const id of holders) membersOf.set(id, this.bundleMembersHeldBy(type, collection, name, id, compositeSet, disc));
+    return [...holders].filter((id) => id === callerPackageId || !this.isBundleAddition(id, membersOf));
+  }
+
+  /**
+   * [#28802] The members (discriminator values) of `name`'s bundle that
+   * `packageId` holds: its composite group's, and the bare-slot entries that
+   * bind to it ({@link overlaySlotBinding}).
+   */
+  private bundleMembersHeldBy(type: string, collection: Map<string, any>, name: string, packageId: string,
+    holders: ReadonlySet<string>, disc: { field: string; canonical: string }): Set<string> {
+    const { local } = collectBundle(collection, name, disc, packageId);
+    const bound = this.bareSlotEntriesOf(type, collection, name)
+      .filter(({ item }) => this.overlaySlotBinding(item, name, collection, holders) === packageId);
+    return new Set([...local, ...bound].map((e) => discriminatorValue(e.item, disc.field) || disc.canonical));
+  }
+
+  /**
+   * [#28802] Whether `packageId`'s holding of a bundle's name is an addition
+   * to another holder's bundle: some other holder is in `packageId`'s declared
+   * dependency closure (the save door's walk), `packageId` is not in that
+   * holder's, and none of `packageId`'s members is one that holder holds.
+   */
+  private isBundleAddition(packageId: string, membersOf: ReadonlyMap<string, ReadonlySet<string>>): boolean {
+    const own = membersOf.get(packageId)!;
+    const reach = new Set(packageDependencyClosure(packageId, this)?.dependencies ?? []);
+    for (const [base, baseMembers] of membersOf) {
+      if (base === packageId || !reach.has(base)) continue;
+      if (packageDependencyClosure(base, this)?.dependencies.includes(packageId)) continue;
+      if ([...own].some((m) => baseMembers.has(m))) continue;
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -9280,6 +9333,34 @@ export class SchemaRegistry {
     return this.metadata.get('package')?.get(id) as InstalledPackage | undefined;
   }
 
+  /**
+   * [ADR-0130 D4, epic #31527 R2] The dependencies each residual owner
+   * declared — the id a multi-package stack's top-level items are owned by,
+   * which has no package record. Kept beside the package records, never as
+   * one: `getPackage` / `getAllPackages` do not see it.
+   */
+  private readonly residualOwnerDependencies = new Map<string, readonly string[]>();
+
+  /**
+   * Record the dependencies residual owner `ownerId` declares on its stack's
+   * manifest, as the artifact door registers its residual. The latest record
+   * wins (a reinstall of the stack restates them).
+   */
+  recordResidualOwnerDependencies(ownerId: string, dependencies: readonly string[]): void {
+    this.residualOwnerDependencies.set(ownerId, Object.freeze([...dependencies]));
+  }
+
+  /**
+   * The dependencies residual owner `id` declared, or `undefined` for an id
+   * that is no recorded residual owner. The one closure walk
+   * (`packageDependencyClosure` in `@objectstack/metadata-core`) reads it for
+   * an id {@link getPackage} cannot produce, so a residual reaches what it
+   * declares through every reader of that walk.
+   */
+  residualOwnerDependenciesOf(id: string): readonly string[] | undefined {
+    return this.residualOwnerDependencies.get(id);
+  }
+
   getAllPackages(): InstalledPackage[] {
     return this.listItems<InstalledPackage>('package');
   }
@@ -9823,6 +9904,7 @@ export class SchemaRegistry {
     this.metadata.clear();
     this.appNavContributions.clear();
     this.picklistExtensionContributions.clear();
+    this.residualOwnerDependencies.clear();
     this._objectRevision += 1;
     this.log('[Registry] Reset complete');
   }

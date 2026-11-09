@@ -54,8 +54,8 @@ export interface CronJobAdapterOptions {
    * discriminator and NEVER depends on this value being supplied or distinct.
    */
   namespace?: string;
-  /** Surface for registry-level anomalies (a reclaimed job name). */
-  logger?: { warn(msg: string, meta?: unknown): void };
+  /** Surface for registry-level anomalies (a reclaimed job name) and cluster-lock outages. */
+  logger?: { warn(msg: string, meta?: unknown): void; info?(msg: string, meta?: unknown): void };
 }
 
 interface CronJobRecord {
@@ -80,7 +80,12 @@ export class CronJobAdapter implements IJobService {
   private readonly jobs = new Map<string, CronJobRecord>();
   private readonly cluster?: SchedulerCluster;
   private readonly leaseMs: number;
-  private readonly logger?: { warn(msg: string, meta?: unknown): void };
+  private readonly logger?: { warn(msg: string, meta?: unknown): void; info?(msg: string, meta?: unknown): void };
+  /**
+   * True from the first cluster-lock failure until the lock answers again:
+   * the outage is warned about once, not once per tick of every job.
+   */
+  private lockOutage = false;
 
   /**
    * This instance's prefix in croner's PROCESS-GLOBAL name registry.
@@ -233,13 +238,49 @@ export class CronJobAdapter implements IJobService {
     if (!record) return;
     const lock = this.cluster?.lock;
     if (!lock) { await this.execute(record); return; }
-    const handle = await lock.acquire(`job:${name}`, { ttlMs: this.leaseMs, waitMs: 0 });
+    // The timers above fire this as `void this.runScheduled(...)`, so a
+    // rejection here is an unhandled one, and an unhandled rejection ends the
+    // process: before this guard, a remote lock store going away crashed every
+    // replica at its next tick. An unreachable lock is not "another node is the
+    // leader" either — it is no answer at all — so the fire is skipped (no
+    // node can prove it alone runs it) and the next tick asks again.
+    let handle: { release(): Promise<void> } | null;
+    try {
+      handle = await lock.acquire(`job:${name}`, { ttlMs: this.leaseMs, waitMs: 0 });
+    } catch (err) {
+      this.reportLockFailure(name, 'acquire', err);
+      return;
+    }
+    this.reportLockAnswered();
     if (!handle) return; // another node is the leader for this fire
     try {
       await this.execute(record);
     } finally {
-      try { await handle.release(); } catch { /* ignore */ }
+      try {
+        await handle.release();
+      } catch (err) {
+        // The lease still expires on its TTL; the fire itself ran.
+        this.reportLockFailure(name, 'release', err);
+      }
     }
+  }
+
+  /** One warning per outage of the cluster lock, never one per tick. */
+  private reportLockFailure(name: string, step: 'acquire' | 'release', err: unknown): void {
+    if (this.lockOutage) return;
+    this.lockOutage = true;
+    this.logger?.warn(
+      `CronJobAdapter: the cluster lock could not ${step} "job:${name}" (${err instanceof Error ? err.message : String(err)}); ` +
+        'scheduled fires are skipped while the lock is unreachable and each job retries on its next tick. ' +
+        'Further lock failures are not logged until it answers again.',
+    );
+  }
+
+  /** The lock answered (granted or held elsewhere): an outage, if one was reported, is over. */
+  private reportLockAnswered(): void {
+    if (!this.lockOutage) return;
+    this.lockOutage = false;
+    this.logger?.info?.('CronJobAdapter: the cluster lock answers again; scheduled fires resume.');
   }
 
   private async execute(record: CronJobRecord, data?: unknown): Promise<void> {

@@ -146,6 +146,54 @@ describe('[#31327] paging — OFFSET … FETCH needs an ORDER BY; LIMIT 0 is TOP
   });
 });
 
+/**
+ * [#31626] The find path's window, as the statement the driver sends. The
+ * window's rules moved to `@objectstack/core` (`mssqlWindow`), which the
+ * analytics echo also renders with; this pins the driver's own statements
+ * byte-identical across that move. The knex client is stubbed below the
+ * compiler, so every statement compiles exactly as it would for a server and
+ * none is sent: the paging-key prime reads no key, the find reads no row.
+ */
+describe('[#31626] find on SQL Server: the window statement is unchanged by the move to core', () => {
+  /** Every statement the driver sends, as `sql · bindings`. */
+  const sent = (d: SqlDriver): string[] => {
+    const statements: string[] = [];
+    const client = (d.getKnex() as unknown as { client: Record<string, unknown> }).client;
+    client.acquireConnection = async () => ({});
+    client.releaseConnection = async () => {};
+    client._query = async (_conn: unknown, obj: { sql: string; bindings?: unknown[]; response?: unknown }) => {
+      statements.push(`${obj.sql} · ${JSON.stringify(obj.bindings ?? [])}`);
+      obj.response = [];
+      return obj;
+    };
+    client.processResponse = () => [];
+    return statements;
+  };
+
+  const WINDOWS: ReadonlyArray<[string, { limit?: number; offset?: number; orderBy?: Array<{ field: string; order: 'asc' | 'desc' }> }, string]> = [
+    ['no window', {}, 'select [name] from [dbo].[Orders] · []'],
+    ['limit 10', { limit: 10 }, 'select top (@p0) [name] from [dbo].[Orders] · [10]'],
+    ['limit 0', { limit: 0 }, 'select top (@p0) [name] from [dbo].[Orders] · [0]'],
+    ['offset 5', { offset: 5 }, 'select [name] from [dbo].[Orders] order by (SELECT NULL) offset @p0 rows · [5]'],
+    ['offset 0', { offset: 0 }, 'select [name] from [dbo].[Orders] · []'],
+    ['limit 10, offset 5', { limit: 10, offset: 5 }, 'select [name] from [dbo].[Orders] order by (SELECT NULL) offset @p0 rows fetch next @p1 rows only · [5,10]'],
+    ['limit 10, offset 0', { limit: 10, offset: 0 }, 'select top (@p0) [name] from [dbo].[Orders] · [10]'],
+    ['limit 0, offset 5', { limit: 0, offset: 5 }, 'select top (@p0) [name] from [dbo].[Orders] order by (SELECT NULL) · [0]'],
+    ['ordered, limit 10, offset 5', { limit: 10, offset: 5, orderBy: [{ field: 'name', order: 'asc' }] }, 'select [name] from [dbo].[Orders] order by [name] asc offset @p0 rows fetch next @p1 rows only · [5,10]'],
+    ['ordered, offset 5', { offset: 5, orderBy: [{ field: 'name', order: 'desc' }] }, 'select [name] from [dbo].[Orders] order by [name] desc offset @p0 rows · [5]'],
+    ['ordered, limit 10', { limit: 10, orderBy: [{ field: 'name', order: 'asc' }] }, 'select top (@p0) [name] from [dbo].[Orders] order by [name] asc · [10]'],
+  ];
+
+  for (const [label, window, expected] of WINDOWS) {
+    it(`${label}: ${expected}`, async () => {
+      const d = probe();
+      const statements = sent(d);
+      await d.find('t', { fields: ['name'], ...window } as never, { bypassTenantAudit: true } as never);
+      expect(statements[statements.length - 1]).toBe(expected);
+    });
+  }
+});
+
 describe('[#31327] aggregands — bit is not a SUM/AVG/MIN/MAX operand on SQL Server', () => {
   it('a boolean aggregand is cast to int, and AVG accumulates in float', () => {
     expect(mssqlAggregandOperandSql('sum', 'boolean', '??')).toBe('cast(?? as int)');

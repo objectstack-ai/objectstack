@@ -80,6 +80,13 @@
  *     `cancelled`. So a superseded matrix masks no regression, and demanding
  *     credentials there would paint the false red on the superseded SHA that
  *     #3668 removed.
+ *     Since #31517 (ruling record 6730013883) the merge queue's `test` and
+ *     `dogfood` matrices are fail-fast, which is run 30271824408's own shape:
+ *     the red shard's `failure` dominates the leg, the leg's declared negative
+ *     vetoes the gate, and the shards the strategy cancelled are missing from
+ *     the count. Such a shard records `The strategy configuration was
+ *     canceled because "…" failed` on its check run, which
+ *     `classifyCancelAnnotations` reads as `other`, never a supersession.
  *     ⛔ That argument covers a shard that RAN AND FAILED. It does not cover a
  *     shard killed while still executing, which produces no verdict at all —
  *     there is no `failure` to dominate (#16157, run 34007386254: `Test Core
@@ -1740,11 +1747,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#26084 a planned roster: only the shards the plan started are counted': 16,
   '#26084 the static guard holds the planned matrix and the gate to one expression': 10,
   '#31519 a borrowed push: the gate skip and the seed-only credential guard': 8,
+  '#31517 merge-queue fail-fast: one shard red, the rest cancelled by the strategy': 8,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 25;
+const SELF_TEST_BATTERY_FLOOR = 26;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2292,6 +2300,40 @@ async function selfTest() {
     !verifyKilled.ok && verifyKilled.errors.some((e) => e.includes('leg dogfood-verify (single leg)') && e.includes('own job timeout')),
     "#22653 control: the single-leg path keeps #22606's verdict and words — a killed CLI leg is red beside a superseded matrix shard",
   );
+
+  // ── #31517: the merge queue's matrices are fail-fast ─────────────────────
+  // On `merge_group` the `test` and `dogfood` matrices stop their remaining
+  // shards once one is red (ruling record 6730013883). The shape is run
+  // 30271824408's: the red shard concludes `failure`, the shards the strategy
+  // cancelled conclude `cancelled` and attest nothing, and the matrix result
+  // reads `failure`. The annotation below is that run's cancelled shard (check
+  // run 89995981782), read from the check-run annotations endpoint.
+  battery('#31517 merge-queue fail-fast: one shard red, the rest cancelled by the strategy');
+  const FAIL_FAST_ANNOTATIONS = [annotation('The strategy configuration was canceled because "matrix._1" failed'), annotation('The operation was canceled.')];
+  const failFast = (ids) => testCore(ids, undefined, { result: 'failure' });
+  const fastShardsFirst = failFast([1, 3].map((n) => attest('test', n, 6)));
+  assert(!fastShardsFirst.ok, '#31517: shard 2 red, 1 and 3 attested before it, 4-6 cancelled by fail-fast ⇒ red');
+  assert(
+    fastShardsFirst.errors.some((e) => e.includes("reported result 'failure'")) &&
+      fastShardsFirst.errors.some((e) => [2, 4, 5, 6].every((n) => e.includes(`test-${n}-of-6`))),
+    '#31517: …by the declared negative AND by the count, which names the red shard and every shard it cancelled',
+  );
+  assert(!failFast([]).ok, '#31517: the first shard red before any sibling attested, all cancelled ⇒ red — `failure` is never the zero-attestation #3668 pass');
+  assert(
+    shardsNeedingCancelCause(testLegs('failure'), new Map([1, 3].map((n) => attest('test', n, 6)))).length === 0,
+    '#31517: a fail-fast matrix reads `failure`, so the gate asks no cancel cause — no API read can turn it green',
+  );
+  assert(classifyCancelAnnotations(FAIL_FAST_ANNOTATIONS).kind === 'other', "#31517: a shard cancelled by its matrix's fail-fast is never read as a supersession");
+  const ifItEverReadCancelled = testCore(only5, new Map([1, 2, 3, 4, 6].map((n) => [attestationId('test', n, 6), classifyCancelAnnotations(FAIL_FAST_ANNOTATIONS)])));
+  assert(
+    !ifItEverReadCancelled.ok && ifItEverReadCancelled.errors.some((e) => e.includes('The strategy configuration was canceled')),
+    '#31517: were the matrix ever to read `cancelled` after a sibling attested, the fail-fast cause still reds it, quoting the record',
+  );
+  assert(
+    !judge({ gate: 'Test Core', legs: [{ job: 'test', total: 8, result: 'failure', shards: [2, 5, 7], planResult: 'success' }], filterResult: 'success', present: new Map([attest('test', 5, 8)]), runId: '99' }).ok,
+    '#31517 × #26084: a planned roster cut short by fail-fast ⇒ red',
+  );
+  assert(!dogfood('failure', 'success', [fullDogfood[0], fullDogfood[3]]).ok, '#31517: dogfood 2/3 red, 3/3 cancelled by fail-fast, the CLI leg green ⇒ the Dogfood Regression Gate reads red');
 
   // ── #22653: the per-shard cause read itself, offline ─────────────────────
   battery('#22653 the cause read, offline: one jobs list, then one annotations read per unattested shard');

@@ -39,6 +39,7 @@ import {
   type QueryReadRequest,
 } from '@objectstack/types';
 import { CubeRegistry } from './cube-registry.js';
+import { createDatasetTools, type DatasetTools, type DatasetToolsDeps } from './dataset-tools.js';
 import { cubeNotFoundError, isCubePublic } from './cube-visibility.js';
 import { cubeNameRequiredError } from './cube-name-refusal.js';
 // The object-level read admission asked at this door, ahead of every strategy
@@ -111,6 +112,7 @@ import { drillWindowBounds } from './drill-window.js';
 import {
   DatasetExecutor,
   declaredDefaultGranularity,
+  expandSelectedMeasures,
   resolveDimensionGranularity,
   resolveSelectionTokens,
   type DateGranularityValue,
@@ -1483,6 +1485,39 @@ interface CubeReads {
  * The service also owns a `CubeRegistry` for metadata discovery and
  * auto-inference from object schemas.
  */
+/**
+ * [ADR-0149 D2] What {@link AnalyticsService.admitDatasetCatalogEntry} admits
+ * of one dataset for one caller.
+ *
+ * - `admitted: false` — the dataset is absent for this caller (a gate refused
+ *   it, or it is an author defect every caller is refused). `unresolved` says
+ *   a gate could not reach a verdict, so the absence is not a fact.
+ * - `admitted: true` — the dimension and measure NAMES the caller may be
+ *   listed; `withheld` when a member was left out because this caller may not
+ *   read a field it reads (ADR-0090 D10: the narrowing is stated);
+ *   `unresolved` when a member was left out because its gate could not answer.
+ */
+export type DatasetCatalogAdmission =
+  | { readonly admitted: false; readonly unresolved: boolean }
+  | {
+      readonly admitted: true;
+      readonly dimensions: ReadonlySet<string>;
+      readonly measures: ReadonlySet<string>;
+      readonly withheld: boolean;
+      readonly unresolved: boolean;
+    };
+
+/**
+ * A refusal that IS a verdict — a declared 4xx (`PERMISSION_DENIED` / 403,
+ * `OBJECT_API_DISABLED` / 404, `OBJECT_API_METHOD_NOT_ALLOWED` / 405,
+ * `INVALID_FIELD` / 400). A 5xx (the 503 `SERVICE_UNAVAILABLE` a provider
+ * that threw answers) or an error with no status reached no verdict.
+ */
+function isAdmissionVerdict(error: unknown): boolean {
+  const status = (error as { status?: unknown } | null | undefined)?.status;
+  return typeof status === 'number' && status >= 400 && status < 500;
+}
+
 export class AnalyticsService implements IAnalyticsService {
   private readonly strategies: AnalyticsStrategy[];
   /** Context-independent part of the StrategyContext (no per-request scope). */
@@ -1541,6 +1576,8 @@ export class AnalyticsService implements IAnalyticsService {
   private readonly objectDeclarationProvider?: ObjectDeclarationProvider;
   /** One-shot flag for the no-declaration-probe stand-down warning. */
   private warnedNoObjectDeclaration = false;
+  /** Names {@link reportDatasetCatalogDefect} already reported (once each). */
+  private readonly reportedCatalogDefects = new Set<string>();
   /** [#3867] One-shot flag for the {@link assertInferableCube} stand-down warning. */
   private warnedNoObjectRegistry = false;
   /** [#19995] One-shot flag for the {@link reportUnjudgedReadScope} warning. */
@@ -2772,6 +2809,156 @@ export class AnalyticsService implements IAnalyticsService {
       query: (query, context) => this.queryIn(scope, query, context),
       getMeta: (cubeName) => this.getMeta(cubeName),
     };
+  }
+
+  /**
+   * [ADR-0149 D4] Whether this service carries every admission hook
+   * `AnalyticsServicePlugin` wires: the exposure declarations
+   * (`getObjectDeclaration`), the object read grant (`admitObjectRead`) and
+   * the field pair (`getReadableFields`, `getQueryableFields`).
+   *
+   * A service built by hand without them answers with the gates INACTIVE —
+   * the exposure gate warns once and passes, the read admission returns
+   * without a word — which is a legitimate configuration for a host that has
+   * no security service, and is never one the dataset AI tools may serve
+   * from: they read on a caller's behalf, so they refuse unless every gate
+   * the REST door asks is live (`dataset-tools.ts`).
+   */
+  hasPluginWiredAdmission(): boolean {
+    return this.objectDeclarationProvider !== undefined
+      && this.readAdmissionProvider !== undefined
+      && this.readableFieldsProvider !== undefined
+      && this.queryableFieldsProvider !== undefined;
+  }
+
+  /**
+   * [ADR-0149 D2] The dataset AI tools bound to THIS service — the seam the
+   * MCP bridges and the product AI reach through the kernel's `'analytics'`
+   * service, so neither host imports this package. `createDatasetTools` with
+   * `analytics` set to this service; `definitions` on the answer is
+   * {@link getDatasetToolDefinitions}. Refuses at every call unless
+   * {@link hasPluginWiredAdmission}.
+   */
+  datasetTools(deps: Omit<DatasetToolsDeps, 'analytics'>): DatasetTools {
+    return createDatasetTools({ ...deps, analytics: this });
+  }
+
+  /**
+   * [ADR-0149 D2/D4] What `list_datasets` may list of `dataset` for the caller
+   * in `context` — asked of the SAME gates every query of the dataset passes,
+   * through the same methods, never a copy of them:
+   *
+   * 1. The dataset as a whole: its `field` text is judgeable
+   *    ({@link assertDatasetFieldsJudgeable}) and it compiles
+   *    ({@link compile}); then exposure ({@link assertQueryObjectsExposed}) and
+   *    the object read grant ({@link assertReadAdmitted}) over its base object
+   *    and every `include` target ({@link cubeObjects}). A refusal here makes
+   *    the dataset ABSENT — the answer a dataset that does not exist gets, the
+   *    `CUBE_NOT_FOUND` shape (`cube-visibility.ts`).
+   * 2. Each member, as the one-member query `DatasetExecutor` would issue for
+   *    it (a derived measure as the base measures it reaches), with the
+   *    dataset's own filter and the measure's scoped filter riding the
+   *    dataset-scope channel exactly as on the query path: the stored-body and
+   *    `internal`-field refusals ({@link assertStoredMetadataBodyNotQueried},
+   *    {@link assertNoInternalFieldsQueried}) refuse it for EVERY caller, so it
+   *    is omitted without a word to the caller and reported once to the server
+   *    log as an author defect; the field-level admission
+   *    ({@link assertFieldsReadable}, `field-read-admission.ts`) refuses it for
+   *    THIS caller, so it is omitted and `withheld` says so.
+   *
+   * A gate that could not reach a verdict (a provider that threw — the 503
+   * `SERVICE_UNAVAILABLE` shape — or an error carrying no status) is never read
+   * as a verdict either way: the dataset or member is left out and
+   * `unresolved` is set, so the catalogue says it is partial instead of
+   * claiming an absence it did not establish.
+   */
+  async admitDatasetCatalogEntry(
+    dataset: Dataset,
+    context?: ExecutionContext,
+  ): Promise<DatasetCatalogAdmission> {
+    let compiled: CompiledDataset;
+    try {
+      this.assertDatasetFieldsJudgeable(dataset, context);
+      compiled = this.compile(dataset);
+    } catch (e) {
+      // Refused for every caller: an author defect, not a withholding.
+      this.reportDatasetCatalogDefect(`${dataset.name}`, e);
+      return { admitted: false, unresolved: false };
+    }
+    const objects = this.cubeObjects(compiled.cube);
+    try {
+      this.assertQueryObjectsExposed(objects);
+      await this.assertReadAdmitted(objects, context);
+    } catch (e) {
+      return { admitted: false, unresolved: !isAdmissionVerdict(e) };
+    }
+
+    const cube = compiled.cube;
+    const datasetScope: DatasetScope = {
+      filter: compiled.filter,
+      measureFilters: compiled.measureFilters,
+      measureDurations: compiled.durations,
+    };
+    const dimensions = new Set<string>();
+    const measures = new Set<string>();
+    let withheld = false;
+    let unresolved = false;
+    const judge = async (member: string, query: AnalyticsQuery): Promise<boolean> => {
+      try {
+        this.assertStoredMetadataBodyNotQueried(query, cube, datasetScope);
+        this.assertNoInternalFieldsQueried(query, cube, datasetScope);
+      } catch (e) {
+        this.reportDatasetCatalogDefect(`${dataset.name}.${member}`, e);
+        return false;
+      }
+      try {
+        await this.assertFieldsReadable(query, cube, datasetScope, context);
+        return true;
+      } catch (e) {
+        if (isAdmissionVerdict(e)) withheld = true;
+        else unresolved = true;
+        return false;
+      }
+    };
+    for (const d of dataset.dimensions ?? []) {
+      const query: AnalyticsQuery = { cube: cube.name, dimensions: [d.name], measures: [] };
+      if (await judge(`dimensions.${d.name}`, query)) dimensions.add(d.name);
+    }
+    for (const m of dataset.measures ?? []) {
+      let base: string[];
+      try {
+        base = [...expandSelectedMeasures([m.name], compiled.derived).base];
+      } catch (e) {
+        this.reportDatasetCatalogDefect(`${dataset.name}.measures.${m.name}`, e);
+        continue;
+      }
+      // A duration measure reads its two columns off the dataset-scope
+      // channel (`measureDurations`), which `namedQueryFields` reads for a
+      // measure named here, as on the query path.
+      const query: AnalyticsQuery = { cube: cube.name, measures: base, dimensions: [] };
+      if (await judge(`measures.${m.name}`, query)) measures.add(m.name);
+    }
+    return { admitted: true, dimensions, measures, withheld, unresolved };
+  }
+
+  /**
+   * [ADR-0149 D2] The author-surface report for a dataset or member the
+   * catalogue leaves out for EVERY caller: logged once per name, at `warn`
+   * (a functional degradation — the member is missing from the AI's
+   * catalogue, visibly), never shown to the caller, because naming it would
+   * disclose that an `internal` field exists (ADR-0100). Public so the
+   * dataset tools report a saved dataset that fails its parse through the
+   * same line (`dataset-tools.ts`).
+   */
+  reportDatasetCatalogDefect(name: string, error: unknown): void {
+    if (this.reportedCatalogDefects.has(name)) return;
+    this.reportedCatalogDefects.add(name);
+    const reason = error instanceof Error ? error.message : String(error);
+    this.logger.warn(
+      `[Analytics] dataset AI catalogue: "${name}" is left out of list_datasets for every caller — a query of ` +
+        `it is refused whoever asks (${reason}). Fix the dataset definition; until then no AI caller sees it. ` +
+        'Reported once.',
+    );
   }
 
   /**

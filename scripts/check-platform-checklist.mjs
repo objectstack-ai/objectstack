@@ -1103,7 +1103,7 @@ let plannedStatusReachedVerdict = false;
 // silences that battery exactly as effectively as zeroing it, so the roster's
 // own size is pinned beside it.
 //
-// The attribution differs from `scripts/pm/ci-failure.mjs`, whose rows open a
+// The attribution differs from `scripts/pm/check-governed-merges.mjs`, whose rows open a
 // battery by name so a stray assertion lands in a declared bucket: here each
 // battery is a FUNCTION returning its own `checked`, so a row cannot be filed
 // under the wrong battery in the first place, and the roster's job is the

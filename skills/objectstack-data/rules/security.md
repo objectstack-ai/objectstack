@@ -34,7 +34,7 @@ export const salesUser = definePermissionSet({
 ## Assigning a permission set to a user
 
 Declaring a set grants nobody anything — an assignment is **data**: one row in
-the join object **`sys_user_permission_set`** (`@objectstack/plugin-security`),
+the join object **`sys_user_permission_set`**,
 carrying `user_id`, `permission_set` (the set's machine **`name`**) and an
 optional `organization_id` (`null` = every org context). Optional `valid_from` /
 `valid_until` bound a half-open window; `granted_by` is stamped by the gate on
@@ -56,7 +56,7 @@ enforcing code path (explaining another user needs `manage_users`).
 ## Row-Level Security (RLS)
 
 The **enforced** RLS surface is a list of `rowLevelSecurity` policies on a
-**permission set / profile** (`PermissionSetSchema.rowLevelSecurity`), *not* a
+**permission set / profile**, *not* a
 CEL predicate on the object. Each policy's `using` and/or `check` is a **string**
 predicate. `using` admits rows: what a `select` policy lets the
 caller read, and the existing rows an `update`/`delete` policy lets it change
@@ -67,7 +67,7 @@ operation: when any applicable policy declares `check`, only those decide
 (OR-combined); else each applicable `using` stands in. A non-blank `check` on a
 `select`/`delete` policy is refused. Default deny, among the policies that
 apply: a row none admits is denied, an unevaluable policy fails closed; when
-none applies the policies restrict nothing (the tenant wall still applies) — an
+none applies the policies restrict nothing — an
 `update`/`delete` target with no write-class `using` is bounded by the caller's
 `select` policies.
 
@@ -94,8 +94,7 @@ Predicates are **canonical CEL** (ADR-0058): `field == current_user.<prop>`,
 `field == 'literal'`, `field in current_user.<array>`, comparisons (`>`/`<`/`>=`/`<=`),
 `&&`/`||`/`!`, and `== null` checks all lower to a pushdown filter. **No** cross-object
 traversal or subqueries — those are a compile error (ADR-0055), never silently dropped.
-A legacy SQL-style `=` / `IN (...)` predicate still compiles via a **deprecated**
-bridge (warns). The compiler resolves these
+The compiler resolves these
 `current_user.*` placeholders:
 
 | Placeholder | Resolves to |
@@ -103,10 +102,10 @@ bridge (warns). The compiler resolves these
 | `current_user.id` | the caller's user id (ownership) |
 | `current_user.email` | the caller's email (ADR-0056) |
 | `current_user.organization_id` | the caller's tenant |
-| `current_user.org_user_ids` | ids of users in the same org (for `IN`) |
-| `current_user.positions` | the caller's positions (for `IN`; ADR-0090 D3) |
-| `current_user.queues` | the ownership queues the caller sits in (for `IN`; ADR-0142 D3) |
-| `current_user.KEY` | the set an object's `membershipKeys.KEY` declares (for `IN`) |
+| `current_user.org_user_ids` | ids of users in the same org |
+| `current_user.positions` | the caller's positions (ADR-0090 D3) |
+| `current_user.queues` | the ownership queues the caller sits in (ADR-0142 D3) |
+| `current_user.KEY` | the set an object's `membershipKeys.KEY` declares |
 
 - Prefer the built-in `member_default` owner scoping (`owner_only_writes` /
   `owner_only_deletes`) and the object's `sharingModel` (ADR-0056 D1) over
@@ -114,9 +113,7 @@ bridge (warns). The compiler resolves these
 
 ## Membership keys — a `current_user.KEY` set the roster object declares
 
-Rows keyed on a **named record** (an account, a supplier):
-declare the set on the **roster** object whose rows
-define it, not one policy per record.
+Declare the set on the **roster** object, not one policy per record.
 
 <!-- os:check -->
 ```typescript
@@ -169,6 +166,13 @@ rowLevelSecurity: [
   one record, once → a sharing rule or a manual share; a team's records → a
   sharing rule whose `sharedWith: { type: 'queue', value: '<queue name>' }`
   reaches an ownership queue's members (SKILL.md § Ownership queues).
+- A package's rule reads `value` as its package's queue, else the one
+  holder in its declared `dependencies` closure plus `sys`, else (none
+  declares it) an org's `sys_queue` row. Else it grants no one new, warned
+  `RESOURCE_CONFLICT`: `outside-closure` (only a non-dependency
+  or an environment item holds `support`),
+  `ambiguous-in-closure` (two dependencies do), `ambiguous-in-environment`
+  (the one it reaches and a non-dependency do).
 
 ## Positions grant only what they name; portal users are `external`
 
@@ -180,7 +184,7 @@ rowLevelSecurity: [
   membership tier (closed list `owner`, `admin`, `delegated_admin`, `member`,
   `external`, one per member —
   https://objectstack.ai/docs/permissions/authentication#membership-tiers-are-a-closed-list).
-  The `everyone` baseline (`isDefault` sets) does not reach it, it sees no
+  The `everyone` baseline does not reach it, it sees no
   member directory and holds no business unit, and every org-wide default is
   owner-only for it: rows reach it **only** through the explicit grants above.
 
@@ -290,7 +294,7 @@ none — e.g. identity tables a plugin writes via its own adapter
 **Recipe — env-global, admin-only object that admins can fully see:**
 
 ```typescript
-tenancy: { enabled: false }, // not a tenant object → Layer 0 contributes nothing
+tenancy: { enabled: false },
 requiredPermissions: ['manage_platform_settings'], // capability AND-gate → members get 403
 ```
 
@@ -299,8 +303,7 @@ requiredPermissions: ['manage_platform_settings'], // capability AND-gate → me
 > wildcard (`'*'`) read grant — the shipped `viewer_readonly`, an app-declared
 > default profile, a customer-authored set; not `member_default`, which is
 > explicit-allow — reads every row env-wide. `requiredPermissions` alone leaves a
-> tenant object whose untagged rows the wall denies to everyone (above); it is
-> the half that holds however permissive the grants. Posture model: ADR-0066.
+> tenant object whose untagged rows the wall denies to everyone (above). Posture model: ADR-0066.
 
 ## Renaming or removing a shipped access item
 

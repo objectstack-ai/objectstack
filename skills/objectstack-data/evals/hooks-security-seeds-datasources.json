@@ -82,6 +82,16 @@
       }
     },
     {
+      "id": 18,
+      "prompt": "Our package `com.acme.crm` must share every escalated `case` with the members of `support_tier2`, the ownership queue the `com.acme.helpdesk` package ships. `com.acme.crm` declares no dependencies today.",
+      "expected_output": "A sharing rule in `com.acme.crm` with `sharedWith: { type: 'queue', value: 'support_tier2' }`, and `com.acme.crm`'s manifest declares `dependencies` on `com.acme.helpdesk`: a package's rule reads the queue as its own package's, else the one holder in its declared `dependencies` closure plus `sys`. Without the dependency the only holder sits outside the closure and the rule is refused `outside-closure` (`RESOURCE_CONFLICT`), granting no one. The queue is not redeclared in `com.acme.crm`: a second package holding the name is refused too.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["type: 'queue'", "dependencies", "outside-closure"],
+        "must_not_contain": ["name: 'support_tier2'"]
+      }
+    },
+    {
       "id": 9,
       "prompt": "A `vendor` list view of the rows whose `api_key` (a `secret` field) starts with `sk_live`.",
       "expected_output": "Redirects: a credential is filtered only by presence, `filter: [{ field: 'api_key', operator: 'is_not_null' }]`; any other filter or sort is `400 INVALID_FIELD`.",
