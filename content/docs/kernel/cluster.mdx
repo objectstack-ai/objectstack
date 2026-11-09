@@ -395,7 +395,10 @@ identically to lanes 2 to 4 (#14021). Lane 5 is narrower: it attaches only
 where the deployment declares several replicas (`OS_CLUSTER_REPLICAS` greater
 than 1, or `OS_EXPECT_MULTI_NODE=true`) over the `redis` driver
 (`declaresMultiReplicaOnRedis`, cloud#3814 R3), so a single node emits
-exactly the local `settings:changed` events it always did. A received
+exactly the local `settings:changed` events it always did. It binds at
+`kernel:bootstrapped`, one phase after the others, because the settings
+service binds its engine at `kernel:ready` and a peer's change must not reach
+a subscriber before that. A received
 settings change is announced locally and never published again, so no
 replica echoes it.
 

@@ -35,7 +35,8 @@ function resyncSeamOf(owner: unknown, method: string): (() => unknown) | undefin
  * state-owner packages only need the `IPubSub` interface, which lives in
  * `@objectstack/spec/contracts`.
  *
- * FIVE lanes, late-bound independently at `kernel:ready`, because the state
+ * FIVE lanes, late-bound independently (lanes 1 to 4 at `kernel:ready`,
+ * lane 5 at `kernel:bootstrapped`), because the state
  * that goes stale lives in five different owners (#13331, #13805, #27428,
  * #31597):
  *
@@ -150,10 +151,22 @@ export class MetadataClusterBridgePlugin implements Plugin {
             this.attachProtocolLane(ctx, cluster);
             this.attachDatasourceLane(ctx, cluster);
             this.attachConnectorCredentialLane(ctx, cluster);
-            this.attachSettingsLane(ctx, cluster);
-            if (this.laneResyncs.length > 0) {
-                this.detachResync = onClusterResync(cluster, (event) => this.resyncLanes(ctx, event));
+            this.subscribeResync(ctx, cluster);
+        });
+
+        // Lane 5 binds one phase later: the settings service binds its engine
+        // from its own `kernel:ready` hook, and a peer's change delivered
+        // before that bind would have every subscriber read the in-memory
+        // defaults (`check:settings-bind-window`).
+        ctx.hook('kernel:bootstrapped', async () => {
+            let cluster: IClusterService | undefined;
+            try {
+                cluster = ctx.getService<IClusterService>('cluster');
+            } catch {
+                return;
             }
+            this.attachSettingsLane(ctx, cluster);
+            this.subscribeResync(ctx, cluster);
         });
 
         ctx.hook('kernel:shutdown', async () => {
@@ -232,6 +245,16 @@ export class MetadataClusterBridgePlugin implements Plugin {
             `MetadataClusterBridgePlugin: resynced ${this.laneResyncs.map((l) => l.lane).join(', ')} after a ` +
                 `${event.outageMs} ms cluster outage (node=${event.nodeId})`,
         );
+    }
+
+    /**
+     * Subscribe to `cluster.resync` once, when at least one attached lane has a
+     * resync seam. The handler reads the lane list when the event fires, so a
+     * lane attached after the subscription is resynced too.
+     */
+    private subscribeResync(ctx: PluginContext, cluster: IClusterService): void {
+        if (this.detachResync || this.laneResyncs.length === 0) return;
+        this.detachResync = onClusterResync(cluster, (event) => this.resyncLanes(ctx, event));
     }
 
     /** Register `owner`'s resync seam `method` for `lane`, when the owner has one. */
@@ -488,6 +511,10 @@ export class MetadataClusterBridgePlugin implements Plugin {
     /**
      * Lane 5 — the settings service's `settings.changed` fan-out (#31597): the
      * settings store adopting the family lanes 2 to 4 established.
+     *
+     * Attached at `kernel:bootstrapped`, after the settings service has bound
+     * its engine at `kernel:ready`, so no peer change reaches a subscriber that
+     * would read the pre-bind in-memory defaults.
      *
      * Duck-typed exactly like lanes 1 to 4 feature-detect their seams: this
      * package must not depend on `@objectstack/service-settings`. The settings

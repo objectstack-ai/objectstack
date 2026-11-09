@@ -633,9 +633,20 @@ describe('[#31597] lane 5 — the settings service’s settings.changed fan-out,
         const h = makeHarness({ settings: 'real' });
         await new MetadataClusterBridgePlugin().init(h.ctx);
         await h.fire('kernel:ready');
+        await h.fire('kernel:bootstrapped');
         expect(h.attachSettings).toHaveBeenCalledTimes(1);
         expect(h.attachSettings).toHaveBeenCalledWith(h.pubsub, 'node-a');
         expect(infoLines(h).some((l) => l.includes('bridged settings.changed'))).toBe(true);
+    });
+
+    it('binds at kernel:bootstrapped, after the settings service bound its engine at kernel:ready', async () => {
+        declare('2');
+        const h = makeHarness({ settings: 'real' });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+        expect(h.attachSettings).not.toHaveBeenCalled();
+        await h.fire('kernel:bootstrapped');
+        expect(h.attachSettings).toHaveBeenCalledTimes(1);
     });
 
     it('CONTROL — the redis driver with no declaration attaches nothing and says nothing above debug', async () => {
@@ -643,6 +654,7 @@ describe('[#31597] lane 5 — the settings service’s settings.changed fan-out,
         const h = makeHarness({ settings: 'real' });
         await new MetadataClusterBridgePlugin().init(h.ctx);
         await h.fire('kernel:ready');
+        await h.fire('kernel:bootstrapped');
         expect(h.attachSettings).not.toHaveBeenCalled();
         expect(infoLines(h).some((l) => l.includes('settings.changed'))).toBe(false);
         expect(warnLines(h).some((l) => l.includes('settings'))).toBe(false);
@@ -656,6 +668,7 @@ describe('[#31597] lane 5 — the settings service’s settings.changed fan-out,
         const h = makeHarness({ settings: 'real' });
         await new MetadataClusterBridgePlugin().init(h.ctx);
         await h.fire('kernel:ready');
+        await h.fire('kernel:bootstrapped');
         expect(h.attachSettings).not.toHaveBeenCalled();
     });
 
@@ -664,6 +677,7 @@ describe('[#31597] lane 5 — the settings service’s settings.changed fan-out,
         const h = makeHarness({ settings: 'real', driver: 'postgres' });
         await new MetadataClusterBridgePlugin().init(h.ctx);
         await h.fire('kernel:ready');
+        await h.fire('kernel:bootstrapped');
         expect(h.attachSettings).not.toHaveBeenCalled();
     });
 
@@ -672,6 +686,7 @@ describe('[#31597] lane 5 — the settings service’s settings.changed fan-out,
         const h = makeHarness({ settings: 'real', driver: 'memory' });
         await new MetadataClusterBridgePlugin().init(h.ctx);
         await h.fire('kernel:ready');
+        await h.fire('kernel:bootstrapped');
         expect(h.attachSettings).not.toHaveBeenCalled();
     });
 
@@ -681,6 +696,7 @@ describe('[#31597] lane 5 — the settings service’s settings.changed fan-out,
             const h = makeHarness({ settings });
             await new MetadataClusterBridgePlugin().init(h.ctx);
             await h.fire('kernel:ready');
+        await h.fire('kernel:bootstrapped');
             expect(h.attachSettings).not.toHaveBeenCalled();
             expect(warnLines(h).some((l) => l.includes('settings'))).toBe(false);
             expect(debugLines(h).some((l) => l.includes('settings fan-out'))).toBe(true);
@@ -692,6 +708,7 @@ describe('[#31597] lane 5 — the settings service’s settings.changed fan-out,
         const h = makeHarness({ settings: 'real', settingsAttachThrows: true, automation: 'real' });
         await new MetadataClusterBridgePlugin().init(h.ctx);
         await h.fire('kernel:ready');
+        await h.fire('kernel:bootstrapped');
         expect(h.logger.error).toHaveBeenCalledWith(
             'MetadataClusterBridgePlugin: settings-lane attach failed',
             expect.any(Error),
@@ -708,6 +725,7 @@ describe('[#31597] lane 5 — the settings service’s settings.changed fan-out,
         });
         await new MetadataClusterBridgePlugin().init(h.ctx);
         await h.fire('kernel:ready');
+        await h.fire('kernel:bootstrapped');
         await h.fire('kernel:shutdown');
         expect(h.detachSettings).toHaveBeenCalledTimes(1);
     });
@@ -735,6 +753,7 @@ describe('[#31597] lane 5 — the settings service’s settings.changed fan-out,
             const h = resyncHarness();
             await new MetadataClusterBridgePlugin().init(h.ctx);
             await h.fire('kernel:ready');
+        await h.fire('kernel:bootstrapped');
             await h.outage();
             expect(h.resyncSettings).toHaveBeenCalledTimes(1);
             expect(infoLines(h).some((l) => l.includes('resynced settings.changed'))).toBe(true);
@@ -745,6 +764,7 @@ describe('[#31597] lane 5 — the settings service’s settings.changed fan-out,
             const h = resyncHarness();
             await new MetadataClusterBridgePlugin().init(h.ctx);
             await h.fire('kernel:ready');
+        await h.fire('kernel:bootstrapped');
             await h.outage();
             expect(h.resyncSettings).not.toHaveBeenCalled();
         });
