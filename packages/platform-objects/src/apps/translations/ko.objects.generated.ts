@@ -88,6 +88,18 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         label: "AI 액세스",
         help: "이 사용자가 AI 시트를 보유하는지 여부입니다. 시트는 `ai_seat` 시스템 권한을 부여하며, 이를 통해 앱의 AI 어시스턴트(빌드 및 질문)를 사용할 수 있습니다. 보유할 수 있는 사용자 수는 라이선스에 포함된 시트 수로 제한됩니다."
       },
+      principal_kind: {
+        label: "주체 유형",
+        help: "이 사용자가 사람인지 AI 서비스 계정인지 여부입니다. AI 서비스 계정은 로그인하지 않으며 자체 API 키로만 작업합니다. 사용자를 만들 때 정해지며 바뀌지 않습니다.",
+        options: {
+          human: "사람",
+          agent: "AI 서비스 계정"
+        }
+      },
+      accountable_user_id: {
+        label: "책임자",
+        help: "AI 서비스 계정의 경우 그 계정을 책임지는 사람입니다. 사람에게는 비어 있습니다. 책임자 자신의 권한은 계정에 넘어가지 않습니다."
+      },
       image: {
         label: "프로필 이미지"
       },

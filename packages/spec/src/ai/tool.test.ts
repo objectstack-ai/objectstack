@@ -53,7 +53,7 @@ describe('ToolSchema', () => {
   });
 
   it('should enforce snake_case for tool name', () => {
-    const validNames = ['list_records', 'create_case', '_internal_tool', 'query_orders'];
+    const validNames = ['list_records', 'create_case', 'query_orders'];
     validNames.forEach(name => {
       expect(() => ToolSchema.parse({
         name,
@@ -63,7 +63,8 @@ describe('ToolSchema', () => {
       })).not.toThrow();
     });
 
-    const invalidNames = ['listRecords', 'Create-Case', '123tool'];
+    // `_internal_tool`: a leading `_` is router-reserved (ADR-0150 D5).
+    const invalidNames = ['listRecords', 'Create-Case', '123tool', '_internal_tool'];
     invalidNames.forEach(name => {
       expect(() => ToolSchema.parse({
         name,

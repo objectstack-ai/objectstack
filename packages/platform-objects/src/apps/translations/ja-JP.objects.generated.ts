@@ -88,6 +88,18 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "AI アクセス",
         help: "このユーザーが AI シートを保有しているかどうか。シートは `ai_seat` ケイパビリティを付与し、アプリ内の AI アシスタント（build と ask）を利用できるようにします。保有できるユーザー数は、ライセンスに含まれるシート数までです。"
       },
+      principal_kind: {
+        label: "プリンシパルの種類",
+        help: "このユーザーが人か AI サービスアカウントか。AI サービスアカウントはサインインせず、自身の API キーだけで操作します。ユーザー作成時に設定され、変更されません。",
+        options: {
+          human: "人",
+          agent: "AI サービスアカウント"
+        }
+      },
+      accountable_user_id: {
+        label: "責任者",
+        help: "AI サービスアカウントについて、その責任を負う人。人のユーザーでは空です。責任者自身の権限はアカウントに引き継がれません。"
+      },
       image: {
         label: "プロフィール画像"
       },

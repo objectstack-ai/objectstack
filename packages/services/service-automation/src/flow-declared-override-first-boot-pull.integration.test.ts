@@ -93,6 +93,17 @@ const shippingStack = () =>
         { strict: false },
     ) as Record<string, unknown>;
 
+/** [#31754] A second package shipping FLOW's bare name — a clash sealed before ADR-0150 phase 1. */
+const OTHER = 'com.acme.other';
+const otherStack = () =>
+    defineStack(
+        { manifest: { ...pluginManifest(OTHER), namespace: 'other', name: 'other' }, flows: [ticketFlow('OTHER')] } as never,
+        { strict: false },
+    ) as Record<string, unknown>;
+
+/** Whether, and before or after the shipping package, OTHER is registered. */
+type Second = 'none' | 'before' | 'after';
+
 type Row = 'override' | 'legacy';
 
 const storedRow = (row: Row) =>
@@ -153,7 +164,7 @@ afterEach(async () => {
  * Boot the composition on `file`. `start` runs in a plugin that starts after
  * the automation plugin: after the boot pull, before `kernel:ready`.
  */
-async function boot(file: string, start: (ql: ObjectQL, automation: AutomationEngine) => Promise<void>) {
+async function boot(file: string, start: (ql: ObjectQL, automation: AutomationEngine) => Promise<void>, second: Second = 'none') {
     const kernel = new ObjectKernel({ logger: { level: 'fatal' }, gracefulShutdown: false } as never);
     kernels.push(kernel);
     const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: file }, useNullAsDefault: true });
@@ -174,9 +185,11 @@ async function boot(file: string, start: (ql: ObjectQL, automation: AutomationEn
         version: '1.0.0',
         dependencies: ['com.objectstack.engine.objectql', 'com.objectstack.service-automation'],
         async init(ctx: PluginContext) {
-            const stack = shippingStack();
-            await ctx.getService<{ register(m: unknown): Promise<void> }>('manifest')
-                .register({ ...(stack.manifest as object), ...stack });
+            const manifests = ctx.getService<{ register(m: unknown): Promise<void> }>('manifest');
+            const registerStack = (stack: Record<string, unknown>) => manifests.register({ ...(stack.manifest as object), ...stack });
+            if (second === 'before') await registerStack(otherStack());
+            await registerStack(shippingStack());
+            if (second === 'after') await registerStack(otherStack());
             const ql = () => ctx.getService<ObjectQL>('objectql');
             const automation = () => ctx.getService<AutomationEngine>('automation');
             automation().registerTrigger(objectqlRecordTrigger(ql, automation, fired));
@@ -192,7 +205,11 @@ async function boot(file: string, start: (ql: ObjectQL, automation: AutomationEn
 }
 
 /** The first boot stores `rows`, in this order; the second, cold, is measured. */
-async function measuredBoot(rows: readonly Row[], start: (ql: ObjectQL, automation: AutomationEngine) => Promise<void>) {
+async function measuredBoot(
+    rows: readonly Row[],
+    start: (ql: ObjectQL, automation: AutomationEngine) => Promise<void>,
+    second: Second = 'none',
+) {
     const dir = mkdtempSync(join(tmpdir(), 'qa-28717-'));
     dirs.push(dir);
     const file = join(dir, 'store.db');
@@ -202,11 +219,16 @@ async function measuredBoot(rows: readonly Row[], start: (ql: ObjectQL, automati
     await first.kernel.shutdown();
     kernels.splice(kernels.indexOf(first.kernel), 1);
     const warn = vi.spyOn(ObjectLogger.prototype, 'warn');
-    const measured = await boot(file, start);
-    const collisions = warn.mock.calls
-        .map(([message]) => String(message))
-        .filter((message) => message.includes('Flow name collision') && message.includes(`'${FLOW}'`));
-    return { ...measured, collisions };
+    const measured = await boot(file, start, second);
+    const collisionCalls = warn.mock.calls
+        .filter(([message]) => String(message).includes('Flow name collision') && String(message).includes(`'${FLOW}'`));
+    const collisions = collisionCalls.map(([message]) => String(message));
+    // [#31754] The engine's own answer for FLOW: each refusal it logged while arming.
+    const refusals = warn.mock.calls
+        .filter(([message, meta]) =>
+            String(message).endsWith('failed to register flow') && (meta as { flow?: unknown } | undefined)?.flow === FLOW)
+        .map(([, meta]) => String((meta as { error?: unknown }).error));
+    return { ...measured, collisions, collisionMeta: collisionCalls.map(([, meta]) => meta), refusals };
 }
 
 const insertTicket = (ql: ObjectQL, title: string) => ql.insert(TICKET, { title }, { context: SYS } as never);
@@ -271,5 +293,71 @@ describe('[#28717] a declared .custom flow override is armed from the first boot
         expect(fired.map((f) => f.armedLabel)).toEqual(['OVERRIDE']);
         expect(automation.getShadowedFlows()).toEqual([]);
         expect(collisions).toEqual([]);
+    });
+});
+
+/**
+ * [#31754, ADR-0150 D3] The collision line agrees with the engine on a real
+ * cold boot. A second package shipping FLOW's bare name (a clash sealed before
+ * phase 1) makes the engine's resolver refuse the name for a caller with no
+ * package, so `registerFlow` arms nothing — in each of the three shapes the
+ * pull ranks differently (the two packages alone; the declared override beside
+ * them; a package-less stored row beside them). Every collision line for the
+ * name then reads "arming neither"/"arming none of them", its meta names no
+ * armed contender, and the engine's refusal names both packages. The line asks
+ * the resolver the engine asks (`refusalOf`), never a guess from the shapes.
+ */
+describe('[#31754] a name a second package also ships: the collision line says no definition is armed, as the engine does', () => {
+    const SHAPES: ReadonlyArray<readonly [string, readonly Row[]]> = [
+        ['two packages', []],
+        ['the declared override beside a second package', ['override']],
+        ['two packages and a package-less stored row', ['legacy']],
+    ];
+    for (const [shape, rows] of SHAPES) {
+        for (const second of ['before', 'after'] as const) {
+            it(`${shape}, the second package registered ${second} the shipping one`, async () => {
+                let armedAtPull: unknown = 'unread';
+                const { automation, collisions, collisionMeta, refusals } = await measuredBoot(rows, async (_ql, engine) => {
+                    armedAtPull = await engine.getFlow(FLOW);
+                }, second);
+
+                // The engine: refused at every arming step, naming both packages; nothing armed.
+                expect(refusals.length, 'the engine refused the name').toBeGreaterThan(0);
+                for (const refusal of refusals) {
+                    expect(refusal).toContain('held by 2 packages in this environment');
+                    expect(refusal).toContain(`package "${BASE}"`);
+                    expect(refusal).toContain(`package "${OTHER}"`);
+                }
+                expect(armedAtPull).toBeNull();
+                expect(await automation.getFlow(FLOW)).toBeNull();
+                expect(automation.getShadowedFlows()).toEqual([]);
+
+                // The line: every collision warning for the name agrees.
+                expect(collisions.length, 'the pull warned about the collision').toBeGreaterThan(0);
+                for (const line of collisions) {
+                    expect(line).toMatch(/; arming (neither|none of them): the engine refuses this bare name for a caller with no package \(ADR-0150 D3\), so no definition dispatches; /);
+                    expect(line).toContain(`the 'failed to register flow' warning for '${FLOW}' names every holder. Rename one of them.`);
+                    expect(line).not.toMatch(/arming (package|the declared override|a runtime-authored)/);
+                    expect(line).not.toContain('Only the armed definition dispatches');
+                }
+                for (const meta of collisionMeta) {
+                    expect(meta).toMatchObject({ flow: FLOW, refused: true });
+                    expect(meta).not.toHaveProperty('armed');
+                }
+            });
+        }
+    }
+
+    it('CONTROL: a name the resolver serves (one package and a package-less row) keeps its line byte for byte', async () => {
+        const { automation, collisions, collisionMeta, refusals } = await measuredBoot(['legacy'], async () => {});
+        expect(refusals).toEqual([]);
+        expect(((await automation.getFlow(FLOW)) as { label?: string } | null)?.label).toBe('BASE');
+        expect(collisions).toEqual([
+            `[Automation] Flow name collision: '${FLOW}' is claimed by 2 definitions (package '${BASE}', a runtime-authored ` +
+                `row (sys_metadata)); arming package '${BASE}' because a managed package's flow is sealed (ADR-0126 §2), and ` +
+                'shadowing 1 other definition(s). Only the armed definition dispatches. To change what runs, declare it as ' +
+                `an override in '${PAIR}' (overrides: { package: '${BASE}', basedOn }), or save it under a new name.`,
+        ]);
+        expect(collisionMeta).toEqual([{ flow: FLOW, armed: { source: 'package', packageId: BASE }, shadowed: [{ source: 'runtime' }] }]);
     });
 });

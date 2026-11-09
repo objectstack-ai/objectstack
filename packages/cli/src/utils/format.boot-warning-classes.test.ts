@@ -15,6 +15,19 @@ import {
 import { BootLogCapture, isVerboseBootLevel } from './boot-log-capture.js';
 import { collectAutomationSummary } from '../commands/serve.js';
 
+// Pay the first load of what `serve.ts` reaches through dynamic `import()`s at
+// MODULE LOAD, outside any clocked case (`pnpm check:test-source-alias`).
+import '@objectstack/metadata-protocol';
+import '@objectstack/metadata';
+import '@objectstack/plugin-hono-server';
+import '@objectstack/rest';
+import '@objectstack/service-settings';
+import '@objectstack/service-datasource';
+import '@objectstack/driver-turso';
+import '@objectstack/driver-sql';
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/plugin-security';
+
 /**
  * #22073 — one boot line per warning class, and each warning printed once.
  *
@@ -491,8 +504,9 @@ describe('print-once: Boot diagnostics withholds what the banner restated (forma
     );
     const collision = record(
       "[Automation] Flow name collision: 'dup_flow' is claimed by 2 definitions (package 'crm', a runtime-authored " +
-        "row (sys_metadata)); arming package 'crm' by package id, and shadowing 1 other definition(s). " +
-        'Only the armed definition dispatches. Rename one of them.',
+        "row (sys_metadata)); arming package 'crm' because a managed package's flow is sealed (ADR-0126 §2), and " +
+        'shadowing 1 other definition(s). Only the armed definition dispatches. To change what runs, declare it ' +
+        "as an override in 'crm.custom' (overrides: { package: 'crm', basedOn }), or save it under a new name.",
     );
     printServerReady({
       ...BASE,

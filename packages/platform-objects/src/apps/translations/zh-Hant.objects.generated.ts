@@ -88,6 +88,18 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "AI 存取權限",
         help: "該使用者是否佔用一個 AI 席位。席位授予 `ai_seat` 能力，可使用應用程式內的 AI 助手（build 和 ask）。可佔用席位的使用者數受許可證所含席位數限制。"
       },
+      principal_kind: {
+        label: "主體類型",
+        help: "該使用者是人員還是 AI 服務帳號。AI 服務帳號從不登入，只透過它自己的 API 金鑰操作。在建立使用者時設定，之後不會改變。",
+        options: {
+          human: "人員",
+          agent: "AI 服務帳號"
+        }
+      },
+      accountable_user_id: {
+        label: "負責人",
+        help: "對於 AI 服務帳號，指對它負責的人員。人員的此項為空。負責人自己的權限不會傳給該帳號。"
+      },
       image: {
         label: "頭像"
       },
