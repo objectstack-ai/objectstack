@@ -162,6 +162,7 @@ import { setPackageDisabled } from '../package-state-store.js';
 // `package-state-store` service replaces the file at every door below.
 import { asPackageStateStore, PACKAGE_STATE_STORE_SERVICE, PACKAGE_STATE_UNINSTALL_CLEANUP } from '../package-state-host-store.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
+import { refuseMultiReplicaPackageChange } from '../multi-replica-package-refusal.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 import { readDispatchedBody } from '../deferred-request-body.js';
 // [#19328] The install door's DECLARED body contract, asked whole at
@@ -2214,6 +2215,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, 'Installing a package');
             if (walled) return walled;
+            // [cloud#3814 D1] Declared replicas on the Redis driver: this change
+            // would reach the serving replica only. Refused before anything is written.
+            const oneReplica = await refuseMultiReplicaPackageChange(deps, _context, 'Installing a package');
+            if (oneReplica) return oneReplica;
             // [#26857] Recognition first, over the measured closed set, ahead of
             // the body parse and the registry read.
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_INSTALL_QUERY_PARAMS); if (queryRefused) return queryRefused;
@@ -2710,6 +2715,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Enabling package "${id}"`);
             if (walled) return walled;
+            // [cloud#3814 D1] Declared replicas on the Redis driver: this change
+            // would reach the serving replica only. Refused before anything is written.
+            const oneReplica = await refuseMultiReplicaPackageChange(deps, _context, `Enabling package "${id}"`);
+            if (oneReplica) return oneReplica;
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             // [#30962] The state store FIRST, the registry second: a host store
             // that refuses leaves the package exactly as it was, and the door
@@ -2756,6 +2765,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Disabling package "${id}"`);
             if (walled) return walled;
+            // [cloud#3814 D1] Declared replicas on the Redis driver: this change
+            // would reach the serving replica only. Refused before anything is written.
+            const oneReplica = await refuseMultiReplicaPackageChange(deps, _context, `Disabling package "${id}"`);
+            if (oneReplica) return oneReplica;
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             // [#7560] ADR-0070: a platform package is not the operator's to
             // switch off. BEFORE `disablePackage`, and before
@@ -3586,6 +3599,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Duplicating package "${id}"`);
             if (walled) return walled;
+            // [cloud#3814 D1] Declared replicas on the Redis driver: this change
+            // would reach the serving replica only. Refused before anything is written.
+            const oneReplica = await refuseMultiReplicaPackageChange(deps, _context, `Duplicating package "${id}"`);
+            if (oneReplica) return oneReplica;
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             const protocol = await resolveProtocol(deps, _context);
             if (!protocol || typeof protocol.duplicatePackage !== 'function') {
@@ -3629,6 +3646,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Ensuring the customization package of "${id}"`);
             if (walled) return walled;
+            // [cloud#3814 D1] Declared replicas on the Redis driver: this change
+            // would reach the serving replica only. Refused before anything is written.
+            const oneReplica = await refuseMultiReplicaPackageChange(deps, _context, `Ensuring the customization package of "${id}"`);
+            if (oneReplica) return oneReplica;
             // AGENTS.md route rule 5: the measured closed query set is EMPTY —
             // the door reads the path and the session, no query parameter.
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
@@ -3730,6 +3751,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Updating package "${id}"`);
             if (walled) return walled;
+            // [cloud#3814 D1] Declared replicas on the Redis driver: this change
+            // would reach the serving replica only. Refused before anything is written.
+            const oneReplica = await refuseMultiReplicaPackageChange(deps, _context, `Updating package "${id}"`);
+            if (oneReplica) return oneReplica;
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             // [#24705] ADR-0070 D2: the manifest of a package the deployment
             // ships is the deployment's, so this door refuses it with the
@@ -3828,6 +3853,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Deleting package "${id}"`);
             if (walled) return walled;
+            // [cloud#3814 D1] Declared replicas on the Redis driver: this change
+            // would reach the serving replica only. Refused before anything is written.
+            const oneReplica = await refuseMultiReplicaPackageChange(deps, _context, `Deleting package "${id}"`);
+            if (oneReplica) return oneReplica;
             // [#26857] `?keepdata=true` is not `keepData`: refused here, before
             // anything is deleted, rather than read as absent (drop the tables).
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_DELETE_QUERY_PARAMS); if (queryRefused) return queryRefused;
