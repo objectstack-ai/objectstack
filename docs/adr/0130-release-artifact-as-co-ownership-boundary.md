@@ -176,7 +176,8 @@ needs to assert it.
 
 > **Note (2026-11-09, [#31685](https://github.com/objectstack-ai/objectstack/issues/31685)) — what
 > co-ownership does not decide: how a reference between two packages of one artifact resolves.**
-> The CLI's picklist-reference check and the post-seal install judge read the paragraph above as
+> The CLI's picklist-reference check and the post-seal install judge read the paragraph above (the
+> install judge until E6, #31731) as
 > letting a package resolve a list a sibling package of the same artifact owns, with no declared
 > dependency (`packages/cli/src/utils/picklist-references.ts`). That allowance narrows to declared
 > dependencies: a bare reference resolves from the referring package's own items, then the unique
