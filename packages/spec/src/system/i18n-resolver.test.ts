@@ -10,6 +10,7 @@ import {
   resolveActionConfirm,
   resolveActionSuccess,
   resolveActionResultDialog,
+  resolveActionPreflight,
   translateAction,
   translateMetadataDocument,
   resolveObjectFieldLabels,
@@ -463,6 +464,109 @@ describe('resolveActionResultDialog + translateAction', () => {
     const out = translateAction(createUser, dialogBundle, { locale: 'zh-CN' });
     expect(out.resultDialog?.title).toBe('用户已创建');
     expect(out.resultDialog?.fields?.[2].label).toBe('临时密码');
+  });
+});
+
+/**
+ * [#31885] `preflight.fields.<path>` — the preflight panel's field labels,
+ * keyed by the literal `path` exactly as `resultDialog.fields` is (dots inside
+ * one key), overlaid only for the fields the action declares, at the action's
+ * one address.
+ */
+describe('resolveActionPreflight + translateAction', () => {
+  const preflightBundle: TranslationBundle = {
+    'zh-CN': {
+      objects: {
+        sys_package: {
+          _actions: {
+            install_package: {
+              preflight: {
+                fields: {
+                  findings: '结构变更',
+                  'verdict.summary': '结论',
+                  // A path the action does not declare: read by nothing.
+                  'verdict.ghost': '幽灵',
+                },
+              },
+            },
+          },
+        },
+      },
+      globalActions: {
+        check_upgrade: { preflight: { fields: { plan: '升级计划' } } },
+      },
+    },
+  };
+
+  const installPackage = {
+    name: 'install_package',
+    label: 'Install Package',
+    objectName: 'sys_package',
+    params: [{ name: 'version', type: 'text' }],
+    preflight: {
+      read: { url: '/api/v1/cloud/packages/${ctx.recordId}/upgrade-plan?version=${param.version}' },
+      path: 'data',
+      fields: [
+        { path: 'findings', label: 'Schema findings', format: 'json' },
+        { path: 'verdict.summary', format: 'text' },
+        { path: 'verdict.count', label: 'Count', format: 'text' },
+      ],
+    },
+  };
+
+  it('overlays per-path field labels and keeps everything else of the preflight', () => {
+    const out = resolveActionPreflight(preflightBundle, installPackage, { locale: 'zh-CN' });
+    expect(out?.fields).toEqual([
+      { path: 'findings', label: '结构变更', format: 'json' },
+      // A dotted path is ONE key, and a row with no authored label gains one.
+      { path: 'verdict.summary', label: '结论', format: 'text' },
+      // Untranslated field keeps its literal label.
+      { path: 'verdict.count', label: 'Count', format: 'text' },
+    ]);
+    expect(out?.read).toBe(installPackage.preflight.read);
+    expect(out?.path).toBe('data');
+    // Source spec is not mutated.
+    expect(installPackage.preflight.fields[0].label).toBe('Schema findings');
+  });
+
+  it('falls back to the literal spec when the locale has no entry', () => {
+    const out = resolveActionPreflight(preflightBundle, installPackage, { locale: 'ja-JP', fallbackChain: [] });
+    expect(out?.fields?.map((f) => f.label)).toEqual(['Schema findings', undefined, 'Count']);
+  });
+
+  it('resolves globalActions for object-less actions', () => {
+    const out = resolveActionPreflight(
+      preflightBundle,
+      { name: 'check_upgrade', preflight: { fields: [{ path: 'plan' }] } },
+      { locale: 'zh-CN' },
+    );
+    expect(out?.fields).toEqual([{ path: 'plan', label: '升级计划' }]);
+  });
+
+  it('returns the spec untouched when the action has no preflight, or the preflight no fields', () => {
+    expect(
+      resolveActionPreflight(preflightBundle, { name: 'install_package', objectName: 'sys_package' }, { locale: 'zh-CN' }),
+    ).toBeUndefined();
+    const bare = { read: { url: '/api/v1/x' } };
+    expect(
+      resolveActionPreflight(preflightBundle, { name: 'install_package', objectName: 'sys_package', preflight: bare }, { locale: 'zh-CN' }),
+    ).toBe(bare);
+  });
+
+  it('translateAction carries the translated preflight, and leaves an action without one as it was', () => {
+    const out = translateAction(installPackage, preflightBundle, { locale: 'zh-CN' });
+    expect(out.preflight?.fields?.map((f) => f.label)).toEqual(['结构变更', '结论', 'Count']);
+    const plain = translateAction({ name: 'plain', objectName: 'sys_package' }, preflightBundle, { locale: 'zh-CN' });
+    expect('preflight' in plain).toBe(false);
+  });
+
+  it('the bundle shape parses through TranslationDataSchema, and a `title` leaf is refused', () => {
+    expect(TranslationDataSchema.safeParse(preflightBundle['zh-CN']).success).toBe(true);
+    const r = TranslationDataSchema.safeParse({ globalActions: { check_upgrade: { preflight: { title: 'x' } } } });
+    expect(r.success).toBe(false);
+    expect(r.error?.issues.map((i) => [i.code, i.path.join('.')])).toEqual([
+      ['unrecognized_keys', 'globalActions.check_upgrade.preflight'],
+    ]);
   });
 });
 
