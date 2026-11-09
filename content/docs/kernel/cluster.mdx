@@ -378,7 +378,7 @@ channel's own doc comment:
   (`MetadataManager.resyncClusterPubSub()`), lane 2 re-converges the object
   registry (`ObjectStackProtocolImplementation.resyncMetadataMutationPubSub()`),
   lane 3 re-converges every stored datasource and every held pool
-  (`DatasourceAdminService.resyncDatasourceMutationPubSub()`), and lane 4
+  (`DatasourceAdminService.resyncDatasourceMutationPubSub()`), lane 4
   runs the connector reconcile
   (`AutomationEngine.resyncConnectorCredentialPubSub()`), and lane 5
   announces every settings namespace locally so each subscriber re-reads it
