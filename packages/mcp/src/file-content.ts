@@ -2,6 +2,8 @@
 
 import { inflateRawSync } from 'node:zlib';
 
+import { runExtractionInWorker } from './file-extraction-pool.js';
+
 /**
  * [#30892] What `read_file` hands an agent from a file a record carries: the
  * file's words, or the image itself, beside its size, the cap that applied
@@ -33,25 +35,35 @@ import { inflateRawSync } from 'node:zlib';
  * Anything else answers its size and the link, and says it has no text this
  * tool reads.
  *
- * ## The two host bounds on document extraction (ADR-0102 D1)
+ * ## Off the request thread, under two host bounds (ADR-0102 D1)
  *
- * PDF and Word extraction runs on the request thread, so every other request
- * in the process waits while it runs. Two host-configured bounds keep one
- * caller's files from holding the process (the #31100 ruling, phase 1; moving
- * extraction off the request thread is phase 2):
+ * PDF and Word extraction runs on a bounded `worker_threads` pool
+ * (`file-extraction-pool.ts`, entry `file-extraction-worker.ts`), so the
+ * request thread keeps serving every other request while a file is read (the
+ * #31100 ruling, phase 2). Two host-configured bounds keep one caller's files
+ * from holding the process (phase 1):
  *
  *  - a CPU-time budget per extraction ({@link READ_FILE_CPU_BUDGET_MS_ENV},
- *    default {@link READ_FILE_CPU_BUDGET_MS_DEFAULT}): process CPU time
- *    (`process.cpuUsage()` deltas), checked between PDF pages and between
- *    Word paragraphs, never mid-page. Out of budget, the answer is the text
- *    read so far, `truncated: true`, and a note naming the budget and the
- *    download link. Process time charges an extraction for work interleaved
- *    with it, so the error is to stop early, never late (ADR-0102 D1).
+ *    default {@link READ_FILE_CPU_BUDGET_MS_DEFAULT}), checked between PDF
+ *    pages and between Word paragraphs, never mid-page. In a worker it is the
+ *    worker thread's own CPU time; in-process it is process CPU time
+ *    (`process.cpuUsage()` deltas), which charges an extraction for work
+ *    interleaved with it, so the error is to stop early, never late. Out of
+ *    budget, the answer is the text read so far, `truncated: true`, and a note
+ *    naming the budget and the download link. A worker that does not reach a
+ *    checkpoint within {@link READ_FILE_WALL_CEILING_MULTIPLE} budgets of wall
+ *    time is terminated and replaced, and the answer is the same shape over the
+ *    pages it had already sent back.
  *  - a process-wide cap on extractions in flight
  *    ({@link READ_FILE_MAX_CONCURRENT_ENV}, default
- *    {@link READ_FILE_MAX_CONCURRENT_DEFAULT}). Over it, the call is refused at
- *    once, never queued: {@link ReadFileExtractionBusyError}, a retryable
- *    `SERVICE_UNAVAILABLE`.
+ *    {@link READ_FILE_MAX_CONCURRENT_DEFAULT}), which is also the pool's size.
+ *    Over it, the call is refused on the request thread at once, before any
+ *    worker is touched, never queued: {@link ReadFileExtractionBusyError}, a
+ *    retryable `SERVICE_UNAVAILABLE`.
+ *
+ * A host where the worker cannot start (one that bundled this package into a
+ * single file, so the worker entry is not beside it) extracts in-process under
+ * the same two bounds, said once at `warn` with the reason.
  *
  * Both are read once at boot ({@link configureReadFileExtraction}, called by
  * the plugin's `init`) and a malformed value is a boot fault naming the
@@ -97,11 +109,23 @@ export const READ_FILE_CPU_BUDGET_MS_DEFAULT = 2000;
  */
 export const READ_FILE_MAX_CONCURRENT_DEFAULT = 4;
 
+/**
+ * A worker's wall-clock ceiling per extraction, as a multiple of the CPU
+ * budget: 5, so 10 s under the default budget. A worker checks its CPU budget
+ * between pages, so the ceiling only catches one that does not reach a
+ * checkpoint (a single page that runs long). Five is the share of one core a
+ * worker still gets when every slot of the default pool (4) and the request
+ * thread run on a single core: under that load a worker that is still
+ * reaching its checkpoints has used its budget before the ceiling, so the
+ * ceiling never cuts a read the budget would have let finish.
+ */
+export const READ_FILE_WALL_CEILING_MULTIPLE = 5;
+
 /** The two host bounds on PDF and Word extraction. */
 export interface ReadFileExtractionLimits {
   /** CPU time one extraction may use, in milliseconds, checked between pages or paragraphs. */
   cpuBudgetMs: number;
-  /** Extractions that may run at once in the process; one more is refused. */
+  /** Extractions that may run at once in the process, and the size of the worker pool; one more is refused. */
   maxConcurrent: number;
 }
 
@@ -179,12 +203,13 @@ export class ReadFileExtractionBusyError extends Error {
 }
 
 /** CPU time spent since a start reading, against one extraction's budget. */
-interface CpuBudget {
+export interface CpuBudget {
   readonly budgetMs: number;
   /** True once the extraction has used its budget. */
   spent(): boolean;
 }
 
+/** The in-process budget: process CPU time, which stops early, never late. */
 function startCpuBudget(budgetMs: number): CpuBudget {
   const start = process.cpuUsage();
   return {
@@ -362,30 +387,93 @@ export async function extractFileContent(bytes: Uint8Array, mimeType: string | n
   if (isTextType(type)) {
     return { kind: 'text', format: type, ...bounded(new TextDecoder('utf-8').decode(bytes)) };
   }
-  if (type === 'application/pdf') return withExtractionSlot((budget) => extractPdfText(bytes, budget));
-  if (type === DOCX_TYPE) return withExtractionSlot(async (budget) => extractDocxText(bytes, budget));
+  if (type === 'application/pdf') return withExtractionSlot('pdf', bytes);
+  if (type === DOCX_TYPE) return withExtractionSlot('docx', bytes);
   return {
     kind: 'none',
     reason: `A ${type} file has no text read_file can read. Download it with the link instead.`,
   };
 }
 
+/** The two documents read by extraction rather than decoding. */
+export type DocumentKind = 'pdf' | 'docx';
+
 /**
- * Run one document extraction inside the process-wide cap, with its CPU
- * budget started. Over the cap it is refused at once, never queued. The slot
- * is released in `finally`, so an extraction that throws frees it too.
+ * Run one document extraction inside the process-wide cap. Over the cap it is
+ * refused at once, on this thread, before any worker is touched, never
+ * queued. Within it, the extraction runs on a pool worker under the CPU
+ * budget and the wall-clock ceiling; where no worker can start, in-process
+ * under the CPU budget. The slot is released in `finally`, so an extraction
+ * that throws (or whose worker crashed) frees it too.
  */
-async function withExtractionSlot(run: (budget: CpuBudget) => Promise<ExtractedContent>): Promise<ExtractedContent> {
+async function withExtractionSlot(kind: DocumentKind, bytes: Uint8Array): Promise<ExtractedContent> {
   const limits = activeExtractionLimits();
   if (extractionsInFlight >= limits.maxConcurrent) {
     throw new ReadFileExtractionBusyError(limits.maxConcurrent, Math.max(1, Math.ceil(limits.cpuBudgetMs / 1000)));
   }
   extractionsInFlight++;
   try {
-    return await run(startCpuBudget(limits.cpuBudgetMs));
+    const outcome = await runExtractionInWorker(
+      { kind, bytes, cpuBudgetMs: limits.cpuBudgetMs },
+      { poolSize: limits.maxConcurrent, ceilingMs: limits.cpuBudgetMs * READ_FILE_WALL_CEILING_MULTIPLE },
+    );
+    if (outcome.status === 'done') return outcome.result;
+    if (outcome.status === 'overrun') return stoppedExtractionAnswer(kind, outcome.progress, limits.cpuBudgetMs);
+    return await extractDocument(kind, bytes, startCpuBudget(limits.cpuBudgetMs));
   } finally {
     extractionsInFlight--;
   }
+}
+
+/**
+ * What an extraction has read so far, sent as it reads, so a worker stopped
+ * part-way still answers the text it had already sent back.
+ */
+export type ExtractionProgress =
+  /** The PDF opened, with this many pages. */
+  | { kind: 'pdf-open'; numPages: number }
+  /** The next PDF page's text, trimmed, in page order. */
+  | { kind: 'pdf-page'; text: string }
+  /** The Word body's text since the last report, as read, and the paragraphs read in all. */
+  | { kind: 'docx-paragraphs'; text: string; paragraphs: number };
+
+/** A sink an extractor reports its progress to; in-process there is none. */
+export type ProgressSink = (progress: ExtractionProgress) => void;
+
+/** One document's text, read under `budget`, reporting progress to `onProgress` as it goes. */
+export async function extractDocument(
+  kind: DocumentKind,
+  bytes: Uint8Array,
+  budget: CpuBudget,
+  onProgress?: ProgressSink,
+): Promise<ExtractedContent> {
+  return kind === 'pdf' ? extractPdfText(bytes, budget, onProgress) : extractDocxText(bytes, budget, onProgress);
+}
+
+/**
+ * The answer of an extraction stopped part-way at the wall-clock ceiling: the
+ * text its progress carried, `truncated: true`, and the CPU-budget note, the
+ * same shape an extraction stopped at its budget answers.
+ */
+export function stoppedExtractionAnswer(kind: DocumentKind, progress: readonly ExtractionProgress[], budgetMs: number): ExtractedContent {
+  if (kind === 'pdf') {
+    let numPages: number | undefined;
+    const pages: string[] = [];
+    for (const p of progress) {
+      if (p.kind === 'pdf-open') numPages = p.numPages;
+      else if (p.kind === 'pdf-page') pages.push(p.text);
+    }
+    const read = numPages === undefined ? `page ${pages.length}` : `page ${pages.length} of ${numPages}`;
+    return pdfAnswer(pages, numPages ?? pages.length, cpuBudgetNote(budgetMs, read));
+  }
+  let text = '';
+  let paragraphs = 0;
+  for (const p of progress) {
+    if (p.kind !== 'docx-paragraphs') continue;
+    text += p.text;
+    paragraphs = p.paragraphs;
+  }
+  return docxAnswer(text, false, cpuBudgetNote(budgetMs, `${paragraphs} paragraphs`));
 }
 
 // ── PDF ──────────────────────────────────────────────────────────────────
@@ -416,19 +504,99 @@ function loadUnpdf(): Promise<UnpdfModule> {
   return unpdfModule;
 }
 
-async function extractPdfText(bytes: Uint8Array, budget: CpuBudget): Promise<ExtractedContent> {
+/** A one-page PDF reading "warm", for {@link preloadPdfReader}. */
+function warmUpPdf(): Uint8Array {
+  const stream = 'BT /F1 12 Tf 72 720 Td (warm) Tj ET';
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  let out = '%PDF-1.4\n';
+  const offsets: number[] = [];
+  objects.forEach((body, i) => {
+    offsets.push(out.length);
+    out += `${i + 1} 0 obj\n${body}\nendobj\n`;
+  });
+  const xref = out.length;
+  out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const o of offsets) out += `${String(o).padStart(10, '0')} 00000 n \n`;
+  out += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return new Uint8Array(Buffer.from(out, 'latin1'));
+}
+
+/**
+ * Make the PDF reader ready now rather than on the first PDF: load `unpdf`
+ * and read one page of a built-in one-page PDF, which is when pdf.js sets up
+ * its in-thread worker and loads the rest of itself. A pool worker does this
+ * before it says it is ready, so that one-time cost (hundreds of milliseconds
+ * on a busy host) belongs to the worker's start and is never charged to a
+ * job's wall-clock ceiling. Charged to a job, a small ceiling could stop a
+ * cold worker's first read every time, and its replacement would start cold
+ * again. A failure here is left to the first PDF read, which answers its
+ * could-not-read sentence as before.
+ */
+export async function preloadPdfReader(): Promise<void> {
+  try {
+    const unpdf = await loadUnpdf();
+    const doc = await unpdf.getDocumentProxy(warmUpPdf(), pdfOpenOptions());
+    try {
+      const page = await doc.getPage(1);
+      await page.getTextContent();
+      page.cleanup?.();
+    } finally {
+      await doc.destroy();
+    }
+  } catch {
+    // Left to the first PDF read.
+  }
+}
+
+/** How every PDF is opened: pdf.js's `eval` path off, its console output off, no font loading. */
+function pdfOpenOptions(): Record<string, unknown> {
+  return {
+    isEvalSupported: false,
+    // Errors only: pdf.js warns through `console.log`, which on a stdio
+    // transport is the protocol stream.
+    verbosity: 0,
+    disableFontFace: true,
+    useSystemFonts: false,
+  };
+}
+
+/**
+ * A PDF's answer from the pages read, in order: their text joined, cut at the
+ * length cap, `truncated` when fewer than `numPages` were read, and the budget
+ * note when reading stopped at the budget (which always truncates).
+ */
+function pdfAnswer(parts: readonly string[], numPages: number, budgetNote: string | undefined): ExtractedContent {
+  const joined = parts.join('\n\n').trim();
+  if (!joined) {
+    return {
+      kind: 'none',
+      reason:
+        budgetNote ??
+        'This PDF has no text layer (it may be a scan), so there is no text to read. Download it with the link instead.',
+    };
+  }
+  const { text, truncated } = bounded(joined);
+  return {
+    kind: 'text',
+    format: 'application/pdf',
+    text,
+    truncated: truncated || parts.length < numPages || budgetNote !== undefined,
+    ...(budgetNote !== undefined ? { note: budgetNote } : {}),
+  };
+}
+
+async function extractPdfText(bytes: Uint8Array, budget: CpuBudget, onProgress?: ProgressSink): Promise<ExtractedContent> {
   let doc: PdfDocument;
   try {
     const unpdf = await loadUnpdf();
     // pdf.js keeps the buffer it is handed; it gets a copy.
-    doc = await unpdf.getDocumentProxy(new Uint8Array(bytes), {
-      isEvalSupported: false,
-      // Errors only: pdf.js warns through `console.log`, which on a stdio
-      // transport is the protocol stream.
-      verbosity: 0,
-      disableFontFace: true,
-      useSystemFonts: false,
-    });
+    doc = await unpdf.getDocumentProxy(new Uint8Array(bytes), pdfOpenOptions());
   } catch (err) {
     const passworded = (err as { name?: unknown })?.name === 'PasswordException';
     return {
@@ -439,6 +607,7 @@ async function extractPdfText(bytes: Uint8Array, budget: CpuBudget): Promise<Ext
     };
   }
   try {
+    onProgress?.({ kind: 'pdf-open', numPages: doc.numPages });
     const pages = Math.min(doc.numPages, READ_FILE_PDF_MAX_PAGES);
     const parts: string[] = [];
     let length = 0;
@@ -459,27 +628,12 @@ async function extractPdfText(bytes: Uint8Array, budget: CpuBudget): Promise<Ext
       }
       page.cleanup?.();
       parts.push(pageText.trim());
+      onProgress?.({ kind: 'pdf-page', text: parts[parts.length - 1] });
       length += pageText.length + 2;
       read = n;
     }
-    const joined = parts.join('\n\n').trim();
     const budgetNote = outOfBudget ? cpuBudgetNote(budget.budgetMs, `page ${read} of ${doc.numPages}`) : undefined;
-    if (!joined) {
-      return {
-        kind: 'none',
-        reason:
-          budgetNote ??
-          'This PDF has no text layer (it may be a scan), so there is no text to read. Download it with the link instead.',
-      };
-    }
-    const { text, truncated } = bounded(joined);
-    return {
-      kind: 'text',
-      format: 'application/pdf',
-      text,
-      truncated: truncated || read < doc.numPages,
-      ...(budgetNote !== undefined ? { note: budgetNote } : {}),
-    };
+    return pdfAnswer(parts, doc.numPages, budgetNote);
   } catch {
     return {
       kind: 'none',
@@ -576,8 +730,13 @@ function docxChunkText(xml: string): string {
  * once the CPU budget is spent; `paragraphs` counts those read and `complete`
  * says whether the body was read to its end.
  */
-function docxXmlText(xml: string, budget: CpuBudget): { text: string; complete: boolean; outOfBudget: boolean; paragraphs: number } {
+function docxXmlText(
+  xml: string,
+  budget: CpuBudget,
+  onProgress?: ProgressSink,
+): { text: string; complete: boolean; outOfBudget: boolean; paragraphs: number } {
   const parts: string[] = [];
+  let reported = 0;
   let at = 0;
   let paragraphs = 0;
   let outOfBudget = false;
@@ -590,20 +749,44 @@ function docxXmlText(xml: string, budget: CpuBudget): { text: string; complete: 
     if (at >= xml.length) break;
     // Between paragraphs, never mid-paragraph; every DOCX_BUDGET_CHECK_EVERY
     // paragraphs, so the clock read stays a rounding error on a long body.
-    if (paragraphs % DOCX_BUDGET_CHECK_EVERY === 0 && budget.spent()) {
-      outOfBudget = true;
-      break;
+    if (paragraphs % DOCX_BUDGET_CHECK_EVERY === 0) {
+      if (onProgress) {
+        onProgress({ kind: 'docx-paragraphs', text: parts.slice(reported).join(''), paragraphs });
+        reported = parts.length;
+      }
+      if (budget.spent()) {
+        outOfBudget = true;
+        break;
+      }
     }
   }
   return {
-    text: parts.join('').replace(/\n{3,}/g, '\n\n').trim(),
+    text: parts.join(''),
     complete: at >= xml.length,
     outOfBudget,
     paragraphs,
   };
 }
 
-function extractDocxText(bytes: Uint8Array, budget: CpuBudget): ExtractedContent {
+/**
+ * A Word document's answer from its body's text as read: blank runs folded,
+ * cut at the length cap, `truncated` when the body was not read to its end,
+ * and the budget note when reading stopped at the budget.
+ */
+function docxAnswer(read: string, complete: boolean, budgetNote: string | undefined): ExtractedContent {
+  const whole = read.replace(/\n{3,}/g, '\n\n').trim();
+  if (!whole) return { kind: 'none', reason: budgetNote ?? 'This Word document has no text.' };
+  const { text, truncated } = bounded(whole);
+  return {
+    kind: 'text',
+    format: DOCX_TYPE,
+    text,
+    truncated: truncated || !complete,
+    ...(budgetNote !== undefined ? { note: budgetNote } : {}),
+  };
+}
+
+function extractDocxText(bytes: Uint8Array, budget: CpuBudget, onProgress?: ProgressSink): ExtractedContent {
   const buf = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let entry: { method: number; data: Buffer } | null;
   try {
@@ -635,17 +818,9 @@ function extractDocxText(bytes: Uint8Array, budget: CpuBudget): ExtractedContent
   // The inflate above is one call and cannot stop part-way; its output is
   // bounded by READ_FILE_DOCX_XML_MAX_BYTES. The budget is checked between
   // the body's paragraphs.
-  const read = docxXmlText(xml.toString('utf8'), budget);
+  const read = docxXmlText(xml.toString('utf8'), budget, onProgress);
   const budgetNote = read.outOfBudget ? cpuBudgetNote(budget.budgetMs, `${read.paragraphs} paragraphs`) : undefined;
-  if (!read.text) return { kind: 'none', reason: budgetNote ?? 'This Word document has no text.' };
-  const { text, truncated } = bounded(read.text);
-  return {
-    kind: 'text',
-    format: DOCX_TYPE,
-    text,
-    truncated: truncated || !read.complete,
-    ...(budgetNote !== undefined ? { note: budgetNote } : {}),
-  };
+  return docxAnswer(read.text, read.complete, budgetNote);
 }
 
 // ── The answer ───────────────────────────────────────────────────────────

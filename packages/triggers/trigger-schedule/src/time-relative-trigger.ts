@@ -19,7 +19,7 @@ import {
     type ScheduledWorkTriggerOptions,
 } from './schedule-trigger.js';
 import type { ScheduledRunOwnership } from '@objectstack/types';
-import { wallClockToUtcMs } from '@objectstack/core';
+import { isFederatedObject, wallClockToUtcMs } from '@objectstack/core';
 // [#18378] The ONE resolver for "which organization does this record BELONG
 // to" — the WALL question (`tenancy.enabled: false` ⇒ nothing, then a declared
 // `tenancy.tenantField`, then the kernel's `organization_id`), shared with the
@@ -221,7 +221,7 @@ export function buildWindowWhere(desc: TimeRelativeDescriptor, window: DateWindo
  * `Engine.buildDriverOptions` scopes a read by `context.tenantId` unless the
  * object opts out, and it documents exactly two opt-outs: `tenancy.enabled:
  * false` (ADR-0066 — a platform-global catalog, whose NULL-organization rows
- * would vanish under a scope) and `external != null` (ADR-0015 — a federated
+ * would vanish under a scope) and `isFederatedObject` (ADR-0015 — a federated
  * object whose table belongs to a remote database, where the platform has no
  * ground to guess a tenant column onto someone else's schema).
  *
@@ -241,7 +241,7 @@ function organizationScopeIsInertFor(schema: unknown): string | null {
     if (!schema || typeof schema !== 'object') return null;
     const s = schema as { tenancy?: { enabled?: unknown } | null; external?: unknown };
     if (s.tenancy?.enabled === false) return 'declares `tenancy: { enabled: false }` (ADR-0066, platform-global)';
-    if (s.external != null) return 'is a federated object (ADR-0015 `external`), whose table the remote database owns';
+    if (isFederatedObject(s)) return 'is a federated object (ADR-0015 `external`), whose table the remote database owns';
     return null;
 }
 

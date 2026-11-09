@@ -84,7 +84,9 @@ export interface UseHitlInChatOptions {
    *
    * Failures (`status: 'failed'`, transport errors) still surface in
    * `decisions[toolCallId]` but do NOT trigger a continuation prompt — the
-   * operator is expected to read the error and decide what to do next.
+   * operator is expected to read the error and decide what to do next. A
+   * `held` outcome (the write waits on an approval outside the conversation)
+   * does not trigger one either: nothing has been written to report.
    *
    * The prompt starts with the `[HITL <id>]` tag, and that tag is how every
    * reader knows the turn is not the person's own words: the chat transcript
@@ -102,7 +104,7 @@ export interface ContinueContext {
   decision: 'approved' | 'rejected';
   /**
    * Raw REST payload — the spec decision response: `{ status: 'executed' |
-   * 'failed', result?, error? }` on approve, `{ status: 'rejected', id }` on
+   * 'held' | 'failed', result?, error? }` on approve, `{ status: 'rejected', id }` on
    * reject (objectui#3783). Note `id` is on the REJECT side only; use
    * `pendingActionId` above, which is populated for both decisions.
    */
@@ -267,6 +269,13 @@ export function useHitlInChat(options: UseHitlInChatOptions): UseHitlInChatRetur
             decision,
           });
           succeeded = true;
+        } else if (status === 'held') {
+          // The confirmation was accepted, but a host policy holds the write
+          // for an approval outside the conversation: nothing is written yet.
+          // Its own state, never `success` — the card draws "waiting for
+          // approval" — and no continuation turn, so the model is not told
+          // the action ran.
+          setDecision(toolCallId, { state: 'held', decision: 'approved', result: payload.result });
         } else if (status === 'failed') {
           const errMsg = (payload.error as string) ?? 'Action approved but execution failed.';
           setDecision(toolCallId, { state: 'error', message: errMsg, decision });

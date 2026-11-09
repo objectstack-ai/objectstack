@@ -1235,7 +1235,15 @@ export const CEILINGS = new Map([
   // main-red resume card (#29445, filing gate ③, a task the maintainer set
   // directly), maintainer verbatim and untranslated: 「这个应该立卡写入 skills：如果到时候发现有哪个 PR 确实因为这次红被挡住（比如有车道把 PR 停下来等 main 绿），我会敲对应车道的邮箱，让它继续推进。」
   // Measured delta +1 (101 → 102); landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/landing-operations.md', 102],
+  // Raised 102 → 107 by the merge-queue jump rule — an ORDINARY raise on the
+  // same destination, recorded under that entry's `ruledRaises` below, ⛔ not a
+  // second move. The text is when a seat may ring the relay's `pr_enqueue_front`
+  // ((a)(b)(c), audit comment first, one jumper per repository, FAILED handling).
+  // Ruling of record: the jump card (#31403, filing gate ③, a task on the
+  // maintainer's word), maintainer verbatim and untranslated: 「已经把 #3686 插到队首了,插队做不到,你应该立卡改进skills」;
+  // letter 「A」 recorded as comment 6729640900. Measured delta +5 (102 → 107);
+  // landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/landing-operations.md', 107],
   // Release-aftercare duties — what a lane PM still owes AFTER a tagged release
   // rolls to production, which the landing window (ends at MERGED) never
   // covered: post-roll placement/latency reading with the waker-bias re-draw
@@ -1708,6 +1716,15 @@ export const CEILINGS = new Map([
   // NEW file, so this is an added row and no other row moves; set at the
   // landed line count (headroom 0, same convention as every lane charter above).
   ['.claude/skills/pm-dispatch/references/lanes/eval.md', 45],
+  // repo:cloud lane charter: the cloud seats keep first-touch triage of the
+  // cloud repo, run the first-touch sweep before they claim, set grade and
+  // state when they file, and triage's daily reconciliation is the backstop;
+  // the cloud seats' own standing commitments come from the companion card
+  // #31918. Ruling of record: comment 6739409918, the maintainer's letter A,
+  // whose workload names `lanes/cloud.md`. A NEW file, so this is an added
+  // row and no other row moves; set at the landed line count (headroom 0,
+  // same convention as every lane charter above).
+  ['.claude/skills/pm-dispatch/references/lanes/cloud.md', 28],
   // 399 → 405 (#11126): maintainer-ruled (2026-08-23, option B, quoted in that
   // PR) — the +6-line cross-repo dispatch-gates caveat, sized so the queued
   // #11137 (395→399 on main) and this PR's +6 compose to exactly 405.
@@ -2386,6 +2403,16 @@ export const CROSS_FILE_MOVES = new Map([
           date: '2026-11-03',
           delta: 1,
         },
+        {
+          // Quoted beside this entry's ceiling above. Copied from there, not paraphrased.
+          ruling:
+            'the merge-queue jump rule on `.claude/skills/pm-dispatch/references/landing-operations.md`'
+            + ' — the jump card (#31403, filing gate ③, a task on the maintainer\'s word),'
+            + ' maintainer verbatim and untranslated: 「已经把 #3686 插到队首了,插队做不到,你应该立卡改进skills」;'
+            + ' letter 「A」 recorded as comment 6729640900',
+          date: '2026-11-09',
+          delta: 5,
+        },
       ],
     },
   ],
@@ -2518,6 +2545,7 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/lanes/review.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/qa.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/eval.md', 0],
+  ['.claude/skills/pm-dispatch/references/lanes/cloud.md', 0],
   ['.claude/agents/os-dev.md', 0],
   ['.claude/skills/checklist-test/SKILL.md', 221],
   ['.claude/skills/checklist-author/SKILL.md', 0],

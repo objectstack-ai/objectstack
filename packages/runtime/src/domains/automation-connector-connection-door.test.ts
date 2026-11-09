@@ -14,6 +14,8 @@
 // (`connector-connection-door.test.ts`).
 
 import { describe, it, expect, vi } from 'vitest';
+// The stack loads the metadata service lazily; pay that load at collection, never in a clocked case.
+import '@objectstack/metadata';
 
 import { PLATFORM_CAPABILITIES } from '@objectstack/spec/security';
 import { assembleExecutionContext } from '@objectstack/core';
@@ -346,6 +348,34 @@ describe('ADR-0143 D5 — connector connection door: begin and revoke refuse a d
             expect(messageOf(response)).toContain(named);
             expect(messageOf(response)).toContain('human administrator');
             expect(member(h)).not.toHaveBeenCalled();
+            for (const m of [h.get, h.begin, h.complete, h.revoke]) expect(m).not.toHaveBeenCalled();
+        }
+    });
+
+    // [ADR-0151 D3] An AI service account's own key: the account is the
+    // subject (`principalKind: 'agent'`, no `onBehalfOf`), so it is named as
+    // itself, never as an agent acting for a person.
+    const ACCOUNT_KEY = (): HttpProtocolContext => ({
+        request: {},
+        admission: { credential: 'api_key', authGate: undefined },
+        executionContext: assembleExecutionContext({
+            authz: { ...holderAuthz, userId: 'u_agent', principalKind: 'agent' as const },
+            oauth: undefined,
+            ...ENTRY,
+        }),
+    } as HttpProtocolContext);
+
+    it('an AI service account is refused on begin and on revoke by its own kind, not as an agent acting for a person', async () => {
+        expect(ACCOUNT_KEY().executionContext).toMatchObject({ userId: 'u_agent', principalKind: 'agent', systemPermissions: [] });
+        expect(ACCOUNT_KEY().executionContext?.onBehalfOf).toBeUndefined();
+        expect(connectorConnectionDelegatedCaller(ACCOUNT_KEY())).toBe('agent_account');
+        for (const verb of ['POST', 'DELETE'] as const) {
+            const h = boot();
+            const { response } = await connection(h, verb, ACCOUNT_KEY());
+            expect(statusOf(response)).toBe(403);
+            expect(messageOf(response)).toBe(connectorConnectionDelegatedCallerRefusal('agent_account'));
+            expect(messageOf(response)).toContain('an AI service account, which acts as itself');
+            expect(messageOf(response)).not.toContain('on a person\'s behalf');
             for (const m of [h.get, h.begin, h.complete, h.revoke]) expect(m).not.toHaveBeenCalled();
         }
     });

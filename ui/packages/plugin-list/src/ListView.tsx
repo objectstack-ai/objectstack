@@ -1256,6 +1256,9 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // request, so the copy points at the filter instead of the network.
   'list.loadErrorRejectedTitle': 'This view’s query was rejected',
   'list.loadErrorRejectedMessage': 'The server could not process this view’s filter or query options. Clearing the filters usually fixes it; if the view is saved this way, an administrator needs to correct it.',
+  // objectstack#31893 — a 400 `INVALID_FIELD` that names the refused field.
+  'list.loadErrorUnknownColumnMessage': 'The column “{{column}}” shows the field “{{field}}”, which {{object}} does not have. An administrator needs to correct or remove the column in this view.',
+  'list.loadErrorUnknownFieldMessage': 'This view’s query names the field “{{field}}”, which {{object}} does not have. Clearing the filters usually fixes it; if the view is saved this way, an administrator needs to correct it.',
   // Load DENIED BY THE OBJECT — the server answered 404 `OBJECT_API_DISABLED`
   // or 405 `OBJECT_API_METHOD_NOT_ALLOWED`. This is not "no records", not a
   // permission grant anyone can give, and not something a retry can change:
@@ -1536,6 +1539,44 @@ function kanbanCardFieldsFromView(columns: readonly unknown[], skip: ReadonlyArr
     if (out.length === KANBAN_VIEW_CARD_FIELD_COUNT) break;
   }
   return out;
+}
+
+/**
+ * The field a `400 INVALID_FIELD` load failure refused, or `null`
+ * (objectstack#31893).
+ *
+ * Read from the answer's structured `details.field` only: `@objectstack/rest`
+ * answers the refusal flat (`{ error, code, field, object }`), and both list
+ * read paths keep that body on `details` (`@objectstack/client`'s wrapper, and
+ * the adapter's raw `$expand`/`$search` branch). ⛔ Never the sentence: its
+ * wording is the server's and moves with it. Any other code, or an
+ * `INVALID_FIELD` that names no field, answers `null` and keeps the generic
+ * rejected panel.
+ */
+function refusedQueryField(err: unknown): string | null {
+  const e = err as { code?: unknown; details?: { field?: unknown } } | null | undefined;
+  if (e?.code !== 'INVALID_FIELD') return null;
+  const field = e.details?.field;
+  return typeof field === 'string' && field.trim() !== '' ? field : null;
+}
+
+/**
+ * The view column whose field is `field`, by the same `columnIdentity` the
+ * `$select` projection reads a column by (objectstack#31893). A bare-string
+ * column has no authored label, so it answers `{ label: undefined }`.
+ */
+function refusedFieldColumn(
+  columns: unknown,
+  field: string,
+): { label?: string | Record<string, string> } | null {
+  if (!Array.isArray(columns)) return null;
+  for (const column of columns) {
+    if (columnIdentity(column) !== field) continue;
+    return typeof column === 'object' && column !== null
+      ? { label: (column as { label?: string | Record<string, string> }).label }
+      : {};
+  }
+  return null;
 }
 
 /**
@@ -2199,6 +2240,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // kind with an answer shows them instead of "check your connection", which
   // is only true of a request that got no answer. `null` = no answer.
   const [loadErrorAnswer, setLoadErrorAnswer] = React.useState<AnsweredLoadFailure | null>(null);
+  // objectstack#31893 — the field a `400 INVALID_FIELD` refused, read from the
+  // answer's structured `details.field` (never its sentence). The rejected
+  // panel names it, and the column that asked for it when it is one of this
+  // view's columns. `null` = not such a refusal.
+  const [loadErrorRefusedField, setLoadErrorRefusedField] = React.useState<string | null>(null);
   // Start in loading state when we will fetch from a dataSource so the empty
   // state doesn't flash before the first effect runs. Inline data (schema.data
   // as an array or a `value` provider) starts as not-loading.
@@ -3406,6 +3452,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       setLoadError(null);
       setLoadErrorIsSearchRefusal(false);
       setLoadErrorAnswer(null);
+      setLoadErrorRefusedField(null);
       // [objectui#10384] Set when this result clamps the pager (see below).
       // The window it moves to is already being fetched, so loading stays on:
       // settling it here would paint the empty window — and with it the
@@ -3972,10 +4019,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           setLoadError((err as any)?.message ? String((err as any).message) : String(err ?? 'Unknown error'));
           setLoadErrorKind(classifyLoadError(err));
           setLoadErrorAnswer(answeredLoadFailure(err));
-          setLoadErrorIsSearchRefusal(
-            // `searchTerm` is what put `$search` on this request's params.
-            !!searchTerm && (err as { code?: unknown } | null)?.code === 'INVALID_FIELD',
-          );
+          // `searchTerm` is what put `$search` on this request's params.
+          const isSearchRefusal = !!searchTerm && (err as { code?: unknown } | null)?.code === 'INVALID_FIELD';
+          setLoadErrorIsSearchRefusal(isSearchRefusal);
+          // The search path above keeps its own panel; this read is for every
+          // other `INVALID_FIELD` (objectstack#31893).
+          setLoadErrorRefusedField(isSearchRefusal ? null : refusedQueryField(err));
         }
       } finally {
         if (isMounted && requestId === fetchRequestIdRef.current && clampedToPage === null) {
@@ -6096,6 +6145,29 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // component fetched: there the rows ARE the list, and two lines each say
   // what a grid row said. A board, a calendar or a grouped grid keeps its own
   // rendering, because its structure is its meaning.
+  // objectstack#31893 — the rejected panel's sentence for a refused field: the
+  // column that asked for it when it is one of this view's columns (its
+  // authored label, else the field name), otherwise the field alone with the
+  // filter remedy. The server's projection door runs before its filter door,
+  // so a field that is a column is always the column's refusal.
+  const refusedFieldCopy = (() => {
+    if (!loadErrorRefusedField) return null;
+    const objectName = (objectDef?.label && objectDef?.name && typeof resolveObjectLabel === 'function'
+      ? resolveObjectLabel(objectDef)
+      : objectDef?.label) || schema.objectName || '';
+    const column = refusedFieldColumn(schema.columns, loadErrorRefusedField);
+    if (column) {
+      const label = column.label == null ? undefined
+        : typeof column.label === 'string' ? column.label
+          : pickLocalized(column.label, displayLocale);
+      return t('list.loadErrorUnknownColumnMessage', {
+        column: label || loadErrorRefusedField,
+        field: loadErrorRefusedField,
+        object: objectName,
+      });
+    }
+    return t('list.loadErrorUnknownFieldMessage', { field: loadErrorRefusedField, object: objectName });
+  })();
   const compactPosture = compact && paginate && surfaceDrawsFetchedRows;
   const compactTitle = compactPosture
     ? (resolveInlineI18nLabel(schema.label, displayLocale)
@@ -7181,6 +7253,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             // verdict) is quoted, with its code below — the network sentence is
             // only for a request that got no answer (objectstack#29704).
             message={loadErrorIsSearchRefusal ? loadError
+              : loadErrorKind === 'rejected' && refusedFieldCopy ? refusedFieldCopy
               : loadErrorKind === 'network' && loadErrorAnswer ? loadErrorAnswer.message
               : t(
               loadErrorKind === 'api-disabled' ? 'list.loadErrorApiDisabledMessage'

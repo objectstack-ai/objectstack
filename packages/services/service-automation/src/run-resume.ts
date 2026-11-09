@@ -217,7 +217,10 @@ export async function seedRunGrants(
     // grants it was not derived from: the resolution below re-seeds the rung
     // with the grants, and a run whose grants stay unresolved (the resolver
     // throws, answers nothing, or is not wired) carries none.
-    if (needsGrants) delete (runContext as SeededRunContext).posture;
+    if (needsGrants) {
+        delete (runContext as SeededRunContext).posture;
+        delete (runContext as SeededRunContext).principalKind;
+    }
     if (
         runContext.runAs !== 'system' &&
         runContext.userId &&
@@ -236,6 +239,9 @@ export async function seedRunGrants(
                     // only with them: carried grants keep the rung they came
                     // with, so a narrowed ceiling never gains a wider rung.
                     if (grants.posture) (runContext as SeededRunContext).posture = grants.posture;
+                    // [ADR-0151 D3] An AI service account runs as the agent
+                    // principal it is, under the agent ceiling.
+                    if (grants.principalKind === 'agent') (runContext as SeededRunContext).principalKind = 'agent';
                 }
                 if (needsPeers && Array.isArray(grants.org_user_ids)) {
                     (runContext as SeededRunContext).org_user_ids = grants.org_user_ids;
@@ -350,6 +356,9 @@ async function deciderSegmentContext(
     // platform administrator's submission would hand a member's decision
     // segment the deployment-level rows. Seeded for the decider below.
     delete switched.posture;
+    // [ADR-0151 D3] The trigger user's kind is theirs too: a decider is
+    // resolved afresh, and only an account is an agent.
+    delete switched.principalKind;
     // The impersonating administrator belonged to the write that STARTED the
     // run: the segment the decider owns names only the administrator, if any,
     // who made THIS decision while impersonating the decider.

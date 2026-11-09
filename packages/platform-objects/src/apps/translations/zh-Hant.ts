@@ -103,6 +103,7 @@ export const zhHant: TranslationData = {
         nav_settings_ai: { label: 'AI 與 Embedder' },
         nav_settings_knowledge: { label: '知識庫' },
         nav_settings_lifecycle: { label: '資料生命週期' },
+        nav_recycle_bin: { label: '回收站' },
         nav_notification_preferences: { label: '通知偏好設定' },
         nav_notification_templates: { label: '通知範本' },
 

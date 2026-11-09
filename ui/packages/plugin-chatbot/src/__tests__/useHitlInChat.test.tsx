@@ -117,6 +117,39 @@ describe('useHitlInChat', () => {
     expect(result.current.decisions['tc-1']?.message).toContain('boom');
   });
 
+  it('records a held outcome as held, never success, and does NOT continue', async () => {
+    // A host policy held the confirmed write for an approver outside the
+    // conversation: the spec's `held` approve outcome, a 200 where nothing
+    // was written. Before it had a branch it fell into the catch-all and was
+    // recorded as `success`.
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      text: async () => JSON.stringify({ status: 'held', result: { code: 'AI_WRITE_HELD' } }),
+    } as Response);
+
+    const continueConversation = vi.fn();
+    const onDecided = vi.fn();
+    const { result } = renderHook(() =>
+      useHitlInChat({
+        messages: [baseMessage('pa_42')],
+        continueConversation,
+        onDecided,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.decide('tc-1', true);
+    });
+
+    expect(result.current.decisions['tc-1']).toEqual({
+      state: 'held',
+      decision: 'approved',
+      result: { code: 'AI_WRITE_HELD' },
+    });
+    expect(continueConversation).not.toHaveBeenCalled();
+    expect(onDecided).toHaveBeenCalledWith('tc-1', { status: 'held', result: { code: 'AI_WRITE_HELD' } });
+  });
+
   /* ------------------------------------------------------------------ */
   /* objectui#3783 — what `onDecided` actually receives.                 */
   /* ------------------------------------------------------------------ */

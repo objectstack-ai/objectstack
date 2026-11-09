@@ -370,14 +370,25 @@ async function holderLeftToReferenceCheck(
   userId: string,
 ): Promise<boolean> {
   if (!referenceCheckAsksCaller(engine, ctx.object)) return false;
+  const reads = await callerReadsGrantHolder(ctx, holder, userId);
+  return reads === false;
+}
+
+/**
+ * Does the caller's own read door return the grant holder `userId`? The same
+ * projected-to-id read this refusal asks, memoised per write, so a sibling
+ * hook judging the same row (`agent-account-grant-refusal.ts`) pays no read
+ * of its own. `undefined` when the dispatch carries no caller api to ask.
+ */
+export async function callerReadsGrantHolder(ctx: any, holder: unknown, userId: string): Promise<boolean | undefined> {
   const memo = memoOf(readsByWrite, ctx);
   let reads = memo?.get(userId);
   if (reads === undefined) {
     reads = await callerReadsHolder(ctx, holder, userId);
-    if (reads === undefined) return false;
+    if (reads === undefined) return undefined;
     memo?.set(userId, reads);
   }
-  return !reads;
+  return reads;
 }
 
 /**

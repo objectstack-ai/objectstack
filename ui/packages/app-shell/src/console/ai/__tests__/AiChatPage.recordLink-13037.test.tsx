@@ -22,6 +22,15 @@ import React from 'react';
 
 const ANSWER = 'Top customer: [Wayne Enterprises](/record/account/acc_42).';
 
+/**
+ * objectstack#31869 — the list case's own answer, so the record describe's
+ * answer stays exactly as it was. `answerNow` is what the mocked chat hook
+ * answers with; each describe sets it.
+ */
+const LIST_FILTER = { logic: 'and', conditions: [{ field: 'stage', operator: 'equals', value: 'open' }] };
+const LIST_ANSWER = `There are [12 open opportunities](/list/opportunity?view=all&uf__filter=${encodeURIComponent(JSON.stringify(LIST_FILTER))}).`;
+const answerNow = vi.hoisted(() => ({ content: '' }));
+
 vi.mock('@object-ui/plugin-chatbot', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
@@ -29,7 +38,7 @@ vi.mock('@object-ui/plugin-chatbot', async (importOriginal) => {
     useObjectChat: () => ({
       messages: [
         { id: 'u1', role: 'user', content: 'analyse my customers' },
-        { id: 'a1', role: 'assistant', content: ANSWER },
+        { id: 'a1', role: 'assistant', content: answerNow.content || ANSWER },
       ],
       isLoading: false,
       error: undefined,
@@ -101,7 +110,9 @@ beforeEach(() => {
     vi.fn(async (input: RequestInfo | URL) => {
       const body = String(input).endsWith('/api/v1/meta/object/account')
         ? { item: { name: 'account', _packageId: 'com.acme.crm' } }
-        : { success: true, data: [] };
+        : String(input).endsWith('/api/v1/meta/object/opportunity')
+          ? { item: { name: 'opportunity', _packageId: 'com.acme.crm' } }
+          : { success: true, data: [] };
       return new Response(JSON.stringify(body), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -110,6 +121,7 @@ beforeEach(() => {
   );
 });
 afterEach(() => {
+  answerNow.content = '';
   cleanup();
   vi.unstubAllGlobals();
   window.history.replaceState(null, '', '/');
@@ -127,6 +139,30 @@ describe('objectui#13037 — a record link in an answer opens the record in the 
         fireEvent.click(link);
       });
       await waitFor(() => expect(window.location.pathname).toBe(expected));
+      expect(document.querySelector('[data-streamdown="link-safety-modal"]')).toBeNull();
+      expect(windowOpen).not.toHaveBeenCalled();
+    });
+  }
+});
+
+describe('objectstack#31869 — a list link in an answer opens the filtered list in the console', () => {
+  for (const [mount, basename, expected] of [
+    ['a /_console/ mount', '/_console', '/_console/apps/com.acme.crm/opportunity'],
+    ['a root mount', '/', '/apps/com.acme.crm/opportunity'],
+  ] as const) {
+    it(`under ${mount}: the list page with the view and the filter, same tab, no dialog`, async () => {
+      answerNow.content = LIST_ANSWER;
+      renderPane(basename);
+      const link = await screen.findByRole('button', { name: '12 open opportunities' });
+      await act(async () => {
+        fireEvent.click(link);
+      });
+      await waitFor(() => expect(window.location.pathname).toBe(expected));
+      const params = new URLSearchParams(window.location.search);
+      // Built from the parsed values: exactly the two keys, the filter equal to the link's.
+      expect([...params.keys()].sort()).toEqual(['uf__filter', 'view']);
+      expect(params.get('view')).toBe('all');
+      expect(JSON.parse(params.get('uf__filter')!)).toEqual(LIST_FILTER);
       expect(document.querySelector('[data-streamdown="link-safety-modal"]')).toBeNull();
       expect(windowOpen).not.toHaveBeenCalled();
     });

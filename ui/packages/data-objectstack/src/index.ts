@@ -5509,6 +5509,14 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       // `code` first, then the nested envelope's.
       err.code = envelope.code;
       err.httpStatus = res.status;
+      // …and the answer's structured members, on `details`, where the client's
+      // wrapper puts them (its `details` falls back to the WHOLE body when the
+      // envelope carries none, the flat shape `@objectstack/rest` answers). A
+      // `400 INVALID_FIELD` names the refused field there (`details.field`),
+      // and the list reads it to say which column asked for it
+      // (objectstack#31893). Without this, a view with a lookup column took
+      // this branch and arrived with the field dropped.
+      err.details = errorBody?.details ?? errorBody?.error?.details ?? errorBody;
       throw err;
     }
 

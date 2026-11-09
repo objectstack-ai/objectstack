@@ -30,6 +30,8 @@ import { ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { INSTALL_RENAME_PLANNER_SERVICE, type InstallRenamePlanner } from './marketplace-install-declared-renames.js';
+import { MarketplaceInstallRenamePlannerPlugin } from './marketplace-install-rename-planner.js';
+import { INSTALL_LOCAL_DOOR_SERVICE } from './install-local-door-service.js';
 import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 
 type Handler = (c: any) => Promise<any>;
@@ -516,4 +518,130 @@ describe('the declared-rename planner service answers what the door does for the
             if (kernel.getState() === 'running') await kernel.shutdown();
         }
     });
+});
+
+describe('the planner mounts without the install door: MarketplaceInstallRenamePlannerPlugin registers the one service and nothing else (#31895)', () => {
+    /** An http-server whose raw app records each route a plugin mounts. */
+    const routeProbe = () => {
+        const routes: string[] = [];
+        const record = (verb: string) => (path: string) => { routes.push(`${verb} ${path}`); };
+        const plugin: Plugin = {
+            name: 'test.http-server-route-probe',
+            init: async (ctx: PluginContext) => {
+                ctx.registerService('http-server', { getRawApp: () => ({ get: record('GET'), post: record('POST'), delete: record('DELETE') }) });
+            },
+        };
+        return { routes, plugin };
+    };
+
+    /** A real ObjectKernel with ObjectQLPlugin, the route probe and `mounts`, booted; the kernel's view of its services. */
+    const boot = async (mounts: Plugin[]) => {
+        const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false } as never);
+        const probe = routeProbe();
+        let services: Map<string, unknown> | undefined;
+        let planner: InstallRenamePlanner | undefined;
+        const consumer: Plugin = {
+            name: 'test.install-rename-planner-consumer',
+            init: async () => undefined,
+            start: async (ctx: PluginContext) => {
+                planner = ctx.getService<InstallRenamePlanner>(INSTALL_RENAME_PLANNER_SERVICE);
+                services = ctx.getServices();
+            },
+        };
+        await kernel.use(new ObjectQLPlugin());
+        await kernel.use(probe.plugin);
+        for (const m of mounts) await kernel.use(m);
+        await kernel.use(consumer);
+        await kernel.bootstrap();
+        return { kernel, routes: probe.routes, services: () => services!, planner: () => planner! };
+    };
+    const shutdown = async (kernel: ObjectKernel) => { if (kernel.getState() === 'running') await kernel.shutdown(); };
+    const door = () => new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: dir });
+
+    it('a kernel with no install door resolves the planner, and its plan is the door\'s for the same versions', async () => {
+        const alone = await boot([new MarketplaceInstallRenamePlannerPlugin()]);
+        const withDoor = await boot([door()]);
+        try {
+            expect(typeof alone.planner().plan).toBe('function');
+            const plan = await alone.planner().plan({ manifestId: VENDOR, incoming: V2, installed: V1 });
+            // No declared-rename members on this engine's driver: a pending
+            // rename is the `transport` refusal, read from the engine.
+            expect(plan.carries).toEqual([]);
+            expect(plan.refusals).toEqual([expect.objectContaining({ object: 'acme_lead', field: 'account_name', reason: 'transport' })]);
+            expect(plan).toEqual(await withDoor.planner().plan({ manifestId: VENDOR, incoming: V2, installed: V1 }));
+        } finally {
+            await shutdown(alone.kernel);
+            await shutdown(withDoor.kernel);
+        }
+    });
+
+    it('over a driver that carries, the door-less planner names the carry the door then performs (`renamesCarried`)', async () => {
+        const driver = fakeDriver({ acme_lead: new Set(['id', 'company']) });
+        const doorMount = await mount({ installed: V1, driver, served: { acme_lead: lead({ company: { type: 'text' } }) } });
+        // The same engine, behind a context that holds no install door.
+        const services: Record<string, any> = { objectql: { getDriverForObject: () => driver, registry: { getObject: () => lead({ company: { type: 'text' } }) } } };
+        const ctx = {
+            getService: (name: string) => {
+                if (!(name in services)) throw new Error(`no ${name}`);
+                return services[name];
+            },
+            getServices: () => new Map(Object.entries(services)),
+            registerService: (name: string, service: unknown) => { services[name] = service; },
+        };
+        await new MarketplaceInstallRenamePlannerPlugin().init(ctx as any);
+        expect(Object.keys(services).sort()).toEqual([INSTALL_RENAME_PLANNER_SERVICE, 'objectql']);
+
+        const plan = await (services[INSTALL_RENAME_PLANNER_SERVICE] as InstallRenamePlanner).plan({ manifestId: VENDOR, incoming: V2, installed: V1 });
+
+        expect(plan).toEqual({
+            carries: [{ object: 'acme_lead', table: 'acme_lead', from: 'company', to: 'account_name' }],
+            refusals: [],
+        });
+        expect(plan).toEqual(await doorMount.planner().plan({ manifestId: VENDOR, incoming: V2, installed: V1 }));
+        expect(driver.carryDeclaredRenames).not.toHaveBeenCalled();
+        const res = await doorMount.install(makeC({ manifest: V2 }));
+        expect(res.status).toBe(200);
+        expect(res.payload.data.renamesCarried).toEqual(plan.carries);
+    });
+
+    it('the door-less kernel mounts no install-local route and holds none of the door\'s other services', async () => {
+        const alone = await boot([new MarketplaceInstallRenamePlannerPlugin()]);
+        try {
+            expect(alone.routes).toEqual([]);
+            expect(alone.services().has(INSTALL_RENAME_PLANNER_SERVICE)).toBe(true);
+            expect(alone.services().has(INSTALL_LOCAL_DOOR_SERVICE)).toBe(false);
+            // Nothing is read into or written to an install ledger.
+            expect(ledgerFiles()).toEqual({});
+        } finally {
+            await shutdown(alone.kernel);
+        }
+    });
+
+    it('CONTROL: a kernel with only the install door keeps the planner, and the route probe sees the door\'s routes', async () => {
+        const doorOnly = await boot([door()]);
+        try {
+            expect(doorOnly.services().has(INSTALL_RENAME_PLANNER_SERVICE)).toBe(true);
+            expect(doorOnly.services().has(INSTALL_LOCAL_DOOR_SERVICE)).toBe(true);
+            expect(doorOnly.routes).toContain('POST /api/v1/marketplace/install-local');
+            expect(typeof doorOnly.planner().plan).toBe('function');
+        } finally {
+            await shutdown(doorOnly.kernel);
+        }
+    });
+
+    for (const order of ['planner plugin first', 'install door first'] as const) {
+        it(`both mounted (${order}): the kernel boots, the service is registered once, and both answer through it`, async () => {
+            const plannerPlugin = new MarketplaceInstallRenamePlannerPlugin();
+            const both = await boot(order === 'planner plugin first' ? [plannerPlugin, door()] : [door(), plannerPlugin]);
+            try {
+                expect(both.kernel.getState()).toBe('running');
+                expect([...both.services().keys()].filter((k) => k === INSTALL_RENAME_PLANNER_SERVICE)).toHaveLength(1);
+                expect(both.services().has(INSTALL_LOCAL_DOOR_SERVICE)).toBe(true);
+                const plan = await both.planner().plan({ manifestId: VENDOR, incoming: V2, installed: V1 });
+                expect(plan.refusals).toEqual([expect.objectContaining({ object: 'acme_lead', field: 'account_name', reason: 'transport' })]);
+            } finally {
+                await shutdown(both.kernel);
+            }
+        });
+    }
 });

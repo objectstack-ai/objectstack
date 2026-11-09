@@ -42,7 +42,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           action_invocation: "Action Invocation",
           package_uninstall: "Package Uninstall",
           package_unmanaged_import: "Package Unmanaged Import",
-          credential_use: "Credential Use"
+          credential_use: "Credential Use",
+          scim_refused: "SCIM Refused"
         }
       },
       user_id: {

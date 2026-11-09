@@ -800,6 +800,9 @@ export async function buildContextForUser(
     // [Ruling of record 6355206139] The population stamp the resolver made, so
     // the explained context is floored at the OWD seam as enforcement is.
     ...(grants.audience ? { audience: grants.audience } : {}),
+    // [ADR-0151 D3] An AI service account is explained as the agent it is: its
+    // own grants under the agent ceiling, with no one it acts for.
+    ...(grants.principalKind ? { principalKind: grants.principalKind } : {}),
     droppedGrants,
     delegatedPositions,
     // [ADR-0068 D2] Not a second derivation: `derivePosture` returns

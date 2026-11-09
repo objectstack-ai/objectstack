@@ -6,8 +6,9 @@
  *
  * - `resolvePermissionSetsForContextUnmemoized`, the resolution itself: the
  *   permission sets the context names, the additive human baseline or the
- *   agent's restricted ceiling, and the post-resolution fallback for an
- *   authenticated caller whose sets resolved nothing.
+ *   agent's restricted ceiling, the post-resolution fallback for an
+ *   authenticated caller whose sets resolved nothing, and the agent ceiling
+ *   clamp (ADR-0151 D3, `agent-ceiling-clamp.ts`) on an agent's sets.
  * - `reportUngrantedNamesakeSets`, the once-per-name warning for a permission
  *   set that shares a held position's name and is NOT granted through it,
  *   because the position's definition does not name it (#13419, #24757).
@@ -84,6 +85,7 @@ import { isGuestEnvelope, POSITION_NAME_FOLD_EVENT } from './security-plugin.js'
 import type { PermissionSet } from '@objectstack/spec/security';
 import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
 import { humanBaselineFor } from './external-baseline.js';
+import { clampPermissionSetsToAgentCeiling } from './agent-ceiling-clamp.js';
 
 /**
  * The `SecurityPlugin` members the functions below read — every one of them,
@@ -148,6 +150,10 @@ export async function resolvePermissionSetsForContextUnmemoized(
   // CLOSED (every object op denied) rather than falling open. The delegating
   // user's own baseline still applies on the OTHER side of the intersection
   // (resolved from `onBehalfOf` via a context without this flag).
+  // [ADR-0151 D3] An AI service account is an agent principal too: its
+  // `permissions` are its own assignments (no scope derivation, no
+  // `onBehalfOf`, so no intersection), and the same rule holds — no member
+  // baseline, the restricted set as its floor.
   const isAgent = context?.principalKind === 'agent';
   // [#7555] The human side is a LIST, and the agent side deliberately is not:
   // the agent's ceiling is EXACTLY the restricted set, and composing the
@@ -209,6 +215,14 @@ export async function resolvePermissionSetsForContextUnmemoized(
       { logger: this.logger },
     );
   }
+  // [ADR-0151 D3] Rule 2's ceiling, held at evaluation: an agent principal —
+  // an AI service account holding ordinary assignments, or an OAuth-delegated
+  // agent holding its scope-derived ceiling — never carries View/Modify All,
+  // the destructive class, a system permission, a superuser wildcard or an
+  // admin scope, whatever a set says. Applied here, after both resolutions,
+  // because every evaluator reads its sets through this one function, and a
+  // set can be edited after the refusal at assignment let it through.
+  if (isAgent) permissionSets = clampPermissionSetsToAgentCeiling(permissionSets);
   return permissionSets;
 }
 

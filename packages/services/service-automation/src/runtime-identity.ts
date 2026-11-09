@@ -92,6 +92,13 @@ export interface RunIdentityContext {
    * run, whose `isSystem` short-circuit precedes every reader of it.
    */
   posture?: AuthzPosture;
+  /**
+   * [ADR-0151 D3] `'agent'` when the acting user is an AI service account, the
+   * kernel `ExecutionContext.principalKind`: the security plugin then applies
+   * the agent ceiling and withholds the member baseline. Present on a
+   * `runAs:'user'` run whose setup seeded it ({@link runPrincipalKind}).
+   */
+  principalKind?: 'agent';
   /** Acting user's tenant/org id. */
   tenantId?: string;
   /**
@@ -211,6 +218,13 @@ export interface SeededRunContext extends AutomationContext {
    */
   posture?: AuthzPosture;
   /**
+   * [ADR-0151 D3] `'agent'` when the acting user is an AI service account, as
+   * the same resolver reports it (`resolveUserAuthzGrants`' `principalKind`).
+   * Seeded with the positions and permission sets, and removed with them by
+   * the decision switch: it is the acting user's fact.
+   */
+  principalKind?: 'agent';
+  /**
    * Who TRIGGERED the run, recorded when a human decision moved the run's
    * acting identity (`userId`) to the decider (ruling A on `FlowSchema.runAs`;
    * `AutomationEngine.resolveDecisionSegmentContext` is the only writer).
@@ -257,6 +271,15 @@ export function runOrgUserIds(context: AutomationContext | undefined): string[] 
 export function runPosture(context: AutomationContext | undefined): AuthzPosture | undefined {
   const parsed = AuthzPostureSchema.safeParse((context as SeededRunContext | undefined)?.posture);
   return parsed.success ? parsed.data : undefined;
+}
+
+/**
+ * [ADR-0151 D3] `'agent'` when run setup seeded the acting user as an AI
+ * service account ({@link SeededRunContext.principalKind}), `undefined` for a
+ * person.
+ */
+export function runPrincipalKind(context: AutomationContext | undefined): 'agent' | undefined {
+  return (context as SeededRunContext | undefined)?.principalKind === 'agent' ? 'agent' : undefined;
 }
 
 /**
@@ -432,6 +455,7 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
   if (context.email) out.email = context.email;
   const posture = runPosture(context);
   if (posture) out.posture = posture;
+  if (runPrincipalKind(context)) out.principalKind = 'agent';
   if (context.tenantId) out.tenantId = context.tenantId;
   if (flowRunId) out.flowRunId = flowRunId;
   if (locale) out.locale = locale;

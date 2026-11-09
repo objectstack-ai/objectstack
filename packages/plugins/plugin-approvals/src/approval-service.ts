@@ -77,6 +77,7 @@ import {
   vetOrganizationClaim,
   withoutOperationPrivateKeys,
 } from '@objectstack/core';
+import type { PackageScopedRefusal } from '@objectstack/core';
 import type { TenancyPosture } from '@objectstack/spec/security';
 import {
   filterApproversWhoCanRead,
@@ -225,6 +226,22 @@ export interface ApprovalResumeSurface {
   }): Promise<unknown>;
   /** Flow definition lookup, used to derive step-progress display data. */
   getFlow?(name: string): Promise<any | null>;
+  /**
+   * [ADR-0150 D3] The package whose OWN body the engine runs for the flow
+   * `name` — the shipping package when the armed body is the loader's, and
+   * `undefined` for a declared `.custom` override or any other
+   * environment-authored body, and for a flow authored in this deployment.
+   * Read by {@link ApprovalService.flowPackageOf}: an approval step is written
+   * in the body that runs, so the queue an approver names is read from that
+   * body's package, and an override's step from no package (ADR-0150 D3: a
+   * reference in an overlay is the environment's).
+   *
+   * ⚠️ Declares a method `AutomationEngine` implements publicly
+   * (`armedFlowPackage`, the reader its own subflow addressing reads); it
+   * widens no engine surface. Optional: absent, every step reads its queue
+   * names environment-wide, as before.
+   */
+  armedFlowPackage?(name: string): string | undefined;
   /**
    * Terminally cancel a suspended run (ADR-0044). Used when a recall lands
    * during a revision window — the run is paused at the revise-window node,
@@ -1254,6 +1271,35 @@ function crossOrgFilterReadFailure(directoryOrg: unknown, organizationId: unknow
 }
 
 /**
+ * [ADR-0150 D3] The resolver's refusal a rejection carries, when the
+ * rejection is a refused package-scoped name (the queue service's
+ * `PackageScopedNameRefusedError`, read by its shape: this package does not
+ * depend on the plugin that throws it).
+ */
+function packageScopedRefusalOf(err: unknown): PackageScopedRefusal | undefined {
+  const refusal = (err as { refusal?: Partial<PackageScopedRefusal> } | null | undefined)?.refusal;
+  return refusal?.status === 'refused' && typeof refusal.message === 'string' && typeof refusal.reason === 'string'
+    ? refusal as PackageScopedRefusal
+    : undefined;
+}
+
+/**
+ * [ADR-0150 D3] What makes a refused queue name resolve, for the package the
+ * step was read from — the refusal's own remedy, said for a step.
+ */
+function refusalRemedy(refusal: PackageScopedRefusal): string {
+  const from = refusal.callerPackageId;
+  if (!from) {
+    return 'Running the flow again changes nothing until the name resolves: leave one holder of it in this '
+      + 'environment, or name the queue from a step in a package that declares a dependency on the package '
+      + 'whose queue it means.';
+  }
+  return `Running the flow again changes nothing until the name resolves from package '${from}': declare a `
+    + `dependency on the package whose queue it means, enable that package if it is disabled, or ship the queue `
+    + `in package '${from}'.`;
+}
+
+/**
  * [ADR-0142 D6 as amended; ruling record 6599731698 on #29604, letter B] The
  * approval node refuses to open because a directory read behind one of its
  * approvers failed ({@link DIRECTORY_REFUSING_APPROVER_TYPES}).
@@ -1267,8 +1313,12 @@ function crossOrgFilterReadFailure(directoryOrg: unknown, organizationId: unknow
  */
 export class ApproverDirectoryUnreadableError extends Error {
   override readonly name = 'ApproverDirectoryUnreadableError';
-  /** The run can be re-triggered once the directory reads again. */
-  readonly retryable = true;
+  /**
+   * The run can be re-triggered once the directory reads again. `false` when
+   * the cause is an ADR-0150 D3 refusal of the name: a re-run is refused the
+   * same way until the remedy the message names is applied.
+   */
+  readonly retryable: boolean;
   /** The approver whose directory read failed: its type and value as authored. */
   readonly approverType: string;
   readonly approverValue: string;
@@ -1289,13 +1339,24 @@ export class ApproverDirectoryUnreadableError extends Error {
       : `approver 'expression' (resolveAs '${input.type}', value '${input.value}')`;
     const inOrg = input.organizationId ? ` in organization '${input.organizationId}'` : '';
     const read = input.failedRead.trim();
+    const refusal = packageScopedRefusalOf(input.cause);
+    const notOpened = 'The approval node does not open: ';
+    const routedPast = ' would be routed past, so the request is not opened on the rest of the slate, on the '
+      + 'declared fallbackApprovers or on the organization\'s administrators, and is not auto-approved, whatever '
+      + 'the node\'s onEmptyApprovers says.';
     super(
-      `APPROVER_DIRECTORY_UNREADABLE: ${approver} could not be expanded${inOrg}, because a read behind it failed: `
-      + `${read}${/[.!?]$/.test(read) ? '' : '.'} The approval node does not open: the people who could not be `
-      + `read would be routed past, so the request is not opened on the rest of the slate, on the declared `
-      + `fallbackApprovers or on the organization's administrators, and is not auto-approved, whatever the node's `
-      + `onEmptyApprovers says. Run the flow again once the directory can be read.`,
+      refusal
+        // [ADR-0150 D3] A refused name is not a failed read: running the flow
+        // again reads the same holders and is refused again. Its remedy is
+        // the refusal's own.
+        ? `APPROVER_DIRECTORY_UNREADABLE: ${approver} could not be expanded${inOrg}, because its name was refused `
+          + `(ADR-0150 D3, ${refusal.reason}): ${refusal.message} ${notOpened}the people of whichever queue was `
+          + `meant${routedPast} ${refusalRemedy(refusal)}`
+        : `APPROVER_DIRECTORY_UNREADABLE: ${approver} could not be expanded${inOrg}, because a read behind it failed: `
+          + `${read}${/[.!?]$/.test(read) ? '' : '.'} ${notOpened}the people who could not be read${routedPast} `
+          + `Run the flow again once the directory can be read.`,
     );
+    this.retryable = refusal === undefined;
     if (input.cause !== undefined) Object.assign(this, { cause: input.cause });
     this.approverType = input.type;
     this.approverValue = String(input.value);
@@ -2591,6 +2652,12 @@ export class ApprovalService implements IApprovalService {
        * was recorded and must not fail it (`decide`'s pre-snapshot tally).
        */
       onDirectoryFailure?: 'refuse' | 'literal';
+      /**
+       * [ADR-0150 D3] The package the step is declared in — its flow's
+       * ({@link flowPackageOf}) — which a `queue` approver's name is read
+       * from. `null` / omitted: environment-wide, as before.
+       */
+      callerPackageId?: string | null;
     },
   ): Promise<string[]> {
     if (!step || !Array.isArray(step.approvers)) return [];
@@ -2644,7 +2711,9 @@ export class ApprovalService implements IApprovalService {
       if (opts?.resolvedFrom && canonicalApproverType(String(a.type)) === 'field' && a.value != null) {
         opts.resolvedFrom[`field:${a.value}`] = (record as any)?.[a.value] ?? null;
       }
-      const ids = await this.resolveApproverSpec(a, record, organizationId, now, opts?.substitutions, onDirectoryFailure);
+      const ids = await this.resolveApproverSpec(
+        a, record, organizationId, now, opts?.substitutions, onDirectoryFailure, opts?.callerPackageId ?? null,
+      );
       // per_group (#3266): tag each resolved id with this spec's group.
       for (const u of ids) {
         if (!u) continue;
@@ -2674,6 +2743,7 @@ export class ApprovalService implements IApprovalService {
     now: number,
     substitutions?: OooSubstitution[],
     onDirectoryFailure: 'refuse' | 'literal' = 'refuse',
+    callerPackageId: string | null = null,
   ): Promise<string[]> {
     // ADR-0090 D3: `role` is the deprecated spelling of `org_membership_level`.
     // Resolve on the canonical type, and write the canonical type in the
@@ -2808,7 +2878,7 @@ export class ApprovalService implements IApprovalService {
         // organization (a queue is an organization's: APPROVER_ORG_SCOPED), on
         // the ADDRESSING purpose — the slate routes work, so the holders of a
         // switched-off position stay on it (D2).
-        const users = await bounded(await this.expandQueueUsers(String(a.value), directoryOrg));
+        const users = await bounded(await this.expandQueueUsers(String(a.value), directoryOrg, callerPackageId));
         if (users.length) return users;
       } else if (type === 'manager' && record) {
         const subject = (record as any)[a.value] ?? (record as any).owner_id;
@@ -3560,12 +3630,38 @@ export class ApprovalService implements IApprovalService {
    * catch turns that rejection into the node's {@link ApproverDirectoryUnreadableError},
    * so the slate is never opened without the people who could not be read. An
    * axis of its own beside `purpose`.
+   *
+   * [ADR-0150 D3] `callerPackageId` is the package the step is declared in
+   * ({@link flowPackageOf}): the name resolves from it — its own queue, else
+   * the one holder in its declared dependencies — through the queue service,
+   * the one resolver. A name it cannot pick rejects under `'refuse'` with the
+   * refusal naming every candidate, which the node answers as it answers a
+   * failed read: the slate is never opened on a guess. No package: the
+   * environment-wide read, as before.
    */
-  private async expandQueueUsers(queueName: string, organizationId?: string | null): Promise<string[]> {
+  private async expandQueueUsers(queueName: string, organizationId?: string | null, callerPackageId?: string | null): Promise<string[]> {
     if (!queueName) return [];
     const queues = this.queueSource();
     if (!queues) return [];
-    return queues.expandMembers(queueName, organizationId ?? null, { purpose: 'addressing', onFailedRead: 'refuse' });
+    return queues.expandMembers(queueName, organizationId ?? null, {
+      purpose: 'addressing', onFailedRead: 'refuse', ...(callerPackageId ? { callerPackageId } : {}),
+    });
+  }
+
+  /**
+   * [ADR-0150 D3] The package the approval step of flow `flowName` is
+   * written in: the package of the body the engine runs for the flow, as the
+   * engine answers it (`armedFlowPackage`, the reader its own subflow
+   * addressing takes the caller's package from) — the shipping package for
+   * its own body, and `null` for an environment-authored override of it, a
+   * flow authored in this deployment, a request with no flow, and an engine
+   * that cannot say. ⛔ Not `packagedFlowOwner`: it names the package that
+   * ships the NAME, whichever body is armed under it.
+   */
+  private flowPackageOf(flowName: string | null | undefined): string | null {
+    if (!flowName || typeof this.automation?.armedFlowPackage !== 'function') return null;
+    const owner = this.automation.armedFlowPackage(flowName);
+    return typeof owner === 'string' && owner !== '' ? owner : null;
   }
 
   /**
@@ -4372,6 +4468,9 @@ export class ApprovalService implements IApprovalService {
     const requestOrg = subjectOrg ?? ctxOrg;
     const resolvedFrom: Record<string, unknown> = {};
     const exprCtx = { trigger: input.record ?? null, vars: input.variables ?? null };
+    // [ADR-0150 D3] The package this step is declared in — its flow's — which
+    // every slate below reads a `queue` approver's name from.
+    const callerPackageId = this.flowPackageOf(input.flowName);
     const submitterId = input.submitterId !== undefined ? input.submitterId : (context.userId ?? null);
     // [#25573] `excludeSubmitter: true` (ruling 6377888641, letter B): the
     // submitter is taken off every slate this request can open on. It runs on
@@ -4410,6 +4509,7 @@ export class ApprovalService implements IApprovalService {
         now: nowDate.getTime(), substitutions, groups,
         exprCtx,
         resolvedFrom,
+        callerPackageId,
       },
     ), 'approvers', groups);
 
@@ -4469,6 +4569,7 @@ export class ApprovalService implements IApprovalService {
               now: nowDate.getTime(), substitutions, groups,
               exprCtx,
               resolvedFrom: fallbackResolvedFrom,
+              callerPackageId,
             },
           ), 'fallback', groups);
           // Keep the primary slate's resolution inputs (they explain WHY the
@@ -5211,7 +5312,13 @@ export class ApprovalService implements IApprovalService {
         // always kept (ADR-0142 D6's refusal is the node's, at open time).
         original = await this.expandApprovers(
           { approvers: config.approvers }, parseJson(raw.payload_json, undefined), org,
-          { onDirectoryFailure: 'literal' },
+          {
+            onDirectoryFailure: 'literal',
+            // [ADR-0150 D3] The step's flow is the row's `flow:<name>` process.
+            callerPackageId: this.flowPackageOf(
+              typeof raw.process_name === 'string' && raw.process_name.startsWith('flow:') ? raw.process_name.slice('flow:'.length) : null,
+            ),
+          },
         );
         groupMap = {};
       }

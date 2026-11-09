@@ -1721,7 +1721,7 @@ export class SharingService implements ISharingService {
     // not an owner column either — it is the one case `hasOwnerField` answers YES
     // about a column that is not there. The platform provisions no storage for a
     // federated object (`Engine.syncObjectSchema` returns early for
-    // `external != null`), so the ownership fast-path behind `checkEdit` /
+    // `isFederatedObject`), so the ownership fast-path behind `checkEdit` /
     // `checkDelete` selects `owner_id` off a remote table that has no such column.
     //
     // MEASURED on a booted showcase stack (SQLite external datasource, an

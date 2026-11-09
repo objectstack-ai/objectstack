@@ -4062,7 +4062,8 @@ const TRANSLATION_TARGET_UNKNOWN_EXPLANATION: RuleExplanation = {
     'Under an action entry: `params.PARAM` a declared param `name`; `outcomeMessages.OUTCOME` an ' +
       'outcome the action\'s own `outcomeMessages` declares; `resultDialog.title`, `.description` ' +
       'and `.acknowledge` an action that declares a `resultDialog` at all; ' +
-      '`resultDialog.fields.PATH` the literal `path` of a declared dialog field, dots included. A ' +
+      '`resultDialog.fields.PATH` the literal `path` of a declared dialog field, dots included; ' +
+      '`preflight.fields.PATH` the literal `path` of a declared preflight field, dots included. A ' +
       'bundle translates what the action declares and cannot add an outcome or a dialog.',
     'Not judged: a platform object in the registry, an object this stack only extends through ' +
       '`objectExtensions[]`, and a picklist it only extends through `picklistExtensions[]` — the ' +
@@ -5658,16 +5659,21 @@ const PICKLIST_REFERENCE_UNVERIFIED_EXPLANATION: RuleExplanation = {
   covers: 'why a picklist reference is not judged',
   paragraphs: [
     'A field\'s `picklist` and a picklist extension\'s `extend` name a shared option list. `os ' +
-      'validate` and `os build` resolve the name against every picklist the stack declares (every ' +
-      '`packages[]` body\'s `picklists`, or the top-level `picklists`) and refuse one that resolves ' +
-      'nowhere, as `picklist-reference-unknown`.',
+      'validate` and `os build` resolve them the way the runtime does (ADR-0150 D3). A field\'s ' +
+      '`picklist` resolves from the package that declares the field: its own `picklists`, then the ' +
+      'packages its manifest declares as dependencies, transitively, plus every `sys` package. A sibling ' +
+      'package of the same artifact counts only when it is declared. An extension\'s `extend` resolves ' +
+      'against the one package of the stack that holds the list. A name that resolves to no list, only ' +
+      'to lists held outside the declaring package\'s declared dependencies, or to two holders, is ' +
+      'refused as `picklist-reference-unknown`.',
     'When the package that declares the reference depends on a package this stack does not carry, the ' +
       'list could live there, and this command cannot read it: `manifest.dependencies` maps package ids ' +
       'to version ranges the installer resolves, and nothing maps such an id to a file the CLI could ' +
       'open. So the reference gets this notice instead of a refusal: it is not judged, and the notice ' +
       'never gates a run, not even under `--strict`.',
     'If one of the named dependencies declares the list, nothing is wrong. Otherwise declare the list ' +
-      'in this stack, or correct the name. A reference saved at runtime through Studio or the REST ' +
+      'in this stack, declare a dependency on the package of this stack that holds it, or correct the ' +
+      'name. A reference saved at runtime through Studio or the REST ' +
       'metadata API is not judged here.',
   ],
 };
