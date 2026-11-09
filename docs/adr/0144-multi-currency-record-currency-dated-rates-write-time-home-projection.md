@@ -288,7 +288,7 @@ a parent's code field, while the finding answers a metadata save that changes wh
 
 *Note (2026-11-09):* re-pointing a stored amount's code field is a destructive change. D5 converts at write and stores
 the result "with the rate used". A stored home amount changes only when a write of its row projects again (one that
-touches the amount, its code, its document date or the two projected fields) or through "an explicit recompute
+touches the amount, its code, its document date, the home field or the rate field) or through "an explicit recompute
 operation", and a metadata save is neither. An amount's value is a bare number (ADR-0104 D1), so a metadata save that
 points a `record`-mode amount's `currencyField` (D2) at another code converts nothing: every stored row keeps its
 number and is read in the currency the new pointer holds, and any stored home amount and rate stay converted from the
@@ -308,9 +308,10 @@ whose new code is blank take the code backfill of Open item 13, `os migrate reco
 that edge stays open as Open item 14. When the amount declares `homeAmount` before and after the save, the message
 names `os migrate recompute-home-amounts`, the explicit recompute operation of the third bullet and a shell command
 with no REST door, to re-derive the stored home amounts from the new code. That holds for a sibling pointer. For a
-path pointer, the recompute on `main` reads the pointer as a column of the child's own row, finds it blank and skips
-every row as `code_blank`, until #31911 resolves the parent's code there. When the save drops `homeAmount`, the
-message says nothing re-rates them. Landed by #31949 in PR #31969 (`33ab84f9`).
+path pointer the command fails on `main`: it projects the dotted pointer as a column, which the engine refuses
+`INVALID_FIELD` / 400 before any row is read, so no home amount is re-derived until #31911 resolves the parent's code
+there. When the save drops `homeAmount`, the message says nothing re-rates them. Landed by #31949 in PR #31969
+(`33ab84f9`).
 
 ### D6 — Q4: raw aggregates over a record-mode field refuse, and consolidation reads the home field (letter A)
 
