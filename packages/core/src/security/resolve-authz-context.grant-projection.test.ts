@@ -173,11 +173,11 @@ async function resolveBoth(
 }
 
 describe('the prelude\'s grant read names the columns the resolver decides on', () => {
-  it('the grant read names exactly permission_set, organization_id, valid_from and valid_until — no other read but the memberships names any', async () => {
+  it('the grant read names exactly permission_set, permission_set_package, organization_id, valid_from and valid_until — no other read but the memberships names any', async () => {
     const { projections } = await resolveBoth('u1', tablesFor(GRANT_FIXTURES.at(-1)!.grants), { tenantId: ORG_A, nowMs: T0 }, definitions);
     const grantReads = projections.filter((p) => p.object === 'sys_user_permission_set');
     expect(grantReads).toHaveLength(1);
-    expect([...(grantReads[0]!.fields as string[])].sort()).toEqual(['organization_id', 'permission_set', 'valid_from', 'valid_until']);
+    expect([...(grantReads[0]!.fields as string[])].sort()).toEqual(['organization_id', 'permission_set', 'permission_set_package', 'valid_from', 'valid_until']);
     // No other read in the prelude changes; the membership reads name theirs
     // (pinned below).
     expect(projections.filter((p) => !['sys_user_permission_set', 'sys_member'].includes(p.object) && p.fields !== undefined)).toEqual([]);

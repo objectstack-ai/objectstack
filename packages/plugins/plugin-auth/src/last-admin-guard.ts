@@ -783,9 +783,15 @@ export const MEMBER_STANDING_KEYS = ['role', 'user_id', 'userId'] as const;
  * [ADR-0131 D4] The enumeration reads WHICH set by the grant's name,
  * `permission_set`, and only by it (the legacy `permission_set_id` is retired,
  * C7b, and a write naming it is refused as an undeclared field).
+ *
+ * [ADR-0150 D8 R1] `permission_set_package` names which holder's set that
+ * name is, and the resolver confers the set (and `admin_full_access`'s
+ * standing) only when that package holds it — so a payload re-pointing it
+ * pays for the enumeration like one re-pointing the name.
  */
 export const GRANT_STANDING_KEYS = [
   'permission_set',
+  'permission_set_package',
   'user_id',
   'userId',
   'organization_id',

@@ -462,6 +462,8 @@ export {
   type SecurityCatalogReader,
   // ADR-0150 D3/D4/D7 — permission sets by (package, name), the resolver handed in.
   resolveCatalogReference,
+  // ADR-0150 D8 — a stored reference read by its package column (R1, R3).
+  storedPermissionSetScope,
   type SecurityCatalogPackageScopedRegistry,
   type SecurityCatalogReferenceScope,
   type SecurityCatalogResolution,

@@ -25,6 +25,7 @@ import {
   permissionSetHolderOf,
   type PermissionSetHolderRegistry,
 } from './stored-permission-set-package-backfill.js';
+import { registerPermissionSetPackageStamp } from './stored-permission-set-package-stamp.js';
 
 const ORG = 'org_a';
 const SYS_ORG = { isSystem: true, tenantId: ORG } as const;
@@ -400,5 +401,93 @@ describe('no unique key widens: the package column sits beside the keys, never i
     ).rejects.toThrow();
     const rows = (await engine.find(GRANTS.object, { where: { user_id: 'u_k' }, context: SYSTEM_CTX })) as unknown[];
     expect(rows).toHaveLength(1);
+  });
+});
+
+/**
+ * [ADR-0150 D8 R1/R3] The write seam (`stored-permission-set-package-stamp.ts`):
+ * a row written after the holders are sealed carries its package at once, by
+ * the backfill's one rule — it does not wait for the next boot.
+ */
+describe('the write seam stamps the package column on every write that names a set', () => {
+  const suggestion = (id: string, packageId: string, name: string) => ({
+    id, package_id: packageId, permission_set_name: name, anchor: 'everyone', status: 'pending', organization_id: ORG,
+  });
+  /** The engine's own hook registry, over the stand-in holders; `sealed` as the boot left it. */
+  async function stamped(sealed = true): Promise<ObjectQL> {
+    const engine = await boot();
+    const registry = Object.assign(standInRegistry(), { bareNameHoldersAreSealed: sealed });
+    expect(registerPermissionSetPackageStamp({
+      registry,
+      getSchema: engine.getSchema.bind(engine),
+      registerHook: engine.registerHook.bind(engine),
+      unregisterHooksByPackage: engine.unregisterHooksByPackage.bind(engine),
+    })).toBe(true);
+    return engine;
+  }
+
+  it('a table registered without the column is never touched: no key is written, so no write is refused as an unknown field', () => {
+    const handlers: Array<{ event: string; object: unknown; run: (ctx: any) => void }> = [];
+    const declared = new Set<string>();
+    const registry = Object.assign(standInRegistry(), { bareNameHoldersAreSealed: true });
+    registerPermissionSetPackageStamp({
+      registry,
+      getSchema: (object: string) => ({ name: object, fields: declared.has(object) ? { [GRANTS.packageColumn]: {} } : { permission_set: {} } }),
+      registerHook: (event, run, options) => { handlers.push({ event, object: options?.object, run }); },
+    });
+    const insert = handlers.find((h) => h.event === 'beforeInsert' && h.object === GRANTS.object)!;
+    const update = handlers.find((h) => h.event === 'beforeUpdate' && h.object === GRANTS.object)!;
+    const write = (h: typeof insert, data: Record<string, unknown>, previous?: Record<string, unknown>) => {
+      h.run({ object: GRANTS.object, input: { data }, previous, session: {} });
+      return data;
+    };
+    expect(write(insert, { permission_set: ONE_HOLDER })).toEqual({ permission_set: ONE_HOLDER });
+    expect(write(update, { permission_set: ONE_HOLDER }, { permission_set: TWO_HOLDERS })).toEqual({ permission_set: ONE_HOLDER });
+    // Declared: the same writes are stamped; a null answer adds no key it did not have to replace.
+    declared.add(GRANTS.object);
+    expect(write(insert, { permission_set: ONE_HOLDER })).toEqual({ permission_set: ONE_HOLDER, [GRANTS.packageColumn]: CRM });
+    expect(write(insert, { permission_set: TWO_HOLDERS })).toEqual({ permission_set: TWO_HOLDERS });
+    expect(write(insert, { permission_set: TWO_HOLDERS, [GRANTS.packageColumn]: HR })).toEqual({ permission_set: TWO_HOLDERS, [GRANTS.packageColumn]: null });
+  });
+
+  it('R1: an insert takes the one package holder; a refused, environment or unheld name stays null', async () => {
+    const engine = await stamped();
+    for (const row of [grant('w1', ONE_HOLDER), grant('w2', TWO_HOLDERS), grant('w3', ENV_SET), grant('w4', NOBODY)]) {
+      await engine.insert(GRANTS.object, row, { context: SYS_ORG });
+    }
+    expect(await packagesById(engine, GRANTS.object)).toEqual({ w1: CRM, w2: null, w3: null, w4: null });
+  });
+
+  it('R1: a writer\'s own package value is replaced by the rule\'s answer — a system writer\'s too', async () => {
+    const engine = await stamped();
+    await engine.insert(GRANTS.object, grant('f1', TWO_HOLDERS, { permission_set_package: HR }), { context: { userId: 'u_admin', tenantId: ORG } });
+    await engine.insert(GRANTS.object, grant('f2', TWO_HOLDERS, { permission_set_package: HR }), { context: SYS_ORG });
+    await engine.insert(GRANTS.object, grant('f3', ONE_HOLDER, { permission_set_package: HR }), { context: SYS_ORG });
+    expect(await packagesById(engine, GRANTS.object)).toEqual({ f1: null, f2: null, f3: CRM });
+  });
+
+  it('R1: a rename re-stamps the column and never keeps the old package; a write that names no set leaves it', async () => {
+    const engine = await stamped();
+    await engine.insert(GRANTS.object, grant('r1', ONE_HOLDER), { context: SYS_ORG });
+    await engine.update(GRANTS.object, { id: 'r1', permission_set: TWO_HOLDERS }, { context: SYS_ORG });
+    expect((await packagesById(engine, GRANTS.object)).r1).toBeNull();
+    await engine.update(GRANTS.object, { id: 'r1', permission_set: ONE_HOLDER }, { context: SYS_ORG });
+    expect((await packagesById(engine, GRANTS.object)).r1).toBe(CRM);
+    await engine.update(GRANTS.object, { id: 'r1', valid_until: '2099-01-01T00:00:00.000Z' }, { context: SYS_ORG });
+    expect((await packagesById(engine, GRANTS.object)).r1).toBe(CRM);
+  });
+
+  it('R3: an insert is asked from the suggesting package — its closure binds, an unrelated holder never does', async () => {
+    const engine = await stamped();
+    for (const row of [suggestion('t1', P, D_ONLY), suggestion('t2', P, U_ONLY), suggestion('t3', P, P_AND_U), suggestion('t4', P, D_AND_D2)]) {
+      await engine.insert(SUGGESTIONS.object, row, { context: SYS_ORG });
+    }
+    expect(await packagesById(engine, SUGGESTIONS.object)).toEqual({ t1: D, t2: null, t3: P, t4: null });
+  });
+
+  it('before the holders are sealed nothing is stamped: the boot backfill binds the row', async () => {
+    const engine = await stamped(false);
+    await engine.insert(GRANTS.object, grant('b1', ONE_HOLDER), { context: SYS_ORG });
+    expect((await packagesById(engine, GRANTS.object)).b1).toBeNull();
   });
 });

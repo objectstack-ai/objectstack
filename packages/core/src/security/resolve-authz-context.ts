@@ -85,7 +85,13 @@ import {
   type OrganizationReach,
 } from './organization-reach.js';
 import { derivePosture } from './posture-ladder.js';
-import { securityCatalogReaderOf, type SecurityCatalogEntry, type SecurityCatalogReader } from './security-catalog.js';
+import {
+  securityCatalogReaderOf,
+  storedPermissionSetScope,
+  type SecurityCatalogEntry,
+  type SecurityCatalogReader,
+  type SecurityCatalogReferenceScope,
+} from './security-catalog.js';
 import { resolveSystemWriteOrganization, type SystemWriteOrganizationDecision } from './system-write-organization.js';
 import { METADATA_ACTIVATION_TABLE } from '../utils/metadata-activation-store.js';
 
@@ -1021,7 +1027,8 @@ function grantAppliesInTenant(organizationId: string | null, tenantId: string | 
 /**
  * The columns of a `sys_user_permission_set` grant row this resolver decides
  * on, and the only ones its grant read asks for: the set it names
- * ({@link grantSetNameOf}), its organization ({@link grantOrganizationOf}) and
+ * ({@link grantSetNameOf}) and the package that holds it ([ADR-0150 D8] R1's
+ * `permission_set_package`, {@link storedPermissionSetScope}), its organization ({@link grantOrganizationOf}) and
  * its validity window (`isGrantActive`, `nextGrantValidityBoundary`). The read
  * runs in every request's prelude, and a read naming no columns computes every
  * formula field the object declares — its record title included, which may
@@ -1029,7 +1036,7 @@ function grantAppliesInTenant(organizationId: string | null, tenantId: string | 
  * nothing here reads. A helper below that learns to read another column of a
  * grant row adds it here; the read returns nothing it does not name.
  */
-const GRANT_ROW_COLUMNS = ['permission_set', 'organization_id', 'valid_from', 'valid_until'] as const;
+const GRANT_ROW_COLUMNS = ['permission_set', 'permission_set_package', 'organization_id', 'valid_from', 'valid_until'] as const;
 
 /**
  * [#30454] The columns of a principal's own `sys_member` row this resolver
@@ -1451,9 +1458,10 @@ async function catalogSetBody(
   catalog: SecurityCatalogReader | undefined,
   name: string,
   position?: SecurityCatalogEntry,
+  stored?: SecurityCatalogReferenceScope,
 ): Promise<CatalogSetBody | undefined> {
   if (!catalog) return undefined;
-  const entry = await catalog.resolve('permission', name, position ? { position } : undefined);
+  const entry = await catalog.resolve('permission', name, position ? { position } : stored);
   if (!entry) return undefined;
   return {
     name: entry.name,
@@ -2291,7 +2299,11 @@ export async function resolveUserAuthzGrants(
   for (const grant of applyingGrants) {
     const name = grantSetNameOf(grant);
     if (!name) continue;
-    const body = await catalogSetBody(catalog, name);
+    // [ADR-0150 D8 R1] A grant whose `permission_set_package` names its
+    // holder reads that package's set and no other; a null column resolves
+    // with no caller (D3), so two holders confer nothing and nothing is
+    // picked (`storedPermissionSetScope`).
+    const body = await catalogSetBody(catalog, name, undefined, storedPermissionSetScope((grant as Record<string, unknown>).permission_set_package));
     if (!body) continue;
     const active = !disabled.permissions.has(name);
     take(body, active);

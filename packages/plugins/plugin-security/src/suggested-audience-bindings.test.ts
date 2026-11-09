@@ -1057,3 +1057,94 @@ describe('[ADR-0131 D5] the walled posture: deployment-level acceptance is host 
     expect(() => refuseAcceptedDefaultsWithoutWall('group', ['crm_readonly'])).not.toThrow();
   });
 });
+
+/**
+ * [ADR-0150 D8 R3] A suggestion reads the set its `permission_set_package`
+ * names; a null column, and a stale one, resolves from the suggesting
+ * package (`package_id`) by D3. A name the rule refuses is never picked: the refusal names every
+ * candidate and the operator's bind.
+ */
+describe('[ADR-0150 D8 R3] a suggestion reads its set by its package column', () => {
+  const CRM = 'com.example.crm';
+  const HR = 'com.example.hr';
+  const SUITE = 'com.example.suite';
+  const OTHER = 'com.example.other';
+  const SHARED = 'shared_default';
+  const packages = [
+    { enabled: true, manifest: { id: CRM, permissions: [{ name: SHARED, label: 'CRM', isDefault: true, objects: {} }] } },
+    { enabled: true, manifest: { id: HR, permissions: [{ name: SHARED, label: 'HR', isDefault: true, objects: {} }] } },
+    { enabled: true, manifest: { id: SUITE, dependencies: { [CRM]: '*', [HR]: '*' } } },
+    { enabled: true, manifest: { id: OTHER } },
+  ];
+  /** {@link makeQl}, its registry carrying the package-scoped reads a `SchemaRegistry` carries (a pre-phase-1 clash on `shared_default`). */
+  function scopedQl() {
+    const ql = makeQl(packages);
+    const r = ql.registry;
+    const held = (name: string) =>
+      r.listItems('permission').filter((i: any) => i.name === name && typeof i._packageId === 'string');
+    Object.assign(r, {
+      packageScopedHoldersOf: (type: string, name: string) => (type === 'permission' ? held(name).map((i: any) => i._packageId) : []),
+      getPackageScopedItem: (type: string, name: string, pkg: string) => (type === 'permission' ? held(name).find((i: any) => i._packageId === pkg) : undefined),
+      getEnvironmentScopedItem: () => undefined,
+      getArtifactItem: () => undefined,
+      getPackage: (id: string) => packages.find((p) => p.manifest.id === id),
+    });
+    bindSecurityCatalogReader(ql, createSecurityCatalogReader({ registry: r, metadata: { get: () => undefined, list: () => [] } }));
+    return ql;
+  }
+  const row = (id: string, packageId: string, setPackage: string | null, status = 'pending') => ({
+    id, package_id: packageId, permission_set_name: SHARED, permission_set_package: setPackage, anchor: 'everyone',
+    status, organization_id: DEFAULT_ORG, deployment_decision: status === 'confirmed' ? true : undefined,
+  });
+
+  it('a column naming the suggesting package confirms that package\'s set — the bare name alone is refused', async () => {
+    const ql = scopedQl();
+    rows(ql).push(row('s_crm', CRM, CRM));
+    const { suggestion } = await confirmAudienceBindingSuggestion(makeDeps(ql), ADMIN_CTX, 's_crm');
+    expect(suggestion).toMatchObject({ status: 'confirmed' });
+    expect(everyoneSets(ql)).toContain(SHARED);
+  });
+
+  it('a null column resolves from the suggesting package: its own set first (D3 step 1)', async () => {
+    const ql = scopedQl();
+    rows(ql).push(row('s_hr', HR, null));
+    const { suggestion } = await confirmAudienceBindingSuggestion(makeDeps(ql), ADMIN_CTX, 's_hr');
+    expect(suggestion).toMatchObject({ status: 'confirmed' });
+  });
+
+  it('a stale column (its package no longer serves the set) reads as a null one, from the suggesting package', async () => {
+    const ql = scopedQl();
+    rows(ql).push(row('s_moved', HR, 'com.example.gone'), row('s_stale', SUITE, 'com.example.gone'));
+    const { suggestion } = await confirmAudienceBindingSuggestion(makeDeps(ql), ADMIN_CTX, 's_moved');
+    expect(suggestion).toMatchObject({ status: 'confirmed' });
+    // ⛔ The same stale column where the suggesting package reaches two holders: refused, naming both.
+    const err = await confirmAudienceBindingSuggestion(makeDeps(ql), ADMIN_CTX, 's_stale').catch((e) => e);
+    expect(err).toBeInstanceOf(SuggestionStateError);
+    expect(err.message).toContain(CRM);
+    expect(err.message).toContain(HR);
+  });
+
+  it('⛔ a null column the rule refuses is a 409 naming every candidate and the bind — never the first holder', async () => {
+    const ql = scopedQl();
+    rows(ql).push(row('s_suite', SUITE, null), row('s_other', OTHER, null));
+    for (const id of ['s_suite', 's_other']) {
+      const err = await confirmAudienceBindingSuggestion(makeDeps(ql), ADMIN_CTX, id).catch((e) => e);
+      expect(err, id).toBeInstanceOf(SuggestionStateError);
+      expect(err.message, id).toContain(CRM);
+      expect(err.message, id).toContain(HR);
+      expect(err.message, id).toContain(`os migrate stored-references bind --table sys_audience_binding_suggestion --id ${id}`);
+    }
+    expect(rows(ql).map((r: any) => r.status)).toEqual(['pending', 'pending']);
+  });
+
+  it('the derivation reads an accepted row by its column, and withholds a refused one with every candidate', async () => {
+    const ql = scopedQl();
+    rows(ql).push(row('a_crm', CRM, CRM, 'confirmed'), row('a_suite', SUITE, null, 'confirmed'));
+    const derived = await readAcceptedEveryoneSets(ql);
+    expect(derived.accepted).toEqual([SHARED]);
+    expect(derived.withheld).toEqual([
+      expect.objectContaining({ set: SHARED, packageId: SUITE, reason: expect.stringContaining('--id a_suite') }),
+    ]);
+    expect(derived.withheld[0].reason).toContain(HR);
+  });
+});

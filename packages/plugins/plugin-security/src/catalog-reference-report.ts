@@ -77,11 +77,13 @@
 
 import {
   resolveCatalogReference,
+  storedPermissionSetScope,
   type SecurityCatalogEntry,
   type SecurityCatalogReader,
   type SecurityCatalogType,
 } from '@objectstack/core';
 import { GRANT_OBJECT, GRANT_SET_NAME_FIELD } from './grant-permission-set-name.js';
+import { PERMISSION_SET_PACKAGE_COLUMN } from './stored-permission-set-package-backfill.js';
 
 /** The user ↔ position assignment object (ADR-0057 D4). */
 export const POSITION_ASSIGNMENT_OBJECT = 'sys_user_position';
@@ -262,15 +264,20 @@ async function listPositions(catalog: SecurityCatalogReader): Promise<SecurityCa
 }
 
 /** The catalog's answer per name, each name asked once. */
-function catalogResolver(catalog: SecurityCatalogReader): (type: SecurityCatalogType, name: string) => Promise<boolean> {
+function catalogResolver(
+  catalog: SecurityCatalogReader,
+): (type: SecurityCatalogType, name: string, packageColumn?: unknown) => Promise<boolean> {
   const memo = new Map<string, boolean>();
-  return async (type, name) => {
-    const key = `${type}\u0000${name}`;
+  return async (type, name, packageColumn) => {
+    // [ADR-0150 D8 R1] A grant naming its holder is asked for that package's
+    // set, as the authorization resolver asks it (`storedPermissionSetScope`).
+    const scope = type === 'permission' ? storedPermissionSetScope(packageColumn) : undefined;
+    const key = `${type}\u0000${name}\u0000${scope?.packageId ?? ''}`;
     const known = memo.get(key);
     if (known !== undefined) return known;
     let resolves: boolean;
     try {
-      const entry = await catalog.resolve(type, name);
+      const entry = await catalog.resolve(type, name, scope);
       resolves = entry !== undefined && entry.name === name;
     } catch (e) {
       throw new ReportStop('catalog-unreadable', 'the security catalog', e);
@@ -332,7 +339,7 @@ export async function collectCatalogReferences(
 
     if (readGrants) {
       const rows = await scanAll(engine, GRANT_OBJECT, [
-        'id', 'user_id', GRANT_SET_NAME_FIELD, 'organization_id',
+        'id', 'user_id', GRANT_SET_NAME_FIELD, PERMISSION_SET_PACKAGE_COLUMN, 'organization_id',
       ]);
       for (const row of rows) {
         const name = nameOf(row[GRANT_SET_NAME_FIELD]);
@@ -342,7 +349,7 @@ export async function collectCatalogReferences(
           });
           continue;
         }
-        if (await resolves('permission', name)) continue;
+        if (await resolves('permission', name, row[PERMISSION_SET_PACKAGE_COLUMN])) continue;
         bucket(organizationOf(row)).permissionSetGrants.push({
           id: String(row.id), userId: stringOrNull(row.user_id), name,
         });
