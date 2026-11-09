@@ -89,6 +89,10 @@ vi.mock('./MetadataInspector', () => ({
 vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 
 import { ObjectView } from './ObjectView';
+// The page reaches `celAuthoring`'s dynamic `@objectstack/lint` import; its
+// first load is paid here, at collection, never inside a case's clock
+// (`check:test-source-alias`).
+import '@objectstack/lint';
 // The grid registers `object-grid` on import. A grouped grid asks the server
 // for its groups itself, and that header query is where the grouping the list
 // opened with is read (objectui#11860's grouping pins below).
