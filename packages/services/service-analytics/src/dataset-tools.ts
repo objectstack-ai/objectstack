@@ -18,7 +18,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { DatasetSchema, resolveI18nLabel, type Dataset } from '@objectstack/spec/ui';
 import { fieldsFromZodIssues } from '@objectstack/types';
-import { AnalyticsService } from './analytics-service.js';
+import type { AnalyticsService } from './analytics-service.js';
 import { datasetDimensionCubeType } from './dataset-compiler.js';
 import { matchDatasetTerms } from './dataset-term-matcher.js';
 
@@ -135,7 +135,8 @@ export interface DatasetToolsDeps {
   /**
    * The analytics service the host registered as `'analytics'`. The tools
    * serve only from an {@link AnalyticsService} whose admission hooks are the
-   * plugin-wired set; anything else (absent, another implementation, a
+   * plugin-wired set ({@link AnalyticsService.datasetTools} binds it to
+   * itself); anything else (absent, another implementation, a
    * hand-built service without the hooks) is refused at every call. Read per
    * call, so a getter resolving the kernel's service lazily is fine.
    */
@@ -193,8 +194,18 @@ function refusal(code: string, status: number, message: string, details?: unknow
  * serve this tool with every gate live, and saying so is the honest answer.
  */
 function wiredService(analytics: DatasetToolsDeps['analytics']): AnalyticsService {
-  const service = typeof analytics === 'function' ? (analytics as () => unknown)() : analytics;
-  if (service instanceof AnalyticsService && service.hasPluginWiredAdmission()) return service;
+  const service = (typeof analytics === 'function' ? (analytics as () => unknown)() : analytics) as
+    | Partial<AnalyticsService>
+    | null
+    | undefined;
+  if (
+    typeof service?.hasPluginWiredAdmission === 'function'
+    && typeof service.admitDatasetCatalogEntry === 'function'
+    && typeof service.queryDataset === 'function'
+    && service.hasPluginWiredAdmission()
+  ) {
+    return service as AnalyticsService;
+  }
   throw refusal(
     'SERVICE_UNAVAILABLE',
     503,

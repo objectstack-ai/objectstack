@@ -39,6 +39,7 @@ import {
   type QueryReadRequest,
 } from '@objectstack/types';
 import { CubeRegistry } from './cube-registry.js';
+import { createDatasetTools, type DatasetTools, type DatasetToolsDeps } from './dataset-tools.js';
 import { cubeNotFoundError, isCubePublic } from './cube-visibility.js';
 import { cubeNameRequiredError } from './cube-name-refusal.js';
 // The object-level read admission asked at this door, ahead of every strategy
@@ -2828,6 +2829,18 @@ export class AnalyticsService implements IAnalyticsService {
       && this.readAdmissionProvider !== undefined
       && this.readableFieldsProvider !== undefined
       && this.queryableFieldsProvider !== undefined;
+  }
+
+  /**
+   * [ADR-0149 D2] The dataset AI tools bound to THIS service — the seam the
+   * MCP bridges and the product AI reach through the kernel's `'analytics'`
+   * service, so neither host imports this package. `createDatasetTools` with
+   * `analytics` set to this service; `definitions` on the answer is
+   * {@link getDatasetToolDefinitions}. Refuses at every call unless
+   * {@link hasPluginWiredAdmission}.
+   */
+  datasetTools(deps: Omit<DatasetToolsDeps, 'analytics'>): DatasetTools {
+    return createDatasetTools({ ...deps, analytics: this });
   }
 
   /**
