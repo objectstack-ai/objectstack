@@ -442,7 +442,6 @@ describe('R10 — the ledger is held until the boot re-key has finished (seat co
             const fake = {
                 find: async () => { calls.push('find'); return []; },
                 insert: async () => undefined,
-                update: async () => undefined,
             };
             const store = new ObjectStoreFlowDispatchStore(fake as never);
             const onTimeout = vi.fn();
