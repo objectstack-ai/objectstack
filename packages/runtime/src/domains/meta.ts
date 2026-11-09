@@ -44,7 +44,7 @@ import {
 import type { MetadataProtocol } from '@objectstack/spec/api';
 // [#21002, #21986] The implementation class, for the ONE member it declares
 // that this domain asks (`declinesStoredRow`) — `Pick`ed below, never restated.
-import { META_ITEM_SUBRESOURCE_SEGMENTS, type ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { META_ITEM_SUBRESOURCE_SEGMENTS, type MetaItemAddress, type ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 // [#20193] THE per-caller read gate of a `/meta/:type/:name` document — the one
 // `RestServer` asks, published by `@objectstack/rest` so this transport asks it
 // too instead of a second audience resolver (ruling `5793362670` item 1).
@@ -1068,9 +1068,18 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         && parts[0] !== 'types' && !parts[0].startsWith('_')
         && !META_ITEM_SUBRESOURCE_SEGMENTS.includes(parts[2])) {
         const qualifierProtocol = await resolveProtocol(deps, _context);
-        const address = typeof qualifierProtocol?.resolveMetaItemAddress === 'function'
-            ? qualifierProtocol.resolveMetaItemAddress({ type: parts[0], segment: parts[1], name: decodeMetaNameSegment(parts[2]) })
-            : undefined;
+        let address: MetaItemAddress | undefined;
+        try {
+            address = typeof qualifierProtocol?.resolveMetaItemAddress === 'function'
+                ? qualifierProtocol.resolveMetaItemAddress({ type: parts[0], segment: parts[1], name: decodeMetaNameSegment(parts[2]) })
+                : undefined;
+        } catch (e) {
+            // A shareable namespace whose owners both hold the name (ADR-0150
+            // D2): the address names no one item — the refusal's own 409,
+            // naming each, answered here like the item read's.
+            if (isPackageScopedRefusal(e)) return { handled: true, response: deps.errorFromThrown(e, 409) };
+            throw e;
+        }
         if (address) {
             // Two qualifiers on one read name two addresses; neither is picked.
             if (query?.package !== undefined) {

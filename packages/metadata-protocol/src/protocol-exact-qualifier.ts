@@ -203,9 +203,15 @@ interface NamespaceCatalogue {
  * answers what it answers today.
  *
  * A namespace two packages co-own (ADR-0130 D1, ADR-0141 D5) names, for one
- * `(type, name)`, at most one package holder (ADR-0150 D2, child N's install
- * rule): that holder. When none of the owners holds the name, the first owner
- * is named, and the exact read answers its own refusal or miss.
+ * `(type, name)`, at most one package holder in a judged namespace (ADR-0150
+ * D2, child N's install rule): that holder. A shareable namespace (`base`,
+ * `system`, `sys`) is exempt from that rule, so two of its owners can hold the
+ * name: the address is then refused naming each (`ambiguous-in-namespace`,
+ * `409 RESOURCE_CONFLICT`), never picked. When none of the owners holds the
+ * name, the first owner is named, and the exact read answers its own refusal
+ * or miss.
+ *
+ * @throws {PackageScopedNameRefusedError} two or more owners hold the name.
  */
 export function resolveMetaItemAddress(
     host: Pick<ProtocolHost, 'engine'>,
@@ -224,7 +230,22 @@ export function resolveMetaItemAddress(
     const holders = typeof registry.packageScopedHoldersOf === 'function'
         ? new Set(registry.packageScopedHoldersOf(request.type, request.name) ?? [])
         : new Set<string>();
-    const packageId = owners.find((owner) => holders.has(owner)) ?? owners[0];
+    const holding = owners.filter((owner) => holders.has(owner));
+    // A shareable namespace (`base`, `system`, `sys`) can have several owners
+    // holding one name: the address names no one item, so it is refused naming
+    // each, never picked (ADR-0150 D2) — as the bare read of the name is.
+    if (holding.length > 1) {
+        const base = {
+            status: 'refused' as const,
+            reason: 'ambiguous-in-namespace' as const,
+            type: request.type as PackageScopedResolvableType,
+            name: request.name,
+            callerPackageId: null,
+            candidates: holding.map((packageId) => ({ kind: 'package' as const, packageId })),
+        };
+        throw new PackageScopedNameRefusedError({ ...base, message: packageScopedRefusalMessage(base) });
+    }
+    const packageId = holding[0] ?? owners[0];
     return { kind: 'namespace', namespace: reading.namespace, packageId };
 }
 

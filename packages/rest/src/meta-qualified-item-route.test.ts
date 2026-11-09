@@ -172,3 +172,31 @@ describe('the anonymous gate judges the qualified shape as no public-audience ro
         expect(isPublic(ITEM, 'book')).toBe(true);
     });
 });
+
+describe('a shareable namespace two packages share (ADR-0150 D2)', () => {
+    const SYS_ONE = 'com.acme.sys_one';
+    const SYS_TWO = 'com.acme.sys_two';
+    const installSys = () => {
+        for (const id of [SYS_ONE, SYS_TWO]) {
+            registry.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace: 'sys' } as never, 'code');
+        }
+    };
+
+    it('both owners hold the name: 409 naming both, never the first owner\'s item', async () => {
+        installSys();
+        ship('page', 'home', SYS_ONE);
+        ship('page', 'home', SYS_TWO);
+        const answer = await drive(QUALIFIED, { type: 'page', ns: 'sys', name: 'home' });
+        expect([answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(messageOf(answer)).toContain(`package "${SYS_ONE}"`);
+        expect(messageOf(answer)).toContain(`package "${SYS_TWO}"`);
+    });
+
+    it('CONTROL — one owner holds the name: its item is served', async () => {
+        installSys();
+        ship('page', 'home', SYS_TWO);
+        const answer = await drive(QUALIFIED, { type: 'page', ns: 'sys', name: 'home' });
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(labelOf(answer)).toBe('sys_two page');
+    });
+});
