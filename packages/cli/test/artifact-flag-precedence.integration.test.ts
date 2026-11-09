@@ -45,10 +45,11 @@
  *   entry: it runs `NODE_ENV=development`, where the dev metadata door over
  *   the supervisor's answer serves ALPHA even with the config loaded beside it.
  * - the honest ready banner on the bare `os start` path (no flag, the config's
- *   own dist/ resolved, dist/ holding a different stack): a host config boots
- *   its own module and the `serve` child's ready banner says `Config:`; a
- *   non-host config serves its dist/ bundle and the banner says `Artifact:`
- *   that file. No ready-banner row names a file the boot did not load.
+ *   own dist/ resolved, dist/ holding a different stack): under this source
+ *   entry's `NODE_ENV=development` a host config's app is registered from the
+ *   dev door's dist/ (#31761), and a non-host config serves its dist/ bundle,
+ *   so both banners say `Artifact:` that file. No ready-banner row names a
+ *   file the boot did not load.
  * - `os dev` under a local `OS_ARTIFACT_PATH` at a named path compiles a host
  *   config INTO that path; the file there is the config's own compiled output,
  *   so the config still composes its plugins (read through the roster).
@@ -398,7 +399,7 @@ describe('#21501 — the named artifact is the served stack, beside a config or 
     expect(r.output).not.toContain(HOST_MARKER);
   });
 
-  it('a bare `os start` beside a HOST config with a differing dist/ boots the config itself — and its ready banner says `Config:`', () => {
+  it('a bare `os start` beside a HOST config with a differing dist/ boots the config itself — and its ready banner names dist/, the app it registered', () => {
     // Also the roster marker's positive control: the config's own compiled
     // output is the one artifact a config still joins.
     const r = reading('hostConfigOwn');
@@ -406,8 +407,11 @@ describe('#21501 — the named artifact is the served stack, beside a config or 
     expect(r.output).toContain(HOST_MARKER);
     // The served label is not asserted here: under the source entry
     // (`NODE_ENV=development`) the dev metadata door over dist/ composes beside
-    // the host module — see the header.
-    expect(readyRow(r.output ?? '')).toEqual({ label: 'Config', value: 'objectstack.config.ts' });
+    // the host module — see the header. Since #31761 the app wrap on that dev
+    // boot carries the door's file too, so the row names it; the production
+    // `os start` row (`Config:`) is held by the shipped-entry CONTROL in
+    // `dev-host-config-artifact-source.integration.test.ts`.
+    expect(readyRow(r.output ?? '')).toEqual({ label: 'Artifact', value: 'dist/objectstack.json' });
   });
 
   it('a bare `os start` beside a NON-host config serves its dist/ bundle — and its ready banner says `Artifact:` that file', () => {
