@@ -18,6 +18,4 @@
  */
 
 export const zhHantGeneratedSourceHashes: Readonly<Record<string, string>> = {
-  "objects.sys_approval_request.fields.process_package.help": "2c4cfa5880a99e24",
-  "objects.sys_approval_request.fields.process_package.label": "e2102a7a50e2a26d",
 };

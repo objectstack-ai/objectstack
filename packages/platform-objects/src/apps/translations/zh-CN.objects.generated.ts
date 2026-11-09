@@ -2954,8 +2954,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "点分隔的 snake_case 标识（例如 auth.password_reset）"
       },
       package_id: {
-        label: "Package",
-        help: "The app the template comes from. Filled in by the platform; empty for templates created here."
+        label: "软件包",
+        help: "模板来自的应用。由平台填写;在此创建的模板为空。"
       },
       label: {
         label: "标签",

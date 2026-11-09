@@ -2954,8 +2954,8 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         help: "點分隔的 snake_case 識別資訊（例如 auth.password_reset）"
       },
       package_id: {
-        label: "Package",
-        help: "The app the template comes from. Filled in by the platform; empty for templates created here."
+        label: "套件",
+        help: "範本來自的應用。由平台填寫;在此建立的範本為空。"
       },
       label: {
         label: "標籤",

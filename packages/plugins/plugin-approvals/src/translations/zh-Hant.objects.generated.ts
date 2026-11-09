@@ -36,8 +36,8 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         help: "請求的來源——由節點驅動的核准為 `flow:<flowName|nodeId>`"
       },
       process_package: {
-        label: "Source Package",
-        help: "The app the flow that opened this request comes from. Filled in by the platform; empty for flows created here."
+        label: "來源套件",
+        help: "發起此請求的流程來自的應用。由平台填寫;在此建立的流程為空。"
       },
       process_label: {
         label: "流程",
