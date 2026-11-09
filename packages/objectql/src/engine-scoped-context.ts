@@ -3,9 +3,10 @@
 /**
  * [#30052 codemod] The "Scoped execution context: repositories, elevation,
  * transactions" section: the bodies of `ScopedContext`'s methods `object`,
- * `sudo`, `withRunAs`, `releaseJoinedHandle`, `txDriver`, `beginTransaction`,
- * `commitTransaction`, `rollbackTransaction`, `serveFormulaField` moved out of
- * `engine.ts` whole by `scripts/codemod-split-engine.mjs` (its second pass).
+ * `sudo`, `withRunAs`, `[SEED_USER_GRANTS]`, `transaction`,
+ * `releaseJoinedHandle`, `txDriver`, `beginTransaction`, `commitTransaction`,
+ * `rollbackTransaction`, `serveFormulaField` moved out of `engine.ts` whole by
+ * `scripts/codemod-split-engine.mjs` (its second pass).
  * The bodies of `derive` and `[APP_AUTHORED_HOOK_API]` moved by hand
  * (#30975): each writes the private `appAuthored` of the instance it builds,
  * which the codemod refuses to move (`foreign-private`), so each writes it
@@ -37,7 +38,11 @@
 import { driverSupportsTransactions } from '@objectstack/spec/data';
 import type { IScopedContext } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { appAutomationElevationOf, markAppAutomationElevation } from '@objectstack/core';
+import { appAutomationElevationOf, markAppAutomationElevation, resolveUserAuthzGrants } from '@objectstack/core';
+import type { EngineTransactionInfo, EngineTransactionOptions } from '@objectstack/core';
+import { rolledBackRefusal } from './summary-errors.js';
+import { TransactionUnsupportedError } from './transaction-errors.js';
+import { redactPropagatedDriverFault } from '@objectstack/types';
 import { UnscopedHookApi } from './hook-run-as.js';
 import { refuseAppAuthoredPermanentDelete } from './recycle-bin/app-authored-delete.js';
 import type { HookRunAs, HookRunAsRef } from './hook-run-as.js';
@@ -57,6 +62,8 @@ export interface ScopedContextHost {
   derive: ScopedContext['derive'];
   readonly engine: ScopedContext['engine'];
   readonly executionContext: ScopedContext['executionContext'];
+  /** The instance itself: a moved body reads `this.facade` where the method read a bare `this` (#30020). */
+  readonly facade: ScopedContext;
   readonly joinedHandles: ScopedContext['joinedHandles'];
   releaseJoinedHandle: ScopedContext['releaseJoinedHandle'];
   txDriver: ScopedContext['txDriver'];
@@ -119,6 +126,111 @@ export class ScopedContextFacet {
     }
     if (!this.executionContext.userId) return new UnscopedHookApi(ref);
     return this.derive({ ...this.executionContext, isSystem: false });
+  }
+
+  /** The body of `ScopedContext#[SEED_USER_GRANTS]`; the method's docblock there is its contract. */
+  static async seedUserGrants(this: Pick<ScopedContextHost, 'derive' | 'engine' | 'executionContext' | 'facade'>): Promise<ScopedContext> {
+    const ctx = this.executionContext;
+    if (!ctx.userId) return this.facade;
+    const needsGrants = !Array.isArray(ctx.permissions);
+    const needsPeers = !Array.isArray(ctx.org_user_ids);
+    const needsEmail = !ctx.email;
+    if (!needsGrants && !needsPeers && !needsEmail) return this.facade;
+    const grants = await resolveUserAuthzGrants(
+      this.engine,
+      ctx.userId,
+      ctx.tenantId ? { tenantId: ctx.tenantId } : {},
+    );
+    return this.derive({
+      ...ctx,
+      ...(needsGrants ? { positions: grants.positions, permissions: grants.permissions } : {}),
+      ...(needsPeers ? { org_user_ids: grants.org_user_ids } : {}),
+      ...(needsEmail && grants.email ? { email: grants.email } : {}),
+    });
+  }
+
+  /** The body of `ScopedContext#transaction`; the method's docblock there is its contract. */
+  static async transaction(this: Pick<ScopedContextHost, 'derive' | 'engine' | 'executionContext' | 'facade'>, callback: (trxCtx: ScopedContext, info: EngineTransactionInfo) => Promise<any>, opts?: EngineTransactionOptions): Promise<any> {
+    const engine = this.engine as any;
+    // The engine's ambient transaction store (ADR-0034), reached the `as any`
+    // way this whole class reaches engine internals, for the D2 join below. A
+    // transaction this call opens is published by the engine's own helper.
+    const txStore = engine?.txStore as
+      | { getStore(): { transaction: unknown } | undefined }
+      | undefined;
+
+    // ADR-0067 D2 — JOIN an already-open ambient transaction instead of opening
+    // a nested driver one (#6168). Same first move, same reasons and the same
+    // shape as `ObjectQL.transaction`: a nested begin would take a second
+    // connection AND would not be covered by the outer rollback, so the outer
+    // caller would stop owning the one-and-only commit/rollback.
+    //
+    // BEFORE the driver/`require` handling on purpose, mirroring the engine:
+    // when there is an ambient transaction there IS a transaction, so
+    // `require: true` is satisfied by joining it and the degrade is not
+    // reachable.
+    const ambient = txStore?.getStore();
+    if (ambient?.transaction) {
+      // The handle is threaded EXPLICITLY into the child context, not left to
+      // the ambient store, for the same reason the engine surface threads it:
+      // `buildDriverOptions` prefers the explicit handle, and it survives async
+      // boundaries the store does not. It is identity-equal to the store's
+      // handle, so `transactionCoversDriverFor` still attributes it to the
+      // OUTER owner and the #5351 same-origin gate judges it unchanged.
+      const joinedCtx = this.derive({ ...this.executionContext, transaction: ambient.transaction });
+      // JOINED, not owned: the outer caller decides commit vs rollback (#5696).
+      return callback(joinedCtx, { owned: false });
+    }
+
+    // Find the default driver for transaction support
+    const driver = engine.defaultDriver
+      ? engine.drivers?.get(engine.defaultDriver)
+      : undefined;
+
+    // [#18063] Declaration, not bare method presence — see the engine surface's
+    // gate; one predicate serves both so they cannot answer differently.
+    if (!driverSupportsTransactions(driver)) {
+      const datasource = engine.defaultDriver ?? driver?.name;
+      if (opts?.require === true) {
+        // Same fail-closed refusal as the engine surface (#5696 point 1).
+        throw new TransactionUnsupportedError(datasource ?? '<no default datasource>');
+      }
+      // No transaction support — execute directly. Declared (ADR-0119 D1), but
+      // said out loud since #4619: the caller asked for atomicity and the
+      // callback is about to run without any.
+      engine.warnTransactionUnsupported?.(datasource, driver?.supports?.transactionsUnsupported === true);
+      return callback(this.facade, { owned: false });
+    }
+
+    const trx = await driver.beginTransaction();
+    const trxCtx = this.derive({ ...this.executionContext, transaction: trx });
+    // Publish this transaction into the engine's ambient store so internal
+    // queries during writes reuse its connection (ADR-0034) — and so a nested
+    // `transaction()` on either surface can JOIN it. The store entry also
+    // carries WHICH driver owns the transaction (#4619) so the write path can
+    // report a write routed off it. [#22855] Through the engine's ONE unit
+    // helper, `runOpenedUnit`, the one `ObjectQL.transaction` runs its callback
+    // in, reached the same `as any` way as `txStore` itself. It closes the unit
+    // when the callback settles, so work the callback started and did not await
+    // (an `async: true` hook) no longer keeps the finished handle, neither the
+    // ambient one nor the `trxCtx` one threaded above.
+    const runIn = <R>(fn: () => Promise<R>): Promise<R> =>
+      typeof engine.runOpenedUnit === 'function' ? engine.runOpenedUnit(trx, driver, fn) : fn();
+
+    try {
+      // Reached only with no ambient transaction to join, so this call really
+      // did open one and the callback owns the outcome (#5696 / #6168).
+      const result = await runIn(() => callback(trxCtx, { owned: true }));
+      if (driver.commit) await driver.commit(trx);
+      else if (driver.commitTransaction) await driver.commitTransaction(trx);
+      return result;
+    } catch (error) {
+      if (driver.rollback) await driver.rollback(trx);
+      else if (driver.rollbackTransaction) await driver.rollbackTransaction(trx);
+      // [#21274] The engine surface's twin (`ObjectQL.transaction`), the
+      // stale-roll-up conversion included.
+      throw redactPropagatedDriverFault(rolledBackRefusal(error));
+    }
   }
 
   /**
