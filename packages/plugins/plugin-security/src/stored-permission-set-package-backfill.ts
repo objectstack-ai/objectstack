@@ -13,23 +13,37 @@
  *
  * ## Where the answer comes from
  *
- * The package is the one holder of the name in this environment when the
- * backfill runs, asked of the one rule (`resolvePackageScopedHolders`,
- * `@objectstack/core`) as a caller with no package, over the engine
- * registry's three holder reads — the source objectql's
+ * The package is the one holder of the name when the backfill runs, asked of
+ * the one rule (`resolvePackageScopedHolders`, `@objectstack/core`) over the
+ * engine registry's three holder reads — the source objectql's
  * `resolvePackageScopedName` hands the same rule, and the one the security
  * catalog reads permission sets through. ⛔ No second rule, no walk of its
- * own, no first-registered fallback:
+ * own, no first-registered fallback. The caller is the one that wrote the
+ * reference (ADR-0150 D3):
+ *
+ *  - a grant (R1) is the environment's own row, so it is asked as a caller
+ *    with no package: the unique holder in the environment;
+ *  - a suggestion (R3) is the reference of the package that made it
+ *    (`package_id`), so it is asked from THAT package, as
+ *    `position.permissionSets` is from its declaring package (D7): its own
+ *    set first, then the unique holder in its declared closure. A set only an
+ *    unrelated package holds is refused (`outside-closure`), never bound to it
+ *    (epic review 6735731423). A row with no `package_id` is asked with no
+ *    package.
+ *
+ * Its answer:
  *
  *  - resolved to a package → the row takes that package;
  *  - resolved to the environment's own set, or the platform's → stays null,
  *    which is its spelling;
- *  - refused → the ambiguous set: left null, and every candidate named;
+ *  - refused (two holders, or none in the caller's reach) → left null, and
+ *    every candidate named;
  *  - not-found → no package holds the name: left null, and named.
  *
  * Phase 1's one-holder refusal keeps a permission-set name to one package
- * holder per environment, so the ambiguous set is what a pre-phase-1 clash
- * left behind.
+ * holder per environment, so a two-holder refusal is what a pre-phase-1 clash
+ * left behind. A suggesting package's own set answers at D3's step 1 even
+ * beside such a clash: that is D3's answer for the package, not a pick.
  *
  * ## What it does not change
  *
@@ -48,14 +62,15 @@
  * so a run can only add a package, never move one.
  *
  * For a suggestion row it also reports a row whose `permission_set_package`
- * differs from its `package_id` (the package that made the suggestion, which
- * is the package that ships the set): every row reads equal today, and one
- * that does not is reported, never rewritten.
+ * differs from its `package_id`: with the suggesting package as the caller,
+ * that is a set one of its declared dependencies holds. Every row reads equal
+ * today; one that does not is reported, never rewritten.
  */
 
 import {
   describePackageScopedHolder,
   resolvePackageScopedHolders,
+  type PackageScopedRefusalReason,
   type PackageScopedResolution,
 } from '@objectstack/core';
 import { packageResolutionClosure, type PackageClosureRegistry } from '@objectstack/metadata-core';
@@ -71,6 +86,11 @@ export interface StoredPermissionSetReference {
   readonly nameColumn: string;
   /** The column this backfill fills. */
   readonly packageColumn: string;
+  /**
+   * The column naming the package that wrote the reference, which the rule is
+   * asked from (ADR-0150 D3); absent when the row is the environment's own.
+   */
+  readonly callerColumn?: string;
 }
 
 /** The column every reference below gains (ADR-0150 D8). */
@@ -79,7 +99,13 @@ export const PERMISSION_SET_PACKAGE_COLUMN = 'permission_set_package';
 /** The two stored references to a permission set this plugin owns (ADR-0150 D8 rows R1, R3). */
 export const STORED_PERMISSION_SET_REFERENCES: readonly StoredPermissionSetReference[] = Object.freeze([
   { row: 'R1', object: 'sys_user_permission_set', nameColumn: 'permission_set', packageColumn: PERMISSION_SET_PACKAGE_COLUMN },
-  { row: 'R3', object: 'sys_audience_binding_suggestion', nameColumn: 'permission_set_name', packageColumn: PERMISSION_SET_PACKAGE_COLUMN },
+  {
+    row: 'R3',
+    object: 'sys_audience_binding_suggestion',
+    nameColumn: 'permission_set_name',
+    packageColumn: PERMISSION_SET_PACKAGE_COLUMN,
+    callerColumn: 'package_id',
+  },
 ]);
 
 /** The suggestion table, whose `package_id` the backfilled column is compared with. */
@@ -97,7 +123,7 @@ export type StoredReferenceHolder =
   | { readonly kind: 'environment' }
   | { readonly kind: 'platform' }
   | { readonly kind: 'unheld' }
-  | { readonly kind: 'ambiguous'; readonly candidates: readonly string[] };
+  | { readonly kind: 'ambiguous'; readonly reason: PackageScopedRefusalReason; readonly candidates: readonly string[] };
 
 /** The registry reads the rule is asked over — ObjectQL's `SchemaRegistry` carries every one. */
 export interface PermissionSetHolderRegistry extends PackageClosureRegistry {
@@ -122,23 +148,26 @@ export function storedReferenceHolderOf(resolution: PackageScopedResolution): St
     case 'resolved':
       return resolution.holder.kind === 'package' ? { kind: 'package', packageId: resolution.holder.packageId } : { kind: resolution.holder.kind };
     case 'refused':
-      return { kind: 'ambiguous', candidates: resolution.candidates.map(describePackageScopedHolder) };
+      return { kind: 'ambiguous', reason: resolution.reason, candidates: resolution.candidates.map(describePackageScopedHolder) };
     default:
       return { kind: 'unheld' };
   }
 }
 
+/** Who holds `name` for `callerPackageId` (`null`: a caller with no package). */
+export type PermissionSetHolderOf = (name: string, callerPackageId: string | null) => StoredReferenceHolder;
+
 /**
- * The holder of a permission-set name for a caller with no package: the one
- * rule over the registry's holder reads (module doc).
+ * The holder of a permission-set name for the caller that wrote the
+ * reference: the one rule over the registry's holder reads (module doc).
  */
-export function permissionSetHolderOf(registry: PermissionSetHolderRegistry): (name: string) => StoredReferenceHolder {
-  return (name) =>
+export function permissionSetHolderOf(registry: PermissionSetHolderRegistry): PermissionSetHolderOf {
+  return (name, callerPackageId) =>
     storedReferenceHolderOf(
       resolvePackageScopedHolders(
-        { type: 'permission', name, callerPackageId: null },
+        { type: 'permission', name, callerPackageId },
         {
-          packageHolders: registry.packageScopedHoldersOf('permission', name, null),
+          packageHolders: registry.packageScopedHoldersOf('permission', name, callerPackageId),
           packageItem: (packageId) => registry.getPackageScopedItem('permission', name, packageId),
           environmentItem: () => registry.getEnvironmentScopedItem('permission', name),
         },
@@ -147,9 +176,10 @@ export function permissionSetHolderOf(registry: PermissionSetHolderRegistry): (n
     );
 }
 
-/** A name and how many rows carry it. */
+/** A name, the package that wrote it (R3; `null` for a row with none, absent for R1), and how many rows carry it. */
 export interface ReferencedName {
   readonly name: string;
+  readonly callerPackageId?: string | null;
   readonly rows: number;
 }
 
@@ -159,8 +189,8 @@ export interface StoredReferenceBackfillReport {
   readonly object: string;
   /** Names whose rows now carry the one package holder (written, or to be written in a dry run). */
   readonly bound: ReadonlyArray<ReferencedName & { readonly packageId: string }>;
-  /** Names two or more holders hold: left null, every candidate named. */
-  readonly ambiguous: ReadonlyArray<ReferencedName & { readonly candidates: readonly string[] }>;
+  /** Names the rule refused (two holders, or none in the caller's reach): left null, every candidate named. */
+  readonly ambiguous: ReadonlyArray<ReferencedName & { readonly reason: PackageScopedRefusalReason; readonly candidates: readonly string[] }>;
   /** Names no package holds: left null. */
   readonly unheld: readonly ReferencedName[];
   /** Names the environment's own item, or the platform's, answers: left null, its spelling. */
@@ -183,9 +213,19 @@ export interface StoredReferenceBackfillOptions {
 
 type Row = Record<string, unknown>;
 
-const tally = <T extends ReferencedName>(into: Map<string, T>, name: string, make: () => T): void => {
-  const at = into.get(name);
-  into.set(name, { ...(at ?? make()), rows: (at?.rows ?? 0) + 1 });
+const tally = <T extends ReferencedName>(into: Map<string, T>, key: string, make: () => T): void => {
+  const at = into.get(key);
+  into.set(key, { ...(at ?? make()), rows: (at?.rows ?? 0) + 1 });
+};
+
+/** One answer per (caller, name). */
+const keyOf = (callerPackageId: string | null, name: string): string => JSON.stringify([callerPackageId, name]);
+
+/** The package a row's reference was written by (`null`: none), read from `callerColumn`. */
+const callerOf = (row: Row, callerColumn: string | undefined): string | null => {
+  if (!callerColumn) return null;
+  const v = row[callerColumn];
+  return typeof v === 'string' && v !== '' ? v : null;
 };
 
 /**
@@ -196,19 +236,22 @@ const tally = <T extends ReferencedName>(into: Map<string, T>, name: string, mak
 export async function backfillStoredPermissionSetPackages(
   engine: StoredReferenceBackfillEngine,
   reference: StoredPermissionSetReference,
-  holderOf: (name: string) => StoredReferenceHolder,
+  holderOf: PermissionSetHolderOf,
   options?: StoredReferenceBackfillOptions,
 ): Promise<StoredReferenceBackfillReport> {
   const bound = new Map<string, ReferencedName & { packageId: string }>();
-  const ambiguous = new Map<string, ReferencedName & { candidates: readonly string[] }>();
+  const ambiguous = new Map<string, ReferencedName & { reason: PackageScopedRefusalReason; candidates: readonly string[] }>();
   const unheld = new Map<string, ReferencedName>();
   const unpackaged = new Map<string, ReferencedName & { holder: 'environment' | 'platform' }>();
   const answers = new Map<string, StoredReferenceHolder>();
-  const { object, nameColumn, packageColumn } = reference;
+  const { object, nameColumn, packageColumn, callerColumn } = reference;
+  const fields = ['id', nameColumn, packageColumn, ...(callerColumn ? [callerColumn] : [])];
+  /** Who wrote the reference, as the report names it: absent for an environment row (R1). */
+  const writer = (caller: string | null) => (callerColumn ? { callerPackageId: caller } : {});
 
   const walk = keysetWalk<Row>(
     async (query) => {
-      const page = await engine.find(object, { ...query, fields: ['id', nameColumn, packageColumn], context: SYSTEM_CTX });
+      const page = await engine.find(object, { ...query, fields, context: SYSTEM_CTX });
       return Array.isArray(page) ? (page as Row[]) : [];
     },
     { where: { [packageColumn]: null }, pageSize: PAGE_SIZE },
@@ -223,10 +266,12 @@ export async function backfillStoredPermissionSetPackages(
       // A row with nothing to address it by, or a grant that names no set
       // (the catalog reference report names those), is left as it stands.
       if (id === null || id === undefined || typeof name !== 'string' || name === '') continue;
-      let holder = answers.get(name);
+      const caller = callerOf(row, callerColumn);
+      const key = keyOf(caller, name);
+      let holder = answers.get(key);
       if (!holder) {
-        holder = holderOf(name);
-        answers.set(name, holder);
+        holder = holderOf(name, caller);
+        answers.set(key, holder);
       }
       switch (holder.kind) {
         case 'package': {
@@ -234,20 +279,20 @@ export async function backfillStoredPermissionSetPackages(
             await engine.update(object, { id, [packageColumn]: holder.packageId }, { context: SYSTEM_CTX });
           }
           const packageId = holder.packageId;
-          tally(bound, name, () => ({ name, rows: 0, packageId }));
+          tally(bound, key, () => ({ name, ...writer(caller), rows: 0, packageId }));
           break;
         }
         case 'ambiguous': {
-          const candidates = holder.candidates;
-          tally(ambiguous, name, () => ({ name, rows: 0, candidates }));
+          const { reason, candidates } = holder;
+          tally(ambiguous, key, () => ({ name, ...writer(caller), rows: 0, reason, candidates }));
           break;
         }
         case 'unheld':
-          tally(unheld, name, () => ({ name, rows: 0 }));
+          tally(unheld, key, () => ({ name, ...writer(caller), rows: 0 }));
           break;
         default: {
           const kind = holder.kind;
-          tally(unpackaged, name, () => ({ name, rows: 0, holder: kind }));
+          tally(unpackaged, key, () => ({ name, ...writer(caller), rows: 0, holder: kind }));
         }
       }
     }
@@ -292,8 +337,10 @@ async function suggestionRowsThatDiffer(
       if (typeof name !== 'string' || name === '') continue;
       // A dry run wrote nothing: read the row as the run would have left it.
       const stored = row[packageColumn];
-      const setPackage = typeof stored === 'string' && stored !== '' ? stored : options?.dryRun ? boundThisRun.get(name)?.packageId : undefined;
       const packageId = row.package_id;
+      const setPackage = typeof stored === 'string' && stored !== ''
+        ? stored
+        : options?.dryRun ? boundThisRun.get(keyOf(callerOf(row, reference.callerColumn), name))?.packageId : undefined;
       if (setPackage === undefined || typeof packageId !== 'string' || setPackage === packageId) continue;
       out.push({ id: String(row.id), name, packageId, permissionSetPackage: setPackage });
     }
@@ -311,6 +358,9 @@ export interface StoredReferenceBackfillLogger {
 }
 
 const rowsOf = (n: number): string => `${n} row${n === 1 ? '' : 's'}`;
+
+/** ` as written by <package>` for a reference a package wrote (R3); nothing for an environment row. */
+const askedBy = (n: ReferencedName): string => (typeof n.callerPackageId === 'string' ? ` as written by ${n.callerPackageId}` : '');
 
 /**
  * Run the backfill once for this boot, for each reference whose table this
@@ -365,28 +415,29 @@ export function logStoredReferenceBackfill(report: StoredReferenceBackfillReport
   if (report.bound.length > 0) {
     logger.info(
       `[security] ${at}: rows now name the package that holds their permission set (ADR-0150 D8) — ` +
-        report.bound.map((b) => `'${b.name}' → ${b.packageId} (${rowsOf(b.rows)})`).join(', ') + '.',
+        report.bound.map((b) => `'${b.name}'${askedBy(b)} → ${b.packageId} (${rowsOf(b.rows)})`).join(', ') + '.',
     );
   }
   if (report.ambiguous.length > 0) {
     logger.warn(
-      `[security] ${at}: more than one holder holds these permission-set names, so none is picked and each row is ` +
-        'left naming no package. Every reader still reads the set by name, as before — ' +
-        report.ambiguous.map((a) => `'${a.name}' (${rowsOf(a.rows)}; held by ${a.candidates.join('; ')})`).join(', ') + '.',
+      `[security] ${at}: these permission-set names have no one holder for the package that wrote them (more than ` +
+        'one holder, or none it depends on), so none is picked and each row is left naming no package. Every reader ' +
+        'still reads the set by name, as before — ' +
+        report.ambiguous.map((a) => `'${a.name}'${askedBy(a)} (${rowsOf(a.rows)}; ${a.reason}; held by ${a.candidates.join('; ')})`).join(', ') + '.',
       { ambiguous: report.ambiguous },
     );
   }
   if (report.unheld.length > 0) {
     logger.info(
       `[security] ${at}: no package holds these permission-set names, so their rows name no package — ` +
-        report.unheld.map((u) => `'${u.name}' (${rowsOf(u.rows)})`).join(', ') + '.',
+        report.unheld.map((u) => `'${u.name}'${askedBy(u)} (${rowsOf(u.rows)})`).join(', ') + '.',
       { unheld: report.unheld },
     );
   }
   if (report.differs.length > 0) {
     logger.warn(
-      `[security] ${at}: these suggestions name a permission set another package holds than the package that made ` +
-        'the suggestion; nothing is rewritten — ' +
+      `[security] ${at}: these suggestions name a permission set a declared dependency of the suggesting package ` +
+        'holds, not the suggesting package itself; nothing is rewritten — ' +
         report.differs.map((d) => `'${d.name}' (suggested by ${d.packageId}, held by ${d.permissionSetPackage})`).join(', ') + '.',
       { differs: report.differs },
     );

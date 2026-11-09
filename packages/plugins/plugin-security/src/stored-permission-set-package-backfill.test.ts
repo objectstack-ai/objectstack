@@ -41,17 +41,50 @@ const ENV_SET = 'env_auditor';
 const NOBODY = 'retired_set';
 
 /**
+ * R3's packages: P makes the suggestions and declares a dependency on D and
+ * D2; U is unrelated to P.
+ */
+const P = 'com.acme.suggester';
+const D = 'com.acme.dependency';
+const D2 = 'com.acme.dependency-two';
+const U = 'com.acme.unrelated';
+/** Held by U alone: outside P's closure. */
+const U_ONLY = 'unrelated_set';
+/** Held by D alone: in P's closure. */
+const D_ONLY = 'dependency_set';
+/** Held by P and by U (a pre-phase-1 clash): P's own. */
+const P_AND_U = 'clashing_set';
+/** Held by D and D2: two holders in P's closure. */
+const D_AND_D2 = 'closure_clash_set';
+
+/**
  * A registry holding: `crm_sales_rep` by CRM alone; `shared_reader` by CRM and
- * HR (a pre-phase-1 clash); `env_auditor` by the environment alone.
+ * HR (a pre-phase-1 clash); `env_auditor` by the environment alone; and R3's
+ * sets above. P's manifest declares D and D2.
  */
 function standInRegistry(): PermissionSetHolderRegistry {
-  const packageHolders: Record<string, string[]> = { [ONE_HOLDER]: [CRM], [TWO_HOLDERS]: [CRM, HR] };
+  const packageHolders: Record<string, string[]> = {
+    [ONE_HOLDER]: [CRM],
+    [TWO_HOLDERS]: [CRM, HR],
+    [U_ONLY]: [U],
+    [D_ONLY]: [D],
+    [P_AND_U]: [P, U],
+    [D_AND_D2]: [D, D2],
+  };
+  const manifests: Record<string, { id: string; dependencies?: Record<string, string> }> = {
+    [P]: { id: P, dependencies: { [D]: '*', [D2]: '*' } },
+    [D]: { id: D },
+    [D2]: { id: D2 },
+    [U]: { id: U },
+    [CRM]: { id: CRM },
+    [HR]: { id: HR },
+  };
   return {
     packageScopedHoldersOf: (_type, name) => packageHolders[name] ?? [],
     getPackageScopedItem: (_type, name, packageId) =>
       (packageHolders[name] ?? []).includes(packageId) ? { name, _packageId: packageId } : undefined,
     getEnvironmentScopedItem: (_type, name) => (name === ENV_SET ? { name } : undefined),
-    getPackage: () => undefined,
+    getPackage: (id: string) => (manifests[id] ? { manifest: manifests[id] } : undefined),
     getAllPackages: () => [],
   } as PermissionSetHolderRegistry;
 }
@@ -194,32 +227,95 @@ describe('R1 — a grant gains the package that holds its permission set', () =>
   });
 });
 
-describe('R3 — a suggestion gains the package that holds its permission set', () => {
+describe('R3 — a suggestion gains the package that holds its permission set, asked from the package that made it', () => {
   const suggestion = (id: string, packageId: string, name: string) => ({
     id, package_id: packageId, permission_set_name: name, anchor: 'everyone', status: 'pending', organization_id: ORG,
   });
+  async function seedSuggestions(engine: ObjectQL): Promise<void> {
+    for (const row of [
+      suggestion('s1', CRM, ONE_HOLDER),
+      suggestion('s2', P, U_ONLY),
+      suggestion('s3', P, D_ONLY),
+      suggestion('s4', P, P_AND_U),
+      suggestion('s5', P, D_AND_D2),
+    ]) await engine.insert(SUGGESTIONS.object, row, { context: SYS_ORG });
+  }
 
-  it('binds the one holder, and reports a row whose set another package holds than the one that suggested it', async () => {
+  it('a set only an unrelated package holds is left null and reported naming it, never bound to it', async () => {
     const engine = await boot();
-    await engine.insert(SUGGESTIONS.object, suggestion('s1', CRM, ONE_HOLDER), { context: SYS_ORG });
-    // Suggested by HR, but CRM alone holds the set.
-    await engine.insert(SUGGESTIONS.object, suggestion('s2', HR, ONE_HOLDER), { context: SYS_ORG });
-    await engine.insert(SUGGESTIONS.object, suggestion('s3', HR, TWO_HOLDERS), { context: SYS_ORG });
+    await seedSuggestions(engine);
 
-    const holderOf = permissionSetHolderOf(standInRegistry());
-    const report = await backfillStoredPermissionSetPackages(engine, SUGGESTIONS, holderOf);
+    const report = await backfillStoredPermissionSetPackages(engine, SUGGESTIONS, permissionSetHolderOf(standInRegistry()));
 
-    expect(await packagesById(engine, SUGGESTIONS.object)).toEqual({ s1: CRM, s2: CRM, s3: null });
-    expect(report.ambiguous.map((a) => a.name)).toEqual([TWO_HOLDERS]);
-    expect(report.differs).toEqual([{ id: 's2', name: ONE_HOLDER, packageId: HR, permissionSetPackage: CRM }]);
+    expect((await packagesById(engine, SUGGESTIONS.object)).s2).toBeNull();
+    const refused = report.ambiguous.find((a) => a.name === U_ONLY);
+    expect(refused).toMatchObject({ name: U_ONLY, callerPackageId: P, rows: 1, reason: 'outside-closure' });
+    expect(refused?.candidates.join(' ')).toContain(U);
+  });
+
+  it('a set a declared dependency holds is bound to it, and reported as differing from the suggesting package', async () => {
+    const engine = await boot();
+    await seedSuggestions(engine);
+
+    const report = await backfillStoredPermissionSetPackages(engine, SUGGESTIONS, permissionSetHolderOf(standInRegistry()));
+
+    expect((await packagesById(engine, SUGGESTIONS.object)).s3).toBe(D);
+    expect(report.differs).toEqual([{ id: 's3', name: D_ONLY, packageId: P, permissionSetPackage: D }]);
     // `package_id` is reported, never rewritten.
-    const s2 = (await engine.find(SUGGESTIONS.object, { where: { id: 's2' }, context: SYSTEM_CTX })) as Array<Record<string, unknown>>;
-    expect(s2[0].package_id).toBe(HR);
+    const s3 = (await engine.find(SUGGESTIONS.object, { where: { id: 's3' }, context: SYSTEM_CTX })) as Array<Record<string, unknown>>;
+    expect(s3[0].package_id).toBe(P);
+  });
 
-    // The next run binds nothing and reports the same differing row.
+  it('the suggesting package\'s own set binds to it even beside a clash with an unrelated package (D3 step 1)', async () => {
+    const engine = await boot();
+    await seedSuggestions(engine);
+
+    const report = await backfillStoredPermissionSetPackages(engine, SUGGESTIONS, permissionSetHolderOf(standInRegistry()));
+
+    const bound = await packagesById(engine, SUGGESTIONS.object);
+    expect(bound.s1).toBe(CRM);
+    expect(bound.s4).toBe(P);
+    expect(report.bound).toEqual(expect.arrayContaining([{ name: P_AND_U, callerPackageId: P, rows: 1, packageId: P }]));
+  });
+
+  it('two holders in the suggesting package\'s closure are left null and reported naming both', async () => {
+    const engine = await boot();
+    await seedSuggestions(engine);
+
+    const report = await backfillStoredPermissionSetPackages(engine, SUGGESTIONS, permissionSetHolderOf(standInRegistry()));
+
+    expect((await packagesById(engine, SUGGESTIONS.object)).s5).toBeNull();
+    const refused = report.ambiguous.find((a) => a.name === D_AND_D2);
+    expect(refused).toMatchObject({ callerPackageId: P, reason: 'ambiguous-in-closure' });
+    expect(refused?.candidates).toHaveLength(2);
+    expect(refused?.candidates.join(' ')).toContain(D);
+    expect(refused?.candidates.join(' ')).toContain(D2);
+  });
+
+  it('a second run writes no row and reports the same refusals and the same differing row', async () => {
+    const engine = await boot();
+    await seedSuggestions(engine);
+    const holderOf = permissionSetHolderOf(standInRegistry());
+    const first = await backfillStoredPermissionSetPackages(engine, SUGGESTIONS, holderOf);
+
+    const update = vi.spyOn(engine, 'update');
     const again = await backfillStoredPermissionSetPackages(engine, SUGGESTIONS, holderOf);
+
+    expect(update).not.toHaveBeenCalled();
     expect(again.bound).toEqual([]);
-    expect(again.differs).toEqual(report.differs);
+    expect(again.ambiguous).toEqual(first.ambiguous);
+    expect(again.differs).toEqual(first.differs);
+  });
+
+  it('a dry run reports the same differing row it would write, and writes nothing', async () => {
+    const engine = await boot();
+    await seedSuggestions(engine);
+    const update = vi.spyOn(engine, 'update');
+
+    const report = await backfillStoredPermissionSetPackages(engine, SUGGESTIONS, permissionSetHolderOf(standInRegistry()), { dryRun: true });
+
+    expect(update).not.toHaveBeenCalled();
+    expect(report.differs).toEqual([{ id: 's3', name: D_ONLY, packageId: P, permissionSetPackage: D }]);
   });
 });
 
