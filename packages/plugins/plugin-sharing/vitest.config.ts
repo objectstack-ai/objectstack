@@ -13,6 +13,10 @@ export default defineConfig({
     // Enforced repo-wide by scripts/check-console-intercept-disarm.mjs.
     disableConsoleIntercept: true,
     environment: 'node',
+    // #13517: quiet the registry's per-item registration chatter — the
+    // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
+    // default. Enforced by scripts/check-registry-log-declared.mjs.
+    env: { OS_REGISTRY_LOG: 'warn' },
   },
   resolve: {
     // `share-link-eligibility.test.ts` (#7861) drives the real `SqlDriver` on

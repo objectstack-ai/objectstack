@@ -250,8 +250,8 @@ npx @objectstack/scenarios help                                      # the comma
   mode scaffolds the project under that name, and template mode installs a template declaring it into a host named
   `host<code>` (the unmanaged copy keeps its namespace, and the install refuses one the host owns). The card's names are
   read relative to it (`account` → `democrm_account`), because a scaffolded project and the unmanaged install both
-  refuse bare object names. The build prompt asks for the prefix on EVERY item, and the scorer reports each bare
-  non-object item name as a failing Build check (`bare-name:<type>:<name>`), so such a build is never verified.
+  refuse bare object names. Views, docs, positions and capabilities (`<ns>.<short>`) keep the prefix too (ADR-0150 bucket 1 and
+  D7): the scorer reports each bare one as a failing Build check (`bare-name:<type>:<name>`); other items may be bare.
 - **Persona contract**: the build is asked for one permission set per persona, named `<namespace>_<persona id>`. The runner
   grants it to that persona's user, and loads a seed row as owned (`owner_id`) by a persona's user only when the row
   names that person (`rowOwner` in `prompts.ts`): it IS the persona's `record`, a declared direct lookup on it holds
@@ -346,6 +346,23 @@ Refresh the ObjectStack scenario gallery. Run each step in order and stop at the
    date, the step that failed and the last 40 lines of /tmp/gallery-refresh.log; otherwise open one issue with that
    title and the same text. Never open a second one.
 ```
+
+### Checking a gallery PR — `export-gallery --check`
+
+```bash
+pnpm --filter @objectstack/scenarios export-gallery --check "$(realpath ../gallery)"   # from a checkout
+npx @objectstack/scenarios export-gallery --check .                                  # from npm, in a gallery clone
+```
+
+The check a PR on objectstack-ai/gallery must pass before it is merged (`src/export/check.ts`, CLI
+`src/export/check-cli.ts`). It writes nothing and reads the exporter's own contract (the `index.json` schema, the app
+layout), so the two cannot drift. It prints one `CODE PATH: MESSAGE` line per finding and exits 1 on any, 0 on a clean
+tree: `index.json` that does not validate (absent is an empty gallery); an entry without a complete `apps/<id>/`
+(README, run record, scorecard and transcript in JSON and Markdown, `source/objectstack.config.ts`, at least one
+screenshot, every listed screenshot on disk and none unlisted); a directory under `apps/` no entry lists; a
+`framework.version` that is not a stable release published for `@objectstack/cli` (read with `npm view … versions`,
+only when the index lists an app); and anywhere in the tree a `.env*` name, a `node_modules` directory, a symbolic link
+or a text file naming a local absolute path.
 
 ## Other agent tools — Codex and the external driver contract
 

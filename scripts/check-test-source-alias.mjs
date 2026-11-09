@@ -620,7 +620,7 @@ const KNOWN_UNALIASED_TEST_IMPORTS = {
   '@objectstack/service-cluster': ['@objectstack/spec'],
   '@objectstack/service-cluster-redis': ['@objectstack/service-cluster'],
   '@objectstack/service-datasource': [
-    '@objectstack/driver-memory', '@objectstack/driver-sql', '@objectstack/driver-sqlite-wasm',
+    '@objectstack/driver-sql', '@objectstack/driver-sqlite-wasm',
     '@objectstack/plugin-hono-server', '@objectstack/spec', '@objectstack/types',
   ],
   '@objectstack/service-i18n': ['@objectstack/core', '@objectstack/spec'],

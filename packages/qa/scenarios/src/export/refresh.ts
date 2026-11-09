@@ -47,16 +47,14 @@ import { join } from 'node:path';
 
 import type { LoadedScenario } from '../loader.js';
 import type { Recording } from '../runner/driver.js';
+import { FRAMEWORK_PACKAGE, STABLE_VERSION } from './contract.js';
 import { exportGallery, type ExportOptions, type ExportSummary } from './exporter.js';
 import { GALLERY_GUARD, type GalleryGuard } from './generic.js';
 import { parseIndex, type GalleryIndex } from './manifest.js';
 import type { CaptureScreenshots } from './screenshots.js';
 
-/** The package whose npm `latest` is the framework release the gallery follows. */
-export const FRAMEWORK_PACKAGE = '@objectstack/cli';
-
-/** A stable release: `MAJOR.MINOR.PATCH`, no prerelease or build suffix. */
-export const STABLE_VERSION = /^\d+\.\d+\.\d+$/;
+/** The framework package and the stable-release shape live in `contract.ts`, which the check reads too. */
+export { FRAMEWORK_PACKAGE, STABLE_VERSION };
 
 /** The branch a refresh commits on. */
 export const galleryBranch = (version: string): string => `export/${version}`;

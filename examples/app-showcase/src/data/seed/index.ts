@@ -349,30 +349,67 @@ const fieldZoo = defineSeed(FieldZoo, {
   ],
 });
 
+/**
+ * Exchange rates — the rates the multi-currency invoices convert at
+ * (`showcase_invoice.amount` → `amount_home`, ADR-0144). The home currency is
+ * USD: `localization.currency` is pinned in this example's `.env`
+ * (`OS_LOCALIZATION_CURRENCY`), because these rates mean something only
+ * against one home currency. The direction is the platform's one direction:
+ * 1 home unit (USD) = `rate` units of the foreign currency.
+ *
+ * Two rows per currency, so invoices on either side of the newer row convert
+ * at different rates: the first row is in force from 2025-01-01, before every
+ * seeded invoice, and the second from 30 days ago. A foreign invoice dated
+ * before its currency's first row would be refused, never converted at 1:1.
+ *
+ * The seed identity is (currency, rate), not the table's own unique key
+ * (currency, effective_date): the second row's date is relative to the boot,
+ * like every seeded invoice date, so a replay on a later day moves that row's
+ * date instead of adding a row. Seeded rows say `source: 'manual'` — the seed
+ * plays the administrator typing them in Setup → Exchange Rates; the
+ * `showcase_exchange_rate_sync` flow template is what writes `source: 'app'`.
+ */
+const exchangeRates = SeedSchema.parse({
+  object: 'sys_exchange_rate',
+  externalId: ['currency', 'rate'],
+  records: [
+    { currency: 'EUR', rate: 0.92, effective_date: '2025-01-01', source: 'manual' },
+    { currency: 'EUR', rate: 0.9, effective_date: cel`daysAgo(30)`, source: 'manual' },
+    { currency: 'JPY', rate: 151.5, effective_date: '2025-01-01', source: 'manual' },
+    { currency: 'JPY', rate: 149.25, effective_date: cel`daysAgo(30)`, source: 'manual' },
+  ],
+});
+
 // Invoices owned by different contributors — the controlled-by-parent demo
 // (ADR-0055). Under the `showcase_contributor` permission set's owner RLS, a
 // contributor (e.g. ada@example.com) sees only the invoices they OWN; because
 // `showcase_invoice_line` is `controlled_by_parent`, the lines below follow
 // automatically — ada sees INV-1001/1002's lines but never linus's INV-1003.
+//
+// Each invoice names its currency (`currency_code`) and its document date
+// (`invoice_date`, the issue date; a draft takes today by default). The EMEA
+// invoices bill in EUR and the APAC ones in JPY, so `amount` is in that
+// currency and `amount_home` holds it in USD at the rate in force on
+// `invoice_date` (see `exchangeRates` above).
 const invoices = defineSeed(Invoice, {
   externalId: 'name',
   records: [
-    { name: 'INV-1001', account: 'Northwind', owner: 'ada@example.com', status: 'sent', issued_on: cel`daysAgo(10)`, tax_rate: 8, region: 'amer' },
-    { name: 'INV-1002', account: 'Contoso', owner: 'ada@example.com', status: 'draft', tax_rate: 0, region: 'amer' },
-    { name: 'INV-1003', account: 'Contoso', owner: 'linus@example.com', status: 'paid', issued_on: cel`daysAgo(30)`, paid_on: cel`daysAgo(2)`, tax_rate: 8, region: 'amer' },
-    { name: 'INV-1004', account: 'Fabrikam', owner: 'grace@example.com', status: 'draft', tax_rate: 0, region: 'emea' },
+    { name: 'INV-1001', account: 'Northwind', owner: 'ada@example.com', status: 'sent', issued_on: cel`daysAgo(10)`, tax_rate: 8, region: 'amer', currency_code: 'USD', invoice_date: cel`daysAgo(10)` },
+    { name: 'INV-1002', account: 'Contoso', owner: 'ada@example.com', status: 'draft', tax_rate: 0, region: 'amer', currency_code: 'USD' },
+    { name: 'INV-1003', account: 'Contoso', owner: 'linus@example.com', status: 'paid', issued_on: cel`daysAgo(30)`, paid_on: cel`daysAgo(2)`, tax_rate: 8, region: 'amer', currency_code: 'USD', invoice_date: cel`daysAgo(30)` },
+    { name: 'INV-1004', account: 'Fabrikam', owner: 'grace@example.com', status: 'draft', tax_rate: 0, region: 'emea', currency_code: 'EUR' },
     // Volume spread across months + regions so the Revenue Pulse filtered
     // dashboard (framework#2501) shows visible movement when the date range
     // or region filter changes — not just one bar. `issued_on` spans ~6
     // months; regions cover AMER / EMEA / APAC.
-    { name: 'INV-1005', account: 'Contoso', owner: 'ada@example.com', status: 'paid', issued_on: cel`daysAgo(45)`, paid_on: cel`daysAgo(40)`, tax_rate: 8, region: 'amer' },
-    { name: 'INV-1006', account: 'Globex', owner: 'linus@example.com', status: 'sent', issued_on: cel`daysAgo(15)`, tax_rate: 8, region: 'amer' },
-    { name: 'INV-1007', account: '华宁科技', owner: 'grace@example.com', status: 'paid', issued_on: cel`daysAgo(60)`, paid_on: cel`daysAgo(50)`, tax_rate: 6, region: 'apac' },
-    { name: 'INV-1008', account: '华宁科技', owner: 'ada@example.com', status: 'sent', issued_on: cel`daysAgo(5)`, tax_rate: 6, region: 'apac' },
-    { name: 'INV-1009', account: 'Vandelay Industries', owner: 'linus@example.com', status: 'paid', issued_on: cel`daysAgo(100)`, paid_on: cel`daysAgo(90)`, tax_rate: 20, region: 'emea' },
-    { name: 'INV-1010', account: 'Fabrikam', owner: 'grace@example.com', status: 'sent', issued_on: cel`daysAgo(75)`, tax_rate: 20, region: 'emea' },
-    { name: 'INV-1011', account: 'Stark Industries', owner: 'ada@example.com', status: 'paid', issued_on: cel`daysAgo(130)`, paid_on: cel`daysAgo(120)`, tax_rate: 8, region: 'amer' },
-    { name: 'INV-1012', account: 'Hooli', owner: 'linus@example.com', status: 'sent', issued_on: cel`daysAgo(170)`, tax_rate: 8, region: 'amer' },
+    { name: 'INV-1005', account: 'Contoso', owner: 'ada@example.com', status: 'paid', issued_on: cel`daysAgo(45)`, paid_on: cel`daysAgo(40)`, tax_rate: 8, region: 'amer', currency_code: 'USD', invoice_date: cel`daysAgo(45)` },
+    { name: 'INV-1006', account: 'Globex', owner: 'linus@example.com', status: 'sent', issued_on: cel`daysAgo(15)`, tax_rate: 8, region: 'amer', currency_code: 'USD', invoice_date: cel`daysAgo(15)` },
+    { name: 'INV-1007', account: '华宁科技', owner: 'grace@example.com', status: 'paid', issued_on: cel`daysAgo(60)`, paid_on: cel`daysAgo(50)`, tax_rate: 6, region: 'apac', currency_code: 'JPY', invoice_date: cel`daysAgo(60)` },
+    { name: 'INV-1008', account: '华宁科技', owner: 'ada@example.com', status: 'sent', issued_on: cel`daysAgo(5)`, tax_rate: 6, region: 'apac', currency_code: 'JPY', invoice_date: cel`daysAgo(5)` },
+    { name: 'INV-1009', account: 'Vandelay Industries', owner: 'linus@example.com', status: 'paid', issued_on: cel`daysAgo(100)`, paid_on: cel`daysAgo(90)`, tax_rate: 20, region: 'emea', currency_code: 'EUR', invoice_date: cel`daysAgo(100)` },
+    { name: 'INV-1010', account: 'Fabrikam', owner: 'grace@example.com', status: 'sent', issued_on: cel`daysAgo(75)`, tax_rate: 20, region: 'emea', currency_code: 'EUR', invoice_date: cel`daysAgo(75)` },
+    { name: 'INV-1011', account: 'Stark Industries', owner: 'ada@example.com', status: 'paid', issued_on: cel`daysAgo(130)`, paid_on: cel`daysAgo(120)`, tax_rate: 8, region: 'amer', currency_code: 'USD', invoice_date: cel`daysAgo(130)` },
+    { name: 'INV-1012', account: 'Hooli', owner: 'linus@example.com', status: 'sent', issued_on: cel`daysAgo(170)`, tax_rate: 8, region: 'amer', currency_code: 'USD', invoice_date: cel`daysAgo(170)` },
   ],
 });
 
@@ -397,6 +434,10 @@ const invoiceLines = defineSeed(InvoiceLine, {
     { description: 'INV-1002 \u00b7 Gadget X units', invoice: 'INV-1002', product: 'GADGET-X', position: 0, quantity: 2, unit_price: 99, amount: 198 },
     { description: 'INV-1003 \u00b7 Widget B units', invoice: 'INV-1003', product: 'WIDGET-B', position: 0, quantity: 6, unit_price: 49.99, amount: 299.94 },
     { description: 'INV-1004 \u00b7 Consulting hours', invoice: 'INV-1004', product: 'SERVICE-HR', position: 0, quantity: 3, unit_price: 150, amount: 450, service_start: '13:40' },
+    // INV-1008 bills in JPY, so its prices are yen: a foreign invoice with a
+    // non-zero total, converted at the newer JPY rate (it is dated 5 days ago).
+    { description: 'INV-1008 \u00b7 Consulting hours', invoice: 'INV-1008', product: 'SERVICE-HR', position: 0, quantity: 8, unit_price: 22500, amount: 180000, service_start: '10:00' },
+    { description: 'INV-1008 \u00b7 Gadget X units', invoice: 'INV-1008', product: 'GADGET-X', position: 1, quantity: 3, unit_price: 14800, amount: 44400 },
   ],
 });
 
@@ -524,4 +565,4 @@ const clientBriefs = defineSeed(ClientBrief, {
   ],
 });
 
-export const ShowcaseSeedData = [accounts, contacts, inquiries, products, projects, tasks, categories, businessUnits, orgUnits, teams, memberships, fieldZoo, invoices, invoiceLines, expenseReports, expenseLines, preferences, announcements, clientBriefs];
+export const ShowcaseSeedData = [accounts, contacts, inquiries, products, projects, tasks, categories, businessUnits, orgUnits, teams, memberships, fieldZoo, exchangeRates, invoices, invoiceLines, expenseReports, expenseLines, preferences, announcements, clientBriefs];
