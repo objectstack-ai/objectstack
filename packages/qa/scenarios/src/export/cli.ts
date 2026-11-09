@@ -21,6 +21,10 @@
  * exits non-zero and touches nothing (a wrong `--runs`, never "every app gone").
  *   --chromium PATH      the Chromium executable for the screenshots
  *
+ * `export-gallery --check DIR` is the other mode: it writes nothing, checks a
+ * gallery tree against what this exporter writes and answers 1 on any finding
+ * (`check.ts`, `check-cli.ts`, which the published bin runs too).
+ *
  * It writes only under `--out`; it pushes nothing anywhere. ⛔ It exports only
  * a card whose `origin` is `generic` and whose `tier` is `starter` or
  * `delivery` (`generic.ts`), and only a run on published packages — never a
@@ -37,6 +41,7 @@ import { HttpApp } from '../runner/app.js';
 import { ADMIN, findUp } from '../runner/cli.js';
 import type { Recording } from '../runner/driver.js';
 import { bootDev } from '../runner/project.js';
+import { asksForCheck, mainCheck, type CheckCliDeps } from './check-cli.js';
 import { exportGallery, type ExportSummary } from './exporter.js';
 import { captureScreenshots, playwrightBrowser, type CaptureScreenshots } from './screenshots.js';
 
@@ -94,9 +99,13 @@ export function liveScreenshots(chromium?: string): CaptureScreenshots {
 /** Test seam: replace the screenshot step (the CLI's is the real browser). */
 export interface ExportCliDeps {
   screenshots?: CaptureScreenshots;
+  /** The `--check` mode's seams (`check-cli.ts`). */
+  check?: CheckCliDeps;
 }
 
 export async function main(argv: readonly string[], deps: ExportCliDeps = {}): Promise<number> {
+  // The check reads a gallery tree only: no cards, no runs, no checkout.
+  if (asksForCheck(argv)) return mainCheck(argv, deps.check);
   const args = parseExportArgs(argv);
   const here = dirname(fileURLToPath(import.meta.url));
   const repo = findUp(here, (d) => existsSync(join(d, 'pnpm-workspace.yaml')));
