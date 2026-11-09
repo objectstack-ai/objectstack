@@ -1,0 +1,36 @@
+{
+  "number": 31811,
+  "kind": "issue",
+  "title": "job pull: an interval shorter than a pull starts overlapping runs of the same mapping, each sending a watermark read from a half-written target",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T05:13:18Z",
+  "updated_at": "2026-11-09T07:15:00Z",
+  "closed_at": "2026-11-09T07:13:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31811",
+  "body": "domain:server#2 · os-steve · session_01ADHkmQKZzp4DLtqiCkZZRM\n\nFiling gate: ① product defect with a named seam and a measured reach (out-of-scope finding of #31778's report 6732731853, G9). ⛔ Not a claim.\nreach: measured on a production-mode `os serve` at `origin/main` `c2bb879f`. A `job.pull` on a 30 s interval pulls 100,000 rows; one pull takes about 62 min. The job service started a second, third and fourth pull of the same mapping while the first was still running (4 `sys_job_run` rows `running` at once). Each sent a `since` watermark read from rows the first run had only partly written. No duplicate landed only because the target has a unique index on the key. Seam (read on main): `packages/services/service-job/src/db-job-adapter.ts` de-duplicates per deadline only, not per running job.\nBusiness reason: a sync that runs longer than its interval piles up concurrent runs of itself. They compete for the same rows, multiply load on the source and the database, and on a target without a unique index they can write the same record twice.\nReader: the next `domain:server` seat, from `pm:queue`.\nDedupe (open AND closed): `job overlapping runs`, `pull concurrent same mapping` → nothing on point.\nclass: a · type: Bug\nGrade: p2. Load amplification on a live door, with duplicate writes possible where the target has no unique index.\n\n## 维护者速读\n\n定时同步任务的间隔比一次同步耗时短时，上一次还没跑完，调度器就会再启动同一个任务，实测同时跑了 4 个。它们抢着写同一批数据，读到的增量水位也不对。这张卡让同一个拉取任务在上一次还在跑时不再重复启动，这一轮记为跳过。\n\n## What to build\n\n1. A `job.pull` (at least; any job if the adapter's shape makes that the simpler rule, say which) does not start while a run of the same job is still `running` on any node. The skipped tick is recorded (a `sys_job_run` row or a log line, say which) so an operator sees why a tick did nothing.\n2. A `running` row from a process that has stopped must not block the job forever: state how a stale run is told apart (lease or heartbeat expiry, if the adapter has one). Orphan `running` rows after shutdown are the related observation in #31778 (G7).\n3. Tests: a job whose run outlasts its interval → one run at a time, the skipped tick recorded. RED on main (overlapping runs). CONTROL: a job that finishes inside its interval still fires every tick.\n\n## Surface\n\n- Expected file surface: `packages/services/service-job/src/db-job-adapter.ts` and its tests, root `.changeset/`. Name any other file in the PR.\n- Clause-②: no.\n\nRelated: #31778 (G7, G9), epic #31763.\n\n<!-- signed: domain:server#2 · os-steve · session_01ADHkmQKZzp4DLtqiCkZZRM -->"
+}

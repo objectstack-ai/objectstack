@@ -1,0 +1,33 @@
+{
+  "number": 31836,
+  "kind": "issue",
+  "title": "mcp stdio: a host whose AI tool registry already carries list_objects / the data tools cannot boot the stdio transport (\"Tool list_objects is already registered\")",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T06:23:26Z",
+  "updated_at": "2026-11-09T07:33:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31836",
+  "body": "repo:cloud#3 · os-warren · session_01JQwxbZqfEd7pcckjz3pGqn\n\nFiling gate: **② a finding from a dispatched card.** It came out of cloud#4049 (an external AI calling over MCP is governed on objectos-ee; PR cloud#4057, report cloud#4049 comment 6733693119). The cloud lane does not dispatch this; triage routes it.\n\n## 维护者速读\n\n- 问题：企业版（已授权）打开 MCP 的 stdio 传输后启动直接失败，报 \"Tool list_objects is already registered\"。社区版能正常启动。\n- 原因：MCP 插件启动时先把 AI 工具注册表里的工具桥接过来，其中已有 `list_objects` 和几个数据工具，然后又注册自己的同名原生数据工具，SDK 报重名。\n- 要做：桥接时跳过和原生工具同名的工具，或者反过来，定一个规则，二者只留一个。\n- 需要你做的：无，分诊定车道。\n\n## Reproduction (pin 9e1f1f90)\n\n- A licensed objectos-ee `serve` with `OS_MCP_STDIO_ENABLED=true` and `OS_MCP_STDIO_API_KEY` exits 1 with `Plugin com.objectstack.mcp failed to start - rollback complete: Tool list_objects is already registered`. The same boot unlicensed comes up (`pm-orders/cloud/seat3/measure-4049-licensed.json`, `stdioBoot`).\n- Cause: `MCPServerPlugin.start` first bridges the AI tool registry (`bridgeTools`), which on a licensed host holds the in-product AI's `list_objects` (service-ai-studio) and data tools (service-ai). It then registers its own native data tools of the same names (`bridgeDataTools`) on the long-lived stdio server. The SDK refuses the duplicate.\n- HTTP `/api/v1/mcp` is not affected: it builds its tool set per request.\n\n## Work\n\n1. In `MCPServerPlugin.start`, decide one rule for a name both sources offer. Either the native data tool wins and the bridged one is skipped with a debug line, or the reverse, so stdio and HTTP expose the same tool by that name.\n2. A host must never be able to fail the MCP plugin's boot through a registry name.\n\n## Done when\n\n- A host whose AI registry carries `list_objects` and the data tools boots stdio, and `tools/list` names each tool once.\n- A test pins the collision.\n\nDedupe: `repo:objectstack-ai/objectstack is:issue`: \"stdio already registered list_objects\" 12 hits, \"bridgeTools bridgeDataTools\" 3. None is this collision. The nearest are #31605 (interceptor seam, closed), #25138 (stdio env kernel, closed) and #8034 (stdio fail-closed, closed).\n\nRelated: cloud#4049, cloud#4057, objectstack#31605."
+}

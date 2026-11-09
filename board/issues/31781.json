@@ -1,0 +1,31 @@
+{
+  "number": 31781,
+  "kind": "issue",
+  "title": "[Epic] Record-level lineage: every record answers where it came from and what was derived from it — provenance on synced rows, lineage across sync, import, flow and action writes, a lineage view in the console",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "enhancement",
+    "priority:p1",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T03:37:55Z",
+  "updated_at": "2026-11-09T04:37:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31781",
+  "body": "coordinator#1 · os-warren · session_01JQwxbaUTJVFuEz81NDUrnw\n\nFiling gate: ④ coordination parent, on the maintainer's ruling. The maintainer, in the project's Fable decision thread \"Discuss Palantir direction (objectstack#31763)\", 2026-11-09T03:32Z, verbatim: 「Palantir 的核心能力我们都应该要有，不等客户需求」 — on the thread's analysis that lineage is one of the three Palantir layers the platform does not have (the others: sync-in, now #31763; label-based access control, the sibling epic). Then, 2026-11-09T03:39Z–2026-11-09T03:41Z, verbatim: 「真正值钱的是图和影响分析，现在有ai，开发商基于开源版本是不是很容易自己搞一套」, which the thread first misread as \"open it all\"; the maintainer corrected it at 2026-11-09T04:35Z, verbatim: 「也就是软件公司获得一个免费的 palentir 工具？我之前的设想是整个血缘 不开源」 — this epic is **entirely Enterprise**: the lineage edges, their storage, the graph and impact analysis all live in the cloud repository under an Enterprise entitlement, on the `hierarchySecurity` precedent (cloud `docs/design/ee-feature-catalog.md`: the open framework exposes the seam, the licensed plugin does the work). The open edition records no lineage; what it keeps is #31763's sync provenance columns (source, external id, synced-at, run), which are the sync kernel's own operational metadata and answer only \"which sync run wrote this synced row\" — not lineage. Ruling-ref: 6731568115 (the #31763 ruling this amends: lineage is no longer \"on customer pull\"). ⛔ Not a claim.\n\nEpic parent under the #31502 A′ working mode: `tracking` + `area:data`, no pm state label, never dispatched; decisions anchor in the children. Filing lane and table owner: `domain:spec` for the write-seam contract in this repository; the recorder, storage, graph and impact analysis are **cloud-repository** cards (`packages/security-enterprise` or a sibling enterprise package, `apps/objectos-ee`), tracked here by link only. Ordered **after** #31763 on the roadmap: it builds on the provenance columns and the run record #31763 lands.\n\n## 维护者速读\n\nPalantir 的 Data Lineage：每条记录能回答「我从哪来、谁派生了我」。我们今天只有元数据层的变更日志与提交回滚（ADR-0008、ADR-0067），记录层没有血缘。这张专题把血缘做成记录级的平台能力：同步进来的行带来源（#31763 已做一半），导入、流程、动作写入也留写入者与输入，控制台能看一张血缘图。开源 / 收费（维护者裁定，2026-11-09T04:35Z，沿 `hierarchySecurity` 先例）：**整体企业版**——血缘边的记录与存储、血缘图、影响分析都在企业版；开源版不记血缘。边界：#31763 的同步来源列（源、外部 id、同步时刻、运行号）留在开源同步内核，它只回答「这行是哪次同步写的」，不是血缘。理由：开源版拿到本体、同步进来、动作与 MCP 已足够做 Palantir 内核，治理层（血缘 + 标签）是企业版面向这个场景的付费价值，不能让软件公司免费拿到整套。排在 #31763 之后。\n\n## Milestones and children\n\n| Milestone | Child | Blocked-by | Lane |\n|:--|:--|:--|:--|\n| **L0 — measurement** | (filed when #31763 P2 lands) what each write path already records in the open framework: `sys_audit_log` (ADR-0052), the import runner's row verdicts, `sys_automation_run`, the action dispatch audit (ADR-0110); which of them name the input rows; what a licensed plugin can observe at the write seam (ADR-0034) without the open engine storing an edge | #31763 P2 engine | server · S |\n| **L1 — ADR (framework)** | (filed after L0) the write-seam contract a lineage recorder plugs into: the per-write context (actor, run, input rows) the engine hands a registered observer at ADR-0034's ambient transaction, with **no** edge stored by the open engine; the `lineage` entitlement name; a cloud ADR mirrors it for the recorder, edge storage, retention and graph | L0 | spec · Tier H · fable + xhigh |\n| **L2 — seam (open)** | this repository: the write-seam observer contract and the context it carries, fail-closed and inert when nothing is registered | L1 | server |\n| **L2′ — recorder (enterprise)** | cloud: the licensed recorder writes the \"written by\" edge (sync run, import job, flow run, action dispatch, user) and the derived-from edge for writes a flow or action makes from other rows; edge storage and retention; EE catalog row under `lineage` | L2 | cloud |\n| **L3 — surfaces (enterprise)** | cloud: a record's lineage panel, the lineage graph and impact analysis (\"what does this record feed\"); the Enterprise MCP mount exposes the lineage edge so an agent can walk it | L2′ | cloud |\n\nRolling split: nothing is a card until #31763's P2 lands; this parent holds the table.\n\n## Done-when\n\nOn the open edition a synced record shows its source system, external id and sync run (the #31763 provenance columns) and nothing else; on Enterprise, open a record a flow created and see the run and the input records, the lineage graph answers \"what does this record feed\" across two hops, and the audit ledger and the lineage edges agree on one write.\n\n## Non-goals\n\nDataset-level pipeline lineage (transforms are the warehouse's / ETL vendor's job, maintainer 2026-11-09T03:33Z); column-level lineage; replaying history from lineage (ADR-0067 commits cover metadata, not data).\n\n## Related\n\n#31763 (sync-in epic, the prerequisite), the sibling epic on label-based access control (filed on the same ruling, linked from #31763), ADR-0052 (audit is not the activity feed), ADR-0067, ADR-0110, ADR-0034; cloud `docs/design/ee-feature-catalog.md` / ADR-0057 `hierarchySecurity` (the open-seam, licensed-plugin precedent); cloud `docs/design/pricing.md` (governance is the Enterprise value). Analysis: the project's Fable thread \"Discuss Palantir direction (objectstack#31763)\".\n"
+}

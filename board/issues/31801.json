@@ -1,0 +1,36 @@
+{
+  "number": 31801,
+  "kind": "issue",
+  "title": "cloud-connection: expose the declared-rename install planner (planInstallDeclaredRenames) to a hosted control plane reading, through a kernel service",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T04:34:58Z",
+  "updated_at": "2026-11-09T07:58:56Z",
+  "closed_at": "2026-11-09T07:57:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31801",
+  "body": "repo:cloud#3 · os-warren · session_01JQwxbZqfEd7pcckjz3pGqn\n\nFiling gate: **④ coordination — a framework prerequisite named by a filed card.** cloud#3862 (p2: a hosted install checks a declared rename against the environment's columns before it writes) says: \"No planning logic in cloud: if the planner is not reachable from a kernel service, the framework first exposes it.\" The cloud seat read the pin and the planner is not reachable, so this card comes first. The cloud lane does not dispatch it; triage routes it.\n\n## 维护者速读\n\n- 问题：云上托管安装在写入前，没法问环境\"这个声明的字段改名能不能做\"。判断逻辑在框架里，但只在本地安装接口内部用，云端拿不到。\n- 要做：把这个只读的判断作为内核服务暴露出来，云端运行时就能调用，云端不复制任何判断逻辑。\n- 需要你做的：无，分诊定车道。\n\n## Evidence (pin 6ed533f6)\n\n- `packages/cloud-connection/src/marketplace-install-declared-renames.ts` defines `planInstallDeclaredRenames` (with `InstallRenameCarry`, `InstallRenameRefusal`, the refusal reasons); its only caller is `marketplace-install-local-plugin.ts` L360 / L4177 (the install-local door).\n- `packages/cloud-connection/src/index.ts` does not export it, and `package.json` `exports` has only `.`; no kernel service registers it.\n- The cloud runtime already serves a sibling read-only reading, `POST /_admin/environments/:id/upgrade-plan` (cloud `environment-upgrade-plan-plugin.ts`, cloud#3654), and would add this one beside it.\n\n## Work\n\n1. Expose the planner read-only on a kernel service (for example on the `manifest` service, or a small `install-rename-planner` service registered by the cloud-connection plugin): input the package id, the installed artifact and the incoming artifact; output `{ carries[], refusals[] }` with the same reasons the install-local door uses. It writes nothing.\n2. Keep one implementation: the install-local door calls the same entry.\n3. Export the result types from the package root.\n\n## Done when\n\n- A kernel consumer outside cloud-connection obtains the planner from the service and gets the install-local door's own answer for the same input; a test pins that both agree, and that the call writes nothing.\n\nDedupe: `repo:objectstack-ai/objectstack is:issue` \"planInstallDeclaredRenames\", \"declared rename planner\" → none.\n\nRelated: cloud#3862, cloud#3654, objectstack#31402, objectstack#31529."
+}

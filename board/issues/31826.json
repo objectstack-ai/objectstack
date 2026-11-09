@@ -1,0 +1,37 @@
+{
+  "number": 31826,
+  "kind": "issue",
+  "title": "mcp read_file: bound PDF and Word text extraction with a per-extraction CPU-time budget and a process-wide concurrency cap, both host-configured (#31100 ruling B, phase 1)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:blocking",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T05:56:43Z",
+  "updated_at": "2026-11-09T07:56:26Z",
+  "closed_at": "2026-11-09T07:53:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31826",
+  "body": "repo:cloud#1 · os-warren · session_01JQwxbYK6SZCmyzbGnrvmkk\n\nFiling gate: ③ a task the maintainer dispatched directly. #31100 was ruled **B, in two phases**, with the maintainer's 「同意」 (2026-11-07T14:47Z, triage ruling comment 6708423049). Its execution line: \"`domain:server` files phase 1 as its own card now\". No card was filed then, because PR #31009 had already merged and the server seat signed off. This card is that phase-1 card. Phase 2 (the worker pool) is filed beside it as its own card, `Blocked-by:` this one.\n\n- **Business reason:** on the shared cloud, every tenant shares the same server processes. `read_file` extracts PDF and `.docx` text synchronously on the request thread, with no time budget and no concurrency cap. One tenant's assistant reading large files in a row holds the event loop for hundreds of milliseconds per file (#31100's table: about 300 ms for a 9 MiB, 200-page PDF), and every other tenant's request in that process waits.\n- **Who acts:** a `domain:server` seat builds it. The cloud lane (`repo:cloud#1`) then sets the shared cloud's values in its deployment config, which is the #31100 cloud half.\n- **Dedupe:** `repo:objectstack-ai/objectstack is:issue \"read_file PDF budget\"` → 1 hit (#31100); `\"extraction concurrency\"` → only #31100 and closed QA records; `31100` → #31100 and seat posts. No phase-1 card exists (search 2026-11-09).\n\n## Reading (objectstack `main` `01cbbba5`)\n\n- `packages/mcp/src/file-content.ts:190` `extractFileContent` and `:240` `extractPdfText` (`unpdf` 1.9.1, dynamic import). It has only per-file caps: `READ_FILE_MAX_BYTES` 10 MiB (L38), `READ_FILE_TEXT_MAX_CHARS` 100,000 (L41), `READ_FILE_PDF_MAX_PAGES` 200 (L44), and `READ_FILE_DOCX_XML_MAX_BYTES` 32 MiB (L47).\n- `grep -cE \"concurren|semaphore|timeout|AbortSignal|deadline|budget\" packages/mcp/src/file-content.ts` → 0.\n- Its one caller is `file-content.ts:437`, the `read_file` door.\n\n## Do (ruling B, phase 1 only)\n\n1. **Measure first:** a test that holds the event loop. Use #31100's method: a 1 ms `setInterval` counted during the extraction of a fixture PDF that is heavy in drawing operators. Record the CPU time and the number of missed ticks on `main`.\n2. **CPU-time budget per extraction.** When it runs out, stop between pages. Answer with the text read so far, `truncated: true`, and a reason that says the rest is in the download link (the answer already carries that link). Use process CPU time, not wall time, as ADR-0102 D1 does for sandboxed scripts. A wall-clock ceiling may sit beside it, as a separate cap.\n3. **Process-wide concurrency cap** on extractions that run at once. Over the cap, refuse at once (no queueing) with a retryable answer: the code, plus \"try again shortly\", and a `Retry-After` hint where the door has one.\n4. **Host-configured values:** two host environment variables, read once at boot, validated loudly when malformed. Name them per the repo's env-var conventions. Document both defaults in `content/docs/ai/connect-mcp.mdx` under \"Files: `read_file` and `create_upload_link`\".\n5. **Ablation tests:** remove the budget and a heavy fixture reads past it; remove the cap and N+1 concurrent extractions all run. Each pin goes red under its ablation.\n6. ⛔ Phase 2 (moving extraction off the request thread) is not in this card. It has its own card.\n\n## Surface\n\n`packages/mcp/src/file-content.ts`, its tests, `content/docs/ai/connect-mcp.mdx`, and one `@objectstack/mcp` changeset. Clause-②: the over-budget and over-cap answers are new refusals on a door that used to answer in full, so the dev states yes or no with the reason. Metadata-protocol: none (no spec or `/meta` change, per #31100).\n\n## Done when\n\nPR merged, and both defaults are documented. The cloud lane is then told, so that it sets the shared cloud's values (the #31100 cloud half)."
+}

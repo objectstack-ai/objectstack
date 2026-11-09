@@ -2,8 +2,8 @@
   "number": 31596,
   "kind": "issue",
   "title": "fix(cluster)!: a Redis outage must not crash replicas; resync caches on reconnect (#3814 F3a)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,9 +21,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T16:27:29Z",
-  "updated_at": "2026-11-09T00:14:37Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-09T02:54:04Z",
+  "closed_at": "2026-11-09T02:53:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 5,
   "locked": false,

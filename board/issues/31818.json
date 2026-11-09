@@ -1,0 +1,34 @@
+{
+  "number": 31818,
+  "kind": "pull_request",
+  "title": "chore(scripts): retire stale prose naming the deleted CI-failure reader",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T05:30:13Z",
+  "updated_at": "2026-11-09T06:07:31Z",
+  "closed_at": "2026-11-09T06:07:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-09T06:07:29Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31818",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9Ubb2qdaBWhYXLTUkSnB1mr88p)_\n\nFixes #31758\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：已删除的 CI 失败读取脚本还被 4 个脚本的 13 处注释当成\"仍在用的调用方\"，现在改成指向树上真实存在的调用方；审计表那一行保留原读数，只加一句\"已删除\"的备注；工作流命令门禁的端到端自测补了两条断言。\n- 为什么改：注释说一个不存在的文件在依赖某个设计，下一个读代码的人会据此保留或误改设计；端到端自测原来在样本输出不含令牌时也会空过。\n- 风险与回滚：除一个自测标签去掉括号后缀、一个自测电池加两条断言外不改任何代码路径；回滚即 revert 本 PR。\n- 先看：`scripts/check-self-test-workflow-commands.mjs`（新增两条断言与下限 5→7）、`scripts/pm/check-half-states.mjs`（L934、L20807 两段设计说明的改写）、`scripts/pm/dispatch-gates.mjs`（L2203、L2213 历史读数）。\n- 两分钟验证：`node scripts/check-self-test-workflow-commands.mjs --self-test`，预期 exit 0，末行写 \"8 declared batteries, 40 cases registered\"；再跑 `grep -rn ci-failure scripts/ .github/ docs/`，预期只剩审计表那一行。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `scripts/pm/check-half-states.mjs` (8 mentions): the docblock at L934 now names the live importer of `classifyTransportProbe` (`scripts/pm/check-handover.mjs`) and this script's own probe as the first-stage callers the optional `repo` stage keeps identical. L1029 names `fleet-write/dispatch.mjs` as an importer that never calls `resolveSweepRepo`. L20807: no live caller omits `transport` any more, so the sentence now says the identity serves the self-test's bare-observation fixtures, where it is pinned. The four self-test comments (L30492, L30540, L30596, L30651) name `check-handover.mjs` as the other importer that runs no sweep of its own. The L36754 self-test label loses its `(ci-failure.mjs)` suffix; the asserted value is unchanged.\n- `scripts/pm/dispatch-gates.mjs` (2): the dated price measurement keeps its numbers and calls the deleted reader \"a PM Actions-failure reader … deleted since, PR #31752\".\n- `scripts/import-prerequisite.mjs` (1): the importer of `EXIT_PREREQUISITE_NOT_MET` is now `pm/board-snapshot.mjs` and others.\n- `scripts/check-workflow-step-name-quoting.mjs` (1): the parenthetical example naming the deleted tool is dropped; the sentence holds without it.\n- `docs/audits/2026-09-self-test-shape-census.md` L376: the dated row is kept, with a trailing \"(note: tool deleted in #31752)\".\n- `scripts/check-self-test-workflow-commands.mjs`, battery `end to end on a real self-test that prints workflow-command prose`: N1 asserts that the output of `scripts/ci/lane-verdict.mjs --self-test` still carries a mid-line workflow-command token, so the clean scan cannot pass vacuously on token-free output. N2 asserts that the target is in `collectPopulation().population`. The battery floor rises 5 → 7 (measured: 7 cases; total 38 → 40).\n\n## Tests\n\n- `node scripts/check-self-test-workflow-commands.mjs --self-test`: exit 0, 8 batteries, 40 cases.\n- `node scripts/pm/check-half-states.mjs --self-test`: exit 0.\n- `node scripts/import-prerequisite.mjs --self-test`: exit 0 (76 cases).\n- `node scripts/check-workflow-step-name-quoting.mjs --self-test`: exit 0 (25 assertions, 7 batteries).\n- `node scripts/pm/dispatch-gates.mjs --self-test`: exit 0.\n\n## Acceptance notes\n\n- Design arguments that only the deleted importer needed: one, the `transport`-absent identity in `classifyTransportProbe`'s docblock (L20807). The identity still holds and is still pinned, but it no longer protects a live caller; the sentence now says so instead of naming one. Every other argument still holds through a live importer (`check-handover.mjs`, `fleet-write/dispatch.mjs`, `board-snapshot.mjs`).\n- `grep -rn ci-failure scripts/ .github/ docs/` after the change: 1 line, the audit row with its note (13 before, on `main` `01cbbba5`).\n\n## Verification\n\nDerived gate set (`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`, at `28fd60b4`, the one content commit): 69 families derived, 69 run, all exit 0; `--ran` reconciliation exit 0 (\"69 run, 0 NOT-MEASURED\"). Six of them (`check:doc-formula-expressions`, `check:doc-security-posture`, `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`, `check:sourcemap-no-sources-content`) first answered exit 3 (prerequisite not met) and were re-run after a full `turbo run build` under the verify lock (VERDICT command-exit 0). Head `aa9dc34a` adds only a merge of `main` (`6be71abc`), which touches none of the six edited files; the edited battery's self-test was re-run there: exit 0, 40 cases.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jVGUe8S2v2PvWkosZD)_\n"
+}

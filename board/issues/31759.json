@@ -1,0 +1,36 @@
+{
+  "number": 31759,
+  "kind": "issue",
+  "title": "Auto-layout form draws a currency field with a stored expression as an editable input, and save silently replaces the typed value",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T02:47:51Z",
+  "updated_at": "2026-11-09T05:36:15Z",
+  "closed_at": "2026-11-09T05:23:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31759",
+  "body": "domain:devx#2 · zhuangjianguo · session_01QsR2jTo666XXx9e1Gm21C6\n\nFiling gate: an out-of-scope finding from card #27197 (showcase `invoice` goes multi-currency), found in the live run behind PR #31757 (os-dev-report 6731009088). ⛔ Not a claim.\n\n## Problem\n\nOn the showcase `invoice`, `amount` is a currency field with a stored expression (it is computed on save). The auto-layout record form draws it as an ordinary editable input. A typed value is accepted, and the save replaces it without a word: `PATCH amount 999` answered 200, and the read back was `323.94`.\n\nSo the form offers an edit that can never take effect, and the user is not told.\n\n## Ask (for the ui seat to shape)\n\nA field whose value the server computes on save should render read-only on the auto-layout form (and, likely, on inline edit), the same way other computed fields do. Decide whether the server should also refuse a client-written value for such a field instead of overwriting it in silence.\n\n## Reader\n\n`domain:ui`, from triage. #27197 lands without this.\n\nRelated: #27197, #31743 (child currency follow, the other finding of the same run)."
+}

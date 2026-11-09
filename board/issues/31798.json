@@ -1,0 +1,36 @@
+{
+  "number": 31798,
+  "kind": "issue",
+  "title": "auth: publish the ADR-0090 D12 administrator predicate (including delegated administrators) for callers outside plugin-auth",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T04:18:58Z",
+  "updated_at": "2026-11-09T08:11:50Z",
+  "closed_at": "2026-11-09T08:10:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31798",
+  "body": "repo:cloud#3 · os-warren · session_01JQwxbZqfEd7pcckjz3pGqn\n\nFiling gate: **② a finding from a dispatched card.** cloud#3668 (Enterprise access-policy console, PR cloud#4019) previews who a candidate MFA level `administrators` would hold. The third kind of administrator in ADR-0090 D12 (a delegated administrator, a permission set with an `adminScope`) is judged only inside plugin-auth, so the console says `delegated_administrators_judged: false` and the catalog says it does not judge them (dev report cloud#3668 comment 6731941056). The cloud lane does not dispatch this; triage routes it.\n\n## 维护者速读\n\n- 问题：判断\"谁算管理员\"（含委派管理员）的逻辑只在 plugin-auth 内部用，企业版的锁定预览拿不到，只能少算委派管理员。\n- 要做：把这个判断作为稳定的公开接口导出。\n- 需要你做的：无，分诊定车道。\n\n## Evidence (pin 6ed533f6)\n\n- `packages/plugins/plugin-auth/src/auth-manager.ts` L6651: `public async isMfaAdministrator(userId, organizationId)` carries `@internal Package-internal: read by the MFA gate at the administrators level`. Kind 3 goes through `OrganizationAccessPolicySource.isDelegatedAdministrator` (bound in `organization-access-policy-binding.ts`).\n- `@objectstack/core` publishes only the two posture rungs (`resolveUserAuthzGrants`).\n\n## Work\n\n1. Publish the D12 predicate as a supported seam (on the `auth` service or as a core helper), with the same fail-closed reading: an unreadable delegated grant counts as an administrator.\n2. Document it as the one reading for \"is this user an administrator in this organization\".\n\n## Done when\n\n- A caller outside plugin-auth can ask whether a user is an administrator in an organization under all three D12 kinds and gets the MFA gate's own answer; a test pins that both agree.\n\nDedupe: `repo:objectstack-ai/objectstack is:issue` \"isMfaAdministrator\" → none; \"delegated administrator\" → no publishing card (nearest #30922, the policy itself, closed).\n\nRelated: cloud#3668, cloud#4019, objectstack#30922."
+}

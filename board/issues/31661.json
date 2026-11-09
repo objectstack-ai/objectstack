@@ -2,7 +2,7 @@
   "number": 31661,
   "kind": "pull_request",
   "title": "feat(objectql)!: a tool holds one name per package (bare-name one holder, after the AI family)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T20:25:35Z",
-  "updated_at": "2026-11-09T01:59:53Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-09T03:11:17Z",
+  "closed_at": "2026-11-09T03:11:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-09T03:11:15Z",
   "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/31661",

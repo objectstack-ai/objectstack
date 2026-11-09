@@ -1,0 +1,36 @@
+{
+  "number": 31804,
+  "kind": "issue",
+  "title": "plugin-auth audit: the admin set-user-password and the user's change-password write a sys_user audit row (must_change_password) with actor and user_id null",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T04:46:36Z",
+  "updated_at": "2026-11-09T06:15:46Z",
+  "closed_at": "2026-11-09T06:14:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31804",
+  "body": "repo:cloud#2 · os-warren · session_01JQwxbWTyRFQwYN1hZXbCHL\n\nFiling gate: ① an out-of-scope finding from the os-dev-report of cloud#4023 (comment 6732451666 on objectstack-ai/cloud#4023, PR cloud#4032; carrier: objectstack). Dedupe: no objectstack issue names `must_change_password` audit attribution, `set-user-password` actor, or `change-password` audit actor (search 2026-11-09). Neighbours: #30960 (SCIM writes now name their connection, PR #30989) and #21174 (a different field-withholding defect on the admin create-user ledger row).\n\n## 维护者速读\n\n- 问题：管理员给用户重设密码（`/auth/admin/set-user-password`），以及用户自己改密码（`/auth/change-password`），都会在 `sys_audit_log` 写一条 `sys_user` 更新（`must_change_password` 翻转），但这条记录的 `actor` 和 `user_id` 都是空的。审计日志看不出是谁改的密码状态。\n- 修法：让这两个入口写审计时带上调用者（管理员或本人），像 #30960 给 SCIM 写入加上连接身份那样。\n- 需要你做的：无，由车道派发。\n\n## Reading\n\nMeasured by the cloud#4023 card thread on a real `objectstack serve` of cloud's `apps/objectos-ee` at framework pin `6ed533f6` (cloud `scim-leaver-lifecycle.e2e.test.ts` rig). In the SCIM leaver window, `sys_audit_log` holds these `sys_user` rows besides the SCIM ones:\n\n| Write | Door | `actor` | `user_id` |\n|---|---|---|---|\n| admin resets the employee's password (`must_change_password` → true) | `POST /api/v1/auth/admin/set-user-password` | null | null |\n| the employee's sign-in stamp (`last_login`) | sign-in | the user | set |\n| the employee changes the password (`must_change_password` → false) | `POST /api/v1/auth/change-password` | null | null |\n\nSo the sign-in stamp is attributed, and both password-state writes are anonymous system writes. NOT MEASURED on objectstack `main`: the reading is at `6ed533f6`; step 1 re-measures it.\n\n## Do\n\n1. Reproduce on `main`: a plugin-auth test (real better-sqlite3 + plugin-audit's real writer, as #30989's test does) that calls both doors with a real session and reads the `sys_audit_log` row for the `must_change_password` flip. Expect actor null on `main`.\n2. Fix: the write runs with the caller's identity (the admin for set-user-password, the user for change-password), so `actor` and `user_id` name them. Reuse whatever context #30989 used to carry identity into the audit writer; do not add a second mechanism.\n3. Pins: both rows name their caller; the sign-in stamp is unchanged; a mutant that drops the context reds them.\n\n## Surface\n\n`packages/plugins/plugin-auth` (the two doors' write path) and its tests, one patch changeset. Clause-②: no (audit row content only; no route, option or field).\n\n## Done when\n\nPR merged; both password-state audit rows name the person who caused them."
+}

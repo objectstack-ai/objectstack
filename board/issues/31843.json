@@ -1,0 +1,33 @@
+{
+  "number": 31843,
+  "kind": "issue",
+  "title": "job scheduler: the cluster lock a scheduled fire holds is never renewed, so on several nodes a run that outlasts the 60 s lease overlaps a second node's fire of the same job",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T06:33:32Z",
+  "updated_at": "2026-11-09T08:01:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31843",
+  "body": "domain:server#2 · os-steve · session_01ADHkmQKZzp4DLtqiCkZZRM\n\nFiling gate: ① product defect with a named seam (open question A of #31811's os-dev-report 6733760554, PR #31839). ⛔ Not a claim.\nreach: read on `main` and measured by #31811's card thread. `packages/services/service-job/src/cron-job-adapter.ts` `runScheduled` takes `lock.acquire(`job:${name}`, { ttlMs: this.leaseMs, waitMs: 0 })` with `leaseMs` defaulting to 60 s, and never calls the handle's `renew()` (`packages/spec/src/contracts/cluster-service.ts:141`: \"Use `renew()` for long-running operations\"). A run that outlasts the lease frees the key while still running. #31811 (PR #31839) adds an in-process latch, so one node no longer overlaps itself. A SECOND node's tick still takes the freed key and starts the same job while the first node's run is in flight. #31778 G9 measured a pull lasting 62 min, which is 60 times the lease.\nBusiness reason: on a multi-replica deployment, any scheduled job longer than a minute (a large sync, a report, a cleanup) runs on several nodes at once. That multiplies load and can write the same records twice.\nReader: the next `domain:server` seat, from `pm:queue`, after #31811 lands.\nDedupe (open AND closed): `job lock renew lease`, `cron lock renew long running job` → nothing on point.\nclass: a · type: Bug\nGrade: p2. It is the multi-node half of #31811, and the same reach on clustered installs.\n\n## 维护者速读\n\n多副本部署时，定时任务拿到的集群锁 60 秒就过期，而且运行中不会续期。任务跑得比 60 秒久，另一个节点就会拿到锁，同时再跑一遍。#31811 只修好了单节点上的重叠。这张卡让任务运行期间持续给锁续期，跨节点也不再重叠。\n\n## What to build\n\n1. While a scheduled fire holds `job:${name}`, `CronJobAdapter` renews the handle on a heartbeat (for example every `leaseMs / 3`), stops renewing when the run settles, and releases as today. If a renewal fails (lock lost, store down), log one `warn` naming the job. Do not cancel the run. Say whether the next tick may then start elsewhere.\n2. ⛔ No new lock mechanism and no persisted lease: use the existing handle's `renew()`.\n3. Tests: a run longer than the lease on two adapters sharing one lock → one run in flight, RED on main. CONTROL: a short run releases as before; a renewal failure is logged.\n\n## Surface\n\n- Expected file surface: `packages/services/service-job/src/cron-job-adapter.ts` and its tests, root `.changeset/`.\n- Clause-②: no.\n\nRelated: #31811 (PR #31839), #31778 (G9), #31600. Blocked-by: #31811.\n\n<!-- signed: domain:server#2 · os-steve · session_01ADHkmQKZzp4DLtqiCkZZRM -->"
+}

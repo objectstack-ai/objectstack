@@ -1,0 +1,34 @@
+{
+  "number": 31769,
+  "kind": "pull_request",
+  "title": "docs(skills): teach the recycle bin restore, purge and list doors in objectstack-api",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T03:16:01Z",
+  "updated_at": "2026-11-09T04:17:12Z",
+  "closed_at": "2026-11-09T04:17:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-09T04:17:11Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31769",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbSk6EED3MLcW2Z91HCLZHAJ)_\n\nFixes #30847\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：`objectstack-api` 技能改写两处：派生动词段落改为 `restore` / `purge` 由 `delete` 派生；常见陷阱第 2 条教会回收站的四个 REST 入口、两个权限和四个恢复拒绝码；\"恢复已删发票\" eval 改为按新教学打分。\n- **为什么改**：#30237 已上线回收站的恢复、清除、列表接口，技能却仍说\"没有恢复或清除入口\"，AI 会因此自造软删除，或告诉用户删掉的记录找不回来。\n- **风险与回滚**：只改对外发布的技能文字与一个 eval，无运行时代码；SKILL.md 字节净增 0（5157 tokens，上限 6314）。回滚即 revert 本 PR。\n- **先看**：`skills/objectstack-api/SKILL.md` 常见陷阱第 2 条；同文件\"Derived operations\"表下的 `restore` / `purge` 句；`skills/objectstack-api/evals/endpoints-auth-routes.json` 第 5 例。\n- **两分钟验证**：`node scripts/check-skills-token-ratchet.mjs | grep objectstack-api/SKILL`，预期 `5157 tokens (ceiling 6314; headroom 1157)`。\n- **需要你做的**：作为受管审批人审阅并批准本 Tier H 草稿 PR。\n\n## What changes\n\n- `skills/objectstack-api/SKILL.md`, passage under **Derived operations**: \"`restore` / `purge` never derive: the recycle bin has no restore or purge door yet\" becomes \"`restore` / `purge` derive from `delete` and open the recycle-bin doors (pitfall 2)\" (`API_METHOD_DERIVATION` in `packages/spec/src/data/api-derivation.ts`).\n- Same file, **Common Pitfalls** 2 (\"Treating `DELETE` as final\"): what a delete keeps (business-object rows, 30-day default retention, not `multi: true` / platform rows / rows deleted before the bin existed), the `recycleBinEntryId` the delete answers, the four doors under `/api/v1/data/{object}/recycle-bin` (`POST /:entryId/restore`, `GET`, `DELETE /:entryId`, `DELETE`), who may use them (`allowRestoreOwnDeleted` for one's own deletes, `manageRecycleBin` for others' and for list / purge / empty), and the four `409` restore refusal codes.\n- `skills/objectstack-api/evals/endpoints-auth-routes.json` case 5: `expected_output` teaches that `restore` derives from `delete` (so the asked-for read-only API also closes the bin's doors) and names the restore door and grants; `must_contain` swaps `recycle bin` for `/recycle-bin/`; `must_not_contain` adds the stale phrase `nothing lists or restores`. `'restore'` stays: it still guards declaring a derived verb in `apiMethods`.\n- New bytes paid inside the same file (net 0 bytes, net 0 lines); each cut rule survives:\n  - \"aggregation through the `query` one\" → the Derived operations table row `aggregate` → `POST /data/{object}/query`.\n  - \"The authorable values are the six primitives — see API Methods\" → the **API Methods (Operations)** opening sentence.\n  - \"Always prefix with `/api/v1/` for versioning\" → every row of the Endpoint Naming Conventions table.\n  - the D6 cross-reference title in Auth Configuration, shortened to \"D6 above\" → **`authRequired` and the D6 pairing**.\n  - Best Practice \"Apply least-privilege auth\" → Auth Configuration (the flat `public` + `permissions` pair).\n  - \"pointer-style — read the spec source for exact shapes\" → **References** (\"Always `Read` the source for exact field shapes\").\n- `.changeset/30847-api-skill-recycle-bin-doors.md`: `'@objectstack/skills': patch`.\n\nDoors and grants, each read in the live tree (`main` 9e1f1f90): `packages/rest/src/recycle-bin-routes.ts` (four routes and their `restore` / `purge` exposure), `packages/spec/src/api/protocol.zod.ts` (`DeleteDataResponseSchema.recycleBinEntryId`, the restore path), `packages/objectql/src/recycle-bin/restore.ts`, `list.ts`, `purge.ts`, `retention.ts` (gates, 30-day default), `packages/core/src/security/effective-object-permissions.ts` (`GRANT_BITS`), `packages/spec/src/data/recycle-bin.zod.ts` (`RECYCLE_BIN_RESTORE_REFUSAL_CODES`, status 409).\n\n## Tests\n\nTeaching text only; no runtime code moves. `pnpm --filter @objectstack/spec run check:skill-examples`: exit 0, 332 prose examples type-check.\n\n## Acceptance notes\n\n- Skill readings (lines, whole file): `skills/objectstack-api/SKILL.md` 441 → 441 lines, 20646 → 20646 bytes, 5157 → 5157 tokens (ceiling 6314). Whole pack (every `SKILL.md`): 4599 → 4599 lines.\n- Model: `dispatch-gates --tier` mandates the contract-review model for `skills/**`; this build ran on the default tier under the no-Fable-build exit, and the contract review runs on the lane's isolated reviewer.\n- No REST door for a permanent delete exists (`permanent: true` is an engine option only), so the skill teaches none.\n\n## Verification\n\n<details><summary>Derived gates (46) on 7d3edcd4</summary>\n\n45 exit 0. `pnpm check:dual-build-cjs-loads` exit 3 (PREREQUISITE NOT MET, needs every package's dist): NOT MEASURED, left to CI. `dispatch-gates --ran`: 46 accounted, 45 run, 1 NOT-MEASURED. The merge of `origin/main` (head 4efbaef8) brought 6 commits touching no file of this diff; `check-skills-token-ratchet` re-run on 4efbaef8: exit 0.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jTbKfNKjrN2RAefJDH)_\n"
+}

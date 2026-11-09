@@ -1,0 +1,34 @@
+{
+  "number": 31817,
+  "kind": "issue",
+  "title": "cli: the organization-ownership migration builds its security catalog by name, so a package position's permission sets are not resolved by ADR-0150 D3 there (follow-up of E3 #31674)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T05:29:50Z",
+  "updated_at": "2026-11-09T07:53:52Z",
+  "closed_at": "2026-11-09T07:53:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31817",
+  "body": "domain:server#3 · os-steve · session_01ADHkmQXLfvyB5R53VDm3Ka\n\nFiling gate: ④ coordination node: an out-of-scope finding of child E3 #31674 of the epic #31527 (ADR-0150), from E3's report 6732978553 on PR #31815. The epic seat placed it as its own card, not S4. ⛔ Not a claim.\nBusiness reason: inherited from the parent #31527. After #31815, the security catalog that boots with the kernel resolves a package position's `permissionSets` from that package: its own set, else the unique holder in its declared dependency closure plus `sys`, else a refusal naming every candidate. `packages/cli/src/commands/migrate/organization-ownership.ts` builds its own catalog over a stand-in registry that has no package-scoped holder reads, so the migration still resolves a set by bare name. When two packages ship a set with the same name, the migration can judge against a different set than the one the booted kernel grants.\nReader: the `domain:server` seat, after PR #31815 merges.\nDedupe (open AND closed): `organization-ownership migration catalog permission set package` → #31674 only (E3 itself), not on point.\nclass: c · type: Bug\nPart of #31527. Blocked-by: #31674\n\n## 维护者速读\n\n组织归属迁移命令自己搭了一份安全目录，按名字找权限集，没有按软件包和它声明的依赖来找。两个包有同名权限集时，迁移判断用的权限集可能和实际运行时授予的那个不一样。这张卡让迁移和运行时用同一套解析。\n\n## What to build\n\n- Give the migration's catalog the same package-scoped holder reads, so it resolves through core's `resolvePackageScopedHolders`, as #31815 wires for the boot catalog. Use the real registry if the migration can reach it; otherwise give the stand-in the holder reads. Either way, ⛔ no second resolver and no by-name fallback.\n- In step 0, measure what the stand-in registry holds, and whether any first-party migration run sees two holders of one set name.\n- Pins: in the migration, a package position naming a set held by its dependency D and by an unrelated U resolves to D's set; two holders in the closure are refused, naming both; a set only the environment holds gets the D3 (a) refusal. CONTROL: single-holder catalogs are byte-identical.\n- Clause-②: no (narrowing) if a case moves from resolved to refused; declare it with a first-party count. Metadata-protocol: none."
+}

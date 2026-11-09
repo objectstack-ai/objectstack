@@ -1,0 +1,34 @@
+{
+  "number": 31800,
+  "kind": "pull_request",
+  "title": "docs(forms): rate limiting is built in, captcha is not",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T04:33:40Z",
+  "updated_at": "2026-11-09T05:16:28Z",
+  "closed_at": "2026-11-09T05:16:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-09T05:16:26Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31800",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9Ubb9yPk1QWTbkc9X2MECZqTq8)_\n\nFixes #31762\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:`content/docs/ui/forms.mdx` 公开表单安全清单里「Rate limiting / captcha — not built in」一行拆成两行:限流(内置、默认关)与验证码(公开表单无内置)。\n- **为什么改**:运行时自带入站限流(`server.security.rateLimit`),匿名表单提交与其它请求一起计量;原句让运营者以为必须自己在代理层加限流。\n- **风险与回滚**:纯文档,一个文件 +2/-1;回滚即 revert 本 PR。\n- **先看**:`content/docs/ui/forms.mdx` 第 476–477 行。\n- **两分钟验证**:`git show HEAD -- content/docs/ui/forms.mdx`,应看到旧的一行变成两条未勾选的清单项,限流项链到 HARDENING.md § Rate limiting。\n- **需要你做的**:无,席位落地。\n\n## What changes\n\nThe public-forms security checklist (section 11 of `content/docs/ui/forms.mdx`) said rate limiting and captcha were both \"not built in\". The one line becomes two, both still unchecked because both are the operator's act:\n\n- **Rate limiting** is built in and off by default. Arm `server.security.rateLimit` (`enabled: true` plus a `windowMs` / `maxRequests` budget). The limiter is server-wide and per caller, so the anonymous `POST /forms/:slug/submit` is metered with every other request; a caller over budget gets `429 RATE_LIMIT_EXCEEDED` with `Retry-After`. Behind a reverse proxy that overwrites `X-Forwarded-For`, `server.trustProxy: true` is also needed, or every anonymous caller shares the proxy's bucket. Links: HARDENING.md § Rate limiting (spelled as `content/docs/api/wire-format.mdx` spells it) and the production-readiness go-live checklist.\n- **Captcha** stays not built in for public forms. The only challenge in the platform is the opt-in Cloudflare Turnstile, and it guards `/sign-up/email` only (`TURNSTILE_GUARDED_ENDPOINTS` in `packages/plugins/plugin-auth/src/turnstile-sign-up.ts`); `packages/rest/src/form-routes.ts` carries no challenge. The fronting proxy or plugin advice stays.\n\nNothing else on the page changes.\n\n## Why\n\nThe text came from before the inbound limiter shipped. `docs/HARDENING.md` § Rate limiting, `content/docs/api/wire-format.mdx` and `content/docs/deployment/production-readiness.mdx` already state the built-in, off-by-default limiter; this page was the one left contradicting them.\n\n## Acceptance notes\n\n- Same-sentence grep over `content/docs` (references and releases excluded) and `skills/**` at origin/main 8dbb4a12a: one hit, the line fixed here. Neighbouring \"rate limit … not implemented\" sentences are different claims and stay: `content/docs/automation/webhooks.mdx` (per-receiver webhook rate limiting) and `content/docs/protocol/kernel/realtime-protocol.mdx` (WebSocket messages). `skills/objectstack-api/SKILL.md` describes rate limits correctly. Skills-docs: not owed.\n- No changeset: the diff touches `content/docs/**` only, which no released package ships, so `skip-changeset` is declared.\n- No live re-measure here; the card's triage carries the www seat's reading on `@objectstack/cli` 18.3.0 (unarmed 40 × 201; armed 9 × 201, then `429 RATE_LIMIT_EXCEEDED`, `retry-after: 6`).\n\n## Verification\n\n<details><summary>Derived gate loop — 43 / 43 exit 0 on head 8fc80e00</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 43 commands for the one changed path (model tier: no path-derived mandate). All 43 ran on the final head 8fc80e00 (after merging origin/main), each exit 0. Four of them (`check:doc-formula-expressions`, `check:doc-security-posture`, `check:skill-examples`, `check:docs-transcript-drift`) first exited 3 for an unbuilt prerequisite; after building the `@objectstack/formula`, `@objectstack/client-react` and `@objectstack/lint` closures they exit 0. Reconciliation: `dispatch-gates --ran` answered \"43 derived famil(ies) accounted for — 43 run, 0 NOT-MEASURED (a DERIVED zero — all 43 recorded an exit code and none of them is 3)\".\n\n</details>\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no names added)\n- [x] 3. No formatter ran; `pnpm lint` passes. (no code touched)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (publishes nothing)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QsR2jUrzXW5KgnucGDExmW\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jUrzXW5KgnucGDExmW)_\n"
+}

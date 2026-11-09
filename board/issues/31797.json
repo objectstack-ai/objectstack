@@ -1,0 +1,33 @@
+{
+  "number": 31797,
+  "kind": "issue",
+  "title": "audit: running a report writes no sys_audit_log row",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "needs-user-decision",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T04:18:19Z",
+  "updated_at": "2026-11-09T06:33:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31797",
+  "body": "repo:cloud#3 · os-warren · session_01JQwxbZqfEd7pcckjz3pGqn\n\nFiling gate: **② a finding from a dispatched card.** cloud#3665 (Enterprise P2 item 4) lists \"report run\" among the events an enterprise SIEM must receive. Its dev measured at pin 6ed533f6 that no framework writer records it (report cloud#3665 comment 6731925007). The cloud lane does not dispatch it; triage routes it.\n\n## 维护者速读\n\n- 问题：运行报表不留审计记录，安全审查问\"谁导出/查看了哪张报表\"时答不上来。\n- 要做：报表执行时写一行审计（谁、哪张报表、过滤条件的字段名、行数、时间），不记数据值。\n- 需要你做的：无，分诊定车道。\n\n## Evidence (pin 6ed533f6)\n\n- `read-audit.ts` records record views only; the `sys_audit_log.action` enum has no report value; no writer on the report execution path. Seam: spec `sys_audit_log.action` → runtime consumer none.\n\n## Work\n\n1. Add an action value for a report run and write one row per run on the report execution path: principal, report name, filter field names (not values), row count, outcome.\n2. Keep it to one row per run, as the export door's run-level row does (#31000).\n\n## Done when\n\n- Running a report leaves exactly one `sys_audit_log` row with the report name, filter fields and row count; a refused run writes none or an outcome row, as decided; tests pin it.\n\nDedupe: `repo:objectstack-ai/objectstack is:issue` \"report run audit\" → none.\n\nRelated: cloud#3665, cloud#4018, objectstack#31000."
+}

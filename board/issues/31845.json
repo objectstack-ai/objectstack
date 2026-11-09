@@ -1,0 +1,37 @@
+{
+  "number": 31845,
+  "kind": "pull_request",
+  "title": "feat(spec): offer dataset member synonyms and description on the dataset form",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:system",
+    "protocol:ui",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T06:50:02Z",
+  "updated_at": "2026-11-09T07:53:46Z",
+  "closed_at": "2026-11-09T07:53:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-09T07:53:44Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31845",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbGjBHBVVt6AwhTdfxq71C4s)_\n\nFixes #31660\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:Studio 数据集表单的维度与度量行,新增「同义词」「描述」两列(ADR-0149 D1),附说明文字与 10 种语言译文;删掉对账测试里这四个键的 4 条 `omit` 行。\n- 为什么改:这两个键早已可写,#31589 落地后已被数据集 AI 工具读取(liveness 均为 live),但在 Studio 里建的数据集没有入口填写,AI 问数的命中率因此打折。\n- 风险与回滚:只动表单布局、翻译包与测试计数,不动 schema;回滚即 revert 本 PR。同义词输入沿用行编辑器现有的逗号分隔输入,含逗号的短语无法录入。\n- 先看:`packages/spec/src/ui/dataset.form.ts`(四行新增与说明文字);`packages/platform-objects/src/apps/translations/zh-CN.metadata-forms.generated.ts`(译文);`packages/spec/src/system/metadata-form-zod-reconciliation.test.ts`(删的四行)。\n- 两分钟验证:`pnpm --filter @objectstack/spec exec vitest run src/system/metadata-form-zod-reconciliation.test.ts`,预期全绿;Studio 打开任一数据集,维度/度量行里出现「同义词」「描述」。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `packages/spec/src/ui/dataset.form.ts`: the dimensions and measures repeaters each offer `synonyms` and `description` as row properties, `label` equal to the item schema's `.meta({ title })`, with help text: synonyms are the words people use in a question, matched by the dataset AI tools and never shown (at most 20, each at most 60 characters, one member per word); description is a plain-language business definition, published with the analytics metadata and read by the dataset AI tools, never a prompt (at most 500 characters).\n- `packages/spec/src/system/metadata-form-zod-reconciliation.test.ts`: the four `kind: 'omit'` rows for `dataset` × `dimensions`/`measures` × `synonyms`/`description` are removed (their reason, \"planned, not yet read\", stopped being true when the readers landed; `packages/spec/liveness/dataset.json` marks all four `live`).\n- `packages/platform-objects/src/apps/translations/*.metadata-forms.generated.ts`: regenerated with `node scripts/check-i18n-bundles.mjs --write`, then the eight new leaves hand-translated in the nine translated locales (values only); re-running `--write` dropped their `source-hashes` entries except fr's two `Description` cognate leaves, which the generator records as copies, matching the dataset's existing root `description` entry.\n- `ui/packages/app-shell/src/views/metadata-admin/metadata-form-zh-cn.ts`: the zh-CN mirror carries the same four rows.\n- Two count pins in `packages/platform-objects/src/apps/translations/`: the zh-CN positive control 733 to 737 (four row labels) and `DATASET_LEAVES` 40 to 48 (four rows, label plus help text).\n- Changeset `31660-dataset-member-vocabulary-form.md`: `@objectstack/spec` and `@objectstack/platform-objects` patch.\n\nThe row editor (`SchemaForm` repeater) derives each row property's widget from the item schema: `synonyms` (array of strings) renders as the comma-separated string-list input, `description` (I18nLabel) as the same control `label` already uses. No `type`/`widget` is set on the rows, per the existing row-property convention.\n\n## Tests\n\n- `@objectstack/spec`: `vitest run src/system/metadata-form-zod-reconciliation.test.ts src/ui/` green (180 files, 6360 tests).\n- `@objectstack/platform-objects`: full `vitest run` green (120 files, 1932 tests) after the two pin updates; before them, three reds named exactly the new rows (two counts, one fr en-echo, fixed by \"Description de la dimension / de la mesure\" as the fr precedent spells sibling rows).\n- `node scripts/check-i18n-bundles.mjs`: all bundles in sync.\n- `ui/`: `node scripts/check-i18n-en-drift.mjs` 0 findings.\n\n## Acceptance notes\n\n- `synonyms` entry inherits the repeater's comma-separated input: a synonym containing a comma cannot be typed in Studio (it can in code). Noted, not filed: no shipped synonym needs a comma.\n\n## Verification\n\nAll readings on head `09425f66` (after merging origin/main `ad622d30` through `scripts/pm/os-regen-merge.sh`; nothing to regenerate):\n\n<details><summary>Derived gates: 87 of 87 run, all exit 0</summary>\n\n`node scripts/pm/dispatch-gates.mjs --ran FILE` answers: 87 derived families accounted for, 87 run, 0 NOT-MEASURED. `check-plugin-teardown-shape --self-test` first exited 3 (shallow clone missing its fixture commit), passed after fetching it. The 85 unlocked families ran before the merge of main (which touched no file in this diff); after the merge: `check-i18n-bundles` in sync, `@objectstack/spec check:generated` all 14 artifacts up to date, `@objectstack/platform-objects` 120/120 files, `@objectstack/spec` reconciliation + `src/ui/` 180/180 files.\n</details>\n\n<details><summary>ui</summary>\n\n`pnpm --dir ui exec vitest run scripts/`: 170 passed, 2 skipped (172 files). `metadata-form-i18n.test.ts` plus the two SchemaForm tests that read the zh-CN mirror: 3/3 files, 46 tests. `node scripts/check-i18n-en-drift.mjs`: 0 findings. Not run locally: the whole app-shell vitest and `type-check` (CI Test UI / Type Check UI).\n</details>\n\nDogfood battery: n/a (no `!` in the title, no narrowing arm).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jUoJGXXRKQk9ypaq82)_\n"
+}

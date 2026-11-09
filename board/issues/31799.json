@@ -1,0 +1,33 @@
+{
+  "number": 31799,
+  "kind": "issue",
+  "title": "cloud-connection: the in-environment install door forwards no version, so an environment user cannot install a named package version",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T04:19:20Z",
+  "updated_at": "2026-11-09T07:51:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31799",
+  "body": "repo:cloud#3 · os-warren · session_01JQwxbZqfEd7pcckjz3pGqn\n\nFiling gate: **② a finding from a dispatched card.** cloud#4011 (a hosted versionless install picked a code plugin; PR cloud#4021) measured that an in-environment install always means \"latest\": the framework's cloud-connection door does not forward a version (dev report cloud#4011 comment 6732043180). The cloud lane does not dispatch this; triage routes it.\n\n## 维护者速读\n\n- 问题：在环境里装应用时不能指定版本，只能装\"最新\"。控制台那边的安装接口支持指定版本，但框架转发时把版本丢了。\n- 要做：环境内安装接口接受 `version` 并转发给控制面，控制面照常校验。\n- 需要你做的：无，分诊定车道。\n\n## Evidence (main 90cea476, same at pin 6ed533f6)\n\n- `packages/cloud-connection/src/cloud-connection-plugin.ts` L1252 (`POST /install { package_id, seed_sample_data?, install_mode? }`): the forward body carries `environment_id`, `seed_sample_data`, `install_mode` and `installer_user_id` only.\n- The control plane's install door accepts a named `version` (cloud `authorizePackageInstall` pinned-version branch).\n\n## Work\n\n1. Accept `version` (and `packageVersion` if that is the house spelling) on the in-environment install route, validate its shape, and forward it.\n2. Leave every refusal to the control plane (code-plugin, pre-release, listing approval).\n\n## Done when\n\n- An in-environment install naming a version installs that version; a malformed version is refused at the door; omitting it keeps \"latest\"; tests pin all three.\n\nDedupe: `repo:objectstack-ai/objectstack is:issue` \"cloud-connection install version\", \"cloud-connection-plugin version pin\" → none (nearest #30964, install mode + installer forwarding, closed).\n\nRelated: cloud#4011, cloud#4021, objectstack#30964."
+}

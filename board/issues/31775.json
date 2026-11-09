@@ -1,0 +1,33 @@
+{
+  "number": 31775,
+  "kind": "pull_request",
+  "title": "fix(pm): the notify:security mailbox key no longer rings a private repository's card",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T03:24:15Z",
+  "updated_at": "2026-11-09T04:17:11Z",
+  "closed_at": "2026-11-09T04:17:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-09T04:17:09Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31775",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbGMw7H5QxZ49mR2oypfnZMz)_\n\nFixes #31458\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:信箱门铃表里 `Notify: security` 一行不再给私有仓(如 cloud)的安全卡敲 `security#1`;读取器把这种写法判为不可读,模板变为 `Notify: security · GHSA-ID or #n`。\n- 为什么改:#31301 的裁定已让规则文字写明「私有仓卡不敲」,代码表与自测却还在教席位敲,`--mailbox-keys` 打印出一个规则已没有的门铃。\n- 风险与回滚:只改 `scripts/pm/record-recognisers.mjs` 一个文件(+10/−20),不发布任何包;误敲的私有仓门铃从「读成功」变为「不可读」,回滚即 revert 本 PR。\n- 先看:`record-recognisers.mjs` 的 `notify:security` 读取器;`MAILBOX_KEYS` 的 `notify:security` 行;自测里翻转的那条 `OWNER/REPO#N` 用例。\n- 两分钟验证:`node scripts/pm/record-recognisers.mjs --mailbox-keys | grep 'Notify: security'` 应只见 `GHSA-ID or #n`,不再有 `OWNER/REPO#N`。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `MAILBOX_KEYS`, the `notify:security` row: `when` drops the private-repository branch and says a private repository's card is never rung (that repository's own lane holds it); `template` becomes `Notify: security · GHSA-ID or #n`.\n- The `notify:security` reader no longer reads `OWNER/REPO#N`: a repository-qualified card under the key returns null, so the line reads `unreadable`. `REPO_CARD_REF` and its doc comment are removed (this reader was its only reader); the `ADVISORY_ID_REF` comment no longer names the private ring.\n- Self-test: the case that read `Notify: security · objectstack-ai/cloud#412` (and `my.org-1/a_b.c-d#7`) as repository plus card now pins both spellings UNREADABLE, keeping its bare `#n` half; the malformed-qualifier case stays unreadable. The mailbox battery floor stays 44, with a note saying what changed.\n\n## Tests\n\n- `node scripts/pm/record-recognisers.mjs --self-test`: 375 cases pass before (f65c36fc) and after (0aabec1e, again at cf203acb).\n- Ablation (one run, through `scripts/ablation-replace.mjs` at 0aabec1e): restoring the qualified read under `notify:security` landed (anchor 1 → 0, blob ab18ddda6eeb → b59c1aec3da6) and the self-test went red, 1 of 375: exactly the flipped `OWNER/REPO#N` case. Restored: blob equals HEAD, `git diff HEAD` empty.\n\n## Acceptance notes\n\n- No protocol text is edited: `.claude/**` already says 「私有仓卡不敲」 (`project-forms.md` L48, `security-findings.md` L63, `lanes/security.md` L16), owned by #31301's PR.\n- The `when` field gains one clause saying a private repository's card is never rung, so the `--mailbox-keys` printout states the routing rather than only dropping it.\n\n## Verification\n\n<details><summary>`--mailbox-keys` row, before and after</summary>\n\nBefore (f65c36fc):\n\n```text\nNotify: security · GHSA-ID or OWNER/REPO#N or #n\n    the seat holding the finding (a dev's or a QA runner's reaches its PM session privately first); triage, for a public card it labelled `security` → security#1; the seat's relay `advisory_create` draft landed: the opaque advisory id ALONE; or the finding is on a PRIVATE repository and the seat filed an ordinary `security` issue there: that card as `OWNER/REPO#N` ALONE; or triage labelled a public card `security`: its number ALONE — never a mechanism, a path or an object name\n```\n\nAfter (cf203acb):\n\n```text\nNotify: security · GHSA-ID or #n\n    the seat holding the finding (a dev's or a QA runner's reaches its PM session privately first); triage, for a public card it labelled `security` → security#1; the seat's relay `advisory_create` draft landed: the opaque advisory id ALONE; or triage labelled a public card `security`: its number ALONE — never a mechanism, a path or an object name, and never a PRIVATE repository's card (that repository's own lane holds it)\n```\n\n</details>\n\n<details><summary>Derived gates (31) at 0aabec1e and again at cf203acb</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 31 families (the same list at both heads); each ran with exit 0, `pnpm check:pm-record-recognisers`, `pnpm check:pm-dispatch-gates` (2205 fast-tier cases), `pnpm check:nul-bytes` and `node scripts/check-self-test-wired.mjs` among them. `--ran` reconciliation at cf203acb: 31 derived, 31 run, 0 NOT-MEASURED, 0 UNRUN. No build prerequisite. No `*.test.*` file names this script.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jSLqzzavrJ38wHg9Qx)_\n"
+}

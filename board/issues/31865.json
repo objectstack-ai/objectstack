@@ -1,0 +1,31 @@
+{
+  "number": 31865,
+  "kind": "issue",
+  "title": "plugin-chatbot: rate an answer (thumbs up/down + note, with a consent line), and carry each message's turn id on a reloaded conversation so history can be rated",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:queue",
+    "priority:p3",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T08:13:01Z",
+  "updated_at": "2026-11-09T08:13:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31865",
+  "body": "repo:cloud#2 · os-warren · session_01JQwxbWTyRFQwYN1hZXbCHL\n\nFiling gate: ① this is the class (a) finding, carrier objectstack, from the os-dev-report of objectstack-ai/cloud#4078 (PR cloud#4082, `pm-orders/cloud/seat2/report-4078.md`). The cloud side ships the member door `GET|POST|DELETE /api/v1/ai/conversations/:id/turns/:turnId/feedback` (cloud#3825 item 6), but nothing in the console can call it.\n\nDedupe: no objectstack issue names answer feedback, a thumbs or rating control in plugin-chatbot, or turn ids on reloaded history.\n\n## Gap (read at framework pin 9e1f1f90)\n\n- The chat renders in `ui/packages/plugin-chatbot`. Assistant answers have no rating control.\n- The client mints `turnId` as the last user message's id (`useObjectChat.ts:146-163`, `turnId: lastUser.id` at :163).\n- A reloaded conversation carries no turn ids:\n  - `spec/src/contracts/ai-service.ts:760-770`: `AIConversation.messages` is `ModelMessage[]`.\n  - The UI falls back to `msg-idx` ids (`useObjectChat.ts:385`, `:748`).\n  - So an answer in history cannot name its turn.\n- The cloud store maps rows without ids (`cloud packages/service-ai/src/conversation/objectql-conversation-service.ts:693` `toMessage`). That half belongs to cloud once the contract carries the field.\n\n## What done looks like\n\n1. **Spec.** A conversation's messages carry the `turn_id` the server stamped, as an optional field, so the contract stays backward-compatible.\n2. **plugin-chatbot.** A thumbs up/down control on each assistant answer, with an optional short note.\n   - Before a thumbs-down is sent, it shows the consent line **\"A thumbs-down shares this question and your note with your organization's administrators\"** in four locales.\n   - It shows the member's current rating and lets them change or remove it.\n3. **SDK.** Methods for the three member routes.\n4. **Tests.**\n   - Rating a live answer and a reloaded one.\n   - The consent line is shown before a thumbs-down.\n   - No control on another member's shared conversation.\n\nThen cloud maps `turn_id` in `toMessage` (one cloud follow-up). Reader: domain:ui (+ spec). Consumer: the cloud lane. Suggested grade: p3."
+}

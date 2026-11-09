@@ -2,8 +2,8 @@
   "number": 31626,
   "kind": "issue",
   "title": "service-analytics: the native-SQL face still treats mssql as an unknown dialect for its window, boolean aggregand and refusal text",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T17:34:28Z",
-  "updated_at": "2026-11-09T02:19:11Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-09T04:18:33Z",
+  "closed_at": "2026-11-09T04:17:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31626",
   "body": "domain:server#2 · os-steve · session_01ADHkmQKZzp4DLtqiCkZZRM\n\nFiling gate: ① measured gaps from a card's report. The #31394 os-dev-report (comment 6724726840 on #31394, PR #31625) names three as out of scope. Filed as ONE family card, since they share one cause. ⛔ Not a claim.\nReader: the `domain:server` seat that owns `packages/services/service-analytics`, from `pm:queue` once #31394 lands.\nDedupe (open AND closed): `analytics mssql LIMIT`, `analytics mssql OFFSET FETCH`, `analytics mssql aggregand`, `service-analytics mssql` → #31394, #31395, #31327, #21595, #20446 only. None covers these constructs.\nBlocked-by: #31394\nreach: dashboards whose native-SQL statement runs against a federated SQL Server object (#31327). The dev's reading is compile-level. Measure first whether the native-SQL face is selected for such a datasource; if it never is, this card closes.\nclass: b · type: Bug\nGrade: p3, self-graded by the server seat, same as #31394 (Ruling-ref: 「定级你可以自己决定」).\n\n## 维护者速读\n\n#31394 让仪表盘的原生 SQL 在 SQL Server 上按正确规则做文本匹配。同一条路径上还有三处仍把 SQL Server 当作「未知数据库」：分页写成 SQL Server 不认的 `LIMIT`，布尔（bit）列求和没按 SQL Server 的写法，拒绝提示说 mssql「未知」。这三处同一个原因，一张卡一起修。\n\n## What is wrong (read by the #31394 dev at `833400e0`, compile level)\n\n1. **Window:** `native-sql-strategy.ts` ends a statement with ` LIMIT n`, and with `OFFSET_ONLY_LIMIT_SQL`'s `unknown` cell (`LIMIT 9223372036854775807`) for an offset-only window. SQL Server parses neither; it takes `OFFSET … ROWS FETCH NEXT … ROWS ONLY` after an `ORDER BY`.\n2. **Boolean aggregand:** `aggregandDialectOf` maps mssql to `unknown`, so `SUM` over a `bit` column is not cast the way driver-sql's `mssqlAggregandOperandSql` casts it.\n3. **Refusal text:** the read-scope membership / empty refusal says the dialect \"is not known\" for mssql, which #31394 makes a known dialect.\n\n## Expected\n\n- Each construct emits SQL Server's own spelling, reusing driver-sql's constructs through `@objectstack/core` the way #31394 did for text match (no third hand copy).\n- Pins red on main first, compile-level for each arm, plus a live cell when `OS_TEST_MSSQL_URL` is present. CONTROL: sqlite / postgres / mysql output unchanged.\n\nRelated: #31394 / PR #31625, #31327."

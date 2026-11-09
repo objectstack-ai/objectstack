@@ -1,0 +1,33 @@
+{
+  "number": 31790,
+  "kind": "issue",
+  "title": "objectql assignment rules and plugin-approvals approver steps pass the declaring package to queue reads, so their queue names resolve by ADR-0150 D3 (follow-up of #31734)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T04:00:36Z",
+  "updated_at": "2026-11-09T07:32:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31790",
+  "body": "domain:server#3 · os-steve · session_01ADHkmQXLfvyB5R53VDm3Ka\n\nFiling gate: ④ coordination node. This is a follow-up of #31734 (PR #31789), the epic #31527 (ADR-0150) E4 follow-up. #31734's dev named it as deviation 4 in report 6731876624, and the epic seat asked for this card. ⛔ Not a claim.\nBusiness reason: inherited from the parent #31527. #31734 gives `IOwnershipQueueService`'s `resolveQueue`, `expandMembers` and `isMember` an optional `callerPackageId`, and plugin-sharing's declared rules pass it. Two other readers still read queue names environment-wide:\n- objectql's assignment rules (`packages/objectql/src/assignment-rules.ts`, the `resolveQueue` and `expandMembers` calls);\n- plugin-approvals' approver steps that address a queue (`packages/plugins/plugin-approvals/src/approval-service.ts`, the `expandMembers` call behind `ApproverQueueSource`).\nSo a rule or step shipped by package P that names queue `q` is refused when P's dependency D and an unrelated package U both hold `q`. Under D3 it should resolve to D's `q`. It is stricter than D3, never looser.\nReader: the `domain:server` seat, after PR #31789 merges.\nDedupe (open AND closed): `assignment rule queue caller package`, `approval queue package scoped` → #31734, #31675, #31527 only, none on point (the contract argument, E4 itself, the epic).\nclass: d · type: Feature\nPart of #31527. Blocked-by: #31734\n\n## 维护者速读\n\n#31734 让共享规则引用队列时带上「是哪个软件包在问」,按统一规则解析。分配规则和审批步骤里引用队列的地方还没有带，仍然按整个环境查。这张卡把这两处补上。\n\n## What to build\n\n- Assignment rules (objectql): pass the declaring rule's package as `callerPackageId` to `resolveQueue` and `expandMembers`.\n- Approval steps (plugin-approvals): pass the declaring approval process's package as `callerPackageId` to `expandMembers`.\n- Resolution goes only through #31734's contract argument, which resolves through objectql's `resolvePackageScopedName`. ⛔ No second resolver, no first-registered fallback.\n- Measure in step 0 how each reader learns its declaring package (the rule's and the process's package coordinate). If a reader has no package coordinate, stop and report back.\n- Clause-②: no (narrowing) if a case moves from served to refused. Declare each such case with a first-party count. Metadata-protocol: none.\n\n## Acceptance\n\n- The epic's three red lines (#31527): no first-registered fallback, every refusal names every candidate, independently releasable.\n- Pins, for each reader: a rule or step in P naming `q`, held by P's dependency D and by unrelated U, resolves to D's `q` (red on `main` after #31789); two holders in the closure are refused, naming both; a caller with no package reads as today (CONTROL)."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 31787,
+  "kind": "pull_request",
+  "title": "fix(service-cache): report the derived Redis connection into the cluster driver's liveness",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T03:51:54Z",
+  "updated_at": "2026-11-09T04:37:44Z",
+  "closed_at": "2026-11-09T04:37:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-09T04:37:42Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31787",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi92KQJzU6m7XpwBUwP81YNn2)_\nFixes #31723\n\nClause-②: yes (widening)\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：共享缓存从 Redis 集群驱动另开的那条连接，现在挂上了错误监听，并接入驱动同一个连接状态（liveness）；关闭缓存前先摘监听。\n- 为什么改：Redis 断线时，这条连接每次重连都打印一大段 \"Unhandled error event\"，把唯一有用的那条断线告警淹没了。\n- 风险与回滚：只影响多副本 + Redis 部署的日志与重同步时机；单节点内存缓存不变。回滚即还原本 PR。\n- 先看：`packages/services/service-cache/src/cache-service-plugin.ts`（接线与关停顺序）、`packages/services/service-cluster/src/cluster-resync.ts`（`watchConnection` / `watchClusterDriverConnection`）、`packages/services/service-cluster-redis/src/client.ts`（委托）。\n- 两分钟验证：`pnpm --filter @objectstack/service-cache exec vitest run src/cache-service-plugin.topology.test.ts`，预期 25/25 通过。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `@objectstack/service-cluster`: `ClusterDriverLiveness.watchConnection(client, source)` is now the one listener style for a driver's connections (`error` and an unexpected `close` report down, `ready` reports up). The client is typed structurally (`on`/`off`/`status`), so the package stays ioredis-free. New export `watchClusterDriverConnection(cluster, client, source)` resolves the liveness through the module's own private reader and returns a no-op disposer when none is offered.\n- `@objectstack/service-cluster-redis`: `watchRedisConnection` delegates to `liveness.watchConnection`. Its signature and behaviour are unchanged, and its tests are untouched and green.\n- `@objectstack/service-cache`: the plugin watches only the connection it derives from the driver's (`duplicate()`), as source `'cache'`. One outage now logs one warning across command, subscriber and cache, and `cluster.resync` waits until the cache's connection is back too. The shutdown hook detaches before `cache.close()` quits that connection, so a deliberate shutdown is not an outage.\n- No liveness offered (a redis driver released before the liveness offer): the derived connection gets a `ClusterDriverLiveness` of its own, logging through the plugin's logger. Its outage is logged **once**, credential-free, in the same text the driver uses. It is not silent, because the card asks for no silent swallow, and it is never once per attempt. Nothing subscribes to that private liveness's resync.\n- Not watched: an injected `redis.client` (its owner listens), a borrowed client that cannot `duplicate()`, and the memory cache (no connection).\n\n## Tests\n\nNew top-level `describe` in `cache-service-plugin.topology.test.ts` (the existing harness file):\n1. Real ioredis against a refused port with a password in the URL, over a driver offering a liveness: no `[ioredis] Unhandled error event`, one warning, no credential, health `down`/`outages: 1`, and no plugin-level warning.\n2. The same with no liveness offered: no unhandled event, one warning through the plugin's logger, no credential.\n3. A deliberate shutdown (the quit emits `close`, as ioredis does) leaves the liveness `up` with 0 outages and no warning.\n4. `cluster.resync` waits for the cache's connection: command back gives 0 resyncs, cache back gives exactly 1.\n5. CONTROL: an injected client gets no listener. The existing single-node and memory-driver pins (exact log lines) are unchanged and green.\n\nNew `describe` in `cluster-resync.test.ts`: `watchClusterDriverConnection` reports into the offered liveness and its disposer detaches all three listeners. CONTROL: on the memory driver it attaches nothing.\n\nNo existing test was edited.\n\n## Acceptance notes\n\n- Besides the seat-accepted `watchClusterDriverConnection`, the hoist adds one public member, `ClusterDriverLiveness.watchConnection`. It is the shared inner that `watchRedisConnection` delegates to (a liveness is already in hand there, pubsub's private one included). This is listed for the seat's ruling.\n- In the no-liveness fallback, the own liveness's warning reuses the driver's text (\"Cluster locks, counters and cross-node cache hints fail until it returns…\"). That text is accurate for the same store, but it is the driver's wording.\n\n## Verification\n\nHead `c9c845d2`.\n\n<details><summary>RED on main (src of the four production files restored from origin/main c2bb879f, rebuilt)</summary>\n\n`Tests 4 failed | 21 passed (25)`. Tests 1 and 2 each saw three `\"[ioredis] Unhandled error event:\"` lines. Test 3: `expected 'unknown' to be 'up'` (nothing watched). Test 4: `TypeError: liveness.watchConnection is not a function`. The ablation A1 below gives this test its behavioural red.\n</details>\n\n<details><summary>GREEN and package runs</summary>\n\nTopology file `Tests 25 passed (25)`. Under the lock, build plus `typecheck` plus `test` for service-cluster (`145/145`, 11 files), service-cluster-redis (`41/41`, 4 files, the real-redis outage test included) and service-cache (`79/79`, 5 files): `VERDICT command-exit 0`. `eslint --no-inline-config` on the three `src` dirs: exit 0.\n</details>\n\n<details><summary>Ablations (scripts/ablation-replace.mjs; each restored, blob == HEAD)</summary>\n\n- A1, cache watches nothing (`? (() => {})`): 4 failed (tests 1–4).\n- A2, detach after quit (`await cache.close(); unwatch();`): 1 failed (test 3, the driver's \"lost its connection … connection closed\" warning appears).\n- A3, own-liveness fallback removed (`if (true)`): 1 failed (test 2).\n- B1, `watchClusterDriverConnection` always a no-op: 1 failed (the service-cluster pin).\n</details>\n\n<details><summary>Gates</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 66 commands on head c9c845d2; all 66 ran locally with exit 0. Three first read exit 3 on prerequisites (the teardown self-test's pinned fixture commit, fetched; two gates needing package dists, built with `turbo run build --filter='./packages/**'`, 81/81) and re-ran exit 0. `--ran` reconciliation: \"66 derived famil(ies) accounted for — 66 run, 0 NOT-MEASURED\". Families CI runs beyond the derived set are left to the PR's check-runs.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmSTGuRMEEW3vjJtdVG)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmSTGuRMEEW3vjJtdVG\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 31792,
+  "kind": "issue",
+  "title": "flow clone: an App member flow's default landing is refused outside_closure by the door that created its App pair",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T04:07:40Z",
+  "updated_at": "2026-11-09T07:54:40Z",
+  "closed_at": "2026-11-09T07:53:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31792",
+  "body": "domain:server#4 · os-steve · session_01ADHkmP8JJo4zF2sjTBRwnX\n\nFiling gate: ① product defect with a named seam and a measured reach. This is the out-of-scope finding of #31599's round-1 dev report on PR #31751, and the seat's delta contract review 6731976766 confirmed it. ⛔ Not a claim.\nreach: measured in a test on PR #31751's branch, not on a live server. In `automation-flow-clone-custom-package.test.ts`, the App-member case on the single-node path answers `409 RESOURCE_CONFLICT [new_similar_target_outside_closure]` where a default landing should succeed. The code that causes it was read on `main`:\n- `packages/runtime/src/domains/automation.ts`, `resolveCloneTarget`'s default `land`: it calls `ensureCustomizationPackage({ basePackageId: owner })` and then `judge(pair)`.\n- Ruling 6691022506 makes an App member's pair the App's pair (`APP.custom`), so the ensure hands back `APP.custom`.\n- `packages/runtime/src/domains/new-similar-target.ts:151-160` (`newSimilarTargetRefusal`) then requires `resolvePackageClosure(APP.custom).dependencies` to include the member's own package id. The closure holds the App and its dependencies, never the member, because the member declares the App and not the other way round.\n- The save gate already accepts that pair (`isPairOf(binding, owner, installedManifestsOfEngine(host.engine))` in `protocol-class-head.ts`), so the two judges disagree about the same pair.\nBusiness reason: in Studio, \"clone into my customizations\" on a flow shipped by an App member always fails, with a message saying the target declares no dependency on the member. The user never chose that target: the platform did. The refusal also says \"Nothing was written\", but the ensure has already created `APP.custom` by then, so a failed clone can leave a new empty customization package behind. The permission-set door doesn't judge its default landing against the closure, so it lands. It only fails on an explicit `package: APP.custom`.\nReader: the next `domain:server` seat, from `pm:queue`. The PR #31751 pin asserts today's answer on both topologies (R3). This card turns it to a successful landing.\nDedupe (open AND closed): `new_similar_target_outside_closure app member`, `clone flow app pair closure` and `newSimilarTargetRefusal pairOf` found #31599 and PR #31751 only. Neither is on point.\nclass: a · type: Bug\nGrade: p3. An authoring action fails closed on a reachable path and may leave an empty pair behind. No data is wrong, and no access widens.\n\n## 维护者速读\n\n一个 App 里的成员包自带的流程，点「复制到我的定制包」时，平台按规则把副本放进 App 的定制包(APP.custom)。但紧接着同一个接口又拿「目标包是否依赖源包」去判它，而 APP.custom 只依赖 App、不依赖成员包，于是被拒(409)。更糟的是拒之前定制包已经建好了，报错却说「什么都没写」。权限集那边默认落点不走这道判断，所以没事。本卡让两道判断对同一个配对给出同一个答案。\n\n## What to build\n\n1. **Make the two judges agree on the App pair.** The rule in `newSimilarTargetRefusal`'s closure branch accepts a target that is the source's own pair, as the save gate defines it: `isPairOf(target, sourcePackageId, installedManifestsOf(registry))`, from `@objectstack/metadata-core`. ⛔ Don't widen the closure rule for any other target. An explicit `package:` that isn't the pair, or isn't in the closure, still refuses exactly as today. The alternative of judging against `appOf(sourcePackageId)` is open to Step 0. Pick the one that also makes the permission-set door's explicit `package: APP.custom` land, and say which you picked.\n2. **Judge before you create.** In the flow door's default `land`, a target that will be refused must not create the pair first. Either judge the derived pair, `pairOf(owner, …)`, before `ensure`, or make the refusal true. Pick the one that keeps \"Nothing was written\" literally true. Check that the permission-set door has no such order.\n3. **Tests**, in the existing suites:\n   - An App-member flow's default landing returns 200 into `APP.custom`, on single-node and on multi-replica with the pair present. Red on `main`.\n   - An explicit `package: APP.custom` on the permission-set door lands.\n   - CONTROL: an explicit package outside the closure that isn't the pair still returns 409 `outside_closure`, and nothing is created.\n   - CONTROL: a standalone (non-App) package's flow is unchanged.\n   - Ablation: drop the pair arm, and the App-member pins go red.\n   - Update the PR #31751 pin that asserts today's 409 (single-node answer) to the new answer. That is a forced edit, so name it.\n\n## Surface\n\n- Expected file surface: `packages/runtime/src/domains/new-similar-target.ts`, `packages/runtime/src/domains/automation.ts` (`resolveCloneTarget`), and `packages/runtime/src/domains/permission-set-clone*.ts` only if Step 0 finds the same order there. Also their tests and the root `.changeset/`.\n- Clause-②: yes (widening). A request refused today is accepted. Metadata-protocol: none, so patch.\n- Serial: after PR #31751 merges, because it touches the same test files.\n\nRelated: #31599, PR #31751, ruling 6691022506."
+}

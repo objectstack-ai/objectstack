@@ -1,0 +1,33 @@
+{
+  "number": 31861,
+  "kind": "pull_request",
+  "title": "feat(cloud-connection): the in-environment install door forwards a named package version",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T07:50:55Z",
+  "updated_at": "2026-11-09T08:10:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31861",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9VJA5ftzZj6fH6CEjFbETUE)_\n\nFixes #31799\n\nClause-②: yes (widening)\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：环境内市场安装接口 `POST /api/v1/cloud-connection/install` 现在接受 `version`，用 SemVer 2.0.0 语法校验后转发给控制平面的安装动作；不传则与今天完全相同（装最新版）。\n- 为什么改：此前该接口不转发任何版本，环境内只能装最新版，无法安装或回装指定版本。\n- 风险与回滚：仅拓宽；不传 `version` 时发给控制平面的请求体逐字节不变（有 CONTROL 测试钉住）。格式错误的 `version` 返回 400 INVALID_REQUEST 且不发出任何请求。回滚即 revert 本 PR。\n- 先看：`packages/cloud-connection/src/cloud-connection-plugin.ts` 中新增的 `packageVersionOf` 和 `/install` 路由里的转发参数。\n- 两分钟验证：`pnpm --filter @objectstack/cloud-connection exec vitest run src/cloud-connection-plugin.test.ts`。\n- 需要你做的：无。控制平面参数名 `version` 取自卡片说明，本会话无法读取 cloud 仓库，未实测（见下）。\n\n## What changes\n\n- `POST /api/v1/cloud-connection/install` accepts an optional `version` in its body.\n- A string that matches `SEMVER_2_0_0_VERSION_PATTERN` (from `@objectstack/spec/kernel`, the grammar `PackageVersionSchema.version`, `PATCH /api/v1/packages/:id` and the plugin loader already use) is trimmed and forwarded as `params.version` to the control plane's `sys_package/install_package` action. No new regex.\n- Anything else (`latest`, `1.2`, `v1.2.3`, `^1.2.3`, a range, an empty string, a number, an object, an array) is refused with `400 INVALID_REQUEST` and a message naming `version`, ending \"Nothing was installed.\", the same shape `install_mode` already uses. Nothing is forwarded.\n- Absent or `null`: no `version` key is sent, so the control plane installs the latest version exactly as today.\n- Every other refusal (an unknown version, a version the environment may not install) stays with the control plane, whose answer is relayed as before.\n- One spelling only: `version`. That is the key the unmanaged grant already echoes (`data.version`) and the install-local door takes. `packageVersion` is not an alias; like any unknown key it is ignored.\n\nNo new route, no new error code, no `packages/spec/**` edit.\n\n## Why\n\nThe in-environment install door forwarded no version, so a marketplace install from inside an environment could only ever take the latest version (#31799).\n\n## Verification\n\nClause-② measured: on base a body with `version: '1.2.3'` is accepted and the version is dropped (the forward carries no `version`); on head the same body forwards it. Bodies without `version` are forwarded byte-for-byte as on base. A malformed `version` that base silently ignored is now refused 400 before anything is sent; that is the card's asked-for validation, not a narrowing of any request that could install a named version before.\n\nStep 0:\n\n- Spelling: `version` (grant echo, install-local door, card). The control plane's own param name is NOT MEASURED: the cloud repository is not reachable from this session, so it rests on the card.\n- Validator: `SEMVER_2_0_0_VERSION_PATTERN`, reused.\n- Overlap: every open PR's diff checked; none touches `packages/cloud-connection/` except the release PR #29963 (CHANGELOG/package.json only).\n\nTests (`cloud-connection-plugin.test.ts`, three new):\n\n- A named version (`1.2.3`, `2.0.0-beta.1`, `1.0.0+20260101`) is forwarded as named; surrounding spaces are trimmed; `version` and `install_mode` travel together.\n- A malformed version (12 shapes, strings and non-strings) answers 400 `INVALID_REQUEST` naming `version`, and the control plane is never called.\n- CONTROL: absent and `null` `version` send exactly the body main sends (`JSON.stringify` compared), with no `version` key.\n\nBase leg (main's source, these tests): the two new pins red, the CONTROL green.\n\nAblation (restored, `git diff HEAD` empty afterwards): shape check disabled → the malformed-version pin red (`\"latest\": expected 200 to be 400`).\n\nRuns: cloud-connection full suite 80 files / 1125 tests green; typecheck green; lint (`eslint --no-inline-config packages/cloud-connection`) clean; every `dispatch-gates --commands` command run with stdin closed and reconciled with `--ran`, plus the four roster gates whose roster sits under a touched directory (`check:dual-build-cjs-loads` first exited 3 for missing `dist/`, green after a workspace build); `check:nul-bytes` OK; the dogfood files that boot cloud-connection (28 files, 245 tests) green locally. No route was added, so the whole dogfood package was not run.\n\nForced test edits: none. Only new tests were added.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (Not touched.)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (The `## 维护者速读` section is Chinese by the dispatch order.)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmQznRNHwfSHVJJUCj2)_\n"
+}

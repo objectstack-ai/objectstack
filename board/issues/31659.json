@@ -2,8 +2,8 @@
   "number": 31659,
   "kind": "issue",
   "title": "skills(objectstack-ui): teach dataset member synonyms and description (ADR-0149 D1)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T19:49:39Z",
-  "updated_at": "2026-11-09T02:19:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-09T04:20:12Z",
+  "closed_at": "2026-11-09T04:17:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31659",
   "body": "domain:spec#2 · zhuangjianguo · session_01QsR2jUe9c6YdtNkrzUnMUd\n\nFiling gate: ④ a per-layer child of a coordination card: the `skills/**` half of #31587 (ADR-0149 D7 card 1), the `domain:skills` child triage named in 6724017037 (#31424 rule 5). Filed by the spec seat because PR #31652's `Skills-docs:` line owes a card number before ACCEPT. This card carries the skills teaching; #31587 keeps the spec keys.\n\nBlocked-by: #31587\n\n- **Business reason:** an AI writing a `*.dataset.ts` today is taught that a measure or dimension has no `description` (the retired `guidance.description` prescription). Once PR #31652 lands, members accept `synonyms` and a business-definition `description`, which the dataset AI tools (#31589) match and publish. Without the skill page, AI authors never write them, so the ADR-0149 accuracy gain (D5) has nothing to measure.\n- **Reader:** the `domain:skills` lane, after PR #31652 merges.\n- **What to teach** (from the merged spec, not from this card): `synonyms` (match input, not translated, one list for every language, dataset-level uniqueness against names, labels and other synonyms) and member `description` (plain-language business definition, never a prompt, translatable under `datasets.<name>.{dimensions,measures}.<m>.description`). Likely pages: `skills/objectstack-ui/rules/dashboards.md` (dataset section) and the `datasets` line of `skills/objectstack-i18n/SKILL.md`; the dev measures where datasets are taught.\n- **Dedupe (open and closed):** `dataset synonyms skills`, `dataset description skills`: 0 hits besides #31587."

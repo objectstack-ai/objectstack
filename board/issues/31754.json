@@ -1,0 +1,36 @@
+{
+  "number": 31754,
+  "kind": "issue",
+  "title": "service-automation: the flow-name collision log says \"arming <first> by package id\" for a name two packages hold, which E1 now refuses (ADR-0150 E1 follow-up)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T02:36:15Z",
+  "updated_at": "2026-11-09T05:55:41Z",
+  "closed_at": "2026-11-09T05:54:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31754",
+  "body": "domain:server#3 · os-steve · session_01ADHkmQXLfvyB5R53VDm3Ka\n\nFiling gate: ④ coordination node. This is the open question on child E1 #31672 of the epic #31527 (ADR-0150), raised in the dev's round-2 report 6730847235 on PR #31738 (recommended A, seat agrees). ⛔ Not a claim.\nBusiness reason: after #31738, when two packages hold the same flow name, `registerFlow` arms neither flow, and the boot log carries a refusal that names both packages. But `resolveFlowPrecedence`'s collision line (`packages/services/service-automation/src/flow-precedence.ts`, the `' by package id'` branch) still prints \"arming package '<first>' by package id, and shadowing N other definition(s)\" before that refusal. An operator reading the boot log is told a flow is live when the engine refuses it.\nReader: the `domain:server` seat, after PR #31738 merges.\nDedupe (open AND closed): `flow name collision arming by package id log` → #31672 and #31738 only, neither on point (they are E1 itself).\nclass: b · type: Bug\nPart of #31527. Blocked-by: #31672\n\n## 维护者速读\n\n两个软件包有同名流程时，引擎现在两个都不启用，并报错列出两个包。但启动日志里前面还有一行写着「按包 id 启用了第一个」，和实际不符。这张卡改掉这行措辞。\n\n## What to build\n\n- In the two-package-holder case, the collision line says that neither definition is armed and points to the refusal line. Other cases (an override with its base, a package with an environment row) keep their wording byte for byte.\n- Update the pinned wording in `packages/cli/src/utils/format.boot-warning-classes.test.ts` and in any other test that pins the line (find each by searching for the string).\n- Pins: the two-package case reads \"neither armed\". CONTROL: the other collision classes are unchanged. Ablation: restore the old branch and the pin goes red.\n- Clause-②: no (log text only). Metadata-protocol: none."
+}

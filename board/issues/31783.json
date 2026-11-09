@@ -1,0 +1,35 @@
+{
+  "number": 31783,
+  "kind": "issue",
+  "title": "docs(client, cli): environments.activate and `os environments switch` say the server writes the session's active environment; the cloud route writes nothing (sessionUpdated: false)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T03:46:25Z",
+  "updated_at": "2026-11-09T05:57:05Z",
+  "closed_at": "2026-11-09T05:55:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31783",
+  "body": "repo:cloud#2 · os-warren · session_01JQwxbWTyRFQwYN1hZXbCHL\n\nFiling gate: ② the framework half of objectstack-ai/cloud#4000 (PR objectstack-ai/cloud#4006). The card thread measured it (report on cloud#4000, `out_of_scope_findings`), and this is the only place it can be fixed. Dedupe: no objectstack issue names `sessionUpdated`, `active_environment_id` or `environments.activate` (search 2026-11-09).\n\n## 维护者速读\n\n- 问题：SDK 的 `environments.activate` 注释和 CLI `os environments switch` 的注释与 flag 说明，都说服务器会把当前环境写进会话。实际上 cloud 的路由什么都不写，总是回 `sessionUpdated: false`，也没有任何代码读写 `active_environment_id`。当前环境只保存在 CLI 本地的 credentials 里。\n- 修法（A，推荐）：只改注释和 flag 说明，如实描述行为，不改代码。cloud#4006 合并后，所有成员调用这个接口都会成功，现有行为不再出错。\n- 需要你做的：无，由车道派发。\n\n## Reading (objectstack `main`)\n\n- `packages/client/src/index.ts:3389`: the endpoint list says \"POST /api/v1/cloud/environments/:id/activate → set as session's active environment\".\n- `packages/client/src/index.ts:3704–3707`: the `activate` jsdoc says \"The server writes `active_environment_id` on the better-auth session; subsequent requests are routed to this environment's database.\"\n- `packages/cli/src/commands/environments/switch.ts`:\n  - :15–17 says \"to update the server-side session\".\n  - The `--remote` flag description (:50) says \"updates the session row\".\n  - :74 says \"the server session is already switched\".\n  - :108 says \"server session unchanged\".\n- Cloud side, for reference: `routes/environment-crud/retry.ts` (after cloud#4006) reads the row, writes nothing, and answers `sessionUpdated: false`.\n\n## Do\n\nOption A: correct the wording in those five places. The call reads the environment the caller is a member of, and confirms access to it. It writes no server state. The active environment lives in the CLI's local credentials. No behaviour change, no changeset beyond a patch note if the client's published jsdoc counts.\n\nOption B (not recommended here) would drop the default-on `--remote` call. That is a CLI behaviour change and needs the flag's fate decided. Raise it in the report if the reading suggests it.\n\n## Surface\n\n`packages/client/src/index.ts` (jsdoc only), `packages/cli/src/commands/environments/switch.ts` (comments and the flag description). Clause-②: no.\n\n## Done when\n\nPR merged; no text in client or cli says the server writes or switches a session's active environment."
+}

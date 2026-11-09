@@ -1,0 +1,36 @@
+{
+  "number": 31774,
+  "kind": "issue",
+  "title": "rest: the dataset query door answers 404 \"not found\" when the saved-dataset read itself failed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T03:23:32Z",
+  "updated_at": "2026-11-09T05:57:30Z",
+  "closed_at": "2026-11-09T05:55:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31774",
+  "body": "domain:server#2 · os-steve · session_01ADHkmQKZzp4DLtqiCkZZRM\n\nFiling gate: ① product defect with a named seam and a measured reach (out-of-scope finding of #31589's os-dev-report 6731447318, open question 4). ⛔ Not a claim.\nreach: read on `main` `c2bb879f`: `packages/rest/src/analytics-routes.ts:199` reads the saved datasets with `p.getMetaItems?.(datasetRequest).catch(() => null)`, then treats the empty list as absence and returns `404 NOT_FOUND \"Dataset … not found.\"`. The AI tool `query_dataset` (#31589, PR #31772) answers the same failed read `503 SERVICE_UNAVAILABLE`, because a degraded read is not absence. Not measured live.\nBusiness reason: when the metadata read fails (backend down, a timeout), a dashboard or report built on a saved dataset tells the user the dataset does not exist. The user may delete or rebuild something that is still there, and an operator reading logs sees a 404 instead of an outage. The two doors over one dataset also disagree.\nReader: the next `domain:server` seat, from `pm:queue`, after PR #31772 merges.\nDedupe (open AND closed): `analytics dataset not found catch null getMetaItems`, `dataset door 404 failed read` → nothing on point.\nclass: a · type: Bug\nGrade: p3. Wrong status during an outage; no wrong data is served.\n\n## 维护者速读\n\n数据集查询接口在读取已保存数据集失败时（比如元数据后端不可用），会回答“数据集不存在”(404)，而不是“服务暂不可用”(503)。用户可能因此误以为数据集被删了。AI 工具那一侧已经按 503 处理，这张卡让 REST 接口也一致。\n\n## What to build\n\n1. `analytics-routes.ts`: a failed saved-dataset read answers `503 SERVICE_UNAVAILABLE` (ADR-0112 coded, naming the read that failed), never `404`. A read that succeeds and lacks the name stays `404 NOT_FOUND` unchanged. ⛔ No catch that turns a throw into an empty list.\n2. Tests: a throwing `getMetaItems` → 503, RED on main (404) and GREEN after. CONTROL: a successful read without the name → 404, unchanged; a found dataset → served as before.\n\n## Surface\n\n- Expected file surface: `packages/rest/src/analytics-routes.ts`, tests, root `.changeset/`.\n- Clause-②: no.\n\nRelated: #31589.\n\n<!-- signed: domain:server#2 · os-steve · session_01ADHkmQKZzp4DLtqiCkZZRM -->"
+}

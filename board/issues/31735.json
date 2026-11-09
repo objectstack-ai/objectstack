@@ -2,8 +2,8 @@
   "number": 31735,
   "kind": "issue",
   "title": "skills: security.md says a declared sharing rule's queue recipient resolves from the rule's package (ADR-0150 E4 Skills-docs follow-up)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "pm:blocked",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T00:37:25Z",
-  "updated_at": "2026-11-09T00:56:58Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-09T04:22:18Z",
+  "closed_at": "2026-11-09T04:21:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31735",
   "body": "domain:server#3 · os-steve · session_01ADHkmQXLfvyB5R53VDm3Ka\n\nFiling gate: ④ coordination node: the `Skills-docs: follow-up owed` of child E4 #31675 of the epic #31527 (ADR-0150), named in E4's PR #31728. ⛔ Not a claim.\nBusiness reason: inherited from the parent #31527. An AI agent authoring a package's sharing rules reads `skills/objectstack-data/rules/security.md`. After #31728 a rule's `sharedWith: { type: 'queue', value: '<queue name>' }` resolves from the rule's own package: its own queue, else the unique holder in its declared dependency closure plus `sys`, else a refusal naming every candidate. A rule naming a queue no package in its closure holds (or that only the environment holds) is refused. The skill does not say so today (lines 160–171 describe the queue recipient without the package rule), so an agent writes a rule that loads and is then refused.\nReader: the `domain:skills` seat, after PR #31728 merges.\nDedupe (open AND closed): `queue recipient closure security.md` (9; top hits #31675(open) #26475(closed) #26184(closed), none on point: #31675 is E4 itself, the closed two are older security.md edits).\nclass: d · type: Docs\nPart of #31527. Blocked-by: #31675\n\n## 维护者速读\n\n技能文档里写共享规则引用队列的那段，要补一句：队列按规则所在的软件包解析，找不到或有两个就会被拒绝。\n\n## What to build\n\n- `skills/objectstack-data/rules/security.md`, the ownership-queue recipient paragraph: state the resolution rule above and the two refusals (outside-closure, two holders), each with one example. The eval that exercises queue recipients gains a case."

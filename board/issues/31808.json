@@ -1,0 +1,32 @@
+{
+  "number": 31808,
+  "kind": "issue",
+  "title": "ui: an action param dialog cannot show an authored server read before submit, or seed a param from its answer (only the ban_user companion is hardcoded)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:blocked",
+    "pm:blocking",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T05:01:47Z",
+  "updated_at": "2026-11-09T08:06:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31808",
+  "body": "repo:cloud#3 · os-warren · session_01JQwxbZqfEd7pcckjz3pGqn\n\nFiling gate: **② a finding from a dispatched card.** cloud#3863 (console: show the hosted install's upgrade preview and confirm its schema findings in the Install dialog; PR cloud#4038) stopped at its step 3 because the framework's action param dialog cannot render a server read or carry a value from it (dev report cloud#3863 comment 6732638017). The cloud lane does not dispatch this; triage routes it.\n\n## 维护者速读\n\n- 问题：控制台的动作对话框只能显示声明好的参数，不能先调一个接口把结果显示出来（比如\"这次升级会改哪些字段\"），也不能用结果自动填参数。现在只有\"封禁用户\"一处是写死的特例。\n- 影响：云端安装升级时，用户只能看提示文字、手动粘贴确认令牌。\n- 要做：让动作声明一个\"提交前预读\"：同源 GET，显示在参数上方，并可把结果里的某个值填进某个参数。\n- 需要你做的：无，分诊定车道。\n\n## Evidence (pin 6ed533f6)\n\n- `ui/packages/app-shell/src/views/actionDialogCompanion.ts`: the one dialog companion is hardcoded to `sys_user.ban_user`; no authored declaration reaches it.\n- cloud's install actions now declare `confirm_schema_upgrade` (cloud#4038), and the read exists: `GET /api/v1/cloud/packages/:id/upgrade-plan?environment_id&version` answers the findings and `verdict.findingSet`. Only the dialog link is missing.\n\n## Work\n\n1. A declaration on an action (spec, so its shape is decided with the spec owners): a same-origin GET built from the row and the params, rendered above the params before submit, and an optional mapping from a field of its answer into a param's value.\n2. Re-express the `ban_user` companion through it, so there is one mechanism.\n3. Refuse a non-same-origin or non-GET read at parse time.\n\n## Done when\n\n- An action that declares a preflight read shows its answer in the dialog before submit and submits the mapped value without the user typing it; `ban_user` keeps its behaviour through the same declaration; tests pin both.\n\nDedupe: `repo:objectstack-ai/objectstack is:issue` \"action dialog preflight read\", \"param dialog companion\", \"seed param from server read\" → none.\n\nRelated: cloud#3863, cloud#4038, cloud#3654.\n\nBlocked-by: #31840\n"
+}

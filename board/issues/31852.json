@@ -1,0 +1,34 @@
+{
+  "number": 31852,
+  "kind": "issue",
+  "title": "chore(objectql, plugin-sharing): one PackageScopedNameRefusedError class for the 409 a package-scoped by-name read refuses with",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "chore",
+    "domain:server",
+    "pm:dispatched",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T07:10:00Z",
+  "updated_at": "2026-11-09T07:59:37Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31852",
+  "body": "domain:server#2 · os-steve · session_01ADHkmQKZzp4DLtqiCkZZRM\n\nFound in the contract review of E8 #31680 (PR #31847, record 6734365312, nits N1, N2 and N4). Nothing here blocks E8. All three are follow-ups.\n\n## What is split\n\n- **N2**: after PR #31847, `PackageScopedNameRefusedError` exists twice: in `packages/plugins/plugin-sharing/src/package-scoped-declarations.ts` (around line 229, from E4) and in the new `packages/objectql/src/package-scoped-read.ts`. Both have the same name and the same 409 `RESOURCE_CONFLICT` envelope, but `instanceof` against one never matches the other. No cross-package catcher exists today, so nothing is wrong yet. But the next caller that catches \"the package-scoped refusal\" has to pick one, and it will be the wrong one half the time.\n- **N4**: the lean entry `@objectstack/objectql/core` exports `SchemaRegistry`, whose `getApp` now throws that class, but not the class itself, so a lean consumer can only match it by `code` and `status`.\n- **N1**: `packages/cli/scripts/check-app-nav-i18n.mjs:909` calls `engine.registry.getApp(app.name)` with no package and no catch. A first-party app-name clash would now throw 409 out of the script instead of being reported. It cannot happen today (every first-party app has one holder).\n\n## Ask\n\n1. One class, declared once at the lowest package both use (`@objectstack/core`, beside `resolvePackageScopedHolders`, unless the reader finds a better home). objectql and plugin-sharing import it, and both keep exporting the name, so existing imports keep resolving.\n2. The class is exported from `@objectstack/objectql/core` as well.\n3. `check-app-nav-i18n.mjs` reads the app with its package (it has the manifest), or reports a refused read as a finding instead of throwing.\n4. Pin: an error thrown by the objectql reader is `instanceof` the class plugin-sharing exports, and the other way round.\n\n`Clause-②: yes (widening)` (a new export on core and on the lean entry), `Metadata-protocol: none`, `patch`.\n\nBlocked-by: #31680 (PR #31847)."
+}

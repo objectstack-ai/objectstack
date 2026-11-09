@@ -1,0 +1,37 @@
+{
+  "number": 31854,
+  "kind": "pull_request",
+  "title": "feat(spec,plugin-auth): publish the ADR-0090 D12 administrator reading as IAuthService.isOrganizationAdministrator",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T07:17:09Z",
+  "updated_at": "2026-11-09T08:10:32Z",
+  "closed_at": "2026-11-09T08:10:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-09T08:10:30Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31854",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9MTgPWiAaZQwNGPpRvYz87D)_\nFixes #31798\n\nClause-②: yes (widening)\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：`auth` 服务契约新增可选成员 `isOrganizationAdministrator(userId, organizationId)`，由 plugin-auth 的 `AuthManager` 实现；它就是 MFA「仅管理员」档位原来内部使用的那一个判断（改名公开，不是复制）。\n- 为什么改：企业版的访问策略控制台要预览「仅管理员需 MFA」会约束谁，但委派管理员（带 adminScope 的权限集）只能在 plugin-auth 内部判断，控制台只好少算；现在外部调用方拿到的就是 MFA 闸门自己的答案。\n- 风险与回滚：只读、进程内、无新路由；闸门行为不变。回滚 = revert 本 PR（外部若已调用该成员，按可选成员探测即退化为不判断）。\n- 先看：`packages/plugins/plugin-auth/src/auth-manager.ts`（`isOrganizationAdministrator` 方法及文档）、`packages/spec/src/contracts/auth-service.ts`（新可选成员）、`packages/plugins/plugin-auth/src/organization-access-policy-mfa-level.test.ts`（一致性钉子）。\n- 两分钟验证：`pnpm --filter @objectstack/plugin-auth exec vitest run src/organization-access-policy-mfa-level.test.ts`，预期 8/8 通过，其中两条新钉子断言公开成员与闸门对三类管理员、普通成员、读不到的委派授权给出相同答案。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- **`@objectstack/spec`**: `IAuthService.isOrganizationAdministrator?(userId, organizationId)`, resolving to a boolean, one optional member with its jsdoc: the one reading of \"is this user an administrator in this organization\", true for ADR-0090 D12's three kinds (tenant-level `PLATFORM_ADMIN` rung, organization-level `TENANT_ADMIN` rung, delegated `adminScope` holder), an unreadable delegated grant counting as an administrator.\n- **`@objectstack/plugin-auth`**: the package-internal `AuthManager.isMfaAdministrator` is renamed to `isOrganizationAdministrator` and documented as the `IAuthService` member. The MFA gate (`resolveUserAuthGates`, level `administrators`) calls that same method through its host, so there is one implementation; the body is unchanged, including the fail-closed `catch` on the delegated check.\n- **Docs**: `content/docs/kernel/contracts/auth-service.mdx` lists the member in the interface block and adds the sentence naming it the one administrator reading.\n- Changeset `.changeset/31798-organization-administrator-reading.md` (`@objectstack/spec`, `@objectstack/plugin-auth`, patch per `Metadata-protocol: none`).\n\nSeam choice (step 0, seat ruling on the claim amendment): (a) a member on the `auth` service, not (b) a core helper taking sources, because kind 3 is judged only where plugin-auth bound the delegated source, so the gate's answer is a property of the composed provider.\n\n## Tests\n\n- New top-level `describe` in the existing harness `organization-access-policy-mfa-level.test.ts` (no new file): the agreement pin. For a tenant-level, an organization-level and a delegated administrator and a plain member, the member typed as the `IAuthService` member (a `Pick` of the contract, so the method's signature is checked against it) answers the expected value and the same value the MFA gate holds; for a delegated check that throws, both answer \"administrator\".\n- Red first on `main` (`ad622d30`, the two plugin-auth source files restored from it, test file from this branch): `Tests 2 failed | 6 passed (8)`, both new pins, `TypeError: published(...).isOrganizationAdministrator is not a function`.\n- Ablations (`scripts/ablation-replace.mjs`, each restored to the HEAD blob with `git diff HEAD` empty; the subject is imported from `src` by a relative path, so no `dist` leg):\n  - fail-closed `return true` → `return false` in the delegated `catch`: `2 failed | 6 passed`, including the new \"counts a user whose delegated grant cannot be read as an administrator, as the gate does\".\n  - a plain `MEMBER` posture counted as an administrator: `4 failed | 4 passed`, including the new \"answers what the gate answers for the three kinds and a plain member\".\n  - the gate diverging from the published method for one user: `2 failed | 6 passed`, including the new agreement pin.\n- Forced test edits: none. The existing four `administrators`-level pins are unchanged.\n\n## Acceptance notes\n\n- Kind 3 is judged only where the access-policy source is bound with its delegated check (the settings service's `access_policy` namespace and the `security` service); elsewhere the member answers from the two rungs, as the gate does. Stated in the jsdoc of both the contract member and the method.\n- A grant store that cannot be read throws out of `resolveUserAuthzGrants`, so the member throws; the gate's enclosing `resolveUserAuthGates` fails open on it by its own contract. Unchanged behaviour, documented on the method; not widened into a fail-closed answer here.\n- No route, read-only, in-process: the triage note's \"behind the existing admin gate\" holds because nothing new is reachable over HTTP.\n\n## Verification\n\nHead `fd140543` (merge of `origin/main` `cc16008a`; neither `packages/spec` nor `plugin-auth` moved on the incoming side).\n\n<details><summary>Local runs</summary>\n\n- `pnpm --filter @objectstack/plugin-auth test`: `Test Files 248 passed (248)`, `Tests 4445 passed | 10 skipped (4455)`, lock VERDICT command-exit 0.\n- `pnpm --filter @objectstack/plugin-auth typecheck` (src, examples, `check:test-typecheck`): exit 0.\n- `pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec check:generated`: exit 0, \"All 14 generated artifacts are up to date\".\n- eslint `--no-inline-config` on `packages/plugins/plugin-auth/src` and the spec contract file: exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 117 derived; reconciled with `--ran` (each line `command :: exit N`): \"117 accounted for — 116 run, 1 NOT-MEASURED\". The two exit-3 refusals of the first sweep were re-run after meeting their prerequisite and exit 0: `check-plugin-teardown-shape --self-test` (pinned fixture commit fetched into the shallow clone) and `@objectstack/spec check:skill-examples` (after building `@objectstack/client-react` and its dependencies: \"337 prose examples type-check\"). NOT MEASURED: `pnpm check:dual-build-cjs-loads`, reason: PREREQUISITE NOT MET, it reads every package's `dist` and 42 packages are unbuilt in this container; CI's `Lint & Repo Gates` runs it.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmPverZQAsu1TD8ZedX)_\n"
+}

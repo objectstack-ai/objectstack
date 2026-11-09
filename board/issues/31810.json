@@ -1,0 +1,36 @@
+{
+  "number": 31810,
+  "kind": "issue",
+  "title": "connector pull: a changed source row whose upsert-key column is gone lands again as a new row with a blank key, and the run says success",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T05:12:52Z",
+  "updated_at": "2026-11-09T06:59:09Z",
+  "closed_at": "2026-11-09T06:57:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31810",
+  "body": "domain:server#2 · os-steve · session_01ADHkmQKZzp4DLtqiCkZZRM\n\nFiling gate: ① product defect with a named seam and a measured reach (out-of-scope finding of #31778's report 6732731853, G6). ⛔ Not a claim.\nreach: measured on a production-mode `os serve` at `origin/main` `c2bb879f`. A `job.pull` mapping in upsert mode keyed on `external_id` (from source `id`). The source drops the `id` column. The changed row `c4` is inserted a second time with `external_id NULL`, and `sys_job_run.status = success` with no warning. Seam (read on main): `packages/services/service-automation/src/connector-pull.ts` passes `skipBlankMatchKey: false` with one key set to `runImport`. `packages/core/src/utils/import-runner.ts` `findExisting` answers `'blank'`, and a blank match key in upsert mode with `skipBlankMatchKey: false` falls through to `willCreate`.\nBusiness reason: a sync source that renames or drops its id column silently duplicates every changed record in the local copy, and nothing tells the operator. A user then sees two of each customer, one with no external key, which no later pull can repair.\nReader: the next `domain:server` seat, from `pm:queue`.\nDedupe (open AND closed): `pull blank match key`, `skipBlankMatchKey connector pull`, `upsert key missing duplicate` → nothing on point (#25476 / #25578 are the import door's ordered key sets, closed).\nclass: a · type: Bug\nGrade: p2. It writes wrong data (duplicates) on a live door, and the run reports success.\n\n## 维护者速读\n\n外部数据同步（`job.pull`）按外部 id 做 upsert。如果源系统去掉或改名了这个 id 列，每一条变化的记录都会在本地再插一条、外部 id 为空的新记录，同步任务还显示成功。结果是重复数据，以后的同步也修不回来。这张卡让拉取在匹配键为空时不再新建记录，并把这件事记为该次运行的错误。\n\n## What to build\n\n1. A pull row whose match key is blank is never created. The pull path counts it as a row error (`BLANK_MATCH_KEY`) in that run's result, so the run is `degraded`, not `success`. Choose between the pull passing `skipBlankMatchKey: true` plus counting skipped-blank as errors, or a pull-only option on `runImport`; say which in the PR. ⛔ Do not change the import door's own blank-key behaviour (`skipBlankMatchKey` stays the caller's choice there).\n2. Tests: a pull whose source row lacks the key column → no new row, run degraded, with a reason naming the mapping and the key. RED on main (a duplicate with a blank key, run success). CONTROL: a row with its key still upserts as before; the import door with `skipBlankMatchKey: false` still creates as before.\n\n## Surface\n\n- Expected file surface: `packages/services/service-automation/src/connector-pull.ts` (and `packages/core/src/utils/import-runner.ts` only if a pull-only option is the chosen route), tests, root `.changeset/`.\n- Clause-②: no.\n\nRelated: #31778 (G6), epic #31763.\n\n<!-- signed: domain:server#2 · os-steve · session_01ADHkmQKZzp4DLtqiCkZZRM -->"
+}

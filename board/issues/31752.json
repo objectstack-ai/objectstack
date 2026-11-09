@@ -1,0 +1,35 @@
+{
+  "number": 31752,
+  "kind": "pull_request",
+  "title": "chore(pm): delete the uncalled ci-failure tool, its lint step and the battery reads of it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "pm:awaiting-merge",
+    "size/xl",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T02:29:52Z",
+  "updated_at": "2026-11-09T03:11:17Z",
+  "closed_at": "2026-11-09T03:11:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-09T03:11:15Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31752",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9Ubb7qLD3BDysX3VtRXifhPn3Z)_\n\nRefs #29471\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么：** 删掉没人调用的 PM 工具 `scripts/pm/ci-failure.mjs`（4,035 行），以及 lint 里专门跑它自测的那一步；另一个保留工具的自测里有 2 条断言专门检查这个被删文件，一并删掉，那组自测的下限从 18 降到实测的 16。\n- **为什么改：** 卡 #29471 的目标是让 `scripts/pm` 30 天内净减行数；维护者已按裁决 6730023204（A）同意删除这个工具和那几条断言。删掉后它们守的配对关系本身就不存在了，不是削弱检查。\n- **风险与回滚：** 只删工具脚本和注释，不动产品代码；保留的检查（巡检侧的 4 条镜像断言）一字未改。合计 +26/−4,115 行。回滚即 revert 本 PR。\n- **先看：** `scripts/pm/check-governed-merges.mjs`（第 18989 组自测：去掉读被删文件的断言、下限 18→16）；`scripts/check-self-test-workflow-commands.mjs`（端到端用例改用 `lane-verdict.mjs`）；`.github/workflows/lint.yml`（删掉的那一步）。\n- **两分钟验证：** 运行 `node scripts/pm/check-governed-merges.mjs --self-test`，预期退出 0、打印 616 条断言（删除前 618）。\n- **需要你做的：** 本 PR 动了 `.github/workflows/lint.yml`，属 Tier H：请受管批准人审批。\n\n## What changes\n\nFamily T3 of #29471, as ruled (record 6730023204, letter A) and claimed (6730060298, amended 6730080794 and 6730147563).\n\n- **Deleted** `scripts/pm/ci-failure.mjs` (4,035 lines). Re-measured on `origin/main` `f2abd476` before deleting: nothing imports it, no skill, agent text, `package.json` script, `dispatch-gates.data.mjs` note or `write-pace.mjs` `WIRED_WRITE_TOOLS` entry names it, and its only runner was its own `lint.yml` step.\n- **`.github/workflows/lint.yml`:** the `PM ci-failure self-test` step and its comment block are gone (−52). The two comments that named the tool (the step-name-quoting rationale, the self-test workflow-commands rationale) no longer point at it.\n- **`scripts/pm/check-governed-merges.mjs`, battery `#18989`:** the `consumer` reading of the deleted file and the two assertions on it are gone; the readability assertion keeps its patrol half (renamed `the-patrol-file-is-readable-so-the-mirror-can-be-pinned-at-all`). The battery floor moves 18 → 16, the measured landed count. Every patrol-side assertion is byte-identical. The comments at the plan's header, at the structural pin, at the main-invocation guard, and the two importer clauses of the `--self-test` success line no longer name the importer.\n- **`scripts/check-self-test-workflow-commands.mjs`:** the end-to-end battery's target moves to `scripts/ci/lane-verdict.mjs`, a self-test CI runs unconditionally whose code mints a workflow-command token (so the prefilter selects it) and whose output prints that token mid-line in prose (`a red gate is named in an ::error:: annotation`), the shape the scan must read as innocent. The battery is renamed to say so; its floor (5) is unchanged. The header prose, the refusal text and the success line follow.\n- **`scripts/check-platform-checklist.mjs`:** the battery-attribution comment now compares against `check-governed-merges.mjs`, which opens batteries by name.\n\n## Why\n\nThe card's target is a net-negative `scripts/pm` over 30 days. The tool had no caller; the three assertions that read it pinned a pair (importer and plan) that stops existing with it, so dropping them weakens no live check.\n\n## Verification\n\nAll at head `23639351` (after merging `origin/main` `90cea476`), unless noted.\n\n- `node scripts/pm/check-governed-merges.mjs --self-test`: exit 0, 616 assertions (618 on `f2abd476`). Battery `#18989` registered **18** cases before and **16** after, read from the floor gate's own message with the pin raised to 99 on a committed tree and restored byte-identical.\n- `node scripts/check-self-test-workflow-commands.mjs --self-test`: exit 0, 8 batteries, 38 cases. The new target, probed among the 36 candidates: `lane-verdict.mjs --self-test` 85 ms, 2,255 bytes, one line carrying a mid-line `::error::`, scan findings 0.\n- Derived gate set (`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`): 56 commands, all exit 0, rerun in full on the final head; `--ran` reconciliation: 56 derived, 56 run, 0 NOT-MEASURED. `pnpm check:pm-dispatch-gates` 427 s; `pnpm check:type-check-debt` under the verify lock, VERDICT command-exit 0.\n- `node scripts/check-platform-checklist.mjs --changed-from origin/main`: exit 0, 0 anchored files.\n- `ui/scripts/__tests__/check-governed-queue-guard.test.ts` (the one test file naming a touched script): 10/10 pass.\n\n## Acceptance notes\n\nStale prose left in staying files outside the ruled surface (report-only, per the order), file:line at `23639351`:\n\n- `scripts/pm/check-half-states.mjs`:934, :1029, :20807, :30492, :30540, :30596, :30651 (comments) and :36754 (a case name)\n- `scripts/pm/dispatch-gates.mjs`:2203, :2213 (a dated population note)\n- `scripts/import-prerequisite.mjs`:224\n- `scripts/check-workflow-step-name-quoting.mjs`:23\n- `docs/audits/2026-09-self-test-shape-census.md`:376 (a dated audit)\n\nNo gate, row or constant is added; one battery floor is lowered by ruling. Governed Tier H (`.github/workflows/lint.yml`): the PR stays draft for a governed approver. No changeset: nothing published moves (`scripts/**` and a workflow only).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jTQzoQLuSgqcLVzJog)_\n"
+}
