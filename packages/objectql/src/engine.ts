@@ -19,7 +19,7 @@ import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 // engine is what `metadata-protocol.validateData` returns, so letting the two
 // drift would put a translation layer between a verdict and its contract.
 import type { ValidateDataResponse } from '@objectstack/spec/api';
-import { parseAutonumberFormat, driverSupportsTransactions } from '@objectstack/spec/data';
+import { parseAutonumberFormat } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
 // [ADR-0053 D-D1, amended 2026-09-30 — #5930] The shared `FilterCondition →
@@ -141,10 +141,9 @@ import {
   Logger,
   type RetryOptions,
   recordNotFoundError,
-  resolveUserAuthzGrants,
 } from '@objectstack/core';
 import { WriteEpoch } from './write-epoch.js';
-import { SummaryRecomputeError, cascadeStoppedRefusal, rolledBackRefusal, type SummaryRecomputeFailure } from './summary-errors.js';
+import { SummaryRecomputeError, cascadeStoppedRefusal, type SummaryRecomputeFailure } from './summary-errors.js';
 import { TransactionUnsupportedError } from './transaction-errors.js';
 import {
   withoutDeletedSelfParents,
@@ -196,7 +195,7 @@ import { AssignmentRuleEvaluator, type AssignmentQueueService } from './assignme
 // [#21274] …and its boundary face — nor the error that leaves the engine.
 // [#21385] It lives in `@objectstack/types` now, so `driver-sql`'s own log lines
 // call the same cut; nothing about it changed in the move.
-import { redactBoundStatement, redactPropagatedDriverFault } from '@objectstack/types';
+import { redactBoundStatement } from '@objectstack/types';
 // [#8844] The runtime half of #8686's ruling: a system-context write on a
 // tenant-scoped object resolves the install's organization the way a session
 // write does, or is refused rather than filed under the `__global__`
@@ -384,7 +383,7 @@ export {
 // [#29986 codemod] Class head: units, hooks, functions, body runners, hook dispatch: the methods of the same names below hand the bodies what they read (`HooksAndFunctionsHost`).
 import { HooksAndFunctionsFacet } from './engine-hooks-and-functions.js';
 // [#29986 codemod] Action system and packaged-action activation: the methods of the same names below hand the bodies what they read (`ActionsHost`).
-import { ActionsFacet, type ActionHandlerEntry } from './engine-actions.js';
+import { ActionsFacet, type ActionHandlerEntry, type ExecuteActionOptions } from './engine-actions.js';
 // [#29986 codemod] Registration seams, readable-ids security, formula and default permissions: the methods of the same names below hand the bodies what they read (`SecurityResolversHost`).
 import { SecurityResolversFacet } from './engine-security-resolvers.js';
 // [#29986 codemod] Authz invalidation, middleware, session, driver options, posture, organization probe: the methods of the same names below hand the bodies what they read (`MiddlewareAndContextHost`).
@@ -623,8 +622,14 @@ export class ObjectQL implements IObjectQLEngine {
     object?: string;
   }> = [];
 
-  // Action registry: key = "objectName:actionName"
+  // Action registry: key = "objectName:actionName" — the UNQUALIFIED slot, what
+  // a call that names no package runs ([#31673] unchanged until #31697).
   private actions = new Map<string, ActionHandlerEntry>();
+
+  // [ADR-0150 D4, #31673] The action engine keyed `(package, objectName, name)`:
+  // package coordinate (`actionHandlerCoordinate`) → "objectName:actionName" →
+  // that package's handler. A call that names its package reads it.
+  private packageActions = new Map<string, Map<string, ActionHandlerEntry>>();
 
   /**
    * [ADR-0126 §8] The packaged-ACTION activation ledger's local projection —
@@ -1084,10 +1089,19 @@ export class ObjectQL implements IObjectQLEngine {
 
   /**
    * Execute a named action on an object.
+   *
+   * [ADR-0150 D4, #31673] Handlers are keyed `(package, objectName, name)`.
+   * `options.packageId` names the package coordinate the caller resolved the
+   * action's declaration to (`resolveActionByPackage`; `''` the environment's
+   * own): that package's handler runs, else the one handler registered under
+   * the key when there is exactly one, else nothing (the "not found" miss).
+   * Omitted, the call names no package and runs the handler the last
+   * registration under `objectName:actionName` left — today's answer, kept
+   * until the action backstop (#31697) decides a two-package key.
    */
-  executeAction(objectName: string, actionName: string, ctx: any): Promise<any> {
+  executeAction(objectName: string, actionName: string, ctx: any, options?: ExecuteActionOptions): Promise<any> {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).
-    return ActionsFacet.executeAction.call(actionsHost.of(this), objectName, actionName, ctx);
+    return ActionsFacet.executeAction.call(actionsHost.of(this), objectName, actionName, ctx, options);
   }
 
   /**
@@ -1100,10 +1114,16 @@ export class ObjectQL implements IObjectQLEngine {
    * boot reconciliation reads this to list handlers no declaration covers —
    * which since D3 are refused at dispatch, so having the inventory is what
    * makes that refusal a checklist instead of a support ticket.
+   *
+   * [ADR-0150 D4, #31673] With `options.packageId`, the handlers a call naming
+   * that package dispatches (`executeAction`'s package-keyed answer), one per
+   * key, each with the `coordinate` whose slot holds it, so a reader gating
+   * that call judges the handler it runs. Without it,
+   * the unqualified slot, as before.
    */
-  listRegisteredActions(): Array<{ objectName: string; actionName: string; package?: string }> {
+  listRegisteredActions(options?: ExecuteActionOptions): Array<{ objectName: string; actionName: string; package?: string; coordinate?: string }> {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).
-    return ActionsFacet.listRegisteredActions.call(actionsHost.of(this));
+    return ActionsFacet.listRegisteredActions.call(actionsHost.of(this), options);
   }
 
   /**
@@ -9055,9 +9075,13 @@ export class ObjectQL implements IObjectQLEngine {
               // walk touches it, and writes the one entry after the walk and
               // before this row goes. A removal that throws takes the entry
               // with it: the transaction's rollback when one covers the bin,
-              // the capture's compensation otherwise. A caller's `multi: true`
-              // opens none, even here: the lifecycle sweep reaps by id with it.
-              // Nor does a permanent delete, which is the point of it.
+              // the capture's compensation otherwise. [#31630] A removal the
+              // driver answers as removing nothing withdraws the entry inside
+              // the same unit, so no entry stays for a row that is still live
+              // (`capture.ts` says why it is not written after instead).
+              // A caller's `multi: true` opens none, even here: the lifecycle
+              // sweep reaps by id with it. Nor does a permanent delete, which
+              // is the point of it.
               //
               // [#30237] The entry's id is told to the caller
               // (`options.onRecycleBinEntry`) only once the unit has landed:
@@ -9076,8 +9100,10 @@ export class ObjectQL implements IObjectQLEngine {
                   );
                   // Told only for a row the driver says it removed: `false`
                   // (not found) and an off-contract count of 0 (kept) name no
-                  // deletion an undo could reverse.
+                  // deletion an undo could reverse, and their entry is
+                  // withdrawn.
                   if (removed !== false && (removed as unknown) !== 0) binEntryId = entry?.id;
+                  else await entry?.withdraw();
                   return removed;
                 } catch (e) {
                   await entry?.compensate();
@@ -9768,6 +9794,7 @@ export class ObjectQL implements IObjectQLEngine {
     actionsHost.install((engine) => ({
       get actionActivation() { return engine.actionActivation; },
       get actions() { return engine.actions; },
+      get packageActions() { return engine.packageActions; },
       get logger() { return engine.logger; },
       get registry() { return engine.registry; },
     }));
@@ -10432,24 +10459,9 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    * export, so it is no nameable member of this class's published face (see
    * the symbol's docblock in `hook-run-as.ts`).
    */
-  async [SEED_USER_GRANTS](): Promise<ScopedContext> {
-    const ctx = this.executionContext;
-    if (!ctx.userId) return this;
-    const needsGrants = !Array.isArray(ctx.permissions);
-    const needsPeers = !Array.isArray(ctx.org_user_ids);
-    const needsEmail = !ctx.email;
-    if (!needsGrants && !needsPeers && !needsEmail) return this;
-    const grants = await resolveUserAuthzGrants(
-      this.engine,
-      ctx.userId,
-      ctx.tenantId ? { tenantId: ctx.tenantId } : {},
-    );
-    return this.derive({
-      ...ctx,
-      ...(needsGrants ? { positions: grants.positions, permissions: grants.permissions } : {}),
-      ...(needsPeers ? { org_user_ids: grants.org_user_ids } : {}),
-      ...(needsEmail && grants.email ? { email: grants.email } : {}),
-    });
+  [SEED_USER_GRANTS](): Promise<ScopedContext> {
+    // [#30052 codemod] The body moved to `engine-scoped-context.ts` (see `ScopedContextHost`).
+    return ScopedContextFacet.seedUserGrants.call(scopedContextHost.of(this));
   }
 
   /**
@@ -10504,90 +10516,12 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    * #6167 tracks, and closing that needs handle ownership to become
    * discoverable on `IDataDriver`.
    */
-  async transaction(
+  transaction(
     callback: (trxCtx: ScopedContext, info: EngineTransactionInfo) => Promise<any>,
     opts?: EngineTransactionOptions,
   ): Promise<any> {
-    const engine = this.engine as any;
-    // The engine's ambient transaction store (ADR-0034), reached the `as any`
-    // way this whole class reaches engine internals, for the D2 join below. A
-    // transaction this call opens is published by the engine's own helper.
-    const txStore = engine?.txStore as
-      | { getStore(): { transaction: unknown } | undefined }
-      | undefined;
-
-    // ADR-0067 D2 — JOIN an already-open ambient transaction instead of opening
-    // a nested driver one (#6168). Same first move, same reasons and the same
-    // shape as `ObjectQL.transaction`: a nested begin would take a second
-    // connection AND would not be covered by the outer rollback, so the outer
-    // caller would stop owning the one-and-only commit/rollback.
-    //
-    // BEFORE the driver/`require` handling on purpose, mirroring the engine:
-    // when there is an ambient transaction there IS a transaction, so
-    // `require: true` is satisfied by joining it and the degrade is not
-    // reachable.
-    const ambient = txStore?.getStore();
-    if (ambient?.transaction) {
-      // The handle is threaded EXPLICITLY into the child context, not left to
-      // the ambient store, for the same reason the engine surface threads it:
-      // `buildDriverOptions` prefers the explicit handle, and it survives async
-      // boundaries the store does not. It is identity-equal to the store's
-      // handle, so `transactionCoversDriverFor` still attributes it to the
-      // OUTER owner and the #5351 same-origin gate judges it unchanged.
-      const joinedCtx = this.derive({ ...this.executionContext, transaction: ambient.transaction });
-      // JOINED, not owned: the outer caller decides commit vs rollback (#5696).
-      return callback(joinedCtx, { owned: false });
-    }
-
-    // Find the default driver for transaction support
-    const driver = engine.defaultDriver
-      ? engine.drivers?.get(engine.defaultDriver)
-      : undefined;
-
-    // [#18063] Declaration, not bare method presence — see the engine surface's
-    // gate; one predicate serves both so they cannot answer differently.
-    if (!driverSupportsTransactions(driver)) {
-      const datasource = engine.defaultDriver ?? driver?.name;
-      if (opts?.require === true) {
-        // Same fail-closed refusal as the engine surface (#5696 point 1).
-        throw new TransactionUnsupportedError(datasource ?? '<no default datasource>');
-      }
-      // No transaction support — execute directly. Declared (ADR-0119 D1), but
-      // said out loud since #4619: the caller asked for atomicity and the
-      // callback is about to run without any.
-      engine.warnTransactionUnsupported?.(datasource, driver?.supports?.transactionsUnsupported === true);
-      return callback(this, { owned: false });
-    }
-
-    const trx = await driver.beginTransaction();
-    const trxCtx = this.derive({ ...this.executionContext, transaction: trx });
-    // Publish this transaction into the engine's ambient store so internal
-    // queries during writes reuse its connection (ADR-0034) — and so a nested
-    // `transaction()` on either surface can JOIN it. The store entry also
-    // carries WHICH driver owns the transaction (#4619) so the write path can
-    // report a write routed off it. [#22855] Through the engine's ONE unit
-    // helper, `runOpenedUnit`, the one `ObjectQL.transaction` runs its callback
-    // in, reached the same `as any` way as `txStore` itself. It closes the unit
-    // when the callback settles, so work the callback started and did not await
-    // (an `async: true` hook) no longer keeps the finished handle, neither the
-    // ambient one nor the `trxCtx` one threaded above.
-    const runIn = <R>(fn: () => Promise<R>): Promise<R> =>
-      typeof engine.runOpenedUnit === 'function' ? engine.runOpenedUnit(trx, driver, fn) : fn();
-
-    try {
-      // Reached only with no ambient transaction to join, so this call really
-      // did open one and the callback owns the outcome (#5696 / #6168).
-      const result = await runIn(() => callback(trxCtx, { owned: true }));
-      if (driver.commit) await driver.commit(trx);
-      else if (driver.commitTransaction) await driver.commitTransaction(trx);
-      return result;
-    } catch (error) {
-      if (driver.rollback) await driver.rollback(trx);
-      else if (driver.rollbackTransaction) await driver.rollbackTransaction(trx);
-      // [#21274] The engine surface's twin (`ObjectQL.transaction`), the
-      // stale-roll-up conversion included.
-      throw redactPropagatedDriverFault(rolledBackRefusal(error));
-    }
+    // [#30052 codemod] The body moved to `engine-scoped-context.ts` (see `ScopedContextHost`).
+    return ScopedContextFacet.transaction.call(scopedContextHost.of(this), callback, opts);
   }
 
   /**
@@ -10732,6 +10666,7 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
       derive: (...a) => instance.derive(...a),
       get engine() { return instance.engine; },
       get executionContext() { return instance.executionContext; },
+      facade: instance,
       get joinedHandles() { return instance.joinedHandles; },
       releaseJoinedHandle: (...a) => instance.releaseJoinedHandle(...a),
       txDriver: (...a) => instance.txDriver(...a),

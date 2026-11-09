@@ -139,6 +139,9 @@ describe('the packed @objectstack/scenarios tarball', () => {
     expect(bin.match(/from\s*["'][^"']+["']/g) ?? []).toEqual(['from "fs"', 'from "path"', 'from "url"']);
     expect(bin).toContain('import("./cli.js")');
     expect(packed).toContain('dist/cli.js');
+    // The gallery check rides the same lazy door, from its own built entry.
+    expect(bin).toContain('import("./export-check.js")');
+    expect(packed).toContain('dist/export-check.js');
   });
 
   it('ships JavaScript and declarations, never a TypeScript source', () => {
@@ -166,6 +169,19 @@ describe('the packed bin, run under plain Node', () => {
     const none = runBin([]);
     expect(none.status).toBe(2);
     expect(none.stderr).toContain('name a command');
+  });
+
+  it('checks a gallery tree: an empty gallery is clean, an .env file fails it, and no checkout is needed', () => {
+    const gallery = join(work, 'gallery');
+    mkdirSync(join(gallery, 'apps'), { recursive: true });
+    writeFileSync(join(gallery, 'apps', 'README.md'), '# apps/\n');
+    const ok = runBin(['export-gallery', '--check', gallery]);
+    expect(ok.status).toBe(0);
+    expect(ok.stdout.trim()).toBe(`gallery check: clean · ${gallery}`);
+    writeFileSync(join(gallery, '.env'), 'X=1\n');
+    const bad = runBin(['export-gallery', '--check', gallery]);
+    expect(bad.status).toBe(1);
+    expect(bad.stdout.split('\n')[0]).toBe('env-file .env: an environment file never belongs in the gallery');
   });
 
   it('runs the library it ships: every card loads, none matches an unknown id', () => {

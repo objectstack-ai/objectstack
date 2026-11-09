@@ -301,3 +301,60 @@ describe('[#27428] the lane carries an address, and the publisher drops its own'
         expect(out.text()).toContain(`connector credential '${REF}' was written on node 'node-b'; reconciling the connectors on node 'node-a'`);
     });
 });
+
+describe('resyncConnectorCredentialPubSub() — a credential write whose signal an outage lost converges on the resync', () => {
+    /** `sharedBus()` that drops every publish while `down`: the at-most-once loss an outage causes. */
+    function lossyBus() {
+        const shared = sharedBus();
+        const state = { down: false };
+        const publish = shared.bus.publish.bind(shared.bus);
+        shared.bus.publish = (async (channel: string, payload: unknown, opts?: never) => {
+            if (state.down) return;
+            await publish(channel, payload, opts);
+        }) as typeof shared.bus.publish;
+        return { ...shared, state };
+    }
+
+    it('B holds its refused instance while A’s correction is lost, and re-materializes on the resync', async () => {
+        const ql = await sharedDatabase();
+        const { bus, state } = lossyBus();
+        const a = await replica(ql, 'node-a', bus);
+        const b = await replica(ql, 'node-b', bus);
+        a.provider.state.reject = true;
+        b.provider.state.reject = true;
+        await a.engine.setConnectorCredential({ ref: REF, value: DUMMY_VALUE, context: ADMIN });
+        await vi.waitFor(() => expect(b.held()).toContain('refused'));
+
+        a.provider.state.reject = false;
+        b.provider.state.reject = false;
+        state.down = true;
+        await a.engine.setConnectorCredential({ ref: REF, value: DUMMY_VALUE_2, context: ADMIN });
+        state.down = false;
+        for (let i = 0; i < 5; i++) await flush();
+        expect(b.held()).toContain('refused');
+
+        await b.engine.resyncConnectorCredentialPubSub();
+        expect(b.held()).toBeUndefined();
+        expect(b.provider.last()).toBe(DUMMY_VALUE_2);
+    });
+
+    it('CONTROL — no transport attached (single node): the resync reconciles nothing', async () => {
+        // The same lost-correction shape as above, with no transport on either
+        // replica: B's resync is inert, so B keeps its refused instance (it
+        // converges on its own reload or restart, as before this change).
+        const ql = await sharedDatabase();
+        const a = await replica(ql, 'node-a', undefined);
+        const b = await replica(ql, 'node-b', undefined);
+        b.provider.state.reject = true;
+        await b.engine.setConnectorCredential({ ref: REF, value: DUMMY_VALUE, context: ADMIN });
+        expect(b.held()).toContain('refused');
+
+        b.provider.state.reject = false;
+        await a.engine.setConnectorCredential({ ref: REF, value: DUMMY_VALUE_2, context: ADMIN });
+        const before = b.provider.state.materialized.length;
+        await b.engine.resyncConnectorCredentialPubSub();
+        for (let i = 0; i < 5; i++) await flush();
+        expect(b.held()).toContain('refused');
+        expect(b.provider.state.materialized).toHaveLength(before);
+    });
+});

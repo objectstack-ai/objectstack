@@ -664,6 +664,17 @@ export class DatasourceAdminServicePlugin implements Plugin {
       // `convergePool` below for the decision table. The engine is resolved
       // per call for the same reason every other seam here resolves lazily.
       convergePool: (name) => this.convergePool(ctx, name, engineOf),
+      // The resync's address list: the SHARED store's rows (the read
+      // `convergePool` makes), plus the pools this replica built — a pool
+      // whose row was deleted during an outage has no row left to name it.
+      listConvergeNames: async () => {
+        const names = new Set<string>(this.livePoolRecords.keys());
+        for (const row of await findEnvironmentRows(engineOf())) {
+          const name = (row as { name?: unknown }).name;
+          if (typeof name === 'string' && name.length > 0) names.add(name);
+        }
+        return [...names];
+      },
 
       // The admin list's `status` reads the connection service's retained
       // verdicts (framework#3827). Resolved lazily per call: the service exists

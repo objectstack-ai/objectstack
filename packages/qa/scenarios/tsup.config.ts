@@ -24,7 +24,9 @@ import { dropSourcesContent } from '../../../scripts/tsup-drop-sources-content.m
  * `bin/objectstack-scenarios.js` loads; it is not an `exports` subpath. Its
  * one import of the runner CLI is lazy (`run` only) and is kept OUT of the
  * bundle: {@link binLoadsBuiltCli} points it at the built `cli` entry, so
- * `help` and `version` load `dist/bin.js` alone. The build's next step copies
+ * `help` and `version` load `dist/bin.js` alone. `export-check` is the
+ * gallery check's command line (`src/export/check-cli.ts`), which the bin's
+ * `export-gallery --check` imports the same lazy way. The build's next step copies
  * the open card library into `dist/library/` (`scripts/pack-library.mjs`).
  *
  * Dependencies stay external (tsup's default for `dependencies`; `export`'s
@@ -33,13 +35,19 @@ import { dropSourcesContent } from '../../../scripts/tsup-drop-sources-content.m
  */
 type EsbuildPlugin = NonNullable<Options['esbuildPlugins']>[number];
 
-/** `src/bin.ts`'s `import('./runner/cli.js')` → the built `./cli.js` / `./cli.cjs`, external. */
+/** `src/bin.ts`'s lazy imports → the built entries they are, external. */
+const BIN_LAZY_ENTRIES: Record<string, string> = {
+  './runner/cli.js': 'cli',
+  './export/check-cli.js': 'export-check',
+};
+
+/** `src/bin.ts`'s `import('./runner/cli.js')` → the built `./cli.js` / `./cli.cjs`, external (and `export-check` alike). */
 const binLoadsBuiltCli: EsbuildPlugin = {
   name: 'bin-loads-built-cli',
   setup(build) {
     const ext = build.initialOptions.format === 'cjs' ? '.cjs' : '.js';
-    build.onResolve({ filter: /^\.\/runner\/cli\.js$/ }, (args) =>
-      basename(args.importer) === 'bin.ts' ? { path: `./cli${ext}`, external: true } : undefined,
+    build.onResolve({ filter: /^\.\/(runner\/cli|export\/check-cli)\.js$/ }, (args) =>
+      basename(args.importer) === 'bin.ts' ? { path: `./${BIN_LAZY_ENTRIES[args.path]}${ext}`, external: true } : undefined,
     );
   },
 };
@@ -53,6 +61,7 @@ export default defineConfig({
     export: 'src/export/index.ts',
     bin: 'src/bin.ts',
     cli: 'src/runner/cli.ts',
+    'export-check': 'src/export/check-cli.ts',
   },
   esbuildPlugins: [binLoadsBuiltCli],
   tsconfig: 'tsconfig.build.json',
