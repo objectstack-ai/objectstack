@@ -73,6 +73,9 @@ import type { PermissionSetNameCollisionDiagnostic } from '@objectstack/plugin-s
 // [#20393] The boot registrar's divergent view-container `name` refusal — the
 // walk `os validate` step 2c runs, over `@objectstack/objectql`'s one judge.
 import { findViewContainerNameRefusals } from '../utils/view-container-names.js';
+// [ADR-0150 D2, child N] The package door's namespace name refusal — the same
+// call `os validate` makes at its step 2c-bis.
+import { findNamespaceNameRefusals } from '../utils/namespace-co-owner-names.js';
 // A field `picklist` that names no picklist the stack declares — the walk
 // `os validate` step 2d runs, over the same judge.
 import { judgePicklistReferences, picklistRefusalHeading, printPicklistReferenceNotices } from '../utils/picklist-references.js';
@@ -509,6 +512,28 @@ export default class Compile extends Command {
         printBulletList(
           containerNameRefusals.map((r) => r.message),
           { noun: 'view-container refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
+      // 3a-ter. [ADR-0150 D2, child N] A package of this artifact holding a
+      //     name of the twelve uncovered bucket 2/3 types that another package
+      //     of its namespace holds is REFUSED, naming every holder — the SAME
+      //     call `os validate` makes at its step 2c-bis, so the artifact this
+      //     door writes is one the package door installs. Right after the
+      //     parse and ahead of every artifact write, like 3a, with 3a's faces.
+      const namespaceNameRefusals = findNamespaceNameRefusals(result.data as Record<string, unknown>);
+      if (namespaceNameRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, errors: namespaceNameRefusals, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
+          this.exit(1);
+        }
+        const n = namespaceNameRefusals.length;
+        console.log('');
+        printError(`The server would refuse this stack at boot (${n} package${n > 1 ? 's' : ''} holding a name another package of its namespace holds)`);
+        printBulletList(
+          namespaceNameRefusals.map((r) => r.message),
+          { noun: 'namespace name refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
         );
         this.exit(1);
       }

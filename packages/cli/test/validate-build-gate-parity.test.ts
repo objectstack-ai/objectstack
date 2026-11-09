@@ -221,6 +221,14 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // a new package edge, and a copy of the walk is what the ruling forbids. So
   // `os lint` does not give this verdict; validate and build do.
   'findFlowCycleRefusals',
+  // [ADR-0150 D2, child N] A package of the artifact holding a name of the
+  // twelve uncovered bucket 2/3 types another package of its namespace holds —
+  // the package door's predicate and sentence (`@objectstack/objectql`). Not a
+  // registry rule: cross-package by construction, and the verdict depends on
+  // the order the boot installs the packages, which the per-package walk a
+  // registry rule gets cannot see. Both doors make the call, right after the
+  // parse.
+  'findNamespaceNameRefusals',
 ];
 
 /**
