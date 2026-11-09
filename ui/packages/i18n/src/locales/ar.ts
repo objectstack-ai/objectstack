@@ -453,6 +453,11 @@ const ar = {
     currencyHome: {
       convertedAt: 'محوّل بسعر {{rate}} بتاريخ {{date}}',
       homeCurrency: 'بالعملة الأساسية (السعر 1)',
+      preview: '≈ {{amount}} بسعر {{rate}} في {{date}}',
+      previewSame: '≈ {{amount}} (العملة الأساسية)',
+      awaitingRate: 'لا يوجد سعر لـ {{currency}} في {{date}} أو قبله: يُرفض الحفظ حتى تتم إضافة سعر',
+      awaitingDate: 'أدخل تاريخ المستند لرؤية المبلغ بالعملة الأساسية',
+      rateUnreadable: 'يُحوَّل إلى العملة الأساسية عند الحفظ',
     },
     boolean: {
       offBadge: "{{label}} — إيقاف",

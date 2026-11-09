@@ -18,10 +18,12 @@
  *   - the reference cycles the seed's lookups close (`seed.ts`), when there
  *     are any: the runner loads them in two passes, so at least one side of
  *     each must be optional;
- *   - the naming rule: EVERY item the app declares is named
- *     `<namespace>_<short>`, not only its objects ({@link namingRule}). The
- *     scorer reports a bare one as a Build finding, so every authoring prompt
- *     (build, iterate, template iterate) states it;
+ *   - the naming rule ({@link namingRule}): the items whose names stay
+ *     global in the environment carry the namespace (objects, views, docs and
+ *     positions `<namespace>_<short>`, capabilities `<namespace>.<short>`),
+ *     and every other item is named plainly (ADR-0150 D1, D7, D9). The scorer
+ *     reports a bare one of the first kind as a Build finding, so every
+ *     authoring prompt (build, iterate, template iterate) states it;
  *   - the structure the Build half checks by exact name beyond the seed
  *     ({@link structureLines}): each lookup's target, each single-choice field
  *     with its minimum option count, each dashboard and each app navigation
@@ -199,13 +201,19 @@ export function unheldHandles(card: Card): string[] {
   return [...out].sort();
 }
 
-/** The every-item-prefixed rule, in every authoring prompt. */
+/**
+ * The naming rule, in every authoring prompt: the items the scorer judges
+ * (`score/scenario-naming.ts`, ADR-0150 bucket 1 and positions) carry the
+ * namespace, and the rest are addressed by their package and named plainly.
+ */
 export function namingRule(card: Card): string {
   const ns = scenarioNamespace(card);
   return (
-    `Naming: this app's namespace is \`${ns}\`. Name EVERY metadata item you declare \`${ns}_<name>\` — not only objects, ` +
-    'but also views, apps, pages, dashboards, reports, datasets, actions, flows, permission sets, picklists, skills, agents ' +
-    'and every other item. Fields are not items and keep their plain names. A bare item name fails the build.'
+    `Naming: this app's namespace is \`${ns}\`. Name each object, view, doc and position you declare \`${ns}_<name>\`, ` +
+    `and each capability \`${ns}.<name>\`: these names are global in the environment, and a bare one fails the build. ` +
+    'Every other item (apps, pages, dashboards, reports, datasets, actions, flows, jobs, permission sets, picklists, tools, ' +
+    'skills, agents and the rest) belongs to this package and needs no prefix, but where this prompt names an item, use ' +
+    'that exact name. Fields are not items and keep their plain names.'
   );
 }
 

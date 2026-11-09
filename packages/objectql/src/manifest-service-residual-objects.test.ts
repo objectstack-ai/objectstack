@@ -41,6 +41,7 @@ import { OWNERSHIP_QUEUE_SERVICE, type IMetadataService } from '@objectstack/spe
 import { ObjectQLPlugin } from './plugin.js';
 import type { ObjectQL } from './engine.js';
 import { viewContainerNameRefusal } from './view-container-name-refusal.js';
+import { packageResolutionClosure } from '@objectstack/metadata-core';
 
 type ManifestService = { register(m: unknown): void | Promise<void> };
 
@@ -721,5 +722,18 @@ describe('ADR-0130 D4 — a residual picklist that no object field names', () =>
     const { kernel } = await boot(registering('app', [payload({ manifest: app, objects: [noteObj()], picklists: [unusedList()] })]));
     expect(kernel.getState()).toBe('running');
     expect(engineOf(kernel).registry.resolvePicklistOptions('acme_unused')?.map((o) => o.value)).toEqual(['a']);
+  });
+});
+
+describe('[ADR-0130 D4, epic #31527 R2] the residual owner\'s declared dependencies reach the one closure walk', () => {
+  it('records what the stack\'s manifest declares, adds no package record, and the walk reads it', async () => {
+    const stack = residualStack();
+    (stack as { manifest: Record<string, unknown> }).manifest.dependencies = { [SERVICE_ID]: '^2.0.0' };
+    const { kernel } = await boot(registering('test.residual-deps', [stack]));
+    const ql = engineOf(kernel);
+    expect(ql.registry.residualOwnerDependenciesOf(RELEASE_ID)).toEqual([SERVICE_ID]);
+    expect(ql.registry.getPackage(RELEASE_ID)).toBeUndefined();
+    expect(acmePackageIds(ql)).not.toContain(RELEASE_ID);
+    expect(packageResolutionClosure(ql.registry, RELEASE_ID).has(SERVICE_ID)).toBe(true);
   });
 });

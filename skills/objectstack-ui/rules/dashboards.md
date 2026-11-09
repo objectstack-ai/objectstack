@@ -9,9 +9,8 @@
 ## Dashboards
 
 Dashboards are a grid of widgets (`columns` × `rowHeight`) sharing a
-`dateRange` scrubber and `globalFilters`. Each widget **binds a `dataset`** and
-selects named `dimensions` + `values`, picks a chart `type`, and sets a
-`layout: {x,y,w,h}` (ADR-0021).
+`dateRange` scrubber and `globalFilters`. Each widget binds a `dataset`
+(below), picks a chart `type`, and sets a `layout: {x,y,w,h}` (ADR-0021).
 
 ### Widget Types
 
@@ -43,8 +42,11 @@ fails `os validate`.
 A widget's presentation-scope `filter` flows into the query as the runtime
 filter; keep `filter` on the widget when binding a dataset.
 
+<!-- os:check -->
 ```typescript
-{
+import type { DashboardWidget } from '@objectstack/spec/ui';
+
+const widget: DashboardWidget = {
   id: 'revenue_by_region',
   type: 'bar',
   title: 'Revenue by Region',
@@ -52,7 +54,7 @@ filter; keep `filter` on the widget when binding a dataset.
   dimensions: ['region'],
   values: ['revenue'],
   layout: { x: 0, y: 0, w: 6, h: 4 },
-}
+};
 ```
 
 **The real decision is not "inline vs dataset" — it is "can a dataset express
@@ -175,15 +177,10 @@ export const SalesDashboard: Dashboard = {
       filter: { stage: { $nin: ['closed_won', 'closed_lost'] } },
       layout: { x: 0, y: 0, w: 3, h: 2 },
       colorVariant: 'success',   // the accent only
-      // Period-over-period: renderer fetches the prior quarter and
-      // surfaces a secondary value + delta arrow automatically.
       compareTo: { kind: 'previousPeriod' },
     },
 
-    // Chart widget with comparison overlay (M2). The renderer issues a
-    // second query with the time window shifted by `compareTo` and
-    // overlays it as a muted/dashed series. The date axis is a dataset
-    // dimension whose monthly bucketing lives on the dataset (`dateGranularity`).
+    // Chart widget with comparison overlay.
     {
       id: 'revenue_vs_last_year', type: 'line',
       title: 'Revenue — This Year vs Last',
@@ -212,29 +209,33 @@ vocabularies.
 | `filterBindings: { filterName: false }` | a widget | Opt out — the honest binding when the vocabularies are disjoint and no field can be re-targeted. |
 | absent | a widget | Default binding: the filter's own `field`; for the reserved `dateRange`, `dateRange.field ?? 'created_at'`. |
 
+<!-- os:check -->
 ```typescript
+import type { DashboardWidget } from '@objectstack/spec/ui';
+
 // One control, two objects: re-target on one widget, opt the other out.
+const widgets: DashboardWidget[] = [
 { id: 'revenue_by_region', dataset: 'crm_order_metrics', values: ['total_sum'],
   filterBindings: { region: 'sales_region' } },
 { id: 'projects_at_risk', dataset: 'crm_project_metrics', values: ['project_count'],
   filterBindings: { task_status: false } },
+];
 ```
 
 ### Period-over-period — `compareTo`
 
 Set `compareTo` on any data-bound widget to add a second query against a
-shifted time window. The renderer derives the comparison automatically;
-no second `filter` is required.
+shifted time window.
 
-`compareTo` is `{ kind, dimension? }` — the same shape the analytics executor
-reads (`DatasetSelection.compareTo`), so what a widget declares is exactly what
-runs.
+`compareTo` is `{ kind, dimension? }`.
 
 | Key | Value | Behaviour |
 |:--|:--|:--|
 | `kind` | `'previousPeriod'` | The equal-length window immediately before the resolved one. |
 | `kind` | `'previousYear'` | The same window shifted back one calendar year. |
 | `dimension` | dimension name, **optional** | Which time dimension's window to shift. Omit it when the selection dates exactly one — the executor resolves it. With zero or several it errors, naming the candidates; it never guesses. |
+
+The two bare `compareTo:` lines are a fragment, so `check:skill-examples` skips them.
 
 ```typescript
 compareTo: { kind: 'previousPeriod' }                            // one dated dimension
@@ -250,26 +251,30 @@ compareTo: { kind: 'previousYear', dimension: 'close_date' }     // several — 
   with `variant: 'comparison'`, muted per family (dashed `'4 4'` on
   line/area only; reduced opacity on all). That muting is the renderer's
   default; `chartConfig.colors` is the one palette channel that remains.
-* **Pie / donut / funnel** — `compareTo` is silently ignored; there is no
-  meaningful "two-period" composition for part-of-whole charts.
+* **Pie / donut / funnel** — `compareTo` is silently ignored.
 * **Requirements** — a comparison needs a **dated window** to shift. When the
   selection carries no time dimension with a date range (no resolvable date
   macro in the widget `filter`, no dashboard `dateRange`), the executor says so
   rather than rendering a silently empty comparison column. The shifted query
   reuses the original `filter` shape and replaces only the date-bound clauses.
 
+<!-- os:check -->
 ```typescript
-// Metric — WoW delta (binds the crm_task_metrics dataset; filter = runtimeFilter)
+import type { DashboardWidget } from '@objectstack/spec/ui';
+
+const widgets: DashboardWidget[] = [
+// Metric — WoW delta
 { id: 'done_this_week', type: 'metric', dataset: 'crm_task_metrics', values: ['task_count'],
   filter: { assignee: '{current_user_id}', status: 'done',
             completed_at: { $gte: '{week_start}' } },
-  compareTo: { kind: 'previousPeriod' } }
+  compareTo: { kind: 'previousPeriod' } },
 
 // Bar — YoY overlay on a stable category set
 { id: 'headcount_by_dept', type: 'bar', dataset: 'crm_employee_metrics',
   dimensions: ['department'], values: ['headcount'],
   filter: { status: { $ne: 'terminated' } },
-  compareTo: { kind: 'previousYear' } }
+  compareTo: { kind: 'previousYear' } },
+];
 ```
 
 ### Server-side date bucketing — `dateGranularity` (ADR-0021)
@@ -288,8 +293,13 @@ import { defineDataset, type DashboardWidget } from '@objectstack/spec/ui';
 defineDataset({
   name: 'crm_contract_metrics', label: 'Contract Metrics', object: 'contract',
   dimensions: [{ name: 'signed_date', field: 'signed_date', type: 'date', dateGranularity: 'month' }],
-  measures: [{ name: 'signed_count', aggregate: 'count' }],
+  measures: [{ name: 'signed_count', aggregate: 'count', synonyms: ['签约数', 'deals signed'],
+    description: 'Contracts signed in the period, drafts excluded.' }],
 });
+// Member `synonyms` (ADR-0149 D1): the words a question uses for it, every
+// language in one list; matched, never translated; none may equal another
+// member's name, label or synonym. `description`: a business definition,
+// never a prompt; translated like `label`.
 // A money measure may set `currency` (ISO 4217, e.g. `'USD'`). Chain:
 // measure `currency` → the field's `defaultCurrency` (`fixed` only) →
 // tenant `localization.currency`; omit it for counts. A
@@ -321,7 +331,7 @@ const signedByMonth: DashboardWidget = { id: 'signed_by_month', type: 'line',
   to the label above, and resolves `select`/`lookup` dimension values to their
   option label / related-record name. Measures carry their `label` + `format`
   (e.g. `$0,0`) so KPIs and legends read "Total Spent / $616,000", not
-  "spent_sum / 616000". Authors do not format dimension/measure values by hand.
+  "spent_sum / 616000".
 * **Combines with `compareTo`** — the comparison query is issued with the same
   granularity, so the muted overlay aligns bucket-for-bucket.
 * **Rule of thumb** — `day` for ≤30d windows, `week` for ~90d, `month` for
@@ -342,9 +352,12 @@ These five change the dataset SQL; a typo (`sortDirection`) parses too, and draw
 | `limit` | positive integer | Max rows, applied **after** ordering — so "top 10 accounts" is `limit` **plus** `sortBy`. Without `sortBy` the runtime orders by the selected dimensions: deterministic, but not the top of anything. |
 | `stageOrder` | array of **stored** values | Explicit stage order for `funnel`; no other type reads it. Stored values, not display labels; omit to inherit the field's picklist order. |
 
+<!-- os:check -->
 ```typescript
-// Top 10 accounts by revenue, bucketed monthly for this widget only
-options: { sortBy: 'revenue_sum', sortOrder: 'desc', limit: 10, dateGranularity: 'month' }
+import type { DashboardWidget } from '@objectstack/spec/ui';
+
+// Top 10 accounts by revenue, bucketed monthly
+const options: DashboardWidget['options'] = { sortBy: 'revenue_sum', sortOrder: 'desc', limit: 10, dateGranularity: 'month' };
 ```
 
 ### Drilldown
@@ -378,8 +391,7 @@ records, click a row to open one, or "Open in list →" for the full list page.
 ```typescript
 import { defineReport } from '@objectstack/spec/ui';
 
-// ADR-0021: a report binds a `dataset` and selects `rows` (dimensions) +
-// `values` (measures) BY NAME. The `crm_opportunity_metrics` dataset defines the
+// ADR-0021: the `crm_opportunity_metrics` dataset defines the
 // object, the `amount_sum` measure, and the `forecast_category` + `close_date`
 // (dateGranularity: 'quarter') dimensions — see Guides → Analytics Datasets.
 export const PipelineCoverageReport = defineReport({

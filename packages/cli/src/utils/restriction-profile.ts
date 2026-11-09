@@ -10,8 +10,11 @@
  * reader that lets a local author see, before a deploy, what that profile
  * refuses. Three parts, each one function:
  *
- *  - {@link loadRestrictionProfile} reads the profile from a file and parses it
- *    with the spec's own schema. An invalid profile is REFUSED, naming the
+ *  - {@link loadRestrictionProfile} reads the profile from a file, or fetches
+ *    it from an environment URL ({@link RESTRICTION_PROFILE_ROUTE}), and parses
+ *    it with the spec's own schema. An unreachable or non-2xx environment, or
+ *    an answer that is not JSON, is REFUSED naming the URL — never read as "no
+ *    restriction". An invalid profile is REFUSED, naming the
  *    schema issue: a reader that judged against half a profile would be the
  *    lenient consumer Prime Directive 12 forbids.
  *  - {@link judgeRestrictionProfile} refuses every item of the stack the
@@ -121,31 +124,64 @@ export interface RestrictionVersionDrift {
 }
 
 /**
- * Whether `--target` names a URL rather than a file.
+ * The route a target environment publishes its restriction profile at,
+ * relative to the environment's ORIGIN. Named once, here.
  *
- * No environment publishes its restriction profile at a defined address yet,
- * so the URL form is refused rather than fetched from a guessed route.
+ * The route is cloud's, not this repository's: objectstack-ai/cloud serves it
+ * since cloud PR #3732 (cloud#3713), and the shape this reader relies on is
+ * the one recorded on objectstack-ai/objectstack#31240, comment 6716619631 —
+ * `GET`, no auth, a `{ success, data }` body whose `data` is a
+ * `RestrictionProfileSchema` value, `404 RESOURCE_NOT_FOUND` when the host
+ * names no environment and `503` otherwise. The CLI only reads it as a client,
+ * so it is not in the spec route ledger (`packages/spec/src/api`), which
+ * records the routes this repository's runtime serves.
+ */
+export const RESTRICTION_PROFILE_ROUTE = '/api/v1/discovery/restriction-profile';
+
+/** How long `--target <url>` waits for the environment before refusing. */
+const RESTRICTION_PROFILE_FETCH_TIMEOUT_MS = 15_000;
+
+/**
+ * Whether `--target` names a URL rather than a file: any `scheme://`. Only
+ * `http:` / `https:` are fetched; every other scheme is refused.
  */
 function isUrl(target: string): boolean {
   return /^[a-z][a-z0-9+.-]*:\/\//i.test(target);
 }
 
 /**
- * Read and parse the restriction profile `--target` names. Throws a plain
- * `Error` naming the file and the problem when the target is a URL, missing,
- * not JSON, or not a valid restriction profile.
+ * One `path: message` per schema issue, the same text for both forms; `at`
+ * prefixes each path with where the profile sits in the body (`data`).
  */
-export function loadRestrictionProfile(
+function profileIssues(error: z.ZodError, at?: string): string {
+  return error.issues
+    .map((issue) => {
+      const path = at === undefined ? issue.path : [at, ...issue.path];
+      return `${path.length > 0 ? path.join('.') : '(root)'}: ${issue.message}`;
+    })
+    .join('; ');
+}
+
+/**
+ * Read and parse the restriction profile `--target` names: a file path, or an
+ * environment URL whose profile is fetched from {@link RESTRICTION_PROFILE_ROUTE}
+ * at that URL's origin. Both forms parse with `RestrictionProfileSchema`, so a
+ * profile judges the same whichever way it arrived.
+ *
+ * Throws a plain `Error` naming the target and the problem when the file is
+ * missing, not JSON, or not a valid restriction profile — or, for a URL, when
+ * the environment cannot be reached, answers anything but a 2xx, answers
+ * something that is not JSON or not the `{ success, data }` envelope, or
+ * answers an invalid profile. Every URL refusal names the URL fetched. ⛔ No
+ * failure is ever read as "no restriction".
+ *
+ * `source` is the file read or the URL fetched.
+ */
+export async function loadRestrictionProfile(
   target: string,
   cwd: string = process.cwd(),
-): { profile: ParsedRestrictionProfile; file: string } {
-  if (isUrl(target)) {
-    throw new Error(
-      `--target ${target}: a target environment does not publish its restriction profile at a defined `
-      + 'address yet, so this command cannot fetch one. Save the environment\'s restriction profile as a '
-      + 'JSON file and pass its path: os validate --target ./restriction-profile.json',
-    );
-  }
+): Promise<{ profile: ParsedRestrictionProfile; source: string }> {
+  if (isUrl(target)) return fetchRestrictionProfile(target);
   const file = isAbsolute(target) ? target : resolve(cwd, target);
   if (!existsSync(file)) {
     throw new Error(`--target ${target}: no restriction profile file at ${file}.`);
@@ -161,15 +197,81 @@ export function loadRestrictionProfile(
   }
   const parsed = RestrictionProfileSchema.safeParse(raw);
   if (!parsed.success) {
-    const issues = parsed.error.issues
-      .map((issue) => `${issue.path.length > 0 ? issue.path.join('.') : '(root)'}: ${issue.message}`)
-      .join('; ');
     throw new Error(
       `--target ${target}: ${file} is not a valid restriction profile (RestrictionProfileSchema, `
-      + `@objectstack/spec/system) — ${issues}`,
+      + `@objectstack/spec/system) — ${profileIssues(parsed.error)}`,
     );
   }
-  return { profile: parsed.data, file };
+  return { profile: parsed.data, source: file };
+}
+
+/** The URL form of {@link loadRestrictionProfile}. */
+async function fetchRestrictionProfile(
+  target: string,
+): Promise<{ profile: ParsedRestrictionProfile; source: string }> {
+  let origin: URL;
+  try {
+    origin = new URL(target);
+  } catch {
+    throw new Error(`--target ${target}: not a valid URL.`);
+  }
+  if (origin.protocol !== 'http:' && origin.protocol !== 'https:') {
+    throw new Error(
+      `--target ${target}: only an http:// or https:// environment URL can be fetched. `
+      + 'To judge against a profile saved on disk, pass its path: os validate --target ./restriction-profile.json',
+    );
+  }
+  const url = new URL(RESTRICTION_PROFILE_ROUTE, origin.origin).href;
+  const refuse = (problem: string): Error => new Error(
+    `--target ${target}: ${url} ${problem} A restriction profile that cannot be read is refused, `
+    + 'never judged as "no restriction".',
+  );
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: { accept: 'application/json' },
+      signal: AbortSignal.timeout(RESTRICTION_PROFILE_FETCH_TIMEOUT_MS),
+    });
+  } catch (error) {
+    const err = error as Error & { cause?: { code?: unknown; message?: unknown } };
+    const reason = err.name === 'TimeoutError'
+      ? `no answer within ${RESTRICTION_PROFILE_FETCH_TIMEOUT_MS / 1000} s`
+      : String(err.cause?.code ?? err.cause?.message ?? err.message);
+    throw refuse(`could not be reached (${reason}).`);
+  }
+
+  const text = await response.text();
+  let body: unknown;
+  let isJson = true;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    isJson = false;
+  }
+
+  if (!response.ok) {
+    const error = isJson ? (body as { error?: { code?: unknown } } | null)?.error : undefined;
+    const code = typeof error?.code === 'string' ? ` ${error.code}` : '';
+    const meaning = response.status === 404 ? ' — no environment is served at this host' : '';
+    throw refuse(`answered HTTP ${response.status}${code}${meaning}.`);
+  }
+  if (!isJson) {
+    throw refuse(`did not answer JSON (content-type ${response.headers.get('content-type') ?? 'none'}).`);
+  }
+  const envelope = body as { success?: unknown; data?: unknown } | null;
+  if (typeof envelope !== 'object' || envelope === null || Array.isArray(envelope)
+    || envelope.success !== true || !('data' in envelope)) {
+    throw refuse('did not answer the { success: true, data } envelope a published restriction profile comes in.');
+  }
+  const parsed = RestrictionProfileSchema.safeParse(envelope.data);
+  if (!parsed.success) {
+    throw refuse(
+      'answered an invalid restriction profile (RestrictionProfileSchema, @objectstack/spec/system) — '
+      + `${profileIssues(parsed.error, 'data')}.`,
+    );
+  }
+  return { profile: parsed.data, source: url };
 }
 
 /**

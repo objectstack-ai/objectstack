@@ -2322,9 +2322,11 @@ export class SqlDriver implements IDataDriver {
     // [#25521 cut 11] The body moved to `sql-driver-autonumber.ts` (see `AutonumberHost`).
     const readKnex = () => this.knex;
     const readSequencesHasKeyHash = () => this.sequencesHasKeyHash;
+    const readIsMysql = () => this.isMysql;
     const host: ThisParameterType<typeof getNextSequenceValue> = {
       attemptWithoutPoisoning: (...a) => this.attemptWithoutPoisoning(...a),
       ensureSequencesTable: (...a) => this.ensureSequencesTable(...a),
+      get isMysql() { return readIsMysql(); },
       get knex() { return readKnex(); },
       resolveSequenceTenantId: (...a) => this.resolveSequenceTenantId(...a),
       scanMaxNumericTail: (...a) => this.scanMaxNumericTail(...a),
@@ -5059,6 +5061,15 @@ export class SqlDriver implements IDataDriver {
   setDeferredDdl(deferred: boolean): void {
     // [#29520 codemod] The body moved to `sql-driver-deferred-ddl.ts` (see `DeferredDdlHost`).
     return DeferredDdlFacet.setDeferredDdl.call(deferredDdlHost.of(this), deferred);
+  }
+
+  /**
+   * [#31715] Whether {@link setDeferredDdl} holds this driver's schema DDL back
+   * right now. The engine's boot reads it to leave the schema-migration lock to
+   * the command that deferred the DDL, which takes it before the flush.
+   */
+  get schemaDdlDeferred(): boolean {
+    return this.deferredDdl;
   }
 
   /** How many objects are waiting for {@link flushDeferredSchemaDdl}. */

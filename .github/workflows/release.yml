@@ -736,15 +736,31 @@ jobs:
             exit 1
           fi
 
-          # Five filters over the reviewed surface: the fixed
-          # release paths by pattern, then the four declared lists by WHOLE-LINE
+          # The skill BODIES the same `--fix` rewrites (install pins, #31115): resolved
+          # from `bodyPinnedPaths()`, which asks that writer which files carry a
+          # version it owns, and judged by the same `check:skill-compatibility`.
+          # Unlike the lists above, EMPTY is a real answer here (a catalog with no
+          # body pins), and `grep -vxF -f` over an empty list admits nothing. A moved
+          # skills directory still fails: the export THROWS, and the resolve exits
+          # non-zero.
+          BODY_LIST="${RUNNER_TEMP}/post-version-skill-body-surfaces.txt"
+          if ! node --input-type=module \
+                 -e 'import { bodyPinnedPaths } from "./scripts/check-skill-compatibility-version.mjs"; for (const p of bodyPinnedPaths()) console.log(p);' \
+                 > "${BODY_LIST}"; then
+            echo "::error::could not resolve bodyPinnedPaths() from scripts/check-skill-compatibility-version.mjs, so the skill-body half of the post-version surface is unknown. Refusing to call this tree validated."
+            exit 1
+          fi
+
+          # Six filters over the reviewed surface: the fixed
+          # release paths by pattern, then the five declared lists by WHOLE-LINE
           # EXACT match, so no derived filter can accept a path its declaration
           # does not name and none needs regex-escaping.
           UNEXPECTED="$(grep -vE '(^|/)package\.json$|(^|/)CHANGELOG\.md$|^\.changeset/|^packages/spec/src/kernel/protocol-version\.ts$' "${MOVED_FILE}" \
             | grep -vxF -f "${TEMPLATE_LIST}" \
             | grep -vxF -f "${SURFACE_LIST}" \
             | grep -vxF -f "${INDEX_LIST}" \
-            | grep -vxF -f "${SKILL_LIST}" || true)"
+            | grep -vxF -f "${SKILL_LIST}" \
+            | grep -vxF -f "${BODY_LIST}" || true)"
           if [ -n "${UNEXPECTED}" ]; then
             printf '%s\n' "${UNEXPECTED}" | sed 's/^/::error::  unexpected: /'
             echo "::error::the version pass wrote outside the reviewed post-version surface (paths above). This is the treadmill guard: a new version-time output must arrive together with the gate that judges it. Add the surface to the declaration its rewriter reads, and its gate to the content half below — deliberately, in one reviewed diff."

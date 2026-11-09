@@ -9,6 +9,8 @@
  * `pnpm --filter @objectstack/scenarios gallery-refresh --gallery DIR`.
  */
 
+export * from './check.js';
+export * from './check-cli.js';
 export * from './exporter.js';
 export * from './generic.js';
 export * from './manifest.js';

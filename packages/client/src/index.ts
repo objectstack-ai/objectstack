@@ -5285,6 +5285,10 @@ export class ObjectStackClient {
      *
      * ⚠️ `data.session` is undelivered here for the same measured reason as on
      * `login`: `/sign-up/email` serves no session object. See that method.
+     *
+     * Under the `invite_only` audience posture a sign-up is admitted only by
+     * the invitation it presents: pass its id (the last segment of the accept
+     * link) as `request.invitationId`.
      */
     register: async (request: RegisterRequest): Promise<SessionResponse> => {
       const route = this.getRoute('auth');

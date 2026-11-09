@@ -438,6 +438,11 @@ const fr = {
     currencyHome: {
       convertedAt: 'Converti au taux de {{rate}} du {{date}}',
       homeCurrency: 'Dans la devise de référence (taux 1)',
+      preview: '≈ {{amount}} au taux {{rate}} le {{date}}',
+      previewSame: '≈ {{amount}} (devise principale)',
+      awaitingRate: 'Aucun taux {{currency}} au plus tard le {{date}} : l’enregistrement est refusé tant qu’aucun n’est ajouté',
+      awaitingDate: 'Renseignez la date du document pour voir le montant en devise principale',
+      rateUnreadable: 'Converti dans la devise principale à l’enregistrement',
     },
     boolean: {
       offBadge: "{{label}} — Désactivé",

@@ -11,7 +11,9 @@
  * sign-up needs a pending invitation, an allowlisted email domain, or an
  * `open` posture. The in-memory harness suites in this package create their
  * second/third fixture users through the real better-auth sign-up route, so
- * they enter the way real users now do: holding a pending invitation.
+ * they enter the way real users now do: holding a pending invitation, and —
+ * under `invite_only` — presenting it, its id in the sign-up body's
+ * `invitationId`, as the accept link hands it to a real invitee.
  *
  * This is deliberately the INVITATION lane rather than an `open` posture on
  * the fixture config: `open` (and `email_domain`) force
@@ -28,8 +30,10 @@ interface TablesEngine {
 
 /**
  * Seed a pending, unexpired `sys_invitation` row for `email` so the audience
- * gate admits its self-serve sign-up. Idempotent enough for fixtures (each
- * call adds one pending row; the gate only asks "does one exist").
+ * gate admits its self-serve sign-up, and answer the row's id: the sign-up
+ * presents it as `invitationId` (an address alone is refused under
+ * `invite_only`). Idempotent enough for fixtures (each call adds one pending
+ * row with its own id).
  *
  * Accepts either the engine itself or an `AuthManager` (whose
  * `config.dataEngine` is the engine) so each file's `signUp` helper can call
@@ -41,7 +45,7 @@ interface TablesEngine {
  *    `insert(...)` under the system context — AWAIT the returned promise
  *    there, or the seed races the sign-up.
  */
-export function inviteForAudienceGate(engineOrManager: unknown, email: string): Promise<void> {
+export function inviteForAudienceGate(engineOrManager: unknown, email: string): Promise<string> {
   const row = {
     id: `inv_audience_${Math.random().toString(36).slice(2, 10)}`,
     // [#11770] Stored NORMALIZED, because that is the only form the product
@@ -64,13 +68,13 @@ export function inviteForAudienceGate(engineOrManager: unknown, email: string): 
   if (tablesEngine) {
     const rows = tablesEngine.tables.get('sys_invitation') ?? [];
     tablesEngine.tables.set('sys_invitation', [...rows, row]);
-    return Promise.resolve();
+    return Promise.resolve(row.id);
   }
   const engine = resolveInsertEngine(engineOrManager);
-  if (!engine) return Promise.resolve();
+  if (!engine) return Promise.resolve(row.id);
   return Promise.resolve(
     engine.insert('sys_invitation', row, { context: { isSystem: true } }),
-  ).then(() => undefined);
+  ).then(() => row.id);
 }
 
 function resolveTablesEngine(engineOrManager: unknown): TablesEngine | null {
