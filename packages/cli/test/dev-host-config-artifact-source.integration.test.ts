@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 120 — five real boots in one beforeAll (two `os dev` legs on a host config, three CONTROL boots) plus one compile; budget set from the first local reading, see the PR
+// test-budget: 65 — five real boots in one beforeAll (two `os dev` legs on a host config, three CONTROL boots) plus one compile; slowest local reading 50.80 s (shared box, under the verify lock) x 1.25, rounded up
 
 /**
  * #31761 — on `os dev` over a HOST config, the boot serves ONE copy of the
@@ -46,7 +46,8 @@
  *      artifact-only directory under `os start` (ART).
  *
  * Spawn shape as `dev-connector-env-parity.integration.test.ts`: the shipped
- * `bin/run.js`, `NODE_ENV` unset, its own process group, a reserved port.
+ * `bin/run.js`, `NODE_ENV` unset, its own process group — on a KERNEL-ASSIGNED
+ * port read back from the banner (no number of this file's is the subject).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -59,11 +60,10 @@ import {
   childEnv,
   E2E_AUTH_SECRET,
   E2E_SECRET_KEY,
-  portContentionError,
-  portDriftError,
+  KERNEL_ASSIGNED_PORT,
   probeThroughChild,
+  readKernelAssignedPort,
   requireBuiltCli,
-  reservePort,
   RUN_JS_RESOLVES_FROM_DIST,
 } from './helpers/serve-process.js';
 import { linkSpec } from './helpers/define-stack-fixture.js';
@@ -159,7 +159,7 @@ const groups: ChildProcess[] = [];
 const dirs: string[] = [];
 const readings: Record<string, Reading | { error: Error }> = {};
 
-function boot(what: string, cwd: string, args: string[], port: number, env: Record<string, string | undefined>): Promise<Live> {
+function boot(what: string, cwd: string, args: string[], env: Record<string, string | undefined>): Promise<Live> {
   return new Promise((resolveBoot, rejectBoot) => {
     const child = spawn(process.execPath, [CLI, ...args], {
       cwd,
@@ -198,15 +198,12 @@ function boot(what: string, cwd: string, args: string[], port: number, env: Reco
     );
     const onData = (d: unknown) => {
       out += String(d);
-      if (READY.test(out)) settle(portDriftError(out, what, port) ?? port);
+      if (READY.test(out)) settle(readKernelAssignedPort(out, what));
     };
     child.stdout?.on('data', onData);
     child.stderr?.on('data', onData);
     child.on('exit', (code) =>
-      settle(
-        portContentionError(out, what, port)
-          ?? new Error(`${what} exited ${String(code)} before ${READY}\n--- output ---\n${out.slice(-4000)}`),
-      ),
+      settle(new Error(`${what} exited ${String(code)} before ${READY}\n--- output ---\n${out.slice(-4000)}`)),
     );
   });
 }
@@ -286,15 +283,14 @@ function project(prefix: string, host: boolean): string {
 async function leg(
   name: string,
   cwd: string,
-  args: (port: number) => string[],
+  args: string[],
   env: Record<string, string | undefined>,
   opts: { signIn: boolean },
 ): Promise<void> {
   rmSync(join(cwd, ON_ENABLE_MARKER), { force: true });
   let live: Live | undefined;
   try {
-    const port = reservePort();
-    live = await boot(name, cwd, args(port), port, env);
+    live = await boot(name, cwd, args, env);
     const form = await http(live, 'GET', `/api/v1/forms/${SLUG}`);
     const reading: Reading = {
       output: live.output(),
@@ -340,9 +336,9 @@ beforeAll(async () => {
   copyFileSync(join(hostDir, 'dist', 'objectstack.json'), join(artifactDir, 'dist', 'objectstack.json'));
   linkSpec(artifactDir);
 
-  const dev = (flags: string[], db: string) => (port: number) =>
-    ['dev', ...flags, '--no-watch', '--no-restart', '-d', `file:${db}`, '-p', String(port)];
-  const start = (port: number) => ['start', '-p', String(port)];
+  const dev = (flags: string[], db: string) =>
+    ['dev', ...flags, '--no-watch', '--no-restart', '-d', `file:${db}`, '-p', KERNEL_ASSIGNED_PORT];
+  const start = ['start', '-p', KERNEL_ASSIGNED_PORT];
   const prod = (db: string) => ({ OS_AUTH_SECRET: E2E_AUTH_SECRET, OS_DATABASE_URL: `file:${db}`, OS_HOME: undefined });
 
   await leg('host --no-compile', hostDir, dev(['--no-compile'], 'nc.db'), {}, { signIn: true });
