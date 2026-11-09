@@ -77,6 +77,7 @@ export interface AuthoringGateHost {
     externalBindingSaveRefusal: ObjectStackProtocolImplementation['externalBindingSaveRefusal'];
     foldStoredCollection: ObjectStackProtocolImplementation['foldStoredCollection'];
     getOverlayRepo: ObjectStackProtocolImplementation['getOverlayRepo'];
+    objectNamespaceObjectNameClash: ObjectStackProtocolImplementation['objectNamespaceObjectNameClash'];
     objectNamespacePrefixViolation: ObjectStackProtocolImplementation['objectNamespacePrefixViolation'];
     hierarchyResolverMounted: ObjectStackProtocolImplementation['hierarchyResolverMounted'];
     isArtifactBacked: ObjectStackProtocolImplementation['isArtifactBacked'];
@@ -530,7 +531,7 @@ function packagedRuleCopyRefusalOf(
 
 /** The body of `ObjectStackProtocolImplementation#draftPublishVerdict`; the method's docblock there is its contract. */
 export async function draftPublishVerdict(
-    this: RuntimeRulesHost & Pick<AuthoringGateHost, 'collectBatchPendingDeclarations' | 'credentialChannelFor' | 'getOverlayRepo' | 'objectNamespacePrefixViolation'>,
+    this: RuntimeRulesHost & Pick<AuthoringGateHost, 'collectBatchPendingDeclarations' | 'credentialChannelFor' | 'getOverlayRepo' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation'>,
     draft: { type: string; name: string; body: unknown; packageId: string | null },
 ): Promise<RuntimeAuthoringIssue[]> {
     const singular = PLURAL_TO_SINGULAR[draft.type] ?? draft.type;
@@ -570,13 +571,31 @@ export async function draftPublishVerdict(
     const prefixViolation = singular === 'object'
         ? this.objectNamespacePrefixViolation(draft.name, draft.packageId)
         : null;
-    if (!prefixViolation) return issues;
-    return [{
-        rule: 'NAMESPACE_PREFIX',
-        path: 'name',
-        where: `object "${draft.name}"`,
-        message: prefixViolation,
-        hint: prefixViolation,
-        severity: 'error',
-    }, ...issues];
+    // [ADR-0150 D6, child K] …and the namespace/object-name verdict the same
+    // promotion doors refuse on, told the same way.
+    const nameClash = singular === 'object'
+        ? this.objectNamespaceObjectNameClash(draft.name, draft.packageId)
+        : null;
+    const told: RuntimeAuthoringIssue[] = [];
+    if (prefixViolation) {
+        told.push({
+            rule: 'NAMESPACE_PREFIX',
+            path: 'name',
+            where: `object "${draft.name}"`,
+            message: prefixViolation,
+            hint: prefixViolation,
+            severity: 'error',
+        });
+    }
+    if (nameClash) {
+        told.push({
+            rule: 'NAMESPACE_CONFLICT',
+            path: 'name',
+            where: `object "${draft.name}"`,
+            message: nameClash,
+            hint: nameClash,
+            severity: 'error',
+        });
+    }
+    return told.length > 0 ? [...told, ...issues] : issues;
 }
