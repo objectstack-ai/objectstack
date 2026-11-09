@@ -71,6 +71,8 @@ import {
 } from './connector-credentials.js';
 import { CONNECTOR_CREDENTIAL_SOURCE_SERVICE } from '@objectstack/types';
 import { createConnectorCredentialSource } from './connector-credential-source.js';
+import { packageScopedRegistryOf, refusedConnectorNames } from './connector-package-scope.js';
+import type { PackageScopedRefusal, PackageScopedRegistry } from '@objectstack/objectql';
 import { createConnectorRequestSigner } from './request-signing/index.js';
 import { ConnectorConnectionStore, type ConnectorConnectionRecord } from './connector-connections.js';
 import {
@@ -2631,6 +2633,31 @@ export class AutomationServicePlugin implements Plugin {
     }
 
     /**
+     * [ADR-0150 D3] The refusal of every enabled provider-bound declared
+     * connector name that resolves to no single holder, read over the ObjectQL
+     * registry ({@link refusedConnectorNames}). A composition with no registry
+     * has no package coordinate to resolve against, and refuses nothing here.
+     */
+    private refusedDeclaredConnectorNames(ctx: PluginContext, declared: readonly unknown[]): Map<string, PackageScopedRefusal> {
+        let registry: PackageScopedRegistry | undefined;
+        try {
+            registry = packageScopedRegistryOf(ctx.getService<{ registry?: unknown }>('objectql')?.registry);
+        } catch {
+            registry = undefined; // no registry service
+        }
+        if (!registry) return new Map();
+        const names: string[] = [];
+        for (const raw of declared) {
+            const entry = raw as DeclaredConnectorItem;
+            if (typeof entry?.name !== 'string' || entry.name.length === 0) continue;
+            if (typeof entry.provider !== 'string' || entry.provider.length === 0) continue;
+            if (entry.enabled === false) continue;
+            names.push(entry.name);
+        }
+        return refusedConnectorNames(registry, names);
+    }
+
+    /**
      * [#28534] The readers {@link nonHostDeclaringPackageOf} judges a
      * connector entry's origin with, off the `objectql` engine the declared
      * items are listed out of ({@link readDeclaredConnectorItems}): its package
@@ -2937,6 +2964,16 @@ export class AutomationServicePlugin implements Plugin {
             ctx.logger.error(msg, undefined, cause === undefined ? undefined : describeThrownForLog(cause));
         };
 
+        // [ADR-0150 D3, epic #31527 child E5] A declared name that resolves to
+        // no single holder (two packages declare it) is refused, naming every
+        // candidate, and never materialized: no instance is picked by list
+        // order ({@link refusedConnectorNames}).
+        const refusedNames = this.refusedDeclaredConnectorNames(ctx, declared);
+        for (const [name, refusal] of refusedNames) {
+            const stored = declared.some((raw) => (raw as DeclaredConnectorItem)?.name === name && storedEntry(raw));
+            fail(`[Automation] connector instance '${name}' is not materialized: ${refusal.message}`, undefined, stored);
+        }
+
         // Build the desired set: enabled provider-bound instances, keyed by name.
         // A descriptor (no `provider`) or an `enabled: false` instance is not
         // desired — if we materialized it before, it is torn down below.
@@ -2947,6 +2984,7 @@ export class AutomationServicePlugin implements Plugin {
             if (typeof entry.provider !== 'string' || entry.provider.length === 0) continue;
             const bound = entry as DeclaredConnectorItem & { name: string; provider: string };
             if (bound.enabled === false) continue;
+            if (refusedNames.has(bound.name)) continue;
             // [#28713] Held until every plugin has started ({@link holdStoredEntries}).
             if (this.holdStoredEntries && storedEntry(bound)) {
                 this.storedEntriesHeld = true;

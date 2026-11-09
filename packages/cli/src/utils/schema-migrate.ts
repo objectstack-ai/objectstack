@@ -66,6 +66,7 @@ import {
 } from '../commands/doctor.js';
 import { describeDriverConnection, describeDriverSqliteFile } from './connection-display.js';
 import { reserveStdoutForJson } from './json-stdout.js';
+import { acquireSchemaMigrationLock } from './schema-migration-lock.js';
 import {
   buildSchemaMigrationPlugins,
   measureComposedCoverage,
@@ -1469,6 +1470,21 @@ export async function bootSchemaStack(
     : [];
   const plannedDrivers: SqlDriverLike[] = [...servedDrivers, ...declaredDrivers.map((d) => d.driver)];
 
+  // [#31598] One migrator per database at a time. A boot that can apply — a
+  // deferred boot that is not a read-only probe, as `os migrate apply` is —
+  // takes the schema-migration lock on the primary HERE: after a boot that held
+  // its DDL back, before the first read of what is pending, so a migrator that
+  // waited reads only the work the other one left. Released by `shutdown()`,
+  // and by {@link underLock} when this boot throws after taking it.
+  const migrationLock = deferral && opts.readOnlyProbe !== true
+    ? await acquireSchemaMigrationLock(driver, { database: describeDb(driver), warn: (line) => console.warn(line) })
+    : null;
+  const underLock = <T>(work: Promise<T>): Promise<T> =>
+    work.catch(async (error: unknown) => {
+      await migrationLock?.release();
+      throw error;
+    });
+
   // #13028 — the composed host declared its objects in `init()`; the pass that
   // hands them to their driver lives in `ObjectQLPlugin.start()`, which the
   // declaration-phase composition suppressed (and which a host bringing its
@@ -1488,7 +1504,7 @@ export async function bootSchemaStack(
     );
   }
   if (composedHost) {
-    const measured = await measureComposedCoverage(kernel, plannedDrivers, defer, { ddlFree: skipSchemaSync });
+    const measured = await underLock(measureComposedCoverage(kernel, plannedDrivers, defer, { ddlFree: skipSchemaSync }));
     composition.coverage = measured.coverage;
     composition.notes.push(...measured.notes);
   }
@@ -1501,7 +1517,7 @@ export async function bootSchemaStack(
   // [#21391] Every datasource the deferral armed, not only the default's.
   const pendingSchemaWork: PendingSchemaWork[] = [];
   for (const d of deferral?.drivers ?? []) {
-    if (d.previewDeferredSchemaWork) pendingSchemaWork.push(...(await d.previewDeferredSchemaWork()));
+    if (d.previewDeferredSchemaWork) pendingSchemaWork.push(...(await underLock(d.previewDeferredSchemaWork())));
   }
   // [#23022] …and the one table outside the object set, `sys_packages`, which
   // no driver deferral can see. Read-only here; `flushSchemaDdl` creates it.
@@ -1510,7 +1526,7 @@ export async function bootSchemaStack(
   // included: `nonObjectTables` below names the table from it whether or not
   // anything is planned for it.
   const packageStorage = findPackageStorage(kernel);
-  let packageTable = defer && packageStorage ? await planPackageTable(packageStorage, composition.notes) : null;
+  let packageTable = defer && packageStorage ? await underLock(planPackageTable(packageStorage, composition.notes)) : null;
   if (packageTable) pendingSchemaWork.push(packageTable.work);
   sortPendingSchemaWork(pendingSchemaWork);
   // [#21529] The tables the held-back sync would create: measured absent.
@@ -1650,7 +1666,13 @@ export async function bootSchemaStack(
      * `destroy()` closes the ones it owns); a second disconnect is a no-op.
      */
     shutdown: async () => {
-      deferral?.release();
+      // [#31598] The migration lock first, in `finally`: whatever the rest of
+      // the teardown does, the next migrator waiting on it may go.
+      try {
+        deferral?.release();
+      } finally {
+        await migrationLock?.release();
+      }
       try { await kernel.shutdown(); } catch { /* teardown is best-effort */ }
       // [#22579] The sibling is a `DriverPlugin` driver, which owns no teardown
       // of its own: the same backstop as the primary's.

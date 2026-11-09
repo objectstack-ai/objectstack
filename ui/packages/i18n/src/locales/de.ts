@@ -435,6 +435,11 @@ const de = {
     currencyHome: {
       convertedAt: 'Umgerechnet zum Kurs {{rate}} vom {{date}}',
       homeCurrency: 'In der Hauswährung (Kurs 1)',
+      preview: '≈ {{amount}} zum Kurs {{rate}} am {{date}}',
+      previewSame: '≈ {{amount}} (Hauswährung)',
+      awaitingRate: 'Kein {{currency}}-Kurs am oder vor dem {{date}}: Speichern wird abgelehnt, bis einer hinzugefügt ist',
+      awaitingDate: 'Belegdatum angeben, um den Betrag in der Hauswährung zu sehen',
+      rateUnreadable: 'Wird beim Speichern in die Hauswährung umgerechnet',
     },
     boolean: {
       offBadge: "{{label}} — Aus",

@@ -448,6 +448,11 @@ const zhHant = {
     currencyHome: {
       convertedAt: '按匯率 {{rate}}（{{date}}）折算',
       homeCurrency: '本位幣（匯率 1）',
+      preview: '≈ {{amount}}（按匯率 {{rate}}，{{date}}）',
+      previewSame: '≈ {{amount}}（本位幣）',
+      awaitingRate: '{{date}} 及之前沒有 {{currency}} 的匯率：新增匯率之前無法儲存',
+      awaitingDate: '填寫單據日期後顯示本位幣金額',
+      rateUnreadable: '儲存時折算為本位幣',
     },
     boolean: {
       offBadge: '{{label}} — 已關閉',

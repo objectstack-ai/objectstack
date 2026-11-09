@@ -402,10 +402,16 @@ const en = {
       all: 'All currencies (ISO 4217)',
     },
     // ADR-0144 D5 — the home field's read-only hint: the rate and document date
-    // the engine converted the record's amount at (`CurrencyField`, the record page).
+    // the engine converted the record's amount at (`CurrencyField`, the record page);
+    // and the live preview under the amount while it is edited (`homeAmountPreview.tsx`).
     currencyHome: {
       convertedAt: 'Converted at {{rate}} on {{date}}',
       homeCurrency: 'In the home currency (rate 1)',
+      preview: '≈ {{amount}} at {{rate}} on {{date}}',
+      previewSame: '≈ {{amount}} (home currency)',
+      awaitingRate: 'No {{currency}} rate on or before {{date}}: saving is refused until one is added',
+      awaitingDate: 'Set the document date to see the home amount',
+      rateUnreadable: 'Converted to the home currency when you save',
     },
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
