@@ -561,9 +561,10 @@ describe('a no-organization job pull on a real engine: the match lookup carries 
             if (!engine.registry.getObject(o.name)) engine.registry.registerObject(o as any);
         }
         await engine.syncSchemas();
-        // The install's organizations, planted through the driver: the engine
-        // only reads them (its organization probe).
-        for (const id of organizations) await driver.create('sys_organization', { id, name: id });
+        // The install's organizations, planted through the driver (each its own
+        // owner, as the Default Organization row is): the engine only reads
+        // them, through its organization probe.
+        for (const id of organizations) await driver.create('sys_organization', { id, name: id, organization_id: id });
         const knex = (driver as unknown as { knex: any }).knex;
         const protocol = new ObjectStackProtocolImplementation(engine as any) as unknown as ImportProtocolLike;
 
