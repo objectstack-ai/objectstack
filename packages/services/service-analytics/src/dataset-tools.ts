@@ -19,7 +19,7 @@ import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { DatasetSchema, resolveI18nLabel, type Dataset } from '@objectstack/spec/ui';
 import { fieldsFromZodIssues } from '@objectstack/types';
 import type { AnalyticsService } from './analytics-service.js';
-import { datasetDimensionCubeType } from './dataset-compiler.js';
+import { dimensionType } from './dataset-compiler.js';
 import { matchDatasetTerms } from './dataset-term-matcher.js';
 
 /**
@@ -307,7 +307,7 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
           name: d.name,
           label: text(d.label, locale, d.name),
           ...optional('description', text(d.description, locale)),
-          type: datasetDimensionCubeType(d),
+          type: dimensionType(d),
           ...(d.synonyms && d.synonyms.length > 0 ? { synonyms: [...d.synonyms] } : {}),
         } as DatasetToolCatalogDimension)),
         measures: measures.map((m): DatasetToolCatalogMeasure => ({

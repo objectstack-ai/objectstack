@@ -600,7 +600,7 @@ function compileDurationMeasure(
  * the compiled cube and the dataset AI tools' catalogue (`dataset-tools.ts`)
  * both read, so the catalogue names the type the query answer carries.
  */
-export function datasetDimensionCubeType(d: DatasetDimension): CubeDimension['type'] {
+export function dimensionType(d: DatasetDimension): CubeDimension['type'] {
   switch (d.type) {
     case 'date': return 'time';
     case 'number': return 'number';
@@ -875,7 +875,7 @@ export function compileDataset(
       // machine name, which `/analytics/meta` then published as a display title
       // (`title: 'owner'` for a dimension labelled `{ en: 'Owner', … }`).
       label: resolveI18nLabel(d.label, REGISTRY_LOCALE) ?? d.name,
-      type: datasetDimensionCubeType(d),
+      type: dimensionType(d),
       sql: d.field,
     };
     // [ADR-0149 D1/M1] The member's business definition rides onto the Cube
