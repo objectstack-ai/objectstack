@@ -39,6 +39,8 @@ import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
 import {
   AGENT_ACCOUNT_CREDENTIAL_REFUSAL,
   AGENT_ACCOUNT_SESSION_REFUSAL,
+  refuseAgentAccountCredential,
+  refuseAgentAccountSession,
 } from './service-account-identity';
 // [#23184] Vendor modules paid at module load, never inside a clocked case.
 import 'better-auth';
@@ -268,5 +270,25 @@ describe.concurrent('ADR-0151 D2 — an AI service account holds no password and
     const ctx: any = await (await manager.getAuthInstance() as any).$context;
     await ctx.internalAdapter.linkAccount({ userId: personId, providerId: 'github', accountId: 'gh-person' });
     expect(rowsOf(engine, 'sys_account').some((r) => r.user_id === personId && r.provider_id === 'github')).toBe(true);
+  });
+});
+
+describe.concurrent('ADR-0151 D2 — a read of the row that fails refuses', () => {
+  // The kind lives on the row, so a read that fails cannot tell a person from
+  // an account. Both refusals treat it as an account: a sign-in fails closed.
+  const brokenEngine = { find: vi.fn(async () => { throw new Error('db down'); }) };
+
+  it('a session whose user row cannot be read is refused', async () => {
+    await expectRejectedWith(refuseAgentAccountSession(brokenEngine, { userId: 'u_any' }), AGENT_ACCOUNT_SESSION_REFUSAL);
+  });
+
+  it('a credential whose user row cannot be read is refused', async () => {
+    await expectRejectedWith(refuseAgentAccountCredential(brokenEngine, { userId: 'u_any' }), AGENT_ACCOUNT_CREDENTIAL_REFUSAL);
+  });
+
+  it('CONTROL: a readable person row passes both', async () => {
+    const engine = { find: vi.fn(async () => [{ id: 'u_any', principal_kind: 'human' }]) };
+    await expect(refuseAgentAccountSession(engine, { userId: 'u_any' })).resolves.toBeUndefined();
+    await expect(refuseAgentAccountCredential(engine, { userId: 'u_any' })).resolves.toBeUndefined();
   });
 });
