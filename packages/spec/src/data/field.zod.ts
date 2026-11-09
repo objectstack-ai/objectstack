@@ -713,7 +713,11 @@ function refuseSummaryWithoutField(
  * amount resolves the roll-up the same way and no key is added. Whether the
  * child amount it rolls up follows that very code through that very
  * `master_detail` is a question about two objects, answered where both are
- * held, never by this one-config shape.
+ * held, never by this one-config shape. Outside that roll-up a `summary` may
+ * declare only `fixed` (read by the analytics layer); a `count` roll-up, any
+ * `dynamic` config and every other `record` roll-up are refused at the object
+ * door (`refuseUnadmittedSummaryCurrency`) and in `defineStack`'s
+ * cross-reference pass (`collectRecordCurrencyPathErrors`).
  *
  * Note: Currency codes are validated by length only (3 characters) to support:
  * - Standard ISO 4217 codes (USD, EUR, CNY, etc.)
@@ -2237,7 +2241,7 @@ export const FieldSchema = lazySchema(() => {
 
   // Currency config — read for a `currency` field and for a `formula` whose
   // `returnType` is `currency` (#22727): one shape for both, never a second one.
-  currencyConfig: CurrencyConfigSchema.optional().describe('Which currency an amount is in: for a currency field, for a formula field whose returnType is currency, and for a summary that rolls up, through a master_detail, child amounts that follow this record\'s currency (`currencyMode: \'record\'` naming this object\'s own code field). Absent: dynamic mode.'),
+  currencyConfig: CurrencyConfigSchema.optional().describe('Which currency an amount is in: for a currency field, for a formula field whose returnType is currency, and for a summary that rolls up, through a master_detail, child amounts that follow this record\'s currency (`currencyMode: \'record\'` naming this object\'s own code field). A summary may otherwise declare only `currencyMode: \'fixed\'`, when every amount it reads is in that one currency; a `count` summary, `dynamic` on a summary and any other `record` roll-up are refused. Absent: dynamic mode, and no currency on a summary.'),
 
   // Vector field — flat dimensionality (the live authoring path).
   // The renderer reads this flat sibling (read point recorded in
