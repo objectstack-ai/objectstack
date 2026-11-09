@@ -253,9 +253,12 @@ jobs:
             # so the tag would not hold DIGEST at all.
             docker buildx imagetools create --prefer-index=false --tag "$TAG" "$IMAGE@$DIGEST"
             HELD="$(held)"
-          fi
-          if [ "$HELD" != "$DIGEST" ]; then
-            echo "::error::$TAG holds ${HELD:-nothing}, not $DIGEST. A digest tag is never re-pointed, so nothing was changed; read the tag's history in the package's settings before touching it."
+            if [ "$HELD" != "$DIGEST" ]; then
+              echo "::error::wrote $TAG, but it reads back as ${HELD:-nothing}, not $DIGEST, so $DIGEST is not yet held by a tag of its own."
+              exit 1
+            fi
+          elif [ "$HELD" != "$DIGEST" ]; then
+            echo "::error::$TAG already holds $HELD, not $DIGEST. A digest tag is never re-pointed, so nothing was changed; read the tag's history in the package's settings before touching it."
             exit 1
           fi
           echo "$TAG holds $DIGEST"
@@ -338,9 +341,12 @@ jobs:
             # so the tag would not hold DIGEST at all.
             docker buildx imagetools create --prefer-index=false --tag "$TAG" "$IMAGE@$DIGEST"
             HELD="$(held)"
-          fi
-          if [ "$HELD" != "$DIGEST" ]; then
-            echo "::error::$TAG holds ${HELD:-nothing}, not $DIGEST. A digest tag is never re-pointed, so nothing was changed; read the tag's history in the package's settings before touching it."
+            if [ "$HELD" != "$DIGEST" ]; then
+              echo "::error::wrote $TAG, but it reads back as ${HELD:-nothing}, not $DIGEST, so $DIGEST is not yet held by a tag of its own."
+              exit 1
+            fi
+          elif [ "$HELD" != "$DIGEST" ]; then
+            echo "::error::$TAG already holds $HELD, not $DIGEST. A digest tag is never re-pointed, so nothing was changed; read the tag's history in the package's settings before touching it."
             exit 1
           fi
           echo "$TAG holds $DIGEST"
