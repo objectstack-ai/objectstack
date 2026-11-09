@@ -267,6 +267,43 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      register_service_account: {
+        label: "Registrar cuenta de servicio de IA",
+        description: "Registra una cuenta de servicio de IA en esta organización: una identidad propia para un agente que funciona sin una persona y que actúa solo mediante las claves de API creadas para ella. No puede hacer nada hasta que se le concedan conjuntos de permisos, y nunca tiene acceso de administrador.",
+        successMessage: "Cuenta de servicio de IA registrada",
+        params: {
+          name: {
+            label: "Nombre",
+            helpText: "Qué es el agente y para qué sirve. Con este nombre se reconoce la cuenta en la lista de usuarios y en el registro de auditoría."
+          },
+          ownerId: {
+            label: "Responsable",
+            helpText: "La persona responsable de esta cuenta, miembro de esta organización. Déjalo vacío para ser tú el responsable."
+          }
+        }
+      },
+      create_service_account_key: {
+        label: "Crear clave de API",
+        description: "Crea una clave de API para esta cuenta de servicio de IA. La clave actúa como la cuenta, con los permisos propios de la cuenta, en la organización de la cuenta.",
+        params: {
+          name: {
+            label: "Nombre de la clave"
+          },
+          expires_at: {
+            label: "Caduca el",
+            helpText: "Déjelo vacío para usar la duración predeterminada de la clave definida en Configuración → Autenticación → Claves de API (90 días si no se ha cambiado). Una fecha posterior a la duración máxima de la clave definida allí se rechaza."
+          }
+        },
+        resultDialog: {
+          title: "Clave de API creada",
+          description: "Copia la clave ahora: solo se muestra una vez y no se puede recuperar. Si se filtra, revócala y crea una nueva.",
+          acknowledge: "He guardado la clave",
+          fields: {
+            key: "Clave de API",
+            expires_at: "Caduca el"
+          }
+        }
+      },
       update_my_profile: {
         label: "Actualizar perfil",
         successMessage: "Perfil actualizado"

@@ -1951,6 +1951,10 @@ function refuseDishonestRecordCurrencyField(
   for (const [name, field] of Object.entries(map)) {
     const config = field?.currencyConfig as { currencyMode?: unknown; currencyField?: unknown } | undefined;
     if (config?.currencyMode !== 'record' || typeof config.currencyField !== 'string') continue;
+    // A `count` roll-up may carry no currency at all, so its pointer is not
+    // worth judging: {@link refuseUnadmittedSummaryCurrency} refuses the whole
+    // config, once.
+    if (summaryRollupOf(field)?.function === 'count') continue;
     const target = config.currencyField;
     const candidates = Object.keys(map).filter((k) => k !== name && isCodeField(map[k]!));
     const prescription =
@@ -2104,6 +2108,97 @@ function refuseDishonestRecordCurrencyPath(
           : '')
         + remedy,
     });
+  }
+}
+
+/** A `summary` field's `summaryOperations`, or `undefined` for any other field (or a roll-up with none). */
+function summaryRollupOf(field: unknown): { function?: unknown; object?: unknown; field?: unknown } | undefined {
+  if (field === null || typeof field !== 'object' || (field as { type?: unknown }).type !== 'summary') return undefined;
+  const ops = (field as { summaryOperations?: unknown }).summaryOperations;
+  return ops !== null && typeof ops === 'object' ? (ops as { function?: unknown; object?: unknown; field?: unknown }) : undefined;
+}
+
+/**
+ * [ADR-0144 D6, amended 2026-11-09 by #31743] The half of "a `summary` carries
+ * a currency only where one is admitted" that the summary's own object can
+ * see. Ruling A admits one roll-up in the parent's currency: "A `summary`
+ * rolled up through that same master_detail is single-currency by
+ * construction, and is admitted in the parent's currency"; every other
+ * roll-up keeps D6's first bullet. The refusal set is the spec seat's claim
+ * amend 1 on #31958 (record 6746006322), after measuring which modes a reader
+ * consumes on a summary:
+ *
+ *  - a `count` roll-up refuses every mode, `fixed` included. A count is a
+ *    number of rows, never an amount, so a currency on it is wrong whichever
+ *    reader sees it (the analytics layer relays both a `fixed` code and a
+ *    `record` pointer for any field type);
+ *  - `dynamic` is refused on every summary. No reader consumes it there (the
+ *    Console's roll-up faces read no `currencyConfig`, and the analytics layer
+ *    relays only `fixed` and `record`), so it declares a currency nothing
+ *    draws. An absent `currencyMode` parses as `dynamic`, so `{}` meets it too;
+ *  - `record` on a roll-up that reads no child amount (no `summaryOperations`)
+ *    is refused: it is not the admitted roll-up, whatever it names.
+ *
+ * `fixed` stays accepted on a `sum` / `min` / `max` / `avg` roll-up: the
+ * analytics layer reads its code (`assertMeasureCurrenciesCoherent` refuses a
+ * measure labelling it another currency), and a fixed roll-up over amounts in
+ * that one currency is honest. Whether a `record` roll-up is the admitted one
+ * needs the child object, so `defineStack`'s cross-reference pass judges it
+ * (`collectRecordCurrencyPathErrors`, stack.zod.ts).
+ *
+ * Judged on the authored object only, as the other currency doors are: a
+ * standalone `FieldSchema`, `CurrencyConfigSchema` and an extension's fields
+ * parse what they parsed before.
+ */
+function refuseUnadmittedSummaryCurrency(
+  ownName: unknown,
+  fields: unknown,
+  ctx: z.RefinementCtx,
+): void {
+  if (fields === null || typeof fields !== 'object') return;
+  const objectName = typeof ownName === 'string' ? ownName : '<unnamed>';
+  for (const [name, field] of Object.entries(fields as Record<string, unknown>)) {
+    if (field === null || typeof field !== 'object' || (field as { type?: unknown }).type !== 'summary') continue;
+    const config = (field as { currencyConfig?: unknown }).currencyConfig;
+    if (config === null || typeof config !== 'object') continue;
+    const mode = (config as { currencyMode?: unknown }).currencyMode ?? 'dynamic';
+    const ops = summaryRollupOf(field);
+    const at = `\`${name}\` is a \`summary\` field of object \`${objectName}\``;
+    const path = ['fields', name, 'currencyConfig'];
+    const admitted =
+      'A roll-up carries a currency in two cases only: `currencyMode: \'fixed\'` when every amount it reads is in that '
+      + 'one currency, and `currencyMode: \'record\'` naming this object\'s own code field when it rolls up, through a '
+      + '`master_detail`, child amounts whose `currencyField` follows this record through that very field '
+      + '(`MASTER_DETAIL_FIELD.CODE_FIELD`).';
+    if (ops?.function === 'count') {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `${at} that counts child rows (\`function: 'count'\`) and declares \`currencyMode: '${String(mode)}'\`. `
+          + 'A count is a number of rows, never an amount, so it has no currency: delete `currencyConfig`. '
+          + admitted,
+      });
+      continue;
+    }
+    if (mode === 'dynamic') {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `${at} declaring \`currencyMode: 'dynamic'\` (an absent \`currencyMode\` is \`dynamic\`). No reader `
+          + 'draws a roll-up in the tenant default currency, so the declaration changes nothing: delete `currencyConfig`, '
+          + 'or declare the currency the amounts are in. ' + admitted,
+      });
+      continue;
+    }
+    if (mode === 'record' && (ops === undefined || typeof ops.object !== 'string' || typeof ops.field !== 'string')) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `${at} declaring \`currencyMode: 'record'\` with no \`summaryOperations\` naming a child amount, so it `
+          + 'rolls up no amount that could follow this record\'s currency: delete `currencyConfig`, or declare the '
+          + 'roll-up. ' + admitted,
+      });
+    }
   }
 }
 
@@ -4210,6 +4305,9 @@ const ObjectSchemaBase = strictObject(
   // [ADR-0144 D2] A `record`-mode amount's `currencyField` names a declared
   // ISO 4217 `text` sibling — the same door: only the object holds the map.
   refuseDishonestRecordCurrencyField(object.name, object.fields, ctx);
+  // [ADR-0144 D6, amended] A `summary` carries a currency only where one is
+  // admitted; the half its own object can see — same door.
+  refuseUnadmittedSummaryCurrency(object.name, object.fields, ctx);
   // [ADR-0144 D5] Its `homeAmount` names a `dynamic` currency home field, a
   // date and a number rate field, the two written ones `readonly` — same door.
   refuseDishonestHomeAmount(object.name, object.fields, ctx);

@@ -165,6 +165,11 @@ export {
   API_KEY_REVOKED_CODE,
   API_KEY_LIFECYCLE_REFUSAL_STATUS,
   apiKeyLifecyclePolicySourceOf,
+  // [ADR-0151 D4] The one signing-expiry rule both mint doors apply.
+  readRequestedApiKeyExpiry,
+  signApiKeyExpiry,
+  type ApiKeyExpiryRefusal,
+  type ApiKeyExpiryCeilingRefusal,
   ApiKeyLifecycleRefusalError,
   isApiKeyLifecycleRefusalError,
   type ApiKeyLifecyclePolicySource,
@@ -462,6 +467,8 @@ export {
   type SecurityCatalogReader,
   // ADR-0150 D3/D4/D7 — permission sets by (package, name), the resolver handed in.
   resolveCatalogReference,
+  // ADR-0150 D8 — a stored reference read by its package column (R1, R3).
+  storedPermissionSetScope,
   type SecurityCatalogPackageScopedRegistry,
   type SecurityCatalogReferenceScope,
   type SecurityCatalogResolution,

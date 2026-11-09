@@ -45,14 +45,16 @@
  * left behind. A suggesting package's own set answers at D3's step 1 even
  * beside such a clash: that is D3's answer for the package, not a pick.
  *
- * ## What it does not change
+ * ## Who reads the column, and who writes it
  *
- * No reader or writer moves onto the column (ADR-0150 red line 3): the
- * authorization resolver still reads a grant by name, a suggestion is still
- * confirmed by name, and no writer stamps the column — a row written after a
- * boot is bound by the next one. The readers that will read it are the
- * permission-set children that follow (the B child for permission sets; S4's
- * upgrade report). No unique key changes.
+ * The readers read it (ADR-0150 D8): a row naming a package reads that
+ * package's set and no other, and a row naming none resolves by the rule above
+ * — so a name the rule refuses confers nothing at read and is never picked
+ * (`storedPermissionSetScope`, `@objectstack/core`). Every write after the
+ * holders are sealed is stamped by the same rule
+ * (`stored-permission-set-package-stamp.ts`); a write before then is bound by
+ * this backfill at `kernel:bootstrapped`. A row left null as ambiguous is the
+ * operator's to bind ({@link bindCommandFor}). No unique key changes.
  *
  * ## Re-runnable
  *
@@ -110,6 +112,17 @@ export const STORED_PERMISSION_SET_REFERENCES: readonly StoredPermissionSetRefer
 
 /** The suggestion table, whose `package_id` the backfilled column is compared with. */
 const SUGGESTION_OBJECT = 'sys_audience_binding_suggestion';
+
+/**
+ * [ADR-0150 D10] The operator's fix for a stored reference the rule refuses:
+ * the reviewed one-row bind of `os migrate stored-references`, named in every
+ * refusal a reader of the column reports. `PACKAGE` is one of the candidates
+ * the refusal names.
+ */
+export function bindCommandFor(object: string, id?: unknown): string {
+  const row = typeof id === 'string' || typeof id === 'number' ? String(id) : 'ID';
+  return `os migrate stored-references bind --table ${object} --id ${row} --package PACKAGE`;
+}
 
 /** Infrastructure rows, written and read the way the platform's own passes do. */
 const SYSTEM_CTX = { isSystem: true } as const;
@@ -398,7 +411,8 @@ export async function backfillStoredPermissionSetPackagesAtBoot(
     } catch (e: unknown) {
       logger.warn(
         `[security] the ${reference.object}.${reference.packageColumn} backfill did not finish: rows that name no package ` +
-          'keep naming none, every reader still reads the set by name as before, and the next boot tries again.',
+          'keep naming none, a reader resolves each by the one rule (one holder answers, two or more confer nothing), ' +
+          'and the next boot tries again.',
         { error: e instanceof Error ? e.message : String(e) },
       );
       continue;
@@ -421,9 +435,10 @@ export function logStoredReferenceBackfill(report: StoredReferenceBackfillReport
   if (report.ambiguous.length > 0) {
     logger.warn(
       `[security] ${at}: these permission-set names have no one holder for the package that wrote them (more than ` +
-        'one holder, or none it depends on), so none is picked and each row is left naming no package. Every reader ' +
-        'still reads the set by name, as before — ' +
-        report.ambiguous.map((a) => `'${a.name}'${askedBy(a)} (${rowsOf(a.rows)}; ${a.reason}; held by ${a.candidates.join('; ')})`).join(', ') + '.',
+        'one holder, or none it depends on), so none is picked, each row is left naming no package, and a read of it ' +
+        'confers nothing — ' +
+        report.ambiguous.map((a) => `'${a.name}'${askedBy(a)} (${rowsOf(a.rows)}; ${a.reason}; held by ${a.candidates.join('; ')})`).join(', ') +
+        `. List the rows with \`os migrate stored-references\`, review each, and bind one with \`${bindCommandFor(report.object)}\`.`,
       { ambiguous: report.ambiguous },
     );
   }

@@ -50,7 +50,7 @@
 import {
     isGrantActive, effectiveTenancyPosture, AuthzStoreUnavailableError,
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
-    apiKeyLifecyclePolicySourceOf,
+    apiKeyLifecyclePolicySourceOf, readRequestedApiKeyExpiry, signApiKeyExpiry,
 } from '@objectstack/core';
 import type { ApiKeyLifecyclePolicy } from '@objectstack/spec/contracts';
 import { postureEnforcesWall } from '@objectstack/spec/security';
@@ -60,16 +60,6 @@ import { buildApiError } from '../error-envelope.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 import { readDispatchedBody } from '../deferred-request-body.js';
-
-const DAY_MS = 86_400_000;
-
-/**
- * [#23367] The clock skew the ceiling forgives. A client that computes "one
- * year from now" on its own clock and sends it is asking for exactly the
- * ceiling; a client clock a few seconds ahead of the server's must not turn
- * that into a refusal.
- */
-const EXPIRY_CEILING_SKEW_MS = 60_000;
 
 /** [#23367] The ceiling refusal, as its wire pair (ADR-0112 ledger, `@objectstack/runtime`). */
 const API_KEY_EXPIRY_TOO_LONG = { code: 'API_KEY_EXPIRY_TOO_LONG', status: 400 } as const;
@@ -180,19 +170,13 @@ export async function handleKeysRequest(
     const rawName = typeof body?.name === 'string' ? body.name.trim() : '';
     const name = rawName || 'API Key';
 
-    let requestedMs: number | undefined;
-    if (body?.expires_at != null && body.expires_at !== '') {
-        const ms = typeof body.expires_at === 'number'
-            ? (body.expires_at < 1e12 ? body.expires_at * 1000 : body.expires_at)
-            : Date.parse(String(body.expires_at));
-        if (Number.isNaN(ms)) {
-            return { handled: true, response: deps.error('Invalid expires_at: must be a parseable date', 400) };
-        }
-        if (ms <= Date.now()) {
-            return { handled: true, response: deps.error('Invalid expires_at: must be in the future', 400) };
-        }
-        requestedMs = ms;
+    // [#23367, ADR-0151 D4] The one signing-expiry rule (core), shared with
+    // the AI service account key door: step 1, the date asked for.
+    const requested = readRequestedApiKeyExpiry(body?.expires_at, Date.now());
+    if (!requested.ok) {
+        return { handled: true, response: deps.error(requested.message, requested.status) };
     }
+    const requestedMs = requested.requestedMs;
 
     const ql = (await deps.getObjectQL(context, context.environmentId))
         ?? (await deps.resolveService(context, 'objectql', context.environmentId));
@@ -267,28 +251,20 @@ export async function handleKeysRequest(
         throw new AuthzStoreUnavailableError('api_key_policy', err);
     }
 
-    const nowMs = Date.now();
-    let expiresAt: string | undefined;
-    if (requestedMs !== undefined) {
-        if (policy && requestedMs > nowMs + policy.maxExpiryDays * DAY_MS + EXPIRY_CEILING_SKEW_MS) {
-            const latest = new Date(nowMs + policy.maxExpiryDays * DAY_MS).toISOString();
-            return {
-                handled: true,
-                response: deps.error(
-                    `expires_at ${new Date(requestedMs).toISOString()} is further away than this deployment allows: the `
-                    + `Authentication API key policy's Maximum key lifetime is ${policy.maxExpiryDays} days, so the `
-                    + `latest expiry a key signed now may have is ${latest}. Ask for that date or an earlier one, and `
-                    + 'rotate the key before it expires.',
-                    API_KEY_EXPIRY_TOO_LONG.status,
-                    { code: API_KEY_EXPIRY_TOO_LONG.code },
-                ),
-            };
-        }
-        expiresAt = new Date(requestedMs).toISOString();
-    } else if (policy) {
-        // No expiry asked for: the policy's default life, never a permanent key.
-        expiresAt = new Date(nowMs + policy.defaultExpiryDays * DAY_MS).toISOString();
+    // Step 2, the policy: the default life when no date was asked for (never a
+    // permanent key), the ceiling refusal when the date is too far away.
+    const signed = signApiKeyExpiry(policy, requestedMs, Date.now());
+    if (!signed.ok) {
+        return {
+            handled: true,
+            response: deps.error(
+                signed.message,
+                API_KEY_EXPIRY_TOO_LONG.status,
+                { code: API_KEY_EXPIRY_TOO_LONG.code },
+            ),
+        };
     }
+    const expiresAt = signed.expiresAt;
 
     if (walled && !activeOrganizationId) {
         // Refuse rather than mint. Under a walled posture an org-less key

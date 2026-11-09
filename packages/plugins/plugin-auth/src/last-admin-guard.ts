@@ -337,6 +337,7 @@ import {
 } from '@objectstack/core';
 
 import { isOrgAdminGrade } from './invitation-role-cap.js';
+import { isAgentAccountRow } from './service-account-identity.js';
 import { GRANT_SET_NAME_FIELD, grantSetNameOf } from './grant-set-name.js';
 
 /** `sys_user_permission_set` has no `SystemObjectName` member; it is spelled once, here. */
@@ -783,9 +784,15 @@ export const MEMBER_STANDING_KEYS = ['role', 'user_id', 'userId'] as const;
  * [ADR-0131 D4] The enumeration reads WHICH set by the grant's name,
  * `permission_set`, and only by it (the legacy `permission_set_id` is retired,
  * C7b, and a write naming it is refused as an undeclared field).
+ *
+ * [ADR-0150 D8 R1] `permission_set_package` names which holder's set that
+ * name is, and the resolver confers the set (and `admin_full_access`'s
+ * standing) only when that package holds it — so a payload re-pointing it
+ * pays for the enumeration like one re-pointing the name.
  */
 export const GRANT_STANDING_KEYS = [
   'permission_set',
+  'permission_set_package',
   'user_id',
   'userId',
   'organization_id',
@@ -1293,6 +1300,14 @@ function createStandingReader(engine: Pick<LastAdminGuardEngine, 'find'>, maxSca
    * `standing: 'platform-admins'` skips half 2 (organization owners and
    * admins), which is no platform-admin standing; the guard always reads all
    * three halves.
+   *
+   * [ADR-0151 D2/D3] An AI service account is never one of them, whatever
+   * its grade or its grants say: it holds no administrator standing (the
+   * resolver withholds every administrator set from it) and it can never
+   * sign in, so it is no escape hatch. The ids the three halves found are
+   * read once more, by id, and every account among them is dropped. The kind
+   * never changes (`service-account-identity.ts`), so no pending write can
+   * move a row onto or off it, and the stored rows are what is read.
    */
   const resolveAdminUserIds = async (
     op: StandingReadOp,
@@ -1468,6 +1483,16 @@ function createStandingReader(engine: Pick<LastAdminGuardEngine, 'find'>, maxSca
     // The legacy service account is not loginable — it can never be the escape
     // hatch, so it must not be counted as one.
     ids.delete(SystemUserId.SYSTEM);
+
+    // [ADR-0151 D2/D3] Nor is an AI service account (see above). Whole rows,
+    // by id: the kind is read off the row the way the resolver reads it.
+    if (ids.size > 0) {
+      const found = await scan(op, SystemObjectName.USER, { where: { id: { $in: [...ids] } } });
+      for (const row of found) {
+        const uid = toId(row.id);
+        if (uid && isAgentAccountRow(row)) ids.delete(uid);
+      }
+    }
     return ids;
   };
 

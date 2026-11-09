@@ -66,10 +66,18 @@
  * declared-closure walk, `packageResolutionClosure`
  * (`@objectstack/metadata-core`). ⛔ No second rule, no second closure.
  *
- *  - **Who asks.** A stored grant (`sys_user_permission_set`) carries only the
- *    name today (its package column is ADR-0150 D8's R1), so it — and every
- *    other by-name read with no position — resolves as a caller with no
- *    package. A position's `permissionSets` resolves from the package that
+ *  - **Who asks.** A stored reference that carries its package column
+ *    (ADR-0150 D8: a grant's `sys_user_permission_set.permission_set_package`,
+ *    R1; a suggestion's, R3) names the exact holder, passed as
+ *    {@link SecurityCatalogReferenceScope.packageId}: that package's set. A
+ *    stale column (that package no longer serves the set) reads as a null
+ *    one, said once. One whose column is null resolves by D3 from the package that
+ *    wrote it ({@link SecurityCatalogReferenceScope.callerPackageId}, R3's
+ *    `package_id`), or as a caller with no package (a grant, R1, and every
+ *    other by-name read with no position) — so two holders are refused,
+ *    naming every candidate, and never picked
+ *    ({@link storedPermissionSetScope} builds the scope from a row). A
+ *    position's `permissionSets` resolves from the package that
  *    declared the position (ADR-0150 D7), passed as
  *    {@link SecurityCatalogReferenceScope.position}. Three positions are the
  *    environment's reference instead, resolved as a caller with no package:
@@ -238,6 +246,12 @@ export interface SecurityCatalogSources {
   registry: SecurityCatalogRegistry | (SecurityCatalogRegistry & SecurityCatalogPackageScopedRegistry);
   /** The kernel `metadata` service. */
   metadata: SecurityCatalogMetadataService;
+  /**
+   * [ADR-0150 D8] Where a stale stored package column is said, once per
+   * (package, name) for the reader's life: a column naming a package that no
+   * longer serves the set (module doc, "Who asks"). Optional; unsaid without.
+   */
+  logger?: { warn(message: string, meta?: Record<string, unknown>): void };
 }
 
 /** One catalog definition, as the reader that answered holds it. */
@@ -267,6 +281,45 @@ export interface SecurityCatalogReferenceScope {
    * for a permission set only.
    */
   readonly position?: SecurityCatalogEntry;
+  /**
+   * [ADR-0150 D8] The package a stored reference names beside the set — its
+   * `permission_set_package` column (R1, R3): the exact holder, never a
+   * caller, read ahead of every other member here. When that package no
+   * longer serves the set (it moved on an upgrade, or was renamed and its name
+   * taken by another), the column is stale and the reference is read as one
+   * with no package: by D3, from {@link callerPackageId} or with no caller —
+   * one holder grants, two are refused naming every candidate — and the stale
+   * column is said once (`SecurityCatalogSources.logger`). Read for a
+   * permission set only.
+   */
+  readonly packageId?: string;
+  /**
+   * [ADR-0150 D3] The package that WROTE a stored reference whose package
+   * column is null (R3's `package_id`): the set resolves from it, by D3.
+   * `null` is a caller with no package. Read for a permission set only,
+   * ahead of {@link SecurityCatalogReferenceScope.position}.
+   */
+  readonly callerPackageId?: string | null;
+}
+
+/**
+ * [ADR-0150 D8] The scope a stored reference to a permission set is read in:
+ * its package column when it carries one (the exact holder), and the package
+ * that wrote it (R3's `package_id`) — the D3 caller a null or stale column is
+ * read from — else none: a caller with no package (R1). Blank values read as
+ * absent.
+ */
+export function storedPermissionSetScope(
+  packageColumn: unknown,
+  writerPackageId?: unknown,
+): SecurityCatalogReferenceScope | undefined {
+  const column = typeof packageColumn === 'string' && packageColumn.trim() !== '' ? packageColumn.trim() : undefined;
+  const writer = typeof writerPackageId === 'string' && writerPackageId.trim() !== '' ? writerPackageId.trim() : undefined;
+  if (column === undefined && writer === undefined) return undefined;
+  return {
+    ...(column !== undefined ? { packageId: column } : {}),
+    ...(writer !== undefined ? { callerPackageId: writer } : {}),
+  };
 }
 
 /** [ADR-0150 D3] A by-name read's whole answer — a refusal included, naming every candidate. */
@@ -388,6 +441,27 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
   /** [ADR-0150 D3/D4] The registry, when it is read by `(package, name)` (module doc). */
   const scoped = isScoped ? (registry as SecurityCatalogRegistry & SecurityCatalogPackageScopedRegistry) : undefined;
 
+  /** [ADR-0150 D8] Each stale (package, name) column is said once (`SecurityCatalogSources.logger`). */
+  const staleSaid = new Set<string>();
+  const warnStale = (packageId: string, name: string, answer: SecurityCatalogResolution): void => {
+    const key = `${packageId}::${name}`;
+    if (!sources.logger || staleSaid.has(key)) return;
+    staleSaid.add(key);
+    const read = answer.status === 'resolved'
+      ? `it now reads ${answer.entry.packageId ? `package "${answer.entry.packageId}"'s set` : 'the environment\'s set'}`
+      : answer.status === 'refused'
+        ? `it is refused: ${answer.message}`
+        : 'nothing serves it';
+    try {
+      sources.logger.warn(
+        `[security] a stored reference names permission set "${name}" of package "${packageId}", which no longer serves it; `
+          + `it is read by the resolution rule instead, as a reference with no package is, and ${read}. `
+          + 'Review it with `os migrate stored-references` and bind it again.',
+        { type: 'permission', name, packageId, answer: answer.status },
+      );
+    } catch { /* a sink that throws says nothing; the read goes on */ }
+  };
+
   /** A definition the reader may serve: an object, named as asked, of an enabled package. */
   const servable = (value: unknown, name?: string): Definition | undefined => {
     if (!isDefinition(value)) return undefined;
@@ -499,10 +573,35 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
     name: string,
     reference: SecurityCatalogReferenceScope | undefined,
   ): Promise<SecurityCatalogResolution> => {
+    const exact = reference?.packageId;
+    if (typeof exact === 'string' && exact !== '') {
+      // [ADR-0150 D8] The stored package column: that package's set, or
+      // nothing — never another holder of the name, and never the metadata
+      // service's by-name body.
+      let item: unknown;
+      try {
+        item = scope.getPackageScopedItem('permission', name, exact);
+      } catch (error) {
+        throw unreadable('registry', 'permission', error);
+      }
+      const definition = servable(item, name);
+      if (definition) return { status: 'resolved', entry: entry('permission', definition, 'registry') };
+      // A stale column — the set moved to another package on an upgrade, or
+      // was renamed and its name taken by another — is read as an unbound
+      // row: the rule below grants the one holder and refuses two, naming
+      // every candidate. Never not-found on its own say: a grant would be
+      // dropped silently where a column-less one is honoured.
+      const { packageId: _stale, ...unbound } = reference as SecurityCatalogReferenceScope;
+      const answer = await resolvePermissionScoped(scope, name, unbound);
+      warnStale(exact, name, answer);
+      return answer;
+    }
     let caller: string | null;
     let outcome: PackageScopedResolution;
     try {
-      caller = referenceCaller(scope, reference?.position);
+      caller = reference && 'callerPackageId' in reference
+        ? (reference.callerPackageId ?? null)
+        : referenceCaller(scope, reference?.position);
       outcome = resolvePackageScopedHolders(
         { type: 'permission', name, callerPackageId: caller },
         {
