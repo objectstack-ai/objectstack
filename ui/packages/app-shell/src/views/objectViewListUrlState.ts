@@ -11,7 +11,10 @@ import { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import type { SetURLSearchParams } from 'react-router-dom';
 import type { useAuth } from '@object-ui/auth';
 import type { usePermissions } from '@object-ui/permissions';
+import { useObjectTranslation } from '@object-ui/i18n';
+import { toast } from 'sonner';
 import {
+    LIST_FILTER_PARAM,
     parseUserFilterParams,
     applyUserFilterParams,
     parseListStateParams,
@@ -98,6 +101,25 @@ export function acceptStoredFilters(
     return conditions.length > 0 ? { ...group, conditions } : undefined;
 }
 
+/**
+ * objectstack#31869 — how many conditions a link's `uf__filter` carries, read
+ * from the envelope itself, before any check: `0` for no param, or for a
+ * value that is not the `{ logic, conditions }` envelope at all (that link
+ * carries no filter to refuse, and opens as it always did).
+ */
+function linkFilterConditionCount(searchParams: URLSearchParams): number {
+    const raw = searchParams.get(LIST_FILTER_PARAM);
+    if (!raw) return 0;
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(raw);
+    } catch {
+        return 0;
+    }
+    if (!isRecord(parsed) || (parsed.logic !== 'and' && parsed.logic !== 'or')) return 0;
+    return Array.isArray(parsed.conditions) ? parsed.conditions.length : 0;
+}
+
 export function useObjectViewListUrlState({
     objectName,
     objectDef,
@@ -157,8 +179,26 @@ export function useObjectViewListUrlState({
      *
      * Both seeds pass the same field gate (`acceptField`, objectstack#28949):
      * a field stored before it was deleted, or before this user lost read on
-     * it, is dropped exactly as a stale link's is, and the rest of the state
-     * opens as stored.
+     * it, is dropped, and the rest of the stored state opens as stored.
+     *
+     * A LINK's filter is judged whole (objectstack#31869): when the gate or
+     * the spec's rule schema drops any of the conditions its `uf__filter`
+     * carries, the whole filter is refused — the list opens on the view's own
+     * filter, the address bar loses `uf__filter`, and one notice says so.
+     * Keeping the rest would answer a different question than the link asked:
+     * dropping an AND condition widens the list, dropping an OR one narrows
+     * it, and the reader could not tell. The server's predicate guard takes
+     * the same posture (reject, never rewrite). The link's search, sort and
+     * grouping still apply. The stored state keeps the per-entry drop above:
+     * it is the reader's own state, gone stale.
+     *
+     * The gate reads field permissions only once they are loaded, the same
+     * gate `ListView` puts on its columns. A link opened before then is judged
+     * on the declaration alone, and a condition on a field this reader cannot
+     * read reaches the server, whose predicate guard refuses the query (403):
+     * loud, never a wider list. The seed does not wait for permissions:
+     * `isLoaded` has no loading-or-failed partner, so a wait could never end
+     * on a host whose permission read failed.
      *
      * Then the seed is written back into the URL (replace, never a new history
      * entry), so the address bar shows the list on screen: a restored filter
@@ -182,7 +222,15 @@ export function useObjectViewListUrlState({
     const listIdentityKey = activeView?.id
         ? `${objectName}-${activeView.id}${listResetGeneration ? `~${listResetGeneration}` : ''}`
         : undefined;
-    const listSeedRef = useRef<{ key: string; source: 'url' | 'storage'; state: ListUrlState; reset?: boolean } | undefined>(undefined);
+    const listSeedRef = useRef<{
+        key: string;
+        source: 'url' | 'storage';
+        state: ListUrlState;
+        reset?: boolean;
+        /** objectstack#31869 — the link's `uf__filter` was refused whole; the notice is owed once. */
+        refusedLinkFilter?: boolean;
+    } | undefined>(undefined);
+    const { t } = useObjectTranslation();
     const ownListParamsRef = useRef<string | undefined>(undefined);
     // objectstack#28950 — set by "Reset to view" and taken by the next seed:
     // that list opens from the (just cleared) stored state, never from the
@@ -200,10 +248,16 @@ export function useObjectViewListUrlState({
         const reset = resetPendingRef.current;
         resetPendingRef.current = false;
         if (carried && carried !== ownListParamsRef.current && !reset) {
+            const state = parseListStateParams(searchParams, acceptField);
+            const carriedConditions = linkFilterConditionCount(searchParams);
+            const refusedLinkFilter = carriedConditions > 0
+                && (state.filters?.conditions.length ?? 0) < carriedConditions;
+            if (refusedLinkFilter) delete state.filters;
             listSeedRef.current = {
                 key: listIdentityKey,
                 source: 'url',
-                state: parseListStateParams(searchParams, acceptField),
+                state,
+                refusedLinkFilter,
             };
         } else {
             const stored = readListFilterState(buildListFilterKey(user?.id, objectName, activeView.id));
@@ -234,6 +288,11 @@ export function useObjectViewListUrlState({
         // view the link names once the saved views arrive.
         if (seed.source === 'storage') ownListParamsRef.current = userFilterParamsKey(next);
         if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
+        // objectstack#31869 — once per refused link, whatever replays this effect.
+        if (seed.refusedLinkFilter) {
+            seed.refusedLinkFilter = false;
+            toast.warning(t('console.objectView.linkFilterRefused'));
+        }
         // Once per list identity, by design: later URL writes are the list's
         // own changes, already on screen. (`listPrefs.ready` and
         // `viewResolving` because the seed is taken only once the user's own
