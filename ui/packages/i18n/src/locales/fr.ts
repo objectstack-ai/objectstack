@@ -1271,6 +1271,7 @@ const fr = {
     copyToClipboard: "Copier dans le presse-papiers",
     copied: "Copié !",
     deleteConfirmation: "Êtes-vous sûr de vouloir supprimer cet enregistrement ? Ceci est irréversible.",
+    deleteConfirmQuestion: "Êtes-vous sûr de vouloir supprimer cet enregistrement ?",
     deleted: "Enregistrement supprimé",
     editRecord: "Modifier l'enregistrement",
     viewAll: "Tout afficher",
@@ -2578,6 +2579,10 @@ const fr = {
       bulkDeleteConfirm_one: "Supprimer {{count}} enregistrement sélectionné ? Ceci est irréversible.",
       bulkDeleteConfirm_many: "Supprimer {{count}} d'enregistrements sélectionnés ? Ceci est irréversible.",
       bulkDeleteConfirm_other: "Supprimer {{count}} enregistrements sélectionnés ? Ceci est irréversible.",
+      bulkDeleteQuestion: "Supprimer {{count}} enregistrements sélectionnés ?",
+      bulkDeleteQuestion_one: "Supprimer {{count}} enregistrement sélectionné ?",
+      bulkDeleteQuestion_many: "Supprimer {{count}} d'enregistrements sélectionnés ?",
+      bulkDeleteQuestion_other: "Supprimer {{count}} enregistrements sélectionnés ?",
       duplicateViewName: "Une vue avec ce nom existe déjà.",
       viewTypeGrid: "Grille",
       viewTypeGridDesc: "Tableau de type tableur d'enregistrements.",
@@ -3578,12 +3583,31 @@ const fr = {
     undoFailed: "Impossible d'annuler la modification de navigation",
     updateFailed: "Impossible de mettre à jour la navigation",
   },
+  // ADR-0148 — why a recycle-bin restore was refused, one sentence per code the
+  // restore door answers (`recycleBinRestoreRefusalText` in @object-ui/core).
+  recycleBin: {
+    refusal: {
+      uniqueValueTaken: "Restauration impossible : un autre enregistrement a désormais la même valeur pour {{field}}. Modifiez d’abord cet enregistrement, puis restaurez.",
+      parentPurged: "Restauration impossible : l’enregistrement parent ({{parent}}) a été supprimé définitivement.",
+      packageUninstalled: "Restauration impossible : le package qui fournissait {{object}} a été désinstallé.",
+      parentInRecycleBin: "Restauration pas encore possible : l’enregistrement parent ({{parent}}) est lui aussi dans la corbeille. Restaurez-le d’abord.",
+      notFound: "Cet enregistrement n’est plus dans la corbeille. Il a peut-être été supprimé définitivement.",
+      permissionDenied: "Vous n’êtes pas autorisé à restaurer cet enregistrement.",
+      notAvailable: "La corbeille n’est pas disponible sur ce déploiement.",
+    },
+  },
   objectActions: {
     deleteSuccess: "{{label}} supprimé avec succès",
     deletedNamed: "{{label}} \"{{name}}\" supprimé",
     deleteFailed: "Impossible de supprimer {{label}}",
     noRecordId: "Aucun ID d'enregistrement fourni",
     deleteConfirm: "Supprimer cet enregistrement ? Ceci est irréversible.",
+    // ADR-0148 — a business object's delete goes to the recycle bin: the
+    // question alone, promising neither permanence nor recovery.
+    deleteConfirmQuestion: "Supprimer cet enregistrement ?",
+    restoredNamed: '{{label}} "{{name}}" restauré',
+    restoreSuccess: "{{label}} restauré",
+    restoreFailed: "Impossible de restaurer {{label}}",
     deleteConfirmTitle: "Supprimer {{label}} \"{{name}}\" ?",
     bulkDeleteConfirmTitle: "Supprimer {{count}} enregistrement(s) {{label}} ?",
     bulkDeleteConfirmTitle_one: "Supprimer {{count}} enregistrement {{label}} ?",

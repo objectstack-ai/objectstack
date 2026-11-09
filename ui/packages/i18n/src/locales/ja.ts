@@ -1239,6 +1239,7 @@ const ja = {
     copyToClipboard: "クリップボードにコピー",
     copied: "コピーしました！",
     deleteConfirmation: "このレコードを削除してもよろしいですか？この操作は元に戻せません。",
+    deleteConfirmQuestion: "このレコードを削除してもよろしいですか？",
     deleted: "レコードを削除しました",
     editRecord: "レコードを編集",
     viewAll: "すべて表示",
@@ -2519,6 +2520,9 @@ const ja = {
       bulkDeleteConfirm: "選択した {{count}} 件のレコードを削除しますか？この操作は元に戻せません。",
       bulkDeleteConfirm_one: "選択した {{count}} 件のレコードを削除しますか？この操作は元に戻せません。",
       bulkDeleteConfirm_other: "選択した {{count}} 件のレコードを削除しますか？この操作は元に戻せません。",
+      bulkDeleteQuestion: "選択した {{count}} 件のレコードを削除しますか？",
+      bulkDeleteQuestion_one: "選択した {{count}} 件のレコードを削除しますか？",
+      bulkDeleteQuestion_other: "選択した {{count}} 件のレコードを削除しますか？",
       duplicateViewName: "この名前のビューはすでに存在します。",
       viewTypeGrid: "グリッド",
       viewTypeGridDesc: "スプレッドシート形式のレコード一覧。",
@@ -3515,12 +3519,31 @@ const ja = {
     undoFailed: "ナビゲーションの変更を元に戻せませんでした",
     updateFailed: "ナビゲーションの更新に失敗しました",
   },
+  // ADR-0148 — why a recycle-bin restore was refused, one sentence per code the
+  // restore door answers (`recycleBinRestoreRefusalText` in @object-ui/core).
+  recycleBin: {
+    refusal: {
+      uniqueValueTaken: "復元できません：別のレコードが同じ「{{field}}」の値を使用しています。そのレコードを変更してから復元してください。",
+      parentPurged: "復元できません：所属していた{{parent}}レコードは完全に削除されています。",
+      packageUninstalled: "復元できません：{{object}} を提供していたパッケージはアンインストールされています。",
+      parentInRecycleBin: "まだ復元できません：所属する{{parent}}レコードもごみ箱にあります。先にそのレコードを復元してください。",
+      notFound: "このレコードはもうごみ箱にありません。完全に削除された可能性があります。",
+      permissionDenied: "このレコードを復元する権限がありません。",
+      notAvailable: "この環境ではごみ箱を利用できません。",
+    },
+  },
   objectActions: {
     deleteSuccess: "{{label}} を削除しました",
     deletedNamed: "{{label}}「{{name}}」を削除しました",
     deleteFailed: "{{label}} の削除に失敗しました",
     noRecordId: "レコードIDが指定されていません",
     deleteConfirm: "このレコードを削除してもよろしいですか？この操作は元に戻せません。",
+    // ADR-0148 — a business object's delete goes to the recycle bin: the
+    // question alone, promising neither permanence nor recovery.
+    deleteConfirmQuestion: "このレコードを削除してもよろしいですか？",
+    restoredNamed: "{{label}}「{{name}}」を復元しました",
+    restoreSuccess: "{{label}} を復元しました",
+    restoreFailed: "{{label}} の復元に失敗しました",
     deleteConfirmTitle: "{{label}}「{{name}}」を削除しますか？",
     bulkDeleteConfirmTitle: "{{count}} 件の {{label}} レコードを削除しますか？",
     bulkDeleteConfirmTitle_one: "{{count}} 件の {{label}} レコードを削除しますか？",

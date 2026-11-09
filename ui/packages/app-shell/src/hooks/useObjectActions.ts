@@ -16,6 +16,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useActionRunner } from '@object-ui/react';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { toast } from 'sonner';
+import { usePermissions } from '@object-ui/permissions';
 import {
   recordDelete,
   readCascadeDeleteObjects,
@@ -24,6 +25,7 @@ import {
   type ConfirmationHandler,
   type RecordDeleteConfirmCopy,
 } from '@object-ui/core';
+import { recycleBinRefusalLabelsOf, recycleBinRestoreOf } from '../utils/recycleBinRestore.js';
 
 /** The browser's native box — the fallback when the host passes no `onConfirm`. */
 const nativeConfirm: ConfirmationHandler = async (message) => window.confirm(message);
@@ -111,6 +113,9 @@ export function useObjectActions({
   const navigate = useNavigate();
   const { appName } = useParams();
   const { t } = useObjectTranslation();
+  // ADR-0148 — the delete toast's Undo needs the caller's own-delete restore
+  // grant on the object, read from the effective map (recycleBinRestoreOf).
+  const { effectiveObjects } = usePermissions();
   const baseUrl = `/apps/${appName}`;
 
   const { execute, loading, error, runner } = useActionRunner({
@@ -141,7 +146,17 @@ export function useObjectActions({
     // success), so the runner's post-execution hook adds no second toast.
     runner.registerHandler('delete', (action: any) =>
       recordDelete.run(
-        { objectName, label: objectLabel || objectName, objectDef, dataSource, t, toast, onRefresh },
+        {
+          objectName,
+          label: objectLabel || objectName,
+          objectDef,
+          dataSource,
+          t,
+          toast,
+          onRefresh,
+          restore: recycleBinRestoreOf(dataSource, objectName, effectiveObjects),
+          refusalLabels: recycleBinRefusalLabelsOf(objectName, objectDef, objectLabelOf),
+        },
         action,
       ),
     );
@@ -160,7 +175,7 @@ export function useObjectActions({
       onRefresh?.();
       return { success: true, reload: true };
     });
-  }, [runner, objectName, dataSource, onEdit, onRefresh, navigate, baseUrl, t, objectLabel, objectDef]);
+  }, [runner, objectName, dataSource, onEdit, onRefresh, navigate, baseUrl, t, objectLabel, objectDef, effectiveObjects, objectLabelOf]);
 
   const create = useCallback(() => {
     onEdit?.(null);

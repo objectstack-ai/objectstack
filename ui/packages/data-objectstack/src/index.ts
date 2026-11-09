@@ -4732,11 +4732,16 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    * Optional `opts.ifMatch` enables Optimistic Concurrency Control —
    * see {@link update} for details. On 409 the call rejects with
    * a {@link ConcurrentUpdateError}.
+   *
+   * `opts.onRecycleBinEntry` is told the server's `recycleBinEntryId`
+   * (ADR-0148): the recycle-bin entry the delete wrote, which
+   * {@link restoreRecycleBinEntry} restores. Not called when the answer
+   * carries none (a platform object, a server with no recycle bin).
    */
   async delete(
     resource: string,
     id: string | number,
-    opts?: { ifMatch?: string },
+    opts?: { ifMatch?: string; onRecycleBinEntry?: (entryId: string) => void },
   ): Promise<boolean> {
     await this.connect();
     try {
@@ -4758,8 +4763,31 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       // `undefined`. Following the rename is what restores both.
       if (result.success) {
         this.emitMutation({ type: 'delete', resource, id: String(id) });
+        // Told only after the mutation event, so a host that offers an undo
+        // offers it for a delete its lists already reflect.
+        if (typeof result.recycleBinEntryId === 'string' && result.recycleBinEntryId !== '') {
+          opts?.onRecycleBinEntry?.(result.recycleBinEntryId);
+        }
       }
       return result.success;
+    } catch (err) {
+      throw normaliseClientError(err);
+    }
+  }
+
+  /**
+   * Restore one recycle-bin entry of `resource` (ADR-0148): the SDK's
+   * `recycleBin.restore`, `POST {data}/:object/recycle-bin/:entryId/restore`.
+   * Its records come back under their original ids; it is never a create.
+   * A refusal rejects with the server's error, normalised as every write's
+   * is, so its `code` and `details` name the reason.
+   */
+  async restoreRecycleBinEntry(resource: string, entryId: string): Promise<unknown> {
+    await this.connect();
+    try {
+      // No mutation event: the event vocabulary has no restore, and a restore
+      // is never a create. The host that restores refreshes what it shows.
+      return await this.client.recycleBin.restore(resource, entryId);
     } catch (err) {
       throw normaliseClientError(err);
     }

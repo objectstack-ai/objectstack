@@ -171,7 +171,7 @@ describe('useObjectActions — the delete confirmation names what it deletes (ob
     });
 
     expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(confirmSpy).toHaveBeenCalledWith('objectActions.deleteConfirm', {
+    expect(confirmSpy).toHaveBeenCalledWith('objectActions.deleteConfirmQuestion', {
       title: 'objectActions.deleteConfirmTitle',
       confirmText: 'objectActions.deleteConfirmButton',
       destructive: true,
@@ -189,7 +189,7 @@ describe('useObjectActions — the delete confirmation names what it deletes (ob
     });
 
     expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(confirmSpy).toHaveBeenCalledWith('console.objectView.bulkDeleteConfirm', {
+    expect(confirmSpy).toHaveBeenCalledWith('console.objectView.bulkDeleteQuestion', {
       title: 'objectActions.bulkDeleteConfirmTitle',
       confirmText: 'objectActions.deleteConfirmButton',
       destructive: true,

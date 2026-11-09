@@ -1239,6 +1239,7 @@ const ko = {
     copyToClipboard: "클립보드에 복사",
     copied: "복사됨!",
     deleteConfirmation: "이 레코드를 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.",
+    deleteConfirmQuestion: "이 레코드를 삭제하시겠습니까?",
     deleted: "레코드가 삭제됨",
     editRecord: "레코드 편집",
     viewAll: "모두 보기",
@@ -2517,6 +2518,9 @@ const ko = {
       bulkDeleteConfirm: "선택한 {{count}}개 레코드를 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.",
       bulkDeleteConfirm_one: "선택한 {{count}}개 레코드를 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.",
       bulkDeleteConfirm_other: "선택한 {{count}}개 레코드를 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.",
+      bulkDeleteQuestion: "선택한 {{count}}개 레코드를 삭제하시겠습니까?",
+      bulkDeleteQuestion_one: "선택한 {{count}}개 레코드를 삭제하시겠습니까?",
+      bulkDeleteQuestion_other: "선택한 {{count}}개 레코드를 삭제하시겠습니까?",
       duplicateViewName: "해당 이름의 보기가 이미 존재합니다.",
       viewTypeGrid: "그리드",
       viewTypeGridDesc: "레코드의 스프레드시트 형식 테이블.",
@@ -3512,12 +3516,31 @@ const ko = {
     undoFailed: "탐색 변경을 실행 취소할 수 없습니다",
     updateFailed: "탐색을 업데이트할 수 없습니다",
   },
+  // ADR-0148 — why a recycle-bin restore was refused, one sentence per code the
+  // restore door answers (`recycleBinRestoreRefusalText` in @object-ui/core).
+  recycleBin: {
+    refusal: {
+      uniqueValueTaken: "복원할 수 없습니다: 다른 레코드가 같은 {{field}} 값을 사용하고 있습니다. 해당 레코드를 먼저 변경한 후 복원하세요.",
+      parentPurged: "복원할 수 없습니다: 이 레코드가 속한 {{parent}} 레코드가 영구 삭제되었습니다.",
+      packageUninstalled: "복원할 수 없습니다: {{object}}을(를) 제공한 패키지가 제거되었습니다.",
+      parentInRecycleBin: "아직 복원할 수 없습니다: 이 레코드가 속한 {{parent}} 레코드도 휴지통에 있습니다. 해당 레코드를 먼저 복원하세요.",
+      notFound: "이 레코드는 더 이상 휴지통에 없습니다. 영구 삭제되었을 수 있습니다.",
+      permissionDenied: "이 레코드를 복원할 권한이 없습니다.",
+      notAvailable: "이 배포에서는 휴지통을 사용할 수 없습니다.",
+    },
+  },
   objectActions: {
     deleteSuccess: "{{label}} 삭제 성공",
     deletedNamed: "{{label}} \"{{name}}\" 삭제됨",
     deleteFailed: "{{label}} 삭제 실패",
     noRecordId: "레코드 ID가 없습니다",
     deleteConfirm: "이 레코드를 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.",
+    // ADR-0148 — a business object's delete goes to the recycle bin: the
+    // question alone, promising neither permanence nor recovery.
+    deleteConfirmQuestion: "이 레코드를 삭제하시겠습니까?",
+    restoredNamed: '{{label}} "{{name}}" 복원됨',
+    restoreSuccess: "{{label}} 복원 성공",
+    restoreFailed: "{{label}} 복원 실패",
     deleteConfirmTitle: "{{label}} \"{{name}}\"을(를) 삭제하시겠습니까?",
     bulkDeleteConfirmTitle: "{{count}}개의 {{label}} 레코드를 삭제하시겠습니까?",
     bulkDeleteConfirmTitle_one: "{{count}}개의 {{label}} 레코드를 삭제하시겠습니까?",

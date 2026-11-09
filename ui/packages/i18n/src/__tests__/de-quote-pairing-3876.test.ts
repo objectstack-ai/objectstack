@@ -414,7 +414,11 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 110 once objectstack-ai/objectstack#28104 added `form.aiDraftNotice`,
     // the notice above a form an AI chat draft filled, which quotes the
     // field mark („KI-Vorschlag“) — one literal span.
-    expect(okSpans, 'correctly paired spans').toBe(110);
+    // 111 once objectstack-ai/objectstack#30239 added
+    // `objectActions.restoredNamed`, the toast after a recycle-bin Undo that
+    // names the restored record („{{name}}“) — one interpolated span, runtime
+    // data.
+    expect(okSpans, 'correctly paired spans').toBe(111);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -511,8 +515,10 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // / 0 after `console.organizationMfa.needsTwoFactor` was removed with the
     // organization form's notices over the retired `require_mfa` column, one
     // matched pair fewer. 110 / 110 / 0 after objectstack-ai/objectstack#28104
-    // added `form.aiDraftNotice`, one more matched pair.
-    expect({ open, close, rdq }).toEqual({ open: 110, close: 110, rdq: 0 });
+    // added `form.aiDraftNotice`, one more matched pair. 111 / 111 / 0 after
+    // objectstack-ai/objectstack#30239 added `objectActions.restoredNamed`, one
+    // more matched pair.
+    expect({ open, close, rdq }).toEqual({ open: 111, close: 111, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);
