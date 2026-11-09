@@ -164,6 +164,78 @@ export const Invoice = ObjectSchema.create({
       label: 'Subtotal',
       summaryOperations: { object: 'showcase_invoice_line', field: 'amount', function: 'sum' },
     }),
+
+    // ── Multi-currency (ADR-0144) ─────────────────────────────────────────
+    //
+    // An invoice is billed in the customer's currency, and the company reports
+    // in its own: the organization's home currency (Setup → Localization →
+    // Default currency). Five fields make that work, and every one of them is
+    // declared here and referenced by name. The platform injects none of them
+    // and fixes none of their names.
+    //
+    //   currency_code   the currency this invoice is billed in (ISO 4217).
+    //   invoice_date    the document date; the exchange rate in force on this
+    //                   day converts the invoice.
+    //   amount          the tax-inclusive total, in `currency_code`
+    //                   (`currencyMode: 'record'`).
+    //   amount_home     the same total converted into the home currency. The
+    //                   engine writes it at every write that moves the amount,
+    //                   its currency or its date, and stores the rate it used in
+    //   amount_rate     (1 home unit = rate units of `currency_code`).
+    //
+    // Rates come from Setup → Exchange Rates (`sys_exchange_rate`). A foreign
+    // invoice dated before any rate of its currency is REFUSED, naming the
+    // currency and the date; nothing converts at 1:1 or at the nearest rate.
+    // Consolidated reporting sums `amount_home`, never `amount`: the Revenue
+    // Pulse dataset does.
+    //
+    // What does NOT follow the invoice's currency: the line items and the
+    // `total` Subtotal above. A line cannot name its invoice's code field as its
+    // own currency, and a roll-up of amounts in different currencies is refused,
+    // so the lines stay plain amounts and display in the home currency's format.
+
+    // The record currency. A `text` field declaring the ISO 4217 value domain,
+    // so a write can store only a real code. Optional: an invoice without a
+    // currency has no `amount` yet (see below).
+    currency_code: Field.text({
+      label: 'Currency',
+      maxLength: 3,
+      valueDomain: 'iso_4217_currency',
+    }),
+    // The document date, distinct from `issued_on` (blank on a draft): a
+    // foreign amount needs a date to pick its rate, so a draft dated today is
+    // convertible from its first save.
+    invoice_date: Field.date({
+      label: 'Invoice Date',
+      required: true,
+      defaultValue: 'NOW()',
+    }),
+    // The tax-inclusive total in the invoice's own currency, recomputed on every
+    // write from the Subtotal roll-up (the roll-up's recompute is itself a
+    // write, so adding a line moves it). It stays blank until a currency is
+    // chosen: an amount of money with no currency is not an amount the engine
+    // will store or convert.
+    amount: Field.currency({
+      label: 'Total',
+      expression: cel`record.currency_code == null || record.currency_code == '' ? null : (record.total == null ? 0 : record.total) * (1 + (record.tax_rate == null ? 0 : record.tax_rate) / 100)`,
+      currencyConfig: {
+        currencyMode: 'record',
+        currencyField: 'currency_code',
+        homeAmount: { field: 'amount_home', rateDate: 'invoice_date', rateField: 'amount_rate' },
+      },
+    }),
+    // Written by the engine only (`readonly`), in `dynamic` mode: it displays
+    // in the home currency, so this metadata never names that currency.
+    amount_home: Field.currency({
+      label: 'Total (Home Currency)',
+      readonly: true,
+    }),
+    // The rate the conversion used, kept with every digit it was stored with
+    // (no `scale`, so nothing rounds the rate a reader is shown).
+    amount_rate: Field.number({
+      label: 'Exchange Rate',
+      readonly: true,
+    }),
   },
 
   validations: [

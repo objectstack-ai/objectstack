@@ -23,7 +23,12 @@ export const ShowcaseInvoiceDataset = defineDataset({
   ],
   measures: [
     { name: 'invoice_count', label: 'Invoices', aggregate: 'count' },
-    { name: 'subtotal_sum', label: 'Subtotal', aggregate: 'sum', field: 'total', format: '0,0' },
+    // Invoices bill in different currencies (`showcase_invoice.currency_code`),
+    // so a sum of their own amounts (or of the line Subtotal, entered in each
+    // invoice's currency) adds euros to yen. The consolidated figure sums the
+    // HOME-currency amount the engine stored at write: one currency, the
+    // organization's, whatever each invoice was billed in.
+    { name: 'total_home_sum', label: 'Total (Home Currency)', aggregate: 'sum', field: 'amount_home', format: '0,0' },
     // A RATE — the percent-scale case (objectui#3136). `paid_rate` is a 0–1
     // ratio by construction, and grouping by `status` makes the Paid bucket
     // exactly 1: the value a magnitude-guessing renderer printed as "1.0%"
