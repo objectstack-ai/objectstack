@@ -56,7 +56,7 @@ export function managedRecycleBinObjects(entries: readonly CatalogEntry[], effec
 }
 
 /** One entry as the list door serves it; rows are masked to what the caller may read. */
-export interface RecycleBinEntry {
+export interface RecycleBinListEntry {
   id: string;
   object: string;
   recordId: string;
@@ -68,7 +68,7 @@ export interface RecycleBinEntry {
 }
 
 export interface RecycleBinPage {
-  entries: RecycleBinEntry[];
+  entries: RecycleBinListEntry[];
   hasMore: boolean;
 }
 
@@ -87,7 +87,7 @@ export function recycleBinDoorsOf(adapter: unknown): RecycleBinDoors | undefined
 }
 
 /** The values of the deleted record itself: its own row, else the first row served. */
-export function entryRecord(entry: RecycleBinEntry): Record<string, unknown> {
+export function entryRecord(entry: RecycleBinListEntry): Record<string, unknown> {
   const own = entry.rows.find((r) => r.object === entry.object && r.id === entry.recordId) ?? entry.rows[0];
   return { id: entry.recordId, ...(own?.values ?? {}) };
 }

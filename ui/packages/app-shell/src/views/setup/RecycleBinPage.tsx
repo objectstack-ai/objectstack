@@ -46,7 +46,7 @@ import {
   entryRecord,
   managedRecycleBinObjects,
   recycleBinDoorsOf,
-  type RecycleBinEntry,
+  type RecycleBinListEntry,
 } from './recycleBin.js';
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
@@ -95,7 +95,7 @@ export function RecycleBinPage() {
 type BinRead =
   | { kind: 'loading' }
   | { kind: 'failed'; message: string }
-  | { kind: 'ready'; entries: RecycleBinEntry[]; hasMore: boolean };
+  | { kind: 'ready'; entries: RecycleBinListEntry[]; hasMore: boolean };
 
 /** The sentence for a failed bin read or empty: a known door code's, else the server message. */
 function failureText(t: Translate, err: unknown, labels: ReturnType<typeof recycleBinRefusalLabelsOf>): string {
@@ -141,7 +141,7 @@ export function RecycleBinSection({ objectName, objectLabel }: { objectName: str
 
   /** Name the people a page cites: one batched `sys_user` read; a refused read leaves the ids. */
   const lookUpPeople = React.useCallback(
-    async (entries: RecycleBinEntry[], known: Record<string, string>) => {
+    async (entries: RecycleBinListEntry[], known: Record<string, string>) => {
       const wanted = [...new Set(entries.map((e) => e.deletedBy).filter((id): id is string => !!id && !(id in known)))];
       const find = (adapter as { find?: (o: string, q: unknown) => Promise<unknown> } | null)?.find;
       if (wanted.length === 0 || typeof find !== 'function') return;
@@ -204,7 +204,7 @@ export function RecycleBinSection({ objectName, objectLabel }: { objectName: str
     }
   };
 
-  const restoreEntry = async (entry: RecycleBinEntry) => {
+  const restoreEntry = async (entry: RecycleBinListEntry) => {
     if (!restore) return;
     setRestoring(entry.id);
     const restored = await recordDelete.undo(
