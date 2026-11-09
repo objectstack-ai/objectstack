@@ -34,7 +34,7 @@ export const salesUser = definePermissionSet({
 ## Assigning a permission set to a user
 
 Declaring a set grants nobody anything — an assignment is **data**: one row in
-the join object **`sys_user_permission_set`** (`@objectstack/plugin-security`),
+the join object **`sys_user_permission_set`**,
 carrying `user_id`, `permission_set` (the set's machine **`name`**) and an
 optional `organization_id` (`null` = every org context). Optional `valid_from` /
 `valid_until` bound a half-open window; `granted_by` is stamped by the gate on
@@ -170,7 +170,7 @@ rowLevelSecurity: [
   holder in its declared `dependencies` closure plus `sys`, else (none
   declares it) an org's `sys_queue` row. Else it grants no one new, warned
   `RESOURCE_CONFLICT`: `outside-closure` (only a non-dependency
-  `com.acme.billing` or an environment item holds `support`),
+  or an environment item holds `support`),
   `ambiguous-in-closure` (two dependencies do), `ambiguous-in-environment`
   (the one it reaches and a non-dependency do).
 
