@@ -1239,6 +1239,7 @@ const de = {
     copyToClipboard: "In Zwischenablage kopieren",
     copied: "Kopiert!",
     deleteConfirmation: "Sind Sie sicher, dass Sie diesen Datensatz löschen möchten? Dies kann nicht rückgängig gemacht werden.",
+    deleteConfirmQuestion: "Sind Sie sicher, dass Sie diesen Datensatz löschen möchten?",
     deleted: "Datensatz gelöscht",
     editRecord: "Datensatz bearbeiten",
     viewAll: "Alle anzeigen",
@@ -2517,6 +2518,9 @@ const de = {
       bulkDeleteConfirm: "{{count}} ausgewählte Datensätze löschen? Dies kann nicht rückgängig gemacht werden.",
       bulkDeleteConfirm_one: "{{count}} ausgewählten Datensatz löschen? Dies kann nicht rückgängig gemacht werden.",
       bulkDeleteConfirm_other: "{{count}} ausgewählte Datensätze löschen? Dies kann nicht rückgängig gemacht werden.",
+      bulkDeleteQuestion: "{{count}} ausgewählte Datensätze löschen?",
+      bulkDeleteQuestion_one: "{{count}} ausgewählten Datensatz löschen?",
+      bulkDeleteQuestion_other: "{{count}} ausgewählte Datensätze löschen?",
       duplicateViewName: "Eine Ansicht mit diesem Namen existiert bereits.",
       viewTypeGrid: "Raster",
       viewTypeGridDesc: "Tabellenkalkulationsartige Tabelle von Datensätzen.",
@@ -3513,12 +3517,31 @@ const de = {
     undoFailed: "Navigationsänderung konnte nicht rückgängig gemacht werden",
     updateFailed: "Navigation konnte nicht aktualisiert werden",
   },
+  // ADR-0148 — why a recycle-bin restore was refused, one sentence per code the
+  // restore door answers (`recycleBinRestoreRefusalText` in @object-ui/core).
+  recycleBin: {
+    refusal: {
+      uniqueValueTaken: "Wiederherstellen nicht möglich: Ein anderer Datensatz hat jetzt denselben Wert für {{field}}. Ändern Sie zuerst diesen Datensatz und stellen Sie dann wieder her.",
+      parentPurged: "Wiederherstellen nicht möglich: Der übergeordnete Datensatz ({{parent}}) wurde endgültig gelöscht.",
+      packageUninstalled: "Wiederherstellen nicht möglich: Das Paket, das {{object}} bereitgestellt hat, wurde deinstalliert.",
+      parentInRecycleBin: "Noch nicht wiederherstellbar: Der übergeordnete Datensatz ({{parent}}) liegt ebenfalls im Papierkorb. Stellen Sie zuerst diesen wieder her.",
+      notFound: "Dieser Datensatz ist nicht mehr im Papierkorb. Möglicherweise wurde er endgültig gelöscht.",
+      permissionDenied: "Sie haben keine Berechtigung, diesen Datensatz wiederherzustellen.",
+      notAvailable: "Der Papierkorb ist in dieser Bereitstellung nicht verfügbar.",
+    },
+  },
   objectActions: {
     deleteSuccess: "{{label}} erfolgreich gelöscht",
     deletedNamed: "{{label}} „{{name}}“ gelöscht",
     deleteFailed: "{{label}} konnte nicht gelöscht werden",
     noRecordId: "Keine Datensatz-ID angegeben",
     deleteConfirm: "Möchten Sie diesen Datensatz wirklich löschen? Dies kann nicht rückgängig gemacht werden.",
+    // ADR-0148 — a business object's delete goes to the recycle bin: the
+    // question alone, promising neither permanence nor recovery.
+    deleteConfirmQuestion: "Möchten Sie diesen Datensatz wirklich löschen?",
+    restoredNamed: "{{label}} „{{name}}“ wiederhergestellt",
+    restoreSuccess: "{{label}} wiederhergestellt",
+    restoreFailed: "{{label}} konnte nicht wiederhergestellt werden",
     deleteConfirmTitle: "{{label}} „{{name}}“ löschen?",
     bulkDeleteConfirmTitle: "{{count}} {{label}}-Datensätze löschen?",
     bulkDeleteConfirmTitle_one: "{{count}} {{label}}-Datensatz löschen?",
