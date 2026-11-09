@@ -66,11 +66,10 @@ export const AUDIT_LOG_SETTINGS_STORE_OBJECTS: readonly string[] = Object.freeze
  * sys_audit_log — System Audit Log Object
  *
  * Audit trail for all significant platform events: who did what, when, and
- * the before/after state. Rows are written only by the platform and are
- * read-only through the data API and in Setup. That is the whole guarantee,
- * not immutability or tamper-evidence: platform code running in a system
- * context (retention archive-then-delete, redaction migrations) can still
- * change or delete rows, and nothing records that it did.
+ * the before/after state. The platform writes these rows, and they are
+ * read-only through the data API and in Setup. Platform code running in a
+ * system context (retention archive-then-delete, redaction migrations) can
+ * still change or delete them, and nothing records that it did.
  *
  * Every field is `readonly: true` — audit logs are written only by
  * internal system hooks, never via UI forms. API exposes only `get` + `list`.
