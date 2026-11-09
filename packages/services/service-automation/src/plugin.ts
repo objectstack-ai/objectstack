@@ -28,7 +28,7 @@ import { resolvePackageScopedName } from '@objectstack/objectql';
 import { describeThrownForLog, thrownMessageText } from './thrown-cause-diagnostics.js';
 import { defaultEnvCredentialResolver, type CredentialResolver } from './credential-resolver.js';
 import { registerFlowCredentialRedactor } from './flow-credential-projection.js';
-import { resolveFlowPrecedence, renderFlowContender } from './flow-precedence.js';
+import { describeArmedFlowContender, resolveFlowPrecedence, renderFlowContender } from './flow-precedence.js';
 import { installBuiltinNodes, rearmSuspendedWaitTimers } from './builtin/index.js';
 import { resolveRunDataContext } from './runtime-identity.js';
 import { SysAutomationRun } from './sys-automation-run.object.js';
@@ -5327,12 +5327,15 @@ export class AutomationServicePlugin implements Plugin {
      */
     private resolveFlowContenders(ctx: PluginContext, items: readonly unknown[]) {
         const engine = this.engine;
-        return resolveFlowPrecedence(
-            items,
-            ctx.logger,
-            engine ? (name) => engine.packagedFlowOwner(name) : undefined,
-            installedManifestsOf(objectqlRegistryOf(ctx)),
-        );
+        const reader = engine ? (name: string) => engine.packagedFlowOwner(name) : undefined;
+        const installed = installedManifestsOf(objectqlRegistryOf(ctx));
+        // [ADR-0150 D3] Every winner carries what it is, so `registerFlow`
+        // records whose body the engine runs (`armedFlowPackage`): a contested
+        // name's from the precedence, an uncontested one's asked here.
+        return resolveFlowPrecedence(items, ctx.logger, reader, installed).map((entry) => ({
+            ...entry,
+            armedFrom: entry.armedFrom ?? describeArmedFlowContender(entry.definition, reader, installed),
+        }));
     }
 
     /**

@@ -101,12 +101,14 @@ export interface FlowPrecedenceWinner {
     /** Present only when this name had more than one contender. */
     shadowing?: FlowShadowingRecord;
     /**
-     * [ADR-0150 D3] What the winner is, by the same classification the
-     * receipt's `armed` records, for every name — one contender or several.
-     * The caller hands it to `AutomationEngine.registerFlow`, so the engine
+     * [ADR-0150 D3] What the winner is — the classification the receipt's
+     * `armed` records — for a name with more than one contender. A name with
+     * one is not classified here (precedence decides nothing there, and asks
+     * the loader's set nothing): ask {@link describeArmedFlowContender}. The
+     * caller hands the answer to `AutomationEngine.registerFlow`, so the engine
      * knows whose body it runs (`armedFlowPackage`).
      */
-    armedFrom: FlowContender;
+    armedFrom?: FlowContender;
 }
 
 /**
@@ -164,6 +166,21 @@ function classifyContender(item: unknown, owner: string | undefined, installed: 
         source: 'runtime',
         ...(typeof packageId === 'string' && packageId ? { packageId } : {}),
     };
+}
+
+/**
+ * [ADR-0150 D3] What a name's ONLY contender is — the body
+ * {@link resolveFlowPrecedence} arms for an uncontested name, which it does
+ * not classify — for `AutomationEngine.registerFlow`'s `armedFrom`. Asks the
+ * loader's set once, for that name. See {@link armedContender}.
+ */
+export function describeArmedFlowContender(
+    item: unknown,
+    packagedFlowOwner: PackagedFlowSource | undefined,
+    installed: InstalledManifestLookup,
+): FlowContender {
+    const owner = loaderSetOwner(packagedFlowOwner, (item as { name?: unknown } | null | undefined)?.name);
+    return armedContender(item, classifyContender(item, owner, installed), owner, installed);
 }
 
 /**
@@ -328,9 +345,9 @@ function undeclaredRemedy(owner: string | undefined, installed: InstalledManifes
  * a body's own claim.
  *
  * [#20864] Which contender is `package` is the loader's set's answer, asked
- * ONCE per name so every contender of that name is judged against one answer
- * — see {@link describeFlowContender}. A name with one contender is classified
- * too, for the winner's `armedFrom` alone: precedence decides nothing there.
+ * ONCE per contested name so every contender of that name is judged against
+ * one answer — see {@link describeFlowContender}. A name with one contender
+ * asks nothing: precedence decides nothing there.
  *
  * [#20913] ONE decision for BOTH boot steps. The automation plugin resolves
  * the boot pull's registry list and the `kernel:ready` / `metadata:reloaded`
@@ -370,17 +387,12 @@ export function resolveFlowPrecedence(
     const winners: FlowPrecedenceWinner[] = [];
     for (const name of order) {
         const members = groups.get(name)!;
-        const owner = loaderSetOwner(packagedFlowOwner, name);
         if (members.length === 1) {
-            const only = members[0].definition;
-            winners.push({
-                name,
-                definition: only,
-                armedFrom: armedContender(only, classifyContender(only, owner, installed), owner, installed),
-            });
+            winners.push({ name, definition: members[0].definition });
             continue;
         }
 
+        const owner = loaderSetOwner(packagedFlowOwner, name);
         const group = members.map((member) => ({
             ...member,
             contender: classifyContender(member.definition, owner, installed),
