@@ -1,6 +1,7 @@
 # Integration recipes — a declared connector per archetype
 
-Each recipe is what the **app author** declares (a `connectors:` entry,
+The rule is `SKILL.md` § Integrations are declared, not coded; this file is the
+shapes. Each recipe is what the **app author** declares (a `connectors:` entry,
 the fields the answer lands in, a flow dispatching `connector_action`) and the
 one thing the **customer's administrator** supplies: the value behind
 `auth.credentialRef` — an environment variable of that name (wins), or a
@@ -20,8 +21,8 @@ an unset ref leaves its instance degraded until set. Keep `automation` in
 - The answer lands as `<nodeId>.<key>` (`rest` / `openapi`: `{ status, ok, body }`;
   `mcp`: `{ ok, content, structuredContent? }`), read from a later node's value slot.
 - `auth`, each variant with a `credentialRef`: `bearer`; `api-key` (`headerName`,
-  or `paramName` for a query-string key); `basic` (`username`
-  stays in metadata); `signed` on `openapi` / `rest` (`scheme`
+  or `paramName` for a query-string key); `basic`;
+  `signed` on `openapi` / `rest` (`scheme`
   `aliyun-acs3-hmac-sha256`, `tencentcloud-tc3-hmac-sha256` or `alipay-v3`,
   `keyId`) signs each request — WeChat Pay has no scheme yet: blocked;
   `oauth2` / `app-credential`: recipe 6. A secret in a url path has no variant — use a
@@ -30,9 +31,7 @@ an unset ref leaves its instance degraded until set. Keep `automation` in
 
 ## 1 · OpenAPI document, static key — Stripe balance, nightly
 
-<!-- os:check -->
 ```ts
-import { defineConnector, defineFlow } from '@objectstack/spec';
 // Trim the vendor's OpenAPI 3.x document to the operations the app calls.
 export const StripeConnector = defineConnector({
   name: 'stripe', label: 'Stripe', type: 'api', provider: 'openapi',
@@ -68,9 +67,7 @@ fatal).
 
 ## 2 · Remote MCP server, static header — GitHub
 
-<!-- os:check -->
 ```ts
-import { defineConnector } from '@objectstack/spec';
 export const GitHubMcp = defineConnector({
   name: 'github_mcp', label: 'GitHub (remote MCP)', type: 'api', provider: 'mcp',
   providerConfig: {
@@ -99,9 +96,7 @@ https://objectstack.ai/docs/automation/connectors#pinning-tools-toolssnapshot.
 
 ## 3 · Plain REST API — `provider: 'rest'`, the one `request` action
 
-<!-- os:check -->
 ```ts
-import { defineConnector } from '@objectstack/spec';
 export const WarehouseApi = defineConnector({
   name: 'warehouse_api', label: 'Warehouse API', type: 'api', provider: 'rest',
   providerConfig: { baseUrl: 'https://wms.example.com' },
@@ -110,6 +105,7 @@ export const WarehouseApi = defineConnector({
 // connector_action { connectorId: 'warehouse_api', actionId: 'request',
 //   input: { method: 'GET', path: '/v1/stock/low' } } → create_record `stock_alert`
 //   fields: { lines: { dialect: 'cel', source: 'low.body' } }.
+// To let an agent run the sweep on request: objectstack-ai § Actions as AI Tools.
 ```
 
 ## 4 · Vendor callback — an `api` flow with `secretRef`
@@ -132,8 +128,9 @@ export const CarrierCallback = defineFlow({
 });
 ```
 
-`requires: ['automation', 'triggers']`. A vendor signing
-its own header adds, keyed by `secretRef`, `signature: { signs: 'body', header:
+`requires: ['automation', 'triggers']`. The sender signs each post
+under `CARRIER_HOOK_SECRET` (SKILL.md *Signature* bullet). A vendor signing
+its own header adds, keyed by that ref, `signature: { signs: 'body', header:
 'X-DocuSign-Signature-1', algorithm: 'hmac-sha256', encoding: 'base64' }`.
 
 ## 5 · Vendor with no machine-readable spec — write the document by hand

@@ -129,7 +129,6 @@ defineFlow({
       condition: cel`record.amount > 100000` },
     { id: 'e2', source: 'manager_review',  target: 'needs_director',   label: 'approve' },
     { id: 'e3', source: 'manager_review',  target: 'rejected',         label: 'reject'  },
-    // Decision branches: mutually-exclusive edge `condition` predicates.
     { id: 'e4', source: 'needs_director',  target: 'director_signoff', label: 'true',
       condition: cel`record.amount > 500000` },
     { id: 'e5', source: 'needs_director',  target: 'mark_won',         label: 'false',
@@ -192,9 +191,9 @@ Three pieces author it:
 > so the branch cannot run; `flow-approval-revise-target-not-service-owned`), a
 > `revise` edge whose window never loops back (a dead end `registerFlow` accepts
 > but that leaves the submitter nowhere to resubmit), and a resubmit edge left
-> **without** `type: 'back'` (an unmarked cycle `registerFlow` rejects). Resubmit
-> is an explicit verb (`POST /api/v1/approvals/requests/:id/resubmit`), never a
-> record-save.
+> **without** `type: 'back'`. Resubmit is never a
+> record-save. See the `showcase_budget_approval` flow in the showcase app in
+> the framework repo for the canonical shape.
 
 ### Recording a decision
 
@@ -382,6 +381,7 @@ These are wired on the **graph**, not in node config:
   `http`, a `notify` node, …) to the `approve` / `reject` out-edge.
 - **Roll back on reject** — route the `reject` edge as a **back-edge** to an
   earlier node so the submitter can revise.
+- **Send back for revision (ADR-0044)** — see *Send-back for revision* above.
 - **Hard reject** — route the `reject` edge to an `end` node.
 
 ### Approval Best Practices
