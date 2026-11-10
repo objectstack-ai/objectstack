@@ -3784,7 +3784,9 @@ export class AuthPlugin implements Plugin {
     // the wildcard below forwards the request and better-auth returns 404.
     rawApp.get(`${basePath}/config`, async (c: any) => {
       try {
-        const config = this.authManager!.getPublicConfig();
+        // The request goes along so the host's organization-create choices
+        // come back in the language this request asked for.
+        const config = this.authManager!.getPublicConfig(c.req.raw);
         // Refine the coarse "SSO wired" flag to "SSO usable" (≥1 provider
         // configured) so the login UI also hides the "Sign in with SSO" button
         // when SSO is enabled but no IdP exists yet — not just when it's off.

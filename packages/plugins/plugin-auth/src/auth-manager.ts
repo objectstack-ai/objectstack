@@ -100,6 +100,7 @@ import {
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/api';
+import { AuthFeaturesConfigSchema, type OrganizationEditionChoice } from '@objectstack/spec/api';
 import { createObjectQLAdapterFactory, withSystemReadContext } from './objectql-adapter.js';
 import { isPresentedInvitationPending } from './presented-invitation.js';
 import { type ExternalDirectoryDoorDeps } from './external-directory-door.js';
@@ -774,18 +775,33 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
   }) => void | Promise<void>;
 
   /**
-   * Advertise that this host's organization-create door accepts
-   * `?edition=developer`, so a client may offer a Developer Edition choice
-   * when creating an organization. `getPublicConfig()` serves it as
-   * `features.developerEditionCreate`. Default `false`.
+   * The editions this host's organization-create door accepts besides its
+   * default, as choices a client may offer when creating an organization.
+   * `getPublicConfig()` calls it per request with that request's
+   * `accept-language` header and serves the answer as
+   * `features.organizationEditions`, labels and hints exactly as returned, so
+   * the host resolves its own copy in the request language (objectui is a
+   * product-neutral renderer and carries no product words). Unset, or
+   * answering an empty list, serves no choices.
+   *
+   * `features.developerEditionCreate` is derived from the answer: `true`
+   * exactly when it holds a choice whose `edition` is `developer`.
    *
    * An advertisement only: nothing in this package reads it to change
    * behaviour, and no door here takes an edition. Set it only on a host that
    * serves that door itself (the cloud control plane does, beside its
    * {@link onOrganizationCreated} provisioning); setting it anywhere else
-   * offers a choice the server ignores.
+   * offers a choice the server ignores. The answer is checked against the
+   * public contract (`features.organizationEditions`: well-formed entries,
+   * each `edition` used once) before it is served. An answer that fails it,
+   * an option that throws, or one that answers a promise (the option is
+   * synchronous) serves no choices (and a false `developerEditionCreate`) and
+   * is reported once at `error` naming this option and the first issue (a
+   * throw by its error class, its message in the log meta; at most 32
+   * distinct failures per process): the rest of the public config, which the
+   * login page and the sign-in checks read, is never failed by it.
    */
-  developerEditionCreate?: boolean;
+  organizationEditions?: (request: { acceptLanguage?: string }) => readonly OrganizationEditionChoice[];
 
   /**
    * [ADR-0105 D8] Optional callback invoked AFTER an invitation is accepted
@@ -1613,6 +1629,24 @@ export function acceptLanguageHeader(source: unknown): string | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * [#32074] How many distinct `AuthManagerOptions.organizationEditions` failures
+ * one process reports before it stops logging new ones. Each key is already
+ * bounded text, so this is the backstop against a host whose error class names
+ * vary without limit: the memo and the error log stay finite whatever an
+ * anonymous `/auth/config` caller sends.
+ */
+const MAX_REPORTED_ORGANIZATION_EDITION_FAILURES = 32;
+
+/** Whether a host answer is a promise-like value (a `then` method), which a synchronous option must not answer. */
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return (
+    (typeof value === 'object' || typeof value === 'function')
+    && value !== null
+    && typeof (value as { then?: unknown }).then === 'function'
+  );
 }
 
 /** [#24243] The standard ADR-0112 code the slug guard's read fault answers with — the status's own name. */
@@ -5020,7 +5054,92 @@ export class AuthManager {
     return this.config.getTenancy?.()?.posture ?? resolveTenancyPosture();
   }
 
-  getPublicConfig() {
+  /**
+   * Each distinct `organizationEditions` failure already reported, so a host
+   * answer that keeps failing is said once per process, not once per request.
+   * Every key is bounded text: a schema issue's path and zod message (neither
+   * carries the input value), or a constant naming the throw's error class.
+   * The host's own error message, which may quote the caller's
+   * `accept-language`, never becomes a key; it travels in the log meta only.
+   * The set also stops growing at {@link MAX_REPORTED_ORGANIZATION_EDITION_FAILURES}.
+   */
+  private readonly reportedOrganizationEditionFailures = new Set<string>();
+
+  /**
+   * The organization-create choices the host declares for this request, checked
+   * against the public contract (`features.organizationEditions`, unique
+   * `edition` values included). `undefined` when the host declares none, so the
+   * key is left out of `features`.
+   *
+   * Fail-soft by ruling: `getPublicConfig()` also feeds the login page, the
+   * `kernel:ready` sign-up reads and the sign-in-method floor, so a host answer
+   * that throws, answers a promise, or fails the schema (one blank translated
+   * hint) must not take those down. It serves no choices instead (the key
+   * absent, the derived `developerEditionCreate` false) and reports the
+   * failure once, at `error`, naming the host option and the first issue.
+   */
+  private resolveOrganizationEditions(request: unknown): OrganizationEditionChoice[] | undefined {
+    const host = this.config.organizationEditions;
+    if (!host) return undefined;
+    try {
+      const answer: unknown = host({ acceptLanguage: acceptLanguageHeader(request) });
+      if (isThenable(answer)) {
+        // The option is synchronous by type. A promise is refused, and its
+        // rejection is handled here so it cannot surface as an unhandled one.
+        void Promise.resolve(answer).catch(() => undefined);
+        this.reportOrganizationEditionFailure(
+          'the option answered a promise; it must answer the list synchronously',
+        );
+        return undefined;
+      }
+      const checked = AuthFeaturesConfigSchema.shape.organizationEditions.safeParse(answer);
+      if (checked.success) return checked.data && checked.data.length > 0 ? checked.data : undefined;
+      const first = checked.error.issues[0];
+      this.reportOrganizationEditionFailure(
+        first ? `${first.path.join('.') || '(list)'}: ${first.message}` : 'invalid',
+      );
+    } catch (error) {
+      const errorClass = error instanceof Error ? error.name : typeof error;
+      this.reportOrganizationEditionFailure(`the option threw (${errorClass})`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return undefined;
+  }
+
+  /**
+   * Reports one `organizationEditions` failure at `error`, once per distinct
+   * `reason` and at most {@link MAX_REPORTED_ORGANIZATION_EDITION_FAILURES}
+   * times per process. Never throws: a host logger that throws is swallowed
+   * here, so it cannot escape `getPublicConfig()` either.
+   */
+  private reportOrganizationEditionFailure(reason: string, detail?: { error: string }): void {
+    try {
+      if (this.reportedOrganizationEditionFailures.has(reason)) return;
+      if (this.reportedOrganizationEditionFailures.size >= MAX_REPORTED_ORGANIZATION_EDITION_FAILURES) return;
+      this.reportedOrganizationEditionFailures.add(reason);
+      const message =
+        '[AuthManager] AuthManagerOptions.organizationEditions answered a list that is not a valid '
+        + 'features.organizationEditions value, so /auth/config serves no organization-create choices '
+        + '(and developerEditionCreate is false) until the host option is fixed: each entry needs a '
+        + 'snake_case edition used once, a non-blank label and hint, and an optional positive whole '
+        + 'memberLimit, answered synchronously. Each distinct failure is reported once per process.';
+      const meta = { option: 'AuthManagerOptions.organizationEditions', firstIssue: reason, ...detail };
+      if (this.config.logger) this.audienceLogError(message, meta);
+      else console.error(message, meta);
+    } catch {
+      // A logger fault must not fail the public config; the choices are
+      // already withheld, which is the fail-soft answer.
+    }
+  }
+
+  /**
+   * The public `/auth/config` payload. `request` (a Web `Request`, or anything
+   * {@link acceptLanguageHeader} reads) carries the language the host resolves
+   * its organization-create copy in; without it the host answers in its
+   * default language.
+   */
+  getPublicConfig(request?: unknown) {
     // Extract social providers info (without sensitive data)
     const socialProviders = [];
     if (this.config.socialProviders) {
@@ -5140,6 +5259,7 @@ export class AuthManager {
     const privacyUrl = resolveLegalUrl(rawPrivacyUrl, DEFAULT_PRIVACY_URL);
 
     const turnstileKeys = resolveTurnstileKeys();
+    const organizationEditions = this.resolveOrganizationEditions(request);
 
     // [#7481, maintainer ruling 2026-08-11] `passkeys` / `magicLink` are
     // deliberately NOT advertised here — see PUBLIC_AUTH_FEATURES_NOT_ADVERTISED
@@ -5211,16 +5331,21 @@ export class AuthManager {
       // judgement site reads (ruling 6341690661 on #25083, Q2 D / Q3 A). A
       // hide-when-on flag: the console hides the doors that add people.
       cloudManaged: isCloudManaged(),
-      // An opt-in host option, served as a boolean like every flag (the drift
-      // guard holds the served key set stable), so `false` when unset. It
+      // Derived from the host's organization-create choices below, served as a
+      // boolean like every flag (the drift guard holds the served key set
+      // stable), so `false` when the host declares no developer choice. It
       // only advertises the host's own create door; nothing here acts on it.
-      developerEditionCreate: this.config.developerEditionCreate === true,
+      developerEditionCreate: organizationEditions?.some((choice) => choice.edition === 'developer') ?? false,
       ...(termsUrl ? { termsUrl } : {}),
       ...(privacyUrl ? { privacyUrl } : {}),
       // The PUBLIC Turnstile site key, served only when the sign-up challenge
       // is wired (both keys set; the resolver `buildPluginList()` mounts the
       // plugin from). The secret is never part of this payload.
       ...(turnstileKeys ? { turnstileSiteKey: turnstileKeys.siteKey } : {}),
+      // The host's organization-create choices, its labels and hints as given,
+      // served only when it declares some (registered in
+      // PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS); absent, the door takes no edition.
+      ...(organizationEditions ? { organizationEditions } : {}),
     };
 
     // Dev-only login hint (15.1 third-party eval): the empty-DB auto-seeded
