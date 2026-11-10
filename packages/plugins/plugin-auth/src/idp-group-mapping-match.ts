@@ -101,7 +101,8 @@ interface Answer {
 /** Write `answer` onto `row` when it differs from what the row says; true when it wrote. */
 async function settle(engine: IDataEngine, row: StoredMapping, answer: Answer): Promise<boolean> {
   if (text(row.match_status) === answer.status && (text(row.matched_group_id) || null) === answer.groupId) return false;
-  await withSystemContext(engine).update(IDP_GROUP_MAPPING_OBJECT, {
+  const writer: IDataEngine = withSystemContext(engine);
+  await writer.update(IDP_GROUP_MAPPING_OBJECT, {
     id: text(row.id),
     match_status: answer.status,
     matched_group_id: answer.groupId,
