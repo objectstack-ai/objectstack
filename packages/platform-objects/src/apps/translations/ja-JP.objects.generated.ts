@@ -2266,12 +2266,78 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "SSO プロバイダーを削除",
-        description: "この SSO プロバイダーを削除しますか？そのドメインのユーザーは、これを通じてサインインできなくなります。",
-        successMessage: "SSO プロバイダーを削除しました"
+        description: "この SSO プロバイダーを削除しますか？リンクされているすべてのユーザーのリンクが解除されます。これには、他のサインイン方法がリンクされていないユーザー（パスワードも他のプロバイダーもないユーザー）も含まれます。IdP グループマッピングと、それによって付与された権限セットも一緒に削除されます。この操作は元に戻せません。",
+        resultDialog: {
+          title: "SSO プロバイダーを削除しました",
+          acknowledge: "完了",
+          fields: {
+            message: "削除済み"
+          }
+        },
+        preflight: {
+          fields: {
+            summary: "この削除で削除されるもの",
+            linkedUsers: "リンクが解除されるユーザー",
+            usersWithoutOtherSignIn: "他のサインイン方法がリンクされていないユーザー"
+          }
+        }
       },
       edit_sso_sign_in_options: {
         label: "サインインオプションを編集",
         successMessage: "サインインオプションを保存しました"
+      },
+      edit_saml_provider: {
+        label: "SAML 設定を編集",
+        params: {
+          issuer: {
+            label: "IdP エンティティ ID",
+            helpText: "IdP の SAML EntityID。プロバイダーにリンクされたユーザーがいない間のみ変更できます。"
+          },
+          entryPoint: {
+            label: "IdP SSO URL",
+            helpText: "IdP のシングルサインオンエンドポイント。空欄のままにすると保存済みの値を維持します。プロバイダーにリンクされたユーザーがいない間のみ変更できます。"
+          },
+          cert: {
+            label: "新しい IdP 署名証明書",
+            helpText: "IdP の新しい X.509 署名証明書（PEM）。空欄のままにすると保存済みの証明書を維持します。"
+          },
+          keepCurrentCert: {
+            label: "現在の証明書も引き続き信頼する",
+            helpText: "IdP の切り替え中は、どちらの証明書で署名されたアサーションも受け入れます。古い証明書を外すには、このオプションなしで再度編集します。"
+          }
+        },
+        resultDialog: {
+          title: "SAML 設定を保存しました",
+          acknowledge: "完了",
+          fields: {
+            message: "変更内容"
+          }
+        }
+      },
+      edit_oidc_provider: {
+        label: "OIDC 設定を編集",
+        params: {
+          clientId: {
+            label: "クライアント ID",
+            helpText: "IdP が発行した OAuth クライアント ID。空欄のままにすると保存済みの値を維持します。プロバイダーにリンクされたユーザーがいない間のみ変更できます。"
+          },
+          clientSecret: {
+            label: "新しいクライアントシークレット",
+            helpText: "空欄のままにすると保存済みのシークレットを維持します。保存済みのシークレットは表示されません。"
+          },
+          scopes: {
+            label: "スコープ",
+            helpText: "スペースまたはカンマ区切りの OAuth スコープ。保存済みのリストを置き換えます。空欄のままにすると維持します。",
+            placeholder: "openid email profile"
+          }
+        },
+        resultDialog: {
+          title: "OIDC 設定を保存しました",
+          acknowledge: "完了",
+          fields: {
+            message: "変更内容"
+          }
+        }
       },
       show_sso_groups_claim: {
         label: "グループクレームを表示",

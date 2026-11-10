@@ -116,6 +116,8 @@ describe('@objectstack/platform-objects', () => {
       ['SysTwoFactor', 'disable_two_factor', 'password', SysTwoFactor],
       ['SysTwoFactor', 'regenerate_backup_codes', 'password', SysTwoFactor],
       ['SysSsoProvider', 'register_sso_provider', 'clientSecret', SysSsoProvider],
+      // [#32085] The OIDC edit's replacement secret, write-only like the register form's.
+      ['SysSsoProvider', 'edit_oidc_provider', 'clientSecret', SysSsoProvider],
     ];
 
     type Param = { name?: string; type?: string };

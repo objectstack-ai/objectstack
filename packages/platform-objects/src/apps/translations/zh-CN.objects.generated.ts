@@ -2266,12 +2266,78 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "删除 SSO 提供方",
-        description: "删除该 SSO 提供方吗？其域名下的用户将无法再通过它登录。",
-        successMessage: "SSO 提供方已删除"
+        description: "删除此 SSO 提供方？关联到它的每个用户都会被解除关联，包括没有关联其他登录方式（没有密码，也没有其他提供方）的用户。它的 IdP 组映射以及由这些映射授予的权限集也会一并移除。此操作无法撤销。",
+        resultDialog: {
+          title: "SSO 提供方已删除",
+          acknowledge: "完成",
+          fields: {
+            message: "已移除"
+          }
+        },
+        preflight: {
+          fields: {
+            summary: "此次删除将移除的内容",
+            linkedUsers: "被解除关联的用户",
+            usersWithoutOtherSignIn: "没有关联其他登录方式的用户"
+          }
+        }
       },
       edit_sso_sign_in_options: {
         label: "编辑登录选项",
         successMessage: "登录选项已保存"
+      },
+      edit_saml_provider: {
+        label: "编辑 SAML 设置",
+        params: {
+          issuer: {
+            label: "IdP 实体 ID",
+            helpText: "IdP 的 SAML EntityID。仅在没有用户关联到该提供方时才能修改。"
+          },
+          entryPoint: {
+            label: "IdP SSO URL",
+            helpText: "IdP 的单点登录端点。留空则保留已存储的值。仅在没有用户关联到该提供方时才能修改。"
+          },
+          cert: {
+            label: "新的 IdP 签名证书",
+            helpText: "IdP 的新 X.509 签名证书（PEM）。留空则保留已存储的证书。"
+          },
+          keepCurrentCert: {
+            label: "继续信任当前证书",
+            helpText: "在 IdP 切换期间，接受由任一证书签名的断言。之后不勾选此项再编辑一次，即可移除旧证书。"
+          }
+        },
+        resultDialog: {
+          title: "SAML 设置已保存",
+          acknowledge: "完成",
+          fields: {
+            message: "已修改"
+          }
+        }
+      },
+      edit_oidc_provider: {
+        label: "编辑 OIDC 设置",
+        params: {
+          clientId: {
+            label: "客户端 ID",
+            helpText: "IdP 签发的 OAuth 客户端 ID。留空则保留已存储的值。仅在没有用户关联到该提供方时才能修改。"
+          },
+          clientSecret: {
+            label: "新的客户端密钥",
+            helpText: "留空则保留已存储的密钥。已存储的密钥永远不会显示。"
+          },
+          scopes: {
+            label: "授权范围",
+            helpText: "以空格或逗号分隔的 OAuth 授权范围，将替换已存储的列表。留空则保留。",
+            placeholder: "openid email profile"
+          }
+        },
+        resultDialog: {
+          title: "OIDC 设置已保存",
+          acknowledge: "完成",
+          fields: {
+            message: "已修改"
+          }
+        }
       },
       show_sso_groups_claim: {
         label: "查看组 claim",
