@@ -334,6 +334,10 @@ import {
   organizationAnchorsPlatformStanding,
   resolvePlatformAdminEmails,
   securityCatalogReaderOf,
+  catalogEntryAddress,
+  grantNamesPlatformPermissionSet,
+  ledgerRowSwitchesOff,
+  platformPermissionSet,
 } from '@objectstack/core';
 
 import { isOrgAdminGrade } from './invitation-role-cap.js';
@@ -851,6 +855,11 @@ export const USER_STANDING_KEYS = ['email', 'email_verified'] as const;
  * it). A ledger DELETE is not judged: absence of a row means ACTIVE, so
  * removing one can only restore standing.
  *
+ * [ADR-0150 D4, D8 R4] `package_id` names WHICH holder's set a row switches
+ * off, and the resolver now reads it: a payload re-pointing it can move the
+ * switch onto `admin_full_access`'s holder, so it pays for the enumeration like
+ * one re-pointing the name.
+ *
  * Two catalog tables get no list, because the resolver no longer reads them:
  * `sys_permission_set` (the set's existence and body are its catalog
  * definition, ADR-0131 D4) and `sys_position` (a position-bound
@@ -858,7 +867,7 @@ export const USER_STANDING_KEYS = ['email', 'email_verified'] as const;
  * standing is read from `sys_member.role`). Writing either row cannot move the
  * administrator population, so neither is guarded.
  */
-export const ACTIVATION_LEDGER_STANDING_KEYS = ['metadata_type', 'name', 'active'] as const;
+export const ACTIVATION_LEDGER_STANDING_KEYS = ['metadata_type', 'name', 'active', 'package_id'] as const;
 
 /**
  * [ADR-0131 D5] Same, for `sys_organization`: the `slug` that names the Default
@@ -1144,15 +1153,14 @@ function createStandingReader(engine: Pick<LastAdminGuardEngine, 'find'>, maxSca
   /**
    * [ADR-0131 D3/D4] Whether the catalog bound to this engine holds an
    * `admin_full_access` permission definition — the set's existence, read
-   * where the resolver reads it. Resolved at the write, never at
+   * where the resolver reads it. [ADR-0150 D3] The PLATFORM's set
+   * (`platformPermissionSet`): another package's set of that name makes no
+   * administrator. Resolved at the write, never at
    * registration: the security plugin binds the reader at its `start()`.
    * A catalog read that fails throws (`AuthzStoreUnavailableError`) and the
    * write is refused by {@link failClosed}.
    */
-  const adminSetDefined = async (): Promise<boolean> => {
-    const catalog = securityCatalogReaderOf(engine);
-    return catalog ? (await catalog.resolve('permission', ADMIN_FULL_ACCESS)) !== undefined : false;
-  };
+  const adminSetDefined = async (): Promise<boolean> => (await platformPermissionSet(engine, ADMIN_FULL_ACCESS)) !== undefined;
 
   /** The permission names the catalog holds — what a grant can name and resolve to. */
   const catalogSetNames = async (): Promise<Set<string>> => {
@@ -1187,7 +1195,7 @@ function createStandingReader(engine: Pick<LastAdminGuardEngine, 'find'>, maxSca
    * judged with them.
    */
   const readAdminSetSwitchedOff = async (op: StandingReadOp, pending?: PendingStandingWrite): Promise<boolean> => {
-    const fields = ['id', 'metadata_type', 'name', 'active'];
+    const fields = ['id', 'metadata_type', 'package_id', 'name', 'active'];
     const rows = await scanLedger(op, { where: { metadata_type: 'permission', name: ADMIN_FULL_ACCESS }, fields });
     const ledgerWrite = pendingFor(pending, METADATA_ACTIVATION);
     if (ledgerWrite && ledgerWrite.ids.size > 0) {
@@ -1197,11 +1205,17 @@ function createStandingReader(engine: Pick<LastAdminGuardEngine, 'find'>, maxSca
     }
     const after = rows.map((row) => applyPending(row, pending, METADATA_ACTIVATION));
     if (ledgerWrite?.inserted) after.push(ledgerWrite.inserted);
-    return after.some((row) =>
-      row !== undefined
-      && row.metadata_type === 'permission'
-      && row.name === ADMIN_FULL_ACCESS
-      && (row.active === false || row.active === 0));
+    // [ADR-0150 D4, D8 R4] A row switches off the holder its `package_id`
+    // names — the PLATFORM's set is the one standing derives from, so a row
+    // switching off another package's set of the name switches off no
+    // administrator. A row that names no package, or a stale one, disables
+    // the holder the name resolves to, the resolver's own reading.
+    const platform = await platformPermissionSet(engine, ADMIN_FULL_ACCESS);
+    const holder = platform ? catalogEntryAddress(platform).packageId : null;
+    for (const row of after) {
+      if (await ledgerRowSwitchesOff(engine, row, holder, ADMIN_FULL_ACCESS)) return true;
+    }
+    return false;
   };
 
   /**
@@ -1382,6 +1396,11 @@ function createStandingReader(engine: Pick<LastAdminGuardEngine, 'find'>, maxSca
         // [ADR-0131 D4] The name is the grant's one reference to its set, and
         // nothing derives it after this guard.
         if (grantSetNameOf(link) !== ADMIN_FULL_ACCESS) continue;
+        // [ADR-0150 D3, D8 R1] …naming the PLATFORM's set, read by the grant's
+        // package column as the resolver reads it (also as the write would
+        // leave it): another package's set of that name makes no administrator,
+        // and a name two holders share with no column names none.
+        if (!(await grantNamesPlatformPermissionSet(engine, ADMIN_FULL_ACCESS, link.permission_set_package))) continue;
         // Any other organization's grant makes a tenant admin, not the
         // environment's break-glass admin — the same distinction
         // `resolveAuthzContext` draws (`grantAnchorsPlatformStanding`): the

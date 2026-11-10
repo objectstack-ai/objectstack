@@ -118,6 +118,8 @@
     "ModelSelectionCriteriaSchema": "ai/ModelSelectionCriteria",
     "ObjectKnowledgeSource": "ai/ObjectKnowledgeSource",
     "ObjectKnowledgeSourceSchema": "ai/ObjectKnowledgeSource",
+    "ObjectQuerySource": "ai/ObjectQuerySource",
+    "ObjectQuerySourceSchema": "ai/ObjectQuerySource",
     "PromptTemplate": "ai/PromptTemplate",
     "PromptTemplateSchema": "ai/PromptTemplate",
     "PromptVariable": "ai/PromptVariable",

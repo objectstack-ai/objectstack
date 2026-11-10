@@ -146,7 +146,12 @@ async function boot(kind: 'secret' | 'public', posture?: 'single' | 'group' | 'i
     ...(posture ? { tenancy: { posture } } : {}),
     manifest: { register: vi.fn() },
     objectql: engine,
-    metadata: { get: async (_t: string, name: string) => engine.getSchema(name) ?? null, list: async () => [MEMBER] },
+    metadata: {
+      // The catalog reads a set by name (ADR-0150 D3): served from the same list.
+      get: async (t: string, name: string) =>
+        (t === 'permission' ? ([MEMBER]).find((s: any) => s?.name === name) : engine.getSchema(name)) ?? null,
+      list: async () => [MEMBER],
+    },
   };
   const ctx = {
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },

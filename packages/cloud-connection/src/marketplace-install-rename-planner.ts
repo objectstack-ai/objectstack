@@ -7,8 +7,8 @@
  * writes. Two mounts register that service, both from here:
  *
  * - {@link MarketplaceInstallRenamePlannerPlugin}, the planner alone: no
- *   install door, no route, no file ledger, no rehydrate. A kernel that serves
- *   no install-local door (a hosted environment's) mounts this one.
+ *   install door, no route, no file ledger, no rehydrate. A kernel that does
+ *   not mount `MarketplaceInstallLocalPlugin` mounts this one.
  * - `MarketplaceInstallLocalPlugin`, the install door, which registers the
  *   same planner beside its door service, so a host that mounts only the door
  *   keeps it.

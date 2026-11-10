@@ -226,7 +226,9 @@ describe('[ADR-0106] HTTP MCP bridge and the /metadata object door agree — the
             manifest: { register: vi.fn() },
             objectql: engine,
             metadata: {
-                get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+                // The catalog reads a set by name (ADR-0150 D3): served from the same list.
+                get: async (type: string, name: string) =>
+                  (type === 'permission' ? sets.find((s: any) => s?.name === name) : engine.getSchema(name)) ?? null,
                 list: async () => sets,
             },
         };
@@ -416,7 +418,9 @@ describe('[ADR-0106] HTTP MCP list_actions summarises an action against the obje
             manifest: { register: vi.fn() },
             objectql: engine,
             metadata: {
-                get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+                // The catalog reads a set by name (ADR-0150 D3): served from the same list.
+                get: async (type: string, name: string) =>
+                  (type === 'permission' ? sets.find((s: any) => s?.name === name) : engine.getSchema(name)) ?? null,
                 list: async () => sets,
             },
         };
@@ -620,7 +624,9 @@ describe('[ADR-0106 D1] a standalone or object-less action entry is served as th
             manifest: { register: vi.fn() },
             objectql: engine,
             metadata: {
-                get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+                // The catalog reads a set by name (ADR-0150 D3): served from the same list.
+                get: async (type: string, name: string) =>
+                  (type === 'permission' ? sets.find((s: any) => s?.name === name) : engine.getSchema(name)) ?? null,
                 list: async () => sets,
             },
         };
@@ -854,5 +860,336 @@ describe('[ADR-0106 D1] a standalone or object-less action entry is served as th
         expect(listed.find((a) => a.name === GL_VENDOR_BUDGET.name)?.params).toEqual([target]);
         const member: any[] = await (await bridgeFor(kernelOver(services), PERSONAS.member)).bridge.listActions();
         expect(member.find((a) => a.name === EMBEDDED_VENDOR_BUDGET.name)?.params).toEqual([target]);
+    });
+});
+
+describe('[ADR-0106 D1] an action the caller is not shown is answered on every run door as an unknown name — REST /actions and MCP run_action', () => {
+    const OBJ = 'run_fls_project';
+    const OTHER = 'run_fls_vendor';
+    const APPROVE = 'run_fls.approve';
+    const ai = (description: string) => ({ exposed: true, description });
+    /** Binds a field the member cannot read; required, so a bag without it is a param error to a caller shown it. */
+    const SET_BUDGET = { name: 'set_budget', label: 'Set budget', operation: 'update', params: [{ field: 'budget' }], ai: ai('Set the approved budget of this project to a new amount.') };
+    /** Binds another object's field the member cannot read (`objectOverride`, judged there). */
+    const QUOTE_RATE = { name: 'quote_rate', label: 'Quote rate', operation: 'update', params: [{ field: 'rate', objectOverride: OTHER }], ai: ai('Quote the day rate of a vendor for this project.') };
+    /** As SET_BUDGET, and gated on a capability no persona but the approver holds. */
+    const APPROVE_BUDGET = {
+        name: 'approve_budget', label: 'Approve budget', operation: 'update', params: [{ field: 'budget' }],
+        requiredPermissions: [APPROVE], ai: ai('Approve the budget of this project at a new amount.'),
+    };
+    /** Binds a field the member CAN read: the control. */
+    const RENAME = { name: 'rename_project', label: 'Rename', operation: 'update', params: [{ field: 'title' }], ai: ai('Rename this project to the title the user gives.') };
+    /** Binds no field at all. */
+    const CLOSE = { name: 'close_project', label: 'Close', operation: 'update', patch: { stage: 'closed' }, ai: ai('Close this project once the work on it is finished.') };
+    /** No params: its `patch` writes the field the member cannot read. */
+    const ZERO_BUDGET = { name: 'zero_budget', label: 'Zero budget', operation: 'update', patch: { budget: 0 }, ai: ai('Set the approved budget of this project to zero.') };
+    /** The handler the two rewrites below dispatch to, and what it was handed. */
+    const HANDLER = 'apply_project_amount';
+    const handled: unknown[] = [];
+    /** A rewrite whose inline param is named like the field: still a mention of it. */
+    const NAMED_LIKE_FIELD = {
+        name: 'apply_named_budget', label: 'Apply amount', type: 'script', target: HANDLER,
+        params: [{ name: 'budget', type: 'number' }], ai: ai('Apply a new amount to the approved budget of this project.'),
+    };
+    /** The changeset's migration followed literally: a handler action whose declaration names no field the member cannot read. */
+    const APPLY_AMOUNT = {
+        name: 'apply_amount', label: 'Apply amount', type: 'script', target: HANDLER,
+        params: [{ name: 'new_amount', type: 'number' }], ai: ai('Apply a new amount to the approved budget of this project.'),
+    };
+    const WITHHELD = [SET_BUDGET.name, QUOTE_RATE.name, APPROVE_BUDGET.name, ZERO_BUDGET.name, NAMED_LIKE_FIELD.name];
+    const UNKNOWN = 'no_such_action';
+    /** Every bag shape a caller can send: none, a value of the wrong type, an undeclared key, a well-formed one on a record. */
+    const BAGS: ReadonlyArray<Record<string, unknown>> = [
+        {},
+        { params: { budget: 'not a number', rate: 'not a number' } },
+        { params: { undeclared_key: 1 } },
+        { recordId: 'p1', params: { budget: 5, rate: 5 } },
+    ];
+
+    const ORG = 'org_run_fls';
+    const member = {
+        userId: 'usr_member', organizationId: ORG, positions: [] as string[], permissions: ['run_fls_member'], systemPermissions: [] as string[],
+    };
+    const PERSONAS = {
+        /** Denied `budget` here and `rate` on the other object. */
+        member,
+        /** As the member, and holding the approve capability. */
+        approver: { ...member, userId: 'usr_approver', systemPermissions: [APPROVE] },
+        /** Denied nothing: the control. */
+        staff: { ...member, userId: 'usr_staff', permissions: ['run_fls_staff'] },
+        /** Denied every field of the project object. */
+        walled: { ...member, userId: 'usr_walled', permissions: ['run_fls_walled'] },
+        /** D4: holds the member's denies and may write the schema. */
+        author: { ...member, userId: 'usr_author', systemPermissions: ['manage_metadata'] },
+        /** The system context. */
+        system: { userId: 'usr_system', organizationId: ORG, isSystem: true },
+    } as const;
+    type Persona = Record<string, unknown>;
+
+    let engine: ObjectQL;
+    let services: Record<string, any>;
+
+    beforeAll(async () => {
+        engine = new ObjectQL();
+        const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as any);
+        const storeObjects = [SysMetadataObject, SysMetadataHistoryObject, SysMetadataAuditObject] as any[];
+        await driver.initObjects(storeObjects);
+        engine.registerDriver(driver as any, true);
+        await engine.init();
+        for (const o of storeObjects) engine.registry.registerObject(o, '@objectstack/platform-objects');
+        engine.registerApp({
+            id: 'com.objectstack.qa.run-door-field-mask',
+            name: 'Run door field mask',
+            version: '1.0.0',
+            type: 'plugin',
+            scope: 'system',
+            objects: [
+                {
+                    name: OBJ,
+                    label: 'Project',
+                    sharingModel: 'public_read_write',
+                    fields: {
+                        title: { name: 'title', type: 'text', label: 'Title' },
+                        stage: {
+                            name: 'stage', type: 'select', label: 'Stage',
+                            options: [{ value: 'open', label: 'Open' }, { value: 'closed', label: 'Closed' }],
+                        },
+                        budget: { name: 'budget', type: 'currency', label: 'Approved budget', required: true },
+                    },
+                    actions: [SET_BUDGET, QUOTE_RATE, APPROVE_BUDGET, RENAME, CLOSE, ZERO_BUDGET, NAMED_LIKE_FIELD, APPLY_AMOUNT],
+                },
+                {
+                    name: OTHER,
+                    label: 'Vendor',
+                    sharingModel: 'public_read_write',
+                    fields: {
+                        name: { name: 'name', type: 'text', label: 'Name' },
+                        rate: { name: 'rate', type: 'currency', label: 'Day rate' },
+                    },
+                },
+            ],
+        } as never);
+        await engine.syncSchemas();
+        engine.registerAction(OBJ, HANDLER, async (ctx: any) => {
+            handled.push(ctx?.params?.new_amount ?? ctx?.params?.budget);
+            return { applied: true };
+        });
+        const all = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
+        const deny = { readable: false, editable: false };
+        const sets = [
+            PermissionSetSchema.parse({
+                name: 'run_fls_member', label: 'Member', objects: { '*': all },
+                fields: { [`${OBJ}.budget`]: deny, [`${OTHER}.rate`]: deny },
+            }),
+            PermissionSetSchema.parse({ name: 'run_fls_staff', label: 'Staff', objects: { '*': all } }),
+            PermissionSetSchema.parse({
+                name: 'run_fls_walled', label: 'Walled', objects: { '*': all },
+                fields: Object.fromEntries(Object.keys((engine.getSchema(OBJ) as any).fields).map((f) => [`${OBJ}.${f}`, deny])),
+            }),
+        ];
+        const pluginServices: Record<string, unknown> = {
+            manifest: { register: vi.fn() },
+            objectql: engine,
+            metadata: {
+                get: async (type: string, name: string) =>
+                  (type === 'permission' ? sets.find((s: any) => s?.name === name) : engine.getSchema(name)) ?? null,
+                list: async () => sets,
+            },
+        };
+        const ctx = {
+            logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+            registerService: vi.fn((name: string, service: unknown) => { pluginServices[name] = service; }),
+            getService: (name: string) => {
+                if (!(name in pluginServices)) throw new Error(`service not registered: ${name}`);
+                return pluginServices[name];
+            },
+        };
+        const plugin = new SecurityPlugin({ fallbackPermissionSet: 'run_fls_staff' });
+        await plugin.init(ctx as never);
+        await plugin.start(ctx as never);
+        expect(pluginServices.security, 'precondition: the security plugin registered its service').toBeDefined();
+        vi.spyOn((engine as unknown as { logger: { warn: () => void } }).logger, 'warn').mockImplementation(() => undefined);
+        services = {
+            protocol: new ObjectStackProtocolImplementation(engine as any),
+            security: pluginServices.security,
+            objectql: engine,
+        };
+        vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    }, 60_000);
+
+    afterAll(async () => {
+        vi.restoreAllMocks();
+        try { await engine?.destroy(); } catch { /* noop */ }
+    });
+
+    /** A project row, written in the system context, read back the same way. */
+    const seed = async (id: string) => {
+        await engine.insert(OBJ, { id, title: 'Apollo', stage: 'open', budget: 100, organization_id: ORG }, { context: { isSystem: true } });
+    };
+    const rowOf = async (id: string): Promise<any> => engine.findOne(OBJ, { where: { id }, context: { isSystem: true } });
+
+    /** `POST /actions/:object/:action` under `persona`, as the wire answers it. */
+    async function restRun(persona: Persona, action: string, bag: Record<string, unknown>, over: Record<string, any> = services) {
+        const dispatcher = new HttpDispatcher(kernelOver(over), undefined, { enforceProjectMembership: false });
+        const answer = await dispatcher.handleActions(`/${OBJ}/${action}`, 'POST', structuredClone(bag), {
+            request: {}, environmentId: undefined, executionContext: { ...persona },
+        } as any);
+        return { status: answer.response?.status ?? 0, body: answer.response?.body };
+    }
+    /** MCP `run_action` under `persona`: the value it resolved, or the refusal's ADR-0112 fields. */
+    async function mcpRun(persona: Persona, action: string, bag: Record<string, unknown>, over: Record<string, any> = services) {
+        const { bridge } = await bridgeFor(kernelOver(over), persona);
+        try {
+            return { value: await bridge.runAction(action, { objectName: OBJ, ...structuredClone(bag) }) };
+        } catch (error: any) {
+            return { refused: { message: String(error?.message), code: error?.code, status: error?.status } };
+        }
+    }
+    /** A host's own door (`dispatchAction`) under `persona`, at the given posture. */
+    async function hostRun(persona: Persona, action: string, bag: Record<string, unknown>, posture: 'rest' | 'ai') {
+        const dispatcher = new HttpDispatcher(kernelOver(services), undefined, { enforceProjectMembership: false });
+        const answer = await dispatcher.dispatchHostAction({
+            executionContext: { ...persona } as any, objectName: OBJ, actionName: action, posture, ...structuredClone(bag),
+        });
+        return { status: answer.status, body: answer.body };
+    }
+    /** `text` with the unknown name standing where `name` stands. */
+    const asUnknown = (text: string, name: string) => text.split(UNKNOWN).join(name);
+
+    it('precondition: the staff is shown every fixture action, and the member is shown exactly the ones binding no field they cannot read', async () => {
+        const read = async (persona: Persona) => {
+            const { dispatcher } = await bridgeFor(kernelOver(services), persona);
+            const meta = await dispatcher.handleMetadata(`/object/${OBJ}`, {
+                request: {}, environmentId: undefined, executionContext: { ...persona },
+            } as any, 'GET');
+            return ((meta.response?.body?.data?.item?.actions ?? []) as any[]).map((a) => a.name).sort();
+        };
+        const every = [SET_BUDGET, QUOTE_RATE, APPROVE_BUDGET, RENAME, CLOSE, ZERO_BUDGET, NAMED_LIKE_FIELD, APPLY_AMOUNT].map((a) => a.name).sort();
+        expect(await read(PERSONAS.staff)).toEqual(every);
+        expect(await read(PERSONAS.member)).toEqual(every.filter((n) => !WITHHELD.includes(n)));
+    });
+
+    it('REST: an action the member is not shown is answered byte-identical to an unknown name, whatever the bag, and nothing is written', async () => {
+        await seed('p1');
+        for (const bag of BAGS) {
+            const unknown = await restRun(PERSONAS.member, UNKNOWN, bag);
+            expect(unknown.status, 'precondition: an unknown name is a 404').toBe(404);
+            for (const name of WITHHELD) {
+                const answer = await restRun(PERSONAS.member, name, bag);
+                expect(JSON.stringify(answer), `${name} ${JSON.stringify(bag)}`).toBe(asUnknown(JSON.stringify(unknown), name));
+            }
+        }
+        expect((await rowOf('p1'))?.budget).toBe(100);
+    });
+
+    it('MCP run_action: an action the member is not shown is answered byte-identical to an unknown name, whatever the bag, and nothing is written', async () => {
+        await seed('p2');
+        for (const bag of BAGS.map((b) => (b.recordId ? { ...b, recordId: 'p2' } : b))) {
+            const unknown = await mcpRun(PERSONAS.member, UNKNOWN, bag);
+            expect(unknown.refused, 'precondition: an unknown name is refused').toBeDefined();
+            for (const name of WITHHELD) {
+                const answer = await mcpRun(PERSONAS.member, name, bag);
+                expect(JSON.stringify(answer), `${name} ${JSON.stringify(bag)}`).toBe(asUnknown(JSON.stringify(unknown), name));
+            }
+        }
+        expect((await rowOf('p2'))?.budget).toBe(100);
+    });
+
+    it('host dispatchAction, both postures: an action the member is not shown is answered byte-identical to an unknown name, whatever the bag', async () => {
+        await seed('p6');
+        for (const posture of ['rest', 'ai'] as const) {
+            for (const bag of BAGS.map((b) => (b.recordId ? { ...b, recordId: 'p6' } : b))) {
+                const unknown = await hostRun(PERSONAS.member, UNKNOWN, bag, posture);
+                expect(unknown.status, 'precondition: an unknown name is a 404').toBe(404);
+                for (const name of WITHHELD) {
+                    const answer = await hostRun(PERSONAS.member, name, bag, posture);
+                    expect(JSON.stringify(answer), `${posture} ${name} ${JSON.stringify(bag)}`).toBe(asUnknown(JSON.stringify(unknown), name));
+                }
+            }
+        }
+        expect((await rowOf('p6'))?.budget).toBe(100);
+    });
+
+    it('a capability-gated action the member is not shown is answered as unknown on both doors, never as its gate\'s refusal; the scoped pre-screen names no gate', async () => {
+        for (const persona of [PERSONAS.member, PERSONAS.approver]) {
+            const rest = await restRun(persona, APPROVE_BUDGET.name, {});
+            expect(JSON.stringify(rest)).toBe(asUnknown(JSON.stringify(await restRun(persona, UNKNOWN, {})), APPROVE_BUDGET.name));
+            const { bridge } = await bridgeFor(kernelOver(services), persona);
+            expect(await bridge.capabilityRefusal(APPROVE_BUDGET.name, OBJ)).toBeUndefined();
+        }
+        // CONTROL: shown it, a caller without the capability is answered the gate's refusal on both.
+        expect((await restRun(PERSONAS.staff, APPROVE_BUDGET.name, {})).status).toBe(403);
+        const { bridge } = await bridgeFor(kernelOver(services), PERSONAS.staff);
+        expect((await bridge.capabilityRefusal(APPROVE_BUDGET.name, OBJ))?.status).toBe(403);
+    });
+
+    it('a caller whose field visibility cannot be evaluated is refused 503 FIELD_VISIBILITY_UNRESOLVED on both doors, and nothing runs', async () => {
+        await seed('p3');
+        for (const name of [SET_BUDGET.name, RENAME.name, CLOSE.name]) {
+            const rest = await restRun(PERSONAS.walled, name, { recordId: 'p3', params: {} });
+            expect({ status: rest.status, code: rest.body?.error?.code }, name).toEqual({ status: 503, code: REFUSED.code });
+            const mcp = await mcpRun(PERSONAS.walled, name, { recordId: 'p3', params: {} });
+            expect({ code: mcp.refused?.code, status: mcp.refused?.status }, name).toEqual(REFUSED);
+        }
+        // A security service that throws is the same refusal.
+        const sick = { ...services, security: { getMetadataReadableFields: async () => { throw new Error('security service unavailable'); } } };
+        expect((await restRun(PERSONAS.member, CLOSE.name, {}, sick)).status).toBe(503);
+        expect((await mcpRun(PERSONAS.member, CLOSE.name, {}, sick)).refused).toMatchObject(REFUSED);
+        expect((await rowOf('p3'))?.stage).toBe('open');
+    });
+
+    it('CONTROL — an action the member is shown runs for the member as it runs for the staff, on both doors', async () => {
+        await seed('p4');
+        await seed('p5');
+        const rest = await restRun(PERSONAS.member, RENAME.name, { recordId: 'p4', params: { title: 'Gemini' } });
+        expect(rest.status, JSON.stringify(rest.body)).toBe(200);
+        expect((await rowOf('p4'))?.title).toBe('Gemini');
+        const mcp = await mcpRun(PERSONAS.member, CLOSE.name, { recordId: 'p5' });
+        expect(mcp.refused, JSON.stringify(mcp.refused)).toBeUndefined();
+        expect((await rowOf('p5'))?.stage).toBe('closed');
+        // A param error is still the shown caller's located 400, on both doors.
+        const staffRest = await restRun(PERSONAS.staff, SET_BUDGET.name, { params: { budget: 'not a number' } });
+        expect(staffRest.status).toBe(400);
+        expect(JSON.stringify(staffRest.body)).toContain('budget');
+        const staffMcp = await mcpRun(PERSONAS.staff, SET_BUDGET.name, { params: { budget: 'not a number' } });
+        expect(staffMcp.refused?.status).toBe(400);
+    });
+
+    it('the migration followed literally: a handler action whose declaration names no field the member cannot read runs for the member, on both doors', async () => {
+        await seed('p7');
+        handled.length = 0;
+        const rest = await restRun(PERSONAS.member, APPLY_AMOUNT.name, { recordId: 'p7', params: { new_amount: 9 } });
+        expect(rest.status, JSON.stringify(rest.body)).toBe(200);
+        const mcp = await mcpRun(PERSONAS.member, APPLY_AMOUNT.name, { recordId: 'p7', params: { new_amount: 9 } });
+        expect(mcp.refused, JSON.stringify(mcp.refused)).toBeUndefined();
+        expect(handled).toEqual([9, 9]);
+        // The same rewrite with the param named like the field is still a mention of it.
+        const named = await restRun(PERSONAS.member, NAMED_LIKE_FIELD.name, { recordId: 'p7', params: { budget: 9 } });
+        expect(JSON.stringify(named)).toBe(asUnknown(JSON.stringify(await restRun(PERSONAS.member, UNKNOWN, {})), NAMED_LIKE_FIELD.name));
+        expect(handled).toEqual([9, 9]);
+    });
+
+    it('CONTROL — the system context and a D4-exempt author are answered as a deployment with the mask switched off answers them', async () => {
+        for (const persona of [PERSONAS.system, PERSONAS.author]) {
+            for (const [door, run] of [['REST', restRun], ['MCP', mcpRun]] as const) {
+                const id = `p_${String(persona.userId)}_${door}`;
+                const twin = `${id}_unmasked`;
+                await seed(id);
+                await seed(twin);
+                const answered = await run(persona, SET_BUDGET.name, { recordId: id, params: { budget: 7 } });
+                process.env[OBJECT_SCHEMA_MASK_DISABLE_ENV] = '1';
+                const control = await run(persona, SET_BUDGET.name, { recordId: twin, params: { budget: 7 } });
+                delete process.env[OBJECT_SCHEMA_MASK_DISABLE_ENV];
+                const where = `${door} ${String(persona.userId)}`;
+                // The row's own timestamps are the wall clock of each write, not anything a gate decided.
+                const text = (answer: unknown, rowId: string) => JSON.stringify(answer).split(rowId).join('ID')
+                    .replace(/"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z"/g, '"CLOCK"');
+                expect(text(answered, id), where).toBe(text(control, twin));
+                expect(JSON.stringify(answered).includes(UNKNOWN), where).toBe(false);
+                expect((await rowOf(id))?.budget, where).toBe((await rowOf(twin))?.budget);
+            }
+        }
+        // The system context's run writes.
+        expect((await rowOf(`p_${PERSONAS.system.userId}_REST`))?.budget).toBe(7);
     });
 });

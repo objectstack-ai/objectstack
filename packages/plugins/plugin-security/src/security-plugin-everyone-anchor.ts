@@ -51,7 +51,9 @@
  *
  * Nothing re-exports this module, so the published surface does not move.
  */
-import type { PluginContext } from '@objectstack/core';
+import type { PluginContext, SecurityCatalogReferenceScope } from '@objectstack/core';
+import { bindAudienceAnchorSetScopes } from '@objectstack/core';
+import { EVERYONE_POSITION } from '@objectstack/spec';
 import type { SecurityPlugin } from './security-plugin.js';
 import { declareEveryoneBaseline, registerBuiltinPositions } from './builtin-positions.js';
 import { readDeclaredCapabilityContext } from './declared-capability-context.js';
@@ -85,9 +87,18 @@ export async function declareEveryone(
     const sets = this.everyoneBaseline(anchorContext, (set, offending) => {
       logger.warn('[security] the everyone anchor does not name a baseline set — high-privilege bits', { set, offending });
     });
+    // [ADR-0150 D8 R3] The stored scope of each accepted set the anchor gains,
+    // rebuilt whole from the accepted rows on every derivation. A baseline set
+    // keeps its own, scope-less, reading.
+    const acceptedScopes = new Map<string, SecurityCatalogReferenceScope[]>();
     try {
       const derived = await readAcceptedEveryoneSets(ql, this.metadata, this.deploymentAcceptance());
-      for (const name of derived.accepted) if (!sets.includes(name)) sets.push(name);
+      for (const name of derived.accepted) {
+        if (sets.includes(name)) continue;
+        sets.push(name);
+        const scopes = derived.acceptedScopes?.get(name);
+        if (scopes) acceptedScopes.set(name, scopes);
+      }
       for (const w of derived.withheld) {
         const line = w.source === 'host-configuration'
           ? `[security] the everyone anchor does not carry the set '${w.set}' the security plugin's ` +
@@ -107,6 +118,7 @@ export async function declareEveryone(
         e as Error,
       );
     }
+    bindAudienceAnchorSetScopes(ql, EVERYONE_POSITION, acceptedScopes);
     if (sets.length > 0) declareEveryoneBaseline((ql as { registry?: unknown })?.registry, SECURITY_PLUGIN_ID, sets);
     this.epoch.bump('metadata');
   } catch (e) {

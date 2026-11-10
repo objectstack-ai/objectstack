@@ -3171,6 +3171,10 @@ const fr = {
       unknownApp: "une application",
       unidentified: "Cette application n'a pas pu être identifiée.",
       clientId: "ID client",
+      unverified: "Application non vérifiée",
+      unverifiedHint: "Aucun administrateur d’ici n’a enregistré cette application : son nom n’a donc pas été vérifié. Ne l’autorisez que si vous faites confiance à {{destination}}.",
+      destinationUnconfirmed: "La destination de cet accès n’a pas pu être confirmée ; il ne peut donc pas être autorisé ici.",
+      sentTo: "L’accès sera envoyé à :",
       willAllow: "Cette application pourra :",
       scope: {
         openid: "Confirmer votre identité",
@@ -4253,6 +4257,16 @@ const fr = {
       collapse: 'Réduire',
       expandTable: 'Agrandir',
       exitExpandedTable: 'Fermer',
+    },
+    answerSource: {
+      title: 'Comment ce résultat a été calculé',
+      object: 'Objet',
+      filter: 'Filtre',
+      allRecords: 'Tous les enregistrements',
+      groupedBy: 'Regroupé par',
+      aggregations: 'Agrégations',
+      records: 'Enregistrements',
+      visibleToYou: 'Uniquement les enregistrements que vous pouvez voir',
     },
     tool: {
       aggregate_data: "Synthétiser les données",

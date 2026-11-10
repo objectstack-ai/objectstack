@@ -35,7 +35,8 @@ import { LiteKernel } from '@objectstack/core';
 import type { Plugin, PluginContext } from '@objectstack/core';
 import type { ITriggerApiService } from '@objectstack/spec/contracts';
 import type { ApiTrigger, FlowTrigger } from './api-trigger.js';
-import { ApiTriggerPlugin, HOOKS_PATH } from './plugin.js';
+import { inboundHookRefusalResponse } from '@objectstack/core';
+import { ApiTriggerPlugin, HOOKS_ADDRESSED_PATH, HOOKS_PATH } from './plugin.js';
 
 const ORIGIN = 'http://hooks.test';
 const NOW = 1760000000;
@@ -60,6 +61,13 @@ interface BootOptions {
     automation?: boolean;
     /** `'absent'` registers no queue service; `'throws'` registers one whose publish throws. */
     queue?: 'ok' | 'absent' | 'throws';
+    /**
+     * [ADR-0150 D5] The engine's `packagedFlowOwner` (absent: the engine
+     * cannot say who ships a flow) and the registry's namespace table, which
+     * the qualified hook's mount judges its qualifier over.
+     */
+    flowOwner?: (name: string) => string | undefined;
+    namespaces?: Record<string, string[]>;
 }
 
 interface Published {
@@ -82,12 +90,21 @@ class FixturePlugin implements Plugin {
     readonly published: Published[] = [];
     readonly canonicalApp = new Hono();
     readonly aliasApp = new Hono();
+    /** Every `packagedFlowOwner` read the mount made. */
+    readonly flowOwnerReads = vi.fn((name: string) => this.options.flowOwner?.(name));
 
     constructor(private readonly options: BootOptions) {}
 
     init(ctx: PluginContext): void {
         if (this.options.automation !== false) {
-            ctx.registerService('automation', { registerTrigger: (t: FlowTrigger) => { this.triggers.push(t); } });
+            ctx.registerService('automation', {
+                registerTrigger: (t: FlowTrigger) => { this.triggers.push(t); },
+                ...(this.options.flowOwner ? { packagedFlowOwner: this.flowOwnerReads } : {}),
+            });
+        }
+        if (this.options.namespaces) {
+            const namespaces = this.options.namespaces;
+            ctx.registerService('objectql', { registry: { getNamespaceOwners: (ns: string) => namespaces[ns] ?? [] } });
         }
         const queueMode = this.options.queue ?? 'ok';
         if (queueMode !== 'absent') {
@@ -114,12 +131,12 @@ class FixturePlugin implements Plugin {
 
 /** The real plugin, with what it logs during boot observed. */
 class ObservedApiTriggerPlugin extends ApiTriggerPlugin {
-    readonly logs: Array<{ level: string; message: string }> = [];
+    readonly logs: Array<{ level: string; message: string; fields?: unknown }> = [];
 
     override async init(ctx: PluginContext): Promise<void> {
         for (const level of ['debug', 'info', 'warn', 'error'] as const) {
-            vi.spyOn(ctx.logger, level).mockImplementation((message: unknown) => {
-                this.logs.push({ level, message: String(message) });
+            vi.spyOn(ctx.logger, level).mockImplementation((message: unknown, fields?: unknown) => {
+                this.logs.push({ level, message: String(message), ...(fields !== undefined ? { fields } : {}) });
             });
         }
         await super.init(ctx);
@@ -580,5 +597,123 @@ describe('[#30009] a declared sender scheme (config.signature) — the one verif
             { flowName: FLOW, hookId: HOOK_ID },
         );
         expect(vendorOnly.status).toBe(401);
+    });
+});
+
+/**
+ * [ADR-0150 D5, child G1] The qualified hook's self-hosted mount,
+ * `POST /api/v1/automation/hooks/:ns/:flowName/:hookId`: the same door as the
+ * bare mount once its qualifier names the package that ships the flow (core's
+ * `admitInboundHookAddress`, over the engine's `packagedFlowOwner` and the
+ * registry's namespace table), `_env` a flow no package ships. Any other
+ * address is the door's one refusal, judged before the body or the signature
+ * is read, its cause logged only. `runs` is never this route: the request goes
+ * on to the run doors of a flow named `hooks`.
+ */
+describe('[ADR-0150 D5] the qualified hook on http.server', () => {
+    const PACKAGE = 'com.pin.crm';
+    const qualified = (qualifier: string, flowName: string, hookId: string, body: string, headers: Record<string, string> = {}) =>
+        new Request(`${ORIGIN}/api/v1/automation/hooks/${qualifier}/${encodeURIComponent(flowName)}/${encodeURIComponent(hookId)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...headers },
+            body,
+        });
+    const causesLogged = (plugin: ObservedApiTriggerPlugin) =>
+        plugin.lines('warn', 'refused an inbound post').map((line) => /refused an inbound post \(([^)]+)\)/.exec(line)?.[1]);
+
+    it('is mounted beside the bare hook, once', async () => {
+        const { fixture } = await boot({ server: 'canonical' });
+        expect(fixture.canonicalApp.routes.filter((r) => r.path === HOOKS_ADDRESSED_PATH).map((r) => r.method)).toEqual(['POST']);
+    });
+
+    it('an admitted address is the bare door: status, headers and bytes equal to the bare mount\'s, for every arm', async () => {
+        for (const [qualifier, flowOwner] of [['crm', () => PACKAGE], ['_env', () => undefined]] as const) {
+            const { fixture } = await boot({ server: 'canonical', flowOwner, namespaces: { crm: [PACKAGE] } });
+            for (const row of ROWS) {
+                const viaBare = await snapshot(await fixture.canonicalApp.fetch(hookRequest(row.flowName, row.hookId, row.body, row.headers)));
+                const viaQualified = await snapshot(await fixture.canonicalApp.fetch(qualified(qualifier, row.flowName, row.hookId, row.body, row.headers)));
+                expect(viaQualified, `${qualifier}: ${row.label}`).toEqual(viaBare);
+            }
+            expect(fixture.published).toHaveLength(2 * ROWS.filter((r) => r.published).length);
+            expect(fixture.flowOwnerReads).toHaveBeenCalledWith(FLOW);
+        }
+    });
+
+    const UNADMITTED: Array<[string, string, BootOptions]> = [
+        ['a namespace another package holds', 'crm', { flowOwner: () => 'com.pin.other', namespaces: { crm: [PACKAGE] } }],
+        ['a namespace nothing is installed under', 'nowhere', { flowOwner: () => PACKAGE, namespaces: { crm: [PACKAGE] } }],
+        ['a namespace, for a flow no package ships', 'crm', { flowOwner: () => undefined, namespaces: { crm: [PACKAGE] } }],
+        ['`_env`, for a flow a package ships', '_env', { flowOwner: () => PACKAGE, namespaces: { crm: [PACKAGE] } }],
+        ['an engine that cannot say who ships a flow', 'crm', { namespaces: { crm: [PACKAGE] } }],
+        ['no namespace table', 'crm', { flowOwner: () => PACKAGE }],
+    ];
+
+    it('⭐ an unadmitted address, correctly signed: the member\'s own bad-signature answer for the same flow and hook — status, headers and bytes — nothing enqueued, its cause logged only', async () => {
+        for (const [label, qualifier, opts] of UNADMITTED) {
+            const { fixture, member, plugin } = await boot({ server: 'canonical', ...opts });
+            // The member's answer, and the bare mount's, to a bad signature on the same flow and hook.
+            const badSig = { 'x-objectstack-signature': sigV1('not-the-secret', BODY, NOW) };
+            const viaMember = await snapshot(await member(hookRequest(FLOW, HOOK_ID, BODY, badSig), { flowName: FLOW, hookId: HOOK_ID }));
+            const viaBare = await snapshot(await fixture.canonicalApp.fetch(hookRequest(FLOW, HOOK_ID, BODY, badSig)));
+            expect(viaMember.status, label).toBe(401);
+            expect(viaBare, label).toEqual(viaMember);
+            // Core's one rendering, which the hosted face answers with, is the same bytes.
+            expect(await snapshot(inboundHookRefusalResponse()), label).toEqual(viaMember);
+
+            plugin.logs.length = 0;
+            const answer = await snapshot(await fixture.canonicalApp.fetch(qualified(qualifier, FLOW, HOOK_ID, BODY, sig(BODY))));
+            expect(answer, label).toEqual(viaMember);
+            expect(fixture.published, label).toEqual([]);
+            expect(causesLogged(plugin), label).toEqual(['unadmitted-address']);
+            // The one record of the cause carries the qualifier that caused it, as the hosted face's does.
+            expect(plugin.logs.filter((l) => l.message.includes('(unadmitted-address)')).map((l) => l.fields), label)
+                .toEqual([{ cause: 'unadmitted-address', flowName: FLOW, qualifier }]);
+            const text = new TextDecoder().decode(answer.body);
+            for (const word of ['unadmitted', qualifier, FLOW, HOOK_ID, 'namespace', 'package']) {
+                expect(text.includes(word), `${label}: the answer names ${word}`).toBe(false);
+            }
+        }
+    });
+
+    it('⭐ `runs` is never this route: the request goes on to the route that serves it, and nothing reads the qualifier', async () => {
+        const { fixture, plugin } = await boot({ server: 'canonical', flowOwner: () => PACKAGE, namespaces: { runs: [PACKAGE] } });
+        // The run doors of a flow named `hooks`, as the dispatcher mounts them on the same app.
+        fixture.canonicalApp.post('/api/v1/automation/:name/runs/:runId/:verb', (c) => c.text(`run door ${c.req.param('name')} ${c.req.param('runId')} ${c.req.param('verb')}`));
+        for (const verb of ['cancel', 'resume', 'restore-suspension']) {
+            plugin.logs.length = 0;
+            const res = await fixture.canonicalApp.fetch(qualified('runs', 'r1', verb, BODY, sig(BODY)));
+            expect(await res.text(), verb).toBe(`run door hooks r1 ${verb}`);
+            expect(causesLogged(plugin), verb).toEqual([]);
+        }
+        expect(fixture.flowOwnerReads).not.toHaveBeenCalled();
+        expect(fixture.published).toEqual([]);
+    });
+    // [ADR-0150 D5, contract review S1] Equal in when it is sent too: the
+    // refusal waits for the whole body, as the bare mount reads every post's
+    // body before it answers.
+    it('⭐ a body that has not arrived gets no answer, on an admitted address and on an unadmitted one alike; once it arrives, each gets its own', async () => {
+        for (const [label, qualifier, status] of [['admitted', 'crm', 202], ['unadmitted', 'nowhere', 401], ['unadmitted `_env`', '_env', 401]] as const) {
+            const { fixture } = await boot({ server: 'canonical', flowOwner: () => PACKAGE, namespaces: { crm: [PACKAGE] } });
+            let ctl!: ReadableStreamDefaultController<Uint8Array>;
+            const stream = new ReadableStream<Uint8Array>({ start(c) { ctl = c; } });
+            ctl.enqueue(new TextEncoder().encode(BODY.slice(0, 10)));
+            const request = new Request(`${ORIGIN}/api/v1/automation/hooks/${qualifier}/${FLOW}/${HOOK_ID}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...sig(BODY) },
+                body: stream,
+                duplex: 'half',
+            } as RequestInit);
+            let settled = false;
+            const answer = Promise.resolve(fixture.canonicalApp.fetch(request));
+            answer.then(() => { settled = true; }, () => { settled = true; });
+            // Real time, not the faked Date: let the handler run as far as it will.
+            for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
+            expect(settled, `${label}: answered before its body arrived`).toBe(false);
+            ctl.enqueue(new TextEncoder().encode(BODY.slice(10)));
+            ctl.close();
+            const res = await answer;
+            expect(res.status, label).toBe(status);
+            expect(fixture.published.length, label).toBe(status === 202 ? 1 : 0);
+        }
     });
 });

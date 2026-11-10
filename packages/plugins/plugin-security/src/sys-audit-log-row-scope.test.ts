@@ -144,7 +144,9 @@ async function boot(opts: { posture: Posture; sets?: PermissionSet[]; ledger?: R
     objectql: engine,
     tenancy: { posture: opts.posture },
     metadata: {
-      get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+      // The catalog reads a set by name (ADR-0150 D3): served from the same list.
+      get: async (type: string, name: string) =>
+        (type === 'permission' ? (sets).find((s: any) => s?.name === name) : engine.getSchema(name)) ?? null,
       list: async () => sets,
     },
   };

@@ -278,7 +278,14 @@ describe('[#10825] batched resolveUserAuthzGrants — equivalence with the seque
     it('resolves the SAME grants envelope, row for row and in the same order', async () => {
       const ql = makeRecordingQl(f.tables);
       const grants = await resolveUserAuthzGrants(ql, f.userId, f.opts);
-      expect(grants).toEqual(GOLDEN[name].grants);
+      // [ADR-0150 D3] `permissionSetAddresses` postdates the capture and is
+      // compared beside it, never written into it: each address names a set
+      // the captured envelope confers.
+      const { permissionSetAddresses, ...envelope } = grants;
+      expect(envelope).toEqual(GOLDEN[name].grants);
+      for (const address of permissionSetAddresses ?? []) {
+        expect(grants.permissions).toContain(address.name);
+      }
     });
 
     it('issues the SAME reads — same objects, same filters, same tenancy scoping, same limits', async () => {

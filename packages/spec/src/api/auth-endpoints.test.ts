@@ -236,6 +236,7 @@ describe('AuthFeaturesConfig declares every classified served key', () => {
     phoneNumberOtp: false,
     emailDelivery: false,
     cloudManaged: false,
+    developerEditionCreate: false,
     termsUrl: 'https://objectstack.ai/terms',
     privacyUrl: 'https://objectstack.ai/privacy',
     turnstileSiteKey: '0x4AAAAAAA',

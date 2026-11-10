@@ -93,7 +93,9 @@ export const PACKAGE_UNINSTALL_AUDIT_ACTION = 'package_uninstall' as const;
  *    `source_namespace` (the namespace a rename came from, or null),
  *    `copied_count`, and `outcome` (`success` or `failure`); a failure adds
  *    the answer's `error_code` and HTTP `status`, never its message (a refusal
- *    message can quote package content).
+ *    message can quote package content). [#31482] A grant refused over its
+ *    namespace adds `requested_namespace` and `granted_namespace` (null when
+ *    the grant named none); no other row carries the two keys.
  */
 export const PACKAGE_UNMANAGED_IMPORT_AUDIT_ACTION = 'package_unmanaged_import' as const;
 
@@ -129,6 +131,14 @@ export interface PackageUnmanagedImportAuditEvent {
   namespace?: string;
   /** The namespace a rename came from (#30794); absent when the copy kept it. */
   sourceNamespace?: string;
+  /**
+   * [#31482] On a control-plane grant the environment refused over its
+   * namespace: the namespace the installer asked the copy to take. Absent on
+   * every other event.
+   */
+  requestedNamespace?: string;
+  /** [#31482] On the same refusal: the namespace the grant named; absent when it named none. */
+  grantedNamespace?: string;
   /** Items the copy wrote. */
   copiedCount?: number;
   /** Whether the copy landed. */
@@ -223,6 +233,12 @@ export function buildPackageLifecycleAuditRow(
         ? {
             error_code: nonEmpty(event.errorCode) ?? null,
             status: typeof event.status === 'number' && Number.isInteger(event.status) ? event.status : null,
+          }
+        : {}),
+      ...(nonEmpty(event.requestedNamespace) !== undefined || nonEmpty(event.grantedNamespace) !== undefined
+        ? {
+            requested_namespace: nonEmpty(event.requestedNamespace) ?? null,
+            granted_namespace: nonEmpty(event.grantedNamespace) ?? null,
           }
         : {}),
     };

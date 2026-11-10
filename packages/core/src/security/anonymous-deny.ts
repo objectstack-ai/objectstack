@@ -55,8 +55,10 @@
  *  - a `book.audience: 'public'` read → the ADR-0046 §6.7 audience gate (#3963);
  *  - an inbound automation hook (`POST /automation/hooks/:flowName/:hookId`) →
  *    the HMAC signature under the hook's own secret, verified by the
- *    trigger-api service; the allow-list's one parameterised row admits that
- *    exact route, `POST` only, past the `/automation` floor (#22773);
+ *    trigger-api service; the allow-list's parameterised row admits that
+ *    exact route, `POST` only, past the `/automation` floor (#22773), and its
+ *    second row the qualified spelling `POST /automation/hooks/:ns/:flowName/:hookId`
+ *    (ADR-0150 D5; `:ns` never `runs`), whose qualifier the door judges itself;
  *  - MCP → an OAuth token or API key, never anonymous.
  *
  * Those run UPSTREAM of this function and set the execution context (a `userId`,
