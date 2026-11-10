@@ -27,7 +27,7 @@
 ## TL;DR
 
 1. **Sync-in is a second way in, beside federation, not a replacement for it.** A remote table or API collection becomes an ordinary object whose rows were **copied** by a pull. Every platform surface (permissions, RLS, reports, datasets, flows, MCP, AI) reads it as it reads any object. Federation stays the answer when a copy would be wrong ([D10](#d10--the-three-way-rule-and-the-partner-stance)).
-2. **Two source keys, one binding home.** `mapping.connectorSource` (a `rest` / `openapi` connector) stays; a sibling `mapping.datasourceSource { object, watermark: { field, start }, full? }` makes any federated object a pull source, a warehouse table included; exactly one source per mapping. Both read paths cut windows `lo <= field < hi` on canon-aligned bounds. A built-in driver reads each window whole with no cap, paged by primary key. A floored plugin driver reads each window through the engine's external-driver floor and halves one that comes back over the cap. That costs more round trips, needs both bounds pushed down, and lifts nothing in ruling `6487532394`. Snowflake and BigQuery drivers move from the engine child to plugin packages outside this repository, per ruling `6731568115` (a departure from the epic's row) ([D1](#d1--pull-sources-a-sibling-datasourcesource-beside-connectorsource)).
+2. **Two source keys, one binding home.** `mapping.connectorSource` (a `rest` / `openapi` connector) stays; a sibling `mapping.datasourceSource { object, watermark: { field, start }, full? }` makes a federated object a pull source, a warehouse table included, when its `columnMap` maps a source key onto `id`; exactly one source per mapping. Both read paths cut windows `lo <= field < hi` on canon-aligned bounds. A bounded window ends at or below a value the source has already shown the run, and only the run's last window is open above. A built-in driver reads each window whole with no cap, paged by that key. A floored plugin driver reads each window through the engine's external-driver floor and halves one that comes back over the cap. That costs more round trips, needs both bounds pushed down, and lifts nothing in ruling `6487532394`. Snowflake and BigQuery drivers move from the engine child to plugin packages outside this repository, per ruling `6731568115` (a departure from the epic's row) ([D1](#d1--pull-sources-a-sibling-datasourcesource-beside-connectorsource)).
 3. **A pull reads every page.** A declared `paging { style, param, nextPath }` on the connector source; aligned windows on the datasource source; a position is **committed** only at a window's end, at the canon-step floor of the smaller of the largest watermark value written and the window's high-water value, and the next pull starts there ([D2](#d2--paging-every-page-is-read-the-watermark-advances-only-when-committed)).
 4. **A source delete is marked, never applied.** `deletePolicy: 'mark' | 'ignore'`, default `mark`, stamping `_sync_deleted_at` ([D3](#d3--deletes-mark-or-ignore-never-a-physical-delete)).
 5. **`managedBy: 'synced'`** marks the object: read-only to members at every mechanism ADR-0103 guards a bucket with, five platform columns under the reserved `_sync_` prefix, no person owner, and an authored `sharingModel` like any custom object (ADR-0090 D1). A mapping that carries a source must target a `synced` object ([D4](#d4--provenance-the-synced-bucket-and-the-_sync_-columns)).
@@ -207,11 +207,12 @@ paging: { style: 'page' | 'cursor' | 'offset' | 'none', param: 'page', nextPath:
 - With no `paging`, a pull keeps today's one-response reading, the `watermark` describe keeps saying so, and the
   platform does not treat that response as complete ([D3](#d3--deletes-mark-or-ignore-never-a-physical-delete)).
 
-**Datasource source: invariants.** Each is one sentence a reviewer can check against the engine child's PR. The
-widths, the page size and how often a probe is tried are that child's tuning.
+**Datasource source: invariants.** Each is a rule a reviewer can check against the engine child's PR. The
+widths, the page size and the number of bounded windows are that child's tuning.
 
 1. **The field.** `watermark.field` is a `datetime` field, a `date` field, or a `number` field that declares
-   `scale: 0` (the build's reading of an integer); any other type is refused at build.
+   `scale: 0` (the build's reading of an integer); any other type is refused at build. An integer watermark is
+   also bound by invariant 7.
 2. **Only grows.** Every write at the source stamps the row's watermark with a value at or above every value the
    source already holds, as an update clock or a source-wide sequence does. A per-row version counter does not.
 3. **Aligned bounds.** Every bound the pull sends is a value aligned to the engine's canon step (a millisecond for
@@ -219,18 +220,29 @@ widths, the page size and how often a probe is tried are that child's tuning.
 4. **No unaligned read-back bound.** No value read back from a row is a bound until it has been floored to the canon
    step.
 5. **No read-back cursor on the watermark.** No watermark value read back from a row is ever a page cursor.
-6. **The key.** The page key is the source field that the object's `external.columnMap` maps onto `id`. It is unique
-   and never NULL, and a source without that entry is refused at build by name (`source_key_missing`).
-7. **An exact key.** The key is a string, or an integer the driver hands back inside JavaScript's safe range. Any
-   other key is refused (`source_key_not_exact`).
+6. **The key.** The key is the source field that the object's `external.columnMap` maps onto `id`. It is required
+   on both paths, because it is the upsert identity (`upsertKey`, D4) on every read, and on a built-in driver it is
+   also the page cursor. A source without that entry is refused at build by name (`source_key_missing`). That the
+   key is unique and never NULL is a requirement on the source, like invariant 2, which the pull cannot check. A
+   duplicate key is not refused: the upsert overwrites, so the copy holds one row per key, the last one written.
+7. **Exact values.** The key is a string or an integer, and an integer key or an integer watermark is exact only when
+   every value the source can hold reads back as an exact JavaScript integer: inside ±2^53 (the field declares a
+   `precision` of 15 digits or fewer), or read as a `bigint` or a string by the dialect's client, on a dialect the
+   engine child has verified. Otherwise it is refused at build, from the declared type: `source_key_not_exact` for
+   the key, `watermark_not_exact` for the watermark. A value that still comes back as a number outside the safe
+   range refuses the run with the same reason, because a declaration can be wrong.
 8. **Commit at a window's end only.** A position is committed when a window has been read to its end, never after a
    page.
 9. **The committed value.** The committed position is the canon-step floor of the smaller of (a) the largest
    watermark value written in the run, and (b) on a window read in more than one page, the high-water value the
-   source held before that window's first page.
+   source held before that window's first page. Every high-water read is one `max(field)` over the whole source
+   under the organization predicate, never within a window's bounds.
 10. **The organization.** Every read the pull makes carries D8's organization predicate.
 11. **NULL is counted.** A source row whose watermark is NULL is in no window, and is counted on the run record
     (`skipped_null_watermark: N`, [D7](#d7--the-run-record-sys_sync_run-beside-sys_job_run)).
+12. **A window is bounded only below a value the source has shown.** A bounded window's `hi` is at or below a
+    watermark value the pull has already read from the source in this run. No other window is bounded. The run's
+    last window is open above (`field >= lo`), and the run ends with it.
 
 **Why the invariants hold.**
 
@@ -259,10 +271,14 @@ widths, the page size and how often a probe is tried are that child's tuning.
   worse than doing nothing"; a `columnMap` entry onto `id` "has DECLARED its key column"). The driver's one other
   key, a SQL Server table's catalog primary key (#31327), is read at run time and is not visible at build, so the pull
   does not use it. A source over a view, a keyless table or a composite key therefore needs that entry, or it is
-  refused. For invariant 7, nothing in `driver-sql` sets `supportBigNumbers` or
-  `bigNumberStrings`. A MySQL `BIGINT` above 2^53 may come back rounded, and `key > lastKey` on a rounded value skips
-  rows. That client default was not verified here. The engine child verifies it per dialect and reads such a key as
-  a string, or refuses it as `source_key_not_exact`.
+  refused.
+- **Why values must be exact (7).** Nothing under `packages/drivers` sets `supportBigNumbers`, `bigNumberStrings` or
+  `safeIntegers`. A MySQL `BIGINT` above 2^53 may come back rounded, and `key > lastKey` on a rounded value skips
+  rows. A rounded-up integer watermark (an epoch in nanoseconds, a log sequence number) commits a position above its
+  own row, the failure "What precision rests on" describes for a `datetime`. On a floored driver the floor's
+  in-memory re-evaluation would also compare the rounded value with `hi` while the remote compares the true one, so a
+  row could fall outside both neighbouring windows. That client default was not verified here. The engine child
+  verifies each dialect for the key and the watermark together.
 - **Why a window commits at its end (8).** Pages cut by key do not arrive in watermark order: page one holds the
   lowest keys with any watermark values. A commit after page one could pass rows on later pages with lower values,
   and an interrupted run would never read them. An interrupted run resumes from the last committed position and
@@ -275,6 +291,13 @@ widths, the page size and how often a probe is tried are that child's tuning.
   the next run, and one below stays in the refused count (`degraded`) until a full pull. A row that becomes visible at
   the source later with a value **below** the high-water value (a long transaction, clock skew) is the late-writes
   open point. It is the same class as a late write, not a new hole.
+- **Why a window is bounded only below a shown value (12).** Under invariant 2, a write that comes after the pull
+  has read value V carries a value at or above V. A window `lo <= field < hi` with `hi <= V` therefore gains no row
+  after V was shown, and it is complete once read. Rows written above `hi` fall in a later window or in the last,
+  open-above window. Without the invariant, invariant 9 caps one window's commit but not a later window's: committed
+  5000, source maximum 5400, a window `[5000, 6000)` read and committed at 5400, the source writes 5401 to 6200, and a
+  next read `field >= 6000` commits 6200. Rows 5401 to 5999 are then never pulled, with every other invariant met. That
+  case is in the conformance kit on both paths.
 - **Ties are read again.** The next incremental pull starts at `field >= committed`, so rows that share the committed
   canon step, including rows written to it after the pull, are read again. The keyed upsert (`upsertKey`,
   [D4](#d4--provenance-the-synced-bucket-and-the-_sync_-columns)) makes a second read harmless. A run that writes no
@@ -282,31 +305,53 @@ widths, the page size and how often a probe is tried are that child's tuning.
 
 **Mechanism, built-in driver: aligned windows read whole, paged by key.** A built-in driver executes the whole
 query, so it is read with no row cap (`external.rowCap` is refused on a built-in driver by the datasource schema,
-"never capped") and no halving. Ruling `6487532394` leaves built-in drivers unfloored, so before each window's first
-page the pull reads the window's high-water value, one `max(field)` under the organization predicate. Then it pages:
-`lo <= field < hi and key > lastKey`, ordered by key, with the field range fixed on every page, until a short page. A
-window may be open above (`field >= lo`). Invariant 9 keeps that safe, and the engine child picks the widths. The
-conformance cases for this path:
+"never capped") and no halving. Ruling `6487532394` leaves built-in drivers unfloored, so the pull may read
+`max(field)`.
+1. At run start it reads `H0`, one `max(field)` over the whole source under the organization predicate. That is the
+   value invariant 12 needs.
+2. The bounded windows cover `committed <= field < floor(H0)` (from `watermark.start` when nothing is committed). The
+   engine child picks their widths. When `floor(H0)` is at or below the start, or `H0` is NULL, there is no bounded
+   window.
+3. The last window is open above, `field >= floor(H0)`, and before its first page the pull reads the high-water value
+   again for (b) of invariant 9.
+4. Each window is paged: `lo <= field < hi and key > lastKey` (no `hi` on the last), ordered by key, with the field
+   range fixed on every page, until a short page.
+
+A row in a bounded window updated while it is read moves to a value at or above `H0`, so the last window reads it.
+The conformance cases for this path:
 - a source row finer than a millisecond;
 - on Postgres, one statement that stamps more rows than a page with one microsecond value;
 - a run interrupted after page one;
-- a row behind the key cursor updated during an open-above window;
-- a 64-bit key;
+- a row behind the key cursor updated during the open-above window;
+- committed 5000, source maximum 5400, the source writing 5401 to 6200 during the run: every row is pulled, by this
+  run or the next;
+- a 64-bit key, and a 64-bit integer watermark;
 - per dialect, a row at `.9996` of a millisecond.
 
 **Mechanism, floored plugin driver: windows bounded on both sides, halved over the cap.** Each window `lo <= field <
 hi` is one plain `find` through the floor ([D1](#d1--pull-sources-a-sibling-datasourcesource-beside-connectorsource)),
-so a window has no pages to interrupt, and (b) of invariant 9 does not apply. That includes the open-above probe,
-which is also one read. The first window starts at the committed position (`field >= committed`), else at
-`watermark.start`.
+so a window has no pages to interrupt, and (b) of invariant 9 does not apply to it. The floor hides `aggregate`
+(`packages/objectql/src/external-driver-floor.ts`), so no `max(field)` is read on this path. The values the source
+shows come from the floor's own answers instead:
+1. The pull reads the open-above window first, `field >= committed` (from `watermark.start` when nothing is
+   committed).
+2. If it answers under the cap, it is the whole tail. It commits per invariant 9, and the run ends.
+3. If it comes back over the cap, the cap + 1 rows the floor returned are values the source has shown. Their largest
+   value, floored to the canon step, is `V`. The bounded windows cover `lo <= field < V`, halved as below. When `V`
+   is at or below `lo`, every returned value is in one canon step, so that step holds more than the cap and the pull
+   refuses as `sync_window_unsplittable`.
+4. Then it reads the open-above window again from `V`, and repeats from step 2. Each round moves `lo` up, or refuses.
+
+The floor's error does not carry those values on `main`: `ExternalRowCapExceededError` has `details: { datasource,
+object, cap }` today. The P2 engine row owns adding them (below).
 
 - **Over the cap, two cases.** The floor receives one `where` and cannot tell which parts of it are the bounds. So
   the engine child makes the floor's `ExternalRowCapExceededError` carry the returned row count and each returned
   row's watermark value. They go on the error object only, never in its `details` or on the wire, and nothing in
   what the floor admits changes. The pull re-evaluates its two bounds on those values itself. D8's organization
   equality is not part of this count.
-  - **Every returned value is inside the bounds.** The window really holds more than the cap. It is halved (`hi`
-    moves to the aligned midpoint) and read again. A window one step wide that still holds more than the cap refuses
+  - **Every returned value is inside the bounds.** The window really holds more than the cap. An open-above window
+    goes to step 3. A bounded window is halved (`hi` moves to the aligned midpoint, still below `V`) and read again. A window one step wide that still holds more than the cap refuses
     the pull as **`sync_window_unsplittable`**, naming the value and the cap. The remedies are that datasource's
     `external.rowCap` (at most 10,000; the schema allows it on a plugin driver) or a finer window field. A compound
     window (the watermark, then a second field) is open for the engine child.
@@ -319,8 +364,8 @@ which is also one read. The first window starts at the committed position (`fiel
 - **A window under the cap is the whole set it matches.** Its rows are written through the import runner
   (`packages/core/src/utils/import-runner.ts#MAX_CREATE_BATCH_SIZE`), its commit follows invariant 9, and the next
   window starts at its `hi`. The windows tile the range with no gap and no overlap.
-- **The end.** After a window answers under the cap, the pull may read the window open above, `field >= lo`. When
-  that answers under the cap, the read is complete.
+- **The end.** The read is complete when the open-above window answers under the cap (step 2). The same 5000, 5400,
+  6200 conformance case runs on this path.
 - **How a bound is compared.** The `where` is pushed to the driver, and the floor re-evaluates it in memory by the
   source field's declared class (`packages/objectql/src/driver-query-in-memory.ts#applyDriverQueryInMemory`). No
   ordering of the driver's answer is read, so no collation enters.
@@ -346,8 +391,8 @@ Each source block gains `deletePolicy: 'mark' | 'ignore'`. Absent, it reads as `
   - a **full** pull (a connector source with no `watermark`, or a datasource source with `full: true`) marks every
     row of this mapping that a completed pull did not read, **only when the read is complete on the terms below**:
     - a datasource source is complete when its read reached the end from `watermark.start`
-      ([D2](#d2--paging-every-page-is-read-the-watermark-advances-only-when-committed)): on a built-in driver its last
-      page came back short; on a floored driver every window up to and including the window open above answered
+      ([D2](#d2--paging-every-page-is-read-the-watermark-advances-only-when-committed)): on a built-in driver every window,
+      the open-above one last, was paged to a short page; on a floored driver every window up to and including the window open above answered
       under the cap. The floored case rests on the floor's own trust, that an answer at or under the cap is the whole
       set it matches, and on nothing more;
     - **what a mark may judge.** A datasource pull marks only target rows its read could have read: rows of this
@@ -683,8 +728,8 @@ where a PR changes more than one kind, the line names the strongest (`narrowed` 
 
 | Child | Lane · size | Scope | Declaration | Order |
 |:--|:--|:--|:--|:--|
-| **P2 — spec** | `domain:spec` · M | The keys `datasourceSource`, `paging` (`none` included), `deletePolicy` (no schema default: absence reads as `mark`) and `deletedField`, each as a `planned` liveness row under `authorWarn`. The refusals, which are live as they land: exclusive source, a federated source object, a source key from the `columnMap` entry onto `id` (`source_key_missing`, D2), a halvable `watermark.field`, the watermark copied unchanged into a target field of its type (`watermark_field_unmapped`, D3), sourced target, `upsert` mode and the `_sync_` reservation. `job.pull` accepting either source. `managedBy: 'synced'` **with every mechanism that enforces it**: the guard set, the reconciliation, the clamp, both mirrors and the `ui/` bucket union, since a security bucket never lands unenforced (ADR-0049). The `userActions` exception (D4). `security-owd-unset`'s `synced` fix-it (D4). `CONNECTOR_SOURCE_NO_POLICY`'s `deleteMode` guidance re-pointed at `deletePolicy`. | `Clause-②: yes (narrowing)`: the keys widen and the refusals narrow, so it is breaking, with the migration and ADR-0087 disposition that brings. `Metadata-protocol: narrowed`. | first |
-| **P2 — engine** | `domain:server` · L | The D2 invariants, with the window widths and other tuning left to this child. On a built-in driver: aligned windows read whole with no cap, paged by the key from the `columnMap` entry onto `id`, and one high-water `max(field)` read under the organization predicate before each window's first page. `source_key_not_exact`, with the `BIGINT` client default verified per dialect and such a key read as a string or refused (D1, D2). The windowed read `lo <= field < hi` through the floor on a floored driver: canon-aligned bounds, the halving, `ExternalRowCapExceededError` carrying the returned row count and each returned row's watermark value (on the error object only, never in `details` or on the wire), and `sync_window_unsplittable` and `sync_bounds_not_pushed` (D1, D2). The organization predicate and `source_organization_scope_unstated` (D8). The commit at a window's end only, of the canon-step floor of the smaller of the largest value written and the window's high-water value, and the connector paging loop with its one commit after the last page (D2). Delete marking with the completeness rule, its range limit and the NULL-watermark count, and the incremental-`mark` refusal (D3). Provenance stamping, the injected-columns plan rows (`resolveInjectedSystemColumns`, in `packages/spec`), the `_sync_` write refusal and the purge (D4). The three drift arms and the record-level watermark refusal (D6). `sys_sync_run`, its writer, its retention rule, the end-of-pull log line and the interrupted-run close (D7). D8 at boot and at the install route, with `JOB_ORGANIZATION_DESCRIPTION` rewritten. `ExternalRowCapExceededError`'s remedy re-pointed from the retired `DataSync` to sync-in. The conformance cases for both read paths: a source row finer than a millisecond; on Postgres, one statement that stamps more rows than a page with one microsecond value; a run interrupted after page one; a row behind the key cursor updated during an open-above window; a 64-bit key; and per dialect, a row at `.9996` of a millisecond. Each `planned` row flips to `live` with the reader that makes it true, and its `authorWarn` is dropped. | `Clause-②: no (narrowing)`: D8 makes `job.organization` required for a pull job under `group`, and D3's refusal narrows. A connector pull's starting point also moves to the committed position, which is a change of meaning. `Metadata-protocol: narrowed` (narrowed over semantic). | after P2 spec |
+| **P2 — spec** | `domain:spec` · M | The keys `datasourceSource`, `paging` (`none` included), `deletePolicy` (no schema default: absence reads as `mark`) and `deletedField`, each as a `planned` liveness row under `authorWarn`. The refusals, which are live as they land: exclusive source, a federated source object, a source key from the `columnMap` entry onto `id` (`source_key_missing`, D2), exact values from the declared type (`source_key_not_exact` and `watermark_not_exact`, D2 invariant 7), a halvable `watermark.field`, the watermark copied unchanged into a target field of its type (`watermark_field_unmapped`, D3), sourced target, `upsert` mode and the `_sync_` reservation. `job.pull` accepting either source. `managedBy: 'synced'` **with every mechanism that enforces it**: the guard set, the reconciliation, the clamp, both mirrors and the `ui/` bucket union, since a security bucket never lands unenforced (ADR-0049). The `userActions` exception (D4). `security-owd-unset`'s `synced` fix-it (D4). `CONNECTOR_SOURCE_NO_POLICY`'s `deleteMode` guidance re-pointed at `deletePolicy`. | `Clause-②: yes (narrowing)`: the keys widen and the refusals narrow, so it is breaking, with the migration and ADR-0087 disposition that brings. `Metadata-protocol: narrowed`. | first |
+| **P2 — engine** | `domain:server` · L | The D2 invariants, with the window widths and other tuning left to this child. On a built-in driver: aligned windows read whole with no cap, paged by the key from the `columnMap` entry onto `id`, bounded windows only below the run-start `max(field)` over the whole source (invariant 12), and one more high-water read before the open-above window's first page. The client default for a `BIGINT` key and an integer watermark verified per dialect, and the run-time refusal of a value outside the safe range (D1, D2). The windowed read `lo <= field < hi` through the floor on a floored driver: the open-above window read first, bounded windows only below the largest value an over-cap answer showed (invariant 12), canon-aligned bounds, the halving, `ExternalRowCapExceededError` carrying the returned row count and each returned row's watermark value (on the error object only, never in `details` or on the wire), and `sync_window_unsplittable` and `sync_bounds_not_pushed` (D1, D2). The organization predicate and `source_organization_scope_unstated` (D8). The commit at a window's end only, of the canon-step floor of the smaller of the largest value written and the window's high-water value, and the connector paging loop with its one commit after the last page (D2). Delete marking with the completeness rule, its range limit and the NULL-watermark count, and the incremental-`mark` refusal (D3). Provenance stamping, the injected-columns plan rows (`resolveInjectedSystemColumns`, in `packages/spec`), the `_sync_` write refusal and the purge (D4). The three drift arms and the record-level watermark refusal (D6). `sys_sync_run`, its writer, its retention rule, the end-of-pull log line and the interrupted-run close (D7). D8 at boot and at the install route, with `JOB_ORGANIZATION_DESCRIPTION` rewritten. `ExternalRowCapExceededError`'s remedy re-pointed from the retired `DataSync` to sync-in. The conformance cases for both read paths: a source row finer than a millisecond; on Postgres, one statement that stamps more rows than a page with one microsecond value; a run interrupted after page one; a row behind the key cursor updated during the open-above window; on both paths, committed 5000, source maximum 5400 and writes of 5401 to 6200 during the run; a 64-bit key and a 64-bit integer watermark; and per dialect, a row at `.9996` of a millisecond. Each `planned` row flips to `live` with the reader that makes it true, and its `authorWarn` is dropped. | `Clause-②: no (narrowing)`: D8 makes `job.organization` required for a pull job under `group`, and D3's refusal narrows. A connector pull's starting point also moves to the committed position, which is a change of meaning. `Metadata-protocol: narrowed` (narrowed over semantic). | after P2 spec |
 | **P2 — runtime job door** | `domain:server` · M | D11: the pull-only acceptance, the flag flip in `DEFAULT_METADATA_TYPE_REGISTRY`, the bridge to `IJobService.schedule` (arm, re-arm, cancel, boot re-arm), the scheduled-work switch at the write and D8's refusal at the write. | `Clause-②: yes (widening)`: `job` becomes writable at runtime, for the pull form only. `Metadata-protocol: added`. | after P2 engine |
 | **P3 — Studio** | ui · M | The sync wizard beside the virtual-object one (`offersSync`'s page): the source object (drafting it when the table has none), field map, sharing model, cadence, organization. Read-only rendering of `synced` objects. Run history (D7). | `Clause-②: no`. `Metadata-protocol: none`. | after P2 runtime job door |
 | **P3 — guide + skills** | devx / skills · S | The three-way rule and the partner stance (D10), the write-back answer (D5), and `SYNC_ARCHITECTURE.md` and the skills pointing at `mapping` / `job`, never at the retired vocabulary. | `Clause-②: no`. `Metadata-protocol: none`. | after P2 engine |
@@ -765,6 +810,9 @@ already parses. The runtime job door proves the bridge against a stored pull job
 - **Page a built-in driver by (watermark, key)** (this record's third draft): the watermark read back is truncated
   to the millisecond, so a statement that stamps more rows than a page with one microsecond value returns the same
   page for ever. Not taken (D2).
+- **Bounded windows of any width, each commit capped by its own window** (this record's fifth draft): a window whose
+  `hi` is above the source's maximum gains rows written during the run after it was read, and a later window's
+  commit passes them. Not taken (D2, invariant 12).
 - **Commit after each page, at the largest value written** (this record's fourth draft): key-ordered pages do not
   arrive in watermark order, so a commit after page one passes lower values on later pages, and a row behind the key
   cursor updated during the window is passed by a later row's higher value. Not taken (D2, invariants 8 and 9).
