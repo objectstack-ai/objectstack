@@ -115,9 +115,11 @@ export interface CryptoHandle {
  *  - `'audit_seal'` — the audit ledger's sealer (ADR-0154 D2, D6): a
  *    checkpoint's seed under the sealed object's name + the JCS array
  *    `[organization id or null, sequence]`, and the signing key's private
- *    half under `sys_audit_signing_key` + the key's fingerprint. Both are
- *    referenced from inside signed bodies, so this scope alone requires a
- *    stable handle id across {@link ICryptoProvider.rotateKey}.
+ *    half under `sys_audit_signing_key` + the key's fingerprint. The seed's
+ *    handle id is recorded inside a signed checkpoint body; the private
+ *    half's sits in the unsigned `sys_audit_signing_key.private_handle`.
+ *    Nothing rewrites either holder, so this scope alone requires a stable
+ *    handle id across {@link ICryptoProvider.rotateKey}.
  *
  * Closed on purpose. A new producer of `CryptoContext` adds its own member
  * here in the same change that adds the producer — ⛔ it never borrows an
@@ -246,9 +248,14 @@ export interface ICryptoProvider {
    * has to be rewritten.
    *
    * Under scope `'audit_seal'` the returned handle's `id` MUST equal the
-   * input's (ADR-0154 D2). That producer records the id inside a signed
-   * checkpoint body, which nothing may rewrite afterwards: a provider that
-   * re-ids such a handle makes every checkpoint holding it unverifiable.
+   * input's (ADR-0154 D2), because that producer never rewrites a holder. A
+   * seed's handle id is recorded inside a signed checkpoint body, which
+   * nothing may rewrite afterwards: a provider that re-ids a seed handle
+   * makes every checkpoint holding it unverifiable. The signing key's private
+   * handle is NOT in a signed body; it sits in the unsigned
+   * `sys_audit_signing_key.private_handle` of an append-only row, so a
+   * provider that re-ids it leaves the key unable to sign or to vouch for its
+   * own public half.
    */
   rotateKey(handle: CryptoHandle, ctx: CryptoContext): Promise<CryptoHandle>;
 
