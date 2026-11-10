@@ -188,8 +188,8 @@ interface Door {
     readonly label: string;
     readonly metadataType: string;
     readonly name: string;
-    /** The package the door's write names; `undefined` when it names none. */
-    readonly writesPackage: string | undefined;
+    /** The package the door's write names: on all three, the package that ships the item. */
+    readonly writesPackage: string;
     readonly route: string;
     readonly params: Record<string, string>;
 }
@@ -207,7 +207,8 @@ const DOORS: readonly Door[] = [
     },
     {
         label: 'POST /actions/_activation/:object/:action (action)',
-        metadataType: 'action', name: ACTION, writesPackage: undefined,
+        // The object's registering package ships the action (`shippingPackageOf`).
+        metadataType: 'action', name: ACTION, writesPackage: TEST_PACKAGE_ID,
         route: `POST ${PREFIX}/actions/:object/:action/:recordId`, params: { object: '_activation', action: ACTION_OBJECT, recordId: ACTION },
     },
 ];
@@ -252,7 +253,7 @@ describe('the activation doors refuse a switch over two package-less rows for it
 
             expect(res.statusCode, JSON.stringify(res.body)).toBe(200);
             expect(await ledgerRows(rig.engine, door.metadataType, door.name)).toEqual([
-                { id: `${door.metadataType}_b`, package_id: door.writesPackage ?? null, active: false },
+                { id: `${door.metadataType}_b`, package_id: door.writesPackage, active: false },
             ]);
         });
     }
