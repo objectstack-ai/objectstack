@@ -4,12 +4,18 @@
  * Server-backed AI chat conversation lifecycle.
  *
  * Binds a chat UI to an `ai_conversations` row owned by the signed-in user.
- * On mount it tries the cached id (per user, optionally per scope); falls
- * back to creating a fresh conversation when the cached one is gone
- * (404/403).
+ * On mount it tries the cached id (per user, optionally per scope). When there
+ * is nothing to resume (no cache, the cached one is gone, `forceNew`,
+ * `startNew()`, `reset()`), it does NOT mint a row: it settles with no
+ * conversation, and the row is created on the FIRST SEND through
+ * {@link UseChatConversationReturn.ensureConversation}. Minting on mount left
+ * an empty "New conversation" row behind every visit that sent nothing — and
+ * the cache is empty after every sign-in (`purgeChatCaches`), so that was most
+ * visits. The server cannot dedupe for us: the create carries no scope, so only
+ * this hook knows which surface a row belongs to.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 // One parse for one contract. `detectPendingApproval` is the live mapper's own
 // reader of the framework HITL envelope, exported (objectui#8442) so this
 // hydration path cannot grow a second dialect of it (Commandment #0.1).
@@ -48,9 +54,9 @@ export interface UseChatConversationOptions {
   apiBase: string;
   /**
    * Explicit conversation id to hydrate. When provided the cache is bypassed
-   * and the hook fetches this conversation directly; falls back to creating a
-   * fresh one if the server returns 404/403. When omitted the hook keeps its
-   * original cache-first / create-on-miss behaviour.
+   * and the hook fetches this conversation directly; if the server returns
+   * 404/403 it settles with no conversation (one is created on first send).
+   * When omitted the hook keeps its cache-first behaviour.
    */
   activeId?: string;
   /**
@@ -59,8 +65,10 @@ export interface UseChatConversationOptions {
    * conversation — which is right for a plain visit but made the New button a
    * no-op: the resolved-once guard kept the current id and the URL-mirroring
    * effect immediately rewrote `/ai` back to `/ai/:currentId`. When true (and
-   * no `activeId`), the cache and the guard are skipped and a fresh
-   * conversation is created. Ignored while `activeId` is set.
+   * no `activeId`), the cache and the guard are skipped, the cache pointer is
+   * dropped and the hook settles with NO conversation; the fresh row is minted
+   * by the first send, so pressing New on a thread nobody wrote in mints
+   * nothing. Ignored while `activeId` is set.
    */
   forceNew?: boolean;
   /**
@@ -74,7 +82,8 @@ export interface UseChatConversationOptions {
    *     the history (the list endpoint keeps empty rows — there's no prune), an
    *     UNTOUCHED (zero-message) cached conversation is REUSED rather than
    *     re-created; a cached conversation that the user actually used is left in
-   *     history and a fresh one is minted.
+   *     history and the surface opens with no conversation (the first send
+   *     mints one).
    * Ignored when `activeId` or `forceNew` is set.
    */
   resumeMode?: 'resume' | 'fresh';
@@ -110,13 +119,32 @@ export interface UseChatConversationReturn {
   conversationScope: string | undefined;
   initialMessages: HydratedUIMessage[];
   isLoading: boolean;
-  /** Delete the current conversation + start a fresh one. */
+  /**
+   * Create the conversation on the FIRST SEND. The hook never mints a row on
+   * its own; a host calls this when the user sends while `conversationId` is
+   * still undefined (ChatPane does, through `useDeferredFirstSend`, which
+   * stashes the message and replays it once the id lands).
+   *
+   * Idempotent: while a create is in flight every call shares it (a fast
+   * double submit makes ONE row), and once a conversation is held for the
+   * current (user, scope) it resolves to that id without a request. Called
+   * while the hook is still resolving, it records the request and creates the
+   * moment the resolve settles with nothing to resume — or drops the request
+   * when the resolve finds a conversation, which the stashed send then joins.
+   * Resolves to the id, or `undefined` when there is none (yet), when the
+   * request was recorded for later, or when the create failed (the host's next
+   * send retries).
+   */
+  ensureConversation: () => Promise<string | undefined>;
+  /** Delete the current conversation; the next send starts a fresh one. */
   reset: () => Promise<void>;
   /**
    * Start a NEW conversation WITHOUT deleting the current one (the floating
-   * assistant's "New chat" button). Mints a fresh row and switches to it; the
-   * prior thread stays in history (reachable from the `/ai` sidebar). Contrast
-   * with {@link reset}, which deletes the current conversation first.
+   * assistant's "New chat" button). Switches to no conversation, so the next
+   * send mints the fresh row; the prior thread stays in history (reachable from
+   * the `/ai` sidebar). Pressed on a thread nobody has written in, it mints
+   * nothing. Contrast with {@link reset}, which deletes the current
+   * conversation first.
    */
   startNew: () => Promise<void>;
   /**
@@ -868,6 +896,82 @@ export function useChatConversation(
   const resolvedScopeRef = useRef<string | undefined>(undefined);
   // Last non-transient user we saw, to detect a logout / user switch.
   const prevUserIdRef = useRef<string | undefined>(userId);
+  // ── Create-on-first-send state (objectstack#32031) ──────────────────────
+  // The committed props, so `ensureConversation` (called from a host effect or
+  // event handler, after commit) acts for the surface the user is looking at.
+  // Synced in a LAYOUT effect: those run before every passive effect of the
+  // commit, the host's replay effect included.
+  const latestRef = useRef({ userId, scope, apiBase });
+  // Mirror of `conversationId`, written eagerly beside every create/settle so
+  // a call landing before the re-render still sees the held id.
+  const conversationIdRef = useRef<string | undefined>(conversationId);
+  useLayoutEffect(() => {
+    latestRef.current = { userId, scope, apiBase };
+    conversationIdRef.current = conversationId;
+  }, [userId, scope, apiBase, conversationId]);
+  // The cache key the hook has SETTLED on with no conversation: nothing to
+  // resume, so the first send mints the row. `undefined` while a resolve runs
+  // or once a conversation is held.
+  const pendingKeyRef = useRef<string | undefined>(undefined);
+  // A first send that arrived while the resolve was still running; fulfilled
+  // when it settles with nothing to resume, dropped when it finds a thread.
+  const requestedKeyRef = useRef<string | undefined>(undefined);
+  // The one create in flight, shared by every caller for the same key.
+  const inflightRef = useRef<{ key: string; promise: Promise<string | undefined> } | null>(null);
+
+  const createFor = useCallback(
+    (key: string, forUser: string, forScope: string | undefined, base: string) => {
+      const inflight = inflightRef.current;
+      if (inflight && inflight.key === key) return inflight.promise;
+      const entry = { key, promise: Promise.resolve<string | undefined>(undefined) };
+      entry.promise = (async (): Promise<string | undefined> => {
+        try {
+          const fresh = await createConversation(base);
+          // The row exists and is the (user, scope)'s, whatever happens next.
+          writeCache(key, fresh.id);
+          // Adopt only while the hook is still waiting on THIS key. A resolve
+          // that started meanwhile awaits this promise and adopts it itself.
+          if (mountedRef.current && pendingKeyRef.current === key) {
+            pendingKeyRef.current = undefined;
+            conversationIdRef.current = fresh.id;
+            resolvedForUserRef.current = forUser;
+            resolvedScopeRef.current = forScope;
+            setConversationId(fresh.id);
+            setInitialMessages(toUIMessages(fresh.messages));
+          }
+          return fresh.id;
+        } catch {
+          // No row, no id: the stashed send stays stashed and the host's next
+          // send retries the create.
+          return undefined;
+        } finally {
+          if (inflightRef.current === entry) inflightRef.current = null;
+        }
+      })();
+      inflightRef.current = entry;
+      return entry.promise;
+    },
+    [],
+  );
+
+  // Settle on "no conversation yet" for (user, scope): the surface renders an
+  // empty chat and the first send creates the row. A first send that arrived
+  // during the resolve is fulfilled right here.
+  const settlePending = useCallback(
+    (key: string, forUser: string, forScope: string | undefined, base: string) => {
+      conversationIdRef.current = undefined;
+      setConversationId(undefined);
+      setInitialMessages([]);
+      resolvedForUserRef.current = forUser;
+      resolvedScopeRef.current = forScope;
+      pendingKeyRef.current = key;
+      if (requestedKeyRef.current === key) {
+        requestedKeyRef.current = undefined;
+        void createFor(key, forUser, forScope, base);
+      }
+    },
+    [createFor],
+  );
 
   useEffect(() => {
     mountedRef.current = true;
@@ -897,6 +1001,8 @@ export function useChatConversation(
       setIsLoading(false);
       resolvedForUserRef.current = undefined;
       resolvedScopeRef.current = undefined;
+      pendingKeyRef.current = undefined;
+      requestedKeyRef.current = undefined;
       return;
     }
     // Already resolved a conversation for this (user, scope) during the
@@ -923,6 +1029,8 @@ export function useChatConversation(
       setConversationId(undefined);
       setInitialMessages([]);
     }
+    // Resolving: no longer settled on "nothing to resume" until this run says so.
+    pendingKeyRef.current = undefined;
     setIsLoading(true);
 
     (async () => {
@@ -954,11 +1062,11 @@ export function useChatConversation(
             resolvedScopeRef.current = scope;
             return;
           }
-          // Requested id is gone — fall through to create a fresh one. The
+          // Requested id is gone — fall through to "no conversation yet". The
           // server was DEFINITIVE (404/403), so from here on we are no longer
           // re-reading a conversation worth preserving: drop the catch guard's
-          // claim on it, or a failing create below would keep an id we have
-          // just been told is dead (and whose caches we just cleared).
+          // claim on it, or a failure below would keep an id we have just been
+          // told is dead (and whose caches we just cleared).
           targetId = undefined;
           writeCache(key, undefined);
           writeConversationMessagesCache(activeId, []);
@@ -973,9 +1081,9 @@ export function useChatConversation(
             const legacyId = readCache(cacheKey(userId, legacyScope));
             if (legacyId) {
               // Inner try/catch: a failing legacy fetch must degrade to a
-              // plain miss (create fresh below), not dead-end the resolve —
-              // the outer catch would leave the surface with no conversation
-              // where, pre-A1.b, it would have happily created one.
+              // plain miss (settle below; the first send creates), not
+              // dead-end the resolve — the outer catch would leave the surface
+              // with no conversation and no way to make one.
               try {
                 const legacy = await fetchConversation(apiBase, legacyId);
                 if (cancelled) return;
@@ -994,7 +1102,7 @@ export function useChatConversation(
                   }
                 }
               } catch {
-                /* treat as a miss — fall through to create */
+                /* treat as a miss — fall through to "no conversation yet" */
               }
               if (cancelled) return;
             }
@@ -1024,26 +1132,45 @@ export function useChatConversation(
                 resolvedScopeRef.current = scope;
                 return;
               }
-              // 'fresh' + a used conversation: fall through to create a fresh
-              // one; the used thread stays in history (writeCache below repoints
-              // the cache to the new conversation).
+              // 'fresh' + a used conversation: fall through to "no
+              // conversation yet"; the used thread stays in history and the
+              // first send mints the fresh one (and repoints the cache).
               targetId = undefined;
             } else {
               // Definitive miss — same as the activeId 404 above: stop claiming
-              // this id, so a failing create cannot preserve a dead one.
+              // this id, so a failure below cannot preserve a dead one.
               targetId = undefined;
               writeCache(key, undefined);
               writeConversationMessagesCache(cached, []);
             }
           }
         }
-        const fresh = await createConversation(apiBase);
-        if (cancelled) return;
-        writeCache(key, fresh.id);
-        setConversationId(fresh.id);
-        setInitialMessages(toUIMessages(fresh.messages));
-        resolvedForUserRef.current = userId;
-        resolvedScopeRef.current = scope;
+        // Nothing to resume. objectstack#32031 — do NOT mint a row here: a
+        // visit that sends nothing would leave an empty "New conversation"
+        // behind, and the cache is empty after every sign-in. Settle with no
+        // conversation; `ensureConversation` creates it on the first send.
+        //
+        // One exception keeps the two halves coherent: a first send's create
+        // may already be in flight for this very key (a re-resolve started
+        // while it was on the wire). That row is the conversation now — wait
+        // for it and adopt it, instead of settling over it.
+        const inflight = inflightRef.current;
+        if (inflight && inflight.key === key) {
+          const createdId = await inflight.promise;
+          if (cancelled) return;
+          if (createdId) {
+            conversationIdRef.current = createdId;
+            setConversationId(createdId);
+            setInitialMessages([]);
+            resolvedForUserRef.current = userId;
+            resolvedScopeRef.current = scope;
+            return;
+          }
+        }
+        // `?new` leaves the old thread in history but stops resuming it: a
+        // later plain visit opens a clean chat, as it did when New minted one.
+        if (!activeId && forceNew) writeCache(key, undefined);
+        settlePending(key, userId, scope, apiBase);
       } catch {
         if (cancelled) return;
         // objectui#2627 — the OTHER half of the same-conversation guard above.
@@ -1071,7 +1198,16 @@ export function useChatConversation(
         setConversationId(undefined);
         setInitialMessages([]);
       } finally {
-        if (!cancelled) setIsLoading(false);
+        if (!cancelled) {
+          setIsLoading(false);
+          // A first send recorded during this run is only for a run that
+          // settled with nothing to resume; one that found a thread drops it
+          // (the stashed send joins that thread), so a LATER settle on this
+          // key never mints a row nobody sent into.
+          if (pendingKeyRef.current !== key && requestedKeyRef.current === key) {
+            requestedKeyRef.current = undefined;
+          }
+        }
       }
     })();
 
@@ -1086,6 +1222,30 @@ export function useChatConversation(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, scope, apiBase, activeId, forceNew, resumeMode, legacyScope]);
 
+  const ensureConversation = useCallback(async (): Promise<string | undefined> => {
+    const { userId: forUser, scope: forScope, apiBase: base } = latestRef.current;
+    if (!forUser) return undefined;
+    const key = cacheKey(forUser, forScope);
+    // Already holding this surface's conversation: nothing to create.
+    if (
+      conversationIdRef.current &&
+      resolvedForUserRef.current === forUser &&
+      resolvedScopeRef.current === forScope
+    ) {
+      return conversationIdRef.current;
+    }
+    // A create is on the wire for this key: share it (one row per first send).
+    const inflight = inflightRef.current;
+    if (inflight && inflight.key === key) return inflight.promise;
+    // Still resolving (or resolving for another surface): record the request;
+    // the resolve fulfils it if it settles with nothing to resume.
+    if (pendingKeyRef.current !== key) {
+      requestedKeyRef.current = key;
+      return undefined;
+    }
+    return createFor(key, forUser, forScope, base);
+  }, [createFor]);
+
   const reset = useCallback(async () => {
     if (!userId) return;
     const key = cacheKey(userId, scope);
@@ -1094,46 +1254,27 @@ export function useChatConversation(
       if (conversationId) await deleteConversation(apiBase, conversationId);
       writeConversationMessagesCache(conversationId, []);
       writeCache(key, undefined);
-      const fresh = await createConversation(apiBase);
-      writeCache(key, fresh.id);
-      writeConversationMessagesCache(fresh.id, []);
       if (!mountedRef.current) return;
-      setConversationId(fresh.id);
-      setInitialMessages([]);
-    } catch {
-      if (mountedRef.current) {
-        setConversationId(undefined);
-        setInitialMessages([]);
-      }
+      // No replacement row: the next send creates it (objectstack#32031).
+      settlePending(key, userId, scope, apiBase);
     } finally {
       if (mountedRef.current) setIsLoading(false);
     }
-  }, [conversationId, userId, scope, apiBase]);
+  }, [conversationId, userId, scope, apiBase, settlePending]);
 
   const startNew = useCallback(async () => {
     if (!userId) return;
     const key = cacheKey(userId, scope);
-    setIsLoading(true);
-    try {
-      // Mint a fresh conversation and switch to it. The current conversation is
-      // intentionally NOT deleted — it stays in history (reachable from the
-      // `/ai` sidebar), unlike reset(). The remount keyed on `conversationId`
-      // in the host clears the visible thread.
-      const fresh = await createConversation(apiBase);
-      writeCache(key, fresh.id);
-      writeConversationMessagesCache(fresh.id, []);
-      if (!mountedRef.current) return;
-      setConversationId(fresh.id);
-      setInitialMessages([]);
-      resolvedForUserRef.current = userId;
-      resolvedScopeRef.current = scope;
-    } catch {
-      // Keep the current conversation on failure — better than dropping the
-      // user into a broken empty state.
-    } finally {
-      if (mountedRef.current) setIsLoading(false);
-    }
-  }, [userId, scope, apiBase]);
+    // Switch to "no conversation yet"; the next send mints the fresh row. The
+    // current conversation is intentionally NOT deleted — it stays in history
+    // (reachable from the `/ai` sidebar), unlike reset(). Dropping the cache
+    // pointer makes a later plain visit open the new (clean) chat rather than
+    // resume the old one. The remount keyed on `conversationId` in the host
+    // clears the visible thread. objectstack#32031 — minting here left an
+    // empty row behind every New pressed on a thread nobody wrote in.
+    writeCache(key, undefined);
+    settlePending(key, userId, scope, apiBase);
+  }, [userId, scope, apiBase, settlePending]);
 
   // A1.b bind-on-create. Synchronous on purpose: the caller invokes this
   // immediately before the navigation that flips its own scope computation to
@@ -1155,5 +1296,14 @@ export function useChatConversation(
   // `resolvedScopeRef` is updated in lockstep with every `setConversationId`
   // (same async tick), so at render time it always describes the scope the
   // current `conversationId` was resolved under.
-  return { conversationId, conversationScope: resolvedScopeRef.current, initialMessages, isLoading, reset, startNew, rekeyScope };
+  return {
+    conversationId,
+    conversationScope: resolvedScopeRef.current,
+    initialMessages,
+    isLoading,
+    ensureConversation,
+    reset,
+    startNew,
+    rekeyScope,
+  };
 }
