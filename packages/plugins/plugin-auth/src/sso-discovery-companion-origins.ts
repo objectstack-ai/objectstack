@@ -131,8 +131,8 @@ export function explainUntrustedDiscoveryEndpoint(message: string): string {
       + 'trusted origins list its origin.';
   }
   return `${message} To trust it for this provider, name it explicitly in the registration: `
-    + `"${field}": "${url}" (oidcConfig.${field} on POST /sso/register; the Register SSO Provider form `
-    + 'takes userInfoEndpoint and discoveryEndpoint as fields of the same names). '
+    + `"${field}": "${url}" (oidcConfig.${field} on POST /sso/register; the Register SSO Provider bridge, `
+    + 'POST /admin/sso/register, takes userInfoEndpoint and discoveryEndpoint as fields of the same names). '
     + 'An endpoint the registration names is trusted for that registration.';
 }
 
