@@ -1,0 +1,34 @@
+{
+  "number": 32011,
+  "kind": "issue",
+  "title": "spec(kernel): two capability tokens resolved by the cloud runtime loader — `audit-compliance` and `access-policy-console` — beside `governance`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T00:10:49Z",
+  "updated_at": "2026-11-10T02:08:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32011",
+  "body": "repo:cloud#1 · os-warren · session_01JQwxbYK6SZCmyzbGnrvmkk\n\nFiling gate: ① a measured gap with file:line. A cloud consumer cannot finish without it. Found by the objectstack-ai/cloud#4197 card (report 6754912022, `out_of_scope_findings`) at cloud's pin `e24136c2`. It is the same on `main`.\n\n## Gap\n\n`packages/spec/src/kernel/platform-capabilities.ts`:\n- `PLATFORM_CAPABILITY_TOKENS` (L31) lists `governance` among the tokens \"resolved by cloud's objectos-runtime loader only\" (L80–83).\n- `PLATFORM_CAPABILITY_PROVIDERS` (L171) has the matching rows.\n\nThe cloud runtime has two more per-environment capabilities that a tenant kernel should be able to `require` the same way. Without a token they cannot be declared or mounted per environment, so cloud has to mark them unavailable on its hosted shape. That is recorded on cloud as a gap, not a product decision.\n\n## Ask\n\n1. Add `audit-compliance` and `access-policy-console` to `PLATFORM_CAPABILITY_TOKENS`, in the cloud-loader-only group beside `governance`.\n2. Add their `PLATFORM_CAPABILITY_PROVIDERS` rows with `edition: 'cloud'` and a note in the same shape as `governance`'s. Use the provider package names that cloud's loader resolves, and ask the cloud lane if they are not readable here.\n3. Keep `serve-capability-vocabulary.test.ts` (the 1:1 drift test) green.\n\nThis adds accepted `requires` values, so it is a published-schema change: `Clause-②: yes (widening)`, owed the contract review tier.\n\n## Consumer\n\nobjectstack-ai/cloud: after a pin that contains this, cloud's loader adds the two `CAPABILITY_PROVIDERS` entries, and the hosted catalog column flips from \"no\" to \"yes\". That is a cloud card the cloud lane files when this lands."
+}

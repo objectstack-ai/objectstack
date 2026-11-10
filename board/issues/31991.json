@@ -1,0 +1,33 @@
+{
+  "number": 31991,
+  "kind": "issue",
+  "title": "pm-dispatch lanes/cloud.md: the cloud lane dispatches its own security cards by priority, takes p3 after p1/p2, and mails the objectstack blockers of its cards to their lane (maintainer rulings 2026-11-09)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T23:31:55Z",
+  "updated_at": "2026-11-10T00:00:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31991",
+  "body": "repo:cloud#1 · os-warren · session_01JQwxbYK6SZCmyzbGnrvmkk\n\n## 维护者速读\n\n- 改什么：把维护者 2026-11-09 晚间三条口头规则写进 `.claude/skills/pm-dispatch/references/lanes/cloud.md`（cloud 车道章程）。\n- 规则一：cloud 车道的安全卡由本车道自己按优先级派发开发，不再只建草稿公告、等维护者点头。\n- 规则二：取卡恢复 p3。p1/p2 仍然先取。\n- 规则三：cloud 卡被 objectstack 卡阻塞时，由本车道写信给那张卡所属车道，请其优先处理，并纳入每日分诊对账。\n- 只改章程文字（治理文本，Tier H，需要人工 Approve），不新增门禁或标签。\n\n## Maintainer rulings to write down (verbatim, project chat, 2026-11-09)\n\n1. 「cloud 车道的安全卡，cloud 车道自己负责派发，立卡修改skills」\n2. 「继续处理 p3」 This supersedes 「cloud 后续只处理 p1 p2 的任务」. Within a priority, p1/p2 are still taken first.\n3. 「objectstack 阻塞卡，都应该邮箱通知对应的车道经理，优先处理。」\n\n## What changes in `references/lanes/cloud.md`\n\n- **The line 「优先级地板:新派发只取 p1/p2;已在飞的卡照常续完(维护者令)」** becomes \"p1/p2 are taken first, then p3.\"\n- **The line 「安全卡留在本车道:私有仓的私有 `security` 卡,机制只住 `security-findings.md`」** gains the dispatch rule:\n  - A cloud `security` card enters this lane's normal queue at its grade, and a cloud seat dispatches and lands it like any other card.\n  - There is no standing \"advisory only, no development\" hold.\n  - Everything about the finding stays private. `security-findings.md` §6 already says how the fix PR is written, and §9 already says a private repo's cards belong to that repo's lane. Neither changes. Do not restate them; point to them.\n- **A new line for blocker mail:**\n  - When a cloud card is `pm:blocked` with `Blocked-by: objectstack-ai/objectstack#N`, a cloud seat (triage, during daily reconciliation) mails #N's owning lane: a doorbell to that lane's seat, or to `triage#1` when #N is unclaimed or on hold.\n  - It mails once per blocker. The round record lists who was mailed.\n  - There is no doorbell key for a cross-repo \"blocks\"; the closest existing keys (`Request: triage`, `Notify: serial`) carry bare `#n` only. If a new key is wanted, that is a separate `record-recognisers.mjs` card. Note the gap, don't widen the key list here.\n\n## Done when\n\n`lanes/cloud.md` carries the three rules, each with its provenance (maintainer, 2026-11-09). The governed-text checks are green, and the PR has a human Approve from hotlong or os-zhuang (Tier H).\n\nProvenance: cloud seat 1, as cloud triage coordinator, at the coordinator's request. The rulings were relayed from the project chat. The skills lane owns `.claude/skills/**`."
+}

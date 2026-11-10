@@ -1,0 +1,37 @@
+{
+  "number": 31990,
+  "kind": "issue",
+  "title": "spec(auth): declare and serve an opt-in `features.developerEditionCreate` on /auth/config from a plugin-auth host option (child of #31988)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:identity",
+    "domain:spec",
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T23:27:31Z",
+  "updated_at": "2026-11-10T01:32:11Z",
+  "closed_at": "2026-11-10T01:29:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31990",
+  "body": "domain:ui#3 · zhuangjianguo · session_01QsR2jVEjiYrK7onirxUGyo\n\nFiling gate: ④ a per-layer child of p1 card #31988. Its step 1 (6754240828) found that the flag the console needs cannot be served without the contract. ⛔ Not a claim.\n\nBlocks: #31988\n\n## 维护者速读\n\n- **问题：** #31988 要在「新建工作区」对话框里加 Developer Edition 选项，但只能在服务端声明支持时才显示。服务端通过 `/auth/config` 的 `features` 告诉前端这件事，而这组键在三处是锁死的：plugin-auth 实际返回的键、`PUBLIC_AUTH_FEATURES` 注册表、`AuthFeaturesConfigSchema`。要新增一个键，就得改 spec 和 plugin-auth，这不是 ui 车道的面。\n- **要做：** 声明并返回一个可选布尔键（暂定名 `features.developerEditionCreate`，名称正在和 cloud 车道确认，以 #31988 上的记录为准），由宿主配置项打开，默认不返回或返回 false。\n- **需要你做的：** 无。\n\n## What to build\n\n1. **Spec.**\n   - `packages/spec/src/api/auth-endpoints.zod.ts`: in `AuthFeaturesConfigSchema`, add `developerEditionCreate: z.boolean().optional().describe(…)`. The describe text says: true only where the organization create door accepts `?edition=developer` (cloud#4042).\n   - `packages/spec/src/kernel/public-auth-features.ts`: one `PUBLIC_AUTH_FEATURES` entry, with `surface: 'login'`, `semantics: 'opt-in'`, and an `exempt` reason (no spec input gates it).\n   - The generated spec baselines that a schema key moves.\n2. **plugin-auth.** `AuthManagerOptions` gets `developerEditionCreate?: boolean`, default `false`. This is a TS-only host option, the sibling of `onOrganizationCreated` (`auth-manager.ts:764`). `getPublicConfig()` serves it in the `features` literal (`auth-manager.ts:5131`). With the option unset, the served answer is unchanged.\n3. **Tests.**\n   - `public-feature-registry.test.ts` and `auth-endpoints.test.ts` pick up the registry row.\n   - A plugin-auth test: the key is served `true` when the option is set, and absent or `false` when it is not.\n\nThe cloud half is one line in the control plane's `auth:configure` handler, and it belongs to the cloud lane. The console half is #31988's PR B, which lands after this.\n\n**Key name:** the key is ⛔ not final until the cloud lane confirms it on #31988 (the seat's question there). Build to the name recorded on #31988.\n\n**Reader:** `domain:spec`, with the plugin-auth host seam riding. **Suggested grade:** p1, because it blocks #31988 (p1), which unblocks cloud#4039. **Clause-②:** expected yes (widening). **Metadata-protocol:** expected none.\n\n## Dedupe\n\nOpen issues were searched on 2026-11-09 for \"developerEditionCreate\", \"edition=developer\" and \"AuthFeaturesConfigSchema developer\". Nothing matched. **New.**\n"
+}

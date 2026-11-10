@@ -2,8 +2,8 @@
   "number": 31778,
   "kind": "issue",
   "title": "sync-in P0 measurement (epic #31763): run the existing pull path end to end (rest connector + mapping.connectorSource + job.pull) and record which of G1–G9 hold",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,21 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [
-    "os-steve"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T03:35:32Z",
-  "updated_at": "2026-11-09T06:00:51Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-09T23:11:20Z",
+  "closed_at": "2026-11-09T23:11:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31778",
   "body": "coordinator#1 · os-warren · session_01JQwxbaUTJVFuEz81NDUrnw\n\nFiling gate: ④ child of the coordination parent #31763 (ruled **A**, ruling 6731568115 — maintainer 「立专题卡」 / 「同意你的意见」, 2026-11-09). ⛔ Not a claim.\nRuling-ref: 6731568115 — letter A: one-way sync-in beside federation; scope = sync-in + provenance marker + write-back through declared actions; the sync kernel is open source in this repository; the retired `DataSyncConfig` / `ETLPipeline` vocabulary is not revived.\nEpic: #31763 · Milestone P0 · Blocked-by: none\nLane: `domain:server` (services face: `packages/services/service-automation/src/connector-pull.ts`, `packages/core/src/utils/import-runner.ts`, `packages/spec/src/data/mapping.zod.ts`, `packages/spec/src/system/job.zod.ts`) · size S · p1 (head of a p1 chain: the ADR card is `Blocked-by:` this one)\nResponsibility: n/a — not a defect card\nMetadata-protocol: none (no product code; a measurement and a report)\nClause-②: no\nReader who acts on it: the `domain:server` seat the coordinator dispatches; its report is the \"Current state\" section of the ADR card (P1), written from the evidence here instead of being re-measured.\n\n## 维护者速读\n\n把现有的「连接器 → mapping → job 拉取」这条窄路真跑一遍，逐项证实父卡表里 G1–G9 哪些真缺、哪些其实已有。不写产品代码，只交一份带证据的报告；ADR 卡的「现状」节直接用它。半天到一天。\n\n## Why\n\nThe parent's gap list (G1–G9) was read from the code on `main` at `9e1f1f90`, not run. An ADR written from a reading can design a key for a gap that does not exist, or miss one the reading did not see (the #27276 spike found a seventh step nobody had read). The platform has the precedent: #27261's P0 was a spike whose report gated P1.\n\n## What to do (no product code; a probe app in a scratch worktree plus a report)\n\n1. Declare, in metadata: a `rest` connector instance against a local fixture server (any JSON API with an `updated_at`-style field is fine); a `mapping` with `connectorSource { connector, action, recordsPath, watermark { field, param } }`, `mode: 'upsert'`, `upsertKey`; a `job` whose `pull` names the mapping, on an interval.\n2. Boot (`os serve`), let the job fire; confirm rows land in the target object through `runImport` (counts, coercion verdicts, per-row refusals).\n3. Change source rows and fire again: does the watermark advance, are rows upserted rather than duplicated?\n4. Delete a source row; fire: the local row stays, or not (G3).\n5. Make the source answer more rows than one page: only the first response is read, or not (G2 — the executor's header says one response per pull is the stop valve).\n6. Try a federated datasource (ADR-0015 `schemaMode: 'external'`, `driver-sql` over a second SQLite or Postgres) as the source: there is no binding for it, or there is one nobody documented (G1).\n7. Inspect the landed rows: which system columns they carry (G4); a member with update permission on the target object can edit a synced row (G5).\n8. Drop a mapped column at the source; fire: what happens (G6)?\n9. Where the run is recorded: `sys_job` run rows, `sys_automation_run`, logs only (G7).\n10. Studio: what the datasource page and the \"sync objects\" wizard offer today for this path (G8).\n11. Pull 100,000 rows once; record wall time, `createMany` batch size and memory (G9).\n\n## Report\n\nOne comment on this card: a table G1–G9 (names as in the parent's gap list) × observed × evidence (command, output excerpt, `file:symbol`), plus the probe metadata inline so the ADR author can replay it. Out-of-scope findings go to Acceptance notes by class, as the lane rules say. No PR is expected; if the dev lands a probe fixture, that is a separate card.\n\n## Acceptance\n\nThe report answers every G1–G9 row with observed evidence, and the ADR card's \"Current state\" section can be written from it without re-measuring. Workload: 0.5–1 agent-day.\n\nDedupe (2026-11-09): `connectorSource` → 8 hits, all closed (#20919 built the executor, #28040 input check, #21672 job pull binding, #21127 lint crash); `sync-in` → #31763 only; `pull mapping job` → no open card on the pull path. No overlap."

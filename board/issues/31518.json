@@ -13,21 +13,19 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:dispatched",
+    "pm:queue",
     "priority:p1",
     "tooling"
   ],
-  "assignees": [
-    "zhuangjianguo"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T12:45:27Z",
-  "updated_at": "2026-11-08T16:17:49Z",
+  "updated_at": "2026-11-09T23:59:43Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 7,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31518",
   "body": "coordinator#1 · os-steve · session_01ADHkmRWWb3MUYRQZiCKQcX\n\nFiling gate ③, a task the maintainer directed. This is recommendation 3 of the 2026-11-08 CI assessment (window 2026-11-01..07). The maintainer answered it in the project thread, verbatim: 「同意，立卡」 · 「高优先」 (2026-11-08T12:30Z). ⛔ Not a claim.\n\n**Business reason.** Every PR author waits in the merge queue. A PR that merged after one queue build waited p50 18 min from enqueue to merge on 2026-11-06. The 79 PRs that needed more than one build waited p50 48 min and p90 130 min. Most of the extra builds came from someone else's red entry ahead of them.\n\n**Reader who acts.** The `domain:devx` seat measures (step 1) and lands the CI-side fixes. Any change to the enqueue procedure (`.claude/skills/pm-dispatch/**`, the `fleet-write` relay) is `domain:skills`' and governed; the devx seat files it there with the readings.\n\n## Measured (Actions REST, every `CI` and `Lint` `merge_group` run, 2026-11-01..07 UTC)\n\n- 1,840 queue builds of each workflow for 1,415 merged commits. 225 red builds: 66 roots and 157 cascades (2 unclassified).\n- Method: a queue build's commit has one parent, the previous group head. Parent is a `main` push or a green group ⇒ root. Parent's `CI` or `Lint` is red ⇒ cascade. Re-check one: `GET /repos/objectstack-ai/objectstack/commits/<sha>` → `parents`.\n- 2026-11-06 was the worst day: 18 roots → 110 cascades, ~6 cascade builds per root.\n- Lint queue reds by failing gate (lane annotations), whole window:\n  - `Lint · CI, release & engine gates` → \"Test-source alias gate\": 65, all 2026-11-06 15:26Z–18:09Z, across about 30 PRs (PR #30902 was built 8 times). Absent on 11-07. The root entry is not identified yet.\n  - `Type Check · consumer gates` → \"Check runtime-merged app navigation is translated in every locale\": 35 (11-06: 28, 11-07: 7); \"Check no new untranslated declared labels\": 4. #31512 already carries this queue-only class.\n  - `Type Check · source gates` → \"Published skills token ratchet\": 29 (11-06).\n  - `Lint · repo & tooling gates` → \"Platform-object tenancy census matches the tree\": 6 (11-06).\n  - Checkout timeouts on 11-03: 9 (#22034's class).\n- CI queue reds: 125. The assessment did not split them by gate; step 1 does.\n\n## Wanted\n\n1. **Read every root of the window** and give each one class, in a table on this card:\n   - (a) stale base: the PR's last green run was N merges behind `main` when it was enqueued;\n   - (b) not selected on the PR: the gate is narrowed on `pull_request` (path scoping or dispatch-gates) and full in the queue — the #31512 shape;\n   - (c) flake: green on rerun with the same tree;\n   - (d) interaction between queue entries.\n   Find the 11-06 15:26Z root of the 65 alias-gate reds first.\n2. **Then the cheapest fix per class with ≥3 roots in the window:**\n   - (a) the enqueue step refreshes the branch, or re-runs `Lint`, when the PR's last green run is more than K merges behind `main` (K from the table);\n   - (b) the PR run selects the gate on the same inputs the queue reads, as #31512 does for the i18n gates — one card per gate family;\n   - a PR the queue ejected is not re-enqueued until its head changes or the ejection is read as a flake.\n3. ⛔ No gate skipped or made report-only, no required context dropped, no merge-queue setting changed here (`max_entries_to_build` stays 10).\n\n## Acceptance\n\n- The roots table is on this card.\n- Each class with ≥3 roots has a landed fix or its own card.\n- A 7-day re-reading after the last fix lands: root reds per week, cascades per root. Target: half of 66 roots.\n\n**Expected saving:** each root removed is about 2.4–6 fewer cascade builds and ~20–25 min less queue wait for the entries behind it. **Size:** M (measurement) plus follow-ups. **Clause-②:** no. **Metadata-protocol:** none.\n\n## Dedupe\n\nSearch 2026-11-08 12:3xZ, open and closed: \"re-enqueue queue red head\" 145 hits, \"enqueue refresh behind main\" 171, \"merge queue cascade\" 299 — seat posts, queue-flake anchors and unrelated cards; nothing about root causes of queue reds. Related, not duplicates: #31512 (one gate family, queue-only), #31403 (relay op to put a PR at the front of the queue), #22034 (checkout). **New.**"

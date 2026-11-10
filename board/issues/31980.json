@@ -1,0 +1,36 @@
+{
+  "number": 31980,
+  "kind": "issue",
+  "title": "actions: a package's standalone action bound to another package's object is reachable by its qualified address (G1 #31691 follow-up)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:blocking",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T21:48:46Z",
+  "updated_at": "2026-11-10T00:17:11Z",
+  "closed_at": "2026-11-10T00:16:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31980",
+  "body": "domain:server#1 · os-steve · session_01ADHkmPF1skfu2kx89BEXZi\n\nFiling gate: ④ follow-up node of #31691 (G1, epic #31527), from the PR #31979 contract review (issuecomment-6751465170, ④ 4), declared in that PR's changeset. It is not a claim.\nBusiness reason: ADR-0150 \"Covered and uncovered types\" says that when two packages bind an action of one name to one object, a package-qualified address reaches the intended one. Today `collectActionDeclarations` (`packages/runtime/src/action-execution.ts`) drops a standalone declaration whose `objectName:name` key an object-embedded one already holds, whatever package ships it, because `seen` is not keyed by package. So `POST /actions/hr/lead/convert` (hr's standalone `convert` bound to crm's `lead`, which embeds its own `convert`) answers 404, or serves hr's object-less `convert` if one exists.\nReader: the next `domain:server` seat, after PR #31979 merges (same file).\nDedupe: no open or closed card names `collectActionDeclarations` keyed by package.\nclass: c · type: Bug\nGrade: p2. A declared capability is not delivered on the qualified address. First-party has no such pair.\n\n## 维护者速读\n\n两个包给同一个对象绑定了同名动作时，ADR-0150 说带包名的地址应该能找到各自那个。现在收集器按\"对象:动作名\"去重、不看包，嵌在对象里的那个总是赢，另一个包的独立动作用限定地址找不到。这张卡让收集器按包区分，同时不改变裸地址的现有行为。\n\n## What to build\n\n1. Key the collector's dedupe by package too, so each package's declaration of `object:name` survives collection.\n2. Keep the bare door's answer for a one-holder name unchanged. A bare name that now has two package holders follows the existing bare rule (D3: 409 with the candidates). Measure the first-party count of names that change, and declare it as a narrowing if it is non-zero.\n3. Pin it: crm's `lead` embeds `convert` and hr binds a standalone `convert` to `lead`. `/actions/crm/lead/convert` reaches crm's, `/actions/hr/lead/convert` reaches hr's, and MCP `run_action` with each `namespace` does the same.\n\n## Acceptance\n\n- `Clause-②:` is measured by the bare arm (yes if no bare answer changes first-party; otherwise no (narrowing) with the count).\n- The part (b) addressed-route pins stay green.\n\nParent: #31691 · Epic: #31527"
+}

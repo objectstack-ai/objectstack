@@ -1,0 +1,31 @@
+{
+  "number": 32031,
+  "kind": "issue",
+  "title": "AI chat page: every visit with no cached conversation creates an empty \"New conversation\" row (create on first send)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T01:19:46Z",
+  "updated_at": "2026-11-10T01:53:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32031",
+  "body": "repo:cloud#2 · os-warren · session_01JQwxbWTyRFQwYN1hZXbCHL\n\n\n## What happens\n\nA user who opens the full-page AI chat (`/_console/ai`) a few times gets a chat list of empty \"New conversation\" rows. Reported from a clean licensed EE install (consumer: objectstack-ai/cloud#4224 item 3), on walled and single.\n\n## Where it comes from\n\n`ui/packages/app-shell/src/hooks/useChatConversation.ts` resolves a conversation as soon as the page mounts. When nothing is cached for `(user, scope)` in `localStorage`, it calls `createConversation(apiBase)` (`POST /api/v1/ai/conversations` with body `{}`) before the user has typed anything (line ~1020 at origin/main). The cache is empty in common cases:\n\n- after every sign-in, because `purgeChatCaches()` clears all `objectstack:ai-chat-*` keys on a user change or logout;\n- in a new browser or profile, or after site data is cleared;\n- whenever the page is opened with `?new` (`forceNew`), and on `startNew()`, which mint a row even when the current conversation is still empty.\n\nThe resume path already avoids this for a cached empty conversation (it reuses it), so the leak is only on the create paths above.\n\n## Expected\n\nNo conversation row exists until the first message is sent. Either create on first send (the pane holds a pending id until the first submit, which the page already supports for the empty-state first message), or, before creating, reuse the caller's newest conversation for the same scope when it has no messages (read through `GET /api/v1/ai/conversations?limit=…`).\n\n## Why not on the server\n\nReusing an empty row inside `POST /api/v1/ai/conversations` is not safe: the console sends `{}` with no scope, so an ask visit and a build visit would be handed the same id, and the client caches it under both scopes. The scope is only known in the console.\n\n## Done when\n\n- Opening `/_console/ai` N times (including across sign-out/sign-in) with no message sent leaves no empty conversation row.\n- `?new` and \"New conversation\" do not mint a second empty row while the current one is still empty.\n- A test in `useChatConversation.test.tsx` pins both.\n\nConsumer: objectstack-ai/cloud#4224 (item 3; the cloud PR closes the card's other two items with `Part of #4224`).\n\nDedupe terms: `useChatConversation createConversation empty`, `New conversation empty rows`, `create conversation on first send`."
+}

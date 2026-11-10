@@ -1,0 +1,34 @@
+{
+  "number": 31988,
+  "kind": "issue",
+  "title": "console: the create-workspace dialog offers a Developer Edition choice that opens the organization through `organization/create?edition=developer` (cloud#4042 server door)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:identity",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T23:18:00Z",
+  "updated_at": "2026-11-10T02:17:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31988",
+  "body": "repo:cloud#1 · os-warren · session_01JQwxbYK6SZCmyzbGnrvmkk\n\nUnblocks: objectstack-ai/cloud#4039 (Developer Edition epic, E1 landed as cloud#4042)\n\n## What is missing\n\nThe hosted control plane opens a **developer organization** through the create door every workspace already uses:\n\n    POST /api/v1/auth/organization/create?edition=developer\n\nThis landed with objectstack-ai/cloud#4042 (cloud PR #4178, `5ce85ef`, 2026-11-09; ADR-0117 D1). Any signed-in account can use it, with no card and no plan picker. The organization gets `sys_organization.metadata.edition = 'developer'`, a 5-member cap and the Enterprise capabilities for non-production use.\n\nThe console has no way to reach the door:\n- `ui/packages/app-shell/src/console/organizations/CreateWorkspaceDialog.tsx` asks only for a name. It calls `createOrganization({ name, slug, timezone })`.\n- `ui/packages/auth/src/createAuthClient.ts` `createOrganization` puts only `timezone` on the query (objectui#11908).\n- `ui/apps/console/src/pages/auth/SetupPage.tsx` takes the same path for a first organization.\n\nSo today a developer organization can be opened only by a hand-made API call. The cloud constant is `packages/service-cloud/src/workspace-creation-locale.ts` `WORKSPACE_CREATE_EDITION_PARAM`, and its doc comment says: \"The console's create screen … offers no such choice yet: that is the framework's card.\"\n\n## What to build\n\n1. `createOrganization` accepts an optional `edition?: 'developer'` and sends it as the `edition` query parameter, the same way `timezone` rides today. With no value, no parameter is sent.\n2. `CreateWorkspaceDialog` offers the choice (\"Developer Edition — free, non-production, up to 5 members\") **only where the server advertises it**. Self-hosted and single-org deployments never show it. The server signal is the open design point:\n   - The dialog already reads `getAuthConfig().features`.\n   - The likely shape is one boolean the cloud control plane serves (for example `features.developerEditionCreate`).\n   - Agree the key with the cloud lane before building. The cloud half is one line in the control plane's auth-config features, filed back to cloud if needed.\n3. The four console locales carry the copy.\n4. Tests:\n   - The client test sends `?edition=developer` only when asked.\n   - The dialog test does not render the choice without the feature flag, and sends the parameter when the choice is picked.\n\n## Done when\n\nOn a hosted cloud with the flag served, a signed-in user picks Developer Edition in the create dialog and gets an organization that the control plane reads as developer: the 5-member cap answers `DEVELOPER_ORGANIZATION_MEMBER_LIMIT_REACHED` on the sixth invite. Without the flag, the dialog is unchanged.\n\nProvenance: cloud seat 1 (triage), from the cloud#4042 LANDED note 6746487459 (seat ruling (a): server door only, console choice is a framework card), and the maintainer's 2026-11-09T23:01Z rule that the objectstack blockers of cloud cards are mailed to their lane and handled first."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 31992,
+  "kind": "issue",
+  "title": "spec(ai): type the Ask data tools' `source` block beside DatasetProvenanceSchema (child of #31868)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T23:32:04Z",
+  "updated_at": "2026-11-10T02:00:27Z",
+  "closed_at": "2026-11-10T01:53:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31992",
+  "body": "domain:ui#3 · zhuangjianguo · session_01QsR2jVEjiYrK7onirxUGyo\n\nFiling gate: ④ a per-layer child of #31868. Its step 1 (6754245963) found that the Ask data tools' `source` block has no spec type. ⛔ Not a claim. It does not block #31868.\n\n## 维护者速读\n\n- **问题：** cloud 的 Ask 数据工具（`query_records`、`query_data`、`get_record`、`aggregate_data`、`visualize_data`）返回一个 `source` 块，说明数字是怎么算出来的。但这个块在 spec 里没有类型，生产方（cloud）和读取方（控制台 #31868）只能各自按约定来写。\n- **要做：** 在 `packages/spec/src/ai/` 里给它一个 schema，放在已有的 `DatasetProvenanceSchema`（`ai/dataset-tools.zod.ts:233`，ADR-0149 D3）旁边，再让控制台改用这个类型。\n- **需要你做的：** 无。\n\n## What to build\n\n1. An `ObjectQuerySourceSchema` (name open) in `packages/spec/src/ai/`, built from the shape cloud confirms on #31868 (Q1–Q5 there): `object`, `label`, `filter`, `scope`, `groupBy`, `aggregations`, `orderBy`, `limit`, `records`, `line`. It sits beside `DatasetProvenanceSchema`, and the two share members where they mean the same thing.\n2. Export it with a describe text a tool author can follow.\n3. Follow-ups that carry it: cloud types its producer against it (cloud lane), and #31868's local `AnswerSource` type switches to the spec type (`domain:ui`).\n\nNoted, not in scope: `query_dataset`'s `provenance` has no console face either. The #31868 block could draw it later, on its own card.\n\n**Reader:** `domain:spec`. **Suggested grade:** p3. **Clause-②:** expected yes (widening). **Metadata-protocol:** expected none.\n\n## Dedupe\n\nOpen issues were searched on 2026-11-09 for \"source block\" ai tool, \"AnswerSource\" and \"DatasetProvenanceSchema\". Only #31868 matched, and it is the console reader. **New.**\n"
+}

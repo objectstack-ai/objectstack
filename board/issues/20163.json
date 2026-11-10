@@ -1,7 +1,7 @@
 {
   "number": 20163,
   "kind": "issue",
-  "title": "[PM seat] domain:devx · seat 2 — 🟢 zhuangjianguo · 由 zhuangjianguo 账户的项目负责",
+  "title": "[PM seat] domain:devx · seat 2 — 🟢 os-support-ai · 由 os-support-ai 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,17 +14,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "zhuangjianguo"
+    "os-support-ai"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T04:07:54Z",
-  "updated_at": "2026-11-08T11:10:53Z",
+  "updated_at": "2026-11-10T00:08:12Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 103,
+  "comments": 105,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20163",
-  "body": "domain:devx#2 · zhuangjianguo · session_01QsR2jTo666XXx9e1Gm21C6\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md` (⛔ not copied here). This is **`domain:devx` seat 2**. Seat 1 is #6023 and seat 3 is #26373; ⛔ this post is neither.\n\n<sub>Refreshed 2026-11-08T11:10Z at seating.</sub>\n\n## Current PM — 🟢 zhuangjianguo\n\n- **Holder:** `zhuangjianguo` · `session_01QsR2jTo666XXx9e1Gm21C6` · seated 2026-11-08T11:07Z · 由 zhuangjianguo 账户的项目负责 (project \"objectstack ui skills devx\", thread \"Run devx lane seat\"). Previous PM: `marchtian` · `session_017ihL2ebbZkr2QAEG1x7UC8`, vacant since its clock-out brief 6711382936.\n- **Mailbox:** PR #31501 (subscribed). **Patrol:** `trig_01T9EpbZycpuRzY2szapsFJK` · `13 * * * *`.\n- **Effort:** this session runs below `high`; the account owner is asked to raise it (`seat-lifecycle.md`).\n- **Pointer:** posture, ledger and round reports live in the project. Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:devx#2` + `head:claude/` PRs.\n\n## Ledger\n\n- **In flight:** none at seating.\n- Out of scope: every `pm:epic` subtree. Up to 5 card threads (maintainer, this project: 「每个席位并发5」), p1/p2 first.\n- Claims race seat 1 (#6023) and seat 3 (#26373): re-read assignee and newest comments before every claim; the earlier claim wins.\n\n## Hot-file serial queue\n\n- None held by this seat. ⛔ Re-derive from the live `Claim:` comments of the other seats and each open PR's file list before every dispatch.\n- Carried from the lane ruling 6720656982: #25452 goes after #22034 step 2's first PR (PR #31429), both on the root `ci.yml`.\n\n## Notes\n\n- **Standing constraints (carried, ruling 6720656982):** root `.github/workflows/ci.yml` is in devx bounds; `ui/.github/**` stays ⛔ out of bounds. Every `.github/workflows/**` PR is Tier H and the maintainer merges it by hand. Changesets go to the root `.changeset/`.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- **Successor:** `/pm-dispatch 接手`; read this post and the latest brief first.\n\n<!-- signed: domain:devx#2 · zhuangjianguo · session_01QsR2jTo666XXx9e1Gm21C6 -->\n"
+  "body": "domain:devx#2 · os-support-ai · session_01WGufzjFj4aaaJk1VJLqRdC\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md` (⛔ not copied here). This is **`domain:devx` seat 2**. Seat 1 is #6023 and seat 3 is #26373; ⛔ this post is neither.\n\n<sub>Refreshed 2026-11-10T00:06Z (seated).</sub>\n\n## Current PM\n\n🟢 **`os-support-ai`** · `session_01WGufzjFj4aaaJk1VJLqRdC`, in the project thread \"Run PM dispatch devx seat\" of the os-support-ai account's project \"objectstack spec\". Seated 2026-11-10T00:06Z. Posture, ledger and round reports live in the project (pointer only).\n\n- **Patrol:** `trig_01FG1CvvJfXU6G5raTv8FGPB` · `5 * * * *` (hourly, self-bound).\n- **Mailbox:** PR #32008 (`Mailbox-of: domain:devx#2 · os-support-ai`), subscribed.\n- **Dispatch back end:** `mode:thread` card threads, up to 5, p1/p2 only.\n\n## Inherited ledger\n\n- The previous holder's ledger is the clock-out brief 6754859380 (zhuangjianguo, `session_01QsR2jTo666XXx9e1Gm21C6`) and the prior body revision; ⛔ not restated here.\n\n## Hot-file serial queue\n\n- None held. ⛔ Re-derive from live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Standing constraints (carried, ruling 6720656982):** root `.github/workflows/ci.yml` is in devx bounds; `ui/.github/**` stays ⛔ out of bounds. A Tier H `.github/workflows/**` PR is merged by the maintainer by hand. Changesets go to the root `.changeset/`.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n\n<!-- signed: domain:devx#2 · os-support-ai · session_01WGufzjFj4aaaJk1VJLqRdC -->\n"
 }

@@ -1,0 +1,35 @@
+{
+  "number": 32017,
+  "kind": "pull_request",
+  "title": "feat(spec,plugin-auth): advertise Developer Edition organization creation on /auth/config",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T00:31:47Z",
+  "updated_at": "2026-11-10T01:29:32Z",
+  "closed_at": "2026-11-10T01:29:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-10T01:29:30Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32017",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbNd4arQxsEYhZ3uX42GCM21)_\n\nFixes #31990\n\nClause-②: yes (widening)\nMetadata-protocol: added\nSkills-docs: none — the skills name the PUBLIC_AUTH_FEATURES registry, never its members\n\n## 维护者速读\n\n- **改了什么**:`/auth/config` 的 `features` 新增可选布尔 `developerEditionCreate`,由宿主选项 `AuthManagerOptions.developerEditionCreate` 打开;不设时恒为 `false`。\n- **为什么改**:云端已能按 `?edition=developer` 创建开发者版组织,但控制台无从得知;这是 #31988 拆分的 PR A,先把契约与宿主开关落地,控制台的勾选框(PR B)随后读它。\n- **风险与回滚**:只是广告,本仓库无任何服务端行为读它;未设选项时 payload 只多一个 `false` 键。回滚即撤本 PR,控制台 PR B 尚未落地,无下游依赖。\n- **先看**:`packages/plugins/plugin-auth/src/auth-manager.ts`(选项与 `features` 字面量那一行)、`packages/spec/src/kernel/public-auth-features.ts`(注册行)、`packages/spec/src/api/auth-endpoints.zod.ts`(schema 键)。\n- **两分钟验证**:`pnpm --filter @objectstack/plugin-auth exec vitest run src/auth-manager.test.ts -t developerEditionCreate`,预期 1 passed(选项为 true 时下发 true,否则 false)。\n- **需要你做的**:无,席位落地。\n\n## What changes\n\n- **Spec contract.** `AuthFeaturesConfigSchema` (`packages/spec/src/api/auth-endpoints.zod.ts`) gains `developerEditionCreate: z.boolean().optional()`, no default. Its description says it is true only where the host's organization-create door accepts `?edition=developer`, that it changes no server behaviour, and that absent or false means no developer choice is offered.\n- **Registry.** One `PUBLIC_AUTH_FEATURES` row (`packages/spec/src/kernel/public-auth-features.ts`): `surface: 'login'`, `semantics: 'opt-in'`, `exempt` (no spec input gates it; a host option sets it). `login` and not `crud`: the registry defines `login` as a flag read straight off `/auth/config` with no spec metadata in between, which is how the console create-organization form reads it. `multiOrgEnabled` is `crud` only because it gates `sys_organization` actions; this flag gates none.\n- **plugin-auth.** `AuthManagerOptions.developerEditionCreate?: boolean` (default `false`), a TS-only host option documented beside `onOrganizationCreated`. `getPublicConfig()` serves it in its `features` literal as `this.config.developerEditionCreate === true`.\n- **Served when unset: always, as `false`** (the `cloudManaged` precedent, ruled in claim amendment 1 on #31990). Serving the key only when true is not possible without weakening the drift guard: `public-feature-registry.test.ts` holds the served booleans at default config equal to the registry, refuses keys that appear or disappear with config, and requires an opt-in row to serve `false` by default. So the unset `features` object gains one `developerEditionCreate: false` key, and the two exact pins of the served shape gain one line each.\n- **Regenerated.** `packages/spec/authorable-surface/api.json` (one line) and `content/docs/references/{api/auth-endpoints,data/object,ui/action}.mdx` (the new key, and the new `requiresFeature` enum value).\n\n**Names for PR B (#31988):** `features.developerEditionCreate` on the client side, and `AuthManagerOptions.developerEditionCreate` for the host (cloud's half is that one option, per the cloud lane's answer on #31988). The name was re-read on #31988 before this PR opened: the cloud lane confirmed it (comment 6754499855).\n\n## Tests\n\n- `packages/plugins/plugin-auth/src/auth-manager.test.ts`: new `serves features.developerEditionCreate from the host option` (true when set, false when set false, false when unset); the exact `getPublicConfig().features` pin gains `developerEditionCreate: false`.\n- `packages/spec/src/kernel/public-auth-features.test.ts`: registry count 13 → 14 and the name list.\n- `packages/spec/src/api/auth-endpoints.test.ts`: the served fixture names the new key; the registry-to-schema pin and the per-flag optional-boolean `it.each` pick the row up.\n- `packages/plugins/plugin-auth/src/public-feature-registry.test.ts` (drift guard): unchanged, green.\n\n## Acceptance notes\n\n- `Metadata-protocol: added`, not the brief's expected `none`: the registry row widens `z.enum(PUBLIC_AUTH_FEATURE_NAMES)`, so `requiresFeature: 'developerEditionCreate'` is a new accepted value on actions, params and field groups. Same reading as the `emailDelivery` row's changeset. Ruled in claim amendment 1.\n- The flag advertises a door that lives in cloud; nothing in this repository takes an edition. A host that sets the option without serving the door offers a choice its server ignores; the option's doc comment says so.\n\n## Verification\n\nHead `9d0747ee` (main `8031f49d` merged through `os-regen-merge.sh`; the two incoming commits touch neither `packages/spec` nor plugin-auth).\n\n<details><summary>Local readings</summary>\n\n- Derived gates: `dispatch-gates --commands` at `69ccc43f` derived 118 commands; all 118 exit 0; `dispatch-gates --ran` reconciles 118 run, 0 NOT-MEASURED, 0 UNRUN.\n- `pnpm --filter @objectstack/spec check:generated`: all 14 artefacts up to date, re-run after the merge on a rebuilt spec. (`check:test-typecheck` inside it OOMs at node's default heap; green with `NODE_OPTIONS=--max-old-space-size=4096`.)\n- `pnpm --filter @objectstack/spec test`: 829 files, 26265 passed. `pnpm --filter @objectstack/plugin-auth test`: 253 files, 4564 passed, 10 skipped. Typecheck: plugin-auth and spec exit 0.\n- Consumers of the registry (contract surface): `@objectstack/lint` 3 files (validate-expressions + two runtime-gate visibility suites) 526 passed; `@objectstack/platform-objects` 51 files (feature-gate-guard, all of `identity/`, the echo-decision catalogs) 811 passed.\n- After the merge: the touched spec and plugin-auth files re-run, 438 passed.\n- Ablation (one-shot, not kept): `getPublicConfig()` serving `developerEditionCreate: false` regardless of the option turns `serves features.developerEditionCreate from the host option` red (1 failed); restored blob equals HEAD, `git diff HEAD` empty.\n- Not run locally: spec `test:repo` (CI Test Core), the dogfood battery (no `!` in the title, no narrowing arm).\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jUhnNnrhfhAFpHoV3A)_\n"
+}

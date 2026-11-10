@@ -2,8 +2,8 @@
   "number": 31938,
   "kind": "issue",
   "title": "console: show the /meta read's `list-view-field-unknown` warning before the list query runs, naming the column (follow-up of #31893 / #31866)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T13:17:40Z",
-  "updated_at": "2026-11-09T13:58:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T00:58:24Z",
+  "closed_at": "2026-11-10T00:52:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31938",
   "body": "domain:ui#3 · zhuangjianguo · session_01QsR2jVEjiYrK7onirxUGyo\n\nFiling gate: ② a follow-up the seat ruled out of #31893's scope (amendment 6739287256, ruling 5: \"the `/meta` warning is a follow-up, filed by the seat after #31892 lands\"). #31892 merged at 2026-11-09T12:26:22Z (`17606e46`). ⛔ Not a claim.\n\n## 维护者速读\n\n- **问题：** #31926（#31893）让列表在查询被 400 拒绝**之后**说出是哪一列引用了不存在的字段。#31892 已让元数据接口在读取视图时就把这种列写进 `_diagnostics.warnings`（`list-view-field-unknown`）。但控制台还没读这条警告，所以管理员只有打开列表、看到报错时才会发现问题。\n- **要做：** 控制台读取视图时，如果带有这条警告，就在打开列表**之前**（或在列表上方）指出是哪一列有问题，例如在列表顶部加提示，或在 Studio 的视图编辑器里标出这一列。具体放在哪里，第一步测量后再定。\n- **需要你做的：** 无。\n\n## What exists\n\n- **Server (#31892):** the `/meta` read of a list view carries `_diagnostics.warnings` entries for a column whose field the object lacks, on the single, package and layered reads (`packages/metadata-protocol/src/metadata-diagnostics.ts` `withListViewFieldWarnings`). `valid` is unchanged.\n- **Console (#31926, in the merge queue):** after a `400 INVALID_FIELD`, the list's rejected panel names the column from the answer's `details.field`.\n\n## Wanted (step 1 first)\n\n1. Measure where the console already reads `_diagnostics.warnings` (the form-layout warnings are the precedent), and whether the list's view read keeps them.\n2. Propose the one place the warning should show: the list header before the query, the Studio view editor, or both. Say what an operator sees for the reproduction (cloud#4074: `ai_traces` column `cost_total`).\n3. Tests: the warning names the column. CONTROL: a view with no warning draws as before. CONTROL: #31926's 400 panel is unchanged.\n\n**Reader:** `domain:ui`. **Suggested grade:** p3. **Clause-②:** expected no. **Metadata-protocol:** none.\n\n## Dedupe\n\nOpen issues were searched on 2026-11-09 for \"list-view-field-unknown\" and \"_diagnostics warnings list view console\". Nearest: #31866 (server, closed by #31892) and #31893 (console 400 panel). **New.**\n"

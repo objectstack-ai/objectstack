@@ -1,0 +1,30 @@
+{
+  "number": 32004,
+  "kind": "issue",
+  "title": "[PM seat] security · seat 2 — 🟢 os-justin",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "pm:seat"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T23:56:00Z",
+  "updated_at": "2026-11-10T00:53:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32004",
+  "body": "security#2 · os-justin · session_01QSeKYn5CmmdShCJifm6WYj\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/security.md` (⛔ not copied here). Never-public rules: `.claude/skills/pm-dispatch/references/security-findings.md`. This is **`security` seat 2**. This post carries no finding, path, object name or mechanism, by rule.\n\n## Current PM — 🟢 os-justin\n\n- **Holder:** `os-justin` · `session_01QSeKYn5CmmdShCJifm6WYj` · seated (the post's creation time) on the maintainer's word in this session, verbatim 「继续上岗 开新座位」, 「并发5」.\n- **Split (maintainer, this session):** security#1 (#29740) keeps the high-severity advisories; **this seat takes the medium and low ones**, the rows below moved from #1's ledger, plus new medium and low intakes. Notified to security#1 as `Notify: split`.\n- **Concurrency:** at most 5 slots.\n- **Patrol:** none; an on-demand seat while the maintainer is in session.\n- **Mailbox:** PR #32005 (`Mailbox-of: security#2 · os-justin`), subscribed by the seated session; `seat-online` rung in triage's mailbox, `split` rung in security#1's.\n- **Ledger rule:** one row per advisory, opaque id · session · state, ⛔ no detail.\n\n## Ledger\n\n| advisory | session | state |\n|:--|:--|:--|\n| GHSA-hjqw-gxfh-v4vp | session_01QSeKYn5CmmdShCJifm6WYj | fixing (the explain half awaits a maintainer ruling) |\n| GHSA-883m-4hm6-m2m2 | session_01QSeKYn5CmmdShCJifm6WYj | fixing (low; the remaining grant paths are ordered) |\n| GHSA-5654-hg87-8g29 | session_01QSeKYn5CmmdShCJifm6WYj | received (medium; goes to the maintainer before any order) |\n| GHSA-6pr9-qjw2-wcrp | session_01QSeKYn5CmmdShCJifm6WYj | received (low; needs a maintainer ruling) |\n| GHSA-8gmf-jrv8-w3fh | session_01QSeKYn5CmmdShCJifm6WYj | fixing (low; one part waits on a maintainer ruling) |\n| GHSA-xh7r-4xff-5qfq | session_01QSeKYn5CmmdShCJifm6WYj | received (medium; with the maintainer since 2026-11-07) |\n| GHSA-wcqv-ph67-v38f | session_01QSeKYn5CmmdShCJifm6WYj | received (medium; rides GHSA-xh7r's ruling) |\n| GHSA-p4cc-477f-7h9r | session_01QSeKYn5CmmdShCJifm6WYj | fixing (medium; ordered) |\n| GHSA-65gg-f747-rc7m | session_01QSeKYn5CmmdShCJifm6WYj | received (medium) |\n| GHSA-r3v3-p5jh-8cx9 | session_01QSeKYn5CmmdShCJifm6WYj | fixing (medium; ordered) |\n| GHSA-pf57-2wj7-2jj8 | session_01QSeKYn5CmmdShCJifm6WYj | fixing (medium; a re-measure on main is ordered, with a fix for what remains) |\n| GHSA-rpvq-7r4f-7qrq | session_01QSeKYn5CmmdShCJifm6WYj | fixing (low; ordered) |\n| GHSA-xpg7-4vqw-rmgp | session_01QSeKYn5CmmdShCJifm6WYj | received (low; a candidate) |\n\nLeft with security#1: GHSA-9p4r (its measurement order is in flight there) and GHSA-m5r4 (maintainer-assigned elsewhere).\n\n## Hot-file serial queue\n\n⛔ Re-derive from live claims and each open PR's file list before every dispatch. None held.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes. Advisory text is read only through the relay `advisory_read`.\n"
+}

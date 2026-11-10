@@ -1,0 +1,34 @@
+{
+  "number": 31994,
+  "kind": "issue",
+  "title": "The hosted unmanaged install forwards a target namespace: /cloud-connection/install reads target_namespace and copyOnUnmanagedGrant passes it to the install door",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T23:36:17Z",
+  "updated_at": "2026-11-09T23:48:17Z",
+  "closed_at": "2026-11-09T23:48:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31994",
+  "body": "repo:cloud#3 · os-warren · session_01JQwxbZqfEd7pcckjz3pGqn\n\nFiling gate: ① a measured gap with file:line. A cloud consumer (objectstack-ai/cloud#3648, Ask item 4) cannot finish without it. Found by that card's premise check (`pm-orders/cloud/seat3/plan-3648.md`) at cloud's pin `e24136c2`, and the same on objectstack main `c9246279`.\n\nDedupe: objectstack#30794 (closed) gave the install-local door `targetNamespace`. No open card covers forwarding it from a hosted environment.\n\n## 维护者速读\n\n- 问题：托管环境里以\"非托管\"方式安装模板时，环境的安装入口不读也不转发目标命名空间，所以副本永远保留模板原来的命名空间（例如 `democrm_account`）。\n- 要做：`/cloud-connection/install` 读 `target_namespace`；控制面授权里带回的 `target_namespace` 交给安装门；环境的安装对话框显示默认值，冲突时再问一次。\n- 需要你做的：无，车道派发。\n\n## Gap (at pin `e24136c2`, the same on main `c9246279`)\n\n1. The environment's `POST /api/v1/cloud-connection/install` (`cloud-connection-plugin.ts` ~L1295) reads only `package_id`, `seed_sample_data`, `install_mode` and `version`. It sends the control plane no namespace.\n2. `copyOnUnmanagedGrant` (~L1404) builds the install-local request as `{ packageId, versionId, installMode: 'unmanaged', seedSampleData? }` and never passes `targetNamespace`. The door itself takes one (objectstack#30794, `marketplace-install-local-plugin.ts` L2215).\n3. The environment's marketplace install dialog, for an unmanaged install, neither shows a default namespace nor asks again on a namespace conflict.\n\n## What done looks like\n\n1. `/cloud-connection/install` accepts an optional `target_namespace` and sends it to the control plane's install request, but only beside `install_mode: 'unmanaged'`. A managed install refuses it, as the door already does.\n2. `copyOnUnmanagedGrant` passes the grant's `data.target_namespace`, when present, as `targetNamespace`. Without one, today's behaviour stays: the copy keeps the source namespace.\n3. The environment install dialog for an unmanaged install shows the default the control plane answers (cloud#3648 adds `GET /cloud/packages/:id/install-namespace`). It lets the user edit the value. On the door's existing namespace-conflict refusal (`INVALID_REQUEST` / 400, `details.targetNamespace`) it asks for another name. A reserved or malformed name is refused with the framework's codes.\n4. Tests: the forward is pinned at the route and at the grant copy (present → passed, absent → unchanged), plus the dialog's re-ask on conflict.\n\nConsumer: objectstack-ai/cloud#3648 lands its control-plane half first; until this card lands, the grant's `target_namespace` is ignored, which is safe. objectstack-ai/cloud#3626 (sign-up deep link) relies on the same forward.\n\nBlocked-by: none."
+}

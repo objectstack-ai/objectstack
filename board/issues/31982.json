@@ -1,0 +1,31 @@
+{
+  "number": 31982,
+  "kind": "issue",
+  "title": "dispatch-gates: move CONTRACT_REVIEW_TIER's value one minor up in its family, at the maintainer's word (2026-11-09)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:blocked",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T23:03:46Z",
+  "updated_at": "2026-11-09T23:57:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31982",
+  "body": "coordinator#1 · huangyiirene · session_01J8VVAjNiKx3kZZmPui3YHZ\n\nFiling gate: ③ 维护者直派 (filed at the maintainer's word, from a thread of the project coordinator, not a lane seat). Thread: `cmsg_01TJXtQ1tVD26ecLDZxFS67xVZCLpZKZAiACMjw8xaR4LS`, project `chan_01TJXtQ1tVD26ecLDZxFS67x`. ⛔ Not a claim.\n\n**Maintainer's words, verbatim and untranslated.** Irene, 2026-11-09T22:58:05Z:\n\n> 复审档位要从 Fable 5.1 改到 5.2，立卡修改\n\n## Governing text\n\n- `scripts/pm/dispatch-gates.mjs` L12807 on `origin/main` (`744211fc`): `export const CONTRACT_REVIEW_TIER` holds the id of the first version the quote names. It is the only value site: its docblock says a model upgrade is \"a one-line change in one file\", the clause-① mandate rows (`MANDATORY_TIER_GLOB_ROWS`, bound through `TIER_BY_NAME`), `TIER_CEILING` (`tierWordOf`), `ceilingTierSpellings()` and the `--tier` note all read it, and the PM skill names it only by its NAME.\n- The same docblock: the comparison against the served tier is EXACT, never a family or prefix floor, and moving the value is the maintainer's decision. The words above are that decision.\n- `.claude/skills/pm-dispatch/references/contract-review.md` L11 / L34 and `platform-readings.md` L375: a review owed at this tier runs at it in-seat or through an isolated at-tier subagent; the served tier is read from `get_session`'s `external_metadata.last_served_model`; the record's `Served-tier:` line carries the constant's NAME, never a value.\n\n## What changes\n\n1. Set the constant's value to the id of the second version the quote names, spelled in the constant's existing `claude-<family>-<major>-<minor>` shape (same family, one minor up). The comparison stays EXACT: ⛔ no accept-both, no prefix or family floor (the docblock forbids widening it at refresh time).\n2. Record the ruling in the constant's docblock beside the 2026-09-22 paragraph: the maintainer's words verbatim as a quotation (the AGENTS.md exemption for a verbatim maintainer ruling), the date, and this card's number. Say it is an upgrade by ruling, not a retirement: `RETIRED_TIER_WORDS` (`dispatch-gates.data.mjs` L1584) stays empty, and the family word `TIER_CEILING` derives is unchanged.\n3. Nothing else moves. Measured with `git grep` on `origin/main`: the old id appears on L12807 and in `scripts/check-commit-card-trailers.mjs` L841 / L848. Those two lines are measured trailer-spelling FIXTURES (\"fixtures, not a vocabulary\"), not a tier reading, so ⛔ leave them. No `Served-tier:` reader, claim template or skill prose spells a value, so none changes.\n\n## Effect on seats\n\nFrom the landing commit, a review owed at `CONTRACT_REVIEW_TIER` is at tier only when the served reading equals the new value. A seat served the old minor renders the review through an isolated at-tier subagent or waits outside the queue, as `contract-review.md`'s last line already says. ⛔ It does not edit the constant back, and the old minor is not \"retired\" by this card.\n\n## Checks\n\n- `node scripts/pm/dispatch-gates.mjs --commands scripts/pm/dispatch-gates.mjs` for the families a change to the constant schedules (#19583), and run each.\n- `node scripts/pm/dispatch-gates.self-test.mjs` (its ceiling-shape and mandate-row cases) and `pnpm check:pm-dispatch-gates`.\n- `git grep` for the new id across `scripts/pm/**` and `.claude/skills/pm-dispatch/**`: exactly one hit, the constant.\n- Landing tier: `node scripts/pm/check-governed-merges.mjs --pr <n>` at the PR.\n\nReader who acts: the `domain:skills` seat (os-dev on `scripts/pm/dispatch-gates.mjs`, size S).\n\nDedupe: `repo:objectstack-ai/objectstack is:issue \"CONTRACT_REVIEW_TIER\" in:title` → 12 hits, closed included. Nearest: #14303 (closed 2026-09-02, the previous one-minor move, filed on a measured mismatch with the served tier) and #19583 (closed, a change to the constant now schedules the gate that imports it). Neither covers this move. **New.**\n\nClause-②: no · Metadata-protocol: none · skip-changeset (`scripts/pm/**` is not published).\n\nSuggested-grade: p2 · a maintainer-direct governance value, one line plus its docblock. If a seat measures that the `fable` alias is already served the newer minor, the in-seat fuse misreads every review until this lands, and #14303 graded that p1."
+}

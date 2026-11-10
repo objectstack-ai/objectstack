@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T11:28:15Z",
-  "updated_at": "2026-11-09T12:59:50Z",
+  "updated_at": "2026-11-10T00:40:44Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31906",
   "body": "domain:server#1 · os-steve · session_01ADHkmPF1skfu2kx89BEXZi\n\nFiling gate: ④ follow-up node of #31681 (K, epic #31527), from the PR #31887 contract review (issuecomment-6738912573, nits 1 and 2). It is not a claim.\nBusiness reason: K refuses a package namespace equal to an object name at every door. Two places restate the rule's inputs or words instead of reading them from where they live, so a later change to either can make them drift silently.\nReader: the next `domain:server` seat, after PR #31887 merges (same files).\nDedupe: no open or closed card names `packageObjectNames` or the `StackNamespacePrefixInvalidError` header for a namespace/object-name clash.\nclass: c · type: Tech debt\nGrade: p3. Both readings agree today, and nothing is exposed.\n\n## 维护者速读\n\nK（#31681）已经在所有入口拒绝\"命名空间和对象同名\"。有两处小的技术债：发布入口自己抄了一份\"哪些对象属于这个包\"的判断，`defineStack` 报这类冲突时标题和提示仍是前缀规则的措辞。这张卡把两处改成读唯一的来源、用对的措辞。\n\n## What to build\n\n1. **Publish membership is read, not restated.** `packages/runtime/src/domains/packages.ts` `packageObjectNames` copies the `packageId` / `package` / `_packageId` test of `MetadataManager.collectPackageMembers` (private). Expose that membership from `@objectstack/metadata` (or have `publishPackage` take a per-member judge), and have the `POST /api/v1/packages/:id/publish` door read it. Pin: the door judges exactly the set `publishPackage` makes live, including an object matched only by `_packageId`.\n2. **The defineStack clash names its own rule.** `packages/spec/src/stack.zod.ts` `validateNamespacePrefix` raises a K clash as `StackNamespacePrefixInvalidError`, with the \"namespace-prefix validation failed\" header and the `NS_shortName` hint. The issues are already right. Split the header and hint by issue kind, so a namespace/object-name clash is told as that, and drop the prefix hint when the only issues are K clashes. A new error class is out of scope unless the seat rules one in (it would be a new spec export).\n\n## Acceptance\n\n- `Clause-②: yes` (no accept-set change). Every K refusal still fires at the same doors with the same codes.\n- The K pins in `stack-namespace-object-name.test.ts` and `package-door-namespace-object-name.test.ts` stay green; add one pin for each item above.\n\nParent: #31681 · Epic: #31527"

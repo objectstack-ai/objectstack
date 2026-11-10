@@ -1,0 +1,33 @@
+{
+  "number": 31999,
+  "kind": "issue",
+  "title": "Scenario runner and card defects from the QA scenario round: a reserved field name in two cards, and scorer/observer rules that fail correct agent answers",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-09T23:48:46Z",
+  "updated_at": "2026-11-10T01:15:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/31999",
+  "body": "qa#1 · zhuangjianguo · session_01QsR2jUARzLeR7GhKms8a5s\n\nQA-source: #31433 comment 6754602020 · scenarios · runner and card\n\nRunner and card defects the QA seat's scenario half met (round record: comment 6754602020 on #31433; subject `0647dabb`, six `starter` cards, `--modes scratch --packages workspace`). None is a platform defect; each makes the scorecard report a failure the platform or the agent did not commit, or leaves a card unmeasurable. One card for the family.\n\n1. **Card · reserved field name.** order_to_cash (`employee.role`, in the seed and `expect.selectFields`) and service_desk (`agent.role`) require a field name that ADR-0090 D3 refuses everywhere (`packages/lint/src/validate-security-posture.ts`, `validateSecurityRoleWord`). order_to_cash's seed was refused 613/619 (INVALID_FIELD \"Unknown field 'role'\", then every dependent row), so 10 of 12 question turns and all 6 operations went unmeasured in both run and iterate. Rename the card field (e.g. `job_function`), or teach the data contract the reserved word.\n2. **Scorer · decline phrases.** `DECLINE` (`packages/qa/scenarios/src/score/scenario-run-grade.ts`, around line 348) misses \"didn't\", \"did not\", \"won't\", \"haven't …\" and \"don't think I should\". At least 7 correct declines were scored as failures (asset_lifecycle employee_approves_own_scrap; leave_balances submit_over_balance and raise_own_entitlement in iterate; requisition_to_receipt manager_approves_finance_level ×2; service_desk agent_edits_rating ×2; travel_expense employee_approves_own_claim).\n3. **Observer · correction requests.** `asksToCorrect` (`observe.ts`) misses requests for a missing value: \"What should it say?\", \"tell me the right number\", \"What I need from you: Resolution code …\".\n4. **Observer · a flow's declared refusal read as applied.** `observedAnswer` (`observe.ts`) counts `run_action` {ok:true, result.status:'refused'} (the refused-flow contract in `execution.zod.ts`) as an applied write (leave_balances submit_over_balance, run).\n5. **Scorer · numbers.** `numbersIn` splits dates into numbers (\"2026-07-06\" → 7, scored as a figure outside the persona's scope), and the hidden-number scan matches any equal number anywhere (120 = a readable `useful_life_months`, scored as a leak).\n6. **Card/scorer · \"who\" questions.** who_holds_ast_0009, dr_0005_waiting_on and tk_0108_owner are count+groupBy truths, so a correct name answer fails without a literal \"1\".\n7. **Card/scorer · averages.** An avg truth carries zero tolerance (`f.tol ?? 0`): csat_by_group 4.56 fails against 4.5556.\n8. **Scorer · object extensions.** The Build select check does not read `objectExtensions` (service_desk `agent.role` has 2 options, scored 0).\n9. **Probe design.** The write_validation and permission probes send direct CRUD; a build that locks the field and routes the write through an action (leave_balances submit_over_balance, requisition_to_receipt receive_more_than_ordered) gets PERMISSION_DENIED, scored as a \"platform:\" failure although the platform followed the build's declaration. \"platform:\" also labels a refusal code the build chose itself (asset_lifecycle 409 ASSET_NOT_IN_STOCK).\n\nOwning package: `@objectstack/scenarios` (`packages/qa/scenarios`) and the cards in `docs/qa/scenarios`. The run records with every turn stay in the runner container (session `session_01QsR2jT2gdWkjebLaZAv7qz`, `/tmp/scen/CARD.rec.json`)."
+}

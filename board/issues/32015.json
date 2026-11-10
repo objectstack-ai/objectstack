@@ -1,0 +1,34 @@
+{
+  "number": 32015,
+  "kind": "pull_request",
+  "title": "feat(i18n): the action param dialog's preflight panel reads its row labels from the bundle",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T00:26:35Z",
+  "updated_at": "2026-11-10T01:22:39Z",
+  "closed_at": "2026-11-10T01:22:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-10T01:22:37Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32015",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9Ubb2Fj9aZwUET7wDczt5jxUYa)_\n\nFixes #31937\n\nClause-②: yes (widening)\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:控制台的动作参数对话框里,预检(preflight)面板每一行的标签现在会读翻译包里的 `preflight.fields.PATH`,中文、日文用户看到的是译文,不再是作者写的英文。\n- **为什么改**:#31885 已在规范与 REST 侧加了这个翻译键,#31808 加了对话框,但控制台从没读过这个键,翻译写了也不生效。\n- **风险与回滚**:风险低。只覆盖已声明的行,翻译包里多出的路径不加行,没有译文的行原样显示;没有 preflight 的动作完全不经过新代码。回滚即 revert 本 PR。\n- **先看**:`ui/packages/i18n/src/useObjectLabel.ts`(新成员 `actionPreflight` 与抽出的两个共用助手),`ui/packages/app-shell/src/hooks/useConsoleActionRuntime.tsx`,`ui/packages/app-shell/src/views/RecordDetailView.tsx`。\n- **两分钟验证**:`pnpm --dir ui exec vitest run packages/i18n/src/__tests__/useObjectLabel-actionPreflight-31937.test.tsx`,预期 5 个用例全绿。\n- **需要你做的**:无,席位落地。\n\n## What changes\n\n- `useObjectLabel()` gains `actionPreflight(objectName, actionName, preflight)`, the client mirror of `actionResultDialog` for an action's declared `preflight` read and of the spec's `resolveActionPreflight`. It reads `objects.OBJECT._actions.ACTION.preflight.fields` (with no key object, `globalActions.ACTION.preflight.fields`) whole, keyed by the literal row path, and overlays a non-empty string onto the matching DECLARED row only. A bundle path no row declares adds nothing; a row with no bundle string keeps its authored label, an inline per-locale map included. No spec, no action name or no declared rows returns the spec itself.\n- The fetch-the-fields-node and overlay-the-rows steps are now two local helpers (`readActionFieldsNode`, `overlayActionFieldLabels`) that `actionResultDialog` and `actionPreflight` share; `actionResultDialog`'s behaviour is unchanged (its suite is green).\n- Both console param-collection handlers (`useConsoleActionRuntime` and `RecordDetailView`) pass `action.preflight` through `actionPreflight` before handing it to `resolveParamDialogCompanion`, on the same key object the rest of the dialog's copy reads. They call it only when the action declares `preflight`, so the no-preflight branch is unchanged.\n- `packages/spec/liveness/action.json`: the `preflight` note's open-gap sentence now says the console reads the key (`check:liveness` green).\n- Changeset: patch on `@object-ui/i18n` and `@object-ui/app-shell`.\n\n## Tests\n\n- New `ui/packages/i18n/src/__tests__/useObjectLabel-actionPreflight-31937.test.tsx` (real i18next, zh session): the zh bundle label lands on its row with the dotted path as one key; an undeclared bundle path adds no row; CONTROL, a row with no bundle string, plain or an inline locale map, is the authored object itself; `globalActions` is read for an action with no key object and not for a bound one; the identity returns.\n- The two `banCompanion-30205` suites gain `actionPreflight` in their `useObjectLabel` double and one top-level describe each: the localized rows reach the companion's judged block, asked on the action's own object, and an action with no preflight asks nothing.\n- `useObjectLabel-identity-5564.test.tsx`: the member census moves 30 to 31 with a sentence naming the new member (both paths still carry the same member set).\n- Ablation through `scripts/ablation-replace.mjs` on the committed tree: replacing the `readActionFieldsNode(objectName, actionName, 'preflight')` argument with `undefined` turns the zh-row and global-action cases red (2 failed, 3 passed); restore verified by blob equal to HEAD and an empty `git diff HEAD`.\n\n## Acceptance notes\n\n- `ui/e2e/record-flow-phone-targets.spec.ts` reads `RecordDetailView.tsx` source for its Tailwind classes; this diff adds no class, and the spec runs in CI's Playwright jobs.\n- The call-site guard (call only when `preflight` is set) was agreed with the seat so the other `useConsoleActionRuntime` suites, whose `useObjectLabel` doubles carry no `actionPreflight`, stay untouched.\n\n## Verification\n\nHead `5b9b0f8a` (main `8031f49d` merged in; the incoming commits touch `packages/runtime` and the cloud connection only).\n\n<details><summary>Local readings</summary>\n\n- Closure build `turbo run build --filter='@object-ui/app-shell^...'` plus formula, sdui-parser, lint, client: 68/68 tasks.\n- Whole `@object-ui/i18n` package plus the two banCompanion suites at `5b9b0f8a`: 103 files, 1860 passed, 13 skipped.\n- Related app-shell sweep (every app-shell / console test naming `useConsoleActionRuntime` or `RecordDetailView`, 259 files in four batches): all passed (503 + 588 + 516 + 528 tests).\n- `turbo run type-check --filter=@object-ui/i18n --filter=@object-ui/app-shell`: 70/70 tasks.\n- eslint on the seven touched files: 0 errors.\n- `dispatch-gates --commands`: 69 derived; all 69 exit 0 (`check-plugin-teardown-shape --self-test` after the documented fixture fetch; `pnpm --dir ui exec vitest run scripts/` 171 files passed; `check:type-check-debt` and `check:dual-build-cjs-loads` green); `dispatch-gates --ran`: 69 run, 0 NOT-MEASURED.\n\n</details>\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; eslint on the touched files passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched (one liveness note): `check:liveness` green, no generated artifact moves.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jS3Ygo2PrNM7BkigsN)_\n"
+}

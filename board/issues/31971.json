@@ -13,19 +13,21 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:blocked",
     "pm:blocking",
+    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T18:30:49Z",
-  "updated_at": "2026-11-09T19:03:20Z",
+  "updated_at": "2026-11-10T00:59:56Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31971",
   "body": "epic:#31527#1 · os-steve · session_01ADHkmP7o3uDTti21wLTfPf\n\nFiling gate: ④ coordination node. A missing child of the epic #31527 (ADR-0150) that #31698's step 0 found (seat 3, claim amendment 6747867088; readings in `/mnt/project-files/server-seat3/31698-step0.md` §1). ⛔ Not a claim.\nBusiness reason: inherited from #31527 (p1). #31698 narrows the permission-set backstop to one holder per namespace (D9). It may not narrow while any authorization step downstream of R1/R3 resolves a permission set by bare name again, because that step would take the first of two holders (red line 1) or drop a lawful grant.\nReader: the `domain:server` seat that holds #31698 (seat 3 offered).\nDedupe (open AND closed): `permission set package name evaluator activation ledger`. E3 #31674 (closed) moved the catalog and `position.permissionSets`. S2 #31683 (closed) added the R1/R3 columns. #31698 is the narrowing itself. None of them carries the identity through the pipeline.\nclass: c · type: Feature\nPart of #31527. Blocked-by: #31970 (the `ExecutionContext` field). Blocks: #31698.\n\n## 维护者速读\n\n授权管线从授予到每个请求的判定，要全程带着“哪个包的权限集”，不能在中途退回只按名字找。做完之后，两个不同命名空间的包才能各带一个同名权限集，权限集的收窄卡 #31698 也才能落地。\n\n## What to build\n\nThese are seat 3's readings at main 0cd594b3. Re-read them at step 0.\n- **Per-request evaluator.** In plugin-security `permission-evaluator.ts`, `resolvePermissionSets` and its callers in `security-plugin-permission-sets.ts` read #31970's `(package, name)` field and resolve each entry exactly through E3's catalog (`resolvePermissionScoped`). An entry without a package resolves environment-wide, as today. ⛔ No `metadataService.list('permission')` first-by-name pick.\n- **Authz context.** core `resolve-authz-context.ts` fills the new field from the resolved grants: R1's column, else the D3 environment-wide answer. A null column that the rule refuses grants nothing and is named, with the `bind` command (S4).\n- **Activation ledger.** `readDisabledCatalogNames` disables by `(package, name)`. A stale row keeps disabling the current holder and warns, by E1 Q3's reading.\n- **Accepted `everyone` suggestions** carry the set's package (R3's column).\n- **Name-derived identities:** `admin_full_access`, the organization-admin grants, `last-admin-guard`, `role-change-granted-set`, `catalog-set-in-effect`, hono `current-user-endpoints`, the delegated-admin gate, and verify `rls.ts`. They compare on `(sys holder, name)`, never on a bare name that another package could also hold.\n- **R1/R3 write seams** are already #31698 PR-1's, so they are not repeated here.\n\n## Red lines (the epic seat reviews the PR against them, ruling 6723571682)\n\n1. **Never loosens.** No grant reaches a set its `(package, name)` does not name. A CONTROL pins the dogfood `/auth/me/permissions` byte-identical with every column bound.\n2. **Never guesses.** No first-of-two pick remains anywhere in the pipeline. Pin it with two packages in different namespaces holding `sales_rep` (installed with the backstop off in the test): each grant reaches only its own set.\n3. **Independently releasable.** With one holder per name, which phase 1 still guarantees until #31698, every answer is as today. List readings (a)–(d) in the PR body."

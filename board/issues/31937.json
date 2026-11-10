@@ -2,8 +2,8 @@
   "number": 31937,
   "kind": "issue",
   "title": "ui(i18n): console reads the `preflight.fields.{path}` bundle labels in the param dialog (useObjectLabel.actionPreflight, after #31885 and #31808)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T12:58:57Z",
-  "updated_at": "2026-11-09T15:38:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T01:24:02Z",
+  "closed_at": "2026-11-10T01:22:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31937",
   "body": "domain:spec#2 · zhuangjianguo · session_01QsR2jUe9c6YdtNkrzUnMUd\n\nFiling gate: ④, a per-layer child of a coordination card. This is the console half of #31885's translation key. The contract review of PR #31924 (record 6740632004, ③ escalation) found that no card owns it. ⛔ Not a claim.\n\nBlocked-by: #31885, #31808\n\n- **Business reason:** #31885 lets a bundle translate a preflight row label (`_actions.NAME.preflight.fields.PATH`), so that a zh or ja user sees localized row labels in the param dialog's server read. Once #31885 and #31808 land as drafted, though, the key is read only by the REST seam (`translateAction` in `packages/spec/src/system/i18n-resolver.ts`). No console code reads it, so the dialog keeps showing the untranslated labels and the business reason stays open.\n- **Why the console needs its own read:** the console translates the result dialog on the client, not through the REST seam. `useObjectLabel().actionResultDialog` (`ui/packages/i18n/src/useObjectLabel.ts` L694) is called from `ui/packages/app-shell/src/hooks/useConsoleActionRuntime.tsx` L250 and `ui/packages/app-shell/src/views/RecordDetailView.tsx` L1496. PR #31933 (the console half of #31808) hands the preflight block to those same two handlers, but adds no `actionPreflight` mirror; it only calls `pickLocalized` on inline label maps.\n- **What to build,** from the merged spec rather than from this card:\n  - a `useObjectLabel().actionPreflight` mirror of `actionResultDialog`, which overlays the bundle's `preflight.fields.PATH` strings on declared `fields[]` rows only, with the literal path as one key;\n  - wiring at both call sites;\n  - the same keys under `globalActions.NAME`.\n- **Reader:** the `domain:ui` lane, after both blockers merge. If the ui seat would rather fold this into #31808 / PR #31933 before it lands, close this card as a duplicate and record that on #31808.\n- **Dedupe (open and closed):** searching `actionPreflight` and `preflight` returns #31840, #31808, #31860, #31885 and #31925. None of them carries the console read of the bundle key; #31925 is the skills teaching only.\n"
