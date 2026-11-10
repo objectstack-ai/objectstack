@@ -33,6 +33,7 @@ import './lint-root-preload.testkit.js';
 import { describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 
 type Row = Record<string, any>;
 
@@ -102,6 +103,7 @@ function makeProtocol(seed: Row[] = [], seedPackages: any[] = []) {
             return cb(undefined, { owned: true });
         },
         registry: {
+            ...NO_PACKAGE_SCOPED_READS,
             registerItem: () => {},
             registerObject: () => {},
             unregisterItem: () => {},

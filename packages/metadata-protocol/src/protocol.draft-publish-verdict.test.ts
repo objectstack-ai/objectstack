@@ -33,6 +33,7 @@ import './lint-root-preload.testkit.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, hashSpec } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 
 /** The LIVE object universe: a deal with a formula field, and its account. */
 const liveDealObject = {
@@ -198,6 +199,7 @@ function makeStubEngine() {
                 ? { ok: false, code: 'FILTER_FIELD_NOT_STORED', status: 400, message: 'Field "deal_score" is a formula field and cannot be filtered.' }
                 : { ok: true },
         registry: {
+            ...NO_PACKAGE_SCOPED_READS,
             registerItem: () => {},
             registerObject: () => {},
             // The LIVE universe: the objects and the one dataset the fixtures

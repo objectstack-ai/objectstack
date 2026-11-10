@@ -53,6 +53,10 @@ import {
 // guard's own `findFileHolder`.
 import type { FileHolder } from './attachment-lifecycle.js';
 import { contentDispositionValue } from './content-disposition.js';
+import { buildKey } from './storage-key.js';
+// [#23306] Re-exported so the server-side attach verbs, which import it from
+// here, lay their keys out exactly as the upload doors do.
+export { buildKey };
 // [#30892] The upload-link doors: the service verbs they call, the one
 // refusal an unusable link gets, and the page a link opens.
 import type { UploadLinkDoor, UploadLinkView } from './record-file-access.js';
@@ -1061,6 +1065,14 @@ export function registerStorageFamily(
       const { filename, mimeType, size, scope, bucket } = req.body ?? {};
       if (!filename || !mimeType || size == null) {
         sendError(res, 400, 'INVALID_REQUEST', 'filename, mimeType, and size are required');
+        return;
+      }
+      // The storage key's extension is read from `filename`, so a name that
+      // is not a string is refused here, as the declared request schema
+      // refuses it: a number or an object used to throw while the key was
+      // built (a 500), and an array was stored as the file's name.
+      if (typeof filename !== 'string') {
+        sendError(res, 400, 'INVALID_REQUEST', 'filename must be a string');
         return;
       }
       // [#27413] Not a byte count ⇒ refused before anything is stored: a
@@ -2354,12 +2366,3 @@ export async function mintDownloadUrl(storage: IStorageService, file: FileRecord
   return null;
 }
 
-/**
- * The storage key of a new file: `<scope>/<fileId><.ext>`. Package-internal
- * (not re-exported from `index.ts`); [#23306] exported so the server-side
- * attach verb lays its keys out exactly as the upload doors do.
- */
-export function buildKey(scope: string, fileId: string, filename: string): string {
-  const ext = filename.includes('.') ? '.' + filename.split('.').pop() : '';
-  return `${scope}/${fileId}${ext}`;
-}

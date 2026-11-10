@@ -3012,14 +3012,14 @@
       "title": "A package flow's by-name references resolve from its package: a subflow held by the flow's own package or one holder in its declared dependencies runs, one held only by the environment or an unrelated package is refused naming the holder and nothing runs",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["admin (the seeded admin): the trigger calls and the run reads"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr_a, namespace qa_a) and qa_b (manifest id com.qa.addr_b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. qa_a holds an autolaunched flow qa_a_child; qa_b holds two autolaunched flows: qa_b_parent with a subflow node naming qa_a_child, and qa_b_env with a subflow node naming qa_env_child",
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. qa_a holds an autolaunched flow qa_a_child; qa_b holds two autolaunched flows: qa_b_parent with a subflow node naming qa_a_child, and qa_b_env with a subflow node naming qa_env_child",
           "an environment flow qa_env_child saved with PUT /api/v1/meta/flow/qa_env_child and no ?package="
         ]
       },
@@ -3033,7 +3033,7 @@
         {
           "clause": "a subflow held by a package outside the caller's closure is refused naming that package, and the child never runs",
           "oracle": "api",
-          "verify": "the qa_b_parent run fails with an error naming qa_a_child and com.qa.addr_a; qa_a_child has no run (packages/services/service-automation/src/engine.ts, flowNameRefusal before dispatch)",
+          "verify": "the qa_b_parent run fails with an error naming qa_a_child and com.qa.addr-a; qa_a_child has no run (packages/services/service-automation/src/engine.ts, flowNameRefusal before dispatch)",
           "evidence": "the run record and the child's empty run list"
         },
         {
@@ -3080,6 +3080,12 @@
           "date": "2026-11-10",
           "change": "initial — ADR-0150 children E1 and E5 (#31738, #31725, #31744, #31825). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
           "ref": "#32019"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-10",
+          "change": "fixture-text correction, no clause change: the scratch package ids are re-spelled with a hyphen (com.qa.addr-a, com.qa.addr-b) everywhere this item names them (fixtures and acceptance), because `objectstack build` refuses an underscore in a package id (packages/spec/src/kernel/manifest.zod.ts#MANIFEST_ID_PATTERN, refused with manifestIdRefusal). The namespaces qa_a and qa_b and every namespace-qualified address are unchanged. No step, clause or variant changes meaning. Found by the M4 verification run (#32316, FOLLOW-UPS §19b); card #32330",
+          "ref": "#32330"
         }
       ]
     }

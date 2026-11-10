@@ -7,6 +7,9 @@ import {
   GetRecordFieldAccessResponse,
   RecordPageRequest,
   RecordPageResponse,
+  // [#32200] The batch dataset-query answer `analytics.queryDatasetBatch`
+  // resolves to the `data` of.
+  DatasetQueryBatchResponse,
   AppMetadataBundleResponse,
   UpdateManyRequest,
   DeleteManyRequest,
@@ -288,6 +291,25 @@ export interface RecycleBinRestoreReport {
   recordId: string;
   rows: Array<{ object: string; id: string }>;
   relinked: number;
+}
+
+/**
+ * One `POST /analytics/dataset/query` body, as `analytics.queryDataset` sends
+ * it and as each entry of `analytics.queryDatasetBatch` carries it: `dataset`
+ * (an inline definition, Studio preview) or `datasetName` (a saved one), plus
+ * `selection.measures`; `previewDrafts` runs over draft-overlaid definitions
+ * (ADR-0037 P3), for a caller the server admits to drafts.
+ *
+ * [#32200] Named so the batch method types its entries as the single door's
+ * body rather than as records of `unknown` (the contract's
+ * `DatasetQueryBatchRequest['queries']` deliberately does not parse an entry:
+ * the server judges each one as the single door does).
+ */
+export interface DatasetQueryBody {
+  dataset?: any;
+  datasetName?: string;
+  selection: { measures: string[]; [k: string]: any };
+  previewDrafts?: boolean;
 }
 
 export interface ClientConfig {
@@ -2765,19 +2787,43 @@ export class ObjectStackClient {
      * `analytics-automation-json-erasure.test.ts`; the shape is
      * `IAnalyticsService.queryDataset`'s declared return.
      */
-    queryDataset: async (payload: {
-        dataset?: any;
-        datasetName?: string;
-        selection: { measures: string[]; [k: string]: any };
-        previewDrafts?: boolean;
-    }): Promise<AnalyticsResult> => {
+    queryDataset: async (payload: DatasetQueryBody): Promise<AnalyticsResult> => {
         const route = this.getRoute('analytics');
         const res = await this.fetch(`${this.baseUrl}${route}/dataset/query`, {
             method: 'POST',
             body: JSON.stringify(payload),
         });
         return res.json();
-    }
+    },
+    /**
+     * [#32200] Several dataset queries in ONE request
+     * (`POST /analytics/dataset/query/batch`), so a dashboard render sends one
+     * POST instead of one per widget. Each entry is a `queryDataset` body, and
+     * the server judges each one exactly as that door does, as the same caller.
+     *
+     * Resolves to the batch answer's `data`, `{ results }`: one entry per query,
+     * in the order sent. An entry is `{ data }` (that query's `AnalyticsResult`)
+     * or `{ status, error }` (that query's own refusal, in the house error
+     * envelope). One refused query never fails the others, so branch per entry.
+     *
+     * Throws, like every method of this client, when the server refuses the
+     * WHOLE batch: a malformed batch (`400 VALIDATION_FAILED`, including more
+     * than `DATASET_QUERY_BATCH_MAX_QUERIES` queries), an identity refusal, or
+     * no analytics service (`501`). It sends what it is given: it neither
+     * bounds nor splits `queries` — a caller with more than the bound sends
+     * consecutive batches.
+     *
+     * Unlike `queryDataset`, this door answers the `{ success, data }`
+     * envelope, so `unwrapResponse` is the right read here.
+     */
+    queryDatasetBatch: async (queries: DatasetQueryBody[]): Promise<DatasetQueryBatchResponse['data']> => {
+        const route = this.getRoute('analytics');
+        const res = await this.fetch(`${this.baseUrl}${route}/dataset/query/batch`, {
+            method: 'POST',
+            body: JSON.stringify({ queries }),
+        });
+        return this.unwrapResponse<DatasetQueryBatchResponse['data']>(res);
+    },
   };
 
   /**

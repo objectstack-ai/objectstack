@@ -42,6 +42,7 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
 import { PackageScopedNameRefusedError, packageScopedRefusalMessage, type PackageScopedRefusalReason } from '@objectstack/core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { unknownGrantObjectSaveRefusal } from './protocol-save-door-refusals.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 
 interface Row {
     id: string;
@@ -91,6 +92,7 @@ function makeSession(opts: { objects?: string[]; looksUpObjects?: boolean } = {}
         return null;
     };
     const registry: any = {
+        ...NO_PACKAGE_SCOPED_READS,
         registerItem: () => {},
         registerObject: () => {},
         listItems: () => [],
