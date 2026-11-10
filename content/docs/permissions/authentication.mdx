@@ -404,7 +404,9 @@ gates its "Sign in with verification code" mode and the SMS reset branch on.
 
 {/* os:check */}
 ```typescript
-// Sign-in / verification: request a code, then verify (creates a session)
+// Sign-in / verification: request a code, then verify (creates a session —
+// for an account with an enrolled second factor, the two-factor challenge
+// instead, exactly as password sign-in answers)
 await fetch('/api/v1/auth/phone-number/send-otp', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
@@ -742,7 +744,11 @@ A complete opt-in 2FA UX still needs to handle:
 
 - enrollment (`/two-factor/enable`),
 - TOTP confirmation (`/two-factor/verify-totp`),
-- the `twoFactorRedirect` response returned by password sign-in, and
+- the `twoFactorRedirect` response returned by password sign-in — and by the
+  one-time-code and link doors too (`/phone-number/verify`, `/magic-link/verify`,
+  and `/verify-email` when it signs the user in): an account with an enrolled
+  second factor is signed in by no one-time code or sign-in link alone, and its
+  session is issued only after the second factor, and
 - backup-code recovery.
 
 <Callout type="warn">
@@ -850,6 +856,13 @@ const response = await fetch('http://localhost:3000/api/v1/auth/sign-in/magic-li
 // User clicks link in email
 const response = await fetch(`http://localhost:3000/api/v1/auth/magic-link/verify?token=${token}`);
 ```
+
+A sign-in link alone never signs in an account with an enrolled second factor:
+verification answers it with the same `twoFactorRedirect` challenge password
+sign-in gives, and no session is issued until the second factor is verified
+(`/two-factor/verify-totp`, or a backup code) — on the `callbackURL` redirect
+lane as well. Accounts with no enrolled factor are signed in by the link as
+before.
 
 ### Phone-Number Sign-In
 

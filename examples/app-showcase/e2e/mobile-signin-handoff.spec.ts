@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type APIRequestContext } from '@playwright/test';
 
 // Ambient `process` for the env reads below: the showcase tsconfig does not pull
 // in `@types/node` (same idiom and reason as the specs beside this file).
@@ -17,9 +17,15 @@ declare const process: { env: Record<string, string | undefined> };
  * Console at its real mount, as a deployment does: `Live E2E UI` serves it from
  * `vite preview` at the root, where the route's redirect has nothing to land on.
  *
- * On a server that did not boot with `playwright.config.ts`'s
- * `OS_TRUSTED_APP_SCHEMES`, such as one `reuseExistingServer` attached to, the first
- * assertion fails with a `400`: no scheme is registered there.
+ * A server that did not boot with `playwright.config.ts`'s `OS_TRUSTED_APP_SCHEMES`,
+ * such as a local one `reuseExistingServer` attached to, cannot hand a token to the
+ * app: it registered no scheme. Both tests then skip, with a reason naming the
+ * variable, and only on the server's own answer: the route refuses the app's
+ * anonymous probe `400` with a message naming the scheme as unregistered, where a
+ * server that trusts it answers `401`. Anything else fails as before. On CI the
+ * config never reuses a server (`reuseExistingServer: !process.env.CI`), so the
+ * server is the one it booted with the scheme, and an untrusting answer there is a
+ * regression that fails, never a skip.
  */
 
 const API = process.env.SMOKE_API_URL || 'http://localhost:3000';
@@ -43,6 +49,37 @@ const HANDOFF = `${HANDOFF_PATH}?${new URLSearchParams({
 // The hand-off exists for a browser with no session, so nothing from the suite's
 // sign-in comes along.
 test.use({ storageState: { cookies: [], origins: [] } });
+
+/**
+ * Why the server cannot run these tests, or `undefined` when it can. Read off the
+ * server's answer to the app's own probe, never off this process's environment:
+ * the variable that matters is the one the SERVER booted with. Only the route's
+ * unregistered-scheme refusal (`400`, its message naming this scheme as not a
+ * registered app scheme, `runOneTimeTokenHandoff` in plugin-auth's
+ * `one-time-token-handoff.ts`) reads as an untrusting server; every other answer
+ * is left to the assertions.
+ */
+async function untrustedSchemeReason(request: APIRequestContext): Promise<string | undefined> {
+  if (process.env.CI) return undefined;
+  const probe = await request.get(HANDOFF, { headers: { Accept: 'application/json' }, maxRedirects: 0 });
+  if (probe.status() !== 400) return undefined;
+  const body = (await probe.json().catch(() => undefined)) as { error?: { code?: string; message?: string } } | undefined;
+  const message = body?.error?.message ?? '';
+  if (body?.error?.code !== 'VALIDATION_ERROR' || !message.includes(`"${HANDOFF_APP_SCHEME}" is not a registered app scheme`)) {
+    return undefined;
+  }
+  return (
+    `The server at ${API} does not trust the app scheme "${HANDOFF_APP_SCHEME}": its hand-off answered 400 (${message}). ` +
+    `It was not booted with OS_TRUSTED_APP_SCHEMES=${HANDOFF_APP_SCHEME}, as playwright.config.ts's webServer boots it, ` +
+    'so it is a server reuseExistingServer attached to. Restart it with that variable exported, or point SMOKE_API_URL ' +
+    'at a free port so the config boots its own.'
+  );
+}
+
+test.beforeEach(async ({ request }) => {
+  const reason = await untrustedSchemeReason(request);
+  test.skip(reason !== undefined, reason);
+});
 
 test('a signed-out browser opens the hand-off, signs in on the sign-in page, and the route hands a token to the app', async ({ page, request }) => {
   // The app's probe: not a page navigation, so it reads `401` as "this server

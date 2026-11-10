@@ -25,9 +25,16 @@ export const ExternalOrder = ObjectSchema.create({
   datasource: 'showcase_external',
   external: { remoteName: 'orders' },
   fields: {
-    customer_id: Field.text({ label: 'Customer ID' }),
-    amount: Field.currency({ label: 'Amount' }),
-    status: Field.text({ label: 'Status' }),
-    placed_on: Field.date({ label: 'Placed On' }),
+    customer_id: Field.text({ label: 'Customer ID', group: 'order' }),
+    amount: Field.currency({ label: 'Amount', group: 'order' }),
+    status: Field.text({ label: 'Status', group: 'order' }),
+    placed_on: Field.date({ label: 'Placed On', group: 'order' }),
   },
+
+  // ADR-0085 §5: the form, detail and drawer layout is derived from these
+  // groups, so each field is placed in a named section rather than left to the
+  // untitled fallback, which the field-no-consumers rule credits to no one (#32168).
+  fieldGroups: [
+    { key: 'order', label: 'Order' },
+  ],
 });

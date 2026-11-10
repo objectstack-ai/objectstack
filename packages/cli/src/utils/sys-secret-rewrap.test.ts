@@ -330,6 +330,7 @@ describe('ADR-0128 §4.2 — the scope comes from the holder', () => {
       settings: 'settings',
       'object-field': 'object_secret_field',
       datasource: 'datasource_credential',
+      'audit-seal': 'audit_seal',
     });
     expect(Object.keys(SCOPE_OF_HOLDER_FAMILY).sort()).toEqual([...SECRET_REFERENCE_FAMILIES].sort());
     expect(Object.values(SCOPE_OF_HOLDER_FAMILY).sort()).toEqual([...CRYPTO_CONTEXT_SCOPES].sort());
@@ -345,7 +346,7 @@ describe('ADR-0128 §4.2 — the scope comes from the holder', () => {
       refused_unreadable: 1, refused_unknown_derivation: 1, refused_verify_failed: 0,
       write_conflict: 0, write_failed: 0,
     });
-    expect(result.rewrapByScope).toEqual({ settings: 2, object_secret_field: 1, datasource_credential: 1 });
+    expect(result.rewrapByScope).toEqual({ settings: 2, object_secret_field: 1, datasource_credential: 1, audit_seal: 0 });
     expect(result.total).toBe(9);
 
     for (const id of [ID.settings, ID.objectField, ID.datasource, ID.multi]) {
@@ -585,6 +586,31 @@ describe('ADR-0128 §4.2 — resumable, live-safe, fail-closed', () => {
     const rt3 = await buildRuntime();
     await runNow(rt3, { apply: true });
     expect(ciphertextDerivationStatus(rt3.store.get('sys_secret', ID.settings)!.ciphertext)).toBe('current');
+  });
+
+  it('KEEPS THE ROW ID: a re-seal under a new id is refused, never written, and the row keeps its id', async () => {
+    // [ADR-0154 D2] A checkpoint's signed body names its seed by `sys_secret`
+    // id, so a rewrap that moved a row to a new id would leave the body naming
+    // a row that no longer exists. The write is keyed on the row's own id and
+    // a re-seal under any other id is refused before it.
+    const rt = await buildRuntime();
+    const before = rt.store.get('sys_secret', ID.settings);
+    const renaming: RewrapProviderLike = {
+      decrypt: (h, c) => rt.provider.decrypt(h, c),
+      async rotateKey(handle, ctx) {
+        const next = await rt.provider.rotateKey(handle, ctx);
+        return handle.id === ID.settings ? { ...next, id: `${handle.id}_moved` } : next;
+      },
+    };
+
+    const { result } = await runNow(rt, { apply: true, provider: renaming });
+
+    expect(result.byClass.refused_verify_failed).toBe(1);
+    expect(rt.store.get('sys_secret', ID.settings)).toEqual(before);
+    expect(rt.store.get('sys_secret', `${ID.settings}_moved`)).toBeUndefined();
+    expect(rt.store.writes.map((w) => w.where.id)).not.toContain(ID.settings);
+    // No write ever carries an id: every row it re-seals keeps the one it had.
+    for (const w of rt.store.writes) expect(Object.keys(w.data)).not.toContain('id');
   });
 
   it('DRY RUN: the same classes as --apply, and nothing is written', async () => {
