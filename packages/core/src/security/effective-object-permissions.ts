@@ -47,6 +47,7 @@
  */
 
 import {
+  MANAGED_BY_WRITE_LOCKED_BUCKETS,
   resolveEffectiveApiMethods,
   effectiveOperationsArray,
   canServeApiOperation,
@@ -232,8 +233,13 @@ function isWriteOptedIn(v: boolean | { enabled?: boolean } | undefined | null): 
  * dropped their now-redundant `userActions` block would report `allowEdit: false`
  * for tables the engine happily writes — the exact false-NEGATIVE this function
  * exists to avoid, merely inverted.
+ *
+ * `synced` (ADR-0153 D4) is guarded by the same engine-owned write guard, and
+ * is the one bucket where `userActions` cannot open a write
+ * (`MANAGED_BY_WRITE_LOCKED_BUCKETS`): the clamp below reads its row as fully
+ * closed whatever `userActions` says, as the guard refuses it.
  */
-const GUARDED_WRITE_BUCKETS: ReadonlySet<string> = new Set(['better-auth', 'engine-owned', 'append-only']);
+const GUARDED_WRITE_BUCKETS: ReadonlySet<string> = new Set(['better-auth', 'engine-owned', 'append-only', 'synced']);
 
 /**
  * Re-clamp a `/me/permissions` `objects` map by the SECOND server-side
@@ -275,7 +281,10 @@ export function clampManagedObjectWrites(
     if (obj === '*' || !acc) continue;
     const schema = schemaOf(obj);
     if (!schema?.managedBy || !GUARDED_WRITE_BUCKETS.has(schema.managedBy)) continue;
-    const ua = schema.userActions ?? {};
+    // [ADR-0153 D4] On a write-locked bucket no `userActions` entry opens a
+    // write, so the row is the closed one even where an entry says otherwise.
+    const ua: NonNullable<ManagedSchemaLike['userActions']> =
+      MANAGED_BY_WRITE_LOCKED_BUCKETS.has(schema.managedBy) ? {} : schema.userActions ?? {};
     const edit = isWriteOptedIn(ua.edit);
     const del = isWriteOptedIn(ua.delete);
     if (!edit) acc.allowEdit = false;

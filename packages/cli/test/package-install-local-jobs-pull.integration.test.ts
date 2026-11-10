@@ -107,6 +107,8 @@ function orderObject(name: string) {
   return {
     name,
     label: 'Order',
+    // [ADR-0153 D4] a mapping that pulls writes into a synced object only.
+    managedBy: 'synced',
     sharingModel: 'public_read_write',
     fields: { external_id: { type: 'text', label: 'External id' } },
   };

@@ -34,6 +34,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Paid at collection, not inside a case's clock: the dispatcher's reach loads it lazily.
+import '@objectstack/metadata';
 
 import { HttpDispatcher } from './http-dispatcher.js';
 
@@ -109,6 +111,7 @@ const FLOW_SCREENS: Record<string, unknown[]> = {
     merge_lead: [SCREEN_1],
     orphan_flow: [SCREEN_1],
     send_digest: [SCREEN_1],
+    score_lead: [SCREEN_1],
 };
 
 interface Run {
@@ -213,6 +216,9 @@ function makeHarness(
         actions?: any[]; standalone?: any[]; engine?: Engine; merged?: 'listing' | 'throws' | 'action-throws';
         /** [#27681] The object the actions are declared on (a `sys_*` name for the system-object cases). */
         objectName?: string;
+        /** [ADR-0106 D1] The object's fields, and the `security` service judging the caller's view of them. */
+        fields?: Record<string, unknown>;
+        security?: unknown;
     } = {},
 ) {
     const engine = opts.engine ?? makeEngine();
@@ -224,7 +230,7 @@ function makeHarness(
     const object = {
         name: opts.objectName ?? OBJECT,
         label: 'Lead',
-        fields: {},
+        fields: opts.fields ?? {},
         actions: opts.actions ?? [SCHEDULE, WIZARD, GATED, CONFIRMED, CONSOLE_ONLY],
     };
     const ql: any = {
@@ -246,7 +252,9 @@ function makeHarness(
         getObject: vi.fn(async () => object),
         loadMany: vi.fn(async () => (opts.merged ? [] : opts.standalone ?? [])),
     };
-    const services: Record<string, unknown> = { objectql: ql, data: ql, metadata, automation: engine };
+    const services: Record<string, unknown> = {
+        objectql: ql, data: ql, metadata, automation: engine, ...(opts.security ? { security: opts.security } : {}),
+    };
     const protocol = {
         getMetaItems: vi.fn(async (request: { type: string }) => {
             if (opts.merged === 'throws') throw new Error('merged listing unavailable');
@@ -663,5 +671,60 @@ describe('[#25297] MCP resumeRun — an object-less flow action is read from the
         await expect(bridge.resumeRun(started.runId, { values: VALUES })).rejects.toThrow('merged action listing unavailable');
         expect(h.metadata.loadMany).not.toHaveBeenCalled();
         expect(h.engine.resume).not.toHaveBeenCalled();
+    });
+});
+
+describe('[ADR-0106 D1] resume_run: a flow action the caller is not shown admits no run', () => {
+    /** A screen flow action whose param binds the lead's `score`. */
+    const SCORE = {
+        name: 'score_lead',
+        label: 'Score Lead',
+        objectName: OBJECT,
+        type: 'flow',
+        target: 'score_lead',
+        params: [{ field: 'score' }],
+        ai: { exposed: true, description: 'Score this lead on the scale the sales team agreed.' },
+    };
+    const FIELDS = { name: { name: 'name', type: 'text' }, score: { name: 'score', type: 'number' } };
+
+    it('a caller who can no longer read the field the action binds is answered as for a run no flow action could have started; the run stays parked', async () => {
+        let readable = ['name', 'score'];
+        const security = { getMetadataReadableFields: async () => readable };
+        const engine = makeEngine();
+        const shown = makeHarness({ engine, actions: [SCORE], fields: FIELDS, security });
+        const runId = await startPaused(shown, SCORE.name);
+        readable = ['name'];
+        const withheld = await refusalOf(shown.bridgeFor('u1').resumeRun(runId, { values: { subject: 'x' } }));
+        // The same run, on a deployment that declares no action for its flow.
+        const undeclared = makeHarness({ engine, actions: [], fields: FIELDS, security });
+        expect(withheld).toEqual(await refusalOf(undeclared.bridgeFor('u1').resumeRun(runId, { values: { subject: 'x' } })));
+        expect(withheld).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+        expect(engine.resume).not.toHaveBeenCalled();
+        expect(engine.runs.get(runId)?.status).toBe('paused');
+    });
+
+    it('a caller whose field visibility cannot be evaluated is refused 503 FIELD_VISIBILITY_UNRESOLVED, and the run stays parked', async () => {
+        let sick = false;
+        const security = {
+            getMetadataReadableFields: async () => {
+                if (sick) throw new Error('security service unavailable');
+                return ['name', 'score'];
+            },
+        };
+        const h = makeHarness({ actions: [SCORE], fields: FIELDS, security });
+        const runId = await startPaused(h, SCORE.name);
+        sick = true;
+        const refused = await refusalOf(h.bridgeFor('u1').resumeRun(runId, { values: { subject: 'x' } }));
+        expect({ code: refused.code, status: refused.status }).toEqual({ code: 'FIELD_VISIBILITY_UNRESOLVED', status: 503 });
+        expect(h.engine.resume).not.toHaveBeenCalled();
+    });
+
+    it('CONTROL — a caller who reads the field the action binds resumes the run as before', async () => {
+        const security = { getMetadataReadableFields: async () => ['name', 'score'] };
+        const h = makeHarness({ actions: [SCORE], fields: FIELDS, security });
+        const runId = await startPaused(h, SCORE.name);
+        const resumed = await h.bridgeFor('u1').resumeRun(runId, { values: { subject: 'Call back' } });
+        expect(resumed.ok).toBe(true);
+        expect(h.engine.tasks).toHaveLength(1);
     });
 });

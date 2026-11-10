@@ -23,7 +23,13 @@ import { HttpDispatcher } from '../http-dispatcher.js';
 const CRM = 'com.crm.pkg';
 const HR = 'com.hr.pkg';
 
-function dispatcherWith(objects: any[], standalone: any[], namespaceOf: Record<string, string> = { [CRM]: 'crm', [HR]: 'hr' }) {
+function dispatcherWith(
+    objects: any[],
+    standalone: any[],
+    namespaceOf: Record<string, string> = { [CRM]: 'crm', [HR]: 'hr' },
+    /** Further kernel services (a `security` service, for the field-visibility pins). */
+    extra: Record<string, unknown> = {},
+) {
     const ran: Array<{ obj: string; key: string; packageId?: string }> = [];
     const subjects: Array<{ obj: string; record?: any; recordId?: string }> = [];
     const ql: any = {
@@ -66,6 +72,7 @@ function dispatcherWith(objects: any[], standalone: any[], namespaceOf: Record<s
         audit: { recordActionInvocation: vi.fn(async () => {}) },
         auth: { api: { getSession: async () => ({ user: { id: 'u1' } }) } },
         automation: { execute: vi.fn(async () => ({ success: true })) },
+        ...extra,
     };
     const kernel: any = { context: { getService: (n: string) => services[n] ?? null } };
     const dispatcher = new HttpDispatcher(kernel) as any;
@@ -396,5 +403,89 @@ describe('a package\'s standalone action bound to another package\'s object that
         const { bridge } = dispatcherWith([lead()], [act('convert', CRM, { objectName: 'lead' })]);
         const listed = ((await bridge.listActions()) as any[]).filter((a) => a.name === 'convert');
         expect(listed.map((a) => [a.objectName, a.namespace])).toEqual([['lead', 'crm']]);
+    });
+});
+
+describe('[ADR-0106 D1] an addressed call of an action the caller is not shown is answered as an unknown name in that scope', () => {
+    const DEAL = {
+        name: 'crm_deal',
+        label: 'Deal',
+        fields: { title: { name: 'title', type: 'text' }, margin: { name: 'margin', type: 'currency' } },
+    };
+    /** The caller reads the deal's `title` and not its `margin`. */
+    const security = { getMetadataReadableFields: async (object: string) => (object === DEAL.name ? ['title'] : undefined) };
+    const deal = () => dispatcherWith(
+        [DEAL],
+        [
+            act('set_margin', CRM, { objectName: DEAL.name, params: [{ field: 'margin' }] }),
+            act('rename_deal', CRM, { objectName: DEAL.name, params: [{ field: 'title' }] }),
+        ],
+        undefined,
+        { security },
+    );
+    const asUnknown = (text: string, name: string) => text.split('no_such_action').join(name);
+
+    it('REST /actions/:ns/:object/:action: answered byte-identical to a name the namespace does not declare, and nothing runs', async () => {
+        const { post, ran } = deal();
+        const unknown = await post(`/crm/${DEAL.name}/no_such_action`);
+        expect(unknown.status, 'precondition: a name the namespace does not declare is a 404').toBe(404);
+        const withheld = await post(`/crm/${DEAL.name}/set_margin`);
+        expect(JSON.stringify(withheld)).toBe(asUnknown(JSON.stringify(unknown), 'set_margin'));
+        expect(ran).toEqual([]);
+    });
+
+    it('MCP run_action with a namespace: answered byte-identical to a name the namespace does not declare, and nothing runs', async () => {
+        const { bridge, ran } = deal();
+        const unknown = await refusalOf(bridge.runAction('no_such_action', { namespace: 'crm', objectName: DEAL.name }));
+        const withheld = await refusalOf(bridge.runAction('set_margin', { namespace: 'crm', objectName: DEAL.name }));
+        const fields = (e: any) => JSON.stringify({ message: String(e?.message), code: e?.code, status: e?.status });
+        expect(fields(unknown)).toContain('"status":404');
+        expect(fields(withheld)).toBe(asUnknown(fields(unknown), 'set_margin'));
+        expect(ran).toEqual([]);
+    });
+
+    it('CONTROL — an action binding a field the caller reads runs on both addressed doors', async () => {
+        const { post, bridge, ran } = deal();
+        expect((await post(`/crm/${DEAL.name}/rename_deal`)).status).toBe(200);
+        await bridge.runAction('rename_deal', { namespace: 'crm', objectName: DEAL.name });
+        expect(ran.map((r) => r.key)).toEqual(['rename_deal', 'rename_deal']);
+    });
+});
+
+describe('[ADR-0106 D6] a run whose action definition read fails is refused 503 FIELD_VISIBILITY_UNRESOLVED, never judged as an action with no object', () => {
+    const DEAL = {
+        name: 'crm_deal',
+        label: 'Deal',
+        fields: { title: { name: 'title', type: 'text' }, margin: { name: 'margin', type: 'currency' } },
+    };
+    /** Bound to the deal's `margin`, which the caller cannot read. */
+    const SET_MARGIN = act('set_margin', undefined, { objectName: DEAL.name, params: [{ field: 'margin' }] });
+    const security = { getMetadataReadableFields: async (object: string) => (object === DEAL.name ? ['title'] : undefined) };
+    /** The deal's definition read throws, as a registry that cannot answer does. */
+    const failingReads = (extra: Record<string, unknown>) => {
+        const door = dispatcherWith([DEAL], [SET_MARGIN], undefined, extra);
+        const unreadable = () => { throw new Error('schema registry unavailable'); };
+        door.ql.getSchema = unreadable;
+        door.ql.registry.getObject = unreadable;
+        return door;
+    };
+
+    it('REST /actions/:object/:action: 503 FIELD_VISIBILITY_UNRESOLVED, and nothing runs', async () => {
+        const { post, ran } = failingReads({ security });
+        const answer = await post(`/${DEAL.name}/set_margin`);
+        expect({ status: answer.status, code: codeOf(answer) }).toEqual({ status: 503, code: 'FIELD_VISIBILITY_UNRESOLVED' });
+        expect(ran).toEqual([]);
+    });
+
+    it('CONTROL — with no security service the visibility question reads no definition and refuses nothing; the call reaches the later gates', async () => {
+        const { post } = failingReads({});
+        // A later gate (the handler-owner check) reads the same registry, so the
+        // call ends there: by that gate's throw, never by this question's 503.
+        const outcome = await post(`/${DEAL.name}/set_margin`).then(
+            (answer) => ({ code: codeOf(answer) }),
+            (error: unknown) => ({ thrown: String((error as Error)?.message) }),
+        );
+        expect(outcome).not.toEqual({ code: 'FIELD_VISIBILITY_UNRESOLVED' });
+        expect(outcome).toEqual({ thrown: 'schema registry unavailable' });
     });
 });

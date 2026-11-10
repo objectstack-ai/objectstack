@@ -769,6 +769,55 @@ const SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const SECURITY_CBP_MASTER_REFERENCE_HIDDEN_EXPLANATION: RuleExplanation = {
+  rule: 'security-controlled-by-parent-master-reference-hidden',
+  covers: 'why a hidden master reference still decides a detail write',
+  paragraphs: [
+    'A `controlled_by_parent` detail derives its record access from its master (ADR-0055). Creating, ' +
+      'editing or deleting a detail row needs edit access to the master record its master reference names, ' +
+      'and the platform reads that reference from the stored row, whatever the writer may read. So a ' +
+      'permission set\'s `readable: false` on the master reference hides the field from the set\'s holders ' +
+      'and does not take it out of the decision: the master it names still decides whether each holder may ' +
+      'write the row.',
+    'What the field-level security does change is the refusal. A writer who can read the master reference ' +
+      'is told which master\'s edit access the write needs and which check refused it. A writer who cannot ' +
+      'read it gets the same `403 PERMISSION_DENIED` with a generic sentence, "no edit permission on the ' +
+      'parent record of this detail", which names no master object, no master record and no check. The ' +
+      'writer has no way to tell from the refusal which record to ask for access to.',
+    'Reported for each permission set whose own entry for the master reference reads `readable: false` (an ' +
+      'omitted `readable` is `true`), on a detail this stack declares with one master. Not reported when the ' +
+      'same set holds View All or Modify All on the detail, because that bit makes the entry inert ' +
+      '(`security-superuser-field-mask-inert`).',
+    'This is a warning, not an error: hiding the reference is legal and no door refuses it. To fix it, make ' +
+      'the reference readable (`readable: true`, or delete the entry) when the set\'s holders should see why ' +
+      'a write is refused. Keep it hidden when a generic refusal is what is meant.',
+  ],
+};
+
+const SECURITY_SYNCED_PRIVATE_UNREADABLE_EXPLANATION: RuleExplanation = {
+  rule: 'security-synced-private-unreadable',
+  covers: 'why members read no row of a private synced object',
+  paragraphs: [
+    'A pull writes the rows of a `managedBy: \'synced\'` object with no person owner: the run is the ' +
+      'attribution, never an owner (ADR-0153 D4). On `sharingModel: \'private\'` record sharing shows a ' +
+      'member the rows they own plus the rows a share grants them, so with no share a member whose ' +
+      'permission set grants `allowRead` lists no row at all. Members never write a synced object ' +
+      'whatever the model says.',
+    'A sharing rule grants read on the object when its `object` names it, it is not `active: false`, and ' +
+      'its `accessLevel` is `read` or `edit` (absent reads as `read`). Any recipient and any `condition` ' +
+      'count. A condition that does not lower grants nothing at runtime, and that is reported on the rule ' +
+      'itself (`os explain sharing-rule-unlowerable-condition`), not here.',
+    'There are two ways out. Declare `sharingModel: \'public_read\'` (recommended): every member who ' +
+      'holds `allowRead` reads the pulled rows. Or keep \'private\' and declare a sharing rule that grants ' +
+      'read to the members who should see the rows.',
+    'Not judged here: an object with no `sharingModel` (that is the `security-owd-unset` error, whose fix ' +
+      'line for a synced object names the same two ways out), any model other than \'private\', and a ' +
+      'permission set\'s read depth (`readScope: \'org\'`, `viewAllRecords`), which also reaches owner-less ' +
+      'rows. A sharing rule another installed package declares is not visible to this stack; if one ' +
+      'grants read, ignore the warning.',
+  ],
+};
+
 const SECURITY_EXTERNAL_OWNER_UNMAPPED_EXPLANATION: RuleExplanation = {
   rule: 'security-external-owner-unmapped',
   covers: 'why members cannot write an external object',
@@ -5841,7 +5890,9 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SECURITY_CBP_AMBIGUOUS_RELATION_EXPLANATION.rule]: SECURITY_CBP_AMBIGUOUS_RELATION_EXPLANATION,
   [SECURITY_CBP_NO_RELATION_EXPLANATION.rule]: SECURITY_CBP_NO_RELATION_EXPLANATION,
   [SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION.rule]: SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION,
+  [SECURITY_CBP_MASTER_REFERENCE_HIDDEN_EXPLANATION.rule]: SECURITY_CBP_MASTER_REFERENCE_HIDDEN_EXPLANATION,
   [SECURITY_EXTERNAL_OWNER_UNMAPPED_EXPLANATION.rule]: SECURITY_EXTERNAL_OWNER_UNMAPPED_EXPLANATION,
+  [SECURITY_SYNCED_PRIVATE_UNREADABLE_EXPLANATION.rule]: SECURITY_SYNCED_PRIVATE_UNREADABLE_EXPLANATION,
   [SECURITY_FLS_UNKNOWN_FIELD_EXPLANATION.rule]: SECURITY_FLS_UNKNOWN_FIELD_EXPLANATION,
   [SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION.rule]: SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION,
   [SECURITY_WILDCARD_VAMA_EXPLANATION.rule]: SECURITY_WILDCARD_VAMA_EXPLANATION,

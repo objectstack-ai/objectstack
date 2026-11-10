@@ -366,6 +366,7 @@ export {
   SECURITY_CBP_NO_RELATION,
   SECURITY_CBP_AMBIGUOUS_RELATION,
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
+  SECURITY_CBP_MASTER_REFERENCE_HIDDEN,
   SECURITY_SUPERUSER_FIELD_MASK_INERT,
   holdsSuperuserBypass,
 } from './validate-security-posture.js';
@@ -420,6 +421,17 @@ export type {
   ExternalOwnerSharingFinding,
   ExternalOwnerSharingSeverity,
 } from './validate-external-owner-sharing.js';
+
+// [ADR-0153 D4] A `private` `synced` object that no sharing rule grants read on
+// shows a member none of its owner-less pulled rows.
+export {
+  validateSyncedPrivateReadability,
+  SECURITY_SYNCED_PRIVATE_UNREADABLE,
+} from './validate-synced-private-readability.js';
+export type {
+  SyncedPrivateReadabilityFinding,
+  SyncedPrivateReadabilitySeverity,
+} from './validate-synced-private-readability.js';
 
 // #4983 — the sibling surface, and ADR-0056 D4's gate finally wired. An RLS
 // `using` / `check` the runtime cannot compile is DROPPED (and, when it is the
