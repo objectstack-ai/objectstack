@@ -649,7 +649,10 @@ describe('a host SMTP connect policy reaches every SMTP transport the plugin bui
     return new Promise((resolve) => getSocket({ ...options }, (err: Error | null) => resolve(err ?? 'admitted')));
   }
 
-  const lastCreateOptions = () => nm.createTransport.mock.calls.at(-1)![0] as Record<string, unknown>;
+  const lastCreateOptions = () => {
+    const calls = nm.createTransport.mock.calls;
+    return calls[calls.length - 1][0] as Record<string, unknown>;
+  };
 
   const SAVED_SMTP: Record<string, Resolved> = {
     provider: { value: 'smtp', source: 'global' },
