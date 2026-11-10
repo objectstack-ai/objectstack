@@ -39,35 +39,35 @@ export const FieldZoo = ObjectSchema.create({
 
   fields: {
     // ── Core text ───────────────────────────────────────────────────────
-    name: Field.text({ label: 'Name', required: true, searchable: true, maxLength: 200 }),
-    f_textarea: Field.textarea({ label: 'Textarea' }),
-    f_email: Field.email({ label: 'Email', searchable: true }),
-    f_url: Field.url({ label: 'URL' }),
-    f_phone: Field.phone({ label: 'Phone' }),
+    name: Field.text({ label: 'Name', required: true, searchable: true, maxLength: 200, group: 'core_text' }),
+    f_textarea: Field.textarea({ label: 'Textarea', group: 'core_text' }),
+    f_email: Field.email({ label: 'Email', searchable: true, group: 'core_text' }),
+    f_url: Field.url({ label: 'URL', group: 'core_text' }),
+    f_phone: Field.phone({ label: 'Phone', group: 'core_text' }),
     // field-zoo intentionally exercises every field type, so the generic
     // `password` contract (plaintext at rest, masked on read — ADR-0100) is
     // deliberate here. Affirm it so the official example boots warning-free (#3420).
-    f_password: Field.password({ label: 'Password (masked on read)', ackPlaintextMasking: true }),
-    f_secret: Field.secret({ label: 'Secret (encrypted at rest)' }),
+    f_password: Field.password({ label: 'Password (masked on read)', ackPlaintextMasking: true, group: 'core_text' }),
+    f_secret: Field.secret({ label: 'Secret (encrypted at rest)', group: 'core_text' }),
 
     // ── Rich content ─────────────────────────────────────────────────────
-    f_markdown: Field.markdown({ label: 'Markdown' }),
-    f_html: Field.html({ label: 'HTML' }),
-    f_richtext: Field.richtext({ label: 'Rich Text' }),
+    f_markdown: Field.markdown({ label: 'Markdown', group: 'rich_content' }),
+    f_html: Field.html({ label: 'HTML', group: 'rich_content' }),
+    f_richtext: Field.richtext({ label: 'Rich Text', group: 'rich_content' }),
 
     // ── Numbers ──────────────────────────────────────────────────────────
-    f_number: Field.number({ label: 'Number', min: 0, max: 1000 }),
-    f_currency: Field.currency({ label: 'Currency', min: 0, currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' } }),
-    f_percent: Field.percent({ label: 'Percent', min: 0, max: 100, defaultValue: 50 }),
+    f_number: Field.number({ label: 'Number', min: 0, max: 1000, group: 'numbers' }),
+    f_currency: Field.currency({ label: 'Currency', min: 0, currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' }, group: 'numbers' }),
+    f_percent: Field.percent({ label: 'Percent', min: 0, max: 100, defaultValue: 50, group: 'numbers' }),
 
     // ── Date & time ──────────────────────────────────────────────────────
-    f_date: Field.date({ label: 'Date' }),
-    f_datetime: Field.datetime({ label: 'Date / Time' }),
-    f_time: Field.time({ label: 'Time' }),
+    f_date: Field.date({ label: 'Date', group: 'date_time' }),
+    f_datetime: Field.datetime({ label: 'Date / Time', group: 'date_time' }),
+    f_time: Field.time({ label: 'Time', group: 'date_time' }),
 
     // ── Logic ────────────────────────────────────────────────────────────
-    f_boolean: Field.boolean({ label: 'Boolean' }),
-    f_toggle: { type: 'toggle', label: 'Toggle', defaultValue: false },
+    f_boolean: Field.boolean({ label: 'Boolean', group: 'logic' }),
+    f_toggle: { type: 'toggle', label: 'Toggle', defaultValue: false, group: 'logic' },
 
     // ── Selection ────────────────────────────────────────────────────────
     f_select: Field.select({
@@ -77,6 +77,7 @@ export const FieldZoo = ObjectSchema.create({
         { label: 'Medium', value: 'medium', color: '#F59E0B' },
         { label: 'High', value: 'high', color: '#EF4444' },
       ],
+      group: 'selection',
     }),
     f_multiselect: {
       type: 'multiselect',
@@ -86,6 +87,7 @@ export const FieldZoo = ObjectSchema.create({
         { label: 'Green', value: 'green' },
         { label: 'Blue', value: 'blue' },
       ],
+      group: 'selection',
     },
     f_radio: {
       type: 'radio',
@@ -94,6 +96,7 @@ export const FieldZoo = ObjectSchema.create({
         { label: 'Yes', value: 'yes' },
         { label: 'No', value: 'no' },
       ],
+      group: 'selection',
     },
     f_checkboxes: {
       type: 'checkboxes',
@@ -103,18 +106,19 @@ export const FieldZoo = ObjectSchema.create({
         { label: 'SMS', value: 'sms' },
         { label: 'Push', value: 'push' },
       ],
+      group: 'selection',
     },
-    f_tags: { type: 'tags', label: 'Tags' },
+    f_tags: { type: 'tags', label: 'Tags', group: 'selection' },
 
     // ── Relational ───────────────────────────────────────────────────────
-    f_lookup: Field.lookup('showcase_account', { label: 'Lookup → Account' }),
+    f_lookup: Field.lookup('showcase_account', { label: 'Lookup → Account', group: 'relational' }),
     // Multi-value reference — stores an ARRAY of account ids (JSON column).
     // Seeded from an array of natural keys, one per element (framework#3911);
     // this is the seedable half of the `multiple: true` reference surface —
     // see `f_users` below for the half that a fresh boot cannot seed.
-    f_lookups: Field.lookup('showcase_account', { label: 'Lookup → Accounts (multiple)', multiple: true }),
-    f_master_detail: Field.masterDetail('showcase_project', { label: 'Master-Detail → Project', required: true }),
-    f_tree: { type: 'tree', label: 'Tree (self-reference)', reference: 'showcase_field_zoo' },
+    f_lookups: Field.lookup('showcase_account', { label: 'Lookup → Accounts (multiple)', multiple: true, group: 'relational' }),
+    f_master_detail: Field.masterDetail('showcase_project', { label: 'Master-Detail → Project', required: true, group: 'relational' }),
+    f_tree: { type: 'tree', label: 'Tree (self-reference)', reference: 'showcase_field_zoo', group: 'relational' },
 
     // ── User (lookup specialized to sys_user) ────────────────────────────
     // NOT seeded, and deliberately so: `sys_user` rows are created by SIGN-UP,
@@ -124,21 +128,22 @@ export const FieldZoo = ObjectSchema.create({
     // showcase seed load report `success: false` on every first boot. The
     // multi-value REFERENCE mechanics these fields share are demonstrated by
     // `f_lookups` above; assign these two in the UI once you have signed up.
-    f_user: Field.user({ label: 'User → sys_user (single)' }),
-    f_users: Field.user({ label: 'Users (multiple)', multiple: true }),
-    f_owner: Field.user({ label: 'Owner (current_user default)', defaultValue: 'current_user' }),
+    f_user: Field.user({ label: 'User → sys_user (single)', group: 'user' }),
+    f_users: Field.user({ label: 'Users (multiple)', multiple: true, group: 'user' }),
+    f_owner: Field.user({ label: 'Owner (current_user default)', defaultValue: 'current_user', group: 'user' }),
 
     // ── Media ────────────────────────────────────────────────────────────
-    f_image: Field.image({ label: 'Image' }),
-    f_file: Field.file({ label: 'File' }),
-    f_avatar: Field.avatar({ label: 'Avatar' }),
-    f_video: { type: 'video', label: 'Video' },
-    f_audio: { type: 'audio', label: 'Audio' },
+    f_image: Field.image({ label: 'Image', group: 'media' }),
+    f_file: Field.file({ label: 'File', group: 'media' }),
+    f_avatar: Field.avatar({ label: 'Avatar', group: 'media' }),
+    f_video: { type: 'video', label: 'Video', group: 'media' },
+    f_audio: { type: 'audio', label: 'Audio', group: 'media' },
 
     // ── Calculated / system ──────────────────────────────────────────────
     f_formula: Field.formula({
       label: 'Formula (number × percent)',
       expression: cel`(record.f_number == null ? 0 : record.f_number) * (record.f_percent == null ? 0 : record.f_percent) / 100`,
+      group: 'calculated',
     }),
     // NO `summary` field here, deliberately — it is the one type this zoo
     // cannot demonstrate. A roll-up aggregates a CHILD object into its parent,
@@ -160,26 +165,45 @@ export const FieldZoo = ObjectSchema.create({
     // `showcase_expense_report.total_amount` / `approved_amount` show the
     // `summaryOperations.filter` variant that rolls ONE child object into two
     // different totals.
-    f_autonumber: Field.autonumber({ label: 'Auto Number' }),
+    f_autonumber: Field.autonumber({ label: 'Auto Number', group: 'calculated' }),
 
     // ── Embedded structured values (stored as JSON on the row) ───────────
-    f_composite: { type: 'composite', label: 'Composite (embedded object)' },
-    f_repeater: { type: 'repeater', label: 'Repeater (embedded array)' },
-    f_record: { type: 'record', label: 'Record (name-keyed map)' },
+    f_composite: { type: 'composite', label: 'Composite (embedded object)', group: 'embedded' },
+    f_repeater: { type: 'repeater', label: 'Repeater (embedded array)', group: 'embedded' },
+    f_record: { type: 'record', label: 'Record (name-keyed map)', group: 'embedded' },
 
     // ── Enhanced types ───────────────────────────────────────────────────
-    f_location: Field.location({ label: 'Location (GPS)' }),
-    f_address: Field.address({ label: 'Address' }),
-    f_code: Field.code('json', { label: 'Code Editor' }),
-    f_json: Field.json({ label: 'JSON' }),
-    f_color: Field.color({ label: 'Color' }),
-    f_rating: { type: 'rating', label: 'Rating', max: 5 },
-    f_slider: Field.slider({ label: 'Slider', min: 0, max: 100, step: 5 }),
-    f_signature: Field.signature({ label: 'Signature' }),
-    f_qrcode: Field.qrcode({ label: 'QR / Barcode' }),
-    f_progress: { type: 'progress', label: 'Progress', min: 0, max: 100 },
+    f_location: Field.location({ label: 'Location (GPS)', group: 'enhanced' }),
+    f_address: Field.address({ label: 'Address', group: 'enhanced' }),
+    f_code: Field.code('json', { label: 'Code Editor', group: 'enhanced' }),
+    f_json: Field.json({ label: 'JSON', group: 'enhanced' }),
+    f_color: Field.color({ label: 'Color', group: 'enhanced' }),
+    f_rating: { type: 'rating', label: 'Rating', max: 5, group: 'enhanced' },
+    f_slider: Field.slider({ label: 'Slider', min: 0, max: 100, step: 5, group: 'enhanced' }),
+    f_signature: Field.signature({ label: 'Signature', group: 'enhanced' }),
+    f_qrcode: Field.qrcode({ label: 'QR / Barcode', group: 'enhanced' }),
+    f_progress: { type: 'progress', label: 'Progress', min: 0, max: 100, group: 'enhanced' },
 
     // ── AI / ML ──────────────────────────────────────────────────────────
-    f_vector: { type: 'vector', label: 'Embedding Vector', dimensions: 1536 },
+    f_vector: { type: 'vector', label: 'Embedding Vector', dimensions: 1536, group: 'ai_ml' },
   },
+
+  // ADR-0085 §5: the form, detail and drawer layout is derived from these
+  // groups, so each field is placed in a named section rather than left to the
+  // untitled fallback, which the field-no-consumers rule credits to no one (#32168).
+  fieldGroups: [
+    { key: 'core_text', label: 'Core Text' },
+    { key: 'rich_content', label: 'Rich Content' },
+    { key: 'numbers', label: 'Numbers' },
+    { key: 'date_time', label: 'Date & Time' },
+    { key: 'logic', label: 'Logic' },
+    { key: 'selection', label: 'Selection' },
+    { key: 'relational', label: 'Relational' },
+    { key: 'user', label: 'User' },
+    { key: 'media', label: 'Media' },
+    { key: 'calculated', label: 'Calculated / System' },
+    { key: 'embedded', label: 'Embedded Structured Values' },
+    { key: 'enhanced', label: 'Enhanced Types' },
+    { key: 'ai_ml', label: 'AI / ML' },
+  ],
 });

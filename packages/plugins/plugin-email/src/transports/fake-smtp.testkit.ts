@@ -22,6 +22,8 @@ export interface FakeSmtp {
   commands: string[];
   /** Raw DATA payloads (headers + body), one per delivered message. */
   messages: string[];
+  /** TCP connections the server accepted. */
+  readonly connections: number;
   close(): Promise<void>;
 }
 
@@ -34,8 +36,10 @@ export async function startFakeSmtp(opts: { authOk?: boolean } = {}): Promise<Fa
   const authOk = opts.authOk !== false;
   const commands: string[] = [];
   const messages: string[] = [];
+  let connections = 0;
 
   const server = net.createServer((socket) => {
+    connections += 1;
     let buffer = '';
     let inData = false;
     let dataBuf = '';
@@ -96,6 +100,7 @@ export async function startFakeSmtp(opts: { authOk?: boolean } = {}): Promise<Fa
     port,
     commands,
     messages,
+    get connections() { return connections; },
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 }

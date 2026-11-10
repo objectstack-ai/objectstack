@@ -4,11 +4,18 @@ import type { IEmailTransport } from '@objectstack/spec/contracts';
 import { LogTransport } from '../email-service.js';
 import { ResendTransport } from './resend.js';
 import { PostmarkTransport } from './postmark.js';
-import { SmtpTransport, type SmtpTransportOptions } from './smtp.js';
+import { SmtpTransport, type SmtpConnectPolicy, type SmtpTransportOptions } from './smtp.js';
 
 export { ResendTransport, type ResendTransportOptions } from './resend.js';
 export { PostmarkTransport, type PostmarkTransportOptions } from './postmark.js';
-export { SmtpTransport, smtpOptionsFromMailSettings, type SmtpTransportOptions } from './smtp.js';
+export {
+  SmtpTransport,
+  smtpOptionsFromMailSettings,
+  type SmtpTransportOptions,
+  type SmtpConnectPolicy,
+  type SmtpConnectRequest,
+  type SmtpConnectCallback,
+} from './smtp.js';
 
 /**
  * Transport tags this package can materialise — the single source of truth,
@@ -130,6 +137,8 @@ export interface MakeTransportOptions {
    * `messageStream`; etc.
    */
   options?: Record<string, unknown>;
+  /** The host's connect policy for an `smtp` transport, applied after `options`. */
+  smtpConnect?: SmtpConnectPolicy;
   logger?: { info: (msg: string, meta?: any) => void };
 }
 
@@ -150,7 +159,7 @@ export interface MakeTransportOptions {
  * the settings page offered more than it could deliver (#5094).
  */
 export function makeTransport(opts: MakeTransportOptions): IEmailTransport {
-  const { provider, apiKey, options = {}, logger } = opts;
+  const { provider, apiKey, options = {}, smtpConnect, logger } = opts;
   switch (provider) {
     case 'log':
       return new LogTransport(logger);
@@ -166,7 +175,12 @@ export function makeTransport(opts: MakeTransportOptions): IEmailTransport {
           + '(OS_EMAIL_SMTP_HOST, config.email.options.host, or Settings → Mail → Host)',
         );
       }
-      return new SmtpTransport({ ...smtp, host: smtp.host, logger });
+      return new SmtpTransport({
+        ...smtp,
+        host: smtp.host,
+        logger,
+        ...(smtpConnect !== undefined ? { connect: smtpConnect } : {}),
+      });
     }
     default:
       throw new Error(

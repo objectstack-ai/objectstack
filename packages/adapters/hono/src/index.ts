@@ -980,7 +980,10 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
       // forwarded to better-auth instead and answered `404`.
       if (path === 'config' && dispatchedMethod(method) === 'GET' && authService) {
         try {
-          const config = (authService as any).getPublicConfig?.();
+          // The request goes along, as on plugin-auth's own `/config` route,
+          // so the host's organization-create choices come back in the
+          // language this request asked for.
+          const config = (authService as any).getPublicConfig?.(c.req.raw);
           if (config) {
             // Refine the coarse "SSO wired" flag to "SSO usable" (≥1 provider
             // configured), mirroring the plugin-auth /config route. Guarded so
