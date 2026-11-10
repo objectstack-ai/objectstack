@@ -450,8 +450,7 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
   /**
    * objectstack#29105 — the one reader of better-auth's two-factor challenge.
    * For an account with two-factor sign-in on, the `twoFactor()` plugin's
-   * after-hook (matched on `/sign-in/email`, `/sign-in/username` and
-   * `/sign-in/phone-number`) deletes the session the credential step made,
+   * after-hook deletes the session the credential step made,
    * holds the pending sign-in in a signed `two_factor` cookie and answers
    * `{ twoFactorRedirect: true, twoFactorMethods }`. The same answer still
    * carries `set-auth-token` naming the DELETED session (measured: it
