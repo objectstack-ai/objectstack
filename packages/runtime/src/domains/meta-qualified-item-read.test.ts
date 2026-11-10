@@ -445,3 +445,52 @@ describe('#32201 — the 409 carries `details.candidates` on every read form', (
         expect(conflictOf(answer), JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT', [pkg(SYS_ONE), pkg(SYS_TWO)]]);
     });
 });
+
+/**
+ * [#32244, ADR-0150 D3] The bare `GET /meta/action/:name` of an action name two
+ * packages hold on any object key — each on its own object, or both on one —
+ * answers `409 RESOURCE_CONFLICT` naming every holder (`details.candidates`)
+ * with its object (the message), on this transport too. `?package=` and a
+ * name one package holds answer as before.
+ *
+ * BASE (main 9bff554e): 200 with the first registered package's action.
+ */
+describe('#32244 — the bare read of an action name two packages hold answers 409', () => {
+    const shipAction = (packageId: string, objectName: string) => registry.registerItem('action', {
+        name: 'approve', label: packageId.split('.').pop(), type: 'script', objectName, target: 'approve',
+        body: { language: 'js', source: 'return 1;', capabilities: [] },
+    }, 'name' as never, packageId);
+    const pkg = (packageId: string) => ({ kind: 'package', packageId });
+    const conflictOf = (answer: { status?: number; body?: any }) => [answer.status, answer.body?.error?.code, answer.body?.error?.details?.candidates];
+
+    it('two packages, two objects: 409 naming both, each with its object', async () => {
+        shipAction(A, 'account');
+        shipAction(B, 'contact');
+        const answer = await read('/action/approve');
+        expect(conflictOf(answer), JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT', [pkg(A), pkg(B)]]);
+        expect(String(answer.body?.error?.message ?? '')).toContain(`package "${A}" binds it to object "account"`);
+        expect(String(answer.body?.error?.message ?? '')).toContain(`package "${B}" binds it to object "contact"`);
+    });
+
+    it('two packages, one object: 409 naming both', async () => {
+        shipAction(A, 'account');
+        shipAction(B, 'account');
+        const answer = await read('/action/approve');
+        expect(conflictOf(answer), JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT', [pkg(A), pkg(B)]]);
+    });
+
+    it('CONTROL — `?package=` reaches the package\'s own action', async () => {
+        shipAction(A, 'account');
+        shipAction(B, 'contact');
+        const qualified = await read('/action/approve', { package: A });
+        expect(qualified.status, JSON.stringify(qualified.body)).toBe(200);
+        expect(labelOf(qualified)).toBe('alpha');
+    });
+
+    it('CONTROL — one package holding the name answers the bare read', async () => {
+        shipAction(A, 'account');
+        const single = await read('/action/approve');
+        expect(single.status, JSON.stringify(single.body)).toBe(200);
+        expect(labelOf(single)).toBe('alpha');
+    });
+});

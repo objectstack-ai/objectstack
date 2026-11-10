@@ -5876,7 +5876,15 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
             // [#31697, review 6762242732 F4] The read's own refusal of a name
             // two holders hold is that refusal, naming them — never an outage.
             const refusal = refusalOf(err);
-            if (refusal !== undefined) return { action: undefined, obj, refusal };
+            if (refusal !== undefined) {
+                // [ADR-0150 D3, #32244] …unless this route's key tells them
+                // apart: the bare read refuses a name two packages hold on
+                // ANY object key, and this route is one object's.
+                return routeOwnerOfRefusedRead(refusal, {
+                    obj, actionName, ownsRoute, objectName,
+                    readAt: (packageId) => byName.call(protocol, { type: 'action', name: actionName, packageId }),
+                });
+            }
             return { action: undefined, obj, degraded: true, reason: err?.message ?? String(err) };
         }
         const item: any = (envelope as { item?: unknown } | null | undefined)?.item;
@@ -5931,6 +5939,58 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
     }
 
     return { action: undefined, obj, degraded, reason };
+}
+
+/**
+ * [ADR-0150 D3, #32244] The declaration a route names when the protocol's bare
+ * by-name read refused its action name. That read cannot see the object, so it
+ * refuses a name two packages hold on any object key: A's `notify` on X beside
+ * B's `notify` on Y. The route can see the object. Each package candidate is
+ * read at its own address (`?package=`, which the disabled-package face
+ * withholds as the bare read does) and the route takes the one declaration
+ * that owns it, the object's own first and then an object-less one, the order
+ * the router reaches a handler in. `bareRouteHolderRefusal` has already found
+ * fewer than two holders on this route's key, so the call is not ambiguous.
+ *
+ * The refusal stands when a candidate is not a package (the platform's or the
+ * environment's item has no address of its own) or two candidates own the
+ * route on one rung. No candidate owning the route is no declaration, as when
+ * the bare read served another object's action. A candidate read that throws
+ * is answered as the bare read's throw would be: its refusal, else an outage.
+ */
+async function routeOwnerOfRefusedRead(
+    refusal: PackageScopedRefusal,
+    args: {
+        obj: any;
+        actionName: string;
+        objectName: string;
+        ownsRoute: (action: any) => boolean;
+        readAt: (packageId: string) => Promise<unknown>;
+    },
+): Promise<RouteActionDeclaration> {
+    const { obj, actionName, objectName, ownsRoute, readAt } = args;
+    if (refusal.candidates.length < 2 || refusal.candidates.some((c) => c.kind !== 'package')) {
+        return { action: undefined, obj, refusal };
+    }
+    const owners: any[] = [];
+    for (const candidate of refusal.candidates) {
+        if (candidate.kind !== 'package') continue;
+        let envelope: unknown;
+        try {
+            envelope = await readAt(candidate.packageId);
+        } catch (err: any) {
+            const refused = refusalOf(err);
+            if (refused !== undefined) return { action: undefined, obj, refusal: refused };
+            return { action: undefined, obj, degraded: true, reason: err?.message ?? String(err) };
+        }
+        const item: any = (envelope as { item?: unknown } | null | undefined)?.item;
+        if (item !== null && typeof item === 'object' && item.name === actionName && ownsRoute(item)) owners.push(item);
+    }
+    const bound = owners.filter((item) => !isObjectLessActionKey(standaloneActionOwnerKey(item)) && standaloneActionOwnerKey(item) === objectName);
+    const rung = bound.length > 0 ? bound : owners.filter((item) => isObjectLessActionKey(standaloneActionOwnerKey(item)));
+    if (rung.length === 1) return { action: rung[0], obj };
+    if (rung.length === 0) return { action: undefined, obj };
+    return { action: undefined, obj, refusal };
 }
 
 /**
