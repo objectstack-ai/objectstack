@@ -29,16 +29,28 @@
  * Multi-tenant, the service is read from the environment's own kernel (the
  * one `kernel-manager` hands out); single-environment, from the host's.
  *
- * Cross-repo, NOT MEASURED: that a hosted environment's kernel mounts the
- * install-local plugin at all. Nothing in this repo shows it, and this repo's
- * own hosted Console reads a cloud base as having no install-local door (the
- * 30963 changeset, `MarketplacePage`). Where the door is not mounted, an
- * unmanaged grant copies nothing and answers 503 `SERVICE_UNAVAILABLE`, saying
- * the plugin is not mounted. Follow-up: #31482.
+ * A hosted environment's kernel registers this door with no HTTP route and no
+ * `installLocal` feature (cloud#3845 ruling A, built on the cloud side by
+ * cloud#4175): only this cloud-connection door, after a control-plane grant,
+ * reaches it there. Where the door is not registered at all, an unmanaged
+ * grant copies nothing and answers 503 `SERVICE_UNAVAILABLE`, saying the
+ * plugin is not mounted.
  */
 
 /** The service name the install-local plugin registers its in-process door under. */
 export const INSTALL_LOCAL_DOOR_SERVICE = 'marketplace-install-local';
+
+/**
+ * [#30794, #31482] The door's refusal of `targetNamespace` beside a managed
+ * install (or no `installMode`), `INVALID_REQUEST` / 400: a managed install is
+ * never renamed. One sentence, answered by the install-local door's step 0″
+ * and by `POST /api/v1/cloud-connection/install` for its `target_namespace`
+ * beside a managed install, so the two doors never drift apart.
+ */
+export const TARGET_NAMESPACE_ON_MANAGED_INSTALL_MESSAGE =
+    '`targetNamespace` renames an unmanaged copy, and this install is managed: a managed install '
+    + 'is never renamed — it keeps the package\'s namespace and its upgrade channel. Install with '
+    + '`installMode: \'unmanaged\'` to take a copy under a namespace of its own, or omit `targetNamespace`.';
 
 /**
  * [#31481] The control plane's unmanaged grant a copy is made for, as the

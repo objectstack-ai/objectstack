@@ -170,7 +170,7 @@ import { readJsonRequestBody } from './request-json-body.js';
 // [#30964] The install mode's one declaration, read by reference: never a copy of its two spellings.
 import { InstallModeSchema, ManifestSchema, SEMVER_2_0_0_VERSION_PATTERN, type InstallMode } from '@objectstack/spec/kernel';
 import {
-    INSTALL_LOCAL_DOOR_SERVICE, grantRefusalEvent, recordUnmanagedImportEvent,
+    INSTALL_LOCAL_DOOR_SERVICE, TARGET_NAMESPACE_ON_MANAGED_INSTALL_MESSAGE, grantRefusalEvent, recordUnmanagedImportEvent,
     type InstallLocalDoor, type InstallLocalDoorGrant, type UnmanagedImportAuditSurface,
 } from './install-local-door-service.js';
 
@@ -349,6 +349,35 @@ function packageVersionOf(body: any): { ok: true; version: string | undefined } 
         };
     }
     return { ok: true, version };
+}
+
+/**
+ * [#31482] The namespace a `POST /install` body asks an unmanaged copy to take:
+ * `target_namespace`, the spelling the control plane's install action reads
+ * and its grant echoes (`data.target_namespace`, cloud#3648). One spelling only.
+ * `namespace` is `undefined` when the body names none (absent or `null`): the
+ * copy keeps the namespace the grant names, else the source's, as before, and
+ * the control plane is then sent no `target_namespace`. Anything else is parsed
+ * by the manifest key's own declaration (`ManifestSchema.shape.namespace`, by
+ * reference, never a copied pattern), and a value it refuses is a 400 here,
+ * before the control plane is asked. Whether the name is reserved, owned by
+ * another package, or fits every copied name is the install-local door's to
+ * answer, on the copy.
+ */
+function targetNamespaceOf(body: any): { ok: true; namespace: string | undefined } | { ok: false; message: string; raw: unknown } {
+    const raw = body?.target_namespace;
+    if (raw === undefined || raw === null) return { ok: true, namespace: undefined };
+    const declared = ManifestSchema.shape.namespace.safeParse(raw);
+    if (!declared.success) {
+        const rule = declared.error.issues[0]?.message ?? 'See `manifest.namespace`';
+        return {
+            ok: false,
+            raw,
+            message: `Invalid package namespace ${JSON.stringify(raw)} on \`target_namespace\`. ${rule}. It becomes the `
+                + 'copy\'s namespace and the prefix of every copied object name. Nothing was installed.',
+        };
+    }
+    return { ok: true, namespace: declared.data };
 }
 
 export interface CloudConnectionPluginConfig {
@@ -1291,7 +1320,7 @@ export class CloudConnectionPlugin implements Plugin {
                 return c.json({ success: true, data: { environmentId: environmentId ?? null, revoked, cleared } });
             }));
 
-            // POST /install { package_id, version?, seed_sample_data?, install_mode? } — in-environment
+            // POST /install { package_id, version?, seed_sample_data?, install_mode?, target_namespace? } — in-environment
             // marketplace install. Authorizes the caller against the
             // environment's own session (SSO-as-owner only ever admits org
             // owners/admins), then performs the install against the cloud
@@ -1335,6 +1364,20 @@ export class CloudConnectionPlugin implements Plugin {
                 const named = packageVersionOf(body);
                 if (!named.ok) return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: named.message } }, 400);
                 const version = named.version;
+                // [#31482] The namespace the caller asks the copy to take. It
+                // renames an UNMANAGED copy only: beside a managed install (or
+                // no mode) it is refused with the install-local door's own
+                // sentence, never ignored, since a managed install is never
+                // renamed. Absent, the control plane is sent no
+                // `target_namespace`, so the request is the one it always was.
+                if (body?.target_namespace !== undefined && body?.target_namespace !== null && installMode !== 'unmanaged') {
+                    return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: TARGET_NAMESPACE_ON_MANAGED_INSTALL_MESSAGE } }, 400);
+                }
+                const asked = targetNamespaceOf(body);
+                if (!asked.ok) {
+                    return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: asked.message, details: { targetNamespace: asked.raw } } }, 400);
+                }
+                const targetNamespace = asked.namespace;
 
                 // Call the cloud install endpoint in service mode. We do NOT send
                 // an active org → package-install treats this as platform/CI and
@@ -1357,6 +1400,8 @@ export class CloudConnectionPlugin implements Plugin {
                                 ...(installMode !== undefined ? { install_mode: installMode } : {}),
                                 // [#31799] The control plane's pinned-version param; absent = latest.
                                 ...(version !== undefined ? { version } : {}),
+                                // [#31482] The copy's namespace (cloud#3648); absent = the grant's, else the source's.
+                                ...(targetNamespace !== undefined ? { target_namespace: targetNamespace } : {}),
                                 // [#30964] The person installing, so the control
                                 // plane's audit row can name a person rather than
                                 // this environment's service principal. A body
@@ -1374,7 +1419,10 @@ export class CloudConnectionPlugin implements Plugin {
                     const json: any = await resp.json().catch(() => ({ success: false, error: 'install failed (no body)' }));
                     // [#30964] A control-plane refusal, and every managed answer, is relayed as it was.
                     if (installMode !== 'unmanaged' || !resp.ok || json?.success === false) return c.json(json, resp.status as any);
-                    return await copyOnUnmanagedGrant(c, { environmentId, packageId, seedSampleData, installerUserId: session.userId, grant: json });
+                    return await copyOnUnmanagedGrant(c, {
+                        environmentId, packageId, seedSampleData, installerUserId: session.userId, grant: json,
+                        ...(targetNamespace !== undefined ? { targetNamespace } : {}),
+                    });
                 } catch (err: any) {
                     ctx.logger?.error?.('[CloudConnectionPlugin] install failed', err instanceof Error ? err : new Error(String(err)));
                     return c.json({ success: false, error: { code: 'PLUGIN_INSTALL_FAILED', message: String(err?.message ?? err) } }, 502);
@@ -1412,6 +1460,18 @@ export class CloudConnectionPlugin implements Plugin {
              * before. The manifest comes only from this answer: the caller's
              * body never reaches the door.
              *
+             * [#31482, cloud#3648] The namespace the copy takes. The grant
+             * governs it, as it governs the manifest: the door is handed the
+             * answer's `data.target_namespace` as `targetNamespace` when it
+             * names one, and never a value straight from the caller's body. A
+             * caller that asked for a namespace the answer does not echo
+             * (none, or another one) copies nothing (502): copying into the
+             * source's namespace instead is not what was asked. With no ask
+             * and no echo the copy keeps the source's namespace, as before.
+             * Cross-repo, NOT MEASURED: the control plane's spelling of the
+             * echo (cloud PR #4206); until it echoes, every request that names
+             * a namespace answers that 502.
+             *
              * [#31481, ruling A「两边审计」] Every refusal after the grant leaves
              * the environment's `package_unmanaged_import` failure row beside
              * the control plane's grant row, through the environment's `audit`
@@ -1421,10 +1481,25 @@ export class CloudConnectionPlugin implements Plugin {
              */
             const copyOnUnmanagedGrant = async (
                 c: any,
-                args: { environmentId: string; packageId: string; seedSampleData: boolean; installerUserId: string; grant: any },
+                args: {
+                    environmentId: string; packageId: string; seedSampleData: boolean; installerUserId: string; grant: any;
+                    /** [#31482] The namespace the caller asked the copy to take; already shape-checked by the route. */
+                    targetNamespace?: string;
+                },
             ): Promise<Response> => {
-                const { environmentId, packageId, seedSampleData, installerUserId, grant } = args;
+                const { environmentId, packageId, seedSampleData, installerUserId, grant, targetNamespace: askedNamespace } = args;
                 const data = grant?.data;
+                // [#31482] The grant's namespace: a string, or none (absent or
+                // `null`). Any other value is an answer this door cannot read.
+                const echoedNamespaceRaw: unknown = data?.target_namespace;
+                const echoedNamespace = typeof echoedNamespaceRaw === 'string' ? echoedNamespaceRaw : undefined;
+                const namespaceUnread = echoedNamespaceRaw !== undefined && echoedNamespaceRaw !== null && echoedNamespace === undefined
+                    ? 'its answer\'s `target_namespace` is not a string'
+                    : askedNamespace !== undefined && echoedNamespace === undefined
+                        ? `its answer does not echo the \`target_namespace\` '${askedNamespace}' it was sent`
+                        : askedNamespace !== undefined && echoedNamespace !== askedNamespace
+                            ? `its answer names \`target_namespace\` '${echoedNamespace}', not the '${askedNamespace}' it was sent`
+                            : undefined;
                 const versionId = typeof data?.version_id === 'string' ? data.version_id.trim() : '';
                 const grantedVersion = typeof data?.version === 'string' && data.version.trim() !== '' ? data.version.trim() : undefined;
                 // [#31963] The grant's own manifest, handed inline only when the
@@ -1465,11 +1540,13 @@ export class CloudConnectionPlugin implements Plugin {
                 // installed the package MANAGED; the refusal says so, so the
                 // installer checks Installed before retrying.
                 const unechoed = data?.install_mode === undefined || data?.install_mode === null;
-                const unread = data?.install_mode !== 'unmanaged'
+                const versionUnread = data?.install_mode !== 'unmanaged'
                     ? 'its answer does not echo `install_mode: \'unmanaged\'`'
                     : versionId === '' ? 'its answer names no `version_id`'
                         : inlineManifest !== undefined && grantedVersion === undefined
                             ? 'its answer carries the granted manifest but names no `version` to check it against' : undefined;
+                const unread = versionUnread ?? namespaceUnread;
+                const cannotTell = versionUnread !== undefined ? 'which version it granted' : 'which namespace it granted';
                 if (unread !== undefined) {
                     const managedNote = unechoed
                         ? ' The control plane did not echo install_mode; a control plane that does not read it may have '
@@ -1485,7 +1562,7 @@ export class CloudConnectionPlugin implements Plugin {
                         error: {
                             code: 'PLUGIN_INSTALL_FAILED',
                             message: `The control plane answered the unmanaged install of '${packageId}', but ${unread}, so this `
-                                + `environment cannot tell which version it granted. Nothing was copied.${managedNote}`,
+                                + `environment cannot tell ${cannotTell}. Nothing was copied.${managedNote}`,
                         },
                     }, 502);
                 }
@@ -1514,6 +1591,8 @@ export class CloudConnectionPlugin implements Plugin {
                         ...(seedSampleData ? { seedSampleData: true } : {}),
                         // [#31963] The grant's own manifest; the door checks it against `granted`.
                         ...(inlineManifest !== undefined ? { manifest: inlineManifest } : {}),
+                        // [#31482] The grant's namespace; the door judges it (reserved, owned, every copied name).
+                        ...(echoedNamespace !== undefined ? { targetNamespace: echoedNamespace } : {}),
                     }),
                 });
                 // The grant rides beside the request, so the door audits its own refusals of it.
