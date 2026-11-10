@@ -1583,7 +1583,9 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
  *
  * Scope: security-relevant identifiers/labels across SIX collections — objects
  * (names, field names, action names, field-group keys and labels), permission
- * sets, positions, apps, books.
+ * sets, positions, apps, books — plus what an `objectExtensions` entry writes
+ * onto an object (#31998): the fields it adds (by name and label), its
+ * `label`, and each `fieldPatches` relabel, all served as that object's own.
  * Pages/views/components are NOT scanned — `role` there is HTML/ARIA
  * semantics, not permission vocabulary. The sole platform exception
  * (better-auth `sys_member.role`) is a system object, which app stacks never
@@ -1674,16 +1676,25 @@ export function validateSecurityRoleWord(stack: AnyRec): SecurityFinding[] {
           `is permission_set (capability), position (distribution), business_unit (hierarchy) (ADR-0090 D3).`,
         hint: `Rename using 'position' for distribution groups or a domain word (e.g. 'function', 'duty').`,
       });
-    } else if (labelHasRoleWord(label)) {
-      findings.push({
-        severity: 'error',
-        rule: SECURITY_ROLE_WORD,
-        where,
-        path: `${path.replace(/\.(?:name|key)$/, '')}.label`,
-        message: `${kind} label "${String(label)}" uses the reserved word "role" (ADR-0090 D3).`,
-        hint: `Relabel with 'Position' (distribution) or a domain word — admins must meet ONE vocabulary.`,
-      });
+    } else {
+      flagRoleLabel(kind, label, where, `${path.replace(/\.(?:name|key)$/, '')}.label`);
     }
+  };
+  /**
+   * The label half alone, at the label's own path: for a label written with no
+   * identifier beside it (an `objectExtensions` entry's `label`, a
+   * `fieldPatches` relabel, #31998).
+   */
+  const flagRoleLabel = (kind: string, label: unknown, where: string, labelPath: string) => {
+    if (!labelHasRoleWord(label)) return;
+    findings.push({
+      severity: 'error',
+      rule: SECURITY_ROLE_WORD,
+      where,
+      path: labelPath,
+      message: `${kind} label "${String(label)}" uses the reserved word "role" (ADR-0090 D3).`,
+      hint: `Relabel with 'Position' (distribution) or a domain word — admins must meet ONE vocabulary.`,
+    });
   };
 
   for (let i = 0; i < objects.length; i++) {
@@ -1709,6 +1720,56 @@ export function validateSecurityRoleWord(stack: AnyRec): SecurityFinding[] {
         `objects[${i}].fieldGroups[${gi}].key`,
         'key',
       );
+    }
+  }
+  // [#31998] What an `objectExtensions` entry writes onto an object, judged as
+  // the owner's own declarations are above: same messages, same severity.
+  //  - the fields it adds: they land in the target's field map (the registry
+  //    merges them as if declared inline);
+  //  - its `label`, which the engine merges over the target's (the owner
+  //    door judges `object.label`);
+  //  - each `fieldPatches.FIELD.label`, the label a base field is served
+  //    with (the owner door judges `field.label`). Option labels stay out:
+  //    the owner door does not judge them either.
+  // Refusing `fields: { role }` on the owner while admitting it here is the
+  // #7220 split one door over: the service desk scenario that found this
+  // renamed nothing, it moved the field.
+  //
+  // Read through the shared fold (`objectExtensionsByTarget`), not
+  // `objectsAsServed`, for two facts the served objects lose:
+  //  - the entry's own path, so a finding points at the extension the author
+  //    wrote (`objectExtensions[i].fields.F.name`, or its `packages[j]`
+  //    body), never at the owner object;
+  //  - entries whose target this stack does not declare (an object of a
+  //    dependency, a platform `sys_*` object): `objectsAsServed` folds only
+  //    onto declared objects, and those are the usual targets.
+  // The fold reads what the registry serves: `packages[]` bodies when the
+  // artifact has them, else the stack's own list, one entry per package per
+  // target (a replaced entry's fields are never served, so never judged).
+  //
+  // ⛔ No `isSystemObject` exemption here. It covers what the PLATFORM
+  // declares (better-auth `sys_member.role`); a field an app's extension adds
+  // to a `sys_*` object is the app's word, on a page an admin reads.
+  //
+  // The loop variables are not `ext` / `obj`: the key-read meta-test in
+  // `validate-security-posture.test.ts` holds those receivers to the spec's
+  // declared keys, and `visible` is the fold's output (`path` is its own).
+  for (const [target, entries] of objectExtensionsByTarget(stack)) {
+    for (const visible of entries) {
+      flagRoleLabel('object', visible.label, `object "${target}"`, `${visible.path}.label`);
+      for (const f of visible.fields) {
+        const fieldName = String(f.name ?? '?');
+        flagRole('field', f.name, f.label, `field "${target}.${fieldName}"`, `${visible.path}.fields.${fieldName}.name`);
+      }
+      for (const [fieldName, displayPatch] of Object.entries(visible.fieldPatches)) {
+        if (!displayPatch || typeof displayPatch !== 'object') continue;
+        flagRoleLabel(
+          'field',
+          displayPatch.label,
+          `field "${target}.${fieldName}"`,
+          `${visible.path}.fieldPatches.${fieldName}.label`,
+        );
+      }
     }
   }
   for (let i = 0; i < permissionSets.length; i++) {

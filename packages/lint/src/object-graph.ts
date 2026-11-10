@@ -386,6 +386,15 @@ export interface VisibleObjectExtension {
    * with it, as its fields do.
    */
   validations: AnyRec[];
+  /**
+   * [#31998] Its `label`, as written (the engine merges it over the target's),
+   * and its `fieldPatches` record, keyed by the base field each patch
+   * relabels (`{}` when absent or not a record). Carried for the one reader
+   * that judges labels, `security-role-word`; like `validations`, carrying
+   * them changes nothing about which entries survive.
+   */
+  label: unknown;
+  fieldPatches: AnyRec;
 }
 
 /**
@@ -439,6 +448,8 @@ export function objectExtensionsByTarget(stack: unknown): Map<string, VisibleObj
         priority: typeof ext.priority === 'number' ? ext.priority : 200,
         fields: recordsOf(ext.fields),
         validations: recordsOf(ext.validations),
+        label: ext.label,
+        fieldPatches: isRec(ext.fieldPatches) ? ext.fieldPatches : {},
       });
       byTarget.set(ext.extend, kept);
     });
