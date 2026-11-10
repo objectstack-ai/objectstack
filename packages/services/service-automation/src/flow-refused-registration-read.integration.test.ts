@@ -33,11 +33,11 @@ import type { AutomationEngine, NodeExecutor } from './engine.js';
 
 /** The read surface these tests drive: `ObjectStackProtocolImplementation`'s meta doors. */
 interface MetadataReadDoors {
-    getMetaItem(request: { type: string; name: string }): Promise<GetMetaItemResponse>;
+    getMetaItem(request: { type: string; name: string; state?: 'draft' }): Promise<GetMetaItemResponse>;
     /** The default door's producer: REST's cached branch serves `data` and `registration` from it. */
     getMetaItemCached(request: { type: string; name: string }): Promise<GetMetaItemCachedResponse>;
     getMetaItems(request: { type: string }): Promise<GetMetaItemsResponse>;
-    saveMetaItem(request: { type: string; name: string; item: unknown }): Promise<unknown>;
+    saveMetaItem(request: { type: string; name: string; item: unknown; mode?: 'draft' }): Promise<unknown>;
 }
 
 const SYS = { isSystem: true } as const;
@@ -250,15 +250,24 @@ describe('a stored flow with no start node: refused at the bind, never at the bo
         expect(reason).toMatch(/^Flow 'no_start' rejected: the flow's top-level `nodes` hold no `start` node/);
     });
 
-    it('the metadata save door still keeps a start-less draft, and the read says the engine refused it', async () => {
+    // [#32289] The save door's own lint rule (`flow-start-node-missing`) now
+    // refuses the live save, whatever the flow's `status`, so nothing reaches
+    // the engine; a metadata draft (`mode: 'draft'`) still stores mid-edit,
+    // with the finding on its draft read.
+    it('the metadata save door refuses a live start-less save, and keeps a start-less draft with the finding', async () => {
         const { protocol, automation } = await boot();
-        await protocol.saveMetaItem({ type: 'flow', name: 'draft_no_start', item: startless('draft_no_start', 'draft') });
+        const refusal = await protocol
+            .saveMetaItem({ type: 'flow', name: 'draft_no_start', item: startless('draft_no_start', 'draft') })
+            .then(() => null, (e: unknown) => e as { code?: string; status?: number; issues?: Array<{ rule?: string }> });
+        expect({ code: refusal?.code, status: refusal?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect((refusal?.issues ?? []).map((i) => i.rule)).toContain('flow-start-node-missing');
+        expect(await automation.getFlow('draft_no_start')).toBeNull();
 
-        await vi.waitFor(async () => {
-            const read = await protocol.getMetaItem({ type: 'flow', name: 'draft_no_start' });
-            expect((read.item as { status?: string }).status).toBe('draft');
-            expect(read.registration?.state).toBe('refused');
-        });
+        await protocol.saveMetaItem({ type: 'flow', name: 'draft_no_start', item: startless('draft_no_start', 'draft'), mode: 'draft' });
+        const read = await protocol.getMetaItem({ type: 'flow', name: 'draft_no_start', state: 'draft' });
+        const diagnostics = (read.item as { _diagnostics?: { valid: boolean; errors?: Array<{ code?: string }> } })._diagnostics;
+        expect(diagnostics?.valid).toBe(false);
+        expect((diagnostics?.errors ?? []).map((e) => e.code)).toContain('flow-start-node-missing');
         expect(await automation.getFlow('draft_no_start')).toBeNull();
     });
 });
