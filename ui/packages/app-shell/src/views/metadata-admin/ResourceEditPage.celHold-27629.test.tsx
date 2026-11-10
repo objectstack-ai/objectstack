@@ -121,8 +121,7 @@ afterEach(() => {
   if (realPagePreview) registerMetadataPreview('page', realPagePreview);
 });
 
-const saveButton = () =>
-  screen.getByRole('button', { name: /Save \(⌘S\)|Fix the issues shown in the inspector before saving\./ });
+const saveButton = () => screen.getByTestId('resource-save');
 
 /** Past the autosave's 1.5 s debounce. */
 const outlastDebounce = () => new Promise((r) => setTimeout(r, 2300));

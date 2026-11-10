@@ -172,7 +172,7 @@ function renderEdit(name: string) {
   );
 }
 
-const saveButton = () => screen.getByRole('button', { name: /Save \(⌘S\)|The server refused this draft/ });
+const saveButton = () => screen.getByTestId('resource-save');
 
 /** Fill the create form and the canvas the way an admin does. */
 async function authorGuide() {

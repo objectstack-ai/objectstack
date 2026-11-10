@@ -211,12 +211,19 @@ afterEach(() => {
   if (realPagePreview) registerMetadataPreview('page', realPagePreview);
 });
 
-/** The Save button, found by its title in every state this suite reaches. */
-// Title flipped to the neutral inspector copy by ruling 5831744213 (objectui#6900).
-const saveButton = () =>
-  screen.getByRole('button', {
-    name: /Save \(⌘S\)|The server refused this draft|Fix the issues shown in the inspector before saving\.|No changes to save/,
-  });
+/** The Save button, in every state this suite reaches. */
+// The withheld reason is the neutral inspector copy by ruling 5831744213 (objectui#6900).
+const saveButton = () => screen.getByTestId('resource-save');
+
+/**
+ * What Save says: a withheld Save's reason, which is its accessible description
+ * (objectstack#32105: it keeps its name "Save"), else an enabled Save's title.
+ */
+const saveSays = () => {
+  const btn = saveButton();
+  const id = btn.getAttribute('aria-describedby');
+  return (id ? document.getElementById(id)?.textContent : null) ?? btn.getAttribute('title') ?? '';
+};
 
 /**
  * Is a REFUSAL what is holding Save shut?
@@ -228,7 +235,7 @@ const saveButton = () =>
  * The question worth asking is which term is holding it.
  */
 const refusalHoldsSave = () =>
-  (saveButton().getAttribute('title') ?? '').includes('The server refused this draft');
+  saveSays().includes('The server refused this draft');
 
 /**
  * Open the editor and select `which`, returning that block's CEL textarea.
@@ -299,7 +306,7 @@ describe('MetadataResourceEditPage — a draft the SERVER refused blocks Save (#
     // disabled, so everything after is taken at a moment the gate provably ran.
     await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1), { timeout: 6000 });
     await waitFor(() => expect(saveButton()).toBeDisabled(), { timeout: 6000 });
-    expect(saveButton()).toHaveAttribute('title', expect.stringContaining('The server refused this draft'));
+    expect(saveSays()).toContain('The server refused this draft');
 
     // Step 2 of the reproduction: select a DIFFERENT element and edit it. The
     // refused element is untouched, so the block must still stand.
@@ -311,7 +318,7 @@ describe('MetadataResourceEditPage — a draft the SERVER refused blocks Save (#
       { timeout: 6000 },
     );
     expect(saveButton()).toBeDisabled();
-    expect(saveButton()).toHaveAttribute('title', expect.stringContaining('The server refused this draft'));
+    expect(saveSays()).toContain('The server refused this draft');
   }, 20000);
 
   it('does not re-send the refused document when an unrelated field changes', async () => {
@@ -385,7 +392,7 @@ describe('MetadataResourceEditPage — the advisory half is untouched (#8057 / #
     await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1), { timeout: 6000 });
     // The server TOOK it: the draft is clean again, and the only thing holding
     // Save is that there is nothing left to save.
-    await waitFor(() => expect(saveButton()).toHaveAttribute('title', 'No changes to save'), {
+    await waitFor(() => expect(saveSays()).toBe('No changes to save'), {
       timeout: 6000,
     });
     expect(refusalHoldsSave()).toBe(false);
@@ -450,7 +457,7 @@ describe('MetadataResourceEditPage — a refusal is read off the parsed error on
       await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1), { timeout: 6000 });
       await waitFor(() => expect(saveButton()).toBeDisabled(), { timeout: 6000 });
 
-      const title = saveButton().getAttribute('title') ?? '';
+      const title = saveSays();
       expect(title).toContain('The server refused this draft');
       expect(title).toContain(FIELD_TRAIL);
       // The banner is the single-issue line: the field's label, then the

@@ -180,8 +180,17 @@ afterEach(() => {
 
 /** The Save button is an icon button identified by its title. */
 // Title flipped to the neutral inspector copy by ruling 5831744213 (objectui#6900).
-const saveButton = () =>
-  screen.getByRole('button', { name: /Save \(⌘S\)|Fix the issues shown in the inspector before saving\./ });
+const saveButton = () => screen.getByTestId('resource-save');
+
+/**
+ * What Save says: a withheld Save's reason, which is its accessible description
+ * (objectstack#32105: it keeps its name "Save"), else an enabled Save's title.
+ */
+const saveSays = () => {
+  const btn = saveButton();
+  const id = btn.getAttribute('aria-describedby');
+  return (id ? document.getElementById(id)?.textContent : null) ?? btn.getAttribute('title') ?? '';
+};
 
 /**
  * Dirty the draft with a predicate that parses, then WAIT FOR THE BANNER.
@@ -238,7 +247,7 @@ describe('MetadataResourceEditPage — client Zod issues are ADVISORY, inspector
     // differently on purpose.
     fireEvent.change(box, { target: { value: 'record.amount >' } });
     await waitFor(() => expect(saveButton()).toBeDisabled(), { timeout: 4000 });
-    expect(saveButton()).toHaveAttribute('title', 'Fix the issues shown in the inspector before saving.');
+    expect(saveSays()).toBe('Fix the issues shown in the inspector before saving.');
     expect(screen.getByTestId('metadata-validation-banner')).toHaveTextContent(SERVER_ONLY_KEY);
   });
 });
