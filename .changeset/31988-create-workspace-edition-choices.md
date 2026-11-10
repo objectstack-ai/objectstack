@@ -4,7 +4,7 @@
 
 feat(auth,app-shell): the create-organization dialog draws the host's organization-create choices and sends the picked edition
 
-Clause-②: no
+Clause-②: yes (widening): `@object-ui/auth` declares the optional `features.organizationEditions` and widens `createOrganization`'s `edition` from 'developer' to string; every value accepted before is still accepted
 Metadata-protocol: none
 
 - **`@object-ui/auth`:** `AuthPublicConfig.features` declares `organizationEditions`, typed from `@objectstack/spec`'s `OrganizationEditionChoice` (`edition`, `label`, `hint`, `memberLimit`). `createOrganization`'s `edition` takes the `edition` value of any served choice (`string`), not only `developer`; it still rides the `edition` query parameter, and an absent value still sends none.
