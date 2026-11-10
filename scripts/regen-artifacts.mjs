@@ -940,6 +940,18 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
       + 'its source, so a conflict is resolved by taking either side and running '
       + '`pnpm --filter @object-ui/i18n gen:zh-hant`.',
   },
+  // objectstack#32225: the developer namespace's Traditional Chinese catalogue, same command.
+  {
+    path: 'ui/packages/i18n/src/namespaces/developer/zh-Hant.ts',
+    gen: 'gen:zh-hant',
+    owner: '@object-ui/i18n',
+    why:
+      'generated WHOLE from the namespace\'s `zh-Hans.ts` by the same `gen:zh-hant` run that writes '
+      + 'the pack, and not routed for the same reason as the marketplace catalogue above: no `check:` '
+      + 'script proves its currency. The proof is the same package test, which walks every generated '
+      + 'target. Line-aligned with its source, so a conflict is resolved by taking either side and '
+      + 'running `pnpm --filter @object-ui/i18n gen:zh-hant`.',
+  },
 ]);
 
 /** Marker file (inside the git dir, never the worktree) listing paths the driver deferred. */
