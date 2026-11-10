@@ -626,6 +626,151 @@
           "ref": "#25842"
         }
       ]
+    },
+    {
+      "id": "i18n.sms-test-answer-language",
+      "title": "Setup's Send test SMS answers in the caller's language: Accept-Language, else ?locale, picks the sentence, zh-TW reads Traditional, and an unknown or absent language reads English",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), over REST"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a stock showcase boot (dogfood §0), signed in as the seeded admin. sms is on the always-on slate (packages/spec/src/kernel/platform-capabilities.ts#PLATFORM_ALWAYS_ON_CAPABILITIES) and the stock boot sets no sms key, so the live transport is the log",
+          "the settings family sits at its default base, /api/settings, not under /api/v1 (packages/services/service-settings/src/settings-route-ledger.ts)"
+        ],
+        "knownGaps": [
+          "the Console's Setup → SMS button is not driven: which language its request names depends on the headers the client sends, which this item does not read"
+        ]
+      },
+      "steps": [
+        "POST /api/settings/sms/test { to: 'not-a-number' } three times: with Accept-Language: zh-CN, with Accept-Language: zh-TW, and with no Accept-Language and no ?locale",
+        "POST /api/settings/sms/test?locale=ja-JP { to: 'not-a-number' } with no Accept-Language; then the same with Accept-Language: xx-XX",
+        "POST /api/settings/sms/test { to: '+15555550123' } with Accept-Language: zh-CN"
+      ],
+      "acceptance": [
+        {
+          "clause": "an invalid to is refused in the caller's language, and zh-TW finds the Traditional sentence",
+          "oracle": "api",
+          "verify": "the message reads '请提供有效的 \"to\" 手机号码（建议使用 E.164 格式）。' under zh-CN, '請提供有效的 \"to\" 手機號碼（建議使用 E.164 格式）。' under zh-TW, and 'Provide a valid \"to\" phone number (E.164 recommended).' with no language (packages/services/service-sms/src/sms-test-copy.ts#smsTestCopy, through core's resolveLocale)",
+          "evidence": "the three answers"
+        },
+        {
+          "clause": "?locale stands in when no Accept-Language is sent, and a language off the table reads English",
+          "oracle": "api",
+          "verify": "?locale=ja-JP answers the ja-JP sentence ('有効な \"to\" 電話番号を指定してください（E.164 形式を推奨）。'); xx-XX answers the English one (packages/services/service-settings/src/settings-routes.ts, the request's locale handed to the action)",
+          "evidence": "the two answers"
+        },
+        {
+          "clause": "the log-only answer says nothing was sent, in the same language",
+          "oracle": "api",
+          "verify": "with a valid to on the stock boot the answer is ok: false, severity 'warning', message '当前没有可用的短信投递方式（服务商：无，仅记录日志），因此测试短信没有发送。请先选择服务商、填写其凭据并保存，再进行测试。' (SmsServicePlugin's sms/test action, packages/services/service-sms/src/sms-plugin.ts#SmsServicePlugin)",
+          "evidence": "the answer"
+        }
+      ],
+      "negative": [
+        "a zh-TW caller answered in Simplified Chinese is a FAIL: zh-TW resolves to zh-Hant",
+        "a log-only boot answering 'Sent test SMS …' in any language is a FAIL: nothing was delivered"
+      ],
+      "traps": [
+        "silent-coercion",
+        "absence-inference"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/services/service-sms/src/sms-test-copy.test.ts and packages/services/service-sms/src/sms-test-recipient.pin.test.ts; no live spec sends Accept-Language to sms/test"
+      },
+      "source": [
+        "packages/services/service-sms/src/sms-test-copy.ts#smsTestCopy and #SMS_TEST_COPY",
+        "packages/services/service-sms/src/sms-plugin.ts#SmsServicePlugin (the sms/test action)",
+        "packages/services/service-settings/src/settings-routes.ts (Accept-Language, else ?locale)",
+        "#30734 (sms/test answers in the caller's language)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — the sms/test answer follows the caller's language (#30734). Scoped sweep #32270 (epic #32022 M4, the zero-citation close-out), read from source at 60b99f8f; no live run made",
+          "ref": "#32270"
+        }
+      ]
+    },
+    {
+      "id": "i18n.seed-dataset-follows-organization-language",
+      "title": "An organization's seed datasets follow its language: the organization's Localization setting, else the founder's language, else the app's default picks the locale-scoped dataset, and the replay log names which rung decided",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "operator (local shell): the walled boot and its log",
+        "two signed-in founders: one whose sys_user.locale is zh-CN, one with no language set"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "an app whose seeds hold two datasets for one object that differ only by locale: one with locale ['en-US'], one with locale ['zh-CN'], each with a row name that tells them apart (packages/spec/src/data/seed.zod.ts#SeedSchema, `locale`), and an i18n.defaultLocale of en-US",
+          "a walled boot of that app at --log-level info, so organizations can be created (RUNNER.md, 'A stock `single` boot holds exactly one organization')"
+        ],
+        "knownGaps": [
+          "no stock app declares a locale-scoped seed dataset, so on every stock boot each load is unrestricted and the language rungs are never read; the walled-boot command boots the stock showcase, which has none. FOLLOW-UPS §19c",
+          "the first rung, the organization's own Localization setting, needs a value in force before the organization exists (the env override or the global row: at founding the organization has no row of its own), and it is left to the pins; so is the marketplace install, reseed and boot-heal use of the same rule"
+        ]
+      },
+      "steps": [
+        "as the zh-CN founder (sys_user.locale written by the language switcher, or PATCH /api/v1/data/sys_user/<id> { locale: 'zh-CN' }), POST /api/v1/auth/organization/create; read the boot log's seed-replayer line; read the object's rows in that organization",
+        "as the founder with no language set, create a second organization; read the line and the rows"
+      ],
+      "acceptance": [
+        {
+          "clause": "at founding the founder's language decides, the platform's built-in en-US default does not count as a setting, and only the dataset of that locale lands",
+          "oracle": "log",
+          "verify": "the log reads '[seed-replayer] organization <id> seeds for locale zh-CN (the user's language)'; the organization holds the zh-CN dataset's rows and none of the en-US one. A line naming en-US from the Localization setting would mean the manifest default (source: 'default') was taken as a choice (packages/runtime/src/seed-locale.ts#resolveSeedLocaleForLoad; the founder is handed over by packages/plugins/organizations/src/organizations-plugin.ts#OrganizationsPlugin)",
+          "evidence": "the log line and the row read"
+        },
+        {
+          "clause": "with no founder language the app's declared default decides",
+          "oracle": "log",
+          "verify": "the line reads 'seeds for locale en-US (the app's i18n.defaultLocale)' and the en-US dataset's rows land, none of the zh-CN one (packages/runtime/src/seed-locale.ts#describeSeedLocale)",
+          "evidence": "the log line and the row read"
+        }
+      ],
+      "negative": [
+        "both datasets landing in one organization is a FAIL when a rung answered: the loader filters on the resolved locale"
+      ],
+      "blocked": {
+        "by": "fixture",
+        "ref": "fixture gap: no stock app declares a locale-scoped seed dataset, so no stock boot reads the language rungs (FOLLOW-UPS §19c, #32270)"
+      },
+      "traps": [
+        "seed-data-thin",
+        "eventual-consistency"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "the runtime seed-locale tests, the organizations founder pin and the cloud-connection install and reseed pins of #30346; no live spec seeds by language"
+      },
+      "source": [
+        "packages/runtime/src/seed-locale.ts#resolveSeedLocaleForLoad and #describeSeedLocale",
+        "packages/runtime/src/app-plugin.ts (the per-organization replayer)",
+        "packages/plugins/organizations/src/organizations-plugin.ts#OrganizationsPlugin (hands the founder to the replayer)",
+        "packages/spec/src/data/seed.zod.ts#SeedSchema (`locale`)",
+        "#30346 (the install paths, reseed, heal and the per-organization replay pick seed datasets by language; ruling on #30281)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — seed datasets follow the organization's language (#30346). Scoped sweep #32270 (epic #32022 M4, the zero-citation close-out), read from source at 60b99f8f; no live run made",
+          "ref": "#32270"
+        }
+      ]
     }
   ]
 }
