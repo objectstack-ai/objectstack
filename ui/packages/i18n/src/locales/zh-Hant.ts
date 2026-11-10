@@ -3191,6 +3191,10 @@ const zhHant = {
       unknownApp: '某個應用',
       unidentified: '無法識別此應用。',
       clientId: '客戶端 ID',
+      unverified: '未經驗證的應用',
+      unverifiedHint: '此應用並非由此處的管理員註冊，其名稱未經核實。僅在您信任 {{destination}} 時才授權。',
+      destinationUnconfirmed: '無法確認此訪問權限將傳送到何處，因此無法在此授權。',
+      sentTo: '訪問權限將傳送到：',
       willAllow: '此應用將能夠：',
       scope: {
         openid: '確認您的身份',
@@ -4386,6 +4390,16 @@ const zhHant = {
       collapse: '收起',
       expandTable: '展開',
       exitExpandedTable: '關閉',
+    },
+    answerSource: {
+      title: '計算方式',
+      object: '物件',
+      filter: '篩選條件',
+      allRecords: '全部記錄',
+      groupedBy: '分組依據',
+      aggregations: '彙總',
+      records: '記錄',
+      visibleToYou: '僅包含你可見的記錄',
     },
     tool: {
       aggregate_data: '彙總相關資料',

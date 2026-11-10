@@ -220,6 +220,7 @@ export async function seedRunGrants(
     if (needsGrants) {
         delete (runContext as SeededRunContext).posture;
         delete (runContext as SeededRunContext).principalKind;
+        delete (runContext as SeededRunContext).permissionSetAddresses;
     }
     if (
         runContext.runAs !== 'system' &&
@@ -233,6 +234,11 @@ export async function seedRunGrants(
                 if (needsGrants) {
                     runContext.positions = Array.isArray(grants.positions) ? grants.positions : [];
                     runContext.permissions = Array.isArray(grants.permissions) ? grants.permissions : [];
+                    // [ADR-0150 D3] The addresses of those same sets, so a
+                    // name two packages ship resolves to the one granted.
+                    if (Array.isArray(grants.permissionSetAddresses)) {
+                        (runContext as SeededRunContext).permissionSetAddresses = grants.permissionSetAddresses;
+                    }
                     if (grants.tenantId && !runContext.tenantId) runContext.tenantId = grants.tenantId;
                     // The rung the resolver derived from these same grants,
                     // as the user's request carries it. Seeded with them and
@@ -351,6 +357,7 @@ async function deciderSegmentContext(
     };
     delete switched.positions;
     delete switched.permissions;
+    delete switched.permissionSetAddresses;
     delete switched.org_user_ids;
     // The trigger user's rung is theirs: kept under the decider's id, a
     // platform administrator's submission would hand a member's decision

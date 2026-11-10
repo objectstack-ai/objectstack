@@ -1117,6 +1117,7 @@
     "system/SettingsManifest:version",
     "system/SettingsManifest:visible",
     "system/SettingsManifest:writePermission",
+    "system/SettingsNamespacePayload:live",
     "system/SettingsNamespacePayload:manifest",
     "system/SettingsNamespacePayload:values",
     "system/Span:attributes",

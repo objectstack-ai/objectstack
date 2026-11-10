@@ -809,6 +809,27 @@ describe('HookContextSchema', () => {
 
       expect(context.user?.organizationId).toBe('org_456');
     });
+
+    // [ADR-0151 D5 · O4] The principal's kind is DECLARED on the session, so a
+    // hook typed `(ctx: HookContext)` reads it and a parse keeps it — this
+    // shape is not `.strict()`, so an undeclared key would be stripped silently.
+    it('carries session.principalKind with the envelope\'s five values, and refuses any other', () => {
+      for (const principalKind of ['human', 'agent', 'service', 'guest', 'system'] as const) {
+        const context = HookContextSchema.parse({
+          object: 'account', event: 'beforeInsert', input: {}, ql: {},
+          session: { userId: 'user_123', principalKind },
+        });
+        expect(context.session?.principalKind).toBe(principalKind);
+      }
+      const typed: NonNullable<HookContext['session']>['principalKind'] = 'agent';
+      expect(typed).toBe('agent');
+      const wrong = HookContextSchema.safeParse({
+        object: 'account', event: 'beforeInsert', input: {}, ql: {},
+        session: { userId: 'user_123', principalKind: 'robot' },
+      });
+      expect(wrong.success).toBe(false);
+      expect(wrong.error?.issues[0]?.path).toEqual(['session', 'principalKind']);
+    });
   });
 
   describe('Transaction Support', () => {

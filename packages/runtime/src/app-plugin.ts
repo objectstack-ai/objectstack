@@ -25,7 +25,7 @@ import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/secu
 import { SeedLoaderService } from './seed-loader.js';
 import { recordSeedOutcome } from './seed-summary.js';
 import { contributeCodeDatasourceNames } from './code-datasource-names.js';
-import { connectPackageDatasources } from './declared-datasources.js';
+import { connectPackageDatasources, recordBootDatasourceConnect } from './declared-datasources.js';
 import { mergeSeedDatasets, readSeedDatasets, registerSeedReplayerOnce } from './seed-datasets.js';
 import { describeSeedLocale, resolveSeedLocaleForLoad } from './seed-locale.js';
 import { declareSeedSource, recordOrganizationReplay, type SeedLandingReport } from './seed-settlement.js';
@@ -1107,6 +1107,9 @@ export class AppPlugin implements Plugin {
                 objects: Array.isArray(declaredObjects) ? declaredObjects : [],
                 mappedObjects,
             });
+            // A connection opened here, before any `start()`, serves its name
+            // for every package this boot composes that declares it too.
+            recordBootDatasourceConnect(ctx, appId, () => this.codeDefinedDatasourceOwners(ctx), results);
             const connected = results.filter((r) => r.status === 'connected');
             if (connected.length > 0) {
                 ctx.logger.info('Auto-connected declared datasources', {

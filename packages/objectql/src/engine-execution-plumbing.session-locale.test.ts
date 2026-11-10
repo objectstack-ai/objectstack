@@ -69,3 +69,43 @@ describe('a guest request reaches create hooks with a session, so an anonymous c
     expect(buildSession({ principalKind: 'guest' } as any)).toBeUndefined();
   });
 });
+
+// [ADR-0151 D5 · O4] The principal's kind rides on the hook session, so a
+// hook asks one question — "did an agent do this?" — for an OAuth client and
+// an AI service account alike. Built through the REAL assembler where a door
+// decides it, so what the doors emit is measured here rather than assumed.
+describe('[ADR-0151 D5] buildSession carries the principal\'s kind', () => {
+  const authz = (over: Record<string, unknown> = {}) => ({
+    userId: 'u1', tenantId: 'org_1',
+    positions: [] as string[], permissions: [] as string[], directPermissions: [] as string[],
+    systemPermissions: [] as string[], org_user_ids: ['u1'], accessible_org_ids: ['org_1'],
+    ...over,
+  });
+  const door = (a: Record<string, unknown>) => assembleExecutionContextOrGuest({
+    authz: a as any, oauth: undefined, localization: undefined, requestLocale: undefined,
+    accessToken: undefined, authGate: undefined,
+  });
+
+  it('an AI service account reads `agent` with itself as the caller', () => {
+    const session = buildSession(door(authz({ userId: 'u_bot', principalKind: 'agent' })));
+    expect(session).toMatchObject({ userId: 'u_bot', principalKind: 'agent' });
+  });
+
+  it('CONTROL — a person reads `human` through the door', () => {
+    expect(buildSession(door(authz()))).toMatchObject({ userId: 'u1', principalKind: 'human' });
+  });
+
+  it('copies each of the envelope\'s five values verbatim', () => {
+    for (const principalKind of ['human', 'agent', 'service', 'guest', 'system'] as const) {
+      expect(buildSession({ userId: 'u1', principalKind } as any)?.principalKind).toBe(principalKind);
+    }
+  });
+
+  it('an envelope with no kind reads no kind — never a defaulted `human`', () => {
+    expect(buildSession({ userId: 'u1' } as any)).not.toHaveProperty('principalKind');
+  });
+
+  it('a kind alone does not make a session — it says what sort of caller, not who', () => {
+    expect(buildSession({ principalKind: 'agent' } as any)).toBeUndefined();
+  });
+});

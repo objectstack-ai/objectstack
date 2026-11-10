@@ -490,7 +490,7 @@ export const fr: PlatformTranslationData = {
       groups: {
         provider: {
           title: 'Fournisseur',
-          description: 'Choisissez le backend LLM. Le mode Memory renvoie l’entrée telle quelle — utile pour les tests, jamais en production.',
+          description: 'Choisissez le backend LLM.',
         },
         gateway: {
           title: 'Vercel AI Gateway',
@@ -537,7 +537,6 @@ export const fr: PlatformTranslationData = {
         provider: {
           label: 'Fournisseur',
           options: {
-            memory: 'Memory (écho — tests uniquement)',
             gateway: 'Vercel AI Gateway',
             openai: 'OpenAI',
             anthropic: 'Anthropic',

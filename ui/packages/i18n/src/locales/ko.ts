@@ -3109,6 +3109,10 @@ const ko = {
       unknownApp: "어떤 애플리케이션",
       unidentified: "이 애플리케이션을 식별할 수 없습니다.",
       clientId: "클라이언트 ID",
+      unverified: "확인되지 않은 애플리케이션",
+      unverifiedHint: "이 애플리케이션은 이곳의 관리자가 등록한 것이 아니므로 그 이름이 확인되지 않았습니다. {{destination}}을(를) 신뢰하는 경우에만 승인하세요.",
+      destinationUnconfirmed: "이 액세스 권한이 전송될 위치를 확인할 수 없어 여기서 승인할 수 없습니다.",
+      sentTo: "액세스 권한이 전송되는 곳:",
       willAllow: "이 앱은 다음을 할 수 있습니다:",
       scope: {
         openid: "본인 확인",
@@ -4175,6 +4179,16 @@ const ko = {
       collapse: '접기',
       expandTable: '펼치기',
       exitExpandedTable: '닫기',
+    },
+    answerSource: {
+      title: '계산 방법',
+      object: '오브젝트',
+      filter: '필터',
+      allRecords: '모든 레코드',
+      groupedBy: '그룹 기준',
+      aggregations: '집계',
+      records: '레코드',
+      visibleToYou: '내가 볼 수 있는 레코드만',
     },
     tool: {
       aggregate_data: "관련 데이터 집계하기",

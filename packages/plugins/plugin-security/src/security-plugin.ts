@@ -17,7 +17,7 @@ import {
   resolveWriteEpochSource,
   type WriteEpochSource,
 } from './write-epoch-source.js';
-import { PermissionEvaluator, crudBucketForOperation } from './permission-evaluator.js';
+import { PermissionEvaluator, crudBucketForOperation, type CatalogSetLoader } from './permission-evaluator.js';
 import { composeHumanBaselinePermissionSets, PLATFORM_BASELINE_PERMISSION_SET } from './app-default-permission-set.js';
 import { DelegatedAdminGate } from './delegated-admin-gate.js';
 import {
@@ -41,6 +41,7 @@ import {
   refuseAcceptedDefaultsWithoutWall,
   type DeploymentAcceptance,
 } from './suggested-audience-bindings.js';
+import { refuseAgentCeilingInBaselineOptions } from './agent-ceiling-grant-refusal.js';
 import { RLSCompiler, RLS_DENY_FILTER, policyDeclaresClause } from './rls-compiler.js';
 import {
   andComposeLayers,
@@ -48,7 +49,7 @@ import {
 import {
   isVerifiedPlatformOwnerRow,
 } from './platform-owner-wall-bypass.js';
-import { isConfiguredPlatformAdminEmail, createSecurityCatalogReader, bindSecurityCatalogReader, securityCatalogReaderOf, readPositionGrantsInForce, countPositionHolders } from '@objectstack/core';
+import { isConfiguredPlatformAdminEmail, createSecurityCatalogReader, bindSecurityCatalogReader, securityCatalogReaderOf, readPositionGrantsInForce, countPositionHolders, resolveCatalogReference } from '@objectstack/core';
 // [#25223 cut 1] The leaf readers (policy collection, unresolved-posture
 // probes, field masks, field-name tables); the methods of the same names below
 // hand each body the members it reads (`ObjectInputsHost`).
@@ -1441,20 +1442,28 @@ export class SecurityPlugin implements Plugin {
    */
   private readonly objectSecurityMetaCache = new Map<string, ObjectSecurityMeta>();
   /**
-   * [ADR-0131 D3/D4] The permission-set loader for names the metadata list and
-   * the bootstrap sets did not answer: the security catalog's definitions, by
-   * name. Environment-level — the catalog takes no organization — so one loader
-   * serves every caller. See where it is built.
+   * [ADR-0131 D3/D4, ADR-0150 D3] The permission-set loader: the security
+   * catalog's definition of each requested set, resolved by the catalog's one
+   * rule. Environment-level — the catalog takes no organization — so one
+   * loader serves every caller. See where it is built.
    */
-  private catalogSetLoader?: (names: string[]) => Promise<PermissionSet[]>;
+  private catalogSetLoader?: CatalogSetLoader;
+  /**
+   * [ADR-0150 D3] Each refused request the catalog loader met, said once per
+   * plugin instance: a name with two or more holders and no address to tell
+   * them apart grants nothing, every request, until it is bound.
+   */
+  private readonly refusedSetRequestsSaid = new Set<string>();
 
   /**
    * The permission-set loader for ONE caller. `undefined` when no engine is
    * wired, so `resolvePermissionSets` keeps its "no third source" branch. The
    * caller does not choose the answer: the catalog is environment-level.
    */
-  private dbLoaderForContext(_context: any): ((names: string[]) => Promise<PermissionSet[]>) | undefined {
-    return this.catalogSetLoader;
+  private dbLoaderForContext(_context: any): CatalogSetLoader | undefined {
+    // [ADR-0150 D3] Only over a bound catalog: without one the evaluator's
+    // by-name arm answers, as `resolvePermissionSets` documents.
+    return this.ql && securityCatalogReaderOf(this.ql) ? this.catalogSetLoader : undefined;
   }
   /**
    * [#10757] Per-EXECUTION-CONTEXT memo for
@@ -1603,6 +1612,9 @@ export class SecurityPlugin implements Plugin {
     // with the platform's own, never one displacing the other (ADR-0090 D5).
     this.baselinePermissionSets = composeHumanBaselinePermissionSets(this.fallbackPermissionSet);
     this.acceptedDefaultPermissionSets = readAcceptedDefaultPermissionSetsOption(options.acceptedDefaultPermissionSets);
+    // [ADR-0090 D10] The baseline is held by every signed-in person, so an
+    // agent ceiling set is never part of it, however it was named.
+    refuseAgentCeilingInBaselineOptions(this.fallbackPermissionSet, this.acceptedDefaultPermissionSets);
   }
 
   /**
@@ -2111,8 +2123,7 @@ export class SecurityPlugin implements Plugin {
       );
     }
 
-    // [ADR-0131 D3/D4] The third source `resolvePermissionSets` asks, for the
-    // names the metadata list and the bootstrap sets did not answer: the
+    // [ADR-0131 D3/D4] The one source `resolvePermissionSets` asks: the
     // security catalog's definition of each name (`securityCatalogReaderOf`,
     // the reader `bindSecurityCatalogReader` attached to this engine in
     // `start()`) — the environment registry, where every package manifest's
@@ -2135,13 +2146,41 @@ export class SecurityPlugin implements Plugin {
     //
     // Whether a set is switched off is not this loader's question: the names
     // it is asked for arrive already judged by the resolver's ledger read.
-    this.catalogSetLoader = async (names: string[]) => {
+    //
+    // [ADR-0150 D3] Each request is resolved by the catalog's one rule
+    // (`resolvePermissionScoped`): at the holder its address names when the
+    // context carried one, else with no caller. One definition per HOLDER is
+    // answered, so two packages' sets of one name are both granted when both
+    // were; a name two holders answer with no address is refused, said once,
+    // and grants nothing — never the first of the two.
+    this.catalogSetLoader = async (requests) => {
       const catalog = securityCatalogReaderOf(ql);
       if (!catalog) return [];
       const out: PermissionSet[] = [];
-      for (const name of new Set(names)) {
-        const entry = await catalog.resolve('permission', name);
-        if (entry) out.push(entry.definition as unknown as PermissionSet);
+      const taken = new Set<string>();
+      for (const request of requests) {
+        const answer = await resolveCatalogReference(
+          catalog,
+          'permission',
+          request.name,
+          request.packageId ? { packageId: request.packageId } : undefined,
+        );
+        if (answer.status === 'refused') {
+          const said = `${request.name}\u0000${answer.candidates.join(',')}`;
+          if (!this.refusedSetRequestsSaid.has(said)) {
+            this.refusedSetRequestsSaid.add(said);
+            this.logger?.warn?.(
+              `[security] permission set "${request.name}" grants nothing: ${answer.message}`,
+              { permissionSet: request.name, candidates: [...answer.candidates], reason: answer.reason },
+            );
+          }
+          continue;
+        }
+        if (answer.status !== 'resolved') continue;
+        const holder = `${answer.entry.packageId ?? ''}\u0000${answer.entry.name}`;
+        if (taken.has(holder)) continue;
+        taken.add(holder);
+        out.push(answer.entry.definition as unknown as PermissionSet);
       }
       return out;
     };
@@ -3841,7 +3880,7 @@ export class SecurityPlugin implements Plugin {
     context?: any,
   ): Promise<PositionGrantSummary[]> {
     const names = positions.filter((n): n is string => typeof n === 'string' && n !== '');
-    const { inForce, disabledPositions } = await readPositionGrantsInForce(this.ql, names);
+    const { inForce, addresses, disabledPositions } = await readPositionGrantsInForce(this.ql, names);
     const tenantId = typeof context?.tenantId === 'string' && context.tenantId !== '' ? context.tenantId : undefined;
     const holders = tenantId && await this.canReadObject('sys_user_position', context)
       ? await countPositionHolders(this.ql, tenantId, names)
@@ -3851,12 +3890,13 @@ export class SecurityPlugin implements Plugin {
       const permissionSets: PositionGrantSummary['permissionSets'] = [];
       if (!disabledPositions.has(position)) {
         const declared = inForce.get(position) ?? [];
+        // [ADR-0150 D3, D7] At the holders the position's package resolved them to.
         const resolved = await this.permissionEvaluator.resolvePermissionSets(
           declared,
           this.metadata,
           this.bootstrapPermissionSets,
-          this.dbLoaderForContext(context),
-          { logger: this.logger },
+          undefined,
+          { catalogLoader: this.dbLoaderForContext(context), logger: this.logger, addresses: addresses.get(position) },
         );
         for (const set of resolved) {
           const name = (set as any)?.name;
@@ -3980,11 +4020,11 @@ export class SecurityPlugin implements Plugin {
       fallback,
       this.metadata,
       this.bootstrapPermissionSets,
+      undefined,
       // Scoped like every other resolution: a guest of one organization must
       // resolve THAT organization's baseline set, not whichever copy of the
       // name the driver ordered first.
-      this.dbLoaderForContext(context),
-      { logger: this.logger },
+      { catalogLoader: this.dbLoaderForContext(context), logger: this.logger },
     );
   }
 
@@ -5325,6 +5365,14 @@ export class SecurityPlugin implements Plugin {
    * `ERR_DATASOURCE_UNAVAILABLE` → `503`) and this gate answers nothing. It
    * used to answer the 404 above, because the existence probe flattened a
    * fault into "absent" — the one thing an outage must never be reported as.
+   *
+   * [ADR-0055 §3] Every `403` above is decided on the master the STORED
+   * reference names, whatever the caller may read, and worded by what the
+   * caller may read: a caller whose field-level security does not let them
+   * read the detail's master reference ({@link getReadableFields}, failing
+   * closed) gets the same `403 PERMISSION_DENIED`, for the same leg, with a
+   * sentence that names no master, no master record and no leg. A caller who
+   * can read the reference gets the specific sentence.
    */
   private assertControlledByParentWrite(
     permissionSets: PermissionSet[],
@@ -5335,11 +5383,12 @@ export class SecurityPlugin implements Plugin {
   ): Promise<void> {
     // [#25223 cut 3] The body moved to `security-plugin-cbp-write-gate.ts` (see `CbpWriteGateHost`).
     const readPermissionEvaluator = () => this.permissionEvaluator;
-    const host: Pick<CbpWriteGateHost, 'assertControlledByParentChainEditable' | 'controlledByParentPredicateWriteMasters' | 'declaresControlledByParent' | 'extractSingleId' | 'permissionEvaluator' | 'readRowById' | 'resolveCbpRelation'> = {
+    const host: Pick<CbpWriteGateHost, 'assertControlledByParentChainEditable' | 'controlledByParentPredicateWriteMasters' | 'declaresControlledByParent' | 'extractSingleId' | 'getReadableFields' | 'permissionEvaluator' | 'readRowById' | 'resolveCbpRelation'> = {
       assertControlledByParentChainEditable: (...a) => this.assertControlledByParentChainEditable(...a),
       controlledByParentPredicateWriteMasters: (...a) => this.controlledByParentPredicateWriteMasters(...a),
       declaresControlledByParent: (...a) => this.declaresControlledByParent(...a),
       extractSingleId: (...a) => this.extractSingleId(...a),
+      getReadableFields: (...a) => this.getReadableFields(...a),
       get permissionEvaluator() { return readPermissionEvaluator(); },
       readRowById: (...a) => this.readRowById(...a),
       resolveCbpRelation: (...a) => this.resolveCbpRelation(...a),
