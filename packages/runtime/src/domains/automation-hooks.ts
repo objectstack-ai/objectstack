@@ -244,7 +244,7 @@ export async function handleInboundHookRequest(
  */
 function memberFaultAnswer(
     deps: DomainHandlerDeps,
-    logger: { error?: (...args: unknown[]) => void } | undefined,
+    logger: DomainHandlerDeps['logger'],
     err: unknown,
 ): HttpDispatcherResult {
     logger?.error?.(
