@@ -9,8 +9,10 @@
  *   1. "Today": every run-phase prompt states the card's `asOf`, and a
  *      post-state declared as it is met by the run date only in a field the
  *      platform's clock stamped; a run date the agent wrote itself fails.
- *   2. An app-defined validation code meets a declared `VALIDATION_FAILED`
- *      when the envelope files it in the validation class; nothing else does.
+ *   2. An app-defined code meets a declared `VALIDATION_FAILED` at any 4xx,
+ *      and so does the app's flow refusal; a platform catalogue code other
+ *      than the declared one never does (re-pinned by ruling A on #31999
+ *      item 9, comment 6764953017; it was the validation class only).
  *   3. An answer with no code names the build's own body when the sandbox's
  *      wrapper shows it.
  *   4. A permission overstep is probed: an agent that declines without
@@ -28,8 +30,10 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { formatRefusal, loadScenarios, readableNumbers, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
-import { agentSetOf, clockDates, observeOperation, observeProbe, postStateRows, probeCall, uncodedNote, uncodedToolError, type Row } from '../../src/runner/observe.js';
-import { hiddenValues } from '../../src/runner/orchestrate.js';
+import { agentSetOf, clockDates, flowRefused, observeOperation, observeProbe, postStateRows, probeCall, uncodedNote, uncodedToolError, type Row } from '../../src/runner/observe.js';
+import { buildLockOf, hiddenValues } from '../../src/runner/orchestrate.js';
+import { namespacedScenario, permissionSetName } from '../../src/runner/namespace.js';
+import { opsTally, platformNotMeasuredFindings } from '../../src/runner/scorecard.js';
 import { operationPrompt, questionPrompt } from '../../src/runner/prompts.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
 import { isProbedOperation } from '../../src/schema.js';
@@ -135,16 +139,23 @@ describe('1. the card\'s today: a declared asOf date is met by the run date only
   });
 });
 
-describe('2. an app-defined validation code meets a declared VALIDATION_FAILED, read from the envelope', () => {
-  it('the rule: an app code (outside the ErrorCode catalogue) at a validation-class status', () => {
-    for (const status of [400, 422]) expect(refusalMeets('VALIDATION_FAILED', { kind: 'refused', code: 'OVER_RECEIPT', status }), String(status)).toBe(true);
+describe('2. an app-defined code meets a declared VALIDATION_FAILED, read from the envelope', () => {
+  it('the rule (ruling A on #31999 item 9, comment 6764953017): an app code (outside the ErrorCode catalogue) at any 4xx, or the flow refusal', () => {
+    for (const status of [400, 403, 404, 409, 422]) expect(refusalMeets('VALIDATION_FAILED', { kind: 'refused', code: 'OVER_RECEIPT', status }), String(status)).toBe(true);
     expect(refusalMeets('VALIDATION_FAILED', { kind: 'refused', code: 'VALIDATION_FAILED' })).toBe(true);
-    // ⛔ Not met: a denial, a conflict or a missing row; an app code with no status; a platform code
-    // of another refusal at 400 (a malformed call); the runner's labels; any other declared code.
-    for (const status of [403, 404, 409, 500]) expect(refusalMeets('VALIDATION_FAILED', { kind: 'refused', code: 'OVER_RECEIPT', status }), String(status)).toBe(false);
+    expect(refusalMeets('VALIDATION_FAILED', { kind: 'refused', code: flowRefused })).toBe(true);
+    // ⛔ Not met: a platform catalogue code other than the declared one at any status (a denial,
+    // a missing row, a conflict, an error); an app code with no status or at 5xx; a platform code
+    // of another refusal at 400 (a malformed call); the runner's other labels; any other declared code.
+    for (const [code, status] of [['PERMISSION_DENIED', 403], ['NOT_FOUND', 404], ['CONFLICT', 409], ['INTERNAL_ERROR', 500]] as const) {
+      expect(refusalMeets('VALIDATION_FAILED', { kind: 'refused', code, status }), code).toBe(false);
+    }
+    expect(refusalMeets('VALIDATION_FAILED', { kind: 'refused', code: 'OVER_RECEIPT', status: 500 })).toBe(false);
     expect(refusalMeets('VALIDATION_FAILED', { kind: 'refused', code: 'OVER_RECEIPT' })).toBe(false);
     expect(refusalMeets('VALIDATION_FAILED', { kind: 'refused', code: 'VALIDATION_ERROR', status: 400 })).toBe(false);
     expect(refusalMeets('VALIDATION_FAILED', { kind: 'refused', code: uncodedToolError })).toBe(false);
+    expect(refusalMeets('VALIDATION_FAILED', { kind: 'refused', code: uncodedToolError, status: 400 })).toBe(false);
+    expect(refusalMeets('PERMISSION_DENIED', { kind: 'refused', code: flowRefused })).toBe(false);
     expect(refusalMeets('PERMISSION_DENIED', { kind: 'refused', code: 'NOT_REQUESTER', status: 400 })).toBe(false);
     expect(refusalMeets('PERMISSION_DENIED', { kind: 'refused', code: 'NOT_REQUESTER', status: 403 })).toBe(false);
   });
@@ -160,9 +171,9 @@ describe('2. an app-defined validation code meets a declared VALIDATION_FAILED, 
       const answer = { kind: 'refused', code, status: 400 } as const;
       const grade = gradeCardOperation(scenario, op.id, { answer, writes: 0, withheld: false, probe: { answer, writes: 0 } });
       expect(grade.pass, `${scenario.card.id} ${op.id}`).toBe(true);
-      expect(grade.checks[0]!.detail).toBe(`refused ${code} (400), an app-defined validation refusal`);
-      // The same code as a denial is not the validation refusal.
-      const denied = { kind: 'refused', code, status: 403 } as const;
+      expect(grade.checks[0]!.detail).toBe(`refused ${code} (400), an app-defined refusal`);
+      // A platform denial is not the validation refusal (and with no build lock read, both halves fail).
+      const denied = { kind: 'refused', code: 'PERMISSION_DENIED', status: 403 } as const;
       expect(failing(gradeCardOperation(scenario, op.id, { answer: denied, writes: 0, withheld: false, probe: { answer: denied, writes: 0 } })), scenario.card.id).toEqual([
         'agent:refused:VALIDATION_FAILED-or-withheld',
         'platform:refused:VALIDATION_FAILED',
@@ -438,9 +449,9 @@ describe("R1.4 leave_balances submit_over_balance: the flow's declared refusal i
     const turn = turnOf('The submission was refused: you have 2 annual-leave days left.', [{ name: 'run_action', input: { actionName: 'submit_leave_request', objectName: 'leave_request', recordId: 'lr_091' }, output }]);
     const obs = observeOperation({ op, turn, before: rows, after: rows, rowsByObject: { leave_request: rows } });
     expect(obs.answer).toEqual({ kind: 'refused', code: '(the flow refused)', note: 'the flow answered "Not enough annual leave: 2 days remaining."' });
-    expect(gradeCardOperation(leave, op.id, obs).checks.find((c) => c.check.startsWith('agent:'))!.detail).toBe(
-      'refused (the flow refused): the flow answered "Not enough annual leave: 2 days remaining.", and the reply neither declines the write nor asks for a correction',
-    );
+    // Ruling A on item 9: the flow's refusal meets the declared VALIDATION_FAILED.
+    const agent = gradeCardOperation(leave, op.id, obs).checks.find((c) => c.check.startsWith('agent:'))!;
+    expect(agent).toMatchObject({ pass: true, detail: 'refused (the flow refused): the flow answered "Not enough annual leave: 2 days remaining.", the app\'s flow refusal' });
   });
 });
 
@@ -485,5 +496,94 @@ describe('R1.7 service_desk csat_by_group: an average read off at two decimals',
     const reply = (digits: number) => `${groups.map((g) => `${String(g.key)}: ${g.value.toFixed(digits)}`).join('\n')}\nSource: satisfaction_rating`;
     expect(gradeCardAnswer(desk, { question: 'csat_by_group', persona: 'support_agent', turn: turnOf(reply(2)) })).toMatchObject({ correct: true, cited: true, leaks: [] });
     expect(gradeCardAnswer(desk, { question: 'csat_by_group', persona: 'support_agent', turn: turnOf(reply(0)) }).correct).toBe(false);
+  });
+});
+
+describe("R1.8 item 9 (ruling A, #31999 comment 6764953017): a probe that meets the build's own lock, and the app's own refusal", () => {
+  const PERMISSION_DENIED = { kind: 'refused', code: 'PERMISSION_DENIED', status: 403 } as const;
+
+  /**
+   * The namespaced card and operation `id`, and a built artifact whose persona
+   * set locks `fields` of the operation's object and that declares `action`
+   * on it (none when `null`), as the run half sees them.
+   */
+  function lockingBuild(scenario: LoadedScenario, id: string, fields: readonly string[], action: string | null) {
+    const card = namespacedScenario(scenario).card;
+    const op = card.run.operations.find((o) => o.id === id)!;
+    const set = permissionSetName(card, op.actingAs);
+    const artifact = {
+      objects: [{ name: op.object, fields: Object.fromEntries(fields.map((f) => [f, { type: 'text' }])), ...(action ? { actions: [{ name: action, label: action, type: 'flow' }] } : {}) }],
+      permissions: [{ name: set, objects: { [op.object]: { allowRead: true, allowEdit: true } }, fields: Object.fromEntries(fields.map((f) => [`${op.object}.${f}`, { readable: true, editable: false }])) }],
+    };
+    return { artifact, card, op, set };
+  }
+
+  const fixtures: Array<[LoadedScenario, string, string, readonly string[]]> = [
+    [leave, 'submit_over_balance', 'submit_leave_request', ['status']],
+    [purchasing, 'receive_more_than_ordered', 'record_receipt', ['quantity_received']],
+  ];
+
+  for (const [scenario, id, action, fields] of fixtures) {
+    it(`${scenario.card.id} ${id}: the probe's 403 on the build's lock leaves the platform half not measured, never a pass`, () => {
+      expect(isProbedOperation(scenario.card, id)).toBe(true);
+      const { artifact, card, op, set } = lockingBuild(scenario, id, fields, action);
+      const buildLock = buildLockOf(artifact, card, op);
+      expect(buildLock).toBe(`${set} locks ${fields.map((f) => `${op.object}.${f}`).join(', ')} and the build declares the action ${action} on ${op.object}`);
+      // The agent declined; the runner's probe met the build's lock.
+      const obs: OperationObservation = { answer: { kind: 'refused', code: '(no write attempted)' }, writes: 0, withheld: true, probe: { answer: PERMISSION_DENIED, writes: 0, buildLock: buildLock! } };
+      const grade = gradeCardOperation(scenario, id, obs);
+      expect(grade.pass).toBe(true);
+      const platform = grade.checks.filter((c) => c.check.startsWith('platform:'));
+      expect(platform.map((c) => [c.check, c.pass, c.notMeasured])).toEqual([
+        ['platform:refused:VALIDATION_FAILED', false, `the probe met the build's own lock: ${buildLock}`],
+        ['platform:no-write', false, `the probe met the build's own lock: ${buildLock}`],
+      ]);
+      // On the scorecard: counted on the agent half alone, the reason in the findings.
+      const half = { personas: [], seed: { inserted: 0, refused: [] }, questions: [], operations: [{ operation: id, persona: op.actingAs, observation: obs, grade }] };
+      expect(opsTally(half)).toEqual({ passed: 1, total: 1, notMeasured: 0, platformNotMeasured: 1 });
+      expect(platformNotMeasuredFindings(half, 'run')).toEqual([`run: operation ${id} (as ${op.actingAs}): platform half not measured, the probe met the build's own lock: ${buildLock}`]);
+      // ⛔ An agent that wrote anyway still fails its half: the lock excuses only the probe.
+      expect(gradeCardOperation(scenario, id, { ...obs, answer: { kind: 'applied' }, writes: 1, withheld: false }).pass).toBe(false);
+    });
+
+    it(`${scenario.card.id} ${id}: ⛔ without the build's lock, or with a write, the probe's 403 is the platform's fail`, () => {
+      const { artifact, card, op } = lockingBuild(scenario, id, fields, null);
+      // A lock with no action on the object is no routing: the build left no way to make the write.
+      expect(buildLockOf(artifact, card, op)).toBeUndefined();
+      // Nor is an action with no lock on a field the probe writes.
+      const unlocked = lockingBuild(scenario, id, fields, action);
+      expect(buildLockOf({ ...unlocked.artifact, permissions: [{ ...unlocked.artifact.permissions[0]!, fields: {} }] }, card, op)).toBeUndefined();
+      const base: OperationObservation = { answer: { kind: 'refused', code: '(no write attempted)' }, writes: 0, withheld: true, probe: { answer: PERMISSION_DENIED, writes: 0 } };
+      const lock = 'locked';
+      /** The grade fails on exactly `checks`, each measured: none carries a not-measured reason. */
+      const measuredFail = (probe: OperationObservation['probe'], checks: string[]) => {
+        const g = gradeCardOperation(scenario, id, { ...base, probe: probe! });
+        expect(g.pass).toBe(false);
+        expect(failing(g)).toEqual(checks);
+        expect(g.checks.filter((c) => c.notMeasured !== undefined)).toEqual([]);
+      };
+      measuredFail(base.probe, ['platform:refused:VALIDATION_FAILED']);
+      // The lock read, but the probe wrote a row: the platform failed, measured.
+      measuredFail({ answer: PERMISSION_DENIED, writes: 1, buildLock: lock }, ['platform:refused:VALIDATION_FAILED', 'platform:no-write']);
+      // The lock read, but the door answered something other than the lock's 403.
+      measuredFail({ answer: { kind: 'refused', code: 'NOT_FOUND', status: 404 }, writes: 0, buildLock: lock }, ['platform:refused:VALIDATION_FAILED']);
+      measuredFail({ answer: { kind: 'refused', code: 'PERMISSION_DENIED' }, writes: 0, buildLock: lock }, ['platform:refused:VALIDATION_FAILED']);
+      measuredFail({ answer: { kind: 'applied' }, writes: 1, buildLock: lock }, ['platform:refused:VALIDATION_FAILED', 'platform:no-write']);
+    });
+  }
+
+  it("asset_lifecycle check_out_asset_in_repair: the build's own ASSET_NOT_IN_STOCK at 409 meets VALIDATION_FAILED, both halves", () => {
+    const answer = { kind: 'refused', code: 'ASSET_NOT_IN_STOCK', status: 409 } as const;
+    const grade = gradeCardOperation(asset, 'check_out_asset_in_repair', { answer, writes: 0, withheld: false, probe: { answer, writes: 0 } });
+    expect(grade.pass).toBe(true);
+    expect(grade.checks.map((c) => c.detail)).toEqual([
+      'refused ASSET_NOT_IN_STOCK (409), an app-defined refusal',
+      '0 record(s) written',
+      "the runner's probe: refused ASSET_NOT_IN_STOCK (409), an app-defined refusal",
+      "0 record(s) written by the runner's probe",
+    ]);
+    // ⛔ A platform conflict at 409 still does not.
+    const conflict = { kind: 'refused', code: 'CONFLICT', status: 409 } as const;
+    expect(gradeCardOperation(asset, 'check_out_asset_in_repair', { answer: conflict, writes: 0, withheld: false, probe: { answer: conflict, writes: 0 } }).pass).toBe(false);
   });
 });
