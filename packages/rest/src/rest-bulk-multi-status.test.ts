@@ -17,6 +17,7 @@ import { describe, it, expect, vi } from 'vitest';
 // function; pay that load during collection, not inside a case's clock.
 import '@objectstack/objectql';
 import { RestServer } from './rest-server';
+import { httpRequestForRoute } from './http-request-test-builder.js';
 
 function createMockServer() {
   return {
@@ -72,7 +73,7 @@ async function post(answer: unknown, path: string, body: unknown) {
   const route = rest.getRoutes().find((r: any) => r.method === 'POST' && r.path === path);
   if (!route) throw new Error(`route not registered: ${path}`);
   const res = makeRes();
-  await route.handler({ method: 'POST', params: { object: 'invoice' }, query: {}, body }, res);
+  await route.handler(httpRequestForRoute(route, { params: { object: 'invoice' }, body }), res);
   return res;
 }
 
