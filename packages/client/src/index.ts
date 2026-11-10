@@ -2087,8 +2087,10 @@ export class ObjectStackClient {
      * When the door refuses the read for its holders (a qualifier whose
      * package holds no item of the name while another holder does, or a name
      * the address cannot tell apart), the promise REJECTS with
-     * `409 RESOURCE_CONFLICT` (`err.code`, `err.httpStatus`), and `err.message`
-     * names every holder; the door never picks one. An item
+     * `409 RESOURCE_CONFLICT` (`err.code`, `err.httpStatus`): `err.message`
+     * names every holder, and `err.details.candidates` lists them
+     * (`{ kind: 'package', packageId }` or `{ kind: 'environment' }`), so a
+     * caller can retry with the one it means; the door never picks one. An item
      * named like one of the door's sub-resources (`history`, `audit`, `diff`,
      * …) has no qualified path, so a `namespace` for it is refused before any
      * request with `400 VALIDATION_ERROR`: read it with `packageId`.
