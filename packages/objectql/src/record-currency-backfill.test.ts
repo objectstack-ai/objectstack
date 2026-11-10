@@ -247,6 +247,25 @@ describe('backfillRecordCurrencyCodes — rows stored before the switch to recor
     expect(d.writes).toEqual([]);
   });
 
+  it('[ADR-0144 D2, amended] an amount that follows its parent\'s code stores none, and is refused before any row is read', async () => {
+    engine.registry.registerObject({ name: 'deal_header', fields: { currency_code: { type: 'text', valueDomain: 'iso_4217_currency' } } } as any);
+    engine.registry.registerObject({
+      name: 'deal_line',
+      fields: {
+        header: { type: 'master_detail', reference: 'deal_header' },
+        amount: { type: 'currency', currencyConfig: { currencyMode: 'record', currencyField: 'header.currency_code' } },
+      },
+    } as any);
+    const err = await backfillRecordCurrencyCodes(engine, quietLogger, {
+      object: 'deal_line', field: 'amount', code: 'USD', apply: true,
+    }).then(() => null, (e: unknown) => e as Record<string, unknown>);
+    expect(err).toMatchObject({ code: 'INVALID_FIELD', status: 400, httpStatus: 400, field: 'amount' });
+    expect(String(err?.message)).toContain("its currencyField is the path 'header.currency_code'");
+    expect(String(err?.message)).toContain('Refused before the walk read or wrote any row.');
+    expect(reads()).toBe(0);
+    expect(d.writes).toEqual([]);
+  });
+
   it('an object the registry does not declare is refused with OBJECT_NOT_FOUND', async () => {
     await expect(backfillRecordCurrencyCodes(engine, quietLogger, {
       object: 'nope', field: 'amount', code: 'USD',

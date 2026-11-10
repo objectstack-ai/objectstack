@@ -144,7 +144,9 @@ function expectServerRowsKept(
   family: ReturnType<typeof serverFamily>,
   userState: ObjectListPreference,
 ) {
-  // Sent by its debounce or by the flush when the user goes; sent either way.
+  // Sent by its debounce or by the flush: `signOut()` flushes it before the
+  // session ends, and a session that ends any other way flushes it as the
+  // family detaches. Sent either way, before the sign-out settles.
   expect(family.save).toHaveBeenCalled();
   for (const [, value] of family.save.mock.calls) expect(value).toEqual(userState);
 }
@@ -181,6 +183,40 @@ describe('sign-out clears the signed-out user’s list state and list filters', 
     expect(localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('de');
     expect(localStorage.getItem(LOCALE_SEED_STORAGE_KEY)).toBe('de');
     expectServerRowsKept(family, userState);
+  });
+
+  it('signOut() saves the last list change under the session, before the session ends', async () => {
+    // What happened, in order: the save is sent and settles while the session
+    // still exists. Sent after `client.signOut()`, the server would refuse it
+    // and the user's last list change would be lost on every device.
+    const events: string[] = [];
+    const client = authClient(async () => ({ user: ALICE, session: { token: 'tok-alice' } }));
+    (client.signOut as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      events.push('session ended');
+      TokenStorage.clear();
+    });
+    const family = serverFamily();
+    family.save.mockImplementation(async () => {
+      events.push('save sent');
+      // A server answer arrives in a later task, never in the same one.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      events.push('save settled');
+    });
+    const rendered = renderConsole(client, family);
+    await waitFor(() => expect(rendered.view.getByTestId('user').textContent).toBe('Alice'));
+    await waitFor(() => expect(prefsRef.current?.ready).toBe(true));
+    act(() => {
+      prefsRef.current!.patchView(VIEW, { filters: GROUP });
+    });
+    const userState = JSON.parse(localStorage.getItem(LIST_STATE_KEY)!) as ObjectListPreference;
+
+    await act(async () => {
+      await authRef.current!.signOut();
+    });
+
+    expect(events).toEqual(['save sent', 'save settled', 'session ended']);
+    expect(family.save).toHaveBeenCalledWith(`ui.list.${OBJECT}`, userState);
+    expect(listKeysLeft()).toEqual([]);
   });
 
   it('a session read that answers no session removes them too', async () => {

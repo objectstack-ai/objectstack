@@ -578,6 +578,51 @@ describe('the groups-claim bridges: show it, set it, clear it, and answer nothin
   });
 });
 
+describe('the Register SSO Provider form names the userinfo endpoint and the userinfo opt-out (Microsoft Entra ID)', () => {
+  const captureOidc = async (form: Record<string, unknown>) => {
+    let dispatched: any = null;
+    const handle = vi.fn(async (req: Request) => {
+      if (req.url.endsWith('/get-session')) return new Response('null', { status: 200 });
+      dispatched = await req.clone().json();
+      return new Response(JSON.stringify({ providerId: 'acme' }), { status: 200 });
+    });
+    const res = await runRegisterSsoProviderFromForm(handle, makeOidcReq(form));
+    expect(res.status).toBe(200);
+    return dispatched;
+  };
+
+  it('sends userInfoEndpoint in oidcConfig, where the register door trusts its origin, and skipUserInfo at the top level', async () => {
+    const sent = await captureOidc({
+      ...OIDC_FORM,
+      userInfoEndpoint: ' https://graph.microsoft.com/oidc/userinfo ',
+      skipUserInfo: true,
+      mapEmail: 'preferred_username',
+    });
+    expect(sent.oidcConfig.userInfoEndpoint).toBe('https://graph.microsoft.com/oidc/userinfo');
+    expect(sent.skipUserInfo).toBe(true);
+    expect(sent.oidcConfig.mapping).toEqual({ email: 'preferred_username', name: 'name' });
+    // A form posted as text carries the opt-out as the string `true`.
+    expect((await captureOidc({ ...OIDC_FORM, skipUserInfo: 'true' })).skipUserInfo).toBe(true);
+  });
+
+  it('CONTROL: a form naming neither sends the body it sent before', async () => {
+    for (const extra of [{}, { userInfoEndpoint: '', skipUserInfo: false }, { skipUserInfo: 'false' }]) {
+      const sent = await captureOidc({ ...OIDC_FORM, ...extra });
+      expect('userInfoEndpoint' in sent.oidcConfig).toBe(false);
+      expect('skipUserInfo' in sent).toBe(false);
+    }
+  });
+
+  it('the body naming the userinfo endpoint clears the INSTALLED vendor schema (reaches the session gate)', async () => {
+    const res = await runRegisterSsoProviderFromForm(
+      makeRealAuthHandler(),
+      makeOidcReq({ ...OIDC_FORM, userInfoEndpoint: 'https://graph.microsoft.com/oidc/userinfo', skipUserInfo: true }),
+    );
+    expect(res.body.error?.message ?? '').not.toMatch(/Unrecognized key|Invalid/);
+    expect(res.status).toBe(401);
+  });
+});
+
 describe('[#32086] the attribute names on the SAML register form: mapping.email / firstName / lastName / name', () => {
   const sentFor = async (extra: Record<string, unknown>) => {
     let dispatched: any = null;

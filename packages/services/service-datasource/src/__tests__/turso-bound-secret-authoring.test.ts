@@ -65,6 +65,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
+// Pay the driver's first load at collection, not inside a clocked `it()`
+// (`check:test-source-alias`).
+import '@objectstack/driver-sql';
 import { validateDriverConfig } from '@objectstack/spec/data';
 import {
   DatasourceAdminService,
@@ -82,6 +85,7 @@ import type {
   DatasourceConnectionSpec,
   IDatasourceDriverFactory,
 } from '../contracts/datasource-driver-factory.js';
+import { refusalAccount } from './refusal-account.js';
 
 const THE_BOUND_JWT = 'eyJhbGciOiJFZERTQSJ9.THE-BOUND-JWT';
 const TURSO_URL = 'libsql://my-db.turso.io';
@@ -195,12 +199,12 @@ describe('#8152 — the credential route a NEW turso datasource has left', () =>
     const { service } = makeAuthoringDoor();
 
     // Half one: the inline key is refused at the door (GREEN on main — #8078).
-    await expect(
+    expect(await refusalAccount(
       service.createDatasource({
         name: 'inline', driver: 'turso',
         config: { url: TURSO_URL, authToken: THE_BOUND_JWT },
       } as never),
-    ).rejects.toThrow(/is a credential and is not accepted inline/);
+    )).toMatch(/is a credential and is not accepted inline/);
 
     // Half two: so the bound route must work, or there is none. RED on main.
     const { seen } = await authorThenConnect(THE_BOUND_JWT);
@@ -228,11 +232,11 @@ describe('#8152 — the credential route a NEW turso datasource has left', () =>
 describe('GREEN ON MAIN — #8078 is not reopened by the route this card restores', () => {
   it('the inline refusal still fires at create and at update', async () => {
     const { service } = makeAuthoringDoor();
-    await expect(
+    expect(await refusalAccount(
       service.createDatasource({
         name: 'inline', driver: 'turso', config: { url: TURSO_URL, authToken: 'jwt' },
       } as never),
-    ).rejects.toThrow(/is a credential and is not accepted inline/);
+    )).toMatch(/is a credential and is not accepted inline/);
 
     // An existing row is not a licence to type the key back in. `updateDatasource`
     // judges the MERGED config, so a patch that reintroduces it is refused too.
@@ -240,11 +244,11 @@ describe('GREEN ON MAIN — #8078 is not reopened by the route this card restore
       { name: 'warehouse', driver: 'turso', config: { url: TURSO_URL } },
       { value: THE_BOUND_JWT },
     );
-    await expect(
+    expect(await refusalAccount(
       service.updateDatasource('warehouse', {
         config: { url: TURSO_URL, authToken: 'jwt' },
       } as never),
-    ).rejects.toThrow(/is a credential and is not accepted inline/);
+    )).toMatch(/is a credential and is not accepted inline/);
   });
 
   it('the refusal still names both mechanisms it diverts to', () => {
