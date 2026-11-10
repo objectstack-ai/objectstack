@@ -2160,7 +2160,15 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
           },
           discoveryEndpoint: {
             label: "URL de découverte",
-            helpText: "Facultatif. URL du document de découverte OIDC. Laissez vide pour utiliser `<issuer>/.well-known/openid-configuration`."
+            helpText: "Facultatif. URL du document de découverte OIDC (https). Laissez vide pour utiliser `<issuer>/.well-known/openid-configuration`. Un point de terminaison indiqué ici est approuvé pour ce fournisseur."
+          },
+          userInfoEndpoint: {
+            label: "URL userinfo",
+            helpText: "Facultatif. URL du point de terminaison userinfo OIDC (https), utilisée à la place de celle indiquée par le document de découverte. Un point de terminaison indiqué ici est approuvé pour ce fournisseur : renseignez-le lorsque l’enregistrement est refusé parce que le document de découverte indique un hôte userinfo auquel le serveur ne fait pas confiance."
+          },
+          skipUserInfo: {
+            label: "Lire les revendications uniquement depuis le jeton d’ID",
+            helpText: "Facultatif. Lire les revendications de l’utilisateur uniquement depuis le jeton d’ID vérifié, sans jamais appeler le point de terminaison userinfo. Microsoft Entra ID : activez cette option pour mapper « preferred_username », que son point de terminaison userinfo ne renvoie pas."
           },
           scopes: {
             label: "Portées",
@@ -2169,7 +2177,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
           },
           mapEmail: {
             label: "Mappage : revendication e-mail",
-            helpText: "Facultatif. Revendication associée à l’e-mail. Par défaut : « email ».",
+            helpText: "Facultatif. Revendication associée à l’e-mail. Par défaut : « email ». Microsoft Entra ID (émetteur sur login.microsoftonline.com) : les utilisateurs sans boîte aux lettres n’ont pas de revendication « email » ; mappez donc « preferred_username » (ou « upn ») et activez « Lire les revendications uniquement depuis le jeton d’ID ».",
             placeholder: "email"
           },
           mapName: {

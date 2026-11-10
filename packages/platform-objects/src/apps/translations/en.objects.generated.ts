@@ -2160,7 +2160,15 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           },
           discoveryEndpoint: {
             label: "Discovery URL",
-            helpText: "Optional. OIDC discovery document URL. Leave blank to derive `<issuer>/.well-known/openid-configuration`."
+            helpText: "Optional. OIDC discovery document URL (https). Leave blank to derive `<issuer>/.well-known/openid-configuration`. An endpoint named here is trusted for this provider."
+          },
+          userInfoEndpoint: {
+            label: "Userinfo URL",
+            helpText: "Optional. OIDC userinfo endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a userinfo host the server does not trust."
+          },
+          skipUserInfo: {
+            label: "Read Claims From the ID Token Only",
+            helpText: "Optional. Read the user’s claims from the verified ID token only and never call the userinfo endpoint. Microsoft Entra ID: turn this on to map \"preferred_username\", which its userinfo endpoint does not return."
           },
           scopes: {
             label: "Scopes",
@@ -2169,7 +2177,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           },
           mapEmail: {
             label: "Map: Email claim",
-            helpText: "Optional. Claim mapped to email. Defaults to \"email\".",
+            helpText: "Optional. Claim mapped to email. Defaults to \"email\". Microsoft Entra ID (issuer on login.microsoftonline.com): users without a mailbox carry no \"email\" claim, so map \"preferred_username\" (or \"upn\") and turn on Read Claims From the ID Token Only.",
             placeholder: "email"
           },
           mapName: {

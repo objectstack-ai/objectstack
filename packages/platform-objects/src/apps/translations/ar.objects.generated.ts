@@ -2160,7 +2160,15 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
           },
           discoveryEndpoint: {
             label: "رابط الاكتشاف",
-            helpText: "اختياري. رابط مستند اكتشاف OIDC. اتركه فارغًا لاشتقاق `<issuer>/.well-known/openid-configuration`."
+            helpText: "اختياري. رابط مستند اكتشاف OIDC (https). اتركه فارغًا لاشتقاق `<issuer>/.well-known/openid-configuration`. تُعدّ نقطة النهاية المحددة هنا موثوقة لهذا المزوّد."
+          },
+          userInfoEndpoint: {
+            label: "رابط userinfo",
+            helpText: "اختياري. رابط نقطة نهاية userinfo في OIDC (https)، يُستخدم بدلًا من الرابط الذي يذكره مستند الاكتشاف. تُعدّ نقطة النهاية المحددة هنا موثوقة لهذا المزوّد: حدّدها عندما يُرفض التسجيل لأن مستند الاكتشاف يذكر مضيف userinfo لا يثق به الخادم."
+          },
+          skipUserInfo: {
+            label: "قراءة المطالبات من رمز المعرّف فقط",
+            helpText: "اختياري. قراءة مطالبات المستخدم من رمز المعرّف الموثَّق فقط وعدم استدعاء نقطة نهاية userinfo مطلقًا. Microsoft Entra ID: فعّل هذا الخيار لتعيين \"preferred_username\"، الذي لا تُرجعه نقطة نهاية userinfo الخاصة به."
           },
           scopes: {
             label: "النطاقات",
@@ -2169,7 +2177,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
           },
           mapEmail: {
             label: "التعيين: مطالبة البريد الإلكتروني",
-            helpText: "اختياري. المطالبة المعيَّنة إلى البريد الإلكتروني. القيمة الافتراضية \"email\".",
+            helpText: "اختياري. المطالبة المعيَّنة إلى البريد الإلكتروني. القيمة الافتراضية \"email\". Microsoft Entra ID (جهة الإصدار على login.microsoftonline.com): المستخدمون الذين ليس لديهم صندوق بريد لا يحملون مطالبة \"email\"، لذا عيِّن \"preferred_username\" (أو \"upn\") وفعّل \"قراءة المطالبات من رمز المعرّف فقط\".",
             placeholder: "email"
           },
           mapName: {

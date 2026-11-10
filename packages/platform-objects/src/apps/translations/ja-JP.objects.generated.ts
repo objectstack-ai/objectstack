@@ -2160,7 +2160,15 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           },
           discoveryEndpoint: {
             label: "ディスカバリ URL",
-            helpText: "任意。OIDC ディスカバリドキュメントの URL。空欄の場合は `<issuer>/.well-known/openid-configuration` を導出します。"
+            helpText: "任意。OIDC ディスカバリドキュメントの URL（https）。空欄の場合は `<issuer>/.well-known/openid-configuration` を導出します。ここで指定したエンドポイントはこのプロバイダーで信頼されます。"
+          },
+          userInfoEndpoint: {
+            label: "Userinfo エンドポイント URL",
+            helpText: "任意。OIDC userinfo エンドポイントの URL（https）。ディスカバリドキュメントが示すものの代わりに使われます。ここで指定したエンドポイントはこのプロバイダーで信頼されます。ディスカバリドキュメントが示す userinfo ホストをサーバーが信頼せず登録が拒否された場合に指定してください。"
+          },
+          skipUserInfo: {
+            label: "ID トークンのみからクレームを読み取る",
+            helpText: "任意。ユーザーのクレームを検証済みの ID トークンのみから読み取り、userinfo エンドポイントを呼び出しません。Microsoft Entra ID: userinfo エンドポイントが返さない「preferred_username」をマッピングするにはオンにします。"
           },
           scopes: {
             label: "スコープ",
@@ -2169,7 +2177,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           },
           mapEmail: {
             label: "マッピング: メールクレーム",
-            helpText: "任意。メールにマッピングするクレーム。既定値は「email」。",
+            helpText: "任意。メールにマッピングするクレーム。既定値は「email」。Microsoft Entra ID（発行者が login.microsoftonline.com）: メールボックスのないユーザーには「email」クレームがないため、「preferred_username」（または「upn」）をマッピングし、「ID トークンのみからクレームを読み取る」をオンにしてください。",
             placeholder: "email"
           },
           mapName: {
