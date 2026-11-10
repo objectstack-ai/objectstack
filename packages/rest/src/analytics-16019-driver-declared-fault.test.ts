@@ -97,7 +97,10 @@ function mockProtocol(savedDatasets: unknown[] = []) {
   return {
     getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
     getMetaTypes: vi.fn().mockResolvedValue([]),
-    getMetaItems: vi.fn().mockResolvedValue(savedDatasets),
+    // [#32072] Read BY NAME, as the door reads a `datasetName`.
+    getMetaItem: vi.fn(async ({ name }: { name: string }) => ({
+      type: 'dataset', name, item: (savedDatasets as Array<{ name?: string }>).find((d) => d?.name === name),
+    })),
   };
 }
 function mockRes() {

@@ -421,3 +421,65 @@ describe('query_dataset', () => {
     });
   });
 });
+
+// ── [#32072, ADR-0150 D3] query_dataset resolves the name by package ────────
+// The tools' callers (the MCP bridges) belong to no package, and the input
+// carries none, so `datasetName` resolves by the one package-scoped rule for a
+// caller with no package, over the holders the listed items' `_packageId`s
+// name: the environment's own item, else the one package holder; a name two
+// packages hold is refused naming both. It never takes the first listed.
+describe('[#32072] query_dataset resolves the dataset by package (ADR-0150 D3)', () => {
+  const ALPHA = 'com.acme.alpha';
+  const BETA = 'com.acme.beta';
+  const held = (packageId: string | undefined, label: string) =>
+    ({ ...PIPELINE, label, ...(packageId !== undefined ? { _packageId: packageId } : {}), _diagnostics: { source: 'test' } });
+  const run = async (listed: unknown[]) => {
+    const { service, reads } = await bootWired([{ stage: 'won', revenue: 100 }]);
+    const spy = vi.spyOn(service, 'queryDataset');
+    const tools = service.datasetTools({ loadDatasets: async () => listed.map((d) => ({ ...(d as object) })) });
+    const answer = await tools
+      .queryDataset({ datasetName: 'pipeline', selection: { measures: ['revenue'] } }, ADMIN)
+      .catch((e: unknown) => e);
+    return { answer, spy, reads };
+  };
+
+  it('a name two packages hold is refused 409 RESOURCE_CONFLICT naming both, whichever is listed first; nothing is read', async () => {
+    for (const listed of [[held(ALPHA, 'Alpha'), held(BETA, 'Beta')], [held(BETA, 'Beta'), held(ALPHA, 'Alpha')]]) {
+      const { answer, spy, reads } = await run(listed);
+      expect(answer).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+      expect(messageOf(answer)).toContain(ALPHA);
+      expect(messageOf(answer)).toContain(BETA);
+      expect(spy).not.toHaveBeenCalled();
+      expect(reads).toEqual([]);
+    }
+  });
+
+  it('…and is refused even when one holder\'s item fails the parse: two holders are a fact, never a pick', async () => {
+    const broken = { ...held(BETA, 'Beta'), measures: [{ name: 'x', aggregate: 'not_a_real_agg' }] };
+    const { answer, spy } = await run([held(ALPHA, 'Alpha'), broken]);
+    expect(answer).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: one package holder is served, the same dataset the list carried', async () => {
+    const { answer, spy } = await run([held(ALPHA, 'Alpha'), { ...LOCKED, _packageId: BETA }]);
+    expect(answer).toMatchObject({ rowCount: 1 });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect((spy.mock.calls[0][0] as { label?: unknown; _packageId?: unknown })).toMatchObject({ label: 'Alpha', _packageId: ALPHA });
+  });
+
+  it('CONTROL: the environment\'s own item (no `_packageId`, or the `sys_metadata` sentinel) is served', async () => {
+    for (const env of [held(undefined, 'Env'), held('sys_metadata', 'Env')]) {
+      const { answer, spy } = await run([env]);
+      expect(answer).toMatchObject({ rowCount: 1 });
+      expect((spy.mock.calls[0][0] as { label?: unknown }).label).toBe('Env');
+    }
+  });
+
+  it('a holder whose only item fails the parse is still not found, as before', async () => {
+    const broken = { ...held(ALPHA, 'Alpha'), measures: [{ name: 'x', aggregate: 'not_a_real_agg' }] };
+    const { answer, spy } = await run([broken]);
+    expect(answer).toMatchObject({ code: 'NOT_FOUND', status: 404 });
+    expect(spy).not.toHaveBeenCalled();
+  });
+});

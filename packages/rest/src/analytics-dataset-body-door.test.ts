@@ -57,7 +57,10 @@ function mockProtocol() {
         getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
         getMetaTypes: vi.fn().mockResolvedValue([]),
         // A saved dataset by the inline one's name, so `datasetName` resolves.
-        getMetaItems: vi.fn().mockResolvedValue({ items: [inlineDataset] }),
+        // [#32072] Read BY NAME, as the door reads a `datasetName`.
+        getMetaItem: vi.fn(async ({ name }: { name: string }) => ({
+            type: 'dataset', name, item: name === inlineDataset.name ? inlineDataset : undefined,
+        })),
     };
 }
 
@@ -85,7 +88,7 @@ async function post(body: unknown) {
     expect(route, 'POST …/analytics/dataset/query must be registered').toBeTruthy();
     const res = mockRes();
     await route!.handler({ method: 'POST', params: {}, headers: {}, query: {}, body } as any, res);
-    return { res, queryDataset, getMetaItems: protocol.getMetaItems };
+    return { res, queryDataset, getMetaItem: protocol.getMetaItem };
 }
 
 const selection = { dimensions: ['region'], measures: ['revenue'] };
@@ -169,7 +172,7 @@ describe('#29156 §1 — an unknown top-level key is refused, the query never ru
 
 describe('#29156 §2 — `dataset` beside `datasetName` is refused instead of the inline one winning silently', () => {
     it('both supplied → 400 VALIDATION_FAILED naming both; no lookup, no query', async () => {
-        const { res, queryDataset, getMetaItems } = await post({ dataset: inlineDataset, datasetName: 'sales', selection });
+        const { res, queryDataset, getMetaItem } = await post({ dataset: inlineDataset, datasetName: 'sales', selection });
         expect(res.statusCode, JSON.stringify(res.body)).toBe(400);
         expect(res.body.code).toBe('VALIDATION_FAILED');
         const message = String(res.body.message);
@@ -178,18 +181,18 @@ describe('#29156 §2 — `dataset` beside `datasetName` is refused instead of th
         const fields: FieldEntry[] = res.body.details?.fields ?? [];
         expect(fields.map((f) => f.field)).toEqual(['dataset', 'datasetName']);
         expect(queryDataset).not.toHaveBeenCalled();
-        expect(getMetaItems).not.toHaveBeenCalled();
+        expect(getMetaItem).not.toHaveBeenCalled();
     });
 
     // The handler's branch reads both keys by truthiness, so a falsy name was
     // never a name: `dataset` beside it ran inline, and still does.
     for (const datasetName of ['', null] as const) {
         it(`CONTROL: \`dataset\` beside a falsy \`datasetName\` (${JSON.stringify(datasetName)}) still runs inline, as it did`, async () => {
-            const { res, queryDataset, getMetaItems } = await post({ dataset: inlineDataset, datasetName, selection });
+            const { res, queryDataset, getMetaItem } = await post({ dataset: inlineDataset, datasetName, selection });
             expect(res.statusCode, JSON.stringify(res.body)).toBe(200);
             expect(queryDataset).toHaveBeenCalledTimes(1);
             expect(queryDataset.mock.calls[0][0].measures[0].name).toBe('revenue');
-            expect(getMetaItems).not.toHaveBeenCalled();
+            expect(getMetaItem).not.toHaveBeenCalled();
         });
     }
 

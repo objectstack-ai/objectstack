@@ -7,6 +7,7 @@ import { RestServer } from './rest-server';
 // call one would pay that module graph's load inside its clocked window. This
 // module-top import pays it during collection instead.
 import '@objectstack/objectql';
+import { PackageScopedNameRefusedError } from '@objectstack/core';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -18,6 +19,16 @@ function mockServer() {
 }
 function mockProtocol() {
   return { getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }), getMetaTypes: vi.fn().mockResolvedValue([]), getMetaItems: vi.fn().mockResolvedValue([]) };
+}
+/**
+ * [#32072] A protocol double's saved datasets, read the way the door reads a
+ * `datasetName`: BY NAME (`getMetaItem`, the package-scoped resolver's read on
+ * the real protocol), answering the `{ type, name, item }` envelope.
+ */
+function savedDatasets(items: any[]) {
+  return {
+    getMetaItem: vi.fn(async ({ name }: { name: string }) => ({ type: 'dataset', name, item: items.find((d) => d?.name === name) })),
+  };
 }
 function mockRes() {
   const res: any = { statusCode: 200, body: undefined };
@@ -123,7 +134,7 @@ describe('POST /analytics/dataset/query', () => {
       _packageId: 'com.example.showcase',
       _diagnostics: { valid: true },
     };
-    const protocol = { ...mockProtocol(), getMetaItems: vi.fn().mockResolvedValue({ items: [served] }) };
+    const protocol = { ...mockProtocol(), ...savedDatasets([served]) };
     const queryDataset = vi.fn().mockResolvedValue({ rows: [{ region: 'NA', revenue: 100 }], fields: [] });
     const { route } = buildServer(async () => ({ queryDataset }), protocol);
     const res = mockRes();
@@ -177,7 +188,7 @@ describe('POST /analytics/dataset/query', () => {
   });
 
   it('localizes a SAVED dataset before it is compiled, so measure labels reach the chart translated', async () => {
-    const protocol = { ...mockProtocol(), getMetaItems: vi.fn().mockResolvedValue({ items: [{ ...inlineDataset }] }) };
+    const protocol = { ...mockProtocol(), ...savedDatasets([{ ...inlineDataset }]) };
     const queryDataset = vi.fn().mockResolvedValue({ rows: [], fields: [] });
     const { route, rest } = buildServer(async () => ({ queryDataset }), protocol);
     (rest as any).resolveI18nService = async () => zhI18n();
@@ -198,7 +209,7 @@ describe('POST /analytics/dataset/query', () => {
   });
 
   it('leaves a saved dataset alone when the request names no locale', async () => {
-    const protocol = { ...mockProtocol(), getMetaItems: vi.fn().mockResolvedValue({ items: [{ ...inlineDataset }] }) };
+    const protocol = { ...mockProtocol(), ...savedDatasets([{ ...inlineDataset }]) };
     const queryDataset = vi.fn().mockResolvedValue({ rows: [], fields: [] });
     const { route, rest } = buildServer(async () => ({ queryDataset }), protocol);
     (rest as any).resolveI18nService = async () => zhI18n();
@@ -227,7 +238,7 @@ describe('POST /analytics/dataset/query', () => {
   });
 
   it('returns 404 for an unknown datasetName', async () => {
-    const protocol = { ...mockProtocol(), getMetaItems: vi.fn().mockResolvedValue({ items: [] }) };
+    const protocol = { ...mockProtocol(), ...savedDatasets([]) };
     const { route } = buildServer(async () => ({ queryDataset: vi.fn() }), protocol);
     const res = mockRes();
     await route!.handler({ method: 'POST', params: {}, headers: {}, body: { datasetName: 'nope', selection } } as any, res);
@@ -237,7 +248,7 @@ describe('POST /analytics/dataset/query', () => {
 
   it('still rejects a saved dataset that is genuinely malformed', async () => {
     const served = { ...inlineDataset, measures: [{ name: 'x', aggregate: 'not_a_real_agg' }], _diagnostics: { valid: false } };
-    const protocol = { ...mockProtocol(), getMetaItems: vi.fn().mockResolvedValue({ items: [served] }) };
+    const protocol = { ...mockProtocol(), ...savedDatasets([served]) };
     const { route } = buildServer(async () => ({ queryDataset: vi.fn() }), protocol);
     const res = mockRes();
     await route!.handler({ method: 'POST', params: {}, headers: {}, body: { datasetName: 'sales', selection } } as any, res);
@@ -291,9 +302,9 @@ describe('POST /analytics/dataset/query — a failed saved-dataset read', () => 
     return { res, queryDataset };
   };
 
-  it('answers 503 SERVICE_UNAVAILABLE, not 404, when getMetaItems throws', async () => {
+  it('answers 503 SERVICE_UNAVAILABLE, not 404, when the by-name read throws', async () => {
     const outage = new Error('connect ECONNREFUSED 10.0.0.7:5432');
-    const protocol = { ...mockProtocol(), getMetaItems: vi.fn().mockRejectedValue(outage) };
+    const protocol = { ...mockProtocol(), getMetaItem: vi.fn().mockRejectedValue(outage) };
     const { res, queryDataset } = await send(protocol);
 
     expect(res.statusCode).toBe(503);
@@ -309,7 +320,7 @@ describe('POST /analytics/dataset/query — a failed saved-dataset read', () => 
   });
 
   it('CONTROL: a read that succeeds without the name still answers 404, byte-identical', async () => {
-    const protocol = { ...mockProtocol(), getMetaItems: vi.fn().mockResolvedValue({ items: [{ ...inlineDataset }] }) };
+    const protocol = { ...mockProtocol(), ...savedDatasets([{ ...inlineDataset }]) };
     const { res, queryDataset } = await send(protocol, 'nope');
     expect(res.statusCode).toBe(404);
     expect(res.body).toEqual({ code: 'NOT_FOUND', message: 'Dataset "nope" not found.' });
@@ -317,18 +328,110 @@ describe('POST /analytics/dataset/query — a failed saved-dataset read', () => 
   });
 
   it('CONTROL: a read that finds the name is served', async () => {
-    const protocol = { ...mockProtocol(), getMetaItems: vi.fn().mockResolvedValue({ items: [{ ...inlineDataset }] }) };
+    const protocol = { ...mockProtocol(), ...savedDatasets([{ ...inlineDataset }]) };
     const { res, queryDataset } = await send(protocol);
     expect(res.statusCode).toBe(200);
     expect(res.body.rows).toEqual([{ region: 'NA', revenue: 100 }]);
     expect(queryDataset.mock.calls[0][0].name).toBe('sales');
   });
 
-  it('CONTROL: a protocol with no getMetaItems keeps its answer, 404 NOT_FOUND', async () => {
-    const { getMetaItems: _absent, ...protocol } = mockProtocol();
+  // [#32072] Was "a protocol with no getMetaItems keeps its answer, 404". The
+  // door now reads the dataset BY NAME through the package-scoped resolver; a
+  // protocol with no by-name read has no resolver to ask, so it fails CLOSED
+  // (503, the operator's fault), never a first match and never "not found".
+  it('a protocol with no by-name read fails closed: 503 SERVICE_UNAVAILABLE, nothing run', async () => {
+    const { res, queryDataset } = await send({ ...mockProtocol(), getMetaItems: vi.fn().mockResolvedValue({ items: [{ ...inlineDataset }] }) });
+    expect(res.statusCode).toBe(503);
+    expect(res.body.code).toBe('SERVICE_UNAVAILABLE');
+    expect(res.body.error).toMatch(/^The dataset "sales" could not be resolved: this deployment's metadata protocol has no by-name read\./);
+    expect(queryDataset).not.toHaveBeenCalled();
+  });
+});
+
+// ── [#32072, ADR-0150 D3/D5] the saved dataset is resolved by package ────────
+// The door reads `datasetName` BY NAME through the protocol (on the real one,
+// the package-scoped resolver's read, since `dataset` joined
+// `PACKAGE_SCOPED_READ_TYPES`), never by taking the first listed item. A bare
+// name is a caller with no package; `?package=X` is `/meta`'s exact qualifier,
+// read through the same `metaItemPackageBinding`. The resolver itself is
+// pinned in objectql (`package-scoped-e8-readers.test.ts`) and the booted
+// two-package answers in dogfood (`dataset-package-scoped-readers.dogfood.test.ts`);
+// this pins what the door hands the read and how it answers the refusal.
+describe('[#32072] POST /analytics/dataset/query — the saved dataset is read by name, by package', () => {
+  const twoHolders = () => new PackageScopedNameRefusedError({
+    status: 'refused',
+    reason: 'ambiguous-in-environment',
+    type: 'dataset',
+    name: 'sales',
+    callerPackageId: null,
+    candidates: [{ kind: 'package', packageId: 'com.acme.alpha' }, { kind: 'package', packageId: 'com.acme.beta' }],
+    message: 'The dataset "sales" is held by 2 packages in this environment and the caller names no package: '
+      + 'package "com.acme.alpha"; package "com.acme.beta". Nothing picks one of them: address it by its package.',
+  });
+  const send = async (protocol: any, query: Record<string, unknown> = {}) => {
+    const queryDataset = vi.fn().mockResolvedValue({ rows: [{ region: 'NA', revenue: 100 }], fields: [] });
+    const { route } = buildServer(async () => ({ queryDataset }), protocol);
+    const res = mockRes();
+    await route!.handler({ method: 'POST', params: {}, query, headers: {}, body: { datasetName: 'sales', selection } } as any, res);
+    return { res, queryDataset };
+  };
+
+  it('a bare name is read with no package: the read carries no packageId, and no list is read', async () => {
+    const protocol = { ...mockProtocol(), ...savedDatasets([{ ...inlineDataset }]) };
+    const { res } = await send(protocol);
+    expect(res.statusCode).toBe(200);
+    expect(protocol.getMetaItem).toHaveBeenCalledTimes(1);
+    expect(protocol.getMetaItem.mock.calls[0][0]).toEqual({ type: 'dataset', name: 'sales' });
+    expect(protocol.getMetaItems).not.toHaveBeenCalled();
+  });
+
+  it('`?package=X` is handed to the read as its exact qualifier', async () => {
+    const protocol = { ...mockProtocol(), ...savedDatasets([{ ...inlineDataset }]) };
+    const { res } = await send(protocol, { package: 'com.acme.beta' });
+    expect(res.statusCode).toBe(200);
+    expect(protocol.getMetaItem.mock.calls[0][0]).toEqual({ type: 'dataset', name: 'sales', packageId: 'com.acme.beta' });
+  });
+
+  it('`?package=` empty or `all` names no package, as on `/meta`', async () => {
+    for (const value of ['', 'all']) {
+      const protocol = { ...mockProtocol(), ...savedDatasets([{ ...inlineDataset }]) };
+      const { res } = await send(protocol, { package: value });
+      expect(res.statusCode, value).toBe(200);
+      expect(protocol.getMetaItem.mock.calls[0][0], value).toEqual({ type: 'dataset', name: 'sales' });
+    }
+  });
+
+  it('a draft preview is forwarded beside the name and the qualifier', async () => {
+    const protocol = { ...mockProtocol(), ...savedDatasets([{ ...inlineDataset }]) };
+    const queryDataset = vi.fn().mockResolvedValue({ rows: [], fields: [] });
+    const { route, rest } = buildServer(async () => ({ queryDataset }), protocol);
+    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user', isSystem: true });
+    const res = mockRes();
+    await route!.handler({
+      method: 'POST', params: {}, query: { package: 'com.acme.beta' }, headers: {},
+      body: { datasetName: 'sales', selection, previewDrafts: true },
+    } as any, res);
+    expect(res.statusCode).toBe(200);
+    expect(protocol.getMetaItem.mock.calls[0][0]).toEqual({
+      type: 'dataset', name: 'sales', packageId: 'com.acme.beta', previewDrafts: true,
+    });
+  });
+
+  it('the resolver\'s refusal answers 409 RESOURCE_CONFLICT with its sentence naming both holders; nothing is run', async () => {
+    const protocol = { ...mockProtocol(), getMetaItem: vi.fn().mockRejectedValue(twoHolders()) };
     const { res, queryDataset } = await send(protocol);
-    expect(res.statusCode).toBe(404);
-    expect(res.body).toEqual({ code: 'NOT_FOUND', message: 'Dataset "sales" not found.' });
+    expect(res.statusCode).toBe(409);
+    expect(res.body.code).toBe('RESOURCE_CONFLICT');
+    expect(res.body.message).toContain('com.acme.alpha');
+    expect(res.body.message).toContain('com.acme.beta');
+    expect(queryDataset).not.toHaveBeenCalled();
+  });
+
+  it('a repeated `?package=` is refused 400, naming no one package; nothing is read', async () => {
+    const protocol = { ...mockProtocol(), ...savedDatasets([{ ...inlineDataset }]) };
+    const { res, queryDataset } = await send(protocol, { package: ['com.acme.alpha', 'com.acme.beta'] });
+    expect(res.statusCode).toBe(400);
+    expect(protocol.getMetaItem).not.toHaveBeenCalled();
     expect(queryDataset).not.toHaveBeenCalled();
   });
 });
