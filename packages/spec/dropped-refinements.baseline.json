@@ -41,6 +41,11 @@
         "runtimeFilter.lazy"
       ]
     },
+    "ai/ObjectQuerySource": {
+      "sites": [
+        "filter.lazy"
+      ]
+    },
     "ai/QueryDatasetInput": {
       "sites": [
         "selection.runtimeFilter.lazy"

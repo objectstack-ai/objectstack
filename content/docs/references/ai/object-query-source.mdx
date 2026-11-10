@@ -1,0 +1,67 @@
+---
+title: Object Query Source — AI Protocol reference
+navTitle: Object Query Source
+description: "Object Query Source schemas of the ObjectStack AI Protocol: ObjectQuerySource — each property with its type, default and a TypeScript example."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+<Callout type="info">
+**Source:** `packages/spec/src/ai/object-query-source.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { ObjectQuerySourceSchema } from '@objectstack/spec/ai';
+import type { ObjectQuerySource } from '@objectstack/spec/ai';
+
+// Validate data
+const result = ObjectQuerySourceSchema.parse(data);
+```
+
+---
+
+## ObjectQuerySource
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | The machine name of the object the figures were read from |
+| **label** | `string` | optional | The object's plural label, or its label when it declares no plural. Translated only when the request is in Chinese and a `zh*` translation pack names the object; otherwise the authored label, not the caller's UI locale. Absent when the producer sets none: a reader falls back to `object` |
+| **filter** | `any` | optional | The caller's `where`, in the `$` query dialect, exactly as the engine accepted it: machine names only, no field labels, date placeholders such as `{today}` as written. Absent when no condition applied |
+| **scope** | `'visible_to_you'` | ✅ | The row scope the figures cover: only the records the caller may read, after sharing and row-level narrowing. Always present; this is its only value |
+| **groupBy** | `string[]` | optional | The field names the figures were grouped by, in order |
+| **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; field?: string }[]` | optional | The aggregations computed, in order |
+| **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | The ordering applied, in order of precedence |
+| **limit** | `integer` | optional | The row or group cut applied (a top-N read or a group cut). Present only together with `orderBy` |
+| **related** | `string[]` | optional | The lookup paths read in the same call, dotted from the object (for example `client.relationship_manager`) |
+| **latestPer** | `{ groupBy: string; orderField: string }` | optional | Present when the answer keeps only the latest row per group |
+| **records** | `integer` | optional | How many records the figures cover — a count, never a list: the match total for a page read, the summed group counts for an aggregate or a chart, 1 for `get_record`. Absent when unknown, never guessed |
+| **line** | `string` | ✅ | The finished one-line citation, in the request language. The producer keeps it to at most 280 characters; a reader does not refuse a longer one |
+
+### Nested Shape: `ObjectQuerySource.aggregations[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **function** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>` | ✅ | The aggregation function |
+| **field** | `string` | optional | The field aggregated; absent for a bare `count` |
+
+### Nested Shape: `ObjectQuerySource.orderBy[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | The field the records were ordered by |
+| **order** | `Enum<'asc' \| 'desc'>` | optional | The direction; absent when the query named none |
+
+### Nested Shape: `ObjectQuerySource.latestPer`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **groupBy** | `string` | ✅ | The field the latest row is taken per |
+| **orderField** | `string` | ✅ | The field that decides which row is latest |
+
+
+---
+
