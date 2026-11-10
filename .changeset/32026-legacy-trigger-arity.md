@@ -4,7 +4,7 @@
 
 fix(runtime): the legacy `POST /automation/trigger/…` is no route past three segments
 
-Clause-②: no
+Clause-②: no (narrowing)
 Metadata-protocol: none
 
 <!-- adr-0087: not-required (no-migration-prescription) no metadata shape, schema, stored row or registered node type changes: the change is what an unserved `/automation/trigger/…` path answers; the stored metadata is read exactly as before, so there is nothing for `objectstack migrate meta` to rewrite -->
