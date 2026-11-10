@@ -151,6 +151,32 @@ describe('the bare read and `?package=` on this transport', () => {
     });
 });
 
+/**
+ * Seat ruling (c) of #32076 (claim amendment 6764879174): a covered type the
+ * registry still reads through `getItem` (`readsByPackage` answers `false`; a
+ * picklist here) is judged by the exact qualifier too.
+ */
+describe('a covered type the registry reads through `getItem`: the exact qualifier on this transport', () => {
+    it('`?package=`, the qualified path and `_env` of a name only alpha holds: 409 naming it (BASE: 200, alpha\'s picklist)', async () => {
+        ship('picklist', 'status', A);
+        for (const answer of [
+            await read('/picklist/status', { package: C }),
+            await read('/picklist/gamma/status'),
+            await read('/picklist/_env/status'),
+        ]) {
+            expect([answer.status, answer.body?.error?.code], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+            expect(answer.body?.error?.message).toContain(`package "${A}"`);
+        }
+    });
+
+    it('CONTROL: the bare read and the holder\'s own reads answer as before', async () => {
+        ship('picklist', 'status', A);
+        expect(labelOf(await read('/picklist/status'))).toBe('alpha picklist');
+        expect(labelOf(await read('/picklist/status', { package: A }))).toBe('alpha picklist');
+        expect(labelOf(await read('/picklist/alpha/status'))).toBe('alpha picklist');
+    });
+});
+
 describe('ruling Q1 — a sub-resource literal in the last position keeps its route', () => {
     it('`/meta/app/alpha/published` is the app `alpha`\'s published read, not the item `published` of namespace alpha', async () => {
         ship('app', 'alpha', A);

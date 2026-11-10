@@ -26,7 +26,7 @@ import { declaredRefusalMessage, resolveThrownHttpError } from '@objectstack/typ
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { SchemaRegistry } from './registry.js';
 import { PACKAGE_SCOPED_READ_TYPES, PackageScopedNameRefusedError } from './package-scoped-read.js';
-import { PACKAGE_SCOPED_TYPES } from '@objectstack/core';
+import { NAMESPACE_SCOPED_BARE_NAME_TYPES, PACKAGE_SCOPED_TYPES } from '@objectstack/core';
 
 /** ADR-0150's covered types whose by-name readers no child of the epic has wired yet. */
 const UNWIRED_COVERED_TYPES = PACKAGE_SCOPED_TYPES.filter(
@@ -301,21 +301,145 @@ describe('fail closed — a registry with no package-scoped resolver refuses wha
     expect(labelOf(await protocol.getMetaItem({ type: 'page', name: 'home', packageId: A }))).toBe('alpha page');
     expect(() => protocol.admitEnvironmentQualifier({ type: 'page', name: 'nothing' })).not.toThrow();
   });
+});
 
-  /**
-   * The registry WITH the resolver reads a covered type no child of the epic
-   * has wired yet (`readsByPackage` answers `false`) through `getItem`, as on
-   * main. That answer is every in-repo composition's for these types, so the
-   * guard judges the registry's declaration, never the type alone: refusing a
-   * `false` answer would refuse every by-name read of them in production.
-   */
-  it.each(UNWIRED_COVERED_TYPES)('CONTROL: %s, covered but read through `getItem` by this registry, is served as before, both ways', async (type) => {
-    expect(registry.readsByPackage(type), 'this registry reads the type through getItem').toBe(false);
-    // A shipped action is stored as its schema parse, which wants a target.
-    const extra = type === 'action' ? { type: 'url', target: 'https://example.com' } : {};
-    registry.registerItem(type, { name: 'solo', label: `alpha ${type}`, ...extra }, 'name' as never, A);
-    expect(labelOf(await protocol.getMetaItem({ type, name: 'solo' }))).toBe(`alpha ${type}`);
-    expect(labelOf(await protocol.getMetaItem({ type, name: 'solo', packageId: A }))).toBe(`alpha ${type}`);
+/**
+ * Seat rulings (a), (b) and (c) of #32076 (claim amendments 6764797602 and
+ * 6764879174): a registry whose `readsByPackage` answers `false` for a covered
+ * type. `SchemaRegistry` answers `false` for every covered type no child of
+ * epic #31527 has wired yet ({@link UNWIRED_COVERED_TYPES}): that is every
+ * in-repo composition's answer for them.
+ */
+describe('a covered type the registry reads through `getItem` (seat rulings (a), (b), (c))', () => {
+  /** Ship an item that parses: a shipped action is stored as its schema parse, which wants a target. */
+  const shipValid = (type: string, name: string, packageId: string) => registry.registerItem(
+    type,
+    { name, label: `${packageId.split('.').pop()} ${type}`, ...(type === 'action' ? { type: 'url', target: 'https://example.com' } : {}) },
+    'name' as never,
+    packageId,
+  );
+
+  it('the registry reads each unwired covered type through `getItem`', () => {
+    expect(UNWIRED_COVERED_TYPES.length).toBeGreaterThan(0);
+    for (const type of UNWIRED_COVERED_TYPES) expect(registry.readsByPackage(type), type).toBe(false);
+  });
+
+  describe('(a) a bare read of a type whose one-holder rule holds keeps `getItem`', () => {
+    it.each(UNWIRED_COVERED_TYPES)('%s: the read naming no package serves the one holder, as on main', async (type) => {
+      shipValid(type, 'solo', A);
+      expect(labelOf(await protocol.getMetaItem({ type, name: 'solo' }))).toBe(`alpha ${type}`);
+    });
+  });
+
+  describe('(b) a bare read of a type narrowed to the namespace, read through `getItem`, is refused 501', () => {
+    /** This file's registry, read through a view that answers `false` for every type. */
+    let readsNothingByPackage: ObjectStackProtocolImplementation;
+    beforeEach(() => {
+      const view = new Proxy(registry, {
+        get(target, prop) {
+          if (prop === 'readsByPackage') return () => false;
+          const value = Reflect.get(target, prop, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+      readsNothingByPackage = new ObjectStackProtocolImplementation({ ...engine, registry: view } as never);
+    });
+
+    it.each([...NAMESPACE_SCOPED_BARE_NAME_TYPES])('%s: 501 naming the missing resolver, even for one holder (BASE: served it)', async (type) => {
+      shipValid(type, 'solo', A);
+      let thrown: (Error & { status?: number; code?: string; refusal?: unknown }) | undefined;
+      try {
+        await readsNothingByPackage.getMetaItem({ type, name: 'solo' });
+      } catch (err) {
+        thrown = err as typeof thrown;
+      }
+      expect([thrown?.status, thrown?.code, thrown?.refusal], String(thrown)).toEqual([501, 'NOT_IMPLEMENTED', true]);
+      expect(thrown?.message).toContain(`has no package-scoped resolver for '${type}' items`);
+    });
+
+    it('CONTROL: a covered type not narrowed (tool) keeps `getItem` on the same view', async () => {
+      shipValid('tool', 'solo', A);
+      expect(labelOf(await readsNothingByPackage.getMetaItem({ type: 'tool', name: 'solo' }))).toBe('alpha tool');
+    });
+
+    it('CONTROL: the registry WITH the resolver reads the narrowed types by package and serves them', async () => {
+      for (const type of NAMESPACE_SCOPED_BARE_NAME_TYPES) {
+        expect(registry.readsByPackage(type), type).toBe(true);
+        shipValid(type, 'solo', A);
+        expect(labelOf(await protocol.getMetaItem({ type, name: 'solo' }))).toBe(`alpha ${type}`);
+      }
+    });
+  });
+
+  describe('(c) a qualified read is the exact qualifier\'s, never `getItem`\'s first match', () => {
+    it.each(UNWIRED_COVERED_TYPES)('%s: `?package=` naming a package that holds nothing is 409 naming the one holder (BASE: 200, alpha\'s)', async (type) => {
+      shipValid(type, 'solo', A);
+      const err = await refusalOf(() => protocol.getMetaItem({ type, name: 'solo', packageId: C }));
+      expect([err.code, err.status, err.refusal.reason, err.refusal.callerPackageId])
+        .toEqual(['RESOURCE_CONFLICT', 409, 'not-held-by-qualifier', C]);
+      expect(err.refusal.candidates).toEqual([{ kind: 'package', packageId: A }]);
+    });
+
+    it('two holders, a third package named: 409 naming both, on both faces (BASE: 200, alpha\'s flow)', async () => {
+      shipValid('flow', 'route', A);
+      shipValid('flow', 'route', B);
+      const err = await refusalOf(() => protocol.getMetaItem({ type: 'flow', name: 'route', packageId: C }));
+      expect(err.refusal.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
+      await refusalOf(() => protocol.getMetaItemForExecution({ type: 'flow', name: 'route', packageId: C }));
+    });
+
+    it('the qualified path of a namespace that holds nothing is the same 409', async () => {
+      shipValid('picklist', 'status', A);
+      const address = protocol.resolveMetaItemAddress({ type: 'picklist', segment: 'gamma', name: 'status' });
+      expect(address).toEqual({ kind: 'namespace', namespace: 'gamma', packageId: C });
+      await refusalOf(() => protocol.getMetaItem({ type: 'picklist', name: 'status', packageId: C }));
+    });
+
+    it('`_env` of a name only a package holds is 409 naming it (BASE: admitted, alpha\'s served)', async () => {
+      shipValid('mapping', 'import', A);
+      const err = await refusalOf(() => protocol.admitEnvironmentQualifier({ type: 'mapping', name: 'import' }));
+      expect([err.refusal.reason, err.refusal.callerPackageId]).toEqual(['not-held-by-qualifier', null]);
+      expect(err.refusal.candidates).toEqual([{ kind: 'package', packageId: A }]);
+    });
+
+    it('the refusal crosses a wire door as 409, never 404 or 500', async () => {
+      shipValid('flow', 'route', A);
+      const err = await refusalOf(() => protocol.getMetaItem({ type: 'flow', name: 'route', packageId: C }));
+      const answer = resolveThrownHttpError(err, 500);
+      expect([answer.status, answer.code]).toEqual([409, 'RESOURCE_CONFLICT']);
+    });
+
+    it('CONTROL: each holder reads its own item, the second-registered too', async () => {
+      shipValid('flow', 'route', A);
+      shipValid('flow', 'route', B);
+      expect(labelOf(await protocol.getMetaItem({ type: 'flow', name: 'route', packageId: A }))).toBe('alpha flow');
+      expect(labelOf(await protocol.getMetaItem({ type: 'flow', name: 'route', packageId: B }))).toBe('beta flow');
+    });
+
+    it('CONTROL: Studio\'s pair read of a base-held item answers the base\'s item (ui carry-in 1)', async () => {
+      shipValid('picklist', 'status', B);
+      shipValid('picklist', 'status', A);
+      expect(labelOf(await protocol.getMetaItem({ type: 'picklist', name: 'status', packageId: PAIR_A }))).toBe('alpha picklist');
+    });
+
+    it('CONTROL: a row bound to the package named is served at it', async () => {
+      rows.push({
+        type: 'picklist', name: 'extra', state: 'active', package_id: PAIR_A,
+        metadata: JSON.stringify({ name: 'extra', label: 'pair picklist' }),
+      });
+      expect(labelOf(await protocol.getMetaItem({ type: 'picklist', name: 'extra', packageId: PAIR_A }))).toBe('pair picklist');
+    });
+
+    it('CONTROL: zero holders stays not-found; the environment\'s own item is admitted at `_env`', async () => {
+      expect((await protocol.getMetaItem({ type: 'flow', name: 'nothing', packageId: A }))?.item).toBeUndefined();
+      envItem('flow', 'local');
+      expect(() => protocol.admitEnvironmentQualifier({ type: 'flow', name: 'local' })).not.toThrow();
+    });
+
+    it('CONTROL: a type outside the covered set (view) keeps the prefer-local read', async () => {
+      registry.registerItem('view', { name: 'all', label: 'alpha view' }, 'name' as never, A);
+      expect(labelOf(await protocol.getMetaItem({ type: 'view', name: 'all', packageId: C }))).toBe('alpha view');
+    });
   });
 });
 

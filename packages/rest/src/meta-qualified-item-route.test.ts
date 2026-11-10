@@ -157,6 +157,32 @@ describe('GET /meta/:type/:name?package=X — the exact qualifier on this transp
     });
 });
 
+/**
+ * Seat ruling (c) of #32076 (claim amendment 6764879174): a covered type the
+ * registry still reads through `getItem` (`readsByPackage` answers `false`; a
+ * picklist here) is judged by the exact qualifier too.
+ */
+describe('a covered type the registry reads through `getItem`: the exact qualifier on this transport', () => {
+    it('`?package=`, the qualified path and `_env` of a name only alpha holds: 409 naming it (BASE: 200, alpha\'s picklist)', async () => {
+        ship('picklist', 'status', A);
+        for (const answer of [
+            await drive(ITEM, { type: 'picklist', name: 'status' }, { package: C }),
+            await drive(QUALIFIED, { type: 'picklist', ns: 'gamma', name: 'status' }),
+            await drive(QUALIFIED, { type: 'picklist', ns: '_env', name: 'status' }),
+        ]) {
+            expect([answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+            expect(messageOf(answer)).toContain(`package "${A}"`);
+        }
+    });
+
+    it('CONTROL: the bare read and the holder\'s own reads answer as before', async () => {
+        ship('picklist', 'status', A);
+        expect(labelOf(await drive(ITEM, { type: 'picklist', name: 'status' }))).toBe('alpha picklist');
+        expect(labelOf(await drive(ITEM, { type: 'picklist', name: 'status' }, { package: A }))).toBe('alpha picklist');
+        expect(labelOf(await drive(QUALIFIED, { type: 'picklist', ns: 'alpha', name: 'status' }))).toBe('alpha picklist');
+    });
+});
+
 describe('the anonymous gate judges the qualified shape as no public-audience route', () => {
     // `RestServer`'s anonymous deny exempts only the item, list and book-tree
     // shapes of `book`/`doc`; the runtime dispatcher keeps the same deny for
