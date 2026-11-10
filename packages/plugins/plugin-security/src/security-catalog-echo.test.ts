@@ -89,6 +89,14 @@ function makeEngine() {
   const positions = new Map<string, Row>();
   const registered: Array<{ type: string; name: unknown }> = [];
   const registry = {
+    // A registry that reads no type by package (ADR-0150): every by-name read
+    // stays this double's `getItem`. Without the slice, the protocol refuses a
+    // by-name read of a package-scoped type it cannot judge.
+    readsByPackage: () => false,
+    packageScopedHoldersOf: () => [],
+    getEnvironmentScopedItem: () => undefined,
+    getPackageScopedItem: () => undefined,
+    resolveItem: () => { throw new Error('[test double] this registry reads no type by package'); },
     registered,
     listItems: (type: string) => (type === 'permission' ? codeArtifacts : type === 'position' ? [...positions.values()] : []),
     getItem: (type: string, name: string) => registry.listItems(type).find((item) => item.name === name),
