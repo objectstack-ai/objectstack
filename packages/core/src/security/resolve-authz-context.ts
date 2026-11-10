@@ -86,6 +86,7 @@ import {
 } from './organization-reach.js';
 import { derivePosture } from './posture-ladder.js';
 import {
+  permissionSetHolderIsPlatform,
   resolveCatalogReference,
   securityCatalogReaderOf,
   storedPermissionSetScope,
@@ -1497,6 +1498,65 @@ async function ledgerRowHolders(
 }
 
 /**
+ * [ADR-0150 D4, D8 R4] Does the activation-ledger row `row` — one
+ * `permission` row as stored, `active` false or not — switch off the set held
+ * at `(packageId, name)`? The reading {@link readDisabledCatalogNames} gives
+ * every row: its `package_id` names the holder; a null or stale one disables
+ * the holder the name resolves to with no caller; one the rule refuses
+ * disables every holder of the name. For a reader that judges ledger rows of
+ * its own (a write it simulates), so it switches off exactly what the
+ * resolver does.
+ */
+export async function ledgerRowSwitchesOff(
+  engine: unknown,
+  row: { metadata_type?: unknown; name?: unknown; package_id?: unknown; active?: unknown } | undefined,
+  packageId: string | null,
+  name: string,
+): Promise<boolean> {
+  if (!row || row.metadata_type !== 'permission' || row.name !== name) return false;
+  if (!(row.active === false || row.active === 0)) return false;
+  const holders = await ledgerRowHolders(securityCatalogReaderOf(engine), name, row.package_id);
+  return holders.includes(packageId);
+}
+
+/**
+ * [ADR-0150 D2/D3] The PLATFORM's set of the name `name`
+ * (`permissionSetHolderIsPlatform`) on `engine`'s catalog, or `undefined` when
+ * the platform holds none, or no catalog is bound. The name with no caller
+ * answers first — the read every environment phase 1 keeps to one holder gives
+ * — and only when that is not the platform's holder (another package's set of
+ * the name beside it, which the caller-less read refuses) is the one platform
+ * holder taken from the catalog's per-holder list. Two platform holders are no
+ * answer: nothing is picked.
+ */
+export async function platformPermissionSet(engine: unknown, name: string): Promise<SecurityCatalogEntry | undefined> {
+  const catalog = securityCatalogReaderOf(engine);
+  if (!catalog) return undefined;
+  const answer = await resolveCatalogReference(catalog, 'permission', name);
+  if (answer.status === 'resolved' && permissionSetHolderIsPlatform(engine, answer.entry.packageId)) return answer.entry;
+  const platform = (await catalog.list('permission'))
+    .filter((entry) => entry.name === name && permissionSetHolderIsPlatform(engine, entry.packageId));
+  return platform.length === 1 ? platform[0] : undefined;
+}
+
+/**
+ * [ADR-0150 D3, D8 R1] Does a stored grant naming `name` with package column
+ * `packageColumn` resolve — as the resolver reads it — to the PLATFORM's set?
+ * The reading every population an identity is derived from (the break-glass
+ * administrators, the Default Organization's owner, an organization's
+ * administrators) asks of each grant row it reads by name: another package's
+ * set of that name is not the platform's, and a name the rule refuses (two
+ * holders, no column) holds nothing. No catalog bound: nothing resolves, so
+ * nothing is the platform's.
+ */
+export async function grantNamesPlatformPermissionSet(engine: unknown, name: string, packageColumn: unknown): Promise<boolean> {
+  const catalog = securityCatalogReaderOf(engine);
+  if (!catalog || typeof name !== 'string' || name === '') return false;
+  const answer = await resolveCatalogReference(catalog, 'permission', name, storedPermissionSetScope(packageColumn));
+  return answer.status === 'resolved' && permissionSetHolderIsPlatform(engine, answer.entry.packageId);
+}
+
+/**
  * [ADR-0049, ADR-0131 D3, ADR-0126 §4] Which of `positions` and `sets` are
  * switched OFF for this deployment: the `sys_metadata_activation` rows of type
  * `position` / `permission` whose `active` is false. ADR-0131 moves the
@@ -1614,6 +1674,16 @@ async function catalogSetBody(
     systemPermissions: entry.definition.systemPermissions,
     tabPermissions: entry.definition.tabPermissions,
   };
+}
+
+/**
+ * [ADR-0150 D3] The package of the PLATFORM's `admin_full_access` — the set
+ * the deployment-config anchor confers (§6b-config) — or `null` when the
+ * environment's own item, or no holder, answers ({@link platformPermissionSet}).
+ */
+async function platformAdminSetPackage(ql: unknown): Promise<string | null> {
+  const entry = await platformPermissionSet(ql, ADMIN_FULL_ACCESS);
+  return entry ? catalogEntryAddress(entry).packageId : null;
 }
 
 /**
@@ -2510,6 +2580,9 @@ export async function resolveUserAuthzGrants(
     readPositionLedger(),
   ]);
   const platformAnchor = { walled, defaultOrganizationId };
+  // [ADR-0150 D3] Read by NAME here, before the grant's set is resolved: this
+  // only picks the rows the loop below resolves. A row anchors standing only
+  // once its set resolves to the platform's holder (`permissionSetHolderIsPlatform`).
   const anchorsPlatformStanding = (grant: unknown): boolean =>
     grantSetNameOf(grant) === ADMIN_FULL_ACCESS && grantAnchorsPlatformStanding(grant, platformAnchor);
   // An anchoring grant applies in whichever organization the principal acts in, and with
@@ -2563,6 +2636,12 @@ export async function resolveUserAuthzGrants(
     // picked (`storedPermissionSetScope`).
     const body = await catalogSetBody(catalog, name, undefined, storedPermissionSetScope((grant as Record<string, unknown>).permission_set_package));
     if (!body) continue;
+    // [ADR-0150 D3] Platform standing is the PLATFORM's `admin_full_access`:
+    // another package's set of that name is granted as any set is, where its
+    // grant applies, and never anchors standing — nor carries its grant across
+    // the tenant wall the anchor crosses.
+    const anchors = anchorsPlatformStanding(grant) && permissionSetHolderIsPlatform(ql, body.packageId);
+    if (!anchors && !grantAppliesInTenant(grantOrganizationOf(grant), tenantId)) continue;
     // [ADR-0150 D4] Switched off per holder: the one this grant resolved to.
     const active = !permissionSetSwitchedOff(disabled, body.packageId, body.name);
     take(body, active);
@@ -2587,7 +2666,7 @@ export async function resolveUserAuthzGrants(
     //
     // [ADR-0151 D3] An AI service account is never an administrator: no grant
     // confers platform standing on it.
-    if (anchorsPlatformStanding(grant) && active && !agentAccount) {
+    if (anchors && active && !agentAccount) {
       hasPlatformAdminGrant = true;
     }
   }
@@ -2648,10 +2727,14 @@ export async function resolveUserAuthzGrants(
     if (!grants.permissions.includes(ADMIN_FULL_ACCESS)) grants.permissions.push(ADMIN_FULL_ACCESS);
     // [ADR-0150 D3] Its address, as a grant row's would be: the set the name
     // resolves to with no caller — the identical envelope again.
+    //
+    // [ADR-0150 D3] The PLATFORM's set (`permissionSetHolderIsPlatform`): the
+    // name with no caller while that answers the platform's holder — every
+    // environment phase 1 keeps to one holder — else the one platform holder
+    // the catalog lists beside another package's set of the name.
     const addresses = (grants.permissionSetAddresses ??= []);
-    if (!addresses.some((a) => a.name === ADMIN_FULL_ACCESS)) {
-      const body = await catalogSetBody(catalog, ADMIN_FULL_ACCESS);
-      addresses.push({ packageId: body?.packageId ?? null, name: ADMIN_FULL_ACCESS });
+    if (!addresses.some((a) => a.name === ADMIN_FULL_ACCESS && permissionSetHolderIsPlatform(ql, a.packageId))) {
+      addresses.push({ packageId: await platformAdminSetPackage(ql), name: ADMIN_FULL_ACCESS });
     }
     recordOrigin(ADMIN_FULL_ACCESS, { kind: 'derived', source: 'platform_admin_config' });
     for (const p of ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions ?? []) {
@@ -2714,7 +2797,10 @@ export async function resolveUserAuthzGrants(
     // [ADR-0105 D4] Either org-admin capability set resolves the rung — the
     // wall-less variant differs only by withholding the superuser bits.
     // [ADR-0151 D3] Never for an AI service account, whatever it holds.
-    isTenantAdmin: !agentAccount && ORGANIZATION_ADMIN_GRANTS.some((n: string) => grants.permissions.includes(n)),
+    // [ADR-0150 D3] …the PLATFORM's set of that name, in force: another
+    // package's set that shares the name grants its own body and no rung.
+    isTenantAdmin: !agentAccount && psRowsAll.some((r) =>
+      r.active && ORGANIZATION_ADMIN_GRANTS.includes(r.name) && permissionSetHolderIsPlatform(ql, r.packageId)),
     isExternal: external,
   });
   if (external) grants.audience = 'external';

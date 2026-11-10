@@ -82,7 +82,7 @@
  * the owner bind.
  */
 
-import { DEFAULT_ORGANIZATION_SLUG, findDefaultOrganization, matchesConfiguredPlatformAdmin, resolvePlatformAdminEmails } from '@objectstack/core';
+import { DEFAULT_ORGANIZATION_SLUG, findDefaultOrganization, grantNamesPlatformPermissionSet, matchesConfiguredPlatformAdmin, resolvePlatformAdminEmails } from '@objectstack/core';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { resolveTenancyPosture } from '@objectstack/types';
@@ -491,6 +491,7 @@ export async function ensureDefaultOrganization(
         ql,
         (object, query) => ql.find(object, query, { context: SYSTEM_CTX }),
         ADMIN_FULL_ACCESS,
+        { platform: true },
       );
     } catch {
       adminSetInEffect = false;
@@ -514,7 +515,7 @@ export async function ensureDefaultOrganization(
     // there (ADR-0131 D1), so it binds nobody here: with no nameable Default
     // Organization no grant is read and the answer is `no_admin`.
     const defaultOrgId = await findDefaultOrganizationId(ql);
-    const adminGrants: any[] = defaultOrgId
+    const namedGrants: any[] = defaultOrgId
       ? await tryFind(
         ql,
         'sys_user_permission_set',
@@ -522,6 +523,13 @@ export async function ensureDefaultOrganization(
         50,
       )
       : [];
+    // [ADR-0150 D3, D8 R1] …naming the PLATFORM's set, read by each grant's
+    // package column as the derivation reads it: another package's set of that
+    // name makes no platform administrator, so it binds no owner here.
+    const adminGrants: any[] = [];
+    for (const grant of namedGrants) {
+      if (await grantNamesPlatformPermissionSet(ql, ADMIN_FULL_ACCESS, grant?.permission_set_package)) adminGrants.push(grant);
+    }
     if (adminGrants.length === 0) {
       return { defaultOrgCreated: false, memberCreated: false, reason: 'no_admin' };
     }
