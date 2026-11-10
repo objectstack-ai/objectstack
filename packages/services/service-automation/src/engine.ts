@@ -3280,7 +3280,8 @@ export class AutomationEngine implements IAutomationService {
             // package (stamped at start) comes first, so a run whose key moved
             // in flight is still its own package's run. A key no slot files is
             // a qualified key moved back to the bare name: split at its last `/`.
-            stored: (key, flowPackage) => {
+            stored: (filed, flowPackage) => {
+                const key = filed.startsWith('\u0000') ? filed.slice(1) : filed; // [S3] an unfiled key stores its name
                 const slot = this.flowSlots.slot(key);
                 const cut = key.lastIndexOf('/');
                 const flowName = slot?.name ?? (cut >= 0 ? key.slice(cut + 1) : key);

@@ -346,9 +346,11 @@ describe('#31696 two packages\' flows of one name — both armed, each its own',
         // [S2] The guards never read P1's call as P2's flow; a stored run naming no package is not P2's.
         expect((engine as unknown as { flowCallKey(c: string, n: string): string }).flowCallKey('c', 'f')).not.toBe('f');
         const legacy = new InMemorySuspendedRunStore();
-        await legacy.save({ runId: 'legacy', flowName: 'f', nodeId: 'hold' } as SuspendedRun);
+        await legacy.save({ runId: 'legacy', flowName: 'f', nodeId: 'hold', steps: [] } as unknown as SuspendedRun);
         engine.setSuspendedRunStore(legacy);
         expect((await (engine as unknown as { store: InMemorySuspendedRunStore }).store.load('legacy'))?.flowName).not.toBe('f');
+        await engine.cancelRun('legacy');
+        expect((await legacy.listHistory('f', 10)).map((r) => r.flowName)).toEqual(['f']);
         engine.setFlowCredentialSource({ holds: () => true, held: () => [], resolve: async () => 'p1-secret' });
         await expect(engine.resolveFlowCredential('f', 'start', 'secret')).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
         expect((await engine.executeSlot(P2, 'f')).success).toBe(true);
