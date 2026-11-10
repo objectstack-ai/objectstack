@@ -34,6 +34,19 @@
  * ⛔ `api`'s endpoint matcher keys its routes by METHOD + path (bucket 1);
  * nothing here resolves a path. What changes is that the matcher now sees
  * every package's endpoint instead of the last one registered under a name.
+ *
+ * ## Which types
+ *
+ * `api` (#32069), and every type whose one-holder rule has narrowed to the
+ * namespace — objectql's `NAMESPACE_SCOPED_BARE_NAME_TYPES`, today `agent`,
+ * `skill` (#31701) and `email_template` (#31699). Two packages of two namespaces may each install such a
+ * name, so a store keyed by bare name would keep whichever registered last:
+ * the artifact door registers every package body's items here, and a read
+ * naming the other package (`get(type, name, packageId)`, the `/meta` code
+ * layer) was served the survivor. ⛔ A type joins the narrowed set only in the
+ * same change that adds it here: objectql pins the superset
+ * (`registry-bare-name-one-holder-ai-family.test.ts`), since this package
+ * cannot import objectql (objectql depends on it).
  */
 
 import {
@@ -45,15 +58,12 @@ import {
 import { peelStoredEnvelope } from './stored-envelope.js';
 
 /**
- * The types whose in-memory items are stored per `(package, name)`.
- *
- * [#31699, ADR-0150 child B] `email_template` joins in the same change that
- * adds it to `NAMESPACE_SCOPED_BARE_NAME_TYPES` (`@objectstack/objectql`):
- * once two packages of two namespaces may each hold one template name, the
- * second package's item must not overwrite the first's here before any reader
- * sees it.
+ * The types whose in-memory items are stored per `(package, name)`: `api`,
+ * then every namespace-scoped type (#32151; see "Which types" above):
+ * `agent`, `skill`, and `email_template` (#31699, ADR-0150 child B), which
+ * joins in the same change that adds it to `NAMESPACE_SCOPED_BARE_NAME_TYPES`.
  */
-export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set(['api', 'email_template']);
+export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set(['api', 'agent', 'skill', 'email_template']);
 
 /** The provenance sentinel a rehydrated row carries in place of a package. */
 const OVERLAY_SENTINEL = 'sys_metadata';

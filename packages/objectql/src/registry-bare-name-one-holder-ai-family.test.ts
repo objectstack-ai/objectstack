@@ -54,6 +54,7 @@ import {
   declaredBareNames,
 } from './bare-name-one-holder.js';
 import type { ObjectQL } from './engine.js';
+import { MetadataManager } from '@objectstack/metadata';
 
 type ManifestService = { register(m: unknown): void | Promise<void> };
 type Holder = { kind: string; packageId?: string };
@@ -480,5 +481,34 @@ describe('the refusal\'s reason names the consumers of the types it lists', () =
     } finally {
       builtIns.delete('platform_skill');
     }
+  });
+});
+
+/**
+ * [ADR-0150 D3/D4, #32151] A type narrows to the namespace only with its
+ * in-memory metadata store keyed per `(package, name)`: once two namespaces
+ * may each install a name, a store keyed by bare name keeps whichever package
+ * registered last, and a read naming the other package is answered the
+ * survivor. So every member of `NAMESPACE_SCOPED_BARE_NAME_TYPES` is a member
+ * of `@objectstack/metadata`'s `PACKAGE_SLOTTED_STORE_TYPES`, and a change
+ * that narrows a type adds it there in the same stroke.
+ *
+ * Pinned here because objectql depends on `@objectstack/metadata`, never the
+ * reverse. The set itself is not on that package's public entry, so the pin
+ * asks the public `MetadataManager` what membership means, for each narrowed
+ * type: the item the artifact door registers for each of two packages
+ * (`register(…, { notify: false })`, stamped `_packageId`) is still each
+ * package's own afterwards. A narrowed type missing from the set fails it:
+ * the second register overwrites the first.
+ */
+describe('every namespace-scoped type is stored per (package, name) in the metadata service\'s in-memory store (#32151)', () => {
+  it.each([...NAMESPACE_SCOPED_BARE_NAME_TYPES])('%s: two packages\' same-named items are both kept, each answered to a read naming its package', async (type) => {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    const name = `shared_${type}`;
+    for (const [packageId, tag] of [['com.acme.alpha', 'alpha'], ['com.acme.beta', 'beta']] as const) {
+      await manager.register(type, name, { name, label: `${tag} ${type}`, _packageId: packageId }, { notify: false });
+    }
+    const labels = await Promise.all(['com.acme.alpha', 'com.acme.beta'].map(async (packageId) => ((await manager.get(type, name, packageId)) as { label?: string } | undefined)?.label));
+    expect(labels, 'a narrowed type whose metadata store slot is still the bare name').toEqual([`alpha ${type}`, `beta ${type}`]);
   });
 });

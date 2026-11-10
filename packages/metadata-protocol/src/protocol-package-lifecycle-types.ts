@@ -52,7 +52,13 @@ export type UninstallCleanup = (args: {
      * does not read it behaves as before.
      */
     declared?: UninstallDeclared;
-}) => Promise<{ success: boolean; removed: number; error?: string }>;
+}) => Promise<{
+    success: boolean;
+    removed: number;
+    error?: string;
+    /** [ADR-0150 D8] Relayed onto the outcome: {@link UninstallCleanupOutcome.reportedGrants}. */
+    reportedGrants?: Array<{ user: string; organization: string | null; permission_set: string }>;
+}>;
 
 /**
  * [#31232] A guard's answer to "may this package be uninstalled now?": the
@@ -170,6 +176,16 @@ export interface UninstallCleanupOutcome {
      * `declaredUserMessage`, never by probing the field.
      */
     userMessage?: string;
+    /**
+     * [ADR-0150 D8] Grants the cleanup revoked that the operator should look
+     * at again: plugin-security's permission-set grants that named no package
+     * while another holder still serves the set's name. Each is revoked (never
+     * bound to the remaining holder) and named here — user, organization, set —
+     * so the operator re-grants it with the package named. Present only when
+     * the cleanup reported at least one, so every other outcome answers as
+     * before.
+     */
+    reportedGrants?: Array<{ user: string; organization: string | null; permission_set: string }>;
 }
 
 /**
