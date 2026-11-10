@@ -3424,14 +3424,14 @@
       "title": "An action call names its holder: POST /api/v1/actions/:ns/:object/:action[/:recordId], /actions/:ns/global/:action and the _env forms run that namespace's (or the environment's) declaration, an action another package binds to an object is reachable by its namespace, and the bare call is unchanged",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": ["admin (the seeded admin): every call"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr_a, namespace qa_a) and qa_b (manifest id com.qa.addr_b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. qa_a declares the object qa_a_ticket with an embedded server action escalate and an object-less action qa_a_ping; qa_b declares a standalone action escalate bound to objectName qa_a_ticket. Each action's handler answers a result naming its package, so the runner can tell which ran",
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. qa_a declares the object qa_a_ticket with an embedded server action escalate and an object-less action qa_a_ping; qa_b declares a standalone action escalate bound to objectName qa_a_ticket. Each action's handler answers a result naming its package, so the runner can tell which ran",
           "one qa_a_ticket record (its id is RID), and an environment object-less action qa_env_ping saved with PUT /api/v1/meta/action/qa_env_ping and no ?package="
         ]
       },
@@ -3497,6 +3497,12 @@
           "date": "2026-11-10",
           "change": "initial — ADR-0150 child G1, the /actions door (#31979, #31993). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
           "ref": "#32019"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-10",
+          "change": "fixture-text correction, no clause change: the scratch package ids are re-spelled with a hyphen (com.qa.addr-a, com.qa.addr-b) everywhere this item names them (fixtures), because `objectstack build` refuses an underscore in a package id (packages/spec/src/kernel/manifest.zod.ts#MANIFEST_ID_PATTERN, refused with manifestIdRefusal). The namespaces qa_a and qa_b and every namespace-qualified address are unchanged. No step, clause or variant changes meaning. Found by the M4 verification run (#32316, FOLLOW-UPS §19b); card #32330",
+          "ref": "#32330"
         }
       ]
     },
@@ -3505,23 +3511,23 @@
       "title": "A metadata item reads by its qualified address: GET /api/v1/meta/:type/:ns/:name and /meta/:type/_env/:name name the holder exactly, a bare read of a name two packages hold answers 409 naming both, and ?package= stays the exact qualifier",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": ["admin (the seeded admin): every read", "a caller the bare item read refuses (no session): the parity leg"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr_a, namespace qa_a) and qa_b (manifest id com.qa.addr_b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Each holds a page named qa_home with a label that says which package it is; qa_a also holds a page qa_only_a. page is one of the nine types whose readers consult (package, name) (packages/objectql/src/package-scoped-read.ts#PACKAGE_SCOPED_READ_TYPES), and no one-holder rule covers it, so both packages may hold qa_home",
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Each holds a page named qa_home with a label that says which package it is; qa_a also holds a page qa_only_a. page is one of the nine types whose readers consult (package, name) (packages/objectql/src/package-scoped-read.ts#PACKAGE_SCOPED_READ_TYPES), and no one-holder rule covers it, so both packages may hold qa_home",
           "an environment page qa_env_home, saved with PUT /api/v1/meta/page/qa_env_home and no ?package= (a minimal valid page body)"
         ]
       },
       "steps": [
         "GET /api/v1/meta/page/qa_a/qa_home and GET /api/v1/meta/page/qa_b/qa_home; record each body's package and label",
         "GET /api/v1/meta/page/qa_home (bare) and GET /api/v1/meta/page/qa_only_a (bare); record status and body",
-        "GET /api/v1/meta/page/qa_home?package=com.qa.addr_a, then GET /api/v1/meta/page/qa_only_a?package=com.qa.addr_b",
+        "GET /api/v1/meta/page/qa_home?package=com.qa.addr-a, then GET /api/v1/meta/page/qa_only_a?package=com.qa.addr-b",
         "GET /api/v1/meta/page/_env/qa_env_home, then GET /api/v1/meta/page/_env/qa_home",
-        "GET /api/v1/meta/page/qa_a/qa_home?package=com.qa.addr_b (two qualifiers) and GET /api/v1/meta/page/qa_nowhere/qa_home (a middle segment that is no installed namespace)",
+        "GET /api/v1/meta/page/qa_a/qa_home?package=com.qa.addr-b (two qualifiers) and GET /api/v1/meta/page/qa_nowhere/qa_home (a middle segment that is no installed namespace)",
         "GET /api/v1/meta/page/qa_a/history and GET /api/v1/meta/page/qa_nopage/history; compare the two answers",
         "without a session: GET /api/v1/meta/page/qa_only_a, then GET /api/v1/meta/page/qa_a/qa_only_a; compare"
       ],
@@ -3535,13 +3541,13 @@
         {
           "clause": "a bare read of a name two packages hold answers 409 RESOURCE_CONFLICT naming both packages, never one picked; a bare read of a name one package holds still answers 200",
           "oracle": "api",
-          "verify": "GET /meta/page/qa_home answers 409 with code RESOURCE_CONFLICT and a message naming com.qa.addr_a and com.qa.addr_b (packages/core/src/package-scoped-resolution.ts#PackageScopedNameRefusedError); GET /meta/page/qa_only_a answers 200 with qa_a's page",
+          "verify": "GET /meta/page/qa_home answers 409 with code RESOURCE_CONFLICT and a message naming com.qa.addr-a and com.qa.addr-b (packages/core/src/package-scoped-resolution.ts#PackageScopedNameRefusedError); GET /meta/page/qa_only_a answers 200 with qa_a's page",
           "evidence": "the 409 body and the 200 body"
         },
         {
           "clause": "?package= is the exact qualifier: it serves that package's item, and a package that holds no item of the name is refused 409 naming every holder, never served another package's item",
           "oracle": "api",
-          "verify": "?package=com.qa.addr_a on qa_home serves qa_a's page; ?package=com.qa.addr_b on qa_only_a answers 409 RESOURCE_CONFLICT naming com.qa.addr_a (packages/metadata-protocol/src/protocol-exact-qualifier.ts#admitExactQualifier, reason not-held-by-qualifier)",
+          "verify": "?package=com.qa.addr-a on qa_home serves qa_a's page; ?package=com.qa.addr-b on qa_only_a answers 409 RESOURCE_CONFLICT naming com.qa.addr-a (packages/metadata-protocol/src/protocol-exact-qualifier.ts#admitExactQualifier, reason not-held-by-qualifier)",
           "evidence": "the 200 body and the 409 body"
         },
         {
@@ -3571,7 +3577,7 @@
       ],
       "negative": [
         "a bare 200 that serves one of the two qa_home pages is a FAIL: a silent pick between holders is what ADR-0150 D5 refuses",
-        "?package=com.qa.addr_b serving qa_a's qa_only_a (or the environment's item) is a FAIL: the qualifier is exact, never a closure",
+        "?package=com.qa.addr-b serving qa_a's qa_only_a (or the environment's item) is a FAIL: the qualifier is exact, never a closure",
         "a qualified read that answers 200 where the bare read refuses the same caller is a FAIL"
       ],
       "traps": ["dispatcher-vs-hono-route", "wrong-persona"],
@@ -3594,6 +3600,12 @@
           "date": "2026-11-10",
           "change": "initial — ADR-0150 child G1, the /meta door (#31959). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
           "ref": "#32019"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-10",
+          "change": "fixture-text correction, no clause change: the scratch package ids are re-spelled with a hyphen (com.qa.addr-a, com.qa.addr-b) everywhere this item names them (fixtures, steps, acceptance and negative), because `objectstack build` refuses an underscore in a package id (packages/spec/src/kernel/manifest.zod.ts#MANIFEST_ID_PATTERN, refused with manifestIdRefusal). The namespaces qa_a and qa_b and every namespace-qualified address are unchanged. No step, clause or variant changes meaning. Found by the M4 verification run (#32316, FOLLOW-UPS §19b); card #32330",
+          "ref": "#32330"
         }
       ]
     },
@@ -3602,7 +3614,7 @@
       "title": "The automation, legacy trigger, connector connection and inbound hook doors take the namespace and _env segments: /automation/:ns/:name[/trigger|/toggle|/clone|/runs…], /automation/trigger/:ns/:name, /automation/connectors/:ns/:name/connection and /automation/hooks/:ns/:flowName/:hookId serve the name's one holder exactly as the bare path does, and refuse any other qualifier with 404, 409 RESOURCE_CONFLICT or, for the hook, the door's own 401",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3614,7 +3626,7 @@
         "app": "showcase",
         "requires": [
           "a fresh boot of the showcase with the hook secret set: export SHOWCASE_WEBHOOK_SECRET=<any test value>, then `pnpm dev -- --fresh -p PORT --seed-admin` (until the variable is set, every hook post is refused 503). The showcase package (manifest id com.example.showcase, namespace showcase: examples/app-showcase/objectstack.config.ts) is the one holder of the flow showcase_batch_reminders (autolaunched, runs through the trigger door), of the flow showcase_inbound_task_webhook (type api, hook intake, secretRef SHOWCASE_WEBHOOK_SECRET) and of the connector instance showcase_status_api (auth none)",
-          "one scratch package qa_b (manifest id com.qa.addr_b, namespace qa_b), its own scratch app directory (never the shared examples), a defineStack({ manifest: { id, namespace, version, type: 'app' }, objects: [one object qa_b_note] }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials). It declares no flow and no connector: it is an installed namespace that holds none of the names below. Its one object is what registers the namespace (packages/objectql/src/registry.ts#registerNamespace)",
+          "one scratch package qa_b (manifest id com.qa.addr-b, namespace qa_b), its own scratch app directory (never the shared examples), a defineStack({ manifest: { id, namespace, version, type: 'app' }, objects: [one object qa_b_note] }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials). It declares no flow and no connector: it is an installed namespace that holds none of the names below. Its one object is what registers the namespace (packages/objectql/src/registry.ts#registerNamespace)",
           "an environment flow qa_env_flow, created as admin with POST /api/v1/automation and a minimal autolaunched body (a start node and an end node joined by one edge), so no package holds it"
         ],
         "knownGaps": [
@@ -3727,6 +3739,12 @@
           "date": "2026-11-10",
           "change": "corrected a stale variant and source line, which said the 16 addressed /automation rows are server-only because the SDK names no namespace. #32197 (f9eaba2d) gave the SDK the namespace and turned eleven of them to disposition sdk; the addressed cancel, restore-suspension and three connector connection rows stay server-only. No step or clause changes. Close-out #32270 (epic #32022 M4), read from source at 60b99f8f",
           "ref": "#32270"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-10",
+          "change": "fixture-text correction, no clause change: the scratch package ids are re-spelled with a hyphen (com.qa.addr-b) everywhere this item names them (fixtures), because `objectstack build` refuses an underscore in a package id (packages/spec/src/kernel/manifest.zod.ts#MANIFEST_ID_PATTERN, refused with manifestIdRefusal). The namespace qa_b and every namespace-qualified address are unchanged. No step, clause or variant changes meaning. Found by the M4 verification run (#32316, FOLLOW-UPS §19b); card #32330",
+          "ref": "#32330"
         }
       ]
     },
@@ -3735,7 +3753,7 @@
       "title": "The client SDK names an item's package: automation.*, actions.invoke / invokeGlobal and meta.getItem take an optional namespace, send the qualified path the server reads, send the bare path unchanged without one, refuse before sending any path the router would read as another request, and hand a 409's candidates to the caller",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -3745,7 +3763,7 @@
         "app": "showcase",
         "requires": [
           "a showcase boot on its own port and file DB (dogfood §0): `pnpm dev -- --fresh -p PORT` after a full `pnpm build`, which also builds packages/client/dist, the code the script imports. The showcase package (manifest id com.example.showcase, namespace showcase) is the one holder of the flow showcase_batch_reminders (autolaunched; it reads a list input tasks, so a run is sent { params: { tasks: [] } }) and of the object-less script action showcase_portfolio_snapshot (read-only: it counts accounts, projects and invoices)",
-          "two scratch packages, each in its own scratch app directory (never the shared examples), compiled with `objectstack build` and installed with `os package install DIR/dist/objectstack.json -u BASE --email … --password …`. Leave about 12 s between the two installs: each one signs in, and the sign-in rate limit answers a second one sooner with 429. qa_a (manifest id com.qa.addr-a, namespace qa_a) holds the pages qa_home and qa_only_a; qa_b (manifest id com.qa.addr-b, namespace qa_b) holds a page qa_home. Each page's label names its package ('qa_a home', 'qa_b home'). A page is { name, label, type: 'app', regions: [{ name: 'main', components: [{ type: 'page:header', properties: { title } }] }] }. A package id takes no underscore (the manifest id grammar refuses com.qa.addr_a at build), so the ids are hyphenated while the namespaces keep theirs",
+          "two scratch packages, each in its own scratch app directory (never the shared examples), compiled with `objectstack build` and installed with `os package install DIR/dist/objectstack.json -u BASE --email … --password …`. Leave about 12 s between the two installs: each one signs in, and the sign-in rate limit answers a second one sooner with 429. qa_a (manifest id com.qa.addr-a, namespace qa_a) holds the pages qa_home and qa_only_a; qa_b (manifest id com.qa.addr-b, namespace qa_b) holds a page qa_home. Each page's label names its package ('qa_a home', 'qa_b home'). A page is { name, label, type: 'app', regions: [{ name: 'main', components: [{ type: 'page:header', properties: { title } }] }] }. A package id takes no underscore (the manifest id grammar refuses an underscore in a package id at build), so the ids are hyphenated while the namespaces keep theirs",
           "as admin, an environment page qa_env_home (PUT /api/v1/meta/page/qa_env_home with no ?package=, a page body as above) and an environment flow qa_env_flow (POST /api/v1/automation with type autolaunched, a start node and an end node joined by one edge), so no package holds either",
           "a scratch Node script (an .mjs file outside the repo) that imports ObjectStackClient from the worktree's packages/client/dist/index.mjs and constructs it with baseUrl BASE and a `fetch` (ClientConfig.fetch) that records each request's method and path, then calls the global fetch. It signs in with client.auth.login, and for each call keeps the requests that call sent and either the resolved value or the rejection's code, httpStatus, message and details.candidates"
         ],
@@ -3842,6 +3860,12 @@
           "date": "2026-11-10",
           "change": "promoted planned to active, earned by a live verification run. #32197 (f9eaba2d) landed the namespace option this item was written planned for, and #32272 put the candidates on the /meta 409. Steps, fixtures and clauses are read from packages/client at 60b99f8f, then run on a showcase boot of 97c6ab29 (60b99f8f plus checklist data only) with the scratch pair installed and the environment page and flow saved, through the built client: every clause passed (26 requests; the six refused calls sent none). The scratch package ids are hyphenated (com.qa.addr-a, com.qa.addr-b) because `objectstack build` refuses an underscore in a package id. The action legs use showcase_portfolio_snapshot because an installed artifact ships no handler code. Close-out #32270 (epic #32022 M4)",
           "ref": "#32270"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-10",
+          "change": "fixture-text correction, no clause change: the fixture's aside on the package-id rule no longer spells the refused underscore id literally; it now says the manifest id grammar refuses an underscore in a package id at build. The ids the item uses were already hyphenated in revision 2, and the namespaces qa_a and qa_b are unchanged. No step, clause or variant changes meaning. Found by the M4 verification run (#32316, FOLLOW-UPS §19b); card #32330",
+          "ref": "#32330"
         }
       ]
     },
