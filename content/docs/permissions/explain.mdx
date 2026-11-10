@@ -89,7 +89,7 @@ through.
 so the `object_crud` layer grants it only where the principal may edit the
 object **and** holds the transfer grant (`allowTransfer`, or `modifyAllRecords`,
 which grants both); a record-grained answer adds the record's own write gates.
-The transfer grant without edit still lets a principal create a record and
+The transfer grant without edit lets a principal create a record and
 assign it to someone else, but it transfers no existing record. The
 `allowTransfer` bit `/me/permissions` serves gives the same answer: it reads
 `true` only with edit.
