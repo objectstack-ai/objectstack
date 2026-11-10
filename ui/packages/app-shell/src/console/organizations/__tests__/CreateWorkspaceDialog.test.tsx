@@ -412,3 +412,120 @@ describe('the organization-limit refusal is shown in the session language (objec
     });
   }
 });
+
+// The Developer Edition choice: one unchecked checkbox, drawn only on the
+// host's explicit `features.developerEditionCreate === true`; checked, every
+// create attempt carries `edition: 'developer'`.
+describe('the Developer Edition choice follows features.developerEditionCreate', () => {
+  const flagOn = () =>
+    getAuthConfig.mockResolvedValue({ features: { multiOrgEnabled: true, developerEditionCreate: true } });
+
+  it.each([
+    ['absent', { multiOrgEnabled: true }],
+    ['false', { multiOrgEnabled: true, developerEditionCreate: false }],
+  ] as const)('control: the flag %s → no choice is drawn and the create call is what it was', async (_label, features) => {
+    getAuthConfig.mockResolvedValue({ features });
+    render(<CreateWorkspaceDialog open onOpenChange={() => {}} />);
+    await settleAuthConfig();
+
+    expect(screen.queryByTestId('workspace-developer-edition')).not.toBeInTheDocument();
+    expect(screen.queryByText('Developer Edition')).not.toBeInTheDocument();
+
+    fillAndSubmit();
+
+    await waitFor(() => expect(createOrganization).toHaveBeenCalledTimes(1));
+    expect(createOrganization.mock.calls[0][0]).toEqual({ name: 'Acme Inc', slug: 'acme-inc', timezone: BROWSER_ZONE });
+  });
+
+  it('the flag on → one unchecked checkbox with its hint; left unchecked, no edition is sent', async () => {
+    flagOn();
+    render(<CreateWorkspaceDialog open onOpenChange={() => {}} />);
+    await settleAuthConfig();
+
+    const box = await screen.findByTestId('workspace-developer-edition');
+    expect(box).toHaveAttribute('role', 'checkbox');
+    expect(box).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByLabelText('Developer Edition')).toBe(box);
+    expect(screen.getByText('Free, non-production, up to 5 members')).toBeInTheDocument();
+
+    fillAndSubmit();
+
+    await waitFor(() => expect(createOrganization).toHaveBeenCalledTimes(1));
+    expect(createOrganization.mock.calls[0][0]).not.toHaveProperty('edition');
+  });
+
+  it('checked → the create call carries edition: developer beside name, slug and zone', async () => {
+    flagOn();
+    render(<CreateWorkspaceDialog open onOpenChange={() => {}} />);
+    await settleAuthConfig();
+
+    fireEvent.click(await screen.findByTestId('workspace-developer-edition'));
+    expect(screen.getByTestId('workspace-developer-edition')).toHaveAttribute('aria-checked', 'true');
+    fillAndSubmit();
+
+    await waitFor(() =>
+      expect(createOrganization).toHaveBeenCalledWith({
+        name: 'Acme Inc',
+        slug: 'acme-inc',
+        timezone: BROWSER_ZONE,
+        edition: 'developer',
+      }),
+    );
+  });
+
+  it('a slug-collision retry keeps the edition on every attempt', async () => {
+    flagOn();
+    createOrganization
+      .mockRejectedValueOnce(Object.assign(new Error('Organization already exists'), { code: 'ORGANIZATION_ALREADY_EXISTS' }))
+      .mockResolvedValueOnce(NEW_ORG);
+    render(<CreateWorkspaceDialog open onOpenChange={() => {}} />);
+    await settleAuthConfig();
+
+    fireEvent.click(await screen.findByTestId('workspace-developer-edition'));
+    fillAndSubmit();
+
+    await waitFor(() => expect(createOrganization).toHaveBeenCalledTimes(2));
+    for (const [arg] of createOrganization.mock.calls) expect(arg).toMatchObject({ edition: 'developer' });
+    expect(createOrganization.mock.calls[1][0].slug).not.toBe('acme-inc');
+  });
+
+  it('a refusal shows the generic error, is not retried without the edition, and the box stays checked', async () => {
+    flagOn();
+    createOrganization.mockRejectedValue(new Error('Something the server said'));
+    render(<CreateWorkspaceDialog open onOpenChange={() => {}} />);
+    await settleAuthConfig();
+
+    fireEvent.click(await screen.findByTestId('workspace-developer-edition'));
+    fillAndSubmit();
+
+    expect(await screen.findByTestId('workspace-create-error')).toBeInTheDocument();
+    expect(createOrganization).toHaveBeenCalledTimes(1);
+    expect(createOrganization.mock.calls[0][0]).toMatchObject({ edition: 'developer' });
+    expect(screen.getByTestId('workspace-developer-edition')).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('reopening the dialog starts the choice unchecked again', async () => {
+    flagOn();
+    const { rerender } = render(<CreateWorkspaceDialog open onOpenChange={() => {}} />);
+    await settleAuthConfig();
+    fireEvent.click(await screen.findByTestId('workspace-developer-edition'));
+    expect(screen.getByTestId('workspace-developer-edition')).toHaveAttribute('aria-checked', 'true');
+
+    rerender(<CreateWorkspaceDialog open={false} onOpenChange={() => {}} />);
+    rerender(<CreateWorkspaceDialog open onOpenChange={() => {}} />);
+    await settleAuthConfig();
+
+    expect(await screen.findByTestId('workspace-developer-edition')).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it.each(['en', 'zh-Hans'] as const)('%s: the hint resolves from the pack with the member cap interpolated', (lang) => {
+    const ws = (builtInLocales[lang] as { workspace: Record<string, string> }).workspace;
+    expect(typeof ws.developerEdition).toBe('string');
+    const slots = Object.entries(ws).filter(([k]) => k.startsWith('developerEditionHint_'));
+    expect(slots.map(([k]) => k)).toEqual(expect.arrayContaining(['developerEditionHint_one', 'developerEditionHint_other']));
+    for (const [key, value] of slots) {
+      expect(value, key).toContain('{{count}}');
+      expect(value, key).not.toMatch(/\b5\b/);
+    }
+  });
+});
