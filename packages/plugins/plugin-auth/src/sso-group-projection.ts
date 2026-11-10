@@ -17,6 +17,30 @@
  * strings. No new provider setting: the claim is configured where every other
  * claim of that provider is.
  *
+ * ## When userinfo does not carry them (OIDC)
+ *
+ * For a provider with a `userInfoEndpoint`, the vendor builds `userInfo`
+ * (`mapping.extraFields` included) from the userinfo response ALONE and never
+ * reads the ID token's claims. Microsoft Entra ID's userinfo answer carries no
+ * `groups`, which its ID token does, so every Entra ID group mapping granted
+ * nothing. {@link resolveSsoGroupClaim} therefore reads the groups claim from
+ * the sign-in's ID token when `userInfo` has no such member: the token the
+ * vendor hands `provisionUser` (`token.idToken`) is the very string its
+ * callback verified moments earlier against the provider's JWKS, issuer,
+ * audience and authorized party, and whose `sub` it matched to the userinfo
+ * answer's (a token that fails any of those never reaches this module: the
+ * vendor redirects with a refusal first). Userinfo still wins wherever it
+ * carries the member. SAML sign-ins hand no token, so they read `userInfo`
+ * only.
+ *
+ * **Groups overage.** Above a size limit Entra ID sends no `groups` and
+ * instead points at Microsoft Graph (`_claim_names` naming the groups claim,
+ * with `_claim_sources`). This module makes no Graph call: such a sign-in
+ * desires no group-projected set (so the grants the provider projected earlier
+ * are removed, as for any sign-in without the claim), and one `warn` line per
+ * provider and process names the overage and the remedy (Entra ID "groups
+ * assigned to the application", or app roles).
+ *
  * ## What a sign-in does with them
  *
  * The vendor calls `provisionUser` after the account is linked and the
@@ -78,7 +102,66 @@ export interface SsoGroupProjectionDeps {
 export interface SsoProvisionUserInput {
   user: { id?: unknown };
   userInfo: Record<string, unknown>;
-  provider: { providerId?: unknown };
+  /** OIDC only: the callback's token response, its `idToken` already verified by the vendor. */
+  token?: { idToken?: unknown } | null;
+  provider: { providerId?: unknown; oidcConfig?: unknown };
+}
+
+/** The claim a provider's mapping names for its groups (`mapping.extraFields.groups`), if any. */
+function oidcGroupsClaimName(provider: SsoProvisionUserInput['provider'] | undefined): string | undefined {
+  const config = provider?.oidcConfig as { mapping?: { extraFields?: Record<string, unknown> } } | null | undefined;
+  const claim = config && typeof config === 'object' ? config.mapping?.extraFields?.[SSO_GROUPS_USER_INFO_KEY] : undefined;
+  return typeof claim === 'string' && claim.length > 0 ? claim : undefined;
+}
+
+/**
+ * The claims of an ID token the vendor verified, decoded, or `undefined` when
+ * there is none or it does not decode. No verification here: the vendor's
+ * callback verified this exact string before it called `provisionUser`.
+ */
+function verifiedIdTokenClaims(token: SsoProvisionUserInput['token']): Record<string, unknown> | undefined {
+  const idToken = token?.idToken;
+  if (typeof idToken !== 'string') return undefined;
+  const payload = idToken.split('.')[1];
+  if (!payload) return undefined;
+  try {
+    const claims: unknown = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    return claims && typeof claims === 'object' && !Array.isArray(claims) ? (claims as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether a claim set points the groups claim at a distributed source (Entra ID's groups overage). */
+function namesGroupsOverage(claims: Record<string, unknown> | undefined, claim: string): boolean {
+  const names = claims?._claim_names;
+  return !!names && typeof names === 'object' && Object.prototype.hasOwnProperty.call(names, claim);
+}
+
+/** What one sign-in's groups read answers: the groups, and whether the IdP sent an overage pointer instead. */
+export interface SsoGroupClaimReading {
+  groups: string[];
+  overage: boolean;
+}
+
+/**
+ * The user's groups for one sign-in: `userInfo`'s member when it has one
+ * (userinfo wins), otherwise the provider's groups claim from the verified ID
+ * token. When neither carries the claim and either names it in `_claim_names`,
+ * the reading is an overage with no groups.
+ */
+export function resolveSsoGroupClaim(input: Pick<SsoProvisionUserInput, 'userInfo' | 'token' | 'provider'>): SsoGroupClaimReading {
+  const userInfo = input.userInfo ?? {};
+  if (userInfo[SSO_GROUPS_USER_INFO_KEY] !== undefined && userInfo[SSO_GROUPS_USER_INFO_KEY] !== null) {
+    return { groups: readSsoGroupClaim(userInfo), overage: false };
+  }
+  const claim = oidcGroupsClaimName(input.provider);
+  if (!claim) return { groups: [], overage: false };
+  const idClaims = verifiedIdTokenClaims(input.token);
+  if (idClaims && idClaims[claim] !== undefined && idClaims[claim] !== null) {
+    return { groups: readSsoGroupClaim({ [SSO_GROUPS_USER_INFO_KEY]: idClaims[claim] }), overage: false };
+  }
+  return { groups: [], overage: namesGroupsOverage(idClaims, claim) || namesGroupsOverage(userInfo, claim) };
 }
 
 /**
@@ -94,14 +177,26 @@ export function readSsoGroupClaim(userInfo: Record<string, unknown> | null | und
 /** Build the `provisionUser` member of `sso({ … })`. */
 export function createSsoGroupProvisioner(deps: SsoGroupProjectionDeps): (input: SsoProvisionUserInput) => Promise<void> {
   const admits = createMappingAdmission(deps, SSO_MAPPING_SOURCE_KIND);
-  return async ({ user, userInfo, provider }) => {
+  // Providers whose groups overage was already reported by this provisioner.
+  const overageReported = new Set<string>();
+  return async ({ user, userInfo, token, provider }) => {
     const providerId = typeof provider?.providerId === 'string' ? provider.providerId : '';
     const userId = typeof user?.id === 'string' ? user.id : '';
     if (!providerId || !userId) return;
     try {
       const engine = deps.getEngine();
       if (!engine) throw new Error('no data engine to read mappings or write grants through');
-      const groups = readSsoGroupClaim(userInfo);
+      const { groups, overage } = resolveSsoGroupClaim({ userInfo, token, provider });
+      if (overage && !overageReported.has(providerId)) {
+        overageReported.add(providerId);
+        deps.warn(
+          `[auth] SSO provider '${providerId}' sent a groups overage instead of the groups claim: the identity provider `
+            + 'left the groups out of the token and points at Microsoft Graph for them (_claim_names / _claim_sources), '
+            + 'which this server does not call. Sign-ins through this provider grant no group-mapped permission sets '
+            + 'while it does. Remedy: in Microsoft Entra ID, emit only the "groups assigned to the application" (the '
+            + 'app registration\'s group claims setting), or map app roles instead of groups.',
+        );
+      }
       const rows = await sourceMappings(engine, SSO_MAPPING_SOURCE_KIND, providerId);
       const mappingIds = rows
         .filter((row) => groups.some((group) => mappingMatchesGroup(row, { externalId: group, displayName: group })))

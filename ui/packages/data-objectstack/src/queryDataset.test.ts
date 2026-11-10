@@ -894,3 +894,51 @@ describe('queryDataset passes the server drillScopes sidecar through (#30526)', 
     expect(true).toBe(true);
   });
 });
+
+describe('queryDataset names the referencing item\'s package as ?package= (ADR-0150 D5, objectstack#32077)', () => {
+  beforeEach(() => clearSharedDiscoveryCache());
+
+  const adapterWith = (fetchImpl: unknown) =>
+    new ObjectStackAdapter({ baseUrl: 'http://localhost:3000', autoReconnect: false, fetch: fetchImpl as any });
+  const datasetCalls = (calls: Array<{ url: string; init?: any }>) =>
+    calls.filter((c) => c.url.includes('/api/v1/analytics/dataset/query'));
+
+  it('two packages holding one name: each caller sends its own package as the exact qualifier', async () => {
+    const { fetchImpl, calls } = makeFetch({ ok: true, body: { rows: [], fields: [] } });
+    const adapter = adapterWith(fetchImpl);
+    await adapter.queryDataset('sales', selection, { packageId: 'com.acme.alpha' });
+    await adapter.queryDataset('sales', selection, { packageId: 'com.acme.beta' });
+    const sent = datasetCalls(calls);
+    expect(sent.map((c) => new URL(c.url).searchParams.getAll('package'))).toEqual([['com.acme.alpha'], ['com.acme.beta']]);
+    // The name stays in the body; the package travels only as the qualifier.
+    expect(sent.map((c) => JSON.parse(c.init.body).datasetName)).toEqual(['sales', 'sales']);
+  });
+
+  it('a caller with no package sends no ?package= at all', async () => {
+    const { fetchImpl, calls } = makeFetch({ ok: true, body: { rows: [], fields: [] } });
+    await adapterWith(fetchImpl).queryDataset('sales', selection);
+    const [sent] = datasetCalls(calls);
+    expect(new URL(sent.url).search).toBe('');
+  });
+
+  it('an inline draft names no saved item, so a package is not sent with it', async () => {
+    const { fetchImpl, calls } = makeFetch({ ok: true, body: { rows: [], fields: [] } });
+    await adapterWith(fetchImpl).queryDataset(inlineDataset as any, selection, { packageId: 'com.acme.alpha' });
+    const [sent] = datasetCalls(calls);
+    expect(new URL(sent.url).search).toBe('');
+  });
+
+  it('a 409 RESOURCE_CONFLICT is thrown with the server sentence naming every candidate, and never retried bare', async () => {
+    const message = 'dataset "sales" is held by 2 packages in this environment and the caller names no package: '
+      + 'package "com.acme.alpha", package "com.acme.beta". Nothing picks one of them: address it by its package.';
+    const { fetchImpl, calls } = makeFetch({ ok: false, status: 409, body: { code: 'RESOURCE_CONFLICT', message } });
+    const adapter = adapterWith(fetchImpl);
+    const thrown = await adapter.queryDataset('sales', selection).then(() => null, (e: unknown) => e as Error);
+    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown?.message).toContain('409');
+    expect(thrown?.message).toContain('com.acme.alpha');
+    expect(thrown?.message).toContain('com.acme.beta');
+    expect(isAnalyticsNotInstalledError(thrown)).toBe(false);
+    expect(datasetCalls(calls)).toHaveLength(1);
+  });
+});

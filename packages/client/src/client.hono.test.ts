@@ -368,4 +368,87 @@ describe('ObjectStackClient (with Hono Server)', () => {
         const remaining = await client.data.find('customer', { where: { id: created.id } });
         expect(remaining.records.length).toBe(0);
     });
+
+    // The per-object bulk doors answer `207 Multi-Status` when a row failed
+    // and `200` when none did, with the per-row report as the body either way
+    // (`bulkReportStatus`, `@objectstack/rest` batch-routes.ts). 207 is a 2xx,
+    // so the SDK's shared `fetch` (which throws on any non-2xx) still RESOLVES
+    // with the report, and the console's bulk edit and bulk delete keep reading
+    // `results`. Real server, real protocol, real rows: the failed rows are ids
+    // no record has, refused per row with `RECORD_NOT_FOUND`.
+    describe('bulk doors: 207 when a row failed, and the SDK still resolves the per-row report', () => {
+        const raw = async (door: string, body: unknown) => {
+            const res = await fetch(`${baseUrl}/api/v1/data/customer/${door}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            return { status: res.status, body: await res.json() };
+        };
+        const missing = ['no-such-customer-a', 'no-such-customer-b'];
+        const rowOutcomes = (r: any) => r.results.map((x: any) => [x.success, x.errors?.[0]?.code ?? null]);
+
+        it('updateMany, every row failed: 207 on the wire, and data.updateMany resolves the same report', async () => {
+            const client = new ObjectStackClient({ baseUrl });
+            await client.connect();
+            const records = missing.map((id) => ({ id, data: { name: 'never' } }));
+            const options = { continueOnError: true };
+
+            const wire = await raw('updateMany', { records, options });
+            expect(wire.status).toBe(207);
+            expect(wire.body).toMatchObject({ success: false, total: 2, succeeded: 0, failed: 2 });
+            expect(rowOutcomes(wire.body)).toEqual([[false, 'RECORD_NOT_FOUND'], [false, 'RECORD_NOT_FOUND']]);
+
+            const sdk = await client.data.updateMany('customer', records, options);
+            expect(sdk).toEqual(wire.body);
+        });
+
+        it('batch, one row of two failed: 207, and data.batch resolves with the row that landed', async () => {
+            const client = new ObjectStackClient({ baseUrl });
+            await client.connect();
+            const real = await client.data.create('customer', { name: 'Bulk Partial', email: 'bulk-partial@example.com' });
+            const request = {
+                operation: 'update' as const,
+                records: [{ id: real.id, data: { name: 'Bulk Partial 2' } }, { id: missing[0], data: { name: 'never' } }],
+                options: { continueOnError: true },
+            };
+
+            const wire = await raw('batch', request);
+            expect(wire.status).toBe(207);
+            expect(wire.body).toMatchObject({ success: false, total: 2, succeeded: 1, failed: 1 });
+            expect(rowOutcomes(wire.body)).toEqual([[true, null], [false, 'RECORD_NOT_FOUND']]);
+
+            const sdk = await client.data.batch('customer', { ...request, records: [{ id: real.id, data: { name: 'Bulk Partial 3' } }, request.records[1]] });
+            expect(sdk).toMatchObject({ success: false, total: 2, succeeded: 1, failed: 1 });
+            expect(rowOutcomes(sdk)).toEqual([[true, null], [false, 'RECORD_NOT_FOUND']]);
+            expect((await client.data.get('customer', real.id)).record.name).toBe('Bulk Partial 3');
+        });
+
+        it('deleteMany, every row failed: 207 on the wire, and data.deleteMany resolves the same report', async () => {
+            const client = new ObjectStackClient({ baseUrl });
+            await client.connect();
+            const options = { continueOnError: true };
+
+            const wire = await raw('deleteMany', { ids: missing, options });
+            expect(wire.status).toBe(207);
+            expect(wire.body).toMatchObject({ success: false, total: 2, succeeded: 0, failed: 2 });
+
+            const sdk = await client.data.deleteMany('customer', missing, options);
+            expect(sdk).toEqual(wire.body);
+        });
+
+        it('CONTROL: every row succeeded: 200, and the SDK resolves the report', async () => {
+            const client = new ObjectStackClient({ baseUrl });
+            await client.connect();
+            const a = await client.data.create('customer', { name: 'Bulk OK A', email: 'bulk-ok-a@example.com' });
+            const b = await client.data.create('customer', { name: 'Bulk OK B', email: 'bulk-ok-b@example.com' });
+
+            const wire = await raw('updateMany', { records: [{ id: a.id, data: { email: 'a2@example.com' } }, { id: b.id, data: { email: 'b2@example.com' } }] });
+            expect(wire.status).toBe(200);
+            expect(wire.body).toMatchObject({ success: true, total: 2, succeeded: 2, failed: 0 });
+
+            const deleted = await client.data.deleteMany('customer', [a.id, b.id]);
+            expect(deleted).toMatchObject({ success: true, total: 2, succeeded: 2, failed: 0 });
+        });
+    });
 });

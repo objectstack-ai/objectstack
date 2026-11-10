@@ -51,7 +51,7 @@ import { ASSIGNMENT_RULE_TYPE, AssignmentRuleEvaluator, OWNERSHIP_QUEUE_SOURCE_S
 import type { AssignmentQueueService } from './assignment-rules.js';
 import { redactBoundStatement } from '@objectstack/types';
 import { ORGANIZATION_OBJECT } from './tenancy/system-write-organization.js';
-import { assertRecordCurrencyCodes } from './validation/record-currency-code.js';
+import { assertRecordCurrencyCodes, followParentCurrencyCodes, recordCurrencyPairs } from './validation/record-currency-code.js';
 import { planHomeAmounts, projectHomeAmounts } from './home-amount-projection.js';
 import { stripSearchCompanion } from './search-companion.js';
 import type { EvalPermissions } from '@objectstack/formula';
@@ -1263,14 +1263,24 @@ export class InsertFacet {
         // mode, and nothing is written for it. Free for an object declaring no
         // `homeAmount` (`planHomeAmounts` is one loop over the field names).
         const homeAmountPlan = planHomeAmounts(schemaForValidation);
+        const homeServing = this.homeAmountServing(opCtx.context);
+        // [ADR-0144 D2, amended] A child amount that follows its parent's code
+        // reads it from the parent: ONE read per master_detail for the whole
+        // batch, laid on a copy of each row for the projection below and the
+        // blank-code guard in the validation loop. Free (nothing is read) for
+        // an object whose amounts name a sibling code or none.
+        const followCodes = await followParentCurrencyCodes(
+          recordCurrencyPairs((schemaForValidation as { fields?: unknown } | undefined)?.fields),
+          rows.filter((_, i) => rowErrors[i] === undefined) as Array<Record<string, unknown>>,
+          homeServing.parentRows,
+        );
         if (homeAmountPlan.length > 0) {
-          const homeServing = this.homeAmountServing(opCtx.context);
           for (let i = 0; i < rows.length; i++) {
             if (rowErrors[i] !== undefined) continue;
             const row = rows[i] as Record<string, unknown> | null | undefined;
             if (!row || typeof row !== 'object') continue;
             try {
-              Object.assign(row, await projectHomeAmounts(homeAmountPlan, row, homeServing, {
+              Object.assign(row, await projectHomeAmounts(homeAmountPlan, followCodes(row), homeServing, {
                 object,
                 operation: 'insert',
                 organizationId: ObjectQL.homeAmountOrganizationOf(row, opCtx.context, derivedOrganizationId),
@@ -1326,7 +1336,8 @@ export class InsertFacet {
             validateRecordInScope(schemaForValidation, rows[i], 'insert', 'include', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues });
             // [ADR-0144 D8 rule 4] A `record`-mode amount is stored with its
             // currency code, or the row is refused (`ERR_CURRENCY_CODE_REQUIRED`).
-            assertRecordCurrencyCodes(object, (schemaForValidation as { fields?: unknown } | undefined)?.fields, rows[i], 'insert');
+            // [ADR-0144 D2, amended] A child amount's code is its parent's, laid on a copy of the row.
+            assertRecordCurrencyCodes(object, (schemaForValidation as { fields?: unknown } | undefined)?.fields, rows[i] && typeof rows[i] === 'object' ? followCodes(rows[i]) : rows[i], 'insert', undefined, undefined, msgCtx);
             // [#29029] A write that is not a system write has its references
             // checked BEFORE the record's validation rules: a reference the
             // caller cannot read answers `reference_not_found`, whatever a rule

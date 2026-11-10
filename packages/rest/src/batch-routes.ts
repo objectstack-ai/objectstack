@@ -149,6 +149,34 @@ function namesNoRow(action: 'update' | 'delete', address: unknown): boolean {
 }
 
 /**
+ * The HTTP status of a per-object bulk door's answer: `207 Multi-Status` when
+ * any row failed, `200` when none did. The three doors that answer a per-row
+ * report (`POST /data/:object/batch`, `/updateMany`, `/deleteMany`) ask it,
+ * and the body is the same report either way.
+ *
+ * A report whose rows all failed used to answer `200 { success: false, … }`,
+ * so a client that reads only the status counted a refused or rolled-back
+ * batch as written. `207` names the outcome at the status line and keeps the
+ * answer 2xx: the client SDK's shared `fetch` throws on any non-2xx and would
+ * turn the per-row `results` into one thrown error, and the console's bulk
+ * edit and bulk delete read those rows.
+ *
+ * Judged on the report's `failed` count, the field the protocol builds the
+ * report's own `success` from. An atomic batch that rolled back reports every
+ * row failed (`ROLLED_BACK` / the causal code / `NOT_ATTEMPTED`), so it answers
+ * `207` too. A report without a numeric `failed` answers `200`, as before.
+ *
+ * `createMany` is not one of the three: it answers no per-row report, and a row
+ * it refuses fails the whole call with that row's error status. The
+ * cross-object `POST {basePath}/batch` is always atomic and answers a refusal
+ * the same way, so neither door reaches this.
+ */
+function bulkReportStatus(report: unknown): 200 | 207 {
+    const failed = (report as { failed?: unknown } | null | undefined)?.failed;
+    return typeof failed === 'number' && failed > 0 ? 207 : 200;
+}
+
+/**
  * Register batch operation endpoints — `RestServer#registerBatchEndpoints`'
  * body, called by that method with the server as `this`. The method's own
  * docblock, which the published declaration carries, names it.
@@ -503,7 +531,7 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                     // [#3431] Each row's strips (`results[i].droppedFields`) in
                     // the header too, as their union; the body keeps each row's.
                     applyDroppedFieldsHeader(res, result, (result as { results?: unknown[] } | null)?.results);
-                    res.json(result);
+                    res.status(bulkReportStatus(result)).json(result);
                 } catch (error: any) {
                     handleRouteError(res, error, req.params?.object);
                 }
@@ -622,7 +650,7 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                     const result = await p.updateManyData!(updateManyRequest);
                     // [#3431] Each row's strips in the header too, as their union.
                     applyDroppedFieldsHeader(res, result, (result as { results?: unknown[] } | null)?.results);
-                    res.json(result);
+                    res.status(bulkReportStatus(result)).json(result);
                 } catch (error: any) {
                     handleRouteError(res, error, req.params?.object);
                 }
@@ -685,7 +713,7 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                         ...(context ? { context } : {}),
                     };
                     const result = await p.deleteManyData!(deleteManyRequest);
-                    res.json(result);
+                    res.status(bulkReportStatus(result)).json(result);
                 } catch (error: any) {
                     handleRouteError(res, error, req.params?.object);
                 }
