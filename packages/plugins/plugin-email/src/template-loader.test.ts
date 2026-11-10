@@ -451,7 +451,7 @@ describe('createRegistryEmailTemplateLoader — the send resolves the name from 
     const protocol = addressedProtocol(items);
     const loader = createRegistryEmailTemplateLoader({ protocol, registry: reg });
     expect(await subjectOf(loader, GAMMA)).toBe('alpha welcome');
-    expect(protocol.requests.at(-1)).toEqual({ type: 'email_template', packageId: ALPHA });
+    expect(protocol.requests[protocol.requests.length - 1]).toEqual({ type: 'email_template', packageId: ALPHA });
   });
 
   it('with no protocol, the registry\'s own list is narrowed to the resolved holder alike', async () => {
