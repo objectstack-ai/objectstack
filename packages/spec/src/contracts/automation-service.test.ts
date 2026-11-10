@@ -558,7 +558,7 @@ describe('ConnectorSourcePullRequest — carries the caller package (ADR-0150 D3
     expect(doc).toMatch(/Absent \(omitted, `null` or `''`\): the read is by no package, exactly as[\s*]+today/);
     // Where the value comes from, and the ruling it serves.
     expect(doc).toContain('ADR-0150 D3');
-    expect(doc).toContain('`appId`');
+    expect(doc).toMatch(/the package[\s*]+that declares the job/);
     // The precedent the spelling follows.
     expect(doc).toContain('OwnershipQueueCallerPackage');
   });

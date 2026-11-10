@@ -1072,14 +1072,18 @@ export interface ConnectorSourcePullRequest {
     environmentId?: string;
     /**
      * The package the caller belongs to, so `mapping` is read by
-     * `(package, name)` (ADR-0150 D3). For a job's pull it is the job's
-     * package, its `appId`. The job binder already requires the mapping to be
-     * declared in the job's own bundle, so read from that package the name
-     * answers the package's own item.
+     * `(package, name)` (ADR-0150 D3). For a job's pull it is the package
+     * that declares the job. ⛔ Not inferred to answer that package's own
+     * mapping: in an artifact of several packages the job binder finds the
+     * mapping in any package body, so the name may resolve through the
+     * closure, or be refused as outside it.
      *
      * - A package id: the name resolves from that package — its own mapping,
-     *   else the unique holder in its declared dependency closure plus `sys`,
-     *   else a refusal naming every candidate.
+     *   else the unique holder in its declared dependency closure plus `sys`.
+     *   A name nothing in the environment holds is not found. A name held
+     *   twice in that reach, held only by a package outside it, or held only
+     *   by an environment-authored item (ADR-0150 D3 (a)) is a refusal naming
+     *   every candidate.
      * - Absent (omitted, `null` or `''`): the read is by no package, exactly as
      *   today — the bare name, read as a caller with no package.
      *
