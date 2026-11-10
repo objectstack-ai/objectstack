@@ -94,6 +94,11 @@ import { registerUserPreferenceHooks } from './user-preference-hooks.js';
 import { registerServiceAccountRowGuard } from './service-account-identity.js';
 import { personalViewCallerResolver, registerPersonalViewRoutes, PERSONAL_VIEW_REMOVE_ROUTE, type PersonalViewEngine } from './personal-view-routes.js';
 import { registerMembershipEndedSessionTrigger } from './membership-ended-session.js';
+import {
+  IDP_GROUP_MAPPING_MATCH_PACKAGE_ID,
+  refreshAllMappingMatches,
+  registerIdpGroupMappingMatchTrigger,
+} from './idp-group-mapping-match.js';
 import { registerServiceAccountOwnerLeavesTrigger } from './service-account-owner-leaves.js';
 import { registerMemberRoleCanonicalization } from './member-role-canonical.js';
 import { registerUserLocaleCaseFold } from './sys-user-locale-case.js';
@@ -2112,6 +2117,25 @@ export class AuthPlugin implements Plugin {
           packageId: 'com.objectstack.plugin-auth.service-account-owner-leaves',
           logger: ctx.logger,
         });
+        // An IdP group mapping says whether it matches a group its SCIM
+        // connection pushes now, kept current on every write to either side
+        // and re-judged once per boot. It describes the row; the projection
+        // still decides every grant. See idp-group-mapping-match.ts.
+        registerIdpGroupMappingMatchTrigger(engine, {
+          packageId: IDP_GROUP_MAPPING_MATCH_PACKAGE_ID,
+          logger: ctx.logger,
+        });
+        try {
+          await refreshAllMappingMatches(engine);
+        } catch (e) {
+          ctx.logger.error(
+            '[auth] re-judging which IdP group mappings match a current SCIM group FAILED at boot, so a mapping '
+              + 'saved before match_status existed may read empty, and one whose group moved below the engine may '
+              + 'read stale (it never changes a grant). Each heals on the next write to a group or mapping of its '
+              + 'connection, or at the next boot once the cause is fixed.',
+            e instanceof Error ? e : undefined,
+          );
+        }
       } catch {
         // Engine not available (mock mode) — permission-set defaults remain
         // the only gate, exactly the pre-guard status quo.

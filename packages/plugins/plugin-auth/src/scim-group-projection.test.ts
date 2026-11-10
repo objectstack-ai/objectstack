@@ -33,6 +33,11 @@ import { createTenancyService } from './tenancy-service.js';
 import { mintScimConnectionCredential, revokeScimConnectionCredential } from './scim-connection-service.js';
 import { runDeleteIdpGroupMapping, runSetIdpGroupMapping, type IdpGroupMappingAdminDeps } from './idp-group-mapping-admin.js';
 import { createScimGroupProjection, scimGroupProjectionReason, type OrganizationBoundaryJudge } from './scim-group-projection.js';
+import {
+  IDP_GROUP_MAPPING_MATCH_PACKAGE_ID,
+  refreshAllMappingMatches,
+  registerIdpGroupMappingMatchTrigger,
+} from './idp-group-mapping-match.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 import { sqliteEnginePool, type BootedSqliteEngine } from './__tests__/sqlite-engine-pool.testkit.js';
 import 'better-auth';
@@ -85,6 +90,8 @@ async function bootEngine(): Promise<BootedSqliteEngine> {
     engine.registry.registerObject(object as never, '@objectstack/plugin-auth');
   }
   await engine.syncSchemas();
+  // The match trigger auth-plugin binds at kernel:ready, so every case here runs with it.
+  registerIdpGroupMappingMatchTrigger(engine as never);
   return { engine, driver };
 }
 
@@ -533,5 +540,150 @@ describe('an identity-provider group mapping never grants an agent ceiling set',
     await projection.reconcileUser(projectedState(ivan.userId, mappingId), {} as never);
 
     expect(await grantsOf(h, ivan.userId)).toEqual([projected(SALES)]);
+  });
+});
+
+// #32121: the mapping row says whether it matches a group its connection pushes
+// now, so a console can show "matches no current group". It describes the row;
+// the projection still decides the grant (a mapping matching nothing grants nothing).
+describe('a group mapping says whether it matches a current group of its source', () => {
+  const MAPPING = 'sys_idp_group_mapping';
+
+  async function matchOf(h: Harness, mappingId: string) {
+    const row = (await h.engine.findOne(MAPPING, { where: { id: mappingId } }, SYSTEM)) as Record<string, unknown> | null;
+    expect(row, `mapping ${mappingId} must exist`).toBeTruthy();
+    return { status: row!.match_status ?? null, groupId: row!.matched_group_id ?? null, changedAt: row!.match_changed_at ?? null };
+  }
+
+  async function renameGroup(h: Harness, groupId: string, displayName: string): Promise<void> {
+    const res = await h.send('PATCH', `/Groups/${groupId}`, {
+      schemas: [PATCH_SCHEMA],
+      Operations: [{ op: 'replace', path: 'displayName', value: displayName }],
+    });
+    expect(res.status, `SCIM PATCH /Groups rename failed: ${await res.clone().text()}`).toBeLessThan(300);
+  }
+
+  /** Every write to the mapping table, by the columns it set. */
+  function observeMappingUpdates(h: Harness): Array<string[]> {
+    const writes: Array<string[]> = [];
+    const engine = h.engine as unknown as Record<string, (...a: unknown[]) => unknown>;
+    const original = engine.update.bind(h.engine);
+    vi.spyOn(engine, 'update').mockImplementation(async (object: unknown, data: unknown, ...rest: unknown[]) => {
+      if (object === MAPPING) writes.push(Object.keys(data as Record<string, unknown>).filter((k) => k !== 'id').sort());
+      return original(object, data, ...rest);
+    });
+    return writes;
+  }
+
+  it('rename the group: the mapping reads unmatched and grants nothing; rename back: matched, and the grant returns', async () => {
+    const h = await boot();
+    const mappingId = mappingIdOf(await saveMapping(h, { connectionId: CONNECTION, groupDisplayName: 'ObjectOS SCIM Test', permissionSet: SALES }));
+    const alice = await provision(h, 'alice');
+    const groupId = await pushGroup(h, { displayName: 'ObjectOS SCIM Test' }, [alice.scimId]);
+    expect(await matchOf(h, mappingId)).toMatchObject({ status: 'matched', groupId });
+    expect(await grantsOf(h, alice.userId)).toEqual([projected(SALES)]);
+
+    await renameGroup(h, groupId, 'ObjectOS SCIM Test (renamed)');
+
+    const unmatched = await matchOf(h, mappingId);
+    expect(unmatched).toMatchObject({ status: 'unmatched', groupId: null });
+    expect(unmatched.changedAt, 'the moment it stopped matching is recorded').toBeTruthy();
+    expect(await grantsOf(h, alice.userId), 'fail closed is unchanged: a mapping matching nothing grants nothing').toEqual([]);
+
+    await renameGroup(h, groupId, 'ObjectOS SCIM Test');
+
+    expect(await matchOf(h, mappingId)).toMatchObject({ status: 'matched', groupId });
+    expect(await grantsOf(h, alice.userId)).toEqual([projected(SALES)]);
+  });
+
+  it('a group with no members still moves the answer: saved before the push, pushed, deleted', async () => {
+    const h = await boot();
+    const mappingId = mappingIdOf(await saveMapping(h, { connectionId: CONNECTION, groupExternalId: 'okta-grp-ops', permissionSet: SALES }));
+    expect(await matchOf(h, mappingId), 'no group pushed yet').toMatchObject({ status: 'unmatched', groupId: null });
+
+    const groupId = await pushGroup(h, { displayName: 'Ops', externalId: 'okta-grp-ops' }, []);
+    expect(await matchOf(h, mappingId)).toMatchObject({ status: 'matched', groupId });
+
+    const res = await h.send('DELETE', `/Groups/${groupId}`);
+    expect(res.status, `SCIM DELETE /Groups failed: ${await res.clone().text()}`).toBe(204);
+    expect(await matchOf(h, mappingId)).toMatchObject({ status: 'unmatched', groupId: null });
+  });
+
+  it('a mapping by external id keeps matching when only the display name changes (PUT)', async () => {
+    const h = await boot();
+    const mappingId = mappingIdOf(await saveMapping(h, { connectionId: CONNECTION, groupExternalId: 'okta-grp-sales', permissionSet: SALES }));
+    const groupId = await pushGroup(h, { displayName: 'Sales', externalId: 'okta-grp-sales' }, []);
+    const before = await matchOf(h, mappingId);
+    expect(before).toMatchObject({ status: 'matched', groupId });
+
+    const res = await h.send('PUT', `/Groups/${groupId}`, { schemas: [GROUP_SCHEMA], displayName: 'Sales EMEA', externalId: 'okta-grp-sales', members: [] });
+    expect(res.status, `SCIM PUT /Groups failed: ${await res.clone().text()}`).toBe(200);
+
+    expect(await matchOf(h, mappingId)).toEqual(before);
+  });
+
+  it('a membership change writes nothing to the mapping row (its history shows only real transitions)', async () => {
+    const h = await boot();
+    const mappingId = mappingIdOf(await saveMapping(h, { connectionId: CONNECTION, groupDisplayName: 'Sales', permissionSet: SALES }));
+    const alice = await provision(h, 'alice');
+    const groupId = await pushGroup(h, { displayName: 'Sales' }, [alice.scimId]);
+    const before = await matchOf(h, mappingId);
+    const writes = observeMappingUpdates(h);
+
+    await removeMember(h, groupId, alice.scimId);
+
+    expect(writes).toEqual([]);
+    expect(await matchOf(h, mappingId)).toEqual(before);
+  });
+
+  it('a mapping whose source is an SSO provider reads not applicable', async () => {
+    const h = await boot();
+    const inserted = (await h.engine.insert(
+      MAPPING,
+      { source_kind: 'sso', source_id: 'okta-oidc', group_external_id: 'grp-sales', permission_set: SALES, organization_id: ORG },
+      SYSTEM,
+    )) as { id: string };
+    expect(await matchOf(h, inserted.id)).toMatchObject({ status: 'not_applicable', groupId: null });
+  });
+
+  it('the boot sweep rights a row saved before the columns existed, and leaves a right row alone', async () => {
+    const h = await boot();
+    const stale = mappingIdOf(await saveMapping(h, { connectionId: CONNECTION, groupDisplayName: 'Sales', permissionSet: SALES }));
+    const groupId = await pushGroup(h, { displayName: 'Sales' }, []);
+    // A row as an older version left it: no match columns at all.
+    await h.engine.update(MAPPING, { id: stale, match_status: null, matched_group_id: null, match_changed_at: null }, SYSTEM);
+    expect(await matchOf(h, stale)).toEqual({ status: null, groupId: null, changedAt: null });
+
+    expect(await refreshAllMappingMatches(h.engine as never)).toBe(1);
+    expect(await matchOf(h, stale)).toMatchObject({ status: 'matched', groupId });
+    expect(await refreshAllMappingMatches(h.engine as never), 'a second sweep finds nothing to write').toBe(0);
+  });
+
+  it('a failure to re-judge never fails the SCIM write: the rename lands, the grant follows, the failure is logged at error', async () => {
+    const h = await boot();
+    const error = vi.fn();
+    registerIdpGroupMappingMatchTrigger(h.engine as never, { packageId: IDP_GROUP_MAPPING_MATCH_PACKAGE_ID, logger: { error } });
+    try {
+      const mappingId = mappingIdOf(await saveMapping(h, { connectionId: CONNECTION, groupDisplayName: 'Sales', permissionSet: SALES }));
+      const alice = await provision(h, 'alice');
+      const groupId = await pushGroup(h, { displayName: 'Sales' }, [alice.scimId]);
+      const engine = h.engine as unknown as Record<string, (...a: unknown[]) => unknown>;
+      const original = engine.update.bind(h.engine);
+      vi.spyOn(engine, 'update').mockImplementation(async (object: unknown, ...rest: unknown[]) => {
+        if (object === MAPPING) throw new Error('mapping table unwritable');
+        return original(object, ...rest);
+      });
+
+      await renameGroup(h, groupId, 'Sales (renamed)');
+
+      const group = (await h.engine.findOne('sys_scim_group', { where: { id: groupId } }, SYSTEM)) as Record<string, unknown>;
+      expect(group.display_name).toBe('Sales (renamed)');
+      expect(await grantsOf(h, alice.userId)).toEqual([]);
+      expect(await matchOf(h, mappingId), 'the stale answer stays until the next write or boot').toMatchObject({ status: 'matched', groupId });
+      expect(error).toHaveBeenCalledTimes(1);
+      expect(String(error.mock.calls[0][0])).toContain(`SCIM connection '${CONNECTION}'`);
+    } finally {
+      registerIdpGroupMappingMatchTrigger(h.engine as never);
+    }
   });
 });
