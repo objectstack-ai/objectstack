@@ -490,7 +490,7 @@ export const ru: PlatformTranslationData = {
       groups: {
         provider: {
           title: 'Провайдер',
-          description: 'Выберите бэкенд LLM. Режим Memory возвращает ввод как есть — полезно для тестов, но не для продакшена.',
+          description: 'Выберите бэкенд LLM.',
         },
         gateway: {
           title: 'Vercel AI Gateway',
@@ -537,7 +537,6 @@ export const ru: PlatformTranslationData = {
         provider: {
           label: 'Провайдер',
           options: {
-            memory: 'Memory (эхо — только для тестов)',
             gateway: 'Vercel AI Gateway',
             openai: 'OpenAI',
             anthropic: 'Anthropic',

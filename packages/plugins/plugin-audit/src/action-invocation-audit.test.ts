@@ -15,6 +15,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
+import { assembleExecutionContext } from '@objectstack/core';
 import {
   ACTION_INVOCATION_AUDIT_ACTION,
   buildActionInvocationAuditRow,
@@ -240,6 +241,29 @@ describe('[#27908] the action_invocation row tells an agent\'s call from a click
     });
     // Control: the user's own click claims no impersonation.
     expect(JSON.parse(String(buildActionInvocationAuditRow(CLICK).metadata))).not.toHaveProperty('impersonated_by');
+  });
+
+  it('[ADR-0151 D5] an AI service account\'s call is its own: `user_id` is the account, and the row names no performer and no delegator', async () => {
+    // The envelope the door hands over, built by the REAL assembler from the
+    // account's resolution (its row's kind on `authz.principalKind`).
+    const account = assembleExecutionContext({
+      authz: {
+        userId: 'usr_invoice_bot', tenantId: 'org_1', principalKind: 'agent',
+        positions: [], permissions: [], directPermissions: [], systemPermissions: [],
+        org_user_ids: ['usr_invoice_bot'], accessible_org_ids: ['org_1'],
+      } as any,
+      oauth: undefined, localization: undefined, requestLocale: undefined, accessToken: undefined, authGate: undefined,
+    });
+    expect(account).toMatchObject({ userId: 'usr_invoice_bot', principalKind: 'agent' });
+    const engine = await boot();
+    const writer = createActionInvocationAuditWriter({ getEngine: () => engine as any });
+
+    await writer.recordActionInvocation({ ...CLICK, context: { ...account, surface: 'mcp' } as any });
+
+    const [row] = await ledgerRows(engine);
+    expect(row.user_id).toBe('usr_invoice_bot');
+    expect(row.actor).toBe('usr_invoice_bot');
+    expect(JSON.parse(row.metadata)).toEqual({ surface: 'mcp', action_name: 'close_case', branch: 'update', outcome: 'succeeded' });
   });
 
   it('an object-less action names no object and no record', () => {

@@ -62,6 +62,7 @@
     "ai/ModelRegistryEntry",
     "ai/ModelSelectionCriteria",
     "ai/ObjectKnowledgeSource",
+    "ai/ObjectQuerySource",
     "ai/PromptTemplate",
     "ai/PromptVariable",
     "ai/QueryDatasetInput",

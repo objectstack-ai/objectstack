@@ -47,6 +47,12 @@
  * holder's registration, recording it in the code-datasource set and answering
  * the holder's pool as its own. The uninstall then withdraws only what the
  * package's own call recorded, and closes only the pools that call opened.
+ *
+ * A boot judges no holder and refuses nothing: every package it composes
+ * registers again at every boot. When two of them declare one datasource
+ * name, one connection serves the name — the one opened from the first
+ * declaration to connect — and the boot logs that once, at `error`, naming
+ * the name and both packages, and continues (`reportBootNameClashes`).
  */
 
 import type { PluginContext } from '@objectstack/core';
@@ -197,6 +203,11 @@ export async function connectPackageDatasources(
         : datasources.filter((ds) => !left.has(ds?.name));
     if (taken.length === 0) return [];
 
+    // A boot notes the names this package declares beside every other package
+    // the boot composes, and reports a name two packages declare once the
+    // connect has said whose connection serves it (`reportBootNameClashes`).
+    const boot = installed ? undefined : noteBootDeclarations(ctx, appId, ownedOf, datasources);
+
     // 1. The metadata registration — lenient: a registry that refuses leaves
     //    the datasource unlisted, never the package unloaded.
     try {
@@ -232,6 +243,7 @@ export async function connectPackageDatasources(
     }
     if (typeof connection?.connectDeclared !== 'function') {
         ctx.logger.debug('No datasource-connection service — declared datasources stay metadata-only', { appId });
+        if (boot) reportBootNameClashes(ctx, tag, boot, []);
         return [];
     }
     try {
@@ -241,6 +253,7 @@ export async function connectPackageDatasources(
             mappedObjects: options.mappedObjects ?? {},
         });
         if (key) recordFound(key, appId, results);
+        if (boot) reportBootNameClashes(ctx, tag, boot, results);
         const connected = results.filter((r) => r.status === 'connected');
         if (connected.length > 0) {
             ctx.logger.info('Auto-connected declared datasources', {
@@ -260,6 +273,14 @@ export async function connectPackageDatasources(
             `${tag} declared-datasource auto-connect failed for app '${appId}': ${(err as Error)?.message ?? String(err)}`,
         );
         // On a boot the kernel surfaces the real cause and the boot is refused.
+        if (boot) {
+            const retained: PackageDatasourceVerdict[] = [];
+            for (const name of boot.declared.keys()) {
+                const state = connection.getConnectionState?.(name);
+                if (state) retained.push({ name: state.name, status: state.status });
+            }
+            reportBootNameClashes(ctx, tag, boot, retained);
+        }
         if (!installed) throw err;
         // In a running kernel there is no boot to refuse. `connectDeclared`
         // attempted every datasource before it threw, and the connection
@@ -450,6 +471,148 @@ async function leaveHeldNames(
         );
     }
     return left;
+}
+
+/**
+ * One datasource name the packages a boot composes declare: each declaring
+ * package in boot order, the one whose declaration opened the connection that
+ * serves the name, and the packages already reported against it.
+ */
+interface BootDatasourceName {
+    declarers: string[];
+    opener?: string;
+    reported: Set<string>;
+}
+
+/**
+ * Per kernel (keyed by its code-datasource set, which every `AppPlugin.init()`
+ * puts in place before any `start()`), the datasource names the packages its
+ * boot composes declare. Only a boot writes it: an installed call is judged by
+ * {@link datasourceNameHolder} instead.
+ */
+const BOOT_DECLARED = new WeakMap<object, Map<string, BootDatasourceName>>();
+
+/** What one boot call declared, and the kernel's record of every boot declaration. */
+interface BootDeclarations {
+    /**
+     * Each name this call declares → the package whose declaration of it the
+     * connect takes first (the first one not `active: false`), `undefined`
+     * when every declaration of it is switched off.
+     */
+    declared: Map<string, string | undefined>;
+    names: Map<string, BootDatasourceName>;
+}
+
+/**
+ * Note, for one boot call, which package declares each datasource name — the
+ * package an `owned` entry is stamped with, else the call's own app id. A
+ * package that declares a name twice, or is composed twice, is one declarer.
+ */
+function noteBootDeclarations(
+    ctx: PluginContext,
+    appId: string,
+    owned: () => OwnedDatasources,
+    datasources: readonly any[],
+): BootDeclarations {
+    let list: OwnedDatasources;
+    try {
+        list = owned();
+    } catch {
+        // The ownership resolution is lenient (the registration's catch says
+        // why); the call's own id then stands for every declaration.
+        list = datasources.map((datasource) => ({ datasource, owner: { packageId: appId } }));
+    }
+    const key = kernelKey(ctx);
+    let names = key ? BOOT_DECLARED.get(key) : undefined;
+    if (!names) {
+        names = new Map();
+        if (key) BOOT_DECLARED.set(key, names);
+    }
+    const declared = new Map<string, string | undefined>();
+    for (const { datasource, owner } of list) {
+        const name = datasource?.name;
+        if (typeof name !== 'string' || name.length === 0) continue;
+        const packageId = typeof owner?.packageId === 'string' && owner.packageId.length > 0 ? owner.packageId : appId;
+        if (declared.get(name) === undefined) declared.set(name, datasource?.active === false ? undefined : packageId);
+        let record = names.get(name);
+        if (!record) {
+            record = { declarers: [], reported: new Set() };
+            names.set(name, record);
+        }
+        if (!record.declarers.includes(packageId)) record.declarers.push(packageId);
+    }
+    return { declared, names };
+}
+
+/** A name whose connect answered `connected` in this call was opened from this call's declaration of it. */
+function noteBootOpeners(boot: BootDeclarations, verdicts: ReadonlyArray<{ name: string; status: string }>): void {
+    for (const { name, status } of verdicts) {
+        if (status !== 'connected') continue;
+        const record = boot.names.get(name);
+        const opener = boot.declared.get(name);
+        if (record && record.opener === undefined && opener !== undefined) record.opener = opener;
+    }
+}
+
+/**
+ * Record a connect a boot ran before any `start()` — `AppPlugin`'s
+ * `datasourceMapping` connect at the drivers-ready hook — so the package whose
+ * declaration opened a connection there is the holder
+ * {@link connectPackageDatasources} names when another package declares the
+ * same name.
+ */
+export function recordBootDatasourceConnect(
+    ctx: PluginContext,
+    appId: string,
+    owned: OwnedDatasources | (() => OwnedDatasources),
+    verdicts: ReadonlyArray<{ name: string; status: string }>,
+): void {
+    const resolve = typeof owned === 'function' ? owned : () => owned;
+    noteBootOpeners(noteBootDeclarations(ctx, appId, resolve, []), verdicts);
+}
+
+/**
+ * A boot composing two packages that declare one datasource name keeps ONE
+ * connection for the name — the one opened from the first declaration to
+ * connect — and every other declaring package's objects bound to the name are
+ * served by it. The boot continues; this says so once per clash per boot, at
+ * `error`, naming the name and both packages, and never a configuration value.
+ *
+ * `error`, not `warn`: the second package's rows land in the holder's
+ * database while everything looks normal, the same consequence the rehydrate
+ * of an older install reports ({@link leaveHeldNames}).
+ */
+function reportBootNameClashes(
+    ctx: PluginContext,
+    tag: string,
+    boot: BootDeclarations,
+    verdicts: ReadonlyArray<{ name: string; status: string }>,
+): void {
+    noteBootOpeners(boot, verdicts);
+    for (const name of boot.declared.keys()) {
+        const record = boot.names.get(name);
+        if (!record || record.declarers.length < 2) continue;
+        const holder = record.opener ?? record.declarers[0];
+        const others = record.declarers.filter((packageId) => packageId !== holder && !record.reported.has(packageId));
+        if (others.length === 0) continue;
+        for (const packageId of others) record.reported.add(packageId);
+        ctx.logger.error(bootNameClashMessage(tag, name, holder, others, record.opener !== undefined));
+    }
+}
+
+/** The one line {@link reportBootNameClashes} logs: names and package ids only. */
+function bootNameClashMessage(tag: string, name: string, holder: string, others: readonly string[], opened: boolean): string {
+    const one = others.length === 1;
+    const subject = `the package${one ? '' : 's'} ${others.map((id) => `'${id}'`).join(', ')}`;
+    const served = opened
+        ? `One connection serves the name, opened from the declaration of '${holder}': the objects ${subject} `
+            + `bind${one ? 's' : ''} to '${name}' are served by that connection, and ${one ? 'its' : 'their'} own `
+            + 'declaration of the name is not connected. '
+        : `No connection is open under the name, and '${holder}' declared it first. `;
+    return `${tag} the datasource name '${name}' is declared by more than one package this boot composes: `
+        + `'${holder}' holds it, and ${subject} declare${one ? 's' : ''} it too. ${served}`
+        + 'The boot continues. Rename the datasource in one of the packages, or remove one of them from this '
+        + 'composition, and restart.';
 }
 
 /**

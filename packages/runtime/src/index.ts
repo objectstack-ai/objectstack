@@ -244,6 +244,12 @@ export type { HttpProtocolContext, HttpDispatcherResult } from './http-dispatche
 // ADR-0006 generic kernel-resolution seam (retained framework contract; the
 // multi-tenant implementation lives in cloud `@objectstack/objectos-runtime`).
 export type { KernelResolver } from './http-dispatcher.js';
+// [#31923] The REST `/actions` door's admission and dispatch as a function a
+// host's own action door calls (an in-product AI tool, a job runner), so the
+// host keeps no second copy of the door's rules. `posture: 'ai'` adds the
+// MCP `run_action` tool's rules.
+export { dispatchAction } from './action-dispatch.js';
+export type { ActionDispatchRequest, ActionDispatchAnswer, ActionDispatchPosture } from './action-dispatch.js';
 // ADR-0076 D11 step ③ — thin domain-handler registry seam; owning service
 // packages register normalized handlers via HttpDispatcher.registerDomainHandler.
 export { DomainHandlerRegistry } from './domain-handler-registry.js';

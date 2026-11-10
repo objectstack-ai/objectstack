@@ -299,9 +299,11 @@ import type * as M202 from './marketplace/taxonomy.zod.js';
 import type * as M203 from './system/restriction-profile.zod.js';
 // [ADR-0149 D2] The dataset AI tools' inputs, outputs and provenance -- new module, next free index.
 import type * as M204 from './ai/dataset-tools.zod.js';
+// The Ask data tools' object-query `source` block -- new module, next free index.
+import type * as M205 from './ai/object-query-source.zod.js';
 
 // ---------------------------------------------------------------------------
-// 852 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 853 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -387,6 +389,9 @@ export type Iso_ai_datasetTools__DatasetToolCatalogEntrySchema = Assert<Eq< z.in
 export type Iso_ai_datasetTools__DatasetToolCatalogMeasureSchema = Assert<Eq< z.input< typeof M204.DatasetToolCatalogMeasureSchema >, z.infer< typeof M204.DatasetToolCatalogMeasureSchema > >>;
 export type Iso_ai_datasetTools__ListDatasetsOutputSchema = Assert<Eq< z.input< typeof M204.ListDatasetsOutputSchema >, z.infer< typeof M204.ListDatasetsOutputSchema > >>;
 export type Iso_ai_datasetTools__QueryDatasetOutputSchema = Assert<Eq< z.input< typeof M204.QueryDatasetOutputSchema >, z.infer< typeof M204.QueryDatasetOutputSchema > >>;
+
+// ai/object-query-source.zod.ts -- plain objects, enums, literals and the filter tree, no default and no transform
+export type Iso_ai_objectQuerySource__ObjectQuerySourceSchema = Assert<Eq< z.input< typeof M205.ObjectQuerySourceSchema >, z.infer< typeof M205.ObjectQuerySourceSchema > >>;
 
 // ai/embedding.zod.ts
 export type Iso_ai_embedding__EmbeddingModelSchema = Assert<Eq< z.input< typeof M2.EmbeddingModelSchema >, z.infer< typeof M2.EmbeddingModelSchema > >>;
@@ -1820,7 +1825,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 852 isomorphic pins', () => {
+  it('still declares all 853 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2874,7 +2879,12 @@ describe('ADR-0122 type-alias convention', () => {
     // `DatasetMemberSynonymsSchema`): an array of bounded, regex-checked
     // strings, no default and no transform
     // (Iso_ui_dataset__DatasetMemberSynonymsSchema). +1 added.
-    expect(pins).toHaveLength(852);
+    // 852 -> 853 is the Ask data tools' `source` block
+    // (`ai/object-query-source.zod.ts`): plain objects, enums, literals and the
+    // `FilterConditionSchema` tree (itself typed with one shape for both
+    // states), no default and no transform
+    // (Iso_ai_objectQuerySource__ObjectQuerySourceSchema). +1 added.
+    expect(pins).toHaveLength(853);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

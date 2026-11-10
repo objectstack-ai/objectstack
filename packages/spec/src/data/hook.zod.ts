@@ -1306,6 +1306,39 @@ export const HookContextSchema = lazySchema(() => z.object({
       + 'the localization setting; absent on a write no person asked for. The body runner answers a declared refusal '
       + '(HookSchema.refusals) in it. Descriptive only — not an authorization input.',
     ),
+    /**
+     * [ADR-0151 D5 · O4] WHAT KIND of principal is calling — the envelope's own
+     * `ExecutionContext.principalKind`, under its own name and with its own
+     * five values, copied verbatim by `buildSession()` (objectql
+     * `engine-execution-plumbing.ts`) once the session already exists: a kind
+     * alone says what sort of caller, not who, and never turns "no caller" into
+     * a session.
+     *
+     * One question for both kinds of agent. An OAuth client acting for a
+     * person reads `'agent'` with that person in `userId` and the client in
+     * `provenance.performedByClientId`; an AI service account reads `'agent'`
+     * with ITSELF in `userId` and no `performedByClientId`, which it never
+     * carries. Before this key a hook could recognise only the first.
+     *
+     * A person reads `'human'` through every door — the shared assembler
+     * stamps it on each one — and a guest reads `'guest'`. Absent when the
+     * envelope carries no kind (a bare-kernel or programmatic call, a system
+     * self-write): the same "absent = human" the envelope itself declares, and
+     * deliberately NOT defaulted here, because a derived context that lost the
+     * kind would then report an agent as a person.
+     *
+     * ⚠️ Descriptive, like {@link positions}: privilege is decided by the
+     * security service on the ExecutionContext, which already clamps an agent
+     * to its ceiling before any hook runs. A hook reads this to ask "did an
+     * agent do this?" — to route, hold or record — never to grant.
+     */
+    principalKind: z.enum(['human', 'agent', 'service', 'guest', 'system']).optional().describe(
+      'What kind of principal is calling (ADR-0090 D10, ADR-0151 D5), copied verbatim from '
+      + 'ExecutionContext.principalKind. A person reads `human` through every door; an agent reads `agent` — an '
+      + 'OAuth client acting for the person in `userId` (with `provenance.performedByClientId` set) and an AI service '
+      + 'account acting as itself (`userId` is the account, no `performedByClientId`) alike. Absent when the envelope '
+      + 'carries no kind, which the envelope reads as `human`. Descriptive only — not an authorization input.',
+    ),
     // `roles` REMOVED (#5050, ADR-0049 D2). It was DECLARED here, READ by two
     // dead exemption branches in plugin-approvals (the approval record lock and
     // the delegation write guard, both deleted in #4839 / PR #5049), and NEVER

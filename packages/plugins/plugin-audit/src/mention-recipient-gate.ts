@@ -257,6 +257,8 @@ async function contextForMentionedUser(
     ...(tenantId ? { tenantId } : {}),
     positions: grants.positions,
     permissions: grants.permissions,
+    // [ADR-0150 D3] Which package's set each of those names is.
+    ...(grants.permissionSetAddresses ? { permissionSetAddresses: grants.permissionSetAddresses } : {}),
     systemPermissions: grants.systemPermissions,
     org_user_ids: grants.org_user_ids,
     accessible_org_ids: grants.accessible_org_ids,

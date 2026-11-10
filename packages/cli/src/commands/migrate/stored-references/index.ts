@@ -47,8 +47,9 @@ export const COMPOSITION_FLAGS = {
  * `os migrate stored-references` — the ADR-0150 D10 upgrade report: every
  * stored reference the package-column backfills (D8) left naming no package
  * because the one D3 rule refuses it, each with every candidate the rule
- * names, plus the packaged picklist references the rule refuses (D8 R17) and
- * the names the boot's holder seal found held twice. The rules, and what is
+ * names, plus the packaged picklist references the rule refuses (D8 R17),
+ * the names the boot's holder seal found held twice, and the installed
+ * packages whose namespace spells an address literal (D5, child G1). The rules, and what is
  * deliberately left out, are `utils/stored-package-references.ts`'s header.
  *
  * Read-only: it boots the deployment as `os serve` composes it (the host
@@ -138,9 +139,11 @@ function printReport(report: StoredPackageReferenceReport, database: string): vo
     printWarning(`Not read — this composition does not carry them (compose their plugins as the server does): ${report.tablesNotCarried.join(', ')}.`);
   }
   console.log('');
-  const total = report.stored.length + report.picklists.length + report.sealedClashes.length;
+  const total = report.stored.length + report.picklists.length + report.sealedClashes.length
+    + report.literalNamespaces.length;
   if (total === 0) {
-    printSuccess('No stored reference, picklist reference or sealed name is refused by the resolution rule — nothing to review.');
+    printSuccess('No stored reference, picklist reference or sealed name is refused by the resolution rule, and no '
+      + 'package namespace spells an address literal — nothing to review.');
     return;
   }
   if (report.stored.length > 0) {
@@ -162,6 +165,14 @@ function printReport(report: StoredPackageReferenceReport, database: string): vo
   if (report.sealedClashes.length > 0) {
     console.log(chalk.bold(`${report.sealedClashes.length} name(s) held twice since before the one-holder rule (a caller naming no package is refused):`));
     for (const c of report.sealedClashes) console.log(`  • ${c.type} "${c.name}": ${c.candidates.join('; ')}`);
+    console.log('');
+  }
+  if (report.literalNamespaces.length > 0) {
+    console.log(chalk.bold(`${report.literalNamespaces.length} installed package(s) whose namespace spells an address literal (kept at boot; an install is refused):`));
+    for (const f of report.literalNamespaces) {
+      console.log(`  • package "${f.packageId}", namespace "${f.namespace}": ${f.message}`);
+      console.log(`      Its items are read with ?package=${f.packageId}; rename the namespace to give them qualified addresses.`);
+    }
     console.log('');
   }
   if (report.stored.some((f) => f.reason === 'ambiguous' && f.packageColumn)) {
