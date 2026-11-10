@@ -1469,6 +1469,16 @@ export class DatabaseLoader implements MetadataLoader {
   ): Promise<void> {
     await this.ensureSchema();
 
+    // [ADR-0150 D3, #32246 R1] A by-package type keeps a row per `(package,
+    // name)`. With rows of two or more packages, a rollback by name cannot
+    // tell whose row it restores — the first row the driver returned would be
+    // overwritten with a body that may be the other package's — so it is
+    // refused naming every holder (`storeRemovalKeys`' refusal), before any
+    // write or history row. Rollback by package is a follow-up card.
+    if (PACKAGE_SLOTTED_STORE_TYPES.has(type)) {
+      storeRemovalKeys(await this.rowSlots(type, name), type, name);
+    }
+
     const now = new Date().toISOString();
     const metadataJson = JSON.stringify(restoredData);
     // [#21828] The one stamp vocabulary of `sys_metadata` — see {@link contentHash}.
@@ -1484,8 +1494,7 @@ export class DatabaseLoader implements MetadataLoader {
 
     const previousChecksum = existing.checksum as string | undefined;
     // [#32246] A by-package type numbers versions per name (see the class
-    // doc). ⛔ Which package's row a rollback restores is still the first row
-    // of `(type, name)` — rollback by package is a recorded follow-up.
+    // doc); at most one package holds the name here (refused above).
     const newVersion = PACKAGE_SLOTTED_STORE_TYPES.has(type)
       ? await this.nextNameVersion(type, name)
       : ((existing.version as number) ?? 0) + 1;
@@ -1538,6 +1547,20 @@ export class DatabaseLoader implements MetadataLoader {
     const { key, replaces } = storeRowWriteKey(bySlot, type, name, data);
     const existing = bySlot.get(key) ?? replaces.map((replaced) => bySlot.get(replaced)).find(Boolean) ?? null;
     return { existing, packageId: slotPackageOf(key), rows };
+  }
+
+  /**
+   * [#32246] The rows of `name`, a by-package type, grouped by the store slot
+   * each holds the item for ({@link storeRowKey}: its package, else the
+   * name's package-less slot).
+   */
+  private async rowSlots(type: string, name: string): Promise<Map<string, Record<string, unknown>[]>> {
+    const bySlot = new Map<string, Record<string, unknown>[]>();
+    for (const row of await this._find(this.tableName, { where: this.baseFilter(type, name) })) {
+      const key = storeRowKey(name, storedRowPackageId(row));
+      bySlot.set(key, [...(bySlot.get(key) ?? []), row]);
+    }
+    return bySlot;
   }
 
   /**
@@ -1721,12 +1744,7 @@ export class DatabaseLoader implements MetadataLoader {
     await this.ensureSchema();
 
     if (PACKAGE_SLOTTED_STORE_TYPES.has(type)) {
-      const rows = await this._find(this.tableName, { where: this.baseFilter(type, name) });
-      const bySlot = new Map<string, Record<string, unknown>[]>();
-      for (const row of rows) {
-        const key = storeRowKey(name, storedRowPackageId(row));
-        bySlot.set(key, [...(bySlot.get(key) ?? []), row]);
-      }
+      const bySlot = await this.rowSlots(type, name);
       const { keys } = storeRemovalKeys(bySlot, type, name, options?.packageId);
       for (const key of keys) {
         for (const row of bySlot.get(key) ?? []) await this._delete(this.tableName, row.id as string);

@@ -1204,6 +1204,37 @@ describe('per-package loader storage for every type stored per package (ADR-0150
     ]);
   });
 
+  /**
+   * [#32246 red-line R1] A rollback by name of a name two packages' rows hold
+   * cannot tell whose row it restores: it used to overwrite the first row the
+   * driver returned, with a body that could be the other package's. It is
+   * refused naming both, before any write or history row. Rollback by package
+   * is a follow-up card.
+   */
+  it.each(SLOTTED)('%s: a rollback of a name two packages\' rows hold is refused naming both, every row byte-unchanged and no history row written (BASE: the first row the driver returned was overwritten)', async (type) => {
+    const ctx = await boot(type);
+    const rowsBefore = JSON.stringify(ctx.rows());
+    const historyBefore = ctx.history().length;
+    const err = await refusalOf(ctx.manager.rollback(type, ctx.name, 2));
+    expect(err).toBeInstanceOf(PackageScopedNameRefusedError);
+    expect([err!.code, err!.status, err!.refusal.reason]).toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment']);
+    expect(err!.refusal.candidates).toEqual([
+      { kind: 'package', packageId: A },
+      { kind: 'package', packageId: B },
+    ]);
+    expect(JSON.stringify(ctx.rows())).toBe(rowsBefore);
+    expect(ctx.history()).toHaveLength(historyBefore);
+    expect(((await ctx.manager.get(type, ctx.name, A)) as any)?.label, 'the registry untouched').toBe(label(type, A));
+  });
+
+  it.each(SLOTTED)('%s: CONTROL — a rollback of a name one package holds still restores that version into its row', async (type) => {
+    const ctx = await boot(type, [A]);
+    await ctx.manager.register(type, ctx.name, { ...doorItem(type, A), label: 'alpha edited' }, { notify: false });
+    await ctx.manager.rollback(type, ctx.name, 1);
+    expect(ctx.rows().map((row) => [row.package_id, row.version, JSON.parse(row.metadata as string).label])).toEqual([[A, 3, label(type, A)]]);
+    expect(ctx.history().map((row) => [row.version, row.operation_type])).toEqual([[1, 'create'], [2, 'update'], [3, 'revert']]);
+  });
+
   describe('CONTROL — a type outside the set keeps one row and one door entry per name, the body saved last', () => {
     const CONTROL_TYPE = ['view', 'object'].find((type) => !PACKAGE_SLOTTED_STORE_TYPES.has(type))!;
 
