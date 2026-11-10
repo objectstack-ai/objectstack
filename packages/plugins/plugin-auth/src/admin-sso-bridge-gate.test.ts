@@ -433,3 +433,78 @@ describe('the groups-claim bridges run the same platform-admin gate as every /ad
     });
   }
 });
+
+describe('[#32085] the provider edit and the delete-impact read run the same platform-admin gate, before they read or write the provider', () => {
+  const SESSIONS: Record<string, unknown> = {
+    member: { user: { id: 'usr_member', positions: ['user'], role: 'user' } },
+    'org-admin': { user: { id: 'usr_orgadmin', positions: ['user', 'org_admin', 'org_owner'], role: 'user' } },
+    'position-named-platform-admin': { user: { id: 'usr_tenant', positions: ['org_member', 'platform_admin'], role: 'user' } },
+    'platform-admin': { user: { id: 'usr_admin', positions: ['user', 'platform_admin'], isPlatformAdmin: true, role: 'user' } },
+  };
+  const STORED = {
+    provider_id: 'acme',
+    oidc_config: JSON.stringify({ clientId: 'cid', mapping: { email: 'email', name: 'name' } }),
+  };
+  /** Each door, as its action sends it. */
+  const DOORS: Array<{ name: string; method: 'GET' | 'POST'; path: string; body?: Record<string, unknown> }> = [
+    { name: 'POST /admin/sso/update-provider', method: 'POST', path: `${BASE}/admin/sso/update-provider`, body: { providerId: 'acme', clientSecret: 'rotated' } },
+    { name: 'GET /admin/sso/delete-impact', method: 'GET', path: `${BASE}/admin/sso/delete-impact?providerId=acme` },
+  ];
+
+  let app: Hono;
+  let delegated: ReturnType<typeof vi.fn>;
+  let engineRead: ReturnType<typeof vi.fn>;
+
+  beforeAll(async () => {
+    delegated = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    engineRead = vi.fn(async () => ({ ...STORED }));
+    const find = vi.fn(async () => []);
+    app = await mountBridges({
+      getSession: (headers) => SESSIONS[headers.get('x-test-session') ?? ''] ?? null,
+      handleRequest: delegated as any,
+      getDataEngine: () => ({ findOne: engineRead, find }),
+    });
+  });
+
+  const send = (door: (typeof DOORS)[number], session?: string) =>
+    app.request(`${ORIGIN}${door.path}`, {
+      method: door.method,
+      headers: { 'content-type': 'application/json', origin: ORIGIN, ...(session ? { 'x-test-session': session } : {}) },
+      ...(door.body ? { body: JSON.stringify(door.body) } : {}),
+    });
+
+  for (const door of DOORS) {
+    it(`${door.name}: anonymous → 401 UNAUTHENTICATED; the provider is neither read nor written`, async () => {
+      delegated.mockClear();
+      engineRead.mockClear();
+      const res = await send(door);
+      const body: any = await res.json();
+      expect(res.status).toBe(401);
+      expect(body.error?.code).toBe('UNAUTHENTICATED');
+      expect(engineRead).not.toHaveBeenCalled();
+      expect(delegated).not.toHaveBeenCalled();
+    });
+
+    for (const session of ['member', 'org-admin', 'position-named-platform-admin']) {
+      it(`${door.name}: ${session} → 403 PERMISSION_DENIED; the provider is neither read nor written`, async () => {
+        delegated.mockClear();
+        engineRead.mockClear();
+        const res = await send(door, session);
+        const body: any = await res.json();
+        expect(res.status).toBe(403);
+        expect(body.error?.code).toBe('PERMISSION_DENIED');
+        expect(engineRead).not.toHaveBeenCalled();
+        expect(delegated).not.toHaveBeenCalled();
+      });
+    }
+
+    it(`${door.name}: a platform admin passes the gate and the bridge runs`, async () => {
+      delegated.mockClear();
+      engineRead.mockClear();
+      const res = await send(door, 'platform-admin');
+      const body: any = await res.json();
+      expect(res.status, JSON.stringify(body)).toBe(200);
+      expect(engineRead).toHaveBeenCalled();
+    });
+  }
+});

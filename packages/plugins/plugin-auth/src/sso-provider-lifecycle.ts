@@ -218,7 +218,8 @@ function unlinkSentence(impact: SsoProviderDeleteImpact, done: boolean): string 
   const head = `Deleting SSO provider '${impact.providerId}' ${done ? 'unlinked' : 'unlinks'} ${plural(impact.linkedUsers, 'user')} from it`;
   if (impact.linkedUsers === 0) return `${head}.`;
   const n = impact.usersWithoutOtherSignIn;
-  return `${head}; ${n} of them ${n === 1 ? 'has' : 'have'} no password or other sign-in method linked and ${done ? 'lost' : 'lose'} access.`;
+  const lose = done ? 'lost' : n === 1 ? 'loses' : 'lose';
+  return `${head}; ${n} of them ${n === 1 ? 'has' : 'have'} no password or other sign-in method linked and ${lose} access.`;
 }
 
 /** One English sentence naming what a delete removes (or removed); the counts themselves ride beside it. */

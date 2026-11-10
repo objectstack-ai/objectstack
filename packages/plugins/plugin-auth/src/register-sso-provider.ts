@@ -39,12 +39,28 @@ export interface RegisterSsoFormResult {
   body: {
     success: boolean;
     data?: { providerId: string };
-    error?: { code: string; message: string };
+    error?: { code: string; message: string; field?: string; heldBy?: string };
   };
 }
 
 /** A better-auth universal handler: `(request) => Response`. */
 export type AuthRequestHandler = (request: Request) => Promise<Response>;
+
+/**
+ * [#32085] The register bridges' failure answer. A register onto a domain
+ * another provider already serves is refused by plugin-auth's before-hook
+ * with a located `409 RESOURCE_CONFLICT` (`field: 'domain'`, and `heldBy`,
+ * the provider that serves it); the bridge relays that refusal as it came,
+ * so the form can mark the field. Every other refusal keeps the bridge's own
+ * code and the vendor's message, as before.
+ */
+function registerRefusal(parsed: any, fallbackCode: string, fallbackMessage: string): NonNullable<RegisterSsoFormResult['body']['error']> {
+  const message = typeof parsed?.message === 'string' && parsed.message ? parsed.message : fallbackMessage;
+  if (parsed?.code === 'RESOURCE_CONFLICT' && parsed?.field === 'domain') {
+    return { code: 'RESOURCE_CONFLICT', message, field: 'domain', ...(typeof parsed.heldBy === 'string' ? { heldBy: parsed.heldBy } : {}) };
+  }
+  return { code: fallbackCode, message };
+}
 
 /**
  * [#24032] The four bridges' body read. A declared-JSON body that does not
@@ -243,7 +259,7 @@ export async function runRegisterSsoProviderFromForm(
   if (!resp.ok) {
     return {
       status: resp.status,
-      body: { success: false, error: { code: 'SSO_REGISTER_FAILED', message: parsed?.message || 'SSO provider registration failed' } },
+      body: { success: false, error: registerRefusal(parsed, 'SSO_REGISTER_FAILED', 'SSO provider registration failed') },
     };
   }
   return { status: 200, body: { success: true, data: { providerId: parsed?.providerId ?? providerId } } };
@@ -341,7 +357,7 @@ export async function runRegisterSamlProviderFromForm(
   let parsed: any = {};
   try { const t = await resp.text(); parsed = t ? JSON.parse(t) : {}; } catch { parsed = {}; }
   if (!resp.ok) {
-    return { status: resp.status, body: { success: false, error: { code: 'SAML_REGISTER_FAILED', message: parsed?.message || 'SAML provider registration failed' } } };
+    return { status: resp.status, body: { success: false, error: registerRefusal(parsed, 'SAML_REGISTER_FAILED', 'SAML provider registration failed') } };
   }
   return { status: 200, body: { success: true, data: { providerId: parsed?.providerId ?? providerId }, acsUrl, spMetadataUrl } };
 }
