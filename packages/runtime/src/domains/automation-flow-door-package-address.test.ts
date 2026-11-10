@@ -79,6 +79,8 @@
  * `meta-save-actor.test.ts` calls them.
  */
 
+// Pays `@objectstack/metadata`'s first load at collection, never inside a clocked case.
+import '@objectstack/metadata';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';

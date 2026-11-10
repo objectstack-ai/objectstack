@@ -23,6 +23,8 @@
  * spelling therefore seed the stored row they re-save ({@link seedStoredFlow}),
  * the only way a retired spelling is still at rest today.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // [#5619] `assertEngine{Delete,Update}Dispatch` are the producer's OWN write-verb
 // dispatch decisions (#4550 delete / #5480 update), so the fake engine below

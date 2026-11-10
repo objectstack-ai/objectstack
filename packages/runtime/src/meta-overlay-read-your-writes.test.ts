@@ -43,6 +43,8 @@
  * removed the entry.
  */
 
+// Pays `@objectstack/metadata`'s first load at collection, never inside a clocked case.
+import '@objectstack/metadata';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ObjectStackProtocolImplementation, resetEnvWritableMetadataTypes } from '@objectstack/metadata-protocol';
 import { SchemaRegistry, assertEngineUpdateDispatch, assertEngineDeleteDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
