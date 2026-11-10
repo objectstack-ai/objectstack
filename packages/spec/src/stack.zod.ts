@@ -11,7 +11,7 @@ import {
   unmanagedInstallValueCarries,
 } from './kernel/unmanaged-install';
 import { PLURAL_TO_SINGULAR, pluralToSingular } from './meta-spelling/manifest-collection-spelling';
-import { findNamespaceObjectNameClashes, validateObjectNamespacePrefix } from './kernel/namespace-prefix';
+import { findNamespaceObjectNameClashes, namespacedHoldersMeet, validateObjectNamespacePrefix } from './kernel/namespace-prefix';
 import { validateNamespaceNotAddressLiteral } from './kernel/address-grammar';
 import { PLATFORM_CAPABILITY_TOKENS, RETIRED_PLATFORM_CAPABILITY_GUIDANCE } from './kernel/platform-capabilities';
 import { DatasourceSchema } from './data/datasource.zod';
@@ -7789,6 +7789,19 @@ function mergeObjects(
  * and an object-bound action sharing a name — two keys) and one name bound to
  * two different objects.
  *
+ * [ADR-0150 D2/D4] Nor, under `manifest: 'preserve'` (`preserve`), two
+ * packages' object-less action of one name when the packages hold the name
+ * apart ({@link composedPackagesHoldApart}): the rule the install gate applies
+ * to the same pair, so one artifact carries what two installs carry. Preserve
+ * keeps each body under its own package, the boot registers each under that
+ * package, and a call reaches each by its namespace's address
+ * (`/actions/NS/global/NAME`) while the call that names no package is refused
+ * naming both. Under the default (flattening) manifest the package identity
+ * is lost, so the pair stays refused, and the refusal names `preserve`
+ * ({@link formatComposedActionKeyCollisions}). Two packages of one namespace,
+ * two bodies of one package, and a package with no namespace stay refused
+ * under either manifest, and an object-bound key keeps the one-holder rule.
+ *
  * Runs BEFORE `mergeActionsIntoObjects` so the composed output's own echo is
  * not counted either. Returns one line per colliding key, in first-seen order.
  *
@@ -7807,10 +7820,13 @@ function collectComposedActionKeyCollisions(
   stacks: ObjectStackDefinition[],
   composedObjects: ObjectStackDefinition['objects'],
   actionsOwner: ReadonlyMap<string, number>,
-): string[] {
+  preserve: boolean,
+): { lines: string[]; preserveWouldAdmit: boolean } {
   type Action = NonNullable<ObjectStackDefinition['actions']>[number];
   // key → stack index → where that stack declares it
   const sitesByKey = new Map<string, Map<number, string[]>>();
+  // Keys some object EMBEDS: object-bound, whatever the scope string reads.
+  const embeddedKeys = new Set<string>();
   const note = (scope: string, name: string, stackIndex: number, site: string): void => {
     const key = `${scope}:${name}`;
     const byStack = sitesByKey.get(key) ?? new Map<number, string[]>();
@@ -7851,12 +7867,21 @@ function collectComposedActionKeyCollisions(
     for (const [j, action] of (embedded as Action[]).entries()) {
       if (!isRecord(action)) continue;
       note(obj.name, action.name, owner, `objects['${obj.name}'].actions[${j}]`);
+      embeddedKeys.add(`${obj.name}:${action.name}`);
     }
   }
 
   const errors: string[] = [];
+  let preserveWouldAdmit = false;
   for (const [key, byStack] of sitesByKey) {
     if (byStack.size < 2) continue;
+    // [ADR-0150 D2/D4] The object-less key, held apart by its packages: admitted
+    // under `preserve`, and under the flattening manifest the refusal names it.
+    if (!embeddedKeys.has(key) && key.startsWith(`${GLOBAL_ACTION_SCOPE}:`)
+      && composedPackagesHoldApart(stacks, [...byStack.keys()])) {
+      if (preserve) continue;
+      preserveWouldAdmit = true;
+    }
     // Stack order, not note order — standalone declarations are walked before
     // embedded ones, so a later stack's standalone would otherwise be named
     // ahead of an earlier stack's embedded action.
@@ -7865,7 +7890,38 @@ function collectComposedActionKeyCollisions(
       .map(([index, sites]) => `${stackLabel(stacks[index], index)} at ${sites.join(' + ')}`);
     errors.push(`Action key '${key}' is declared by ${byStack.size} stacks: ${joinDeclarationOrigins(parties)}.`);
   }
-  return errors;
+  return { lines: errors, preserveWouldAdmit };
+}
+
+/**
+ * [ADR-0150 D2/D4] Do the input stacks at `indices` hold one object-less
+ * action name APART, as packages the install gate would admit side by side?
+ * Each must be ONE package — a `manifest` with an `id`, and no `packages` list
+ * of its own (a nested artifact's top-level actions belong to no single body)
+ * — no two may be one package (two bodies of one package are one holder, and
+ * it holds one body per name), and no two may meet under
+ * {@link namespacedHoldersMeet}, the namespace half of the install gate's rule,
+ * read from its one copy: a package with no namespace, or two packages of one
+ * namespace, meet.
+ * @internal
+ */
+function composedPackagesHoldApart(stacks: readonly ObjectStackDefinition[], indices: readonly number[]): boolean {
+  const holders: Array<{ id: string; namespace: string | undefined }> = [];
+  for (const index of indices) {
+    const stack = stacks[index] as Record<string, unknown> & ObjectStackDefinition;
+    if (Array.isArray(stack.packages)) return false;
+    const id = stack.manifest?.id;
+    if (typeof id !== 'string' || id === '') return false;
+    const namespace = stack.manifest?.namespace;
+    holders.push({ id, namespace: typeof namespace === 'string' && namespace !== '' ? namespace : undefined });
+  }
+  for (let a = 0; a < holders.length; a += 1) {
+    for (let b = a + 1; b < holders.length; b += 1) {
+      if (holders[a].id === holders[b].id) return false;
+      if (namespacedHoldersMeet(holders[a].namespace, holders[b].namespace)) return false;
+    }
+  }
+  return true;
 }
 
 /**
@@ -7875,7 +7931,7 @@ function collectComposedActionKeyCollisions(
  * carries. Names no strategy option: there is none for actions by ruling.
  * @internal
  */
-function formatComposedActionKeyCollisions(lines: readonly string[]): string {
+function formatComposedActionKeyCollisions(lines: readonly string[], preserveWouldAdmit: boolean): string {
   const header =
     `composeStacks conflict: cross-stack action key collision ` +
     `(${lines.length} issue${lines.length === 1 ? '' : 's'}):`;
@@ -7889,7 +7945,14 @@ function formatComposedActionKeyCollisions(lines: readonly string[]): string {
   const fix =
     `Fix: rename one of the colliding actions within its scope, bind one of them to a different ` +
     `object, or remove the duplicate from one of the stacks. composeStacks does not pick a winner for actions.`;
-  return `${header}\n\n${body}\n\n${why}\n${fix}`;
+  // [ADR-0150 D2/D4] Only where `preserve` would admit a refused key: each
+  // package of its own namespace keeps its object-less action there.
+  const preserve = preserveWouldAdmit
+    ? `\nTo keep both object-less actions, compose with { manifest: 'preserve' }: it keeps each package's ` +
+      `body under its own package, so two packages of two namespaces may each declare one object-less ` +
+      `action of a name, called at '/actions/NAMESPACE/${GLOBAL_ACTION_SCOPE}/NAME'.`
+    : '';
+  return `${header}\n\n${body}\n\n${why}\n${fix}${preserve}`;
 }
 
 /**
@@ -8702,11 +8765,13 @@ function composeBuiltStacks(
   //    copies each bound standalone action into its object: that copy is the
   //    echo an input built by `defineStack` already carries, and counting it
   //    would make every bound action collide with itself.
-  const actionCollisions = collectComposedActionKeyCollisions(stacks, objects, actionsOwner);
-  if (actionCollisions.length > 0) {
+  //    [ADR-0150 D2/D4] Under `manifest: 'preserve'`, two packages' object-less
+  //    action of one name is admitted when the packages hold it apart.
+  const actionCollisions = collectComposedActionKeyCollisions(stacks, objects, actionsOwner, opts.manifest === 'preserve');
+  if (actionCollisions.lines.length > 0) {
     throw new StackComposeActionKeyCollisionError(
-      formatComposedActionKeyCollisions(actionCollisions),
-      actionCollisions,
+      formatComposedActionKeyCollisions(actionCollisions.lines, actionCollisions.preserveWouldAdmit),
+      actionCollisions.lines,
     );
   }
 

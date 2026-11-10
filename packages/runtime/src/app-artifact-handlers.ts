@@ -43,6 +43,18 @@
  * list — a reinstall whose new version declares no hooks would otherwise keep
  * the old ones firing.
  *
+ * ## Each package's actions under its own package (ADR-0150 D4)
+ *
+ * A multi-package artifact (`packages[]`, `composeStacks(…, { manifest:
+ * 'preserve' })`) carries each package's actions in that package's body, and
+ * each body's action handlers are registered under THAT package
+ * (`app:<package id>`, {@link actionBindingGroups}), as an install of each
+ * package registers them, so a package-qualified call
+ * (`/actions/NS/global/NAME`, `executeAction`'s `packageId`) reaches its own,
+ * and two packages of two namespaces may each hold one object-less action of
+ * a name. An action the top level carries and no body declares stays under
+ * the artifact's owner. Hooks and functions stay under the artifact's owner.
+ *
  * Functions are not torn down: they are code (ADR-0088 — never a metadata row),
  * so a JSON artifact cannot carry one, and `registerFunction` replaces by name.
  *
@@ -170,6 +182,7 @@ import {
     collectBundleJobs,
 } from './app-plugin.js';
 import { resolveArtifactCollections } from './artifact-collections.js';
+import { artifactPackageId, resolveArtifactPackageOrder } from '@objectstack/core';
 import { toBoundaryJobSchedule } from './job-schedule.js';
 import type { JobHandlerContext } from './job-handler-context.js';
 import { resolveMetrics } from './observability/observability-service-plugin.js';
@@ -242,9 +255,21 @@ export function bindAppArtifactHandlers(
     const owner = appArtifactHandlerOwner(appId);
     const out: AppArtifactHandlerBinding = { owner, hooks: 0, functions: 0, actions: 0, withheldHooks: [] };
 
+    // [ADR-0150 D4] Each package body's actions under its own package. Read
+    // before the teardown, which removes every owner the groups name.
+    let actionGroups: ActionBindingGroup[] = [];
+    try {
+        actionGroups = actionBindingGroups(bundle, owner);
+    } catch (err: any) {
+        logger.error(`${tag} Failed to read the declared actions`, err as Error, { appId });
+    }
+
     // ── Tear down the owner's previous set ──────────────────────────────
     try {
-        if (typeof ql.removeActionsByPackage === 'function') ql.removeActionsByPackage(owner);
+        if (typeof ql.removeActionsByPackage === 'function') {
+            ql.removeActionsByPackage(owner);
+            for (const group of actionGroups) if (group.owner !== owner) ql.removeActionsByPackage(group.owner);
+        }
         if (typeof ql.unregisterHooksByPackage === 'function') ql.unregisterHooksByPackage(owner);
     } catch (err: any) {
         logger.error(`${tag} Failed to tear down the previous handler set`, err as Error, { appId, owner });
@@ -319,10 +344,10 @@ export function bindAppArtifactHandlers(
     // them. Actions without one are left to imperative
     // `engine.registerAction(...)` registration in user code.
     try {
-        const actions = collectBundleActions(bundle);
-        if (actions.length > 0 && typeof ql.registerAction === 'function') {
+        const total = actionGroups.reduce((sum, group) => sum + group.actions.length, 0);
+        if (total > 0 && typeof ql.registerAction === 'function') {
             const actionBodyRunner = actionBodyRunnerFactory(new QuickJSScriptRunner(), { ql, logger, appId });
-            for (const action of actions) {
+            for (const { owner: actionOwner, actions } of actionGroups) for (const action of actions) {
                 const handler = actionBodyRunner(action);
                 if (!handler) continue;
                 // Object-less actions register under the canonical `'global'`
@@ -334,7 +359,7 @@ export function bindAppArtifactHandlers(
                         ? action.object
                         : GLOBAL_ACTION_OBJECT_KEY;
                 try {
-                    ql.registerAction(objectKey, action.name, handler, owner);
+                    ql.registerAction(objectKey, action.name, handler, actionOwner);
                     out.actions++;
                 } catch (err: any) {
                     logger.warn(`${tag} Failed to register action body`, {
@@ -354,6 +379,46 @@ export function bindAppArtifactHandlers(
     }
 
     return out;
+}
+
+/** One owner's share of an artifact's declared actions ({@link actionBindingGroups}). */
+interface ActionBindingGroup {
+    readonly owner: string;
+    readonly actions: ReturnType<typeof collectBundleActions>;
+}
+
+/**
+ * [ADR-0150 D4] An artifact's declared actions, grouped by the owner each is
+ * registered under. A bundle with no `packages[]` is one group, under the
+ * artifact's `owner`, exactly as before. A bundle carrying `packages[]`
+ * contributes one group per body, in the boot's package order
+ * (`resolveArtifactPackageOrder`), under that body's package
+ * (`app:<package id>`), read from the body alone: `resolveArtifactCollections`
+ * keys an item by its name, so two bodies' same-named actions resolve to one
+ * there, which is right for a reader that counts declarations and wrong for
+ * the binder, which needs each. The actions the resolved artifact carries
+ * that no body declares under the same object and name (a top-level residual:
+ * an input with no manifest) stay under `owner`.
+ */
+function actionBindingGroups(bundle: unknown, owner: string): ActionBindingGroup[] {
+    const declared = (bundle as { packages?: unknown } | null | undefined)?.packages;
+    if (!Array.isArray(declared) || declared.length === 0) {
+        return [{ owner, actions: collectBundleActions(bundle) }];
+    }
+    const keyOf = (action: { name: string; object?: string }) =>
+        `${typeof action.object === 'string' && action.object.length > 0 ? action.object : GLOBAL_ACTION_OBJECT_KEY}:${action.name}`;
+    const groups: ActionBindingGroup[] = [];
+    const claimed = new Set<string>();
+    for (const body of resolveArtifactPackageOrder(bundle) as unknown[]) {
+        const packageId = artifactPackageId(body);
+        if (typeof packageId !== 'string' || packageId === '') continue;
+        const actions = collectBundleActions(body);
+        for (const action of actions) claimed.add(keyOf(action));
+        groups.push({ owner: appArtifactHandlerOwner(packageId), actions });
+    }
+    const residual = collectBundleActions(bundle).filter((action) => !claimed.has(keyOf(action)));
+    if (residual.length > 0) groups.push({ owner, actions: residual });
+    return groups;
 }
 
 // ─── The job half (#21489) ─────────────────────────────────────────────

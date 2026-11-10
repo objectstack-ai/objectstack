@@ -176,6 +176,7 @@
  */
 
 import type { ObjectStackManifest } from '@objectstack/spec/kernel';
+import { namespacedHoldersMeet } from '@objectstack/spec/kernel';
 import {
   artifactPackageId,
   BARE_NAME_ONE_HOLDER_TYPES,
@@ -345,6 +346,8 @@ export function isNamespaceScopedBareNameType(type: unknown): boolean {
  * (`NS/NAME`) and two AI faces (`NS-NAME`), and every by-name reader resolves
  * a bare name by `(package, name)` or refuses it naming both. A package with
  * no namespace has no address of its own, so it still meets every holder.
+ * The namespace comparison is `namespacedHoldersMeet` (`@objectstack/spec`),
+ * the copy `composeStacks` reads for the same pair in one artifact.
  */
 export function bareNameHoldersMeet(
   type: BareNameOneHolderType,
@@ -352,7 +355,8 @@ export function bareNameHoldersMeet(
   holderNamespace: string | undefined,
 ): boolean {
   if (!isNamespaceScopedBareNameType(type)) return true;
-  return !(incomingNamespace && holderNamespace && incomingNamespace !== holderNamespace);
+  // The namespace half is spec's one copy, which `composeStacks` reads too.
+  return namespacedHoldersMeet(incomingNamespace, holderNamespace);
 }
 
 /**
