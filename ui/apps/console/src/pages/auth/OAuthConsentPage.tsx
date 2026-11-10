@@ -27,6 +27,21 @@
  * says the application could not be identified and shows the raw `client_id`
  * labelled as the id. ⛔ The id is never shown in the name's place: an id
  * the user cannot recognise must not read as the name of something they can.
+ *
+ * ## Where the grant goes, and who registered the client
+ *
+ * The name and logo are what the client declared at registration, so the page
+ * never lets them stand alone as the identity a person approves. It asks
+ * `POST /api/v1/auth/oauth-consent/request` with the signed query, and the
+ * server answers from the request it signed: the redirect a consent sends the
+ * code to (`redirectUri`), and whether a platform administrator registered the
+ * client (`registeredByAdministrator`). The page names that destination — the
+ * host of an `http(s)` redirect, a loopback one included, and any other
+ * redirect (a native app's custom scheme) as it is — and marks every client no
+ * administrator registered as unverified, a dynamically registered one
+ * included. Until the server has answered, Authorize is
+ * disabled; when it cannot answer, the page says the destination could not be
+ * confirmed and Authorize stays disabled. Deny always works.
  */
 
 import { useEffect, useState } from 'react';
@@ -68,6 +83,43 @@ type ClientLookup =
 const PENDING: ClientLookup = { state: 'pending' };
 const UNIDENTIFIED: ClientLookup = { state: 'unidentified' };
 
+/** What the server established about the signed request being authorized. */
+type RequestLookup =
+  | { state: 'pending' }
+  | { state: 'confirmed'; destination: string; registeredByAdministrator: boolean }
+  | { state: 'unconfirmed' };
+
+const REQUEST_PENDING: RequestLookup = { state: 'pending' };
+const REQUEST_UNCONFIRMED: RequestLookup = { state: 'unconfirmed' };
+
+/**
+ * Where a redirect sends the grant, as a person reads it: the host (with its
+ * port) of an `http(s)` redirect, and any other redirect exactly as it is.
+ */
+function redirectDestination(redirectUri: string): string {
+  try {
+    const url = new URL(redirectUri);
+    if ((url.protocol === 'https:' || url.protocol === 'http:') && url.host) return url.host;
+  } catch {
+    // Not a URL the platform can parse: shown as it is.
+  }
+  return redirectUri;
+}
+
+/** Read the server's account of the signed request. */
+async function readConsentRequest(res: Response): Promise<RequestLookup> {
+  if (!res.ok) return REQUEST_UNCONFIRMED;
+  const body = (await res.json().catch(() => null)) as {
+    data?: { redirectUri?: unknown; registeredByAdministrator?: unknown };
+  } | null;
+  const redirectUri = body?.data?.redirectUri;
+  const registeredByAdministrator = body?.data?.registeredByAdministrator;
+  if (typeof redirectUri !== 'string' || !redirectUri || typeof registeredByAdministrator !== 'boolean') {
+    return REQUEST_UNCONFIRMED;
+  }
+  return { state: 'confirmed', destination: redirectDestination(redirectUri), registeredByAdministrator };
+}
+
 /** Read the server's answer: identified only by a non-empty `client_name`. */
 async function readPublicClient(res: Response): Promise<ClientLookup> {
   if (!res.ok) return UNIDENTIFIED;
@@ -86,6 +138,7 @@ export function OAuthConsentPage() {
   // Keyed by the client id it answers for, so the lookup below is derived
   // rather than reset from an effect.
   const [answer, setAnswer] = useState<{ clientId: string; lookup: ClientLookup } | null>(null);
+  const [requestAnswer, setRequestAnswer] = useState<{ query: string; lookup: RequestLookup } | null>(null);
 
   // Read raw query so the signed `sig=` is forwarded verbatim.
   const rawSearch = typeof window !== 'undefined' ? window.location.search : '';
@@ -121,6 +174,33 @@ export function OAuthConsentPage() {
       cancelled = true;
     };
   }, [clientId, userId]);
+
+  // Ask the server where the signed request sends the grant and who
+  // registered the client. Session-required, like the lookup above.
+  useEffect(() => {
+    if (!oauthQuery || !userId) return;
+    let cancelled = false;
+    fetch(`${AUTH_BASE}/oauth-consent/request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ oauth_query: oauthQuery }),
+    })
+      .then(readConsentRequest, () => REQUEST_UNCONFIRMED)
+      .then((lookup) => {
+        if (!cancelled) setRequestAnswer({ query: oauthQuery, lookup });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [oauthQuery, userId]);
+
+  const request: RequestLookup = !oauthQuery
+    ? REQUEST_UNCONFIRMED
+    : requestAnswer?.query === oauthQuery
+      ? requestAnswer.lookup
+      : REQUEST_PENDING;
+  const confirmed = request.state === 'confirmed' ? request : null;
 
   const lookup: ClientLookup = !clientId
     ? UNIDENTIFIED
@@ -234,6 +314,45 @@ export function OAuthConsentPage() {
             </Alert>
           )}
 
+          {confirmed && !confirmed.registeredByAdministrator && (
+            <Alert data-testid="oauth-consent-unverified">
+              <ShieldAlert className="size-4" />
+              <AlertTitle>
+                {t('oauth.consent.unverified', { defaultValue: 'Unverified application' })}
+              </AlertTitle>
+              <AlertDescription>
+                {t('oauth.consent.unverifiedHint', {
+                  destination: confirmed.destination,
+                  defaultValue:
+                    'No administrator here registered this application, so its name has not been checked. Authorize it only if you trust {{destination}}.',
+                })}
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {request.state === 'unconfirmed' && (
+            <Alert variant="destructive" data-testid="oauth-consent-unconfirmed">
+              <ShieldAlert className="size-4" />
+              <AlertTitle>
+                {t('oauth.consent.destinationUnconfirmed', {
+                  defaultValue:
+                    'Where this access would be sent could not be confirmed, so it cannot be authorized here.',
+                })}
+              </AlertTitle>
+            </Alert>
+          )}
+
+          {confirmed && (
+            <div data-testid="oauth-consent-destination">
+              <p className="mb-1 text-sm font-medium">
+                {t('oauth.consent.sentTo', { defaultValue: 'Access will be sent to:' })}
+              </p>
+              <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
+                <code className="break-all font-mono">{confirmed.destination}</code>
+              </p>
+            </div>
+          )}
+
           {scopes.length > 0 && (
             <div>
               <p className="mb-2 text-sm font-medium">
@@ -261,7 +380,7 @@ export function OAuthConsentPage() {
               <X className="mr-2 h-4 w-4" />
               {t('oauth.consent.deny', { defaultValue: 'Deny' })}
             </Button>
-            <Button onClick={() => handleDecision(true)} disabled={submitting}>
+            <Button onClick={() => handleDecision(true)} disabled={submitting || !confirmed}>
               <Check className="mr-2 h-4 w-4" />
               {submitting
                 ? t('oauth.consent.submitting', { defaultValue: 'Authorizing…' })

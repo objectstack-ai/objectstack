@@ -235,10 +235,10 @@ The boot-time LLM adapter priority is:
 
 After boot, if the Settings service is mounted, the ObjectOS AI runtime
 reads the `ai` Settings namespace and swaps the adapter when the provider
-comes from env or a stored Settings UI value. The manifest default
-`provider=memory` is ignored so it does not mask boot-time auto-detection;
-an explicit `OS_AI_PROVIDER=memory` or stored UI value does switch the runtime
-back to memory. Settings values resolve as:
+comes from env or a stored Settings UI value. The `provider` setting has no
+default, so an unset provider never masks boot-time auto-detection. `memory` is
+not a Settings value: the Settings UI does not offer it, saving it is refused,
+and `OS_AI_PROVIDER=memory` is reported and ignored. Settings values resolve as:
 
 ```text
 env (`OS_<NAMESPACE>_<KEY>`) > stored Settings UI value > default
@@ -383,6 +383,8 @@ the hosted ObjectOS Cloud control plane.
 | `OS_TELEMETRY_CLIENT_ERROR_REPORTING_ENVIRONMENT` | string | — | `environment` tag on client error events (`production`, `staging`, …). Unset lets the Console tag events with its own build mode. Inert without a DSN. |
 | `OS_TELEMETRY_CLIENT_ERROR_REPORTING_TRACES_SAMPLE_RATE` | number | `0.1` | Fraction (`0`–`1`) of Console transactions sampled for performance tracing. Out-of-range or unparseable values are refused at mount and fall back to the default. Inert without a DSN. |
 | `OS_TELEMETRY_CLIENT_ERROR_REPORTING_REPLAY_SAMPLE_RATE` | number | `0` | Fraction (`0`–`1`) of Console **error** sessions recorded as session replays. Off by default — replay records what the user did, so it is the deliberate choice of the deployment that wants it. Inert without a DSN. |
+
+With several replicas declared over the Redis cluster driver (`OS_CLUSTER_REPLICAS` greater than 1 or `OS_EXPECT_MULTI_NODE=true`, with `OS_CLUSTER_DRIVER=redis`), the OTLP resource also carries `service.instance.id`, one value per replica: `HOSTNAME-PID` (the host name is the pod name on Kubernetes), or a random id when the host reports no name. The pid tells replicas apart only within one PID namespace: replicas that share a host name across containers (a fixed Compose `hostname:`, host-network containers) are each pid 1 and export the same id, so give each replica its own host name. It has no variable of its own. Every other boot exports `service.name` and `deployment.environment` only.
 
 ---
 

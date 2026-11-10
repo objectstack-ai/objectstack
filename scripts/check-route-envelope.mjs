@@ -168,6 +168,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '(2) `c.req.json()` READS a request. The regex version counted it as two': 3,
   'The sibling-`code` dialect (#7035, counted since #7295)': 11,
   'Dispatcher domains': 5,
+  'Dispatcher shared files (#31923)': 5,
   'Plugin-mounted Hono routes (#9267)': 13,
   'Surface 4 (#9813): the same grammar under express receivers': 4,
   'The #9389 ruling: an exemption is a CLOSED list': 1,
@@ -1027,9 +1028,14 @@ const DISPATCHER_DOMAINS = {
   // `deps.error` takes headers, so each spreads the helper's own envelope and
   // adds `headers` (since #27738 an enveloped non-2xx refusal is built by
   // `apiErrorResponse`, which takes none either, and is spread the same way).
+  //
+  // [#31923] 3 → 1: the two api-forward relays moved, with the rest of the
+  // admitted sequence, to `src/action-dispatch.ts` (`restAnswerOf`), which
+  // the REST door, MCP `run_action` and `dispatchAction` share. They are
+  // still spreads of `deps.success` / `apiErrorResponse` / `deps.error`.
   'actions.ts': {
-    handBuilt: 3,
-    note: 'one 405 for every verb but POST, which must carry an `Allow:` header (`deps.error` takes none); and the two answers of the same-origin api forward — the 2xx relay (`deps.success` spread) and the non-2xx relay (`apiErrorResponse` for an enveloped refusal, else `deps.error`, spread) — which must carry the target\'s Set-Cookie / set-auth-token / set-admin-session-token headers (neither helper takes any); every body is the helper\'s own declared envelope',
+    handBuilt: 1,
+    note: 'one 405 for every verb but POST, which must carry an `Allow:` header (`deps.error` takes none); the api-forward relays live in `src/action-dispatch.ts` since #31923; every body is the helper\'s own declared envelope',
   },
   // [#12160] Not a domain either — the ADR-0126 §5 activation write-authority
   // gates, shared by the `/automation` toggle door, the `/actions` activation
@@ -1044,7 +1050,17 @@ const DISPATCHER_DOMAINS = {
   // refusal it makes itself — the two 501s, the sanitised 500s — goes through
   // `deps.error`.
   'approvals.ts': { handBuilt: 0 },
-  'automation.ts': { handBuilt: 0 },
+  // [ADR-0150 D5] Kind 1: the `405` for a shape the domain serves under
+  // another verb must carry an `Allow:` header (`deps.error` takes none), as
+  // `/actions`' does; its body is `buildApiError`'s declared envelope.
+  'automation.ts': {
+    handBuilt: 1,
+    note: 'one 405 for a served shape under another verb, which must carry an `Allow:` header (`deps.error` takes none); the body is `buildApiError`\'s declared envelope',
+  },
+  // [ADR-0150 D5] Not a domain: the `/automation` address read and admission
+  // the domain calls. It answers nothing itself — its refusals are values the
+  // domain hands to `deps.error`.
+  'automation-address.ts': { handBuilt: 0 },
   // [#22773] The inbound-hook door the `/automation` domain hands its one
   // admitted route to: the trigger-api member's own JSON `Response` is handed
   // back as `result` (the `/webhooks/redeliver` shape), and every refusal it
@@ -2543,6 +2559,57 @@ function auditDialectOnly(file, declared, got, problems) {
  * @param {string} key                    repo-relative path, or a basename for the domain table
  * @returns {object | undefined}
  */
+/**
+ * [#31923] Files OUTSIDE `DISPATCHER_DOMAIN_DIR` that build a dispatcher
+ * domain's responses, by repo-relative path. The `/actions` door's admitted
+ * sequence moved to `packages/runtime/src/action-dispatch.ts` (shared with MCP
+ * `run_action` and the `dispatchAction` export), and with it the door's two
+ * api-forward relays. A file listed here is scanned with the domain scanner and
+ * held to its declared count exactly as a domain is, so moving a body out of
+ * `domains/` cannot move it out of this census. ⛔ A path that disappears is an
+ * error, never a silent skip.
+ */
+const DISPATCHER_SHARED_FILES = {
+  'packages/runtime/src/action-dispatch.ts': {
+    handBuilt: 2,
+    note: 'the two answers of the `/actions` same-origin api forward (#27506), moved here from `domains/actions.ts`: the 2xx relay (`deps.success` spread) and the non-2xx relay (`apiErrorResponse` for an enveloped refusal, else `deps.error`, spread), which must carry the target\'s Set-Cookie / set-auth-token / set-admin-session-token headers (neither helper takes any); every body is the helper\'s own declared envelope',
+  },
+};
+
+/**
+ * Problems for the shared files a dispatcher domain's responses are built in.
+ * `read(path)` answers the source text, or `null` when the path is not there.
+ *
+ * @param {Record<string, {handBuilt: number, note?: string}>} table
+ * @param {(path: string) => string | null} read
+ * @returns {string[]}
+ */
+export function auditDispatcherSharedFiles(table, read) {
+  const problems = [];
+  for (const [file, declared] of Object.entries(table)) {
+    const source = read(file);
+    if (source === null) {
+      problems.push(`${file}\n    declared in DISPATCHER_SHARED_FILES but not found — moved or deleted? Update the table.`);
+      continue;
+    }
+    const got = scanDomainSource(source, file);
+    if (got.handBuilt !== declared.handBuilt) {
+      problems.push(
+        `${file}\n    handBuilt: found ${got.handBuilt}, declared ${declared.handBuilt}` +
+        (got.handBuilt > declared.handBuilt
+          ? `\n    A dispatcher response is being assembled by hand in this shared file instead of\n` +
+            `    returned as a \`deps.*\` envelope. If that is deliberate, raise the count and say\n` +
+            `    which kind in \`note\`. Sites: ${got.sites.join(', ')}`
+          : `\n    Fewer than declared — if a hand-built response moved onto \`deps.*\`, lower the count.`),
+      );
+    }
+    if (declared.handBuilt > 0 && !declared.note) {
+      problems.push(`${file}\n    declares handBuilt: ${declared.handBuilt} with no \`note\`.`);
+    }
+  }
+  return problems;
+}
+
 export function declarationFor(table, key) {
   return Object.hasOwn(table, key) ? table[key] : undefined;
 }
@@ -2675,6 +2742,11 @@ function audit() {
       `${DISPATCHER_DOMAIN_DIR}/${name}\n    declared in DISPATCHER_DOMAINS but not found — moved or deleted?`,
     );
   }
+
+  // [#31923] The shared files a domain's responses are built in.
+  problems.push(...auditDispatcherSharedFiles(DISPATCHER_SHARED_FILES, (file) => {
+    try { return readFileSync(join(ROOT, file), 'utf8'); } catch { return null; }
+  }));
 
   // ── The plugin-mounted Hono routes (#9267) ────────────────────────────────
   const honoRoutes = discoverHonoRoutes();
@@ -3009,6 +3081,26 @@ function selfTest() {
   // ── Plugin-mounted Hono routes (#9267) ────────────────────────────────────
   // Every case below is a shape measured in the repo when this surface was
   // added, not an invented one.
+  // ── Dispatcher shared files (#31923) ──────────────────────────────────────
+  // A response body moved out of `domains/` is still counted where it went.
+  battery('Dispatcher shared files (#31923)');
+  assert(
+    Object.prototype.hasOwnProperty.call(DISPATCHER_SHARED_FILES, 'packages/runtime/src/action-dispatch.ts'),
+    'the /actions sequence file is not in the shared-file census',
+  );
+  {
+    const RELAY = `return { handled: true, response: { ...deps.success(x), ...relayed } };`;
+    const one = { 'pkg/shared.ts': { handBuilt: 0 } };
+    let p = auditDispatcherSharedFiles(one, () => RELAY);
+    assert(p.length === 1 && /handBuilt: found 1, declared 0/.test(p[0]), `an undeclared relay in a shared file must red → ${JSON.stringify(p)}`);
+    p = auditDispatcherSharedFiles({ 'pkg/shared.ts': { handBuilt: 1, note: 'a relay' } }, () => RELAY);
+    assert(p.length === 0, `a declared relay must be green → ${JSON.stringify(p)}`);
+    p = auditDispatcherSharedFiles({ 'pkg/shared.ts': { handBuilt: 1 } }, () => RELAY);
+    assert(p.length === 1 && /with no `note`/.test(p[0]), `a count without a note must red → ${JSON.stringify(p)}`);
+    p = auditDispatcherSharedFiles(one, () => null);
+    assert(p.length === 1 && /not found/.test(p[0]), `a declared path that is gone must red, never skip → ${JSON.stringify(p)}`);
+  }
+
   battery('Plugin-mounted Hono routes (#9267)');
 
   // The conformant body: nothing to report, and the write site is still seen.

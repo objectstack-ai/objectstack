@@ -340,8 +340,13 @@ function entryFields(
     // security plugin's empty-context skip path keeps its meaning.
     positions: agent ? [] : anonymous ? ['guest'] : authz.positions,
     permissions: agent ? agent.scopePermissions : authz.permissions,
-    // [ADR-0150 D3] Decided, and not yet filled: the server half (#31971) sets it from the security catalog's resolved (package, name); undefined is dropped by emit(), so the envelope is unchanged.
-    permissionSetAddresses: undefined,
+    // [ADR-0150 D3] The address of each set the resolver granted, as the
+    // security catalog resolved it (`ResolvedAuthzContext.permissionSetAddresses`):
+    // the evaluator resolves each exactly, so it never picks between two
+    // holders of a name. An agent principal's `permissions` are its
+    // scope-derived ceiling names, which carry no address and resolve by D3
+    // with no caller. Undefined is dropped by emit().
+    permissionSetAddresses: agent ? undefined : authz.permissionSetAddresses,
     // [ADR-0090 D10] System capabilities on the agent principal gate business
     // ACTION invocation (`actionPermissionError` reads `ctx.systemPermissions`)
     // — a door SEPARATE from the object CRUD/FLS/RLS intersection, which is

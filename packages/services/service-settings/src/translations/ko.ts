@@ -378,7 +378,7 @@ export const ko: PlatformTranslationData = {
       groups: {
         provider: {
           title: '공급자',
-          description: 'LLM 백엔드를 선택합니다. Memory 모드는 입력을 그대로 돌려주므로 테스트에는 유용하지만 운영 환경에는 절대 쓰지 마세요.',
+          description: 'LLM 백엔드를 선택합니다.',
         },
         gateway: {
           title: 'Vercel AI Gateway',
@@ -413,7 +413,6 @@ export const ko: PlatformTranslationData = {
         provider: {
           label: '공급자',
           options: {
-            memory: 'Memory(에코 — 테스트 전용)',
             gateway: 'Vercel AI Gateway',
             openai: 'OpenAI',
             anthropic: 'Anthropic',

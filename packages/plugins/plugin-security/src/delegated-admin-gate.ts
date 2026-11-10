@@ -56,9 +56,13 @@
  */
 
 import {
+  catalogEntryAddress,
   isGrantActive,
+  permissionSetAddressKey,
+  permissionSetHolderIsPlatform,
   resolveCatalogReference,
   securityCatalogReaderOf,
+  storedPermissionSetScope,
   type SecurityCatalogEntry,
   type SecurityCatalogReader,
   type SecurityCatalogReferenceScope,
@@ -303,12 +307,53 @@ interface HeldScope {
   scope: AdminScopeParsed & { assignablePermissionSets: string[] };
   /** Resolved BU ids covered (root + descendants when includeSubtree). Empty = misconfigured → approves nothing. */
   subtree: Set<string>;
+  /**
+   * [ADR-0150 D3] The holders the allowlist names, each `permissionSetAddressKey`:
+   * every name resolved from the package of the set that carries the scope — a
+   * reference written inside a package resolves from it. A name that rule
+   * refuses, or that no holder serves, allows nothing.
+   */
+  allowed: ReadonlySet<string>;
 }
 
-/** A permission set a position distributes, as the containment check reads it. */
+/** A permission set a position distributes, or a grant names, as the gate judges it. */
 interface BoundSet {
   name: string;
   adminScope?: unknown;
+  /**
+   * [ADR-0150 D3] The holder the catalog resolved the name to (`null`: no
+   * package holds it). Absent for a name that resolves to no holder: such a
+   * name grants nothing, and is judged by name alone.
+   */
+  packageId?: string | null;
+  /**
+   * [ADR-0150 D3] The holders its own `adminScope`'s allowlist names, resolved
+   * from its own package — what the containment check compares.
+   */
+  assignableHolders?: ReadonlySet<string>;
+}
+
+/**
+ * [ADR-0150 D3] Does held scope `s` allowlist the set `set` — its name, and
+ * the holder that name resolves to? Allowed to grant package A's `X` is never
+ * allowed to grant package B's `X`. A set no holder serves (`packageId`
+ * absent) grants nothing and is judged by its name, as before.
+ */
+function scopeAllows(s: Pick<HeldScope, 'scope' | 'allowed'>, set: { name: string; packageId?: string | null }): boolean {
+  if (!s.scope.assignablePermissionSets.includes(set.name)) return false;
+  return set.packageId === undefined || s.allowed.has(permissionSetAddressKey(set.packageId, set.name));
+}
+
+/** The `_packageId` a resolved definition carries — its holder — or `null` for one that names none. */
+function definitionPackageOf(ps: unknown): string | null {
+  const owner = (ps as { _packageId?: unknown } | null | undefined)?._packageId;
+  return typeof owner === 'string' && owner !== '' ? owner : null;
+}
+
+/** A grant row's stored package column (ADR-0150 D8 R1), or `undefined` when it carries none. */
+function grantPackageOf(row: any): string | undefined {
+  const value = row?.permission_set_package;
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
 }
 
 function rowsOf(opCtx: any): any[] {
@@ -328,13 +373,14 @@ function parseMaybeJson(v: unknown): any {
  * {@link HeldScope.scope} describes, with no business unit resolved: what the
  * caller holds, before the question of what it covers.
  */
-function adminScopesCarriedBy(sets: PermissionSet[]): Array<Pick<HeldScope, 'setName' | 'scope'>> {
-  const out: Array<Pick<HeldScope, 'setName' | 'scope'>> = [];
+function adminScopesCarriedBy(sets: PermissionSet[]): Array<Pick<HeldScope, 'setName' | 'scope'> & { carrier: string | null }> {
+  const out: Array<Pick<HeldScope, 'setName' | 'scope'> & { carrier: string | null }> = [];
   for (const ps of sets) {
     const raw = parseMaybeJson((ps as any).adminScope ?? (ps as any).admin_scope);
     if (!raw || typeof raw !== 'object' || typeof raw.businessUnit !== 'string') continue;
     out.push({
       setName: (ps as any).name ?? '?',
+      carrier: definitionPackageOf(ps),
       scope: {
         businessUnit: raw.businessUnit,
         includeSubtree: raw.includeSubtree !== false,
@@ -384,9 +430,20 @@ const ORGANIZATION_BOUNDARY_DENYLIST: ReadonlySet<string> = new Set([
   MCP_AGENT_PERMISSION_SET_RESTRICTED,
 ]);
 
+/**
+ * [ADR-0150 D3] Is `ps` one of the PLATFORM's organization-administrator sets
+ * on `engine` — the name, from the platform's holder
+ * (`permissionSetHolderIsPlatform`)? Another package's set of that name is
+ * that package's set, granted as any other, and confers no administration.
+ */
+function isPlatformOrganizationAdminSet(engine: unknown, ps: PermissionSet): boolean {
+  return ORGANIZATION_ADMIN_SETS.has(String((ps as any)?.name ?? ''))
+    && permissionSetHolderIsPlatform(engine, definitionPackageOf(ps));
+}
+
 /** Does the caller hold an organization-administrator set for its active organization? */
-function holdsOrganizationAdmin(sets: PermissionSet[]): boolean {
-  return sets.some((ps) => ORGANIZATION_ADMIN_SETS.has(String((ps as any)?.name ?? '')));
+function holdsOrganizationAdmin(engine: unknown, sets: PermissionSet[]): boolean {
+  return sets.some((ps) => isPlatformOrganizationAdminSet(engine, ps));
 }
 
 /**
@@ -395,8 +452,8 @@ function holdsOrganizationAdmin(sets: PermissionSet[]): boolean {
  * wildcard too, bounded by the organization wall — under the 2026-10-17
  * amendment its holder is organization-level, judged by the boundary below.
  */
-function isTenantLevelAdmin(sets: PermissionSet[]): boolean {
-  return isTenantAdmin(sets.filter((ps) => !ORGANIZATION_ADMIN_SETS.has(String((ps as any)?.name ?? ''))));
+function isTenantLevelAdmin(engine: unknown, sets: PermissionSet[]): boolean {
+  return isTenantAdmin(sets.filter((ps) => !isPlatformOrganizationAdminSet(engine, ps)));
 }
 
 /** A refusal reason from the organization-level branch, and the subject it names. */
@@ -769,7 +826,7 @@ export class DelegatedAdminGate {
       sets = []; // resolution failure → treated as no authority (fail closed)
     }
 
-    if (isTenantLevelAdmin(sets)) return; // status quo — downstream CRUD/RLS decide
+    if (isTenantLevelAdmin(this.deps.ql, sets)) return; // status quo — downstream CRUD/RLS decide
 
     // ── [#3697 follow-up] Organization membership is NOT delegable ────────
     // Every other governed object has an adminScope axis that can approve part
@@ -813,7 +870,7 @@ export class DelegatedAdminGate {
     // delegate and fails the boundary is still judged by its adminScope below;
     // one who is not is refused with the boundary's own reason.
     let organizationFailure: OrganizationFailure | null = null;
-    if (holdsOrganizationAdmin(sets)) {
+    if (holdsOrganizationAdmin(this.deps.ql, sets)) {
       organizationFailure = await this.organizationAdminFailure(opCtx, organizationId);
       if (organizationFailure === null) return;
     }
@@ -997,7 +1054,7 @@ export class DelegatedAdminGate {
       }
     };
 
-    if (isTenantLevelAdmin(sets)) {
+    if (isTenantLevelAdmin(this.deps.ql, sets)) {
       return {
         isTenantAdmin: true,
         scopes: [],
@@ -1041,7 +1098,7 @@ export class DelegatedAdminGate {
         const ok = placing.some((s) =>
           boundSets.every(
             (bound) =>
-              s.scope.assignablePermissionSets.includes(bound.name) &&
+              scopeAllows(s, bound) &&
               this.assertScopeGrantContainment(bound, held, /*dryRun*/ true) === null,
           ),
         );
@@ -1055,7 +1112,7 @@ export class DelegatedAdminGate {
     // option offered here is one the write path admits. The ADR-0068 D2
     // identity names carry no sets, so the boundary does not settle them; the
     // shared listing has already left them out (see `allPositions`).
-    if (holdsOrganizationAdmin(sets) && organizationId) {
+    if (holdsOrganizationAdmin(this.deps.ql, sets) && organizationId) {
       for (const id of await this.organizationBusinessUnitIds(organizationId)) {
         if (!placeableBusinessUnitIds.includes(id)) placeableBusinessUnitIds.push(id);
       }
@@ -1092,7 +1149,7 @@ export class DelegatedAdminGate {
     targetUserId: string,
     callerContext?: any,
   ): Promise<boolean> {
-    if (!holdsOrganizationAdmin(sets)) return false;
+    if (!holdsOrganizationAdmin(this.deps.ql, sets)) return false;
     const organizationId = callerOrganizationId(callerContext);
     const ql = this.deps.ql;
     if (!organizationId || !targetUserId || !ql?.find) return false;
@@ -1202,9 +1259,14 @@ export class DelegatedAdminGate {
         }
       } else {
         const setName = grantSetNameOf(row) ?? '';
-        const reason = setName
-          ? await this.organizationBoundaryFailure(setName)
-          : 'the grant names no permission set';
+        // [ADR-0150 D8 R1] The holder the grant names; for an insert the write
+        // seam re-stamps the column from the name with no caller, so that
+        // holder is judged as well.
+        const column = grantPackageOf(row);
+        const reason = !setName
+          ? 'the grant names no permission set'
+          : (await this.organizationBoundaryFailure(setName, storedPermissionSetScope(column)))
+            ?? (t.next && column !== undefined ? await this.organizationBoundaryFailure(setName) : null);
         if (reason) {
           return mayName(t, side, GRANT_SET_NAME_FIELD)
             ? { reason, meta: { permissionSet: setName } }
@@ -1669,7 +1731,7 @@ export class DelegatedAdminGate {
         // ({@link setsBoundToPosition}). A set is named only beside the
         // position it is read from.
         for (const bound of boundSets) {
-          if (!s.scope.assignablePermissionSets.includes(bound.name)) {
+          if (!scopeAllows(s, bound)) {
             return outsideScope(positionNamed
               ? `position '${positionName}' distributes permission set '${bound.name}', which is not in the scope's allowlist`
               : "the assignment's position distributes a permission set which is not in the scope's allowlist");
@@ -1701,7 +1763,7 @@ export class DelegatedAdminGate {
     for (const t of targets) {
       const side = t.next ? 'next' : 'prev';
       const row = t.next ?? t.prev ?? {};
-      const { setRow, setName, unresolved, setNamed, stored } = await this.directGrantSet(t, row);
+      const { setRow, setName, unresolved, setNamed, stored, alsoStored } = await this.directGrantSet(t, row);
       const targetUserId = grantHolderOf(row);
       // A target user — one the write names, or one the grant stores — is first
       // asked of the caller's own read door ({@link targetUserUnits}): a user it
@@ -1745,15 +1807,24 @@ export class DelegatedAdminGate {
         refusedSet = { setRow, setName, setNamed };
         if (!s.scope.manageAssignments) return 'the scope does not grant manageAssignments';
         if (unresolved) return unresolved;
-        if (!s.scope.assignablePermissionSets.includes(setName)) {
-          return outsideScope(setNamed
-            ? `permission set '${setName}' is not in the scope's allowlist`
-            : "the grant's permission set is not in the scope's allowlist");
+        // [ADR-0150 D3] The holder the grant will name, and — where the write
+        // seam re-stamps the column (an insert, a re-name) — the holder the
+        // name resolves to with no caller: each must be allowlisted.
+        for (const judged of [setRow ?? { name: setName }, ...(alsoStored ?? [])]) {
+          if (!scopeAllows(s, judged)) {
+            // The package is named only when the allowlist names the set's
+            // name at another holder — the one case the name alone misleads.
+            const atHolder = judged.packageId && s.scope.assignablePermissionSets.includes(setName)
+              ? ` of package '${judged.packageId}'` : '';
+            return outsideScope(setNamed
+              ? `permission set '${setName}'${atHolder} is not in the scope's allowlist`
+              : "the grant's permission set is not in the scope's allowlist");
+          }
         }
         // The set the update takes away, judged as the removal judges it.
         if (stored) {
           if (stored.unresolved) return judgedOn(stored, stored.unresolved);
-          if (!s.scope.assignablePermissionSets.includes(stored.setName)) {
+          if (!scopeAllows(s, stored.setRow ?? { name: stored.setName })) {
             return judgedOn(stored, outsideScope(stored.setNamed
               ? `permission set '${stored.setName}' is not in the scope's allowlist`
               : "the grant's permission set is not in the scope's allowlist"));
@@ -1783,8 +1854,8 @@ export class DelegatedAdminGate {
               : "the grant's target user is outside the delegated subtree");
           }
         }
-        if (setRow) {
-          const contained = this.assertScopeGrantContainment(setRow, held, true, setNamed ? undefined : "the grant's permission set");
+        for (const judged of [...(setRow ? [setRow] : []), ...(alsoStored ?? [])]) {
+          const contained = this.assertScopeGrantContainment(judged, held, true, setNamed ? undefined : "the grant's permission set");
           if (contained) return contained;
         }
         if (stored?.setRow) {
@@ -1843,7 +1914,7 @@ export class DelegatedAdminGate {
     // the pre-resolved held scopes. Grant paths compare conservatively by
     // definition (name + flags + allowlist).
     for (const s of held) {
-      if (this.definitionContainsStrictly(s.scope, carried)) return null;
+      if (this.definitionContainsStrictly({ ...s.scope, allowed: s.allowed }, carried, setRowOrDef.assignableHolders)) return null;
     }
     return `granting ${unnamed ?? `set '${setRowOrDef.name ?? '?'}'`} would hand out an adminScope not strictly contained by yours`;
   }
@@ -1862,7 +1933,11 @@ export class DelegatedAdminGate {
    *  otherwise equal scope "strictly smaller". The second was a live
    *  loosening: an inert `true` on the delegate's side let it hand out a
    *  scope equal to its own through the equal-scope refusal. */
-  private definitionContainsStrictly(outer: HeldScope['scope'], inner: AdminScope): boolean {
+  private definitionContainsStrictly(
+    outer: HeldScope['scope'] & Pick<HeldScope, 'allowed'>,
+    inner: AdminScope,
+    innerHolders?: ReadonlySet<string>,
+  ): boolean {
     const innerFull = {
       includeSubtree: inner.includeSubtree !== false,
       manageAssignments: inner.manageAssignments === true,
@@ -1874,16 +1949,24 @@ export class DelegatedAdminGate {
     if (innerFull.includeSubtree && outer.includeSubtree === false) return false;
     // Rights axis: inner ⊆ outer.
     if (innerFull.manageAssignments && !outer.manageAssignments) return false;
-    // Allowlist axis: inner ⊆ outer.
+    // Allowlist axis: inner ⊆ outer — by name, and [ADR-0150 D3] by holder:
+    // every holder the inner allowlist names (resolved from its own set's
+    // package) must be one the outer allowlist names.
     for (const name of innerFull.assignable) {
       if (!outer.assignablePermissionSets.includes(name)) return false;
+    }
+    if (innerHolders) {
+      for (const key of innerHolders) {
+        if (!outer.allowed.has(key)) return false;
+      }
     }
     // Strictness: some axis must be strictly smaller.
     const equalRights = innerFull.manageAssignments === (outer.manageAssignments === true);
     const equalTree = innerFull.includeSubtree === (outer.includeSubtree !== false);
     const equalAllow =
       innerFull.assignable.length === outer.assignablePermissionSets.length &&
-      innerFull.assignable.every((n) => outer.assignablePermissionSets.includes(n));
+      innerFull.assignable.every((n) => outer.assignablePermissionSets.includes(n)) &&
+      (!innerHolders || innerHolders.size === outer.allowed.size);
     return !(equalRights && equalTree && equalAllow);
   }
 
@@ -1906,9 +1989,9 @@ export class DelegatedAdminGate {
   ): Promise<HeldScope[]> {
     if (!organizationId) return [];
     const out: HeldScope[] = [];
-    for (const { setName, scope } of adminScopesCarriedBy(sets)) {
+    for (const { setName, scope, carrier } of adminScopesCarriedBy(sets)) {
       const subtree = await this.resolveSubtree(scope.businessUnit, scope.includeSubtree, organizationId);
-      out.push({ setName, scope, subtree });
+      out.push({ setName, scope, subtree, allowed: await this.allowlistHolders(scope.assignablePermissionSets, carrier) });
     }
     return out;
   }
@@ -2185,7 +2268,7 @@ export class DelegatedAdminGate {
       // resolve grants nothing, so it is returned with no `adminScope`, like a
       // name the catalog does not hold (refuses more, never less).
       const set = await catalog.resolve('permission', name, { position: carried.position });
-      out.push({ name, ...(set?.definition.adminScope ? { adminScope: set.definition.adminScope } : {}) });
+      out.push(set ? await this.boundSetOf(set) : { name });
     }
     return out;
   }
@@ -2221,15 +2304,23 @@ export class DelegatedAdminGate {
   private async directGrantSet(
     t: DelegatedTarget,
     row: any,
-  ): Promise<GrantSetJudgment & { stored?: GrantSetJudgment }> {
-    const repointed = !!t.next && (!t.prev || grantSetNameOf(t.next) !== grantSetNameOf(t.prev));
-    if (repointed) {
+  ): Promise<GrantSetJudgment & { stored?: GrantSetJudgment; alsoStored?: BoundSet[] }> {
+    const renamed = !!t.next && (!t.prev || grantSetNameOf(t.next) !== grantSetNameOf(t.prev));
+    // [ADR-0150 D8 R1] A write that re-binds the grant's package column points
+    // it at another holder, as a re-name points it at another set.
+    const rebound = !!t.next && !!t.prev && grantPackageOf(t.next) !== grantPackageOf(t.prev);
+    if (renamed || rebound) {
       const nextName = grantSetNameOf(t.next) ?? '';
-      const setRow = nextName ? await this.catalogSet(nextName) : null;
-      const stored = t.prev ? await this.grantOwnSet(grantSetNameOf(t.prev), mayName(t, 'prev', 'permission_set')) : null;
-      return { setRow, setName: nextName, setNamed: true, ...(stored ? { stored } : {}) };
+      const setRow = nextName ? await this.catalogSet(nextName, grantPackageOf(t.next)) : null;
+      // The write seam (`stored-permission-set-package-stamp.ts`) re-stamps the
+      // column of an insert and a re-name from the name with no caller: that
+      // holder is judged too, so the one stored is judged either way.
+      const restamped = renamed && nextName ? await this.catalogSet(nextName) : null;
+      const alsoStored = restamped && restamped.packageId !== setRow?.packageId ? [restamped] : [];
+      const stored = t.prev ? await this.grantOwnSet(grantSetNameOf(t.prev), mayName(t, 'prev', 'permission_set'), grantPackageOf(t.prev)) : null;
+      return { setRow, setName: nextName, setNamed: true, ...(stored ? { stored } : {}), ...(alsoStored.length > 0 ? { alsoStored } : {}) };
     }
-    return this.grantOwnSet(grantSetNameOf(row), mayName(t, t.next ? 'next' : 'prev', 'permission_set'));
+    return this.grantOwnSet(grantSetNameOf(row), mayName(t, t.next ? 'next' : 'prev', 'permission_set'), grantPackageOf(row));
   }
 
   /**
@@ -2239,7 +2330,7 @@ export class DelegatedAdminGate {
    * set the catalog does not hold, is `unresolved` — fail closed. `setNamed`
    * says whether a refusal may name it ({@link mayName}).
    */
-  private async grantOwnSet(name: string | undefined, setNamed: boolean): Promise<GrantSetJudgment> {
+  private async grantOwnSet(name: string | undefined, setNamed: boolean, packageColumn?: string): Promise<GrantSetJudgment> {
     if (!name) {
       return {
         setRow: null,
@@ -2248,7 +2339,7 @@ export class DelegatedAdminGate {
         unresolved: 'the grant names no permission set (it is not yet named, or could not be) — only a tenant admin may change it',
       };
     }
-    const setRow = await this.catalogSet(name);
+    const setRow = await this.catalogSet(name, packageColumn);
     if (!setRow) {
       return {
         setRow: null,
@@ -2266,14 +2357,51 @@ export class DelegatedAdminGate {
    * catalog holds no such set, none is bound, or the read fails (fail closed:
    * the caller refuses a delegate's write it cannot judge).
    */
-  private async catalogSet(name: string): Promise<BoundSet | null> {
+  private async catalogSet(name: string, packageColumn?: string): Promise<BoundSet | null> {
     try {
-      const entry = await this.catalog()?.resolve('permission', name);
+      // [ADR-0150 D8 R1] Read as the resolver reads the grant: its package
+      // column names the exact holder; none resolves with no caller (D3).
+      const entry = await this.catalog()?.resolve('permission', name, storedPermissionSetScope(packageColumn));
       if (!entry) return null;
-      return { name: entry.name, ...(entry.definition.adminScope ? { adminScope: entry.definition.adminScope } : {}) };
+      return await this.boundSetOf(entry);
     } catch {
       return null;
     }
+  }
+
+  /** [ADR-0150 D3] A resolved set as the gate judges it: its holder, and the holders its own allowlist names. */
+  private async boundSetOf(entry: SecurityCatalogEntry): Promise<BoundSet> {
+    const packageId = catalogEntryAddress(entry).packageId;
+    const adminScope = entry.definition.adminScope;
+    const raw = parseMaybeJson(adminScope);
+    const assignable = raw && typeof raw === 'object' && Array.isArray(raw.assignablePermissionSets)
+      ? (raw.assignablePermissionSets as unknown[]).filter((n): n is string => typeof n === 'string')
+      : undefined;
+    return {
+      name: entry.name,
+      packageId,
+      ...(adminScope ? { adminScope } : {}),
+      ...(assignable ? { assignableHolders: await this.allowlistHolders(assignable, packageId) } : {}),
+    };
+  }
+
+  /**
+   * [ADR-0150 D3] The holders an allowlist written inside a set of package
+   * `carrier` names: each name resolved from that package (`null`: as a caller
+   * with no package), keyed by `permissionSetAddressKey`. A name the rule
+   * refuses, or no holder serves, adds none — it allows nothing.
+   */
+  private async allowlistHolders(names: readonly string[], carrier: string | null): Promise<Set<string>> {
+    const out = new Set<string>();
+    const catalog = this.catalog();
+    if (!catalog) return out;
+    for (const name of new Set(names)) {
+      const answer = await resolveCatalogReference(catalog, 'permission', name, storedPermissionSetScope(undefined, carrier));
+      if (answer.status === 'resolved') {
+        out.add(permissionSetAddressKey(catalogEntryAddress(answer.entry).packageId, answer.entry.name));
+      }
+    }
+    return out;
   }
 
   /** Target user's BU memberships (sys_business_unit_member ∪ primary projection). */

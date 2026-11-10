@@ -2,6 +2,7 @@
 
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import { AuthzPostureSchema, type AuthzPosture } from '@objectstack/spec/security';
+import type { PermissionSetAddressParsed } from '@objectstack/spec/kernel';
 import { markFlowWriteReferenceCheck } from '@objectstack/core';
 import { markGuardRefusal } from './guard-refusal.js';
 
@@ -62,6 +63,14 @@ export interface RunIdentityContext {
    * this one is absent.
    */
   permissions?: string[];
+  /**
+   * [ADR-0150 D3] The `(package, name)` address of each permission set the
+   * acting user holds, the kernel `ExecutionContext.permissionSetAddresses`:
+   * the security plugin resolves {@link permissions} through it, so a name two
+   * packages ship resolves to the set the user was granted. Carried with
+   * {@link permissions} and only with them ({@link runPermissionSetAddresses}).
+   */
+  permissionSetAddresses?: PermissionSetAddressParsed[];
   /**
    * The acting user's fellow-organization peers, the user included: the value
    * RLS reads as `current_user.org_user_ids` (`sys_user_org_members` and every
@@ -206,6 +215,13 @@ export interface RunDataContext extends RunIdentityContext {
 export interface SeededRunContext extends AutomationContext {
   org_user_ids?: string[];
   /**
+   * [ADR-0150 D3] The acting user's permission-set addresses, as the same
+   * resolver reports them (`resolveUserAuthzGrants`' own field). Seeded with
+   * the positions and permission sets, and removed with them by the decision
+   * switch: they address those names and nothing else.
+   */
+  permissionSetAddresses?: PermissionSetAddressParsed[];
+  /**
    * The acting user's posture rung, as the same resolver derives it for the
    * same user's request (`resolveUserAuthzGrants`, which
    * `resolveAuthzContext` copies onto a request's `ExecutionContext.posture`).
@@ -271,6 +287,18 @@ export function runOrgUserIds(context: AutomationContext | undefined): string[] 
 export function runPosture(context: AutomationContext | undefined): AuthzPosture | undefined {
   const parsed = AuthzPostureSchema.safeParse((context as SeededRunContext | undefined)?.posture);
   return parsed.success ? parsed.data : undefined;
+}
+
+/**
+ * [ADR-0150 D3] The permission-set addresses run setup seeded on `context`
+ * ({@link SeededRunContext.permissionSetAddresses}), or `undefined` when it
+ * carries none: the names then resolve caller-less, as before.
+ */
+export function runPermissionSetAddresses(
+  context: AutomationContext | undefined,
+): PermissionSetAddressParsed[] | undefined {
+  const addresses = (context as SeededRunContext | undefined)?.permissionSetAddresses;
+  return Array.isArray(addresses) ? addresses : undefined;
 }
 
 /**
@@ -450,6 +478,8 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
     positions: Array.isArray(context.positions) ? context.positions : [],
     permissions: Array.isArray(context.permissions) ? context.permissions : [],
   };
+  const addresses = Array.isArray(context.permissions) ? runPermissionSetAddresses(context) : undefined;
+  if (addresses) out.permissionSetAddresses = addresses;
   const orgUserIds = runOrgUserIds(context);
   if (orgUserIds) out.org_user_ids = orgUserIds;
   if (context.email) out.email = context.email;

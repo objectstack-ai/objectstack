@@ -337,7 +337,8 @@ import { readJsonRequestBody } from './request-json-body.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
 import { countSeedRows, matchSeedRows, purgeSeedRows, seedDatasetOfReceiptItem, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
 import {
-    INSTALL_LOCAL_DOOR_SERVICE, grantRefusalEvent, recordUnmanagedImportEvent, refusalCodeOf, routeContextOf,
+    INSTALL_LOCAL_DOOR_SERVICE, TARGET_NAMESPACE_ON_MANAGED_INSTALL_MESSAGE, grantRefusalEvent, recordUnmanagedImportEvent,
+    refusalCodeOf, routeContextOf,
     type InstallLocalDoor, type InstallLocalDoorGrant, type UnmanagedImportAuditEvent, type UnmanagedImportAuditSurface,
 } from './install-local-door-service.js';
 import {
@@ -2108,7 +2109,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      */
     private installForGrant = async (c: any, ctx: PluginContext, grant: InstallLocalDoorGrant | undefined): Promise<Response> => {
         if (!grant) return this.handleInstall(c, ctx);
-        const call = { audited: false };
+        const call = { audited: false, grant };
         this.grantCalls.set(c, call);
         let answer: Response;
         try {
@@ -2127,8 +2128,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         return answer;
     };
 
-    /** [#31481] The grant-path calls in flight, by route context: whether the call's audit event was handed. */
-    private readonly grantCalls = new WeakMap<object, { audited: boolean }>();
+    /**
+     * [#31481] The grant-path calls in flight, by route context: whether the
+     * call's audit event was handed, and [#31963] the grant itself, which an
+     * inline manifest on that call must match.
+     */
+    private readonly grantCalls = new WeakMap<object, { audited: boolean; grant: InstallLocalDoorGrant }>();
 
     private handleInstall = async (c: any, ctx: PluginContext): Promise<Response> => {
         // [#8976] The sharpest of the four: this door accepts an INLINE manifest
@@ -2218,9 +2223,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 success: false,
                 error: {
                     code: 'INVALID_REQUEST',
-                    message: '`targetNamespace` renames an unmanaged copy, and this install is managed: a managed install '
-                        + 'is never renamed — it keeps the package\'s namespace and its upgrade channel. Install with '
-                        + '`installMode: \'unmanaged\'` to take a copy under a namespace of its own, or omit `targetNamespace`.',
+                    message: TARGET_NAMESPACE_ON_MANAGED_INSTALL_MESSAGE,
                 },
             }, 400);
         }
@@ -2254,6 +2257,14 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // ── Offline path: an inline manifest was supplied (file import). ──
         // Bypass the cloud-fetch entirely; no OS_CLOUD_URL required.
         const inlineManifest = body?.manifest && typeof body.manifest === 'object' ? body.manifest : null;
+        // [#31963] On the grant path ({@link installForGrant}) an inline
+        // manifest is the control plane's grant answer, not the caller's file:
+        // it is upstream input, answered with the fetched snapshot's statuses
+        // (502 where a caller's file answers 400), and it must be the manifest
+        // the grant is for (step 1b′ below). No HTTP caller reaches this: the
+        // grant rides only the in-process door's `install(request, { grant })`.
+        const grantedInline = inlineManifest ? this.grantCalls.get(c)?.grant : undefined;
+        const callerManifest = inlineManifest !== null && grantedInline === undefined;
 
         // A COMPILED stack bundle (`dist/objectstack.json`, what publish
         // uploads as the version payload) nests its meta under `.manifest`:
@@ -2373,7 +2384,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         }
 
         if (!manifest || typeof manifest !== 'object') {
-            return c.json({ success: false, error: { code: 'PLUGIN_MANIFEST_INVALID', message: 'Invalid manifest payload.' } }, inlineManifest ? 400 : 502);
+            return c.json({ success: false, error: { code: 'PLUGIN_MANIFEST_INVALID', message: 'Invalid manifest payload.' } }, callerManifest ? 400 : 502);
         }
 
         // 1b. [#19576] ⭐ THE DOOR PARSES THE PACKAGE ID — through its
@@ -2424,10 +2435,36 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             const message = typeof rawId === 'string' && issue?.message
                 ? issue.message
                 : manifestIdRefusal('manifest.id', rawId);
-            return c.json({ success: false, error: { code: 'PLUGIN_MANIFEST_INVALID', message } }, inlineManifest ? 400 : 502);
+            return c.json({ success: false, error: { code: 'PLUGIN_MANIFEST_INVALID', message } }, callerManifest ? 400 : 502);
         }
         const manifestId = declaredId.data;
         if (inlineManifest) packageId = manifestId;
+
+        // 1b′. [#31963, cloud#3624 ruling A] ⭐ THE GRANT GOVERNS THE COPY. A
+        //      grant-path inline manifest is copied only when it declares the
+        //      package and version the control plane granted: the cloud
+        //      branch fetches by the granted version, and this branch must
+        //      not copy anything else. Asked here, right after the id is
+        //      parsed and before every later step reads or writes anything;
+        //      the refusal is the fetched snapshot's invalid-manifest answer,
+        //      and {@link installForGrant} audits it as every grant refusal.
+        if (grantedInline !== undefined) {
+            const grantedId = grantedInline.manifestId;
+            const grantedVersion = grantedInline.version;
+            if (grantedId === undefined || grantedVersion === undefined || manifestId !== grantedId || version !== grantedVersion) {
+                const named = (id: string | undefined, v: string | undefined): string =>
+                    `'${id ?? '(no manifest id)'}'@${v ?? '(no version)'}`;
+                return c.json({
+                    success: false,
+                    error: {
+                        code: 'PLUGIN_MANIFEST_INVALID',
+                        message: `The control plane granted ${named(grantedId, grantedVersion)}, but the manifest it answered `
+                            + `declares ${named(manifestId, version)}. Only the granted package and version are copied. `
+                            + 'Nothing was copied.',
+                    },
+                }, 502);
+            }
+        }
 
         // [ADR-0131 D12 items 7–8] Under a wall, installing, upgrading or
         // replacing a package is the operator's. Asked before any later step
@@ -2569,7 +2606,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //         import verb's own, through the same function, so its code,
         //         status and sentence are one.
         //     Both on both branches, before any write.
-        const modeRefusal = this.judgeInstallMode(manifest, manifestId, installMode, inlineManifest ? 400 : 502);
+        const modeRefusal = this.judgeInstallMode(manifest, manifestId, installMode, callerManifest ? 400 : 502);
         if (modeRefusal) return c.json({ success: false, error: modeRefusal.error }, modeRefusal.status as any);
 
         // 1d. [#21489] ⭐ CODE THIS DOOR CANNOT RUN IS REFUSED, not installed.
@@ -2622,7 +2659,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     that arrives incomplete ({@link judgeWithheldMaps}). Accepted,
         //     never refused for, as the ruling has it; only a list the export's
         //     declaration refuses is.
-        const withheld = judgeWithheldMaps(manifest, manifestId, inlineManifest ? 400 : 502);
+        const withheld = judgeWithheldMaps(manifest, manifestId, callerManifest ? 400 : 502);
         if (!withheld.ok) return c.json({ success: false, error: withheld.error }, withheld.status as any);
         const { withheldMaps } = withheld;
 

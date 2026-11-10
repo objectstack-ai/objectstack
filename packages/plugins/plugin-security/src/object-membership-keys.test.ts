@@ -159,7 +159,12 @@ async function boot(shape: Shape) {
     tenancy: { posture: 'isolated' },
     manifest: { register: vi.fn() },
     objectql: engine,
-    metadata: { get: async (_t: string, name: string) => engine.getSchema(name) ?? null, list: async () => sets },
+    metadata: {
+      // The catalog reads a set by name (ADR-0150 D3): served from the same list.
+      get: async (t: string, name: string) =>
+        (t === 'permission' ? (sets).find((s: any) => s?.name === name) : engine.getSchema(name)) ?? null,
+      list: async () => sets,
+    },
     ...(shape.resolver ? { [RLS_MEMBERSHIP_RESOLVER_SERVICE]: shape.resolver } : {}),
   };
   let security: any;
@@ -454,7 +459,12 @@ async function bootPeople(declaration: Record<string, unknown> | null = { userFi
     tenancy: { posture: 'isolated' },
     manifest: { register: vi.fn() },
     objectql: engine,
-    metadata: { get: async (_t: string, name: string) => engine.getSchema(name) ?? null, list: async () => sets },
+    metadata: {
+      // The catalog reads a set by name (ADR-0150 D3): served from the same list.
+      get: async (t: string, name: string) =>
+        (t === 'permission' ? (sets).find((s: any) => s?.name === name) : engine.getSchema(name)) ?? null,
+      list: async () => sets,
+    },
   };
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
   let security: any;

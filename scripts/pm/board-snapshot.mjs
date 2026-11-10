@@ -270,8 +270,10 @@
  *                        record is archived again; a 301 to a named issue in
  *                        ANOTHER repository is written onto the archived
  *                        record as `transferred_to`, and the census counts it
- *                        apart from the open set; a 404 or 410 is left exactly
- *                        as archived. When anything was written the board's
+ *                        apart from the open set; a 301 with an EMPTY or
+ *                        absent `Location` is the same transfer, to a
+ *                        repository this token cannot read (below); a 404 or
+ *                        410 is left exactly as archived. When anything was written the board's
  *                        arithmetic is read again, so both sides of the check
  *                        reported name one instant after the repair. An
  *                        AGREEING census is reconciled too: errors of opposite
@@ -288,8 +290,23 @@
  * the verdict from BEFORE it — the census and the board read that name one
  * instant — and never the repaired census against the earlier board read. A
  * gone-ledger number is subtracted only while the census counts it open. A
- * transfer is recognised only from GitHub's own redirect to an issue in
- * another repository, and the record stays in the archive with where it went.
+ * transfer is recognised only from GitHub's own redirect out of this
+ * repository, and the record stays in the archive with where it went.
+ *
+ * A redirect names its target only when the token can READ the target.
+ * Measured 2026-11-10 (#32047) on #31781 and #31782, moved to the private
+ * `objectstack-ai/cloud`: a token that cannot read cloud — the workflow's
+ * `GITHUB_TOKEN` is scoped to this repository — gets `301` with an EMPTY
+ * `Location` and the body `{"message":"Moved Permanently","url":""}`, while a
+ * token that reads cloud gets `Location: …/repos/objectstack-ai/cloud/issues/4163`.
+ * Read as `unreadable`, that pair failed every scheduled count check by a
+ * SURPLUS of 2. So a redirect with no target is a transfer to a repository
+ * this token cannot read (`TRANSFERRED_TO_UNREADABLE`). That is an inference,
+ * stated as one: GitHub blanks the target only when the token cannot read it,
+ * and the same reconcile has just read THIS repository's open listing with the
+ * same token, so a rename of this repository would carry a readable `Location`
+ * — which names this repository and stays `unreadable`. The rename side is not
+ * measured; no renamed repository was available to read.
  *
  * ## The count check, and why a mismatch is red rather than a warning
  *
@@ -905,16 +922,25 @@ export function reconcileCandidates({ archivedOpen, listedOpen, gone = [], max =
   return { numbers: all.slice(0, max), left: Math.max(0, all.length - max) };
 }
 
+/** Where a transfer went when GitHub's redirect names no target (#32047). */
+export const TRANSFERRED_TO_UNREADABLE = 'a repository this token cannot read';
+
 /**
  * What one number's own read says, from the status and `Location` of a read
  * that does not follow redirects.
  *
  *   live         200 naming this number in this repository: the record as the
  *                board holds it now — archive it again.
- *   transferred  a redirect to `/repos/{other}/issues/{n}` in ANOTHER repository.
+ *   transferred  a redirect to `/repos/{other}/issues/{n}` in ANOTHER repository,
+ *                named by where it went; or a redirect whose `Location` is
+ *                EMPTY or absent — a target this token cannot read, which is
+ *                not this repository (it has just been read), named
+ *                `TRANSFERRED_TO_UNREADABLE` and carrying the raw status
+ *                (§ A listing that lags, #32047).
  *   destroyed    404 or 410: the destruction signature; nothing is written.
  *   unreadable   anything else — including a redirect within this repository
- *                (a rename), which is not a transfer and is not acted on.
+ *                (a rename), which is not a transfer and is not acted on, and
+ *                a `Location` that is present but does not parse.
  */
 export function numberReadVerdict({ repo, number, status, location = null, body = null }) {
   if (status === 200 && body) {
@@ -925,6 +951,9 @@ export function numberReadVerdict({ repo, number, status, location = null, body 
     return body.number === number && here ? { verdict: 'live', raw: body } : { verdict: 'unreadable', status };
   }
   if ([301, 302, 307, 308].includes(status)) {
+    if (location === null || location === undefined || String(location).trim() === '') {
+      return { verdict: 'transferred', to: TRANSFERRED_TO_UNREADABLE, status };
+    }
     const moved = /\/repos\/([^/]+\/[^/]+)\/issues\/(\d+)\/?$/.exec(String(location ?? ''));
     if (moved && moved[1].toLowerCase() !== String(repo).toLowerCase()) return { verdict: 'transferred', to: `${moved[1]}#${moved[2]}` };
     return { verdict: 'unreadable', status };
@@ -2327,9 +2356,11 @@ class FakeReply {
  * destination answers its own card, so a read that FOLLOWS the redirect gets
  * another repository's record — exactly what production fetch would do);
  * `destroyed` numbers answer 404 and `failing` numbers 502. A per-number read
- * serves the current row.
+ * serves the current row. `movedHidden` numbers moved to a repository the
+ * token cannot read: their 301 carries an EMPTY `Location`, as measured on
+ * #31781 (#32047).
  */
-function fakeBoard({ rows, openPulls = [], blankListings = 0, lagging = new Map(), lagListings = 0, moved = new Map(), destroyed = new Set(), failing = new Set() }) {
+function fakeBoard({ rows, openPulls = [], blankListings = 0, lagging = new Map(), lagListings = 0, moved = new Map(), movedHidden = new Set(), destroyed = new Set(), failing = new Set() }) {
   const calls = [];
   // The blank reply measured 2026-10-22, reproduced: the first N listing GETs
   // answer `[]` whatever the board holds. The witness and the pulls do not.
@@ -2354,6 +2385,7 @@ function fakeBoard({ rows, openPulls = [], blankListings = 0, lagging = new Map(
     if (one) {
       const number = Number(one[1]);
       if (failing.has(number)) return new FakeReply(502);
+      if (movedHidden.has(number)) return new FakeReply(301, '');
       if (moved.has(number)) {
         const [to, n] = moved.get(number).split('#');
         return new FakeReply(301, `${API}/repos/${to}/issues/${n}`);
@@ -2457,7 +2489,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the delta walk, driven: the archive catches up with the live board': 19,
   'the freshness row: a stale archive is never a green run': 18,
   'the blank page: asked again, then believed or stopped by where the walk is': 13,
-  'the lagging listing and the moved card: a disagreement is reconciled before it is reported': 31,
+  'the lagging listing and the moved card: a disagreement is reconciled before it is reported': 36,
 });
 const SELF_TEST_BATTERY_FLOOR = 14;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -2804,6 +2836,7 @@ export async function selfTest() {
   const cancelDir = mkdtempSync(join(tmpdir(), 'board-snapshot-cancel-'));
   const cutDir = mkdtempSync(join(tmpdir(), 'board-snapshot-cut-'));
   const ledgerDir = mkdtempSync(join(tmpdir(), 'board-snapshot-ledger-'));
+  const hiddenDir = mkdtempSync(join(tmpdir(), 'board-snapshot-hidden-'));
   try {
     // THE REGRESSION, driven from the manifest board-archive actually carried.
     //
@@ -3102,8 +3135,17 @@ export async function selfTest() {
       stableJson(numberReadVerdict({ repo: 'objectstack-ai/objectstack', status: 301, location: 'https://api.github.com/repos/objectstack-ai/hotcrm/issues/2307' }))
         === stableJson({ verdict: 'transferred', to: 'objectstack-ai/hotcrm#2307' }));
     t('…a redirect within THIS repository (a rename) is not a transfer and is not acted on',
-      numberReadVerdict({ repo: 'O/R', status: 301, location: 'https://api.github.com/repos/o/r/issues/7' }).verdict === 'unreadable'
-      && numberReadVerdict({ repo: 'o/r', status: 301, location: null }).verdict === 'unreadable');
+      numberReadVerdict({ repo: 'O/R', status: 301, location: 'https://api.github.com/repos/o/r/issues/7' }).verdict === 'unreadable');
+    t('a 301 with an EMPTY Location is a transfer to a repository this token cannot read, carrying its status (the #31781 reply, #32047)',
+      stableJson(numberReadVerdict({ repo: 'objectstack-ai/objectstack', number: 31781, status: 301, location: '' }))
+        === stableJson({ verdict: 'transferred', to: TRANSFERRED_TO_UNREADABLE, status: 301 }));
+    t('…and so is a redirect with NO Location at all, for every redirect status (was unreadable before #32047)',
+      [301, 302, 307, 308].every((status) => stableJson(numberReadVerdict({ repo: 'o/r', status, location: null }))
+        === stableJson({ verdict: 'transferred', to: TRANSFERRED_TO_UNREADABLE, status }))
+      && numberReadVerdict({ repo: 'o/r', status: 301 }).verdict === 'transferred');
+    t('…but a Location that is PRESENT and does not parse stays unreadable — no target is guessed from it',
+      numberReadVerdict({ repo: 'o/r', status: 301, location: 'https://api.github.com/repositories/1/issues/7' }).verdict === 'unreadable'
+      && numberReadVerdict({ repo: 'o/r', status: 301, location: 'not a url' }).verdict === 'unreadable');
     t('…404 and 410 are the destruction signature, and anything else is unreadable',
       numberReadVerdict({ repo: 'o/r', status: 404 }).verdict === 'destroyed' && numberReadVerdict({ repo: 'o/r', status: 410 }).verdict === 'destroyed'
       && numberReadVerdict({ repo: 'o/r', status: 502 }).verdict === 'unreadable');
@@ -3169,6 +3211,21 @@ export async function selfTest() {
     t('the next run is green with nothing to reconcile, and the transferred number is never read again',
       steady.manifest.count_check.verdict === 'ok' && steady.reconcile?.candidates === 0 && steady.manifest.run.reconcile?.wrote === 0
       && !after.calls.some((c) => /^\/repos\/o\/r\/issues\/\d+$/.test(c)) && steady.manifest.counts.issues_transferred === 1);
+
+    // THE PATROL RED OF #32047, reproduced: two cards moved to a PRIVATE
+    // repository, whose 301 names no target to this token (#31781, #31782).
+    seedArchive(hiddenDir, [card(401), card(402), card(403)]);
+    const hiddenRun = await driveSnapshot({ dir: hiddenDir, board: fakeBoard({ rows: [card(403)], movedHidden: new Set([401, 402]) }) });
+    const hiddenText = renderRun(hiddenRun, { out: hiddenDir, dryRun: false });
+    t('cards moved to a repository this token cannot read (301, EMPTY Location) are recorded as transferred, and the count check reads OK (#32047)',
+      hiddenRun.reconcile?.first.verdict === 'surplus' && hiddenRun.reconcile.first.surplus === 2
+      && hiddenRun.manifest.count_check.verdict === 'ok' && hiddenText.exitCode === EXIT_OK
+      && stableJson(hiddenRun.reconcile?.transferred) === stableJson([{ number: 401, to: TRANSFERRED_TO_UNREADABLE }, { number: 402, to: TRANSFERRED_TO_UNREADABLE }])
+      && hiddenRun.reconcile.unreadable.length === 0);
+    t('…the records stay in the archive, whole, saying the target could not be read, counted apart from the open set',
+      readArchivedCard(hiddenDir, 401).issue.transferred_to === TRANSFERRED_TO_UNREADABLE && readArchivedCard(hiddenDir, 401).issue.body === 'the body that a suspension destroys'
+      && hiddenRun.manifest.counts.issues_transferred === 2 && hiddenRun.manifest.counts.issues_open === 1
+      && /#401 → a repository this token cannot read/.test(hiddenText.text) && !/unreadable:/.test(hiddenText.text));
 
     // THE SETTLE WINDOW, alone: a lagged update that moves no count, so no
     // reconcile runs — only the next run's window can catch it.
@@ -3261,7 +3318,7 @@ export async function selfTest() {
       stableJson(ledgered.reconcile?.unreadable) === stableJson([{ number: 602, status: 502 }]) && readArchivedCard(ledgerDir, 602).issue.state === 'open'
       && /unreadable:     #602 \(HTTP 502\)/.test(renderRun(ledgered, { out: ledgerDir, dryRun: false }).text));
   } finally {
-    for (const d of [liveDir, busyDir, stopDir, idemDir, quietDir, staleDir, blankDir, blankStopDir, plainDir, lagDir, settleDir, destroyedDir, cancelDir, cutDir, ledgerDir]) rmSync(d, { recursive: true, force: true });
+    for (const d of [liveDir, busyDir, stopDir, idemDir, quietDir, staleDir, blankDir, blankStopDir, plainDir, lagDir, settleDir, destroyedDir, cancelDir, cutDir, ledgerDir, hiddenDir]) rmSync(d, { recursive: true, force: true });
   }
 
   const declared = Object.keys(SELF_TEST_BATTERIES);

@@ -2774,6 +2774,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.viewPreview.noObject': '此视图尚未绑定对象。请在右侧面板中设置绑定的 {object}，以获取实时数据和字段选项。',
   'engine.viewPreview.formFailed': '表单视图引用了无法解析的对象或字段。',
   'engine.viewPreview.listFailed': '视图引用了无法解析的对象或字段。',
+  'engine.viewPreview.listHeldForColumns': '列表预览已暂停：只要有列引用了对象中不存在的字段，服务器就会拒绝它的查询。修正或移除上方的列后即可预览列表。',
   'engine.reportPreview.renderFailed': '报表引用了无法解析的数据集/度量，或其配置不完整。',
   'engine.reportPreview.loading': '正在加载报表渲染器…',
   'engine.reportPreview.joinedEmpty': '添加一个区块以预览此联合报表',

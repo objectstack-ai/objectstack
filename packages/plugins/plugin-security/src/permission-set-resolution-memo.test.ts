@@ -44,7 +44,7 @@ import type { PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
 import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
-/** Resolvable from metadata, so only `custom_role` below reaches the catalog loader. */
+/** Served by the metadata double; its catalog reads are not counted below. */
 const baselineSet: PermissionSet = {
   name: 'member_default',
   label: 'Member',
@@ -89,7 +89,13 @@ const makeHarness = () => {
   const services: Record<string, unknown> = {
     manifest: { register: vi.fn() },
     objectql: ql,
-    metadata: { get: async () => baseSchema, list: async () => [baselineSet] },
+    // The catalog reads a set by name (ADR-0150 D3): the baseline is served
+    // by name as it is listed.
+    metadata: {
+      get: async (type: string, name: string) =>
+        (type === 'permission' ? (name === baselineSet.name ? baselineSet : null) : baseSchema),
+      list: async () => [baselineSet],
+    },
   };
   const ctx = {
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -104,12 +110,12 @@ const makeHarness = () => {
     find,
     /**
      * How many catalog set resolutions THE LOADER has issued so far — the
-     * registry's by-name reads of type `permission` (the baseline set answers
-     * from metadata and never reaches it), so a read of another type does not
-     * count: the number means "resolutions of this context", the quantity
-     * under test.
+     * registry's by-name reads of type `permission` other than the baseline
+     * set's (since ADR-0150 D3 the baseline is read through the catalog too,
+     * so its reads are left out), so a read of another type does not count:
+     * the number means "resolutions of this context", the quantity under test.
      */
-    permissionSetReads: () => getItem.mock.calls.filter((c) => c[0] === 'permission').length,
+    permissionSetReads: () => getItem.mock.calls.filter((c) => c[0] === 'permission' && c[1] !== baselineSet.name).length,
     run: async (opCtx: unknown) => {
       if (!middleware) throw new Error('middleware never registered');
       await middleware(opCtx, async () => {});

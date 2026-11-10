@@ -38,6 +38,8 @@ import { RestServer } from '@objectstack/rest';
 import { declaredEnvelopeForThrow } from '@objectstack/plugin-hono-server';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { HttpDispatcher } from '../http-dispatcher.js';
+// Paid at collection, not inside a case's clocked window: the stack reaches it by dynamic import.
+import '@objectstack/metadata';
 import { installDefaultOrganization } from '../default-organization.testkit.js';
 
 const PREFIX = '/api/v1';
@@ -155,7 +157,9 @@ describe('[#26816] GET /data/:object/:id — RestServer and the dispatcher give 
             manifest: { register: vi.fn() },
             objectql: engine,
             metadata: {
-                get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+                // The catalog reads a set by name (ADR-0150 D3): served from the same list.
+                get: async (type: string, name: string) =>
+                  (type === 'permission' ? [MEMBER_SET].find((s: any) => s?.name === name) : engine.getSchema(name)) ?? null,
                 list: async () => [MEMBER_SET],
             },
         };

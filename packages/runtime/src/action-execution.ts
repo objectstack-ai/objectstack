@@ -85,9 +85,11 @@ import type { FlowFailureDetails } from '@objectstack/spec/api';
 // when the fallback runs.
 import { recordNotFoundError, omitInternalFieldsFromWriteResponse } from '@objectstack/metadata-protocol';
 import { serveStoredMetadataRead, serveStoredMetadataReadsThrough } from './stored-metadata-reader-seam.js';
-import { actorUserFromExecutionContext, resolveActorDisplayName } from './security/actor-user.js';
 import { actionInvocationBranch, actionInvocationFailure, actionInvocationTarget, recordActionInvocation, withActionSurface } from './action-invocation-audit.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
+// The ONE admitted sequence every action door shares; `invokeBusinessAction`
+// below is its MCP door (posture `ai`).
+import { refuseDispatchToDisabledObject, runResolvedAction, type ActionRefusal } from './action-dispatch.js';
 import { admittingCredentialKind, type AdmittingCredentialKind } from './security/admitting-credential.js';
 import {
     GLOBAL_ACTION_OBJECT_KEY,
@@ -4499,21 +4501,29 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
             namespaceOwners: (ns) => (typeof registry?.getNamespaceOwners === 'function' ? registry.getNamespaceOwners(ns) : []),
         };
     }
+    // [#25296] AN OBJECT THE DATA PLANE REFUSES HAS NO ACTION THAT MAY RUN —
+    // asked BEFORE the resolution, as at the REST door: the listing below
+    // omits a disabled package's object, so a check after it would answer
+    // "not found" where the REST door answers `404 OBJECT_PACKAGE_DISABLED`.
+    const askedObject = typeof input?.objectName === 'string' && input.objectName !== '' ? input.objectName : undefined;
+    if (askedObject) await refuseDispatchToDisabledObject(deps, requestContext, askedObject, envId);
     const objectsListing = await readObjects?.();
     const resolved = await resolveActionByName(
         deps, meta, name, input?.objectName, objectsListing, await readActions?.(), qualifier,
     );
-    if (!resolved) {
-        throw new Error(
-            input?.objectName
-                ? `Action '${name}' not found on object '${input.objectName}'`
-                : `Action '${name}' not found`,
-        );
+    if (!resolved && !askedObject) {
+        // No object named: nothing for the shared undeclared answer to name.
+        // Refused `404` as the REST door refuses a name nothing declares.
+        throw Object.assign(new Error(`Action '${name}' not found`), {
+            code: standardErrorCodeForHttpStatus(404), status: 404,
+        });
     }
     // [ADR-0150 D4] Set only for a qualified call: the resolved holder's
     // package, whose handler the dispatch runs (the engine's package key).
-    const { action, packageId } = resolved;
-    let { objectName, obj } = resolved;
+    const action = resolved?.action;
+    const packageId = resolved?.packageId;
+    let objectName = resolved?.objectName ?? askedObject!;
+    let obj = resolved?.obj;
     // [ADR-0150 D5, child G1] A qualified call on an object that reached the
     // holder's OBJECT-LESS declaration (`addressedActionHits`' fallback) keeps
     // the caller's object as its subject, as the REST door keeps the routed
@@ -4522,7 +4532,6 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     // it. So `run_action(name, { namespace, objectName, recordId })` and
     // `POST /actions/:ns/:object/:action/:recordId` are the same call. The bare
     // arm has no fallback (it answers not-found), so this never fires on it.
-    const askedObject = typeof input?.objectName === 'string' && input.objectName !== '' ? input.objectName : undefined;
     if (qualifier && askedObject && !isObjectLessActionKey(askedObject) && isObjectLessActionKey(objectName)) {
         objectName = askedObject;
         obj = (objectsListing ?? []).find((o: any) => o?.name === askedObject)
@@ -4530,152 +4539,115 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
             ?? obj;
     }
 
-    // Fail-closed on system-object actions, PER ACTION (#27681): a `sys_*`
-    // action passes only on its author's `ai.exposed` opt-in, and every gate
-    // below still runs for it.
-    const systemObjectError = systemObjectActionExposureError(deps, action, objectName);
-    if (systemObjectError) throw new Error(systemObjectError);
-    const hasAutomation = Boolean(await resolveAutomationService(deps, requestContext, envId));
-    if (!isHeadlessInvokableAction(deps, action, hasAutomation)) {
-        throw new Error(
-            `Action '${name}' (type='${action?.type ?? 'script'}') cannot be invoked via MCP`,
-        );
-    }
-
-    // [#2849 / ADR-0011] AI-exposure gate — fail-closed. Bodies run trusted
-    // (unbounded by the caller's RLS or an agent's data ceiling), so only
-    // actions the author explicitly exposed to AI may be invoked here.
-    const exposureError = actionAiExposureError(deps, action, objectName);
-    if (exposureError) throw new Error(exposureError);
-
-    // ADR-0066 D4 capability gate — same declaration the REST route enforces,
-    // thrown with the REST door's `403` and its standard code (#30771).
-    const gateRefusal = actionPermissionRefusal(deps, action, ec, objectName);
-    if (gateRefusal) {
-        throw Object.assign(new Error(gateRefusal.message), { code: gateRefusal.code, status: gateRefusal.status });
-    }
-
-    // [ADR-0126 §8 item 2] ACTIVATION CONSULT — door 2 of 2. A packaged action
-    // the installation switched off is refused here, before the param contract
-    // and before the subject record is read: nothing about a disabled action
-    // should run, and an agent must not be able to probe its param shape.
+    // Everything after the resolution is the ONE admitted sequence every door
+    // shares (`action-dispatch.ts`), under the AI posture: the REST door's
+    // gates in the REST door's order (an undeclared name `404`, D4 `403`, the
+    // ADR-0126 §8 consult, the owner gate, the type and availability checks,
+    // ADR-0104), plus the three AI-door rules — the fail-closed `sys_*`
+    // exposure (#27681), the `ai.exposed` opt-in (#2849 / ADR-0011) and the
+    // `ai.requiresConfirmation` gate (#15942 / #16293) — and this door's
+    // invokability check. A refusal is thrown with its `code` + `status`
+    // (+ `details`), so the ADR-0112 envelope survives the bridge
+    // (`resolveThrownHttpError`), and a refused call runs nothing and writes
+    // no row.
     //
-    // The engine is resolved for this — the same `getObjectQL` the script
-    // branch below uses — because the projection lives on it (ADR-0110 D5's
-    // "the engine plugin is the component unconditionally present wherever
-    // actions execute"). A flow-type action is refused here too: the switch is
-    // the ACTION's, independent of whatever its target flow's own ledger row
-    // says, so this must sit AHEAD of the type branch.
-    {
-        const activationEngine: any = await deps.getObjectQL(requestContext, envId).catch(() => undefined);
-        const refusal = disabledActionRefusal(deps, activationEngine, action);
-        // Thrown with `code` + `status` so the ADR-0112 envelope survives the
-        // bridge: `resolveThrownHttpError` reads both, and the MCP tool surface
-        // gets a clean tool-error instead of a 500 (the #7535/#8055 shape).
-        if (refusal) {
-            throw Object.assign(new Error(refusal.message), { code: refusal.code, status: refusal.status });
-        }
-
-        // The handler the script dispatch below reaches may be one a DIFFERENT
-        // declared action owns: that owner's gates apply too, at the same
-        // point the REST `/actions` door asks the same function.
-        const ownerRefusal = await actionHandlerOwnerRefusal(deps, requestContext, {
-            ql: activationEngine, action, objectName, candidates: resolveActionHandlerKeys(action), ec, envId, obj,
-            ...(packageId !== undefined ? { packageId } : {}),
-        });
-        if (ownerRefusal) {
-            throw Object.assign(new Error(ownerRefusal.message), { code: ownerRefusal.code, status: ownerRefusal.status });
-        }
-    }
-
-    // [ADR-0104 D2] Declared param contract — same enforcement as the REST
-    // route. AI/MCP is the caller most likely to send a plausible-but-wrong
-    // bag, and a rejection is corrective feedback the agent consumes in-loop,
-    // which a server-side warning never was. Strict by default (#3438);
-    // OS_ALLOW_LAX_ACTION_PARAMS=1 restores the pass-through.
-    //
-    // [#24268] Thrown with `code` + `status` — the 400 and the standard code
-    // the REST door's `deps.error(paramError, 400)` answers — so the MCP tool
-    // surface renders the same ADR-0112 envelope rather than a bare sentence
-    // (`thrownRefusalEnvelope` reads a string `code`). The code is derived
-    // from the status, never spelled, as `declarativeUpdateRefusal` does.
-    const paramError = enforceActionParams(deps, action, obj, params, { objectName, actionName: name });
-    if (paramError) {
-        throw Object.assign(new Error(paramError), { code: standardErrorCodeForHttpStatus(400), status: 400 });
-    }
-
-    // [#15942 / #16293] CONFIRMATION GATE — the last pre-dispatch check, and
-    // the first one that can refuse a well-formed, fully-entitled request.
-    //
-    // Placed HERE deliberately: AFTER the param contract, so a caller with a
-    // malformed bag still gets the located 400 that tells it how to fix the
-    // call; and BEFORE `loadActionSubjectRecord` below, so a refusal reads
-    // nothing and writes nothing — "the action body does not run, no record is
-    // read or written" is the contract's own sentence, and a gate that refuses
-    // after the subject read would only describe the defect instead of ending
-    // it. Nothing is queued and nothing is parked (ruling batch #54): the
-    // caller confirms with its human and retries the same call.
-    const confirmationRefusal = actionConfirmationRefusal(deps, action, input, objectName);
-    if (confirmationRefusal) {
-        // Thrown with `code` + `status` + `details` so the ADR-0112 envelope
-        // survives the bridge intact — the `details` are what let a refused
-        // agent rebuild the retry without re-parsing the prose it was handed.
-        throw Object.assign(new Error(confirmationRefusal.message), {
-            code: confirmationRefusal.code,
-            status: confirmationRefusal.status,
-            details: confirmationRefusal.details,
-        });
-    }
-
-    // Load the subject record under RLS when row-context (engages the same
-    // permission path as get_record — an unseen record reads as not-found).
-    // [commit f19475c0a] Through the ONE shared producer, so this door and the REST
-    // `/actions` door emit the same `recordLoadDenied` signal to handlers.
-    const subject = await loadActionSubjectRecord(objectName, recordId, () =>
-        callData('get', { object: objectName, id: recordId }, driver, envId, ec));
+    // SECURITY MODEL (#2849, #3914): a script/body handler runs TRUSTED — its
+    // `ctx.engine` / `ctx.api` bypass RLS/FLS — so every gate runs before it.
+    const engine: any = await deps.getObjectQL(requestContext, envId).catch(() => undefined);
+    const run = await runResolvedAction(deps, requestContext, {
+        posture: 'ai',
+        door: 'mcp',
+        objectName,
+        actionName: name,
+        declaration: { action, obj, ...(packageId !== undefined ? { packageId } : {}) },
+        body: { params, ...(recordId !== undefined ? { recordId } : {}) },
+        confirmation: input,
+        ql: engine,
+        wiring: {
+            ec, envId, driver, callData,
+            actorEngine: async () => driver ?? await deps.getObjectQL(requestContext, envId),
+        },
+    });
+    if ('refused' in run) throw refusalThrownByBridge(run.refused);
 
     // [#27908 — ruling 6513869839 on #27681, parameter 3] THE INVOCATION ROW.
-    // Every call that cleared the gates above reaches its branch below; one
-    // `action_invocation` row is written for it whether the branch answers or
-    // throws (the subject-record verdict, a target's refusal, a body's throw),
-    // naming this door (`surface: 'mcp'`, set from the door's identity on a
-    // copy of the caller's envelope; nothing on the request can move it). A
-    // call a gate above refused ran nothing and writes no row. The REST
-    // `/actions` door writes the same row with `surface: 'rest'`. See
+    // Every call that cleared the gates writes one `action_invocation` row,
+    // whether the arm answers or throws, naming this door (`surface: 'mcp'`,
+    // set from the door's identity on a copy of the caller's envelope). The
+    // REST `/actions` door writes the same row with `surface: 'rest'`. See
     // `action-invocation-audit.ts`.
+    const declarative = isDeclarativeUpdateAction(action);
     const invocation = {
         context: withActionSurface(ec, 'mcp'),
         actionName: typeof action?.name === 'string' && action.name ? action.name : name,
         objectName: isObjectLessActionKey(objectName) ? undefined : objectName,
         recordId,
-        branch: actionInvocationBranch(action, isDeclarativeUpdateAction(action)),
-        target: actionInvocationTarget(action, isDeclarativeUpdateAction(action)), // #28281: the outer row names where an api forward went
+        branch: actionInvocationBranch(action, declarative),
+        target: actionInvocationTarget(action, declarative), // #28281: the outer row names where an api forward went
     };
-    let answer: any;
-    try {
-        answer = await dispatchAdmittedBusinessAction(deps, requestContext, name, {
-            action, objectName, recordId, params, subject, ec, driver, envId, callData,
-            ...(packageId !== undefined ? { packageId } : {}),
-        });
-    } catch (err) {
-        // [#28856] A refusal carrying the action's answer is answered as the
-        // success it is by the `run_action` tool, so the row records that.
+    const answered = (result: unknown, headers?: Record<string, string>) => ({
+        ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result,
+        ...(headers && Object.keys(headers).length > 0 ? { headers } : {}),
+    });
+    const { outcome } = run;
+    if (outcome.kind === 'answered') {
+        await recordActionInvocation(deps, requestContext, envId, { ...invocation, outcome: 'succeeded' });
+        if (action?.type === 'api' && !declarative) {
+            // A credential rotation the target emitted (impersonation): the
+            // bearer pair ONLY — see {@link mcpRelayableForwardHeaders} for why
+            // no `Set-Cookie` line may enter a tool result.
+            return answered(outcome.result, mcpRelayableForwardHeaders(outcome.headers ?? {}));
+        }
+        const scriptArm = !declarative && action?.type !== 'flow';
+        return answered(scriptArm ? outcome.result ?? null : outcome.result);
+    }
+    let err: unknown;
+    if (outcome.kind === 'refused') {
+        err = refusalThrownByBridge(outcome.refusal, outcome.thrown);
+    } else if (outcome.kind === 'forward-refused') {
+        err = apiActionForwardRefusal(action, outcome.forward);
+    } else {
+        err = outcome.error;
+        // [#28856] The write landed under a failing roll-up: the action's own
+        // answer rides the refusal for the `run_action` tool to relay, and the
+        // row records the success it is.
         //
         // [#28861] Read on the declarative-update arm only: that arm composes
-        // the ACTION's answer and attaches it (`dispatchAdmittedBusinessAction`).
-        // Any other arm's refusal can carry only a WRITE's data answer — a
-        // handler that let out a refusal a data door attached its answer to —
-        // and the action that threw has no result. It is answered as the
-        // failure it is, and leaves this door with nothing attached, so the
-        // `run_action` tool, which reads every throw, cannot relay it either.
-        const declarative = isDeclarativeUpdateAction(action);
-        await recordActionInvocation(deps, requestContext, envId, declarative && earnedAnswerOf(err)
-            ? { ...invocation, outcome: 'succeeded' }
-            : { ...invocation, outcome: 'failed', ...actionInvocationFailure(err) });
-        throw declarative ? err : withoutWriteAnswer(err);
+        // the ACTION's answer. Any other arm's refusal can carry only a WRITE's
+        // data answer, and the action that threw has no result: it leaves this
+        // door with nothing attached, so the tool cannot relay it either.
+        const earned = declarative ? earnedAnswerOf(err) : undefined;
+        if (earned) {
+            await recordActionInvocation(deps, requestContext, envId, { ...invocation, outcome: 'succeeded' });
+            throw withEarnedAnswer(err as SummaryRecomputeRefusal, answered(earned));
+        }
+        if (!declarative) err = withoutWriteAnswer(err);
     }
-    await recordActionInvocation(deps, requestContext, envId, { ...invocation, outcome: 'succeeded' });
-    return answer;
+    await recordActionInvocation(deps, requestContext, envId, { ...invocation, outcome: 'failed', ...actionInvocationFailure(err) });
+    throw err;
+}
+
+/**
+ * The MCP bridge's throw for a refusal of the shared sequence: an `Error`
+ * carrying the ADR-0112 envelope's `code` + `status`, and the refusal's
+ * `details` and `userMessage` — what the `run_action` tool renders through the
+ * REST door's reader (`actionsDoorAnswerOf`), whose `details` it serves on a
+ * refusal. A flow run's refusal is its own carrier (`FlowActionRefusal`),
+ * thrown with the run details the REST door serves beside it.
+ */
+function refusalThrownByBridge(refusal: ActionRefusal, carrier?: unknown): Error {
+    const { code, ...rest } = refusal.details ?? {};
+    const details = Object.keys(rest).length > 0 ? rest : undefined;
+    if (carrier instanceof Error) {
+        if (details !== undefined) Object.assign(carrier, { details });
+        return carrier;
+    }
+    return Object.assign(new Error(refusal.message), {
+        code: typeof code === 'string' && code !== '' ? code : standardErrorCodeForHttpStatus(refusal.status),
+        status: refusal.status,
+        ...(details !== undefined ? { details } : {}),
+        ...(refusal.userMessage !== undefined ? { userMessage: refusal.userMessage } : {}),
+    });
 }
 
 /**
@@ -4691,214 +4663,6 @@ function withoutWriteAnswer(err: unknown): unknown {
     const bare = new SummaryRecomputeError([...(stale.failures ?? [])] as SummaryRecomputeError['failures'], stale.written);
     if (typeof stale.stack === 'string') bare.stack = stale.stack;
     return bare;
-}
-
-/**
- * The MCP `run_action` dispatch, once every admission gate in
- * {@link invokeBusinessAction} has passed: the declarative update, the
- * subject-record verdict, the api forward, the flow dispatch and the
- * script/body dispatch. Split out so the door can write the invocation row
- * for whatever this answers or throws (#27908); the code is unchanged.
- */
-async function dispatchAdmittedBusinessAction(deps: ActionExecutionDeps,
-    requestContext: HttpProtocolContext,
-    name: string,
-    admitted: {
-        action: any;
-        objectName: string;
-        recordId: string | undefined;
-        params: Record<string, unknown>;
-        subject: ActionSubjectRecordLoad;
-        ec: any;
-        driver: any;
-        envId?: string;
-        callData: (action: string, params: any, dataDriver?: any, scopeId?: string, ec?: ExecutionContext) => Promise<any>;
-        /**
-         * [ADR-0150 D4] The package of the declaration a qualified call
-         * resolved ({@link invokeBusinessAction}): the engine runs that
-         * package's handler. Omitted, the unqualified handler, as before.
-         */
-        packageId?: string;
-    },
-): Promise<any> {
-    const { action, objectName, recordId, params, subject, ec, driver, envId, callData, packageId } = admitted;
-    const record = subject.record;
-
-    // ── declarative update ── [#15079] BEFORE the `type` switch below, and
-    // before the trusted-mode plumbing: contract point 1 reads `operation`
-    // first, and an action with no handler has no body to elevate for. The
-    // shared executor the REST `/actions` door also calls, so the two doors
-    // cannot disagree about the identity the write carries — the failure class
-    // commit f19475c0a and #15168 each paid for once, on this exact seam.
-    if (isDeclarativeUpdateAction(action)) {
-        const answered = (result: unknown) => ({ ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result });
-        let result: DeclarativeUpdateResult;
-        try {
-            result = await executeDeclarativeUpdateAction(deps, action, {
-                objectName, actionName: name, subject, recordId, params, ec, driver, envId, callData, requestContext,
-            });
-        } catch (e) {
-            // [#28856] The write landed under a failing roll-up: the action's
-            // own answer rides the refusal for the `run_action` tool to relay.
-            const earned = earnedAnswerOf(e);
-            if (!earned) throw e;
-            throw withEarnedAnswer(e as SummaryRecomputeRefusal, answered(earned));
-        }
-        return answered(result);
-    }
-
-    // ── contract point 3: the caller-scope load's VERDICT, consumed ──────────
-    // [#16370] The flow door and the script/body door, on the SAME rule the
-    // declarative door has enforced since #15079 — one implementation, three
-    // doors. Placed HERE deliberately:
-    //
-    //  - AFTER the declarative branch above, whose own points 7 and 4 answer a
-    //    LOCATED 400 before point 3 ever runs; hoisting the refusal over them
-    //    would re-label those prescriptions as a 404;
-    //  - BEFORE the identity resolution and everything below it, so no
-    //    persisted automation run exists and no trusted body has been entered
-    //    when the refusal lands. `ok: true` on a row the caller cannot read is
-    //    the defect; refusing after the run was created would only describe it.
-    //
-    // [#28657] Except ahead of an api forward that needs nothing from the row
-    // (`refuseDeniedSubjectLoadBeforeDispatch`): the target authorizes the
-    // caller itself. The REST `/actions` door calls the same function.
-    refuseDeniedSubjectLoadBeforeDispatch(action, objectName, recordId, subject);
-
-    // ── api forward (#27506) ── a same-origin `type: 'api'` action is
-    // forwarded in-process to its declared `target` with the caller's own
-    // credentials, AFTER every gate above (exposure, D4, the activation
-    // consult, the param contract, confirmation, the subject load) and
-    // BEFORE the trusted-mode plumbing below, which an api action never gets:
-    // the target endpoint authorizes the caller itself (ADR-0066 D4). The
-    // REST `/actions` door runs the identical sequence (`domains/actions.ts`).
-    if (action?.type === 'api') {
-        const mark = requestContext?.request?.headers?.[API_FORWARD_MARK_HEADER];
-        if (typeof mark === 'string' && mark.length > 0) {
-            throw Object.assign(new Error(apiActionForwardLoopError(action, mark)), {
-                code: standardErrorCodeForHttpStatus(400), status: 400,
-            });
-        }
-        const inject = await resolveInProcessRequest(deps, requestContext, envId);
-        if (!inject) {
-            throw Object.assign(new Error(apiActionForwardUnavailableError(action)), {
-                code: standardErrorCodeForHttpStatus(503), status: 503,
-            });
-        }
-        const built = buildApiActionRequest(action, { recordId, record: apiForwardSubjectRecord(recordId, subject), params, ec });
-        if ('message' in built) {
-            throw Object.assign(new Error(built.message), { code: standardErrorCodeForHttpStatus(built.status), status: built.status });
-        }
-        const answer = await forwardApiAction(inject, requestContext, built, { objectName, actionName: action.name, target: action.target, ...(recordId ? { recordId: String(recordId) } : {}) });
-        if (answer.status < 200 || answer.status >= 300) throw apiActionForwardRefusal(action, answer);
-        return {
-            ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}),
-            result: apiActionResultOf(answer),
-            // A credential rotation the target emitted (impersonation) — the
-            // bearer caller's own new tokens, which only a header could carry
-            // over HTTP; over MCP the tool result is the one channel there is.
-            // Bearer pair ONLY — see {@link mcpRelayableForwardHeaders} for why
-            // no `Set-Cookie` line may enter a tool result.
-            ...(() => { const h = mcpRelayableForwardHeaders(answer.headers); return Object.keys(h).length > 0 ? { headers: h } : {}; })(),
-        };
-    }
-
-    // [#5372] One shared producer for the user shape (`security/actor-user.ts`),
-    // the same one the REST `/actions` route and the AI routes use. What stood
-    // here was `name: ec.userName ?? ec.userDisplayName ?? ec.userId` — a `??`
-    // chain over two fields `ExecutionContextSchema` never declared and nothing
-    // in the repo ever assigned, so its only reachable arm was the id (#4984's
-    // dead-limb family). The name now comes from `sys_user.name`, resolved once
-    // per request. `organizationId` is the blessed name for the caller's active
-    // org (matches columns + `current_user.organizationId`); the action body
-    // executes TRUSTED (RLS-bypassing), so a body that wants to scope by org
-    // must read it here (#3280).
-    const user = actorUserFromExecutionContext(
-        ec,
-        await resolveActorDisplayName(
-            async () => driver ?? await deps.getObjectQL(requestContext, envId),
-            ec,
-        ),
-    );
-
-    // ── flow dispatch ── (shared with the REST /actions route, #3915)
-    if (action.type === 'flow') {
-        // [#15168] `subject`, not `record`: the shared door derives the flow
-        // context's `record` AND its `recordLoadDenied` sibling from the one
-        // load outcome, so this door cannot forward the row without the verdict.
-        const result = await dispatchFlowAction(deps, requestContext, action, { objectName, subject, params, recordId, ec, envId });
-        return { ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result };
-    }
-
-    // ── script/body dispatch via the engine's executeAction ──
-    // [#4127] `executeAction` is
-    // ObjectQL's own surface, outside IDataEngine; `getObjectQL` exists to reach
-    // exactly that. Closing this needs ObjectQL's contract written, not a cast.
-    const ql: any = await deps.getObjectQL(requestContext, envId);
-    if (!ql || typeof ql.executeAction !== 'function') {
-        throw new Error('Data engine not available for action dispatch');
-    }
-    // [#2849] Trusted-mode elevation must be AUDIBLE: the body's `ctx.engine`
-    // and `ctx.api` bypass RLS/FLS, so record who triggered which action.
-    // [#3914] Wording tracks what the body ACTUALLY gets — a system-elevated
-    // context carrying the caller's identity, not a context-less engine.
-    console.info(
-        `[action-audit] MCP run_action '${action.name}' on '${objectName}' — body executes TRUSTED ` +
-        `(system-elevated context, RLS/FLS-bypassing) for user '${ec?.userId ?? 'anonymous'}'` +
-        // [ADR-0151 D3] An agent names a person it acts for only when it is
-        // OAuth-delegated; an AI service account is its own subject, so the
-        // user above IS the agent and no one stands behind it.
-        (ec?.principalKind === 'agent'
-            ? ec?.onBehalfOf
-                ? ` (AGENT on behalf of '${ec.onBehalfOf.userId ?? 'unknown'}')`
-                : ' (AGENT: an AI service account, acting for itself)'
-            : ''),
-    );
-    const actionContext: any = {
-        record,
-        // [commit f19475c0a] The caller-scope load's verdict, on the same context the
-        // record rides. `ctx.record.id` is present either way (the stamp is
-        // load-bearing for record-less actions), so this is the ONLY thing that
-        // tells a handler its subject row did not resolve for THIS caller —
-        // and the body face carries it too (`sandbox/body-runner.ts`).
-        ...actionRecordLoadSignal(subject),
-        user,
-        session: buildActionSession(deps, ec),
-        engine: buildActionEngineFacade(deps, ql, ec),
-        // [#3914] `ctx.api` — the ScopedContext a body's `ctx.api.object(...)`
-        // resolves to. Absent here, the sandbox synthesized a context-less
-        // facade and every owner-scoped write died FORBIDDEN. `executionContext`
-        // is the same envelope, carried so the sandbox's own last-resort facade
-        // is elevated identically instead of falling back to no identity.
-        api: buildActionApi(deps, ql, ec),
-        executionContext: buildActionExecutionContext(ec),
-        params: { ...params, recordId, objectName },
-    };
-    // [ADR-0110 D2] Handler-key derivation + the probe rotation are shared with
-    // the REST `/actions` route — one addressing algorithm, not two.
-    const dispatch = await executeRegisteredAction(
-        deps, ql, objectName, resolveActionHandlerKeys(action), actionContext, packageId,
-    );
-    if (!dispatch.dispatched) {
-        // No key carried a handler: the routing miss the REST `/actions` door
-        // answers from its own branch (`domains/actions.ts`), thrown as that
-        // answer — its sentence, `404` and the closed code the status derives
-        // (`RESOURCE_NOT_FOUND`) — so `run_action`, which reads every throw
-        // through that door's reader (`actionsDoorAnswerOf`), answers it as
-        // the door does. Thrown uncoded ("No handler registered …"), the
-        // reader answered it as the door's `400 VALIDATION_ERROR` rejection,
-        // telling the agent its input was bad, and the invocation row recorded
-        // a `500`.
-        throw Object.assign(new Error(`Action '${name}' on object '${objectName}' not found`), {
-            code: standardErrorCodeForHttpStatus(404), status: 404,
-        });
-    }
-    // [#11519] Same doubled post-success-navigation diagnostic as the REST
-    // seam — the defect is a property of the authored action + handler pair,
-    // observable wherever the two meet. Observe-only; the result is untouched.
-    const doubled = doubledPostSuccessNavigationWarning(deps, action, dispatch.result, objectName);
-    if (doubled) console.warn(doubled);
-    return { ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result: dispatch.result ?? null };
 }
 
 /**
@@ -4938,7 +4702,9 @@ export async function resolveActionByName(deps: ActionExecutionDeps,
         // for a caller with no package, never the first listed.
         if (isObjectLessActionKey(objectName)) return pickActionHolder(hits, name, false);
         // ⛔ An object-bound pair two packages bind to ONE object keeps today's
-        // answer (the first declaration): its no-package refusal is the action
+        // answer (the first declaration — the object's own, since the
+        // collector lists embedded rows first and keeps another package's
+        // standalone row beside it): its no-package refusal is the action
         // family's own card (ADR-0150 "Covered and uncovered types", record
         // 6729825528), not this door's.
         return { action: hits[0].action, objectName, obj: hits[0].obj };
@@ -5102,10 +4868,12 @@ function addressedActionHits(
  *     same convention as the engine registration key (`objectName` field,
  *     legacy `object` field, else the object-less `GLOBAL_ACTION_OBJECT_KEY`).
  *
- * On a key clash (`objectName:name`) the object-embedded declaration wins,
- * mirroring the execution layer's artifact-wins rule — `resyncAuthoredActions`
- * refuses to clobber an artifact-registered handler, so the embedded
- * declaration is the one that matches what actually runs. All MCP gating
+ * On a key clash (`objectName:name`) within ONE holder, the object-embedded
+ * declaration wins, mirroring the execution layer's artifact-wins rule —
+ * `resyncAuthoredActions` refuses to clobber an artifact-registered handler,
+ * so the embedded declaration is the one that matches what actually runs. A
+ * standalone declaration of ANOTHER holder bound to the same object is its
+ * own row (ADR-0150 D4, below). All MCP gating
  * (`ai.exposed`, ADR-0066 D4, headless-invokability) applies downstream of
  * this collection, unchanged.
  *
@@ -5130,10 +4898,17 @@ function addressedActionHits(
  *
  * [ADR-0150 D4] Each row carries `packageId`: the package that holds the
  * declaration (a standalone item's `_packageId`, an embedded one's object's),
- * absent for the environment's own. Two packages' standalone declarations of
- * one key are BOTH rows — the key is `(package, objectName, name)` — so a name
- * two packages hold is listed twice and resolved by the package rule
- * ({@link resolveActionByName}), never by which one this walk met first.
+ * absent for the environment's own. Two holders' declarations of one key are
+ * BOTH rows — the key is `(package, objectName, name)`, for an embedded row as
+ * for a standalone one — so a name two packages hold is listed twice and
+ * resolved by the package rule ({@link resolveActionByName}), never by which
+ * one this walk met first. In particular a package's standalone action bound
+ * to ANOTHER package's object that embeds the same name survives here, so its
+ * package-qualified address (`/actions/NS/OBJECT/NAME`, `run_action` with
+ * `namespace`) reaches it (ADR-0150 "Covered and uncovered types"). A bare call
+ * on such a pair keeps its answer, the object's own declaration: the
+ * no-package refusal of an object-bound pair is the action family's own card
+ * (epic ruling record 6729825528), not this walk's.
  */
 export async function collectActionDeclarations(deps: ActionExecutionDeps, 
     meta: any,
@@ -5146,14 +4921,18 @@ export async function collectActionDeclarations(deps: ActionExecutionDeps,
         if (typeof obj?.name === 'string') objByName.set(obj.name, obj);
     }
     const out: Array<{ action: any; objectName: string; obj: any; packageId?: string }> = [];
+    // [ADR-0150 D4] One holder's `objectName:name` once, keyed by its package
+    // (the environment's own as ''): an embedded declaration shadows only its
+    // own holder's standalone duplicate, never another package's.
+    const holdingOf = (packageId: string | undefined, key: string) => `${packageId ?? ''}\u0000${key}`;
     const seen = new Set<string>();
     for (const obj of objs) {
         const objectName: string | undefined = obj?.name;
         if (!objectName) continue;
         for (const action of Array.isArray(obj?.actions) ? obj.actions : []) {
             if (!action || typeof action.name !== 'string') continue;
-            seen.add(`${objectName}:${action.name}`);
             const packageId = declaringPackageOf(action) ?? declaringPackageOf(obj);
+            seen.add(holdingOf(packageId, `${objectName}:${action.name}`));
             out.push({ action, objectName, obj, ...(packageId !== undefined ? { packageId } : {}) });
         }
     }
@@ -5167,17 +4946,15 @@ export async function collectActionDeclarations(deps: ActionExecutionDeps,
             standalone = []; // no standalone-item source on this metadata service
         }
     }
-    const seenStandalone = new Set<string>();
     for (const action of standalone) {
         if (!action || typeof action.name !== 'string') continue;
         const objectName = standaloneActionObjectName(deps, action);
-        const key = `${objectName}:${action.name}`;
-        if (seen.has(key)) continue; // object-embedded declaration wins
         const packageId = declaringPackageOf(action);
-        // One holder's key once; another package's declaration of the key is its own row.
-        const holding = `${packageId ?? ''}\u0000${key}`;
-        if (seenStandalone.has(holding)) continue;
-        seenStandalone.add(holding);
+        // The holder's own embedded declaration wins, and its key counts once;
+        // another holder's declaration of the key is its own row.
+        const holding = holdingOf(packageId, `${objectName}:${action.name}`);
+        if (seen.has(holding)) continue;
+        seen.add(holding);
         out.push({ action, objectName, obj: objByName.get(objectName), ...(packageId !== undefined ? { packageId } : {}) });
     }
     return out;

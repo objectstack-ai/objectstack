@@ -346,3 +346,40 @@ describe('AiChatPage hydration — the approval envelope and the pending-action 
     expect(tool?.state).toBe('approval-requested');
   });
 });
+
+describe('AiChatPage hydration — the data tools\' source block (objectstack#31868)', () => {
+  it('lifts answerSource from a persisted tool result, so "How this was computed" survives a reload', () => {
+    const source = {
+      object: 'crm_opportunity',
+      label: 'Opportunities',
+      filter: { stage: 'open' },
+      scope: 'visible_to_you',
+      groupBy: ['owner'],
+      aggregations: [{ function: 'sum', field: 'amount' }],
+      orderBy: [{ field: 'amount', order: 'desc' }],
+      records: 7,
+      line: 'Summed the amount of 7 open opportunities',
+    };
+    const [msg] = hydratedMessagesToChatMessages(
+      assistantWith([
+        {
+          type: 'tool-aggregate_data',
+          toolCallId: 't1',
+          toolName: 'aggregate_data',
+          state: 'output-available',
+          output: { type: 'text', value: JSON.stringify({ rows: [{ owner: 'u1', amount: 1 }], source }) },
+        },
+      ]),
+    );
+    // The same lifted copy the live mapper gives: the drawn members only.
+    expect(msg.toolInvocations?.[0].answerSource).toEqual({
+      object: 'crm_opportunity',
+      label: 'Opportunities',
+      filter: { stage: 'open' },
+      scope: 'visible_to_you',
+      groupBy: ['owner'],
+      aggregations: [{ function: 'sum', field: 'amount' }],
+      records: 7,
+    });
+  });
+});

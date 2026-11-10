@@ -23,6 +23,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { PackageScopedNameRefusedError } from '@objectstack/core';
 import { MetadataManager } from './metadata-manager.js';
 import { MemoryLoader } from './loaders/memory-loader.js';
 import type { MetadataLoader } from './loaders/loader-interface.js';
@@ -311,5 +312,119 @@ describe('the endpoint index keeps one slot per (package, name) (ADR-0150 D4)', 
     const manager = new MetadataManager({ formats: ['json'], loaders: [] });
     manager.registerLoader(storeOf([{ name: 'list_tasks', data: endpoint({ path: A_PATH.path, target: 'env' }) }]));
     expect((await manager.matchEndpoint(A_PATH))?.endpoint.target).toBe('env');
+  });
+});
+
+/**
+ * [ADR-0150 D3/D4, #32069] The in-memory store keeps one slot per
+ * `(package, name)` for `api`, so the index above sees every package's item.
+ * On main ff04ad81 the store was keyed by bare name: the second package's
+ * `registerInMemory('api', NAME, …)` overwrote the first's, the first
+ * package's path answered 404, and `get` answered the survivor whatever
+ * package the read named. The items are stamped the way the boot registrar
+ * stamps them (`applyProtection`: `_packageId`).
+ */
+describe('the in-memory api store keeps one slot per (package, name) (ADR-0150 D4, #32069)', () => {
+  const A_PATH = { method: 'GET', path: '/api/v1/apps/alpha/feed' };
+  const B_PATH = { method: 'GET', path: '/api/v1/apps/beta/feed' };
+  const shipped = (packageId: string, path: string, target: string) =>
+    endpoint({ name: 'feed', path, target, _packageId: packageId, _provenance: 'package' });
+
+  function twoHolders(): MetadataManager {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerInMemory('api', 'feed', shipped('com.acme.alpha', A_PATH.path, 'a'));
+    manager.registerInMemory('api', 'feed', shipped('com.acme.beta', B_PATH.path, 'b'));
+    return manager;
+  }
+
+  it('serves both packages\' endpoints, each on its own path (BASE: the first package\'s path answered nothing)', async () => {
+    const manager = twoHolders();
+    expect((await manager.matchEndpoint(A_PATH))?.endpoint.target).toBe('a');
+    expect((await manager.matchEndpoint(B_PATH))?.endpoint.target).toBe('b');
+  });
+
+  it('a read naming a package answers that package\'s item, both faces alike; a package holding no slot answers nothing', async () => {
+    const manager = twoHolders();
+    expect(((await manager.get('api', 'feed', 'com.acme.alpha')) as any)?.target).toBe('a');
+    expect(((await manager.get('api', 'feed', 'com.acme.beta')) as any)?.target).toBe('b');
+    expect(((await manager.getDiagnosed('api', 'feed', 'com.acme.alpha')).data as any)?.target).toBe('a');
+    expect(await manager.get('api', 'feed', 'com.acme.gamma'), 'never another package\'s item').toBeUndefined();
+    expect(await manager.getDiagnosed('api', 'feed', 'com.acme.gamma')).toEqual({ data: undefined, degraded: false, errors: [] });
+  });
+
+  it('a read naming no package of a two-holder name is refused naming both (D3), never one of them picked', async () => {
+    const manager = twoHolders();
+    for (const read of [() => manager.get('api', 'feed'), () => manager.getDiagnosed('api', 'feed')]) {
+      const err = await read().then(() => undefined, (e: unknown) => e as PackageScopedNameRefusedError);
+      expect(err, 'the read refuses').toBeInstanceOf(PackageScopedNameRefusedError);
+      expect([err!.code, err!.status, err!.refusal.reason]).toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment']);
+      expect(err!.refusal.candidates).toEqual([
+        { kind: 'package', packageId: 'com.acme.alpha' },
+        { kind: 'package', packageId: 'com.acme.beta' },
+      ]);
+    }
+  });
+
+  it('enumerates both items under the one name; unregisterPackage drops only its own slot; unregister drops every slot', async () => {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerInMemory('api', 'feed', { ...shipped('com.acme.alpha', A_PATH.path, 'a'), packageId: 'com.acme.alpha' });
+    manager.registerInMemory('api', 'feed', { ...shipped('com.acme.beta', B_PATH.path, 'b'), packageId: 'com.acme.beta' });
+    expect(((await manager.list('api')) as any[]).map((i) => i.target)).toEqual(['a', 'b']);
+    expect(await manager.listNames('api')).toEqual(['feed']);
+    expect(await manager.exists('api', 'feed')).toBe(true);
+    await manager.unregisterPackage('com.acme.alpha');
+    expect(((await manager.list('api')) as any[]).map((i) => i.target)).toEqual(['b']);
+    expect(await manager.matchEndpoint(A_PATH)).toBeUndefined();
+    expect((await manager.matchEndpoint(B_PATH))?.endpoint.target).toBe('b');
+    await manager.unregister('api', 'feed');
+    expect(await manager.exists('api', 'feed')).toBe(false);
+  });
+
+  describe('CONTROL — one holder per name: the store holds and answers the one item the bare-name map did', () => {
+    it('one package\'s item is answered to every read, the very object registered', async () => {
+      const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+      const item = shipped('com.acme.alpha', A_PATH.path, 'a');
+      manager.registerInMemory('api', 'feed', item);
+      expect(await manager.get('api', 'feed')).toBe(item);
+      expect(await manager.get('api', 'feed', 'com.acme.alpha')).toBe(item);
+      expect(await manager.list('api')).toEqual([item]);
+      expect((await manager.matchEndpoint(A_PATH))?.endpoint.target).toBe('a');
+    });
+
+    it('a package-less write of the held name replaces the holder\'s item (its customization, D4), as the bare-name map did', async () => {
+      const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+      manager.registerInMemory('api', 'feed', shipped('com.acme.alpha', A_PATH.path, 'shipped'));
+      const custom = endpoint({ name: 'feed', path: A_PATH.path, target: 'custom' });
+      await manager.register('api', 'feed', custom);
+      expect(await manager.get('api', 'feed')).toBe(custom);
+      expect(await manager.get('api', 'feed', 'com.acme.alpha')).toBe(custom);
+      expect(await manager.list('api')).toEqual([custom]);
+    });
+
+    it('a package\'s write of a name the environment authored replaces it, as the bare-name map did', async () => {
+      const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+      manager.registerInMemory('api', 'feed', endpoint({ name: 'feed', path: A_PATH.path, target: 'env' }));
+      const item = shipped('com.acme.alpha', A_PATH.path, 'a');
+      manager.registerInMemory('api', 'feed', item);
+      expect(await manager.list('api')).toEqual([item]);
+      expect(await manager.get('api', 'feed')).toBe(item);
+    });
+
+    it('an environment-authored item no package holds is answered to a read naming none or any package', async () => {
+      const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+      const item = endpoint({ name: 'feed', path: A_PATH.path, target: 'env' });
+      manager.registerInMemory('api', 'feed', item);
+      expect(await manager.get('api', 'feed')).toBe(item);
+      expect(await manager.get('api', 'feed', 'com.acme.alpha')).toBe(item);
+    });
+  });
+
+  it('a type outside the slotted set keeps one item per name: the later write replaces the earlier', async () => {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerInMemory('flow', 'f', { name: 'f', _packageId: 'com.acme.alpha' });
+    const later = { name: 'f', _packageId: 'com.acme.beta' };
+    manager.registerInMemory('flow', 'f', later);
+    expect(await manager.get('flow', 'f')).toBe(later);
+    expect(await manager.list('flow')).toEqual([later]);
   });
 });

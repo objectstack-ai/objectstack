@@ -79,6 +79,9 @@ import { findNamespaceNameRefusals } from '../utils/namespace-co-owner-names.js'
 // [ADR-0150 D6, child K] A namespace never equals an object name, both directions,
 // and no object is short-named `custom` — the spec's predicate over one artifact.
 import { findNamespaceObjectNameRefusals } from '../utils/namespace-object-names.js';
+// [ADR-0150 D5, child G1] A namespace spelling a literal of the address grammar
+// (`trigger`, `global`, `hooks`, …) — the install door's own judge.
+import { findNamespaceAddressLiteralRefusals } from '../utils/namespace-address-literals.js';
 // A field `picklist` that names no picklist the stack declares — the walk
 // `os validate` step 2d runs, over the same judge.
 import { judgePicklistReferences, picklistRefusalHeading, printPicklistReferenceNotices } from '../utils/picklist-references.js';
@@ -557,6 +560,29 @@ export default class Compile extends Command {
         printBulletList(
           namespaceObjectRefusals.map((r) => r.message),
           { noun: 'namespace/object name refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
+      // 3a-quinquies. [ADR-0150 D5, child G1] A namespace of this artifact
+      //     spelling a literal segment of the address grammar (`actions`, `connectors`,
+      //     `global`, `hooks`, `oauth`, `trigger`) is REFUSED, naming the
+      //     literal and the doors that serve it — the install door and
+      //     `defineStack` ask the same judge (`validateNamespaceNotAddressLiteral`).
+      //     The SAME call `os validate` makes at its step 2c-quater, ahead of
+      //     every artifact write.
+      const addressLiteralRefusals = findNamespaceAddressLiteralRefusals(result.data as Record<string, unknown>);
+      if (addressLiteralRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, errors: addressLiteralRefusals, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
+          this.exit(1);
+        }
+        const n = addressLiteralRefusals.length;
+        console.log('');
+        printError(`The server would refuse this stack at install (${n} namespace${n > 1 ? 's' : ''} spelling an address literal; rename ${n > 1 ? 'them' : 'it'})`);
+        printBulletList(
+          addressLiteralRefusals.map((r) => r.message),
+          { noun: 'address-literal namespace refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
         );
         this.exit(1);
       }

@@ -17,6 +17,7 @@ import { describe, it, expect } from 'vitest';
 import { ConnectorSchema, DeclarativeConnectorEntrySchema } from './connector.zod';
 import { redactConnectorItem } from './connector-credential-redaction';
 import { ObjectStackDefinitionSchema } from '../stack.zod';
+import { CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES } from './connector-url-credentials';
 
 const PLACEHOLDER = 'TEST_PLACEHOLDER_NOT_A_SECRET';
 
@@ -481,5 +482,123 @@ describe('a URL with a special scheme is read for credentials the way a URL pars
         expect(refused, 'refused ⇔ rewritten').toBe(rewritten);
       }
     }
+  });
+});
+
+// Whatever a URL parser reads a credential from is judged as a URL, at the
+// write door and the read door alike. A provider builds its request with
+// `new URL()` (the rest and openapi `baseUrl`, the mcp `transport.url`, a URL
+// openapi `spec`), so the parser itself is the oracle here: every spelling
+// below is one it reads a userinfo or a credential query parameter from, and
+// at every provider URL position the entry is refused at that position, while
+// the read serves a value the parser reads no credential from.
+describe('whatever a URL parser reads a credential from is refused on write and withheld on read, at every provider URL position', () => {
+  const BS = String.fromCharCode(0x5c);
+  const TAB = String.fromCharCode(0x09);
+
+  const openapiBase = (baseUrl: string) => ({
+    ...openapi('openapi/billing.json'),
+    providerConfig: { spec: 'openapi/billing.json', baseUrl },
+  });
+  /** [position label, the entry holding `url` there, the path it sits at]. */
+  const POSITIONS: Array<[string, (url: string) => Record<string, unknown>, string]> = [
+    ['the rest `baseUrl`', (url) => rest(url), 'providerConfig.baseUrl'],
+    ['the mcp `transport.url`', (url) => mcp(url), 'providerConfig.transport.url'],
+    ['the openapi `spec` URL', (url) => openapi(url), 'providerConfig.spec'],
+    ['the openapi `baseUrl`', (url) => openapiBase(url), 'providerConfig.baseUrl'],
+  ];
+  const valueAt = (item: Record<string, unknown>, path: string): unknown =>
+    path.split('.').reduce<unknown>((node, key) => (node as Record<string, unknown> | undefined)?.[key], item);
+
+  const CREDENTIAL_PARAMS = CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES.map((name) => name.toLowerCase());
+  /** Whether a URL parser reads a userinfo or a credential query parameter from `value`. */
+  const parserReadsCredential = (value: string): boolean => {
+    let url: URL;
+    try {
+      url = new URL(value);
+    } catch {
+      return false;
+    }
+    return url.username !== ''
+      || url.password !== ''
+      || [...url.searchParams].some(([name, v]) => v !== '' && CREDENTIAL_PARAMS.includes(name.toLowerCase()));
+  };
+
+  /** Refused at `at`, withheld by the read, and the served value carries nothing a URL parser reads as a credential. */
+  const judgedAtBothDoors = (entry: Record<string, unknown>, at: string): void => {
+    const { located, messages } = refusals(entry);
+    expect(located).toEqual([['custom', at]]);
+    expect(messages[0]).not.toContain(PLACEHOLDER);
+    const { item: served, redactedKeys } = redactConnectorItem(entry);
+    expect(redactedKeys).toEqual([at]);
+    expect(JSON.stringify(served)).not.toContain(PLACEHOLDER);
+    const servedValue = valueAt(served, at);
+    expect(typeof servedValue).toBe('string');
+    expect(parserReadsCredential(servedValue as string), `served ${JSON.stringify(servedValue)}`).toBe(false);
+    accepts(served);
+  };
+
+  /** [spelling, a value a URL parser reads a credential from]. */
+  const SPELLINGS: Array<[string, string]> = [
+    ['a userinfo behind a leading space', ` https://u:${PLACEHOLDER}@h.example/v1`],
+    ['a userinfo behind a leading tab', `${TAB}https://${PLACEHOLDER}@h.example/v1`],
+    ['a userinfo after one slash', `https:/u:${PLACEHOLDER}@h.example/v1`],
+    ['a userinfo after no slash', `https:u:${PLACEHOLDER}@h.example/v1`],
+    ['a userinfo after backslashes', `https:${BS}${BS}u:${PLACEHOLDER}@h.example${BS}v1`],
+    ['a query credential behind a leading space', ` https://h.example/v1?api_key=${PLACEHOLDER}`],
+    ['a query credential behind a leading tab', `${TAB}https://h.example/v1?token=${PLACEHOLDER}`],
+    ['a query credential after one slash', `https:/h.example/v1?token=${PLACEHOLDER}`],
+    ['a query credential after no slash', `https:h.example/v1?token=${PLACEHOLDER}`],
+    ['a query credential after backslashes', `https:${BS}${BS}h.example${BS}v1?token=${PLACEHOLDER}`],
+    ['a userinfo and a query credential after one slash, behind a leading tab', `${TAB}https:/u:${PLACEHOLDER}@h.example/v1?sig=${PLACEHOLDER}`],
+  ];
+
+  describe.each(POSITIONS)('at %s', (_position, entryWith, at) => {
+    it.each(SPELLINGS)('%s', (_spelling, value) => {
+      expect(parserReadsCredential(value), 'the URL parser reads a credential from this spelling').toBe(true);
+      judgedAtBothDoors(entryWith(value), at);
+    });
+
+    it('CONTROL: the same spellings with no credential part are accepted and served as stored', () => {
+      for (const value of [' https://h.example/v1', `${TAB}https://h.example/v1?page=2`, 'https:/h.example/v1', 'https:h.example/v1', `https:${BS}${BS}h.example${BS}v1`]) {
+        expect(parserReadsCredential(value)).toBe(false);
+        const entry = entryWith(value);
+        accepts(entry);
+        const { item: served, redactedKeys } = redactConnectorItem(entry);
+        expect(redactedKeys).toEqual([]);
+        expect(valueAt(served, at)).toBe(value);
+      }
+    });
+  });
+
+  // Every C0 control character and the space, U+0000 to U+0020, is what a URL
+  // parser trims from both ends of a URL before it reads it — the whole range,
+  // not only the whitespace a regular expression's `\s` names.
+  const C0_AND_SPACE = Array.from({ length: 0x21 }, (_, code) => code);
+  const hex = (code: number) => `U+${code.toString(16).toUpperCase().padStart(4, '0')}`;
+
+  describe.each(C0_AND_SPACE.map((code) => [hex(code), String.fromCharCode(code)] as [string, string]))('%s, leading or trailing', (_label, c) => {
+    const values = [
+      `${c}https:/u:${PLACEHOLDER}@h.example/v1`,
+      `https:/u:${PLACEHOLDER}@h.example/v1${c}`,
+      `${c}${c}https:h.example/v1?token=${PLACEHOLDER}${c}`,
+    ];
+
+    it.each(POSITIONS)('is trimmed before the credential is judged, at %s', (_position, entryWith, at) => {
+      for (const value of values) {
+        expect(parserReadsCredential(value), JSON.stringify(value)).toBe(true);
+        judgedAtBothDoors(entryWith(value), at);
+      }
+    });
+
+    it('CONTROL: around a URL with no credential part, it is accepted and served as stored', () => {
+      const value = `${c}https:/h.example/v1?page=2${c}`;
+      for (const [, entryWith, at] of POSITIONS) {
+        accepts(entryWith(value));
+        const { item: served, redactedKeys } = redactConnectorItem(entryWith(value));
+        expect(redactedKeys).toEqual([]);
+        expect(valueAt(served, at)).toBe(value);
+      }
+    });
   });
 });

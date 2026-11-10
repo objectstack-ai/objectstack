@@ -550,6 +550,59 @@ describe('sanitizeChatMessagesForCache — affordance cards survive a cache roun
   });
 });
 
+// objectstack#31868 — the data tools' `source` block ("How this was
+// computed") must survive a cache-fallback reload like the affordance cards
+// above. It rides inside the cached `output`, beside any envelope, so a turn
+// that also waits on an approval keeps both.
+describe('sanitizeChatMessagesForCache — the answer source survives a cache round-trip (objectstack#31868)', () => {
+  const answerSource = {
+    object: 'opportunity',
+    label: 'Opportunities',
+    filter: { stage: 'won', amount: { $gte: 1000 } },
+    scope: 'visible_to_you',
+    groupBy: ['owner'],
+    aggregations: [{ function: 'sum', field: 'amount' }],
+    records: 7,
+  };
+
+  function roundTrip(toolInvocations: Parameters<typeof sanitizeChatMessagesForCache>[0][number]['toolInvocations']) {
+    const cached = sanitizeChatMessagesForCache([
+      { id: 'a1', role: 'assistant', content: 'Seven deals.', toolInvocations },
+    ]);
+    return JSON.parse(JSON.stringify(cached)) as typeof cached;
+  }
+
+  it('keeps a data tool\'s source through sanitize → localStorage → hydration', () => {
+    const persisted = roundTrip([
+      { toolCallId: 'tc-agg', toolName: 'aggregate_data', state: 'output-available', answerSource },
+    ]);
+
+    const reloaded = hydratedMessagesToChatMessages(persisted);
+    expect(reloaded[0]?.toolInvocations?.[0]?.answerSource).toEqual(answerSource);
+    // The live mapper (the floating chat's cache restore) reads it back too.
+    expect(uiMessageToChatMessage(persisted[0]).toolInvocations?.[0]?.answerSource).toEqual(answerSource);
+  });
+
+  it('keeps both a pending approval and the source on one turn', () => {
+    const persisted = roundTrip([
+      {
+        toolCallId: 'tc-both',
+        toolName: 'aggregate_data',
+        state: 'approval-requested',
+        pendingActionId: 'pa_31868',
+        answerSource,
+      },
+    ]);
+    const toolPart = persisted[0]?.parts.find((p) => p.type === 'tool-aggregate_data');
+    // One `output`: the approval envelope keeps its keys and gains `source`.
+    expect(detectPendingApproval(toolPart?.output)?.pendingActionId).toBe('pa_31868');
+
+    const tool = hydratedMessagesToChatMessages(persisted)[0]?.toolInvocations?.[0];
+    expect(tool?.pendingActionId).toBe('pa_31868');
+    expect(tool?.answerSource).toEqual(answerSource);
+  });
+});
+
 // The server persists conversations in ModelMessage format, where an assistant
 // tool CALL is the literal `type:'tool-call'` with the real tool in `toolName`.
 // Left as-is the chat step humanizes to "Call"; toUIMessages must remap it to
