@@ -487,18 +487,19 @@ My Apps opens the app's home page URL) can carry the parameter in that URL:
 `…/sso/callback/<providerId>?iss=<the registered issuer, URL-encoded>`.
 
 A request there that carries `iss` and no `code`, `state` or `error` starts
-the platform's own sign-in at the IdP, with a fresh `state` and PKCE, as
-**Sign in with SSO** does, only when all four hold:
+the platform's own sign-in at the IdP, with a fresh `state` (and PKCE when
+the provider uses it), as **Sign in with SSO** does, only when all four hold:
 
 1. the provider is a registered OIDC provider;
 2. its `allowIdpInitiated` option is on;
 3. `iss` is the provider's registered issuer, byte for byte (no case or
    trailing-slash folding);
 4. `target_link_uri`, when present, is on this deployment's origin or a
-   trusted origin. The sign-in then lands there; without it, it lands on the
-   deployment's base URL.
+   trusted origin, sent once and not empty. The sign-in then lands there;
+   without it, it lands on the deployment's base URL.
 
-Anything else redirects with `error=state_not_found`, as before, and writes
+A request of this shape that misses any of the four redirects with
+`error=state_not_found`, as before, and writes
 one `warn` line naming the first condition that failed
 (`provider_not_registered`, `provider_not_oidc`, `idp_initiated_off`,
 `issuer_mismatch`, `target_link_uri_untrusted`, or `start_refused` when the

@@ -183,7 +183,7 @@ function landing(res: Response): { base: string; error: string | null } {
 }
 
 /** The IdP's third-party-initiated request: `GET` the callback with `iss` and no code. */
-function initiate(rp: Rp, query: Record<string, string> = { iss: IDP }): Promise<Response> {
+function initiate(rp: Rp, query: Record<string, string> | Array<[string, string]> = { iss: IDP }): Promise<Response> {
   return rp.manager.handleRequest(new Request(`${AUTH}/sso/callback/${PROVIDER_ID}?${new URLSearchParams(query)}`));
 }
 
@@ -306,6 +306,62 @@ describe('[#32086] an IdP app tile starts an OIDC sign-in (third-party-initiated
     });
   }
 
+  // The open-redirect control against the real vendor matcher (`isTrustedOrigin`,
+  // relative paths allowed), and a `target_link_uri` that is repeated or empty:
+  // each is a miss, never read as absent.
+  const hostileTargets: Array<{ name: string; query: Array<[string, string]> }> = [
+    { name: 'a protocol-relative //host', query: [['iss', IDP], ['target_link_uri', '//attacker.example/after']] },
+    { name: 'a backslash /\\host', query: [['iss', IDP], ['target_link_uri', '/\\attacker.example/after']] },
+    { name: 'userinfo before the attacker host', query: [['iss', IDP], ['target_link_uri', `${BASE}@attacker.example/after`]] },
+    { name: 'a look-alike host suffix', query: [['iss', IDP], ['target_link_uri', 'http://localhost:3000.attacker.example/after']] },
+    { name: 'a non-http scheme', query: [['iss', IDP], ['target_link_uri', 'javascript:alert(document.domain)']] },
+    {
+      name: 'a repeated target_link_uri, each one trusted',
+      query: [['iss', IDP], ['target_link_uri', `${BASE}/a`], ['target_link_uri', `${BASE}/b`]],
+    },
+    { name: 'an empty target_link_uri', query: [['iss', IDP], ['target_link_uri', '']] },
+  ];
+  for (const hostile of hostileTargets) {
+    it(`CONTROL ${hostile.name}: today's state_not_found, one warn line naming target_link_uri_untrusted, nothing written`, async () => {
+      const rp = await makeRp({ provider: { allowIdpInitiated: true } });
+      const res = await initiate(rp, hostile.query);
+      expect(res.status).toBe(302);
+      expect(landing(res)).toEqual({ base: `${BASE}/_console/login`, error: 'state_not_found' });
+      expect(authStateRows(rp)).toHaveLength(0);
+      expect(rows(rp, 'sys_session')).toHaveLength(0);
+      expect(entryLines(rp).map(([, meta]) => meta.reason)).toEqual(['target_link_uri_untrusted']);
+    });
+  }
+
+  it('under NODE_ENV=production, with the vendor origin check live, the start is not refused', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    try {
+      const rp = await makeRp({ provider: { allowIdpInitiated: true } });
+      // Production's default: a vitest process reads as a test to better-auth,
+      // which skips its origin and callbackURL checks there.
+      const ctx = await ((await rp.manager.getAuthInstance()) as any).$context;
+      ctx.skipOriginCheck = false;
+      // Live: a cookie-carrying start with no Origin is refused, and no Origin is synthesised in production.
+      const bare = await rp.manager.handleRequest(
+        new Request(`${AUTH}/sign-in/sso`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', cookie: 'better-auth.session_token=x' },
+          body: JSON.stringify({ providerId: PROVIDER_ID, providerType: 'oidc', callbackURL: BASE }),
+        }),
+      );
+      expect(bare.status).toBe(403);
+
+      const res = await initiate(rp, [['iss', IDP], ['target_link_uri', `${BASE}/_console/apps/crm`]]);
+      expect(res.status).toBe(302);
+      const location = new URL(res.headers.get('location')!);
+      expect(`${location.origin}${location.pathname}`).toBe(`${IDP}/authorize`);
+      expect(authStateRows(rp)).toHaveLength(1);
+      expect(entryLines(rp)).toHaveLength(0);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('the warn line carries neither the iss nor the target it refused', async () => {
     const rp = await makeRp({ provider: { allowIdpInitiated: true } });
     await initiate(rp, { iss: `${IDP}/evil`, target_link_uri: 'https://attacker.example/after' });
@@ -327,6 +383,15 @@ describe('[#32086] an IdP app tile starts an OIDC sign-in (third-party-initiated
 
 // ── 2. The shape, the gate, the fall-through ────────────────────────────────
 
+/** A URL's origin, or `undefined` for anything that does not parse. */
+function originOf(url: string): string | undefined {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return undefined;
+  }
+}
+
 describe('[#32086] the third-party-initiated shape and gate', () => {
   const at = (query: string, method = 'GET') => new Request(`${AUTH}/sso/callback/${PROVIDER_ID}?${query}`, { method });
 
@@ -338,12 +403,16 @@ describe('[#32086] the third-party-initiated shape and gate', () => {
     for (const query of ['', 'iss=', `iss=a&iss=b`, `iss=a&code=c`, `iss=a&state=s`, `iss=a&error=e`]) {
       expect(thirdPartyInitiatedLoginOf(at(query)), query).toBeUndefined();
     }
+    for (const query of ['iss=a&target_link_uri=', 'iss=a&target_link_uri=%2Fx&target_link_uri=%2Fy']) {
+      expect(thirdPartyInitiatedLoginOf(at(query)), query).toEqual({ iss: 'a', targetLinkUriUnusable: true });
+    }
+    expect(thirdPartyInitiatedLoginOf(at('iss=a&login_hint=x&login_hint=y'))).toEqual({ iss: 'a' });
     expect(thirdPartyInitiatedLoginOf(at('iss=a', 'POST'))).toBeUndefined();
   });
 
   it('judges the four conditions in order; iss is compared byte for byte', () => {
     const on = { issuer: IDP, oidc: true, allowIdpInitiated: true };
-    const trusted = (url: string) => url.startsWith(BASE) || url.startsWith('/');
+    const trusted = (url: string) => (url.startsWith('/') && !url.startsWith('//')) || originOf(url) === BASE;
     expect(judgeThirdPartyInitiatedLogin({ iss: IDP }, on, trusted)).toBeUndefined();
     expect(judgeThirdPartyInitiatedLogin({ iss: IDP, targetLinkUri: '/x' }, on, trusted)).toBeUndefined();
     expect(judgeThirdPartyInitiatedLogin({ iss: IDP }, undefined, trusted)).toBe('provider_not_registered');
@@ -354,6 +423,9 @@ describe('[#32086] the third-party-initiated shape and gate', () => {
     }
     expect(judgeThirdPartyInitiatedLogin({ iss: '' }, { ...on, issuer: '' }, trusted)).toBe('issuer_mismatch');
     expect(judgeThirdPartyInitiatedLogin({ iss: IDP, targetLinkUri: 'https://x.example' }, on, trusted)).toBe(
+      'target_link_uri_untrusted',
+    );
+    expect(judgeThirdPartyInitiatedLogin({ iss: IDP, targetLinkUriUnusable: true }, on, () => true)).toBe(
       'target_link_uri_untrusted',
     );
   });
@@ -380,7 +452,7 @@ describe('[#32086] the third-party-initiated shape and gate', () => {
     const host = (over: Partial<ThirdPartyLoginHost> = {}): ThirdPartyLoginHost & { dispatch: ReturnType<typeof vi.fn> } =>
       ({
         readProvider: async () => ({ issuer: IDP, oidc: true, allowIdpInitiated: true }),
-        context: async () => ({ isTrustedOrigin: (url: string) => url.startsWith(BASE), options: { baseURL: BASE } }),
+        context: async () => ({ isTrustedOrigin: (url: string) => originOf(url) === BASE, options: { baseURL: BASE } }),
         startUrl: `${AUTH}/sign-in/sso`,
         dispatch: vi.fn(async () =>
           new Response(JSON.stringify({ url: `${IDP}/authorize?state=s1`, redirect: true }), {
@@ -399,15 +471,19 @@ describe('[#32086] the third-party-initiated shape and gate', () => {
       request: new Request(`${AUTH}/sso/callback/${PROVIDER_ID}?${query}`, { headers }),
     });
 
-    it('re-dispatches the vendor start without the browser cookies or navigation headers, and answers its URL and state cookie', async () => {
+    it('re-dispatches the vendor start with an allow-list of headers (no cookie, no authorization), and answers its URL and state cookie', async () => {
       const h = host();
       const fallThrough = vi.fn(async () => vendorAnswer);
       const res = await runThirdPartyInitiatedLogin(
         entry(`iss=${encodeURIComponent(IDP)}&target_link_uri=${encodeURIComponent(`${BASE}/x`)}&login_hint=mia`, {
           cookie: 'better-auth.session_token=secret',
+          authorization: 'Bearer secret',
+          origin: IDP,
           referer: IDP,
           'sec-fetch-site': 'cross-site',
           'user-agent': 'ua/1',
+          'x-forwarded-for': '192.0.2.44, 10.0.0.2',
+          'x-real-ip': '192.0.2.44',
         }),
         h,
         fallThrough,
@@ -420,10 +496,11 @@ describe('[#32086] the third-party-initiated shape and gate', () => {
       expect(sent.method).toBe('POST');
       expect(sent.url).toBe(`${AUTH}/sign-in/sso`);
       expect(await sent.json()).toEqual({ providerId: PROVIDER_ID, providerType: 'oidc', callbackURL: `${BASE}/x`, loginHint: 'mia' });
-      expect(sent.headers.get('cookie')).toBeNull();
-      expect(sent.headers.get('referer')).toBeNull();
-      expect(sent.headers.get('sec-fetch-site')).toBeNull();
-      expect(sent.headers.get('user-agent')).toBe('ua/1');
+      expect([...sent.headers.keys()].sort()).toEqual(['content-type', 'origin', 'x-forwarded-for', 'x-real-ip']);
+      // The request's own origin, never the browser's cross-site one.
+      expect(sent.headers.get('origin')).toBe(BASE);
+      expect(sent.headers.get('x-forwarded-for')).toBe('192.0.2.44, 10.0.0.2');
+      expect(sent.headers.get('x-real-ip')).toBe('192.0.2.44');
     });
 
     it('a start the vendor refuses, an unreadable context or a missing base URL keeps the vendor answer, with one warn line', async () => {
@@ -438,8 +515,17 @@ describe('[#32086] the third-party-initiated shape and gate', () => {
         const h = host(over);
         const res = await runThirdPartyInitiatedLogin(entry(`iss=${encodeURIComponent(IDP)}`), h, async () => vendorAnswer);
         expect(res).toBe(vendorAnswer);
-        expect((h.logger!.warn as any).mock.calls).toHaveLength(1);
+        expect((h.logger!.warn as any).mock.calls.map(([, meta]: [string, any]) => meta.reason)).toEqual(['start_refused']);
       }
+    });
+
+    it('bounds the caller-chosen providerId on its warn line', async () => {
+      const h = host({ readProvider: async () => undefined });
+      const long = 'p'.repeat(1000);
+      const request = new Request(`${AUTH}/sso/callback/${long}?iss=${encodeURIComponent(IDP)}`);
+      await runThirdPartyInitiatedLogin({ providerId: long, request }, h, async () => vendorAnswer);
+      const [[, meta]] = (h.logger!.warn as any).mock.calls;
+      expect(meta).toEqual({ providerId: `${'p'.repeat(128)}…`, entry: 'third_party_initiated', reason: 'provider_not_registered' });
     });
 
     it('a request of any other shape goes straight to the vendor, with no read and no line', async () => {

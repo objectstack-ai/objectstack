@@ -34,7 +34,8 @@
  *     verify it; no case or trailing-slash normalisation);
  *  4. `target_link_uri` is absent, same-origin, or a trusted origin (§4: the
  *     RP MUST check it against open redirection), judged by better-auth's own
- *     `isTrustedOrigin`, whose list always holds the deployment's origin.
+ *     `isTrustedOrigin`, whose list always holds the deployment's origin. A
+ *     `target_link_uri` sent more than once, or empty, is a miss too.
  *
  * Any miss, an unreadable row, or a start the vendor refuses (an unverified
  * domain, a failed discovery) keeps today's answer: the vendor runs on the
@@ -45,9 +46,12 @@
  *
  * The entry sets no session cookie and writes no `sys_session` row:
  * `/sign-in/sso` answers JSON with the IdP's authorization URL, its state
- * cookie and its `auth-state` verification row, and nothing else. The start is
- * re-dispatched without the browser's cookies, so no session is read or
- * renewed on the way. A session is created only by the vendor's callback,
+ * cookie and its `auth-state` verification row, and nothing else. The start
+ * carries an allow-list of headers ({@link startHeaders}): no cookie and no
+ * `authorization`, so no session is read or renewed on the way. It is handed
+ * the transport of the request it serves (#24877), so the vendor's per-address
+ * rate limit counts each caller as it counts a direct `POST /sign-in/sso`.
+ * A session is created only by the vendor's callback,
  * after the IdP returns a `code` with the matching `state`, the code exchange
  * succeeds and the ID token verifies, which is #30967's "no sign-in mechanism
  * of our own": state, PKCE, the exchange, the verification and the session
@@ -60,6 +64,7 @@
  * is passed on to the IdP as `loginHint`.
  */
 
+import { carryForwardedClientAddress } from './client-address-forwarding.js';
 import { SSO_OIDC_CONFIG_FIELD, SSO_PROVIDER_OBJECT } from './sso-client-secret.js';
 import { SSO_ALLOW_IDP_INITIATED_FIELD, ssoToggleStoredOn, type SsoProviderReader } from './sso-sign-in-options.js';
 import type { SsoRefusalHostLogger } from './sso-oidc-refusal-cause.js';
@@ -68,13 +73,17 @@ import type { SsoRefusalHostLogger } from './sso-oidc-refusal-cause.js';
 export interface ThirdPartyInitiatedLogin {
   iss: string;
   targetLinkUri?: string;
+  /** `target_link_uri` was sent, but not exactly once with a value: a miss, never read as absent. */
+  targetLinkUriUnusable?: true;
   loginHint?: string;
 }
 
 /**
  * The §4 shape: a `GET` carrying exactly one non-empty `iss`, and no `code`,
  * `state` or `error`. Anything else is not this entry's (`undefined`), and the
- * vendor answers it as it always has.
+ * vendor answers it as it always has. A `target_link_uri` that is repeated or
+ * empty is marked `targetLinkUriUnusable` (the gate refuses it); a repeated or
+ * empty `login_hint` is not passed on.
  */
 export function thirdPartyInitiatedLoginOf(request: Request): ThirdPartyInitiatedLogin | undefined {
   if (request.method !== 'GET') return undefined;
@@ -92,10 +101,12 @@ export function thirdPartyInitiatedLoginOf(request: Request): ThirdPartyInitiate
     return values.length === 1 && values[0] ? values[0] : undefined;
   };
   const targetLinkUri = one('target_link_uri');
+  const targetLinkUriUnusable = targetLinkUri === undefined && query.has('target_link_uri');
   const loginHint = one('login_hint');
   return {
     iss: iss[0],
     ...(targetLinkUri !== undefined ? { targetLinkUri } : {}),
+    ...(targetLinkUriUnusable ? { targetLinkUriUnusable: true as const } : {}),
     ...(loginHint !== undefined ? { loginHint } : {}),
   };
 }
@@ -156,6 +167,7 @@ export function judgeThirdPartyInitiatedLogin(
   if (!provider.oidc) return 'provider_not_oidc';
   if (!provider.allowIdpInitiated) return 'idp_initiated_off';
   if (!provider.issuer || login.iss !== provider.issuer) return 'issuer_mismatch';
+  if (login.targetLinkUriUnusable) return 'target_link_uri_untrusted';
   if (login.targetLinkUri !== undefined && !isTrustedTarget(login.targetLinkUri)) return 'target_link_uri_untrusted';
   return undefined;
 }
@@ -172,19 +184,32 @@ export interface ThirdPartyLoginHost {
   context: () => Promise<ThirdPartyLoginContext>;
   /** The vendor's `POST {basePath}/sign-in/sso`, as an absolute URL. */
   startUrl: string;
-  /** Re-dispatch one request through the manager's own request seam. */
+  /**
+   * Re-dispatch one request through the manager's own request seam, with the
+   * transport of the request the entry serves (#24877).
+   */
   dispatch: (request: Request) => Promise<Response>;
   logger?: SsoRefusalHostLogger;
 }
 
 /**
- * Headers never carried onto the re-dispatched start: the browser's cookies
- * (no session is read or renewed by the start) and what describes the
- * browser's own navigation or body rather than this request. The rest (the
- * user agent, forwarded client-address headers) is carried as sent.
+ * The headers the re-dispatched start carries, by allow-list as the bridges
+ * build theirs (`register-sso-provider.ts` `forwardAuthHeaders`,
+ * `sys-session-revoke.ts`): its JSON body type, the request's own `Origin`, and
+ * the forwarding facts the client-address rule reads
+ * (`carryForwardedClientAddress`). No cookie and no `authorization`: the start
+ * reads and renews no session.
  */
-const droppedHeader = (name: string): boolean =>
-  ['cookie', 'origin', 'referer', 'content-type', 'content-length'].includes(name) || name.startsWith('sec-fetch-');
+function startHeaders(request: Request, origin: string): Headers {
+  const headers = new Headers({ 'content-type': 'application/json', origin });
+  carryForwardedClientAddress(request.headers, headers);
+  return headers;
+}
+
+/** The longest `providerId` the `warn` line carries: the path segment is the caller's. */
+const LOGGED_PROVIDER_ID_MAX = 128;
+const loggedProviderId = (providerId: string): string =>
+  providerId.length > LOGGED_PROVIDER_ID_MAX ? `${providerId.slice(0, LOGGED_PROVIDER_ID_MAX)}…` : providerId;
 
 /**
  * Run one `/sso/callback/:providerId` request through the entry: a request of
@@ -201,19 +226,24 @@ export async function runThirdPartyInitiatedLogin(
   if (!login) return fallThrough();
 
   const miss = async (reason: ThirdPartyInitiatedLoginMiss): Promise<Response> => {
-    const meta = { providerId: entry.providerId, entry: 'third_party_initiated', reason };
+    const meta = { providerId: loggedProviderId(entry.providerId), entry: 'third_party_initiated', reason };
     const text = `[auth] Third-party-initiated SSO sign-in not started: the request did not pass the entry's checks (${reason})`;
     if (host.logger) host.logger.warn(text, meta);
     else console.warn(text, meta);
     return fallThrough();
   };
 
-  let context: ThirdPartyLoginContext;
   let provider: ThirdPartyLoginProvider | undefined;
   try {
-    [context, provider] = await Promise.all([host.context(), host.readProvider()]);
+    provider = await host.readProvider();
   } catch {
-    return miss('provider_not_registered');
+    provider = undefined;
+  }
+  let context: ThirdPartyLoginContext;
+  try {
+    context = await host.context();
+  } catch {
+    return miss('start_refused');
   }
   const isTrustedTarget = (url: string): boolean => {
     try {
@@ -227,17 +257,12 @@ export async function runThirdPartyInitiatedLogin(
 
   const callbackURL = login.targetLinkUri ?? context.options.baseURL;
   if (!callbackURL) return miss('start_refused');
-  const headers = new Headers();
-  entry.request.headers.forEach((value, name) => {
-    if (!droppedHeader(name.toLowerCase())) headers.set(name, value);
-  });
-  headers.set('content-type', 'application/json');
   let started: Response;
   try {
     started = await host.dispatch(
       new Request(host.startUrl, {
         method: 'POST',
-        headers,
+        headers: startHeaders(entry.request, new URL(entry.request.url).origin),
         body: JSON.stringify({
           providerId: entry.providerId,
           providerType: 'oidc',

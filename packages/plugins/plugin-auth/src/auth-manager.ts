@@ -4071,9 +4071,15 @@ export class AuthManager {
    * URL, read from the relay state before better-auth consumes it, or for an
    * IdP-initiated response (no relay state) on the platform error page. An
    * OIDC callback of the third-party-initiated shape (`iss`, no code) passes
-   * the entry of `sso-third-party-initiated-login.ts` first.
+   * the entry of `sso-third-party-initiated-login.ts` first. `transport` is the
+   * one {@link handleRequest} was handed for the callback: the entry's
+   * re-dispatched start is handed it too (#24877).
    */
-  private runSsoCallback(callback: SsoCallbackRequest, run: () => Promise<Response>): Promise<Response> {
+  private runSsoCallback(
+    callback: SsoCallbackRequest,
+    run: () => Promise<Response>,
+    transport?: { remoteAddress?: string },
+  ): Promise<Response> {
     // A SAML ACS request runs with its provider's IdP-initiated toggle in
     // scope: the vendor's one plugin-wide option answers it per provider
     // (`sso-sign-in-options.ts`, ruling record 6718355623).
@@ -4124,7 +4130,7 @@ export class AuthManager {
           return (await auth.$context) as ThirdPartyLoginContext;
         },
         startUrl: new URL(`${this.getBasePath()}/sign-in/sso`, callback.request.url).href,
-        dispatch: (request) => this.handleRequest(request),
+        dispatch: (request) => this.handleRequest(request, transport),
         logger: this.config.logger,
       },
       callbackScope,

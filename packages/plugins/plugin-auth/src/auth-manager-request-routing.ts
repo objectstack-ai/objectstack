@@ -268,7 +268,7 @@ export async function handleRequest(this: Pick<RequestRoutingHost, 'config' | 'b
         return scimResponse;
       }
     : ssoCallback !== undefined
-      ? (): Promise<Response> => this.runSsoCallback(ssoCallback, runHandler)
+      ? (): Promise<Response> => this.runSsoCallback(ssoCallback, runHandler, transport)
       : runHandler;
   // [objectstack-ai/cloud#3606, ruling A] `/oauth2/revoke` is answered a
   // second time, AFTER the provider: the provider authenticates the client
