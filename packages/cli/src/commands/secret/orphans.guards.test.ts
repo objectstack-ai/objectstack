@@ -181,6 +181,7 @@ const unreferencingCompleteUnion = (): SecretReferenceUnion => ({
     'settings': { family: 'settings', status: 'enumerated', references: [] },
     'object-field': { family: 'object-field', status: 'enumerated', references: [] },
     'datasource': { family: 'datasource', status: 'enumerated', references: [] },
+    'audit-seal': { family: 'audit-seal', status: 'enumerated', references: [] },
   },
   complete: true,
   gaps: [],
