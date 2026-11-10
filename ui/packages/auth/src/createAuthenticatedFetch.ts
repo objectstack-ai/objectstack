@@ -8,6 +8,7 @@
 
 import { TokenStorage } from './createAuthClient.js';
 import { authGateEvents, detectAuthGate } from './auth-gate-events.js';
+import { sessionEndEvents } from './session-end-events.js';
 import { ActiveOrganizationStorage } from './ActiveOrganizationStorage.js';
 
 /**
@@ -189,6 +190,13 @@ export function createAuthenticatedFetch(
         const gate = detectAuthGate(response.status, await response.clone().json());
         if (gate) authGateEvents.emit(gate);
       } catch { /* not a JSON gate body — leave the response untouched */ }
+    }
+    // objectstack#32138 — a 401 may mean the session ended on the server.
+    // `AuthProvider` re-checks the session and, on a confirmed "none", the
+    // route guard sends the visitor to the login page. Gated on `isApiCall`,
+    // the condition under which this request carried our credentials at all.
+    if (isApiCall && response.status === 401) {
+      sessionEndEvents.emit();
     }
     return response;
   };

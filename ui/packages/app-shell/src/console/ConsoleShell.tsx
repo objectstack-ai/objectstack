@@ -31,6 +31,7 @@ import { appRouteSegment } from '../utils/appRoute.js';
 import { SETUP_APP_PACKAGE_ID, SETUP_APP_NAME } from './setupApp.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
 import { useHomePath } from '../hooks/useHomePath.js';
+import { useSignedInUserLocale } from '../hooks/useUserLocale.js';
 import { AiUnavailable } from './ai/AiUnavailable.js';
 import { PreviewModeProvider } from '../preview/PreviewModeContext.js';
 import { NavigationProvider } from '../context/NavigationContext.js';
@@ -329,6 +330,9 @@ function ConnectedShellInner({ children }: { children: ReactNode }) {
   // can resolve it.
   return (
     <SchemaRendererProvider dataSource={adapter} apiFetch={apiProviderFetch}>
+      {/* objectstack#32140 — outside the language key, so a switch does not
+          remount it and read the row again. */}
+      <SignedInUserLocale />
       <MetadataProvider key={language} adapter={adapter}>
         {/* objectui#13323 — one open's API reads, shared by the navigation's
             gates and the page's elements. Inside the language key, so a
@@ -342,6 +346,23 @@ function ConnectedShellInner({ children }: { children: ReactNode }) {
       </MetadataProvider>
     </SchemaRendererProvider>
   );
+}
+
+/**
+ * SignedInUserLocale — applies the signed-in user's `sys_user.locale` to the UI
+ * language (objectui#10059). Renders nothing.
+ *
+ * The ONE mount of {@link useSignedInUserLocale} (objectstack#32140). It sits
+ * here, not in an app's content, because every signed-in console page renders
+ * under this shell: the console's `/home`, `/apps/:appName/*` and `/forms/:name`
+ * share one instance through their pathless layout route, so Home reads the
+ * saved language too, and the hop between them reads nothing again. A route
+ * tree under its own `ConnectedShell` (Studio, organizations, the assistant)
+ * reads it once on entry.
+ */
+function SignedInUserLocale() {
+  useSignedInUserLocale();
+  return null;
 }
 
 /**
