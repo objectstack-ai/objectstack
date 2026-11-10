@@ -4,7 +4,7 @@
 
 feat(objectql): a child amount follows its parent's currency through its master_detail, a summary through that master_detail rolls up in the parent's currency, and the parent's code locks while a child follows it (ADR-0144 D2 and D6, amended)
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: added
 
 The engine half of the ADR-0144 amendment (ruling A on #31743). The spec half landed in #31910: `currencyField` may name `MASTER_DETAIL.CODE`, and a `summary` through that `master_detail` declares `currencyConfig: { currencyMode: 'record', currencyField: CODE }`. Until now the engine refused or misread both.
