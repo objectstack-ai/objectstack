@@ -235,10 +235,10 @@ The boot-time LLM adapter priority is:
 
 After boot, if the Settings service is mounted, the ObjectOS AI runtime
 reads the `ai` Settings namespace and swaps the adapter when the provider
-comes from env or a stored Settings UI value. The manifest default
-`provider=memory` is ignored so it does not mask boot-time auto-detection;
-an explicit `OS_AI_PROVIDER=memory` or stored UI value does switch the runtime
-back to memory. Settings values resolve as:
+comes from env or a stored Settings UI value. The `provider` setting has no
+default, so an unset provider never masks boot-time auto-detection. `memory` is
+not a Settings value: the Settings UI does not offer it, saving it is refused,
+and `OS_AI_PROVIDER=memory` is reported and ignored. Settings values resolve as:
 
 ```text
 env (`OS_<NAMESPACE>_<KEY>`) > stored Settings UI value > default

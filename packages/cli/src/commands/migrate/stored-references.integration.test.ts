@@ -40,7 +40,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -398,5 +399,48 @@ describe('os migrate stored-references bind', () => {
     expect(payload).toMatchObject({ outcome: 'refused', reason: 'resolved', written: 0 });
     expect(exitCode).toBe(1);
     expect((await shareRow(db)).package_id ?? null).toBeNull();
+  }, CASE_TIMEOUT_MS);
+});
+
+describe('os migrate stored-references — a host config under an address-literal namespace (ADR-0150 D5)', () => {
+  // The deployment's own `objectstack.config.ts`, a strict `defineStack` under
+  // `hooks`: the load warns rather than throws, so the report boots the
+  // composition and names the package. (With a throwing `defineStack` the run
+  // ended `host_config_unloadable`, exit 1, and named nothing.)
+  it('loads the config, exits 0 and names the held package in literalNamespaces', async () => {
+    const project = join(dir, 'literal-host');
+    mkdirSync(project, { recursive: true });
+    const stack = {
+      manifest: { id: 'com.example.hooks-host', name: 'hooks_host', version: '1.0.0', type: 'app', namespace: 'hooks' },
+      objects: [{ name: 'hooks_task', label: 'Task', fields: { title: { type: 'text', label: 'Title' } } }],
+    };
+    writeFileSync(
+      join(project, 'objectstack.config.ts'),
+      `import { defineStack } from '@objectstack/spec';\n\nexport default defineStack(${JSON.stringify(stack, null, 2)});\n`,
+    );
+    // The config imports `@objectstack/spec` from its own directory; link the
+    // workspace package there (`test/helpers/define-stack-fixture.ts` does the
+    // same, out of reach of this `src` program's `rootDir`).
+    const specRoot = dirname(createRequire(import.meta.url).resolve('@objectstack/spec/package.json'));
+    mkdirSync(join(project, 'node_modules', '@objectstack'), { recursive: true });
+    symlinkSync(specRoot, join(project, 'node_modules', '@objectstack', 'spec'), 'dir');
+    process.chdir(project);
+    // No compiled artifact: the boot composes the host config's own stack.
+    const artifactPath = process.env.OS_ARTIFACT_PATH;
+    process.env.OS_ARTIFACT_PATH = join(project, 'dist', 'objectstack.json');
+    let result: RunResult;
+    try {
+      result = await report(caseDb());
+    } finally {
+      process.env.OS_ARTIFACT_PATH = artifactPath;
+    }
+    const { payload, exitCode } = result;
+    expect(payload.error, JSON.stringify(payload).slice(0, 600)).toBeUndefined();
+    expect(exitCode).toBe(0);
+    expect(payload.literalNamespaces).toEqual([{
+      packageId: 'com.example.hooks-host',
+      namespace: 'hooks',
+      message: expect.stringContaining("Namespace 'hooks' spells a literal segment of the address grammar"),
+    }]);
   }, CASE_TIMEOUT_MS);
 });

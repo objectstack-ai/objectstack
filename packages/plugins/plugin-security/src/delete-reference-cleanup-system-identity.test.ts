@@ -331,7 +331,11 @@ async function boot(sets: PermissionSet[] = [LINE_LEAD], extraObjects: Array<{ n
   const services: Record<string, unknown> = {
     manifest: { register: vi.fn() },
     objectql: engine,
-    metadata: { get: async (n: string) => schemas[n], list: async () => sets },
+    metadata: {
+      // The catalog reads a set by name (ADR-0150 D3): served from the same list.
+      get: async (t: string, name: string) => (t === 'permission' ? sets.find((s: any) => s?.name === name) : schemas[t]),
+      list: async () => sets,
+    },
   };
   const ctx: any = {
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },

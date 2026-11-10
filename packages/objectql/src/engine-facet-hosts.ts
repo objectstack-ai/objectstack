@@ -33,6 +33,7 @@ import type { SecretsAndRoutingHost } from './engine-secrets-and-routing.js';
 import type { SecurityResolversHost } from './engine-security-resolvers.js';
 import type { SummariesAndExpansionHost } from './engine-summaries-and-expansion.js';
 import type { TransactionsSectionHost } from './engine-transactions-section.js';
+import type { UpdateHost } from './engine-update.js';
 
 /** One facet's host for each engine: built on first use, kept for the engine's life. */
 export class FacetHost<H> {
@@ -76,3 +77,4 @@ export const secretsAndRoutingHost = new FacetHost<SecretsAndRoutingHost>('Secre
 export const securityResolversHost = new FacetHost<SecurityResolversHost>('SecurityResolversFacet');
 export const summariesAndExpansionHost = new FacetHost<SummariesAndExpansionHost>('SummariesAndExpansionFacet');
 export const transactionsSectionHost = new FacetHost<TransactionsSectionHost>('TransactionsSectionFacet');
+export const updateHost = new FacetHost<UpdateHost>('UpdateFacet');

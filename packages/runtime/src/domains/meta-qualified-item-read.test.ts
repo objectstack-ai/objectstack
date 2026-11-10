@@ -27,6 +27,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import '@objectstack/metadata';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SchemaRegistry } from '@objectstack/objectql';
+import { defineStack } from '@objectstack/spec';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
 const A = 'com.acme.alpha';
@@ -202,6 +203,32 @@ describe('a package already installed under an address-literal namespace (ADR-01
         const answer = await read('/page/home', { package: HOOKS });
         expect(answer.status, JSON.stringify(answer.body)).toBe(200);
         expect(labelOf(answer)).toBe('hooks page');
+    });
+
+    it('a config built by `defineStack` under `hooks` loads with a warning, boots, and is read by `?package=`', async () => {
+        // The server's load of an `objectstack.config.ts`: a strict `defineStack`
+        // call. It warns (the author's doors, `os validate` / `os build`, refuse),
+        // so a deployment holding such a package keeps booting after an upgrade.
+        const HOOKS = 'com.acme.hooks-config';
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        let stack: ReturnType<typeof defineStack> | undefined;
+        try {
+            stack = defineStack({
+                manifest: { id: HOOKS, name: 'hooks_config', version: '1.0.0', type: 'app', namespace: 'hooks' },
+                objects: [{ name: 'hooks_task', label: 'Task', fields: { title: { type: 'text' } } }],
+            });
+            // The boot registers the stack's package (this registry is never sealed).
+            registry.installPackage(stack.manifest as never, 'code');
+            const warned = warn.mock.calls.map((c) => String(c[0]));
+            expect(warned.some((line) => line.startsWith(`defineStack: package '${HOOKS}': Namespace 'hooks' spells a literal segment`))).toBe(true);
+        } finally {
+            warn.mockRestore();
+        }
+        expect(stack?.manifest?.namespace).toBe('hooks');
+        ship('page', 'home', HOOKS);
+        const answer = await read('/page/home', { package: HOOKS });
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(labelOf(answer)).toBe('hooks-config page');
     });
 });
 

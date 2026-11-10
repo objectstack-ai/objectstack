@@ -250,7 +250,9 @@ describe('[ADR-0131 D7] no stand-down path remains in plugin-security', () => {
       manifest: { register: () => undefined },
       objectql: engine,
       metadata: {
-        get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+        // The catalog reads a set by name (ADR-0150 D3): served from the same list.
+        get: async (type: string, name: string) =>
+          (type === 'permission' ? ([member]).find((s: any) => s?.name === name) : engine.getSchema(name)) ?? null,
         list: async () => [member],
       },
       'org-scoping': { name: 'test.org-scoping', platformGlobalObjects: [DECLARED] },

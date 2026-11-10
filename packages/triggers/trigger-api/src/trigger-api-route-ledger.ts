@@ -126,4 +126,18 @@ export const TRIGGER_API_ROUTE_LEDGER: readonly TriggerApiRouteLedgerEntry[] = [
             + '`_local/raw/:token` routes with. Every hook this door serves is signed: a flow that declares no `secret` is '
             + 'refused at arm time and at registration (ADR-0041), so there is no unsigned posture for this row to record.',
     },
+    {
+        route: 'POST /api/v1/automation/hooks/:ns/:flowName/:hookId',
+        family: 'inbound-hooks',
+        disposition: 'server-only',
+        note:
+            '[ADR-0150 D5] The same door named by its flow\'s namespace, or `_env`: served as the row above once core\'s '
+            + '`admitInboundHookAddress` admits the qualifier (it names the package that ships the flow, read from the engine\'s '
+            + '`packagedFlowOwner` and the registry\'s namespace table; `_env` a flow no package ships), judged before the '
+            + 'signature is read. An address it does not admit gets the door\'s one refusal, `401 INVALID_SIGNATURE`, rendered by '
+            + 'core as every unverified post is, answered only once its body has been read in full as every post\'s is, so its '
+            + 'timing is an admitted address\'s too; its cause in the server log only. The qualifier `runs` is never this route: that '
+            + 'verb and arity are the run-lifecycle doors of a flow named `hooks`, so the handler passes the request on. '
+            + 'server-only for the reason the row above states.',
+    },
 ];

@@ -238,6 +238,13 @@ export async function explainAccessForCaller(
     // their own find reads under `isolated`, and without a permission set
     // their organization authored.
     if (explainedTenantId !== undefined) explained.tenantId = explainedTenantId;
+    // [ADR-0151 D5 · O4] ...and explained as the kind of principal they are.
+    // The resolver stamps only an AI service account (`'agent'`); a person,
+    // whose own requests every door stamps `'human'`, read no kind here, so
+    // the same person explained by themselves and by an administrator read
+    // two different principals. The row exists (asked above), so a resolution
+    // that names no kind is a person's.
+    if (explained.principalKind === undefined) explained.principalKind = 'human';
     targetContext = explained;
   } else if (
     callerContext?.principalKind === 'human'

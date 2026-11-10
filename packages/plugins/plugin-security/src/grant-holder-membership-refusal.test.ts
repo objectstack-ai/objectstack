@@ -194,7 +194,9 @@ async function boot(opts: BootOptions = {}) {
     // security catalog an assignment is judged against reads them.
     metadata: {
       get: async (type: string, name: string) =>
-        (type === 'position' ? QA_POSITIONS.find((p) => p.name === name) : engine.getSchema(name)) ?? null,
+        (type === 'position'
+          ? QA_POSITIONS.find((p) => p.name === name)
+          : type === 'permission' ? PERMISSION_SETS.find((s: any) => s.name === name) : engine.getSchema(name)) ?? null,
       list: async (type: string) => (type === 'position' ? QA_POSITIONS : PERMISSION_SETS),
     },
     ...(opts.walled

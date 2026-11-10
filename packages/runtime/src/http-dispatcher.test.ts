@@ -4568,7 +4568,11 @@ describe('HttpDispatcher — MCP action bridge (list_actions / run_action)', () 
 
   it('run_action refuses a UI-only (modal) action', async () => {
     const { bridge } = makeBridge({ userId: 'u1', systemPermissions: [] });
-    await expect(bridge.runAction('defer_task', { recordId: 't1' })).rejects.toThrow(/cannot be invoked/i);
+    // [#31923] The bridge runs the REST door's admitted sequence under the
+    // ai posture: the `ai.exposed` gate comes before the type check, so this
+    // never-exposed modal action is refused there (still a 400, nothing ran)
+    // instead of with the old "cannot be invoked via MCP" sentence.
+    await expect(bridge.runAction('defer_task', { recordId: 't1' })).rejects.toThrow(/is not exposed to AI/i);
   });
 
   // ── flow dispatch (type:'flow' → automation flow runner) ──

@@ -100,6 +100,9 @@ describe('[#10757 leg 4] the Default Organization read and the activation ledger
       accessible_org_ids: ['org_default'],
       email: 'admin@example.com',
       posture: 'PLATFORM_ADMIN',
+      // [ADR-0150 D3] The address of the one set it holds; the catalog here
+      // serves it from no package.
+      permissionSetAddresses: [{ packageId: null, name: ADMIN_FULL_ACCESS }],
       ...(grants.tabPermissions ? { tabPermissions: grants.tabPermissions } : {}),
     });
     expect(asMultiset(ql.calls)).toEqual(asMultiset([

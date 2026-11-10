@@ -418,7 +418,7 @@ export const jaJP: PlatformTranslationData = {
         'プラットフォームの AI およびナレッジサービスが使用する LLM プロバイダー、モデル、認証情報、Embedder 設定。',
       groups: {
         provider: { title: 'プロバイダー',
-          description: 'LLM バックエンドを選択します。Memory モードは入力をそのまま返します。テスト用であり、本番では使用しないでください。' },
+          description: 'LLM バックエンドを選択します。' },
         gateway: { title: 'Vercel AI Gateway',
           description: 'マルチプロバイダールーター。モデルは provider/model の形式で指定します（例: openai/gpt-4o）。' },
         openai: { title: 'OpenAI' },
@@ -442,7 +442,6 @@ export const jaJP: PlatformTranslationData = {
         provider: {
           label: 'プロバイダー',
           options: {
-            memory: 'Memory（エコー — テスト専用）',
             gateway: 'Vercel AI Gateway',
             openai: 'OpenAI',
             anthropic: 'Anthropic',

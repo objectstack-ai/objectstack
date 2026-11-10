@@ -869,6 +869,112 @@ export function detectRecordWrite(result: unknown): RecordWrite | undefined {
 }
 
 /**
+ * The `source` block a data tool answers beside its result (`query_records`,
+ * `query_data`, `get_record`, `aggregate_data`, `visualize_data`): the object,
+ * filter, grouping, aggregations and record count the answer was computed
+ * from, composed by the tool and never typed by the model. The chat draws it
+ * as the turn's "How this was computed" block.
+ *
+ * Read as cloud service-ai's `ResultSource` (`resultSourceBlock()`) serves it.
+ * Local until the spec declares the object-query source beside
+ * `DatasetProvenanceSchema` (`@objectstack/spec/ai`, ADR-0149 D3); this type
+ * then becomes that one. Members the block does not draw (`orderBy`, `limit`,
+ * `related`, `latestPer`, `line`) are not lifted.
+ */
+export interface AnswerSource {
+  /** The object's machine name. */
+  object: string;
+  /** The object's label as the producer served it; absent when it named none. */
+  label?: string;
+  /** The `where` the engine accepted, in the query dialect (`FilterCondition`); absent when empty. */
+  filter?: Record<string, unknown>;
+  /** Whose records were read; `visible_to_you` is the one value served. */
+  scope?: string;
+  /** The grouping field names, in order. */
+  groupBy: string[];
+  /** The aggregations, in order; `field` is absent for a bare `count`. */
+  aggregations: Array<{ function: string; field?: string }>;
+  /** How many records the figures cover; absent when the producer did not know. */
+  records?: number;
+}
+
+/** One member's reading: `undefined` when absent, `false` when present but not the shape. */
+type MemberReading<T> = T | undefined | false;
+
+const nonEmpty = (v: unknown): string | undefined => {
+  const t = typeof v === 'string' ? v.trim() : '';
+  return t.length > 0 ? t : undefined;
+};
+
+function readSourceGroupBy(raw: unknown): MemberReading<string[]> {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw)) return false;
+  const out: string[] = [];
+  for (const entry of raw) {
+    const field = nonEmpty(entry);
+    if (!field) return false;
+    out.push(field);
+  }
+  return out;
+}
+
+function readSourceAggregations(raw: unknown): MemberReading<AnswerSource['aggregations']> {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw)) return false;
+  const out: AnswerSource['aggregations'] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+    const e = entry as Record<string, unknown>;
+    const fn = nonEmpty(e.function);
+    if (!fn) return false;
+    if (e.field !== undefined && !nonEmpty(e.field)) return false;
+    const field = nonEmpty(e.field);
+    out.push({ function: fn, ...(field ? { field } : {}) });
+  }
+  return out;
+}
+
+function readSourceRecords(raw: unknown): MemberReading<number> {
+  if (raw === undefined) return undefined;
+  return typeof raw === 'number' && Number.isInteger(raw) && raw >= 0 ? raw : false;
+}
+
+/**
+ * Lift a data tool result's `source` block, member by member, so the member
+ * face can draw it and nothing else of the payload. Keys the block does not
+ * draw are left behind; a block without `object`, or with a drawn member that
+ * is not its shape, is no block at all, so a producer that drifts is seen as a
+ * missing block rather than drawn half-right. Each member has its own reader
+ * above, so a change to one member's served shape is a change to that reader.
+ */
+export function detectAnswerSource(result: unknown): AnswerSource | undefined {
+  const raw = parseResultEnvelope(result)?.source;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const o = raw as Record<string, unknown>;
+  const object = nonEmpty(o.object);
+  if (!object) return undefined;
+  if (o.label !== undefined && !nonEmpty(o.label)) return undefined;
+  if (o.scope !== undefined && !nonEmpty(o.scope)) return undefined;
+  const filter = o.filter;
+  if (filter !== undefined && (!filter || typeof filter !== 'object' || Array.isArray(filter))) {
+    return undefined;
+  }
+  const groupBy = readSourceGroupBy(o.groupBy);
+  const aggregations = readSourceAggregations(o.aggregations);
+  const records = readSourceRecords(o.records);
+  if (groupBy === false || aggregations === false || records === false) return undefined;
+  return {
+    object,
+    ...(nonEmpty(o.label) ? { label: nonEmpty(o.label) } : {}),
+    ...(filter !== undefined ? { filter: filter as Record<string, unknown> } : {}),
+    ...(nonEmpty(o.scope) ? { scope: nonEmpty(o.scope) } : {}),
+    groupBy: groupBy ?? [],
+    aggregations: aggregations ?? [],
+    ...(records !== undefined ? { records } : {}),
+  };
+}
+
+/**
  * cloud#3565 — 「清理示例数据」: the chat's `remove_sample_data` queues a HITL
  * pending action and answers `{ status:'pending_approval', pendingActionId,
  * sampleDataCleanup:{ tables:[{ objectName, label, count }], total, absent,
@@ -1388,6 +1494,7 @@ function extractToolInvocations(
       const builderHandoff = detectBuilderHandoff(result);
       const recordHandoff = detectRecordHandoff(result);
       const recordWrite = detectRecordWrite(result);
+      const answerSource = detectAnswerSource(result);
       const sampleDataCleanup = detectSampleDataCleanup(result);
       // Promote a dangling `input-*` state to a terminal one so a reloaded
       // conversation never shows "Running" forever (the server doesn't always
@@ -1425,6 +1532,7 @@ function extractToolInvocations(
         builderHandoff,
         recordHandoff,
         recordWrite,
+        answerSource,
         sampleDataCleanup,
         replayOutcome,
       } satisfies ChatToolInvocation;

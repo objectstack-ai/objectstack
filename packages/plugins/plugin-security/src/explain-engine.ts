@@ -23,6 +23,9 @@ import {
   isGrantActive,
   isGrantExpired,
   derivePosture as deriveAdminPosture,
+  catalogEntryAddress,
+  holdsPlatformPermissionSet,
+  permissionSetSwitchedOff,
   readDisabledCatalogNames,
   resolveUserAuthzGrants,
   securityCatalogReaderOf,
@@ -159,13 +162,14 @@ function isAuthzPosture(v: unknown): v is AuthzPosture {
  *         role positions are a provisioning source only and are no longer read
  *         as posture evidence — closing the same #2836 dual-track explain-side.
  */
-function derivePosture(context: any): AuthzPosture {
+function derivePosture(ql: unknown, context: any): AuthzPosture {
   if (!context?.userId || context?.principalKind === 'guest') return 'EXTERNAL';
   if (isAuthzPosture(context?.posture)) return context.posture;
-  const permissions: string[] = Array.isArray(context?.permissions) ? context.permissions : [];
   return deriveAdminPosture({
     isPlatformAdmin: context?.hasPlatformAdminGrant === true,
-    isTenantAdmin: ORGANIZATION_ADMIN_GRANTS.some((n) => permissions.includes(n)),
+    // [ADR-0150 D3] The PLATFORM's organization-administrator set, as the
+    // resolver reads the rung: another package's set of that name confers none.
+    isTenantAdmin: ORGANIZATION_ADMIN_GRANTS.some((n) => holdsPlatformPermissionSet(ql, context, n)),
     // [Ruling of record 6355206139] The same evidence the resolver reads: the
     // projected `org_external` identity.
     isExternal: holdsExternalPosition(context?.positions),
@@ -700,26 +704,35 @@ async function collectGrantProvenance(
       // catalog does not hold resolves nothing either way, so it is reported
       // neither as expired nor as deactivated: there is no set to lose.
       const catalog = securityCatalogReaderOf(ql);
-      const held = new Set<string>();
+      // [ADR-0150 D3, D8 R1] Each grant row's set, asked as the resolver asks
+      // it: the package the grant names, else no caller
+      // (`storedPermissionSetScope`) — keyed by row, since two rows of one
+      // name may name two holders.
+      const holderOf = new Map<unknown, string | null>();
       for (const g of [...expiredRows, ...activeRows]) {
         const n = grantSetNameOf(g) as string;
-        // [ADR-0150 D8 R1] Asked as the resolver asks it: the package the
-        // grant names, else no caller (`storedPermissionSetScope`).
-        if (!held.has(n) && catalog && (await catalog.resolve('permission', n, storedPermissionSetScope((g as any).permission_set_package)))) held.add(n);
+        const entry = catalog ? await catalog.resolve('permission', n, storedPermissionSetScope((g as any).permission_set_package)) : undefined;
+        if (entry) holderOf.set(g, catalogEntryAddress(entry).packageId);
       }
       for (const g of expiredRows) {
         const n = grantSetNameOf(g) as string;
-        if (held.has(n)) droppedGrants.push({ kind: 'permission_set', name: n, state: 'expired', until: untilOfGrantRow(g) });
+        if (holderOf.has(g)) droppedGrants.push({ kind: 'permission_set', name: n, state: 'expired', until: untilOfGrantRow(g) });
       }
       // [commit 42b05af89 / ADR-0049] Whether a held set is switched off is the
       // activation ledger's answer, read once for every name a window-active
-      // grant carries — the resolver's own read. Several grant rows can name
-      // one deactivated set; the fact is reported once.
-      const activeNames = [...new Set(activeRows.map((g: any) => grantSetNameOf(g) as string))].filter((n) => held.has(n));
+      // grant carries — the resolver's own read, and [ADR-0150 D4] judged per
+      // holder: the one each grant resolved to. Several grant rows can name
+      // one deactivated set; the fact is reported once per name.
+      const heldActive = activeRows.filter((g: any) => holderOf.has(g));
+      const activeNames = [...new Set(heldActive.map((g: any) => grantSetNameOf(g) as string))];
       if (activeNames.length > 0) {
         const disabled = await readDisabledCatalogNames(ql, [], activeNames);
-        for (const n of activeNames) {
-          if (disabled.permissions.has(n)) droppedGrants.push({ kind: 'permission_set', name: n, state: 'deactivated' });
+        const reported = new Set<string>();
+        for (const g of heldActive) {
+          const n = grantSetNameOf(g) as string;
+          if (reported.has(n) || !permissionSetSwitchedOff(disabled, holderOf.get(g), n)) continue;
+          reported.add(n);
+          droppedGrants.push({ kind: 'permission_set', name: n, state: 'deactivated' });
         }
       }
     }
@@ -793,6 +806,8 @@ export async function buildContextForUser(
     userId,
     positions: grants.positions,
     permissions: grants.permissions,
+    // [ADR-0150 D3] Explained through the same addresses enforcement reads.
+    ...(grants.permissionSetAddresses ? { permissionSetAddresses: grants.permissionSetAddresses } : {}),
     directPermissions: grants.directPermissions,
     systemPermissions: grants.systemPermissions,
     org_user_ids: grants.org_user_ids,
@@ -1803,7 +1818,7 @@ async function applyRecordAttribution(
     declaredColumns, depthScope, delegator, delegatedUnitScope,
   } = ra;
   const isRead = engineOp === 'find';
-  const posture = derivePosture(context);
+  const posture = derivePosture(deps.ql, context);
 
   const record = deps.fetchRecord
     ? await deps.fetchRecord(object, recordId, engineOp).catch(() => null)
