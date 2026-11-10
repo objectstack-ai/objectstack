@@ -23,7 +23,7 @@ Metadata-protocol: none
 The fix for each:
 
 - FROM a bare read of a two-holder name TO `?package=<id>` or `/meta/mapping/<namespace>/NAME`.
-- FROM importing or pulling by a two-holder name TO renaming one of the two mappings; the import door and the pull do not yet take a package.
+- FROM importing or pulling by a two-holder name TO renaming one of the two mappings; the import door does not yet take a package, and the pull does not yet read the `callerPackageId` its request carries.
 - FROM an address naming a package that does not hold the name TO the holder the refusal names.
 
 **TypeScript:** `ConnectorPullRefusalReason` (`@objectstack/service-automation`) gains the member `mapping_name_refused`. A `switch` over the union that must be exhaustive needs a case for it; code that only reads `reason` is unaffected.
