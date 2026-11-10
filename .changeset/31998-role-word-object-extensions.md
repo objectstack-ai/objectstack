@@ -4,7 +4,7 @@
 
 fix(lint)!: `security-role-word` judges what an `objectExtensions` entry writes onto an object (its fields, its `label`, its `fieldPatches` relabels), in `os validate` / `os build` / `os verify` and at the `object_extension` publish door (#31998)
 
-Clause-②: no
+Clause-②: no (narrowing)
 Metadata-protocol: narrowed
 Skills-docs: none — no page under `skills/**` teaches a field or label using the reserved word on an object extension (grep `security-role-word` / `reserved word`: zero hits in `skills/`); `content/docs/deployment/validating-metadata.mdx` gains the `object_extension` write type on the vocabulary-freeze row and one paragraph saying what an extension is judged on.
 
