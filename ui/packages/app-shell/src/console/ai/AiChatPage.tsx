@@ -24,6 +24,7 @@ import { useAdapter } from '../../providers/AdapterProvider.js';
 import { useMetadata } from '../../providers/MetadataProvider.js';
 import { formatPublishFailures, type PublishFailure } from '../../views/studio-design/metadataError.js';
 import { useMetadataClient } from '../../views/metadata-admin/useMetadata.js';
+import { translateMetadataType } from '../../views/metadata-admin/i18n.js';
 import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
 import { resolveKeyedI18nLabel } from '../../utils/index.js';
 import { resolvePublicShareBase } from '../organizations/resolveHomeUrl.js';
@@ -66,6 +67,7 @@ import {
   detectRecordHandoff,
   detectRecordWrite,
   detectSampleDataCleanup,
+  detectPackageRemoval,
   detectProposedChanges,
   detectReplayOutcome,
   detectAuthoringVerdict,
@@ -287,6 +289,7 @@ export function hydratedMessagesToChatMessages(messages: HydratedUIMessage[]): C
         // id below is lifted from; it must survive a reload like the rest.
         const recordWrite = detectRecordWrite(result);
         const sampleDataCleanup = detectSampleDataCleanup(result);
+        const packageRemoval = detectPackageRemoval(result);
         const proposedChanges = detectProposedChanges(result);
         // objectui#5695 — a confirm-replay result becomes a terminal state on
         // the original 确认修改 card; it must never rehydrate as an ordinary
@@ -336,6 +339,7 @@ export function hydratedMessagesToChatMessages(messages: HydratedUIMessage[]): C
           ...(recordHandoff ? { recordHandoff } : {}),
           ...(recordWrite ? { recordWrite } : {}),
           ...(sampleDataCleanup ? { sampleDataCleanup } : {}),
+          ...(packageRemoval ? { packageRemoval } : {}),
           ...(proposedChanges ? { proposedChanges } : {}),
           ...(replayOutcome ? { replayOutcome } : {}),
           ...(part.errorText ? { errorText: String(part.errorText) } : {}),
@@ -1706,7 +1710,7 @@ export function ChatPane({
   showDebug,
   onCanvasOpenChange,
 }: ChatPaneProps) {
-  const { t } = useObjectTranslation();
+  const { t, language } = useObjectTranslation();
   const navigate = useNavigate();
   // The advisory seam for this pane's draft-card publish. `useMetadataClient`
   // is the layer that hands the console's advisory toast renderer to the
@@ -2709,6 +2713,19 @@ export function ChatPane({
         sampleDataCleanupIrreversibleLabel={t('console.ai.sampleDataCleanupIrreversible')}
         sampleDataCleanupAbsentLabel={(count) => t('console.ai.sampleDataCleanupAbsent', { count })}
         sampleDataCleanupEditedLabel={(count) => t('console.ai.sampleDataCleanupEdited', { count })}
+        // objectstack#31025 — the package-removal card; type names are the
+        // ones the Studio Delete package dialog shows.
+        packageRemovalTitleLabel={(packageLabel) => t('console.ai.packageRemovalTitle', { package: packageLabel })}
+        packageRemovalRowsLabel={(count) => t('console.ai.packageRemovalRows', { count })}
+        packageRemovalDraftLabel={t('console.ai.packageRemovalDraft')}
+        packageRemovalRowsUnknownLabel={t('console.ai.packageRemovalRowsUnknown')}
+        packageRemovalItemTypeLabel={(type) => translateMetadataType(type, language)}
+        packageRemovalTotalLabel={(count) => t('console.ai.packageRemovalTotal', { count })}
+        packageRemovalUncountedLabel={(count) => t('console.ai.packageRemovalUncounted', { count })}
+        packageRemovalPermanentLabel={t('console.ai.packageRemovalPermanent')}
+        packageRemovalKeptLabel={t('console.ai.packageRemovalKept')}
+        packageRemovalRemovedLabel={t('console.ai.packageRemovalRemoved')}
+        packageRemovalPartialLabel={(failed) => t('console.ai.packageRemovalPartial', { count: failed })}
         surface="plain"
         maxHeight="100%"
         headerSlot={headerSlot}

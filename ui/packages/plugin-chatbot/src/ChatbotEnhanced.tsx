@@ -21,7 +21,7 @@ import * as React from 'react';
 import { cn, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@object-ui/components';
 import { SchemaRenderer } from '@object-ui/react';
 import { useObjectTranslation, useSafeTranslate } from '@object-ui/i18n';
-import { AlertCircle, ArrowRight, Copy, Check, RefreshCw, CornerDownLeft, Bot, Eye, GitCompareArrows, Rocket, Clock3, CheckCircle2, ChevronDown, XCircle, Loader2, ShieldCheck, TriangleAlert, ClipboardList, HelpCircle, Info, Table2, WifiOff, Sparkles, Hourglass } from 'lucide-react';
+import { AlertCircle, ArrowRight, Copy, Check, RefreshCw, CornerDownLeft, Bot, Eye, GitCompareArrows, Rocket, Clock3, CheckCircle2, ChevronDown, XCircle, Loader2, ShieldCheck, TriangleAlert, ClipboardList, HelpCircle, Info, Table2, WifiOff, Sparkles, Hourglass, Trash2 } from 'lucide-react';
 import type { ChatStatus } from 'ai';
 import {
   humanizeToolName,
@@ -93,6 +93,7 @@ import {
   detectBuildChecklist,
   detectPublishedBuildReview,
   buildProgressFromDraftReview,
+  detectPackageRemovedResult,
   type BuildResultChecklist,
   type DraftReview,
   type ProposedChanges,
@@ -100,6 +101,7 @@ import {
   type ProposedPlanCard,
   type RecordWrite,
   type SampleDataCleanup,
+  type PackageRemoval,
   type ReplayOutcome,
 } from './mapMessages';
 
@@ -397,6 +399,12 @@ export interface ChatbotEnhancedToolInvocation {
    * Approve / Deny strip is the decision).
    */
   sampleDataCleanup?: SampleDataCleanup;
+  /**
+   * objectstack#31025 — 「删除软件包」: the objects with their row counts, the
+   * other items by type, and whether the tables are dropped, listed on the card
+   * before the user confirms (the generic Approve / Deny strip is the decision).
+   */
+  packageRemoval?: PackageRemoval;
   /**
    * objectui#5695 — the terminal verdict of a confirm-replay (`replay_<id>`
    * tool results; cloud `runApprovedProposalReplay`). Rendered as a terminal
@@ -867,6 +875,28 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
   sampleDataCleanupAbsentLabel?: (count: number) => string;
   /** cloud#3565 — the line for the recorded rows kept because someone edited them (shown when `edited` > 0). */
   sampleDataCleanupEditedLabel?: (count: number) => string;
+  /** objectstack#31025 — the package-removal card's title, given the package's label. */
+  packageRemovalTitleLabel?: (packageLabel: string) => string;
+  /** objectstack#31025 — an object's row count on the package-removal card. */
+  packageRemovalRowsLabel?: (count: number) => string;
+  /** objectstack#31025 — what a draft object (no table yet) shows in place of a count. */
+  packageRemovalDraftLabel?: string;
+  /** objectstack#31025 — what a published object whose rows could not be counted shows in place of a count. */
+  packageRemovalRowsUnknownLabel?: string;
+  /** objectstack#31025 — the display name of a metadata type in the other-items list (default: the type itself). */
+  packageRemovalItemTypeLabel?: (type: string) => string;
+  /** objectstack#31025 — the total-rows line. */
+  packageRemovalTotalLabel?: (count: number) => string;
+  /** objectstack#31025 — the line saying the total is short by the objects that could not be counted (shown when above 0). */
+  packageRemovalUncountedLabel?: (count: number) => string;
+  /** objectstack#31025 — the destructive line, shown only when the tables are dropped. */
+  packageRemovalPermanentLabel?: string;
+  /** objectstack#31025 — the line shown when the tables and their records are kept. */
+  packageRemovalKeptLabel?: string;
+  /** objectstack#31025 — the outcome once the package was removed. */
+  packageRemovalRemovedLabel?: string;
+  /** objectstack#31025 — the outcome when some items could not be removed, given how many. */
+  packageRemovalPartialLabel?: (failed: number) => string;
   /** Label for the publish-drafts button (default "Publish"). */
   publishDraftsLabel?: string;
   /** Label for the published-state badge that replaces the button (default "Published"). */
@@ -2295,6 +2325,19 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
         `${count} recorded ${count === 1 ? 'row is' : 'rows are'} not listed: you cannot see ${count === 1 ? 'it' : 'them'}, or ${count === 1 ? 'it is' : 'they are'} already gone.`,
       sampleDataCleanupEditedLabel = (count) =>
         `${count} ${count === 1 ? 'row' : 'rows'} edited since being seeded ${count === 1 ? 'stays' : 'stay'}.`,
+      packageRemovalTitleLabel = (packageLabel) => `Delete the package ${packageLabel}`,
+      packageRemovalRowsLabel = (count) => `${count} ${count === 1 ? 'record' : 'records'}`,
+      packageRemovalDraftLabel = 'Draft, no table',
+      packageRemovalRowsUnknownLabel = 'Record count unavailable',
+      packageRemovalItemTypeLabel = (type) => type,
+      packageRemovalTotalLabel = (count) => `${count} ${count === 1 ? 'record' : 'records'} in total`,
+      packageRemovalUncountedLabel = (count) =>
+        `The total leaves out ${count} ${count === 1 ? 'object whose records' : 'objects whose records'} could not be counted.`,
+      packageRemovalPermanentLabel = 'The tables are dropped permanently, with every record in them. Dropped tables do not go to the recycle bin and cannot be restored.',
+      packageRemovalKeptLabel = 'The database tables and every record in them are kept; only the package is removed.',
+      packageRemovalRemovedLabel = 'The package was deleted.',
+      packageRemovalPartialLabel = (failed) =>
+        `The package was partly deleted: ${failed} ${failed === 1 ? 'item was' : 'items were'} not removed.`,
       builderHandoffSupersededTitle = 'A newer request is available',
       onOpenBuilder,
       onOpenRecord,
@@ -3221,7 +3264,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       // the whole-app blueprint JSON and "status: drafted" envelopes stay hidden.
       const showPayload =
         processVisibility === 'debug' ||
-        (isAwaitingApproval && !isRecordWriteCard && !tool.sampleDataCleanup);
+        (isAwaitingApproval && !isRecordWriteCard && !tool.sampleDataCleanup && !tool.packageRemoval);
       // Lifecycle truth for this card's draft package, in precedence order:
       // the server's live pending-draft count (host wired
       // `fetchPendingDraftCount`), else this session's in-memory publish
@@ -3296,6 +3339,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
             Boolean(tool.builderHandoff) ||
             Boolean(tool.recordHandoff) ||
             Boolean(tool.recordWrite) ||
+            Boolean(tool.packageRemoval) ||
             // Fallback confirm gate (unstructured proposal) must open so its
             // "Build it" button is visible without an extra click.
             isUnstructuredBuildProposal(tool)
@@ -3634,6 +3678,100 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                     {sampleDataCleanupAbsentLabel(tool.sampleDataCleanup.absent)}
                   </p>
                 ) : null}
+              </div>
+            ) : null}
+            {/* objectstack#31025 — 「删除软件包」: what goes, per object with its
+                row count, the other items by type, and the total, so the user
+                confirms a list rather than a payload. A draft object has no
+                table and an uncounted one says so; neither reads as 0. When the
+                tables are dropped the card says they are gone for good and skip
+                the recycle bin (the shape's `recycleBin: false`); when they are
+                kept it says so. The generic Approve / Deny strip below stays the
+                decision; once approved, the outcome says removed or partial. */}
+            {tool.packageRemoval ? (
+              <div
+                className="flex flex-col gap-2 border-t bg-muted/20 px-3 py-2.5"
+                data-testid="package-removal"
+                data-data={tool.packageRemoval.data}
+              >
+                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground/80">
+                  <Trash2 className="size-3.5" />
+                  {packageRemovalTitleLabel(tool.packageRemoval.label)}
+                </span>
+                {tool.packageRemoval.objects.length > 0 ? (
+                  <ul className="flex flex-col gap-0.5 text-xs" data-testid="package-removal-objects">
+                    {tool.packageRemoval.objects.map((o) => (
+                      <li
+                        key={o.name}
+                        className="flex items-baseline justify-between gap-3"
+                        data-testid={`package-removal-object-${o.name}`}
+                      >
+                        <span className="min-w-0 truncate">{o.label}</span>
+                        <span className="shrink-0 tabular-nums text-muted-foreground">
+                          {o.rows !== undefined
+                            ? packageRemovalRowsLabel(o.rows)
+                            : o.draft
+                              ? packageRemovalDraftLabel
+                              : packageRemovalRowsUnknownLabel}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                {Object.keys(tool.packageRemoval.items).length > 0 ? (
+                  <ul className="flex flex-col gap-0.5 text-xs" data-testid="package-removal-items">
+                    {Object.entries(tool.packageRemoval.items).map(([type, n]) => (
+                      <li
+                        key={type}
+                        className="flex items-baseline justify-between gap-3"
+                        data-testid={`package-removal-item-${type}`}
+                      >
+                        <span className="min-w-0 truncate">{packageRemovalItemTypeLabel(type)}</span>
+                        <span className="shrink-0 tabular-nums text-muted-foreground">{n}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                <p className="text-xs text-muted-foreground" data-testid="package-removal-total">
+                  {packageRemovalTotalLabel(tool.packageRemoval.totalRows)}
+                </p>
+                {tool.packageRemoval.uncountedObjects > 0 ? (
+                  <p className="text-xs text-muted-foreground" data-testid="package-removal-uncounted">
+                    {packageRemovalUncountedLabel(tool.packageRemoval.uncountedObjects)}
+                  </p>
+                ) : null}
+                {tool.packageRemoval.data === 'dropped' ? (
+                  <p className="text-xs font-medium text-destructive" data-testid="package-removal-permanent">
+                    {packageRemovalPermanentLabel}
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground" data-testid="package-removal-kept">
+                    {packageRemovalKeptLabel}
+                  </p>
+                )}
+                {(() => {
+                  const outcome =
+                    decision?.state === 'success' && decision.decision === 'approved'
+                      ? detectPackageRemovedResult(decision.result)
+                      : undefined;
+                  if (!outcome) return null;
+                  return (
+                    <p
+                      className={
+                        'text-xs font-medium ' +
+                        (outcome.status === 'removed'
+                          ? 'text-emerald-700 dark:text-emerald-400'
+                          : 'text-amber-700 dark:text-amber-400')
+                      }
+                      data-testid="package-removal-outcome"
+                      data-state={outcome.status}
+                    >
+                      {outcome.status === 'removed'
+                        ? packageRemovalRemovedLabel
+                        : packageRemovalPartialLabel(outcome.failed)}
+                    </p>
+                  );
+                })()}
               </div>
             ) : null}
             {/* cloud#3565 — the ONE-record write the user confirms. The card is
