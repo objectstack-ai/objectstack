@@ -90,6 +90,7 @@ import {
   BARE_NAME_ONE_HOLDER_TYPES,
   bareNameHoldersMeet,
   declaredBareNames,
+  declaredBuiltInBoundActions,
   describeBareNameHolder,
   handlerOwnerPackageId,
   holdsBareName,
@@ -2888,12 +2889,17 @@ export interface BareNameConflict {
   readonly existingHolder: BareNameHolder;
   /** The rename that clears it — the incoming package's namespace prefixed — when it has one. */
   readonly rename?: string;
+  /** [#31697] For an action bound to an object under a built-in key ({@link BUILT_IN_BOUND_ACTION_KEYS}): that object. */
+  readonly objectName?: string;
 }
 
 /** One conflict's line, the same at every door. */
 function bareNameConflictLine(c: BareNameConflict): string {
+  const what = c.objectName !== undefined
+    ? `action "${c.name}" bound to "${c.objectName}"`
+    : `${bareNameTypeLabel(c.type)} "${c.name}"`;
   return (
-    `package "${c.incomingPackageId}" declares the ${bareNameTypeLabel(c.type)} "${c.name}", ` +
+    `package "${c.incomingPackageId}" declares the ${what}, ` +
     `already held by ${describeBareNameHolder(c.existingHolder)}` +
     (c.rename ? ` — rename it to "${c.rename}" in "${c.incomingPackageId}"` : '')
   );
@@ -5037,6 +5043,17 @@ export class SchemaRegistry {
         });
       }
     }
+    // [#31697, contract review G6] An action bound to an object under a key the
+    // platform holds (`BUILT_IN_BOUND_ACTION_KEYS`): the platform's own UI posts
+    // to that route by its fixed name.
+    for (const { name, objectName } of declaredBuiltInBoundActions(manifest)) {
+      if (this.getPackage(selfId) !== undefined && declaredBuiltInBoundActions(this.getPackage(selfId)?.manifest)
+        .some((held) => held.name === name && held.objectName === objectName)) continue;
+      conflicts.push({
+        type: 'action', name, objectName, incomingPackageId: selfId, existingHolder: { kind: 'built-in' },
+        rename: this.bareNameRenameFor(selfId, name, manifest.namespace),
+      });
+    }
     if (conflicts.length > 0) throw new BareNameConflictError(conflicts);
   }
 
@@ -5165,6 +5182,18 @@ export class SchemaRegistry {
             type, name, incomingPackageId: packageId, existingHolder: { kind: 'package', packageId: first },
             rename: this.bareNameRenameFor(packageId, name),
           });
+        });
+      }
+    }
+    // [#31697, contract review G6] A package the boot registered that declares
+    // an action bound to a key the platform holds (`BUILT_IN_BOUND_ACTION_KEYS`).
+    for (const pkg of this.getAllPackages()) {
+      const packageId = pkg.manifest?.id;
+      if (typeof packageId !== 'string') continue;
+      for (const { name, objectName } of declaredBuiltInBoundActions(pkg.manifest)) {
+        conflicts.push({
+          type: 'action', name, objectName, incomingPackageId: packageId, existingHolder: { kind: 'built-in' },
+          rename: this.bareNameRenameFor(packageId, name),
         });
       }
     }

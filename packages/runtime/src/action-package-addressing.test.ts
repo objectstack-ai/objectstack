@@ -315,6 +315,34 @@ describe('[#31697] the by-name read of an object-less action two packages hold',
         expect(declaration.action).toMatchObject({ name: 'digest', label: 'alpha' });
     });
 
+    it('[#31697 contract review G3] the bare REST door judges two holders whenever the merged listing answers, even where the protocol\'s engine reports no `sys_metadata` schema', async () => {
+        install(A);
+        install(B);
+        ship(A);
+        ship(B);
+        (protocol as any).engine.getSchema = () => undefined;
+        const declaration = await resolve();
+        expect(declaration.degraded).toBeFalsy();
+        expect(declaration.refusal?.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
+    });
+
+    it('[#31697 contract review G4] a disabled package\'s handler is no owner at the engine either: the bare call resolves and DISPATCHES the enabled holder\'s handler, though the disabled package bound last', async () => {
+        install(A);
+        install(B);
+        ship(A);
+        ship(B);
+        bind(A);
+        bind(B);
+        engine.registry.disablePackage(B);
+        const declaration = await resolve();
+        expect(declaration.refusal).toBeUndefined();
+        expect(declaration.action).toMatchObject({ name: 'approve', label: 'alpha' });
+        expect(await executeRegisteredAction(deps, engine, OBJECT, ['approve'], {}, undefined)).toEqual({ dispatched: true, result: `ran ${A}` });
+        engine.registry.enablePackage(B);
+        await expect(executeRegisteredAction(deps, engine, OBJECT, ['approve'], {}, undefined), 'CONTROL: both enabled, refused naming both')
+            .rejects.toMatchObject({ code: 'RESOURCE_CONFLICT' });
+    });
+
     it('CONTROL — two packages\' actions of one name bound to two objects are not refused (object-bound reads are not this card\'s)', async () => {
         install(A);
         install(B);

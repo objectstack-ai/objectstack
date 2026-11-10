@@ -46,6 +46,7 @@ import {
 import {
   BARE_NAME_ONE_HOLDER_TYPES,
   BUILT_IN_BARE_NAMES,
+  BUILT_IN_BOUND_ACTION_KEYS,
   NAMESPACE_SCOPED_BARE_NAME_TYPES,
   bareNameHoldersMeet,
   bareNameReason,
@@ -425,6 +426,24 @@ describe('the narrowing — the object-less action holds one name per namespace 
     expect([...BUILT_IN_BARE_NAMES.action]).toEqual(['install_package']);
     const { register } = await boot();
     expectRefusal(await register(pkg('com.acme.alpha', { action: ['install_package'] })), 'com.acme.alpha', { kind: 'built-in' }, 'alpha_install_package');
+  });
+
+  it('[#31697, contract review G6] the action key the platform\'s UI posts to, `sys_package:install_package`, is a built-in too: a package binding `install_package` to `sys_package` is refused at install, and the cold boot reports it', async () => {
+    expect([...BUILT_IN_BOUND_ACTION_KEYS]).toEqual(['sys_package:install_package']);
+    const bound = (ns: string, objectName: string) => ({ ...body('action', 'install_package', ns), objectName });
+    // The platform's object, as a served kernel registers it.
+    const sysPackage = { name: 'sys_package', label: 'Package', managedBy: 'platform', fields: { name: { name: 'name', type: 'text', label: 'Name' } } };
+    const { register, registry } = await boot();
+    registry.registerObject(sysPackage as never, 'com.objectstack.platform', 'sys', 'own');
+    const err = await register(pkg('com.acme.alpha', {}, { actions: [bound('alpha', 'sys_package')] }));
+    expectRefusal(err, 'com.acme.alpha', { kind: 'built-in' }, 'alpha_install_package');
+    expect(err!.message).toContain('action "install_package" bound to "sys_package"');
+    expect(await register(pkg('com.acme.beta', {}, { actions: [bound('beta', 'beta_item')] })), 'CONTROL: bound to its own object, it installs')
+      .toBeUndefined();
+
+    const platform = { id: 'com.objectstack.platform', name: 'platform', namespace: 'sys', version: '1.0.0', type: 'plugin', scope: 'system', objects: [sysPackage] };
+    const atBoot = await boot([platform, pkg('com.acme.gamma', {}, { actions: [bound('gamma', 'sys_package')] })]);
+    expect(atBoot.bareNameWarnings().join('\n')).toContain('package "com.acme.gamma" declares the action "install_package" bound to "sys_package"');
   });
 
   it('a built-in name is still refused to a package of any namespace', async () => {

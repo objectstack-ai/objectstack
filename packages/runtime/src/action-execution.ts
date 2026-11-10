@@ -5695,10 +5695,11 @@ async function resolveRouteActionByPackage(deps: ActionExecutionDeps,
  * Fail closed (epic record 6762108144, review F1). A CAPABILITY that is
  * absent judges nothing — no `protocol` with a merged listing and no
  * `metadata` service with a listing (`listObjects` / `loadMany`), or a
- * protocol whose own engine registers no `sys_metadata` object, so its merged
- * listing has no store to read (the in-process fixtures that compose a bare
- * engine; every served kernel registers it, ObjectQL's plugin syncs it
- * first). A read that THROWS
+ * merged listing that fails for want of any metadata store — its engine
+ * registers no `sys_metadata` object ({@link listingNotServed}; the in-process
+ * fixtures that compose a bare engine). The test is the listing's own
+ * failure, never the engine's schema, so a kernel whose listing answers is
+ * judged whatever its topology (contract review G3). Any other read that THROWS
  * once the capability is there is the metadata plane failing to answer
  * (ADR-0110 D3): `degraded` (503), ⛔ never the rungs, which would serve the
  * object's own declaration or the first registered while the refusal is
@@ -5723,7 +5724,6 @@ async function bareRouteHolderRefusal(deps: ActionExecutionDeps,
     };
     const protocol = await resolved('protocol');
     const merged = typeof protocol?.getMetaItems === 'function';
-    if (merged && !holdsMetadataStore(protocol.engine)) return undefined;
     let meta: any;
     if (!merged) {
         meta = await resolved('metadata');
@@ -5735,6 +5735,10 @@ async function bareRouteHolderRefusal(deps: ActionExecutionDeps,
         const actions = merged ? await readMergedItems(protocol, 'action') : undefined;
         decls = await collectActionDeclarations(deps, meta, objects, actions);
     } catch (err: any) {
+        // [contract review G3] A merged listing whose engine registers no
+        // metadata store at all is not served: it judges nothing, as an
+        // absent capability. Any other failure is the plane failing to answer.
+        if (merged && listingNotServed(err)) return undefined;
         return degraded(err);
     }
     const named = decls.filter((d) => d.action?.name === actionName);
@@ -5752,19 +5756,20 @@ async function bareRouteHolderRefusal(deps: ActionExecutionDeps,
 }
 
 /**
- * [#31697] Does the engine the protocol reads its merged listings through
- * register the environment's metadata store, the `sys_metadata` object?
- * `true` when that engine cannot say (it has no schema read): only a
- * structural NO lets the bare door's holder rule judge nothing
- * ({@link bareRouteHolderRefusal}).
+ * [#31697, contract review G3] Is a merged listing's failure the one that says
+ * the listing is not served at all: the protocol's engine registers no
+ * `sys_metadata` object (`OBJECT_NOT_FOUND` naming it, anywhere in the
+ * `cause` chain) — a bare engine with no metadata store behind it? Asked of
+ * the listing's own failure, not of the engine's schema: a kernel that serves
+ * the listing judges two holders whatever its topology (an `environmentId`
+ * kernel included), and only a listing that cannot be read for want of a
+ * store judges nothing.
  */
-function holdsMetadataStore(engine: any): boolean {
-    if (typeof engine?.getSchema !== 'function') return true;
-    try {
-        return Boolean(engine.getSchema('sys_metadata'));
-    } catch {
-        return true;
+function listingNotServed(err: unknown): boolean {
+    for (let at: any = err, depth = 0; at && depth < 8; at = at.cause, depth++) {
+        if (at.code === 'OBJECT_NOT_FOUND' && String(at.message ?? '').includes('sys_metadata')) return true;
     }
+    return false;
 }
 
 /**

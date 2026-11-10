@@ -275,6 +275,50 @@ export const BUILT_IN_BARE_NAMES: Readonly<Record<BareNameOneHolderType, Readonl
 });
 
 /**
+ * [#31697; contract review G6, epic answer on #32213] The OBJECT-BOUND action
+ * keys (`OBJECT:NAME`) the platform itself holds. The Console's marketplace
+ * and the cloud connection post `POST /actions/sys_package/install_package`
+ * by that fixed name, and that route reaches an action bound to `sys_package`
+ * first, so {@link BUILT_IN_BARE_NAMES}' object-less entry alone does not
+ * guard it. A package declaring an action bound to one of these keys is
+ * refused at install, naming the platform — a declared narrowing (first-party
+ * count 0). The census: no other fixed-name action request in the platform's
+ * own code (`packages/**` and `ui/**` sources), and no source in this
+ * repository declares the action (the call reaches the cloud control plane).
+ */
+export const BUILT_IN_BOUND_ACTION_KEYS: ReadonlySet<string> = new Set(['sys_package:install_package']);
+
+/** One object-bound action a manifest declares under a key the platform holds ({@link BUILT_IN_BOUND_ACTION_KEYS}). */
+export interface DeclaredBuiltInBoundAction {
+  readonly name: string;
+  readonly objectName: string;
+}
+
+/**
+ * The object-bound actions `manifest` (and each plugin it carries) declares
+ * under a key the platform holds ({@link BUILT_IN_BOUND_ACTION_KEYS}). An
+ * overridable baseline package is not judged, as {@link declaredBareNames}.
+ */
+export function declaredBuiltInBoundActions(manifest: ObjectStackManifest | unknown): DeclaredBuiltInBoundAction[] {
+  const out: DeclaredBuiltInBoundAction[] = [];
+  if (isOverridableBaseline('action', artifactPackageId(manifest))) return out;
+  const read = (source: unknown) => {
+    const items = source && typeof source === 'object' ? (source as Record<string, unknown>)[COLLECTION_KEY.action] : undefined;
+    if (!Array.isArray(items)) return;
+    for (const item of items) {
+      const name = itemName(item);
+      if (name === undefined || holdsBareName('action', item)) continue;
+      const objectName = standaloneActionOwnerKey(item);
+      if (BUILT_IN_BOUND_ACTION_KEYS.has(`${objectName}:${name}`)) out.push({ name, objectName });
+    }
+  };
+  read(manifest);
+  const plugins = (manifest as { plugins?: unknown } | null | undefined)?.plugins;
+  if (Array.isArray(plugins)) for (const plugin of plugins) read(plugin);
+  return out;
+}
+
+/**
  * [ADR-0150 D2/D9, child B] The covered types whose one-holder rule has
  * narrowed from the deployment to the namespace (module doc, "The narrowing").
  * Each type joins in its own trailing change, once its by-name readers, its

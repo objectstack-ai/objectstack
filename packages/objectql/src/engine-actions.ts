@@ -275,7 +275,7 @@ export class ActionsFacet {
   }
 
   /** The body of `ObjectQL#executeAction`; the method's docblock there is its contract. */
-  static async executeAction(this: Pick<ActionsHost, 'actions' | 'packageActions'>, objectName: string, actionName: string, ctx: any, options?: ExecuteActionOptions): Promise<any> {
+  static async executeAction(this: Pick<ActionsHost, 'actions' | 'packageActions' | 'registry'>, objectName: string, actionName: string, ctx: any, options?: ExecuteActionOptions): Promise<any> {
     const key = `${objectName}:${actionName}`;
     // [ADR-0150 D5, #31697; ruling record 6729825528, letter A] A call that
     // names no package runs the unqualified slot's handler, except in the two
@@ -316,22 +316,42 @@ export class ActionsFacet {
    * declared override, ADR-0146 D9) or is re-judged by the next resync once a
    * package ships the name (#30542), as an environment row over a held name is
    * that holder's overlay (ADR-0150 D4).
+   *
+   * [contract review G4] A DISABLED package is no owner here, as it holds
+   * nothing at the declaration doors (`isPackageDisabled`): its handler stays
+   * in its slot (disabling flips the package row only), but it is not counted,
+   * and when the unqualified slot holds its handler while an enabled owner
+   * remains, that owner's handler runs. With no enabled owner left the
+   * unqualified slot answers as before, and the doors' own disabled-package
+   * gates judge the call.
    */
-  static unqualifiedHandler(this: Pick<ActionsHost, 'actions' | 'packageActions'>, key: string): ActionHandlerEntry | undefined {
+  static unqualifiedHandler(this: Pick<ActionsHost, 'actions' | 'packageActions' | 'registry'>, key: string): ActionHandlerEntry | undefined {
     const packages: string[] = [];
     const shared: string[] = [];
+    const live: Array<{ coordinate: string; isShared: boolean }> = [];
+    const disabledCoordinates = new Set<string>();
     for (const [coordinate, slot] of this.packageActions) {
       const owner = ActionsFacet.codeOwnerOf(slot.get(key));
       if (owner === undefined) continue;
       const label = owner === HOST_CODE_OWNER ? undefined : owner;
       const isShared = coordinate === HOST_ACTION_COORDINATE || isSharedHandlerCoordinate(coordinate, label);
+      if (!isShared && this.registry?.isPackageDisabled?.(coordinate) === true) {
+        disabledCoordinates.add(coordinate);
+        continue;
+      }
       (isShared ? shared : packages).push(owner);
+      live.push({ coordinate, isShared });
     }
     const objectLess = isObjectLessActionKey(key.slice(0, key.lastIndexOf(':')));
     if (packages.length > 1 || (objectLess && packages.length > 0 && shared.length > 0)) {
       throw new UnqualifiedActionHandlerAmbiguityError(key, [...packages, ...shared]);
     }
-    return this.actions.get(key);
+    const entry = this.actions.get(key);
+    if (entry !== undefined && disabledCoordinates.has(ActionsFacet.coordinateOfUnqualified.call(this, key))) {
+      const enabled = packages.length === 1 ? live.find((at) => !at.isShared) : shared.length === 1 ? live[0] : undefined;
+      if (enabled !== undefined) return this.packageActions.get(enabled.coordinate)?.get(key) ?? entry;
+    }
+    return entry;
   }
 
   /**
