@@ -105,7 +105,7 @@ const {
 | `isPreviewMode` | `boolean` | Whether the app is running in preview mode |
 | `previewMode` | `PreviewModeOptions \| null` | Preview mode configuration (only set when `isPreviewMode` is true) |
 | `signIn` | `(email, password) => Promise` | Sign in with credentials |
-| `signOut` | `() => Promise` | Sign out the current user |
+| `signOut` | `() => Promise` | Sign out the current user and clear their browser storage (see [Browser storage at sign-out](#browser-storage-at-sign-out)) |
 | `signUp` | `(name, email, password) => Promise` | Register a new user |
 
 ### AuthGuard
@@ -197,6 +197,20 @@ const authedFetch = createAuthenticatedFetch();
 // origin so the platform token never leaks to third-party hosts:
 const sameOriginFetch = createAuthenticatedFetch({ sameOriginOnly: true });
 ```
+
+### Browser storage at sign-out
+
+Every sign-out clears the `localStorage` and `sessionStorage` keys the session
+wrote: `signOut()`, and any session read that answers "no session" in a browser
+that has held one (a session that expired, was revoked or was ended in another
+tab, at boot or in place). It is the same allowlist sweep a change of session
+user runs, so a key added later is covered without being listed. What the
+sweep leaves: the session token (`auth-session-token`, which the auth client
+manages itself), the session-user pointer
+(`auth-session-user-id`), the theme (`vite-ui-theme`) and the sign-in page
+language (`objectui-locale`, `objectui-locale-seed`). A session read that fails
+is not a sign-out and clears nothing. Server-side user preferences are not
+changed.
 
 ### getSessionOwnerChangeCount / subscribeSessionOwnerChange
 
