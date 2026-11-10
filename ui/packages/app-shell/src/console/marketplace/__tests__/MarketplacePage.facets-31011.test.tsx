@@ -98,7 +98,7 @@ const answer = (status: number, body: unknown) =>
 /** Each catalog list read's query, in order. */
 let catalogQueries: URLSearchParams[] = [];
 /** The rows and total the stubbed list door answers a read with. */
-let catalogAnswer: (query: URLSearchParams) => { items: unknown[]; total?: number } = () => ({ items: [] });
+let catalogAnswer: (query: URLSearchParams) => { items: unknown[]; total?: number; facets?: unknown } = () => ({ items: [] });
 
 async function boot(answerWith: typeof catalogAnswer) {
   resetRuntimeConfigForTesting();
@@ -120,10 +120,13 @@ async function boot(answerWith: typeof catalogAnswer) {
       }
       if (path === '/api/v1/marketplace/packages' && method === 'GET') {
         catalogQueries.push(url.searchParams);
-        const { items, total } = catalogAnswer(url.searchParams);
+        const { items, total, facets } = catalogAnswer(url.searchParams);
         const limit = Number(url.searchParams.get('limit'));
         const offset = Number(url.searchParams.get('offset'));
-        return answer(200, { success: true, data: { items, total: total ?? items.length, limit, offset } });
+        return answer(200, {
+          success: true,
+          data: { items, total: total ?? items.length, limit, offset, ...(facets !== undefined ? { facets } : {}) },
+        });
       }
       if (path === '/api/v1/marketplace/install-local' && method === 'GET') {
         return answer(200, { success: true, data: { items: [], total: 0 } });
@@ -474,5 +477,108 @@ describe('Marketplace card languages (objectstack#31462)', () => {
 
     expect(screen.queryAllByTestId('marketplace-card-languages')).toHaveLength(0);
     expect(screen.queryByText(L.languages.none)).toBeNull();
+  });
+});
+
+/**
+ * The languages facet (objectstack#31462): its values are the catalog's own
+ * counts, `data.facets.languages` — `{ value, count }`, counts above zero
+ * only, most listings first, then by value — because no vocabulary of locales
+ * is declared. Each button is labelled as the language menu names the locale
+ * and carries its count; a selection goes out as ONE comma-joined
+ * `?languages=` in the served spelling. The counts leave out the facet's own
+ * selection, so the other languages stay on offer. An empty list, or no
+ * `facets` at all, draws no row.
+ */
+describe('Marketplace languages facet (objectstack#31462)', () => {
+  const FACETS = {
+    business_functions: [],
+    industries: [],
+    solution_types: [],
+    languages: [
+      { value: 'en', count: 4 },
+      { value: 'zh-CN', count: 3 },
+      { value: 'ja-JP', count: 1 },
+      { value: 'th', count: 1 },
+    ],
+  };
+  const languageButtons = () =>
+    within(screen.getByRole('group', { name: L.facet.languages })).getAllByRole('button');
+
+  it('offers the served counts in the served order, named like the language menu, each with its count', async () => {
+    await renderPage(() => ({ items: TAXONOMY_CATALOG, facets: FACETS }));
+
+    expect(languageButtons().map((b) => b.getAttribute('data-testid'))).toEqual([
+      'marketplace-facet-languages-en',
+      'marketplace-facet-languages-zh-CN',
+      'marketplace-facet-languages-ja-JP',
+      'marketplace-facet-languages-th',
+    ]);
+    expect(languageButtons().map((b) => b.textContent)).toEqual(['English4', '简体中文3', '日本語1', 'ไทย1']);
+    expect(lastQuery()).toEqual(WINDOW);
+  });
+
+  it('a selection is one comma-joined ?languages= in the served spelling; deselecting drops it', async () => {
+    await renderPage(() => ({ items: TAXONOMY_CATALOG, facets: FACETS }));
+
+    fireEvent.click(facetButton('languages', 'zh-CN'));
+    await expectRead(['languages=zh-CN', ...WINDOW]);
+    expect(facetButton('languages', 'zh-CN')).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(facetButton('languages', 'ja-JP'));
+    await expectRead(['languages=ja-JP,zh-CN', ...WINDOW]);
+
+    fireEvent.click(facetButton('languages', 'zh-CN'));
+    fireEvent.click(facetButton('languages', 'ja-JP'));
+    await expectRead(WINDOW);
+  });
+
+  it('a selected language the newest counts no longer name stays on offer, without a count', async () => {
+    await renderPage((query) => ({
+      items: TAXONOMY_CATALOG,
+      facets: query.get('industries')
+        ? { ...FACETS, languages: [{ value: 'en', count: 1 }] }
+        : FACETS,
+    }));
+
+    fireEvent.click(facetButton('languages', 'th'));
+    await expectRead(['languages=th', ...WINDOW]);
+    fireEvent.click(facetButton('industry', 'retail'));
+    await expectRead(['industries=retail', 'languages=th', ...WINDOW]);
+
+    await waitFor(() => expect(languageButtons().map((b) => b.textContent)).toEqual(['English1', 'ไทย']));
+    expect(facetButton('languages', 'th')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('CONTROL: an empty languages list, or no facets at all, draws no languages row', async () => {
+    await renderPage(() => ({ items: TAXONOMY_CATALOG, facets: { ...FACETS, languages: [] } }));
+    expect(screen.queryByRole('group', { name: L.facet.languages })).toBeNull();
+    cleanup();
+
+    await renderPage(always(TAXONOMY_CATALOG));
+    expect(screen.queryByRole('group', { name: L.facet.languages })).toBeNull();
+    expect(screen.getByRole('group', { name: L.facet.businessFunction })).toBeInTheDocument();
+  });
+
+  it('the card puts the default first by default_locale, not by position', async () => {
+    const LATE_DEFAULT = row('latedefault', 'Late Default', {
+      latest_version: {
+        id: 'ver_late',
+        version: '1.0.0',
+        supported_locales: ['en', 'zh-CN'],
+        locale_coverage: {
+          default_locale: 'zh-CN',
+          expected_keys: 10,
+          locales: [
+            { locale: 'en', translated: 8, coverage_percent: 80 },
+            { locale: 'zh-CN', translated: 10, coverage_percent: 100 },
+          ],
+        },
+      },
+    });
+    await renderPage(always([LATE_DEFAULT]));
+
+    const line = within(screen.getByTestId('marketplace-card-com.acme.latedefault')).getByTestId('marketplace-card-languages');
+    expect(line).toHaveAttribute('title', '简体中文 100% · English 80%');
   });
 });
