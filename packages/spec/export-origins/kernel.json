@@ -513,6 +513,7 @@
     "listUnregisteredKindSchemaTypes": "src/kernel/metadata-type-schemas.ts#listUnregisteredKindSchemaTypes (function)",
     "lowerRequiresFeature": "src/kernel/public-auth-features.ts#lowerRequiresFeature (function)",
     "manifestIdRefusal": "src/kernel/manifest.zod.ts#manifestIdRefusal (function)",
+    "namespacedHoldersMeet": "src/kernel/namespace-prefix.ts#namespacedHoldersMeet (function)",
     "readNamespacePositionSegment": "src/kernel/address-grammar.ts#readNamespacePositionSegment (function)",
     "redactStoredMetadataBody": "src/kernel/metadata-type-redaction.ts#redactStoredMetadataBody (function)",
     "redactStoredMetadataRow": "src/kernel/metadata-type-redaction.ts#redactStoredMetadataRow (function)",
