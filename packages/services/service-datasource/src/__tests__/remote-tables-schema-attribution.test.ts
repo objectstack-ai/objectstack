@@ -37,6 +37,7 @@ import {
   createSessionAuthService,
   createGrantsEngine,
 } from './entitled-caller.fixture.js';
+import { thrownRefusalText } from '../datasource-refusal.js';
 
 const col = (name: string, primaryKey = false): IntrospectedColumn => ({
   name,
@@ -144,13 +145,16 @@ describe('SQLite, through a real SqlDriver introspection (bare names)', () => {
   it('refuses ?schema= rather than answering the unfiltered list', async () => {
     const err = await refusalOf(serviceOver(await introspectSqlite()).listRemoteTables(DS, { schema: 'main' }));
     expect(err).toMatchObject({ code: 'EXTERNAL_DATASOURCE_ERROR', status: 400 });
-    expect(err.message).toContain(`schema 'main'`);
+    // The reason a client branches on; the filter and the remedies in the hint, beside a one-line message.
+    expect(err).toMatchObject({ details: { reason: 'schema_filter_unattributed' } });
+    expect(err.message.length).toBeLessThanOrEqual(160);
+    expect(thrownRefusalText(err)).toContain(`schema 'main'`);
   });
 
   it('refuses a listing the allow-list cannot narrow', async () => {
     const err = await refusalOf(serviceOver(await introspectSqlite(), { allowedSchemas: ['main'] }).listRemoteTables(DS));
     expect(err).toMatchObject({ code: 'EXTERNAL_DATASOURCE_ERROR', status: 400 });
-    expect(err.message).toContain('external.allowedSchemas');
+    expect(thrownRefusalText(err)).toContain('external.allowedSchemas');
   });
 });
 
@@ -158,7 +162,7 @@ describe('Postgres, through a fake shaped like the real driver introspection (ba
   it('?schema=sales no longer answers the public tables: it refuses', async () => {
     const err = await refusalOf(serviceOver(PG_DEFAULT_PATH).listRemoteTables(DS, { schema: 'sales' }));
     expect(err).toMatchObject({ code: 'EXTERNAL_DATASOURCE_ERROR', status: 400 });
-    expect(err.message).toContain(`schema 'sales'`);
+    expect(thrownRefusalText(err)).toContain(`schema 'sales'`);
   });
 
   it('refuses even when every table is in fact in the requested schema, because the listing cannot say so', async () => {
@@ -169,7 +173,7 @@ describe('Postgres, through a fake shaped like the real driver introspection (ba
   it('an allow-list refuses the listing instead of letting every table through', async () => {
     const err = await refusalOf(serviceOver(PG_SALES_PATH, { allowedSchemas: ['public'] }).listRemoteTables(DS));
     expect(err).toMatchObject({ code: 'EXTERNAL_DATASOURCE_ERROR', status: 400 });
-    expect(err.message).toContain('external.allowedSchemas');
+    expect(thrownRefusalText(err)).toContain('external.allowedSchemas');
   });
 
   it('answers an empty list where no table can pass whatever its schema', async () => {
@@ -210,7 +214,7 @@ describe('control: a producer that qualifies its names is narrowed, as before', 
     };
     const err = await refusalOf(serviceOver(mixed).listRemoteTables(DS, { schema: 'sales' }));
     expect(err).toMatchObject({ code: 'EXTERNAL_DATASOURCE_ERROR', status: 400 });
-    expect(err.message).toContain(`'audit_log'`);
+    expect(thrownRefusalText(err)).toContain(`'audit_log'`);
   });
 });
 
