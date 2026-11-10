@@ -1005,9 +1005,9 @@ describe('[ADR-0106 D1] an action the caller is not shown is answered on every r
 
     /** A project row, written in the system context, read back the same way. */
     const seed = async (id: string) => {
-        await engine.insert(OBJ, { id, title: 'Apollo', stage: 'open', budget: 100, organization_id: ORG }, { context: { isSystem: true } } as any);
+        await engine.insert(OBJ, { id, title: 'Apollo', stage: 'open', budget: 100, organization_id: ORG }, { context: { isSystem: true } });
     };
-    const rowOf = async (id: string) => (await engine.find(OBJ, { where: { id } } as any, { context: { isSystem: true } } as any) as any[])?.[0];
+    const rowOf = async (id: string): Promise<any> => engine.findOne(OBJ, { where: { id }, context: { isSystem: true } });
 
     /** `POST /actions/:object/:action` under `persona`, as the wire answers it. */
     async function restRun(persona: Persona, action: string, bag: Record<string, unknown>, over: Record<string, any> = services) {
