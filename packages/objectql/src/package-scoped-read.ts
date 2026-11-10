@@ -13,9 +13,11 @@
  *
  * {@link PACKAGE_SCOPED_READ_TYPES}: the presentation and AI types of child E8
  * (#31680) — app, page, dashboard, report, book, analytics cube, tool, skill
- * and agent — and the picklist (#32070), whose bare by-name read was the
- * last of its readers still on `getItem`. A later child adds its own types to
- * the list in its own change; until then a type's by-name read stays
+ * and agent — then `api` (#32069), whose in-memory store `@objectstack/metadata`
+ * keeps per `(package, name)`, so its qualified read serves the holder's own
+ * body, and the picklist (#32070), whose bare by-name read was the last of its
+ * readers still on `getItem`. A later child adds its own types to the list in
+ * its own change; until then a type's by-name read stays
  * `SchemaRegistry.getItem`'s, exactly as before (`SchemaRegistry.resolveItem`).
  *
  * ## What a reader answers
@@ -60,8 +62,8 @@ import {
 
 /**
  * The types whose by-name readers consult `(package, name)` today — child E8's
- * nine (#31680) and the picklist (#32070), as the registry spells them. Each
- * later child of epic #31527 appends its own.
+ * nine (#31680), as the registry spells them, then `api` (#32069) and the
+ * picklist (#32070). Each later child of epic #31527 appends its own.
  */
 export const PACKAGE_SCOPED_READ_TYPES = Object.freeze([
   'app',
@@ -73,6 +75,7 @@ export const PACKAGE_SCOPED_READ_TYPES = Object.freeze([
   'tool',
   'skill',
   'agent',
+  'api',
   // [#32070] the bare `/meta/picklist/NAME` read; a field's `picklist:` is
   // already resolved by its referrer's package (child E6), not through here.
   'picklist',
