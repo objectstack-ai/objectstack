@@ -2106,6 +2106,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "ジャストインタイムのプロビジョニングを許可",
         help: "招待制のオーディエンス方針のもとで、アカウントも招待もないままこのプロバイダー経由でサインインした人のアカウントを作成します。既定ではオフで、そのような人は拒否されます。ほかの方針では従来どおりプロビジョニングされます。「サインインオプションを編集」で変更します。"
       },
+      skip_user_info: {
+        label: "ID トークンのみからクレームを読み取る",
+        help: "OIDC のみ。ID プロバイダーの検証済み ID トークンからメールアドレス、名前、グループを読み取り、userinfo エンドポイントは呼び出しません。Microsoft Entra ID ではオンにしてください。その userinfo 応答にはグループも preferred_username も含まれません。既定はオフで、userinfo エンドポイントを持つプロバイダーはその応答からクレームを読み取ります。「サインインオプションを編集」で変更します。"
+      },
       user_id: {
         label: "登録者",
         help: "このプロバイダーを登録したユーザー"
@@ -2432,6 +2436,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "トークンダイジェスト",
         help: "デプロイメントの認証シークレットを鍵とする、ベアラーの HMAC-SHA-256（base64url）— 一方向。平文は発行時に一度だけ表示され、保存されません。"
       },
+      token_hint: {
+        label: "トークンのヒント",
+        help: "ベアラートークンの末尾 4 文字。発行時に記録され、同じ接続の資格情報を見分けるために使います。トークン本体やそのダイジェストではありません。ヒントの記録が始まる前に発行された資格情報では空です。"
+      },
       active: {
         label: "有効",
         help: "失効スイッチ — 無効な資格情報は検証時に拒否されます"
@@ -2439,6 +2447,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       expires_at: {
         label: "有効期限",
         help: "段階的な資格情報ローテーションのための任意の強制有効期限。期限切れの資格情報は拒否されます"
+      },
+      last_used_at: {
+        label: "最終使用日時",
+        help: "この資格情報が最後に SCIM リクエストを認証した日時(最大 1 分に 1 回記録)。使用記録がない場合は空です"
       },
       user_id: {
         label: "発行者",
@@ -2488,6 +2500,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "トークンを保存しました",
           fields: {
             token: "トークン",
+            tokenHint: "トークンのヒント",
             connectionId: "接続 ID",
             expiresAt: "有効期限"
           }

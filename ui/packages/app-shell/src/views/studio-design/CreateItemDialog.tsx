@@ -37,6 +37,7 @@ import {
   Label,
 } from '@object-ui/components';
 import { t, type SupportedLocale } from '../metadata-admin/i18n.js';
+import { DisabledControlReason } from '../metadata-admin/inspectors/_shared.js';
 import { toFieldName, toFieldNameLoose } from '../metadata-admin/previews/object-fields-io.js';
 import { romanizeHan, romanizerPending, useHanRomanizer } from '../metadata-admin/romanizeHan.js';
 
@@ -125,6 +126,15 @@ export function CreateItemDialog({
   const notDerived =
     !!label.trim() && !name.trim() && !toFieldNameLoose(romanizeHan(label)) && !romanizerPending(label);
 
+  // Why the submit button is off, while it is off for the input: a display
+  // name first, then an identifier. A submit in flight gives none — its label
+  // already says so.
+  const submitReason = busy || valid
+    ? undefined
+    : !label.trim()
+      ? t('engine.studio.createItem.needLabel', locale)
+      : t('engine.studio.createItem.needName', locale);
+
   const submit = () => {
     if (!valid || busy) return;
     onSubmit({ label: label.trim(), name: finalName });
@@ -186,9 +196,18 @@ export function CreateItemDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             {t('engine.studio.cancel', locale)}
           </Button>
-          <Button onClick={submit} disabled={!valid || busy}>
-            {busy ? (submittingLabel ?? submitLabel) : submitLabel}
-          </Button>
+          {/* The footer stacks its buttons full-width on a narrow screen. */}
+          <DisabledControlReason
+            reason={submitReason}
+            testId="create-item-submit-reason"
+            className="[&>button]:w-full sm:[&>button]:w-auto"
+          >
+            {(describedBy) => (
+              <Button onClick={submit} disabled={!valid || busy} aria-describedby={describedBy}>
+                {busy ? (submittingLabel ?? submitLabel) : submitLabel}
+              </Button>
+            )}
+          </DisabledControlReason>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -1,6 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
+// Pay the driver's first load at collection, not inside a clocked `it()`
+// (`check:test-source-alias`).
+import '@objectstack/driver-sql';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 import { registerDatasourceAdminRoutes } from '../admin-routes.js';
 import {
@@ -495,7 +498,7 @@ describe('DELETE /datasources/:name — the bound-object refusal carries details
     expect(h.exists('parts_db')).toBe(false);
   });
 
-  it('another 400 of the same door (a code-defined datasource) carries no details', async () => {
+  it('another 400 of the same door (a code-defined datasource) carries its own reason, and none of the bound-object facts', async () => {
     const h = deleteHarness({ diagnosed: { count: 2, degraded: false, errors: [], objects: ['bin', 'part'] } });
 
     const res = await h.del('code_db');
@@ -506,6 +509,7 @@ describe('DELETE /datasources/:name — the bound-object refusal carries details
       error: {
         code: 'DATASOURCE_ADMIN_ERROR',
         message: "Datasource 'code_db' is code-defined and cannot be removed at runtime.",
+        details: { reason: 'code_defined' },
       },
     });
   });

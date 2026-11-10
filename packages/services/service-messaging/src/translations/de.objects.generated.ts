@@ -60,6 +60,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       created_at: {
         label: "Erstellt am"
+      },
+      keyed_text: {
+        label: "Textschlüssel",
+        help: "Die Katalogschlüssel und Parameter, aus denen Titel und Text bei der Zustellung gerendert wurden. Beim Lesen werden Titel und Text daraus in der Sprache des Lesers neu gerendert; null, wenn die Benachrichtigung keine Schlüssel trug – dann werden der gespeicherte Titel und Text unverändert ausgeliefert."
       }
     },
     _views: {

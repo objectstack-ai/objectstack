@@ -66,6 +66,13 @@ export function VerifyEmailPage() {
         // for a garbage or expired token. So the SPA keeps the post-verify
         // UX, and only that JSON receipt counts as success: a 2xx that is
         // not it (an HTML page, a followed redirect's landing) is an error.
+        //
+        // The one other success: when verifying would also sign in an account
+        // with an enrolled second factor, the route answers the two-factor
+        // challenge (`{ twoFactorRedirect: true, twoFactorMethods }`) instead
+        // of the receipt. The address IS verified; only the session waits for
+        // the second factor. So the page says the email is verified and sends
+        // the person to sign in, where the same two-factor step follows.
         const query = new URLSearchParams({ token });
         const res = await fetch(`${AUTH_BASE}/verify-email?${query}`, {
           method: 'GET',
@@ -74,8 +81,10 @@ export function VerifyEmailPage() {
         const data = (await res.json().catch(() => null)) as {
           status?: unknown;
           message?: unknown;
+          twoFactorRedirect?: unknown;
         } | null;
-        if (!res.ok || data?.status !== true) {
+        const verifiedPendingSecondFactor = res.ok && data?.twoFactorRedirect === true;
+        if (!res.ok || (data?.status !== true && !verifiedPendingSecondFactor)) {
           const serverMessage =
             !res.ok && typeof data?.message === 'string' ? data.message : '';
           throw new Error(
