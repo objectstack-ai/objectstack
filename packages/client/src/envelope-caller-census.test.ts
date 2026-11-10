@@ -589,6 +589,12 @@ const LEDGER: readonly LedgerRow[] = [
         method: 'analytics.explain', receiver: 'sdk', count: 1, verdict: 'RESULT_INSENSITIVE',
         why: 'asserts POST /analytics/sql and the body; the resolved value is discarded',
     },
+    // [#31695] the package-address pins: the dialled path, and which holder ran
+    {
+        file: 'packages/client/src/package-addressing.test.ts',
+        method: 'automation.trigger', receiver: 'sdk', count: 3, verdict: 'RESULT_INSENSITIVE',
+        why: 'two assert the dialled URL only (bare / qualified, and `_env`); one runs the flow through the real dispatcher and reads which flow the automation service was handed, never the resolved value',
+    },
 ];
 
 /**
@@ -839,9 +845,10 @@ describe('#13079 §3 — every call site is classified', () => {
         expect(production, literalNote()).toEqual([]);
     });
 
-    it('records the split: 18 payload pins, 10 result-insensitive, 19 not-SDK', () => {
+    it('records the split: 18 payload pins, 13 result-insensitive, 19 not-SDK', () => {
         expect(verdictTotal('PAYLOAD_DEPENDENT')).toBe(18);
-        expect(verdictTotal('RESULT_INSENSITIVE')).toBe(10);
+        // [#31695] 10 -> 13: the package-address pins' three trigger calls (§3).
+        expect(verdictTotal('RESULT_INSENSITIVE')).toBe(13);
         // [#21441] 8 -> 9: the date-bucket echo pin's producer call (§2).
         // [#21647] 9 -> 11: the bucket echo enumeration's two producer calls (§2).
         // [#28841] 11 -> 14: the dry-run parity pin's three producer calls (§2).
@@ -851,10 +858,12 @@ describe('#13079 §3 — every call site is classified', () => {
         expect(verdictTotal('NOT_SDK')).toBe(19);
         // The three above are LEDGER sums and cannot move on a census reading;
         // this one is census-derived, so it carries the note. [#13874]
-        expect(sdkSites.length, literalNote()).toBe(28);
+        // [#31695] 28 -> 31: the package-address pins' three trigger calls.
+        expect(sdkSites.length, literalNote()).toBe(31);
         // [#25803] 28 -> 29 first-party SDK sites since the objectui import: the
         // walk's 28 plus the recorded objectui one, which it does not enter.
-        expect(sdkSites.length + OBJECTUI_CENSUS.sdkCallSites, literalNote()).toBe(29);
+        // [#31695] 29 -> 32: the walk's 31 plus that objectui one.
+        expect(sdkSites.length + OBJECTUI_CENSUS.sdkCallSites, literalNote()).toBe(32);
     });
 });
 

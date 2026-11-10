@@ -26,7 +26,10 @@ import {
   parentWriteReachSecurity,
   runDashboardWindowProofs,
   formatDashboardWindowReport,
+  readSeedOutcome,
+  formatSeedReport,
   type VerifyReport,
+  type SeedReport,
   type RlsReport,
   type ReferenceShapeReport,
   type DeleteBehaviorReport,
@@ -37,7 +40,8 @@ import {
   type RlsPositionPersonaInput,
 } from '@objectstack/verify';
 import { authoringRulesFor } from '@objectstack/lint';
-import { loadConfig } from '../utils/config.js';
+import { loadConfig, resolveConfigPath } from '../utils/config.js';
+import { loadProjectEnvFiles } from '../utils/schema-migrate.js';
 import { judgeAuthorTimeRules, VERIFY_RULE_COMMAND } from '../utils/author-time-rules.js';
 import {
   printError,
@@ -91,8 +95,11 @@ export function resolveVerifyMultiTenant(flags: { 'multi-tenant'?: boolean }): b
  *      prepared the way `os validate` prepares it (`utils/author-time-rules.ts`).
  *      A gating finding fails the run with those findings, and stage 2 never
  *      starts (#21323);
- *   2. boot the app in-process and exercise it through the real HTTP stack,
+ *   2. boot the app in-process, with the project's `.env*` files loaded as
+ *      `os dev` loads them, and exercise it through the real HTTP stack,
  *      asserting runtime behavior the static gates can't see:
+ *        - the seed (#32141): the records the app's seed declares land at
+ *          boot; each one the boot drops counts as a failure
  *        - data fidelity: author → write → read → assert, per object/field type
  *        - authorization (--rls): "you can't write what you can't read" (#1994 class)
  *        - reference-value shape (--reference-shapes, ADR-0104 D1): every
@@ -247,7 +254,28 @@ export default class Verify extends Command {
     'multi-tenant': boolean;
     json: boolean;
   }): Promise<void> {
-    const { config, absolutePath } = await loadConfig(flags.app);
+    // [#32141] The project's `.env*` files, loaded before anything reads the
+    // environment — the config module, the tenancy posture below, and every
+    // service the boot composes (the settings service reads its `OS_*`
+    // pins at start). `os dev`, `os serve`, `os start` and `os migrate` all
+    // load them first; `os verify` did not, so a value an app pins in its
+    // `.env` was missing from verify's boot alone. Measured on the showcase,
+    // which pins its home currency there (`OS_LOCALIZATION_CURRENCY=USD`):
+    // verify's boot had none, refused all 12 seeded invoices
+    // (`ERR_HOME_CURRENCY_UNSET`) and the 7 invoice lines under them — 26
+    // seed records dropped where `os dev` drops none.
+    //
+    // Through `loadProjectEnvFiles`, the load `os serve` and `os migrate`
+    // share, never a second dotenv call. Anchored at the app's root, the
+    // directory holding its config, as `bootStack` is below (#22301): `--app`
+    // run from elsewhere reads the app's files, not the cwd's. In the
+    // development mode, because the boot is the development composition (the
+    // seeded dev admin, an in-memory database, the harness's own key): the
+    // files `os dev` reads. dotenv-flow never overrides a variable this process
+    // already has, so an exported value still wins, as it does for `serve`.
+    const configPath = resolveConfigPath(flags.app);
+    loadProjectEnvFiles(dirname(configPath), { dev: true });
+    const { config, absolutePath } = await loadConfig(configPath);
 
     // Stage 1 — the author-time rules, before anything boots. A failure here
     // exits inside the call; see `runAuthorTimeStage`.
@@ -268,9 +296,15 @@ export default class Verify extends Command {
 
     // Data fidelity runs on its own pristine stack.
     let crud: VerifyReport;
+    let seed: SeedReport;
     {
       const stack = await bootStack(config, { multiTenant, hostRoot });
       try {
+        // [#32141] The boot's seed, judged before anything runs against the
+        // rows it landed (waiting first for a seed still writing past the
+        // inline budget). Every later phase boots the same config and seeds
+        // the same rows, so this one reading stands for all of them.
+        seed = await readSeedOutcome(stack);
         const adminToken = await stack.signIn();
         crud = await runCrudVerification(stack, adminToken, config);
       } finally {
@@ -424,6 +458,12 @@ export default class Verify extends Command {
     // position that could not be provisioned counts for the same reason a
     // degraded base persona does: the run covered less than its numbers read.
     const hardFailures =
+      // [#32141] Every seed record the boot dropped, every reference field it
+      // dropped from a written record, every install that came up empty, and
+      // one for a seed this run could not judge (still writing, or settled
+      // with no outcome): the run covered less than its numbers read, the
+      // reason a degraded RLS probe counts below.
+      seed.hardFailures +
       crud.summary.createFailed +
       crud.summary.readFailed +
       crud.summary.fidelityGaps +
@@ -455,9 +495,10 @@ export default class Verify extends Command {
       // `emitJson`, not `this.log`: stdout is reserved (see `run()`), so the
       // report has to leave through the real stream — and awaiting the write
       // drains a report larger than one pipe buffer before `this.exit` below.
-      await emitJson({ app: crud.app, config: absolutePath, multiTenant, crud, rls, referenceShapes, deleteBehaviors, uniqueScopes, parentWriteReach, dashboardWindows, hardFailures });
+      await emitJson({ app: crud.app, config: absolutePath, multiTenant, seed, crud, rls, referenceShapes, deleteBehaviors, uniqueScopes, parentWriteReach, dashboardWindows, hardFailures });
     } else {
       this.log(formatReport(crud));
+      this.log(formatSeedReport(seed));
       if (rls) this.log(formatRlsReport(rls));
       if (referenceShapes) this.log(formatReferenceShapeReport(referenceShapes));
       if (deleteBehaviors) this.log(formatDeleteBehaviorReport(deleteBehaviors));

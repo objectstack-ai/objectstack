@@ -64,6 +64,7 @@
  * never returned.
  */
 
+import { CRYPTO_CONTEXT_SCOPES } from '@objectstack/spec/contracts';
 import type { CryptoContext, CryptoContextScope, CryptoHandle } from '@objectstack/spec/contracts';
 import type { CiphertextDerivationStatus } from '@objectstack/service-settings';
 import {
@@ -75,19 +76,28 @@ import {
 /**
  * The producer scope each holder family's references are sealed under.
  *
- * A `Record` over the closed family set, so a fourth family cannot join the
+ * A `Record` over the closed family set, so a new family cannot join the
  * union without a scope here: the map stops compiling first. The pairing is
  * the producers' own (ADR-0128 D1): `SettingsService` holds in
  * `sys_setting.value_enc` and seals under `settings`, the engine's
  * secret-field path holds a `secret:` ref on the business row and seals under
- * `object_secret_field`, and the datasource binder holds a `sys_secret:`
- * `credentialsRef` and seals under `datasource_credential`.
+ * `object_secret_field`, the datasource binder holds a `sys_secret:`
+ * `credentialsRef` and seals under `datasource_credential`, and the audit
+ * ledger's sealer holds a bare id in `sys_audit_checkpoint.seed_handle` /
+ * `sys_audit_signing_key.private_handle` and seals under `audit_seal`
+ * (ADR-0154 D2, D6).
+ *
+ * ⚠️ The re-wrap writes by `sys_secret.id` (one conditional update keyed on
+ * the row's id), never by the id `rotateKey` returns: a handle id the
+ * `audit_seal` producer recorded inside a signed checkpoint body therefore
+ * survives a re-wrap whatever the provider answers.
  */
 export const SCOPE_OF_HOLDER_FAMILY: Readonly<Record<SecretReferenceFamily, CryptoContextScope>> =
   Object.freeze({
     settings: 'settings',
     'object-field': 'object_secret_field',
     datasource: 'datasource_credential',
+    'audit-seal': 'audit_seal',
   });
 
 /**
@@ -382,7 +392,9 @@ export async function executeSysSecretRewrap(input: {
   const { plan, provider, derivationOf, writer } = input;
   const now = input.now ?? (() => new Date());
   const byClass = Object.fromEntries(REWRAP_CLASSES.map((c) => [c, 0])) as Record<RewrapClass, number>;
-  const rewrapByScope = { settings: 0, object_secret_field: 0, datasource_credential: 0 } as Record<
+  // One count per member of the closed scope set, derived so a new producer's
+  // scope is never missing from the report.
+  const rewrapByScope = Object.fromEntries(CRYPTO_CONTEXT_SCOPES.map((scope) => [scope, 0])) as Record<
     CryptoContextScope,
     number
   >;

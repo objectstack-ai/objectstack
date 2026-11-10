@@ -42,7 +42,9 @@
  * A zero alone cannot tell a placed field from a rule that never ran, or a
  * `--json` that stopped carrying warnings. So each leg whose starter places a
  * field then strips every `group` line from its `src/objects/*.object.ts` and
- * runs both commands again: each must now report `field-no-consumers`, and
+ * runs both commands again — with any view the STARTER ships unwired too, since
+ * its columns display the same fields (#32152: the blank starter ships a list of
+ * its sample object) — : each must now report `field-no-consumers`, and
  * only on fields the stripped files declare. A starter whose object sources
  * place nothing (its only field is the record's title, which the rule exempts)
  * has no control, decided from those sources when the file is collected; the
@@ -96,6 +98,8 @@ type Gate = (typeof GATES)[number];
 
 /** A `group: '<key>',` line exactly as the starters write one. */
 const GROUP_LINE = /^[ \t]*group: '[a-z_][a-z0-9_]*',\r?\n/gm;
+/** A views-barrel line wiring one view file, as `os g view` appends it. */
+const VIEW_EXPORT = /^export \{ default as \w+ \} from '\.\/[\w.-]+';$/;
 /** Whether an object source places any field in a group (non-global: `test` keeps no state). */
 const placesAField = (source: string): boolean => new RegExp(GROUP_LINE.source, 'm').test(source);
 
@@ -219,6 +223,10 @@ beforeAll(async () => {
     const leg: Leg = { scaffold, steps, gates: {} as Leg['gates'], control: null };
     legs[starter.name] = leg;
     if (scaffold.code !== 0) continue;
+    // [#32152] The views the starter itself ships (the blank starter's list of
+    // its sample object), read before any waker appends its own export line.
+    const viewsBarrel = join(dir, 'src', 'views', 'index.ts');
+    const starterViewExports = readFileSync(viewsBarrel, 'utf8').split('\n').filter((l) => VIEW_EXPORT.test(l));
     for (const args of WAKER_STEPS) steps.push({ args, run: await os(args, dir) });
     leg.gates = await gatesIn(dir);
 
@@ -233,6 +241,19 @@ beforeAll(async () => {
       if (after === before) continue;
       writeFileSync(path, after);
       stripped += after;
+    }
+    // [#32152] A view the starter ships lists its object's fields as columns,
+    // which credits them as displayed just as a `group` does — so with the
+    // groups gone, the starter's own list would still hide every finding and
+    // the control would measure nothing. Unwire those views too (their export
+    // lines only; a waker's view of `gate_target` stays), so the stripped
+    // fields are again displayed by nothing.
+    if (starterViewExports.length > 0) {
+      const before = readFileSync(viewsBarrel, 'utf8');
+      writeFileSync(
+        viewsBarrel,
+        before.split('\n').filter((l) => !starterViewExports.includes(l)).join('\n'),
+      );
     }
     leg.control = { stripped, gates: await gatesIn(dir) };
   }
