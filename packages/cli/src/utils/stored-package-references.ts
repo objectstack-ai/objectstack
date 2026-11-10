@@ -42,6 +42,21 @@
  * `?package=ID`, and only a rename of its namespace gives them qualified
  * addresses. Not bindable either: a namespace is the author's to change.
  *
+ * ## A database this release has not booted yet
+ *
+ * The release that carries D8 adds each package column at its first boot and
+ * then runs the backfill. Before that boot, a database written by an earlier
+ * release has the D8 tables without their package columns, and the report's
+ * boot is read-only, so it adds none. Such a table is read as nothing bound
+ * yet: every row names no package, exactly the state the backfill starts from,
+ * so each row is asked the one rule and reported only when the rule refuses
+ * it. The findings are therefore the rows the first boot's backfill will
+ * leave null. Only a package column the caller MEASURED missing
+ * (`packageColumnAbsent`: the held-back sync's `add_columns`, a fact about the
+ * database) is read this way. ⛔ No refused read is ever recognised as this
+ * state: any other missing column, and any other driver error, is still
+ * thrown and reported.
+ *
  * ## What it never does
  *
  * - **Resolution never loosens.** No first-registered fallback, no guess: every
@@ -234,10 +249,10 @@ function isAsked(reference: StoredPackageReference, row: Row): boolean {
   return true;
 }
 
-/** The columns a row read needs. */
-function fieldsOf(reference: StoredPackageReference): string[] {
+/** The columns a row read needs; without the package column on a table that does not have it yet (module doc). */
+function fieldsOf(reference: StoredPackageReference, packageColumnPresent = true): string[] {
   const fields = new Set(['id', reference.nameColumn]);
-  if (reference.packageColumn) fields.add(reference.packageColumn);
+  if (reference.packageColumn && packageColumnPresent) fields.add(reference.packageColumn);
   if (reference.callerColumn) fields.add(reference.callerColumn);
   if (reference.d8 === 'R5') fields.add('managed_by');
   if (reference.d8 === 'R7' || reference.d8 === 'R8') fields.add('status');
@@ -278,19 +293,24 @@ function carries(registry: StoredReferenceRegistry, table: string): boolean {
   }
 }
 
-/** The stored rows of one reference the rule refuses (module doc). Reads only; ordered by id. */
+/**
+ * The stored rows of one reference the rule refuses (module doc). Reads only; ordered by id.
+ * `packageColumnPresent: false` (measured by the caller) reads every row as naming no package.
+ */
 async function refusedRowsOf(
   engine: StoredReferenceEngine,
   registry: StoredReferenceRegistry,
   reference: StoredPackageReference,
+  packageColumnPresent: boolean,
 ): Promise<StoredReferenceFinding[]> {
   const findings: StoredReferenceFinding[] = [];
   const answers = new Map<string, PackageScopedResolution>();
-  const unbound = reference.packageColumn ? { [reference.packageColumn]: null } : undefined;
+  const unbound = reference.packageColumn && packageColumnPresent ? { [reference.packageColumn]: null } : undefined;
   const where = unbound && reference.where ? { $and: [unbound, reference.where] } : (unbound ?? reference.where ?? {});
+  const fields = fieldsOf(reference, packageColumnPresent);
   const walk = keysetWalk<Row>(
     async (query) => {
-      const page = await engine.find(reference.table, { ...query, fields: fieldsOf(reference), context: SYSTEM_CTX });
+      const page = await engine.find(reference.table, { ...query, fields, context: SYSTEM_CTX });
       return Array.isArray(page) ? (page as Row[]) : [];
     },
     { where, pageSize: PAGE_SIZE },
@@ -338,7 +358,16 @@ const byText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 export async function collectStoredPackageReferences(
   engine: StoredReferenceEngine,
   registry: StoredReferenceRegistry,
-  options?: { readonly absent?: (table: string) => boolean },
+  options?: {
+    /** Did the boot measure `table` absent from the database? */
+    readonly absent?: (table: string) => boolean;
+    /**
+     * Did the boot measure `column` missing from the present `table` (module
+     * doc: a database this release has not booted yet)? Asked only of a D8
+     * package column; absent, every package column is read.
+     */
+    readonly packageColumnAbsent?: (table: string, column: string) => boolean;
+  },
 ): Promise<StoredPackageReferenceReport> {
   const stored: StoredReferenceFinding[] = [];
   const tablesNotCarried: string[] = [];
@@ -352,7 +381,8 @@ export async function collectStoredPackageReferences(
       tablesAbsent.push(reference.table);
       continue;
     }
-    stored.push(...(await refusedRowsOf(engine, registry, reference)));
+    const packageColumnPresent = !(reference.packageColumn && options?.packageColumnAbsent?.(reference.table, reference.packageColumn));
+    stored.push(...(await refusedRowsOf(engine, registry, reference, packageColumnPresent)));
   }
 
   const picklists: PicklistReferenceFinding[] = [];

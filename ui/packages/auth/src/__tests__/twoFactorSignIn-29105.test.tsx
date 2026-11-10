@@ -177,3 +177,69 @@ describe('LoginForm — two-factor sign-in (objectstack#29105)', () => {
     expect(client.verifySignInTwoFactor).not.toHaveBeenCalled();
   });
 });
+
+describe('LoginForm — two-factor sign-in by phone number and password (objectstack#32107)', () => {
+  const PHONE_ON = { features: { phoneNumber: true } };
+
+  async function submitPhonePassword(password = 'correct horse') {
+    fireEvent.change(await screen.findByLabelText('Email or phone number'), {
+      target: { value: '138 0013 8000' },
+    });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: password } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
+  }
+
+  it('asks for the code after the phone password, as on the email path, then signs the user in', async () => {
+    const client = stubClient({
+      getConfig: vi.fn().mockResolvedValue(PHONE_ON),
+      signInWithPhonePassword: vi.fn().mockResolvedValue({ twoFactor: { methods: ['totp'] } }),
+    });
+    const onSuccess = vi.fn();
+    renderLogin(client, { onSuccess });
+
+    await submitPhonePassword();
+    await screen.findByTestId('two-factor-challenge');
+    expect(client.signInWithPhonePassword).toHaveBeenCalledWith('13800138000', 'correct horse');
+    expect(client.signIn).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByTestId('signed-in-as').textContent).toBe('');
+    expect(onSuccess).not.toHaveBeenCalled();
+
+    enterCode('Authentication code', '123456');
+
+    await waitFor(() => expect(screen.getByTestId('signed-in-as').textContent).toBe(USER.email));
+    expect(client.verifySignInTwoFactor).toHaveBeenCalledWith('123456', 'totp');
+    expect(onSuccess).toHaveBeenCalledTimes(1);
+  });
+
+  it('signs a phone account without two-factor sign-in straight in, as before', async () => {
+    const client = stubClient({
+      getConfig: vi.fn().mockResolvedValue(PHONE_ON),
+      signInWithPhonePassword: vi.fn().mockResolvedValue({ user: USER, session: { token: 'phone-token' } }),
+    });
+    const onSuccess = vi.fn();
+    renderLogin(client, { onSuccess });
+
+    await submitPhonePassword('pw');
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId('signed-in-as').textContent).toBe(USER.email);
+    expect(screen.queryByTestId('two-factor-challenge')).toBeNull();
+  });
+
+  it('still says a wrong phone password is wrong, and asks for no code', async () => {
+    const client = stubClient({
+      getConfig: vi.fn().mockResolvedValue(PHONE_ON),
+      signInWithPhonePassword: vi
+        .fn()
+        .mockRejectedValue(refusal('INVALID_PHONE_NUMBER_OR_PASSWORD', 'Invalid phone number or password.')),
+    });
+    renderLogin(client);
+
+    await submitPhonePassword('wrong');
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Invalid phone number or password.');
+    expect(screen.queryByTestId('two-factor-challenge')).toBeNull();
+    expect(screen.getByLabelText('Password')).toBeTruthy();
+  });
+});

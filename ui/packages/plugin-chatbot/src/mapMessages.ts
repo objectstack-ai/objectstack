@@ -1019,6 +1019,102 @@ export function detectSampleDataCleanup(result: unknown): SampleDataCleanup | un
   };
 }
 
+/**
+ * objectstack#31025 — 「删除软件包」: cloud's `delete_package` queues a HITL
+ * pending action and answers `{ success:true, status:'pending_approval',
+ * pendingActionId, packageRemoval:{ packageId, label, objects:[{ name, label,
+ * rows?, draft? }], totalRows, uncountedObjects, items, data, recycleBin },
+ * message }` (the shape on objectstack#31025, read at cloud `d6288d27`). The
+ * card lists what goes before the user confirms; the generic Approve / Deny
+ * strip stays the decision and sends nothing but the decision. An envelope
+ * without the id or without the plan is not a card, and a refusal
+ * (`success:false`) carries neither. `rows` absent means the object has no
+ * table (a draft) or could not be counted, so it stays absent, never `0`.
+ */
+export interface PackageRemovalObject {
+  name: string;
+  label: string;
+  /** Absent: a draft (no table) or a published object whose rows could not be counted. */
+  rows?: number;
+  draft?: true;
+}
+
+export interface PackageRemoval {
+  packageId: string;
+  label: string;
+  objects: PackageRemovalObject[];
+  /** The sum of the counted rows. */
+  totalRows: number;
+  /** Published objects whose rows could not be counted: `totalRows` is short by them. */
+  uncountedObjects: number;
+  /** Other items that go, by metadata type. */
+  items: Record<string, number>;
+  /** `dropped`: the tables go with every row and nothing restores them. */
+  data: 'dropped' | 'kept';
+}
+
+export function detectPackageRemoval(result: unknown): PackageRemoval | undefined {
+  const pending = detectPendingApproval(result);
+  if (!pending) return undefined;
+  const raw = pending.raw.packageRemoval;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const o = raw as Record<string, unknown>;
+  const str = (v: unknown): string | undefined => {
+    const t = typeof v === 'string' ? v.trim() : '';
+    return t.length > 0 ? t : undefined;
+  };
+  const count = (v: unknown): number | undefined =>
+    typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : undefined;
+  const packageId = str(o.packageId);
+  const data = o.data === 'dropped' || o.data === 'kept' ? o.data : undefined;
+  if (!packageId || !data) return undefined;
+  const objects = (Array.isArray(o.objects) ? o.objects : []).flatMap((x): PackageRemovalObject[] => {
+    const r = (x ?? {}) as Record<string, unknown>;
+    const name = str(r.name);
+    if (!name) return [];
+    const rows = count(r.rows);
+    return [
+      {
+        name,
+        label: str(r.label) ?? name,
+        ...(rows !== undefined ? { rows } : {}),
+        ...(r.draft === true ? { draft: true as const } : {}),
+      },
+    ];
+  });
+  const items: Record<string, number> = {};
+  if (o.items && typeof o.items === 'object' && !Array.isArray(o.items)) {
+    for (const [type, n] of Object.entries(o.items as Record<string, unknown>)) {
+      const c = count(n);
+      if (str(type) && c) items[type] = c;
+    }
+  }
+  return {
+    packageId,
+    label: str(o.label) ?? packageId,
+    objects,
+    totalRows: count(o.totalRows) ?? objects.reduce((n, x) => n + (x.rows ?? 0), 0),
+    uncountedObjects: count(o.uncountedObjects) ?? 0,
+    items,
+    data,
+  };
+}
+
+/**
+ * The outcome an approved `delete_package` answers with
+ * (`PackageRemovedResult`: `{ status:'removed'|'partial', packageId, removed,
+ * failed:[{ type, name, code? }], data, message }`), so the card can say
+ * whether everything went or how many items were left.
+ */
+export function detectPackageRemovedResult(
+  result: unknown,
+): { status: 'removed' | 'partial'; failed: number } | undefined {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return undefined;
+  const r = result as Record<string, unknown>;
+  if (r.status !== 'removed' && r.status !== 'partial') return undefined;
+  return { status: r.status, failed: Array.isArray(r.failed) ? r.failed.length : 0 };
+}
+
 export function detectProposedChanges(result: unknown): ProposedChanges | undefined {
   const obj = parseResultEnvelope(result);
   if (!obj || obj.status !== 'changes_proposed') return undefined;
@@ -1496,6 +1592,7 @@ function extractToolInvocations(
       const recordWrite = detectRecordWrite(result);
       const answerSource = detectAnswerSource(result);
       const sampleDataCleanup = detectSampleDataCleanup(result);
+      const packageRemoval = detectPackageRemoval(result);
       // Promote a dangling `input-*` state to a terminal one so a reloaded
       // conversation never shows "Running" forever (the server doesn't always
       // snapshot the terminal tool state). Two cases:
@@ -1534,6 +1631,7 @@ function extractToolInvocations(
         recordWrite,
         answerSource,
         sampleDataCleanup,
+        packageRemoval,
         replayOutcome,
       } satisfies ChatToolInvocation;
     });

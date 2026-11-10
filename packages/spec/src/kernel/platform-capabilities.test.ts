@@ -386,3 +386,41 @@ describe('push — the mobile push capability', () => {
     expect(classifyRequiredCapability('push', (pkg) => pkg === '@objectstack/service-push').status).toBe('ok');
   });
 });
+
+// The cloud runtime loader resolves a closed set of tokens this repository
+// installs nothing for. Each row has `governance`'s shape — `package: null`,
+// `edition: 'cloud'`, a note — so the `os build` preflight classifies it
+// unavailable rather than advising an install no registry can satisfy.
+describe('the cloud-loader-only capability tokens', () => {
+  const CLOUD_LOADER_TOKENS = ['ai-seat', 'governance', 'audit-compliance', 'access-policy-console'];
+
+  it('are exactly the package-less rows', () => {
+    const packageless = Object.entries(PLATFORM_CAPABILITY_PROVIDERS)
+      .filter(([, p]) => p.package === null)
+      .map(([t]) => t);
+    expect(new Set(packageless)).toEqual(new Set(CLOUD_LOADER_TOKENS));
+  });
+
+  it.each(CLOUD_LOADER_TOKENS)('%s is in the vocabulary with a cloud row, no package and a note', (token) => {
+    expect(isKnownPlatformCapability(token)).toBe(true);
+    const row = PLATFORM_CAPABILITY_PROVIDERS[token];
+    expect(row?.package).toBeNull();
+    expect(row?.edition).toBe('cloud');
+    expect(row?.note).toEqual(expect.any(String));
+  });
+
+  it('audit-compliance and access-policy-console are unavailable even when every package resolves', () => {
+    const allInstalled = () => true;
+    for (const token of ['audit-compliance', 'access-policy-console']) {
+      const c = classifyRequiredCapability(token, allInstalled);
+      expect(c.status, token).toBe('unavailable');
+      expect(c.provider?.edition, token).toBe('cloud');
+    }
+  });
+
+  it('their near-miss spellings are not in the vocabulary', () => {
+    for (const miss of ['audit_compliance', 'auditCompliance', 'access-policy', 'access_policy_console']) {
+      expect(isKnownPlatformCapability(miss), miss).toBe(false);
+    }
+  });
+});

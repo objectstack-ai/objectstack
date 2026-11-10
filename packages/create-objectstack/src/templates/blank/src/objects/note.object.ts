@@ -5,9 +5,13 @@
 // `note` is here so a blank project has one object to boot, query and test
 // on day one. It is not part of the app you are building: until you remove
 // it, it ships in every build, is served over REST and is listed to MCP
-// clients like any object of yours. To remove it, delete this file and its
-// export line in `src/objects/index.ts`, then point `note.test.ts` at one of
-// your own objects (it imports `Note` and will not compile without it).
+// clients like any object of yours. The starter app (`src/apps/main.app.ts`)
+// lists it, and `src/views/note.view.ts` draws its list, so the Console shows
+// it on day one. To remove it, delete this file and its export line in
+// `src/objects/index.ts`, delete `src/views/note.view.ts` and its export line
+// in `src/views/index.ts`, and delete the `Notes` entry in
+// `src/apps/main.app.ts`; then point `note.test.ts` at one of your own objects.
+// All three import `Note` and will not compile until you do.
 // The README's "The sample `note` object" section says the same.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
