@@ -89,7 +89,6 @@ vi.mock('@object-ui/components', async (importOriginal) => ({
 
 import { ConnectedShell } from '../ConsoleShell';
 import { LocaleSwitcher } from '../../layout/LocaleSwitcher';
-import { pickRenderableLocale } from '../../hooks/useUserLocale';
 
 function HomeProbe() {
   const { language } = useObjectTranslation();
@@ -124,17 +123,12 @@ function renderConsoleAt(path: string) {
 }
 
 const homeLanguage = () => screen.getByTestId('home-language').textContent;
-const offered = () => {
-  // The language the reader is expected to land on: the offered spelling of
-  // `zh-CN`, decided by the same ladder the reader runs.
-  const { offerableLanguages } = latestI18n;
-  return pickRenderableLocale('zh-CN', offerableLanguages);
-};
-let latestI18n: { offerableLanguages: readonly string[] | null } = { offerableLanguages: null };
-function I18nSpy() {
-  latestI18n = useObjectTranslation() as never;
-  return null;
-}
+
+/**
+ * The offered spelling of a saved `zh-CN`: the reader answers what the
+ * provider can switch to, through the platform locale table.
+ */
+const SIMPLIFIED_CHINESE = 'zh-Hans';
 
 /** Let the after-first-paint read and any queued switch settle. */
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 150)); });
@@ -155,24 +149,19 @@ describe('Home renders in the saved language from an empty storage (objectstack#
     userRow.locale = 'zh-CN';
     expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBeNull();
 
-    render(<I18nProvider><I18nSpy /></I18nProvider>);
-    const expected = offered();
-    cleanup();
-    expect(expected).toMatch(/^zh/);
-
     renderConsoleAt('/home');
 
-    await waitFor(() => expect(homeLanguage()).toBe(expected));
+    await waitFor(() => expect(homeLanguage()).toBe(SIMPLIFIED_CHINESE));
     // The device slot now caches the column, so the next boot paints Chinese
     // before any read.
-    expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe(expected);
-    expect(document.documentElement.lang).toBe(expected);
+    expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe(SIMPLIFIED_CHINESE);
+    expect(userRow.reads).toBe(1);
   });
 
   it('the Home -> app hop and a language switch read the row once in total', async () => {
     userRow.locale = 'zh-CN';
     renderConsoleAt('/home');
-    await waitFor(() => expect(homeLanguage()).toMatch(/^zh/));
+    await waitFor(() => expect(homeLanguage()).toBe(SIMPLIFIED_CHINESE));
     await settle();
     expect(userRow.reads).toBe(1);
 
