@@ -236,9 +236,10 @@ export function createResponseCompression(options: {
         });
         // After the assignment: Hono's `res` setter copies the previous
         // response's headers onto the new one, `Content-Length` included.
-        c.res.headers.delete('content-length');
+        const encodedHeaders: Headers = c.res.headers;
+        encodedHeaders.delete('content-length');
         // A byte range names offsets in the identity bytes, not the encoded ones.
-        c.res.headers.delete('accept-ranges');
-        c.res.headers.set('content-encoding', encoding);
+        encodedHeaders.delete('accept-ranges');
+        encodedHeaders.set('content-encoding', encoding);
     };
 }
