@@ -1981,6 +1981,34 @@ export function uiMessageToChatMessage(
 }
 
 /**
+ * The plans a later plan in the same build turn replaced, by `toolCallId`.
+ *
+ * A turn is everything after a user message up to the next one. The model may
+ * call `propose_blueprint` several times in one turn, and the runtime builds
+ * only the newest plan, so the chat draws that one as the turn's plan card and
+ * every earlier plan of the turn as a completed step. The turn is read across
+ * messages because stored history keeps one assistant message per step, while
+ * the live stream keeps the whole turn in one message. A plan from an earlier
+ * turn is never in the set.
+ */
+export function supersededPlanIds(messages: readonly ChatMessage[]): ReadonlySet<string> {
+  const superseded = new Set<string>();
+  let newest: string | undefined;
+  for (const message of messages) {
+    if (message.role === 'user') {
+      newest = undefined;
+      continue;
+    }
+    for (const tool of message.toolInvocations ?? []) {
+      if (!tool.proposedPlan || !tool.toolCallId) continue;
+      if (newest !== undefined && newest !== tool.toolCallId) superseded.add(newest);
+      newest = tool.toolCallId;
+    }
+  }
+  return superseded;
+}
+
+/**
  * Map an array of `UIMessage`s. The trailing assistant message gets the
  * `streaming` flag when `isStreaming` is true (mirrors `useObjectChat`).
  */

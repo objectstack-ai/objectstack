@@ -64,7 +64,7 @@ export const CascadingSelect = ObjectSchema.create({
     'B3 dynamic-options fixture: a country → province cascade (per-option visibleWhen + dependsOn) plus a role-gated tier, enforced client-side (offered set) AND server-side (objectql rejects an out-of-set submit).',
 
   fields: {
-    name: Field.text({ label: 'Label', required: true, searchable: true, maxLength: 120 }),
+    name: Field.text({ label: 'Label', required: true, searchable: true, maxLength: 120, group: 'selection' }),
 
     country: Field.select({
       label: 'Country',
@@ -72,6 +72,7 @@ export const CascadingSelect = ObjectSchema.create({
         { label: 'China', value: 'cn' },
         { label: 'United States', value: 'us' },
       ],
+      group: 'selection',
     }),
 
     // Dependent (cascading) options: gated until `country` is set, then filtered
@@ -88,6 +89,7 @@ export const CascadingSelect = ObjectSchema.create({
         { label: 'California', value: 'ca', visibleWhen: P`record.country == 'us'` },
         { label: 'Texas', value: 'tx', visibleWhen: P`record.country == 'us'` },
       ],
+      group: 'selection',
     }),
 
     // Role-gated option: `restricted` is offered only to admins. The client hides
@@ -99,6 +101,14 @@ export const CascadingSelect = ObjectSchema.create({
         { label: 'Standard', value: 'standard', default: true },
         { label: 'Restricted (admin only)', value: 'restricted', visibleWhen: P`'org_admin' in current_user.positions` },
       ],
+      group: 'selection',
     }),
   },
+
+  // ADR-0085 §5: the form, detail and drawer layout is derived from these
+  // groups, so each field is placed in a named section rather than left to the
+  // untitled fallback, which the field-no-consumers rule credits to no one (#32168).
+  fieldGroups: [
+    { key: 'selection', label: 'Selection' },
+  ],
 });
