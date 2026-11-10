@@ -2783,7 +2783,11 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "الكل"
+        label: "الكل",
+        emptyState: {
+          title: "لا توجد روابط مجموعات بعد",
+          message: "امنح مجموعة أذونات لأعضاء مجموعة من موفّر الهوية باستخدام \"ربط مجموعة SSO\" (مجموعة يرسلها موفّر SSO عند تسجيل الدخول) أو \"ربط مجموعة SCIM\" (مجموعة يجهّزها اتصال SCIM)."
+        }
       }
     },
     _actions: {

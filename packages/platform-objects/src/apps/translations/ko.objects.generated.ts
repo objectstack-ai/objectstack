@@ -2783,7 +2783,11 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "전체"
+        label: "전체",
+        emptyState: {
+          title: "아직 그룹 매핑이 없습니다",
+          message: "\"SSO 그룹 매핑\"(SSO 제공자가 로그인 시 보내는 그룹) 또는 \"SCIM 그룹 매핑\"(SCIM 연결이 프로비저닝하는 그룹)으로 ID 제공자 그룹의 구성원에게 권한 세트를 부여합니다."
+        }
       }
     },
     _actions: {

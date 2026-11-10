@@ -2783,7 +2783,11 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "Tous"
+        label: "Tous",
+        emptyState: {
+          title: "Aucune correspondance de groupe pour l’instant",
+          message: "Accordez un ensemble d’autorisations aux membres d’un groupe du fournisseur d’identité avec « Associer un groupe SSO » (un groupe qu’un fournisseur SSO envoie à la connexion) ou « Associer un groupe SCIM » (un groupe qu’une connexion SCIM provisionne)."
+        }
       }
     },
     _actions: {

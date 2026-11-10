@@ -2783,7 +2783,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "All"
+        label: "All",
+        emptyState: {
+          title: "No group mappings yet",
+          message: "Grant a permission set to the members of an identity provider group with “Map SSO Group” (a group an SSO provider sends at sign-in) or “Map SCIM Group” (a group a SCIM connection provisions)."
+        }
       }
     },
     _actions: {

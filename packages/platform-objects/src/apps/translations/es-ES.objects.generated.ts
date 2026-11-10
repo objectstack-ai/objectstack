@@ -2783,7 +2783,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "Todos"
+        label: "Todos",
+        emptyState: {
+          title: "Aún no hay asignaciones de grupo",
+          message: "Concede un conjunto de permisos a los miembros de un grupo del proveedor de identidad con «Asignar grupo de SSO» (un grupo que un proveedor de SSO envía al iniciar sesión) o «Asignar grupo de SCIM» (un grupo que aprovisiona una conexión SCIM)."
+        }
       }
     },
     _actions: {

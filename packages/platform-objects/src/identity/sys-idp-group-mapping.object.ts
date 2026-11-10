@@ -214,6 +214,14 @@ export const SysIdpGroupMapping = ObjectSchema.create({
       columns: ['source_kind', 'source_id', 'group_external_id', 'group_display_name', 'permission_set', 'organization_id'],
       sort: [{ field: 'source_id', order: 'asc' }],
       pagination: { pageSize: 50 },
+      // Per-object empty state: the engine-owned bucket's shared copy ("entries
+      // appear automatically when their source action runs") is false here,
+      // where a platform administrator adds each row with the actions above.
+      emptyState: {
+        title: 'No group mappings yet',
+        message: 'Grant a permission set to the members of an identity provider group with “Map SSO Group” (a group an SSO provider sends at sign-in) or “Map SCIM Group” (a group a SCIM connection provisions).',
+        icon: 'users',
+      },
     },
   },
 

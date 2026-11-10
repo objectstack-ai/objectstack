@@ -2783,7 +2783,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "全部"
+        label: "全部",
+        emptyState: {
+          title: "还没有组映射",
+          message: "使用“映射 SSO 组”（SSO 提供方在登录时发送的组）或“映射 SCIM 组”（SCIM 连接开通的组），为身份提供方某个组的成员授予权限集。"
+        }
       }
     },
     _actions: {

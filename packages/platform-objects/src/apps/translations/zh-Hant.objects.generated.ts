@@ -2783,7 +2783,11 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "全部"
+        label: "全部",
+        emptyState: {
+          title: "尚無群組對應",
+          message: "使用「對應 SSO 群組」（SSO 提供者在登入時傳送的群組）或「對應 SCIM 群組」（SCIM 連線佈建的群組），為身分提供者某個群組的成員授予權限集。"
+        }
       }
     },
     _actions: {

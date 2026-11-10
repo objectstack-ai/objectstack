@@ -2783,7 +2783,11 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "Todos"
+        label: "Todos",
+        emptyState: {
+          title: "Ainda não há mapeamentos de grupo",
+          message: "Conceda um conjunto de permissões aos membros de um grupo do provedor de identidade com \"Mapear grupo de SSO\" (um grupo que um provedor de SSO envia no login) ou \"Mapear grupo de SCIM\" (um grupo que uma conexão SCIM provisiona)."
+        }
       }
     },
     _actions: {

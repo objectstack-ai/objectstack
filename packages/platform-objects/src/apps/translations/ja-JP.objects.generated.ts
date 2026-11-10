@@ -2783,7 +2783,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "すべて"
+        label: "すべて",
+        emptyState: {
+          title: "グループマッピングはまだありません",
+          message: "「SSO グループをマッピング」（SSO プロバイダーがサインイン時に送るグループ）または「SCIM グループをマッピング」（SCIM 接続がプロビジョニングするグループ）で、ID プロバイダーのグループのメンバーに権限セットを付与します。"
+        }
       }
     },
     _actions: {

@@ -2783,7 +2783,11 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "Alle"
+        label: "Alle",
+        emptyState: {
+          title: "Noch keine Gruppenzuordnungen",
+          message: "Mit „SSO-Gruppe zuordnen“ (eine Gruppe, die ein SSO-Anbieter bei der Anmeldung sendet) oder „SCIM-Gruppe zuordnen“ (eine Gruppe, die eine SCIM-Verbindung bereitstellt) den Mitgliedern einer Gruppe des Identitätsanbieters einen Berechtigungssatz gewähren."
+        }
       }
     },
     _actions: {

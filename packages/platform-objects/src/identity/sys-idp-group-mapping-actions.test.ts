@@ -144,4 +144,10 @@ describe('sys_idp_group_mapping: each action is offered to, and gated on, the ru
     expect(SysIdpGroupMapping.enable?.apiMethods).toEqual(['list']);
     expect(SysIdpGroupMapping.managedBy).toBe('engine-owned');
   });
+
+  it('the list draws its own empty state, not the engine-owned bucket\'s "appears automatically" copy', () => {
+    // The console draws a view's declared emptyState before the managedBy fallback.
+    const empty = (SysIdpGroupMapping.listViews?.all as { emptyState?: { title?: string } } | undefined)?.emptyState;
+    expect(empty?.title).toBeTruthy();
+  });
 });
