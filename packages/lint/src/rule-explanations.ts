@@ -923,7 +923,7 @@ const SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION: RuleExplanation = {
 
 const SECURITY_UPDATE_POLICY_NO_CHECK_EXPLANATION: RuleExplanation = {
   rule: 'security-update-policy-no-check',
-  covers: 'why an update policy keyed on the caller also admits the rows the ownership floor admits',
+  covers: 'why a caller-keyed update policy should declare a check',
   paragraphs: [
     'A row-level policy with no `check` also admits new rows the ownership floor admits; declare `check` to ' +
       'bound what an update may write. The write check is decided per operation across the applicable policies ' +
