@@ -220,13 +220,19 @@ describe('one package holder per picklist, mapping and dataset name, on a booted
       }
     });
 
-    it('a qualifier that does not hold the name is refused naming its holder, never served another package\'s list', async () => {
-      for (const path of [`/meta/picklist/beta/${SOLO_PICKLIST}`, `/meta/picklist/${SOLO_PICKLIST}?package=com.qa.bare.beta`, `/meta/picklist/_env/${SOLO_PICKLIST}`]) {
+    // One case per shape, so each one reds on its own: before this card each
+    // answered 200 with alpha's list for an address that does not name alpha.
+    for (const [shape, path] of [
+      ['the namespace address', `/meta/picklist/beta/${SOLO_PICKLIST}`],
+      ['`?package=`', `/meta/picklist/${SOLO_PICKLIST}?package=com.qa.bare.beta`],
+      ['the `_env` address', `/meta/picklist/_env/${SOLO_PICKLIST}`],
+    ] as const) {
+      it(`${shape} of a qualifier that does not hold the name is refused naming its holder, never served another package's list`, async () => {
         const { status, body } = await read(path);
         expect([status, codeOf(body)], `${path} ${JSON.stringify(body)}`).toEqual([409, 'RESOURCE_CONFLICT']);
         expect(sentenceOf(body), path).toContain('com.qa.bare.alpha');
-      }
-    });
+      });
+    }
 
     it('CONTROL: a name one package holds is served at the bare address and at the holder\'s qualified addresses', async () => {
       for (const path of [`/meta/picklist/${SOLO_PICKLIST}`, `/meta/picklist/alpha/${SOLO_PICKLIST}`, `/meta/picklist/${SOLO_PICKLIST}?package=com.qa.bare.alpha`]) {
