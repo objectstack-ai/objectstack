@@ -227,6 +227,28 @@ export interface MarketplaceListResponse {
   total: number;
   limit: number;
   offset: number;
+  /**
+   * The catalog's facet counts under the current query. The console reads
+   * only `languages` (`readLanguageCounts`, `MarketplaceFacetFilters.tsx`):
+   * the taxonomy facets offer the spec's whole vocabulary instead. Absent on
+   * a catalog that does not count, and on the runtime's public-snapshot path.
+   */
+  facets?: MarketplaceFacetCounts | null;
+}
+
+/**
+ * One facet's counts as the catalog serves them: only values with a count
+ * above zero, most listings first, then by value. Each facet's counts apply
+ * every other filter and the search text, but not that facet's own selection.
+ */
+export type MarketplaceFacetCount = { value: string; count: number };
+
+export interface MarketplaceFacetCounts {
+  business_functions?: readonly MarketplaceFacetCount[];
+  industries?: readonly MarketplaceFacetCount[];
+  solution_types?: readonly MarketplaceFacetCount[];
+  /** Counted on each listing's latest approved release's `supported_locales`. */
+  languages?: readonly MarketplaceFacetCount[];
 }
 
 export interface MarketplaceDetailResponse {
@@ -288,11 +310,18 @@ export interface MarketplaceListParams {
   businessFunctions?: readonly MarketplaceBusinessFunction[];
   industries?: readonly MarketplaceIndustry[];
   solutionTypes?: readonly MarketplaceSolutionType[];
+  /**
+   * The languages facet: listings whose latest approved release ships any of
+   * these locales, in the spelling the catalog's own counts serve them
+   * (`facets.languages[].value`, e.g. `zh-CN`). Not a spec vocabulary: the
+   * values are the catalog's, read off its answer.
+   */
+  languages?: readonly string[];
   maturity?: PackageMaturity;
 }
 
 /** The list-valued filters, each sent as one comma-joined parameter. */
-const LIST_FILTERS = ['businessFunctions', 'industries', 'solutionTypes'] as const;
+const LIST_FILTERS = ['businessFunctions', 'industries', 'solutionTypes', 'languages'] as const;
 
 /**
  * Read one page of the catalog. A list filter goes out as ONE comma-joined
