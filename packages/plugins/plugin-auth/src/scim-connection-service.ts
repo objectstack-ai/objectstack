@@ -444,23 +444,19 @@ export class ScimCredentialLastUseStamper {
 }
 
 /**
- * Application-owned bearer verification for the stable scim plugin: digest the
- * presented token, probe the credential store by digest (unique index), refuse
- * inactive or expired rows, and resolve the connection from the row.
- *
- * Returns `null` — upstream's "unauthenticated" — on any miss. Never throws on
- * a bad token: an unknown bearer is a 401, not a 500.
- *
- * [#32120] On a successful verification only, `lastUse` stamps the row's
- * `last_used_at` (throttled; see {@link ScimCredentialLastUseStamper}). A miss,
- * a revoked or expired row and a storage fault stamp nothing.
+ * The live credential row a presented bearer digests to, naming a connection —
+ * or `null` on any miss: no row, a row {@link scimCredentialIsLive} refuses, a
+ * row naming no connection, a storage fault. The verifier's lookup, and ONLY a
+ * read: it writes nothing (no last-use stamp) and answers the row, never the
+ * digest. [#32116] The refused-request audit (`scim-refusal-audit.ts`) resolves
+ * a bearer the vendor refused before verifying through this and nothing else,
+ * so a refusal never counts as a use. Never throws.
  */
-export async function verifyScimBearerToken(
+export async function findLiveScimCredential(
   engine: CredentialEngine,
   secret: string,
   token: string,
-  lastUse?: ScimCredentialLastUseStamper,
-): Promise<ScimBearerVerification | null> {
+): Promise<Record<string, unknown> | null> {
   if (!token || typeof token !== 'string') return null;
   const digest = digestScimBearerToken(secret, token);
   let row: Record<string, unknown> | null;
@@ -471,10 +467,36 @@ export async function verifyScimBearerToken(
     return null;
   }
   if (!row || !scimCredentialIsLive(row)) return null;
+  if (!String((row as { connection_id?: unknown }).connection_id ?? '')) return null;
+  return row;
+}
+
+/**
+ * Application-owned bearer verification for the stable scim plugin: digest the
+ * presented token, probe the credential store by digest (unique index), refuse
+ * inactive or expired rows, and resolve the connection from the row — the
+ * lookup is {@link findLiveScimCredential}.
+ *
+ * Returns `null` — upstream's "unauthenticated" — on any miss. Never throws on
+ * a bad token: an unknown bearer is a 401, not a 500.
+ *
+ * [#32120] On a successful verification only, `lastUse` stamps the row's
+ * `last_used_at` (throttled; see {@link ScimCredentialLastUseStamper}). A miss,
+ * a revoked or expired row and a storage fault stamp nothing. The stamp is
+ * this function's own step AFTER the read-only lookup, so nothing else that
+ * calls the lookup writes it.
+ */
+export async function verifyScimBearerToken(
+  engine: CredentialEngine,
+  secret: string,
+  token: string,
+  lastUse?: ScimCredentialLastUseStamper,
+): Promise<ScimBearerVerification | null> {
+  const row = await findLiveScimCredential(engine, secret, token);
+  if (!row) return null;
   const rawExpiry = (row as { expires_at?: unknown }).expires_at;
   const expiresAt = rawExpiry != null ? new Date(rawExpiry as string) : undefined;
   const connectionId = String((row as { connection_id?: unknown }).connection_id ?? '');
-  if (!connectionId) return null;
   const domain = (row as { provisioning_domain_id?: unknown }).provisioning_domain_id;
   const organization = (row as { organization_id?: unknown }).organization_id;
   if (lastUse) await lastUse.record(engine, row, connectionId);
