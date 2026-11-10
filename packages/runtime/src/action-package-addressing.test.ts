@@ -45,7 +45,7 @@ let engine: ObjectQL;
 let deps: ActionExecutionDeps;
 let protocol: ObjectStackProtocolImplementation;
 /** The environment store's active `sys_metadata` rows the row store answers (empty unless a case seeds it). */
-let storedRows: any[];
+let storedRows: any[] = [];
 
 const install = (id: string, deps: string[] = []) => engine.registry.installPackage(manifest(id, deps), 'code');
 const ship = (packageId: string, objectName = OBJECT) =>
@@ -67,11 +67,14 @@ beforeEach(() => {
     const rowStore: any = {
         registry: engine.registry,
         find: async (object: string, query: any) => {
-            if (object !== 'sys_metadata' || storedRows.length === 0) return [];
-            const type = query?.where?.type;
-            const types: string[] = typeof type === 'string' ? [type] : Array.isArray(type?.$in) ? type.$in : [];
-            const name = query?.where?.name;
-            return storedRows.filter((row) => types.includes(row.type) && (name === undefined || row.name === name));
+            if (object !== 'sys_metadata') return [];
+            const where: Record<string, any> = query?.where ?? {};
+            const rows = storedRows.filter((row) => Object.keys(where).every((field) => {
+                if (field.startsWith('$')) throw new Error(`row store double: combinator ${field} is not implemented`);
+                const want = where[field];
+                return Array.isArray(want?.$in) ? want.$in.includes(row[field]) : row[field] === want;
+            }));
+            return typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
         },
         findOne: async (object: string, query: any) => { assertEngineFindOnePredicate(object, query); return null; },
         count: async () => 0, aggregate: async () => [],

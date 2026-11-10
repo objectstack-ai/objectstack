@@ -21,6 +21,9 @@
 
 import { describe, it, expect, vi } from 'vitest';
 
+// Pay the first load of `@objectstack/metadata` (standalone-stack's dynamic import) during collection.
+import '@objectstack/metadata';
+
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
 import { invokeBusinessAction } from '../action-execution.js';
