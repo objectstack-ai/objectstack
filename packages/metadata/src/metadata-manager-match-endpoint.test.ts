@@ -593,8 +593,18 @@ function rowDriver(): { driver: IDataDriver; rows: (type: string) => Array<Recor
     if (!tables.has(name)) tables.set(name, new Map());
     return tables.get(name)!;
   };
+  // Equality and `$in` per field, every key conjoined; a combinator or another
+  // operator it does not implement is refused, never read as a field name.
   const matches = (row: Record<string, unknown>, where: Record<string, unknown> = {}) =>
-    Object.entries(where).every(([key, value]) => row[key] === value);
+    Object.entries(where).every(([key, value]) => {
+      if (key.startsWith('$')) throw new Error(`rowDriver: combinator ${key} is not implemented`);
+      if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+        const ops = Object.keys(value);
+        if (ops.length === 1 && ops[0] === '$in') return ((value as { $in: unknown[] }).$in).includes(row[key]);
+        throw new Error(`rowDriver: operator ${ops.join(', ')} on ${key} is not implemented`);
+      }
+      return row[key] === value;
+    });
   const driver = {
     name: 'rows',
     version: '1.0.0',
@@ -604,7 +614,11 @@ function rowDriver(): { driver: IDataDriver; rows: (type: string) => Array<Recor
     checkHealth: async () => true,
     execute: async () => undefined,
     syncSchema: async () => undefined,
-    find: async (name: string, query: any) => [...table(name).values()].filter((r) => matches(r, query?.where)).map((r) => ({ ...r })),
+    find: async (name: string, query: any) => {
+      const rows = [...table(name).values()].filter((r) => matches(r, query?.where));
+      const page = typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
+      return page.map((r) => ({ ...r }));
+    },
     findOne: async (name: string, query: any) => {
       for (const row of table(name).values()) if (matches(row, query?.where)) return { ...row };
       return null;
