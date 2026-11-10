@@ -1680,6 +1680,8 @@ function moduleText(moduleFile, title, movers, scope, leafNames, routed = false)
     out.push(' */');
     out.push(`export interface ${hostName} {`);
     for (const member of [...hostMembers.keys()].sort()) {
+      // R1's identity port: only a fourth-pass mover reads it (R11 starts its facet with this text).
+      if (hostMembers.get(member) === 'facade') { out.push(facadeIfaceLine(classType)); continue; }
       const ro = hostMembers.get(member) === 'getter' && !written.has(member);
       out.push(`  ${ro ? 'readonly ' : ''}${member}: ${classType}['${member}'];`);
     }
@@ -4036,9 +4038,10 @@ async function mainHandDocs(tm, argv) {
 // module of its section that the first pass wrote, in class order. That
 // module's header, host interface and import lines grow by what the moved
 // bodies read, and so do the class's statics route and that facet's host
-// factory. Nothing else moves, and the pass never starts a facet or widens a
-// generated export list: each refuses (exit 2), and is a decision someone
-// writes here. It reroutes a module onto the statics route only by R10 below.
+// factory. Nothing else moves, and the pass never widens a generated export
+// list: that refuses (exit 2), and is a decision someone writes here. It
+// reroutes a module onto the statics route only by R10 below, and starts a
+// facet only by R11.
 //
 // The proof (`--members --verify --base REF` re-runs it) undoes the moves from
 // the head, as the first pass's does: each moved body, docblock and `async`
@@ -4104,6 +4107,24 @@ async function mainHandDocs(tm, argv) {
 //    head before the moved members come out, due only where the base module
 //    was off the route and a moved member reads a static; a member the module
 //    keeps that reads one fails it.
+//
+// And one rule starts a facet (#30020 E6):
+//
+//  - R11, a facet the anchor names and the first pass never wrote. A section
+//    whose every method a stay rule held when the file was split (`update`,
+//    which reads `this` bare) has a module in `SECTION_ANCHORS` and none on
+//    disk. Its first move writes that module as the first pass writes one for
+//    the moved members (`moduleText`; a name `engine.ts` imports from the
+//    leaf is the leaf's there, as it was then), routed when one of them reads
+//    a non-public static, and makes the edits the first pass makes for a
+//    facet: `engine.ts` gains the facet's import, under its comment, among
+//    the facet imports in section order; and, when a body reads the class,
+//    its host in the hosts import, its install call in the install block
+//    (sorted) and its line in `HOSTS_MODULE` (`hostsTexts` of one module
+//    more). A constructor never starts a facet. The undo deletes the module
+//    and those lines: the started module must be exactly the text a stay-rule
+//    reading of the base renders, and `engine.ts` and `HOSTS_MODULE` without
+//    them must be their base byte for byte.
 //
 // A statement the hand grew on one line past the wrap width (`runStyles`) is
 // kept on one line by the move and by the undo alike.
@@ -4282,6 +4303,124 @@ function staticsRegionOf(text) {
   const b = text.indexOf(t.block);
   if (a < 0 || b < 0 || text.indexOf(t.ahead, a + 1) >= 0 || text.indexOf(t.block, b + 1) >= 0) return null;
   return { kinds, ahead: { start: a, end: a + t.ahead.length }, block: { start: b, end: b + t.block.length } };
+}
+
+// R11 (#30020 E6), a facet the anchor names and the first pass never wrote:
+// the module, `engine.ts`'s three edits and `HOSTS_MODULE`'s, each rendered as
+// the first pass renders it and each read back for the undo.
+
+/** The facet modules `HOSTS_MODULE` holds a host for, read back; null unless it is `hostsTexts` of them. */
+function hostsModuleFilesOf(text) {
+  const files = [...text.matchAll(/^import type \{ [A-Za-z]+Host \} from '\.\/(engine-[a-z0-9-]+)\.js';$/gm)].map((m) => `${m[1]}.ts`);
+  const facets = files.map((moduleFile) => ({ moduleFile, members: new Map(), written: new Set() }));
+  return hostsTexts(facets).module === text ? files : null;
+}
+
+/** `HOSTS_MODULE`'s text for these facet modules (`hostsTexts`'s module half, which reads only their names). */
+const hostsModuleText = (files) => hostsTexts(files.map((moduleFile) => ({ moduleFile, members: new Map(), written: new Set() }))).module;
+
+/** A facet's import in `engine.ts`, under its comment, as `generate` writes it: two lines, each ending in a newline. */
+function facetImportText(file, title, anyHost) {
+  return `// ${MARK} ${title}: the methods of the same names below hand the bodies` +
+    `${anyHost ? ` what they read (\`${hostNameOf(file)}\`)` : ' their arguments'}.\n` +
+    `import { ${facetNameOf(file)} } from './${file.replace(/\.ts$/, '.js')}';\n`;
+}
+
+/** The comment that heads the hosts import in `engine.ts`, as `generate` writes it. */
+const HOSTS_IMPORT_COMMENT = `// ${MARK} The facets' hosts, one per engine, which the static block at the end of the class builds.\n`;
+
+/**
+ * Where a started facet's import goes in `engine.ts`: at the comment line of
+ * the first facet import after it in section order, or, with none written
+ * after it, at the hosts import's comment. Null when neither is there.
+ */
+function facetImportAt(text, file, anchors) {
+  const rows = anchors.filter((row) => row[2]);
+  for (const row of rows.slice(rows.findIndex((r) => r[2] === file) + 1)) {
+    const i = text.indexOf(`\nimport { ${facetNameOf(row[2])} } from './${row[2].replace(/\.ts$/, '.js')}';\n`);
+    if (i < 0) continue;
+    const at = lineStartOf(text, i);
+    return text.startsWith(`// ${MARK} ${row[1]}: `, at) ? at : null;
+  }
+  const h = text.indexOf(`\n${HOSTS_IMPORT_COMMENT}`);
+  return h < 0 ? null : h + 1;
+}
+
+/** The hosts import in `engine.ts` (a `namedStatement` of the host names, sorted); null unless it is one in that form. */
+function hostsImportOf(tm, text) {
+  const ts = tm.ts;
+  const spec = `./${HOSTS_MODULE.replace(/\.ts$/, '.js')}`;
+  const sf = parseSourceFile(HOST_PATH, text);
+  const decls = sf.statements.filter((st) => ts.isImportDeclaration(st) && st.moduleSpecifier.text === spec);
+  if (decls.length !== 1) return null;
+  const nb = decls[0].importClause?.namedBindings;
+  if (!nb || !ts.isNamedImports(nb) || decls[0].importClause.isTypeOnly || nb.elements.some((e) => e.propertyName || e.isTypeOnly)) return null;
+  const names = nb.elements.map((e) => e.name.text);
+  const start = decls[0].getStart(sf);
+  const end = decls[0].getEnd();
+  return text.slice(start, end) === namedStatement('import', [...names].sort(), ` from '${spec}';`) ? { start, end, names, spec } : null;
+}
+
+/** The head of the class's install block (`hostsTexts`'s block half), through its `static {` line. */
+const INSTALL_BLOCK_HEAD = [
+  `  // ${MARK} Installs each facet's host factory (\`${HOSTS_MODULE}\`): a static block adds`,
+  '  // no member to the class, so the published `.d.ts` does not move.',
+  '  static {',
+  '',
+].join('\n');
+
+/** One facet's install call, whole, as `hostsTexts` writes it in the install block. */
+const installCallText = (file, members, written) =>
+  `    ${hostVarOf(file)}.install((engine) => ({\n${hostInstallLines(members, written).join('\n')}\n    }));\n`;
+
+/** Where a started facet's install call goes: before the first call whose host sorts after it, else at the block's close. Null without the block. */
+function installCallAt(text, file) {
+  const i = text.indexOf(INSTALL_BLOCK_HEAD);
+  if (i < 0 || text.indexOf(INSTALL_BLOCK_HEAD, i + 1) >= 0) return null;
+  const start = i + INSTALL_BLOCK_HEAD.length;
+  const end = text.indexOf('\n  }\n', start - 1);
+  if (end < 0) return null;
+  const mine = hostVarOf(file);
+  for (const m of text.slice(start, end + 1).matchAll(/^ {4}([\w$]+)\.install\(\(engine\) => \(\{$/gm)) {
+    if (m[1] > mine) return start + m.index;
+  }
+  return end + 1;
+}
+
+/** One facet's install call, whole (from its line start through its closing line's newline); null unless it is `installCallText`'s shape. */
+function installCallRegionOf(text, file) {
+  const inst = installRegionOf(text, file);
+  if (!inst) return null;
+  const head = `    ${hostVarOf(file)}.install((engine) => ({\n`;
+  const close = '\n    }));\n';
+  if (text.slice(inst.end, inst.end + close.length) !== close) return null;
+  return { start: inst.start - head.length, end: inst.end + close.length, inst };
+}
+
+/**
+ * A started facet module's text: `moduleText` of the moved members, each
+ * binding `engine.ts` imports from the leaf read as the leaf's top-level name
+ * it was when the first pass split the file (it renders those from the leaf,
+ * after the package imports, as `importPair` writes them). Refuses an aliased
+ * or default leaf binding, which the first pass never wrote.
+ */
+function startedModuleText(scope, file, title, records, routed) {
+  const leaf = leafSpecifier();
+  const leafNames = new Set();
+  const movers = records.map((r) => {
+    const imports = new Map();
+    const moduleRefs = new Map(r.moduleRefs);
+    for (const [local, use] of r.imports) {
+      const b = scope.bindings.get(local);
+      if (!b || b.specifier !== leaf) { imports.set(local, use); continue; }
+      if (b.form !== 'named' || b.imported !== local) refuse(`${file}: ${local} is bound from the leaf in a form the first pass does not write`);
+      leafNames.add(local);
+      const prev = moduleRefs.get(local);
+      moduleRefs.set(local, { value: Boolean(prev && prev.value) || (use.value && !b.typeOnly) });
+    }
+    return { ...r, imports, moduleRefs };
+  });
+  return moduleText(file, title, movers, scope, leafNames, routed);
 }
 
 // R10 (#30020 E4), the statics route for a written module. The first pass
@@ -4579,24 +4718,44 @@ function planMembers(tm, text, moduleTexts, names, { anchors = SECTION_ANCHORS, 
   const modules = new Map();
   for (const r of records) modules.set(r.module, [...(modules.get(r.module) ?? []), r]);
   const reroutes = new Set();
+  const starts = new Set();
   for (const [file, movers] of modules) {
     const mod = moduleTexts.get(file);
-    if (mod == null || !mod.includes(MARK)) refuse(`${file} is not on disk as the first pass wrote it: this pass adds to a written facet, never starts one`);
+    // R11 (#30020 E6): a module the anchor names and the disk lacks is started,
+    // as the first pass writes one for these movers.
+    const starting = mod == null;
+    if (starting) {
+      if (movers.some((r) => r.r8)) refuse(`${file} is not on disk, and a constructor never starts a facet (R11 starts one for methods)`);
+      for (const n of [facetNameOf(file), hostNameOf(file), hostVarOf(file)]) {
+        if (ctx.scope.bindings.has(n)) refuse(`${HOST_BASENAME} already binds ${n}, a name R11 generates for ${file}`);
+      }
+      if (movers.some((r) => r.host.size > 0)) {
+        const hosts = moduleTexts.get(HOSTS_MODULE);
+        if (hosts == null || !hostsModuleFilesOf(hosts)) refuse(`${HOSTS_MODULE} is not on disk as the first pass wrote it: R11 adds ${file}'s host to it`);
+      }
+      starts.add(file);
+    } else if (!mod.includes(MARK)) refuse(`${file} is not on disk as the first pass wrote it: this pass grows a written facet, and starts one only for a module the disk lacks (R11)`);
     // R10 (#30020 E4): a mover that reads a non-public static puts a module
     // off the route on it, as the first pass routes a module for one; the
     // rewrite refuses any module that is not the first pass's unrouted shape.
-    let routed = routesStatics(mod);
-    if (!routed && movers.some((r) => r.readsNonPublicStatic)) {
+    // A module R11 starts is routed as the first pass routes one.
+    let routed = starting ? movers.some((r) => r.readsNonPublicStatic) : routesStatics(mod);
+    if (!starting && !routed && movers.some((r) => r.readsNonPublicStatic)) {
       rerouteModule(tm, file, mod);
       reroutes.add(file);
       routed = true;
     }
-    const hasHost = interfaceRegionOf(mod, hostNameOf(file)) !== null;
-    const typeImportsClass = new RegExp(`^import type \\{[^}]*\\b${CLASS_NAME}\\b[^}]*\\} from '\\./engine\\.js';$`, 'm').test(mod);
+    const hasHost = starting || interfaceRegionOf(mod, hostNameOf(file)) !== null;
+    const typeImportsClass = !starting && new RegExp(`^import type \\{[^}]*\\b${CLASS_NAME}\\b[^}]*\\} from '\\./engine\\.js';$`, 'm').test(mod);
     for (const r of movers) {
       if (r.host.size > 0 && !hasHost) refuse(`${r.name} reads the class, and ${file} has no host: this pass does not give a facet one`);
       if (r.r8 && r.r8.length > 0 && !hasHost) refuse(`${r.name}: R8 types its facet members by the host interface's class, and ${file} has no host`);
-      if (r.facetNames) {
+      if (starting) {
+        for (const local of [...r.imports.keys(), ...r.moduleRefs.keys()]) {
+          if (local === facetNameOf(file) || local === hostNameOf(file) || local === CLASS_TYPE_ALIAS) refuse(`${file}: ${r.name} reads ${local}, a name this script generates in that module`);
+        }
+      }
+      if (r.facetNames && !starting) {
         const held = facetMembersOf(tm, file, mod)?.members.map((x) => x.name) ?? [];
         for (const n of r.facetNames) if (held.includes(n)) refuse(`${r.name}: ${file} already holds a facet member ${n}`);
       }
@@ -4610,14 +4769,16 @@ function planMembers(tm, text, moduleTexts, names, { anchors = SECTION_ANCHORS, 
         if (blockers.length > 0) refuse(`${r.name} stays on the class, as the first pass would keep it in a routed module: ${blockers.join('; ')}`);
       }
       for (const [n, use] of r.moduleRefs) {
-        if (n === CLASS_NAME && (routed || (!use.value && typeImportsClass))) continue;
+        // A started module imports the class as the first pass does (`importLines`).
+        if (n === CLASS_NAME && (starting || routed || (!use.value && typeImportsClass))) continue;
         // R4 (#30020): a name `engine.ts` already exports is imported from it
         // (lever (a) of ruling 6591753301); no export list widens.
         if (n !== CLASS_NAME && ctx.scope.exported.has(n) && ctx.scope.bindings.get(n)?.kind === 'local') {
           // A routed module's `./engine.js` line is the statics pair's: a name it
           // already imports there, in a form that serves the read, needs no edit.
-          const held = routed ? engineRunOf(tm, file, mod, [])?.uses.get(n) : null;
-          if (routed && !(held && (held.value || !use.value))) refuse(`${r.name} reads ${n}, a name ${HOST_BASENAME} exports, and ${file} takes the statics route: this pass does not import into a routed module's \`./engine.js\` line`);
+          // A started module's line is written whole (`importLines`).
+          const held = routed && !starting ? engineRunOf(tm, file, mod, [])?.uses.get(n) : null;
+          if (routed && !starting && !(held && (held.value || !use.value))) refuse(`${r.name} reads ${n}, a name ${HOST_BASENAME} exports, and ${file} takes the statics route: this pass does not import into a routed module's \`./engine.js\` line`);
           continue;
         }
         refuse(`${r.name} reads ${n}, a top-level name of ${HOST_BASENAME}: this pass does not widen the generated export lists`);
@@ -4628,15 +4789,23 @@ function planMembers(tm, text, moduleTexts, names, { anchors = SECTION_ANCHORS, 
       }
     }
   }
-  return { ctx, records, modules, reroutes };
+  return { ctx, records, modules, reroutes, starts, anchors };
 }
 
 /** Apply a `planMembers` plan. Returns `{ host, modules, pruned }` (`modules`: the receiving modules' new texts). Pure. */
 function generateMembers(tm, text, moduleTexts, planned) {
   const { ctx, modules } = planned;
+  const starts = planned.starts ?? new Set();
   const edits = [];
   const newStatics = new Map();
+  const startedHosts = [];
   for (const [file, movers] of modules) {
+    if (starts.has(file)) {
+      // R11: the started facet's import, under its comment, in section order.
+      const at = facetImportAt(text, file, planned.anchors ?? SECTION_ANCHORS);
+      if (at === null) refuse(`${HOST_BASENAME}: no facet import or hosts import to place ${file}'s import by, as the first pass writes them`);
+      edits.push({ start: at, end: at, text: facetImportText(file, movers[0].section, movers.some((r) => r.host.size > 0)) });
+    }
     for (const r of movers) {
       const body = r.node.getBody();
       const lineStart = lineStartOf(text, body.getEnd() - 1);
@@ -4656,6 +4825,15 @@ function generateMembers(tm, text, moduleTexts, planned) {
     for (const r of movers) for (const [k, kind] of r.host) members.set(k, kind);
     for (const r of movers) for (const k of r.writes) written.add(k);
     if (members.size === 0) continue;
+    if (starts.has(file)) {
+      // R11: its install call, among the others in host-name order.
+      if (installRegionOf(text, file)) refuse(`${file}: ${HOST_BASENAME} already installs a host factory for it`);
+      const at = installCallAt(text, file);
+      if (at === null) refuse(`${HOST_BASENAME}: its install block is not as the first pass wrote it`);
+      edits.push({ start: at, end: at, text: installCallText(file, members, written) });
+      startedHosts.push(file);
+      continue;
+    }
     const inst = installRegionOf(text, file);
     if (!inst) refuse(`${file}: its host factory in ${HOST_BASENAME}'s install block is not as the first pass wrote it`);
     const merged = new Map(inst.members);
@@ -4666,6 +4844,13 @@ function generateMembers(tm, text, moduleTexts, planned) {
     const mergedWritten = new Set([...inst.written, ...written]);
     const lines = hostInstallLines(merged, mergedWritten).join('\n');
     if (lines !== text.slice(inst.start, inst.end)) edits.push({ start: inst.start, end: inst.end, text: lines });
+  }
+  if (startedHosts.length > 0) {
+    // R11: the hosts import gains each started facet's host.
+    const imp = hostsImportOf(tm, text);
+    if (!imp) refuse(`${HOST_BASENAME}: its hosts import is not as the first pass wrote it`);
+    const names = [...imp.names, ...startedHosts.map(hostVarOf)].sort();
+    edits.push({ start: imp.start, end: imp.end, text: namedStatement('import', names, ` from '${imp.spec}';`) });
   }
   if (newStatics.size > 0) {
     const region = staticsRegionOf(text);
@@ -4682,7 +4867,18 @@ function generateMembers(tm, text, moduleTexts, planned) {
   const pruned = pruneHostImports(tm, out, usedImportNames(tm, out));
 
   const moduleOut = new Map();
+  if (startedHosts.length > 0) {
+    // R11: `HOSTS_MODULE` is the first pass's text for one module more.
+    const files = hostsModuleFilesOf(moduleTexts.get(HOSTS_MODULE) ?? '');
+    if (!files) refuse(`${HOSTS_MODULE} is not on disk as the first pass wrote it`);
+    moduleOut.set(HOSTS_MODULE, hostsModuleText([...files, ...startedHosts]));
+  }
   for (const [file, movers] of modules) {
+    if (starts.has(file)) {
+      // R11: the module the first pass writes for these movers.
+      moduleOut.set(file, startedModuleText(ctx.scope, file, movers[0].section, movers, movers.some((r) => r.readsNonPublicStatic)));
+      continue;
+    }
     // R10: a module this plan reroutes is put on the statics route first, and grows from there.
     const mod = planned.reroutes?.has(file) ? rerouteModule(tm, file, moduleTexts.get(file)) : moduleTexts.get(file);
     const title = movers[0].section;
@@ -5057,6 +5253,7 @@ function verifyMembers(tm, baseText, headText, baseModules, headModules, {
     if (body.getText() !== stubBody({ node: hm, name, usesHost: mv.usesHost, docMoved: mv.docMoved }, file, closeIndent)) fail(`${name}: the stub is not the first pass's stub`);
     if (hm.isAsync()) fail(`${name}: the stub kept \`async\``);
     const baseDoc = bm.getScope() === 'private' && bm.getStart(true) < bm.getStart() ? baseText.slice(bm.getStart(true), bm.getStart()) : null;
+    mv.record = { ...read, name, node: bm, doc: baseDoc };
     if (mv.docMoved !== (baseDoc !== null)) fail(`${name}: its stub says its docblock ${mv.docMoved ? 'moved' : 'stayed'}, and the base method is ${baseDoc === null ? 'not a private one with a docblock' : 'a private one with a docblock'}`);
     if (fm.text !== facetMethodText({ name, node: bm, host: read.host, doc: baseDoc, identity: read.identity }, hostNameOf(file))) {
       fail(`${name}: the facet member is not its base method's text (docblock, parameters, return type, body)`);
@@ -5066,15 +5263,46 @@ function verifyMembers(tm, baseText, headText, baseModules, headModules, {
   // The modules: the receiving ones undo to their base; every other one is its base.
   const touched = new Map();
   for (const mv of moved) if (mv.fm) touched.set(mv.file, [...(touched.get(mv.file) ?? []), mv]);
+  // R11: a receiving module absent at base was started; its undo is its deletion.
+  const started = new Set([...touched.keys()].filter((f) => !baseModules.has(f)));
+  const startedHosts = [...started].filter((f) => interfaceRegionOf(headModules.get(f), hostNameOf(f)) !== null);
   const undone = new Map();
   for (const file of new Set([...baseModules.keys(), ...headModules.keys()])) {
     const b = baseModules.get(file) ?? null;
     const h = headModules.get(file) ?? null;
+    if (file === HOSTS_MODULE && startedHosts.length > 0) {
+      // R11: the hosts module is its base with the started facets' hosts, and nothing else.
+      const files = h === null ? null : hostsModuleFilesOf(h);
+      if (!files) { fail(`${HOSTS_MODULE}: not as the first pass writes it at head`); continue; }
+      for (const f of started) {
+        if (files.includes(f) !== startedHosts.includes(f)) fail(`${HOSTS_MODULE}: ${files.includes(f) ? 'holds' : 'lacks'} a host for ${f}, which ${startedHosts.includes(f) ? 'has' : 'has no'} host interface`);
+      }
+      const u = hostsModuleText(files.filter((f) => !started.has(f)));
+      if (u !== b) fail(`undoing the started facets out of ${HOSTS_MODULE} does not rebuild its base (first difference at line ${firstDiffLine(u, b ?? '')})`);
+      continue;
+    }
     if (!touched.has(file)) {
       if (b !== h) fail(`${file}: changed, and no member this pass moved is in it`);
       continue;
     }
-    if (b === null) { fail(`${file}: absent at base (this pass never starts a facet)`); continue; }
+    if (b === null) {
+      // R11: exactly the text the first pass writes for the moved members, read off the base.
+      const mvs = touched.get(file);
+      if (mvs.some((mv) => mv.ctor)) { fail(`${file}: absent at base, and a constructor never starts a facet`); continue; }
+      const records = [...mvs].sort((x, y) => x.bm.getStart() - y.bm.getStart()).map((mv) => mv.record);
+      const routed = records.some((r) => r.readsNonPublicStatic);
+      if (routesStatics(h) !== routed) fail(`${file}: ${routesStatics(h) ? 'on' : 'off'} the statics route, and ${routed ? 'a' : 'no'} moved member reads a non-public static`);
+      let want = null;
+      try {
+        want = startedModuleText(base.scope, file, mvs[0].title, records, routed);
+      } catch (e) {
+        if (!(e instanceof CodemodRefusal)) throw e;
+        fail(`${file}: its base members do not render as a started facet (${e.message})`);
+      }
+      if (want !== null && want !== h) fail(`${file}: started, and not the module the first pass writes for its members (first difference at line ${firstDiffLine(h, want)})`);
+      undone.set(file, '');
+      continue;
+    }
     const mvs = touched.get(file);
     const u = undoMembersModule(tm, file, h, mvs.flatMap((mv) => mv.facetNames ?? [mv.name]), mvs[0].title, fail, b);
     if (u === null) continue;
@@ -5111,6 +5339,20 @@ function verifyMembers(tm, baseText, headText, baseModules, headModules, {
   } else if (headText.includes(`export interface ${STATICS_HOST_NAME} {`)) {
     fail(`${HOST_BASENAME}: its statics route is not as the first pass writes it`);
   }
+  for (const file of started) {
+    // R11: the facet's import and its comment come out of engine.ts.
+    const mvs = touched.get(file);
+    const t = facetImportText(file, mvs[0].title, mvs.some((mv) => mv.usesHost));
+    const at = headText.indexOf(`\n${t}`);
+    if (at < 0 || headText.indexOf(`\n${t}`, at + 1) >= 0) fail(`${file}: ${HOST_BASENAME} does not import its facet once, as the first pass writes the import`);
+    else edits.push({ start: at + 1, end: at + 1 + t.length, text: '' });
+  }
+  if (startedHosts.length > 0) {
+    const imp = hostsImportOf(tm, headText);
+    const gone = new Set(startedHosts.map(hostVarOf));
+    if (!imp || startedHosts.some((f) => !imp.names.includes(hostVarOf(f)))) fail(`${HOST_BASENAME}: its hosts import does not import each started facet's host as the first pass writes it`);
+    else edits.push({ start: imp.start, end: imp.end, text: namedStatement('import', imp.names.filter((n) => !gone.has(n)).sort(), ` from '${imp.spec}';`) });
+  }
   for (const file of touched.keys()) {
     const head = headModules.get(file);
     const iface = interfaceRegionOf(head, hostNameOf(file));
@@ -5123,6 +5365,13 @@ function verifyMembers(tm, baseText, headText, baseModules, headModules, {
       if (!kind || v.readonly !== readonly || Boolean(v.facade) !== (kind === 'facade')) fail(`${file}: host member ${k} is not the same member in its interface and its factory`);
     }
     if (inst.members.size !== iface.members.size) fail(`${file}: its host factory forwards members its interface does not declare`);
+    if (started.has(file)) {
+      // R11: its whole install call comes out.
+      const call = installCallRegionOf(headText, file);
+      if (!call) fail(`${file}: its install call in ${HOST_BASENAME} is not as the first pass writes one`);
+      else edits.push({ start: call.start, end: call.end, text: '' });
+      continue;
+    }
     const u = undone.get(file);
     const keptIface = u ? interfaceRegionOf(u, hostNameOf(file)) : null;
     if (!keptIface) continue;
@@ -5708,6 +5957,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'hand-series host slots (fifth pass, #30020)': 17,
   'constructor and definite-assignment wiring (fourth pass, #30020 R8)': 17,
   'statics route for a written module (fourth pass, #30020 R10)': 21,
+  'a facet the anchor names and the first pass never wrote (fourth pass, #30020 R11)': 18,
   'scoped members, instance identity port and symbol keys (second pass, #30020 S1)': 25,
 });
 const SELF_TEST_BATTERY_FLOOR = 5;
@@ -6121,7 +6371,7 @@ const IDENTITY_FIXTURE_ANCHORS = Object.freeze([
   ['seed', 'Identity', 'engine-identity.ts'],
   ['keptSection', 'Kept', null],
 ]);
-function identityFixtureSource({ facadeField = false, staticReader = false } = {}) {
+function identityFixtureSource({ facadeField = false, staticReader = false, startSection = false } = {}) {
   const pad = Array.from({ length: 12 }, (_, i) => `    const p${i} = ${i};`).join('\n');
   const extra = `
   protected seed(): number {
@@ -6176,6 +6426,18 @@ ${pad}
     const self = (this as any)._flag ? this : null;
     return n + ObjectQL.SECRET + this.count + (self ? 1 : 0);
   }
+` : ''}${startSection ? `
+  /** Hands the engine on (R1): the first pass keeps it, so its section has no module (R11). */
+  protected handsOn(n: number): Scoped {
+${pad}
+    return new Scoped(n + this.count, this);
+  }
+
+  /** Reads a private static and the engine itself: the module R11 starts takes the statics route. */
+  private handsOnStatic(n: number): number {
+${pad}
+    return n + ObjectQL.SECRET + ((this as any)._flag ? 1 : 0);
+  }
 ` : ''}`;
   const source = `${fixtureSource(extra)}
 export class Scoped {
@@ -6184,6 +6446,14 @@ export class Scoped {
 `;
   return facadeField ? source.replace('  private count = 0;\n', '  private count = 0;\n  private facade = 0;\n') : source;
 }
+
+/** The identity fixture's anchors with a section whose every method the first pass keeps (`startSection`, R11). */
+const START_FIXTURE_ANCHORS = Object.freeze([
+  ['count', 'Lifecycle', 'engine-lifecycle.ts'],
+  ['seed', 'Identity', 'engine-identity.ts'],
+  ['handsOn', 'Hand-on', 'engine-hand-on.ts'],
+  ['keptSection', 'Kept', null],
+]);
 
 /**
  * The constructor fixture (#30020 R8): the identity fixture with a field only
@@ -6892,6 +7162,76 @@ async function selfTest() {
         /not the one/.test(refusalOf(() => planMembers(tm, input, new Map([...mods, ['engine-identity.ts', baseIdm.replace(unroutedEngineImport(), unroutedEngineImport().replace('{ ', '{'))]]), ['staticReader'], opts))));
     }
     check('a module already on the route is not rerouted', refused(() => rerouteModule(tm, 'engine-lifecycle.ts', routedLife)));
+  }
+
+  open('a facet the anchor names and the first pass never wrote (fourth pass, #30020 R11)');
+  {
+    const opts = { anchors: START_FIXTURE_ANCHORS, pins: FIXTURE_PINS, needles: FIXTURE_NEEDLES, classNeedles: FIXTURE_CLASS_NEEDLES };
+    const source = identityFixtureSource({ startSection: true });
+    const split = generate(tm, source, plan(tm, source, opts));
+    const input = split.host;
+    const mods = split.modules;
+    const file = 'engine-hand-on.ts';
+    const names = ['handsOnStatic', 'handsOn'];
+    check('the first pass keeps every method of the section on the class (bare-this) and writes no module for it',
+      !mods.has(file) && input.includes('  protected handsOn(n: number): Scoped {\n    const p0') &&
+      input.includes('  private handsOnStatic(n: number): number {\n    const p0') && mods.has('engine-identity.ts') && mods.has(HOSTS_MODULE));
+    const planned = planMembers(tm, input, mods, names, opts);
+    check('the plan starts the module its anchor names, the members in class order',
+      [...planned.starts].join() === file && [...planned.modules.keys()].join() === file &&
+      planned.records.map((r) => r.name).join() === 'handsOn,handsOnStatic', planned.records.map((r) => `${r.name}->${r.module}`).join());
+    const out = generateMembers(tm, input, mods, planned);
+    const again = generateMembers(tm, input, mods, planMembers(tm, input, mods, names, opts));
+    const head = new Map([...mods, ...out.modules]);
+    const v = verifyMembers(tm, input, out.host, mods, head, opts);
+    check('the generated moves prove against their base, the module absent there', v.failures.length === 0 && v.moved.length === 2, v.failures.join(' | '));
+    check('two runs on one input write byte-identical trees',
+      treeHash(new Map([['h', out.host], ...out.modules])) === treeHash(new Map([['h', again.host], ...again.modules])));
+    const hom = out.modules.get(file) ?? '';
+    check('the started module is the first pass\'s text for its members: header list, routed, the identity port, the private docblock with its body',
+      headerNamesOf(hom, 'Hand-on')?.names.join() === 'handsOn,handsOnStatic' && routesStatics(hom) && hom.includes(`\n *\n${STATICS_PARA}\n *\n${VALUES_CYCLE_PARA}\n */`) &&
+      hom.includes(`${FACADE_DOC}\n  readonly facade: ObjectQLClass;`) && hom.includes('export class HandOnFacet {') &&
+      hom.includes('  /** Reads a private static and the engine itself: the module R11 starts takes the statics route. */\n  static handsOnStatic(') &&
+      hom.includes('    return new Scoped(n + this.count, this.facade);') && hom.includes("import { ObjectQLStatics as ObjectQL, Scoped } from './engine.js';\nimport type { ObjectQL as ObjectQLClass } from './engine.js';"), hom);
+    check('engine.ts imports the facet under its comment, in section order, ahead of the hosts import',
+      out.host.includes(`import { IdentityFacet } from './engine-identity.js';\n${facetImportText(file, 'Hand-on', true)}${HOSTS_IMPORT_COMMENT}`), out.host.slice(0, 1600));
+    check('the hosts import gains the host, sorted, and the install block its call, sorted, handing the engine',
+      out.host.includes("import { handOnHost, identityHost, lifecycleHost } from './engine-facet-hosts.js';") &&
+      out.host.includes(`  static {\n    handOnHost.install((engine) => ({\n      count: (`) === false && /\n {4}handOnHost\.install\(\(engine\) => \(\{\n[^]*?\n {4}\}\)\);\n {4}identityHost\.install/.test(out.host) &&
+      (installRegionOf(out.host, file)?.members.get('facade') === 'facade'));
+    check('the hosts module is the first pass\'s text for one module more',
+      out.modules.get(HOSTS_MODULE) === hostsModuleText(['engine-hand-on.ts', 'engine-identity.ts', 'engine-lifecycle.ts']) &&
+      (out.modules.get(HOSTS_MODULE) ?? '').includes("export const handOnHost = new FacetHost<HandOnHost>('HandOnFacet');") &&
+      hostsModuleFilesOf(mods.get(HOSTS_MODULE) ?? '')?.join() === 'engine-identity.ts,engine-lifecycle.ts');
+    check('the stubs name the started module and hand its host',
+      out.host.includes('    return HandOnFacet.handsOn.call(handOnHost.of(this), n);') && out.host.includes('    return HandOnFacet.handsOnStatic.call(handOnHost.of(this), n);'));
+    // A negative control whose edit changed nothing would pass for the wrong reason: it fails the case instead.
+    const fails = (host, edited, re = null) => {
+      if (host === out.host && edited.every(([f, t]) => t === head.get(f))) return false;
+      const fs = verifyMembers(tm, input, host, mods, new Map([...head, ...edited]), opts).failures;
+      return fs.length > 0 && (!re || fs.some((f) => re.test(f)));
+    };
+    check('a started module with one line more than the first pass writes fails',
+      fails(out.host, [[file, hom.replace('export class HandOnFacet {', '// hand\nexport class HandOnFacet {')]], /not the module the first pass writes/));
+    check('a started module taken off the statics route fails',
+      fails(out.host, [[file, hom.replace(`\n *\n${STATICS_PARA}`, '')]], /off the statics route|not the module/));
+    check('a hosts module that lacks the started facet\'s host fails',
+      fails(out.host, [[HOSTS_MODULE, mods.get(HOSTS_MODULE)]], /lacks a host for engine-hand-on\.ts/));
+    check('an engine.ts that keeps a second copy of the facet import fails',
+      fails(out.host.replace(HOSTS_IMPORT_COMMENT, `${facetImportText(file, 'Hand-on', true)}${HOSTS_IMPORT_COMMENT}`), [], /import its facet once/));
+    check('an engine.ts without the started facet\'s install call fails',
+      fails(out.host.replace(/\n {4}handOnHost\.install\(\(engine\) => \(\{\n[^]*?\n {4}\}\)\);/, ''), [], /handOnHost|host factory|HandOnHost|install/));
+    check('a module started where its base already had one is the written-module path, not R11',
+      refused(() => planMembers(tm, input, new Map([...mods, [file, '// not the first pass\n']]), names, opts)));
+    check('a name R11 generates that engine.ts already binds refuses',
+      /a name R11 generates/.test(refusalOf(() => planMembers(tm, input.replace('export class ObjectQL {', 'const handOnHost = 0;\nexport class ObjectQL {'), mods, names, opts))));
+    {
+      const noHosts = new Map([...mods].filter(([f]) => f !== HOSTS_MODULE));
+      check('a body that reads the class refuses to start a facet without the hosts module the first pass wrote',
+        /R11 adds engine-hand-on\.ts's host/.test(refusalOf(() => planMembers(tm, input, noHosts, names, opts))));
+    }
+    check('a section that maps to no module still keeps its method (section-kept)',
+      /section-kept/.test(refusalOf(() => planMembers(tm, input, mods, ['keptSection'], opts))));
   }
 
   open('constructor and definite-assignment wiring (fourth pass, #30020 R8)');

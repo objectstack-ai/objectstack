@@ -1,7 +1,5 @@
 # 车队项目(项目形态)
 
-协调者每次开场读本文;坐席、接管、移交、开信箱 PR 前再读。本文是席位之上的项目层。
-
 ## 一种项目形态
 
 - 车队项目 = 任一账号上、指令行指向 pm-dispatch 的 Claude Code 项目;⛔ 不分项目类型。
@@ -23,7 +21,6 @@
 - 指令行就是指派:维护者在项目里写下或改写这一行,是唯一的指派动作。
 - 项目聊天里的长句(「本账户坐 X;Y 的 PR 由本账户复审」)是等价写法。
 - 坐席即把本账号写进 🟢 行、每席开一条席位线程;⛔ 无花名册文件。
-- 坐席即建巡查 routine(见 `seat-lifecycle.md`);分诊加每时裸卡轮;总监与宪章定的按需席不建。
 
 ## 接管不等撞墙账号
 
@@ -42,8 +39,11 @@
 - 立锚卡者→分诊(缺则总监)`Request: main-red`,→破坏 PR 的席与锚卡车道 `Notify: main-red`。
 - 锚卡关闭:分诊(缺则总监)→正文带 `Waits-on: main-red #n` 的每张 open PR 之席 `Notify: main-green`。
 - 车道→分诊问卡去留路由定级 `Request: triage`;反向 p0/p1 发版阻塞定入 `Notify: release-blocker`。
+- 车道→cloud 席:缺 cloud 事实读数 `Request: cloud-confirm`;反向随记录 `Notify: cloud-confirm`。
 - 移卡入队者→车道:p0/p1 `Blocked-by` 关闭 `Notify: unblocked`;记裁决席→被改席 `Notify: ruling`。
 - 席→兄弟席或他车道:认领文件面相交或须先落 `Notify: serial`,先落者落地 `Notify: landed`。
+- p0/p1 卡阻于他车道未认领或闲置 ≥3h 的卡:认领席(未认领则分诊)→其车道 `Request: assist`。
+- 收方随记录(认领/ETA/不接理由)回 `Notify: assist`;ETA 或 2h 无记录交分诊,彼道无席呈决策卡。
 - 上下线→兄弟席与分诊 `Notify: seat-online`、`Notify: seat-offline`;清单变→兄弟席 `Notify: split`。
 - 持发现席→`security#1`:公告建成或误公开卡挂标即 `Notify: security`,只带编号;私有仓卡不敲。
 - 分诊→认领席:认领卡或 open PR 闲置 ≥3h `Request: progress`;反向随记录 `Notify: progress`。
