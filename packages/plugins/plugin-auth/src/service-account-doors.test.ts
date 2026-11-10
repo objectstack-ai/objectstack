@@ -22,13 +22,17 @@
  *  - what the key is: the account's, in the account's organization, signed
  *    under the lifecycle policy, its secret returned once and stored hashed;
  *  - a person's id, and a retired account, get no key;
- *  - an unreadable membership is an outage (503), never a verdict.
+ *  - an unreadable membership is an outage (503), never a verdict;
+ *  - [ADR-0151 D7] a refusal a hook or middleware DECLARES on either write
+ *    (the user row, the membership) is answered with its own status, the
+ *    closed code in `code` and its own spelling in `declaredCode` (ADR-0112
+ *    D4), and nothing is written; an undeclared throw still fails.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { hashApiKey, isAuthzStoreUnavailableError } from '@objectstack/core';
+import { AuthzStoreUnavailableError, hashApiKey, isAuthzStoreUnavailableError } from '@objectstack/core';
 
 import {
   runCreateServiceAccountKey, runRegisterServiceAccount,
@@ -332,5 +336,116 @@ describe('[ADR-0151 D4] create-key: who may mint, and what the key is', () => {
   it('userId is required', async () => {
     const r = await runCreateServiceAccountKey(deps(), caller('usr_admin'), post({}));
     expect(r).toMatchObject({ status: 400, body: { error: { code: 'INVALID_REQUEST' } } });
+  });
+});
+
+describe('[ADR-0151 D7] register: a licence refusal declared on either write keeps its status and code', () => {
+  const PACKAGE = 'test.licence-plugin';
+  /** What cloud's AI-seat cap throws: a numeric `statusCode` and its own string `code`. */
+  const seatCap = (extra: Record<string, unknown> = {}) =>
+    Object.assign(new Error('AI-seat cap reached: 5 of 5 seats are in use.'), {
+      statusCode: 402, code: 'ai_seat_limit_reached', ...extra,
+    });
+  const refuseUserInsert = (error: () => unknown) =>
+    engine.registerHook('beforeInsert', async (ctx: any) => {
+      if (ctx.input?.data?.principal_kind === 'agent') throw error();
+    }, { object: 'sys_user', packageId: PACKAGE });
+  const refuseMemberInsert = (error: () => unknown) =>
+    engine.registerMiddleware(async (ctx, next) => {
+      if (ctx.operation === 'insert') throw error();
+      await next();
+    }, { object: 'sys_member' });
+
+  const agents = () => rows('sys_user', { principal_kind: 'agent' });
+  const register = () => runRegisterServiceAccount(deps(), caller('usr_admin'), post({ name: 'Bot', ownerId: 'usr_owner' }));
+
+  it('a 402 thrown by a hook on the user row: 402, the closed code beside ai_seat_limit_reached, its message, and nothing written', async () => {
+    refuseUserInsert(() => seatCap());
+    const members = (await rows('sys_member')).length;
+    const r = await register();
+    expect(r).toEqual({
+      status: 402,
+      body: {
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          declaredCode: 'ai_seat_limit_reached',
+          message: 'AI-seat cap reached: 5 of 5 seats are in use.',
+        },
+      },
+    });
+    expect(await agents()).toEqual([]);
+    expect((await rows('sys_member')).length).toBe(members);
+  });
+
+  it('a 402 thrown by middleware on the membership insert: 402 with ai_seat_limit_reached, and the user row is rolled back', async () => {
+    refuseMemberInsert(() => seatCap());
+    const users = (await rows('sys_user')).length;
+    const members = (await rows('sys_member')).length;
+    const r = await register();
+    expect(r).toMatchObject({
+      status: 402,
+      body: { success: false, error: { code: 'VALIDATION_ERROR', declaredCode: 'ai_seat_limit_reached' } },
+    });
+    expect(String(r.body.error!.message)).toMatch(/could not be added to the organization.*AI-seat cap reached/);
+    expect(await agents()).toEqual([]);
+    expect((await rows('sys_user')).length).toBe(users);
+    expect((await rows('sys_member')).length).toBe(members);
+  });
+
+  it('a registered code travels in code itself, with no declaredCode beside it', async () => {
+    refuseUserInsert(() => Object.assign(new Error('Licence refuses this kind.'), { statusCode: 403, code: 'PERMISSION_DENIED' }));
+    const r = await register();
+    expect(r).toEqual({
+      status: 403,
+      body: { success: false, error: { code: 'PERMISSION_DENIED', message: 'Licence refuses this kind.' } },
+    });
+    expect(await agents()).toEqual([]);
+  });
+
+  it('a declared 503 keeps its status and code; its message is withheld unless the producer declared it a refusal', async () => {
+    const unknown = (extra: Record<string, unknown> = {}) =>
+      Object.assign(new Error('seat ledger at db-7.internal timed out'), { statusCode: 503, code: 'ai_seat_cap_unknown', ...extra });
+    refuseUserInsert(() => unknown());
+    const withheld = await register();
+    expect(withheld).toEqual({
+      status: 503,
+      body: {
+        success: false,
+        error: { code: 'SERVICE_UNAVAILABLE', declaredCode: 'ai_seat_cap_unknown', message: 'The request could not be completed.' },
+      },
+    });
+
+    engine.unregisterHooksByPackage(PACKAGE);
+    refuseUserInsert(() => Object.assign(new Error('The AI-seat count cannot be read right now. Try again shortly.'), {
+      statusCode: 503, code: 'ai_seat_cap_unknown', refusal: true,
+    }));
+    const addressed = await register();
+    expect(addressed).toMatchObject({
+      status: 503,
+      body: { error: { code: 'SERVICE_UNAVAILABLE', declaredCode: 'ai_seat_cap_unknown', message: 'The AI-seat count cannot be read right now. Try again shortly.' } },
+    });
+    expect(await agents()).toEqual([]);
+  });
+
+  it('a throw that declares only one half, or a status outside 400-599, is not a refusal: it still fails as before', async () => {
+    const undeclared: Array<[string, () => unknown]> = [
+      ['no code', () => Object.assign(new Error('seat check failed'), { statusCode: 402 })],
+      ['no status', () => Object.assign(new Error('seat check failed'), { code: 'ai_seat_limit_reached' })],
+      ['a status outside 400-599', () => Object.assign(new Error('seat check failed'), { statusCode: 700, code: 'ai_seat_limit_reached' })],
+      ['an empty code', () => Object.assign(new Error('seat check failed'), { statusCode: 402, code: '' })],
+      ['a plain error', () => new Error('seat check failed')],
+    ];
+    for (const [label, error] of undeclared) {
+      engine.unregisterHooksByPackage(PACKAGE);
+      refuseUserInsert(error);
+      await expect(register(), label).rejects.toThrow('seat check failed');
+    }
+    expect(await agents()).toEqual([]);
+  });
+
+  it('an unreadable authorization store inside the write is still the route\'s outage, not a declared refusal', async () => {
+    refuseUserInsert(() => new AuthzStoreUnavailableError('sys_member', new Error('down')));
+    await expect(register()).rejects.toSatisfy(isAuthzStoreUnavailableError);
   });
 });
