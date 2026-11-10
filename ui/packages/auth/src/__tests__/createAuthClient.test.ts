@@ -372,8 +372,8 @@ describe('createAuthClient — phone-number OTP (framework#2780)', () => {
     });
     const client = createAuthClient({ baseURL: 'http://localhost/api/auth', fetchFn: mockFn });
     const result = await client.signInWithPhonePassword('+8613800000000', 'S3cret-pass!');
-    expect(result.session.token).toBe('pw-session-token');
-    expect(result.user.id).toBe('u2');
+    expect(result.session?.token).toBe('pw-session-token');
+    expect(result.user?.id).toBe('u2');
     expect(TokenStorage.get()).toBe('pw-session-token');
     const call = calls.find((c) => c.url.includes('/sign-in/phone-number'));
     expect(call?.method).toBe('POST');
