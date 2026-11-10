@@ -2013,7 +2013,7 @@ describe('one plan card per build turn — the newest propose_blueprint result',
     input: {},
     ...(state === 'output-available' ? { output: plan(n) } : {}),
   });
-  const user = (id: string) => ({ id, role: 'user', parts: [{ type: 'text', text: 'build me a library app' }] });
+  const user = (id: string) => ({ id, role: 'user' as const, parts: [{ type: 'text', text: 'build me a library app' }] });
   const titles = () => screen.getAllByTestId('proposed-plan-title').map((el) => el.textContent);
 
   it('a turn with four propose_blueprint results draws one card, the newest', () => {
