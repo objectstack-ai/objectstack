@@ -31,7 +31,10 @@
 //     showcase's email template name, which another namespace may now ship;
 //   - the email template's narrowing at the door (#31699): a third namespace's
 //     package shipping the held template name installs, a co-owner of `alpha`'s
-//     namespace is refused naming `alpha` only, and a second namespace's
+//     namespace is refused naming `alpha` only (at this door a co-owner depends
+//     on `alpha`, so the ADR-0146 D2 override write gate refuses it first, 403
+//     NOT_OVERRIDABLE; the bare-name rule's own co-owner refusal, for an
+//     artifact co-owner, is pinned in objectql), and a second namespace's
 //     override of the platform-requested `auth.password_reset` is refused naming
 //     the first overriding app;
 //   - CONTROL: a package declaring fresh names installs — and so does one
@@ -332,16 +335,18 @@ describe('one package holder per flow, webhook, connector and email template nam
       expect(await packageIds()).toContain('com.qa.bare.zeta');
     });
 
-    it('install-local of a co-owner of alpha\'s namespace shipping the held name is refused, naming alpha only and the namespace\'s rename', async () => {
+    it('install-local of a co-owner of alpha\'s namespace shipping the held name is refused, naming alpha only; nothing is installed', async () => {
+      // A co-owner reaches this door by depending on alpha (ADR-0141 D5), so
+      // the ADR-0146 D2 override write gate refuses its same-named item before
+      // the bare-name rule is asked: 403 NOT_OVERRIDABLE, never an install.
       const before = await packageIds();
       const { status, body } = await installLocal(coOwner('com.qa.bare.alphamod', { emailTemplates: [template('alphamod')] }));
-      expect([status, codeOf(body)], JSON.stringify(body)).toEqual([422, 'PLUGIN_REGISTER_FAILED']);
+      expect([status, codeOf(body)], JSON.stringify(body)).toEqual([403, 'NOT_OVERRIDABLE']);
       const message = String(body?.error?.message ?? '');
-      expect(message).toContain(`the email template "${TPL}"`);
-      expect(message).toContain('com.qa.bare.alpha"');
+      expect(message).toContain(`email_template/${TPL}`);
+      expect(message).toContain(`'com.qa.bare.alpha' ships`);
       expect(message).not.toContain('com.qa.bare.beta');
       expect(message).not.toContain('com.qa.bare.zeta');
-      expect(message).toContain(`"alpha_${TPL}"`);
       expect(await packageIds()).toEqual(before);
     });
 

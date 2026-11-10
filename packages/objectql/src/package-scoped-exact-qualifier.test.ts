@@ -195,3 +195,61 @@ describe('CONTROL — what the exact qualifier keeps serving', () => {
     expect(labelOf(await protocol.getMetaItem({ type: 'page', name: 'solo' }))).toBe('alpha page');
   });
 });
+
+describe('[#31699] a bundled type (email_template): the exact qualifier reads a member addition and a pair\'s member as the package\'s own', () => {
+  const D = 'com.acme.alphaaddon';
+  /** One member of `packageId`'s bundle `welcome` (its composite slot). */
+  const tpl = (locale: string, packageId: string) => registry.registerItem('email_template', {
+    name: 'welcome', label: `${packageId.split('.').pop()} ${locale}`, locale,
+    subject: `${packageId.split('.').pop()} ${locale}`, bodyHtml: '<p>x</p>',
+  }, 'name' as never, packageId);
+  const read = (packageId: string, member?: string) => protocol.getMetaItem({
+    type: 'email_template', name: 'welcome', packageId, ...(member !== undefined ? { member } : {}),
+  } as never);
+
+  beforeEach(() => {
+    registry.installPackage({ ...(manifest(D) as object), dependencies: { [A]: '^1.0.0' } } as never, 'code');
+  });
+
+  it('a dependent\'s added member (a locale its base does not ship): naming the dependent is admitted, with or without a member', async () => {
+    tpl('en-US', A);
+    tpl('fr-FR', D);
+    // R2: the addition holds no name for a bare read, so a caller with no package reads alpha's.
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([A]);
+    expect(labelOf(await read(D, 'fr-FR'))).toBe('alphaaddon fr-FR');
+    // The read that names no member (the layered door's disabled-package probe
+    // asks it) is the dependent's own holding, never `not-held-by-qualifier`.
+    expect(labelOf(await read(D))).toBe('alphaaddon fr-FR');
+  });
+
+  it('CONTROL — the addition is still the dependent\'s only: naming the base does not serve it, naming a third package is refused naming the base', async () => {
+    tpl('en-US', A);
+    tpl('fr-FR', D);
+    expect((await read(A, 'fr-FR'))?.item).toBeUndefined();
+    const err = await refusalOf(() => read(C, 'fr-FR'));
+    expect(err.refusal.candidates).toEqual([{ kind: 'package', packageId: A }]);
+  });
+
+  it('the pair\'s added member is served on its base\'s address, stamped with the pair (#28802 ruling A), when the pair is installed', async () => {
+    registry.installPackage(manifest(PAIR_A), 'code');
+    tpl('en-US', A);
+    rows.push({
+      type: 'email_template', name: 'welcome', state: 'active', package_id: PAIR_A, bundle_member: 'fr-FR',
+      metadata: JSON.stringify({ name: 'welcome', label: 'pair fr-FR', locale: 'fr-FR', subject: 'pair fr-FR', bodyHtml: '<p>p</p>' }),
+    });
+    const answer = await read(A, 'fr-FR');
+    expect(labelOf(answer)).toBe('pair fr-FR');
+    expect((answer as { item?: { _packageId?: string } }).item?._packageId).toBe(PAIR_A);
+    // CONTROL: the base's own member.
+    expect(labelOf(await read(A, 'en-US'))).toBe('alpha en-US');
+  });
+
+  it('CONTROL — another package\'s stored member is never served on the base\'s address', async () => {
+    tpl('en-US', A);
+    rows.push({
+      type: 'email_template', name: 'welcome', state: 'active', package_id: B, bundle_member: 'fr-FR',
+      metadata: JSON.stringify({ name: 'welcome', label: 'beta fr-FR', locale: 'fr-FR', subject: 'beta fr-FR', bodyHtml: '<p>b</p>' }),
+    });
+    expect((await read(A, 'fr-FR'))?.item).toBeUndefined();
+  });
+});

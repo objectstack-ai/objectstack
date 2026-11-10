@@ -18,7 +18,10 @@
  *
  * What X holds (the census of ui carry-in 1, comment 6727995849 on #31691):
  *  - X's own item: a registry holder of the name (its composite, or a bare-slot
- *    row bound to it);
+ *    row bound to it). A bundle ADDITION is X's own item too: a dependent's
+ *    member its base does not ship holds no name for a bare read (R2), but X
+ *    named is X's holding, as the resolver keeps a caller's own addition
+ *    (#31699, the first bundled type the exact qualifier reads);
  *  - an item of a package X is a customization pair of (ADR-0146): the base's
  *    item, which X's declared override customizes. Studio reads a base-held
  *    item's override and draft at the pair (`?package=PAIR`), before and after
@@ -27,7 +30,7 @@
  *    member, an item authored into X.
  */
 
-import { pairsOf } from '@objectstack/metadata-core';
+import { isPairOf, pairsOf } from '@objectstack/metadata-core';
 import {
     PackageScopedNameRefusedError,
     packageScopedRefusalMessage,
@@ -43,7 +46,7 @@ import type { ProtocolHost } from './protocol-host.js';
 /** The registry reads the exact qualifier asks. */
 interface ExactQualifierRegistry {
     readsByPackage(type: string): boolean;
-    packageScopedHoldersOf(type: string, name: string): string[];
+    packageScopedHoldersOf(type: string, name: string, callerPackageId?: string | null): string[];
     getEnvironmentScopedItem(type: string, name: string, member?: string): unknown;
     getPackageScopedItem(type: string, name: string, packageId: string, member?: string): unknown;
     getPackage?(id: string): unknown;
@@ -109,7 +112,9 @@ export async function admitExactQualifier(
     const registry = exactQualifierRegistry(host);
     if (!registry || !registry.readsByPackage(request.type)) return undefined;
 
-    const holders = registry.packageScopedHoldersOf(request.type, request.name) ?? [];
+    // X named is X's holding even when it is a bundle addition (R2 drops one
+    // only for OTHER readers): the qualifier asks as the caller it names.
+    const holders = registry.packageScopedHoldersOf(request.type, request.name, packageId) ?? [];
     if (holders.includes(packageId)) return { packageId, registryHolders: [packageId] };
 
     const installed = installedManifestsOfEngine(host.engine);
@@ -141,6 +146,12 @@ export async function admitExactQualifier(
  * Another package's item is never served for the address; two bases the
  * package is a pair of, both holding the name, are refused naming both.
  *
+ * An item of a customization pair of the address's package, or of a holder it
+ * admitted, is that package's own (ADR-0146; #28802, #28390 ruling A: the
+ * pair's added member is served on the base's address). It is served as the
+ * layers below reached it, never replaced by the registry's item, whose bare
+ * slot a dependent's same member can hold (#31699).
+ *
  * @returns the item to serve (unchanged when it is the address's).
  */
 export function exactQualifierItem(
@@ -157,6 +168,8 @@ export function exactQualifierItem(
     if (typeof served !== 'string' || served === address.packageId || address.registryHolders.includes(served)) return item;
     // A provenance sentinel or a package this registry does not hold is not another package's item.
     if (typeof registry.getPackage === 'function' && registry.getPackage(served) === undefined) return item;
+    const installed = installedManifestsOfEngine(host.engine);
+    if ([address.packageId, ...address.registryHolders].some((base) => isPairOf(served, base, installed))) return item;
     if (address.registryHolders.length > 1) {
         throw refusal(request.type, request.name, address.packageId, 'ambiguous-in-closure',
             address.registryHolders.map((holder) => ({ kind: 'package' as const, packageId: holder })));
