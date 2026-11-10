@@ -1784,7 +1784,7 @@
         "first-boot-cold-start"
       ],
       "source": [
-        "packages/runtime/src/domains/actions.ts#record (the REST door's ordered gates: ADR-0066 D4 capability gate → activation consult → type branch → ADR-0104 param contract → best-effort record load)",
+        "packages/runtime/src/action-dispatch.ts#admitResolvedAction (the ordered gates the REST door, MCP run_action and dispatchAction share since #31923: ADR-0066 D4 capability gate → activation consult → type branch → ADR-0104 param contract → best-effort record load)",
         "packages/runtime/src/action-execution.ts#disabledActionRefusal (disabledActionRefusal — ACTION_DISABLED_CODE/STATUS 409, the shared consult both doors call; invokeBusinessAction — the MCP door, whose AI-exposure + capability gates run ahead of the consult)",
         "packages/objectql/src/engine.ts#isActionEnabled (isActionEnabled / describeDisabledAction / hydrateActionActivations / setActionActive — projection over the durable ledger, row-first then projection)",
         "packages/spec/src/api/error-code-ledger.zod.ts#ACTION_DISABLED (ACTION_DISABLED registered — the *_DISABLED family)",
