@@ -350,7 +350,8 @@ describe('#31696 two packages\' flows of one name — both armed, each its own',
         engine.setSuspendedRunStore(legacy);
         expect((await (engine as unknown as { store: InMemorySuspendedRunStore }).store.load('legacy'))?.flowName).not.toBe('f');
         await engine.cancelRun('legacy');
-        expect((await legacy.listHistory('f', 10)).map((r) => r.flowName)).toEqual(['f']);
+        // [N8] Written back under its name and no package: the lone slot's package is not stamped on it.
+        expect((await legacy.listHistory('f', 10)).map((r) => [r.flowName, r.flowPackage])).toEqual([['f', undefined]]);
         engine.setFlowCredentialSource({ holds: () => true, held: () => [], resolve: async () => 'p1-secret' });
         await expect(engine.resolveFlowCredential('f', 'start', 'secret')).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
         expect((await engine.executeSlot(P2, 'f')).success).toBe(true);
@@ -645,9 +646,46 @@ describe('#31696 R8 — a stored run names its flow\'s package and resumes on it
         expect(await view.listHistory!(`${P2}/f`, 10)).toEqual([expect.objectContaining({ runId: 'r3', flowName: `${P2}/f` })]);
         expect(await view.listHistory!('f', 10)).toEqual([]);
     });
+
+    it('[N2] a slot\'s history window is not filled by another slot\'s newer rows of the name', async () => {
+        const inner = new InMemorySuspendedRunStore();
+        const view = flowSlotRunStore(inner, {
+            stored: (key) => ({ flowName: 'f', flowPackage: key.split('/')[0] }),
+            key: (name, pkg) => `${pkg}/${name}`,
+        });
+        const at = (n: number) => `2026-01-0${n}T00:00:00.000Z`;
+        await view.recordTerminal!({ runId: 'old', flowName: `${P2}/f`, status: 'completed', startedAt: at(1) } as RunRecord);
+        for (const n of [2, 3, 4]) await view.recordTerminal!({ runId: `p1-${n}`, flowName: `${P1}/f`, status: 'completed', startedAt: at(n) } as RunRecord);
+        expect((await view.listHistory!(`${P2}/f`, 1)).map((r) => r.runId)).toEqual(['old']);
+        expect((await view.listHistory!(`${P1}/f`, 2)).map((r) => r.runId)).toEqual(['p1-4', 'p1-3']);
+    });
 });
 
 describe('#31696 R9 — the engine asks a credential source by package only for a slot of a shared name', () => {
+    it('the channel reads by package when asked by package, every row of the name when not', async () => {
+        const rows = [
+            { id: '1', flow_name: 'f', flow_package: P1, node_id: 'start', credential_key: 'secret', state: 'active' },
+            { id: '2', flow_name: 'f', flow_package: '', node_id: 'call', credential_key: 'signingSecret', state: 'active' },
+        ];
+        const channel = new FlowCredentialChannel(() => ({ find: async () => rows, resolveSecretField: async (_o: string, id: string) => `plain-${id}` }) as never);
+        await channel.loadIndex();
+        expect([channel.holds('f', 'start', 'secret'), channel.holds('f', 'start', 'secret', P1)]).toEqual([true, true]);
+        expect(channel.holds('f', 'start', 'secret', P2)).toBe(false);
+        expect(channel.held('f')).toHaveLength(2);
+        expect(await channel.resolve('f', 'start', 'secret', P2)).toBeUndefined();
+        expect(await channel.resolve('f', 'start', 'secret', P1)).toBe('plain-1');
+        // [R1] The row naming no package is any holder's: held for every slot, and its reads refused.
+        expect([channel.holds('f', 'call', 'signingSecret', P1), channel.holds('f', 'call', 'signingSecret', P2)]).toEqual([true, true]);
+        expect(() => channel.held('f', P2)).toThrow(/names no package/);
+        await expect(channel.resolve('f', 'call', 'signingSecret', P1)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+        // Beside P1's own row at one position, the row naming none is refused, in either store order.
+        const mine = { id: '3', flow_name: 'f', flow_package: P1, node_id: 'call', credential_key: 'signingSecret', state: 'active' };
+        for (const order of [[rows[1], mine], [mine, rows[1]]]) {
+            const both = new FlowCredentialChannel(() => ({ find: async () => order, resolveSecretField: async () => 'p1-own' }) as never);
+            await expect(both.resolve('f', 'call', 'signingSecret', P1)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+        }
+    });
+
     it('the engine asks the channel by package only for a slot of a name two packages hold', async () => {
         const asked: unknown[][] = [];
         engine.setFlowCredentialSource({
@@ -690,11 +728,14 @@ describe('#31696 R9 — the engine asks a credential source by package only for 
         // Only that by-name `holds` was asked for the shared slot.
         expect(asked.slice(2)).toEqual([['f', 'start', 'secret']]);
 
-        // The plugin's channel reads by name alone (R9 by package is PR-1b's): refused the same way, and
-        // where no package holds a credential, `holds` says so (an unsigned http node runs).
-        engine.setFlowCredentialSource(new FlowCredentialChannel(() => ({ find: async () => [] }) as never));
+        // [R9] The plugin's channel reads by package: P2's slot is asked for P2's rows, and P1's row answers it nothing.
+        const p1Row = [{ id: '1', flow_name: 'f', flow_package: P1, node_id: 'start', credential_key: 'secret', state: 'active' }];
+        const channel = new FlowCredentialChannel(() => ({ find: async () => p1Row, resolveSecretField: async () => 'p1-secret' }) as never);
+        await channel.loadIndex();
+        engine.setFlowCredentialSource(channel);
         expect(engine.holdsFlowCredential(key, 'start', 'secret')).toBe(false);
-        await expect(engine.resolveFlowCredential(key, 'start', 'secret')).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+        expect(await engine.resolveFlowCredential(key, 'start', 'secret')).toBeUndefined();
+        expect(await engine.resolveFlowCredential(`${P1}/f`, 'start', 'secret')).toBe('p1-secret');
     });
 });
 

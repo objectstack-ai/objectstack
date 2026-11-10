@@ -266,9 +266,11 @@ for (const cell of CELLS) {
           const res = await query(body as Record<string, unknown>);
           expect(res.status, JSON.stringify(res.body)).toBe(400);
           expect(res.body.code, member).toBe('VALIDATION_FAILED');
-          const at = (res.body.fields as Array<{ field: string; message: string }>).filter((f) => f.field === member);
+          const at = (res.body.fields as Array<{ field: string; message: string; hint?: string }>).filter((f) => f.field === member);
           expect(at, JSON.stringify(res.body.fields)).toHaveLength(1);
-          expect(at[0]!.message.startsWith(`${sentence}. Write ONE value.`), at[0]!.message).toBe(true);
+          // [#32279] The face's sentence rides as `hint`; `message` is its one-line head.
+          expect(at[0]!.hint?.startsWith(`${sentence}. Write ONE value.`), at[0]!.hint).toBe(true);
+          expect(at[0]!.message.length).toBeLessThanOrEqual(160);
         }
         // In process the engine's seam runs the face itself: INVALID_FILTER, located.
         const err = await refusalOf(engine.find(OBJECT, { where }));

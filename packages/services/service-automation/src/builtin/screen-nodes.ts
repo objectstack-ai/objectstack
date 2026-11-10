@@ -10,6 +10,9 @@ import { renderTextSlot } from './template.js';
 import { parseNodeConfig } from './parse-config.js';
 import { resolveValueSlot, resolveValueSlotMap } from './value-slot-map.js';
 import { judgeHeadlessScreen } from '../screen-input-contract.js';
+import { refuseNode } from '../guard-refusal.js';
+import { refusalCarriedBy } from '../inner-refusal.js';
+import { isPackageScopedRefusal } from '../function-package-scope.js';
 
 /**
  * Screen / Script built-in nodes — 'screen' and 'script' executors.
@@ -633,7 +636,29 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
         // registry is the host's (`defineStack({ functions })`), so the same
         // metadata succeeds on a host that registers the name. Only the
         // metadata itself earns a guard.
-        const registration = engine.resolveFunction(target);
+        //
+        // [ADR-0150 D3/D4, #32073] The name is resolved in the package of
+        // THIS flow (the package whose own body is armed under its name; an
+        // environment flow has none). A name that means no single function
+        // for that caller — two holders, a holder outside the flow's declared
+        // closure, the platform's function beside a package's — fails the
+        // step with the resolver's refusal, every candidate named, never one
+        // of them run on a guess. Like `connector_action`'s name refusal it is
+        // a guard: no `fault` edge routes a run past a function it cannot
+        // name. The refusal rides beside the text as `code` (in-flow
+        // `$error.code`) and `innerRefusal` (the door's `FLOW_FAILED`
+        // details), so a caller reads `RESOURCE_CONFLICT`, not prose.
+        let registration: ReturnType<typeof engine.resolveFunction>;
+        try {
+            registration = engine.resolveFunction(target, context);
+        } catch (err) {
+            if (!isPackageScopedRefusal(err)) throw err;
+            return {
+                ...refuseNode(`script node '${node.id}': ${(err as Error).message}`),
+                code: 'RESOURCE_CONFLICT',
+                ...refusalCarriedBy(err),
+            };
+        }
         if (!registration) {
           return {
             success: false,

@@ -33,6 +33,7 @@
     "@objectstack/objectql": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
     "@objectstack/plugin-auth": "workspace:*",
+    "@objectstack/plugin-security": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*"
   },
@@ -40,7 +41,6 @@
     "@objectstack/driver-sql": "workspace:*",
     "@objectstack/metadata-core": "workspace:*",
     "@objectstack/plugin-audit": "workspace:*",
-    "@objectstack/plugin-security": "workspace:*",
     "@objectstack/plugin-sharing": "workspace:*",
     "@objectstack/refd-timer-testkit": "workspace:*",
     "@objectstack/service-cache": "workspace:*",

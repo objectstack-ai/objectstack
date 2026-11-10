@@ -593,7 +593,10 @@ import {
 } from './protocol-meta-list-reads.js';
 // [#25467 E2 cut 1b] The metadata item reads and the layered reads.
 import { getMetaItem, getMetaItemForExecution, readMetaItem } from './protocol-meta-item-reads.js';
-import { admitEnvironmentQualifier, resolveMetaItemAddress, type MetaItemAddress } from './protocol-exact-qualifier.js';
+import {
+    admitEnvironmentQualifier, resolveCallerPackageAddress, resolveMetaItemAddress,
+    type CallerPackageAddress, type MetaItemAddress,
+} from './protocol-exact-qualifier.js';
 import { getMetaItemLayered, packagelessLayeredReadRefusal } from './protocol-meta-layered-reads.js';
 // [#25467 E2 section 3] The single-record data writes.
 import { createData, deleteData, updateData, validateData } from './protocol-data-writes.js';
@@ -4021,6 +4024,21 @@ export class ObjectStackProtocolImplementation implements
      */
     admitEnvironmentQualifier(request: { type: string; name: string; member?: string }): void {
         return admitEnvironmentQualifier(protocolHost(this), request);
+    }
+
+    /**
+     * [ADR-0150 D3, #32310] Where a by-name read made FROM a package
+     * (`?callerPackage=`, on the dataset query door and `GET /meta/dataset/:name`)
+     * is read: the holder the caller package resolves to by D3 — its own item,
+     * else the unique holder in its declared closure plus `sys` — at that
+     * holder's exact address, or a refusal naming the candidates. Both `/meta`
+     * transports and the query door ask it, then read the address through
+     * {@link getMetaItem}. See {@link resolveCallerPackageAddress}.
+     *
+     * @throws {PackageScopedNameRefusedError} `409 RESOURCE_CONFLICT`.
+     */
+    resolveCallerPackageAddress(request: { type: string; name: string; callerPackageId: string; member?: string }): CallerPackageAddress {
+        return resolveCallerPackageAddress(protocolHost(this), request);
     }
 
     /**
