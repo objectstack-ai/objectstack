@@ -62,6 +62,7 @@ import type { AuthPluginConfig } from '@objectstack/spec/system';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import { resolveUserAuthzGrants } from '@objectstack/core';
 import { applyPlatformAdminImpersonation } from './admin-impersonate-endpoint.js';
+import { requireSecondFactorAtCodeAndLinkDoors } from './second-factor-code-and-link-doors.js';
 import { buildOrganizationPlugin, type OrganizationPluginHost } from './auth-manager-organization-plugin.js';
 import {
   OAUTH_ORGANIZATION_CLAIM,
@@ -277,12 +278,17 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
 
   if (enabled.twoFactor) {
     const { twoFactor } = await import('better-auth/plugins/two-factor');
-    plugins.push(twoFactor({
+    // An account with an enrolled second factor is signed in by no one-time
+    // code or sign-in link alone: the code and link doors ask for the second
+    // factor, as password sign-in does. Throws (fails the build) when the
+    // vendor plugin no longer exposes the password door's challenge to reuse.
+    // See `second-factor-code-and-link-doors.ts`.
+    plugins.push(requireSecondFactorAtCodeAndLinkDoors(twoFactor({
       schema: buildTwoFactorPluginSchema(),
       // ADR-0069 D2 (#3690) — the operator's lockout policy governs BOTH
       // stages of sign-in, not just the password one.
       accountLockout: this.resolveTwoFactorAccountLockout(),
-    }));
+    })));
   }
 
   // Breached-password rejection (ADR-0069 D1). Native, stateless: a

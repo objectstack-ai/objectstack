@@ -164,7 +164,11 @@ Better-auth endpoints are forwarded immediately:
 
 For 2FA specifically, do not expose it as an end-user feature until the UI
 also handles TOTP confirmation, the password sign-in `twoFactorRedirect`
-challenge, and backup-code recovery.
+challenge, and backup-code recovery. The same challenge answers an enrolled
+account at the one-time-code and link doors (`/phone-number/verify`,
+`/magic-link/verify`, `/verify-email` when it signs in): an account with an
+enrolled second factor is signed in by no code or link alone
+(`src/second-factor-code-and-link-doors.ts`).
 
 ## Lessons Learned
 
