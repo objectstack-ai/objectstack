@@ -2208,6 +2208,26 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
             helpText: "선택 사항입니다. 요청할 SAML NameID 형식입니다. 기본값은 IdP에 구성된 형식입니다.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          mapEmail: {
+            label: "매핑: 이메일 속성",
+            helpText: "선택 사항입니다. 사용자 이메일에 매핑되는 어설션 속성입니다. 기본값은 \"email\"이며, 없으면 NameID입니다. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          mapFirstName: {
+            label: "매핑: 이름 속성",
+            helpText: "선택 사항입니다. 사용자 이름에 매핑되는 어설션 속성입니다. 기본값은 \"givenName\"입니다. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          mapLastName: {
+            label: "매핑: 성 속성",
+            helpText: "선택 사항입니다. 사용자 성에 매핑되는 어설션 속성입니다. 기본값은 \"surname\"입니다. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          mapName: {
+            label: "매핑: 표시 이름 속성",
+            helpText: "선택 사항입니다. 사용자 전체 이름에 매핑되는 어설션 속성으로, 이름과 성 속성이 없을 때 사용됩니다. 기본값은 \"displayName\"이며, 없으면 NameID입니다. Okta: name. Entra ID: http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          },
           mapGroups: {
             label: "매핑: 그룹 속성",
             helpText: "선택 사항입니다. 사용자의 그룹을 담는 어설션 속성입니다. 로그인할 때마다 해당 그룹에 매핑된 권한 집합이 부여됩니다. 비워 두면 그룹을 매핑하지 않습니다.",
@@ -2267,6 +2287,57 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "완료",
           fields: {
             groupsClaim: "그룹 클레임"
+          }
+        }
+      },
+      show_sso_attribute_mapping: {
+        label: "속성 매핑 보기",
+        resultDialog: {
+          title: "속성 매핑",
+          description: "이 공급자가 로그인할 때마다 사용자의 이메일과 이름을 읽는 IdP 속성(SAML) 또는 클레임(OIDC)입니다. 비어 있으면 기본값이 적용됩니다. 이메일은 \"email\"(SAML은 없으면 NameID), 이름은 \"givenName\" + \"surname\", 없으면 \"displayName\"(OIDC는 \"name\")입니다. 이름과 성은 SAML에만 적용됩니다. \"속성 매핑 편집\"으로 변경하세요.",
+          acknowledge: "완료",
+          fields: {
+            protocol: "프로토콜",
+            email: "이메일",
+            firstName: "이름",
+            lastName: "성",
+            name: "표시 이름"
+          }
+        }
+      },
+      edit_sso_attribute_mapping: {
+        label: "속성 매핑 편집",
+        params: {
+          email: {
+            label: "이메일 속성",
+            helpText: "사용자 이메일에 매핑되는 IdP 속성 또는 클레임입니다. 그대로 두면 현재 값이 유지되고, 지우면 기본값(\"email\")으로 돌아갑니다. Entra ID SAML: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          firstName: {
+            label: "이름 속성(SAML)",
+            helpText: "SAML 전용입니다. 사용자 이름에 매핑되는 어설션 속성입니다. 그대로 두면 현재 값이 유지됩니다. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          lastName: {
+            label: "성 속성(SAML)",
+            helpText: "SAML 전용입니다. 사용자 성에 매핑되는 어설션 속성입니다. 그대로 두면 현재 값이 유지됩니다. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          name: {
+            label: "표시 이름 속성",
+            helpText: "사용자 전체 이름에 매핑되는 IdP 속성 또는 클레임입니다(SAML: 이름과 성이 없을 때 사용). 그대로 두면 현재 값이 유지됩니다. Okta SAML: name. Entra ID: http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          }
+        },
+        resultDialog: {
+          title: "속성 매핑 저장됨",
+          description: "이 공급자가 이후 로그인할 때마다 사용자의 이메일과 이름을 읽는 속성 또는 클레임입니다. 비어 있으면 기본값이 적용됩니다.",
+          acknowledge: "완료",
+          fields: {
+            email: "이메일",
+            firstName: "이름",
+            lastName: "성",
+            name: "표시 이름"
           }
         }
       }
@@ -2800,7 +2871,64 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "전체"
+        label: "전체",
+        emptyState: {
+          title: "아직 그룹 매핑이 없습니다",
+          message: "\"SSO 그룹 매핑\"(SSO 제공자가 로그인 시 보내는 그룹) 또는 \"SCIM 그룹 매핑\"(SCIM 연결이 프로비저닝하는 그룹)으로 ID 제공자 그룹의 구성원에게 권한 세트를 부여합니다."
+        }
+      }
+    },
+    _actions: {
+      map_sso_group: {
+        label: "SSO 그룹 매핑",
+        description: "SSO 제공자가 로그인 시 보내는 그룹의 모든 구성원에게 권한 세트를 부여합니다. 각 구성원이 다음에 해당 제공자로 로그인할 때 적용됩니다.",
+        successMessage: "그룹 매핑을 저장했습니다. 각 구성원이 다음에 해당 제공자로 로그인할 때 적용됩니다.",
+        params: {
+          providerId: {
+            label: "SSO 제공자 ID",
+            helpText: "로그인 시 그룹을 보내는 SSO 제공자의 제공자 ID(예: \"okta\"). 제공자에 그룹 클레임이 설정되어 있어야 합니다(SSO 제공자의 그룹 클레임 편집)."
+          },
+          groupExternalId: {
+            label: "그룹 외부 ID",
+            helpText: "그룹 클레임이 ID를 보내는 경우 그 값을 그대로 입력합니다(예: Entra ID 그룹 개체 ID). 그룹 표시 이름과 둘 중 하나만 설정하세요."
+          },
+          groupDisplayName: {
+            label: "그룹 표시 이름",
+            helpText: "그룹 클레임이 이름을 보내는 경우 그 값을 그대로 입력합니다(예: \"Sales\"). 그룹 외부 ID와 둘 중 하나만 설정하세요."
+          },
+          permissionSet: {
+            label: "권한 세트",
+            helpText: "그룹 구성원이 제공자의 조직에서 부여받는 권한 세트입니다. 관리자 권한 세트는 거부됩니다."
+          }
+        }
+      },
+      map_scim_group: {
+        label: "SCIM 그룹 매핑",
+        description: "SCIM 연결이 프로비저닝하는 그룹의 모든 구성원에게 권한 세트를 부여합니다. 그룹의 현재 구성원에게 즉시 부여됩니다.",
+        successMessage: "그룹 매핑을 저장했습니다",
+        params: {
+          connectionId: {
+            label: "SCIM 연결 ID",
+            helpText: "그룹을 프로비저닝하는 SCIM 연결(예: \"okta-prod\"). 자격 증명의 연결 ID입니다."
+          },
+          groupExternalId: {
+            label: "그룹 외부 ID",
+            helpText: "ID 제공자가 보내는 그룹의 externalId입니다. 그룹 표시 이름과 둘 중 하나만 설정하세요."
+          },
+          groupDisplayName: {
+            label: "그룹 표시 이름",
+            helpText: "그룹의 displayName이며 정확히 일치해야 합니다. 그룹 외부 ID와 둘 중 하나만 설정하세요."
+          },
+          permissionSet: {
+            label: "권한 세트",
+            helpText: "그룹 구성원이 연결의 조직에서 부여받는 권한 세트입니다. 관리자 권한 세트는 거부됩니다."
+          }
+        }
+      },
+      delete_group_mapping: {
+        label: "매핑 삭제",
+        confirmText: "이 그룹 매핑을 삭제할까요? 그룹 구성원은 더 이상 이 권한 세트를 부여받지 않습니다. SCIM 연결의 경우 그룹 구성원이 즉시 다시 프로젝션되어 이 매핑이 부여한 권한을 잃습니다. SSO 제공자의 경우 해당 로그인이 이 권한 세트로 부여한 권한이 즉시 제거됩니다(같은 권한 세트를 가리키는 제공자의 다른 매핑이 있는 경우 제외). 복원하려면 그룹을 다시 매핑하세요.",
+        successMessage: "그룹 매핑을 삭제했습니다"
       }
     }
   },
@@ -3602,6 +3730,55 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       },
       note: {
         label: "메모"
+      }
+    }
+  },
+  sys_metadata_commit: {
+    label: "Metadata Commit",
+    pluralLabel: "Metadata Commits",
+    description: "Package-scoped commit log grouping a turn’s metadata changes.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      package_id: {
+        label: "Package"
+      },
+      operation: {
+        label: "Operation",
+        options: {
+          apply: "apply",
+          revert: "revert"
+        }
+      },
+      message: {
+        label: "Message",
+        help: "Change summary; for AI turns, the user instruction that produced it."
+      },
+      actor: {
+        label: "Actor"
+      },
+      ai_model: {
+        label: "AI Model"
+      },
+      parent_commit_id: {
+        label: "Parent Commit"
+      },
+      event_seq_start: {
+        label: "Event Seq Start"
+      },
+      event_seq_end: {
+        label: "Event Seq End"
+      },
+      items: {
+        label: "Items",
+        help: "JSON: [{ type, name, existedBefore, prevVersion }] — the revert plan."
+      },
+      item_count: {
+        label: "Item Count"
+      },
+      created_at: {
+        label: "Created At"
       }
     }
   },

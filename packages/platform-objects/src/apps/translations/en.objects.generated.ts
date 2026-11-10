@@ -2208,6 +2208,26 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
             helpText: "Optional. Requested SAML NameID format. Defaults to the IdP’s configured format.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          mapEmail: {
+            label: "Map: Email attribute",
+            helpText: "Optional. Assertion attribute mapped to the user’s email. Defaults to \"email\", then the NameID. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          mapFirstName: {
+            label: "Map: First name attribute",
+            helpText: "Optional. Assertion attribute mapped to the user’s first name. Defaults to \"givenName\". Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          mapLastName: {
+            label: "Map: Last name attribute",
+            helpText: "Optional. Assertion attribute mapped to the user’s last name. Defaults to \"surname\". Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          mapName: {
+            label: "Map: Display name attribute",
+            helpText: "Optional. Assertion attribute mapped to the user’s full name, used when the first and last name attributes are absent. Defaults to \"displayName\", then the NameID. Okta: name. Entra ID: http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          },
           mapGroups: {
             label: "Map: Groups attribute",
             helpText: "Optional. Assertion attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.",
@@ -2267,6 +2287,57 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Done",
           fields: {
             groupsClaim: "Groups claim"
+          }
+        }
+      },
+      show_sso_attribute_mapping: {
+        label: "Show Attribute Mapping",
+        resultDialog: {
+          title: "Attribute mapping",
+          description: "The IdP attributes (SAML) or claims (OIDC) this provider reads the user’s email and name from at each sign-in. Empty means the default: email from \"email\" (SAML: then the NameID); name from \"givenName\" + \"surname\", then \"displayName\" (OIDC: \"name\"). First and last name apply to SAML only. Change it with “Edit Attribute Mapping”.",
+          acknowledge: "Done",
+          fields: {
+            protocol: "Protocol",
+            email: "Email",
+            firstName: "First name",
+            lastName: "Last name",
+            name: "Display name"
+          }
+        }
+      },
+      edit_sso_attribute_mapping: {
+        label: "Edit Attribute Mapping",
+        params: {
+          email: {
+            label: "Email attribute",
+            helpText: "The IdP attribute or claim mapped to the user’s email. Leave untouched to keep the current one; clear it to go back to the default (\"email\"). Entra ID SAML: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          firstName: {
+            label: "First name attribute (SAML)",
+            helpText: "SAML only. The assertion attribute mapped to the user’s first name. Leave untouched to keep the current one. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          lastName: {
+            label: "Last name attribute (SAML)",
+            helpText: "SAML only. The assertion attribute mapped to the user’s last name. Leave untouched to keep the current one. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          name: {
+            label: "Display name attribute",
+            helpText: "The IdP attribute or claim mapped to the user’s full name (SAML: used when first and last name are absent). Leave untouched to keep the current one. Okta SAML: name. Entra ID: http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          }
+        },
+        resultDialog: {
+          title: "Attribute mapping saved",
+          description: "The attributes or claims this provider now reads the user’s email and name from at each sign-in. Empty means the default applies.",
+          acknowledge: "Done",
+          fields: {
+            email: "Email",
+            firstName: "First name",
+            lastName: "Last name",
+            name: "Display name"
           }
         }
       }
@@ -2800,7 +2871,64 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "All"
+        label: "All",
+        emptyState: {
+          title: "No group mappings yet",
+          message: "Grant a permission set to the members of an identity provider group with “Map SSO Group” (a group an SSO provider sends at sign-in) or “Map SCIM Group” (a group a SCIM connection provisions)."
+        }
+      }
+    },
+    _actions: {
+      map_sso_group: {
+        label: "Map SSO Group",
+        description: "Grant a permission set to every member of a group an SSO provider sends at sign-in. It applies at each member's next sign-in through the provider.",
+        successMessage: "Group mapping saved. It applies at each member's next sign-in through the provider.",
+        params: {
+          providerId: {
+            label: "SSO Provider ID",
+            helpText: "The Provider ID of the SSO provider whose sign-in carries the group, e.g. \"okta\". The provider must have a groups claim (Edit Groups Claim on the SSO provider)."
+          },
+          groupExternalId: {
+            label: "Group External ID",
+            helpText: "The group value exactly as the groups claim sends it when that is an ID, e.g. an Entra ID group object ID. Set this or Group Display Name, not both."
+          },
+          groupDisplayName: {
+            label: "Group Display Name",
+            helpText: "The group value exactly as the groups claim sends it when that is a name, e.g. \"Sales\". Set this or Group External ID, not both."
+          },
+          permissionSet: {
+            label: "Permission Set",
+            helpText: "The permission set a member of the group is granted, in the provider's organization. Administrator sets are refused."
+          }
+        }
+      },
+      map_scim_group: {
+        label: "Map SCIM Group",
+        description: "Grant a permission set to every member of a group a SCIM connection provisions. The group's current members are granted it now.",
+        successMessage: "Group mapping saved",
+        params: {
+          connectionId: {
+            label: "SCIM Connection ID",
+            helpText: "The SCIM connection the group is provisioned through, e.g. \"okta-prod\": the Connection ID of its credential."
+          },
+          groupExternalId: {
+            label: "Group External ID",
+            helpText: "The group's externalId as the identity provider sends it. Set this or Group Display Name, not both."
+          },
+          groupDisplayName: {
+            label: "Group Display Name",
+            helpText: "The group's displayName, matched exactly. Set this or Group External ID, not both."
+          },
+          permissionSet: {
+            label: "Permission Set",
+            helpText: "The permission set a member of the group is granted, in the connection's organization. Administrator sets are refused."
+          }
+        }
+      },
+      delete_group_mapping: {
+        label: "Delete Mapping",
+        confirmText: "Delete this group mapping? The group's members stop being granted its permission set. For a SCIM connection, the group's members are re-projected now and lose the grants this mapping made. For an SSO provider, the grants its sign-ins made for this set are removed now, unless another of the provider's mappings names the same set. To restore it, map the group again.",
+        successMessage: "Group mapping deleted"
       }
     }
   },
@@ -3602,6 +3730,55 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       note: {
         label: "Note"
+      }
+    }
+  },
+  sys_metadata_commit: {
+    label: "Metadata Commit",
+    pluralLabel: "Metadata Commits",
+    description: "Package-scoped commit log grouping a turn’s metadata changes.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      package_id: {
+        label: "Package"
+      },
+      operation: {
+        label: "Operation",
+        options: {
+          apply: "apply",
+          revert: "revert"
+        }
+      },
+      message: {
+        label: "Message",
+        help: "Change summary; for AI turns, the user instruction that produced it."
+      },
+      actor: {
+        label: "Actor"
+      },
+      ai_model: {
+        label: "AI Model"
+      },
+      parent_commit_id: {
+        label: "Parent Commit"
+      },
+      event_seq_start: {
+        label: "Event Seq Start"
+      },
+      event_seq_end: {
+        label: "Event Seq End"
+      },
+      items: {
+        label: "Items",
+        help: "JSON: [{ type, name, existedBefore, prevVersion }] — the revert plan."
+      },
+      item_count: {
+        label: "Item Count"
+      },
+      created_at: {
+        label: "Created At"
       }
     }
   },

@@ -439,7 +439,15 @@ function placeholderPair(t: TranslateFn): string {
  * which read the spec spelling first. That cost was presented and accepted as
  * part of the A1 ruling; it is not an oversight to route around with a shim.
  */
-export function LocationField({ value, onChange, field, readonly, error, ...props }: FieldWidgetComponentProps<LocationValue | null>) {
+export function LocationField({
+  value,
+  onChange,
+  field,
+  readonly,
+  error,
+  onInvalidInputChange,
+  ...props
+}: FieldWidgetComponentProps<LocationValue | null>) {
   const config = field;
 
   /**
@@ -518,11 +526,49 @@ export function LocationField({ value, onChange, field, readonly, error, ...prop
     setDraft(coordinateText(value));
   }, [value, draft, refusalError]);
 
+  /**
+   * Tell the host about a refused draft (objectstack#32139).
+   *
+   * A refusal never reaches `onChange`, so the form value stays what it was —
+   * `null` after the person first emptied the box — and the form saved it with
+   * a success message while the box still showed the refused text. Through
+   * `onInvalidInputChange` the form renderer turns the refusal into this
+   * field's validation error, which blocks submit the way a missing required
+   * value does. Reported when the refusal changes, withdrawn once it clears,
+   * when the field turns readonly, and on unmount — the date picker's pattern
+   * for the same channel.
+   */
+  const invalidMessage = readonly ? null : refusalError;
+  const reportInvalid = useRef(onInvalidInputChange);
+  useEffect(() => {
+    reportInvalid.current = onInvalidInputChange;
+  });
+  const reported = useRef<string | null>(null);
+  useEffect(() => {
+    if (reported.current === invalidMessage) return;
+    reported.current = invalidMessage;
+    reportInvalid.current?.(invalidMessage);
+  }, [invalidMessage]);
+  useEffect(() => () => {
+    if (reported.current === null) return;
+    reported.current = null;
+    reportInvalid.current?.(null);
+  }, []);
+
   if (readonly) {
     // The STORED value, never the draft: a readonly field renders what is
     // saved, and nothing can have been typed into it.
     return <span className="text-sm">{coordinateText(value) || <EmptyValue />}</span>;
   }
+
+  /**
+   * The refusal line this widget draws itself. A host that takes the report
+   * draws the same sentence as the field's error (`<FormMessage/>`) once its
+   * validation has run, and from then on the widget's copy would repeat it; it
+   * stays up until then, so the reason never blinks out between the keystroke
+   * and the host's asynchronous validation.
+   */
+  const ownNotice = refusalError && !(onInvalidInputChange && error === refusalError) ? refusalError : null;
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const text = e.target.value;
@@ -592,7 +638,7 @@ export function LocationField({ value, onChange, field, readonly, error, ...prop
         // produce (objectui#6716). Same OR, and same reason, as `ObjectField`.
         aria-invalid={!!error || !!refusalError}
       />
-      {refusalError && <p className="text-xs text-red-500">{refusalError}</p>}
+      {ownNotice && <p className="text-xs text-red-500">{ownNotice}</p>}
     </div>
   );
 }

@@ -103,7 +103,7 @@ export async function listDrafts(
             const err = new Error(
                 `'${request.packageId}' is not an installed package, and no pending draft is bound to it, so a `
                 + `draft list scoped to it would report nothing pending in a package that does not exist. `
-                + `GET /api/v1/packages lists the installed packages; omit packageId to list every package's drafts.`,
+                + `GET /api/v1/packages lists the installed packages; omit \`package\` to list every package's drafts.`,
             );
             (err as any).code = 'INVALID_REQUEST';
             (err as any).status = 400;
