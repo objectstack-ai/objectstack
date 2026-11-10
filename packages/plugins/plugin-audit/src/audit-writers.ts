@@ -336,6 +336,14 @@ const SKIP_OBJECTS = new Set<string>([
   // `sys_audit_log` and `sys_activity` row for row — the first replay after
   // the upgrade, one per seeded row. The seeded rows themselves stay audited.
   'sys_seed_landed_key',         // landed seed keys (1 write per new key)
+  // [ADR-0154 D4] The ledger's own tamper evidence, written only by the sealer.
+  // Audited, every checkpoint, amendment or key would write a ledger row, which
+  // the next pass would seal into a new checkpoint, which would write a row
+  // again; and an expiry would write ledger rows about its own deletes. A key's
+  // creation and rotation are recorded instead as `audit_signing_key_change`.
+  'sys_audit_checkpoint',
+  'sys_audit_amendment',
+  'sys_audit_signing_key',
 ]);
 
 /**

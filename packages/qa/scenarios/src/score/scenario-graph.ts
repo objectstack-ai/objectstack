@@ -115,15 +115,36 @@ function navEntries(items: unknown, members: Readonly<Record<string, Set<string>
 export function artifactToEvalGraph(artifact: unknown): EvalGraph {
   const collection = (key: string) => resolveStackCollection(artifact, key);
 
+  // Each extension's `fields`, in the order the registry applies them:
+  // ascending `priority` (the spec's default 200), equal priorities in
+  // artifact order, a later field of one name replacing an earlier one.
+  // An extension that adds no `fields` (a label, validations) adds none here.
+  const extensions = collection('objectExtensions')
+    .flatMap((raw, i) => {
+      if (!isBag(raw) || typeof raw.extend !== 'string' || raw.extend === '') {
+        throw new TypeError(`scenario graph: objectExtensions[${i}] has no \`extend\` naming the object it extends.`);
+      }
+      if (raw.fields === undefined) return [];
+      if (!isBag(raw.fields)) throw new TypeError(`scenario graph: objectExtensions[${i}] has a \`fields\` that is not a name-keyed record.`);
+      return [{ extend: raw.extend, fields: raw.fields, priority: typeof raw.priority === 'number' ? raw.priority : 200, i }];
+    })
+    .sort((a, b) => a.priority - b.priority || a.i - b.i);
+
   const objects = collection('objects').map((raw, i) => {
     const o = named(raw, `objects[${i}]`);
     const fieldsRaw = o.fields ?? {};
     if (!isBag(fieldsRaw)) {
       throw new TypeError(`scenario graph: object ${o.name} has a \`fields\` that is not a name-keyed record.`);
     }
+    // The fields the registry serves: the object's own, with every
+    // `objectExtensions` entry that extends it merged in, as
+    // `SchemaRegistry.resolveObject` folds them at boot. A field declared
+    // only through an extension is a field of the build.
+    const merged: Record<string, unknown> = { ...fieldsRaw };
+    for (const ext of extensions) if (ext.extend === o.name) Object.assign(merged, ext.fields);
     return {
       name: o.name,
-      fields: Object.entries(fieldsRaw).map(([name, def]) => toField(name, def, `${o.name}.${name}`)),
+      fields: Object.entries(merged).map(([name, def]) => toField(name, def, `${o.name}.${name}`)),
     };
   });
 
