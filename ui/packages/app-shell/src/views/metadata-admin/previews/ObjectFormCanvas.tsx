@@ -79,6 +79,7 @@ import {
   useExternalWriteState,
 } from './external-object.js';
 import { t, tFormat } from '../i18n.js';
+import { DisabledControlReason } from '../inspectors/_shared.js';
 
 /* ─── locale helpers ─── */
 // Both resolve through the Studio catalog now. They used to read a `labelZh`
@@ -952,24 +953,43 @@ function SectionHeader({
           )}
           {onMove && (
             <>
-              <button
-                type="button"
-                onClick={() => onMove(-1)}
-                disabled={!canMoveUp}
-                className="h-5 w-5 flex items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30 disabled:pointer-events-none"
-                aria-label={t('designer.canvas.moveSectionUp', locale)}
+              {/* A boundary arrow says why it is off, on hover, focus and
+                  to assistive tech; focusing its wrapper also reveals this
+                  hover-only row (`focus-within`). */}
+              <DisabledControlReason
+                reason={canMoveUp ? undefined : t('designer.canvas.sectionFirst', locale)}
+                testId="canvas-section-up-reason"
               >
-                <ArrowUp className="h-3 w-3" />
-              </button>
-              <button
-                type="button"
-                onClick={() => onMove(1)}
-                disabled={!canMoveDown}
-                className="h-5 w-5 flex items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30 disabled:pointer-events-none"
-                aria-label={t('designer.canvas.moveSectionDown', locale)}
+                {(describedBy) => (
+                  <button
+                    type="button"
+                    onClick={() => onMove(-1)}
+                    disabled={!canMoveUp}
+                    className="h-5 w-5 flex items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30 disabled:pointer-events-none"
+                    aria-label={t('designer.canvas.moveSectionUp', locale)}
+                    aria-describedby={describedBy}
+                  >
+                    <ArrowUp className="h-3 w-3" />
+                  </button>
+                )}
+              </DisabledControlReason>
+              <DisabledControlReason
+                reason={canMoveDown ? undefined : t('designer.canvas.sectionLast', locale)}
+                testId="canvas-section-down-reason"
               >
-                <ArrowDown className="h-3 w-3" />
-              </button>
+                {(describedBy) => (
+                  <button
+                    type="button"
+                    onClick={() => onMove(1)}
+                    disabled={!canMoveDown}
+                    className="h-5 w-5 flex items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30 disabled:pointer-events-none"
+                    aria-label={t('designer.canvas.moveSectionDown', locale)}
+                    aria-describedby={describedBy}
+                  >
+                    <ArrowDown className="h-3 w-3" />
+                  </button>
+                )}
+              </DisabledControlReason>
             </>
           )}
           {onRemove && (

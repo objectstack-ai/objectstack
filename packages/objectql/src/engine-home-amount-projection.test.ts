@@ -29,7 +29,12 @@
 //    `localization.timezone` (UTC when unset); a `date` is its own day;
 //  - an update projects when it moves the amount, its code or its document
 //    date, and never otherwise (a corrected rate reaches stored rows only
-//    through a recompute).
+//    through a recompute);
+//  - [ADR-0144 D2, amended] a line whose amount follows its header's currency
+//    (`currencyField: 'header.currency_code'`) is converted from the header's
+//    code at every seam, the batch reads each header once, a line moved to
+//    another header is converted from that header's code, and the recompute
+//    reads the master_detail column, never the dotted pointer.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { EngineUpdateOptions } from '@objectstack/spec/data';
@@ -749,5 +754,113 @@ describe('recompute: refused before any row is read', () => {
     const t = await boot();
     const run = await refusalOf(recompute(t, { since: '2026-02-30' }));
     expect(run?.message).toBe(pure?.message);
+  });
+});
+
+// ── [ADR-0144 D2, amended 2026-11-09 by #31743] A line that follows its header's currency ──
+
+const FX_HEADER = {
+  name: 'fx_header',
+  fields: { title: { type: 'text' }, currency_code: { type: 'text', valueDomain: 'iso_4217_currency' } },
+};
+const FX_LINE = {
+  name: 'fx_line',
+  fields: {
+    title: { type: 'text' },
+    header: { type: 'master_detail', reference: 'fx_header' },
+    line_date: { type: 'date' },
+    amount: {
+      type: 'currency',
+      currencyConfig: { currencyMode: 'record', currencyField: 'header.currency_code', homeAmount: { field: 'amount_home', rateDate: 'line_date', rateField: 'amount_rate' } },
+    },
+    amount_home: { type: 'currency', readonly: true },
+    amount_rate: { type: 'number', readonly: true },
+  },
+};
+
+describe('a line whose amount follows its header\'s currency is converted from the header\'s code (ADR-0144 D2, amended)', () => {
+  let t: Awaited<ReturnType<typeof boot>>;
+  const line = (id: string) => t.storeFor('fx_line').get(id)!;
+  beforeEach(async () => {
+    t = await boot(FX_LINE as any);
+    t.engine.registry.registerObject(FX_HEADER as any);
+    t.engine.registry.registerObject(AUDIT_OBJECT as any);
+    t.rate('USD', '2026-01-01', 0.1389);
+    t.rate('EUR', '2026-01-01', 0.128);
+    await t.engine.insert('fx_header', { id: 'h_usd', title: 'usd', currency_code: 'USD' });
+    await t.engine.insert('fx_header', { id: 'h_eur', title: 'eur', currency_code: 'EUR' });
+    await t.engine.insert('fx_header', { id: 'h_cny', title: 'cny', currency_code: 'CNY' });
+  });
+
+  it('insert: a USD header\'s line converts at the USD rate, a home-currency header\'s at 1', async () => {
+    const usd = await t.engine.insert('fx_line', { title: 'u', header: 'h_usd', line_date: '2026-03-15', amount: 10000 });
+    const cny = await t.engine.insert('fx_line', { title: 'c', header: 'h_cny', amount: 12.345 });
+    expect(line(usd.id)).toMatchObject({ amount_home: 71994.24, amount_rate: 0.1389 });
+    expect(line(cny.id)).toMatchObject({ amount_home: 12.35, amount_rate: 1 });
+  });
+
+  it('a batch under two headers reads their codes once, and converts each line from its own header', async () => {
+    // The header reads that fetch the code; the reference check's own existence reads are not counted here.
+    const codeReads: unknown[] = [];
+    const find = t.driver.find.bind(t.driver);
+    t.driver.find = async (object: string, ast: any, ...rest: unknown[]) => {
+      if (object === 'fx_header' && Array.isArray(ast?.fields) && ast.fields.includes('currency_code')) codeReads.push(ast.where);
+      return find(object, ast, ...rest);
+    };
+    await t.engine.insert('fx_line', [
+      { title: 'a', header: 'h_usd', line_date: '2026-03-15', amount: 100 },
+      { title: 'b', header: 'h_eur', line_date: '2026-03-15', amount: 64 },
+      { title: 'c', header: 'h_usd', line_date: '2026-03-15', amount: 200 },
+    ]);
+    expect(codeReads).toHaveLength(1);
+    const byTitle = Object.fromEntries([...t.storeFor('fx_line').values()].map((r) => [r.title, [r.amount_home, r.amount_rate]]));
+    expect(byTitle).toEqual({ a: [719.94, 0.1389], b: [500, 0.128], c: [1439.88, 0.1389] });
+  });
+
+  it('by-id update: a line moved to another header converts from that header\'s code; a new amount converts from its header\'s', async () => {
+    const { id } = await t.engine.insert('fx_line', { title: 'u', header: 'h_usd', line_date: '2026-03-15', amount: 64 });
+    await t.engine.update('fx_line', { id, header: 'h_eur' });
+    expect(line(id)).toMatchObject({ header: 'h_eur', amount_home: 500, amount_rate: 0.128 });
+    await t.engine.update('fx_line', { id, amount: 128 });
+    expect(line(id)).toMatchObject({ amount_home: 1000, amount_rate: 0.128 });
+  });
+
+  it('predicate update: each matched line converts from its own header', async () => {
+    await t.engine.insert('fx_line', [
+      { title: 'batch', header: 'h_usd', line_date: '2026-03-15', amount: 1 },
+      { title: 'batch', header: 'h_usd', line_date: '2026-03-15', amount: 2 },
+    ]);
+    await t.engine.update('fx_line', { amount: 10000 }, { where: { title: 'batch' }, multi: true });
+    expect([...t.storeFor('fx_line').values()].map((r) => [r.amount_home, r.amount_rate])).toEqual([[71994.24, 0.1389], [71994.24, 0.1389]]);
+  });
+
+  it('validate(): a line whose header\'s currency has no rate in force is refused as the write refuses it', async () => {
+    await t.engine.insert('fx_header', { id: 'h_jpy', title: 'jpy', currency_code: 'JPY' });
+    const preview = await t.engine.validate('fx_line', { title: 'j', header: 'h_jpy', line_date: '2026-03-15', amount: 1 });
+    expect(preview.valid).toBe(false);
+    expect(preview.results?.[0]?.errors?.[0]).toMatchObject({ code: 'ERR_EXCHANGE_RATE_MISSING' });
+    const err = await refusalOf(t.engine.insert('fx_line', { title: 'j', header: 'h_jpy', line_date: '2026-03-15', amount: 1 }));
+    expect({ code: err?.code, status: err?.status }).toEqual({ code: 'ERR_EXCHANGE_RATE_MISSING', status: 400 });
+  });
+
+  it('recompute: reads the master_detail, converts each line from its header\'s code, and lists a line whose header holds none', async () => {
+    const { id } = await t.engine.insert('fx_line', { title: 'u', header: 'h_usd', line_date: '2026-03-15', amount: 10000 });
+    t.rate('USD', '2026-01-01', 0.125);
+    t.storeFor('fx_header').set('h_blank', { id: 'h_blank', title: 'blank' });
+    t.storeFor('fx_line').set('legacy', { id: 'legacy', title: 'legacy', header: 'h_blank', line_date: '2026-03-15', amount: 5 });
+    const dry = await recomputeHomeAmounts(t.engine as never, noopLogger, { object: 'fx_line' });
+    expect(dry.fields).toEqual([{ field: 'amount', codeField: 'header.currency_code', homeField: 'amount_home', rateField: 'amount_rate', rateDateField: 'line_date' }]);
+    expect(dry.changes).toEqual([
+      { recordId: id, organizationId: null, field: 'amount', from: { home: 71994.24, rate: 0.1389 }, to: { home: 80000, rate: 0.125 } },
+    ]);
+    expect(dry.skipped).toEqual([{ recordId: 'legacy', organizationId: null, field: 'amount', reason: 'code_blank' }]);
+    const lines = formatHomeAmountRecomputeReport(dry).join('\n');
+    expect(lines).toContain("the amount follows its parent's code 'header.currency_code'");
+    expect(lines).not.toContain('os migrate record-currency-codes');
+
+    const applied = await recomputeHomeAmounts(t.engine as never, noopLogger, { object: 'fx_line', apply: true });
+    expect(applied).toMatchObject({ written: 1, failures: [] });
+    expect(line(id)).toMatchObject({ amount_home: 80000, amount_rate: 0.125 });
+    expect(Object.keys(line(id)).filter((k) => k.includes('.'))).toEqual([]);
   });
 });

@@ -7282,11 +7282,21 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    *   draft views. A surface that is a draft window without carrying the URL
    *   flag passes it: the Studio canvas. When the option is absent, the page
    *   URL decides (see the body).
+   *
+   *   `packageId` names the package a saved dataset is read from, sent as
+   *   `?package=` (ADR-0150 D5): the exact qualifier the server reads with
+   *   `/meta`'s meaning, that package's dataset or a refusal naming the
+   *   holders. It is the package of the item that references the dataset (the
+   *   dashboard, report or view as served), and it is sent only with a saved
+   *   dataset NAME: an inline draft names no saved item. A caller with no
+   *   package leaves it out and the read stays caller-less. A `409
+   *   RESOURCE_CONFLICT` is thrown as it came, with the server's sentence that
+   *   names every candidate; it is never retried bare.
    */
   async queryDataset(
     dataset: Record<string, unknown> | string,
     selection: DatasetSelection,
-    options?: { previewDrafts?: boolean },
+    options?: { previewDrafts?: boolean; packageId?: string },
   ): Promise<{
     rows: Array<Record<string, unknown>>;
     /**
@@ -7352,7 +7362,11 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     totals?: Array<{ dimensions: string[]; rows: Array<Record<string, unknown>> }>;
   }> {
     await this.connect();
-    const url = `${this.baseUrl}/api/v1/analytics/dataset/query`;
+    const packageId = typeof dataset === 'string' && typeof options?.packageId === 'string' && options.packageId !== ''
+      ? options.packageId
+      : undefined;
+    const url = `${this.baseUrl}/api/v1/analytics/dataset/query`
+      + (packageId !== undefined ? `?package=${encodeURIComponent(packageId)}` : '');
     // ADR-0037 P3 — draft data preview. Preview mode is URL-keyed by design
     // (`?preview=draft` flips the whole document, incl. the Live Canvas
     // iframe), so the adapter reads it straight off the location rather than
@@ -7483,7 +7497,10 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       //    `DATASET_INVALID`), a `CUBE_NOT_FOUND`, a 5xx — is a real failure
       //    with a real server detail, and keeps it. Note that a 404
       //    `CUBE_NOT_FOUND` used to land in the capability-missing branch too,
-      //    by the same status collision; it now reads as what it is.
+      //    by the same status collision; it now reads as what it is. A `409
+      //    RESOURCE_CONFLICT` (a dataset name two packages hold, ADR-0150 D5)
+      //    lands here too: its sentence names every candidate, and it is never
+      //    retried bare.
       throw new Error(`Dataset query failed: ${res.status} ${res.statusText}${detail ? ` — ${detail}` : ''}`);
     }
 

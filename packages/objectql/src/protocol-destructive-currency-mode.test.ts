@@ -303,6 +303,17 @@ describe('ObjectStackProtocolImplementation - currency_field_repointed', () => {
         expectNoRowRead('line_home');
     });
 
+    it('[ADR-0144 D2, amended] names the home-amount recompute for a path pointer too: the run reads each row\'s parent code', async () => {
+        register('line_path_home', 'order.currency_code', { homeAmount: HOME });
+        const err = await refusal(savePointer('line_path_home', 'order.billing_currency', { homeAmount: HOME }));
+        expect(findingsOf(err)).toEqual(['currency_field_repointed']);
+        const { message } = err.issues[0];
+        expect(message).toContain("its parent's code");
+        expect(message).toContain('`os migrate recompute-home-amounts --object line_path_home --field amount`');
+        expect(message).not.toContain(BACKFILL);
+        expectNoRowRead('line_path_home');
+    });
+
     it('says nothing re-rates the stored home amounts when the save also drops homeAmount', async () => {
         const err = await refusal(savePointer('line_home', 'billing_currency'));
         const { message } = err.issues[0];

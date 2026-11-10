@@ -103,7 +103,8 @@ interface TokenShape {
   nbf?: number;
   kid?: string;
   signWith?: 'current' | 'other';
-  email?: string;
+  /** `null` asserts no email claim at all (an Entra ID user without a mailbox). */
+  email?: string | null;
   /** Further claims the IdP asserts (e.g. `groups`). */
   claims?: Record<string, unknown>;
 }
@@ -111,7 +112,7 @@ interface TokenShape {
 async function idToken(shape: TokenShape = {}): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   const claims: Record<string, unknown> = {
-    email: shape.email ?? EMAIL,
+    ...(shape.email === null ? {} : { email: shape.email ?? EMAIL }),
     email_verified: true,
     name: 'Mia Chen',
     ...shape.claims,
@@ -128,13 +129,28 @@ async function idToken(shape: TokenShape = {}): Promise<string> {
   return jwt.sign(shape.signWith === 'other' ? keys.otherPrivateKey : keys.privateKey);
 }
 
-/** Routes the IdP's token and JWKS endpoints; everything else is refused loudly. */
-function stubIdp(token: string) {
+/** Userinfo on a host other than the issuer's, as Microsoft Entra ID's discovery names it (Microsoft Graph). */
+const USERINFO_HOST = 'https://graph.idp.example.test';
+const USERINFO_ENDPOINT = `${USERINFO_HOST}/oidc/userinfo`;
+
+/** The userinfo calls the stubbed IdP answered in this process. */
+const userInfoCalls: string[] = [];
+
+/**
+ * Routes the IdP's token and JWKS endpoints, and its userinfo endpoint when
+ * `userInfo` is given; everything else at the IdP is refused loudly.
+ */
+function stubIdp(token: string, userInfo?: Record<string, unknown>) {
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url;
     const json = (body: unknown) =>
       new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (userInfo && url.startsWith(USERINFO_ENDPOINT)) {
+      userInfoCalls.push(url);
+      return json(userInfo);
+    }
+    if (url.startsWith(USERINFO_HOST)) throw new Error(`unexpected userinfo fetch: ${url}`);
     if (url.startsWith(`${IDP}/token`)) {
       return json({ access_token: 'at-opaque', token_type: 'Bearer', expires_in: 300, id_token: token });
     }
@@ -218,7 +234,7 @@ const cookiesOf = (res: Response): string =>
     .join('; ');
 
 /** `/sign-in/sso` → the IdP → `/sso/callback/:providerId`; answers the callback response. */
-async function signInThroughIdp(rp: Rp, token: string): Promise<Response> {
+async function signInThroughIdp(rp: Rp, token: string, userInfo?: Record<string, unknown>): Promise<Response> {
   const start = await rp.manager.handleRequest(
     new Request(`${AUTH}/sign-in/sso`, {
       method: 'POST',
@@ -231,7 +247,7 @@ async function signInThroughIdp(rp: Rp, token: string): Promise<Response> {
   const state = new URL(body.url).searchParams.get('state');
   expect(state, `sign-in/sso answered no state: ${JSON.stringify(body)}`).toBeTruthy();
 
-  const restore = stubIdp(token);
+  const restore = stubIdp(token, userInfo);
   try {
     return await rp.manager.handleRequest(
       new Request(`${AUTH}/sso/callback/${PROVIDER_ID}?code=idp-code&state=${encodeURIComponent(state!)}`, {
@@ -254,7 +270,7 @@ function errorParams(res: Response): { base: string; error: string | null; descr
 }
 
 /** The structured refusal lines this package wrote: `warn` calls carrying `protocol: 'oidc'`. */
-function refusalLines(rp: Rp): Array<[string, Record<string, unknown>]> {
+function refusalLines(rp: Pick<Rp, 'warn'>): Array<[string, Record<string, unknown>]> {
   return rp.warn.mock.calls.filter(([, meta]) => (meta as any)?.protocol === 'oidc') as never;
 }
 
@@ -651,7 +667,9 @@ async function makeGroupRp(opts: { judge?: boolean; provider?: Record<string, un
     secret: SECRET,
     baseUrl: BASE,
     dataEngine: engine,
-    trustedOrigins: [BASE, IDP],
+    // The userinfo host is listed as an operator would list it: these cases
+    // pin what a sign-in reads, not how a provider is registered.
+    trustedOrigins: [BASE, IDP, USERINFO_HOST],
     plugins: { sso: true, organization: true },
     logger: { warn, error, info: vi.fn() },
     organizationBoundary: async () => judge,
@@ -981,5 +999,187 @@ describe('the SSO Providers form sets the groups claim a sign-in grants from, an
     const cleared = await storedConfig(rp);
     expect(cleared.mapping).toEqual({ email: 'upn', name: 'display_name', image: 'picture', extraFields: { department: 'dept' } });
     expect(withoutMapping(cleared)).toEqual(withoutMapping(before));
+  });
+});
+
+// ── Microsoft Entra ID shapes: userinfo that carries less than the ID token ─
+//
+// A provider registered from Entra ID's discovery document has a
+// `userInfoEndpoint` (on Microsoft Graph), and `@better-auth/sso` then reads
+// every claim from the userinfo answer alone. Entra ID's answers `sub`,
+// `name`, `given_name`, `family_name`, `picture` and `email`: no `groups`, no
+// `preferred_username`, no `upn`. These cases sign in through the real chain
+// above with a userinfo answer of that shape beside an ID token that carries
+// the rest.
+
+/** The configuration Entra ID's discovery document hydrates (userinfo on another host), with `mapping`. */
+function entraConfig(mapping: Record<string, unknown>): string {
+  return JSON.stringify({
+    issuer: IDP,
+    clientId: CLIENT_ID,
+    clientSecret: CLIENT_SECRET,
+    authorizationEndpoint: `${IDP}/authorize`,
+    tokenEndpoint: `${IDP}/token`,
+    jwksEndpoint: `${IDP}/jwks`,
+    userInfoEndpoint: USERINFO_ENDPOINT,
+    discoveryEndpoint: `${IDP}/.well-known/openid-configuration`,
+    pkce: true,
+    scopes: ['openid', 'email', 'profile'],
+    mapping,
+  });
+}
+
+/** Entra ID's userinfo answer: the standard profile claims, never `groups`. */
+const ENTRA_USERINFO = { sub: SUBJECT, name: 'Mia Chen', given_name: 'Mia', family_name: 'Chen', email: EMAIL };
+
+/** The Entra ID group object id the mapping names. */
+const ENTRA_SALES_GROUP = '9f1c2d3e-0000-4a5b-8c6d-sales0000001';
+
+describe('Entra ID: the groups claim reaches the group mapping when userinfo does not carry it', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  async function entraRp() {
+    const rp = await makeGroupRp({ provider: { oidc_config: entraConfig({ email: 'email', name: 'name', extraFields: { groups: 'groups' } }) } });
+    savedMappingId(await saveGroupMapping(rp, { providerId: PROVIDER_ID, groupExternalId: ENTRA_SALES_GROUP, permissionSet: SALES }));
+    return rp;
+  }
+
+  async function signInEntra(rp: GroupRp, idClaims: Record<string, unknown>, userInfo: Record<string, unknown> = ENTRA_USERINFO) {
+    userInfoCalls.length = 0;
+    const res = await signInThroughIdp(rp as unknown as Rp, await idToken({ claims: idClaims }), userInfo);
+    expect(res.headers.get('location'), `the sign-in did not land: ${res.headers.get('location')}`).toBe(AFTER);
+    expect(userInfoCalls, 'the userinfo endpoint was called, as it is for every provider that has one').toHaveLength(1);
+    const user = (await rp.engine.findOne('sys_user', { where: { email: EMAIL }, fields: ['id'] }, SYSTEM)) as { id: string };
+    return String(user.id);
+  }
+
+  it('a group member is granted with userinfo present: the groups come from the verified ID token', async () => {
+    const rp = await entraRp();
+    const userId = await signInEntra(rp, { groups: [ENTRA_SALES_GROUP, 'another-group-id'] });
+    expect(await grantsOf(rp, userId)).toEqual([projectedSales]);
+  });
+
+  it('removal from the group revokes the projected grant at the next sign-in', async () => {
+    const rp = await entraRp();
+    const userId = await signInEntra(rp, { groups: [ENTRA_SALES_GROUP] });
+    expect(await grantsOf(rp, userId)).toEqual([projectedSales]);
+    await signInEntra(rp, { groups: ['another-group-id'] });
+    expect(await grantsOf(rp, userId)).toEqual([]);
+  });
+
+  it('a groups overage grants nothing from groups, revokes what the provider projected, and warns once per provider', async () => {
+    const rp = await entraRp();
+    const userId = await signInEntra(rp, { groups: [ENTRA_SALES_GROUP] });
+    expect(await grantsOf(rp, userId)).toEqual([projectedSales]);
+
+    const overage = {
+      _claim_names: { groups: 'src1' },
+      _claim_sources: { src1: { endpoint: 'https://graph.windows.net/tenant/users/oid/getMemberObjects' } },
+    };
+    await signInEntra(rp, overage);
+    expect(await grantsOf(rp, userId)).toEqual([]);
+    await signInEntra(rp, overage);
+    const overageLines = rp.warn.mock.calls.filter(([message]) => String(message).includes('groups overage'));
+    expect(overageLines).toHaveLength(1);
+    expect(String(overageLines[0]![0])).toContain(`'${PROVIDER_ID}'`);
+    expect(String(overageLines[0]![0])).toContain('groups assigned to the application');
+    // No Graph call was made for the groups.
+    expect(userInfoCalls.every((url) => url.startsWith(USERINFO_ENDPOINT))).toBe(true);
+  });
+
+  it('CONTROL (Okta shape): userinfo that carries the groups claim still wins over the ID token', async () => {
+    const rp = await makeGroupRp({ provider: { oidc_config: entraConfig({ email: 'email', name: 'name', extraFields: { groups: 'groups' } }) } });
+    savedMappingId(await saveGroupMapping(rp, { providerId: PROVIDER_ID, groupDisplayName: 'Acme Sales', permissionSet: SALES }));
+    const userId = await signInEntra(rp, { groups: ['Acme Everyone'] }, { ...ENTRA_USERINFO, groups: ['Acme Sales'] });
+    expect(await grantsOf(rp, userId)).toEqual([projectedSales]);
+    // …and a userinfo answer whose groups leave out the mapped group grants nothing, whatever the ID token says.
+    await signInEntra(rp, { groups: ['Acme Sales'] }, { ...ENTRA_USERINFO, groups: ['Acme Everyone'] });
+    expect(await grantsOf(rp, userId)).toEqual([]);
+  });
+});
+
+describe('Entra ID: a user without a mailbox signs in through an explicit email mapping', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  /** An Entra ID user with no `mail`: no `email` in the ID token or in userinfo, a `preferred_username` in the ID token. */
+  const MAILBOXLESS = 'kai.ng@acme.onmicrosoft.com';
+  const mailboxlessToken = () => idToken({ email: null, claims: { preferred_username: MAILBOXLESS, upn: MAILBOXLESS } });
+  const { email: _noEmail, ...MAILBOXLESS_USERINFO } = ENTRA_USERINFO;
+
+  async function signInMailboxless(rp: GroupRp): Promise<Response> {
+    userInfoCalls.length = 0;
+    return signInThroughIdp(rp as unknown as Rp, await mailboxlessToken(), MAILBOXLESS_USERINFO);
+  }
+
+  it('mapping preferred_username with claims from the ID token signs in, and userinfo is not called', async () => {
+    const rp = await makeGroupRp({
+      provider: { oidc_config: entraConfig({ email: 'preferred_username', name: 'name' }), skip_user_info: true },
+    });
+    const res = await signInMailboxless(rp);
+    expect(res.headers.get('location'), `the sign-in did not land: ${res.headers.get('location')}`).toBe(AFTER);
+    expect(cookiesOf(res)).toMatch(/session_token=[^;]/);
+    expect(userInfoCalls).toEqual([]);
+    const user = await rp.engine.findOne('sys_user', { where: { email: MAILBOXLESS }, fields: ['id', 'email_verified'] }, SYSTEM);
+    expect(user, 'the user is provisioned with the mapped claim as the email').toBeTruthy();
+  });
+
+  it('no mapping: refused naming the missing claim and the mapping key that would supply it', async () => {
+    const rp = await makeGroupRp({ provider: { oidc_config: entraConfig({ email: 'email', name: 'name' }), skip_user_info: true } });
+    const res = await signInMailboxless(rp);
+    expect(errorParams(res)).toEqual({ base: FAILED, error: 'invalid_provider', description: 'email_claim_missing' });
+    expect(refusalLines(rp)).toEqual([
+      [
+        expect.stringContaining('mapping.email'),
+        { providerId: PROVIDER_ID, protocol: 'oidc', cause: 'email_claim_missing', claim: 'email', mappingKey: 'mapping.email' },
+      ],
+    ]);
+    expect(await rp.engine.find('sys_user', { where: { email: MAILBOXLESS } }, SYSTEM)).toEqual([]);
+    // No claim value and no account signal in the refusal.
+    const logged = JSON.stringify(rp.warn.mock.calls);
+    expect(logged).not.toContain(MAILBOXLESS);
+    expect(res.headers.get('location')).not.toContain(MAILBOXLESS);
+  });
+
+  it('a mapping userinfo cannot satisfy is refused naming that claim: preferred_username is read from userinfo while it is on', async () => {
+    const rp = await makeGroupRp({ provider: { oidc_config: entraConfig({ email: 'preferred_username', name: 'name' }) } });
+    const res = await signInMailboxless(rp);
+    expect(userInfoCalls).toHaveLength(1);
+    expect(errorParams(res)).toEqual({ base: FAILED, error: 'invalid_provider', description: 'email_claim_missing' });
+    expect(refusalLines(rp)[0]?.[1]).toMatchObject({ cause: 'email_claim_missing', claim: 'preferred_username' });
+  });
+
+  it('CONTROL: a user with a mailbox signs in through userinfo as before, and no refusal line is written', async () => {
+    const rp = await makeGroupRp({ provider: { oidc_config: entraConfig({ email: 'email', name: 'name' }) } });
+    userInfoCalls.length = 0;
+    const res = await signInThroughIdp(rp as unknown as Rp, await idToken(), ENTRA_USERINFO);
+    expect(res.headers.get('location')).toBe(AFTER);
+    expect(userInfoCalls).toHaveLength(1);
+    expect(refusalLines(rp)).toEqual([]);
+  });
+
+  it('a vendor write of an opted-out provider keeps its stored userinfo endpoint', async () => {
+    const rp = await makeGroupRp({
+      provider: { oidc_config: entraConfig({ email: 'preferred_username', name: 'name' }), skip_user_info: true },
+    });
+    await rp.engine.insert('sys_member', { user_id: 'usr_admin', organization_id: GROUP_ORG, role: 'owner' }, SYSTEM);
+    const ctx = await ((await rp.manager.getAuthInstance()) as any).$context;
+    const token = (await ctx.internalAdapter.createSession('usr_admin')).token as string;
+    // The Edit Groups Claim bridge writes through the vendor's update-provider,
+    // which merges the configuration it read (with the endpoint parked) and stores it.
+    const reader = createEngineSsoProviderConfigReader(() => rp.engine as never);
+    const res = await runSetSsoGroupsClaim(
+      (req) => rp.manager.handleRequest(req),
+      new Request(`${AUTH}/admin/sso/set-groups-claim`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: BASE, authorization: `Bearer ${token}` },
+        body: JSON.stringify({ providerId: PROVIDER_ID, groupsClaim: 'groups' }),
+      }),
+      reader,
+    );
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const stored = JSON.parse(String((await reader(PROVIDER_ID))!.oidcConfig)) as Record<string, unknown>;
+    expect(stored.userInfoEndpoint).toBe(USERINFO_ENDPOINT);
+    expect(Object.keys(stored).filter((k) => /parked/i.test(k))).toEqual([]);
+    expect(stored.mapping).toEqual({ email: 'preferred_username', name: 'name', extraFields: { groups: 'groups' } });
   });
 });

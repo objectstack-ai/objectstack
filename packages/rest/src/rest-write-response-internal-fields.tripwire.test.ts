@@ -398,6 +398,7 @@ const DISPOSITIONS: Record<string, Disposition> = {
   'POST /api/v1/approvals/requests/:id/comment': { kind: 'no-record-echo', why: 'Approval comment row.' },
 
   'POST /api/v1/analytics/dataset/query': { kind: 'no-record-echo', why: 'A READ (aggregated dataset) over POST.' },
+  'POST /api/v1/analytics/dataset/query/batch': { kind: 'no-record-echo', why: 'A READ (aggregated datasets, one answer entry per query) over POST.' },
 
   'POST /api/v1/security/suggested-bindings/:id/confirm': { kind: 'no-record-echo', why: 'Binding receipt.' },
   'POST /api/v1/security/suggested-bindings/:id/dismiss': { kind: 'no-record-echo', why: 'Dismissal receipt.' },
