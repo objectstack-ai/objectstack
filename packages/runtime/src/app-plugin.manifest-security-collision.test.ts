@@ -259,15 +259,20 @@ describe('#32162 — the registrar stamps each permission set with its package',
         expect([solo?.label, solo?._packageId]).toEqual(['alpha set', 'com.acme.alpha']);
     });
 
-    it('a set already carrying a package keeps it; the other collections keep their bytes', async () => {
+    it('a set wearing another package\'s stamp is filed in the stack\'s own slot, never that package\'s; the other collections keep their bytes (BASE r1: the foreign stamp was kept)', async () => {
+        const metadata = new MetadataManager({});
+        const alpha = stack('com.acme.alpha', ['alpha_item']);
+        (alpha.permissions[0] as Record<string, unknown>)._packageId = 'com.acme.beta';
+        await startOn(metadata, alpha);
+        expect(await metadata.get('permission', 'shared_set', 'com.acme.beta'), 'beta holds no set: alpha\'s body is never served there').toBeUndefined();
+        const own = await metadata.get('permission', 'shared_set', 'com.acme.alpha') as any;
+        expect([own?.label, own?._packageId]).toEqual(['alpha set', 'com.acme.alpha']);
+
         const registrations: Registration[] = [];
         const sink = { warns: [] as string[], infos: [] as string[] };
-        const bundle = stack('com.acme.alpha', ['alpha_item']);
-        (bundle.permissions[0] as Record<string, unknown>)._packageId = 'com.acme.elsewhere';
-        await new AppPlugin(bundle).start!(fakeCtx({
+        await new AppPlugin(stack('com.acme.alpha', ['alpha_item'])).start!(fakeCtx({
             registerInMemory: (type: string, name: string, item: unknown) => { registrations.push({ type, name, item }); },
         }, sink));
-        expect(registrations.find((r) => r.type === 'permission')?.item._packageId).toBe('com.acme.elsewhere');
         expect(registrations.find((r) => r.type === 'position')?.item).not.toHaveProperty('_packageId');
     });
 });

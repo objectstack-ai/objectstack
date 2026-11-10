@@ -803,6 +803,23 @@ describe('removal by (package, name) for every type stored per package (ADR-0150
     expect(ctx.rowBodies(), 'the row holding P2\'s set is kept').toEqual(['beta permission']);
   });
 
+  // #32162 S1: the security-catalog echo drops a stale slot with
+  // `{ packageId, notify: false }` while the name's stored row is live. The
+  // real manager removes that slot only, keeps the row it does not hold, and
+  // announces nothing to watchers — so nothing reaches the cluster channel,
+  // whose peers would drop every slot of the name. The realtime `deleted`
+  // still names the removed package (it is not governed by `notify`).
+  it('permission (#32162): a silent removal naming a package takes that slot only, keeps the other\'s row, and announces nothing to watchers', async () => {
+    const ctx = await boot('permission');
+    await ctx.manager.unregister('permission', ctx.name, { packageId: A, notify: false });
+    expect(await ctx.manager.get('permission', ctx.name, A)).toBeUndefined();
+    expect(((await ctx.manager.get('permission', ctx.name, B)) as any)?.label).toBe('beta permission');
+    expect(ctx.rowBodies()).toEqual(['beta permission']);
+    expect(ctx.watched, 'no watcher event, so no cluster broadcast').toEqual([]);
+    expect(ctx.published.map((event) => [(event.payload as any).type, (event.payload as any).packageId]))
+      .toEqual([['metadata.permission.deleted', A]]);
+  });
+
   /**
    * Today's state, pinned so the carry stays visible. The artifact door's
    * `MemoryLoader` is a `memory:` loader, so no removal deletes from it, and it

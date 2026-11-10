@@ -178,11 +178,27 @@ async function servedSlotsOf(metadata: any, type: SecurityCatalogEchoType, name:
  * package named (`unregister(type, name, { packageId })`), so another
  * package's item of the name, and the stored row it holds, are never taken
  * with it; a slot with no package by name, as before.
+ *
+ * `silent` removes the slot without announcing it to `subscribe` watchers
+ * (`notify: false`): the stale-slot drop, which runs while the name's stored
+ * row is live and its echo is re-registered in the same pass. Announced, a
+ * package-less watcher `deleted` reached every cluster peer, and each peer's
+ * foreign-write invalidation dropped every slot of the name.
  */
-async function unregisterEchoSlot(metadata: any, type: SecurityCatalogEchoType, name: string, slot: ServedSlot): Promise<void> {
+async function unregisterEchoSlot(
+  metadata: any,
+  type: SecurityCatalogEchoType,
+  name: string,
+  slot: ServedSlot,
+  silent = false,
+): Promise<void> {
   if (typeof metadata?.unregister !== 'function') return;
-  if (slot.packageId === undefined) await metadata.unregister(type, name);
-  else await metadata.unregister(type, name, { packageId: slot.packageId });
+  const options = {
+    ...(slot.packageId !== undefined ? { packageId: slot.packageId } : {}),
+    ...(silent ? { notify: false } : {}),
+  };
+  if (Object.keys(options).length === 0) await metadata.unregister(type, name);
+  else await metadata.unregister(type, name, options);
 }
 
 /** Remove our echo of `name` from the metadata service, and from the engine registry if it leaked there. */
@@ -300,10 +316,12 @@ export async function echoSecurityCatalogMutation(
     ? classifyPackagedPermissionSet(name, ql, { status: 'read', envelope }).status === 'org'
     : true;
   let ownerPackageId: string | undefined;
+  let bindingUnread = false;
   if (tenantAuthored) {
     try {
       ownerPackageId = await readServedPackageBinding(protocol, name, type);
     } catch (e) {
+      bindingUnread = true;
       // Functional, not durability: nothing persisted is lost and nothing
       // grants differently — the echo is registered unowned, so it still
       // resolves and enforces the stored body. What is missing is said once,
@@ -323,10 +341,14 @@ export async function echoSecurityCatalogMutation(
   // stale slot is dropped first, naming its package — the stored row, now
   // bound to the new owner, is not that package's and stays. Left in place,
   // two slots of the name would refuse every later read naming no package.
+  // A binding read that failed is not a moved binding: nothing is dropped
+  // then, so the owner's slot keeps serving its package's address.
   const ownerSlot = tenantAuthored ? ownerPackageId : undefined;
-  for (const slot of slots) {
-    if (slot.packageId !== undefined && slot.packageId !== ownerSlot) {
-      await unregisterEchoSlot(metadata, type, name, slot);
+  if (!bindingUnread) {
+    for (const slot of slots) {
+      if (slot.packageId !== undefined && slot.packageId !== ownerSlot) {
+        await unregisterEchoSlot(metadata, type, name, slot, true);
+      }
     }
   }
   metadata.registerInMemory(type, name, {

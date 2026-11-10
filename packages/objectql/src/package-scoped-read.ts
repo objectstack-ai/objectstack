@@ -20,7 +20,9 @@
  * picklist-family backstop #31700 needs) and `dataset` (#32072, a reader
  * #31700 needs before it narrows: `POST /analytics/dataset/query` reads its
  * `datasetName` through the protocol's by-name read, which is this resolver's
- * for the types listed here). A later child adds its own types to the list in
+ * for the types listed here), and `permission` (#32162), whose in-memory store
+ * `@objectstack/metadata` now keeps per `(package, name)` too, so a package's
+ * qualified read serves its own grants. A later child adds its own types to the list in
  * its own change; until then a type's by-name read stays
  * `SchemaRegistry.getItem`'s, exactly as before (`SchemaRegistry.resolveItem`).
  *

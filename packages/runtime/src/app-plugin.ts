@@ -1669,8 +1669,14 @@ export class AppPlugin implements Plugin {
                     // stamps — or two packages' sets of one name would share
                     // the bare slot and a read naming one package
                     // (`/meta/permission/NAME?package=`) would be served the set
-                    // registered last. A set already carrying a package keeps
-                    // it; the other three collections keep their bytes.
+                    // registered last. The stack's own package always wins: a
+                    // body that wears another package's `_packageId` is filed
+                    // in the stack's slot, never in that package's, so no stack
+                    // can have `?package=<another>` serve its set (the engine
+                    // seam refuses such a body at `registerApp`,
+                    // `collectionItemOwnerStampRefusal`; this registrar does not
+                    // judge it a second time). The other three collections keep
+                    // their bytes.
                     const permissionOwner = artifactPackageId(this.bundle.manifest || this.bundle);
                     let count = 0;
                     for (const [field, type] of SECURITY_FIELDS) {
@@ -1696,7 +1702,7 @@ export class AppPlugin implements Plugin {
                                 metadata.registerInMemory(
                                     type,
                                     item.name,
-                                    type === 'permission' && permissionOwner && item._packageId === undefined
+                                    type === 'permission' && permissionOwner
                                         ? { ...item, _packageId: permissionOwner }
                                         : item,
                                 );

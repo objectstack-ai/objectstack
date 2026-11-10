@@ -587,7 +587,11 @@ describe('the boot pass echoes every stored env-wide overlay, and only those', (
  * The double answers as `@objectstack/metadata`'s slotted store does (its
  * write, read and removal rules are pinned there): a package's item in its own
  * slot, a read naming no package refused across two package slots, a removal
- * naming a package taking that slot only.
+ * naming a package taking that slot only — and, as `MetadataManager.unregister`
+ * does, a removal announces a watcher `deleted` unless it passes
+ * `notify: false` (`announced`). The real manager honouring `notify: false`
+ * for a slotted removal is pinned in `@objectstack/metadata`
+ * (`metadata-manager-match-endpoint.test.ts`, the #32162 pins).
  */
 describe('[#32162] a re-bound set\'s echo leaves one slot, never two', () => {
   const NAME = 'ops_reader';
@@ -604,9 +608,11 @@ describe('[#32162] a re-bound set\'s echo leaves one slot, never two', () => {
       code: 'RESOURCE_CONFLICT', status: 409,
       refusal: { reason: 'ambiguous-in-environment', candidates: holders().map((packageId) => ({ kind: 'package', packageId })) },
     });
+    const announced: string[] = [];
     return {
       slots,
       removals,
+      announced,
       registerInMemory: (_type: string, _name: string, data: Row) => {
         const own = typeof data._packageId === 'string' ? data._packageId : undefined;
         if (own !== undefined) {
@@ -620,11 +626,13 @@ describe('[#32162] a re-bound set\'s echo leaves one slot, never two', () => {
         return holders().length === 1 ? slots.get(holders()[0]!) : slots.get('');
       },
       list: () => [...slots.values()],
-      unregister: (_type: string, _name: string, options?: { packageId?: string }) => {
-        if (options?.packageId !== undefined) { removals.push(options.packageId); slots.delete(options.packageId); return; }
+      unregister: (_type: string, _name: string, options?: { packageId?: string; notify?: boolean }) => {
+        const announce = (what: string) => { if (options?.notify !== false) announced.push(what); };
+        if (options?.packageId !== undefined) { removals.push(options.packageId); slots.delete(options.packageId); announce(options.packageId); return; }
         if (holders().length > 1) throw refusal();
         removals.push('(by name)');
         slots.clear();
+        announce('(by name)');
       },
     };
   }
@@ -642,6 +650,7 @@ describe('[#32162] a re-bound set\'s echo leaves one slot, never two', () => {
     expect(await echo('active')).toBe('registered');
     expect([...metadata.slots.keys()], 'one slot, the new owner\'s').toEqual([Q]);
     expect(metadata.removals, 'the stale slot went by its package, never by name').toEqual([P]);
+    expect(metadata.announced, 'the stale-slot drop announces nothing: the row is live and re-echoed in the same pass').toEqual([]);
     expect(metadata.get('permission', NAME)).toMatchObject({ _packageId: Q, _envProjection: true });
 
     // The next save of the name echoes again, and the delete drops the one echo.
@@ -650,6 +659,22 @@ describe('[#32162] a re-bound set\'s echo leaves one slot, never two', () => {
     expect(await echo('deleted')).toBe('dropped');
     expect(metadata.slots.size).toBe(0);
     expect(metadata.removals).toEqual([P, Q]);
+    expect(metadata.announced, 'the overlay\'s delete still announces its drop').toEqual([Q]);
+  });
+
+  it('a binding read that fails is not a moved binding: the owner\'s slot stays, and its package\'s address keeps serving the set (epic N1)', async () => {
+    const metadata = slottedMetadataService();
+    const overlays: Record<string, { body: Row; packageId?: string }> = { [`permission/${NAME}`]: { body: body(), packageId: P } };
+    const protocol: any = stubProtocol(overlays);
+    const echo = () => echoSecurityCatalogMutation(protocol, { ql: engineDeclaring(), metadata }, { type: 'permission', name: NAME, state: 'active' });
+    expect(await echo()).toBe('registered');
+    expect([...metadata.slots.keys()]).toEqual([P]);
+
+    protocol.getMetaItem = async () => { throw new Error('binding read down'); };
+    expect(await echo()).toBe('registered');
+    expect(metadata.removals, 'nothing dropped on an unread binding').toEqual([]);
+    expect([...metadata.slots.keys()], 'the owner\'s slot holds the re-echo').toEqual([P]);
+    expect(metadata.get('permission', NAME, P)).toMatchObject({ name: NAME, _envProjection: true });
   });
 
   it('two echo slots already present (an echo before this change): the delete drops each by its package', async () => {
