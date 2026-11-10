@@ -59,6 +59,9 @@ function dispatcherWith(h: Holdings, flowNames: string[] = ['send_digest', 'ping
         toggleFlow: vi.fn(async () => {}),
         listRunsPage: vi.fn(async () => ({ runs: [] as unknown[], hasMore: false })),
         getConnectorConnection: vi.fn(async (request: { connector: string }) => ({ connector: request.connector, status: 'not_connected' })),
+        getActionDescriptors: vi.fn(() => []),
+        getFlowRuntimeStates: vi.fn(() => []),
+        getRun: vi.fn(async (runId: string) => ({ id: runId, flowName: 'trigger' })),
     };
     const ql = { registry: registryWith(h) };
     const services: Record<string, unknown> = { automation, objectql: ql };
@@ -205,12 +208,60 @@ describe('every gate judges the bare shape, ahead of the address', () => {
     });
 });
 
+describe('the door\'s own literals are never an addressed name, and never the bare by-name 409', () => {
+    it('`_env` followed by a door literal is no route: declined, nothing read or run', async () => {
+        const { call, automation } = dispatcherWith({ ...ONE_HOLDER, environment: ['flow:actions', 'flow:_status', 'flow:connectors', 'flow:trigger', 'flow:hooks'] });
+        for (const [path, method] of [
+            ['/_env/actions', 'GET'], ['/_env/_status', 'GET'], ['/_env/connectors', 'GET'],
+            ['/_env/trigger/send_digest', 'POST'], ['/_env/hooks/send_digest/h1', 'POST'],
+        ] as const) {
+            expect([path, method, (await call(path, method)).handled]).toEqual([path, method, false]);
+        }
+        expect(automation.getActionDescriptors).not.toHaveBeenCalled();
+        expect(automation.getFlowRuntimeStates).not.toHaveBeenCalled();
+        expect(automation.execute).not.toHaveBeenCalled();
+    });
+
+    it('a namespace followed by a door literal that is no sub-resource is no route either', async () => {
+        const { call, automation } = dispatcherWith(ONE_HOLDER);
+        for (const [path, method] of [
+            ['/crm/actions', 'GET'], ['/crm/_status', 'GET'], ['/crm/connectors', 'GET'], ['/crm/hooks/send_digest/h1', 'POST'],
+        ] as const) {
+            expect([path, method, (await call(path, method)).handled]).toEqual([path, method, false]);
+        }
+        expect(automation.getActionDescriptors).not.toHaveBeenCalled();
+        expect(automation.getFlowRuntimeStates).not.toHaveBeenCalled();
+    });
+
+    it('a bare literal route stays its own though two packages hold a flow of that name', async () => {
+        const { call, automation } = dispatcherWith({ packages: { 'flow:actions': [CRM, HR], 'flow:_status': [CRM, HR] } });
+        const catalog = await call('/actions', 'GET');
+        expect([catalog.status, catalog.body?.data?.total], JSON.stringify(catalog.body)).toEqual([200, 0]);
+        expect((await call('/_status', 'GET')).status).toBe(200);
+        expect(automation.getActionDescriptors).toHaveBeenCalled();
+        expect(automation.getFlowRuntimeStates).toHaveBeenCalled();
+    });
+
+    it('CONTROL — `_env` followed by a flow name is still the environment\'s flow', async () => {
+        const { call, automation } = dispatcherWith(ONE_HOLDER);
+        expect((await call('/_env/ping', 'GET')).status).toBe(200);
+        expect(automation.getFlow).toHaveBeenCalledWith('ping');
+    });
+});
+
 describe('the legacy trigger is two segments bare, three addressed, and nothing else at three', () => {
     it('`trigger/:x/:y` whose `:x` is no address is declined — the flow `:x` never runs', async () => {
         const { call, automation } = dispatcherWith(ONE_HOLDER);
         expect((await call('/trigger/nope/send_digest', 'POST')).handled).toBe(false);
         expect((await call('/trigger/send_digest/extra', 'POST')).handled).toBe(false);
         expect(automation.execute).not.toHaveBeenCalled();
+    });
+
+    it('CONTROL — another verb at three segments is the flow `trigger`\'s: its run read answers', async () => {
+        const { call, automation } = dispatcherWith(ONE_HOLDER, ['trigger']);
+        const answer = await call('/trigger/runs/r1', 'GET');
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(automation.getRun).toHaveBeenCalledWith('r1');
     });
 
     it('CONTROL — the addressed and the bare legacy trigger run their flow', async () => {

@@ -42,7 +42,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
-import { AppPlugin } from '@objectstack/runtime';
+import { AppPlugin, HttpDispatcher } from '@objectstack/runtime';
 import { MarketplaceInstallLocalPlugin } from '@objectstack/cloud-connection';
 import { MCPServerPlugin } from '@objectstack/mcp';
 import { defineStack } from '@objectstack/spec';
@@ -245,18 +245,40 @@ describe('agent and skill names held per namespace, a tool name per deployment, 
     }
   });
 
-  // [ADR-0150 D5, G1 #31691] The address form of `?package=`: the qualified
-  // read `/meta/TYPE/:ns/NAME` serves each namespace's own agent and skill,
-  // where the bare read refuses naming both (the test above).
-  it('the qualified read `/meta/TYPE/:ns/NAME` serves each namespace\'s own agent and skill', async () => {
-    for (const [type, name] of [['agent', AGENT], ['skill', SKILL]] as const) {
-      for (const ns of ['alpha', 'beta'] as const) {
-        const r = await stack.apiAs(admin, 'GET', `/meta/${type}/${ns}/${name}`);
-        const body = (await r.json()) as any;
-        expect(r.status, JSON.stringify(body)).toBe(200);
-        const d = body?.data ?? body;
-        const item = d?.item ?? d;
-        expect([type, ns, item?._packageId, item?.label]).toEqual([type, ns, `com.qa.bare.${ns}`, `${ns} ${type}`]);
+  // [ADR-0150 D5, G1 #31691] The address form of `?package=`, on both
+  // transports: the REST route manager over the booted socketless app, and the
+  // runtime dispatcher's `/meta` domain over the same booted kernel. Each
+  // namespace's address serves its own agent and skill; `_env` serves only an
+  // environment item, so for a name only packages hold it is refused naming
+  // them; the bare read stays the 409 naming both.
+  it('the qualified read `/meta/TYPE/:ns/NAME` serves each namespace\'s own agent and skill, `_env` none, on both transports', async () => {
+    const dispatcher = new HttpDispatcher(stack.kernel as never);
+    const viaDispatcher = async (path: string) => {
+      const answered = await dispatcher.handleMetadata(path, {
+        request: {},
+        executionContext: { userId: 'u_dogfood_admin', systemPermissions: ['manage_metadata'] },
+      } as never, 'GET');
+      const response = answered?.response as { status?: number; body?: any } | undefined;
+      return { status: response?.status, body: response?.body };
+    };
+    const viaRest = async (path: string) => {
+      const r = await stack.apiAs(admin, 'GET', `/meta${path}`);
+      return { status: r.status, body: (await r.json()) as any };
+    };
+    const itemOf = (body: any) => { const d = body?.data ?? body; return d?.item ?? d; };
+    const messageOf = (body: any) => String(typeof body?.error === 'string' ? body.error : body?.error?.message ?? body?.message ?? '');
+    for (const [transport, read] of [['rest', viaRest], ['dispatcher', viaDispatcher]] as const) {
+      for (const [type, name] of [['agent', AGENT], ['skill', SKILL]] as const) {
+        for (const ns of ['alpha', 'beta'] as const) {
+          const answer = await read(`/${type}/${ns}/${name}`);
+          expect([transport, type, ns, answer.status], JSON.stringify(answer.body)).toEqual([transport, type, ns, 200]);
+          expect([itemOf(answer.body)?._packageId, itemOf(answer.body)?.label]).toEqual([`com.qa.bare.${ns}`, `${ns} ${type}`]);
+        }
+        for (const path of [`/${type}/_env/${name}`, `/${type}/${name}`]) {
+          const refused = await read(path);
+          expect([transport, path, refused.status], JSON.stringify(refused.body)).toEqual([transport, path, 409]);
+          for (const holder of ['com.qa.bare.alpha', 'com.qa.bare.beta']) expect(messageOf(refused.body)).toContain(holder);
+        }
       }
     }
   });

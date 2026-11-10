@@ -29,14 +29,22 @@
  * Q1 = A, as the metadata door's): `/automation/crm/runs` is the runs of the
  * flow `crm`, never the flow `runs` of namespace `crm`, so a flow named like an
  * installed namespace keeps every bare door. A flow whose name is one of those
- * literals is reached bare, or under `_env`, after which the segment is always
- * the name (`_env` is never a flow's name).
+ * sub-resource literals is reached bare, or under `_env`.
+ *
+ * A qualifier followed by one of the door's own literals
+ * ({@link AUTOMATION_DOOR_LITERALS}: `actions`, `_status`, `connectors`,
+ * `hooks`, `trigger`) is no address and no bare route: it is declined
+ * (`declined`). Stripped, it would hand a literal arm (the catalog, the legacy
+ * trigger) a path whose admission was judged against a flow of that name.
  *
  * ## The admission: after the gates, before the service
  *
  * {@link admitAutomationAddress} judges the qualifier against the registry, the
  * holder table the resolver reads, so it is asked only once the caller has
- * passed every gate (a refused caller learns nothing about the address):
+ * passed every gate (a refused caller learns nothing about who holds the name;
+ * whether the namespace is installed is read before the gates, so a caller the
+ * gates refuse can tell an installed namespace from none, as on every door
+ * that reads one):
  *
  *  - a namespace names, among its packages, the ones holding the name. Two —
  *    a shareable namespace's co-owners (ADR-0150 D2) — are refused naming
@@ -63,6 +71,7 @@
 
 import {
     ENVIRONMENT_ADDRESS_SEGMENT,
+    NAMESPACE_POSITION_LITERALS,
     readNamespacePositionSegment,
     type AddressDoor,
 } from '@objectstack/spec/kernel';
@@ -85,6 +94,15 @@ import { resolvePackageScopedName, type PackageScopedRegistry } from '@objectsta
  */
 export const AUTOMATION_FLOW_SUBRESOURCE_SEGMENTS: readonly string[] = Object.freeze(['clone', 'runs', 'toggle', 'trigger']);
 
+/**
+ * [ADR-0150 D5, child G1] The `/automation` door's own literal segments, read
+ * from the one grammar table (`NAMESPACE_POSITION_LITERALS`). After a
+ * qualifier they are declined; a bare one-segment `GET` of one is the literal's
+ * route (the catalog, `_status`) or a flow of that name, never the bare
+ * by-name `409`.
+ */
+export const AUTOMATION_DOOR_LITERALS: readonly string[] = NAMESPACE_POSITION_LITERALS.automation.literals;
+
 /** The qualifier an addressed `/automation` path carried. */
 export type AutomationAddressQualifier =
     | { readonly kind: 'namespace'; readonly namespace: string }
@@ -98,6 +116,8 @@ export interface AutomationAddressReading {
     readonly qualifier?: AutomationAddressQualifier;
     /** The item the qualifier names, and its type, for {@link admitAutomationAddress}. */
     readonly item?: { readonly type: 'flow' | 'connector'; readonly name: string };
+    /** A qualifier followed by one of the door's literals: no address, no route. */
+    readonly declined?: true;
 }
 
 /** The slice of the ObjectQL registry the address reads: the namespace table and the holders. */
@@ -157,9 +177,10 @@ export function readAutomationAddress(parts: readonly string[], registry: Automa
     const qualifier = readSegment('automation', parts[0], registry);
     if (!qualifier) return bare;
     // A sub-resource literal in the name position keeps its bare route after a
-    // namespace (ruling Q1). `_env` is never a flow's name, so after it the
-    // segment is always the name.
+    // namespace (ruling Q1).
     if (qualifier.kind === 'namespace' && AUTOMATION_FLOW_SUBRESOURCE_SEGMENTS.includes(parts[1])) return bare;
+    // One of the door's own literals after a qualifier is no address.
+    if (AUTOMATION_DOOR_LITERALS.includes(parts[1])) return { ...bare, declined: true };
     return { parts: parts.slice(1), qualifier, item: { type: 'flow', name: parts[1] } };
 }
 

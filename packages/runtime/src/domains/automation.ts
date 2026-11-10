@@ -23,6 +23,7 @@ import {
     bareNameRefusal,
     readAutomationAddress,
     automationRouteAllow,
+    AUTOMATION_DOOR_LITERALS,
     type AutomationAddressRefusal,
     type AutomationAddressRegistry,
 } from './automation-address.js';
@@ -1247,7 +1248,9 @@ function bareByNameItem(parts: readonly string[], method: string): { type: 'flow
             return undefined;
         }
     }
-    if (parts.length === 1) return method === 'GET' ? { type: 'flow', name: parts[0] } : undefined;
+    // A door literal (`actions`, `_status`, …) is its own route or a flow the
+    // engine reads by that name, never the by-name 409.
+    if (parts.length === 1) return method === 'GET' && !AUTOMATION_DOOR_LITERALS.includes(parts[0]) ? { type: 'flow', name: parts[0] } : undefined;
     if ((parts[1] === 'trigger' || parts[1] === 'toggle') && method === 'POST') return { type: 'flow', name: parts[0] };
     if (parts[1] === 'runs') return { type: 'flow', name: parts[0] };
     return undefined;
@@ -3479,12 +3482,17 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // (`/automation/:ns/:name…`, `/automation/_env/:name…`,
     // `/automation/trigger/:ns/:name`, `/automation/connectors/:ns/:name/connection`)
     // is handed on as its bare path, and every gate judges the shape it judged
-    // before (seat ruling Q3 = A). The qualifier is judged after the gates and
-    // the service probe (`admitAutomationAddress` below), so a refused caller
-    // learns nothing about it. See `./automation-address.ts`.
+    // before (seat ruling Q3 = A). Who holds the name is judged after the gates
+    // and the service probe (`admitAutomationAddress` below), so a refused
+    // caller learns nothing about the holders; whether a namespace is installed
+    // is read here, so it can tell an installed namespace from none (`403`
+    // against `404`), as on every door that reads one. A qualifier followed by
+    // one of the door's own literals is no route: declined before any arm can
+    // read the literal. See `./automation-address.ts`.
     const rawParts = path.replace(/^\/+/, '').split('/').filter(Boolean);
     const addressRegistry = rawParts.length >= 1 ? await automationRegistryOf(deps, context) : undefined;
     const address = readAutomationAddress(rawParts, addressRegistry);
+    if (address.declined) return { handled: false };
     const parts = address.parts;
 
     // [#7900] RUN-STATE READ GATE — the maintainer ruling of 2026-08-12: the
@@ -3642,9 +3650,10 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // [ADR-0150 D5, child G1] `trigger/:x/:y` is the addressed legacy trigger
     // or no route: a first segment that is no address leaves three segments
     // here, which the arm below would have run as the flow `:x`, ignoring the
-    // rest. Declined — behind every gate above, so none becomes narrower than
+    // rest. Only `POST` is that arm's: another verb is the flow `trigger`'s
+    // (`GET trigger/runs/:runId`). Declined — behind every gate above, so none becomes narrower than
     // its route — as `/actions` declines a path past its arity.
-    if (parts[0] === 'trigger' && parts.length === 3) return { handled: false };
+    if (parts[0] === 'trigger' && parts.length === 3 && m === 'POST') return { handled: false };
     if (parts[0] === 'trigger' && parts[1] && m === 'POST') {
         const triggerName = parts[1];
         if (typeof automationService.execute === 'function') {
