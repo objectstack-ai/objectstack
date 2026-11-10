@@ -2686,10 +2686,10 @@ export interface FlowCredentialSource {
     resolve(flowName: string, nodeId: string, key: string, flowPackage?: string): Promise<string | undefined>;
     /**
      * [ADR-0150 D8 row R9, #31696] `true` when, given `flowPackage`, only that
-     * package's rows answer. A source that does not say so (the plugin's
-     * `FlowCredentialChannel` today) is never asked for a flow of a name two
-     * packages hold: `holds` answers `true`, and `held` / `resolve` throw
-     * `FlowCredentialUnresolvableError` naming the flow and its package.
+     * package's rows answer. A source that does not say so is never read for
+     * a flow of a name two packages hold: `holds` asks it by name alone, and
+     * `held` / `resolve` throw `FlowCredentialUnresolvableError` naming the
+     * flow and its package.
      */
     readonly readsByPackage?: boolean;
 }
@@ -3280,8 +3280,9 @@ export class AutomationEngine implements IAutomationService {
             // package (stamped at start) comes first, so a run whose key moved
             // in flight is still its own package's run. A key no slot files is
             // a qualified key moved back to the bare name: split at its last `/`.
-            stored: (filed, flowPackage) => {
-                const key = filed.startsWith('\u0000') ? filed.slice(1) : filed; // [S3] an unfiled key stores its name
+            stored: (key, flowPackage) => {
+                // [S3, N8] An unfiled key stores its name and no slot's package: the lone slot of a shared name is not its.
+                if (key.startsWith('\u0000')) return { flowName: key.slice(1), ...(flowPackage ? { flowPackage } : {}) };
                 const slot = this.flowSlots.slot(key);
                 const cut = key.lastIndexOf('/');
                 const flowName = slot?.name ?? (cut >= 0 ? key.slice(cut + 1) : key);

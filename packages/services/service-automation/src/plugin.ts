@@ -1920,8 +1920,9 @@ export class AutomationServicePlugin implements Plugin {
         // [#20790] The write-only flow credential channel — the engine reads a
         // flow's credentials from it at verification and execution, and the
         // metadata save door stores them in it (registered at `start()`).
-        // [ADR-0150 D8 row R9, #31696] By name alone: under a name two packages hold, a write that would
-        // touch a row is refused, and the engine never asks it for such a flow's credential.
+        // [ADR-0150 D8 row R9, #31696] Each row it writes names the flow's one package holder, and a
+        // read for a slot of a shared name answers by that package. Under a shared name a write touches
+        // only the rows naming no package, and one that sets or clears a credential is refused.
         const engine = this.engine;
         this.credentialChannel = new FlowCredentialChannel(
             () => this.resolveDataEngine(ctx),
@@ -1929,6 +1930,7 @@ export class AutomationServicePlugin implements Plugin {
                 const answer = engine.flowHolder(name);
                 return answer?.status === 'refused' ? answer : undefined;
             },
+            (name) => engine.flowHolderPackage(name),
         );
         this.engine.setFlowCredentialSource(this.credentialChannel);
 
