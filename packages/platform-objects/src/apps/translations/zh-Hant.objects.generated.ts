@@ -2845,6 +2845,23 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "組織",
         help: "授權所在的組織：擁有該 SCIM 連線或 SSO 提供者的組織。"
       },
+      match_status: {
+        label: "比對狀態",
+        help: "此對應指定的群組是否為其 SCIM 連線目前推送的群組。未比對到時不授予任何權限。SSO 提供者不儲存群組清單，因此不適用。",
+        options: {
+          matched: "已比對",
+          unmatched: "未比對到任何現有群組",
+          not_applicable: "不適用"
+        }
+      },
+      matched_group_id: {
+        label: "比對到的群組 ID",
+        help: "此對應目前比對到的 SCIM 群組的 ID。未比對到任何群組時為空。"
+      },
+      match_changed_at: {
+        label: "比對變更時間",
+        help: "比對狀態或比對到的群組最近一次變更的時間。"
+      },
       created_at: {
         label: "建立時間"
       },

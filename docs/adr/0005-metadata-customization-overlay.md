@@ -79,7 +79,7 @@ Studio ships an in-browser editor for views and dashboards. Customers expect "Sa
 Until today, the runtime did not:
 
 1. `PUT /api/v1/meta/view/<name>` in **project-kernel mode** updated only the in-memory registry and returned `200 { success: true, message: "Saved to memory registry (project kernel — sys_metadata is control-plane only)" }`. The change vanished on restart.
-2. `GET /api/v1/meta/view/<name>` skipped `sys_metadata` entirely in project-kernel mode (`packages/metadata-protocol/src/protocol.ts#sys_metadata`).
+2. `GET /api/v1/meta/view/<name>` skipped `sys_metadata` entirely in project-kernel mode (`packages/metadata-protocol/src/protocol-meta-item-reads.ts#sys_metadata`).
 3. `loadMetaFromDb()` returned `{ loaded: 0 }` early in project-kernel mode (`#loadMetaFromDb`), so even if rows existed they would never be hydrated.
 
 Worse, a separate detour — Studio's "Duplicate View" calls `POST /api/v1/data/sys_view` — wrote rows to a **physical projection table** (`sys_view`, 21 flat columns) that has nothing to do with the metadata protocol path. The same applies to `sys_flow`, `sys_agent`, `sys_tool`, `sys_object`. Each of these tables duplicates a Zod schema already defined in `@objectstack/spec` (`ui/view.zod.ts`, `automation/flow.zod.ts`, etc.) and goes out of sync the moment the spec evolves.

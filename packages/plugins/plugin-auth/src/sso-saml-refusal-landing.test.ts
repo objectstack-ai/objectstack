@@ -116,7 +116,7 @@ interface RpOptions {
   provider?: Record<string, unknown>;
   /** Extra `AuthManager` config (e.g. `audience`). */
   config?: Record<string, unknown>;
-  /** Extra stored `samlConfig` members (e.g. `mapping`, or a `cert` the IdP no longer signs with). */
+  /** Extra stored `samlConfig` members (e.g. `idpInitiatedCallbackUrl`, `mapping`, or a `cert` the IdP no longer signs with). */
   samlConfig?: Record<string, unknown>;
 }
 
@@ -381,10 +381,19 @@ describe('reading the landing from the relay state', () => {
     expect(await readSamlAcsLanding(ctx, PROVIDER_ID, acsPost('RelayState=rs'))).toEqual({ success: AFTER, error: CONSOLE_LOGIN });
   });
 
-  it('no landing without a relay state, a row, or a readable row', async () => {
-    expect(await readSamlAcsLanding(context(stateRow({ callbackURL: AFTER })), PROVIDER_ID, acsPost('SAMLResponse=x'))).toBeUndefined();
-    expect(await readSamlAcsLanding(context(null), PROVIDER_ID, acsPost('RelayState=rs'))).toBeUndefined();
-    expect(await readSamlAcsLanding(context({ value: '{not json' }), PROVIDER_ID, acsPost('RelayState=rs'))).toBeUndefined();
+  it('with no relay state, no row, or no readable row (IdP-initiated): the platform error page, for the bare fallback', async () => {
+    const idpInitiatedLanding = { fallback: BASE, error: CONSOLE_LOGIN };
+    expect(await readSamlAcsLanding(context(stateRow({ callbackURL: AFTER })), PROVIDER_ID, acsPost('SAMLResponse=x'))).toEqual(idpInitiatedLanding);
+    expect(await readSamlAcsLanding(context(null), PROVIDER_ID, acsPost('RelayState=rs'))).toEqual(idpInitiatedLanding);
+    expect(await readSamlAcsLanding(context({ value: '{not json' }), PROVIDER_ID, acsPost('RelayState=rs'))).toEqual(idpInitiatedLanding);
+    expect(await readSamlAcsLanding(context(stateRow({ errorURL: FAILED })), PROVIDER_ID, acsPost('RelayState=rs'))).toEqual(idpInitiatedLanding);
+  });
+
+  it('with no relay-state row and no platform error page configured, the vendor default; an unsafe one, no landing', async () => {
+    const bare = { ...context(null), options: {} };
+    expect(await readSamlAcsLanding(bare, PROVIDER_ID, acsPost('SAMLResponse=x'))).toEqual({ fallback: BASE, error: `${AUTH}/error` });
+    const elsewhere = { ...context(null), options: { onAPIError: { errorURL: 'https://elsewhere.example/login' } } };
+    expect(await readSamlAcsLanding(elsewhere, PROVIDER_ID, acsPost('SAMLResponse=x'))).toBeUndefined();
   });
 
   it('applies the vendor redirect safety rule to the error URL', async () => {
@@ -427,6 +436,31 @@ describe('putting an ACS answer on its landing', () => {
     expect(landSamlRefusal(json, landingOf)).toBe(json);
   });
 
+  it('IdP-initiated: a refusal on the bare app-origin fallback is re-based onto the platform error page, every header kept', () => {
+    const idp = { fallback: BASE, error: CONSOLE_LOGIN };
+    const res = landSamlRefusal(redirect(`${BASE}/?error=unsolicited_response&error_description=IdP-initiated+SSO+not+allowed`), idp);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe(`${CONSOLE_LOGIN}?error=unsolicited_response&error_description=IdP-initiated+SSO+not+allowed`);
+    expect(res.headers.get('set-cookie')).toBe('a=1');
+    expect(landSamlRefusal(redirect('/?error=account_not_linked'), idp).headers.get('location')).toBe(`${CONSOLE_LOGIN}?error=account_not_linked`);
+  });
+
+  it('IdP-initiated: a success on the fallback, and anything not on the bare fallback, are left alone', () => {
+    const idp = { fallback: BASE, error: CONSOLE_LOGIN };
+    for (const location of [
+      BASE, // the vendor's success on its fallback
+      `${BASE}/`,
+      `${BASE}/sso-landing?error=unsolicited_response`, // a configured IdP-initiated callback
+      `${BASE}/?tenant=acme&error=unsolicited_response`, // the root, with a query of its own
+      `${BASE}/?error=unsolicited_response#top`,
+      `https://elsewhere.example/?error=unsolicited_response`,
+      `//elsewhere.example/?error=unsolicited_response`,
+    ]) {
+      const res = redirect(location);
+      expect(landSamlRefusal(res, idp), location).toBe(res);
+    }
+  });
+
   it('with no landing read, the vendor answer stands', async () => {
     const vendor = redirect(`${AFTER}?error=account_not_linked`);
     const saml = { protocol: 'saml' as const, providerId: PROVIDER_ID, request: new Request(ACS, { method: 'POST' }) };
@@ -445,7 +479,11 @@ const seedAdmin = async (rp: Rp) => {
 };
 
 /** An IdP-initiated Response: the IdP posts an assertion no AuthnRequest asked for (no InResponseTo, no RelayState). */
-async function idpInitiated(rp: Rp, email: string): Promise<Response> {
+async function idpInitiated(
+  rp: Rp,
+  email: string,
+  shapeResponse: (samlResponse: string) => string = (r) => r,
+): Promise<Response> {
   const spMetadata = await (await rp.manager.handleRequest(
     new Request(`${AUTH}/sso/saml2/sp/metadata?providerId=${PROVIDER_ID}`),
   )).text();
@@ -463,19 +501,20 @@ async function idpInitiated(rp: Rp, email: string): Promise<Response> {
     new Request(ACS, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ SAMLResponse: context }).toString(),
+      body: new URLSearchParams({ SAMLResponse: shapeResponse(context) }).toString(),
     }),
   );
 }
 
 describe('SAML IdP-initiated sign-in is a per-provider toggle, off by default', () => {
-  it('off (the default): an unsolicited Response is refused 302 error=unsolicited_response, and signs nobody in', async () => {
+  it('off (the default): an unsolicited Response is refused 302 error=unsolicited_response on the platform error page, and signs nobody in', async () => {
     const rp = await makeRp({ provider: { allowJit: true } });
     await seedAdmin(rp);
     const res = await idpInitiated(rp, 'new.person@acme.com');
     expect(res.status).toBe(302);
-    expect(landing(res).error).toBe('unsolicited_response');
+    expect(landing(res)).toEqual({ base: CONSOLE_LOGIN, error: 'unsolicited_response' });
     expect(cookiesOf(res)).not.toMatch(/session_token=[^;]/);
+    expect(rp.engine.tables.get('sys_user')?.map((u: any) => u.email)).toEqual(['admin@acme.com']);
   });
 
   it('on: the same Response signs the person in', async () => {
@@ -497,7 +536,8 @@ describe('SAML IdP-initiated sign-in is a per-provider toggle, off by default', 
       data: { providerId: 'other-idp', issuer: 'https://other.example/entity', domain: 'other.example', allowIdpInitiated: true },
     });
     const res = await idpInitiated(rp, 'new.person@acme.com');
-    expect(landing(res).error).toBe('unsolicited_response');
+    expect(landing(res)).toEqual({ base: CONSOLE_LOGIN, error: 'unsolicited_response' });
+    expect(cookiesOf(res)).not.toMatch(/session_token=[^;]/);
   });
 
   it('CONTROL: an SP-initiated sign-in is answered as before with the toggle off', async () => {
@@ -506,6 +546,57 @@ describe('SAML IdP-initiated sign-in is a per-provider toggle, off by default', 
     const res = await signInThroughIdp(rp, 'new.person@acme.com');
     expect(res.headers.get('location')).toBe(AFTER);
     expect(cookiesOf(res)).toMatch(/session_token=/);
+  });
+});
+
+describe('a refused IdP-initiated SAML sign-in lands on the platform error page, as one with no errorCallbackURL does', () => {
+  // With no relay state the vendor lands every IdP-initiated answer on its
+  // fallback, the bare app origin, whose console redirect drops the query.
+
+  it('on, but the person may not be provisioned: error=SELF_REGISTRATION_CLOSED on the platform error page, no user created', async () => {
+    const rp = await makeRp({ provider: { allowIdpInitiated: true } });
+    await seedAdmin(rp);
+    const res = await idpInitiated(rp, 'new.person@acme.com');
+    expect(res.status).toBe(302);
+    expect(landing(res)).toEqual({ base: CONSOLE_LOGIN, error: 'SELF_REGISTRATION_CLOSED' });
+    expect(cookiesOf(res)).not.toMatch(/session_token=[^;]/);
+    expect(rp.engine.tables.get('sys_user')?.map((u: any) => u.email)).toEqual(['admin@acme.com']);
+  });
+
+  it('on, and the email belongs to an account this provider is not linked to: error=account_not_linked on the platform error page', async () => {
+    const rp = await makeRp({ provider: { allowIdpInitiated: true, allowJit: true } });
+    await rp.engine.insert('sys_user', { id: 'usr_known', email: KNOWN_EMAIL, name: 'Mia Chen', email_verified: true });
+    const res = await idpInitiated(rp, KNOWN_EMAIL);
+    expect(res.status).toBe(302);
+    expect(landing(res)).toEqual({ base: CONSOLE_LOGIN, error: 'account_not_linked' });
+    expect(cookiesOf(res)).not.toMatch(/session_token=[^;]/);
+  });
+
+  it("a Response the vendor's signature check refuses: error=saml_error on the platform error page", async () => {
+    const rp = await makeRp({ provider: { allowIdpInitiated: true, allowJit: true } });
+    await seedAdmin(rp);
+    const res = await idpInitiated(rp, 'someone@acme.com', tamper);
+    expect(res.status).toBe(302);
+    expect(landing(res)).toEqual({ base: CONSOLE_LOGIN, error: 'saml_error' });
+    expect(cookiesOf(res)).not.toMatch(/session_token=[^;]/);
+  });
+
+  it('CONTROL: an allowed IdP-initiated sign-in still lands on the app origin, signed in', async () => {
+    const rp = await makeRp({ provider: { allowIdpInitiated: true, allowJit: true } });
+    await seedAdmin(rp);
+    const res = await idpInitiated(rp, 'new.person@acme.com');
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe(BASE);
+    expect(cookiesOf(res)).toMatch(/session_token=[^;]/);
+  });
+
+  it("CONTROL: a provider's own IdP-initiated callback keeps its refusals, as the operator configured", async () => {
+    const rp = await makeRp({ provider: { allowJit: true }, samlConfig: { idpInitiatedCallbackUrl: `${BASE}/sso-landing` } });
+    await seedAdmin(rp);
+    const res = await idpInitiated(rp, 'new.person@acme.com');
+    expect(res.status).toBe(302);
+    expect(landing(res)).toEqual({ base: `${BASE}/sso-landing`, error: 'unsolicited_response' });
+    expect(cookiesOf(res)).not.toMatch(/session_token=[^;]/);
   });
 });
 

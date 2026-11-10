@@ -2845,6 +2845,23 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         label: "Organisation",
         help: "Die Organisation, in der die Berechtigung erteilt wird: die Organisation, der die SCIM-Verbindung oder der SSO-Anbieter gehört."
       },
+      match_status: {
+        label: "Übereinstimmungsstatus",
+        help: "Ob die Gruppe, die die Zuordnung nennt, eine Gruppe ist, die ihre SCIM-Verbindung derzeit überträgt. Ohne Übereinstimmung wird nichts gewährt. Nicht zutreffend für einen SSO-Anbieter, der keine Gruppenliste speichert.",
+        options: {
+          matched: "Stimmt überein",
+          unmatched: "Stimmt mit keiner aktuellen Gruppe überein",
+          not_applicable: "Nicht zutreffend"
+        }
+      },
+      matched_group_id: {
+        label: "ID der übereinstimmenden Gruppe",
+        help: "Die ID der SCIM-Gruppe, mit der die Zuordnung derzeit übereinstimmt. Leer, wenn sie mit keiner übereinstimmt."
+      },
+      match_changed_at: {
+        label: "Übereinstimmung geändert am",
+        help: "Wann sich der Übereinstimmungsstatus oder die übereinstimmende Gruppe zuletzt geändert hat."
+      },
       created_at: {
         label: "Erstellt am"
       },

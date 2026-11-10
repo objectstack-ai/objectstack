@@ -150,6 +150,16 @@
         "must_contain": ["type: 'gallery'", "coverField: 'main_image'"],
         "must_not_contain": ["type: 'grid'"]
       }
+    },
+    {
+      "id": 16,
+      "prompt": "Add an 'Upgrade' action on `installed_package` that asks for the target version, shows what the upgrade will change before the user confirms (our endpoint `GET /api/v1/packages/{id}/upgrade-plan?version=…` answers `{ success, data: { changes, token } }`), and posts the plan's `token` with the upgrade to `/api/v1/packages/{id}/upgrade`.",
+      "expected_output": "One `defineAction` (`type: 'api'`, that `target` with `${ctx.recordId}`) whose `params` are `version` and `plan_token` (both `required`; `plan_token` declares no default or carry-over), beside `preflight: { read: { url: '/api/v1/packages/${ctx.recordId}/upgrade-plan?version=${param.version}' }, path: 'data', fields: [{ path: 'changes', label: 'Changes', format: 'json' }], seed: [{ param: 'plan_token', path: 'token' }] }`. The dialog sends that one same-origin GET once `version` has a value, shows `changes` above the params, and fills `plan_token` read-only, so Confirm waits for the answer. Not a script or companion action that fetches the plan by hand, not an absolute URL, credential headers or a non-GET read, and no `result` hole (there is no answer before the read); the endpoint still checks the token.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["preflight", "read: { url: '/api/v1/packages/${ctx.recordId}/upgrade-plan?version=${param.version}' }", "seed: [{ param: 'plan_token', path: 'token' }]"],
+        "must_not_contain": ["headers:", "${result."]
+      }
     }
   ]
 }

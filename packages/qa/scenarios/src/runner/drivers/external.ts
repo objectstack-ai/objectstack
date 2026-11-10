@@ -105,7 +105,12 @@ export const ExternalToolCallSchema = z.strictObject({
   isError: z.boolean().optional(),
 });
 
-/** The `author` and `ask` answer: the reply the agent wrote (every text it said, joined), its tool calls, and what it knows of itself. */
+/**
+ * The `author` and `ask` answer: the reply the agent wrote (every text it
+ * said, joined), its tool calls, and what it knows of itself — its model, its
+ * turn count and its usage. Every key after `toolCalls` is optional, so a
+ * command that reports no usage answers the same contract.
+ */
 export const ExternalTurnSchema = z.strictObject({
   replyText: z.string(),
   toolCalls: z.array(ExternalToolCallSchema),
@@ -113,6 +118,16 @@ export const ExternalTurnSchema = z.strictObject({
   model: z.string().min(1).optional(),
   /** The agentic turns the call took, when the tool counts them. */
   numTurns: z.number().int().min(0).optional(),
+  /**
+   * The cost of the call in US dollars, as the tool reports it (the same
+   * reading as Claude Code's `total_cost_usd`). Absent ⇒ the tool reported
+   * none, and the record holds none: never a zero.
+   */
+  reportedCostUsd: z.number().nonnegative().optional(),
+  /** The input tokens the call used, when the tool reports them. Absent ⇒ none recorded. */
+  inputTokens: z.number().int().min(0).optional(),
+  /** The output tokens the call used, when the tool reports them. Absent ⇒ none recorded. */
+  outputTokens: z.number().int().min(0).optional(),
 });
 export type ExternalTurn = z.infer<typeof ExternalTurnSchema>;
 
@@ -251,7 +266,17 @@ export class ExternalDriver implements AgentDriver {
     return {
       replyText: out.replyText,
       toolCalls,
-      meta: { process: proc, ...(out.model ? { model: out.model } : {}), ...(out.numTurns !== undefined ? { numTurns: out.numTurns } : {}), resultSubtype: 'success', isError: false },
+      meta: {
+        process: proc,
+        ...(out.model ? { model: out.model } : {}),
+        ...(out.numTurns !== undefined ? { numTurns: out.numTurns } : {}),
+        // A usage figure the command did not report stays absent: a turn that reports none records none, never a zero.
+        ...(out.reportedCostUsd !== undefined ? { reportedCostUsd: out.reportedCostUsd } : {}),
+        ...(out.inputTokens !== undefined ? { inputTokens: out.inputTokens } : {}),
+        ...(out.outputTokens !== undefined ? { outputTokens: out.outputTokens } : {}),
+        resultSubtype: 'success',
+        isError: false,
+      },
     };
   }
 
