@@ -44,6 +44,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import '@objectstack/metadata';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
