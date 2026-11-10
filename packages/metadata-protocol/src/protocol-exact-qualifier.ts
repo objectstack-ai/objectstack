@@ -30,7 +30,7 @@
  *    member, an item authored into X.
  */
 
-import { isPairOf, pairsOf } from '@objectstack/metadata-core';
+import { ITEM_KEY_DISCRIMINATORS, isPairOf, pairsOf } from '@objectstack/metadata-core';
 import {
     PackageScopedNameRefusedError,
     packageScopedRefusalMessage,
@@ -146,11 +146,13 @@ export async function admitExactQualifier(
  * Another package's item is never served for the address; two bases the
  * package is a pair of, both holding the name, are refused naming both.
  *
- * An item of a customization pair of the address's package, or of a holder it
+ * For a bundled type (`ITEM_KEY_DISCRIMINATORS`: an email template's locale),
+ * a member of a customization pair of the address's package, or of a holder it
  * admitted, is that package's own (ADR-0146; #28802, #28390 ruling A: the
  * pair's added member is served on the base's address). It is served as the
  * layers below reached it, never replaced by the registry's item, whose bare
- * slot a dependent's same member can hold (#31699).
+ * slot a dependent's same member can hold (#31699). Every other type keeps
+ * the replacement it had: the keep is gated to a bundled type.
  *
  * @returns the item to serve (unchanged when it is the address's).
  */
@@ -168,8 +170,10 @@ export function exactQualifierItem(
     if (typeof served !== 'string' || served === address.packageId || address.registryHolders.includes(served)) return item;
     // A provenance sentinel or a package this registry does not hold is not another package's item.
     if (typeof registry.getPackage === 'function' && registry.getPackage(served) === undefined) return item;
-    const installed = installedManifestsOfEngine(host.engine);
-    if ([address.packageId, ...address.registryHolders].some((base) => isPairOf(served, base, installed))) return item;
+    if (ITEM_KEY_DISCRIMINATORS[request.type] !== undefined) {
+        const installed = installedManifestsOfEngine(host.engine);
+        if ([address.packageId, ...address.registryHolders].some((base) => isPairOf(served, base, installed))) return item;
+    }
     if (address.registryHolders.length > 1) {
         throw refusal(request.type, request.name, address.packageId, 'ambiguous-in-closure',
             address.registryHolders.map((holder) => ({ kind: 'package' as const, packageId: holder })));
