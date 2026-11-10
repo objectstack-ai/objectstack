@@ -36,6 +36,9 @@ export { MarketplaceProxyPlugin } from './marketplace-proxy-plugin.js';
 export type { MarketplaceProxyPluginConfig } from './marketplace-proxy-plugin.js';
 export { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 export type { MarketplaceInstallLocalPluginConfig } from './marketplace-install-local-plugin.js';
+// [#32176] The install-local doors' multi-replica refusal message, spelled once,
+// so `os package install`'s pin reads the same text the door answers.
+export { multiReplicaInstallLocalRefusalMessage } from './marketplace-install-local-plugin.js';
 // [#31801, cloud#3862] The install door's declared-rename planner, read-only,
 // on the kernel service INSTALL_RENAME_PLANNER_SERVICE: what an install of a
 // version would carry and refuse on this environment's tables, answered by the

@@ -421,3 +421,147 @@ describe('query_dataset', () => {
     });
   });
 });
+
+// ── [#32072, ADR-0150 D3] query_dataset resolves the name by package ────────
+// The tools' callers (the MCP bridges) belong to no package, and the input
+// carries none, so `datasetName` resolves by the one package-scoped rule for a
+// caller with no package, over the holders the listed items' `_packageId`s
+// name: the environment's own item, else the one package holder; a name two
+// packages hold is refused naming both. It never takes the first listed.
+// Admission comes first (epic ruling 6766102988 on #32098, ADR-0149 D2): only
+// the holders the caller may query are candidates, and a hidden one is never
+// named.
+describe('[#32072] query_dataset resolves the dataset by package (ADR-0150 D3)', () => {
+  const ALPHA = 'com.acme.alpha';
+  const BETA = 'com.acme.beta';
+  const held = (packageId: string | undefined, label: string) =>
+    ({ ...PIPELINE, label, ...(packageId !== undefined ? { _packageId: packageId } : {}), _diagnostics: { source: 'test' } });
+  const run = async (listed: unknown[], context: ExecutionContext = ADMIN) => {
+    const { service, reads } = await bootWired([{ stage: 'won', revenue: 100 }]);
+    const spy = vi.spyOn(service, 'queryDataset');
+    const tools = service.datasetTools({ loadDatasets: async () => listed.map((d) => ({ ...(d as object) })) });
+    const answer = await tools
+      .queryDataset({ datasetName: 'pipeline', selection: { measures: ['revenue'] } }, context)
+      .catch((e: unknown) => e);
+    return { answer, spy, reads };
+  };
+  /** A `pipeline` over `crm_locked`, which u_me may not read: hidden from ME, admitted to ADMIN. */
+  const lockedHeld = (packageId: string, label: string) => ({
+    name: 'pipeline', label, object: 'crm_locked', dimensions: [],
+    measures: [{ name: 'revenue', label: 'Revenue', aggregate: 'sum', field: 'amount' }],
+    _packageId: packageId, _diagnostics: { source: 'test' },
+  });
+  /** Everything an answer carries a reader could see: the thrown error's own fields, or the result. */
+  const visible = (answer: unknown) =>
+    answer instanceof Error
+      ? JSON.stringify({ message: answer.message, ...(answer as unknown as Record<string, unknown>) })
+      : JSON.stringify(answer);
+
+  it('a name two packages hold is refused 409 RESOURCE_CONFLICT naming both, whichever is listed first; nothing is read', async () => {
+    for (const listed of [[held(ALPHA, 'Alpha'), held(BETA, 'Beta')], [held(BETA, 'Beta'), held(ALPHA, 'Alpha')]]) {
+      const { answer, spy, reads } = await run(listed);
+      expect(answer).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+      expect(messageOf(answer)).toContain(ALPHA);
+      expect(messageOf(answer)).toContain(BETA);
+      expect(spy).not.toHaveBeenCalled();
+      expect(reads).toEqual([]);
+    }
+  });
+
+  // Was "…and is refused even when one holder's item fails the parse". Forced by
+  // the admission-first ruling (6766102988): an item the parse leaves out is
+  // refused for every caller, so it is admitted to none and is no candidate.
+  it('an item the parse leaves out is admitted to no caller: the other holder is served, the broken one never named', async () => {
+    const broken = { ...held(BETA, 'Beta'), measures: [{ name: 'x', aggregate: 'not_a_real_agg' }] };
+    const { answer, spy } = await run([held(ALPHA, 'Alpha'), broken]);
+    expect(answer).toMatchObject({ rowCount: 1 });
+    expect((spy.mock.calls[0][0] as { label?: unknown }).label).toBe('Alpha');
+    expect(visible(answer)).not.toContain(BETA);
+  });
+
+  it('admitted to neither holder: NOT_FOUND, byte-equal to the answer for a name nothing holds; neither is named', async () => {
+    const missing = await run([], ME);
+    const hidden = await run([lockedHeld(ALPHA, 'Alpha'), lockedHeld(BETA, 'Beta')], ME);
+    expect(hidden.answer).toMatchObject({ code: 'NOT_FOUND', status: 404 });
+    expect(visible(hidden.answer)).toBe(visible(missing.answer));
+    expect(messageOf(hidden.answer)).toBe(messageOf(missing.answer));
+    expect(visible(hidden.answer)).not.toContain(ALPHA);
+    expect(visible(hidden.answer)).not.toContain(BETA);
+    expect(hidden.spy).not.toHaveBeenCalled();
+    expect(hidden.reads).toEqual([]);
+  });
+
+  it('admitted to exactly one holder: that one is served, in either list order, and the hidden holder is never named', async () => {
+    for (const listed of [[held(ALPHA, 'Alpha'), lockedHeld(BETA, 'Beta')], [lockedHeld(BETA, 'Beta'), held(ALPHA, 'Alpha')]]) {
+      const { answer, spy } = await run(listed, ME);
+      expect(answer).toMatchObject({ rowCount: 1 });
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect((spy.mock.calls[0][0] as { label?: unknown; _packageId?: unknown })).toMatchObject({ label: 'Alpha', _packageId: ALPHA });
+      expect(visible(answer)).not.toContain(BETA);
+    }
+  });
+
+  it('admitted to two of three holders: 409 naming only those two; the hidden third is never named', async () => {
+    const GAMMA = 'com.acme.gamma';
+    const { answer, spy } = await run([held(ALPHA, 'Alpha'), lockedHeld(BETA, 'Beta'), held(GAMMA, 'Gamma')], ME);
+    expect(answer).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+    expect(messageOf(answer)).toContain(ALPHA);
+    expect(messageOf(answer)).toContain(GAMMA);
+    expect(visible(answer)).not.toContain(BETA);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('a degraded read (`partial: true`) with fewer than two admitted holders is 503, never a 404 or a pick; nothing is read', async () => {
+    for (const items of [[], [held(ALPHA, 'Alpha')]]) {
+      const { service, reads } = await bootWired([{ stage: 'won', revenue: 100 }]);
+      const spy = vi.spyOn(service, 'queryDataset');
+      const tools = service.datasetTools({
+        loadDatasets: async () => ({ items, partial: true as const, warning: 'one source did not answer' }),
+      });
+      const answer = await tools
+        .queryDataset({ datasetName: 'pipeline', selection: { measures: ['revenue'] } }, ADMIN)
+        .catch((e: unknown) => e);
+      expect(answer).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+      expect(messageOf(answer)).toContain('one source did not answer');
+      expect(spy).not.toHaveBeenCalled();
+      expect(reads).toEqual([]);
+    }
+  });
+
+  it('two listed rows of ONE holder (an overlay beside the composite) are one holder: served, never a TypeError', async () => {
+    const one = await run([held(ALPHA, 'Overlay'), held(ALPHA, 'Composite')]);
+    expect(one.answer).toMatchObject({ rowCount: 1 });
+    expect((one.spy.mock.calls[0][0] as { label?: unknown }).label).toBe('Overlay');
+    // The holder's first row that parsed, as the `find` before answered.
+    const broken = { ...held(ALPHA, 'Broken'), measures: [{ name: 'x', aggregate: 'not_a_real_agg' }] };
+    const parsedSecond = await run([broken, held(ALPHA, 'Good')]);
+    expect(parsedSecond.answer).toMatchObject({ rowCount: 1 });
+    expect((parsedSecond.spy.mock.calls[0][0] as { label?: unknown }).label).toBe('Good');
+    // Beside a second holder the rule still refuses, naming each holder once.
+    const two = await run([held(ALPHA, 'Overlay'), held(ALPHA, 'Composite'), held(BETA, 'Beta')]);
+    expect(two.answer).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+    expect(two.answer).not.toBeInstanceOf(TypeError);
+  });
+
+  it('CONTROL: one package holder is served, the same dataset the list carried', async () => {
+    const { answer, spy } = await run([held(ALPHA, 'Alpha'), { ...LOCKED, _packageId: BETA }]);
+    expect(answer).toMatchObject({ rowCount: 1 });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect((spy.mock.calls[0][0] as { label?: unknown; _packageId?: unknown })).toMatchObject({ label: 'Alpha', _packageId: ALPHA });
+  });
+
+  it('CONTROL: the environment\'s own item (no `_packageId`, or the `sys_metadata` sentinel) is served', async () => {
+    for (const env of [held(undefined, 'Env'), held('sys_metadata', 'Env')]) {
+      const { answer, spy } = await run([env]);
+      expect(answer).toMatchObject({ rowCount: 1 });
+      expect((spy.mock.calls[0][0] as { label?: unknown }).label).toBe('Env');
+    }
+  });
+
+  it('a holder whose only item fails the parse is still not found, as before', async () => {
+    const broken = { ...held(ALPHA, 'Alpha'), measures: [{ name: 'x', aggregate: 'not_a_real_agg' }] };
+    const { answer, spy } = await run([broken]);
+    expect(answer).toMatchObject({ code: 'NOT_FOUND', status: 404 });
+    expect(spy).not.toHaveBeenCalled();
+  });
+});

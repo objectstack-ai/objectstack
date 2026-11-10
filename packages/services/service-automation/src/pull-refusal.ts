@@ -10,6 +10,11 @@
 /** Which part of the binding a refused pull failed on. */
 export type ConnectorPullRefusalReason =
     | 'mapping_not_found'
+    /**
+     * [ADR-0150 D3, #32071] The mapping's name resolves to no one item: more
+     * than one package holds it. The message names every candidate.
+     */
+    | 'mapping_name_refused'
     | 'no_connector_source'
     | 'connector_not_registered'
     | 'connector_plugin_origin'

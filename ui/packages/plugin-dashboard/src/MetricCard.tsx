@@ -13,7 +13,7 @@ import { useObjectTranslation, pickLocalized } from '@object-ui/i18n';
 import type { I18nLabel } from '@object-ui/types';
 import { ArrowDownIcon, ArrowUpIcon, MinusIcon, AlertCircle, Loader2 } from 'lucide-react';
 import { hostDomProps, type SchemaHostProps } from './schemaHostProps';
-import { METRIC_TILE_CONTAINER_CLASS, METRIC_TILE_TITLE_CLASS, metricTileValueClass, metricTileValueTitle } from './metricTile';
+import { METRIC_TILE_CONTAINER_CLASS, METRIC_TILE_TITLE_CLASS, metricTileSubtitle, metricTileValueClass, metricTileValueTitle } from './metricTile';
 
 /**
  * DOM PASS-THROUGH (objectui#4426) — see `MetricWidget.tsx`'s interface header
@@ -93,14 +93,17 @@ export const MetricCard: React.FC<MetricCardProps & SchemaHostProps> = ({
   const IconComponent = icon ? getLazyIcon(icon) : null;
   // Label text follows the active UI language (not the tenant's number locale).
   const { language } = useObjectTranslation();
+  const resolvedTitle = pickLocalized(title, language) || undefined;
+  // Never a description that only repeats the title (objectstack#32165).
+  const subtitle = metricTileSubtitle(resolvedTitle, pickLocalized(description, language) || undefined);
 
   return (
     // objectui#12623 — the tile's own box is what the title and value rules in
     // `./metricTile` measure.
     <Card className={cn("h-full", METRIC_TILE_CONTAINER_CLASS, className)} {...hostProps}>
       <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-        <CardTitle className={METRIC_TILE_TITLE_CLASS} title={pickLocalized(title, language) || undefined}>
-          {pickLocalized(title, language)}
+        <CardTitle className={METRIC_TILE_TITLE_CLASS} title={resolvedTitle}>
+          {resolvedTitle}
         </CardTitle>
         {IconComponent && (
           // eslint-disable-next-line react-hooks/static-components -- getLazyIcon returns a module-cached stable component per name, not one created during render
@@ -121,7 +124,7 @@ export const MetricCard: React.FC<MetricCardProps & SchemaHostProps> = ({
         ) : (
           <>
             <div className={cn('font-bold', metricTileValueClass(value))} title={metricTileValueTitle(value)}>{value}</div>
-            {(trend || trendValue || description) && (
+            {(trend || trendValue || subtitle) && (
               <p className="text-xs text-muted-foreground flex items-center mt-1">
                 {trend && trendValue && (
                   <span className={cn(
@@ -136,7 +139,7 @@ export const MetricCard: React.FC<MetricCardProps & SchemaHostProps> = ({
                     {trendValue}
                   </span>
                 )}
-                {pickLocalized(description, language)}
+                {subtitle}
               </p>
             )}
           </>

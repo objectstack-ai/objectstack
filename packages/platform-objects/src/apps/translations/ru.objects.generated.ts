@@ -2208,6 +2208,26 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
             helpText: "Необязательно. Запрашиваемый формат SAML NameID. По умолчанию — формат, настроенный в IdP.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          mapEmail: {
+            label: "Сопоставление: атрибут эл. почты",
+            helpText: "Необязательно. Атрибут утверждения SAML, сопоставляемый с эл. почтой пользователя. По умолчанию — «email», затем NameID. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          mapFirstName: {
+            label: "Сопоставление: атрибут имени",
+            helpText: "Необязательно. Атрибут утверждения SAML, сопоставляемый с именем пользователя. По умолчанию — «givenName». Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          mapLastName: {
+            label: "Сопоставление: атрибут фамилии",
+            helpText: "Необязательно. Атрибут утверждения SAML, сопоставляемый с фамилией пользователя. По умолчанию — «surname». Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          mapName: {
+            label: "Сопоставление: атрибут отображаемого имени",
+            helpText: "Необязательно. Атрибут утверждения SAML, сопоставляемый с полным именем пользователя; используется, когда нет атрибутов имени и фамилии. По умолчанию — «displayName», затем NameID. Okta: name. Entra ID: http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          },
           mapGroups: {
             label: "Сопоставление: атрибут групп",
             helpText: "Необязательно. Атрибут утверждения SAML, содержащий группы пользователя. При каждом входе выдаются наборы разрешений, сопоставленные этим группам. Оставьте пустым, чтобы не сопоставлять группы.",
@@ -2267,6 +2287,57 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Готово",
           fields: {
             groupsClaim: "Утверждение групп"
+          }
+        }
+      },
+      show_sso_attribute_mapping: {
+        label: "Показать сопоставление атрибутов",
+        resultDialog: {
+          title: "Сопоставление атрибутов",
+          description: "Атрибуты IdP (SAML) или утверждения (OIDC), из которых этот провайдер читает эл. почту и имя пользователя при каждом входе. Пустое значение означает значение по умолчанию: эл. почта из «email» (SAML: затем NameID); имя из «givenName» + «surname», затем «displayName» (OIDC: «name»). Имя и фамилия применяются только к SAML. Изменить можно через «Изменить сопоставление атрибутов».",
+          acknowledge: "Готово",
+          fields: {
+            protocol: "Протокол",
+            email: "Эл. почта",
+            firstName: "Имя",
+            lastName: "Фамилия",
+            name: "Отображаемое имя"
+          }
+        }
+      },
+      edit_sso_attribute_mapping: {
+        label: "Изменить сопоставление атрибутов",
+        params: {
+          email: {
+            label: "Атрибут эл. почты",
+            helpText: "Атрибут или утверждение IdP, сопоставляемое с эл. почтой пользователя. Не меняйте, чтобы сохранить текущее значение; очистите, чтобы вернуть значение по умолчанию («email»). Entra ID SAML: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          firstName: {
+            label: "Атрибут имени (SAML)",
+            helpText: "Только SAML. Атрибут утверждения, сопоставляемый с именем пользователя. Не меняйте, чтобы сохранить текущее значение. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          lastName: {
+            label: "Атрибут фамилии (SAML)",
+            helpText: "Только SAML. Атрибут утверждения, сопоставляемый с фамилией пользователя. Не меняйте, чтобы сохранить текущее значение. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          name: {
+            label: "Атрибут отображаемого имени",
+            helpText: "Атрибут или утверждение IdP, сопоставляемое с полным именем пользователя (SAML: используется, когда нет имени и фамилии). Не меняйте, чтобы сохранить текущее значение. Okta SAML: name. Entra ID: http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          }
+        },
+        resultDialog: {
+          title: "Сопоставление атрибутов сохранено",
+          description: "Атрибуты или утверждения, из которых этот провайдер теперь читает эл. почту и имя пользователя при каждом входе. Пустое значение означает, что применяется значение по умолчанию.",
+          acknowledge: "Готово",
+          fields: {
+            email: "Эл. почта",
+            firstName: "Имя",
+            lastName: "Фамилия",
+            name: "Отображаемое имя"
           }
         }
       }
@@ -2774,6 +2845,23 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
         label: "Организация",
         help: "Организация, в которой выдаётся разрешение: организация, которой принадлежит подключение SCIM или поставщик SSO."
       },
+      match_status: {
+        label: "Статус соответствия",
+        help: "Является ли группа, указанная в сопоставлении, группой, которую сейчас передаёт его SCIM-подключение. Без соответствия ничего не предоставляется. Не применяется к SSO-провайдеру, который не хранит список групп.",
+        options: {
+          matched: "Соответствует",
+          unmatched: "Не соответствует ни одной текущей группе",
+          not_applicable: "Не применяется"
+        }
+      },
+      matched_group_id: {
+        label: "ID соответствующей группы",
+        help: "ID группы SCIM, которой сейчас соответствует сопоставление. Пусто, если соответствия нет."
+      },
+      match_changed_at: {
+        label: "Соответствие изменено",
+        help: "Когда в последний раз изменились статус соответствия или соответствующая группа."
+      },
       created_at: {
         label: "Создано"
       },
@@ -2783,7 +2871,64 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "Все"
+        label: "Все",
+        emptyState: {
+          title: "Сопоставлений групп пока нет",
+          message: "Выдайте набор разрешений участникам группы поставщика удостоверений с помощью «Сопоставить группу SSO» (группа, которую поставщик SSO передаёт при входе) или «Сопоставить группу SCIM» (группа, которую создаёт подключение SCIM)."
+        }
+      }
+    },
+    _actions: {
+      map_sso_group: {
+        label: "Сопоставить группу SSO",
+        description: "Выдать набор разрешений каждому участнику группы, которую поставщик SSO передаёт при входе. Действует со следующего входа участника через этого поставщика.",
+        successMessage: "Сопоставление группы сохранено. Оно действует со следующего входа каждого участника через поставщика.",
+        params: {
+          providerId: {
+            label: "ID поставщика SSO",
+            helpText: "ID поставщика SSO, чей вход передаёт группу, например «okta». У поставщика должно быть задано утверждение групп (Изменить утверждение групп у поставщика SSO)."
+          },
+          groupExternalId: {
+            label: "Внешний ID группы",
+            helpText: "Значение группы в точности так, как его передаёт утверждение групп, если это ID, например ID объекта группы Entra ID. Укажите это поле или отображаемое имя группы, но не оба."
+          },
+          groupDisplayName: {
+            label: "Отображаемое имя группы",
+            helpText: "Значение группы в точности так, как его передаёт утверждение групп, если это имя, например «Sales». Укажите это поле или внешний ID группы, но не оба."
+          },
+          permissionSet: {
+            label: "Набор разрешений",
+            helpText: "Набор разрешений, который участник группы получает в организации поставщика. Наборы администратора отклоняются."
+          }
+        }
+      },
+      map_scim_group: {
+        label: "Сопоставить группу SCIM",
+        description: "Выдать набор разрешений каждому участнику группы, которую создаёт подключение SCIM. Текущие участники группы получают его сразу.",
+        successMessage: "Сопоставление группы сохранено",
+        params: {
+          connectionId: {
+            label: "ID подключения SCIM",
+            helpText: "Подключение SCIM, через которое создаётся группа, например «okta-prod»: ID подключения его учётных данных."
+          },
+          groupExternalId: {
+            label: "Внешний ID группы",
+            helpText: "externalId группы в том виде, в каком его передаёт поставщик удостоверений. Укажите это поле или отображаемое имя группы, но не оба."
+          },
+          groupDisplayName: {
+            label: "Отображаемое имя группы",
+            helpText: "displayName группы, сравнивается точно. Укажите это поле или внешний ID группы, но не оба."
+          },
+          permissionSet: {
+            label: "Набор разрешений",
+            helpText: "Набор разрешений, который участник группы получает в организации подключения. Наборы администратора отклоняются."
+          }
+        }
+      },
+      delete_group_mapping: {
+        label: "Удалить сопоставление",
+        confirmText: "Удалить это сопоставление группы? Участники группы перестанут получать его набор разрешений. Для подключения SCIM участники группы будут сразу перепроецированы и потеряют выданные этим сопоставлением права. Для поставщика SSO права, выданные его входами для этого набора, будут сразу удалены, если только другое сопоставление поставщика не указывает тот же набор. Чтобы восстановить, сопоставьте группу снова.",
+        successMessage: "Сопоставление группы удалено"
       }
     }
   },
@@ -3585,6 +3730,55 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
       },
       note: {
         label: "Примечание"
+      }
+    }
+  },
+  sys_metadata_commit: {
+    label: "Metadata Commit",
+    pluralLabel: "Metadata Commits",
+    description: "Package-scoped commit log grouping a turn’s metadata changes.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      package_id: {
+        label: "Package"
+      },
+      operation: {
+        label: "Operation",
+        options: {
+          apply: "apply",
+          revert: "revert"
+        }
+      },
+      message: {
+        label: "Message",
+        help: "Change summary; for AI turns, the user instruction that produced it."
+      },
+      actor: {
+        label: "Actor"
+      },
+      ai_model: {
+        label: "AI Model"
+      },
+      parent_commit_id: {
+        label: "Parent Commit"
+      },
+      event_seq_start: {
+        label: "Event Seq Start"
+      },
+      event_seq_end: {
+        label: "Event Seq End"
+      },
+      items: {
+        label: "Items",
+        help: "JSON: [{ type, name, existedBefore, prevVersion }] — the revert plan."
+      },
+      item_count: {
+        label: "Item Count"
+      },
+      created_at: {
+        label: "Created At"
       }
     }
   },

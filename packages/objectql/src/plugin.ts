@@ -1352,7 +1352,11 @@ export class ObjectQLPlugin implements Plugin {
         // ledger row that names no package to the one package that holds its
         // item, and report the rows two packages hold (never guessed). Writes
         // only `package_id`, so every later boot finds nothing new; never fatal.
-        await backfillActivationLedgerAtBoot(this.ql, registry, ctx.logger);
+        // [#32096] Except on a boot that repairs nothing behind the operator's
+        // back (the CLI's one-shot boot): there it only names the rows.
+        await backfillActivationLedgerAtBoot(this.ql, registry, ctx.logger, {
+            runPlatformMigrations: this.runPlatformMigrations,
+        });
         // [ADR-0139 D5.2 / D5.3] A `controlled_by_parent` detail over a master
         // the engine composes no read over fails the boot, naming both and the
         // remedy. Judged HERE, not at `kernel:ready`: the object-scoped read
