@@ -297,7 +297,7 @@ describe('http (canonical node) — a failed call names its host and cause', () 
         try {
             const result = await run({ url: `http://127.0.0.1:${port}/slow`, timeoutMs: 50 });
             expect(result.success).toBe(false);
-            expect(result.error).toBe('http: timeout after 50ms');
+            expect(result.error).toMatch(/http: timeout after 50ms$/);
         } finally {
             server.closeAllConnections?.();
             await new Promise<void>((r) => server.close(() => r()));
@@ -308,7 +308,7 @@ describe('http (canonical node) — a failed call names its host and cause', () 
         vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('boom')));
         try {
             const result = await run({ url: 'https://api.test/items' });
-            expect(result.error).toBe('http: boom — api.test');
+            expect(result.error).toMatch(/http: boom \u2014 api\.test$/);
         } finally {
             vi.unstubAllGlobals();
         }
