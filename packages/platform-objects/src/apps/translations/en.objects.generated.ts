@@ -2208,6 +2208,26 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
             helpText: "Optional. Requested SAML NameID format. Defaults to the IdP’s configured format.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          mapEmail: {
+            label: "Map: Email attribute",
+            helpText: "Optional. Assertion attribute mapped to the user’s email. Defaults to \"email\", then the NameID. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          mapFirstName: {
+            label: "Map: First name attribute",
+            helpText: "Optional. Assertion attribute mapped to the user’s first name. Defaults to \"givenName\". Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          mapLastName: {
+            label: "Map: Last name attribute",
+            helpText: "Optional. Assertion attribute mapped to the user’s last name. Defaults to \"surname\". Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          mapName: {
+            label: "Map: Display name attribute",
+            helpText: "Optional. Assertion attribute mapped to the user’s full name, used when the first and last name attributes are absent. Defaults to \"displayName\", then the NameID. Okta: name. Entra ID: http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          },
           mapGroups: {
             label: "Map: Groups attribute",
             helpText: "Optional. Assertion attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.",
@@ -2267,6 +2287,57 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Done",
           fields: {
             groupsClaim: "Groups claim"
+          }
+        }
+      },
+      show_sso_attribute_mapping: {
+        label: "Show Attribute Mapping",
+        resultDialog: {
+          title: "Attribute mapping",
+          description: "The IdP attributes (SAML) or claims (OIDC) this provider reads the user’s email and name from at each sign-in. Empty means the default: email from \"email\" (SAML: then the NameID); name from \"givenName\" + \"surname\", then \"displayName\" (OIDC: \"name\"). First and last name apply to SAML only. Change it with “Edit Attribute Mapping”.",
+          acknowledge: "Done",
+          fields: {
+            protocol: "Protocol",
+            email: "Email",
+            firstName: "First name",
+            lastName: "Last name",
+            name: "Display name"
+          }
+        }
+      },
+      edit_sso_attribute_mapping: {
+        label: "Edit Attribute Mapping",
+        params: {
+          email: {
+            label: "Email attribute",
+            helpText: "The IdP attribute or claim mapped to the user’s email. Leave untouched to keep the current one; clear it to go back to the default (\"email\"). Entra ID SAML: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          firstName: {
+            label: "First name attribute (SAML)",
+            helpText: "SAML only. The assertion attribute mapped to the user’s first name. Leave untouched to keep the current one. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          lastName: {
+            label: "Last name attribute (SAML)",
+            helpText: "SAML only. The assertion attribute mapped to the user’s last name. Leave untouched to keep the current one. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          name: {
+            label: "Display name attribute",
+            helpText: "The IdP attribute or claim mapped to the user’s full name (SAML: used when first and last name are absent). Leave untouched to keep the current one. Okta SAML: name. Entra ID: http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          }
+        },
+        resultDialog: {
+          title: "Attribute mapping saved",
+          description: "The attributes or claims this provider now reads the user’s email and name from at each sign-in. Empty means the default applies.",
+          acknowledge: "Done",
+          fields: {
+            email: "Email",
+            firstName: "First name",
+            lastName: "Last name",
+            name: "Display name"
           }
         }
       }

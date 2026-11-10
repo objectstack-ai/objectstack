@@ -90,6 +90,16 @@
         "must_contain": ["books", "groups", "getting_started", "doc.translations"],
         "must_not_contain": ["pages.crm_manual", "sections.getting_started"]
       }
+    },
+    {
+      "id": 10,
+      "prompt": "In zh-CN the `crm_renew` action on `crm_opportunity` opens its param dialog with the rows of its pre-submit read still in English. Its `preflight.fields` declares the paths `amount` and `verdict.summary`.",
+      "expected_output": "`objects.crm_opportunity._actions.crm_renew.preflight.fields`, keyed by each declared field's literal `path`: `amount` and `'verdict.summary'` (one key, dots included, never split into nested objects), each value the translated label string itself, with no `.label`. The node holds nothing else: the panel has no heading of its own to translate, and `defineTranslationBundle` refuses any other key under `preflight`. A path the action's `preflight.fields` does not declare is `translation-target-unknown`.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["_actions", "crm_renew", "preflight", "fields", "verdict.summary"],
+        "must_not_contain": ["title:", "verdict: {"]
+      }
     }
   ]
 }
