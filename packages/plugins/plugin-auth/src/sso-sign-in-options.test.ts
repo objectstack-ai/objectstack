@@ -12,10 +12,12 @@ import { describe, expect, it } from 'vitest';
 import {
   SSO_PROVIDER_SIGN_IN_FIELDS,
   applyIdpInitiatedToOidcConfigOnRead,
+  applyUserInfoOptOutOnRead,
   isSsoProviderSource,
   readSsoProviderSignInOptions,
   runWithSamlIdpInitiated,
   ssoProviderIdOfSource,
+  restoreUserInfoEndpointOnWrite,
   ssoSamlOptions,
   stripIdpInitiatedFromOidcConfigOnWrite,
 } from './sso-sign-in-options';
@@ -23,10 +25,11 @@ import {
 const OFF = { allowIdpInitiated: false, allowJit: false };
 
 describe('the vendor declaration', () => {
-  it('both toggles are boolean provider fields, default off, writable through the vendor doors', () => {
+  it('every toggle is a boolean provider field, default off, writable through the vendor doors', () => {
     expect(SSO_PROVIDER_SIGN_IN_FIELDS).toEqual({
       allowIdpInitiated: { type: 'boolean', required: false, defaultValue: false, input: true },
       allowJit: { type: 'boolean', required: false, defaultValue: false, input: true },
+      skipUserInfo: { type: 'boolean', required: false, defaultValue: false, input: true },
     });
   });
 });
@@ -116,6 +119,40 @@ describe('OIDC: the column carried in the blob the vendor reads', () => {
     const columnOnly: Record<string, unknown> = { allow_jit: 1 };
     stripIdpInitiatedFromOidcConfigOnWrite('sys_sso_provider', columnOnly);
     expect(columnOnly).toEqual({ allow_jit: 1 });
+  });
+});
+
+describe('OIDC: the userinfo opt-out hides the stored endpoint from the vendor, and every write keeps it', () => {
+  const blob = (config: Record<string, unknown>) => JSON.stringify(config);
+  const GRAPH = 'https://graph.microsoft.com/oidc/userinfo';
+
+  it('on read, the column ON parks the endpoint (the vendor then reads the ID token); OFF leaves the blob alone', () => {
+    const on = { provider_id: 'a', skip_user_info: 1, oidc_config: blob({ clientId: 'c', userInfoEndpoint: GRAPH }) };
+    applyUserInfoOptOutOnRead('sys_sso_provider', on);
+    expect(JSON.parse(on.oidc_config)).toEqual({ clientId: 'c', osParkedUserInfoEndpoint: GRAPH });
+    for (const column of [0, null, undefined, false]) {
+      const off = { provider_id: 'a', skip_user_info: column, oidc_config: blob({ clientId: 'c', userInfoEndpoint: GRAPH }) };
+      applyUserInfoOptOutOnRead('sys_sso_provider', off);
+      expect(off.oidc_config, String(column)).toBe(blob({ clientId: 'c', userInfoEndpoint: GRAPH }));
+    }
+    const other = { skip_user_info: 1, oidc_config: blob({ userInfoEndpoint: GRAPH }) };
+    applyUserInfoOptOutOnRead('sys_account', other);
+    expect(other.oidc_config).toBe(blob({ userInfoEndpoint: GRAPH }));
+  });
+
+  it('on write, a parked endpoint goes back in place; an endpoint the write names wins; the parked key is never stored', () => {
+    const merged = { oidc_config: blob({ clientId: 'c', osParkedUserInfoEndpoint: GRAPH }) };
+    restoreUserInfoEndpointOnWrite('sys_sso_provider', merged);
+    expect(JSON.parse(merged.oidc_config)).toEqual({ clientId: 'c', userInfoEndpoint: GRAPH });
+    const named = { oidc_config: blob({ userInfoEndpoint: 'https://other.example/userinfo', osParkedUserInfoEndpoint: GRAPH }) };
+    restoreUserInfoEndpointOnWrite('sys_sso_provider', named);
+    expect(JSON.parse(named.oidc_config)).toEqual({ userInfoEndpoint: 'https://other.example/userinfo' });
+    const clean = { oidc_config: blob({ clientId: 'c' }) };
+    restoreUserInfoEndpointOnWrite('sys_sso_provider', clean);
+    expect(clean.oidc_config).toBe(blob({ clientId: 'c' }));
+    const columnOnly: Record<string, unknown> = { skip_user_info: 1 };
+    restoreUserInfoEndpointOnWrite('sys_sso_provider', columnOnly);
+    expect(columnOnly).toEqual({ skip_user_info: 1 });
   });
 });
 

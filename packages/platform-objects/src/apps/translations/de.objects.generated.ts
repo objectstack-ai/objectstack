@@ -2106,6 +2106,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         label: "Just-in-Time-Bereitstellung zulassen",
         help: "Bei der Zielgruppenrichtlinie „Nur auf Einladung“ ein Konto für eine Person anlegen, die sich ohne Konto oder Einladung über diesen Anbieter anmeldet. Standardmäßig deaktiviert: Eine solche Person wird abgewiesen. Andere Richtlinien stellen wie bisher bereit. Ändern Sie dies mit „Anmeldeoptionen bearbeiten“."
       },
+      skip_user_info: {
+        label: "Claims nur aus dem ID-Token lesen",
+        help: "Nur OIDC. Liest E-Mail-Adresse, Name und Gruppen aus dem verifizierten ID-Token des Identitätsanbieters und ruft dessen Userinfo-Endpunkt nicht auf. Für Microsoft Entra ID einschalten: Dessen Userinfo-Antwort enthält keine Gruppen und kein preferred_username. Standardmäßig aus: Ein Anbieter mit Userinfo-Endpunkt liest seine Claims aus dieser Antwort. Änderung über „Anmeldeoptionen bearbeiten“."
+      },
       user_id: {
         label: "Registriert von",
         help: "Benutzer, der diesen Anbieter registriert hat"

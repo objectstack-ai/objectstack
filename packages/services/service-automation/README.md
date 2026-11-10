@@ -312,7 +312,9 @@ parent-id resume of a `map` whose item run is still suspended; resume the item r
 message names. The same code answers when the item's suspension is gone without a
 `cancelled` entry in its run history; cancel the parent run to end the batch. A cancelled
 item is recorded in its slot instead), plus the trigger-time
-`FLOW_DISABLED` / `FLOW_NO_START_NODE`.
+`FLOW_DISABLED`. `FLOW_NO_START_NODE` is a defensive exit that no door reaches since #32273: a flow
+with no `start` node is refused at registration, and a stored one is never armed, so its trigger
+answers `404`.
 
 ⚠️ `runAs` on `AutomationContext` is derived by the engine from the flow definition —
 callers do not set it.

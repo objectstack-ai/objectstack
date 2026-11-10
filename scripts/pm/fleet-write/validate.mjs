@@ -252,6 +252,7 @@ import {
   ADVISORY_LIST_PAGE_PATH_SHAPE,
   ADVISORY_LIST_PAGE_SIZE,
   ADVISORY_LIST_REPEATED,
+  ADVISORY_LIST_FIELD_SHAPES,
   ADVISORY_LIST_SEVERITIES,
   ADVISORY_LIST_SHORT_PAGE_NEXT,
   ADVISORY_LIST_TIMESTAMP_SHAPE,
@@ -260,6 +261,7 @@ import {
   ADVISORY_LIST_UNREACHED,
   advisoryListCall,
   advisoryListDisplay,
+  advisoryListFieldSentence,
   advisoryListNextCursor,
   advisoryListPadded,
   advisoryListPageFailure,
@@ -2170,9 +2172,21 @@ export async function selfTest() {
     const page = (json, status = 200) => ({ status, json });
     const pageFails = [page([item()]), page([]), page({ message: 'Not Found' }, 404), page({ message: 'Resource not accessible by integration' }, 403), page({}), page(null), page([item({ state: 'triage' })]), page([item({ state: 'published' })]), page([item({ ghsa_id: MARKER })]), page([item({ ghsa_id: undefined })]), page(['x']), page([[item()]])].map((pg) => advisoryListPageFailure(pg, 'draft'));
     t('⛔ a page holds only as 200 with a list of advisories in the state it asked for — an empty list among them; a refusal, a non-list, an item in another state, one with no or a malformed id, and an item that is no object each fail, naming the status alone', pageFails, [null, null, 'a page of the listing answered HTTP 404', 'a page of the listing answered HTTP 403', 'a page of the listing answered HTTP 200 with no list', 'a page of the listing answered HTTP 200 with no list', ...Array.from({ length: 6 }, () => 'a page of the listing lists an item that is not an advisory in the state the page asked for')]);
-    const fieldFails = [item({ severity: null }), item({ severity: 'critical', created_at: '2026-11-01T00:00:00.123Z', updated_at: '2026-11-02T08:00:00+08:00' }), item({ severity: { level: MARKER } }), item({ severity: 'catastrophic' }), item({ severity: 'HIGH' }), item({ severity: undefined }), item({ created_at: 1730000000 }), item({ updated_at: MARKER }), item({ created_at: null }), item({ updated_at: '2026-11-02' }), item({ created_at: ['2026-11-01T00:00:00Z'] })].map((it) => advisoryListPageFailure(page([item(), it]), 'draft'));
-    const fieldSentence = "a page of the listing lists an advisory whose severity or dates are not of the field's declared shape";
-    t("⛔ a page holds only when every advisory's severity is one of the platform's four or null and its created_at and updated_at are ISO-8601 strings (fractions and offsets among them); a nested severity carrying the marker, a made-up or upper-case word, a missing severity, a number, prose, null, a bare date or a list for a date each fail with one sentence that echoes no value", [[...ADVISORY_LIST_SEVERITIES], ADVISORY_LIST_TIMESTAMP_SHAPE.test('2026-11-01T00:00:00Z'), fieldFails, fieldFails.some((x) => x !== null && /ADVISORY LIST MARKER|catastrophic|HIGH|1730000000/.test(x))], [['critical', 'high', 'medium', 'low'], true, [null, null, ...Array.from({ length: 9 }, () => fieldSentence)], false]);
+    const fieldFails = [item({ severity: null }), item({ severity: 'critical', created_at: '2026-11-01T00:00:00.123Z', updated_at: '2026-11-02T08:00:00+08:00' }), item({ severity: { level: MARKER } }), item({ severity: 'catastrophic' }), item({ severity: 'HIGH' }), item({ severity: undefined }), item({ created_at: 1730000000 }), item({ updated_at: MARKER }), item({ updated_at: '2026-11-02' }), item({ created_at: ['2026-11-01T00:00:00Z'] })].map((it) => advisoryListPageFailure(page([item(), it]), 'draft'));
+    const sentenceOf = (...fields) => `a page of the listing lists an advisory whose ${fields.length > 1 ? `${fields.slice(0, -1).join(', ')} and ${fields.at(-1)} are not of the fields' declared shapes` : `${fields[0]} is not of the field's declared shape`}`;
+    t("⛔ a page holds only when every advisory's severity is one of the platform's four or null and its created_at and updated_at are ISO-8601 strings (fractions and offsets among them) or null; a nested severity carrying the marker, a made-up or upper-case word, a missing severity, a number, prose, a bare date or a list for a date each fail with one sentence that names the failing field and echoes no value", [[...ADVISORY_LIST_SEVERITIES], ADVISORY_LIST_TIMESTAMP_SHAPE.test('2026-11-01T00:00:00Z'), fieldFails, fieldFails.some((x) => x !== null && /ADVISORY LIST MARKER|catastrophic|HIGH|1730000000|2026-11-02/.test(x))], [['critical', 'high', 'medium', 'low'], true, [null, null, ...Array.from({ length: 4 }, () => sentenceOf('severity')), sentenceOf('created_at'), sentenceOf('updated_at'), sentenceOf('updated_at'), sentenceOf('created_at')], false]);
+    // ⭐ The platform's schema declares created_at and updated_at nullable: null is an answer, never a refusal.
+    const nullDates = [item({ created_at: null }), item({ updated_at: null }), item({ severity: null, created_at: null, updated_at: null })].map((it) => advisoryListPageFailure(page([item(), it]), 'draft'));
+    const absent = (field) => {
+      const it = item();
+      delete it[field];
+      return advisoryListPageFailure(page([item(), it]), 'draft');
+    };
+    t('⭐ a null created_at, a null updated_at, and an advisory whose severity and both dates are all null each hold — the platform\'s repository-advisory schema declares all three nullable — while a field the advisory LACKS still fails, naming that field', [nullDates, ['severity', 'created_at', 'updated_at'].map(absent)], [[null, null, null], [sentenceOf('severity'), sentenceOf('created_at'), sentenceOf('updated_at')]]);
+    // ⛔ The refusal names every failing field, in the declared order, and nothing else.
+    const several = [item({ severity: 'catastrophic', updated_at: 1730000000 }), item({ created_at: MARKER, updated_at: MARKER, severity: 'HIGH' })].map((it) => advisoryListPageFailure(page([item(), it]), 'draft'));
+    const split = advisoryListPageFailure(page([item({ severity: 'catastrophic' }), item({ updated_at: '2026-11-02' })]), 'draft');
+    t("⛔ a refusal names EVERY failing field in the declared order — severity, created_at, updated_at — across the whole page, one advisory or several, and no value: the run says which field to measure, never what it held", [ADVISORY_LIST_FIELD_SHAPES.map((x) => x.field), several, split, [advisoryListFieldSentence(['created_at']), advisoryListFieldSentence(['severity', 'created_at', 'updated_at'])], [...several, split].some((x) => /ADVISORY LIST MARKER|catastrophic|HIGH|1730000000|2026-11-02/.test(x))], [['severity', 'created_at', 'updated_at'], [sentenceOf('severity', 'updated_at'), sentenceOf('severity', 'created_at', 'updated_at')], sentenceOf('severity', 'updated_at'), [sentenceOf('created_at'), sentenceOf('severity', 'created_at', 'updated_at')], false]);
     // The projection.
     const projected = advisoryListProjection(item());
     const json = advisoryListPlaintext([item(), item({ ghsa_id: 'GHSA-wxyz-2345-abcd', state: 'closed', severity: null })]);

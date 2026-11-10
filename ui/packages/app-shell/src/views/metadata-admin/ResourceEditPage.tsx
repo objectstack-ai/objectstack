@@ -146,7 +146,7 @@ import { readFields } from './previews/object-fields-io.js';
 import { useRegisterAssistantEditor, type AssistantEditorContext } from '../../assistant/assistantBus.js';
 import { useRegisteredMetadataInspector } from './inspector-registry.js';
 import { useRegisteredMetadataDefaultInspector } from './default-inspector-registry.js';
-import { InspectorReadOnlyReason } from './inspectors/_shared.js';
+import { DisabledControlReason, InspectorReadOnlyReason } from './inspectors/_shared.js';
 import { isZhLocale, useMetadataLocale, t, tFormat, translateMetadataType, translateSchemaIssue, translateValidationMessage } from './i18n.js';
 import { JsonSourceEditor } from '../item-tools/JsonSourceEditor.js';
 import { validateMetadataDraft, hasClientValidator, type DraftMode } from './clientValidation.js';
@@ -2711,9 +2711,10 @@ function MetadataResourceEditPageImpl({
   // sheets (Layers / References / Related). Anything else is ignored —
   // the main work area is always the form+preview.
 
-  // The Save button's name: the shortcut hint, or why Save is withheld. It is
+  // The shortcut hint, or why Save is withheld. Enabled (or mid-save) it is
   // the button's accessible name and tooltip both, so the word drawn beside
-  // the icon (objectui#13337) leaves the name a reader hears unchanged.
+  // the icon (objectui#13337) leaves the name a reader hears unchanged; a
+  // withheld Save keeps its name "Save" and is described by it instead.
   const saveTitle = saving
     ? t('engine.edit.saving', locale)
     : inspectorBlocking > 0
@@ -2727,6 +2728,11 @@ function MetadataResourceEditPageImpl({
         : !createMode && !isDirty
           ? t('engine.edit.noChanges', locale)
           : `${t('engine.edit.save', locale)} (⌘S)`;
+  const saveDisabled =
+    saving || (!createMode && !isDirty) || inspectorBlocking > 0 || refusalBlocking > 0;
+  // Why Save is withheld, while it is: the same sentence as `saveTitle`. A save
+  // in flight is no withholding, so it gives none.
+  const saveReason = saveDisabled && !saving ? saveTitle : undefined;
 
   // Action group rendered identically in either the PageShell header
   // (form-only types) or the canvas toolbar (types with a PreviewComponent).
@@ -2950,29 +2956,39 @@ function MetadataResourceEditPageImpl({
           at `blockingReport` and `saveRefusal` above. ⛔ Do not add
           `issues.length` to this gate without reading it. */}
       {canWrite && (editing || createMode) && (
-        <Button
-          size="sm"
-          onClick={() => doSave(false)}
-          disabled={saving || (!createMode && !isDirty) || inspectorBlocking > 0 || refusalBlocking > 0}
-          className="h-7 gap-1 px-2.5 text-xs relative"
-          aria-label={saveTitle}
-          title={saveTitle}
-          data-testid="resource-save"
-        >
-          {saving ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Save className="h-3.5 w-3.5" />
+        // A Save withheld for a reason keeps its name "Save" and gives the
+        // reason the header Publish's way — a focusable wrapper with a
+        // tooltip, both it and the button described by it — never as a
+        // `title` or name on a disabled button no one can reach. Enabled, or
+        // mid-save, the button is as it was.
+        <DisabledControlReason reason={saveReason} testId="resource-save-reason">
+          {(describedBy) => (
+            <Button
+              size="sm"
+              onClick={() => doSave(false)}
+              disabled={saveDisabled}
+              className="h-7 gap-1 px-2.5 text-xs relative"
+              aria-label={saveReason ? undefined : saveTitle}
+              aria-describedby={describedBy}
+              title={saveReason ? undefined : saveTitle}
+              data-testid="resource-save"
+            >
+              {saving ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Save className="h-3.5 w-3.5" />
+              )}
+              {/* objectui#13337 — labelled, not an icon alone. */}
+              <span>{t('engine.edit.save', locale)}</span>
+              {isDirty && !saving && (
+                <span
+                  aria-hidden
+                  className="absolute -top-0.5 -right-0.5 inline-block h-2 w-2 rounded-full bg-amber-300 ring-2 ring-background"
+                />
+              )}
+            </Button>
           )}
-          {/* objectui#13337 — labelled, not an icon alone. */}
-          <span>{t('engine.edit.save', locale)}</span>
-          {isDirty && !saving && (
-            <span
-              aria-hidden
-              className="absolute -top-0.5 -right-0.5 inline-block h-2 w-2 rounded-full bg-amber-300 ring-2 ring-background"
-            />
-          )}
-        </Button>
+        </DisabledControlReason>
       )}
       {/* Publish / Discard draft — only when there is a pending draft.
           Save writes to the draft buffer; the runtime keeps serving the

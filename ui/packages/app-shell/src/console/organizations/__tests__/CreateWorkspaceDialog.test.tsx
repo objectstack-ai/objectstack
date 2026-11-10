@@ -412,3 +412,117 @@ describe('the organization-limit refusal is shown in the session language (objec
     });
   }
 });
+
+describe("draws the host's organization-create choices (objectstack#31988)", () => {
+  // Host-shaped words: the console spells none of its own, so a case reads
+  // the text it was served back off the dialog (ADR-0060).
+  const CHOICES = [
+    { edition: 'developer', label: 'Host choice A', hint: 'Host hint A, up to 5 members', memberLimit: 5 },
+    { edition: 'sandbox_plus', label: 'Host choice B', hint: 'Host hint B' },
+  ];
+
+  function serve(organizationEditions?: unknown) {
+    getAuthConfig.mockResolvedValue({
+      features: { multiOrgEnabled: true, ...(organizationEditions === undefined ? {} : { organizationEditions }) },
+    });
+  }
+
+  it.each([
+    ['absent', undefined],
+    ['empty', []],
+  ])('list %s → no choice is drawn and the create call carries no edition', async (_label, served) => {
+    serve(served);
+    render(<CreateWorkspaceDialog open onOpenChange={() => {}} />);
+    await settleAuthConfig();
+
+    expect(screen.queryByTestId('workspace-edition-choices')).toBeNull();
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+
+    fillAndSubmit();
+    await waitFor(() =>
+      expect(createOrganization).toHaveBeenCalledWith({ name: 'Acme Inc', slug: 'acme-inc', timezone: BROWSER_ZONE }),
+    );
+  });
+
+  it("a served list → one unchecked choice per entry, with the host's label and hint as given", async () => {
+    serve(CHOICES);
+    render(<CreateWorkspaceDialog open onOpenChange={() => {}} />);
+    await settleAuthConfig();
+
+    const boxes = screen.getAllByRole('checkbox');
+    expect(boxes).toHaveLength(2);
+    for (const box of boxes) expect(box).toHaveAttribute('data-state', 'unchecked');
+    for (const choice of CHOICES) {
+      const box = screen.getByRole('checkbox', { name: choice.label });
+      expect(box).toHaveAccessibleDescription(choice.hint);
+    }
+  });
+
+  it('not picking → the create call carries no edition', async () => {
+    serve(CHOICES);
+    render(<CreateWorkspaceDialog open onOpenChange={() => {}} />);
+    await settleAuthConfig();
+
+    fillAndSubmit();
+    await waitFor(() => expect(createOrganization).toHaveBeenCalledTimes(1));
+    expect(createOrganization.mock.calls[0][0]).toEqual({ name: 'Acme Inc', slug: 'acme-inc', timezone: BROWSER_ZONE });
+  });
+
+  it("picking one → the create call carries that choice's edition value; picking another replaces it", async () => {
+    serve(CHOICES);
+    render(<CreateWorkspaceDialog open onOpenChange={() => {}} />);
+    await settleAuthConfig();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Host choice A' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Host choice B' }));
+    expect(screen.getByRole('checkbox', { name: 'Host choice A' })).toHaveAttribute('data-state', 'unchecked');
+    expect(screen.getByRole('checkbox', { name: 'Host choice B' })).toHaveAttribute('data-state', 'checked');
+
+    fillAndSubmit();
+    await waitFor(() => expect(createOrganization).toHaveBeenCalledTimes(1));
+    expect(createOrganization.mock.calls[0][0]).toEqual({
+      name: 'Acme Inc',
+      slug: 'acme-inc',
+      timezone: BROWSER_ZONE,
+      edition: 'sandbox_plus',
+    });
+  });
+
+  it('unchecking the picked choice → back to no edition', async () => {
+    serve(CHOICES);
+    render(<CreateWorkspaceDialog open onOpenChange={() => {}} />);
+    await settleAuthConfig();
+
+    const box = screen.getByRole('checkbox', { name: 'Host choice A' });
+    fireEvent.click(box);
+    fireEvent.click(box);
+    expect(box).toHaveAttribute('data-state', 'unchecked');
+
+    fillAndSubmit();
+    await waitFor(() => expect(createOrganization).toHaveBeenCalledTimes(1));
+    expect(createOrganization.mock.calls[0][0]).not.toHaveProperty('edition');
+  });
+
+  it('the picked edition survives a slug retry', async () => {
+    createOrganization.mockImplementation(async ({ slug }: { slug: string }) => {
+      if (slug === 'acme-inc') {
+        throw Object.assign(new Error('Organization already exists'), { code: 'ORGANIZATION_ALREADY_EXISTS' });
+      }
+      return NEW_ORG;
+    });
+    serve(CHOICES);
+    const onCreated = vi.fn();
+    render(<CreateWorkspaceDialog open onOpenChange={() => {}} onCreated={onCreated} />);
+    await settleAuthConfig();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Host choice A' }));
+    fillAndSubmit();
+
+    await waitFor(() => expect(onCreated).toHaveBeenCalled());
+    expect(createOrganization).toHaveBeenCalledTimes(2);
+    expect(createOrganization.mock.calls[0][0]).toMatchObject({ slug: 'acme-inc', edition: 'developer' });
+    const retry = createOrganization.mock.calls[1][0] as { slug: string; edition?: string };
+    expect(retry.slug).toMatch(/^acme-inc-[0-9a-z]{4}$/);
+    expect(retry.edition).toBe('developer');
+  });
+});

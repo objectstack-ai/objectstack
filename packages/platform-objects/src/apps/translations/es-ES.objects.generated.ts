@@ -2106,6 +2106,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Permitir aprovisionamiento just-in-time",
         help: "Con la política de audiencia solo por invitación, crea una cuenta para quien inicia sesión a través de este proveedor sin cuenta ni invitación. Desactivado de forma predeterminada: esa persona es rechazada. Las demás políticas aprovisionan como antes. Cámbielo con «Editar opciones de inicio de sesión»."
       },
+      skip_user_info: {
+        label: "Leer las notificaciones solo del token de ID",
+        help: "Solo OIDC. Lee el correo electrónico, el nombre y los grupos del token de ID verificado del proveedor de identidad y no llama a su endpoint userinfo. Actívalo para Microsoft Entra ID, cuya respuesta de userinfo no incluye grupos ni preferred_username. Desactivado de forma predeterminada: un proveedor con endpoint userinfo lee sus notificaciones de esa respuesta. Cámbialo con «Editar opciones de inicio de sesión»."
+      },
       user_id: {
         label: "Registrado por",
         help: "Usuario que registró este proveedor"

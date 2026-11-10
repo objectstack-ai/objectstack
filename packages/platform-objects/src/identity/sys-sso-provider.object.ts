@@ -309,7 +309,8 @@ export const SysSsoProvider = ObjectSchema.create({
       type: 'api',
       method: 'POST',
       // The provider's two sign-in toggles (ruling record 6718355623 on the
-      // Enterprise SSO operator knobs), written through @better-auth/sso's own
+      // Enterprise SSO operator knobs) and its OIDC userinfo opt-out
+      // (`skip_user_info`), written through @better-auth/sso's own
       // /sso/update-provider, which takes them as provider additional fields
       // (plugin-auth `sso-sign-in-options.ts`). Its writers are the provider's
       // writers: the vendor's provider-access check plus plugin-auth's
@@ -324,6 +325,7 @@ export const SysSsoProvider = ObjectSchema.create({
         { name: 'providerId', field: 'provider_id', defaultFromRow: true, required: true },
         { name: 'allowIdpInitiated', field: 'allow_idp_initiated', defaultFromRow: true, required: false },
         { name: 'allowJit', field: 'allow_jit', defaultFromRow: true, required: false },
+        { name: 'skipUserInfo', field: 'skip_user_info', defaultFromRow: true, required: false },
       ],
     },
     // [#32085] Edit a registered provider instead of deleting and
@@ -624,6 +626,23 @@ export const SysSsoProvider = ObjectSchema.create({
       trackHistory: true,
       description:
         'Under the invite-only audience posture, create an account for a person who signs in through this provider without an account or an invitation. Off by default: such a person is refused. Other postures provision as before. Change it with “Edit Sign-In Options”.',
+      group: 'Identity',
+    }),
+
+    // The OIDC userinfo opt-out, written as the @better-auth/sso provider
+    // additional field `skipUserInfo` (plugin-auth `sso-sign-in-options.ts`).
+    // On, the provider's claims (email, name, groups) come from the verified
+    // ID token only and its userinfo endpoint is not called: the vendor reads
+    // claims from userinfo ALONE whenever one is configured, and Microsoft
+    // Entra ID's userinfo carries no `groups`, `preferred_username` or `upn`.
+    // `trackHistory`, like the two toggles above: it changes what a sign-in
+    // reads about the person.
+    skip_user_info: Field.boolean({
+      label: 'Read Claims From the ID Token Only',
+      defaultValue: false,
+      trackHistory: true,
+      description:
+        'OIDC only. Read the email, name and groups from the identity provider’s verified ID token and do not call its userinfo endpoint. Turn it on for Microsoft Entra ID, whose userinfo answer carries no groups and no preferred_username. Off by default: a provider with a userinfo endpoint reads its claims from that answer. Change it with “Edit Sign-In Options”.',
       group: 'Identity',
     }),
 

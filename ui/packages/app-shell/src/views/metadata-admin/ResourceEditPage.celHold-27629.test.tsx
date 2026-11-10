@@ -19,6 +19,9 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source loads these lazily; pay that load at collection, not inside a
+// case's clocked window.
+import '@objectstack/lint';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
@@ -121,8 +124,7 @@ afterEach(() => {
   if (realPagePreview) registerMetadataPreview('page', realPagePreview);
 });
 
-const saveButton = () =>
-  screen.getByRole('button', { name: /Save \(⌘S\)|Fix the issues shown in the inspector before saving\./ });
+const saveButton = () => screen.getByTestId('resource-save');
 
 /** Past the autosave's 1.5 s debounce. */
 const outlastDebounce = () => new Promise((r) => setTimeout(r, 2300));
