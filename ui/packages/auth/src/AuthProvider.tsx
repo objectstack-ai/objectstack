@@ -601,8 +601,16 @@ export function AuthProvider({
       setError(null);
       try {
         const result = await client.signInWithPhoneOtp(phoneNumber, code);
+        if (result.twoFactor) {
+          // The code was accepted for an account with an enrolled second
+          // factor: no session yet, the code step follows.
+          setTwoFactorChallenge(result.twoFactor);
+          return { twoFactorRequired: true };
+        }
+        setTwoFactorChallenge(null);
         setUser(result.user);
         setSession(result.session);
+        return { twoFactorRequired: false };
       } catch (err) {
         const authError = err instanceof Error ? err : new Error(String(err));
         setError(authError);
