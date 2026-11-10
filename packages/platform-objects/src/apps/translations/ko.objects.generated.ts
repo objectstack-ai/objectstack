@@ -2234,12 +2234,78 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "SSO 공급자 삭제",
-        description: "이 SSO 공급자를 삭제하시겠습니까? 해당 도메인의 사용자는 더 이상 이를 통해 로그인할 수 없습니다.",
-        successMessage: "SSO 공급자 삭제됨"
+        description: "이 SSO 공급자를 삭제하시겠습니까? 연결된 모든 사용자의 연결이 해제되며, 비밀번호나 다른 로그인 방법이 없는 사용자는 더 이상 로그인할 수 없습니다. IdP 그룹 매핑과 이를 통해 부여된 권한 집합도 함께 제거됩니다. 이 작업은 되돌릴 수 없습니다.",
+        resultDialog: {
+          title: "SSO 공급자 삭제됨",
+          acknowledge: "완료",
+          fields: {
+            message: "제거됨"
+          }
+        },
+        preflight: {
+          fields: {
+            summary: "이 삭제로 제거되는 항목",
+            linkedUsers: "연결이 해제되는 사용자",
+            usersWithoutOtherSignIn: "로그인할 수 없게 되는 사용자"
+          }
+        }
       },
       edit_sso_sign_in_options: {
         label: "로그인 옵션 편집",
         successMessage: "로그인 옵션 저장됨"
+      },
+      edit_saml_provider: {
+        label: "SAML 설정 편집",
+        params: {
+          issuer: {
+            label: "IdP 엔터티 ID",
+            helpText: "IdP의 SAML EntityID입니다. 공급자에 연결된 사용자가 없을 때만 변경할 수 있습니다."
+          },
+          entryPoint: {
+            label: "IdP SSO URL",
+            helpText: "IdP의 Single Sign-On 엔드포인트입니다. 비워 두면 저장된 값을 유지합니다. 공급자에 연결된 사용자가 없을 때만 변경할 수 있습니다."
+          },
+          cert: {
+            label: "새 IdP 서명 인증서",
+            helpText: "IdP의 새 X.509 서명 인증서(PEM)입니다. 비워 두면 저장된 인증서를 유지합니다."
+          },
+          keepCurrentCert: {
+            label: "현재 인증서도 계속 신뢰",
+            helpText: "IdP가 전환하는 동안 두 인증서 중 하나로 서명된 어설션을 모두 허용합니다. 이전 인증서를 제거하려면 이 옵션 없이 다시 편집하세요."
+          }
+        },
+        resultDialog: {
+          title: "SAML 설정 저장됨",
+          acknowledge: "완료",
+          fields: {
+            message: "변경됨"
+          }
+        }
+      },
+      edit_oidc_provider: {
+        label: "OIDC 설정 편집",
+        params: {
+          clientId: {
+            label: "클라이언트 ID",
+            helpText: "IdP가 발급한 OAuth 클라이언트 ID입니다. 비워 두면 저장된 값을 유지합니다. 공급자에 연결된 사용자가 없을 때만 변경할 수 있습니다."
+          },
+          clientSecret: {
+            label: "새 클라이언트 비밀",
+            helpText: "비워 두면 저장된 비밀을 유지합니다. 저장된 비밀은 표시되지 않습니다."
+          },
+          scopes: {
+            label: "범위",
+            helpText: "공백 또는 쉼표로 구분한 OAuth 범위로, 저장된 목록을 대체합니다. 비워 두면 유지합니다.",
+            placeholder: "openid email profile"
+          }
+        },
+        resultDialog: {
+          title: "OIDC 설정 저장됨",
+          acknowledge: "완료",
+          fields: {
+            message: "변경됨"
+          }
+        }
       },
       show_sso_groups_claim: {
         label: "그룹 클레임 보기",

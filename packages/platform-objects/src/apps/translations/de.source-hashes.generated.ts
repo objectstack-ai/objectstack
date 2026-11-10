@@ -165,6 +165,7 @@ export const deGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_setting_audit.fields.source.options.import": "05c80d3a61ec3290",
   "objects.sys_setting_audit.fields.source.options.migration": "477a479630b97ad5",
   "objects.sys_setting_audit.fields.source.options.system": "d2c13a5a8c70ea8d",
+  "objects.sys_sso_provider._actions.edit_oidc_provider.params.scopes.placeholder": "58ac90cde28c764d",
   "objects.sys_sso_provider._actions.edit_sso_groups_claim.params.groupsClaim.placeholder": "833cddda1a6e25f9",
   "objects.sys_sso_provider._actions.register_saml_provider.params.identifierFormat.placeholder": "5945ff9a6b644855",
   "objects.sys_sso_provider._actions.register_saml_provider.params.mapGroups.placeholder": "833cddda1a6e25f9",

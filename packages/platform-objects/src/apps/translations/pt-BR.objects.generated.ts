@@ -2234,12 +2234,78 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "Excluir provedor de SSO",
-        description: "Excluir este provedor de SSO? Os usuários do domínio dele não poderão mais entrar por meio dele.",
-        successMessage: "Provedor de SSO excluído"
+        description: "Excluir este provedor de SSO? Todo usuário vinculado a ele é desvinculado, e um usuário sem senha ou outro método de entrada perde o acesso. Os mapeamentos de grupos do IdP e os conjuntos de permissões concedidos por eles são removidos junto. Esta ação não pode ser desfeita.",
+        resultDialog: {
+          title: "Provedor de SSO excluído",
+          acknowledge: "Concluído",
+          fields: {
+            message: "Removido"
+          }
+        },
+        preflight: {
+          fields: {
+            summary: "O que esta exclusão remove",
+            linkedUsers: "Usuários desvinculados",
+            usersWithoutOtherSignIn: "Usuários que perdem o acesso"
+          }
+        }
       },
       edit_sso_sign_in_options: {
         label: "Editar opções de login",
         successMessage: "Opções de login salvas"
+      },
+      edit_saml_provider: {
+        label: "Editar configurações SAML",
+        params: {
+          issuer: {
+            label: "Entity ID do IdP",
+            helpText: "O EntityID SAML do IdP. Só pode ser alterado enquanto nenhum usuário estiver vinculado ao provedor."
+          },
+          entryPoint: {
+            label: "URL de SSO do IdP",
+            helpText: "O endpoint de logon único do IdP. Deixe em branco para manter o valor armazenado. Só pode ser alterado enquanto nenhum usuário estiver vinculado ao provedor."
+          },
+          cert: {
+            label: "Novo certificado de assinatura do IdP",
+            helpText: "O novo certificado de assinatura X.509 do IdP (PEM). Deixe em branco para manter o certificado armazenado."
+          },
+          keepCurrentCert: {
+            label: "Continuar confiando no certificado atual",
+            helpText: "Enquanto o IdP faz a troca, aceitar asserções assinadas por qualquer um dos certificados. Edite novamente sem esta opção para remover o antigo."
+          }
+        },
+        resultDialog: {
+          title: "Configurações SAML salvas",
+          acknowledge: "Concluído",
+          fields: {
+            message: "Alterado"
+          }
+        }
+      },
+      edit_oidc_provider: {
+        label: "Editar configurações OIDC",
+        params: {
+          clientId: {
+            label: "ID do cliente",
+            helpText: "ID do cliente OAuth emitido pelo IdP. Deixe em branco para manter o valor armazenado. Só pode ser alterado enquanto nenhum usuário estiver vinculado ao provedor."
+          },
+          clientSecret: {
+            label: "Novo segredo do cliente",
+            helpText: "Deixe em branco para manter o segredo armazenado. O segredo armazenado nunca é exibido."
+          },
+          scopes: {
+            label: "Escopos",
+            helpText: "Escopos OAuth separados por espaços ou vírgulas, substituindo a lista armazenada. Deixe em branco para mantê-la.",
+            placeholder: "openid email profile"
+          }
+        },
+        resultDialog: {
+          title: "Configurações OIDC salvas",
+          acknowledge: "Concluído",
+          fields: {
+            message: "Alterado"
+          }
+        }
       },
       show_sso_groups_claim: {
         label: "Mostrar declaração de grupos",

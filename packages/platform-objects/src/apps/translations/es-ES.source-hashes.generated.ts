@@ -124,6 +124,7 @@ export const esESGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_setting_audit.fields.id.label": "00b0385c9c152888",
   "objects.sys_setting_audit.fields.source.options.api": "4baeeff968e192d1",
   "objects.sys_setting_audit.fields.source.options.ui": "95caad102a5c97ba",
+  "objects.sys_sso_provider._actions.edit_oidc_provider.params.scopes.placeholder": "58ac90cde28c764d",
   "objects.sys_sso_provider._actions.edit_sso_groups_claim.params.groupsClaim.placeholder": "833cddda1a6e25f9",
   "objects.sys_sso_provider._actions.register_saml_provider.params.identifierFormat.placeholder": "5945ff9a6b644855",
   "objects.sys_sso_provider._actions.register_saml_provider.params.mapGroups.placeholder": "833cddda1a6e25f9",

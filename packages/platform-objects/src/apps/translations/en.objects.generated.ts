@@ -2234,12 +2234,78 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "Delete SSO Provider",
-        description: "Delete this SSO provider? Users from its domain will no longer be able to sign in through it.",
-        successMessage: "SSO provider deleted"
+        description: "Delete this SSO provider? Every user linked to it is unlinked, and a user with no password or other sign-in method loses access. Its IdP group mappings and the permission-set grants they gave are removed with it. This cannot be undone.",
+        resultDialog: {
+          title: "SSO provider deleted",
+          acknowledge: "Done",
+          fields: {
+            message: "Removed"
+          }
+        },
+        preflight: {
+          fields: {
+            summary: "What this delete removes",
+            linkedUsers: "Users unlinked",
+            usersWithoutOtherSignIn: "Users who lose access"
+          }
+        }
       },
       edit_sso_sign_in_options: {
         label: "Edit Sign-In Options",
         successMessage: "Sign-in options saved"
+      },
+      edit_saml_provider: {
+        label: "Edit SAML Settings",
+        params: {
+          issuer: {
+            label: "IdP Entity ID",
+            helpText: "The IdP’s SAML EntityID. Changes only while no user is linked to the provider."
+          },
+          entryPoint: {
+            label: "IdP SSO URL",
+            helpText: "The IdP’s single sign-on endpoint. Leave blank to keep the stored one. Changes only while no user is linked to the provider."
+          },
+          cert: {
+            label: "New IdP Signing Certificate",
+            helpText: "The IdP’s new X.509 signing certificate (PEM). Leave blank to keep the stored certificate."
+          },
+          keepCurrentCert: {
+            label: "Keep trusting the current certificate",
+            helpText: "While the IdP switches over, accept assertions signed by either certificate. Edit again without this to drop the old one."
+          }
+        },
+        resultDialog: {
+          title: "SAML settings saved",
+          acknowledge: "Done",
+          fields: {
+            message: "Changed"
+          }
+        }
+      },
+      edit_oidc_provider: {
+        label: "Edit OIDC Settings",
+        params: {
+          clientId: {
+            label: "Client ID",
+            helpText: "OAuth client ID issued by the IdP. Leave blank to keep the stored one. Changes only while no user is linked to the provider."
+          },
+          clientSecret: {
+            label: "New Client Secret",
+            helpText: "Leave blank to keep the stored secret. The stored secret is never shown."
+          },
+          scopes: {
+            label: "Scopes",
+            helpText: "Space- or comma-separated OAuth scopes, replacing the stored list. Leave blank to keep it.",
+            placeholder: "openid email profile"
+          }
+        },
+        resultDialog: {
+          title: "OIDC settings saved",
+          acknowledge: "Done",
+          fields: {
+            message: "Changed"
+          }
+        }
       },
       show_sso_groups_claim: {
         label: "Show Groups Claim",
