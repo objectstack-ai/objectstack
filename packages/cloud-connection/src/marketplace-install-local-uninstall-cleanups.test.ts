@@ -167,6 +167,20 @@ describe('#21490: an install-local uninstall runs the registered uninstall clean
         expect(existsSync(ledgerFile())).toBe(false);
     });
 
+    it('[ADR-0150 D8] the grants a cleanup revoked and reported ride on the answer, verbatim', async () => {
+        seedLedger();
+        const outcomes = [{
+            name: 'security.package-permissions', success: true, removed: 2,
+            reportedGrants: [{ user: 'usr_w', organization: 'org_2', permission_set: 'qa_removal_set' }],
+        }];
+        const { uninstall } = await bootPlugin({ kind: 'runner', outcomes });
+
+        const res = await uninstall();
+
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(res.payload.data.cleanups).toEqual(outcomes);
+    });
+
     it('a failed cleanup is reported on the response, and the log names it with the remedy', async () => {
         seedLedger();
         const failed = { name: 'security.package-permissions', success: false, removed: 0, error: 'cleanup failed' };
