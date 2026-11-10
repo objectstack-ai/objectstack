@@ -73,7 +73,12 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  */
 const PRODUCERS: Readonly<Record<string, number>> = {
   // [#30147] 3: three of its throw sites moved to the two modules below.
-  'protocol.ts': 3,
+  // [#30020] 2: `publishPackageDrafts`' throw site moved to its facet below.
+  'protocol.ts': 2,
+  // [#30020] The history and publish facet, which `publishPackageDrafts`' body
+  // (and its throw site) joined when the codemod's members pass moved it out of
+  // `protocol.ts`; the floor is the module's `new Error(` count after that move.
+  'protocol-history-and-publish.ts': 4,
   // [#30147] The write gates' and the registry hydration's refusals, moved out
   // of `protocol.ts` by the codemod's members pass into modules it had split
   // out before; the floor is each module's `new Error(` count after that move.

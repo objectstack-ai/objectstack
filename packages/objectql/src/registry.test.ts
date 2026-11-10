@@ -1143,6 +1143,36 @@ describe('reconcileManagedApiMethods', () => {
         expect(warn).toHaveBeenCalledTimes(1);
     });
 
+    // [ADR-0153 D4] A pulled copy: the HTTP surface offers no write method,
+    // and `userActions` — which keeps a verb on the other guarded buckets —
+    // keeps none here.
+    it('strips every write verb from a synced object, even one whose userActions opens them', () => {
+        for (const userActions of [undefined, { create: true, edit: true, delete: { enabled: true } }]) {
+            const warn = vi.fn();
+            const synced: any = {
+                name: 'erp_order_copy',
+                managedBy: 'synced',
+                ...(userActions ? { userActions } : {}),
+                enable: { apiEnabled: true, apiMethods: ['get', 'list', 'create', 'update', 'delete'] },
+            };
+            const out = reconcileManagedApiMethods(synced, { warn });
+            expect(out.enable?.apiMethods, JSON.stringify(userActions)).toEqual(['get', 'list']);
+            expect(warn).toHaveBeenCalledTimes(1);
+            expect(warn.mock.calls[0][0]).toContain("managedBy:'synced'");
+        }
+    });
+
+    it('twin: a synced object advertising reads only is left as it is', () => {
+        const warn = vi.fn();
+        const readOnly: any = {
+            name: 'erp_order_copy',
+            managedBy: 'synced',
+            enable: { apiEnabled: true, apiMethods: ['get', 'list'] },
+        };
+        expect(reconcileManagedApiMethods(readOnly, { warn })).toBe(readOnly);
+        expect(warn).not.toHaveBeenCalled();
+    });
+
     it('keeps CRUD on a `system-data` object — the bucket default grants the writes (#3355)', () => {
         const warn = vi.fn();
         const writable: any = {
