@@ -48,15 +48,22 @@ vi.mock('@object-ui/i18n/namespaces/developer/ko', async (importOriginal) => {
 });
 
 let record: { objectName: string; recordId: string } | null = null;
-vi.mock('@object-ui/react', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  useAdapter: () => ({
+// One object for the whole file: the widgets' reads key their effects on it.
+const ADAPTER = vi.hoisted(() => {
+  const none = async () => ({ clients: [], truncated: false });
+  return {
     getClient: () => ({
-      oauth: { authorizedClients: { list: async () => ({ clients: [], truncated: false }), withdraw: async () => ({}) } },
+      oauth: {
+        authorizedClients: { list: none, listForUser: none, withdraw: async () => ({}), withdrawForUser: async () => ({}) },
+      },
     }),
     find: async () => ({ data: [] }),
     update: async () => ({}),
-  }),
+  };
+});
+vi.mock('@object-ui/react', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useAdapter: () => ADAPTER,
   useRecordContext: () => record,
 }));
 

@@ -148,7 +148,12 @@ describe('marketplace namespace — the all-packs door hands out complete langua
   it.each(BUILT_IN_LANGUAGE_CODES.map((code) => [code]))('%s: pack keys and namespace keys are both there', (code) => {
     const complete = (builtInLocales as unknown as Record<string, Tree>)[code];
     const expected = [...leaves(PACKS[code]), ...leaves(CATALOGUES[code])].sort();
-    expect(leaves(complete).sort()).toEqual(expected);
+    // Every pack leaf and every catalogue leaf; the other namespaces' leaves
+    // (`developer-namespace.test.ts`) are there too, and none is `marketplace.*`.
+    const completeLeaves = leaves(complete);
+    expect(completeLeaves).toEqual(expect.arrayContaining(expected));
+    const isMarketplace = (key: string) => key.startsWith(`${MARKETPLACE_NAMESPACE}.`);
+    expect(completeLeaves.filter(isMarketplace).sort()).toEqual(expected.filter(isMarketplace));
     expect(lookup(complete, MARKETPLACE_NAMESPACE_PROBE_KEY)).toBe(lookup(CATALOGUES[code], MARKETPLACE_NAMESPACE_PROBE_KEY));
     // A family Studio's packages page reads, still served from the pack.
     expect(lookup(complete, 'marketplace.action.uninstall')).toBe(lookup(PACKS[code], 'marketplace.action.uninstall'));
