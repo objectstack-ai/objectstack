@@ -1868,10 +1868,18 @@ describe('[#6084, ADR-0131 D3] path 4 — switching admin_full_access off in the
     await quiet.insert('sys_metadata_activation', ledgerRow('act_admin', ADMIN_FULL_ACCESS, true), SYSTEM);
 
     // Every read runs inside the fail-CLOSED envelope, so a payload that
-    // provoked ANY read would come back as a refusal.
+    // provoked ANY read would come back as a refusal. [ADR-0150 D8 R4] Every
+    // writable column of the ledger is a standing key now that the resolver
+    // reads `package_id`, so the payload that touches none is the one that
+    // names only the row.
+    await expect(
+      quiet.update('sys_metadata_activation', { id: 'act_admin' }, SYSTEM),
+    ).resolves.toBeTruthy();
+    // ...and re-pointing the package IS a standing payload: it is read, and
+    // here, with every read failing, refused closed.
     await expect(
       quiet.update('sys_metadata_activation', { id: 'act_admin', package_id: 'com.example.other' }, SYSTEM),
-    ).resolves.toBeTruthy();
+    ).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
   });
 
   it('switching ANOTHER set off — or a position of the same name — is unaffected', async () => {

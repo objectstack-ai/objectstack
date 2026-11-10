@@ -45,7 +45,7 @@ import { SecurityPlugin, RLS_DENY_FILTER } from '@objectstack/plugin-security';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 import { resolveExecutionContext } from './resolve-execution-context.js';
-import { bindCatalogFromTables } from './security-catalog.testkit.js';
+import { bindCatalogFromTables, bindTestSecurityCatalog, catalogFromTables } from './security-catalog.testkit.js';
 
 const ALPHA = 'org_alpha';
 const BETA = 'org_beta';
@@ -193,6 +193,17 @@ function rig(posture: 'isolated' | 'group' | 'single' | undefined) {
     };
     await plugin.init(ctx);
     await plugin.start(ctx);
+    // The plugin's shipped sets — an agent's scope ceiling among them — are in
+    // the catalog on a booted stack (its manifest registers them); this
+    // double's `manifest.register` does not, so the fixture's catalog carries
+    // them beside its own rows. The evaluator reads every set through the
+    // catalog (ADR-0150 D3).
+    const shipped: Array<{ name: string }> = (plugin as any).bootstrapPermissionSets ?? [];
+    bindTestSecurityCatalog(ql, () => {
+      const fromRows = catalogFromTables(t);
+      const own = new Set((fromRows.permissions ?? []).map((d) => d.name));
+      return { ...fromRows, permissions: [...(fromRows.permissions ?? []), ...shipped.filter((d) => !own.has(d.name))] };
+    });
   };
 
   /** Run one operation through the security middleware; the engine body stands in for `next()`. */

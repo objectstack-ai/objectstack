@@ -13,7 +13,9 @@
  *
  * {@link PACKAGE_SCOPED_READ_TYPES}: the presentation and AI types of child E8
  * (#31680) — app, page, dashboard, report, book, analytics cube, tool, skill
- * and agent. A later child adds its own types to the list in its own change;
+ * and agent — and `api` (#32069), whose in-memory store `@objectstack/metadata`
+ * keeps per `(package, name)`, so its qualified read serves the holder's own
+ * body. A later child adds its own types to the list in its own change;
  * until then a type's by-name read stays `SchemaRegistry.getItem`'s, exactly
  * as before (`SchemaRegistry.resolveItem`).
  *
@@ -59,8 +61,8 @@ import {
 
 /**
  * The types whose by-name readers consult `(package, name)` today — child E8's
- * nine (#31680), as the registry spells them. Each later child of epic #31527
- * appends its own.
+ * nine (#31680), as the registry spells them, then `api` (#32069). Each later
+ * child of epic #31527 appends its own.
  */
 export const PACKAGE_SCOPED_READ_TYPES = Object.freeze([
   'app',
@@ -72,6 +74,7 @@ export const PACKAGE_SCOPED_READ_TYPES = Object.freeze([
   'tool',
   'skill',
   'agent',
+  'api',
 ] as const);
 
 /** A type whose by-name readers consult `(package, name)` ({@link PACKAGE_SCOPED_READ_TYPES}). */

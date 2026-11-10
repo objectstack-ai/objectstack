@@ -43,6 +43,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SysJwks, SysMember, SysUser, SysVerification } from '@objectstack/platform-objects/identity';
 import { SecurityPlugin } from './security-plugin.js';
+import { defaultPermissionSets } from './objects/default-permission-sets.js';
 import { SysPosition } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
@@ -127,9 +128,13 @@ async function boot(shape: Shape): Promise<ObjectQL> {
     tenancy: { posture: shape.posture },
     manifest: { register: vi.fn() },
     objectql: engine,
-    // `list` answers nothing, so every set name resolves from the plugin's
-    // bootstrap list: the SHIPPED `defaultPermissionSets`, not a copy.
-    metadata: { get: async (_t: string, name: string) => engine.getSchema(name) ?? null, list: async () => [] },
+    // Every set name resolves from the SHIPPED `defaultPermissionSets`, not a
+    // copy — served by name, as the catalog reads a set (ADR-0150 D3).
+    metadata: {
+      get: async (t: string, name: string) =>
+        (t === 'permission' ? defaultPermissionSets.find((s) => s.name === name) : engine.getSchema(name)) ?? null,
+      list: async (t: string) => (t === 'permission' ? defaultPermissionSets : []),
+    },
   };
   const ctx = {
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },

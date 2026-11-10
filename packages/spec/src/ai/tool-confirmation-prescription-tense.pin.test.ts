@@ -37,7 +37,9 @@
  *    sentences verbatim, so it cannot pass merely by the prose falling silent;
  *  - if the runtime door is removed or narrowed — `actionConfirmationRefusal`
  *    gone, no longer reading the DECLARED flag, or no longer called
- *    pre-dispatch by `invokeBusinessAction` — this goes red naming both files,
+ *    pre-dispatch on the AI-facing door (`invokeBusinessAction`, which since
+ *    #31923 runs the one admitted sequence in `runtime/src/action-dispatch.ts`
+ *    under the `ai` posture) — this goes red naming the files,
  *    and whoever makes that change is told the prescriptions are now the thing
  *    that has to move.
  *
@@ -75,6 +77,18 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '../../../..');
 const GATE_SOURCE = join(REPO_ROOT, 'packages', 'runtime', 'src', 'action-execution.ts');
 const REST_ACTIONS_SOURCE = join(REPO_ROOT, 'packages', 'runtime', 'src', 'domains', 'actions.ts');
+/** [#31923] The one admitted sequence the REST door, MCP `run_action` and `dispatchAction` share. */
+const SEQUENCE_SOURCE = join(REPO_ROOT, 'packages', 'runtime', 'src', 'action-dispatch.ts');
+
+/** One top-level function's text, from its signature to the next top-level declaration. */
+function topLevelBody(file: string, signature: string): string {
+  const source = readFileSync(file, 'utf8');
+  const start = source.indexOf(signature);
+  expect(start, `\`${signature}\` moved — re-anchor this pin`).toBeGreaterThan(-1);
+  const rest = source.slice(start + signature.length);
+  const next = rest.search(/\n(export |async function |function |interface |type |const )/);
+  return signature + (next === -1 ? rest : rest.slice(0, next));
+}
 
 /** The shipped prescription, read off the rejection an author actually meets. */
 function toolRejectionMessage(): string {
@@ -172,22 +186,47 @@ describe('the confirmation-gate prescriptions match the door that runs', () => {
   });
 
   it('the AI-facing door still calls the gate pre-dispatch', () => {
+    const stale = ' — the prescriptions in `ai/tool.zod.ts` now describe a door that does not run';
+    // [#31923] The AI-facing door runs the one admitted sequence under the
+    // `ai` posture; the gate is that sequence's, so the door is read in two
+    // steps: the door enters the sequence as `ai`, and the sequence's
+    // admission half calls the gate under `ai` before anything dispatches.
+    const door = aiDoorBody();
+    expect(door, '`invokeBusinessAction` no longer runs the admitted sequence' + stale).toMatch(/runResolvedAction\(/);
+    expect(door, '`invokeBusinessAction` no longer runs the sequence under the `ai` posture' + stale).toMatch(/posture: 'ai'/);
+
+    const admit = topLevelBody(SEQUENCE_SOURCE, 'async function admitResolvedAction(');
     expect(
-      aiDoorBody(),
-      '`invokeBusinessAction` no longer calls `actionConfirmationRefusal` — the prescriptions '
-        + 'in `ai/tool.zod.ts` now describes a door that does not run',
-    ).toMatch(/actionConfirmationRefusal\(/);
+      admit,
+      'the admission half no longer calls `actionConfirmationRefusal` under the `ai` posture' + stale,
+    ).toMatch(/if \(posture === 'ai'\) \{\s*const confirmationRefusal = actionExec\.actionConfirmationRefusal\(/);
+    // Pre-dispatch: the admission half runs nothing itself …
+    expect(admit, 'the admission half now dispatches').not.toMatch(/dispatchAdmittedAction\(|executeAction\(|dispatchFlowAction\(/);
+    // … and the sequence returns its refusal before it dispatches.
+    const run = topLevelBody(SEQUENCE_SOURCE, 'export async function runResolvedAction(');
+    const admitAt = run.indexOf('admitResolvedAction(');
+    const refusedAt = run.indexOf("if ('refused' in admission) return");
+    const dispatchAt = run.indexOf('dispatchAdmittedAction(');
+    expect(
+      admitAt > -1 && refusedAt > admitAt && dispatchAt > refusedAt,
+      'the sequence no longer admits, and returns a refusal, before it dispatches' + stale,
+    ).toBe(true);
   });
 
   it('REST `/actions` is still OUTSIDE the gate, which is what the bound claims', () => {
     // The over-claim guard. The prose tells an author to arrange their own
     // human in front of REST; if that door joins the gate, the sentence is
     // false and this is where it is caught.
+    const rest = readFileSync(REST_ACTIONS_SOURCE, 'utf8');
     expect(
-      readFileSync(REST_ACTIONS_SOURCE, 'utf8'),
+      rest,
       'the REST actions door now enforces the confirmation gate — the `ai.exposed` bound in '
         + 'the shipped prescriptions is stale',
     ).not.toMatch(/actionConfirmationRefusal|ACTION_CONFIRMATION_REQUIRED/);
+    // [#31923] REST runs the shared sequence, whose gate is under `ai` only:
+    // the door must enter it as `rest`, or it joins the gate.
+    expect(rest, 'the REST actions door no longer runs the sequence under the `rest` posture').toMatch(/posture: 'rest'/);
+    expect(rest, 'the REST actions door now runs the sequence under the `ai` posture').not.toMatch(/posture: 'ai'/);
   });
 
   it('would flag each retired sentence as a denial (self-test)', () => {

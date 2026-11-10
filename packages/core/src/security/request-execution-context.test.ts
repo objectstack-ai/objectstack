@@ -143,6 +143,8 @@ describe('choice 1 — the anonymous entry', () => {
     expect(guest).toEqual({
       positions: ['guest'],
       permissions: [GUEST_SET],
+      // [ADR-0150 D3] The guest anchor's set, addressed: it resolves from no package here.
+      permissionSetAddresses: [{ packageId: null, name: GUEST_SET }],
       systemPermissions: [],
       isSystem: false,
       principalKind: 'guest',

@@ -712,9 +712,12 @@ for (const { shape, environmentId } of SHAPES) {
                 expect(ran.message).toMatch(/^Action 'hidden_done' on 'qa_act_open' is not exposed to AI/);
             });
 
-            it('CONTROL: a name the package does not declare is still not found', async () => {
+            it('CONTROL: a name the package does not declare is still refused, with the REST door\'s undeclared 404', async () => {
                 const ran = await runOutcome(async () => (await bridge()).runAction('qa_nowhere', { objectName: pkg.open }));
-                expect(ran.message).toBe(`Action 'qa_nowhere' not found on object '${pkg.open}'`);
+                // [#31923] C3: the bridge runs the REST door's sequence, so a
+                // name nothing declares takes that door's 404 and sentence.
+                expect({ code: ran.code, status: ran.status }).toEqual({ code: 'RESOURCE_NOT_FOUND', status: 404 });
+                expect(ran.message).toMatch(new RegExp(`^Action 'qa_nowhere' on '${pkg.open}' has no declaration`));
             });
         });
     }
@@ -753,12 +756,20 @@ for (const { shape, environmentId } of SHAPES) {
         });
 
         for (const name of ['mark_done', 'ping', 'bound_done'] as const) {
-            it(`run_action answers ${name} "not found", scoped and unscoped`, async () => {
+            it(`run_action refuses ${name}: the disabled package's object scoped, "not found" unscoped`, async () => {
                 const bridge = await bridgeFor(dispatcher, mcp, undefined, TENANT_CALLER);
+                // [#31923] R1: the object is asked BEFORE the resolution, as at
+                // the REST door — 404 OBJECT_PACKAGE_DISABLED (was an uncoded
+                // "not found on object").
                 expect(await runOutcome(() => bridge.runAction(name, { objectName: pkg.open, recordId: 'r_any' })))
-                    .toEqual({ code: undefined, status: undefined, message: `Action '${name}' not found on object '${pkg.open}'` });
+                    .toEqual({
+                        code: 'OBJECT_PACKAGE_DISABLED',
+                        status: 404,
+                        message: `Object '${pkg.open}' belongs to a disabled package and is not being served. Re-enable the package to restore access.`,
+                    });
+                // [#31923] C3, unscoped: the REST door's undeclared status and code.
                 expect(await runOutcome(() => bridge.runAction(name, { recordId: 'r_any' })))
-                    .toEqual({ code: undefined, status: undefined, message: `Action '${name}' not found` });
+                    .toEqual({ code: 'RESOURCE_NOT_FOUND', status: 404, message: `Action '${name}' not found` });
             });
         }
     });
@@ -936,10 +947,12 @@ for (const { shape, environmentId } of SHAPES) {
 
         it('run_action answers the package\'s action "not found", scoped and unscoped, and runs the environment-authored one', async () => {
             const bridge = await bridgeFor(dispatcher, mcp, undefined, TENANT_CALLER);
+            // [#31923] C3: the REST door's undeclared 404, unscoped and scoped.
             expect(await runOutcome(() => bridge.runAction(pkg.ping, {})))
-                .toEqual({ code: undefined, status: undefined, message: `Action '${pkg.ping}' not found` });
-            expect(await runOutcome(() => bridge.runAction(pkg.ping, { objectName: GLOBAL })))
-                .toEqual({ code: undefined, status: undefined, message: `Action '${pkg.ping}' not found on object 'global'` });
+                .toEqual({ code: 'RESOURCE_NOT_FOUND', status: 404, message: `Action '${pkg.ping}' not found` });
+            const scoped = await runOutcome(() => bridge.runAction(pkg.ping, { objectName: GLOBAL }));
+            expect({ code: scoped.code, status: scoped.status }).toEqual({ code: 'RESOURCE_NOT_FOUND', status: 404 });
+            expect(scoped.message).toMatch(new RegExp(`^Action '${pkg.ping}' on 'global' has no declaration`));
             expect(await runOutcome(() => bridge.runAction(AUTHORED, {}))).toEqual({ result: { pong: 'authored' } });
         });
     });
@@ -1036,10 +1049,12 @@ for (const { shape, environmentId } of SHAPES) {
                 });
 
                 it('run_action answers the disabled package\'s action "not found", scoped and unscoped, and still runs the project\'s own', async () => {
+                    // [#31923] C3: the REST door's undeclared 404, unscoped and scoped.
                     expect(await runOutcome(async () => (await bridge()).runAction(ART.pkgPing, {})))
-                        .toEqual({ code: undefined, status: undefined, message: `Action '${ART.pkgPing}' not found` });
-                    expect(await runOutcome(async () => (await bridge()).runAction(ART.pkgPing, { objectName: GLOBAL })))
-                        .toEqual({ code: undefined, status: undefined, message: `Action '${ART.pkgPing}' not found on object 'global'` });
+                        .toEqual({ code: 'RESOURCE_NOT_FOUND', status: 404, message: `Action '${ART.pkgPing}' not found` });
+                    const scoped = await runOutcome(async () => (await bridge()).runAction(ART.pkgPing, { objectName: GLOBAL }));
+                    expect({ code: scoped.code, status: scoped.status }).toEqual({ code: 'RESOURCE_NOT_FOUND', status: 404 });
+                    expect(scoped.message).toMatch(new RegExp(`^Action '${ART.pkgPing}' on 'global' has no declaration`));
                     expect(await runOutcome(async () => (await bridge()).runAction(ART.ping, {}))).toEqual({ result: { pong: 'artifact' } });
                 });
             }

@@ -43,7 +43,7 @@
  * exactly as the vendor wrote it — a missing line, never a wrong one.
  */
 
-import { securityCatalogReaderOf } from '@objectstack/core';
+import { grantNamesPlatformPermissionSet, platformPermissionSet } from '@objectstack/core';
 import { GRANT_SET_NAME_FIELD, grantSetNameOf } from './grant-set-name.js';
 import { ORGANIZATION_ADMIN_SET_NAMES } from './organization-delete.js';
 
@@ -101,10 +101,18 @@ export function roleChangeGrantDepsFor(engine: object, sys: SystemReader): RoleC
         },
         limit: 10,
       });
-      return [...new Set(rows.map(grantSetNameOf).filter((n): n is string => n !== undefined))];
+      // [ADR-0150 D3, D8 R1] The PLATFORM's org-admin sets only — what the
+      // reconciler grants: another package's set of one of those names is
+      // not what the role change granted.
+      const names = new Set<string>();
+      for (const row of rows) {
+        const name = grantSetNameOf(row);
+        if (name !== undefined && (await grantNamesPlatformPermissionSet(engine, name, row?.permission_set_package))) names.add(name);
+      }
+      return [...names];
     },
     readSetLabel: async (name) => {
-      const entry = await securityCatalogReaderOf(engine)?.resolve('permission', name);
+      const entry = await platformPermissionSet(engine, name);
       const label = entry?.definition?.label;
       return typeof label === 'string' && label.trim() !== '' ? label : undefined;
     },

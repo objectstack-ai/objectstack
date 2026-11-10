@@ -25,6 +25,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import '@objectstack/runtime';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 import type { InstallLocalDoor, InstallLocalDoorGrant } from './install-local-door-service.js';
 
@@ -391,5 +392,41 @@ describe('[#31963] an unmanaged grant copies from the grant\'s own manifest, inl
         const res = await h.plainWith({ manifest: crm({ id: 'com.example.other' }) });
         expect(res.status, JSON.stringify(res.payload)).toBe(200);
         expect(h.importUnmanagedPackage.mock.calls[0][0].manifest).toMatchObject({ id: 'com.example.other' });
+    });
+});
+
+describe('[#31482] the copy-once import\'s own namespace refusals, reached through the grant path, keep their codes and statuses', () => {
+    // The REAL copy-once import, not a double. The cloud-connection door hands
+    // the grant's `data.target_namespace` as `targetNamespace`; what the import
+    // answers about that name is the caller's to fix (another name), so the
+    // grant path keeps the import's 409 / 400, never the 502 an unreadable
+    // grant answers. Each is audited once, by the import's own failure event.
+    const realImporter = (owners: Record<string, string[]> = {}) => {
+        const protocol = new ObjectStackProtocolImplementation(
+            { registry: { getNamespaceOwners: (ns: string) => owners[ns] ?? [] } } as any,
+            () => new Map(),
+        ) as any;
+        return (request: any) => protocol.importUnmanagedPackage(request);
+    };
+
+    it('a namespace another package owns: 409 RESOURCE_CONFLICT with `details { namespace, owners }`, audited once', async () => {
+        const h = await boot({ importer: realImporter({ acme: ['com.example.other'] }) });
+        const res = await h.viaGrantWith({ targetNamespace: 'acme' }, GRANT);
+        expect(res.status, JSON.stringify(res.payload)).toBe(409);
+        expect(res.payload.error.code).toBe('RESOURCE_CONFLICT');
+        expect(res.payload.error.details).toEqual({ namespace: 'acme', owners: ['com.example.other'] });
+        expect(h.importUnmanagedPackage.mock.calls[0][0]).toMatchObject({ targetNamespace: 'acme' });
+        expect(h.auditEvents).toHaveLength(1);
+        expect(h.auditEvents[0]).toMatchObject({ action: 'package_unmanaged_import', outcome: 'failure', errorCode: 'RESOURCE_CONFLICT', status: 409 });
+    });
+
+    it('a platform-reserved namespace: 400 INVALID_REQUEST with `details.targetNamespace`, audited once', async () => {
+        const h = await boot({ importer: realImporter() });
+        const res = await h.viaGrantWith({ targetNamespace: 'sys' }, GRANT);
+        expect(res.status, JSON.stringify(res.payload)).toBe(400);
+        expect(res.payload.error.code).toBe('INVALID_REQUEST');
+        expect(res.payload.error.details).toEqual({ targetNamespace: 'sys' });
+        expect(h.auditEvents).toHaveLength(1);
+        expect(h.auditEvents[0]).toMatchObject({ outcome: 'failure', errorCode: 'INVALID_REQUEST', status: 400 });
     });
 });

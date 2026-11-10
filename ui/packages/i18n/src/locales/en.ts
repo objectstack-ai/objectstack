@@ -3750,6 +3750,16 @@ const en = {
       // `client_id` labelled `clientId` — the id is never shown as the name.
       unidentified: 'This application could not be identified.',
       clientId: 'Client ID',
+      // The server's account of the signed request (`oauth-consent/request`):
+      // `sentTo` labels where a consent sends the grant (`{{destination}}` is
+      // the redirect's host, or a native app's redirect as it is);
+      // `unverified` marks a client no platform administrator registered;
+      // `destinationUnconfirmed` is shown, with Authorize disabled, when the
+      // server could not answer.
+      unverified: 'Unverified application',
+      unverifiedHint: 'No administrator here registered this application, so its name has not been checked. Authorize it only if you trust {{destination}}.',
+      destinationUnconfirmed: 'Where this access would be sent could not be confirmed, so it cannot be authorized here.',
+      sentTo: 'Access will be sent to:',
       willAllow: 'This app will be able to:',
       // One sentence per scope the page names. The MCP agent scopes take their
       // English from `@objectstack/spec`'s `MCP_OAUTH_SCOPE_CONSENT_COPY` (the
