@@ -257,7 +257,7 @@ describe('the MySQL-family arms (statement and verdict)', () => {
         const log = { warn: vi.fn(), error: vi.fn() };
         const result = await ensureUserPermissionSetPackagelessIndex(exec, log, { client: 'mysql2' });
         expect(result).toMatchObject({ status: 'unsupported', oldKey: 'kept' });
-        expect(ran.at(-1)).toBe(buildUserPermissionSetOldKeySql('mysql2'));
+        expect(ran[ran.length - 1]).toBe(buildUserPermissionSetOldKeySql('mysql2'));
         expect(buildUserPermissionSetOldKeySql('mysql2')).toBe(
             `CREATE UNIQUE INDEX ${USER_PERMISSION_SET_OLD_KEY_INDEX_NAME} ON ${USER_PERMISSION_SET_TABLE} (user_id, permission_set, organization_id)`,
         );
