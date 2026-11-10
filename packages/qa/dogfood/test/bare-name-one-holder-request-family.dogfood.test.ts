@@ -25,6 +25,14 @@
 //
 // A function cannot come through install-local (it is code; that door carries
 // no runtime module), so its post-boot door is pinned in-process only.
+//
+// [#32073, ADR-0150 D3/D4] The function the cold boot keeps two holders of is
+// resolved in the package of the flow that names it: each package's `script`
+// flow runs its OWN function (on main the bare map's last registration ran for
+// both), a flow with no package is refused `400 FLOW_FAILED` carrying the
+// `RESOURCE_CONFLICT` refusal naming both, and a packaged flow naming a
+// function held only outside its closure is refused naming the holder. The
+// one-holder CONTROL is alpha's own `qa_alpha_only_fn`.
 
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -42,6 +50,21 @@ const SHOWCASE_API = 'showcase_task_feed';
 const API = 'qa_shared_api';
 const ACTION = 'qa_shared_run';
 const FN = 'qa_shared_fn';
+const ALPHA_FN = 'qa_alpha_only_fn';
+/** Which package's function ran, in order (the functions run in this process). */
+const fnRuns: string[] = [];
+const takeRuns = () => fnRuns.splice(0, fnRuns.length);
+
+/** An autolaunched flow whose one `script` node calls `fn`. */
+const fnFlow = (name: string, fn: string) => ({
+  name, label: name, type: 'autolaunched',
+  nodes: [
+    { id: 'start', type: 'start', label: 'Start' },
+    { id: 'run', type: 'script', label: 'Run', config: { function: fn, outputVariable: 'out' } },
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [{ id: 'e1', source: 'start', target: 'run' }, { id: 'e2', source: 'run', target: 'end' }],
+});
 
 const item = (p: string) => ({
   name: `${p}_item`,
@@ -64,7 +87,11 @@ function bootPackage(p: 'alpha' | 'beta') {
     objects: [item(p)],
     apis: [api(p)],
     actions: [action(p)],
-    functions: { [FN]: async () => p },
+    flows: [fnFlow(`${p}_fn_flow`, FN), fnFlow(`${p}_alpha_fn_flow`, ALPHA_FN)],
+    functions: {
+      [FN]: async () => { fnRuns.push(p); return p; },
+      ...(p === 'alpha' ? { [ALPHA_FN]: async () => { fnRuns.push('alpha-only'); return 'alpha-only'; } } : {}),
+    },
   } as never);
 }
 
@@ -204,6 +231,54 @@ describe('one package holder per API, object-less action and function name, on a
       expect([status, codeOf(body)], `${path} ${JSON.stringify(body)}`).toEqual([409, 'RESOURCE_CONFLICT']);
       expect(String(body?.error?.message ?? body?.error ?? ''), path).toContain(SHOWCASE_PKG);
     }
+  });
+
+  // [#32073] The script node's function, resolved by the calling flow's package.
+  const trigger = async (flow: string) => {
+    takeRuns();
+    const r = await stack.apiAs(admin, 'POST', `/automation/${flow}/trigger`, {});
+    return { status: r.status, body: (await r.json()) as any, ran: takeRuns() };
+  };
+
+  it('each package\'s script flow runs its OWN function of the name both hold (it ran the last registration)', async () => {
+    for (const p of ['alpha', 'beta'] as const) {
+      const { status, body, ran } = await trigger(`${p}_fn_flow`);
+      expect([status, body?.data?.success ?? body?.success, ran], `${p}_fn_flow ${JSON.stringify(body)}`).toEqual([200, true, [p]]);
+    }
+  });
+
+  it('narrowing — a flow with no package naming the two-holder function is 400 FLOW_FAILED carrying RESOURCE_CONFLICT naming both; neither runs', async () => {
+    const put = await stack.apiAs(admin, 'PUT', '/meta/flow/qa_env_fn_flow', fnFlow('qa_env_fn_flow', FN));
+    expect(put.status, await put.clone().text()).toBeLessThan(300);
+    const { status, body, ran } = await trigger('qa_env_fn_flow');
+    expect([status, codeOf(body)], JSON.stringify(body)).toEqual([400, 'FLOW_FAILED']);
+    const inner = body?.error?.details?.innerRefusal;
+    expect(inner?.code, JSON.stringify(body)).toBe('RESOURCE_CONFLICT');
+    for (const holder of ['com.qa.bare.alpha', 'com.qa.bare.beta']) {
+      expect(String(inner?.message), holder).toContain(holder);
+      expect(String(body?.error?.message), holder).toContain(holder);
+    }
+    expect(String(body?.error?.message)).toContain("script node 'run'");
+    expect(ran, 'a candidate ran on a refused name').toEqual([]);
+  });
+
+  it('narrowing — D3 (c): a packaged flow naming a function held only outside its closure is refused naming the holder; it does not run', async () => {
+    const { status, body, ran } = await trigger('beta_alpha_fn_flow');
+    expect([status, codeOf(body)], JSON.stringify(body)).toEqual([400, 'FLOW_FAILED']);
+    expect(body?.error?.details?.innerRefusal?.code).toBe('RESOURCE_CONFLICT');
+    const message = String(body?.error?.message);
+    expect(message).toContain('held outside the declared dependency closure of package "com.qa.bare.beta"');
+    expect(message).toContain('com.qa.bare.alpha');
+    expect(ran).toEqual([]);
+  });
+
+  it('CONTROL — a one-holder function runs for its own package\'s flow and for a flow with no package, as before', async () => {
+    const own = await trigger('alpha_alpha_fn_flow');
+    expect([own.status, own.body?.data?.success ?? own.body?.success, own.ran], JSON.stringify(own.body)).toEqual([200, true, ['alpha-only']]);
+    const put = await stack.apiAs(admin, 'PUT', '/meta/flow/qa_env_alpha_fn_flow', fnFlow('qa_env_alpha_fn_flow', ALPHA_FN));
+    expect(put.status, await put.clone().text()).toBeLessThan(300);
+    const env = await trigger('qa_env_alpha_fn_flow');
+    expect([env.status, env.body?.data?.success ?? env.body?.success, env.ran], JSON.stringify(env.body)).toEqual([200, true, ['alpha-only']]);
   });
 
   it('install-local of a third package declaring a held API name is 422 PLUGIN_REGISTER_FAILED naming both holders and the rename; nothing is installed or served', async () => {

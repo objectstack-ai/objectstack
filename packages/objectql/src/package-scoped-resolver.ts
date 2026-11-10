@@ -177,9 +177,13 @@ export type PackageScopedFunctionEngine = Pick<ObjectQL, 'registry' | 'functionH
  * a package caller holding none itself counts it beside its closure's
  * holders. Writes nothing, never throws for a name.
  *
- * ⛔ No caller reads it yet: `resolveFunction` / `resolveFunctionEntry` keep
- * answering the one last-registered function per name until a later child
- * wires the flow `script` node and the action `target` to this.
+ * [#32073] Read by the flow `script` node, through the automation service's
+ * function bridge (service-automation `function-package-scope.ts`), with the
+ * calling flow's armed package as the caller. An action `target` is no
+ * reader: it names a handler key in the action registry, which E2 resolves
+ * by package, never a registered function. `resolveFunction` /
+ * `resolveFunctionEntry` keep answering the one last-registered function per
+ * name for any other caller.
  */
 export function resolvePackageScopedFunction(
   engine: PackageScopedFunctionEngine,

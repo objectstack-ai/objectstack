@@ -770,9 +770,23 @@ export interface FlowFunctionRegistration {
  * A resolver may return the bare handler — which IS the declaration
  * `effect: 'pure'`, written the short way — or a {@link FlowFunctionRegistration}
  * carrying what the function declared.
+ *
+ * [ADR-0150 D3/D4] `callerPackageId` is the package the calling flow's armed
+ * body comes from ({@link AutomationEngine.armedFlowPackage}), or `null` for a
+ * caller with no package: an environment-authored flow, an environment
+ * override of a packaged flow, a call outside a run. A function is resolved in
+ * the package of the flow that names it, so a resolver over a registry that
+ * holds one function per package answers that package's own, else the one
+ * holder its declared closure (plus `sys` and the platform) reaches. Where the
+ * name means no single function for that caller, the resolver THROWS the
+ * package-scoped refusal (`PackageScopedNameRefusedError`, `409
+ * RESOURCE_CONFLICT`, naming every candidate) rather than answering one of
+ * them or `undefined`. A resolver that holds one function per name may ignore
+ * the argument.
  */
 export type FlowFunctionResolver = (
     name: string,
+    callerPackageId: string | null,
 ) => FlowFunctionHandler | FlowFunctionRegistration | undefined;
 
 /**
@@ -4291,9 +4305,10 @@ export class AutomationEngine implements IAutomationService {
     /**
      * Wire the engine to the host's named-function registry (#1870). The
      * automation plugin calls this in `start()` with a resolver backed by
-     * ObjectQL's `resolveFunction` (populated from `bundle.functions` /
-     * `defineStack({ functions })`), so a `script` node can invoke an
-     * authored function by name. Passing `null` detaches the bridge.
+     * ObjectQL's function holders (populated from `bundle.functions` /
+     * `defineStack({ functions })`) and resolved by package
+     * (`resolvePackageScopedFunction`, ADR-0150 D3), so a `script` node can
+     * invoke an authored function by name. Passing `null` detaches the bridge.
      */
     setFunctionResolver(resolver: FlowFunctionResolver | null): void {
         this.functionResolver = resolver;
@@ -4355,14 +4370,25 @@ export class AutomationEngine implements IAutomationService {
      * Returns `undefined` when no resolver is wired or the name is unregistered
      * — the node then fails the step with a clear error rather than silently
      * no-op'ing.
+     *
+     * [ADR-0150 D3/D4] The function is resolved for the package of the flow
+     * whose run makes the call: `context`'s flow, read through the same caller
+     * reader `subflow`, `map` and `connector_action` names use
+     * ({@link flowCallerPackage}: the package whose OWN body is armed under
+     * that flow name, else no package). With no `context` the caller has no
+     * package. Where the name means no single function for that caller (two
+     * holders, a holder outside the caller's declared closure, the platform's
+     * function beside a package's), this THROWS the resolver's refusal
+     * (`PackageScopedNameRefusedError`: `409 RESOURCE_CONFLICT`, every
+     * candidate named) — never one of the candidates.
      */
-    resolveFunction(name: string): FlowFunctionRegistration | undefined {
+    resolveFunction(name: string, context?: AutomationContext): FlowFunctionRegistration | undefined {
         // The body lives in ./flow-definitions.ts (#25222).
         const readFunctionResolver = () => this.functionResolver;
         const host: ThisParameterType<typeof resolveFunction> = {
             get functionResolver() { return readFunctionResolver(); },
         };
-        return resolveFunction.call(host, name);
+        return resolveFunction.call(host, name, this.flowCallerPackage(context));
     }
 
     /** Get all registered connector names. */

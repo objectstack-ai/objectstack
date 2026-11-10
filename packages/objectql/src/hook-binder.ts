@@ -26,6 +26,7 @@ import { normalizeFlowFunctionEntry, type FlowFunctionEntry } from '@objectstack
 import type { ObjectQL, HookHandler } from './engine.js';
 import { wrapDeclarativeHook, type HookDiagnosticsLogger } from './hook-wrappers.js';
 import type { HookMetricsRecorder } from './hook-metrics.js';
+import { handlerOwnerPackageId } from './bare-name-one-holder.js';
 
 export interface BindHooksOptions {
   /** Owning package / app id — used for `unregisterHooksByPackage`. */
@@ -452,10 +453,10 @@ function resolveInProcessHandler(
     // record resolves to its handler — a hook cares only about the callable.
     const fromBundle = normalizeFlowFunctionEntry(opts.functions?.[h]);
     if (fromBundle) return fromBundle.handler as HookHandler;
-    // Then a function the SAME package registered on the engine earlier. The
-    // registry is keyed by bare name, so the owner on the entry is what keeps
-    // a hook from binding to a function another package registered under the
-    // same name — that package's code would run on this package's events.
+    // Then a function the SAME package registered on the engine earlier, read
+    // from that package's own holding: a hook never binds to a function
+    // another package registered under the same name — that package's code
+    // would run on this package's events.
     return ownPackageFunction(engine, h, opts.packageId);
   }
   return undefined;
@@ -465,6 +466,14 @@ function resolveInProcessHandler(
  * The engine-registered function `name` when — and only when — its owner is
  * `packageId`. A bind that states no owner holds only the functions handed to
  * it: an entry with no owner, or with another owner, is not this package's.
+ *
+ * [ADR-0150 D3 step 1, #32073] Read from the package's OWN holding
+ * (`ObjectQL#functionHoldersOf`), never from the bare map's one
+ * last-registered entry per name: a package's own function stays its own
+ * after another package registers the same name, where the bare map's entry
+ * would then name the other package and refuse the bind. The rule is still
+ * own package only — a holder in the hook's closure, the platform's
+ * owner-less function and every other package's are not this package's code.
  */
 function ownPackageFunction(
   engine: ObjectQL,
@@ -472,8 +481,8 @@ function ownPackageFunction(
   packageId: string | undefined,
 ): HookHandler | undefined {
   if (!packageId) return undefined;
-  if (typeof (engine as any).resolveFunctionEntry !== 'function') return undefined;
-  const entry = (engine as any).resolveFunctionEntry(name);
+  if (typeof (engine as any).functionHoldersOf !== 'function') return undefined;
+  const entry = (engine as ObjectQL).functionHoldersOf(name).packageItem(handlerOwnerPackageId(packageId));
   if (!entry || entry.packageId !== packageId) return undefined;
   return typeof entry.handler === 'function' ? (entry.handler as HookHandler) : undefined;
 }
