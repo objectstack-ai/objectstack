@@ -423,6 +423,8 @@ assertion content, and the answer does not depend on whether the account exists.
 | `saml_issuer_mismatch` | The response is signed with the configured certificate but comes from another IdP entity ID. Check the provider's IdP Entity ID against the IdP's issuer. |
 | `Invalid SAML response` | Any other refusal of the response (for example an expired assertion or a broken signature). The server log carries the vendor's line. |
 
+The list is exported as `SSO_SAML_REFUSAL_CAUSES` from `@objectstack/plugin-auth`.
+
 ---
 
 ## Per-provider sign-in options

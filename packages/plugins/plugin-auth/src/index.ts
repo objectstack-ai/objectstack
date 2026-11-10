@@ -112,6 +112,13 @@ export {
   SSO_OIDC_UNCLASSIFIED_REFUSAL,
   type SsoOidcRefusalCause,
 } from './sso-oidc-refusal-cause.js';
+// [#32086] The SAML counterpart: the closed list of causes a refused SAML
+// response names in place of the vendor's opaque `Invalid SAML response`.
+export {
+  SSO_SAML_REFUSAL_CAUSES,
+  SSO_SAML_UNCLASSIFIED_REFUSAL,
+  type SsoSamlRefusalCause,
+} from './sso-saml-refusal-cause.js';
 export * from './send-verification-email.js';
 export * from './objectql-adapter.js';
 // [#7732] ADR-0069 D4's revoke-audit trail. Exported alongside the adapter it
