@@ -138,6 +138,11 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * their own. What a write type can be declared for is a stack key, so that is
  * the granularity this derives.
  *
+ * [#31998] A sixth key, `objectExtensions`, which the rule reaches through the
+ * shared fold (`objectExtensionsByTarget(stack)`) rather than a `stack.X`
+ * read: the fold call is counted as the key it reads, so the derivation sees
+ * the collection the way the rule reaches it.
+ *
  * Source-scanned rather than probed, for `authoring-rule-wiring.test.ts`'s
  * reason one file over: vitest inlines imports through its transform, so a spy
  * cannot prove which collections a pure function reached for. The path is
@@ -150,7 +155,9 @@ function stackKeysJudgedByRoleWord(): string[] {
   const end = source.indexOf('\n}\n', start);
   expect(end, "the rule's body must terminate at column 0 \u2014 re-point this derivation").toBeGreaterThan(start);
   const body = source.slice(start, end);
-  return [...new Set([...body.matchAll(/\bstack\.([A-Za-z_][A-Za-z0-9_]*)/g)].map((m) => m[1]))].sort();
+  const direct = [...body.matchAll(/\bstack\.([A-Za-z_][A-Za-z0-9_]*)/g)].map((m) => m[1]);
+  const viaFold = /\bobjectExtensionsByTarget\(stack\)/.test(body) ? ['objectExtensions'] : [];
+  return [...new Set([...direct, ...viaFold])].sort();
 }
 
 const ENTRY = AUTHORING_RULES.find((r) => r.name === 'validateSecurityPosture')!;
@@ -359,7 +366,7 @@ describe('validateSecurityPosture at the runtime publish surface (#7576 → #830
     // silence this comment claimed it covered).
     expect(ROLE_ENTRY, 'the split entry must exist — role-word may not ride the crossed entry').toBeDefined();
     expect(ROLE_ENTRY.surfaces).toEqual(['cli', 'runtime-publish']);
-    expect(ROLE_ENTRY.runtimeTypes).toEqual(['object', 'permission', 'book', 'position', 'app']);
+    expect(ROLE_ENTRY.runtimeTypes).toEqual(['object', 'permission', 'book', 'position', 'app', 'object_extension']);
     // `surfaceReason` is the field for a rule that does NOT cross ("why the
     // runtime gate does not run it"), so a crossed entry carries none — the
     // shape every other `CLI_AND_RUNTIME` entry in the registry has. The old
@@ -376,7 +383,7 @@ describe('validateSecurityPosture at the runtime publish surface (#7576 → #830
     // ⛔ This list is a statement about the RULE, so a collection genuinely
     // added to or removed from it is a deliberate edit to this line — and to
     // `runtimeTypes`, which is exactly the pairing the next assertion enforces.
-    expect(judged).toEqual(['apps', 'books', 'objects', 'permissions', 'positions']);
+    expect(judged).toEqual(['apps', 'books', 'objectExtensions', 'objects', 'permissions', 'positions']);
 
     // The invariant, with the two sides read from different places: the keys
     // the rule judges, and the keys the registry declaration reaches through
@@ -550,6 +557,57 @@ describe('validateSecurityPosture at the runtime publish surface (#7576 → #830
       expect(clean.errors, `${c.type}: the lit control must pass`).toEqual([]);
       expect(clean.rulesRun).toContain('validateSecurityRoleWord');
     }
+  });
+
+  it('[#31998] an OBJECT_EXTENSION write carrying the reserved word is REFUSED at the real gate', () => {
+    // The door the CLI fix would otherwise split from: Studio's add-field on a
+    // `.custom` pair and the `/meta` doors publish an `object_extension` item
+    // (`allowRuntimeCreate: true`), and before this crossing no rule ran on it.
+    const entry = DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === 'object_extension');
+    expect(entry?.allowRuntimeCreate, "'object_extension' is runtime-creatable").toBe(true);
+    expect(stackKeyForType('object_extension')).toBe('objectExtensions');
+    expect(runtimeAuthoringRulesFor('object_extension').map((r) => r.name)).toEqual(['validateSecurityRoleWord']);
+
+    const roleSelect = { type: 'select', label: 'Group Function', options: [{ value: 'l1', label: 'Tier 1' }] };
+    const refused = runRuntimeAuthoringRules({
+      type: 'object_extension',
+      item: { extend: 'sd_agent', fields: { role: roleSelect } },
+      context: { objects: [{ name: 'sd_agent', label: 'Agent', sharingModel: 'private', fields: { tier: { type: 'text' } } }] },
+    });
+    expect(refused.errors.map((f) => f.rule)).toEqual([SECURITY_ROLE_WORD]);
+    expect(refused.errors[0].severity).toBe('error');
+    // Not a context collection, and an extension carries no `name`: the
+    // written item is the sole member of its collection, so the path stays
+    // positional and names it.
+    expect(refused.errors[0].path).toBe('objectExtensions[0].fields.role.name');
+    expect(refused.errors[0].where).toBe('field "sd_agent.role"');
+    expect(refused.rulesRun).toEqual(['validateSecurityRoleWord']);
+
+    // The two labels the entry serves, at the same door.
+    const labelled = runRuntimeAuthoringRules({
+      type: 'object_extension',
+      item: { extend: 'sd_agent', label: 'Agent Roles', fieldPatches: { tier: { label: 'Role Tier' } } },
+    });
+    expect(labelled.errors.map((f) => f.path)).toEqual([
+      'objectExtensions[0].label',
+      'objectExtensions[0].fieldPatches.tier.label',
+    ]);
+
+    // ⭐ The lit control: a door that refuses every extension write would pass
+    // everything above.
+    const clean = runRuntimeAuthoringRules({
+      type: 'object_extension',
+      item: { extend: 'sd_agent', label: 'Agent', fields: { group_function: { ...roleSelect } } },
+    });
+    expect(clean.errors).toEqual([]);
+    expect(clean.advisories).toEqual([]);
+    expect(clean.rulesRun).toEqual(['validateSecurityRoleWord']);
+
+    // Not a context row: the baseline carries no `objectExtensions`, and the
+    // candidate holds exactly the written item.
+    const snapshots = buildRuntimeWriteSnapshots({ type: 'object_extension', item: { extend: 'sd_agent' } })!;
+    expect(snapshots.baseline).not.toHaveProperty('objectExtensions');
+    expect(snapshots.candidate.objectExtensions).toEqual([{ extend: 'sd_agent' }]);
   });
 
   it('[#19370] `positions` / `apps` are written-into keys, not context collections', () => {
