@@ -313,6 +313,11 @@ path pointer the command fails on `main`: it projects the dotted pointer as a co
 there. When the save drops `homeAmount`, the message says nothing re-rates them. Landed by #31949 in PR #31969
 (`33ab84f9`).
 
+*Note (2026-11-10):* the wait above is resolved by #31911 in PR #32216: `os migrate recompute-home-amounts` reads a
+path pointer's `master_detail` column and converts each row from its parent's code
+(`packages/objectql/src/home-amount-recompute.ts#recomputeHomeAmounts`), listing a row whose parent holds no code as
+`code_blank`, so the message names a recompute that runs for a path pointer as for a sibling one.
+
 ### D6 — Q4: raw aggregates over a record-mode field refuse, and consolidation reads the home field (letter A)
 
 - A raw aggregate over a record-mode amount refuses at build unless it groups by that amount's code field.
