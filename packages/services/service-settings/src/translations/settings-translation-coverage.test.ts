@@ -243,3 +243,70 @@ describe('warnings live in info_banner rows, not in description or help strings'
     });
   }
 });
+
+/**
+ * Inside a Chinese sentence the punctuation is full-width: `，；：（）`, not the
+ * ASCII `, ; : ( )`. The zh-CN `settings.auth` copy mixed the two, so an admin
+ * read 「认证限流:最大请求数」 beside 「新用户的成员归属」 on one page.
+ *
+ * The rule is read off the characters around each mark, so ASCII stays where
+ * it belongs: a mark whose nearest non-space neighbours are both non-CJK (the
+ * `.` and `/` of `203.0.113.0/24`, a comma inside an English product name) is
+ * left alone, and code spans and `{{placeholders}}` are not read at all. A
+ * paren pair is Chinese when either side of it touches CJK or it encloses CJK.
+ */
+const CJK = /[　-〿㐀-鿿＀-￯—]/;
+const HALF_WIDTH_MARKS = new Set([',', ';', ':', '(', ')']);
+
+function nearestNonSpace(s: string, from: number, step: 1 | -1): string {
+  for (let i = from + step; i >= 0 && i < s.length; i += step) if (s[i] !== ' ') return s[i];
+  return '';
+}
+
+/** Each half-width mark inside Chinese prose in `text`, as `index:mark`. */
+function halfWidthMarksInChinese(text: string): string[] {
+  // Blank code spans and placeholders to spaces, keeping every other index.
+  const s = text.replace(/`[^`]*`|\{\{[^}]*\}\}|\{[^}]*\}/g, (m) => ' '.repeat(m.length));
+  const hits = new Set<number>();
+  const open: number[] = [];
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (!HALF_WIDTH_MARKS.has(c)) continue;
+    if (CJK.test(nearestNonSpace(s, i, -1)) || CJK.test(nearestNonSpace(s, i, 1))) hits.add(i);
+    if (c === '(') open.push(i);
+    if (c === ')' && open.length > 0) {
+      const o = open.pop()!;
+      if (CJK.test(s.slice(o + 1, i))) hits.add(o).add(i);
+    }
+  }
+  return [...hits].sort((a, b) => a - b).map((i) => `${i}:${s[i]}`);
+}
+
+function stringsUnder(node: unknown, path: string, out: Array<[string, string]>): Array<[string, string]> {
+  if (typeof node === 'string') out.push([path, node]);
+  else if (node && typeof node === 'object') {
+    for (const [k, v] of Object.entries(node)) stringsUnder(v, `${path}.${k}`, out);
+  }
+  return out;
+}
+
+describe('zh-CN settings.auth uses full-width punctuation inside Chinese sentences', () => {
+  it('the rule flags a half-width mark in Chinese prose and leaves codes, paths and placeholders', () => {
+    expect(halfWidthMarksInChinese('认证限流:最大请求数')).toEqual(['4::']);
+    expect(halfWidthMarksInChinese('要求成员使用身份验证器应用(TOTP)保护账户。')).toEqual(['12:(', '17:)']);
+    expect(halfWidthMarksInChinese('裸域名,每行一个')).toEqual(['3:,']);
+    expect(halfWidthMarksInChinese('例如 203.0.113.0/24。Auth Token')).toEqual([]);
+    expect(halfWidthMarksInChinese('设置 `auth:mfa` 与 {{count}}, 共计')).toEqual([]);
+  });
+
+  it('no zh-CN settings.auth string carries a half-width , ; : ( ) inside Chinese prose', () => {
+    const strings = stringsUnder(zhCN.settings?.auth, 'settings.auth', []);
+    // Non-vacuity: the sweep reads the namespace, not an empty set.
+    expect(strings.length).toBeGreaterThan(60);
+    const hits = strings
+      .map(([path, v]) => [path, halfWidthMarksInChinese(v)] as const)
+      .filter(([, marks]) => marks.length > 0)
+      .map(([path, marks]) => `${path} @ ${marks.join(' ')}`);
+    expect(hits, `half-width punctuation in zh-CN Chinese copy:\n${hits.join('\n')}`).toEqual([]);
+  });
+});
