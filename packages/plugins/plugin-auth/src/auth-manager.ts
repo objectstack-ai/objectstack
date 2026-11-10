@@ -264,6 +264,7 @@ import { resolvePasswordHasher } from './auth-manager-password-hasher.js';
 // two arrows that moved with it.
 import { createAuthInstance, type AuthInstanceHost } from './auth-manager-auth-instance.js';
 import { readSamlAcsLanding, runSsoCallbackScope, type SamlLandingContext, type SsoCallbackRequest } from './sso-oidc-refusal-cause.js';
+import { createEngineSsoProviderConfigReader, emailClaimOfStoredOidcConfig, type SsoProviderConfigEngine } from './register-sso-provider.js';
 import { readSsoProviderSignInOptions, runWithSamlIdpInitiated } from './sso-sign-in-options.js';
 // [#25224 cut 16] The body of `buildPluginList`; the method of the same name
 // below hands it the members it reads (`PluginListHost`). The organization
@@ -4093,6 +4094,14 @@ export class AuthManager {
         return readSamlAcsLanding(context, saml.providerId, saml.request);
       },
       scoped,
+      // Read only when the vendor refused the sign-in for a missing email: the
+      // claim the provider's email mapping names, for the refusal's log line.
+      async (providerId) => {
+        const stored = await createEngineSsoProviderConfigReader(
+          () => this.config.dataEngine as SsoProviderConfigEngine | undefined,
+        )(providerId);
+        return stored ? emailClaimOfStoredOidcConfig(stored.oidcConfig) : undefined;
+      },
     );
   }
 

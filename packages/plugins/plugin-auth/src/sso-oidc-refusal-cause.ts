@@ -122,6 +122,25 @@ export const SSO_OIDC_UNCLASSIFIED_REFUSAL = 'token_not_verified';
 /** The vendor's `error=` value on that redirect, which this module never changes. */
 const OPAQUE_REFUSAL_ERROR = 'invalid_provider';
 
+/**
+ * The vendor's description when the sign-in's claims carry no email address
+ * (or, for an IdP that sends no ID token, no `sub`): `handleOIDCCallback`'s
+ * `if (!userInfo.email || !userInfo.id)`.
+ */
+export const SSO_OIDC_MISSING_USER_INFO = 'missing_user_info';
+
+/**
+ * What {@link SSO_OIDC_MISSING_USER_INFO} becomes on the redirect: the email
+ * claim is the one missing. With an ID token (every OIDC sign-in that asks for
+ * the `openid` scope) the subject is always present, because the vendor
+ * refuses a token without `sub` first (`id_token_subject_missing`), so the
+ * missing member is the email the provider's email mapping reads.
+ */
+export const SSO_OIDC_EMAIL_CLAIM_MISSING = 'email_claim_missing';
+
+/** The mapping key that names the claim the email is read from (the form's "Map: Email claim"). */
+export const SSO_OIDC_EMAIL_MAPPING_KEY = 'mapping.email';
+
 const CALLBACK_PATH_PREFIX = '/sso/callback/';
 
 /**
@@ -275,22 +294,69 @@ function splitLocation(location: string): { head: string; segments: string[]; fr
   };
 }
 
-/** Whether a `Location` is the vendor's opaque ID-token refusal. */
-function isOpaqueRefusal(location: string): boolean {
+/** Whether a `Location` is the vendor's `invalid_provider` refusal with this description. */
+function isVendorRefusal(location: string, description: string): boolean {
   const parts = splitLocation(location);
   return (
     !!parts &&
     parts.segments.includes(`error=${OPAQUE_REFUSAL_ERROR}`) &&
-    parts.segments.includes(`error_description=${SSO_OIDC_UNCLASSIFIED_REFUSAL}`)
+    parts.segments.includes(`error_description=${description}`)
   );
 }
 
-function withDescription(location: string, cause: SsoOidcRefusalCause): string {
+/** Whether a `Location` is the vendor's opaque ID-token refusal. */
+function isOpaqueRefusal(location: string): boolean {
+  return isVendorRefusal(location, SSO_OIDC_UNCLASSIFIED_REFUSAL);
+}
+
+function withDescription(location: string, cause: string, replaced: string = SSO_OIDC_UNCLASSIFIED_REFUSAL): string {
   const parts = splitLocation(location)!;
   const segments = parts.segments.map((s) =>
-    s === `error_description=${SSO_OIDC_UNCLASSIFIED_REFUSAL}` ? `error_description=${cause}` : s,
+    s === `error_description=${replaced}` ? `error_description=${cause}` : s,
   );
   return `${parts.head}?${segments.join('&')}${parts.fragment}`;
+}
+
+/**
+ * Reads the claim a provider's email mapping names (`mapping.email`, `email`
+ * when unset), for the refusal's log line; `undefined` when it cannot be read.
+ */
+export type SsoOidcEmailClaimReader = (providerId: string) => Promise<string | undefined>;
+
+/**
+ * The vendor's `missing_user_info` refusal, named: the redirect's description
+ * becomes {@link SSO_OIDC_EMAIL_CLAIM_MISSING}, and one `warn` line names the
+ * claim the provider's email mapping read and the mapping key that would
+ * supply another one. The line carries no claim value and nothing about the
+ * account. ⛔ No email is ever derived here: which claim holds the address is
+ * the administrator's explicit choice.
+ */
+async function nameMissingEmailClaim(
+  response: Response,
+  location: string,
+  providerId: string,
+  host: SsoRefusalHostLogger | undefined,
+  readEmailClaim: SsoOidcEmailClaimReader | undefined,
+): Promise<Response> {
+  const claim = (await readEmailClaim?.(providerId).catch(() => undefined)) || 'email';
+  const meta = {
+    providerId,
+    protocol: 'oidc',
+    cause: SSO_OIDC_EMAIL_CLAIM_MISSING,
+    claim,
+    mappingKey: SSO_OIDC_EMAIL_MAPPING_KEY,
+  };
+  const text =
+    `[auth] SSO sign-in refused: the identity provider sent no "${claim}" claim, which the provider's email mapping `
+    + `(${SSO_OIDC_EMAIL_MAPPING_KEY}, "Map: Email claim") reads the user's email address from. Remedy: set `
+    + `${SSO_OIDC_EMAIL_MAPPING_KEY} to a claim this identity provider sends for every user; for Microsoft Entra ID `
+    + 'users without a mailbox that is preferred_username (or upn), read from the ID token, so the provider must also '
+    + 'read its claims from the ID token (skipUserInfo).';
+  if (host) host.warn(text, meta);
+  else console.warn(text, meta);
+  const headers = new Headers(response.headers);
+  headers.set('location', withDescription(location, SSO_OIDC_EMAIL_CLAIM_MISSING, SSO_OIDC_MISSING_USER_INFO));
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
 /**
@@ -310,6 +376,7 @@ export async function runSsoOidcCallbackScope(
   providerId: string,
   host: SsoRefusalHostLogger | undefined,
   run: () => Promise<Response>,
+  readEmailClaim?: SsoOidcEmailClaimReader,
 ): Promise<Response> {
   const scope: CallbackScope = { held: [] };
   let response: Response;
@@ -321,6 +388,10 @@ export async function runSsoOidcCallbackScope(
   }
 
   const location = response.headers.get('location');
+  if (location && isVendorRefusal(location, SSO_OIDC_MISSING_USER_INFO)) {
+    for (const line of scope.held) line.release();
+    return nameMissingEmailClaim(response, location, providerId, host, readEmailClaim);
+  }
   if (!location || !isOpaqueRefusal(location)) {
     for (const line of scope.held) line.release();
     return response;
@@ -565,8 +636,9 @@ export async function runSsoCallbackScope(
   host: SsoRefusalHostLogger | undefined,
   readSamlLanding: (saml: Extract<SsoCallbackRequest, { protocol: 'saml' }>) => Promise<SamlAcsLanding | undefined>,
   run: () => Promise<Response>,
+  readEmailClaim?: SsoOidcEmailClaimReader,
 ): Promise<Response> {
-  if (callback.protocol === 'oidc') return runSsoOidcCallbackScope(callback.providerId, host, run);
+  if (callback.protocol === 'oidc') return runSsoOidcCallbackScope(callback.providerId, host, run, readEmailClaim);
   // A landing that cannot be read leaves the vendor's answer as it is.
   const landing = await readSamlLanding(callback).catch(() => undefined);
   const response = await run();
