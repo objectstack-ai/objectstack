@@ -2572,7 +2572,7 @@
       "title": "A session with no active organization is a LEGAL state with fail-closed semantics: tenant-scoped reads resolve to nothing, tenant-scoped writes are refused loudly naming the missing org, and nothing is ever NULL-stamped",
       "since": "v17",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -2589,13 +2589,10 @@
         "knownGaps": [
           "The state needs a producer. QA run #24783 measured two durable, non-racy ones on the walled boot (knownGaps[2]), on `isolated` and `group`; since #25626 only (2) has a door. (1) NO membership: at #24783 a user minted by POST /api/v1/auth/admin/create-user under OS_AUTH_MEMBERSHIP_POLICY=invite-only answered membershipCreated:false and held no sys_member row. #25626 retired that recipe: in multi-org mode create-user joins the new user to the operator's ACTIVE organization as member, invite-only included, and with no active organization answers 400 NO_ACTIVE_ORGANIZATION and creates no user (packages/plugins/plugin-auth/src/admin-user-endpoints.ts, the ADR-0093 D3 amendment; packages/qa/dogfood/test/create-user-organization-join.dogfood.test.ts, J1 and J2). The reconciler still answers `policy-skip` under invite-only for automatic binding (packages/plugins/plugin-auth/src/reconcile-membership.ts#reconcileMembership), but no HTTP door that mints a member-less user on a walled boot has been measured since, so a clause or leg scored on producer (1) records blocked(fixture) naming this line until a run measures one. (An explicitly declared `auto` binds nobody under a wall either, ADR-0093 D1 `no-target-org`; no run has measured that boot.) (2) A member who CLEARS its active organization: POST /api/v1/auth/organization/set-active {\"organizationId\": null}, after which GET /api/v1/auth/get-session reads null. The two differ under `group`, where the scope is the membership set (acceptance[0]), so record WHICH producer each clause was scored on. Two former producers no longer yield the state. The signup race is gone: the session seam settles a newly created user's membership before its first session resolves an organization (ADR-0123 D3; packages/plugins/plugin-auth/src/auth-manager.ts#composeDatabaseHooks, its defaultActiveOrg hook), so only a policy that binds nobody leaves that session without one. The removed-member path ends the session's claim instead: removing a user's last membership revokes each live session that named that organization, and a user still holding another membership has such a session re-pointed to it (packages/plugins/plugin-auth/src/membership-ended-session.ts#endSessionClaimsForEndedMembership); QA run #24783 measured the removed member's token answering 401 UNAUTHENTICATED",
           "`invite-only` is no longer a fixture gap: the walled boot must declare a membership policy anyway (RUNNER.md 'A walled boot is a fixture of its own', prerequisite 3), and declaring `invite-only` gives knownGaps[0]'s producer (1). SSO-JIT-pending still has no stock fixture: that producer is blocked(fixture) unless the run configures SSO.",
-          "requires[0]'s tenancy-walled deployment is a walled boot. On 18.0.0 os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): 18.x step 4 (#24580) deleted the walled boot refusal (serve.ts walledPostureRefusal) before 18.0.0, and of the published prereleases only 18.0.0-next.5 carries it. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses an os dev boot naming itself, while a bare os serve in production mode judges none of them until OS_AUTH_SECRET is set (that entry). The item stays blocked (fixture, #9334) because every clause is a walled leg and the stock showcase provisions no walled boot, not for want of a producer (knownGaps[0]); its pin (automated.ref) boots the posture in-process.",
-          "acceptance[4] has an open question for a user who holds NO membership at all (producer (1) of knownGaps[0]): its login/logout rows in sys_audit_log carry tenant_id null, because no organization exists to stamp and ADR-0123 D3's ordering fix 'must not manufacture a membership that policy says must not exist'. QA run #24783 read those rows only as the platform operator (GET /api/v1/data/sys_audit_log filtered by user_id answered 200), while the user itself gets 403 on sys_audit_log, on both postures. ADR-0123 does not state whether that is the intended answer: D3 forbids a NULL-tenanted row under this state 'in any subsystem' and pays the audit ledger by ordering, which binds nobody under invite-only. ADR-0131 D7 moves the clause's premise without answering the question: sys_audit_log is a deployment-level ledger with no organization column, its tenant_id is an attribution field the tenant-field resolver does not claim, 'never the tenancy anchor', and such objects are 'governed by object permission, not by the wall'. So Layer 0 is inert on the ledger, and the clause's 'invisible to RLS readers' (written for #8245, when the ledger was walled) no longer names its read path; ADR-0131 D9 scopes the no-NULL rule to tenant-column objects ('column ⇒ in scope'). Neither ADR states whether a member-less actor's row may carry a NULL attribution, nor who must be able to read it. The operator's 200 and the user's 403 are the implementation: packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts, whose tenant_id docblock says NULL means a deployment-level action and whose defaultRowScope sys_audit_log_org reads tenant_id == current_user.organization_id, which a NULL row matches for no organization reader. The clause stands as written. Until the question is ruled (raised by QA run #24783's finding F3 for wave anchor #24579; no card carries it yet), score acceptance[4] on that user from what is measured (the raw rows, their tenant_id and the readers that see them) and name this question beside the verdict",
-          "On `group`, producer (2), a member with no active organization, gets 500 {\"code\": \"ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED\"} on a tenant-scoped create, where `isolated` and a member-less caller answer the acceptance[1] 403 naming the missing organization; nothing is written (QA run #24783: acceptance[1], acceptance[5], acceptance[6] and negative[3] FAIL on `group` only). That is the open product card #24784. The clauses stand as written: score them against it until it lands, and score the member-less caller's write separately",
-          "acceptance[7] (the walled `group` leg for a member with no active organization) stays red until #24784 lands: on a walled group boot at 580fd4ed (QA run #24783, re-derived under RUNNER rule 7) the create answers 500 ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED and writes no row. It is scored only on a live walled group boot; a run without one records it blocked(fixture) citing RUNNER.md's 'A walled boot is a fixture of its own' — ⛔ never from automated.ref, whose group CONTROL stops at the plugin-security layer (RUNNER rule 6, a pin scores only the layer it drives). When #24784's fix merges, re-run the clause and drop this line"
+          "requires[0]'s tenancy-walled deployment is a walled boot. On 18.0.0 os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): 18.x step 4 (#24580) deleted the walled boot refusal (serve.ts walledPostureRefusal) before 18.0.0, and of the published prereleases only 18.0.0-next.5 carries it. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (examples/app-showcase declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses an os dev boot naming itself, while a bare os serve in production mode judges none of them until OS_AUTH_SECRET is set (that entry). Every clause is a walled leg, and the walled boot runs from the tree with the three variables exported: QA run #32102 (ff04ad81) booted the stock showcase under group and isolated that way and served every leg, so the item carries no blocked marker (#9334, lifted by #32111). A run that does not provision the walled boot records each walled leg blocked(fixture) naming that entry; its pin (automated.ref) boots the posture in-process.",
+          "acceptance[4] carries an open question: may a login/logout row produced by a session with no organization scope carry a NULL organization attribution, and must it? Two producers give such rows. (1) A user who holds NO membership at all (producer (1) of knownGaps[0]): its login/logout rows in sys_audit_log carry tenant_id null, because no organization exists to stamp and ADR-0123 D3's ordering fix 'must not manufacture a membership that policy says must not exist'. QA run #24783 read those rows only as the platform operator (GET /api/v1/data/sys_audit_log filtered by user_id answered 200), while the user itself gets 403 on sys_audit_log, on both postures. (2) A member who CLEARED its active organization (producer (2) of knownGaps[0]): QA run #32102 (ff04ad81, repro rule R-1), on walled group and isolated boots, read the member's rows as login A, login A, a logout with tenant_id NULL (sent while the session had no active organization), login A; the operator reads that logout row (200) and the member gets 403 (object permission). The mechanism: packages/plugins/plugin-auth/src/auth-session-audit.ts#logoutEventFor takes the session's activeOrganizationId, and packages/plugins/plugin-audit/src/auth-event-audit.ts writes tenant_id from the event's organizationId, null when it has none. ADR-0131 D7 settles the read path, and acceptance[4] and acceptance[6] read the ledger that way since revision 10: sys_audit_log is a deployment-level ledger with no organization column, its tenant_id is an attribution field the tenant-field resolver does not claim, 'never the tenancy anchor', such objects are 'governed by object permission, not by the wall', and D7's 2026-10-22 note keeps tenant_id's NULL arm by design; ADR-0131 D9 scopes the no-NULL rule to tenant-column objects ('column ⇒ in scope'). The clause's former 'invisible to RLS readers' premise was written for #8245, when the ledger was walled. Neither ADR states whether a row from either producer must carry an organization attribution. ADR-0123 D3 pays the ledger by ordering, which binds nobody under invite-only (producer (1)) and does not reach a session that cleared its organization (producer (2)). If the answer is 'must be attributed', producer (2)'s logout row is a product defect in logoutEventFor. The implementation: packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts, whose tenant_id docblock says NULL means a deployment-level action and whose defaultRowScope sys_audit_log_org reads tenant_id == current_user.organization_id, which a NULL row matches for no organization reader. Until the question is ruled (QA run #24783's finding F3 for wave anchor #24579 raised it for producer (1); #32111 carries it to the maintainer for both producers), score acceptance[4] from what is measured (the raw rows, their tenant_id and the readers that see them) and name this question and the producer beside the verdict"
         ]
       },
-      "blocked": { "by": "fixture", "ref": "#9334" },
       "automated": {
         "kind": "unit",
         "ref": "packages/plugins/plugin-security/src/no-active-organization-write-refusal.test.ts — a plugin unit: SecurityPlugin's middleware over a stub terminal that stands in for the engine, so a case that 'lands' there means the middleware called next(), and the engine's own insert path never runs. It has cases for acceptance[0] (the read deny sentinel), acceptance[1] and acceptance[2] (insert, update and bulk insert refused naming the missing active organization, nothing stamped), and a control asserting that the `single` posture has no wall — the test itself agrees the stock showcase configuration makes the item vacuous. It has NO case, at any level, for acceptance[3], acceptance[4], acceptance[5] or acceptance[6]. Its `group` describe now asserts 'a NON-EMPTY membership set with NO active organization: an insert has nowhere to land, and is refused the same way' (the #24784 fix, PR #24819), still at the plugin layer. + packages/qa/dogfood/test/no-active-organization-write-refusal.dogfood.test.ts (HTTP, a `posture-only` isolated showcase boot whose admin session carries no active organization: the write is refused 403 naming the missing organization and nothing is written — acceptance[1], acceptance[2], negative[1]) + packages/qa/dogfood/test/sharing-rule-org-less-caller.dogfood.test.ts (HTTP: the #8158 manage_sharing holder with no active organization is refused list, by-name and by-id read, evaluate, delete and create, and an org-scoped grant confers nothing — acceptance[3], negative[0]) + packages/plugins/plugin-security/src/no-active-organization-insert-union-scope.test.ts (ENGINE: a real ObjectQL engine and SqlDriver, the `group` refusal with nothing stored — acceptance[7]'s shape in-process, not the live walled group boot acceptance[7] requires). Under RUNNER rule 6 the plugin-unit pin scores an HTTP-oracle clause partial at most, naming the engine and HTTP layers as missing, and no pin scores acceptance[7]"
@@ -2637,10 +2634,10 @@
           "evidence": "responses + a cross-check that another tenant's rows exist and were not returned"
         },
         {
-          "clause": "the audit carve-out is paid for by ORDERING, not by an exemption: audit rows from a first session carry a real tenant — no audit row is NULL-tenanted and therefore permanently invisible to RLS readers (#8245)",
+          "clause": "the audit ledger is read through object permission, not through the wall (ADR-0131 D7): the login/logout rows the session produced exist in sys_audit_log, a deployment-level ledger (systemFields: { tenant: false }) whose tenant_id is a plain attribution field that keeps its NULL arm by design (D7's 2026-10-22 note) and that ADR-0131 D9's no-NULL rule does not reach ('column ⇒ in scope'). The platform operator, who holds object permission on the ledger, reads every such row, a NULL-attributed one included; the session's own user, who holds none, is refused 403 by object permission. Whether a row from this state must carry an organization attribution is open (fixtures.knownGaps[3]) and is not scored here",
           "oracle": "api",
-          "verify": "read the login/logout audit rows the session produced as a tenant-scoped reader; they must be visible. A row present in the raw table but invisible to every RLS reader is a FAIL even though nothing errored",
-          "evidence": "raw rows + the RLS-scoped read of the same rows"
+          "verify": "as the platform operator, read sys_audit_log filtered by the user's user_id (GET /api/v1/data/sys_audit_log): 200, returning every login/logout row the session produced, each row's tenant_id quoted (NULL or an organization id). A row present in the raw table that the operator's read does not return is a FAIL even though nothing errored. As the session's own user, the same read answers 403 by object permission: a 5xx, or rows of another user, is a FAIL. A NULL tenant_id on such a row is not by itself a FAIL: record it beside the verdict with the producer it came from and knownGaps[3]'s question",
+          "evidence": "raw rows with tenant_id + the operator's read of the same rows + the user's 403 envelope"
         },
         {
           "clause": "the state is LEGAL, not a crash: the session authenticates, non-tenant-scoped surfaces still work, and nothing 500s",
@@ -2649,9 +2646,9 @@
           "evidence": "the response set"
         },
         {
-          "clause": "three subsystems agree — sharing, the Layer 0 wall + write path, and the audit ledger give the SAME answer for the SAME state (this item exists because they once gave three contradictory ones on the same working day)",
+          "clause": "three subsystems agree — sharing, the Layer 0 wall + write path, and the audit ledger give the SAME answer for the SAME state (this item exists because they once gave three contradictory ones on the same working day). Under ADR-0131 D7 the audit ledger is deployment-level and off the wall, so its answer for this state is acceptance[4]'s: the row is written and is read through object permission. A NULL tenant_id on a ledger row is attribution, not a tenant column (D7's 2026-10-22 note; D9 reaches tenant-column objects only), so it is not a disagreement with the wall's refusal",
           "oracle": "api",
-          "verify": "the run record states each subsystem's observed behavior side by side; any disagreement is the finding, whichever way it leans",
+          "verify": "the run record states each subsystem's observed behavior side by side; any disagreement is the finding, whichever way it leans. The audit ledger's column records whether its rows were written and who reads them (acceptance[4]); a NULL tenant_id there is recorded with knownGaps[3]'s question, not scored as a disagreement. A ledger row that is lost, or that the operator's read does not return, is one",
           "evidence": "the three-way comparison table"
         },
         {
@@ -2733,6 +2730,12 @@
           "date": "2026-10-26",
           "change": "Six checklist-accuracy findings, re-read on main b4199c96. Five from Tier 1 record #25815: automated.ref quoted the unit pin's group CONTROL as 'a NON-EMPTY membership set lands, even with no active organization'; on this tree that case reads 'a NON-EMPTY membership set with NO active organization: an insert has nowhere to land, and is refused the same way' and asserts refusal (#24784, PR #24819) — the ref now quotes it. The ref claimed the pin covers every clause; acceptance[3] to acceptance[6] have no case in it, and the ref says so. Three existing pins join the ref with their layers: no-active-organization-write-refusal.dogfood.test.ts (HTTP, a1/a2/n1), sharing-rule-org-less-caller.dogfood.test.ts (HTTP, a3/n0) and no-active-organization-insert-union-scope.test.ts (engine, a7's shape, which still does not score a7). From addendum record #25823 (after #25626): the operator create-user producer of a member-less user is retired — under a wall create-user joins the operator's active organization, or answers 400 NO_ACTIVE_ORGANIZATION — so personas[0], personas[1], fixtures.requires[1] and knownGaps[0] now mint producer (2)'s member that way and record producer (1) blocked(fixture). knownGaps[4] and knownGaps[5] still read #24784 as open; #24784 closed 2026-10-20 (PR #24819), and their own text asks for a live walled group re-run before the line drops, so they are left for that run. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-10",
+          "change": "Stale-spec re-point of acceptance[4] and acceptance[6] to ADR-0131 D7/D9, from QA run #32102 (ff04ad81, repro rule R-1), which scored both FAIL on walled group and isolated boots: a member that cleared its active organization signs out and its logout row carries tenant_id NULL, which the operator reads (200) and the member is refused (403, object permission). acceptance[4]'s clause read 'no audit row is NULL-tenanted and therefore permanently invisible to RLS readers (#8245)', written when the ledger was walled; D7 makes sys_audit_log a deployment-level ledger governed by object permission, not by the wall, its 2026-10-22 note keeps tenant_id's NULL arm by design, and D9 scopes the no-NULL rule to tenant-column objects. The clause, verify and evidence now name who must read the row (the operator, 200) and who is refused (the user, 403 by object permission), and a NULL attribution is recorded with the open question rather than scored. acceptance[6] states that the ledger's NULL attribution is not a subsystem disagreement under D7. fixtures.knownGaps[3] extends the open question (may such a row carry a NULL attribution, and must it?) to producer (2), with R-1's rows and mechanism; the question is carried to the maintainer by #32111 and is not answered here. The blocked marker (#9334) is dropped: #32102 booted the stock showcase walled from the tree with the three variables exported and served every leg (RUNNER.md 'A walled boot is a fixture of its own'), and knownGaps[2] no longer says the item stays blocked or that no example app declares the multi-org runtime (examples/app-showcase declares it). knownGaps[4] and knownGaps[5] are dropped: #24784 closed (PR #24819) and #32102 measured it holding live on a walled group boot (acceptance[7] pass, the acceptance[1] 403 instead of the 500), the re-run both lines asked for. No other knownGaps index moved, and no cross-reference elsewhere named either line",
+          "ref": "#32111"
         }
       ]
     },
@@ -4702,6 +4705,464 @@
           "date": "2026-10-26",
           "change": "One checklist-accuracy finding of Tier 1 record #25815 (negative[2]), re-read on main b4199c96: org-admin-assignment-boundary.posture.test.ts exercises only admin_full_access out of boundary in each posture; the rest of negative[2]'s set list is asserted only by the unit gate in delegated-admin-gate.test.ts. automated.ref says so. No clause or status changed",
           "ref": "#25835"
+        }
+      ]
+    },
+    {
+      "id": "access-security.permission-set-package-resolution",
+      "title": "A package's position resolves its permission sets from that package and its declared dependencies: a set only the environment or an unrelated package holds is refused and grants nothing, the boot report names the candidates, and a grant row records the package that holds its set",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "admin (the seeded admin): the installs, the grant and the reads",
+        "a member who holds the position qa_b_desk: the effective-permissions read"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr_a, namespace qa_a) and qa_b (manifest id com.qa.addr_b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. qa_a holds the permission set qa_a_reader (read on one showcase object); qa_b holds the position qa_b_desk binding qa_a_reader and qa_env_reader, and declares no dependency on qa_a",
+          "an environment permission set qa_env_reader saved with PUT /api/v1/meta/permission/qa_env_reader and no ?package=; a member assigned qa_b_desk; the server restarted after the installs so the boot report runs"
+        ]
+      },
+      "steps": [
+        "read the boot log for the catalog reference report",
+        "as the member, read the effective permissions (GET /api/v1/auth/me/permissions); record whether either set's grants are present",
+        "rebuild qa_b declaring a dependency on qa_a, reinstall, restart, and repeat the two reads",
+        "as admin, insert a sys_user_permission_set row granting qa_a_reader to the member with no package column; read the row back"
+      ],
+      "acceptance": [
+        {
+          "clause": "a position's set that only the environment holds, or that a package outside the position's closure holds, resolves to nothing and grants nothing",
+          "oracle": "api",
+          "verify": "before the dependency, the member holds neither set's grants (packages/core/src/security/security-catalog.ts: a refusal confers nothing and is never a guess, reason outside-closure)",
+          "evidence": "the effective-permissions body"
+        },
+        {
+          "clause": "the boot report names each refused reference with its candidates",
+          "oracle": "log",
+          "verify": "the boot log names qa_b_desk, qa_a_reader with com.qa.addr_a, and qa_env_reader with the environment",
+          "evidence": "the report lines"
+        },
+        {
+          "clause": "once qa_b declares qa_a, the position reaches qa_a_reader; qa_env_reader stays refused, since no package can depend on the environment",
+          "oracle": "api",
+          "verify": "after the dependency, the member holds qa_a_reader's grants and not qa_env_reader's (ADR-0150 D3 (a))",
+          "evidence": "the second effective-permissions body"
+        },
+        {
+          "clause": "a grant row written without a package records the package that holds its set",
+          "oracle": "api",
+          "verify": "the read-back row carries permission_set_package com.qa.addr_a (packages/plugins/plugin-security/src/stored-permission-set-package-stamp.ts#registerPermissionSetPackageStamp)",
+          "evidence": "the row"
+        },
+        {
+          "clause": "confirming a binding suggestion whose set name is refused answers 409 naming the reviewed bind command",
+          "oracle": "test",
+          "verify": "run packages/plugins/plugin-security/src/suggested-audience-bindings.test.ts and cite the case naming os migrate stored-references bind (a live run needs a suggestion row whose set two holders reach, which no stock fixture writes)",
+          "evidence": "the test output"
+        }
+      ],
+      "negative": [
+        "the member holding qa_env_reader's grants through the package position is a FAIL: that is the D3 (a) narrowing",
+        "a grant row stamped with a package that does not hold the set is a FAIL"
+      ],
+      "traps": ["wrong-persona", "cache-staleness"],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/objectql/src/engine-security-catalog-package-door.test.ts, packages/plugins/plugin-security/src/suggested-audience-bindings.test.ts, packages/qa/dogfood/test/stored-reference-package-column.dogfood.test.ts (R1)"
+      },
+      "source": [
+        "packages/core/src/security/security-catalog.ts (reads permission sets by (package, name) through resolvePackageScopedHolders; positions stay one slot per name)",
+        "packages/plugins/plugin-security/src/stored-permission-set-package-stamp.ts#registerPermissionSetPackageStamp (the column stamp on insert and update)",
+        "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D3 (own, then the one holder in the closure, else the refusal) and D3 (a)",
+        "#31815 (E3), #31974 (R1/R3 stamp and the suggestion refusal)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0150 child E3 and the R1/R3 stamp (#31815, #31974). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
+          "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "access-security.sharing-queue-assignment-package-resolution",
+      "title": "Sharing rules, queues and assignment rules resolve by (package, name): the activation door refuses a name two packages hold with the candidates, a declared rule's queue recipient and an assignment rule's queue come from the rule's own package, and a refused declared name serves nothing",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": ["admin (the seeded admin): the activation calls"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr_a, namespace qa_a) and qa_b (manifest id com.qa.addr_b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Each holds a queue qa_desk, a sharing rule qa_share and an assignment rule qa_route (none of these types has a one-holder rule, and the namespaces differ, so both install)"
+        ]
+      },
+      "steps": [
+        "POST /api/v1/security/_activation/queue/qa_desk {\"enabled\": false}; record status and body",
+        "repeat for /security/_activation/sharing_rule/qa_share and /security/_activation/assignment_rule/qa_route",
+        "GET /api/v1/data/sys_metadata_activation; record any row for the three names"
+      ],
+      "acceptance": [
+        {
+          "clause": "the activation door answers 409 RESOURCE_CONFLICT with the candidates for a queue, sharing rule or assignment rule name two packages hold, and writes no row",
+          "oracle": "api",
+          "verify": "each call answers 409 with code RESOURCE_CONFLICT and candidates naming com.qa.addr_a and com.qa.addr_b (packages/runtime/src/domains/catalog-activation.ts); the ledger holds no row for the three names",
+          "evidence": "the three 409 bodies and the ledger read"
+        },
+        {
+          "clause": "a declared sharing rule's queue recipient and an assignment rule's queue resolve from the rule's own package, and a refused declared name serves nothing and warns once",
+          "oracle": "test",
+          "verify": "run packages/plugins/plugin-sharing/src/package-scoped-declarations.test.ts and packages/plugins/plugin-sharing/src/queue-recipient.test.ts and cite their output (packages/plugins/plugin-sharing/src/package-scoped-declarations.ts#resolveDeclaredName). No checklist app stages queue members, so the live leg is the door above",
+          "evidence": "the test output"
+        }
+      ],
+      "negative": [
+        "a 200 that switches off one of the two holders' items is a FAIL: the door never picks",
+        "a 503 for the same call is a regression of #31959, which maps the package-scoped refusal to 409"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-sharing/src/package-scoped-declarations.test.ts, packages/plugins/plugin-sharing/src/queue-recipient.test.ts, packages/plugins/plugin-sharing/src/stored-declaration-package-backfill.test.ts"
+      },
+      "source": [
+        "packages/plugins/plugin-sharing/src/package-scoped-declarations.ts#resolveDeclaredName and #listedHoldersView",
+        "packages/plugins/plugin-sharing/src/ownership-queue-service.ts (resolve, expandMembers and isMember take the caller's package)",
+        "packages/runtime/src/domains/catalog-activation.ts (the 409 with candidates)",
+        "#31728, #31789, #31850 (E4), #31959 (the activation door's 409)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0150 child E4 (#31728, #31789, #31850). The queue and assignment_rule waivers in coverage.json stand: this item drives the activation door, not claim, release or move. Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
+          "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "access-security.permission-set-address-in-execution-context",
+      "title": "A permission set travels as (package, name) from the grant to every request's evaluation: the execution context carries permissionSetAddresses, the evaluator reads each set at its holder, the activation ledger switches a set off per holder, and an OAuth client acting for a user carries none",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "a member M holding a packaged permission set: every read the set decides",
+        "admin (the seeded admin): the grant, the explain reads and the activation switch"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr_a, namespace qa_a) and qa_b (manifest id com.qa.addr_b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. qa_a declares the object qa_a_ticket and the permission set qa_a_reader (read on qa_a_ticket, nothing else); qa_b declares one object and no permission set",
+          "a boot on a file database, as platform-core.activation-ledger-row-contract boots, because two steps stop the server and write the ledger directly",
+          "a member M (any signed-up person) granted qa_a_reader as admin with POST /api/v1/data/sys_user_permission_set {\"user_id\": M, \"permission_set\": \"qa_a_reader\"}; the grant door stamps permission_set_package (access-security.permission-set-package-resolution); one qa_a_ticket record"
+        ],
+        "knownGaps": [
+          "two packages each shipping qa_a_reader is not reachable through install today (#32027's own note), so the cases this change exists for (one name, two holders, each grant reaching only its own) are held by packages/plugins/plugin-security/src/permission-set-address.test.ts, not driven live"
+        ]
+      },
+      "steps": [
+        "as M: GET /api/v1/auth/me/permissions and GET /api/v1/data/qa_a_ticket. As admin: POST /api/v1/security/explain {\"userId\": M, \"object\": \"qa_a_ticket\", \"operation\": \"read\"}, and read M's grant row (GET /api/v1/data/sys_user_permission_set) for its permission_set_package",
+        "stop the server. In the database file, INSERT one sys_metadata_activation row: metadata_type 'permission', package_id 'com.qa.addr_b', name 'qa_a_reader', active false, with a fresh id and the audit columns as an existing row carries them. That row is a holder of the name M does not hold. Restart and repeat step 1. Then stop, DELETE that row and restart",
+        "as admin: POST /api/v1/security/_activation/permission/qa_a_reader {\"enabled\": false}; read the row it wrote (GET /api/v1/data/sys_metadata_activation); repeat step 1",
+        "stop the server; UPDATE that row's package_id to NULL (a package-less row, the shape an earlier release wrote); restart and repeat step 1. Then POST /api/v1/security/_activation/permission/qa_a_reader {\"enabled\": true} and repeat step 1 once more"
+      ],
+      "acceptance": [
+        {
+          "clause": "a grant resolves its set at its holder, and the member holds what the set grants",
+          "oracle": "api",
+          "verify": "M's effective permissions list qa_a_reader and the data read returns the record; the grant row's permission_set_package is com.qa.addr_a, which the resolver reads first, else ADR-0150 D3, and records as M's address (packages/core/src/security/resolve-authz-context.ts#resolveUserAuthzGrants; the evaluator resolves each address through the security catalog: packages/plugins/plugin-security/src/permission-evaluator.ts#permissionSetRequestsFor)",
+          "evidence": "the effective-permissions body, the data read and the grant row"
+        },
+        {
+          "clause": "a ledger row for another holder of the name switches nothing off for the holder M's grant names",
+          "oracle": "api",
+          "verify": "after step 2's restart M still lists qa_a_reader and still reads the record, and explain lists qa_a_reader as a contributor with no 'held — deactivated' entry (packages/core/src/security/resolve-authz-context.ts#permissionSetSwitchedOff, per holder since #32027)",
+          "evidence": "the three answers after the restart"
+        },
+        {
+          "clause": "the holder's own row switches the set off, and explain names it deactivated",
+          "oracle": "api",
+          "verify": "the door's row carries package_id com.qa.addr_a and active false; M's effective permissions no longer list qa_a_reader and the data read no longer returns the record (record its status); explain's principal layer carries the contributor {kind: 'permission_set', name: 'qa_a_reader', via: 'held — deactivated', state: 'deactivated'} (packages/plugins/plugin-security/src/explain-engine.ts, which judges dropped grants per holder)",
+          "evidence": "the ledger row and the three answers"
+        },
+        {
+          "clause": "a package-less row switches every holder of the name off, and re-enabling restores the grant",
+          "oracle": "api",
+          "verify": "with package_id NULL, step 1's answers are those of the previous clause (packages/core/src/security/resolve-authz-context.ts#readDisabledCatalogNames); after {\"enabled\": true} M lists qa_a_reader again and reads the record",
+          "evidence": "both sets of answers"
+        },
+        {
+          "clause": "an OAuth client acting for a user carries no address; an AI service account carries its own",
+          "oracle": "test",
+          "verify": "packages/core/src/security/assemble-execution-context.ts#assembleExecutionContext sets permissionSetAddresses to undefined on the OAuth agent arm: its permissions are the scope-derived ceiling names, which resolve by D3 with no caller, as #32027's comment on the line states. The AI service account (ADR-0151) is the account arm, not that one, and carries authz.permissionSetAddresses. ⚠️ No pin tells the arms apart: assemble-execution-context.test.ts's 'decided but not yet filled' case asserts the agent context has no key, but its authz fixture carries no addresses either. Score this clause from the source reading and say so in the run record (FOLLOW-UPS §16b)",
+          "evidence": "the source lines read, and the run record's note"
+        }
+      ],
+      "negative": [
+        "the foreign row of step 2 switching off M's set is a FAIL: the ledger is judged per holder",
+        "⛔ leaving step 2's foreign row in place before step 3 makes the door switch that row instead of writing com.qa.addr_a's: setActive finds its row by (metadata_type, name) (packages/core/src/utils/metadata-activation-store.ts, FOLLOW-UPS §16b). That is a fixture error, never a verdict on this item"
+      ],
+      "traps": ["cache-staleness", "wrong-persona"],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-security/src/permission-set-address.test.ts and packages/core/src/security/request-execution-context.test.ts; no live spec drives the ledger per holder"
+      },
+      "source": [
+        "packages/core/src/security/assemble-execution-context.ts#assembleExecutionContext (permissionSetAddresses: agent ? undefined : authz.permissionSetAddresses)",
+        "packages/core/src/security/resolve-authz-context.ts#resolveUserAuthzGrants (each set resolved once through the security catalog: the R1 column first, else D3)",
+        "packages/core/src/security/resolve-authz-context.ts#permissionSetSwitchedOff and #readDisabledCatalogNames (the ledger per holder; a package-less row switches every holder off)",
+        "packages/plugins/plugin-security/src/permission-evaluator.ts#permissionSetRequestsFor (the evaluator reads each set at its address)",
+        "packages/plugins/plugin-security/src/explain-engine.ts (dropped grants per holder)",
+        "packages/spec/src/kernel/execution-context.zod.ts#PermissionSetAddressSchema (declared by #31978)",
+        "#32027 (part of #31971), #31698 (permission-set family narrowing, open)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0150 D3 and D4 (D8 row R4), the permission set address pipeline (#32027). This sweep first drafted the item as planned at 60f8149e, when the assembler always left permissionSetAddresses undefined; #32027 landed before the item reached main, so it is authored active, as a new item, not promoted. Scoped sweep #32019 (epic #32022 M1, theme 1), read from source at 0f7389cc; no live run made",
+          "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "access-security.ai-service-account-agent-ceiling",
+      "title": "An AI service account acts under the agent ceiling: its key never carries View All, Modify All, the destructive class, a system permission or admin standing; assigning it a set or a position above the ceiling, by insert or update, is refused 400 naming what breaches; and a set edited above it after assignment still grants nothing more",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["organization administrator: the assignments", "the AI service account, through its key: every effective read"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "an account with a key, registered as identity-auth.ai-service-account-register-and-key does; a scratch permission set qa_agent_reader (read on one showcase object, no system permissions) and a second set qa_view_all with viewAllRecords on the same object",
+          "a position qa_view_all_pos whose permissionSets is [\"qa_view_all\"], saved as admin with PUT /api/v1/meta/position/qa_view_all_pos"
+        ]
+      },
+      "steps": [
+        "with the key: GET /api/v1/auth/me/permissions; record system permissions, admin standing and any View All / Modify All",
+        "as the administrator: POST /api/v1/data/sys_user_permission_set granting qa_view_all to the account, then qa_agent_reader; POST /api/v1/data/sys_user_position assigning qa_view_all_pos to the account; PATCH the accepted qa_agent_reader row's permission_set to qa_view_all; then grant mcp_agent_data_read to the account; record each answer and read the account's grant and position rows",
+        "with the key: read the object; then as the administrator edit qa_agent_reader to add viewAllRecords (PUT /api/v1/meta/permission/qa_agent_reader) and repeat the effective-permissions read and the object read with the key"
+      ],
+      "acceptance": [
+        {
+          "clause": "the account resolves as an agent: no system permissions, no admin standing, and no everyone-anchor sets",
+          "oracle": "api",
+          "verify": "the effective-permissions body lists no system permission and no admin scope (packages/core/src/security/resolve-authz-context.ts#isAgentAccountRow, #resolveUserAuthzGrants)",
+          "evidence": "the body"
+        },
+        {
+          "clause": "assigning a set or a position above the ceiling, by insert or by update, is refused 400 VALIDATION_FAILED naming what breaches; a set inside it is accepted",
+          "oracle": "api",
+          "verify": "the qa_view_all grant answers 400 with code VALIDATION_FAILED and invalid_value at permission_set naming viewAllRecords (packages/plugins/plugin-security/src/agent-account-grant-refusal.ts#agentAccountSetGrantMessage); the qa_view_all_pos assignment answers 400 at position naming qa_view_all and its breaching bits (#agentAccountPositionGrantMessage); the PATCH answers 400 at permission_set and the row keeps qa_agent_reader; the qa_agent_reader grant is accepted. No refused row is stored",
+          "evidence": "the four answers and the rows read after them"
+        },
+        {
+          "clause": "an MCP agent ceiling set is refused to the account by its sibling rule, which runs first",
+          "oracle": "api",
+          "verify": "the mcp_agent_data_read grant answers 400 VALIDATION_FAILED at permission_set with the sentence of the MCP ceiling rule (\"…the permission ceiling of an AI assistant connected over MCP, not a permission set for a person…\": packages/plugins/plugin-security/src/agent-ceiling-grant-refusal.ts#agentCeilingGrantMessage). That rule judges every holder at hook priority 35, before this item's rule at 45; access-security.agent-ceiling-set-assignment-refusal covers its other doors",
+          "evidence": "the answer"
+        },
+        {
+          "clause": "a set edited above the ceiling after assignment is still read under it",
+          "oracle": "api",
+          "verify": "after the edit the key's effective permissions still carry no View All, and the object read returns only what qa_agent_reader allowed before the edit (packages/plugins/plugin-security/src/agent-ceiling-clamp.ts#clampPermissionSetToAgentCeiling)",
+          "evidence": "the effective-permissions body and both object reads"
+        }
+      ],
+      "negative": [
+        "View All reaching the key through any path is a FAIL",
+        "this item's refusal applied to a person's grant is a FAIL: only an agent holder is judged by the bits its sets carry. ⛔ Do not confuse it with the MCP agent ceiling sets' rule, which refuses those three sets to every holder (access-security.agent-ceiling-set-assignment-refusal)"
+      ],
+      "traps": ["wrong-persona", "cache-staleness"],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-security/src/agent-account-grant-refusal.test.ts, packages/plugins/plugin-security/src/agent-ceiling-clamp.test.ts, packages/plugins/plugin-security/src/agent-ceiling-grant-refusal.test.ts, packages/core/src/security/resolve-authz-context.agent-account.test.ts"
+      },
+      "source": [
+        "packages/plugins/plugin-security/src/agent-account-grant-refusal.ts#registerAgentAccountGrantRefusal (the write-path refusal on sys_user_permission_set and sys_user_position, insert and update, priority 45)",
+        "packages/plugins/plugin-security/src/agent-ceiling-clamp.ts#AGENT_CEILING_OBJECT_KEYS (the clamp at evaluation)",
+        "packages/plugins/plugin-security/src/agent-ceiling-grant-refusal.ts#registerAgentCeilingGrantRefusal (the sibling rule for the MCP ceiling sets, priority 35)",
+        "packages/core/src/security/resolve-authz-context.ts#resolveUserAuthzGrants",
+        "docs/adr/0151-ai-service-account-a-headless-agent-is-a-registered-principal-of-its-own.md D3",
+        "#31867, #32056"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0151 D3, the agent ceiling (#31867): the set and position refusals, insert and update, and the clamp; with the sibling MCP ceiling-set rule's answer to the account (#32056 widened that rule's doors). Scoped sweep #32019 (epic #32022 M1, theme 3: AI service accounts and identity), read from source at 0f7389cc; no live run made",
+          "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "access-security.credential-use-audit-row",
+      "title": "Each API key or OAuth access token use writes one credential_use audit row per use window, naming the credential, its owner and the client's address, and never the key, its hash or its prefix",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": ["a member holding an osk_ API key: the requests", "admin (the seeded admin): the audit read"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": ["one API key a member minted at POST /api/v1/keys, unused since it was minted"]
+      },
+      "steps": [
+        "make two reads with the key in quick succession",
+        "as admin: GET /api/v1/data/sys_audit_log filtered to action credential_use; record every row for the key",
+        "search each row's whole text for the raw key and for its prefix"
+      ],
+      "acceptance": [
+        {
+          "clause": "the first admitted use writes one credential_use row; a second use inside the window writes none",
+          "oracle": "api",
+          "verify": "exactly one row for the key (packages/plugins/plugin-audit/src/credential-use-audit.ts#CREDENTIAL_USE_AUDIT_ACTION; the stamp is the window)",
+          "evidence": "the audit rows"
+        },
+        {
+          "clause": "the row names the key owner as actor, the key row as its record, and carries credential_kind api_key, credential_id, used_at and the client address and user agent, or ip_address_absent",
+          "oracle": "api",
+          "verify": "the row's metadata holds those keys (packages/plugins/plugin-audit/src/credential-use-audit.ts#buildCredentialUseAuditRow; packages/core/src/security/credential-use-client.ts#credentialUseClientOf)",
+          "evidence": "the row"
+        },
+        {
+          "clause": "the row never carries the key, its hash or its prefix",
+          "oracle": "api",
+          "verify": "neither search finds a match",
+          "evidence": "the two search results"
+        }
+      ],
+      "negative": [
+        "one row per request is a FAIL: the ledger would grow with traffic, not with use windows",
+        "a client address read from X-Forwarded-For is a FAIL: only the transport peer is read"
+      ],
+      "traps": ["eventual-consistency"],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-audit/src/credential-use-audit.integration.test.ts, packages/core/src/security/credential-use-client-doors.pin.test.ts"
+      },
+      "source": [
+        "packages/plugins/plugin-audit/src/credential-use-audit.ts#installCredentialUseAudit (the stamp is the window; the row's keys)",
+        "packages/core/src/security/credential-use-client.ts#transportPeerAddressOf",
+        "#31862, #31897, #31967"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — the credential_use ledger row (#31862, #31897, #31967). Scoped sweep #32019 (epic #32022 M1, theme 3: AI service accounts and identity), read from source at 60f8149e; no live run made",
+          "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "access-security.agent-ceiling-set-assignment-refusal",
+      "title": "The MCP agent ceiling sets (mcp_agent_data_read, mcp_agent_data_write, mcp_agent_restricted) reach no person through any door: a direct grant, a position definition saved at the metadata door (active or draft), a position assignment, a seed and the deployment baseline are each refused 400 VALIDATION_FAILED at the field that named the set, and an ordinary set passes every one of them",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "admin (the seeded admin): every write",
+        "a person P (any signed-up account): the holder every write targets, and the effective-permissions read"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh showcase boot and a person P signed up through the auth door",
+          "an authored package created as admin with POST /api/v1/packages {\"manifest\": {\"id\": \"com.qa.ceil\", \"name\": \"QA ceiling doors\", \"version\": \"0.1.0\", \"type\": \"app\", \"namespace\": \"qa_ceil\"}} (201), for the draft and seed legs",
+          "one scratch package qa_decl (manifest id com.qa.decl, namespace qa_decl), its own scratch app directory, compiled with `objectstack build` and installed with `os package install DIR/dist/objectstack.json`, declaring one object and the position qa_declared_ceiling whose permissionSets is [\"mcp_agent_data_read\"]: a definition that reaches the catalog without the metadata door, for the assignment leg",
+          "the showcase person sets showcase_contributor, showcase_auditor and showcase_ops, used as the ordinary-set controls"
+        ],
+        "knownGaps": [
+          "if installing qa_decl is itself refused, record that answer: the assignment leg then has no position to assign, so score it blocked(fixture), never a pass. The dogfood pin registers such a definition straight into the registry, which a live run cannot do",
+          "the baseline leg needs a host whose SecurityPlugin options name a ceiling set, which the showcase boot does not take; it is scored from the unit pin"
+        ]
+      },
+      "steps": [
+        "as admin: POST /api/v1/data/sys_user_permission_set {\"user_id\": P, \"permission_set\": \"mcp_agent_data_read\"}; then the same with showcase_contributor; then PATCH that accepted row's permission_set to mcp_agent_data_write; record each answer",
+        "PUT /api/v1/meta/position/qa_ceiling_pos {\"name\": \"qa_ceiling_pos\", \"label\": \"QA ceiling\", \"permissionSets\": [\"showcase_auditor\", \"mcp_agent_data_read\"]}; then PUT /api/v1/meta/position/qa_ceiling_pos?mode=draft&package=com.qa.ceil with the same body; then GET /api/v1/meta/position/qa_ceiling_pos",
+        "control: PUT /api/v1/meta/position/qa_person_pos {\"name\": \"qa_person_pos\", \"label\": \"QA person\", \"permissionSets\": [\"showcase_auditor\"]}, then POST /api/v1/data/sys_user_position {\"user_id\": P, \"position\": \"qa_person_pos\"}",
+        "POST /api/v1/data/sys_user_position {\"user_id\": P, \"position\": \"qa_declared_ceiling\"}; read P's sys_user_position rows",
+        "seed: PUT /api/v1/meta/seed/qa_ceiling_seed?mode=draft&package=com.qa.ceil {\"object\": \"sys_user_permission_set\", \"mode\": \"insert\", \"records\": [{\"user_id\": P, \"permission_set\": \"mcp_agent_restricted\"}]} and PUT /api/v1/meta/seed/qa_person_seed?mode=draft&package=com.qa.ceil with permission_set showcase_ops; POST /api/v1/packages/com.qa.ceil/publish-drafts {}; read P's sys_user_permission_set rows",
+        "as P: GET /api/v1/auth/me/permissions"
+      ],
+      "acceptance": [
+        {
+          "clause": "a direct grant of a ceiling set, by insert or by update, is refused; an ordinary set is granted",
+          "oracle": "api",
+          "verify": "the mcp_agent_data_read insert and the PATCH each answer 400 with code VALIDATION_FAILED and one fields[] entry {field: 'permission_set', code: 'invalid_value', value: <the set>}, whose constraint carries principalKind agent and permissionSet (packages/plugins/plugin-security/src/agent-ceiling-grant-refusal.ts#agentCeilingGrantError); the showcase_contributor grant is accepted and keeps its set",
+          "evidence": "the three answers and the row after the PATCH"
+        },
+        {
+          "clause": "the metadata door refuses a position definition naming a ceiling set, active and draft, and stores neither",
+          "oracle": "api",
+          "verify": "both saves answer 400 VALIDATION_FAILED at permissionSets with value mcp_agent_data_read (#registerPositionAgentCeilingGate, the protocol's authoring gate for position; a restore runs the same gate); the read answers 404. The control position saves 200 and its assignment answers 201",
+          "evidence": "the two refusals, the 404 and the two control answers"
+        },
+        {
+          "clause": "assigning a position whose definition names a ceiling set is refused at position, for a definition that never met the metadata door",
+          "oracle": "api",
+          "verify": "the qa_declared_ceiling assignment answers 400 VALIDATION_FAILED with fields[0] {field: 'position', code: 'invalid_value', value: 'qa_declared_ceiling'}, whose message names the set (#agentCeilingPositionAssignment); P has no row for it",
+          "evidence": "the answer and the rows"
+        },
+        {
+          "clause": "a seed granting a ceiling set stores no grant, and the seed's ordinary grant lands",
+          "oracle": "api",
+          "verify": "the publish answers 200; P's grant rows include showcase_ops and no row names any of the three ceiling sets. The seed's refused row is reported, and its other rows land",
+          "evidence": "the publish answer and the rows"
+        },
+        {
+          "clause": "the person resolves the ordinary sets and no ceiling set",
+          "oracle": "api",
+          "verify": "P's permissionSets include showcase_contributor, showcase_auditor (through qa_person_pos) and showcase_ops, and none of mcp_agent_data_read, mcp_agent_data_write, mcp_agent_restricted",
+          "evidence": "the body"
+        },
+        {
+          "clause": "a baseline naming a ceiling set does not boot, and an identity-provider group mapping never grants one",
+          "oracle": "test",
+          "verify": "run agent-ceiling-grant-refusal.test.ts: a SecurityPlugin whose fallbackPermissionSet (directly or as the isDefault set of defaultPermissionSets) or acceptedDefaultPermissionSets names a ceiling set throws at construction (#refuseAgentCeilingInBaselineOptions). Run scim-group-projection.test.ts: the mapping save refuses each of the three names and stores nothing, and the per-grant admission grants nothing for a stored mapping naming one. Each file reports at least one test and 0 failed",
+          "evidence": "both runs"
+        }
+      ],
+      "negative": [
+        "a ceiling set reaching a person through any of these doors is a FAIL",
+        "an ordinary set refused at any of these doors is a FAIL: the rule matches the three names exactly",
+        "reading a position a person holds without an assignment row, or a definition that reached the catalog without the metadata door and is never assigned, as a miss of this item is wrong: these doors do not judge them, and the read side is a separate decision (#32004)"
+      ],
+      "traps": ["wrong-persona"],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-security/src/agent-ceiling-grant-refusal.test.ts, packages/plugins/plugin-auth/src/scim-group-projection.test.ts and packages/qa/dogfood/test/grant-table-write-contract.dogfood.test.ts (the door pins on a booted showcase)"
+      },
+      "source": [
+        "packages/plugins/plugin-security/src/agent-ceiling-grant-refusal.ts#registerAgentCeilingGrantRefusal (sys_user_permission_set and sys_user_position, insert and update, priority 35)",
+        "packages/plugins/plugin-security/src/agent-ceiling-grant-refusal.ts#registerPositionAgentCeilingGate and #refuseAgentCeilingInBaselineOptions",
+        "packages/plugins/plugin-security/src/security-plugin-start-hooks.ts (both registrations)",
+        "packages/spec/src/ai/mcp.zod.ts#MCP_AGENT_PERMISSION_SETS",
+        "docs/adr/0090-permission-model-v2-concept-convergence.md D10",
+        "#32056"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0090 D10, the MCP agent ceiling sets reach no person: the direct grant rule, and the four doors #32056 added (the metadata door's position definition, every sys_user_position write, a seed, the baseline options), with the identity-provider mapping pins. Scoped sweep #32019 (epic #32022 M1, theme 3), read from source at 0f7389cc; no live run made",
+          "ref": "#32019"
         }
       ]
     }

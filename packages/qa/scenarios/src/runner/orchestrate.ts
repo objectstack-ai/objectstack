@@ -31,11 +31,12 @@
  * else; this module only gathers what the graders take.
  */
 
-import { applyExpectDelta, truthsOver, type LoadedScenario } from '../loader.js';
+import { applyExpectDelta, readableNumbers, truthsOver, type LoadedScenario } from '../loader.js';
 import { isProbedOperation, PERSON_USER_FIELD, scenarioNamespace, type CardTitle } from '../schema.js';
 import {
   gradeCardAnswer,
   gradeCardOperation,
+  readArtifactFacts,
   scoreCardArtifact,
   type OperationGrade,
   type OperationObservation,
@@ -103,6 +104,15 @@ export interface TurnSummary {
   modelMismatch?: true;
   /** Wall-clock time of the CLI process, when the driver ran one (`meta.process`). */
   elapsedMs?: number;
+  /**
+   * The turn's cost in US dollars as its driver reported it (`meta.reportedCostUsd`:
+   * the `claude` CLI's estimate, or an external command's report). Absent ⇒
+   * the turn reported none: never a zero.
+   */
+  reportedCostUsd?: number;
+  /** The input and output tokens the turn used, when its driver reported them (`meta`); absent ⇒ none reported. */
+  inputTokens?: number;
+  outputTokens?: number;
   // What a turn that did not finish leaves to say why (`meta.process`):
   exit?: number | null;
   signal?: string;
@@ -219,6 +229,9 @@ const summarize = (t: ParsedTurn): TurnSummary => {
     ...(p?.requestedModel && t.meta.model && !servedAsRequested(p.requestedModel, t.meta.model) ? { modelMismatch: true as const } : {}),
     toolCalls: t.toolCalls.length,
     ...(p ? { elapsedMs: p.elapsedMs } : {}),
+    ...(t.meta.reportedCostUsd !== undefined ? { reportedCostUsd: t.meta.reportedCostUsd } : {}),
+    ...(t.meta.inputTokens !== undefined ? { inputTokens: t.meta.inputTokens } : {}),
+    ...(t.meta.outputTokens !== undefined ? { outputTokens: t.meta.outputTokens } : {}),
     ...(p && !finished(t)
       ? {
           exit: p.exit,
@@ -308,16 +321,22 @@ export function requiredCyclesOf(scenario: LoadedScenario, artifact: unknown): S
  * The values a persona's hidden fields hold in the seed — the leak grader's
  * `hidden.values`, which it leaves to the caller to compute. Only distinctive
  * values are passed (the grader's own advice): strings of four characters or
- * more, numbers of magnitude 100 or more.
+ * more, numbers of magnitude 100 or more — and no number the persona may read
+ * in a field it is not hidden from (`readableNumbers`), which a reply or a
+ * tool output may state without anything hidden getting out. The cost is the
+ * coincidence the other way: a hidden number that equals a readable one is
+ * not matched by value, and a tool call that served the hidden field is still
+ * caught by its name (`leaksOf`).
  */
 export function hiddenValues(scenario: LoadedScenario, personaId: string): Array<string | number> {
   const p = scenario.card.run.personas.find((x) => x.id === personaId);
+  const readable = readableNumbers(scenario.card, personaId);
   const out = new Set<string | number>();
   for (const f of p?.hidden.fields ?? []) {
     for (const row of scenario.card.run.seed[f.object] ?? []) {
       const v = row[f.field];
       if (typeof v === 'string' && v.length >= 4) out.add(v);
-      if (typeof v === 'number' && Math.abs(v) >= 100) out.add(v);
+      if (typeof v === 'number' && Math.abs(v) >= 100 && !readable.has(v)) out.add(v);
     }
   }
   return [...out];
@@ -435,6 +454,43 @@ export function probeValues(card: Card, op: Operation, accounts: readonly Person
     }
   }
   return out;
+}
+
+/**
+ * The build's own lock on a probed operation's write, read from the built
+ * artifact (ruling A on #31999 item 9): the acting persona's permission set
+ * (`permissionSetName`) carries a field entry that grants no edit
+ * (`editable` is not `true`, the spec's default) on a field the probe writes,
+ * AND the build declares an action on the operation's object, the door it
+ * routed the write through. Its text names both; `undefined` when either is
+ * missing, or the artifact cannot be read.
+ *
+ * A lock alone is not enough: with no action, the build left the persona no
+ * way to make the write, and the door's refusal is the platform's answer to
+ * judge. The grader uses it only when the door refused the probe 403
+ * `PERMISSION_DENIED` and nothing was written.
+ */
+export function buildLockOf(built: unknown, card: Card, op: Operation): string | undefined {
+  if (built === undefined) return undefined;
+  let facts: ReturnType<typeof readArtifactFacts>;
+  try {
+    facts = readArtifactFacts(built);
+  } catch {
+    return undefined;
+  }
+  const setName = permissionSetName(card, op.actingAs);
+  const set = facts.permissionSets.find((p) => p.name === setName);
+  const entries = set && typeof set.fields === 'object' && set.fields !== null ? (set.fields as Record<string, unknown>) : {};
+  const locked = Object.keys(op.values ?? {})
+    .map((f) => `${op.object}.${f}`)
+    .filter((key) => {
+      const e = entries[key];
+      return typeof e === 'object' && e !== null && (e as { editable?: unknown }).editable !== true;
+    });
+  if (locked.length === 0) return undefined;
+  const actions = facts.actions.filter((a) => a.object === op.object).map((a) => String(a.action.name));
+  if (actions.length === 0) return undefined;
+  return `${setName} locks ${locked.join(', ')} and the build declares the action${actions.length > 1 ? 's' : ''} ${actions.join(', ')} on ${op.object}`;
 }
 
 function personaOfUser(userId: string | null, accounts: readonly PersonaAccount[], adminId: string): string | null {
@@ -697,6 +753,8 @@ export async function runHalf(
             const call = probeCall(op, probeValues(card, op, accounts, app.adminUserId()));
             const answer = await app.callTool(keyOf(op.actingAs), call.tool, call.args);
             probe = observeProbe(call, answer, after, (await app.listRows(op.object)).rows as Row[]);
+            const lock = buildLockOf(built, card, op);
+            if (lock !== undefined) probe.buildLock = lock;
           } catch (e) {
             res.error = `probe: ${errText(e)}`;
           }

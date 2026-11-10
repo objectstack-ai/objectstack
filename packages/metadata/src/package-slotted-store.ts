@@ -34,6 +34,19 @@
  * ⛔ `api`'s endpoint matcher keys its routes by METHOD + path (bucket 1);
  * nothing here resolves a path. What changes is that the matcher now sees
  * every package's endpoint instead of the last one registered under a name.
+ *
+ * ## Which types
+ *
+ * `api` (#32069), and every type whose one-holder rule has narrowed to the
+ * namespace — objectql's `NAMESPACE_SCOPED_BARE_NAME_TYPES`, today `agent` and
+ * `skill` (#31701). Two packages of two namespaces may each install such a
+ * name, so a store keyed by bare name would keep whichever registered last:
+ * the artifact door registers every package body's items here, and a read
+ * naming the other package (`get(type, name, packageId)`, the `/meta` code
+ * layer) was served the survivor. ⛔ A type joins the narrowed set only in the
+ * same change that adds it here: objectql pins the superset
+ * (`registry-bare-name-one-holder-ai-family.test.ts`), since this package
+ * cannot import objectql (objectql depends on it).
  */
 
 import {
@@ -45,13 +58,10 @@ import {
 import { peelStoredEnvelope } from './stored-envelope.js';
 
 /**
- * The types whose in-memory items are stored per `(package, name)`: `api`
- * (#32069), and `action` (#31697), slotted in the same change that made its
- * object-less name one per namespace (objectql's
- * `NAMESPACE_SCOPED_BARE_NAME_TYPES`), so two packages' same-named actions
- * are both kept before any reader resolves the name.
+ * The types whose in-memory items are stored per `(package, name)`: `api`,
+ * then every namespace-scoped type (#32151, #31697; see "Which types" above).
  */
-export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set(['api', 'action']);
+export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set(['api', 'agent', 'skill', 'action']);
 
 /** The provenance sentinel a rehydrated row carries in place of a package. */
 const OVERLAY_SENTINEL = 'sys_metadata';
