@@ -17,6 +17,7 @@
 import { describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 
 const PKG_A = 'app.alpha_demo';
 const PKG_B = 'app.beta_demo';
@@ -47,6 +48,7 @@ function makeProtocol() {
         return null;
     };
     const registry: any = {
+        ...NO_PACKAGE_SCOPED_READS,
         getItem: () => undefined,
         getArtifactItem: () => undefined,
         listItems: () => [],

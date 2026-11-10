@@ -17,7 +17,7 @@
  * the fail-closed obligation of #32076). G1 judged only the types whose
  * by-name readers consult `(package, name)` (`registry.readsByPackage`, E8's
  * nine); a covered type the registry still reads through `getItem` (a flow, a
- * picklist, …) kept the prefer-local read for a qualified address, which
+ * queue, …) kept the prefer-local read for a qualified address, which
  * served the first package that registered the name. Every type outside the
  * covered set keeps the prefer-local read.
  *
@@ -101,7 +101,7 @@ function exactQualifierRegistry(host: Pick<ProtocolHost, 'engine'>): ExactQualif
     return registry as ExactQualifierRegistry;
 }
 
-/** Whose read a refusal of {@link refuseUnjudgeableByNameRead} names. */
+/** Whose read a `501` refusal of a read the registry cannot judge names ({@link unjudgeableRefusal}). */
 export type UnjudgeableReadAddress =
     /** `?package=X`, or the qualified path the doors translate to it. */
     | { readonly kind: 'package'; readonly packageId: string }
@@ -111,34 +111,31 @@ export type UnjudgeableReadAddress =
     | { readonly kind: 'none' };
 
 /**
- * Why the engine's registry cannot judge a by-name read of `type` by
- * `(package, name)` — `undefined` when it can, or when the type is not one
- * ADR-0150 addresses by `(package, name)` (core's static
+ * Why the engine's registry cannot judge a read of `type` answered as a
+ * caller with no package (a read naming no package, and `_env` once the
+ * environment qualifier admits it) — `undefined` when it can, or when the type
+ * is not one ADR-0150 addresses by `(package, name)` (core's static
  * `PACKAGE_SCOPED_TYPES`, never a list the registry would have to supply).
- * For a covered type:
- *  - a read that names a package or the environment is judged by the exact
- *    qualifier ({@link admitExactQualifier}, {@link admitEnvironmentQualifier})
- *    through the registry's exact-qualifier reads, whatever the registry
- *    answers `readsByPackage`; missing any of them: `no-resolver`;
- *  - a read that names no package, on a registry with no `readsByPackage`:
- *    `no-resolver`, since the registry cannot say how it reads the type;
+ * A read naming a package is the exact qualifier's ({@link admitExactQualifier}),
+ * which refuses itself when the registry lacks the reads it needs. For a
+ * covered type:
+ *  - on a registry with no `readsByPackage`: `no-resolver`, since the registry
+ *    cannot say how it reads the type;
  *  - on a registry that reads the type by package, it is answered through the
  *    package-scoped resolver (`resolveItem`); missing it: `no-resolver`;
  *  - on a registry that answers `false` (it reads the type through `getItem`,
  *    as `SchemaRegistry` reads a type no child of epic #31527 has wired), it
- *    keeps `getItem` while the type's phase-1 one-holder rule still keeps a
- *    name to one package holder per deployment (seat ruling (a)); a type whose
- *    rule has narrowed to the namespace (`NAMESPACE_SCOPED_BARE_NAME_TYPES`)
- *    can have two package holders of a name: `narrowed`, refused like a
- *    missing resolver (seat ruling (b)).
+ *    keeps `getItem`'s read, as on `main` (seat ruling (a)): each such type
+ *    narrows in its own reader card. A type whose names are scoped to the
+ *    namespace (`NAMESPACE_SCOPED_BARE_NAME_TYPES`) can have two package
+ *    holders of a name: `narrowed`, refused like a missing resolver (seat
+ *    ruling (b)).
  */
 function unjudgeableCause(
     host: Pick<ProtocolHost, 'engine'>,
     type: string,
-    address: UnjudgeableReadAddress,
 ): 'no-resolver' | 'narrowed' | undefined {
     if (!isPackageScopedType(type)) return undefined;
-    if (address.kind !== 'none') return exactQualifierRegistry(host) === undefined ? 'no-resolver' : undefined;
     const registry = registryOf(host);
     if (typeof registry?.readsByPackage !== 'function') return 'no-resolver';
     if (registry.readsByPackage(type)) return typeof registry.resolveItem === 'function' ? undefined : 'no-resolver';
@@ -183,6 +180,11 @@ function unjudgeableRefusal(
  * `501 NOT_IMPLEMENTED` naming the cause. Never a first match (red line 1),
  * never a guess (red line 2).
  *
+ * For a read answered as a caller with no package: a read naming no package
+ * (`address` `none`), and `_env` once {@link admitEnvironmentQualifier} admits
+ * it (`environment`). A read naming a package is refused by
+ * {@link admitExactQualifier} itself.
+ *
  * Every production composition carries the reads (`ObjectQL`'s
  * `SchemaRegistry`); only an engine without them, such as a test double or an
  * embedder's own engine, reaches the refusal. A type outside the set is
@@ -194,9 +196,9 @@ function unjudgeableRefusal(
 export function refuseUnjudgeableByNameRead(
     host: Pick<ProtocolHost, 'engine'>,
     request: { type: string; name: string },
-    address: UnjudgeableReadAddress,
+    address: Exclude<UnjudgeableReadAddress, { kind: 'package' }>,
 ): void {
-    const cause = unjudgeableCause(host, request.type, address);
+    const cause = unjudgeableCause(host, request.type);
     if (cause !== undefined) throw unjudgeableRefusal(request, address, cause);
 }
 
@@ -226,8 +228,9 @@ function refusal(
  * @throws {PackageScopedNameRefusedError} `not-held-by-qualifier`, naming
  *   every holder, when the package holds no item of the name and another
  *   holder does — the package holders, and the environment's own item.
- * @throws a `501 NOT_IMPLEMENTED` refusal when the registry lacks the reads
- *   the judgment needs ({@link refuseUnjudgeableByNameRead}).
+ * @throws a `501 NOT_IMPLEMENTED` refusal (`refusal: true`) when the registry
+ *   lacks the reads the judgment needs (`packageScopedHoldersOf`,
+ *   `getEnvironmentScopedItem`, `getPackageScopedItem`).
  */
 export async function admitExactQualifier(
     host: Pick<ProtocolHost, 'engine' | 'findServedOverlayRow'>,
@@ -455,8 +458,11 @@ export function resolveMetaItemAddress(
  *
  * @throws {PackageScopedNameRefusedError} when packages hold the name and the
  *   environment does not.
- * @throws a `501 NOT_IMPLEMENTED` refusal when the registry lacks the reads
- *   the judgment needs ({@link refuseUnjudgeableByNameRead}).
+ * @throws a `501 NOT_IMPLEMENTED` refusal (`refusal: true`) when the registry
+ *   lacks the reads the judgment needs (`packageScopedHoldersOf`,
+ *   `getEnvironmentScopedItem`, `getPackageScopedItem`), or, for the read it
+ *   admits as a caller with no package, the reads that read needs
+ *   ({@link refuseUnjudgeableByNameRead}, naming the environment).
  */
 export function admitEnvironmentQualifier(
     host: Pick<ProtocolHost, 'engine'>,
@@ -466,9 +472,16 @@ export function admitEnvironmentQualifier(
     if (!isPackageScopedType(request.type)) return;
     const registry = exactQualifierRegistry(host);
     if (!registry) throw unjudgeableRefusal(request, { kind: 'environment' }, 'no-resolver');
-    if (registry.getEnvironmentScopedItem(request.type, request.name, request.member) !== undefined) return;
+    // [#32076] Admitted, `_env` is read as a caller with no package: its refusal names the environment.
+    if (registry.getEnvironmentScopedItem(request.type, request.name, request.member) !== undefined) {
+        refuseUnjudgeableByNameRead(host, request, { kind: 'environment' });
+        return;
+    }
     const holders = registry.packageScopedHoldersOf(request.type, request.name) ?? [];
-    if (holders.length === 0) return;
+    if (holders.length === 0) {
+        refuseUnjudgeableByNameRead(host, request, { kind: 'environment' });
+        return;
+    }
     const candidates: PackageScopedHolder[] = holders.map((holder) => ({ kind: 'package' as const, packageId: holder }));
     const base = {
         status: 'refused' as const,

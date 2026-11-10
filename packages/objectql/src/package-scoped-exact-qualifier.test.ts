@@ -279,6 +279,32 @@ describe('fail closed — a registry with no package-scoped resolver refuses wha
     expect(err.message).toContain('naming no package');
   });
 
+  it('[#32076] the layered read (`/layers`) is refused 501 as the plain read is, naming a package or naming none (BASE: served alpha\'s layers)', async () => {
+    ship('page', 'home', A);
+    ship('page', 'home', B);
+    const named = await unjudgeable(() => sliceless.getMetaItemLayered({ type: 'page', name: 'home', packageId: C }));
+    expectUnjudgeable(named);
+    expect(named.message).toContain(`naming package '${C}'`);
+    const bare = await unjudgeable(() => sliceless.getMetaItemLayered({ type: 'page', name: 'home' }));
+    expectUnjudgeable(bare);
+    expect(bare.message).toContain('naming no package');
+  });
+
+  it('[#32076] `_env` of the environment\'s own item, on a registry with the exact reads but no `readsByPackage`, is refused naming the environment', async () => {
+    const readsNoTypeByName = new Proxy(registry, {
+      get(target, prop) {
+        if (prop === 'readsByPackage' || prop === 'resolveItem') return undefined;
+        const value = Reflect.get(target, prop, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const half = new ObjectStackProtocolImplementation({ ...engine, registry: readsNoTypeByName } as never);
+    envItem('report', 'pipeline');
+    const err = await unjudgeable(() => half.admitEnvironmentQualifier({ type: 'report', name: 'pipeline' }));
+    expectUnjudgeable(err);
+    expect(err.message).toContain('naming the environment');
+  });
+
   it('the refusal crosses a wire door as 501 with its own sentence, never withheld as a fault', async () => {
     ship('page', 'home', A);
     const err = await unjudgeable(() => sliceless.getMetaItem({ type: 'page', name: 'home', packageId: C }));
@@ -324,7 +350,7 @@ describe('a covered type the registry reads through `getItem` (seat rulings (a),
     for (const type of UNWIRED_COVERED_TYPES) expect(registry.readsByPackage(type), type).toBe(false);
   });
 
-  describe('(a) a bare read of a type whose one-holder rule holds keeps `getItem`', () => {
+  describe('(a) a bare read of a type the registry reads through `getItem` keeps that read, as on main', () => {
     it.each(UNWIRED_COVERED_TYPES)('%s: the read naming no package serves the one holder, as on main', async (type) => {
       shipValid(type, 'solo', A);
       expect(labelOf(await protocol.getMetaItem({ type, name: 'solo' }))).toBe(`alpha ${type}`);
@@ -400,6 +426,18 @@ describe('a covered type the registry reads through `getItem` (seat rulings (a),
       const err = await refusalOf(() => protocol.admitEnvironmentQualifier({ type: 'webhook', name: 'notify' }));
       expect([err.refusal.reason, err.refusal.callerPackageId]).toEqual(['not-held-by-qualifier', null]);
       expect(err.refusal.candidates).toEqual([{ kind: 'package', packageId: A }]);
+    });
+
+    it('[#32076] the layered read (`/layers?package=`) of a name the package does not hold is the same 409 (BASE: alpha\'s layers)', async () => {
+      shipValid('flow', 'route', A);
+      const err = await refusalOf(() => protocol.getMetaItemLayered({ type: 'flow', name: 'route', packageId: C }));
+      expect([err.code, err.status, err.refusal.reason]).toEqual(['RESOURCE_CONFLICT', 409, 'not-held-by-qualifier']);
+      expect(err.refusal.candidates).toEqual([{ kind: 'package', packageId: A }]);
+      // CONTROL: the holder's own layers, and the layers read naming no package.
+      const own = await protocol.getMetaItemLayered({ type: 'flow', name: 'route', packageId: A });
+      expect((own.code as { label?: string } | null)?.label).toBe('alpha flow');
+      const bare = await protocol.getMetaItemLayered({ type: 'flow', name: 'route' });
+      expect((bare.code as { label?: string } | null)?.label).toBe('alpha flow');
     });
 
     it('the refusal crosses a wire door as 409, never 404 or 500', async () => {

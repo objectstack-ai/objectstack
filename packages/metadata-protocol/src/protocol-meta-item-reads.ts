@@ -111,8 +111,8 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // names are scoped to the namespace (two packages may hold one): nothing
     // can count its holders, and `getItem` would serve the first match.
     // Refused here, before any layer is read ({@link refuseUnjudgeableByNameRead}).
-    // A type the registry reads through `getItem` whose one-holder rule
-    // still holds keeps `getItem`'s read: one package holds the name.
+    // Any other type the registry reads through `getItem` keeps that read,
+    // as on `main` (seat ruling (a)): it narrows in its own reader card.
     if (!request.packageId) refuseUnjudgeableByNameRead(host, request, { kind: 'none' });
     const registry = host.engine?.registry;
     const packagelessScopedRead: { item: unknown } | undefined =
