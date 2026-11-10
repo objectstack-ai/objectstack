@@ -7231,9 +7231,11 @@ export class AutomationEngine implements IAutomationService {
             if (!startNode) {
                 // [#9415] Inside the `try`, but still a NEVER-DISPATCHED exit:
                 // nothing has executed at this point — the run id and the run
-                // context exist, no node does. Registration accepts a flow with
-                // no `start` (`FlowSchema` requires no such member), so this is
-                // reachable from the trigger door and is not dead code. No
+                // context exist, no node does. Since #32273 registration
+                // refuses a flow with no `start` node, so no door can arm one
+                // and this is a defensive exit that none reaches: a trigger of
+                // such a stored flow finds no flow and answers `404`. The exit
+                // and its `422` mapping stay as a declared defensive path. No
                 // `status`, for the reason the disabled exit above states.
                 return { success: false, code: 'FLOW_NO_START_NODE', error: 'Flow has no start node' };
             }

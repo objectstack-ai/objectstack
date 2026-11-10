@@ -7,7 +7,7 @@ import { SchemaRenderer, useHasDndProvider, useDnd, type SchemaRendererProps } f
 import { useObjectTranslation, useObjectLabel, useSafeTranslate, pickLocalized } from '@object-ui/i18n';
 import type { DashboardComponentSchema, ObjectChartSchema, PivotTableSchema } from '@object-ui/types';
 import { completeWidgetLayout, defaultWidgetPlacement } from '@object-ui/types';
-import { chartCategoryKey, chartConfigPresentation, chartMeasureKey } from '@object-ui/core';
+import { chartCategoryKey, chartConfigPresentation, chartMeasureKey, servedPackageId } from '@object-ui/core';
 import { isObjectProvider, deriveStaticTableColumns, composeSeriesLabel } from './utils';
 import {
   classifyWidgetType,
@@ -144,6 +144,9 @@ export const DashboardGridLayout: React.FC<DashboardGridLayoutProps> = ({
   onRefresh,
 }) => {
   const { width, containerRef, mounted } = useContainerWidth();
+  // ADR-0150 D5 — the package this dashboard is served from, which each
+  // dataset widget's query names.
+  const dashboardPackageId = servedPackageId(schema);
   const [editMode, setEditMode] = React.useState(false);
   const hasDndProvider = useHasDndProvider();
   // Active UI language, for resolving inline per-locale widget titles below.
@@ -710,6 +713,7 @@ export const DashboardGridLayout: React.FC<DashboardGridLayoutProps> = ({
                           ? <DatasetWidget
                               widget={datasetWidget}
                               dataSource={dataSource}
+                              packageId={dashboardPackageId}
                               heading={datasetMetric
                                 ? {
                                     title: widgetTitle,

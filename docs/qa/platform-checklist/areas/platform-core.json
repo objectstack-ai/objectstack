@@ -4217,20 +4217,20 @@
       "title": "Packages that share a namespace keep each behavioural name unique across it: a second co-owner holding a sharing rule, queue, assignment rule, hook, job, app, page, dashboard, report, book, cube or tool name is refused at os validate, os build and install, while base, system and sys are exempt",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["developer at the CLI", "admin (the seeded admin): the install leg"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "two scratch packages that both declare namespace qa_n (ids com.qa.n_one and com.qa.n_two), each holding a page qa_board; and a defineStack with packages[] whose residual top-level items hold a page qa_board under the same namespace as one of its packages",
-          "a boot of the showcase with com.qa.n_one installed"
+          "two scratch packages that both declare namespace qa_n (ids com.qa.n-one and com.qa.n-two), each holding a page qa_board; and a defineStack with packages[] whose residual top-level items hold a page qa_board under the same namespace as one of its packages",
+          "a boot of the showcase with com.qa.n-one installed"
         ]
       },
       "steps": [
         "os validate and objectstack build on a stack that composes both qa_n packages; record exit codes and output",
-        "install com.qa.n_two into the boot that holds com.qa.n_one; record status and body",
+        "install com.qa.n-two into the boot that holds com.qa.n-one; record status and body",
         "os validate the packages[] stack whose residual items repeat qa_board",
         "repeat the install with both packages in a shareable namespace (base) instead; record the answer"
       ],
@@ -4244,7 +4244,7 @@
         {
           "clause": "the install door refuses the second co-owner with 422 naming page qa_board and both packages, and installs nothing",
           "oracle": "api",
-          "verify": "os package install answers 422 PLUGIN_REGISTER_FAILED whose message carries the registry's refusal (packages/cloud-connection/src/marketplace-install-local-plugin.ts answers a register refusal of an inline manifest so; the registry's own error is 422 NAMESPACE_CONFLICT with conflicts[]: packages/objectql/src/namespace-co-owner-names.ts#namespaceNameConflicts, #namespaceNameConflictMessage); com.qa.n_two is absent from GET /api/v1/packages",
+          "verify": "os package install answers 422 PLUGIN_REGISTER_FAILED whose message carries the registry's refusal (packages/cloud-connection/src/marketplace-install-local-plugin.ts answers a register refusal of an inline manifest so; the registry's own error is 422 NAMESPACE_CONFLICT with conflicts[]: packages/objectql/src/namespace-co-owner-names.ts#namespaceNameConflicts, #namespaceNameConflictMessage); com.qa.n-two is absent from GET /api/v1/packages",
           "evidence": "the 422 body and the package list"
         },
         {
@@ -4283,6 +4283,12 @@
           "date": "2026-11-10",
           "change": "initial — ADR-0150 child N, co-owner name uniqueness (#31717, #31767). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
           "ref": "#32019"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-10",
+          "change": "fixture-text correction, no clause change: the scratch package ids are re-spelled with a hyphen (com.qa.n-one, com.qa.n-two) everywhere this item names them (fixtures, steps and acceptance), because `objectstack build` refuses an underscore in a package id (packages/spec/src/kernel/manifest.zod.ts#MANIFEST_ID_PATTERN, refused with manifestIdRefusal). The shared namespace qa_n and every namespace-qualified address are unchanged. No step, clause or variant changes meaning. Found by the M4 verification run (#32316, FOLLOW-UPS §19b); card #32330",
+          "ref": "#32330"
         }
       ]
     },
@@ -4444,14 +4450,14 @@
       "title": "A covered bare name has one package holder: installing a second package that holds a picklist, mapping, dataset, api, object-less action, function, flow, webhook, connector, email template or tool name is refused 422 naming both, agent and skill names are held per namespace, and a clash an earlier deployment already holds boots with a warning",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin (the seeded admin): every install"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr_a, namespace qa_a) and qa_b (manifest id com.qa.addr_b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Both hold a flow qa_sync and an agent qa_helper; qa_a also holds an email template auth.password_reset (a name the platform's email service ships as an overridable baseline)",
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Both hold a flow qa_sync and an agent qa_helper; qa_a also holds an email template auth.password_reset (a name the platform's email service ships as an overridable baseline)",
           "for the cold-boot leg: a scratch app that registers two code packages which both hold the flow qa_sync (the doors judge nothing during a boot, so both register), booted on its own port and file DB"
         ]
       },
@@ -4464,7 +4470,7 @@
         {
           "clause": "the second package holding a covered name is refused 422 naming both packages and a rename, and leaves nothing installed",
           "oracle": "api",
-          "verify": "installing qa_b answers 422 PLUGIN_REGISTER_FAILED whose message carries the registry's refusal naming flow qa_sync, com.qa.addr_a, com.qa.addr_b and a rename (packages/cloud-connection/src/marketplace-install-local-plugin.ts answers a register refusal of an inline manifest so; the registry's own error is packages/objectql/src/registry.ts#BareNameConflictError, 422 NAMESPACE_CONFLICT; packages/objectql/src/bare-name-one-holder.ts#suggestedBareNameRename); qa_b is absent from the package list",
+          "verify": "installing qa_b answers 422 PLUGIN_REGISTER_FAILED whose message carries the registry's refusal naming flow qa_sync, com.qa.addr-a, com.qa.addr-b and a rename (packages/cloud-connection/src/marketplace-install-local-plugin.ts answers a register refusal of an inline manifest so; the registry's own error is packages/objectql/src/registry.ts#BareNameConflictError, 422 NAMESPACE_CONFLICT; packages/objectql/src/bare-name-one-holder.ts#suggestedBareNameRename); qa_b is absent from the package list",
           "evidence": "the 422 body and the package list"
         },
         {
@@ -4510,6 +4516,12 @@
           "date": "2026-11-10",
           "change": "initial — bare-name phase 1 (#30836 to #31661) and ADR-0150 child B for agent and skill (#31973). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
           "ref": "#32019"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-10",
+          "change": "fixture-text correction, no clause change: the scratch package ids are re-spelled with a hyphen (com.qa.addr-a, com.qa.addr-b) everywhere this item names them (fixtures and acceptance), because `objectstack build` refuses an underscore in a package id (packages/spec/src/kernel/manifest.zod.ts#MANIFEST_ID_PATTERN, refused with manifestIdRefusal). The namespaces qa_a and qa_b and every namespace-qualified address are unchanged. No step, clause or variant changes meaning. Found by the M4 verification run (#32316, FOLLOW-UPS §19b); card #32330",
+          "ref": "#32330"
         }
       ]
     },

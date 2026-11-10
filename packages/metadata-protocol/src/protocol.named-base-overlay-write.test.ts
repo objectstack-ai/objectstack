@@ -42,6 +42,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 import { namedBaseOverlayWriteRefusal } from './protocol-packaged-base-refusal.js';
 import { resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
 
@@ -159,6 +160,7 @@ function makeProtocol({ pairInstalled = true }: { pairInstalled?: boolean } = {}
         },
         async syncObjectSchema() { return true; },
         registry: {
+            ...NO_PACKAGE_SCOPED_READS,
             registerItem: () => {},
             registerObject: () => {},
             unregisterItem: () => {},

@@ -986,14 +986,14 @@
       "title": "MCP names package items by their face: prompts/list serves NS-NAME for a package skill and the bare name for an environment skill, list_actions rows carry namespace and face, run_action takes namespace, and a name two holders share is refused naming the faces",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": ["admin holding an osk_ API key, over MCP HTTP"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr_a, namespace qa_a) and qa_b (manifest id com.qa.addr_b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Each holds a skill qa_triage with instructions (skill is narrowed to one holder per namespace, so two namespaces may each hold it); qa_a also holds an object-less action qa_a_ping and an object qa_a_ticket with an embedded action escalate. One skill name long enough that NS-NAME passes 64 characters",
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Each holds a skill qa_triage with instructions (skill is narrowed to one holder per namespace, so two namespaces may each hold it); qa_a also holds an object-less action qa_a_ping and an object qa_a_ticket with an embedded action escalate. One skill name long enough that NS-NAME passes 64 characters",
           "an environment skill qa_env_triage (PUT /api/v1/meta/skill/qa_env_triage with tools: [] and instructions)",
           "MCP HTTP reachable with an osk_ key (see ai.mcp-http-surface)"
         ]
@@ -1059,6 +1059,12 @@
           "date": "2026-11-10",
           "change": "initial — ADR-0150 child G2, the MCP faces and namespace (#31955). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
           "ref": "#32019"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-10",
+          "change": "fixture-text correction, no clause change: the scratch package ids are re-spelled with a hyphen (com.qa.addr-a, com.qa.addr-b) everywhere this item names them (fixtures), because `objectstack build` refuses an underscore in a package id (packages/spec/src/kernel/manifest.zod.ts#MANIFEST_ID_PATTERN, refused with manifestIdRefusal). The namespaces qa_a and qa_b and every namespace-qualified address are unchanged. No step, clause or variant changes meaning. Found by the M4 verification run (#32316, FOLLOW-UPS §19b); card #32330",
+          "ref": "#32330"
         }
       ]
     },
