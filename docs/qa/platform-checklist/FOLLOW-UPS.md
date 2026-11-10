@@ -1296,3 +1296,107 @@ missing. No live run was made: every clause is read from source, and each item's
 ### 18d. Security note
 
 No security finding was made, and none is withheld.
+
+## 19. Scoped sweep 2026-11-10 — the zero-citation packages since 18.3.0 and the `coverage.json` close-out (#32270, epic #32022 M4)
+
+**Not a full sweep.** One writer worked sequentially, with no hunter subagents. The scope is
+the workspace packages changed since the 18.3.0 subject `83d7e4ae` that no bearing item's
+`source[]` cited, read from source at `60b99f8f` (main with M3, #32299, merged). Neither
+SWEEP.md nor the `checklist-author` skill ships a citation scan, so the pass used a scratch
+one: `git diff --name-status 83d7e4ae HEAD` mapped to the 92 workspace packages it touches,
+against the paths in every active or draft item's `source[]`, with the legacy spelling
+`objectui packages/X` read as `ui/packages/X`. For each package it read the commits in range,
+the non-test source diff and the code an item would cite, and ran these SWEEP.md angles on
+what needed an item:
+
+- angle 3: the device routes (`POST /notifications/devices`, `DELETE …/:deviceId`), the
+  settings action route (`POST /api/settings/:namespace/:actionId`) and
+  `POST /analytics/dataset/query`;
+- angle 2: the refusal texts and constants (the push origin pattern, the web-vendor refusal,
+  the air-gapped relay message, the unrequested push key warning, the eleven-language SMS
+  sentences, the seed-locale rungs);
+- angle 1, limited to the Console's sign-in, sign-out and report drill.
+
+Angles 4, 5 and 6 were not run, so this section supports **no** claim about what else is
+missing. No live run was made: every clause is read from source, and each item's
+`automated.ref` names the pins that hold it today.
+
+- **The zero-citation list, before and after.** 28 → **22** packages (41 → 35 if the
+  legacy spelling is not read). Every package on the before list has a disposition in
+  `coverage.json` `releaseSweeps.v18.4.packages`: 6 cited by new items (service-push,
+  service-sms, organizations, ui auth, ui mobile, plugin-report), 6 covered through named
+  items, 13 internal-only and 3 test-only.
+- **6 new items**, all `since: "v18.4"`, 5 runnable and 1 `blocked(fixture)`:
+  `integration-system.push-device-registry-and-relay-boot`,
+  `identity-auth.console-two-factor-prompt-phone-doors`,
+  `identity-auth.console-sign-out-and-ended-session`, `dashboards.report-measure-drill-scope`,
+  `i18n.sms-test-answer-language`; blocked, `i18n.seed-dataset-follows-organization-language`
+  (see 19c).
+- **`coverage.json`**: the drill item is mapped to `dataset` and `report`. The other new items
+  drive no governed metadata kind (push devices, the Console's auth client, the SMS copy
+  table), and the blocked one carries none. A new top-level `releaseSweeps.v18.4` holds the
+  close-out: the eight themes and M4, each with its items, every blocked item with why
+  (the six theme-2 multi-replica items M2 left unmapped are mapped there, and still carry no
+  kind, as §17 ruled), every planned item with why, and the 28 package dispositions. No gate
+  reads `releaseSweeps`: `check-platform-checklist.mjs` and `checklist-select.mjs` read
+  `metadataKinds` only.
+- **`since:v18.4`**: 48 → **53** runnable, 58 → **64** with `--include-blocked`.
+
+### 19a. Declared but not landed — written as `planned`
+
+None new. The three planned items of M1–M3 are listed in `releaseSweeps` with why; one of
+them is stale (19b).
+
+### 19b. Measured from source — notes for owners, no card filed
+
+- **`api-backend.client-sdk-namespace-address` is stale.** It was written `planned` because
+  the client SDK took no namespace (#31695). #32197 (`f9eaba2d`) landed it and closed #31695
+  on 2026-11-10, so the item is owed a promotion to active. Not done here: this close-out
+  re-authors no M1 item.
+- **Package changes no item covers.** Their home packages are cited elsewhere, so they are
+  off the zero-citation list, but nothing drives them:
+  - `@object-ui/auth`: a refused single sign-on names its cause and SSO with no email asks
+    for one (#32129); the phone way in drawn on first paint (#31533); the sign-in page
+    re-reads the server's methods after sign-out (#30413); the forgot-password page says no
+    reset mail can be sent (#30366); a Developer Edition organization create (#32042, behind
+    the host's `developerEditionCreate`).
+  - the renderers the objectui CLI now knows: the quiet-hours field (#31459), the
+    notification topic and channel fields (#31069), the user page's effective permission
+    sets (#31370), the shareable-object picker (#31274) and the authorized assistants widget
+    (#31084).
+  - the declared rename (#31402): a field's `renamedFrom` carries the old column's values on
+    upgrade, with seven planner refusals (`packages/drivers/driver-sql/src/declared-rename.ts`).
+    Only the Studio hooks item mentions `renamedFrom`.
+  - the unmanaged install mode, whose base-instance record #31570 fixed.
+- **Comment drift.** The `push` entry in `packages/core/src/capability-providers.ts` says
+  `resolvePushCapabilityArg` refuses "the not-yet-served relay transport (and an absent key,
+  which reads as it) at boot". Since #30749 the relay is served, and it is refused only on a
+  deployment that declared no control plane (`capability-arg.ts`). No behaviour follows from
+  the comment.
+- **`integration-system.notify-inbox-delivery` still calls push unimplemented** (#3197).
+  Since #29794 the push channel ships in service-messaging and mounts while a `push` service
+  is registered. On a stock boot no `push` service is registered, so its probe may still be
+  refused; whether the WARN still reads "channel 'push' is not registered" now that a
+  provider is registered for the channel is not read here. A checklist-accuracy candidate
+  for the next run of that item.
+- **A stock dataset with synonyms exists.** §18c says no showcase dataset declares synonyms.
+  The CRM example's `crm_opportunity_metrics` declares business vocabulary (#31771), so a run
+  on the CRM app could score `ai.mcp-dataset-tools`' synonym match on stock data.
+- **13 packages are cited only under the legacy spelling** `objectui packages/X`
+  (`releaseSweeps.v18.4.legacySpelling`). A scan that matches path literals misses them.
+
+### 19c. Fixtures worth adding
+
+- **A locale-scoped seed pair.** Two seed datasets on one showcase object that differ only by
+  `locale` (`['en-US']` and `['zh-CN']`) would lift `blocked` on
+  `i18n.seed-dataset-follows-organization-language`, run on the walled boot.
+- **A browser stand-in for the mobile shell bridge.** The Console registers and unregisters
+  its push device only when `getNativeHost()` finds the shell's bridge. An init script that
+  installs a bridge with `version`, `has()`, `platform` and `getPushToken()` would let a run
+  drive that half of `integration-system.push-device-registry-and-relay-boot`.
+- **A push sink.** A cloud-bound server, or a direct-transport stand-in, would let a run see
+  the push request and the origin it carries.
+
+### 19d. Security note
+
+No security finding was made, and none is withheld.
