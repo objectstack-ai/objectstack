@@ -360,19 +360,25 @@ describe('a package\'s standalone action bound to another package\'s object that
         expect(listed.map((a) => [a.objectName, a.namespace]).sort()).toEqual([['lead', 'crm'], ['lead', 'hr']]);
     });
 
-    it('the bare call keeps its answer, the object\'s own (crm\'s), on REST and MCP: no pick by package, no refusal — the no-package refusal of an object-bound pair is the action family\'s own card (ADR-0150 child B, epic ruling record 6729825528); flip these when it lands', async () => {
-        // hr's declaration is gated and the caller holds nothing: had a bare
-        // door read hr's, it would answer 403.
+    it('[#31697] the bare call is refused on REST and MCP, 409 naming both packages — no pick by package, never the object\'s own by listing order (epic ruling record 6729825528, letter A)', async () => {
+        // hr's declaration is gated and the caller holds nothing: the refusal
+        // is the ambiguity's, judged before either declaration's gate.
         const { post, bridge, ran } = pair({ requiredPermissions: ['hr_admin'] });
         const rest = await post('/lead/convert/r1');
-        expect(rest.status, JSON.stringify(rest.body)).toBe(200);
-        expect((await bridge.runAction('convert', { objectName: 'lead', recordId: 'r1' })).ok).toBe(true);
-        expect((await bridge.runAction('convert', {})).ok).toBe(true);
-        expect(ran).toEqual([
-            { obj: 'lead', key: 'convert' },
-            { obj: 'lead', key: 'convert' },
-            { obj: 'lead', key: 'convert' },
-        ]);
+        expect(rest.status, JSON.stringify(rest.body)).toBe(409);
+        expect(codeOf(rest)).toBe('RESOURCE_CONFLICT');
+        expect(messageOf(rest)).toContain(CRM);
+        expect(messageOf(rest)).toContain(HR);
+        for (const input of [{ objectName: 'lead', recordId: 'r1' }, {}]) {
+            const err = await refusalOf(bridge.runAction('convert', input));
+            expect(err.status ?? err.httpStatus, JSON.stringify(input)).toBe(409);
+            expect(String(err.message)).toContain(CRM);
+            expect(String(err.message)).toContain(HR);
+        }
+        expect(ran).toEqual([]);
+        // Each address still reaches its own (the qualified doors, above).
+        expect((await post('/crm/lead/convert/r1')).status).toBe(200);
+        expect(ran).toEqual([{ obj: 'lead', key: 'convert', packageId: CRM }]);
     });
 
     it('CONTROL — one package holding both an embedded and a standalone `convert` on its object: the embedded one wins, listed once', async () => {
@@ -396,5 +402,62 @@ describe('a package\'s standalone action bound to another package\'s object that
         const { bridge } = dispatcherWith([lead()], [act('convert', CRM, { objectName: 'lead' })]);
         const listed = ((await bridge.listActions()) as any[]).filter((a) => a.name === 'convert');
         expect(listed.map((a) => [a.objectName, a.namespace])).toEqual([['lead', 'crm']]);
+    });
+});
+
+/**
+ * [#31697, epic obligation record 6742974046 (G2)] A declaration with no
+ * package is the ENVIRONMENT's only when the environment's own store holds it
+ * (an active `sys_metadata` row bound to no package); any other — code the
+ * host or a plugin registered with no package — is the PLATFORM's: alone it
+ * answers, beside a package holder the bare call is refused naming both. The
+ * row's source decides, never a byte of its definition (seat ruling, option b).
+ */
+describe('[#31697] an owner-less declaration beside a package holder: the platform\'s, unless the environment\'s store holds it', () => {
+    const storeHolding = (names: string[]) => vi.fn(async (object: string, query?: any) =>
+        object === 'sys_metadata' && query?.where?.type === 'action'
+            ? names.map((name) => ({ name, type: 'action', state: 'active', package_id: null }))
+            : object === 'sys_metadata' ? [] : [{ id: 'r1' }]);
+
+    it('host code beside a package: the bare call is refused on REST and MCP, naming the package and the platform; the package\'s address reaches its own', async () => {
+        const { post, bridge, ran, ql } = dispatcherWith([], [act('send_digest', CRM), act('send_digest', undefined)]);
+        ql.find = storeHolding([]);
+        const rest = await post('/global/send_digest');
+        expect(rest.status, JSON.stringify(rest.body)).toBe(409);
+        expect(codeOf(rest)).toBe('RESOURCE_CONFLICT');
+        expect(messageOf(rest)).toContain(CRM);
+        expect(messageOf(rest)).toContain('the platform');
+        const mcp = await refusalOf(bridge.runAction('send_digest', {}));
+        expect(mcp.status ?? mcp.httpStatus).toBe(409);
+        expect(String(mcp.message)).toContain(CRM);
+        expect(String(mcp.message)).toContain('the platform');
+        expect(ran).toEqual([]);
+        expect((await post('/crm/global/send_digest')).status).toBe(200);
+        expect(ran).toEqual([{ obj: 'global', key: 'send_digest', packageId: CRM }]);
+    });
+
+    it('the definition\'s bytes never make a host row the environment\'s: `_provenance: \'org\'` on it changes nothing', async () => {
+        const { post, bridge, ran, ql } = dispatcherWith([], [act('send_digest', CRM), act('send_digest', undefined, { _provenance: 'org' })]);
+        ql.find = storeHolding([]);
+        expect((await post('/global/send_digest')).status).toBe(409);
+        expect((await refusalOf(bridge.runAction('send_digest', {}))).status).toBe(409);
+        expect(ran).toEqual([]);
+    });
+
+    it('CONTROL — the environment\'s store holds the owner-less name: the environment\'s item answers the bare call first, on REST and MCP (ADR-0150 D3)', async () => {
+        const { post, bridge, ran, ql } = dispatcherWith([], [act('send_digest', CRM), act('send_digest', undefined)]);
+        ql.find = storeHolding(['send_digest']);
+        const rest = await post('/global/send_digest');
+        expect(rest.status, JSON.stringify(rest.body)).toBe(200);
+        expect((await bridge.runAction('send_digest', {})).ok).toBe(true);
+        expect(ran).toEqual([{ obj: 'global', key: 'send_digest' }, { obj: 'global', key: 'send_digest' }]);
+    });
+
+    it('CONTROL — the platform alone answers the bare call', async () => {
+        const { post, bridge, ran, ql } = dispatcherWith([], [act('send_digest', undefined)]);
+        ql.find = storeHolding([]);
+        expect((await post('/global/send_digest')).status).toBe(200);
+        expect((await bridge.runAction('send_digest', {})).ok).toBe(true);
+        expect(ran).toEqual([{ obj: 'global', key: 'send_digest' }, { obj: 'global', key: 'send_digest' }]);
     });
 });

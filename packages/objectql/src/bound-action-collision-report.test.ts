@@ -11,8 +11,11 @@
  *
  * The handler face of the same pair: the engine keys handlers by
  * `OBJECT:ACTION`, so the second package's `registerAction` replaces the
- * first's. It still does — the last registration runs — but it is warned,
- * naming both owners; the same owner re-registering is not.
+ * first's in the slot a call that names no package reads. It is warned,
+ * naming both owners; the same owner re-registering is not. [#31697, ruling
+ * record 6729825528 letter A] A call that names no package is then refused
+ * (409 `RESOURCE_CONFLICT`) naming both owners — the last registration is no
+ * answer — while a call naming either package runs its own.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -210,11 +213,13 @@ describe('ObjectQL.registerAction on a key another owner holds', () => {
         return { engine, replacements };
     }
 
-    it('replaces the handler — the last registration runs — and warns naming both owners', async () => {
+    it('warns naming both owners, and a call that names no package is refused naming both (#31697)', async () => {
         const { engine, replacements } = await engineSpied();
         engine.registerAction('bc_org', 'rename', () => 'owner', 'app:com.test.owner');
         engine.registerAction('bc_org', 'rename', () => 'twin', 'app:com.test.twin');
-        expect(await engine.executeAction('bc_org', 'rename', {})).toBe('twin');
+        const refused = await engine.executeAction('bc_org', 'rename', {}).then(() => undefined, (e: any) => e);
+        expect(refused).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409, owners: ['app:com.test.owner', 'app:com.test.twin'] });
+        for (const subject of ["'bc_org:rename'", "'app:com.test.owner'", "'app:com.test.twin'"]) expect(refused.message).toContain(subject);
         expect(replacements()).toHaveLength(1);
         const [message, meta] = replacements()[0] as [string, any];
         expect(meta).toEqual({ objectName: 'bc_org', actionName: 'rename', package: 'app:com.test.twin', replacedPackage: 'app:com.test.owner' });
@@ -267,15 +272,42 @@ describe('ObjectQL action handlers keyed (package, objectName, name)', () => {
         expect(await engine.executeAction('bc_org', 'rename', {}, { packageId: TWIN })).toBe('twin');
     });
 
-    it('[#31697 interim] a call that names no package keeps today\'s answer exactly: the last registration runs', async () => {
-        // Ruling 6728550494 (epic #31527, option B): whether this call refuses
-        // when two packages hold one object and name is #31697's decision.
+    it('[#31697] a call that names no package is refused (409) naming both packages, whichever registered last; one package alone answers', async () => {
+        // Ruling 6729825528 (epic #31527, letter A): two packages' handlers
+        // under one object and name are no answer for a caller that names
+        // neither.
         const engine = new ObjectQL();
         engine.registerAction('bc_org', 'rename', () => 'owner', `app:${OWNER}`);
+        expect(await engine.executeAction('bc_org', 'rename', {})).toBe('owner');
         engine.registerAction('bc_org', 'rename', () => 'twin', `app:${TWIN}`);
-        expect(await engine.executeAction('bc_org', 'rename', {})).toBe('twin');
+        await expect(engine.executeAction('bc_org', 'rename', {})).rejects.toMatchObject({
+            code: 'RESOURCE_CONFLICT', status: 409, owners: [`app:${OWNER}`, `app:${TWIN}`],
+        });
         engine.registerAction('bc_org', 'rename', () => 'owner again', `app:${OWNER}`);
+        await expect(engine.executeAction('bc_org', 'rename', {})).rejects.toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+        // Withdrawing one package leaves one owner: the call answers again.
+        engine.removeActionsByPackage(`app:${TWIN}`);
         expect(await engine.executeAction('bc_org', 'rename', {})).toBe('owner again');
+    });
+
+    it('[#31697] host code (no owner) or a plugin beside a package is two owners; the environment\'s resync is never one', async () => {
+        const engine = new ObjectQL();
+        engine.registerAction('bc_org', 'rename', () => 'owner', `app:${OWNER}`);
+        engine.registerAction('bc_org', 'rename', () => 'host');
+        await expect(engine.executeAction('bc_org', 'rename', {})).rejects.toMatchObject({
+            code: 'RESOURCE_CONFLICT', owners: [`app:${OWNER}`, '(host code, no owner)'],
+        });
+        const plugin = new ObjectQL();
+        plugin.registerAction('bc_org', 'rename', () => 'owner', `app:${OWNER}`);
+        plugin.registerAction('bc_org', 'rename', () => 'plugin', 'com.test.plugin');
+        await expect(plugin.executeAction('bc_org', 'rename', {})).rejects.toMatchObject({
+            code: 'RESOURCE_CONFLICT', owners: [`app:${OWNER}`, 'com.test.plugin'],
+        });
+        // CONTROL — an environment-authored handler beside one package is one code owner.
+        const env = new ObjectQL();
+        env.registerAction('bc_org', 'rename', () => 'owner', `app:${OWNER}`);
+        env.registerAction('bc_org', 'rename', () => 'authored', 'metadata-service');
+        expect(await env.executeAction('bc_org', 'rename', {})).toBe('authored');
     });
 
     it('withdrawing one package keeps the other\'s handler for a call naming it', async () => {

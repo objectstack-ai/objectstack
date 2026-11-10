@@ -8,8 +8,10 @@
  * name through R's resolver (`resolveActionByPackage` in
  * `@objectstack/objectql`) and answers the holder's package coordinate;
  * `executeRegisteredAction` given that coordinate runs that package's handler.
- * A caller that names no package resolves and dispatches exactly as before
- * (the #31697 interim, ruling 6728550494 on epic #31527).
+ * A caller that names no package, while two packages hold the name on the
+ * object, is refused naming both, at the declaration and at the dispatch
+ * (#31697, ruling 6729825528 letter A on epic #31527); one holder answers as
+ * before.
  *
  * Real: `ObjectQL` (its `SchemaRegistry` and action engine),
  * `ObjectStackProtocolImplementation`'s execution read. Doubled: the row store
@@ -37,6 +39,7 @@ const manifest = (id: string, deps: string[] = []) => ({
 
 let engine: ObjectQL;
 let deps: ActionExecutionDeps;
+let protocol: ObjectStackProtocolImplementation;
 
 const install = (id: string, deps: string[] = []) => engine.registry.installPackage(manifest(id, deps), 'code');
 const ship = (packageId: string, objectName = OBJECT) =>
@@ -60,7 +63,7 @@ beforeEach(() => {
         findOne: async (object: string, query: any) => { assertEngineFindOnePredicate(object, query); return null; },
         count: async () => 0, aggregate: async () => [],
     };
-    const protocol = new ObjectStackProtocolImplementation(rowStore);
+    protocol = new ObjectStackProtocolImplementation(rowStore);
     deps = {
         resolveService: (async (_ctx: unknown, name: string) => (name === 'protocol' ? protocol : undefined)) as any,
         getObjectQL: async () => engine,
@@ -187,8 +190,8 @@ describe('ADR-0150 D4 — the owner gate judges the handler the package call run
     });
 });
 
-describe('[#31697 interim] a caller that names no package', () => {
-    it('resolves and dispatches exactly as before: no refusal, no package, the last registered handler runs', async () => {
+describe('[#31697] a caller that names no package', () => {
+    it('is refused naming both packages when two hold the name on the object — at the declaration (D5) and at the dispatch (409), never the last registered', async () => {
         install(A);
         install(B);
         ship(A);
@@ -196,9 +199,82 @@ describe('[#31697 interim] a caller that names no package', () => {
         bind(A);
         bind(B);
         const declaration = await resolve();
+        expect(declaration.action).toBeUndefined();
+        expect(declaration.refusal).toMatchObject({
+            reason: 'ambiguous-in-environment',
+            candidates: [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }],
+        });
+        await expect(executeRegisteredAction(deps, engine, OBJECT, ['approve'], {})).rejects.toMatchObject({
+            code: 'RESOURCE_CONFLICT', status: 409, owners: [`app:${A}`, `app:${B}`],
+        });
+        // Each package's address still reaches its own.
+        expect((await executeRegisteredAction(deps, engine, OBJECT, ['approve'], {}, A)).result).toBe(`ran ${A}`);
+        expect((await executeRegisteredAction(deps, engine, OBJECT, ['approve'], {}, B)).result).toBe(`ran ${B}`);
+    });
+
+    it('CONTROL — one package holding the name answers as before: no refusal, no package, its handler runs', async () => {
+        install(A);
+        ship(A);
+        bind(A);
+        const declaration = await resolve();
         expect(declaration.refusal).toBeUndefined();
         expect(declaration.packageId).toBeUndefined();
-        expect(declaration.action).toMatchObject({ name: 'approve' });
-        expect((await executeRegisteredAction(deps, engine, OBJECT, ['approve'], {})).result).toBe(`ran ${B}`);
+        expect(declaration.action).toMatchObject({ name: 'approve', label: 'alpha' });
+        expect((await executeRegisteredAction(deps, engine, OBJECT, ['approve'], {})).result).toBe(`ran ${A}`);
+    });
+});
+
+/**
+ * [#31697, step-0 ruling Q1 = A] `/meta/action/NAME` (the protocol's by-name
+ * read, the Console's ActionNavItem read) with no package: an OBJECT-LESS
+ * action two packages hold — two namespaces may, now that its one-holder rule
+ * narrowed to the namespace — is refused naming both, `409
+ * RESOURCE_CONFLICT`; it served the first registered. A read naming a package
+ * reaches that package's. Object-bound same-name reads are not this card's.
+ */
+describe('[#31697] the by-name read of an object-less action two packages hold', () => {
+    const shipObjectLess = (packageId: string | undefined, name = 'digest') =>
+        engine.registry.registerItem('action', {
+            name, label: packageId?.split('.').pop() ?? 'env', type: 'script',
+            body: { language: 'js', source: 'return 1;', capabilities: [] },
+        } as never, 'name' as never, packageId);
+    const read = (packageId?: string) =>
+        protocol.getMetaItem({ type: 'action', name: 'digest', ...(packageId ? { packageId } : {}) } as any) as Promise<any>;
+
+    it('is refused when the read names no package, naming both; a read naming each package reaches its own', async () => {
+        install(A);
+        install(B);
+        shipObjectLess(A);
+        shipObjectLess(B);
+        const refused = await read().then(() => undefined, (e: any) => e);
+        expect(refused, 'the read was refused').toBeDefined();
+        expect(refused).toMatchObject({ code: 'RESOURCE_CONFLICT' });
+        expect(refused.status ?? refused.httpStatus).toBe(409);
+        expect(String(refused.message)).toContain(A);
+        expect(String(refused.message)).toContain(B);
+        expect((await read(A)).item).toMatchObject({ name: 'digest', label: 'alpha' });
+        expect((await read(B)).item).toMatchObject({ name: 'digest', label: 'beta' });
+    });
+
+    it('CONTROL — one package\'s object-less action answers the bare read', async () => {
+        install(A);
+        shipObjectLess(A);
+        expect((await read()).item).toMatchObject({ name: 'digest', label: 'alpha' });
+    });
+
+    it('CONTROL — the environment\'s own item answers first beside a package\'s (ADR-0150 D3)', async () => {
+        install(A);
+        shipObjectLess(A);
+        shipObjectLess(undefined);
+        expect((await read()).item).toMatchObject({ name: 'digest', label: 'env' });
+    });
+
+    it('CONTROL — two packages\' actions of one name bound to two objects are not refused (object-bound reads are not this card\'s)', async () => {
+        install(A);
+        install(B);
+        ship(A, 'account');
+        ship(B, 'contact');
+        const answer: any = await protocol.getMetaItem({ type: 'action', name: 'approve' } as any);
+        expect(answer.item).toMatchObject({ name: 'approve' });
     });
 });
