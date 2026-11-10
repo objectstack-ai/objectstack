@@ -2160,7 +2160,15 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
           },
           discoveryEndpoint: {
             label: "검색 URL",
-            helpText: "선택 사항입니다. OIDC 검색 문서 URL입니다. 비워 두면 `<issuer>/.well-known/openid-configuration`에서 도출합니다."
+            helpText: "선택 사항입니다. OIDC 검색 문서 URL(https)입니다. 비워 두면 `<issuer>/.well-known/openid-configuration`에서 도출합니다. 여기에 지정한 엔드포인트는 이 공급자에 대해 신뢰됩니다."
+          },
+          userInfoEndpoint: {
+            label: "Userinfo 엔드포인트 URL",
+            helpText: "선택 사항입니다. 검색 문서가 지정한 엔드포인트 대신 사용할 OIDC userinfo 엔드포인트 URL(https)입니다. 여기에 지정한 엔드포인트는 이 공급자에 대해 신뢰됩니다. 검색 문서가 서버가 신뢰하지 않는 userinfo 호스트를 지정해 등록이 거부되면 이 값을 입력하세요."
+          },
+          skipUserInfo: {
+            label: "ID 토큰에서만 클레임 읽기",
+            helpText: "선택 사항입니다. 사용자의 클레임을 검증된 ID 토큰에서만 읽고 userinfo 엔드포인트를 호출하지 않습니다. Microsoft Entra ID: userinfo 엔드포인트가 반환하지 않는 \"preferred_username\"을 매핑하려면 켜세요."
           },
           scopes: {
             label: "범위",
@@ -2169,7 +2177,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
           },
           mapEmail: {
             label: "매핑: 이메일 클레임",
-            helpText: "선택 사항입니다. 이메일에 매핑되는 클레임입니다. 기본값은 \"email\"입니다.",
+            helpText: "선택 사항입니다. 이메일에 매핑되는 클레임입니다. 기본값은 \"email\"입니다. Microsoft Entra ID(발급자가 login.microsoftonline.com): 사서함이 없는 사용자에게는 \"email\" 클레임이 없으므로 \"preferred_username\"(또는 \"upn\")을 매핑하고 \"ID 토큰에서만 클레임 읽기\"를 켜세요.",
             placeholder: "email"
           },
           mapName: {
@@ -2258,12 +2266,78 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "SSO 공급자 삭제",
-        description: "이 SSO 공급자를 삭제하시겠습니까? 해당 도메인의 사용자는 더 이상 이를 통해 로그인할 수 없습니다.",
-        successMessage: "SSO 공급자 삭제됨"
+        description: "이 SSO 공급자를 삭제하시겠습니까? 연결된 모든 사용자의 연결이 해제되며, 여기에는 다른 로그인 방법이 연결되지 않은 사용자(비밀번호도, 다른 공급자도 없음)도 포함됩니다. IdP 그룹 매핑과 이를 통해 부여된 권한 집합도 함께 제거됩니다. 이 작업은 되돌릴 수 없습니다.",
+        resultDialog: {
+          title: "SSO 공급자 삭제됨",
+          acknowledge: "완료",
+          fields: {
+            message: "제거됨"
+          }
+        },
+        preflight: {
+          fields: {
+            summary: "이 삭제로 제거되는 항목",
+            linkedUsers: "연결이 해제되는 사용자",
+            usersWithoutOtherSignIn: "다른 로그인 방법이 연결되지 않은 사용자"
+          }
+        }
       },
       edit_sso_sign_in_options: {
         label: "로그인 옵션 편집",
         successMessage: "로그인 옵션 저장됨"
+      },
+      edit_saml_provider: {
+        label: "SAML 설정 편집",
+        params: {
+          issuer: {
+            label: "IdP 엔터티 ID",
+            helpText: "IdP의 SAML EntityID입니다. 공급자에 연결된 사용자가 없을 때만 변경할 수 있습니다."
+          },
+          entryPoint: {
+            label: "IdP SSO URL",
+            helpText: "IdP의 Single Sign-On 엔드포인트입니다. 비워 두면 저장된 값을 유지합니다. 공급자에 연결된 사용자가 없을 때만 변경할 수 있습니다."
+          },
+          cert: {
+            label: "새 IdP 서명 인증서",
+            helpText: "IdP의 새 X.509 서명 인증서(PEM)입니다. 비워 두면 저장된 인증서를 유지합니다."
+          },
+          keepCurrentCert: {
+            label: "현재 인증서도 계속 신뢰",
+            helpText: "IdP가 전환하는 동안 두 인증서 중 하나로 서명된 어설션을 모두 허용합니다. 이전 인증서를 제거하려면 이 옵션 없이 다시 편집하세요."
+          }
+        },
+        resultDialog: {
+          title: "SAML 설정 저장됨",
+          acknowledge: "완료",
+          fields: {
+            message: "변경됨"
+          }
+        }
+      },
+      edit_oidc_provider: {
+        label: "OIDC 설정 편집",
+        params: {
+          clientId: {
+            label: "클라이언트 ID",
+            helpText: "IdP가 발급한 OAuth 클라이언트 ID입니다. 비워 두면 저장된 값을 유지합니다. 공급자에 연결된 사용자가 없을 때만 변경할 수 있습니다."
+          },
+          clientSecret: {
+            label: "새 클라이언트 비밀",
+            helpText: "비워 두면 저장된 비밀을 유지합니다. 저장된 비밀은 표시되지 않습니다."
+          },
+          scopes: {
+            label: "범위",
+            helpText: "공백 또는 쉼표로 구분한 OAuth 범위로, 저장된 목록을 대체합니다. 비워 두면 유지합니다.",
+            placeholder: "openid email profile"
+          }
+        },
+        resultDialog: {
+          title: "OIDC 설정 저장됨",
+          acknowledge: "완료",
+          fields: {
+            message: "변경됨"
+          }
+        }
       },
       show_sso_groups_claim: {
         label: "그룹 클레임 보기",
