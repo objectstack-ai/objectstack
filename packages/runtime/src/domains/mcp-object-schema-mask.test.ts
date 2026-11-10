@@ -881,7 +881,22 @@ describe('[ADR-0106 D1] an action the caller is not shown is answered on every r
     const RENAME = { name: 'rename_project', label: 'Rename', operation: 'update', params: [{ field: 'title' }], ai: ai('Rename this project to the title the user gives.') };
     /** Binds no field at all. */
     const CLOSE = { name: 'close_project', label: 'Close', operation: 'update', patch: { stage: 'closed' }, ai: ai('Close this project once the work on it is finished.') };
-    const WITHHELD = [SET_BUDGET.name, QUOTE_RATE.name, APPROVE_BUDGET.name];
+    /** No params: its `patch` writes the field the member cannot read. */
+    const ZERO_BUDGET = { name: 'zero_budget', label: 'Zero budget', operation: 'update', patch: { budget: 0 }, ai: ai('Set the approved budget of this project to zero.') };
+    /** The handler the two rewrites below dispatch to, and what it was handed. */
+    const HANDLER = 'apply_project_amount';
+    const handled: unknown[] = [];
+    /** A rewrite whose inline param is named like the field: still a mention of it. */
+    const NAMED_LIKE_FIELD = {
+        name: 'apply_named_budget', label: 'Apply amount', type: 'script', target: HANDLER,
+        params: [{ name: 'budget', type: 'number' }], ai: ai('Apply a new amount to the approved budget of this project.'),
+    };
+    /** The changeset's migration followed literally: a handler action whose declaration names no field the member cannot read. */
+    const APPLY_AMOUNT = {
+        name: 'apply_amount', label: 'Apply amount', type: 'script', target: HANDLER,
+        params: [{ name: 'new_amount', type: 'number' }], ai: ai('Apply a new amount to the approved budget of this project.'),
+    };
+    const WITHHELD = [SET_BUDGET.name, QUOTE_RATE.name, APPROVE_BUDGET.name, ZERO_BUDGET.name, NAMED_LIKE_FIELD.name];
     const UNKNOWN = 'no_such_action';
     /** Every bag shape a caller can send: none, a value of the wrong type, an undeclared key, a well-formed one on a record. */
     const BAGS: ReadonlyArray<Record<string, unknown>> = [
@@ -941,7 +956,7 @@ describe('[ADR-0106 D1] an action the caller is not shown is answered on every r
                         },
                         budget: { name: 'budget', type: 'currency', label: 'Approved budget', required: true },
                     },
-                    actions: [SET_BUDGET, QUOTE_RATE, APPROVE_BUDGET, RENAME, CLOSE],
+                    actions: [SET_BUDGET, QUOTE_RATE, APPROVE_BUDGET, RENAME, CLOSE, ZERO_BUDGET, NAMED_LIKE_FIELD, APPLY_AMOUNT],
                 },
                 {
                     name: OTHER,
@@ -955,6 +970,10 @@ describe('[ADR-0106 D1] an action the caller is not shown is answered on every r
             ],
         } as never);
         await engine.syncSchemas();
+        engine.registerAction(OBJ, HANDLER, async (ctx: any) => {
+            handled.push(ctx?.params?.new_amount ?? ctx?.params?.budget);
+            return { applied: true };
+        });
         const all = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
         const deny = { readable: false, editable: false };
         const sets = [
@@ -1045,7 +1064,7 @@ describe('[ADR-0106 D1] an action the caller is not shown is answered on every r
             } as any, 'GET');
             return ((meta.response?.body?.data?.item?.actions ?? []) as any[]).map((a) => a.name).sort();
         };
-        const every = [SET_BUDGET, QUOTE_RATE, APPROVE_BUDGET, RENAME, CLOSE].map((a) => a.name).sort();
+        const every = [SET_BUDGET, QUOTE_RATE, APPROVE_BUDGET, RENAME, CLOSE, ZERO_BUDGET, NAMED_LIKE_FIELD, APPLY_AMOUNT].map((a) => a.name).sort();
         expect(await read(PERSONAS.staff)).toEqual(every);
         expect(await read(PERSONAS.member)).toEqual(every.filter((n) => !WITHHELD.includes(n)));
     });
@@ -1134,6 +1153,20 @@ describe('[ADR-0106 D1] an action the caller is not shown is answered on every r
         expect(JSON.stringify(staffRest.body)).toContain('budget');
         const staffMcp = await mcpRun(PERSONAS.staff, SET_BUDGET.name, { params: { budget: 'not a number' } });
         expect(staffMcp.refused?.status).toBe(400);
+    });
+
+    it('the migration followed literally: a handler action whose declaration names no field the member cannot read runs for the member, on both doors', async () => {
+        await seed('p7');
+        handled.length = 0;
+        const rest = await restRun(PERSONAS.member, APPLY_AMOUNT.name, { recordId: 'p7', params: { new_amount: 9 } });
+        expect(rest.status, JSON.stringify(rest.body)).toBe(200);
+        const mcp = await mcpRun(PERSONAS.member, APPLY_AMOUNT.name, { recordId: 'p7', params: { new_amount: 9 } });
+        expect(mcp.refused, JSON.stringify(mcp.refused)).toBeUndefined();
+        expect(handled).toEqual([9, 9]);
+        // The same rewrite with the param named like the field is still a mention of it.
+        const named = await restRun(PERSONAS.member, NAMED_LIKE_FIELD.name, { recordId: 'p7', params: { budget: 9 } });
+        expect(JSON.stringify(named)).toBe(asUnknown(JSON.stringify(await restRun(PERSONAS.member, UNKNOWN, {})), NAMED_LIKE_FIELD.name));
+        expect(handled).toEqual([9, 9]);
     });
 
     it('CONTROL — the system context and a D4-exempt author are answered as a deployment with the mask switched off answers them', async () => {
