@@ -907,3 +907,111 @@ describe('[#31699] a package-less row of a name two packages hold is no holder\'
     expect(() => protocol.admitEnvironmentQualifier({ type: 'agent', name: 'dup' })).toThrow(PackageScopedNameRefusedError);
   });
 });
+
+/**
+ * [#32310, ADR-0150 D3] The caller arm (`?callerPackage=P`) on the dataset
+ * read: the name resolves FROM P by the one rule — P's own dataset, else the
+ * unique holder in P's declared closure plus `sys`, else `409` naming the
+ * candidates — and the read then reads that holder at its exact address.
+ * Real registry, real protocol, no stubbed resolver.
+ *
+ * BASE (main 351c22c9, booted showcase): `?package=P` for a dataset only a
+ * dependency of P holds answered `409 not-held-by-qualifier`; the protocol had
+ * no caller arm, so P's dashboard could not say who it is.
+ */
+describe('[#32310] the caller arm resolves a dataset from the reader\'s package (ADR-0150 D3)', () => {
+  const P = 'com.acme.app';
+  const SYS = 'com.acme.kernel_bits';
+  /** Where the arm reads, then the read at that address — what both doors do. */
+  const readFrom = async (name: string, callerPackageId: string) => {
+    const address = protocol.resolveCallerPackageAddress({ type: 'dataset', name, callerPackageId });
+    return protocol.getMetaItem({ type: 'dataset', name, ...(address.kind === 'package' ? { packageId: address.packageId } : {}) });
+  };
+
+  beforeEach(() => {
+    registry.installPackage({ ...(manifest(P) as object), dependencies: { [A]: '^1.0.0', [B]: '^1.0.0' } } as never, 'code');
+    registry.installPackage({ ...(manifest(SYS) as object), namespace: 'sys' } as never, 'code');
+  });
+
+  it('P\'s own dataset answers first, though a dependency holds the name too', async () => {
+    ship('dataset', 'pipeline', A);
+    ship('dataset', 'pipeline', P);
+    expect(protocol.resolveCallerPackageAddress({ type: 'dataset', name: 'pipeline', callerPackageId: P }))
+      .toEqual({ kind: 'package', packageId: P });
+    expect(labelOf(await readFrom('pipeline', P))).toBe('app dataset');
+  });
+
+  it('a dataset only a dependency holds is that dependency\'s (`?package=P` refuses it, BASE)', async () => {
+    ship('dataset', 'pipeline', A);
+    expect(protocol.resolveCallerPackageAddress({ type: 'dataset', name: 'pipeline', callerPackageId: P }))
+      .toEqual({ kind: 'package', packageId: A });
+    expect(labelOf(await readFrom('pipeline', P))).toBe('alpha dataset');
+    const exact = await refusalOf(() => protocol.getMetaItem({ type: 'dataset', name: 'pipeline', packageId: P }));
+    expect(exact.refusal.reason).toBe('not-held-by-qualifier');
+  });
+
+  it('a registry that cannot judge the name fails closed: 503, never a first match (#32277\'s rule guards the arm)', () => {
+    ship('dataset', 'pipeline', A);
+    // The exact qualifier's reads gone: the registry cannot say who holds the name.
+    Object.defineProperty(registry, 'getPackageScopedItem', { value: undefined, configurable: true });
+    let thrown: any;
+    try {
+      protocol.resolveCallerPackageAddress({ type: 'dataset', name: 'pipeline', callerPackageId: P });
+    } catch (e) { thrown = e; }
+    expect([thrown?.status, thrown?.code]).toEqual([503, 'SERVICE_UNAVAILABLE']);
+  });
+
+  it('a `sys` package is in every caller\'s closure', async () => {
+    ship('dataset', 'audit', SYS);
+    expect(protocol.resolveCallerPackageAddress({ type: 'dataset', name: 'audit', callerPackageId: P }))
+      .toEqual({ kind: 'package', packageId: SYS });
+  });
+
+  it('two holders in P\'s closure: 409 ambiguous-in-closure naming both, nothing read', async () => {
+    ship('dataset', 'pipeline', A);
+    ship('dataset', 'pipeline', B);
+    const err = await refusalOf(() => readFrom('pipeline', P));
+    expect([err.code, err.status, err.refusal.reason, err.refusal.callerPackageId])
+      .toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-closure', P]);
+    expect(err.refusal.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
+    expect([resolveThrownHttpError(err, 500).status, resolveThrownHttpError(err, 500).code]).toEqual([409, 'RESOURCE_CONFLICT']);
+  });
+
+  it('a holder outside P\'s closure: 409 outside-closure naming it', async () => {
+    ship('dataset', 'pipeline', C);
+    const err = await refusalOf(() => readFrom('pipeline', P));
+    expect([err.refusal.reason, err.refusal.candidates]).toEqual(['outside-closure', [{ kind: 'package', packageId: C }]]);
+  });
+
+  it('only the environment holds it: 409 outside-closure naming the environment (D3 (a))', async () => {
+    envItem('dataset', 'pipeline');
+    const err = await refusalOf(() => readFrom('pipeline', P));
+    expect([err.refusal.reason, err.refusal.candidates]).toEqual(['outside-closure', [{ kind: 'environment' }]]);
+  });
+
+  it('a caller package that is not installed reads at its own address: what `?package=` naming it answers', async () => {
+    ship('dataset', 'pipeline', A);
+    const ghost = 'com.acme.ghost';
+    expect(protocol.resolveCallerPackageAddress({ type: 'dataset', name: 'pipeline', callerPackageId: ghost }))
+      .toEqual({ kind: 'package', packageId: ghost });
+    const viaArm = await refusalOf(() => readFrom('pipeline', ghost));
+    const viaQualifier = await refusalOf(() => protocol.getMetaItem({ type: 'dataset', name: 'pipeline', packageId: ghost }));
+    expect(viaArm.refusal).toEqual(viaQualifier.refusal);
+    expect(viaArm.refusal.reason).toBe('not-held-by-qualifier');
+  });
+
+  it('nothing holds the name: read at P\'s own address, which answers its miss', async () => {
+    expect(protocol.resolveCallerPackageAddress({ type: 'dataset', name: 'nowhere', callerPackageId: P }))
+      .toEqual({ kind: 'package', packageId: P });
+    expect((await readFrom('nowhere', P) as { item?: unknown })?.item ?? null).toBeNull();
+  });
+
+  it('CONTROL: the bare read and `?package=` answer as before', async () => {
+    ship('dataset', 'pipeline', A);
+    ship('dataset', 'twin', A);
+    ship('dataset', 'twin', B);
+    expect(labelOf(await protocol.getMetaItem({ type: 'dataset', name: 'pipeline' }))).toBe('alpha dataset');
+    expect(labelOf(await protocol.getMetaItem({ type: 'dataset', name: 'twin', packageId: B }))).toBe('beta dataset');
+    expect((await refusalOf(() => protocol.getMetaItem({ type: 'dataset', name: 'twin' }))).refusal.reason).toBe('ambiguous-in-environment');
+  });
+});

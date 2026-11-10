@@ -37,7 +37,7 @@ import { isFilterAST, parseFilterAST } from '@objectstack/spec/data';
 // below cannot judge a different set than the `$` dialect beside it.
 import { isRefusedTextComparand, textComparandRefusalReason } from '@objectstack/spec/data';
 import type { ApiError, BatchUpdateResponse, ValidateDataIssue } from '@objectstack/spec/api';
-import { ValidateDataIssueSchema } from '@objectstack/spec/api';
+import { DATASET_QUERY_BATCH_MAX_QUERIES, ValidateDataIssueSchema } from '@objectstack/spec/api';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { isPlatformProvidedObjectName } from '@objectstack/spec/system';
 // #4237 — the metadata save door's advisory reader, shared with `MetadataClient`
@@ -1517,6 +1517,223 @@ function readAnalyticsErrorEnvelope(body: unknown): { code?: string; message?: s
  * ships a `code`, so a 404 WITHOUT one cannot be the unknown-dataset case.
  */
 const ANALYTICS_ABSENT_STATUSES: readonly number[] = [404, 501];
+
+/**
+ * The package a dataset query is read from, sent as `?package=` (ADR-0150 D5):
+ * the caller's package, and only with a saved dataset NAME. An inline draft
+ * names no saved item, so it is read with no package.
+ */
+function datasetQueryPackage(dataset: Record<string, unknown> | string, packageId: string | undefined): string | undefined {
+  return typeof dataset === 'string' && typeof packageId === 'string' && packageId !== '' ? packageId : undefined;
+}
+
+/**
+ * Whether a dataset query asks for the draft world.
+ *
+ * ADR-0037 P3 — draft data preview. Preview mode is URL-keyed by design
+ * (`?preview=draft` flips the whole document, incl. the Live Canvas iframe),
+ * so the adapter reads it straight off the location rather than threading a
+ * React context down through every widget package. When set, the server
+ * overlays the pending seed draft's rows on the dataset query and resolves
+ * draft-overlaid dataset definitions. An explicit `previewDrafts` is the
+ * caller's answer and wins over the URL.
+ */
+function datasetPreviewDrafts(previewDrafts: boolean | undefined): boolean {
+  return previewDrafts !== undefined
+    ? previewDrafts === true
+    : typeof window !== 'undefined' &&
+      new URLSearchParams(window.location.search).get('preview') === 'draft';
+}
+
+/** One `POST /analytics/dataset/query` body, as the single door and each batch entry send it. */
+function datasetQueryBody(
+  dataset: Record<string, unknown> | string,
+  selection: DatasetSelection,
+  previewDrafts: boolean,
+): Record<string, unknown> {
+  return typeof dataset === 'string'
+    ? { datasetName: dataset, selection, ...(previewDrafts ? { previewDrafts: true } : {}) }
+    : { dataset, selection, ...(previewDrafts ? { previewDrafts: true } : {}) };
+}
+
+/**
+ * The original refusal `code` of one batch entry, as the single door's body
+ * would have carried it. The batch door maps a refusal into the house error
+ * envelope (`DatasetQueryBatchEntrySchema`): a 4xx code outside the closed
+ * vocabulary moves to `declaredCode` and `code` takes the member the status
+ * derives, so below 500 `declaredCode` IS the door's code. A 5xx refusal's
+ * `declaredCode` was written by the door itself beside the derived `code` it
+ * answered, so there the door's code is `code`.
+ */
+function batchEntryRefusalBody(status: number, error: unknown): Record<string, unknown> {
+  const e = (error && typeof error === 'object' ? error : {}) as Record<string, unknown>;
+  const declared = typeof e.declaredCode === 'string' && e.declaredCode !== '' ? e.declaredCode : undefined;
+  const code = status < 500 && declared !== undefined ? declared : e.code;
+  return { ...e, code };
+}
+
+/**
+ * Whether a WHOLE-batch refusal says the batch door is not served here (an
+ * older server, a gateway): `404 ROUTE_NOT_FOUND`, or a bare 404/501 no
+ * ObjectStack route wrote. The batch door itself never answers either, so the
+ * single door, which may well be served, answers each query instead.
+ */
+function batchDoorAbsent(status: number, body: unknown): boolean {
+  const { code } = readAnalyticsErrorEnvelope(body);
+  if (code === undefined) return ANALYTICS_ABSENT_STATUSES.includes(status);
+  return errorCodeIs({ code }, 'ROUTE_NOT_FOUND');
+}
+
+/** What `queryDataset` resolves to: one query's rows, columns and drill sidecars. */
+export type DatasetQueryAnswer = Awaited<ReturnType<ObjectStackAdapter['queryDataset']>>;
+
+/** One query of {@link ObjectStackAdapter.queryDatasetBatch}: `queryDataset`'s first two arguments. */
+export interface DatasetBatchQuery {
+  dataset: Record<string, unknown> | string;
+  selection: DatasetSelection;
+}
+
+/**
+ * One query's outcome in a batch, in `Promise.allSettled`'s shape: the answer
+ * `queryDataset` resolves to, or the error it throws for that query.
+ */
+export type DatasetBatchOutcome =
+  | { status: 'fulfilled'; value: DatasetQueryAnswer }
+  | { status: 'rejected'; reason: unknown };
+
+/** The single door's surface, as an `AnalyticsNotInstalledError` names it. */
+const DATASET_QUERY_SURFACE = 'POST /analytics/dataset/query';
+
+/** The batch door's surface, named by a whole-batch refusal. */
+const DATASET_QUERY_BATCH_SURFACE = 'POST /analytics/dataset/query/batch';
+
+/**
+ * The single door's classification of one REFUSED dataset query: the error
+ * `queryDataset` throws for that answer. One ladder for every way a query is
+ * refused — the single door's non-2xx response, a batch entry's `{ status,
+ * error }` and a whole batch refused for a reason that is no query's own
+ * ({@link ObjectStackAdapter.queryDatasetBatch}) — so a widget shows the same
+ * refusal whichever door answered it.
+ *
+ * `body` is the refusal body as the single door reads it (flat
+ * `{ code, message }` or the wrapped `{ error: { code, message } }`); `dataset`
+ * is the query's own dataset argument, the subject of a not-found sentence.
+ */
+function datasetQueryRefusal({ status, statusText, body: errBody, dataset, surface }: {
+  status: number;
+  statusText: string;
+  body: unknown;
+  dataset: Record<string, unknown> | string;
+  surface: string;
+}): Error {
+  const { code: serverCode, message: serverMessage } = readAnalyticsErrorEnvelope(errBody);
+  // The generic branch's tail, and ONLY the generic branch's: it falls back
+  // to the raw body so an unclassifiable failure still shows an operator
+  // something the server actually sent. Every classified branch below
+  // quotes `serverMessage` instead — a message the producer DECLARED — so a
+  // parenthetical is never a JSON dump dressed up as the server speaking.
+  const detail = serverMessage || (errBody === undefined ? '' : JSON.stringify(errBody));
+  // The dataset this query asked for, read off OUR request. `queryDataset`
+  // accepts either a saved dataset by name or an inline draft; only the
+  // by-name form can miss, but the inline form still carries `name`, so the
+  // subject of the sentence is known in both.
+  const requestedDatasetName =
+    typeof dataset === 'string' ? dataset
+    : typeof (dataset as { name?: unknown })?.name === 'string' ? String((dataset as { name?: unknown }).name)
+    : undefined;
+
+  /* ── objectui#5663 — branch on the server's ADR-0112 `code`, never on
+   * "the endpoint errored" ────────────────────────────────────────────────
+   *
+   * What stood here tested `res.status === 501 || res.status === 404` and
+   * called all of it "the analytics capability is not installed". TWO
+   * unrelated conditions answer 404 on this url, and the mapping could not
+   * see the difference:
+   *
+   *   route absent      404 `ROUTE_NOT_FOUND` (runtime dispatcher)
+   *   dataset unknown   404 `NOT_FOUND`       (this route's own lookup miss)
+   *
+   * So a HotCRM tenant whose installed app was too old to define
+   * `opportunity_metrics` was told to install a server plugin — while the
+   * server printed `Dataset "opportunity_metrics" not found.` inside the
+   * SAME banner, in the parenthetical the headline was contradicting. The
+   * evidence was in the payload the whole time; the mapping was reading a
+   * different field from the one it quoted.
+   *
+   * The status is not a contract here and never was: it is a transport fact
+   * several conditions share, which is the same reason `isApiAccessDenied`
+   * and `isAppPermissionDeniedError` above discriminate on `code` (see
+   * objectui#4408). The `code` is the contract, it is what ADR-0112 exists
+   * to make readable, and the framework declares a distinct one for every
+   * condition this call can land in. Branch on it.
+   */
+
+  // ① The capability really is absent, from either of its two producers:
+  //    the route is mounted with no analytics service behind it (501
+  //    `NOT_IMPLEMENTED`, `registerAnalyticsEndpoints`), or the route was
+  //    never mounted and the dispatcher answered (404 `ROUTE_NOT_FOUND`).
+  //    One remedy — install and mount the service — so one copy.
+  if (errorCodeIsAnyOf({ code: serverCode }, ['NOT_IMPLEMENTED', 'ROUTE_NOT_FOUND'])) {
+    return new AnalyticsNotInstalledError(surface, serverMessage, serverCode);
+  }
+
+  // ② The route answered; the DATASET is the thing that is missing (404
+  //    `NOT_FOUND`). A package problem in the environment, not a missing
+  //    server capability — the remedy is upgrading the installed app.
+  if (errorCodeIs({ code: serverCode }, 'NOT_FOUND')) {
+    return new AnalyticsDatasetNotFoundError({
+      datasetName: requestedDatasetName,
+      serverCode,
+      serverMessage,
+    });
+  }
+
+  // ③ The request never ran: the session is anonymous or its token lapsed
+  //    (401 `UNAUTHENTICATED`, `enforceAuth`). Nothing about it is evidence
+  //    for or against the capability being installed.
+  if (errorCodeIs({ code: serverCode }, 'UNAUTHENTICATED')) {
+    return new AnalyticsUnauthenticatedError({ serverCode, serverMessage });
+  }
+
+  // ③a The request ran into a READ refusal: this user may not read an
+  //    object the dataset queries (403 `PERMISSION_DENIED`, the analytics
+  //    read admission — objectui#10899). Typed so a tile can render the
+  //    same localized "no access" state the list view does, instead of
+  //    the generic string below.
+  if (errorCodeIs({ code: serverCode }, 'PERMISSION_DENIED')) {
+    return new AnalyticsForbiddenError({
+      serverCode,
+      serverMessage,
+      datasetName: requestedDatasetName,
+    });
+  }
+
+  // ④ Residual — the answer declared NO ADR-0112 code, so no ObjectStack
+  //    route wrote it (a proxy, a gateway, a host with no API mounted).
+  //    Only here is the bare status the best signal available, and only
+  //    because every code branch has already declined: this route's own
+  //    `NOT_FOUND` always ships a `code`, so a code-less 404 cannot be the
+  //    unknown-dataset case.
+  if (serverCode === undefined) {
+    if (ANALYTICS_ABSENT_STATUSES.includes(status)) {
+      return new AnalyticsNotInstalledError(surface, detail || undefined);
+    }
+    if (status === 401) {
+      return new AnalyticsUnauthenticatedError({ serverMessage });
+    }
+  }
+
+  // ⑤ Everything that named itself and is none of the above — a compile
+  //    error like "relationship not declared in include" (400
+  //    `DATASET_INVALID`), a `CUBE_NOT_FOUND`, a 5xx — is a real failure
+  //    with a real server detail, and keeps it. Note that a 404
+  //    `CUBE_NOT_FOUND` used to land in the capability-missing branch too,
+  //    by the same status collision; it now reads as what it is. A `409
+  //    RESOURCE_CONFLICT` (a dataset name two packages hold, ADR-0150 D5)
+  //    lands here too: its sentence names every candidate, and it is never
+  //    retried bare.
+  return new Error(`Dataset query failed: ${status} ${statusText}${detail ? ` — ${detail}` : ''}`);
+}
 
 /**
  * Thrown when the server REJECTED the analytics query body (HTTP 400 —
@@ -7362,25 +7579,10 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     totals?: Array<{ dimensions: string[]; rows: Array<Record<string, unknown>> }>;
   }> {
     await this.connect();
-    const packageId = typeof dataset === 'string' && typeof options?.packageId === 'string' && options.packageId !== ''
-      ? options.packageId
-      : undefined;
+    const packageId = datasetQueryPackage(dataset, options?.packageId);
     const url = `${this.baseUrl}/api/v1/analytics/dataset/query`
       + (packageId !== undefined ? `?package=${encodeURIComponent(packageId)}` : '');
-    // ADR-0037 P3 — draft data preview. Preview mode is URL-keyed by design
-    // (`?preview=draft` flips the whole document, incl. the Live Canvas
-    // iframe), so the adapter reads it straight off the location rather than
-    // threading a React context down through every widget package. When set,
-    // the server overlays the pending seed draft's rows on the dataset query
-    // and resolves draft-overlaid dataset definitions. An explicit
-    // `options.previewDrafts` is the caller's answer and wins over the URL.
-    const previewDrafts = options?.previewDrafts !== undefined
-      ? options.previewDrafts === true
-      : typeof window !== 'undefined' &&
-        new URLSearchParams(window.location.search).get('preview') === 'draft';
-    const requestBody = typeof dataset === 'string'
-      ? { datasetName: dataset, selection, ...(previewDrafts ? { previewDrafts: true } : {}) }
-      : { dataset, selection, ...(previewDrafts ? { previewDrafts: true } : {}) };
+    const requestBody = datasetQueryBody(dataset, selection, datasetPreviewDrafts(options?.previewDrafts));
 
     const res = await this.fetchImpl(url, {
       method: 'POST',
@@ -7394,117 +7596,19 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     if (!res.ok) {
       let errBody: unknown;
       try { errBody = await res.json(); } catch { /* non-JSON error body */ }
-      const { code: serverCode, message: serverMessage } = readAnalyticsErrorEnvelope(errBody);
-      // The generic branch's tail, and ONLY the generic branch's: it falls back
-      // to the raw body so an unclassifiable failure still shows an operator
-      // something the server actually sent. Every classified branch below
-      // quotes `serverMessage` instead — a message the producer DECLARED — so a
-      // parenthetical is never a JSON dump dressed up as the server speaking.
-      const detail = serverMessage || (errBody === undefined ? '' : JSON.stringify(errBody));
-      const surface = 'POST /analytics/dataset/query';
-      // The dataset this query asked for, read off OUR request. `queryDataset`
-      // accepts either a saved dataset by name or an inline draft; only the
-      // by-name form can miss, but the inline form still carries `name`, so the
-      // subject of the sentence is known in both.
-      const requestedDatasetName =
-        typeof dataset === 'string' ? dataset
-        : typeof (dataset as { name?: unknown })?.name === 'string' ? String((dataset as { name?: unknown }).name)
-        : undefined;
-
-      /* ── objectui#5663 — branch on the server's ADR-0112 `code`, never on
-       * "the endpoint errored" ────────────────────────────────────────────────
-       *
-       * What stood here tested `res.status === 501 || res.status === 404` and
-       * called all of it "the analytics capability is not installed". TWO
-       * unrelated conditions answer 404 on this url, and the mapping could not
-       * see the difference:
-       *
-       *   route absent      404 `ROUTE_NOT_FOUND` (runtime dispatcher)
-       *   dataset unknown   404 `NOT_FOUND`       (this route's own lookup miss)
-       *
-       * So a HotCRM tenant whose installed app was too old to define
-       * `opportunity_metrics` was told to install a server plugin — while the
-       * server printed `Dataset "opportunity_metrics" not found.` inside the
-       * SAME banner, in the parenthetical the headline was contradicting. The
-       * evidence was in the payload the whole time; the mapping was reading a
-       * different field from the one it quoted.
-       *
-       * The status is not a contract here and never was: it is a transport fact
-       * several conditions share, which is the same reason `isApiAccessDenied`
-       * and `isAppPermissionDeniedError` above discriminate on `code` (see
-       * objectui#4408). The `code` is the contract, it is what ADR-0112 exists
-       * to make readable, and the framework declares a distinct one for every
-       * condition this call can land in. Branch on it.
-       */
-
-      // ① The capability really is absent, from either of its two producers:
-      //    the route is mounted with no analytics service behind it (501
-      //    `NOT_IMPLEMENTED`, `registerAnalyticsEndpoints`), or the route was
-      //    never mounted and the dispatcher answered (404 `ROUTE_NOT_FOUND`).
-      //    One remedy — install and mount the service — so one copy.
-      if (errorCodeIsAnyOf({ code: serverCode }, ['NOT_IMPLEMENTED', 'ROUTE_NOT_FOUND'])) {
-        throw new AnalyticsNotInstalledError(surface, serverMessage, serverCode);
-      }
-
-      // ② The route answered; the DATASET is the thing that is missing (404
-      //    `NOT_FOUND`). A package problem in the environment, not a missing
-      //    server capability — the remedy is upgrading the installed app.
-      if (errorCodeIs({ code: serverCode }, 'NOT_FOUND')) {
-        throw new AnalyticsDatasetNotFoundError({
-          datasetName: requestedDatasetName,
-          serverCode,
-          serverMessage,
-        });
-      }
-
-      // ③ The request never ran: the session is anonymous or its token lapsed
-      //    (401 `UNAUTHENTICATED`, `enforceAuth`). Nothing about it is evidence
-      //    for or against the capability being installed.
-      if (errorCodeIs({ code: serverCode }, 'UNAUTHENTICATED')) {
-        throw new AnalyticsUnauthenticatedError({ serverCode, serverMessage });
-      }
-
-      // ③a The request ran into a READ refusal: this user may not read an
-      //    object the dataset queries (403 `PERMISSION_DENIED`, the analytics
-      //    read admission — objectui#10899). Typed so a tile can render the
-      //    same localized "no access" state the list view does, instead of
-      //    the generic string below.
-      if (errorCodeIs({ code: serverCode }, 'PERMISSION_DENIED')) {
-        throw new AnalyticsForbiddenError({
-          serverCode,
-          serverMessage,
-          datasetName: requestedDatasetName,
-        });
-      }
-
-      // ④ Residual — the answer declared NO ADR-0112 code, so no ObjectStack
-      //    route wrote it (a proxy, a gateway, a host with no API mounted).
-      //    Only here is the bare status the best signal available, and only
-      //    because every code branch has already declined: this route's own
-      //    `NOT_FOUND` always ships a `code`, so a code-less 404 cannot be the
-      //    unknown-dataset case.
-      if (serverCode === undefined) {
-        if (ANALYTICS_ABSENT_STATUSES.includes(res.status)) {
-          throw new AnalyticsNotInstalledError(surface, detail || undefined);
-        }
-        if (res.status === 401) {
-          throw new AnalyticsUnauthenticatedError({ serverMessage });
-        }
-      }
-
-      // ⑤ Everything that named itself and is none of the above — a compile
-      //    error like "relationship not declared in include" (400
-      //    `DATASET_INVALID`), a `CUBE_NOT_FOUND`, a 5xx — is a real failure
-      //    with a real server detail, and keeps it. Note that a 404
-      //    `CUBE_NOT_FOUND` used to land in the capability-missing branch too,
-      //    by the same status collision; it now reads as what it is. A `409
-      //    RESOURCE_CONFLICT` (a dataset name two packages hold, ADR-0150 D5)
-      //    lands here too: its sentence names every candidate, and it is never
-      //    retried bare.
-      throw new Error(`Dataset query failed: ${res.status} ${res.statusText}${detail ? ` — ${detail}` : ''}`);
+      throw datasetQueryRefusal({ status: res.status, statusText: res.statusText, body: errBody, dataset, surface: DATASET_QUERY_SURFACE });
     }
 
-    const payload = await res.json();
+    return this.datasetQueryAnswer(await res.json());
+  }
+
+  /**
+   * The single door's answer read off a 200 body: the rows, the column
+   * metadata and the drill sidecars `queryDataset` resolves to. Shared with
+   * {@link queryDatasetBatch}, whose `{ data }` entry is the same body, so a
+   * query answered in a batch resolves to exactly what the single door gives.
+   */
+  private datasetQueryAnswer(payload: unknown): DatasetQueryAnswer {
     // Unwrap the standard `{ success, data }` envelope when present.
     const data = payload && typeof payload === 'object' && 'success' in payload && 'data' in payload
       ? (payload as { data: unknown }).data
@@ -7540,6 +7644,144 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       : undefined;
     const totals = Array.isArray((data as any)?.totals) ? (data as any).totals : undefined;
     return { rows, fields, object, dimensionFields, drillRawRows, drillRanges, drillScopes, totals };
+  }
+
+  /**
+   * Run several dataset queries as `POST /api/v1/analytics/dataset/query/batch`
+   * requests, so a dashboard render sends one request instead of one per
+   * widget (objectstack#32165, the server door is objectstack#32200).
+   *
+   * Resolves to one outcome per query, in the order given, each exactly what
+   * `queryDataset` would give that query alone: `fulfilled` with the answer it
+   * resolves to, or `rejected` with the error it throws — classified by the
+   * single door's own ladder (`datasetQueryRefusal`), so a refused query
+   * reaches its widget as the same error, and its siblings are answered. It
+   * never rejects itself.
+   *
+   * What a batch request can carry decides how the queries are sent:
+   *
+   * - The batch URL's `?package=` and `?preview=` are read once for every
+   *   query, so one request carries one package. `packageId` is the package
+   *   of every saved dataset name here; an inline draft names no saved item
+   *   and goes without one, as the single door sends it. Queries with no
+   *   package and queries with one go in separate requests.
+   * - At most `DATASET_QUERY_BATCH_MAX_QUERIES` queries go in one request;
+   *   more go in several, sent side by side.
+   * - A request carrying one query is the single door's own request.
+   *
+   * A WHOLE batch refused for a reason that is no query's own (not signed in,
+   * no analytics service, a malformed batch) rejects every query of it with
+   * the error the single door's ladder gives that answer. A server that does
+   * not serve the batch door (`batchDoorAbsent`) has each query answered by
+   * the single door instead, and this adapter stops asking it for batches.
+   */
+  async queryDatasetBatch(
+    queries: readonly DatasetBatchQuery[],
+    options?: { previewDrafts?: boolean; packageId?: string },
+  ): Promise<DatasetBatchOutcome[]> {
+    const outcomes = new Array<DatasetBatchOutcome>(queries.length);
+    // Group by the package each query is read from, keeping each query's index.
+    const groups = new Map<string, number[]>();
+    queries.forEach((query, index) => {
+      const key = datasetQueryPackage(query.dataset, options?.packageId) ?? '';
+      const group = groups.get(key);
+      if (group) group.push(index); else groups.set(key, [index]);
+    });
+    const requests: Promise<void>[] = [];
+    for (const [packageKey, indexes] of groups) {
+      for (let at = 0; at < indexes.length; at += DATASET_QUERY_BATCH_MAX_QUERIES) {
+        const chunk = indexes.slice(at, at + DATASET_QUERY_BATCH_MAX_QUERIES);
+        requests.push(this.sendDatasetQueryBatch(queries, chunk, packageKey || undefined, options?.previewDrafts, outcomes));
+      }
+    }
+    await Promise.all(requests);
+    return outcomes;
+  }
+
+  /** Set once a server answered that it does not serve the batch door. */
+  private datasetBatchDoorAbsent = false;
+
+  /**
+   * One request of {@link queryDatasetBatch}: the queries at `indexes`, all
+   * read from `packageId`, settled into `outcomes` at their own indexes.
+   */
+  private async sendDatasetQueryBatch(
+    queries: readonly DatasetBatchQuery[],
+    indexes: readonly number[],
+    packageId: string | undefined,
+    previewDrafts: boolean | undefined,
+    outcomes: DatasetBatchOutcome[],
+  ): Promise<void> {
+    const viaSingleDoor = () => Promise.all(indexes.map(async (index) => {
+      const { dataset, selection } = queries[index];
+      try {
+        outcomes[index] = { status: 'fulfilled', value: await this.queryDataset(dataset, selection, { previewDrafts, packageId }) };
+      } catch (reason) {
+        outcomes[index] = { status: 'rejected', reason };
+      }
+    }));
+    if (indexes.length === 1 || this.datasetBatchDoorAbsent) {
+      await viaSingleDoor();
+      return;
+    }
+    const rejectAll = (reasonFor: (query: DatasetBatchQuery) => unknown) => {
+      for (const index of indexes) outcomes[index] = { status: 'rejected', reason: reasonFor(queries[index]) };
+    };
+    try {
+      await this.connect();
+      const drafts = datasetPreviewDrafts(previewDrafts);
+      const url = `${this.baseUrl}/api/v1/analytics/dataset/query/batch`
+        + (packageId !== undefined ? `?package=${encodeURIComponent(packageId)}` : '');
+      const res = await this.fetchImpl(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
+        },
+        body: JSON.stringify({ queries: indexes.map((index) => datasetQueryBody(queries[index].dataset, queries[index].selection, drafts)) }),
+      });
+
+      if (!res.ok) {
+        let errBody: unknown;
+        try { errBody = await res.json(); } catch { /* non-JSON error body */ }
+        if (batchDoorAbsent(res.status, errBody)) {
+          this.datasetBatchDoorAbsent = true;
+          await viaSingleDoor();
+          return;
+        }
+        rejectAll(({ dataset }) => datasetQueryRefusal({ status: res.status, statusText: res.statusText, body: errBody, dataset, surface: DATASET_QUERY_BATCH_SURFACE }));
+        return;
+      }
+
+      const payload = await res.json();
+      const results: unknown = payload?.data?.results;
+      if (!Array.isArray(results) || results.length !== indexes.length) {
+        const error = new Error(
+          `Dataset query batch failed: the answer carried ${Array.isArray(results) ? results.length : 'no'} results `
+          + `for ${indexes.length} queries; a batch answers one result per query, in order.`,
+        );
+        rejectAll(() => error);
+        return;
+      }
+      indexes.forEach((index, at) => {
+        const entry = results[at] as { data?: unknown; status?: unknown; error?: unknown } | null;
+        if (entry && typeof entry === 'object' && 'data' in entry) {
+          outcomes[index] = { status: 'fulfilled', value: this.datasetQueryAnswer(entry.data) };
+          return;
+        }
+        const status = typeof entry?.status === 'number' ? entry.status : 500;
+        outcomes[index] = {
+          status: 'rejected',
+          // A batch entry carries no reason phrase. The single door's phrase
+          // is a transport fact too: an HTTP/2 answer has none either.
+          reason: datasetQueryRefusal({ status, statusText: '', body: batchEntryRefusalBody(status, entry?.error), dataset: queries[index].dataset, surface: DATASET_QUERY_SURFACE }),
+        };
+      });
+    } catch (error) {
+      // The request itself failed (network, a body that is not JSON): the
+      // single door throws that same failure for every query it would carry.
+      rejectAll(() => error);
+    }
   }
 
   /** Client-side aggregation fallback */

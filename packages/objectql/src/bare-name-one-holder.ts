@@ -195,6 +195,7 @@
  */
 
 import type { ObjectStackManifest } from '@objectstack/spec/kernel';
+import { namespacedHoldersMeet } from '@objectstack/spec/kernel';
 import {
   artifactPackageId,
   BARE_NAME_ONE_HOLDER_TYPES,
@@ -361,6 +362,9 @@ export function declaredBuiltInBoundActions(manifest: ObjectStackManifest | unkn
  * requester can name no package, so two holders would leave it refused as
  * ambiguous on every request (`email_template`'s `auth.*` mails, #31699).
  * `name` omitted judges by the type alone.
+ *
+ * The namespace comparison is `namespacedHoldersMeet` (`@objectstack/spec`),
+ * the copy `composeStacks` reads for the same pair in one artifact.
  */
 export function bareNameHoldersMeet(
   type: BareNameOneHolderType,
@@ -370,7 +374,8 @@ export function bareNameHoldersMeet(
 ): boolean {
   if (!isNamespaceScopedBareNameType(type)) return true;
   if (name !== undefined && isPackageScopedType(type) && isPlatformRequestedBareName(type, name)) return true;
-  return !(incomingNamespace && holderNamespace && incomingNamespace !== holderNamespace);
+  // The namespace half is spec's one copy, which `composeStacks` reads too.
+  return namespacedHoldersMeet(incomingNamespace, holderNamespace);
 }
 
 /**

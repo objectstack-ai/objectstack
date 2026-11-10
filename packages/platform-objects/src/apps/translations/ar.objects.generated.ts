@@ -2160,7 +2160,15 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
           },
           discoveryEndpoint: {
             label: "رابط الاكتشاف",
-            helpText: "اختياري. رابط مستند اكتشاف OIDC. اتركه فارغًا لاشتقاق `<issuer>/.well-known/openid-configuration`."
+            helpText: "اختياري. رابط مستند اكتشاف OIDC (https). اتركه فارغًا لاشتقاق `<issuer>/.well-known/openid-configuration`. تُعدّ نقطة النهاية المحددة هنا موثوقة لهذا المزوّد."
+          },
+          userInfoEndpoint: {
+            label: "رابط userinfo",
+            helpText: "اختياري. رابط نقطة نهاية userinfo في OIDC (https)، يُستخدم بدلًا من الرابط الذي يذكره مستند الاكتشاف. تُعدّ نقطة النهاية المحددة هنا موثوقة لهذا المزوّد: حدّدها عندما يُرفض التسجيل لأن مستند الاكتشاف يذكر مضيف userinfo لا يثق به الخادم."
+          },
+          skipUserInfo: {
+            label: "قراءة المطالبات من رمز المعرّف فقط",
+            helpText: "اختياري. قراءة مطالبات المستخدم من رمز المعرّف الموثَّق فقط وعدم استدعاء نقطة نهاية userinfo مطلقًا. Microsoft Entra ID: فعّل هذا الخيار لتعيين \"preferred_username\"، الذي لا تُرجعه نقطة نهاية userinfo الخاصة به."
           },
           scopes: {
             label: "النطاقات",
@@ -2169,7 +2177,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
           },
           mapEmail: {
             label: "التعيين: مطالبة البريد الإلكتروني",
-            helpText: "اختياري. المطالبة المعيَّنة إلى البريد الإلكتروني. القيمة الافتراضية \"email\".",
+            helpText: "اختياري. المطالبة المعيَّنة إلى البريد الإلكتروني. القيمة الافتراضية \"email\". Microsoft Entra ID (جهة الإصدار على login.microsoftonline.com): المستخدمون الذين ليس لديهم صندوق بريد لا يحملون مطالبة \"email\"، لذا عيِّن \"preferred_username\" (أو \"upn\") وفعّل \"قراءة المطالبات من رمز المعرّف فقط\".",
             placeholder: "email"
           },
           mapName: {
@@ -2258,12 +2266,78 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "حذف مزوّد SSO",
-        description: "هل تريد حذف مزوّد SSO هذا؟ لن يتمكن مستخدمو نطاقه من تسجيل الدخول من خلاله بعد ذلك.",
-        successMessage: "تم حذف مزوّد SSO"
+        description: "هل تريد حذف مزوّد SSO هذا؟ يُلغى ربط كل مستخدم مرتبط به، بمن فيهم المستخدمون الذين ليست لديهم طريقة تسجيل دخول أخرى مرتبطة (لا كلمة مرور ولا مزوّد آخر). وتُزال معه تعيينات مجموعات مزوّد الهوية ومجموعات الأذونات التي منحتها. لا يمكن التراجع عن هذا الإجراء.",
+        resultDialog: {
+          title: "تم حذف مزوّد SSO",
+          acknowledge: "تم",
+          fields: {
+            message: "ما أُزيل"
+          }
+        },
+        preflight: {
+          fields: {
+            summary: "ما يزيله هذا الحذف",
+            linkedUsers: "المستخدمون الذين يُلغى ربطهم",
+            usersWithoutOtherSignIn: "المستخدمون الذين ليست لديهم طريقة تسجيل دخول أخرى مرتبطة"
+          }
+        }
       },
       edit_sso_sign_in_options: {
         label: "تعديل خيارات تسجيل الدخول",
         successMessage: "تم حفظ خيارات تسجيل الدخول"
+      },
+      edit_saml_provider: {
+        label: "تعديل إعدادات SAML",
+        params: {
+          issuer: {
+            label: "معرّف كيان مزوّد الهوية",
+            helpText: "معرّف EntityID في SAML لمزوّد الهوية. لا يمكن تغييره إلا عندما لا يكون أي مستخدم مرتبطًا بالمزوّد."
+          },
+          entryPoint: {
+            label: "رابط SSO لمزوّد الهوية",
+            helpText: "نقطة نهاية تسجيل الدخول الموحَّد لدى مزوّد الهوية. اتركه فارغًا للإبقاء على القيمة المخزّنة. لا يمكن تغييره إلا عندما لا يكون أي مستخدم مرتبطًا بالمزوّد."
+          },
+          cert: {
+            label: "شهادة توقيع جديدة لمزوّد الهوية",
+            helpText: "شهادة التوقيع X.509 الجديدة لمزوّد الهوية (PEM). اتركها فارغة للإبقاء على الشهادة المخزّنة."
+          },
+          keepCurrentCert: {
+            label: "الاستمرار في الوثوق بالشهادة الحالية",
+            helpText: "أثناء انتقال مزوّد الهوية، تُقبل التأكيدات الموقّعة بأيٍّ من الشهادتين. عدّل مرة أخرى دون هذا الخيار لإزالة الشهادة القديمة."
+          }
+        },
+        resultDialog: {
+          title: "تم حفظ إعدادات SAML",
+          acknowledge: "تم",
+          fields: {
+            message: "ما تغيّر"
+          }
+        }
+      },
+      edit_oidc_provider: {
+        label: "تعديل إعدادات OIDC",
+        params: {
+          clientId: {
+            label: "معرّف العميل",
+            helpText: "معرّف عميل OAuth الصادر عن مزوّد الهوية. اتركه فارغًا للإبقاء على القيمة المخزّنة. لا يمكن تغييره إلا عندما لا يكون أي مستخدم مرتبطًا بالمزوّد."
+          },
+          clientSecret: {
+            label: "سر عميل جديد",
+            helpText: "اتركه فارغًا للإبقاء على السر المخزّن. لا يُعرض السر المخزّن أبدًا."
+          },
+          scopes: {
+            label: "النطاقات",
+            helpText: "نطاقات OAuth مفصولة بمسافات أو فواصل، تحل محل القائمة المخزّنة. اتركها فارغة للإبقاء عليها.",
+            placeholder: "openid email profile"
+          }
+        },
+        resultDialog: {
+          title: "تم حفظ إعدادات OIDC",
+          acknowledge: "تم",
+          fields: {
+            message: "ما تغيّر"
+          }
+        }
       },
       show_sso_groups_claim: {
         label: "عرض مطالبة المجموعات",
