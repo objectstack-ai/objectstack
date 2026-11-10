@@ -454,7 +454,7 @@ export const ar: PlatformTranslationData = {
       groups: {
         provider: {
           title: 'المزوّد',
-          description: 'اختر الواجهة الخلفية لـ LLM. وضع Memory يعيد صدى المدخلات — مفيد للاختبارات ولا يصلح للإنتاج أبدًا.',
+          description: 'اختر الواجهة الخلفية لـ LLM.',
         },
         gateway: {
           title: 'Vercel AI Gateway',
@@ -498,7 +498,6 @@ export const ar: PlatformTranslationData = {
         provider: {
           label: 'المزوّد',
           options: {
-            memory: 'Memory (صدى — للاختبار فقط)',
             gateway: 'Vercel AI Gateway',
             openai: 'OpenAI',
             anthropic: 'Anthropic',

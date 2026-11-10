@@ -915,7 +915,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // The tenant default currency (ADR-0053) a `dynamic` currency diff reads,
   // the same `useLocalization().currency` the record page's cells read.
   const { currency: tenantCurrency } = useLocalization();
-  const { objectLabel, objectPluralLabel, viewLabel: _vLabel, sectionLabel, actionParamText, actionParamOptionLabel, actionDescription, actionSubmitText, actionCancelText, actionResultDialog, fieldLabel, fieldOptionLabel } = useObjectLabel();
+  const { objectLabel, objectPluralLabel, viewLabel: _vLabel, sectionLabel, actionParamText, actionParamOptionLabel, actionDescription, actionSubmitText, actionCancelText, actionResultDialog, actionPreflight, fieldLabel, fieldOptionLabel } = useObjectLabel();
   // label + confirmText + successMessage through ONE call (objectui#4265) —
   // the three keys of an `_actions.<name>` bundle entry can no longer be
   // localized apart from one another on this surface.
@@ -1608,14 +1608,18 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // The action's declared `preflight` read joins the same slot
         // (objectstack#31808): judged against the params the runner handed
         // over, its URL filled by the runner's `interpolateRead`.
+        // Its `fields` row labels read the bundle's
+        // `…preflight.fields.PATH` strings first (objectstack#31937).
         companion: resolveParamDialogCompanion(objForI18n, action?.name, row, {
-          preflight: action?.preflight,
+          preflight: action?.preflight
+            ? actionPreflight(objForI18n, action?.name, action.preflight)
+            : action?.preflight,
           params,
           interpolateRead,
         }),
       });
     });
-  }, [objectName, objectDef, objects, fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionSubmitText, actionCancelText, language]);
+  }, [objectName, objectDef, objects, fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionSubmitText, actionCancelText, actionPreflight, language]);
 
   // Global undo/redo (Ctrl+Z), backed by the dataSource — the success toast's
   // "Undo" button (for `undoable` actions) restores the record's prior values.
