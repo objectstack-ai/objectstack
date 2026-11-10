@@ -175,16 +175,19 @@ export function registerAnalyticsEndpoints(this: AnalyticsRouteHost, basePath: s
     this.routeManager.register({
         method: 'POST',
         path: `${basePath}/analytics/dataset/query/batch`,
-        handler: async (req: any, res: any) => {
+        handler: async (req: any, wire: any) => {
+            // Every refusal written on `res` leaves on the wire in the house
+            // error envelope ({@link houseEnvelopeResponse}), so the shared
+            // gates below are asked exactly as the single door asks them.
+            const res = houseEnvelopeResponse(wire);
             try {
                 const environmentId = isScoped ? req.params?.environmentId : undefined;
                 const context = await this.resolveExecCtx(environmentId, req);
-                const denied = writtenAnswer((recorder) => this.enforceAuth(req, recorder, context));
-                if (denied) return sendWholeBatchRefusal(res, denied);
+                if (this.enforceAuth(req, res, context)) return;
 
                 const svc = await resolveService(environmentId, req);
                 if (!svc || typeof svc.queryDataset !== 'function') {
-                    return sendWholeBatchRefusal(res, { status: 501, body: DATASET_QUERY_NOT_IMPLEMENTED });
+                    return res.status(501).json(DATASET_QUERY_NOT_IMPLEMENTED);
                 }
 
                 const body = req.body;
@@ -200,8 +203,7 @@ export function registerAnalyticsEndpoints(this: AnalyticsRouteHost, basePath: s
                 // one-element array it unwraps here is unwrapped for every
                 // query below. Whether a caller may READ drafts is still judged
                 // per query, as that caller, inside {@link answerDatasetQuery}.
-                const repeated = writtenAnswer((recorder) => refuseRepeatedQueryParams(req, recorder, ['preview', 'package']));
-                if (repeated) return sendWholeBatchRefusal(res, repeated);
+                if (refuseRepeatedQueryParams(req, res, ['preview', 'package'])) return;
 
                 // The caller's own objects, never the parse output: the single
                 // door judges the body it was sent.
@@ -211,7 +213,8 @@ export function registerAnalyticsEndpoints(this: AnalyticsRouteHost, basePath: s
                     datasetQueryBatchEntry(await answerDatasetQuery.call(this, query, request)));
                 sendOk(res, { results });
             } catch (error: any) {
-                sendWholeBatchRefusal(res, datasetQueryFaultAnswer(error));
+                const answer = datasetQueryFaultAnswer(error);
+                res.status(answer.status).json(answer.body);
             }
         },
         metadata: { summary: 'Run several semantic-layer dataset queries in one request', tags: ['analytics'] },
@@ -296,6 +299,29 @@ function writtenAnswer(gate: (recorder: { status(code: number): any; json(body: 
         json(written: unknown) { body = written; return recorder; },
     };
     return gate(recorder) ? { status, body } : undefined;
+}
+
+/**
+ * The batch door's response. A refusal written on it (status 400 or above) by a
+ * gate the batch shares with the single door (`enforceAuth`,
+ * `refuseRepeatedQueryParams`, the 501, the fault classification) leaves on
+ * `wire` in the house error envelope, mapped as an entry's refusal is
+ * ({@link sendWholeBatchRefusal}), with the status the gate chose. A body
+ * already in the house envelope (`sendOk`, `sendError`) passes through as
+ * written. This is what makes the batch a house-envelope door end to end
+ * while it asks those gates exactly as the single door does.
+ */
+function houseEnvelopeResponse(wire: any): { status(code: number): any; json(body: unknown): any } {
+    let status = 200;
+    const res = {
+        status(code: number) { status = code; return res; },
+        json(body: unknown) {
+            if (status >= 400 && !(isRecord(body) && body.success === false)) sendWholeBatchRefusal(wire, { status, body });
+            else wire.status(status).json(body);
+            return res;
+        },
+    };
+    return res;
 }
 
 /**
