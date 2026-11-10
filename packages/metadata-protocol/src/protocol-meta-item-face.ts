@@ -64,6 +64,35 @@ function disabledOnlyHolderOf(registry: any, type: string, name: string): string
     return holders.length > 0 && holders.every((id) => registry.isPackageDisabled(id) === true) ? holders[0] : undefined;
 }
 
+/**
+ * [#32183] The package whose stack a read naming no package takes, for a
+ * name a disabled package also holds: the one holder ADR-0150 D3 resolves
+ * over the served set. `undefined` leaves the read as it was: a type the
+ * registry does not read by package, a name no disabled package holds (the
+ * read is `main`'s, untouched), the environment's own item (D3 (a) serves
+ * it), no served holder (the withheld arm of the face) or two or more (the
+ * read's own refusal).
+ *
+ * Without it, the reads that pick a layer by name alone (the layered read's
+ * code layer, the first composite in registration order, and the package-less
+ * overlay row's address, which counts every shipper) reached the disabled
+ * holder's body while the by-name read served the enabled one. Shared by
+ * the face and the layered read, so both read one stack. Optional-called:
+ * a registry without these reads leaves every read as it was.
+ */
+export function servedHolderAddressOf(registry: any, type: string, name: string): string | undefined {
+    if (typeof registry?.readsByPackage !== 'function' || registry.readsByPackage(type) !== true) return undefined;
+    if (typeof registry.packageScopedHoldersOf !== 'function' || typeof registry.isPackageDisabled !== 'function') return undefined;
+    const every: readonly string[] = registry.packageScopedHoldersOf(type, name, null, { includeDisabledPackages: true }) ?? [];
+    if (!every.some((id) => registry.isPackageDisabled(id) === true)) return undefined;
+    const served: readonly string[] = registry.packageScopedHoldersOf(type, name, null) ?? [];
+    if (served.length !== 1) return undefined;
+    if (typeof registry.getEnvironmentScopedItem === 'function' && registry.getEnvironmentScopedItem(type, name) !== undefined) {
+        return undefined;
+    }
+    return served[0];
+}
+
 /** The body of `ObjectStackProtocolImplementation#readMetaItemFace`; the method's docblock there is its contract. */
 export async function readMetaItemFace(
     this: Pick<MetaItemFaceHost, 'engine' | 'readMetaItem'>,
@@ -76,7 +105,11 @@ export async function readMetaItemFace(
     if (request.type === 'object' && isObjectOfDisabledPackage(this.engine?.registry, request.name)) {
         throw objectPackageDisabledError(request.name);
     }
-    const answer = await this.readMetaItem(request, { face });
+    // [#32183] A name a disabled package also holds is read at the served
+    // holder's address ({@link servedHolderAddressOf}), so no layer of the
+    // read can be the disabled holder's.
+    const servedAddress = request.packageId ? undefined : servedHolderAddressOf(this.engine?.registry, request.type, request.name);
+    const answer = await this.readMetaItem(servedAddress === undefined ? request : { ...request, packageId: servedAddress }, { face });
     // [#28877] The served read of an `action` also withholds one that launches
     // into a disabled package, as the served list does.
     const withheldAction = request.type === 'action' && face === 'served'

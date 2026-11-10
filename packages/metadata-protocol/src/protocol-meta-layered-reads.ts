@@ -10,7 +10,9 @@
  * of the same name as it stood, re-indented one level, with `this.<member>`
  * read as `host.<member>` and nothing else changed
  * (`node scripts/host-split.mjs check <base> <member> protocol-meta-layered-reads.ts`
- * proves it). Each method stays on the class with its docblock and signature,
+ * proves it at the cut). Since then, [#32183] added one step to each body: a
+ * name a disabled package also holds is read at the served holder's address.
+ * Each method stays on the class with its docblock and signature,
  * which the published `.d.ts` prints, and hands its body the host
  * (`protocol-host.ts`).
  *
@@ -60,16 +62,22 @@ import { boundPackageOf } from './protocol-package-bindings.js';
 import type { RowlessExpandedView } from './protocol-stored-overlay-types.js';
 import { type ServedOverrideRow, isServedOverrideRowOf } from './served-override.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
+import { servedHolderAddressOf } from './protocol-meta-item-face.js';
 import { packagelessAddressAmbiguityRefusal } from './sys-metadata-repository.js';
 
 /** The body of `ObjectStackProtocolImplementation#packagelessLayeredReadRefusal`; the method's docblock there is its contract. */
-export async function packagelessLayeredReadRefusal(host: Pick<ProtocolHost, 'packagelessAddress'>, request: {
+export async function packagelessLayeredReadRefusal(host: Pick<ProtocolHost, 'engine' | 'packagelessAddress'>, request: {
         type: string;
         name: string;
         /** The bundle member the layered read addresses ({@link resolveBundleMemberSelector}); omitted, the canonical one. */
         member?: string;
     }): Promise<(Error & { code: 'RESOURCE_CONFLICT'; status: 409 }) | undefined> {
     const { type, name } = canonicalizeMetaRequestType(request);
+    // [#32183] A name a disabled package also holds is read at the served
+    // holder's address ({@link getMetaItemLayered}), so the read names its
+    // package and the stored rows of other packages (the disabled holder's
+    // among them) leave it no ambiguity to refuse.
+    if (servedHolderAddressOf(host.engine?.registry, PLURAL_TO_SINGULAR[type] ?? type, name) !== undefined) return undefined;
     const member = resolveBundleMemberSelector(type, request.member);
     const address = await host.packagelessAddress(PLURAL_TO_SINGULAR[type] ?? type, name, member);
     return address.candidates.length > 1
@@ -135,6 +143,15 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     // refuses a disabled package's object itself: one answer per door.
     if (request.type === 'object' && isObjectOfDisabledPackage(host.engine?.registry, request.name)) {
         throw objectPackageDisabledError(request.name);
+    }
+    // [#32183] Naming no package, a name a disabled package also holds is read
+    // at the served holder's address, the one the by-name read serves
+    // ({@link servedHolderAddressOf}): its code layer, its overlay rows and its
+    // lock. The code layer is otherwise the first composite in registration
+    // order, which can be the disabled holder's.
+    if (!request.packageId) {
+        const servedAddress = servedHolderAddressOf(host.engine?.registry, request.type, request.name);
+        if (servedAddress !== undefined) request = { ...request, packageId: servedAddress };
     }
     // [#26699] Ruling 6116165299 (Q2 i), extended to this read by the
     // option-A ruling on #26649: ONE member of a bundled type, the

@@ -238,6 +238,10 @@ describe('a shareable namespace two packages share (ADR-0150 D2)', () => {
  * `/:type/gamma/:name` and `_env` with 409 naming both packages; a name only a
  * disabled package holds answered `_env` and `?package=gamma` with 409 naming
  * it.
+ *
+ * Contract review M1 (branch head 340f7cbc, measured): with the disabled holder
+ * registered first, bare `/layers` served its code layer as `code` and
+ * `effective`, while the plain read served the enabled holder.
  */
 describe('#32183 — a disabled package holds no name: the by-name read judges the served holders', () => {
     const LIST = '/api/v1/meta/:type';
@@ -260,13 +264,20 @@ describe('#32183 — a disabled package holds no name: the by-name read judges t
     };
 
     for (const type of PACKAGE_SCOPED_READ_TYPES) {
-        it(`${type}: two holders, one disabled — the enabled holder answers; the disabled one is named nowhere`, async () => {
-            ship(type, 'shared', A);
-            ship(type, 'shared', B);
+        // [contract review M1, S2] Both registration orders: a reader that takes
+        // the first registered holder serves the disabled one's body when it
+        // registered first.
+        it.each([['enabled first', [A, B]], ['disabled first', [B, A]]] as const)(`${type}: two holders, one disabled (%s) — the enabled holder answers, its layers too; the disabled one is named nowhere`, async (_order, order) => {
+            for (const id of order) ship(type, 'shared', id);
             registry.disablePackage(B);
             const bare = await drive(ITEM, { type, name: 'shared' });
             expect(bare.status, JSON.stringify(bare.body)).toBe(200);
             expect(labelOf(bare)).toBe(`alpha ${type}`);
+            // The bare layered view reads the served holder's stack, never the first registered one's.
+            const layers = await drive(LAYERS, { type, name: 'shared' });
+            expect(layers.status, JSON.stringify(layers.body)).toBe(200);
+            expect([layers.body?.code?.label, layers.body?.effective?.label]).toEqual([`alpha ${type}`, `alpha ${type}`]);
+            expect(JSON.stringify(layers.body)).not.toContain(`beta ${type}`);
             expect(labelOf(await drive(ITEM, { type, name: 'shared' }, { package: A }))).toBe(`alpha ${type}`);
             expect(labelOf(await drive(QUALIFIED, { type, ns: 'alpha', name: 'shared' }))).toBe(`alpha ${type}`);
             refusedNaming(await drive(ITEM, { type, name: 'shared' }, { package: C }), [A], [B]);
