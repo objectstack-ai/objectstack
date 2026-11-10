@@ -375,7 +375,7 @@ describe('[S3] through the real data door: no count beside a read, and every rea
         const find = vi.spyOn(h.ql, 'find');
         return { count, find };
     }
-    const sourceReads = (find: ReturnType<typeof vi.spyOn>, object: string) =>
+    const sourceReads = (find: { mock: { calls: unknown[][] } }, object: string): Array<Record<string, unknown>> =>
         find.mock.calls.filter((c: unknown[]) => c[0] === object).map((c: unknown[]) => c[1] as Record<string, unknown>);
 
     it('built-in path: pages read through findData run no engine.count, and each names its own limit', async () => {
