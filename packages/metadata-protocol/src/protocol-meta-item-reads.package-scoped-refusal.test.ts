@@ -7,6 +7,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
+// Paid at collection, not inside a case's clock (check:test-source-alias): the
+// module under test reaches it dynamically.
+import '@objectstack/lint';
 import { PackageScopedNameRefusedError, packageScopedRefusalMessage, type PackageScopedRefusal } from '@objectstack/core';
 import { packageScopedRefusalOf, rethrowPackageScopedRefusal } from './protocol-meta-item-reads.js';
 
