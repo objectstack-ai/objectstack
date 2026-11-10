@@ -332,10 +332,25 @@ describe('OrganizationEditionChoice', () => {
     expect(result.error.issues.map((issue) => issue.path)).toEqual([['organizationEditions', 0, 'label']]);
   });
 
+  it('features.organizationEditions refuses an edition value used twice', () => {
+    const result = AuthFeaturesConfigSchema.safeParse({
+      organizationEditions: [choice, { ...choice, label: 'Another label', hint: 'Another hint' }],
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues).toEqual([expect.objectContaining({ code: 'custom', path: ['organizationEditions'] })]);
+  });
+
+  it('CONTROL: distinct edition values pass', () => {
+    const list = [choice, { edition: 'trial', label: 'Trial label', hint: 'Trial hint' }];
+    expect(AuthFeaturesConfigSchema.parse({ organizationEditions: list }).organizationEditions).toEqual(list);
+  });
+
   it('states the renderer\'s unchecked-default rule and the request-language resolution in its describe', () => {
     const description = AuthFeaturesConfigSchema.shape.organizationEditions.description ?? '';
     expect(description).toMatch(/unchecked/);
     expect(description).toMatch(/request language/);
+    expect(description).toMatch(/appears once/);
   });
 });
 

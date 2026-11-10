@@ -309,11 +309,18 @@ export const AuthFeaturesConfigSchema = lazySchema(() => z.object({
   ),
   // Served by plugin-auth from the host option
   // `AuthManagerOptions.organizationEditions`, only when the host sets it.
-  organizationEditions: z.array(OrganizationEditionChoiceSchema).optional().describe(
-    'Editions the host\'s organization-create door accepts besides its default, each with the edition query value, a label and a hint the host resolved in the request language, and its member cap when one applies. '
-    + 'The create-organization form draws each as a choice that starts unchecked (the renderer\'s rule: no choice is ever picked for the user) and, when one is picked, sends its edition value to the create door. '
-    + 'Served only when the host declares choices; absent means the door takes no edition and the form offers none',
-  ),
+  organizationEditions: z.array(OrganizationEditionChoiceSchema)
+    .refine(
+      (choices) => new Set(choices.map((choice) => choice.edition)).size === choices.length,
+      { message: 'each edition value may appear only once in organizationEditions' },
+    )
+    .optional()
+    .describe(
+      'Editions the host\'s organization-create door accepts besides its default, each with the edition query value, a label and a hint the host resolved in the request language, and its member cap when one applies. '
+      + 'Each edition value appears once, so a picked choice names one door value. '
+      + 'The create-organization form draws each as a choice that starts unchecked (the renderer\'s rule: no choice is ever picked for the user) and, when one is picked, sends its edition value to the create door. '
+      + 'Served only when the host declares choices; absent means the door takes no edition and the form offers none',
+    ),
   turnstileSiteKey: z.string().optional().describe(
     'Public Cloudflare Turnstile site key, present only while the opt-in sign-up challenge is on: the sign-up form renders the widget and sends its token in the x-captcha-response header; absent means no challenge',
   ),

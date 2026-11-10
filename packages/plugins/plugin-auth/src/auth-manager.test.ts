@@ -3301,12 +3301,46 @@ describe('AuthManager', () => {
         expect(host.mock.calls).toEqual([[{ acceptLanguage: 'ja-JP' }], [{ acceptLanguage: undefined }]]);
       });
 
-      it('refuses to serve an answer the public contract would reject, naming the option', () => {
-        const manager = new AuthManager({
-          ...base,
-          organizationEditions: () => [{ ...developer, label: '   ' }],
+      // Fail-soft by ruling: getPublicConfig() also feeds the login page and the
+      // sign-in checks, so a bad host answer serves no choices and is reported
+      // once, never thrown.
+      describe('a host answer the public contract rejects', () => {
+        const withLogger = (organizationEditions: (r: { acceptLanguage?: string }) => readonly any[]) => {
+          const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+          const manager = new AuthManager({ ...base, logger, organizationEditions } as any);
+          return { manager, logger };
+        };
+
+        it.each([
+          ['a blank translated hint', () => [{ ...developer, hint: '   ' }], '0.hint'],
+          ['an edition value used twice', () => [developer, { ...developer, label: 'Other' }], '(list)'],
+        ])('%s: the config is served without the key, the flag false, one error logged', (_name, answer, where) => {
+          const { manager, logger } = withLogger(answer);
+          const served = (manager.getPublicConfig() as any).features;
+          expect(served).not.toHaveProperty('organizationEditions');
+          expect(served.developerEditionCreate).toBe(false);
+          expect(served.twoFactor).toBe(false);
+          expect(logger.error).toHaveBeenCalledTimes(1);
+          const [message, meta] = logger.error.mock.calls[0]!;
+          expect(message).toMatch(/AuthManagerOptions\.organizationEditions/);
+          expect(meta).toEqual({ option: 'AuthManagerOptions.organizationEditions', firstIssue: expect.stringMatching(new RegExp(`^${where.replace(/[.()]/g, '\\$&')}: `)) });
+
+          // The same failure again is not reported again.
+          manager.getPublicConfig();
+          expect(logger.error).toHaveBeenCalledTimes(1);
         });
-        expect(() => manager.getPublicConfig()).toThrow(/AuthManagerOptions\.organizationEditions.*0\.label/);
+
+        it('an option that throws: same fail-soft answer, one error naming it', () => {
+          const { manager, logger } = withLogger(() => { throw new Error('copy bundle missing'); });
+          const served = (manager.getPublicConfig() as any).features;
+          expect(served).not.toHaveProperty('organizationEditions');
+          expect(served.developerEditionCreate).toBe(false);
+          expect(logger.error).toHaveBeenCalledTimes(1);
+          expect(logger.error.mock.calls[0]![1]).toEqual({
+            option: 'AuthManagerOptions.organizationEditions',
+            firstIssue: 'the option threw: copy bundle missing',
+          });
+        });
       });
     });
 

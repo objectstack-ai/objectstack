@@ -100,7 +100,7 @@ import {
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/api';
-import { OrganizationEditionChoiceSchema, type OrganizationEditionChoice } from '@objectstack/spec/api';
+import { AuthFeaturesConfigSchema, type OrganizationEditionChoice } from '@objectstack/spec/api';
 import { createObjectQLAdapterFactory, withSystemReadContext } from './objectql-adapter.js';
 import { isPresentedInvitationPending } from './presented-invitation.js';
 import { type ExternalDirectoryDoorDeps } from './external-directory-door.js';
@@ -791,10 +791,13 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * behaviour, and no door here takes an edition. Set it only on a host that
    * serves that door itself (the cloud control plane does, beside its
    * {@link onOrganizationCreated} provisioning); setting it anywhere else
-   * offers a choice the server ignores. The answer is checked against
-   * `OrganizationEditionChoiceSchema` before it is served, and a malformed one
-   * fails the `/auth/config` read loudly rather than publishing a contract
-   * violation.
+   * offers a choice the server ignores. The answer is checked against the
+   * public contract (`features.organizationEditions`: well-formed entries,
+   * each `edition` used once) before it is served. An answer that fails it, or
+   * an option that throws, serves no choices (and a false
+   * `developerEditionCreate`) and is reported once at `error` naming this
+   * option and the first issue: the rest of the public config, which the
+   * login page and the sign-in checks read, is never failed by it.
    */
   organizationEditions?: (request: { acceptLanguage?: string }) => readonly OrganizationEditionChoice[];
 
@@ -5031,24 +5034,53 @@ export class AuthManager {
   }
 
   /**
+   * Each distinct `organizationEditions` failure already reported, so a host
+   * answer that keeps failing is said once per process, not once per request.
+   */
+  private readonly reportedOrganizationEditionFailures = new Set<string>();
+
+  /**
    * The organization-create choices the host declares for this request, checked
-   * against the public contract. `undefined` when the host declares none, so
-   * the key is left out of `features`.
+   * against the public contract (`features.organizationEditions`, unique
+   * `edition` values included). `undefined` when the host declares none, so the
+   * key is left out of `features`.
+   *
+   * Fail-soft by ruling: `getPublicConfig()` also feeds the login page, the
+   * `kernel:ready` sign-up reads and the sign-in-method floor, so a host answer
+   * that throws or fails the schema (one blank translated hint) must not take
+   * those down. It serves no choices instead (the key absent, the derived
+   * `developerEditionCreate` false) and reports the failure once, at `error`,
+   * naming the host option and the first issue.
    */
   private resolveOrganizationEditions(request: unknown): OrganizationEditionChoice[] | undefined {
     const host = this.config.organizationEditions;
     if (!host) return undefined;
-    const answer = host({ acceptLanguage: acceptLanguageHeader(request) });
-    const checked = OrganizationEditionChoiceSchema.array().safeParse(answer);
-    if (!checked.success) {
+    let reason: string;
+    try {
+      const answer = host({ acceptLanguage: acceptLanguageHeader(request) });
+      const checked = AuthFeaturesConfigSchema.shape.organizationEditions.safeParse(answer);
+      if (checked.success) return checked.data && checked.data.length > 0 ? checked.data : undefined;
       const first = checked.error.issues[0];
-      throw new Error(
-        'AuthManagerOptions.organizationEditions answered a list that is not a valid '
-        + `features.organizationEditions value (${first ? `${first.path.join('.') || '(root)'}: ${first.message}` : 'invalid'}); `
-        + 'fix the host option so each entry carries an edition (snake_case), a non-blank label and hint, and an optional positive whole memberLimit.',
-      );
+      reason = first ? `${first.path.join('.') || '(list)'}: ${first.message}` : 'invalid';
+    } catch (error) {
+      reason = `the option threw: ${error instanceof Error ? error.message : String(error)}`;
     }
-    return checked.data.length > 0 ? checked.data : undefined;
+    this.reportOrganizationEditionFailure(reason);
+    return undefined;
+  }
+
+  private reportOrganizationEditionFailure(reason: string): void {
+    if (this.reportedOrganizationEditionFailures.has(reason)) return;
+    this.reportedOrganizationEditionFailures.add(reason);
+    const message =
+      '[AuthManager] AuthManagerOptions.organizationEditions answered a list that is not a valid '
+      + 'features.organizationEditions value, so /auth/config serves no organization-create choices '
+      + '(and developerEditionCreate is false) until the host option is fixed: each entry needs a '
+      + 'snake_case edition used once, a non-blank label and hint, and an optional positive whole '
+      + 'memberLimit. Each distinct failure is reported once per process.';
+    const meta = { option: 'AuthManagerOptions.organizationEditions', firstIssue: reason };
+    if (this.config.logger) this.audienceLogError(message, meta);
+    else console.error(message, meta);
   }
 
   /**
