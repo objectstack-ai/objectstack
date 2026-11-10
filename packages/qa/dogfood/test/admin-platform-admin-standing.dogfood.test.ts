@@ -277,6 +277,13 @@ const ADMITTED = [
   // `sso-provider-lifecycle.test.ts`.
   'POST /api/v1/auth/admin/sso/update-provider',
   'GET /api/v1/auth/admin/sso/delete-impact',
+  // #32086 — the SSO Providers form's attribute mapping (show, and set): the
+  // same raw mounts and gate as the groups claim above, the same unknown probe
+  // provider (404, nothing moves); the stored effect (the members a sign-in
+  // reads the user's email and name from) is pinned in plugin-auth's
+  // `register-sso-provider.test.ts` and `sso-saml-refusal-landing.test.ts`.
+  'POST /api/v1/auth/admin/sso/get-attribute-mapping',
+  'POST /api/v1/auth/admin/sso/set-attribute-mapping',
   // #30958 — the SCIM connection credential door: ObjectStack raw mounts whose
   // FIRST statement is the ADR-0068 gate. SCIM is on at this boot
   // (`OS_SCIM_ENABLED`), so the mint reaches a 200 and stores a credential;
@@ -791,6 +798,13 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
       // read's one query parameter. With none, each answers 400 past the gate.
       'POST /api/v1/auth/admin/sso/update-provider': { body: { providerId: 'standing-probe-edit', clientSecret: 'probe-secret' } },
       'GET /api/v1/auth/admin/sso/delete-impact': { query: '?providerId=standing-probe-edit' },
+      // #32086. `providerId` is required by both; the set takes at least one
+      // member as text (none, or a non-text one, answers `400 INVALID_REQUEST`
+      // past the gate).
+      'POST /api/v1/auth/admin/sso/get-attribute-mapping': { body: { providerId: 'standing-probe-attribute-mapping' } },
+      'POST /api/v1/auth/admin/sso/set-attribute-mapping': {
+        body: { providerId: 'standing-probe-attribute-mapping', name: 'displayName' },
+      },
       // #30958. A connection id is the only required field; the revoke names a
       // credential id that does not exist, so it moves nothing.
       'POST /api/v1/auth/admin/scim/mint-credential': { body: { connectionId: 'standing-probe-scim' } },

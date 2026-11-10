@@ -3752,6 +3752,194 @@
           "ref": "#32019"
         }
       ]
+    },
+    {
+      "id": "api-backend.recycle-bin-delete-entry-restore",
+      "title": "A business-record delete keeps its rows in the recycle bin: the delete answer names the entry, GET /api/v1/data/:object/recycle-bin lists it with its cascade and retention, and POST …/recycle-bin/:entryId/restore writes every row back under its original id",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123): every call"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a showcase boot on its own port and file DB (dogfood §0), OS_PORT exported, signed in as the seeded admin; OS_RECYCLE_BIN_RETENTION_DAYS unset, so retention is the 30-day default (packages/spec/src/data/recycle-bin.zod.ts#RECYCLE_BIN_DEFAULT_RETENTION_DAYS)",
+          "a project of this run, never a seeded one: POST /api/v1/data/showcase_project with a unique name (QA-RB-<run>), then two showcase_task rows whose project (the master_detail field to showcase_project) is its id, with the task's other required fields as GET /api/v1/meta/object/showcase_task declares them. Its id is PID, the task ids T1 and T2",
+          "one scratch exchange-rate row for the platform-object leg: POST /api/v1/data/sys_exchange_rate (currency EUR, a rate, effective_date 2001-01-01, source manual) — an admin writes it (packages/platform-objects/src/system/sys-exchange-rate.object.ts#SysExchangeRate); its id is XID"
+        ]
+      },
+      "steps": [
+        "DELETE /api/v1/data/showcase_project/PID and keep the whole answer; then GET /api/v1/data/showcase_task/T1 and /T2",
+        "GET /api/v1/data/showcase_project/recycle-bin and find the entry whose id the delete answer named",
+        "POST /api/v1/data/showcase_project/recycle-bin/EID/restore (EID = that id) and keep the receipt",
+        "GET /api/v1/data/showcase_project/PID, /showcase_task/T1 and /T2; GET the recycle-bin listing again, then repeat the restore POST",
+        "DELETE /api/v1/data/sys_exchange_rate/XID and keep the answer"
+      ],
+      "acceptance": [
+        {
+          "clause": "the delete answer names the entry to undo: { object, id, success: true, recycleBinEntryId }, and the cascade went with the master (the two tasks read 404)",
+          "oracle": "api",
+          "verify": "the answer carries recycleBinEntryId as a string beside object and id (packages/metadata-protocol/src/protocol-data-writes.ts, the deleteData answer; DeleteDataResponseSchema in packages/spec/src/api/protocol.zod.ts). The two task reads answer 404",
+          "evidence": "the delete answer and the two 404 bodies"
+        },
+        {
+          "clause": "the listing serves the entry with the master and its cascade in one snapshot, who deleted it, and when it is purged",
+          "oracle": "api",
+          "verify": "the entry has id = recycleBinEntryId, object showcase_project, recordId PID, recordCount 3, rows listing the project first and then both tasks as { object, id, values }, deletedBy = the admin's user id, retentionDays 30 and purgeAfter = deletedAt + 30 days; the page answers { object, entries, hasMore }, newest first (packages/rest/src/recycle-bin-routes.ts#registerRecycleBinEndpoints, the GET door)",
+          "evidence": "the listing body"
+        },
+        {
+          "clause": "a restore is a receipt, never a record body, and writes every row back under its original id",
+          "oracle": "api",
+          "verify": "the restore answers 200 with exactly { entryId, object, recordId, rows, relinked }, rows naming showcase_project PID and both tasks as { object, id } (packages/rest/src/recycle-bin-routes.ts#restoreReceipt). The three GETs answer 200 under PID, T1 and T2, and each task's project is PID again (packages/objectql/src/recycle-bin/restore.ts#restoreRecycleBinEntry)",
+          "evidence": "the receipt and the three reads"
+        },
+        {
+          "clause": "a restored entry leaves the bin, and restoring it again answers 404 naming it",
+          "oracle": "api",
+          "verify": "the second listing no longer holds EID; the repeated POST answers 404 RECORD_NOT_FOUND with \"No recycle-bin entry 'EID' of 'showcase_project' is visible to you\" and details { object, entryId }",
+          "evidence": "the second listing and the 404 body"
+        },
+        {
+          "clause": "a platform object keeps no entry: deleting a sys_ row answers without recycleBinEntryId",
+          "oracle": "api",
+          "verify": "the sys_exchange_rate delete answers success with no recycleBinEntryId key: only an object without the platform prefix enters the bin (packages/objectql/src/recycle-bin/capture.ts#recycleBinTakesObject)",
+          "evidence": "the delete answer"
+        }
+      ],
+      "negative": [
+        "a delete answer without recycleBinEntryId for showcase_project, a restore that mints new ids, or a restore that brings back the project without its tasks is a FAIL",
+        "reading a missing data.record.restored flow run as a defect is wrong: a restore is never a create, so a record-created trigger does not fire (packages/spec/src/data/recycle-bin.zod.ts#RECORD_RESTORED_EVENT)"
+      ],
+      "traps": [
+        "destructive-in-place"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/rest/src/recycle-bin-routes.test.ts, packages/metadata-protocol/src/protocol.delete-recycle-bin-entry.test.ts and packages/objectql/src/recycle-bin/*.test.ts; no live spec drives the four doors over a booted showcase"
+      },
+      "source": [
+        "docs/adr/0148-recycle-bin-separate-store-restore-under-original-ids-retention-in-days.md (D1 the separate store, D2 restore under the original ids)",
+        "packages/rest/src/recycle-bin-routes.ts#registerRecycleBinEndpoints and #restoreReceipt",
+        "packages/rest/src/rest-route-ledger.ts (the four recycle-bin rows)",
+        "packages/metadata-protocol/src/protocol-data-writes.ts (deleteData: recycleBinEntryId on the answer)",
+        "packages/objectql/src/recycle-bin/capture.ts#recycleBinTakesObject",
+        "packages/objectql/src/recycle-bin/restore.ts#restoreRecycleBinEntry",
+        "packages/spec/src/data/recycle-bin.zod.ts#RECYCLE_BIN_DEFAULT_RETENTION_DAYS and #RECYCLE_BIN_RETENTION_DAYS_ENV",
+        "#30780 (a by-id delete keeps its rows), #31220 (restore), #31595 (the REST doors and the delete answer)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0148 recycle bin: the delete answer, the listing and the restore (#31595, #31220, #30780). Scoped sweep #32020 (epic #32022 M2), read from source at 43a51b55; no live run made",
+          "ref": "#32020"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.recycle-bin-refusals-purge-empty",
+      "title": "Recycle-bin refusals and removals: a detail whose master is in the bin or purged answers 409 naming why, purge and empty remove entries for good, the listing's paging is declared, and a non-manager or anonymous caller is refused",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123): every positive call",
+        "a contributor-bound member (the search:qa-contributor-bound-member recipe): the non-manager probes",
+        "an anonymous caller (no session): the 401 probe"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a showcase boot on its own port and file DB (dogfood §0), OS_PORT exported, signed in as the seeded admin; OS_RECYCLE_BIN_RETENTION_DAYS unset, so retention is the 30-day default (packages/spec/src/data/recycle-bin.zod.ts#RECYCLE_BIN_DEFAULT_RETENTION_DAYS)",
+          "two projects of this run, each built as api-backend.recycle-bin-delete-entry-restore builds PID (a unique name, two tasks): P1 with tasks A1, A2 and P2 with tasks B1, B2"
+        ],
+        "provisioning": {
+          "use": "search:qa-contributor-bound-member",
+          "why": "acceptance[3] needs a member who does NOT manage the bin and holds no allowRestoreOwnDeleted on showcase_project; the contributor-bound member is that persona (showcase_contributor grants neither, examples/app-showcase/src/security/permission-sets.ts#ContributorPermissionSet). Without it acceptance[3] scores blocked(fixture)"
+        },
+        "knownGaps": [
+          "no stock showcase persona holds allowRestoreOwnDeleted without manageRecycleBin, so the own-entry half of the restore rule (a caller restores the entries it deleted, and only those) is not driven live here: it is pinned by packages/objectql/src/recycle-bin/restore.ts#assertCallerMayRestoreEntry and its tests. A permission set granting allowRestoreOwnDeleted alone on a writable object would let a run drive it (FOLLOW-UPS §17c)",
+          "RESTORE_UNIQUE_VALUE_TAKEN and RESTORE_PACKAGE_UNINSTALLED are not driven live: the showcase business objects declare no unique field, and uninstalling the package that defines a binned object is destructive to the boot. Both are pinned by the restore tests (packages/spec/src/data/recycle-bin.zod.ts#RECYCLE_BIN_RESTORE_REFUSAL_CODES lists all four)"
+        ]
+      },
+      "steps": [
+        "as admin, DELETE /api/v1/data/showcase_task/A1 (entry EA1), then DELETE /api/v1/data/showcase_project/P1 (entry EP1, holding P1 and A2); POST /api/v1/data/showcase_project/recycle-bin/… is not the door for A1: POST /api/v1/data/showcase_task/recycle-bin/EA1/restore",
+        "POST /api/v1/data/showcase_project/recycle-bin/EP1/restore, then POST /api/v1/data/showcase_task/recycle-bin/EA1/restore again",
+        "DELETE /api/v1/data/showcase_task/B1 (entry EB1), DELETE /api/v1/data/showcase_project/P2 (entry EP2), DELETE /api/v1/data/showcase_project/recycle-bin/EP2 (purge), then POST /api/v1/data/showcase_task/recycle-bin/EB1/restore; repeat the purge DELETE",
+        "GET /api/v1/data/showcase_task/recycle-bin?limit=0, ?limit=201, ?offset=-1, ?limit=1&limit=2 and ?foo=1; POST …/recycle-bin/EB1/restore?x=1",
+        "as the contributor-bound member: GET /api/v1/data/showcase_project/recycle-bin and POST /api/v1/data/showcase_task/recycle-bin/EB1/restore; with no session: GET /api/v1/data/showcase_project/recycle-bin",
+        "as admin, DELETE /api/v1/data/showcase_task/recycle-bin (empty) and GET the listing again"
+      ],
+      "acceptance": [
+        {
+          "clause": "a detail whose master is in the bin is refused, not orphaned: 409 RESTORE_PARENT_IN_RECYCLE_BIN naming the master's entry, and it restores once that entry is restored",
+          "oracle": "api",
+          "verify": "the first EA1 restore answers 409 RESTORE_PARENT_IN_RECYCLE_BIN with details { object, recordId, field: 'project', entryId, parentObject: 'showcase_project', parentId: P1, parentEntryId: EP1 }; after EP1 restores, the second EA1 restore answers 200 and A1 reads back under P1 (packages/objectql/src/recycle-bin/restore.ts#parentInRecycleBinRefusal)",
+          "evidence": "the 409 body, the EP1 receipt and the 200 receipt"
+        },
+        {
+          "clause": "a detail whose master was purged is refused for good: 409 RESTORE_PARENT_PURGED, and nothing is written",
+          "oracle": "api",
+          "verify": "the purge answers 200 { object, entryId, purged: true }; the EB1 restore answers 409 RESTORE_PARENT_PURGED, \"This record cannot be restored: the record it belongs to was deleted for good.\" (packages/objectql/src/recycle-bin/restore.ts#parentPurgedRefusal), and GET /api/v1/data/showcase_task/B1 still answers 404; the repeated purge answers 404 RECORD_NOT_FOUND",
+          "evidence": "the purge answer, the 409 body, the 404 read and the second purge's 404"
+        },
+        {
+          "clause": "the listing's paging is declared, and every door refuses a parameter it does not take",
+          "oracle": "api",
+          "verify": "limit 0, limit 201 and offset -1 answer 400 VALIDATION_FAILED with details.fields naming the parameter (limit is 1 to 200, packages/objectql/src/recycle-bin/list.ts#RECYCLE_BIN_LIST_MAX_LIMIT); the repeated limit and the unknown foo answer 400 naming it; the restore door takes no query parameter, so ?x=1 answers 400 and restores nothing (packages/rest/src/recycle-bin-routes.ts#RECYCLE_BIN_LIST_QUERY_PARAMS and #RECYCLE_BIN_ACT_QUERY_PARAMS)",
+          "evidence": "the six 400 bodies"
+        },
+        {
+          "clause": "only a recycle-bin manager lists the bin, and a caller with no restore grant restores nothing; anonymous is 401",
+          "oracle": "api",
+          "verify": "the member's listing answers 403 PERMISSION_DENIED, \"Listing the recycle bin of this object needs the recycle-bin manager permission on it.\" (packages/objectql/src/recycle-bin/list.ts#assertCallerManagesRecycleBin); the member's restore answers 403 PERMISSION_DENIED and B1 stays absent; the anonymous listing answers 401 (the authz-conformance row anonymous-deny-recycle-bin, packages/qa/dogfood/test/authz-conformance.matrix.ts)",
+          "evidence": "the two 403 bodies, the 401 body and the unchanged read"
+        },
+        {
+          "clause": "emptying the bin purges every entry the caller manages for that object and says how many",
+          "oracle": "api",
+          "verify": "the empty answers 200 { object: 'showcase_task', removed: N } with N the number of showcase_task entries the listing held just before; the listing then holds none (packages/objectql/src/recycle-bin/purge.ts#emptyRecycleBin)",
+          "evidence": "the listing before, the empty answer and the empty listing"
+        }
+      ],
+      "negative": [
+        "a detail restored under a master that is not live (any 200 on the first EA1 restore or on the EB1 restore) is a FAIL: a detail is never written back under a parent that is not there",
+        "a non-manager listing that answers 200, even with an empty page, is a FAIL: the door refuses, it does not filter",
+        "⛔ the empty step purges every showcase_task entry the admin manages, including entries an earlier item left: run it on this run's own database"
+      ],
+      "traps": [
+        "wrong-persona",
+        "destructive-in-place"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/rest/src/recycle-bin-routes.test.ts and packages/objectql/src/recycle-bin/*.test.ts (restore refusals, purge, empty, the grant reads); packages/qa/dogfood/test/showcase-anonymous-deny-surfaces.dogfood.test.ts drives the anonymous row"
+      },
+      "source": [
+        "docs/adr/0148-recycle-bin-separate-store-restore-under-original-ids-retention-in-days.md (D4 the restore refusals, D5 the grants)",
+        "packages/objectql/src/recycle-bin/restore.ts#parentInRecycleBinRefusal, #parentPurgedRefusal and #assertCallerMayRestoreEntry",
+        "packages/objectql/src/recycle-bin/purge.ts#purgeRecycleBinEntry and #emptyRecycleBin",
+        "packages/objectql/src/recycle-bin/list.ts#assertCallerManagesRecycleBin and #RECYCLE_BIN_LIST_MAX_LIMIT",
+        "packages/rest/src/recycle-bin-routes.ts#RECYCLE_BIN_LIST_QUERY_PARAMS and #RECYCLE_BIN_ACT_QUERY_PARAMS",
+        "packages/spec/src/data/recycle-bin.zod.ts#RECYCLE_BIN_RESTORE_REFUSAL_CODES and #RECYCLE_BIN_GRANT_KEYS",
+        "packages/spec/src/security/permission.zod.ts#objectPermissionGrants (manageRecycleBin implies allowRestoreOwnDeleted; modifyAllRecords implies both; allowDelete implies neither)",
+        "#30990 (purge and empty), #31220 (restore refusals), #31438 (the grants), #31595 (the doors)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0148 recycle bin: restore refusals, purge, empty, paging and the grant refusals (#30990, #31220, #31438, #31595). Scoped sweep #32020 (epic #32022 M2), read from source at 43a51b55; no live run made",
+          "ref": "#32020"
+        }
+      ]
     }
   ]
 }

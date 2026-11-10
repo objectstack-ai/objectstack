@@ -357,7 +357,7 @@ describe('#9653 the card’s assertion: on an SSO-ENABLED fixture a real plain m
   });
 });
 
-describe('the groups-claim bridges run the same platform-admin gate as every /admin/sso bridge, before they read or write the provider', () => {
+describe('the groups-claim and attribute-mapping bridges run the same platform-admin gate as every /admin/sso bridge, before they read or write the provider', () => {
   // Same session shapes as the matrix above. These two bridges read the stored
   // provider through the data engine before (show) or ahead of (set) any
   // delegation, so "never consulted" is asserted on BOTH seams: the engine read
@@ -371,6 +371,10 @@ describe('the groups-claim bridges run the same platform-admin gate as every /ad
   const GROUPS_CLAIM_BODIES: Record<string, Record<string, unknown>> = {
     [`${BASE}/admin/sso/get-groups-claim`]: { providerId: 'acme' },
     [`${BASE}/admin/sso/set-groups-claim`]: { providerId: 'acme', groupsClaim: 'groups' },
+    // [#32086] The attribute mapping, show and set: the same gate, ahead of
+    // the same engine read.
+    [`${BASE}/admin/sso/get-attribute-mapping`]: { providerId: 'acme' },
+    [`${BASE}/admin/sso/set-attribute-mapping`]: { providerId: 'acme', name: 'displayName' },
   };
   const STORED = {
     provider_id: 'acme',

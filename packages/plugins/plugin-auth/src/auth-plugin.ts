@@ -107,7 +107,7 @@ import { registerExternalMembershipGuard } from './external-membership.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { MANAGED_EXTENSION_EDITABLE_FIELDS } from './managed-extension-fields.js';
 import { runSetInitialPassword } from './set-initial-password.js';
-import { createEngineSsoProviderConfigReader, runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runSetSsoGroupsClaim, runShowSsoGroupsClaim, runSsoProviderDeleteImpact, runUpdateSsoProviderFromForm, runVerifyDomain, type AuthRequestHandler, type SsoProviderConfigEngine } from './register-sso-provider.js';
+import { createEngineSsoProviderConfigReader, runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runSetSsoAttributeMapping, runSetSsoGroupsClaim, runShowSsoAttributeMapping, runShowSsoGroupsClaim, runSsoProviderDeleteImpact, runUpdateSsoProviderFromForm, runVerifyDomain, type AuthRequestHandler, type SsoProviderConfigEngine } from './register-sso-provider.js';
 import { runResendVerificationEmail } from './send-verification-email.js';
 import { runSysSessionRevoke, sysSessionRevokeDepsFor } from './sys-session-revoke.js';
 import { oneAccountReadFaultAtMount, oneAccountRefusalAtMount } from './one-account-per-request.js';
@@ -5122,6 +5122,39 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] sso/set-groups-claim bridge failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    // The provider's attribute mapping (`mapping.email` / `firstName` /
+    // `lastName` / `name`: the IdP attributes or claims a sign-in reads the
+    // user's email and name from): show it, and change it, for the
+    // `sys_sso_provider` "Show Attribute Mapping" / "Edit Attribute Mapping"
+    // actions. Same shape and gate as the groups-claim pair above: the stored
+    // blob is read through the system read seam, only the mapped members are
+    // answered, and the write goes through the vendor's /sso/update-provider.
+    rawApp.post(`${basePath}/admin/sso/get-attribute-mapping`, async (c: any) => {
+      try {
+        const gated = await gateAdmin(c);
+        if (gated instanceof Response) return gated;
+        const { status, body } = await runShowSsoAttributeMapping(c.req.raw, readSsoProviderConfigs);
+        return c.json(body, status as any);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] sso/get-attribute-mapping bridge failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    rawApp.post(`${basePath}/admin/sso/set-attribute-mapping`, async (c: any) => {
+      try {
+        const gated = await gateAdmin(c);
+        if (gated instanceof Response) return gated;
+        const { status, body } = await runSetSsoAttributeMapping(handleWithTransportOf(c), c.req.raw, readSsoProviderConfigs);
+        return c.json(body, status as any);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] sso/set-attribute-mapping bridge failed', err);
         return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
       }
     });

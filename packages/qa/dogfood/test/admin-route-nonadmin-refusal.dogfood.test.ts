@@ -391,6 +391,19 @@ function expectationsFor(targetUserId: string): Record<string, RouteExpectation>
       query: '?providerId=refusal-probe-edit',
       note: 'a read: the gate runs before the query is read; the admin lands on 404 RESOURCE_NOT_FOUND for the unknown provider',
     },
+    // #32086 — the SSO Providers form's attribute mapping, show and set: the
+    // same gate first, ahead of any body read, and the same unknown probe
+    // provider for the admin.
+    'POST /api/v1/auth/admin/sso/get-attribute-mapping': {
+      bucket: 'objectstack-gate',
+      body: { providerId: 'refusal-probe-attribute-mapping' },
+      note: 'admin passes the gate and lands on 404 RESOURCE_NOT_FOUND for the unknown provider',
+    },
+    'POST /api/v1/auth/admin/sso/set-attribute-mapping': {
+      bucket: 'objectstack-gate',
+      body: { providerId: 'refusal-probe-attribute-mapping', name: 'displayName' },
+      note: 'admin passes the gate and lands on 404 RESOURCE_NOT_FOUND for the unknown provider; nothing is written',
+    },
 
     // ── #9652: ban / unban moved from the vendor to an ObjectStack mount ────
     //

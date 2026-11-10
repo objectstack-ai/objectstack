@@ -2208,6 +2208,26 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
             helpText: "Optional. Angefordertes SAML-NameID-Format. Standard ist das im IdP konfigurierte Format.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          mapEmail: {
+            label: "Zuordnung: E-Mail-Attribut",
+            helpText: "Optional. Assertion-Attribut, das der E-Mail-Adresse des Benutzers zugeordnet wird. Standard ist „email“, danach die NameID. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          mapFirstName: {
+            label: "Zuordnung: Vornamenattribut",
+            helpText: "Optional. Assertion-Attribut, das dem Vornamen des Benutzers zugeordnet wird. Standard ist „givenName“. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          mapLastName: {
+            label: "Zuordnung: Nachnamenattribut",
+            helpText: "Optional. Assertion-Attribut, das dem Nachnamen des Benutzers zugeordnet wird. Standard ist „surname“. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          mapName: {
+            label: "Zuordnung: Anzeigenamenattribut",
+            helpText: "Optional. Assertion-Attribut, das dem vollständigen Namen des Benutzers zugeordnet wird; es wird verwendet, wenn Vor- und Nachnamenattribute fehlen. Standard ist „displayName“, danach die NameID. Okta: name. Entra ID: http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          },
           mapGroups: {
             label: "Zuordnung: Gruppenattribut",
             helpText: "Optional. Assertion-Attribut, das die Gruppen des Benutzers enthält. Jede Anmeldung vergibt die diesen Gruppen zugeordneten Berechtigungssätze. Leer lassen, um keine Gruppen zuzuordnen.",
@@ -2333,6 +2353,57 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Fertig",
           fields: {
             groupsClaim: "Gruppen-Claim"
+          }
+        }
+      },
+      show_sso_attribute_mapping: {
+        label: "Attributzuordnung anzeigen",
+        resultDialog: {
+          title: "Attributzuordnung",
+          description: "Die IdP-Attribute (SAML) oder Claims (OIDC), aus denen dieser Anbieter bei jeder Anmeldung die E-Mail-Adresse und den Namen des Benutzers liest. Leer bedeutet den Standard: E-Mail aus „email“ (SAML: danach die NameID); Name aus „givenName“ + „surname“, danach „displayName“ (OIDC: „name“). Vor- und Nachname gelten nur für SAML. Ändern Sie sie mit „Attributzuordnung bearbeiten“.",
+          acknowledge: "Fertig",
+          fields: {
+            protocol: "Protokoll",
+            email: "E-Mail",
+            firstName: "Vorname",
+            lastName: "Nachname",
+            name: "Anzeigename"
+          }
+        }
+      },
+      edit_sso_attribute_mapping: {
+        label: "Attributzuordnung bearbeiten",
+        params: {
+          email: {
+            label: "E-Mail-Attribut",
+            helpText: "Das IdP-Attribut oder der Claim, das bzw. der der E-Mail-Adresse des Benutzers zugeordnet wird. Unverändert lassen, um den aktuellen Wert zu behalten; leeren, um zum Standard („email“) zurückzukehren. Entra ID SAML: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          firstName: {
+            label: "Vornamenattribut (SAML)",
+            helpText: "Nur SAML. Das Assertion-Attribut, das dem Vornamen des Benutzers zugeordnet wird. Unverändert lassen, um den aktuellen Wert zu behalten. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          lastName: {
+            label: "Nachnamenattribut (SAML)",
+            helpText: "Nur SAML. Das Assertion-Attribut, das dem Nachnamen des Benutzers zugeordnet wird. Unverändert lassen, um den aktuellen Wert zu behalten. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          name: {
+            label: "Anzeigenamenattribut",
+            helpText: "Das IdP-Attribut oder der Claim, das bzw. der dem vollständigen Namen des Benutzers zugeordnet wird (SAML: verwendet, wenn Vor- und Nachname fehlen). Unverändert lassen, um den aktuellen Wert zu behalten. Okta SAML: name. Entra ID: http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          }
+        },
+        resultDialog: {
+          title: "Attributzuordnung gespeichert",
+          description: "Die Attribute oder Claims, aus denen dieser Anbieter ab jetzt bei jeder Anmeldung die E-Mail-Adresse und den Namen des Benutzers liest. Leer bedeutet, dass der Standard gilt.",
+          acknowledge: "Fertig",
+          fields: {
+            email: "E-Mail",
+            firstName: "Vorname",
+            lastName: "Nachname",
+            name: "Anzeigename"
           }
         }
       }
@@ -3668,6 +3739,55 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       note: {
         label: "Notiz"
+      }
+    }
+  },
+  sys_metadata_commit: {
+    label: "Metadata Commit",
+    pluralLabel: "Metadata Commits",
+    description: "Package-scoped commit log grouping a turn’s metadata changes.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      package_id: {
+        label: "Package"
+      },
+      operation: {
+        label: "Operation",
+        options: {
+          apply: "apply",
+          revert: "revert"
+        }
+      },
+      message: {
+        label: "Message",
+        help: "Change summary; for AI turns, the user instruction that produced it."
+      },
+      actor: {
+        label: "Actor"
+      },
+      ai_model: {
+        label: "AI Model"
+      },
+      parent_commit_id: {
+        label: "Parent Commit"
+      },
+      event_seq_start: {
+        label: "Event Seq Start"
+      },
+      event_seq_end: {
+        label: "Event Seq End"
+      },
+      items: {
+        label: "Items",
+        help: "JSON: [{ type, name, existedBefore, prevVersion }] — the revert plan."
+      },
+      item_count: {
+        label: "Item Count"
+      },
+      created_at: {
+        label: "Created At"
       }
     }
   },
