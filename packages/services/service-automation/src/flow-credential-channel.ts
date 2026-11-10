@@ -142,6 +142,13 @@ interface ChannelRow {
     node_id: string;
     credential_key: string;
     state: FlowCredentialState;
+    /** [ADR-0150 D8 row R9] The row's `flow_package`; `''` for a row naming none. */
+    flow_package: string;
+}
+
+/** A row's `flow_package`, `''` for one naming no package. */
+function rowPackage(row: Record<string, unknown>): string {
+    return typeof row.flow_package === 'string' ? row.flow_package : '';
 }
 
 /** The identity of a position within one flow and state. */
@@ -169,10 +176,30 @@ function rowsOf(found: unknown): Record<string, unknown>[] {
  * credential channel, the publish promotion and the delete projection.
  */
 export class FlowCredentialChannel implements FlowCredentialSource {
-    /** flow name → the ACTIVE positions the channel holds. */
-    private readonly activeIndex = new Map<string, Set<string>>();
+    /**
+     * flow name → row package (`''` for none) → the ACTIVE positions the
+     * channel holds. [ADR-0150 D8 row R9, #31696] Keyed by package too, so a
+     * flow of a name two packages hold reads only its own package's rows.
+     */
+    private readonly activeIndex = new Map<string, Map<string, Set<string>>>();
 
-    constructor(private readonly resolveEngine: () => FlowCredentialEngine | undefined) {}
+    /**
+     * @param holderOf [ADR-0150 D8 row R9, #31696] The package that holds the
+     *   flow a write names — the automation engine's one-holder answer
+     *   (`flowHolderPackage`) — stamped on every row the write door writes as
+     *   `flow_package`. `null` (an environment-authored flow, a name two
+     *   packages hold, no reader) writes none: such a row answers a read that
+     *   names no package only, so under two holders it serves neither.
+     */
+    constructor(
+        private readonly resolveEngine: () => FlowCredentialEngine | undefined,
+        private readonly holderOf?: (name: string) => string | null,
+    ) {}
+
+    /** The package a write of the flow `name` stamps, `''` for none. */
+    private writePackage(name: string): string {
+        return this.holderOf?.(name) ?? '';
+    }
 
     // ── the presence index ─────────────────────────────────────────────────
 
@@ -187,41 +214,67 @@ export class FlowCredentialChannel implements FlowCredentialSource {
         if (!engine) return false;
         const found = await engine.find(FLOW_CREDENTIAL_OBJECT, {
             where: { state: 'active' },
-            fields: ['id', 'flow_name', 'node_id', 'credential_key'],
+            fields: ['id', 'flow_name', 'flow_package', 'node_id', 'credential_key'],
             context: SYSTEM_CONTEXT,
         });
         this.activeIndex.clear();
         for (const row of rowsOf(found)) {
             const flow = row.flow_name;
             if (typeof flow !== 'string' || typeof row.node_id !== 'string' || typeof row.credential_key !== 'string') continue;
-            this.indexOf(flow).add(positionKey(row.node_id, row.credential_key));
+            this.indexOf(flow, rowPackage(row)).add(positionKey(row.node_id, row.credential_key));
         }
         return true;
     }
 
-    private indexOf(flowName: string): Set<string> {
-        let set = this.activeIndex.get(flowName);
+    private indexOf(flowName: string, flowPackage: string): Set<string> {
+        let packages = this.activeIndex.get(flowName);
+        if (!packages) {
+            packages = new Map();
+            this.activeIndex.set(flowName, packages);
+        }
+        let set = packages.get(flowPackage);
         if (!set) {
             set = new Set();
-            this.activeIndex.set(flowName, set);
+            packages.set(flowPackage, set);
         }
         return set;
     }
 
-    private setIndexed(flowName: string, keys: Iterable<string>): void {
-        const set = new Set(keys);
-        if (set.size === 0) this.activeIndex.delete(flowName);
-        else this.activeIndex.set(flowName, set);
+    /**
+     * Index the ACTIVE positions of `flowName`: `rows` read with no package
+     * replace every package's positions of the name; read for one package
+     * (`flowPackage`), only that package's.
+     */
+    private setIndexed(flowName: string, rows: Iterable<{ key: string; flowPackage: string }>, flowPackage?: string): void {
+        const packages: Map<string, Set<string>> = flowPackage === undefined ? new Map<string, Set<string>>() : new Map(this.activeIndex.get(flowName) ?? []);
+        if (flowPackage !== undefined) packages.delete(flowPackage);
+        for (const row of rows) {
+            const set = packages.get(row.flowPackage) ?? new Set<string>();
+            set.add(row.key);
+            packages.set(row.flowPackage, set);
+        }
+        if (packages.size === 0) this.activeIndex.delete(flowName);
+        else this.activeIndex.set(flowName, packages);
+    }
+
+    /** The positions of `flowName` that answer `flowPackage` — every package's when it is not given. */
+    private indexedPositions(flowName: string, flowPackage: string | undefined): Set<string> {
+        const packages = this.activeIndex.get(flowName);
+        if (!packages) return new Set();
+        if (flowPackage !== undefined) return new Set(packages.get(flowPackage) ?? []);
+        const all = new Set<string>();
+        for (const set of packages.values()) for (const k of set) all.add(k);
+        return all;
     }
 
     /** {@link FlowCredentialSource.holds}: does the channel hold this ACTIVE position? */
-    holds(flowName: string, nodeId: string, key: string): boolean {
-        return this.activeIndex.get(flowName)?.has(positionKey(nodeId, key)) ?? false;
+    holds(flowName: string, nodeId: string, key: string, flowPackage?: string): boolean {
+        return this.indexedPositions(flowName, flowPackage).has(positionKey(nodeId, key));
     }
 
     /** {@link FlowCredentialSource.held}: every ACTIVE position the channel holds for a flow. */
-    held(flowName: string): Array<{ nodeId: string; key: string }> {
-        return [...(this.activeIndex.get(flowName) ?? [])].map((k) => {
+    held(flowName: string, flowPackage?: string): Array<{ nodeId: string; key: string }> {
+        return [...this.indexedPositions(flowName, flowPackage)].map((k) => {
             const [nodeId, key] = JSON.parse(k) as [string, string];
             return { nodeId, key };
         });
@@ -243,21 +296,25 @@ export class FlowCredentialChannel implements FlowCredentialSource {
         engine: FlowCredentialEngine,
         flowName: string,
         state: FlowCredentialState,
+        flowPackage?: string,
     ): Promise<Map<string, ChannelRow>> {
         const found = await engine.find(FLOW_CREDENTIAL_OBJECT, {
             where: { flow_name: flowName, state },
-            fields: ['id', 'node_id', 'credential_key', 'state'],
+            fields: ['id', 'node_id', 'credential_key', 'state', 'flow_package'],
             context: SYSTEM_CONTEXT,
         });
         const out = new Map<string, ChannelRow>();
         for (const row of rowsOf(found)) {
             if (typeof row.node_id !== 'string' || typeof row.credential_key !== 'string') continue;
             if (typeof row.id !== 'string' && typeof row.id !== 'number') continue;
+            // [#31696] Read for one package: only that package's rows.
+            if (flowPackage !== undefined && rowPackage(row) !== flowPackage) continue;
             out.set(positionKey(row.node_id, row.credential_key), {
                 id: String(row.id),
                 node_id: row.node_id,
                 credential_key: row.credential_key,
                 state,
+                flow_package: rowPackage(row),
             });
         }
         return out;
@@ -270,18 +327,18 @@ export class FlowCredentialChannel implements FlowCredentialSource {
      * when a row exists and does not come back (no crypto provider, a missing
      * ciphertext row, an engine without the privileged dereference).
      */
-    async resolve(flowName: string, nodeId: string, key: string): Promise<string | undefined> {
+    async resolve(flowName: string, nodeId: string, key: string, flowPackage?: string): Promise<string | undefined> {
         const engine = this.resolveEngine();
         if (!engine) {
             throw new FlowCredentialUnresolvableError(
                 `Flow '${flowName}': ${flowCredentialClassList([key])} cannot be read — no data engine is available.`,
             );
         }
-        const rows = await this.readRows(engine, flowName, 'active');
+        const rows = await this.readRows(engine, flowName, 'active', flowPackage);
         const k = positionKey(nodeId, key);
         const row = rows.get(k);
         // Keep the index honest with what the store says right now.
-        this.setIndexed(flowName, rows.keys());
+        this.setIndexed(flowName, indexedRows(rows), flowPackage);
         if (!row) return undefined;
         if (typeof engine.resolveSecretField !== 'function') {
             throw new FlowCredentialUnresolvableError(
@@ -345,6 +402,8 @@ export class FlowCredentialChannel implements FlowCredentialSource {
                         FLOW_CREDENTIAL_OBJECT,
                         {
                             flow_name: args.name,
+                            // [ADR-0150 D8 row R9, #31696] The flow's one holder, beside its name.
+                            ...(this.writePackage(args.name) ? { flow_package: this.writePackage(args.name) } : {}),
                             state: args.state,
                             node_id: position.nodeId,
                             credential_key: position.key,
@@ -382,9 +441,13 @@ export class FlowCredentialChannel implements FlowCredentialSource {
         }
 
         if (args.state === 'active') {
-            const held = new Set(rows.keys());
-            for (const p of explicit) held.add(positionKey(p.nodeId, p.key));
-            this.setIndexed(args.name, held);
+            const held = new Map(indexedRows(rows).map((row) => [row.key, row] as const));
+            const written = this.writePackage(args.name);
+            for (const p of explicit) {
+                const k = positionKey(p.nodeId, p.key);
+                if (!held.has(k)) held.set(k, { key: k, flowPackage: written });
+            }
+            this.setIndexed(args.name, held.values());
         }
         return stripFlowCredentialValues(args.body);
     }
@@ -461,7 +524,7 @@ export class FlowCredentialChannel implements FlowCredentialSource {
         for (const row of draft.values()) {
             await engine.delete(FLOW_CREDENTIAL_OBJECT, { where: { id: row.id }, context: SYSTEM_CONTEXT });
         }
-        this.setIndexed(args.name, active.keys());
+        this.setIndexed(args.name, indexedRows(active));
         return { promoted, removed };
     }
 
@@ -485,6 +548,11 @@ export class FlowCredentialChannel implements FlowCredentialSource {
         }
         return removed;
     }
+}
+
+/** The index entries of a read's rows: each position with its row's package. */
+function indexedRows(rows: ReadonlyMap<string, ChannelRow>): Array<{ key: string; flowPackage: string }> {
+    return [...rows].map(([key, row]) => ({ key, flowPackage: row.flow_package }));
 }
 
 /**

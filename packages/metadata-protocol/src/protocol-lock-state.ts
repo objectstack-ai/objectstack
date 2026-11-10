@@ -57,6 +57,7 @@ import type { ItemLock } from './item-lock.js';
 import { isOriginGatedType } from './packaged-base-regime.js';
 import { isServedOverrideRowOf, type ServedOverrideRow } from './served-override.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
+import { shippingPackageIds } from './protocol-environment-rows.js';
 import { servesSealedOverrideRow } from './protocol-package-bindings.js';
 import { isCodeArtifactBody } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
@@ -84,6 +85,7 @@ export interface LockStateHost {
     isUnservedSealedOverlay: ObjectStackProtocolImplementation['isUnservedSealedOverlay'];
     packagedArtifactOwner: ObjectStackProtocolImplementation['packagedArtifactOwner'];
     packagedBaseRefusal: ObjectStackProtocolImplementation['packagedBaseRefusal'];
+    shippedArtifactsOf: ObjectStackProtocolImplementation['shippedArtifactsOf'];
 }
 
 /** The body of `ObjectStackProtocolImplementation#servedLockState`; the method's docblock there is its contract. */
@@ -146,7 +148,7 @@ export function isStoredFlowEntryOfShippedName(
 
 /** The body of `ObjectStackProtocolImplementation#declinesStoredRow`; the method's docblock there is its contract. */
 export function declinesStoredRow(
-    this: Pick<LockStateHost, 'engine' | 'isDeclaredCodeDatasource' | 'isShippedFlowName' | 'isUnservedSealedOverlay' | 'packagedArtifactOwner'>,
+    this: Pick<LockStateHost, 'engine' | 'isDeclaredCodeDatasource' | 'isShippedFlowName' | 'isUnservedSealedOverlay' | 'packagedArtifactOwner' | 'shippedArtifactsOf'>,
     type: string, name: unknown, row?: ServedOverrideRow): boolean {
     const installed = installedManifestsOfEngine(this.engine);
     if (this.isShippedFlowName(type, name)) {
@@ -154,7 +156,14 @@ export function declinesStoredRow(
         // packaged flow now: the shipping package's declared override, judged
         // on the row's own `package_id` and body by the one served-override
         // predicate. Every other stored row of the name stays declined.
-        return !isServedOverrideRowOf(row, this.packagedArtifactOwner({ type: 'flow', name: name as string }), installed);
+        // [ADR-0150 D4, #31696] Judged against EVERY package that ships the
+        // name: two packages' flows of one name are two items, each with its
+        // own declared override, so the read serves each in its package's
+        // slot — never only the override of whichever shipper the by-name
+        // lookup happens to find first.
+        if (isServedOverrideRowOf(row, this.packagedArtifactOwner({ type: 'flow', name: name as string }), installed)) return false;
+        return ![...shippingPackageIds(this.shippedArtifactsOf('flow', name as string))]
+            .some((shipper) => isServedOverrideRowOf(row, shipper, installed));
     }
     if (typeof name !== 'string' || name === '') return false;
     if (this.isDeclaredCodeDatasource(type, name)) return true;

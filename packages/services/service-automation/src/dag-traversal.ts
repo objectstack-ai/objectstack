@@ -62,6 +62,7 @@ import { FlowValueSlotSchema, VALUE_ENVELOPE_REFUSAL } from '@objectstack/spec/a
 import { ExpressionEngine, validateExpression } from '@objectstack/formula';
 import { readPartialSteps } from './partial-steps.js';
 import { isRegionSuspensionRefusal, refuseRegionSuspension } from './region-suspension-refusal.js';
+import { stampFlowRunSlot } from './flow-slots.js';
 
 /**
  * The value the flow CEL scope binds as `current_user` for a run (#19939 —
@@ -1233,8 +1234,10 @@ export async function executeWithoutRetry(
 
     // ADR-0049 / #1888 — establish the run's effective execution identity
     // from flow.runAs (see execute() / resolveRunContext); threaded below.
-    // `flowRunId` is stamped here too (#3456).
+    // `flowRunId` is stamped here too (#3456). [#31696] And the slot, as
+    // `execute()` stamps it.
     const runContext = await this.resolveRunContext(flow, context, runId);
+    stampFlowRunSlot(runContext, flowName);
 
     try {
         const startNode = flow.nodes.find(n => n.type === 'start');
