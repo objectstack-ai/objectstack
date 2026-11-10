@@ -2031,8 +2031,8 @@ const RECORD_CURRENCY_PATH_SEGMENT = /^[a-z_][a-z0-9_]*$/;
  * not hold: `defineStack`'s cross-reference pass judges it where the stack
  * holds both (`collectRecordCurrencyPathErrors`, stack.zod.ts), and the
  * engine registry judges it, in the same words (`record-currency-path.ts`), at
- * a registration after the cold boot (`record-currency-aggregate-door.ts`,
- * `@objectstack/objectql`).
+ * a single metadata save or publish after the cold boot
+ * (`record-currency-aggregate-door.ts`, `@objectstack/objectql`).
  */
 function refuseDishonestRecordCurrencyPath(
   objectName: string,
