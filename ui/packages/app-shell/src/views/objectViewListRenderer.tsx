@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useRef, lazy, Suspense, type ReactNode } from 'react';
-import { DENSITY_MODE_TO_ROW_HEIGHT, columnIdentity, normalizeListViewSchema, type FilterTokenScope } from '@object-ui/core';
+import { DENSITY_MODE_TO_ROW_HEIGHT, columnIdentity, normalizeListViewSchema, servedPackageId, type FilterTokenScope } from '@object-ui/core';
 import { buildListFilterKey, writeListFilterState } from './listFilterStorage.js';
 import type { useObjectListPreferences, ListViewPreference, ListViewPreferencePatch } from '../context/ListPreferencesProvider.js';
 const ObjectChart = lazy(() =>
@@ -324,6 +324,9 @@ export function useObjectViewListRenderer({
                     <Suspense key={identityKey} fallback={<div className="p-4 text-sm text-muted-foreground">{t('chart.loading')}</div>}>
                         <ObjectChart
                             dataSource={ds}
+                            // ADR-0150 D5 — the view's own served package, never the
+                            // object's or the app's: a view with none queries bare.
+                            packageId={servedPackageId(viewDef)}
                             schema={{
                                 type: 'object-chart',
                                 dataset: chartConfig.dataset,
