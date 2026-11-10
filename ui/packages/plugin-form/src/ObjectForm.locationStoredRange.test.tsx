@@ -99,6 +99,15 @@ const waitInput = (c: HTMLElement, name: string) =>
   });
 
 /**
+ * The form's own error line for a field — `<FormMessage/>`, the text a submit
+ * refusal draws — or `null` while the field carries none. Distinct from the
+ * widget's own refusal line, which shows before any validation has run.
+ */
+function formError(container: HTMLElement, name: string): string | null {
+  return container.querySelector(`[data-field="${name}"] [id$="-form-item-message"]`)?.textContent ?? null;
+}
+
+/**
  * Open a real EDIT form on a record that already holds `place`, submit it
  * without touching the location box, and report what the form did.
  *
@@ -229,31 +238,39 @@ async function submitCreate(coordinateText?: string) {
     fireEvent.change(await waitInput(container, 'place'), { target: { value: coordinateText } });
   }
   fireEvent.submit(container.querySelector('form') as HTMLFormElement);
-  await waitFor(() => expect(ds.create).toHaveBeenCalled());
-  return { ds, container, payload: ds.create.mock.calls[0][1] as Record<string, unknown> };
+  // Settle either way: a refused coordinate blocks the submit (objectstack#32139).
+  await waitFor(() => {
+    if (!ds.create.mock.calls.length && formError(container, 'place') === null) {
+      throw new Error('form has neither written nor refused yet');
+    }
+  });
+  return { ds, container, payload: ds.create.mock.calls[0]?.[1] as Record<string, unknown> | undefined };
 }
 
 describe('the create form behaves exactly as before (objectui#6744)', () => {
   it('an untouched location field still creates', async () => {
     const { payload } = await submitCreate();
     expect(payload).toMatchObject({ title: 'HQ' });
-    expect(payload.place).toBeUndefined();
+    expect(payload?.place).toBeUndefined();
   });
 
   it('a legal typed coordinate is still stored', async () => {
     const { payload } = await submitCreate('30.2741, 120.1551');
-    expect(payload.place).toEqual({ lat: 30.2741, lng: 120.1551 });
+    expect(payload?.place).toEqual({ lat: 30.2741, lng: 120.1551 });
   });
 
   it('an out-of-range typed coordinate is still refused by the WIDGET, not by this rule', async () => {
     // objectui#6714 unchanged: the widget never emits it, so the value never
-    // becomes a form value and this rule is handed `undefined`. The create
-    // payload carries no `place` — the same reading `ObjectForm.locationRange`
-    // pins — and the create still goes through, which is what proves the
-    // refusal happened upstream of the rule rather than in it.
-    const { payload } = await submitCreate('999, 999');
-    expect(payload.place).toBeUndefined();
-    expect(payload).toMatchObject({ title: 'HQ' });
+    // becomes a form value and this rule is handed `undefined`. Since
+    // objectstack#32139 the widget's refusal blocks the create — and the
+    // field's error is the WIDGET's sentence, never this rule's
+    // `Invalid location:`, which is what proves the refusal happened upstream
+    // of the rule rather than in it.
+    const { ds, container, payload } = await submitCreate('999, 999');
+    expect(payload).toBeUndefined();
+    expect(ds.create).not.toHaveBeenCalled();
+    expect(formError(container, 'place')).toContain('Not saved:');
+    expect(formError(container, 'place')).not.toContain('Invalid location:');
   });
 });
 

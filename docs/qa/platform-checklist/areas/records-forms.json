@@ -187,7 +187,7 @@
       "title": "Create → read → update → delete a record through the console UI",
       "since": "v15",
       "status": "active",
-      "revision": 17,
+      "revision": 18,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -212,7 +212,7 @@
         "click New; fill name with a distinctive value (os-qa-<runid>), industry, status=active; leave website empty; submit — the create form's button reads 'Create', not 'Save' (ui/packages/plugin-form: form.create / form.update)",
         "capture the create request/response (expect POST /api/v1/data/showcase_account). The payload also carries the select defaults of fields the step leaves untouched — sales_region:'amer' (its AMER option is default:true, examples/app-showcase/src/data/objects/account.object.ts) — so expect that key in the body you diff (QA run #24556)",
         "re-read server-side: GET /api/v1/data/showcase_account?$filter=[[\"name\",\"=\",\"os-qa-<runid>\"]] — field-by-field vs the submitted payload",
-        "open the record detail; edit exactly one field (annual_revenue); submit it (an edit form's button reads 'Update'); capture the PATCH /api/v1/data/showcase_account/<id>; re-read the full row via GET /api/v1/data/showcase_account/<id>",
+        "open the record detail; edit exactly one field, annual_revenue, to a new positive number; submit it (an edit form's button reads 'Update'); capture the PATCH /api/v1/data/showcase_account/<id>; re-read the full row via GET /api/v1/data/showcase_account/<id>. annual_revenue is the field because showcase_account has no rule-free TEXT field the later steps can spare: `name` is the key steps[3] and steps[8] filter on, and tax_id, billing_email and churn_reason are each judged by a validation rule (account.object.ts: tax_id_format, billing_email_format, churn_reason_consistency); annual_revenue carries none (its only constraint is the field's min 0). ⛔ Not `hq`: it is a location field (Field.location), whose input takes 'latitude, longitude', and text that is not a coordinate pair clears the stored value while the save still reports success (#32139) — a defect of its own, not this clause's subject",
         "read the record's field-change history on the record page's timeline stream, under its Changes chip (变更). Record page v3 draws no tab named History at any width (#27055). The stream's whole face, with its chips, is the 动态 (Activity) tab: open it from the header of the 动态 panel, the first panel of the record page's right column (below the details in one column under 760 px, ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor), or by ?related=timeline (#27524). At 1440 px the page also draws a top-level tab row — Overview, Activity (动态), then its panels (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row) — and its Activity tab is the same door as ?related=timeline. The panel itself shows only the newest lines, with no chips, and can lag the update line until a fresh read (QA run #28545): read the change lines on the Activity tab after a reload, not off the panel. Screenshot first, then read the change lines",
         "clone the record: POST /api/v1/data/showcase_account/<id>/clone (optionally with {overrides:{name:'os-qa-<runid>-clone'}}); capture the 201 result (new id ≠ source, sourceId, record); re-read the clone via GET /api/v1/data/showcase_account/<new id>",
         "RLS probe on clone: as a persona WITHOUT read on the source row (a permission-zoo persona, or a non-owner under owner-RLS), POST the same clone route and capture the refusal — expect 404 RECORD_NOT_FOUND, never a silent duplicate (record blocked(fixture) if no non-reading persona is bound on this boot)",
@@ -385,6 +385,12 @@
           "date": "2026-11-01",
           "change": "QA run #28545 (W3-C1R) finding: at 1440 px the record page also has a top-level Activity tab, the same face as ?related=timeline, and steps[5] named only the panel header and the query. steps[5] now names the tab row (RecordPageColumns.tsx: Overview, Activity, then the panels), and steps[5] and acceptance[4].verify say to read the change lines on the full stream after a fresh read, because the right-column panel lagged the update line in #28545. The tab row is read from source; the lag is #28545's live reading. No clause weakened. Read from source at base 6b9c1ca991. Wave anchor #27377, wave-3 accuracy slice S9 (#28641); finding parked in anchor comment 6554042054",
           "ref": "#28545"
+        },
+        {
+          "revision": 18,
+          "date": "2026-11-10",
+          "change": "steps[4] says why annual_revenue is the single-field edit and steers off `hq`. Checklist-accuracy finding of QA run #32135 (at ff04ad81; card #32168): the runner reached for `hq` as a text field to edit, but it is Field.location — a non-coordinate text cleared the stored value with a success toast, extracted as #32139 — and the run asked for a rule-free text field to be named. Re-read at base 8523ef9a: examples/app-showcase/src/data/objects/account.object.ts has no rule-free text field besides `name`, which the filtered reads key on (tax_id, billing_email and churn_reason each meet a validation rule), so the step keeps annual_revenue, which no rule names, and says so. No clause changed",
+          "ref": "#32168"
         }
       ]
     },
@@ -2923,7 +2929,7 @@
       "title": "Calendar is interactive: drag reschedules via PATCH, a failing PATCH reverts with an error, mode switches re-render, empty-day click quick-creates",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2935,6 +2941,10 @@
           "the showcase_task Calendar view (examples/app-showcase/src/ui/views/task.view.ts: named 'Calendar' view + allowedVisualizations calendar, calendar.startDateField due_date, titleField title, colorField status)",
           "10 seeded tasks carrying due_date values so cards land on distinct days (examples/app-showcase/src/data/seed/index.ts)"
         ],
+        "provisioning": {
+          "use": "search:qa-contributor-bound-member",
+          "why": "steps[2]'s failing reschedule, which acceptance[1] scores: a member whose task_own_rows narrowing lets the admin reassign its task away server-side, so its drag PATCH answers 404 RECORD_NOT_FOUND and the optimistic move has something to roll back (a persona lacking edit gets draggable=false and moves nothing, QA run #24616). Run with `--task` for the assigned task. Without it acceptance[1] scores blocked(fixture), as QA run #32135 recorded"
+        },
         "knownGaps": [
           "NO PIN COVERS A FULL CLAUSE — `automated` was dropped at revision 4, so this P1 item is hand-driven (Tier 2). objectui packages/plugin-calendar/src/CalendarView.dnd.test.tsx, the pin it cited, asserts the drag geometry handed to onEventDrop and onTimeRangeSelect (move, resize, time-grid move, drag-create) with no PATCH, re-read, revert or toast, so it scores no clause (Tier 1 run #24598: every clause not-run); acceptance[1]'s verify still names it for the geometry alone. Re-add `automated` only with a pin that asserts a full clause."
         ]
@@ -2949,7 +2959,7 @@
         "open showcase_task; switch to the Calendar view; wait for cards to render (screenshot FIRST)",
         "drag one task card to another day; capture the PATCH /api/v1/data/showcase_task/<id> carrying the new due_date; re-read the record over the API",
         "reload the view; confirm the card renders on the new day from server state",
-        "force a FAILING reschedule: as a contributor-bound member (search:qa-contributor-bound-member; task_own_rows shows only its assigned tasks) load the calendar with a task assigned to it, have the admin reassign that task away server-side, then drag it — the PATCH answers 404 RECORD_NOT_FOUND; observe the optimistic move, then the rollback to the original day AND an error toast. ⛔ Not a persona lacking edit: it gets draggable=false, so nothing moves and there is no optimistic step to roll back (QA run #24616)",
+        "force a FAILING reschedule: as a contributor-bound member with a task assigned to it (fixtures.provisioning; one command, `node scripts/qa/qa-fixture.mjs contributor-member --task`, prints the persona and the task; task_own_rows shows only its assigned tasks) load the calendar, have the admin reassign that task away server-side, then drag it — the PATCH answers 404 RECORD_NOT_FOUND; observe the optimistic move, then the rollback to the original day AND an error toast. ⛔ Not a persona lacking edit: it gets draggable=false, so nothing moves and there is no optimistic step to roll back (QA run #24616)",
         "switch month → week → day modes; confirm the same records re-render placed by their date fields",
         "click an empty day cell; on showcase_task this hands off to the FULL create form with that date pre-filled, not a quick-create dialog — the object has a required field quick-create cannot fill (project), objectui plugin-calendar ObjectCalendar.tsx, objectui#12291; fill it and submit; capture the create and re-read the new row's due_date = the clicked day",
         "capture one screenshot per interaction variant"
@@ -3018,6 +3028,12 @@
           "date": "2026-10-20",
           "change": "automated dropped and fixtures.knownGaps[0] rewritten — §2 theme \"pins that cover no full clause\" of wave anchor #24579 (18.0 sweep). Tier 1 run #24598 scored every clause not-run on CalendarView.dnd.test.tsx (green at the sweep's console pin 4016370af3c9, a geometry-only unit pin); QA run #24616 passed the item by hand after round 1's #24572 handed it over. The item is now Tier 2 (P1, no pin). No clause changed",
           "ref": "#24697"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-10",
+          "change": "fixtures.provisioning opts into search:qa-contributor-bound-member, and steps[2] names its one command (`node scripts/qa/qa-fixture.mjs contributor-member --task`, which adds the assigned task the step drags). QA run #32135 scored this item PARTIAL with the contributor leg blocked(fixture) and listed the persona among the recurring fixture debt (#32168 ask C). The step named the recipe in prose only, so the validator could not see the dependency. No clause changed",
+          "ref": "#32168"
         }
       ]
     },
