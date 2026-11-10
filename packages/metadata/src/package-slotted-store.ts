@@ -44,8 +44,14 @@ import {
 } from '@objectstack/core';
 import { peelStoredEnvelope } from './stored-envelope.js';
 
-/** The types whose in-memory items are stored per `(package, name)`. */
-export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set(['api']);
+/**
+ * The types whose in-memory items are stored per `(package, name)`: `api`
+ * (#32069), and `action` (#31697), slotted in the same change that made its
+ * object-less name one per namespace (objectql's
+ * `NAMESPACE_SCOPED_BARE_NAME_TYPES`), so two packages' same-named actions
+ * are both kept before any reader resolves the name.
+ */
+export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set(['api', 'action']);
 
 /** The provenance sentinel a rehydrated row carries in place of a package. */
 const OVERLAY_SENTINEL = 'sys_metadata';
