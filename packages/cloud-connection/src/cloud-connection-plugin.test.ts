@@ -503,8 +503,67 @@ describe('[#30964] an unmanaged grant hands the copy to the environment\'s insta
         expect(new URL(seen.request!.url).pathname).toBe('/api/v1/marketplace/install-local');
         expect(seen.request!.headers.get('cookie')).toBe(COOKIE);
         expect(seen.request!.headers.get('authorization')).toBeNull();
-        // No sample data unless asked (framework parity), and never a manifest from the grant.
+        // No sample data unless asked (framework parity), and no manifest when the grant carries none.
         expect(seen.body).toEqual({ packageId: 'pkg_1', versionId: 'ver_9', installMode: 'unmanaged' });
+    });
+
+    // ── [#31963, cloud#3624 ruling A] the grant's own manifest, handed inline ──
+
+    const MANIFEST = { id: 'com.acme.crm', version: '2.0.0', name: 'CRM' };
+    const grantWith = (extra: Record<string, unknown>) =>
+        ({ json: { success: true, data: { install_mode: 'unmanaged', version_id: 'ver_9', version: '2.0.0', ...extra } } });
+
+    it('[#31963] a record-id grant naming its manifest id hands the door the grant\'s manifest inline, with the id and version to hold it to', async () => {
+        const { res, seen } = await grant({ answer: grantWith({ manifest: MANIFEST, manifest_id: 'com.acme.crm' }) });
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(seen.body).toEqual({ packageId: 'pkg_1', versionId: 'ver_9', installMode: 'unmanaged', manifest: MANIFEST });
+        expect(seen.options).toEqual({
+            grant: { packageId: 'pkg_1', version: '2.0.0', manifestId: 'com.acme.crm', environmentId: ENV, actor: 'user-1' },
+        });
+    });
+
+    it('[#31963] a grant for a package named by its manifest id hands the manifest inline, held to that id', async () => {
+        const { seen } = await grant({
+            body: { package_id: 'com.acme.crm', install_mode: 'unmanaged' },
+            answer: grantWith({ manifest: MANIFEST, manifest_id: 'com.acme.other' }),
+        });
+        expect(seen.body).toEqual({ packageId: 'com.acme.crm', versionId: 'ver_9', installMode: 'unmanaged', manifest: MANIFEST });
+        expect(seen.options.grant.manifestId).toBe('com.acme.crm');
+    });
+
+    it('[#31963] CONTROL: a record-id grant that does not say which manifest it granted keeps the cloud fetch, as does one with no manifest', async () => {
+        for (const extra of [{ manifest: MANIFEST }, {}, { manifest: [MANIFEST], manifest_id: 'com.acme.crm' }, { manifest: 'x', manifest_id: 'com.acme.crm' }]) {
+            const { res, seen } = await grant({ answer: grantWith(extra) });
+            expect(res.status, JSON.stringify(extra)).toBe(200);
+            expect(seen.body, JSON.stringify(extra)).toEqual({ packageId: 'pkg_1', versionId: 'ver_9', installMode: 'unmanaged' });
+            expect(seen.options.grant).not.toHaveProperty('manifestId');
+        }
+    });
+
+    it('[#31963] a grant carrying its manifest but no version fails closed: 502, nothing copied, audited', async () => {
+        const answer = { json: { success: true, data: { install_mode: 'unmanaged', version_id: 'ver_9', manifest: MANIFEST, manifest_id: 'com.acme.crm' } } };
+        const { res, door, auditEvents } = await grant({ answer });
+        expect(res.status).toBe(502);
+        expect(res.payload.error.code).toBe('PLUGIN_INSTALL_FAILED');
+        expect(res.payload.error.message).toContain('Nothing was copied');
+        expect((door as any).install).not.toHaveBeenCalled();
+        expect(auditEvents).toEqual([{
+            action: 'package_unmanaged_import', packageId: 'pkg_1', environmentId: ENV, actor: 'user-1',
+            outcome: 'failure', errorCode: 'PLUGIN_INSTALL_FAILED', status: 502,
+        }]);
+    });
+
+    it('[#31963] the manifest comes only from the grant: a manifest in the caller\'s body never reaches the door', async () => {
+        const forged = { id: 'com.evil.app', version: '9.9.9' };
+        const body = { package_id: 'pkg_1', install_mode: 'unmanaged', manifest: forged };
+        const without = await grant({ body });
+        expect(without.seen.body).toEqual({ packageId: 'pkg_1', versionId: 'ver_9', installMode: 'unmanaged' });
+        const withGrant = await grant({ body, answer: grantWith({ manifest: MANIFEST, manifest_id: 'com.acme.crm' }) });
+        expect(withGrant.seen.body.manifest).toEqual(MANIFEST);
+        // The control plane is never sent a manifest either.
+        const sent = JSON.parse(String((withGrant.fetchSpy.mock.calls[0] as any[])[1].body));
+        expect(sent).not.toHaveProperty('manifest');
+        expect(sent.params).not.toHaveProperty('manifest');
     });
 
     it('asked for the sample data, the door is asked for it too (the #30808 copy, owned by the installer)', async () => {
