@@ -62,8 +62,8 @@
 - 「无则关」= 首触即关 not_planned,带理由与入队三门,⛔ 不定 p3、不 hold;下行同此。
 - 所入车道队列 P0/P1 开着(= 未派发,在飞不算)时,三门皆无的 p2/p3 `tooling` 卡同样关。
 - 路由属分诊技术判断,⛔ 不升级哪个仓的问题;父单永不派发,`pm:epic` 卡 `pm:retriage` 即答。
-- 算涉 cloud:亦含托管面(objectos-runtime)、`Blocked-by:` cloud 卡、病因在 cloud。
-- 不算涉 cloud:只在 cloud 测得而修复与验收全在本仓;仅引 cloud 卡作历史。
+- 算涉 cloud:亦含托管面(objectos-runtime)、修复待其改动的 `Blocked-by:` cloud 卡、病因在 cloud。
+- 不算涉 cloud:修复与验收全在本仓,只在 cloud 测得或只缺其事实读数;仅引 cloud 卡作历史。
 - 父单已有子结构的:父单挂 `tracking`,分诊逐个展开子卡路由、补 `Blocked-by:` 排序。
 - 跨层功能点(≥2 层)立父单带 `area:*`+`tracking`+清单项级,逐层子单按 `Blocked-by:` 排。
 - 每张留一条英文审计评论(`Triage: lands in …; rationale: …`),可选带 `Size/model suggestion:` 行。
