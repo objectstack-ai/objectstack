@@ -325,6 +325,8 @@ export class FlowCredentialChannel implements FlowCredentialSource {
             if (typeof row.id !== 'string' && typeof row.id !== 'number') continue;
             // [#31696] Read for one package: that package's rows, and those naming none (whose is unknown).
             if (flowPackage !== undefined && rowPackage(row) !== flowPackage && rowPackage(row) !== '') continue;
+            // [R1] Beside the package's row at one position, the row naming none wins, whatever the store's order.
+            if (flowPackage !== undefined && rowPackage(row) !== '' && out.get(positionKey(row.node_id, row.credential_key))?.flow_package === '') continue;
             out.set(positionKey(row.node_id, row.credential_key), {
                 id: String(row.id),
                 node_id: row.node_id,

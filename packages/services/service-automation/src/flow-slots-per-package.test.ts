@@ -678,6 +678,12 @@ describe('#31696 R9 — the engine asks a credential source by package only for 
         expect([channel.holds('f', 'call', 'signingSecret', P1), channel.holds('f', 'call', 'signingSecret', P2)]).toEqual([true, true]);
         expect(() => channel.held('f', P2)).toThrow(/names no package/);
         await expect(channel.resolve('f', 'call', 'signingSecret', P1)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+        // Beside P1's own row at one position, the row naming none is refused, in either store order.
+        const mine = { id: '3', flow_name: 'f', flow_package: P1, node_id: 'call', credential_key: 'signingSecret', state: 'active' };
+        for (const order of [[rows[1], mine], [mine, rows[1]]]) {
+            const both = new FlowCredentialChannel(() => ({ find: async () => order, resolveSecretField: async () => 'p1-own' }) as never);
+            await expect(both.resolve('f', 'call', 'signingSecret', P1)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+        }
     });
 
     it('the engine asks the channel by package only for a slot of a name two packages hold', async () => {
