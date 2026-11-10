@@ -4229,9 +4229,9 @@
           "evidence": "both outputs and exit codes"
         },
         {
-          "clause": "the install door refuses 422 NAMESPACE_CONFLICT with conflicts[], and the second package is not installed",
+          "clause": "the install door refuses the second co-owner with 422 naming page qa_board and both packages, and installs nothing",
           "oracle": "api",
-          "verify": "the install answers 422 with code NAMESPACE_CONFLICT and conflicts[] naming page qa_board and both ids (packages/objectql/src/namespace-co-owner-names.ts#namespaceNameConflicts, #namespaceNameConflictMessage)",
+          "verify": "os package install answers 422 PLUGIN_REGISTER_FAILED whose message carries the registry's refusal (packages/cloud-connection/src/marketplace-install-local-plugin.ts answers a register refusal of an inline manifest so; the registry's own error is 422 NAMESPACE_CONFLICT with conflicts[]: packages/objectql/src/namespace-co-owner-names.ts#namespaceNameConflicts, #namespaceNameConflictMessage); com.qa.n_two is absent from GET /api/v1/packages",
           "evidence": "the 422 body and the package list"
         },
         {
@@ -4285,14 +4285,14 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a scratch app directory whose manifest namespace is qa_k and which declares an object qa_k_case, plus a second scratch package (namespace qa_k_case) that is otherwise valid; and a scratch app (namespace qa_k) that declares an object qa_k_custom, whose short name is custom",
+          "a scratch app directory whose manifest namespace is qa_k and which declares an object qa_k_case, plus a second scratch package (namespace qa_k_case) that is otherwise valid; and a scratch app (namespace qa_k) that declares an object qa_k_custom, whose short name is custom; for the save leg, an authored (writable) scratch package created with POST /api/v1/packages (id com.qa.w, namespace qa_w) and an installed scratch package whose namespace is qa_w_desk (it installs: no object carries that name yet)",
           "a boot of the showcase with the qa_k app installed (os package install DIR/dist/objectstack.json)"
         ]
       },
       "steps": [
         "in the qa_k_case package directory: os validate, then objectstack build; record exit codes and output",
         "try to install a compiled qa_k_case artifact into the boot that holds qa_k: os package install FILE (or POST /api/v1/marketplace/install-local with the file); record status and body",
-        "on a writable scratch package in the boot, save an object named after an installed namespace through the metadata door with publish mode, and publish package drafts that hold one (POST /api/v1/packages/:id/publish); record each answer",
+        "save an object qa_w_desk on com.qa.w through the metadata door in publish mode (PUT /api/v1/meta/object/qa_w_desk?package=com.qa.w), then save it as a draft and publish the package's drafts (POST /api/v1/packages/com.qa.w/publish); record each answer",
         "os validate the app that declares the object custom"
       ],
       "acceptance": [
@@ -4303,9 +4303,9 @@
           "evidence": "both outputs and exit codes"
         },
         {
-          "clause": "the install door refuses 422 NAMESPACE_CONFLICT with the clashes listed, and nothing is installed",
+          "clause": "the install door refuses the clash with 422 naming both spellings, and nothing is installed",
           "oracle": "api",
-          "verify": "the install answers 422 with code NAMESPACE_CONFLICT and clashes[] naming qa_k_case both ways; GET /api/v1/packages lists no qa_k_case package (packages/objectql/src/registry-namespace-object-name.test.ts pins the door)",
+          "verify": "os package install answers 422 PLUGIN_REGISTER_FAILED whose message carries the registry's refusal naming qa_k_case both ways (packages/cloud-connection/src/marketplace-install-local-plugin.ts answers a register refusal of an inline manifest so; the registry's own error is 422 NAMESPACE_CONFLICT with clashes[], pinned by packages/objectql/src/registry-namespace-object-name.test.ts); GET /api/v1/packages lists no qa_k_case package",
           "evidence": "the 422 body and the package list"
         },
         {
@@ -4356,7 +4356,7 @@
       "fixtures": {
         "app": "any",
         "requires": [
-          "an 18.3.0-shaped SQLite file, copied, never the original, by one of two routes. (a) A file a boot of npm `@objectstack/cli@18.3.0` (published; the tree is 18.3.0 plus the unreleased v18.4 work) wrote for a blank scaffold, with the rows the steps name planted through that release's own doors; a blank scaffold, because the showcase is a private workspace package with no published build. (b) The planted shape: a copy of a file DB this tree's own boot wrote, in which the step's columns are set back to NULL (and, for the activation ledger, the index uniq_sys_metadata_activation_packageless is dropped), which is what a database an earlier release built holds once this release's schema sync has added the columns. Its sys_metadata_activation holds, all with package_id NULL: a row for a flow one installed package ships; a row for a position; and, for the planted route only, a row for a name two packages hold",
+          "an 18.3.0-shaped SQLite file, copied, never the original, by one of two routes. (a) A file a boot of npm `@objectstack/cli@18.3.0` (published; the tree is 18.3.0 plus the unreleased v18.4 work) wrote for a blank scaffold, with the rows the steps name planted through that release's own doors; a blank scaffold, because the showcase is a private workspace package with no published build. (b) The planted shape: a copy of a file DB this tree's own boot wrote, in which the step's columns are set back to NULL (and, for the activation ledger, the index uniq_sys_metadata_activation_packageless is dropped), which is what a database an earlier release built holds once this release's schema sync has added the columns. Its sys_metadata_activation holds a package-less row (package_id NULL) for a flow one installed package ships (on route (a), set it NULL by hand if the 18.3.0 door wrote the package), a row for a position, and, on route (b), a package-less row for a name two packages hold",
           "a copy of the same file with two package-less rows planted for one (metadata_type, name), for the conflict leg"
         ]
       },
@@ -4447,9 +4447,9 @@
       ],
       "acceptance": [
         {
-          "clause": "the second package holding a covered name is refused 422 NAMESPACE_CONFLICT naming both packages and a rename, and leaves nothing installed",
+          "clause": "the second package holding a covered name is refused 422 naming both packages and a rename, and leaves nothing installed",
           "oracle": "api",
-          "verify": "installing qa_b answers 422 with code NAMESPACE_CONFLICT naming flow qa_sync, com.qa.addr_a and com.qa.addr_b (packages/objectql/src/registry.ts#BareNameConflictError; packages/objectql/src/bare-name-one-holder.ts#suggestedBareNameRename); qa_b is absent from the package list",
+          "verify": "installing qa_b answers 422 PLUGIN_REGISTER_FAILED whose message carries the registry's refusal naming flow qa_sync, com.qa.addr_a, com.qa.addr_b and a rename (packages/cloud-connection/src/marketplace-install-local-plugin.ts answers a register refusal of an inline manifest so; the registry's own error is packages/objectql/src/registry.ts#BareNameConflictError, 422 NAMESPACE_CONFLICT; packages/objectql/src/bare-name-one-holder.ts#suggestedBareNameRename); qa_b is absent from the package list",
           "evidence": "the 422 body and the package list"
         },
         {

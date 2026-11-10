@@ -2650,9 +2650,9 @@
           "evidence": "the output and exit code"
         },
         {
-          "clause": "the running install door refuses a namespace that spells a grammar literal: 422 NAMESPACE_CONFLICT naming it",
+          "clause": "the running install door refuses a namespace that spells a grammar literal with 422 naming it",
           "oracle": "api",
-          "verify": "the install answers 422 with code NAMESPACE_CONFLICT (packages/spec/src/kernel/address-grammar.ts#validateNamespaceNotAddressLiteral, #NAMESPACE_REFUSED_LITERALS: actions, connectors, global, hooks, oauth, trigger)",
+          "verify": "os package install answers 422 PLUGIN_REGISTER_FAILED whose message names the namespace hooks (packages/cloud-connection/src/marketplace-install-local-plugin.ts answers a register refusal of an inline manifest so; the registry raises 422 NAMESPACE_CONFLICT through packages/spec/src/kernel/address-grammar.ts#validateNamespaceNotAddressLiteral; #NAMESPACE_REFUSED_LITERALS holds actions, connectors, global, hooks, oauth and trigger)",
           "evidence": "the 422 body"
         },
         {
