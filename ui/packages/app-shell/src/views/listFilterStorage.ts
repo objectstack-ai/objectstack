@@ -108,8 +108,9 @@ export function writeListFilterState(key: string | undefined, patch: ListFilterS
 
 /**
  * Drop every write still waiting on the debounce, for every key.
- * `ListPreferencesProvider` runs it before each sign-out, so no write queued
- * under the signed-out user's key lands after the sign-out sweep.
+ * `ListPreferencesProvider` runs it before each `signOut()` and when a session
+ * ends any other way, so no write queued under the signed-out user's key lands
+ * after the sign-out sweep.
  */
 export function discardPendingListFilterWrites(): void {
   for (const key of Object.keys(timers)) {

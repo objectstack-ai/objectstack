@@ -438,6 +438,14 @@ export function ListPreferencesProvider({ children }: { children: ReactNode }) {
   // A list-filter write still waiting on its debounce is dropped before the
   // session ends, so none lands after the sign-out sweep.
   useEffect(() => registerBeforeSignOut(async () => discardPendingListFilterWrites()), []);
+  // A session that ends without `signOut()` (a session read the server answers
+  // with "no session") drops them as soon as the user is gone.
+  const signedInUserRef = useRef(userId);
+  useEffect(() => {
+    const previous = signedInUserRef.current;
+    signedInUserRef.current = userId;
+    if (previous !== null && userId === null) discardPendingListFilterWrites();
+  }, [userId]);
 
   // Debounced remote writes, one per object, each bound to the family that
   // was attached when it was made (a user switch flushes to the right user).

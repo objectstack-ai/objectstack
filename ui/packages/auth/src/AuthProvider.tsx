@@ -12,7 +12,7 @@ import { runBeforeSignOut } from './beforeSignOut.js';
 import type { AuthUser, AuthClient, AuthProviderOptions, PreviewModeOptions, AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthPublicConfig, SignInWithProviderOptions, SignInTwoFactorCodeKind, TwoFactorChallenge } from './types.js';
 import { TWO_FACTOR_CHALLENGE_ENDED_CODES } from './two-factor-codes.js';
 import { AuthCtx, type AuthContextValue } from './AuthContext.js';
-import { createAuthClient, takePreflightSession, TokenStorage } from './createAuthClient.js';
+import { createAuthClient, sessionReadWasInconclusive, takePreflightSession, TokenStorage } from './createAuthClient.js';
 import { ActiveOrganizationStorage, SessionUserScope, purgeSignedOutUserClientState } from './ActiveOrganizationStorage.js';
 
 /**
@@ -30,7 +30,8 @@ import { ActiveOrganizationStorage, SessionUserScope, purgeSignedOutUserClientSt
  * the same allowlist sweep a change of session user runs: every key goes but the
  * few that describe the device, so a key added later is covered without being
  * named. It runs on every sign-out path: `signOut()` below, and every session
- * read that answers "no session" on a browser that has held one (`loadSession`).
+ * read the server answers with "no session" on a browser that has held one
+ * (`loadSession`). A read the server did not answer clears nothing.
  *
  * `MetadataProvider` additionally keys the seed entry by session fingerprint,
  * so an entry that escapes the sweep is unreadable rather than merely
@@ -207,11 +208,15 @@ export function AuthProvider({
         // already null, so this changes nothing there.
         setUser(null);
         setSession(null);
-        // No session on a browser that has held one: the boot of an expired
-        // or revoked session, or one ended elsewhere. That is a sign-out too,
-        // so the signed-out user's client state goes before the sign-in page
-        // is shown. A browser that never held a session has none to drop.
-        if (SessionUserScope.current() !== null) purgeSignedOutClientCaches();
+        // The server says there is no session, on a browser that has held
+        // one: the boot of an expired or revoked session, or one ended
+        // elsewhere. That is a sign-out too, so the signed-out user's client
+        // state goes before the sign-in page is shown. A read the server did
+        // not answer is not a sign-out, and a browser that never held a
+        // session has nothing to drop.
+        if (SessionUserScope.current() !== null && !sessionReadWasInconclusive(client)) {
+          purgeSignedOutClientCaches();
+        }
       }
     } catch (err) {
       if (isCancelled?.()) return;

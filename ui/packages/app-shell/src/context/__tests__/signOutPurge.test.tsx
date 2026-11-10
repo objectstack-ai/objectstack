@@ -127,13 +127,26 @@ async function signInAndFilter(client: AuthClient) {
     prefsRef.current!.patchView(VIEW, { filters: GROUP });
   });
   writeListFilterState(LIST_FILTER_KEY, { search: 'term' });
-  // Both writes have landed: the search debounce and the remote save debounce.
+  // The search write has landed past its debounce; the list state is written
+  // at once, and is what the user's server row holds once its save is sent.
   await waitFor(() => expect(localStorage.getItem(LIST_FILTER_KEY)).not.toBeNull());
-  await waitFor(() => expect(rendered.family.save).toHaveBeenCalled());
-  expect(localStorage.getItem(LIST_STATE_KEY)).not.toBeNull();
-  rendered.family.save.mockClear();
-  rendered.family.load.mockClear();
-  return rendered;
+  const userState = JSON.parse(localStorage.getItem(LIST_STATE_KEY)!) as ObjectListPreference;
+  expect(userState).not.toEqual({});
+  return { ...rendered, userState };
+}
+
+/**
+ * The server-side row is the user's state on every device: whatever is sent
+ * to it, before or after the sign-out, is the state the user left, never a
+ * cleared one.
+ */
+function expectServerRowsKept(
+  family: ReturnType<typeof serverFamily>,
+  userState: ObjectListPreference,
+) {
+  // Sent by its debounce or by the flush when the user goes; sent either way.
+  expect(family.save).toHaveBeenCalled();
+  for (const [, value] of family.save.mock.calls) expect(value).toEqual(userState);
 }
 
 function listKeysLeft(): string[] {
@@ -156,7 +169,7 @@ afterEach(() => {
 describe('sign-out clears the signed-out user’s list state and list filters', () => {
   it('signOut() removes every list-state and list-filters key and keeps the sign-in page language', async () => {
     const client = authClient(async () => ({ user: ALICE, session: { token: 'tok-alice' } }));
-    const { family } = await signInAndFilter(client);
+    const { family, userState } = await signInAndFilter(client);
     localStorage.setItem(LOCALE_STORAGE_KEY, 'de');
     localStorage.setItem(LOCALE_SEED_STORAGE_KEY, 'de');
 
@@ -167,14 +180,13 @@ describe('sign-out clears the signed-out user’s list state and list filters', 
     expect(listKeysLeft()).toEqual([]);
     expect(localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('de');
     expect(localStorage.getItem(LOCALE_SEED_STORAGE_KEY)).toBe('de');
-    // The server-side rows are the user's state on every device: untouched.
-    expect(family.save).not.toHaveBeenCalled();
+    expectServerRowsKept(family, userState);
   });
 
   it('a session read that answers no session removes them too', async () => {
     let live = true;
     const client = authClient(async () => (live ? { user: ALICE, session: { token: 'tok-alice' } } : null));
-    const { view, family } = await signInAndFilter(client);
+    const { view, family, userState } = await signInAndFilter(client);
 
     live = false;
     await act(async () => {
@@ -183,7 +195,7 @@ describe('sign-out clears the signed-out user’s list state and list filters', 
 
     expect(view.getByTestId('user').textContent).toBe('none');
     expect(listKeysLeft()).toEqual([]);
-    expect(family.save).not.toHaveBeenCalled();
+    expectServerRowsKept(family, userState);
   });
 
   it('a search typed just before sign-out is not written after it', async () => {
@@ -193,6 +205,24 @@ describe('sign-out clears the signed-out user’s list state and list filters', 
     writeListFilterState(LIST_FILTER_KEY, { search: 'typed-at-sign-out' });
     await act(async () => {
       await authRef.current!.signOut();
+    });
+    // Past the write debounce.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+
+    expect(listKeysLeft()).toEqual([]);
+  });
+
+  it('a search typed just before a session read answers no session is not written after it', async () => {
+    let live = true;
+    const client = authClient(async () => (live ? { user: ALICE, session: { token: 'tok-alice' } } : null));
+    await signInAndFilter(client);
+
+    writeListFilterState(LIST_FILTER_KEY, { search: 'typed-at-expiry' });
+    live = false;
+    await act(async () => {
+      await authRef.current!.refreshSession();
     });
     // Past the write debounce.
     await act(async () => {

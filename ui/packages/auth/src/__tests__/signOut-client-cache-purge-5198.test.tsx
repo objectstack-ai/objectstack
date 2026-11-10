@@ -31,7 +31,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, act, waitFor, cleanup } from '@testing-library/react';
 import { AuthProvider } from '../AuthProvider';
 import { useAuth } from '../useAuth';
-import { TokenStorage } from '../createAuthClient';
+import { TokenStorage, createAuthClient } from '../createAuthClient';
 import { ActiveOrganizationStorage } from '../createAuthenticatedFetch';
 import { SessionUserScope, purgeSignedOutUserClientState } from '../ActiveOrganizationStorage';
 import type { AuthClient } from '../types';
@@ -452,4 +452,57 @@ describe('every sign-out path clears the signed-out user\u2019s client state', (
 
     expect(userKeysLeft()).toHaveLength(4);
   });
+});
+
+describe('only a session read the server answers with no session clears the client state', () => {
+  beforeEach(() => {
+    SessionUserScope._resetForTests();
+  });
+
+  /** The real client, over a `get-session` that answers the way `answer` says. */
+  function realClient(answer: 'transport-error' | 'status-503' | 'no-session' | 'status-401'): AuthClient {
+    const fetchFn = vi.fn(async () => {
+      if (answer === 'transport-error') throw new TypeError('Failed to fetch');
+      const status = answer === 'status-503' ? 503 : answer === 'status-401' ? 401 : 200;
+      const body = status === 200 ? 'null' : JSON.stringify({ message: 'no' });
+      return new Response(body, { status, headers: { 'Content-Type': 'application/json' } });
+    });
+    return createAuthClient({ baseURL: 'http://localhost/api/auth', fetchFn: fetchFn as unknown as typeof fetch });
+  }
+
+  async function bootWith(client: AuthClient) {
+    const view = render(
+      <AuthProvider authUrl="http://localhost/api/auth" client={client}>
+        <Probe />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(authRef.current?.isLoading).toBe(false));
+    expect(view.getByTestId('user').textContent).toBe('none');
+  }
+
+  it.each(['transport-error', 'status-503'] as const)(
+    'a read that ends in %s clears nothing',
+    async (answer) => {
+      localStorage.setItem('auth-session-user-id', ALICE.id);
+      seedSignedInUserKeys();
+
+      await bootWith(realClient(answer));
+
+      expect(userKeysLeft()).toHaveLength(4);
+    },
+  );
+
+  it.each(['no-session', 'status-401'] as const)(
+    'a read the server answers with %s clears the signed-out user\u2019s keys',
+    async (answer) => {
+      localStorage.setItem('auth-session-user-id', ALICE.id);
+      seedSignedInUserKeys();
+      seedDeviceKeys();
+
+      await bootWith(realClient(answer));
+
+      expect(userKeysLeft()).toEqual([]);
+      expectDeviceKeysKept();
+    },
+  );
 });

@@ -201,14 +201,15 @@ const sameOriginFetch = createAuthenticatedFetch({ sameOriginOnly: true });
 ### Browser storage at sign-out
 
 Every sign-out clears the `localStorage` and `sessionStorage` keys the session
-wrote: `signOut()`, and any session read that answers "no session" in a browser
-that has held one (a session that expired, was revoked or was ended in another
-tab, at boot or in place). It is the same allowlist sweep a change of session
+wrote: `signOut()`, and any session read the server answers with "no session"
+in a browser that has held one (a session that expired, was revoked or was
+ended in another tab, at boot or in place). It is the same allowlist sweep a change of session
 user runs, so a key added later is covered without being listed. What the
 sweep leaves: the session token (`auth-session-token`, which the auth client
 manages itself), the session-user pointer
 (`auth-session-user-id`), the theme (`vite-ui-theme`) and the sign-in page
-language (`objectui-locale`, `objectui-locale-seed`). A session read that fails
+language (`objectui-locale`, `objectui-locale-seed`). A session read the
+server does not answer (a network failure, or an error status other than 401)
 is not a sign-out and clears nothing. Server-side user preferences are not
 changed.
 
