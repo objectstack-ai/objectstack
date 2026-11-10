@@ -2783,6 +2783,23 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         label: "조직",
         help: "권한이 부여되는 조직, 즉 SCIM 연결 또는 SSO 공급자를 소유한 조직입니다."
       },
+      match_status: {
+        label: "일치 상태",
+        help: "이 매핑이 지정한 그룹이 해당 SCIM 연결이 현재 푸시하는 그룹인지 여부입니다. 일치하지 않으면 아무 권한도 부여되지 않습니다. SSO 공급자는 그룹 목록을 저장하지 않으므로 해당 없음입니다.",
+        options: {
+          matched: "일치함",
+          unmatched: "현재 그룹과 일치하지 않음",
+          not_applicable: "해당 없음"
+        }
+      },
+      matched_group_id: {
+        label: "일치한 그룹 ID",
+        help: "이 매핑이 현재 일치하는 SCIM 그룹의 ID입니다. 일치하는 그룹이 없으면 비어 있습니다."
+      },
+      match_changed_at: {
+        label: "일치 변경 시각",
+        help: "일치 상태 또는 일치한 그룹이 마지막으로 바뀐 시각입니다."
+      },
       created_at: {
         label: "생성 시각"
       },

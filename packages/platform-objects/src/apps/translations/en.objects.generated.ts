@@ -2783,6 +2783,23 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Organization",
         help: "The organization the grant is made in: the organization that owns the SCIM connection or the SSO provider."
       },
+      match_status: {
+        label: "Match Status",
+        help: "Whether the group the mapping names is one its SCIM connection currently pushes. Unmatched grants nothing. Not applicable for an SSO provider, which stores no group list.",
+        options: {
+          matched: "Matched",
+          unmatched: "Matches No Current Group",
+          not_applicable: "Not Applicable"
+        }
+      },
+      matched_group_id: {
+        label: "Matched Group ID",
+        help: "The ID of the SCIM group the mapping currently matches. Empty when it matches none."
+      },
+      match_changed_at: {
+        label: "Match Changed At",
+        help: "When the match status or the matched group last changed."
+      },
       created_at: {
         label: "Created At"
       },

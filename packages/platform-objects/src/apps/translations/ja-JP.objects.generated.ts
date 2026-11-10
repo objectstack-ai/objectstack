@@ -2783,6 +2783,23 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "組織",
         help: "付与が行われる組織：SCIM 接続または SSO プロバイダーを所有する組織。"
       },
+      match_status: {
+        label: "一致状態",
+        help: "このマッピングが指定するグループが、その SCIM 接続が現在プッシュしているグループかどうか。一致しない場合は何も付与されません。SSO プロバイダーはグループ一覧を保存しないため、対象外です。",
+        options: {
+          matched: "一致",
+          unmatched: "現在のどのグループとも一致しない",
+          not_applicable: "対象外"
+        }
+      },
+      matched_group_id: {
+        label: "一致したグループ ID",
+        help: "このマッピングが現在一致している SCIM グループの ID。どのグループとも一致しない場合は空です。"
+      },
+      match_changed_at: {
+        label: "一致状態の変更日時",
+        help: "一致状態または一致したグループが最後に変わった日時。"
+      },
       created_at: {
         label: "作成日時"
       },

@@ -2783,6 +2783,23 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         label: "Organisation",
         help: "L’organisation dans laquelle l’attribution est faite : celle qui possède la connexion SCIM ou le fournisseur SSO."
       },
+      match_status: {
+        label: "Statut de correspondance",
+        help: "Indique si le groupe nommé par le mappage est un groupe que sa connexion SCIM envoie actuellement. Sans correspondance, rien n'est accordé. Sans objet pour un fournisseur SSO, qui ne stocke aucune liste de groupes.",
+        options: {
+          matched: "Correspond",
+          unmatched: "Ne correspond à aucun groupe actuel",
+          not_applicable: "Sans objet"
+        }
+      },
+      matched_group_id: {
+        label: "ID du groupe correspondant",
+        help: "L'ID du groupe SCIM auquel le mappage correspond actuellement. Vide s'il ne correspond à aucun."
+      },
+      match_changed_at: {
+        label: "Correspondance modifiée le",
+        help: "Date du dernier changement du statut de correspondance ou du groupe correspondant."
+      },
       created_at: {
         label: "Créé le"
       },

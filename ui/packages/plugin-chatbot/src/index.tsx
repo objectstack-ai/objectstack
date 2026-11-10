@@ -351,6 +351,7 @@ export {
   detectRecordWrite,
   detectAnswerSource,
   detectSampleDataCleanup,
+  detectPackageRemoval,
   detectProposedChanges,
   detectReplayOutcome,
   detectAuthoringVerdict,
@@ -369,6 +370,8 @@ export type {
   RecordWriteField,
   AnswerSource,
   SampleDataCleanup,
+  PackageRemoval,
+  PackageRemovalObject,
   ProposedChanges,
   ReplayOutcome,
 } from './mapMessages';

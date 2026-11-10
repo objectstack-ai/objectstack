@@ -17,6 +17,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/client/src/package-addressing.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/cloud-connection/src/connection-credential-ledger.test.ts",
       "verb": "delete",
       "pinned": 1

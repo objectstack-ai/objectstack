@@ -2783,6 +2783,23 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "组织",
         help: "授权所在的组织：拥有该 SCIM 连接或 SSO 提供方的组织。"
       },
+      match_status: {
+        label: "匹配状态",
+        help: "该映射指定的组是否为其 SCIM 连接当前推送的组。未匹配时不授予任何权限。SSO 提供方不保存组列表，因此不适用。",
+        options: {
+          matched: "已匹配",
+          unmatched: "未匹配任何当前组",
+          not_applicable: "不适用"
+        }
+      },
+      matched_group_id: {
+        label: "匹配的组 ID",
+        help: "该映射当前匹配的 SCIM 组的 ID。未匹配任何组时为空。"
+      },
+      match_changed_at: {
+        label: "匹配变更时间",
+        help: "匹配状态或匹配的组最近一次变化的时间。"
+      },
       created_at: {
         label: "创建时间"
       },
