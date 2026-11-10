@@ -34,6 +34,8 @@
  * sides of a hydration, and an item registered at runtime with no package keeps
  * its code layer — the fallback's stated purpose.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, expect, it } from 'vitest';
 import { assertEngineFindOnePredicate, isCodeArtifactBody } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';

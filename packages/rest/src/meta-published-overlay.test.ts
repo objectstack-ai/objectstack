@@ -38,6 +38,8 @@
  * in to test this.
  */
 
+// Pays `@objectstack/objectql`'s first load at collection, never inside a clocked case.
+import '@objectstack/objectql';
 import { describe, it, expect, vi } from 'vitest';
 // The producer's OWN write-verb dispatch decisions, so the fake engine below
 // cannot accept a call ObjectQL itself would refuse — a double looser than the

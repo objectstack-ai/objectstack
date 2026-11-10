@@ -14,6 +14,8 @@
  * had. The door asks the judge (`createMetaLayeredAnswer` in `@objectstack/rest`).
  */
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
