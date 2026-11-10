@@ -61,8 +61,10 @@
  */
 
 import {
+  grantNamesPlatformPermissionSet,
   isAgentAccountRow,
   readDefaultOrganizationId,
+  securityCatalogReaderOf,
   resolvePlatformAdminEmails,
   type PlatformAdminEmailConfig,
 } from '@objectstack/core';
@@ -197,12 +199,18 @@ export async function resolveUpgradeReportAudience(engine: UpgradeReportEngine):
   if (organizationId === undefined || !engine.getObject(GRANT_OBJECT)) return { recipients };
   const grants = await engine.find(GRANT_OBJECT, {
     where: { [GRANT_SET_NAME_FIELD]: ADMIN_FULL_ACCESS, organization_id: organizationId },
-    fields: ['user_id'],
     limit: 10000,
     context: SYSTEM_CTX,
   });
   const granted: string[] = [];
+  // [ADR-0150 D3, D8 R1] A grant of the PLATFORM's set, read by its package
+  // column as the resolver reads it: another package's set of that name makes
+  // no administrator, so its holder is sent no deployment report. A
+  // composition with no catalog bound (a test rig) reads the grants by name,
+  // as before.
+  const catalogBound = securityCatalogReaderOf(engine) !== undefined;
   for (const row of rowsOf(grants)) {
+    if (catalogBound && !(await grantNamesPlatformPermissionSet(engine, ADMIN_FULL_ACCESS, row.permission_set_package))) continue;
     const userId = idOf(row.user_id);
     if (userId !== undefined && !recipients.includes(userId) && !granted.includes(userId)) granted.push(userId);
   }
