@@ -152,8 +152,10 @@ describe('userActionPredicates', () => {
 });
 
 describe('MANAGED_BY_BUCKETS', () => {
-  it('is the closed 6-bucket union in canonical order (objectstack#3355 — `system` → `system-data`)', () => {
-    expect(MANAGED_BY_BUCKETS).toEqual(['platform', 'config', 'system-data', 'engine-owned', 'append-only', 'better-auth']);
+  // objectstack ADR-0153 D4 — `synced` (rows a pull copies from a source)
+  // joins the union beside the other guarded buckets, in the spec enum's order.
+  it('is the closed 7-bucket union in canonical order (objectstack#3355 — `system` → `system-data`; ADR-0153 — `synced`)', () => {
+    expect(MANAGED_BY_BUCKETS).toEqual(['platform', 'config', 'system-data', 'engine-owned', 'append-only', 'synced', 'better-auth']);
   });
 
   it('no longer carries the retired `system` value', () => {

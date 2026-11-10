@@ -104,6 +104,15 @@ export interface TurnSummary {
   modelMismatch?: true;
   /** Wall-clock time of the CLI process, when the driver ran one (`meta.process`). */
   elapsedMs?: number;
+  /**
+   * The turn's cost in US dollars as its driver reported it (`meta.reportedCostUsd`:
+   * the `claude` CLI's estimate, or an external command's report). Absent ⇒
+   * the turn reported none: never a zero.
+   */
+  reportedCostUsd?: number;
+  /** The input and output tokens the turn used, when its driver reported them (`meta`); absent ⇒ none reported. */
+  inputTokens?: number;
+  outputTokens?: number;
   // What a turn that did not finish leaves to say why (`meta.process`):
   exit?: number | null;
   signal?: string;
@@ -220,6 +229,9 @@ const summarize = (t: ParsedTurn): TurnSummary => {
     ...(p?.requestedModel && t.meta.model && !servedAsRequested(p.requestedModel, t.meta.model) ? { modelMismatch: true as const } : {}),
     toolCalls: t.toolCalls.length,
     ...(p ? { elapsedMs: p.elapsedMs } : {}),
+    ...(t.meta.reportedCostUsd !== undefined ? { reportedCostUsd: t.meta.reportedCostUsd } : {}),
+    ...(t.meta.inputTokens !== undefined ? { inputTokens: t.meta.inputTokens } : {}),
+    ...(t.meta.outputTokens !== undefined ? { outputTokens: t.meta.outputTokens } : {}),
     ...(p && !finished(t)
       ? {
           exit: p.exit,

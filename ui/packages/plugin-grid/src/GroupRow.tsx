@@ -59,6 +59,18 @@ export interface GroupRowProps {
   onToggle: (key: string) => void;
 }
 
+/**
+ * One aggregation as its chip reads: the cell's own text when the result
+ * carries one (a date-family `min` / `max`), otherwise the number — whole as
+ * is, fractional at two places. No answer, or no finite number, is a dash:
+ * ⛔ never `NaN` (objectstack#32119).
+ */
+function aggregateText(agg: AggregationResult): string {
+  if (agg.display !== undefined) return agg.display;
+  if (agg.value === null || !Number.isFinite(agg.value)) return '\u2014';
+  return Number.isInteger(agg.value) ? String(agg.value) : agg.value.toFixed(2);
+}
+
 /** Left inset of a band's content per nesting level (Tailwind steps, no inline style). */
 const DEPTH_INSET = ['pl-3', 'pl-8', 'pl-12', 'pl-16'] as const;
 
@@ -114,7 +126,7 @@ export const GroupRow: React.FC<GroupRowProps> = ({
           <span className="ml-2 text-xs text-muted-foreground group-aggregations">
             {aggregations.map((agg) => (
               <span key={`${agg.field}-${agg.type}`} className="mr-2">
-                {agg.type}: {agg.value === null ? '\u2014' : Number.isInteger(agg.value) ? agg.value : agg.value.toFixed(2)}
+                {agg.type}: {aggregateText(agg)}
               </span>
             ))}
           </span>

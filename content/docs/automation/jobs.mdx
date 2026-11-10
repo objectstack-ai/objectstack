@@ -241,8 +241,9 @@ everything at once.
 A job whose work is "copy the records an external system holds into a local
 object" needs no code. Declare the sync on its target — a
 [`mapping`](/docs/references/data/mapping) with a `connectorSource` naming the
-`rest` or `openapi` connector it reads from — and give the job a `pull` naming
-that mapping. The mapping says where the rows come from, how fields map, and how a
+`rest` or `openapi` connector it reads from, in `mode: 'upsert'` with an
+`upsertKey`, into an object declared `managedBy: 'synced'` — and give the job a
+`pull` naming that mapping. The mapping says where the rows come from, how fields map, and how a
 pulled row matches a stored one; the job says when.
 
 {/* os:check */}
@@ -261,8 +262,9 @@ export const OrdersPullJob = defineJob({
   platform binds the pull itself, so code beside it would never run. A body
   cannot call a pull; a pull on a schedule is this declaration.
 - **Checked when you build.** `defineStack` — and so `os validate` — refuses a
-  `pull` that names a mapping the stack does not declare, or one with no
-  `connectorSource`. The binder checks the same reference against the artifact
+  `pull` that names a mapping the stack does not declare, or one with no source
+  (`connectorSource`, or `datasourceSource`, which the pull engine does not run
+  yet). The binder checks the same reference against the artifact
   before it schedules the job, on every door, and `os package install` refuses a
   package whose enabled job's `pull` fails that check, with `422 VALIDATION_ERROR`
   naming the job and the reason. A package an earlier version installed still

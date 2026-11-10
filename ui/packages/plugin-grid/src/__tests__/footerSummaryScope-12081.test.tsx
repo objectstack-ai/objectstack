@@ -70,14 +70,18 @@ afterEach(() => {
 const OBJECT = 'plan_line';
 const PAGE = 25;
 
-type Row = { id: string; name: string; stage: string; amount: number; note: string | null } & Record<string, unknown>;
-/** 300 rows; every fifth `note` is empty, every third row is `won`. */
+type Row = { id: string; name: string; stage: string; amount: number; note: string | null; closed_at: string } & Record<string, unknown>;
+/**
+ * 300 rows; every fifth `note` is empty, every third row is `won`, and
+ * `closed_at` is one day later per row, so the last row is the latest.
+ */
 const ROWS: Row[] = Array.from({ length: 300 }, (_, i) => ({
   id: `r${i}`,
   name: `Line ${i}`,
   stage: i % 3 === 0 ? 'won' : 'open',
   amount: (i + 1) * 100,
   note: i % 5 === 0 ? null : `n${i}`,
+  closed_at: new Date(Date.UTC(2025, 0, 1, 9, 30) + i * 86_400_000).toISOString(),
 }));
 
 const OBJECT_FIELDS = {
@@ -86,6 +90,7 @@ const OBJECT_FIELDS = {
   stage: { type: 'text', label: 'Stage' },
   amount: { type: 'number', label: 'Amount' },
   note: { type: 'text', label: 'Note' },
+  closed_at: { type: 'datetime', label: 'Closed At' },
 };
 
 /** The `FilterCondition` subset the lowered filters here use. */
@@ -113,10 +118,18 @@ function matchesSearch(row: Record<string, unknown>, term: unknown, fields: unkn
 type Agg = { function: string; field?: string; alias: string };
 type AggregateQuery = { where?: unknown; groupBy?: string[]; aggregations?: Agg[]; search?: unknown; searchFields?: unknown };
 
-/** One aggregation node over a row set, as `engine.aggregate` answers it. */
-function aggregateOf(rows: Row[], node: Agg): number | null {
+/**
+ * One aggregation node over a row set, as `engine.aggregate` answers it. A
+ * `min` / `max` over stored instants is the stored TEXT (ISO text orders as
+ * time), as a SQL driver answers it.
+ */
+function aggregateOf(rows: Row[], node: Agg): number | string | null {
   const values: unknown[] = node.field === undefined ? [] : rows.map((r) => r[node.field!]).filter((v) => v !== null && v !== undefined);
   const total = (): number => values.reduce((a: number, b) => a + Number(b), 0);
+  if ((node.function === 'min' || node.function === 'max') && typeof values[0] === 'string') {
+    const sorted = [...(values as string[])].sort();
+    return node.function === 'min' ? sorted[0] : sorted[sorted.length - 1];
+  }
   switch (node.function) {
     case 'count': return node.field === undefined ? rows.length : values.length;
     case 'count_distinct': return new Set(values).size;
@@ -497,5 +510,65 @@ describe('the page label is the pack\'s, not an English suffix (objectui#12081 i
     await waitFor(() => expect(footerText('amount')).toContain('（本页）'));
     expect(footerText('amount')).toContain('合计');
     expect(footerText('amount')).not.toMatch(/this page|Sum/);
+  });
+});
+
+describe('a date-family `min` / `max` in the footer reads as its cell, never as a number (objectstack#32119)', () => {
+  const CLOSED_MAX = [
+    { field: 'name', label: 'Name' },
+    { field: 'closed_at', label: 'Closed At', summary: 'max' },
+  ];
+
+  /** The Closed At cell of the row named `name`, in the grid on screen. */
+  function closedAtCell(name: string): string | null {
+    const headers = [...document.querySelectorAll('thead tr th')].map((th) => th.textContent ?? '');
+    const index = headers.findIndex((text) => text.includes('Closed At'));
+    for (const tr of document.querySelectorAll('tbody tr')) {
+      const tds = tr.querySelectorAll('td');
+      if ([...tds].some((td) => td.textContent === name) && tds.length > index) return tds[index].textContent;
+    }
+    return null;
+  }
+
+  /** The cell a one-row grid of `row` draws for Closed At — the cell's own face. */
+  async function cellOf(row: Row): Promise<string> {
+    cleanup();
+    const ds = makeDataSource({ door: 'absent' });
+    render(hostGrid(ds, { rows: [row], columns: CLOSED_MAX }));
+    await waitFor(() => expect(closedAtCell(row.name)).toBeTruthy());
+    return closedAtCell(row.name)!;
+  }
+
+  it('rows handed in whole: the `max` is the latest row\'s cell, not its year', async () => {
+    const ds = makeDataSource({ door: 'absent' });
+    const rows = ROWS.slice(0, 10);
+    render(hostGrid(ds, { rows, columns: CLOSED_MAX }));
+    await waitFor(() => expect(footerText('closed_at')).toBeTruthy());
+    await waitFor(() => expect(closedAtCell('Line 9')).toBeTruthy());
+    expect(footerText('closed_at')).toBe(`Closed At: Max: ${closedAtCell('Line 9')}`);
+    expect(footerText('closed_at')).not.toMatch(/2,025|NaN/);
+  });
+
+  it('own fetch, one page of 300: the whole set\'s `max` (the server\'s stored text) reads as the last row\'s cell', async () => {
+    const ds = makeDataSource();
+    render(ownFetchGrid(ds, CLOSED_MAX));
+    await waitFor(() => expect(footerText('closed_at')).toMatch(/^Closed At: Max: /));
+    const footer = footerText('closed_at');
+    expect(footer).not.toMatch(/2,025|NaN|this page/);
+    expect(footer).toBe(`Closed At: Max: ${await cellOf(ROWS[299])}`);
+  });
+
+  it('a `sum` / `avg` over a datetime column draws no figure; CONTROL — a `max` over a number column still reads as a number', async () => {
+    const ds = makeDataSource({ door: 'absent' });
+    render(hostGrid(ds, {
+      rows: ROWS.slice(0, 10),
+      columns: [
+        { field: 'name', label: 'Name' },
+        { field: 'closed_at', label: 'Closed At', summary: 'sum' },
+        { field: 'amount', label: 'Amount', type: 'number', summary: 'max' },
+      ],
+    }));
+    await waitFor(() => expect(footerText('amount')).toBe(`Amount: Max: ${fmt(1000)}`));
+    expect(footerText('closed_at')).toBeNull();
   });
 });
