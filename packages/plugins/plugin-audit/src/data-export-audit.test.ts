@@ -18,7 +18,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { ObjectKernel } from '@objectstack/core';
+import { ObjectKernel, assembleExecutionContext } from '@objectstack/core';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 
@@ -231,6 +231,26 @@ describe('[#30955] the row attributes the export the way the other ledger rows d
       context: { userId: 'u_human', tenantId: 'org_a', performedBy: { clientId: 'client_agent' } as any },
     }));
     expect(metadataOf(row)).toMatchObject({ performed_by: 'client_agent', on_behalf_of: 'u_human' });
+  });
+
+  it('[ADR-0151 D5] an AI service account\'s export is its own: `user_id` is the account, and the row names no performer and no delegator', () => {
+    // The envelope the door hands over, built by the REAL assembler from the
+    // account's resolution (its row's kind on `authz.principalKind`).
+    const account = assembleExecutionContext({
+      authz: {
+        userId: 'u_invoice_bot', tenantId: 'org_a', principalKind: 'agent',
+        positions: [], permissions: [], directPermissions: [], systemPermissions: [],
+        org_user_ids: ['u_invoice_bot'], accessible_org_ids: ['org_a'],
+      } as any,
+      oauth: undefined, localization: undefined, requestLocale: undefined, accessToken: undefined, authGate: undefined,
+    });
+    expect(account).toMatchObject({ userId: 'u_invoice_bot', principalKind: 'agent' });
+    const row = buildDataExportAuditRow(exportEvent({ context: account as any }));
+    expect(row).toMatchObject({ user_id: 'u_invoice_bot', actor: 'u_invoice_bot' });
+    const meta = metadataOf(row);
+    expect(meta).not.toHaveProperty('performed_by');
+    expect(meta).not.toHaveProperty('on_behalf_of');
+    expect(Object.keys(row).filter((k) => /principal|kind/i.test(k))).toEqual([]);
   });
 
   it('a service principal with no user is the actor', () => {

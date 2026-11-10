@@ -95,6 +95,9 @@ const USER_MEMBER = 'usr_alpha_member';
 /** Removed from `org_alpha`, still a member of `org_beta`; the grant scoped to `org_alpha` was left behind. */
 const USER_REMOVED = 'usr_alpha_removed';
 
+/** [ADR-0151] An AI service account, a current `org_alpha` member. */
+const USER_ACCOUNT = 'usr_alpha_account';
+
 /** The set the removed member held in `org_alpha`: the only grant of the probe object. */
 const PROBE_SET = 'qa_probe_editor';
 
@@ -144,6 +147,13 @@ async function boot(makeDriver: () => Driver, posture: TenancyPosture) {
   for (const id of [USER_ADMIN, USER_MEMBER, USER_REMOVED]) {
     await e.insert('sys_user', { id, name: id, email: `${id}@example.test` }, SYS);
   }
+  // [ADR-0151 D1] An AI service account, a current org_alpha member: a
+  // `sys_user` row of kind `agent` with the person accountable for it.
+  await e.insert('sys_user', {
+    id: USER_ACCOUNT, name: USER_ACCOUNT, email: `${USER_ACCOUNT}@placeholder.invalid`,
+    principal_kind: 'agent', accountable_user_id: USER_ADMIN,
+  }, SYS);
+  await e.insert('sys_member', { id: `mem_account_${n}`, user_id: USER_ACCOUNT, organization_id: ALPHA, role: 'member' }, SYS);
   await e.insert('sys_member', { id: `mem_admin_${n}`, user_id: USER_ADMIN, organization_id: ALPHA, role: 'member' }, SYS);
   await e.insert('sys_member', { id: `mem_member_${n}`, user_id: USER_MEMBER, organization_id: ALPHA, role: 'member' }, SYS);
   // The removal deleted the org_alpha membership row; the org_beta one remains.
@@ -344,5 +354,30 @@ describe.each(DRIVERS)('[#20580] %s', (_driver, makeDriver) => {
       expect(sorted(d.principal.permissionSets)).toEqual(sorted(enforcement.sets));
       expect(crudOf(d)).toBe('grants');
     });
+  });
+});
+
+/**
+ * [ADR-0151 D5 · O4] An administrator's explanation of another user names the
+ * kind of principal they are, as their own request does: a person `human` —
+ * the kind every door stamps on their requests — and an AI service account
+ * `agent`. Before O4 the person's explanation carried no kind at all, so the
+ * same person read two different principals depending on who asked.
+ */
+describe('[ADR-0151 D5] explaining another user names the kind of principal they are', () => {
+  const r = withRig(DRIVERS[0]![1], 'isolated');
+
+  it('CONTROL — a person explained by an administrator reads `human`, the kind their own request carries', async () => {
+    const d = await r.rig().explain(USER_MEMBER);
+    // A person's own request, assembled through the real door (the rig's caller).
+    expect(r.rig().admin.principalKind).toBe('human');
+    expect(d.principal.userId).toBe(USER_MEMBER);
+    expect(d.principal.principalKind).toBe('human');
+  });
+
+  it('an AI service account explained by an administrator reads `agent`', async () => {
+    const d = await r.rig().explain(USER_ACCOUNT);
+    expect(d.principal.userId).toBe(USER_ACCOUNT);
+    expect(d.principal.principalKind).toBe('agent');
   });
 });

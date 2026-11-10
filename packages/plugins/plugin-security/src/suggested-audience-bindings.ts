@@ -89,6 +89,7 @@ import {
   storedPermissionSetScope,
   type SecurityCatalogEntry,
   type SecurityCatalogReader,
+  type SecurityCatalogReferenceScope,
 } from '@objectstack/core';
 import { METADATA_AUTHORING_CAPABILITY } from '@objectstack/metadata-core';
 import { PermissionDeniedError } from './errors.js';
@@ -632,8 +633,24 @@ export async function readAcceptedEveryoneSets(
   ql: any,
   metadata?: any,
   deployment?: DeploymentAcceptance,
-): Promise<{ accepted: string[]; withheld: WithheldAcceptance[] }> {
-  const out = { accepted: [] as string[], withheld: [] as WithheldAcceptance[] };
+): Promise<{
+  accepted: string[];
+  /**
+   * [ADR-0150 D8 R3] The stored scope each accepted set resolves through, by
+   * name: each accepting row's `permission_set_package` (the exact holder)
+   * and `package_id` (the D3 caller of a null or stale column),
+   * `storedPermissionSetScope`. One entry per accepting row, so two
+   * packages' accepted sets of one name are two scopes. A host-declared name
+   * has none: it is the environment's, resolved with no caller. Absent when
+   * no accepted set carries one.
+   */
+  acceptedScopes?: Map<string, SecurityCatalogReferenceScope[]>;
+  withheld: WithheldAcceptance[];
+}> {
+  const out: { accepted: string[]; acceptedScopes?: Map<string, SecurityCatalogReferenceScope[]>; withheld: WithheldAcceptance[] } = {
+    accepted: [],
+    withheld: [],
+  };
   const declared = hostDeclaredAcceptance(deployment);
   let candidates: Array<{ set: string; packageId?: string; row?: Record<string, unknown> }>;
   if (declared) {
@@ -675,6 +692,11 @@ export async function readAcceptedEveryoneSets(
     const offending = describeAnchorForbiddenBits(entry.definition, EVERYONE_POSITION, capabilities);
     if (offending) { withhold(`it carries ${offending}, which the everyone anchor forbids (ADR-0090 D7)`, true); continue; }
     if (!out.accepted.includes(set)) out.accepted.push(set);
+    const scope = row ? storedPermissionSetScope(row.permission_set_package, row.package_id) : undefined;
+    if (scope) {
+      out.acceptedScopes ??= new Map();
+      out.acceptedScopes.set(set, [...(out.acceptedScopes.get(set) ?? []), scope]);
+    }
   }
   return out;
 }
