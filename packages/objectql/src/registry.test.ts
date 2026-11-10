@@ -1156,7 +1156,7 @@ describe('reconcileManagedApiMethods', () => {
                 enable: { apiEnabled: true, apiMethods: ['get', 'list', 'create', 'update', 'delete'] },
             };
             const out = reconcileManagedApiMethods(synced, { warn });
-            expect(out.enable.apiMethods, JSON.stringify(userActions)).toEqual(['get', 'list']);
+            expect(out.enable?.apiMethods, JSON.stringify(userActions)).toEqual(['get', 'list']);
             expect(warn).toHaveBeenCalledTimes(1);
             expect(warn.mock.calls[0][0]).toContain("managedBy:'synced'");
         }
