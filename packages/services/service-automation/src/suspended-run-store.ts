@@ -725,6 +725,8 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
         record.organizationId ??
         null,
       flow_name: record.flowName,
+      // [ADR-0150 D8 row R8, #31696] The flow's package, beside its name.
+      ...(record.flowPackage ? { flow_package: record.flowPackage } : {}),
       flow_version: record.flowVersion ?? null,
       node_id: record.nodeId ?? null,
       status: record.status,
@@ -879,6 +881,7 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
     return {
       runId: rawId.startsWith(HISTORY_PREFIX) ? rawId.slice(HISTORY_PREFIX.length) : rawId,
       flowName: String(row.flow_name ?? ''),
+      ...readFlowPackage(row),
       flowVersion: typeof row.flow_version === 'number' ? row.flow_version : undefined,
       status,
       startedAt: row.started_at ?? row.created_at ?? '',
@@ -971,6 +974,8 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       id: run.runId,
       organization_id: org,
       flow_name: run.flowName,
+      // [ADR-0150 D8 row R8, #31696] The flow's package, beside its name.
+      ...(run.flowPackage ? { flow_package: run.flowPackage } : {}),
       flow_version: run.flowVersion ?? null,
       // [#28405] The identity of the body the run is executing — what its
       // resume continues on. NULL for a run that recorded none.
@@ -1005,6 +1010,7 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
     return {
       runId: String(row.id),
       flowName: String(row.flow_name ?? ''),
+      ...readFlowPackage(row),
       flowVersion: row.flow_version ?? undefined,
       // [#28405] A row written before the column existed reads "no identity".
       flowChecksum: readFlowChecksum(row),
@@ -1090,6 +1096,15 @@ function serializeConsumedSuspension(
 }
 
 /**
+ * [ADR-0150 D8 row R8, #31696] A row's `flow_package`, as the record's
+ * `flowPackage` — nothing for a row that names no package (an
+ * environment-authored flow, a row written before the column was stamped).
+ */
+function readFlowPackage(row: any): { flowPackage?: string } {
+  return typeof row.flow_package === 'string' && row.flow_package !== '' ? { flowPackage: row.flow_package } : {};
+}
+
+/**
  * [#28405] A row's `flow_checksum`, or `undefined` for one that carries none —
  * a row written before the column existed, or by a run that recorded no
  * identity. Both resume as every run did before (see `resolveResumeTarget`).
@@ -1132,6 +1147,7 @@ function deserializeConsumedSuspension(row: any): SuspendedRun | undefined {
   return {
     runId: rawId.startsWith(HISTORY_PREFIX) ? rawId.slice(HISTORY_PREFIX.length) : rawId,
     flowName: String(row.flow_name ?? ''),
+    ...readFlowPackage(row),
     flowVersion: typeof row.flow_version === 'number' ? row.flow_version : undefined,
     flowChecksum: readFlowChecksum(row),
     nodeId: String(row.node_id ?? ''),
