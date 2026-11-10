@@ -105,6 +105,8 @@ import {
 import { earnedAnswerOf, staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 // [#28861] A landed write answers its success to the action handler's code.
 import { answerLandedWritesDespiteStaleSummary, landedWriteAnswer } from './landed-write-answer.js';
+// [ADR-0106 D1] The run doors' visibility question: the `/meta` projection's.
+import { actionRunFieldVisibilityRefusal, actionRunMasker, projectActionForCaller } from './action-run-visibility.js';
 
 // [ADR-0110] The addressing vocabulary and the D5 reconciliation moved to
 // @objectstack/objectql (the engine owns the map they describe, and its
@@ -4503,13 +4505,7 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     const resolved = await resolveActionByName(
         deps, meta, name, input?.objectName, objectsListing, await readActions?.(), qualifier,
     );
-    if (!resolved) {
-        throw new Error(
-            input?.objectName
-                ? `Action '${name}' not found on object '${input.objectName}'`
-                : `Action '${name}' not found`,
-        );
-    }
+    if (!resolved) throw unknownBusinessActionError(name, input?.objectName);
     // [ADR-0150 D4] Set only for a qualified call: the resolved holder's
     // package, whose handler the dispatch runs (the engine's package key).
     const { action, packageId } = resolved;
@@ -4528,6 +4524,29 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
         obj = (objectsListing ?? []).find((o: any) => o?.name === askedObject)
             ?? (typeof meta?.getObject === 'function' ? await meta.getObject(askedObject) : undefined)
             ?? obj;
+    }
+
+    // [ADR-0106 D1] AN ACTION THE CALLER IS NOT SHOWN, THE CALLER CANNOT RUN.
+    // Asked first, ahead of every gate that reads the declaration on the
+    // caller's behalf (the exposure gates, D4's capability gate, the
+    // activation switch, the param contract): an action `/meta` and
+    // `list_actions` withhold from this caller is answered here exactly as a
+    // name nothing declares is answered above, so no answer of this door
+    // tells the two apart. One field-visibility posture that cannot be
+    // evaluated refuses the run (D6 tier 3). The REST `/actions` door asks
+    // the same question at the same point.
+    {
+        const projected = await projectActionForCaller(actionRunMasker(deps, requestContext), {
+            action, objectName, obj,
+            readObject: async (other) => (objectsListing ?? []).find((o: any) => o?.name === other)
+                ?? (typeof meta?.getObject === 'function' ? await meta.getObject(other) : undefined),
+        });
+        if (projected.kind === 'fault') throw actionRunFieldVisibilityRefusal(projected.object);
+        if (projected.kind === 'withhold') {
+            throw qualifier
+                ? addressedActionNotFoundError(name, input?.objectName, actionAddressScope(qualifier))
+                : unknownBusinessActionError(name, input?.objectName);
+        }
     }
 
     // Fail-closed on system-object actions, PER ACTION (#27681): a `sys_*`
@@ -4676,6 +4695,15 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     }
     await recordActionInvocation(deps, requestContext, envId, { ...invocation, outcome: 'succeeded' });
     return answer;
+}
+
+/**
+ * The MCP `run_action` door's answer for a name nothing declares — and,
+ * [ADR-0106 D1], for an action the caller is not shown, which is answered as
+ * one ({@link invokeBusinessAction}).
+ */
+function unknownBusinessActionError(name: string, objectName: string | undefined): Error {
+    return new Error(objectName ? `Action '${name}' not found on object '${objectName}'` : `Action '${name}' not found`);
 }
 
 /**
@@ -5032,7 +5060,7 @@ function resolveQualifiedActionDeclaration(
         );
     }
     const inNamespace = decls.filter((d) => d.action?.name === name && d.packageId !== undefined && owners.has(d.packageId));
-    return pickActionHolder(addressedActionHits(inNamespace, name, objectName, `namespace '${namespace}'`), name, true);
+    return pickActionHolder(addressedActionHits(inNamespace, name, objectName, actionAddressScope(qualifier)), name, true);
 }
 
 /**
@@ -5047,7 +5075,27 @@ function resolveEnvironmentActionDeclaration(
     objectName: string | undefined,
 ): { action: any; objectName: string; obj: any; packageId?: string } {
     const own = decls.filter((d) => d.action?.name === name && d.packageId === undefined);
-    return pickActionHolder(addressedActionHits(own, name, objectName, 'the environment'), name, false);
+    return pickActionHolder(addressedActionHits(own, name, objectName, actionAddressScope({ environment: true })), name, false);
+}
+
+/** [ADR-0150 D5] The scope an addressed call names, as its refusals word it. */
+export function actionAddressScope(qualifier: ActionAddressQualifier): string {
+    return 'environment' in qualifier ? 'the environment' : `namespace '${qualifier.namespace}'`;
+}
+
+/**
+ * [ADR-0150 D5] The `404` an addressed call answers for a name its scope
+ * (`where`, {@link actionAddressScope}) declares none of — and, [ADR-0106 D1],
+ * for one the caller is not shown ({@link projectActionForCaller}), which is
+ * answered as a name nothing declares.
+ */
+export function addressedActionNotFoundError(name: string, objectName: string | undefined, where: string): Error {
+    return Object.assign(
+        new Error(objectName
+            ? `Action '${name}' not found on object '${objectName}' in ${where}`
+            : `Action '${name}' not found in ${where}`),
+        { code: standardErrorCodeForHttpStatus(404), status: 404 },
+    );
 }
 
 /**
@@ -5081,14 +5129,7 @@ function addressedActionHits(
             );
         }
     }
-    if (hits.length === 0) {
-        throw Object.assign(
-            new Error(objectName
-                ? `Action '${name}' not found on object '${objectName}' in ${where}`
-                : `Action '${name}' not found in ${where}`),
-            { code: standardErrorCodeForHttpStatus(404), status: 404 },
-        );
-    }
+    if (hits.length === 0) throw addressedActionNotFoundError(name, objectName, where);
     return hits;
 }
 

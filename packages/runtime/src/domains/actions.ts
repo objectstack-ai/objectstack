@@ -72,6 +72,8 @@ import { readNamespacePositionSegment } from '@objectstack/spec/kernel';
 // activation write below asks to name the ledger row's package.
 import { isCodeArtifactBody, isTenantAuthored } from '@objectstack/metadata-core';
 import * as actionExec from '../action-execution.js';
+// [ADR-0106 D1] The run doors' visibility question: the `/meta` projection's.
+import { actionRunFieldVisibilityRefusal, actionRunMasker, projectActionForCaller } from '../action-run-visibility.js';
 import {
     actionInvocationBranch,
     actionInvocationForwardedFrom,
@@ -729,17 +731,44 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         // shipped a documented way to reopen the gate for a population nobody
         // has ever observed. The boot inventory (D5) names the offenders and
         // the 404 below names the fix, which is the whole migration path.
-        if (!actionDef) {
-            return {
-                handled: true,
-                response: deps.error(
-                    `Action '${actionName}' on '${objectName}' has no declaration — ` +
-                    `add \`defineAction({ name: '${actionName}', … })\`, or register the handler under a ` +
-                    `declared action's \`target\`. Undeclared handlers cannot be permission-gated ` +
-                    `(ADR-0110 D3); startup logs every one of them under [action-governance].`,
-                    404,
-                ),
-            };
+        if (!actionDef) return undeclaredActionAnswer(deps, actionName, objectName);
+
+        // [ADR-0106 D1] AN ACTION THE CALLER IS NOT SHOWN, THE CALLER CANNOT
+        // RUN. Asked first among the gates that read the declaration on the
+        // caller's behalf (D4's capability gate, the activation switch, the
+        // param contract below): an action `/meta` withholds from this caller
+        // is answered exactly as this door answers a name nothing declares —
+        // the bare arm's answer just above, the addressed arm's the 404 its
+        // resolution answers — so no answer of this door tells the two apart.
+        // One field-visibility posture that cannot be evaluated refuses the
+        // run (D6 tier 3). The MCP `run_action` door asks the same question at
+        // the same point.
+        const projected = await projectActionForCaller(actionRunMasker(deps, _context), {
+            action: actionDef,
+            objectName,
+            obj: actionSchema,
+            readObject: (other) => {
+                try {
+                    return (typeof ql?.getSchema === 'function' ? ql.getSchema(other) : undefined)
+                        ?? ql?.registry?.getObject?.(other);
+                } catch {
+                    return undefined;
+                }
+            },
+        });
+        if (projected.kind === 'fault') {
+            const refusal = actionRunFieldVisibilityRefusal(projected.object);
+            return { handled: true, response: deps.error(refusal.message, refusal.status, { code: refusal.code }) };
+        }
+        if (projected.kind === 'withhold') {
+            return addressQualifier
+                ? {
+                    handled: true,
+                    response: deps.errorFromThrown(actionExec.addressedActionNotFoundError(
+                        actionName, objectName, actionExec.actionAddressScope(addressQualifier),
+                    ), 404),
+                }
+                : undeclaredActionAnswer(deps, actionName, objectName);
         }
 
         // ── 1/3: declared → gate against it ──
@@ -935,6 +964,24 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         forwardedFrom: actionInvocationForwardedFrom(_context, actionExec.API_FORWARD_MARK_HEADER),
     });
     return answer;
+}
+
+/**
+ * [ADR-0110 D3] The bare arm's answer for an action name nothing declares —
+ * and, [ADR-0106 D1], for an action the caller is not shown, which is
+ * answered as one ({@link handleActionsRequest}).
+ */
+function undeclaredActionAnswer(deps: DomainHandlerDeps, actionName: string, objectName: string): HttpDispatcherResult {
+    return {
+        handled: true,
+        response: deps.error(
+            `Action '${actionName}' on '${objectName}' has no declaration — ` +
+            `add \`defineAction({ name: '${actionName}', … })\`, or register the handler under a ` +
+            `declared action's \`target\`. Undeclared handlers cannot be permission-gated ` +
+            `(ADR-0110 D3); startup logs every one of them under [action-governance].`,
+            404,
+        ),
+    };
 }
 
 /**
