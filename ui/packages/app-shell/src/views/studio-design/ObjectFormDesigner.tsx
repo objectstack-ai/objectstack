@@ -63,6 +63,7 @@ import {
 } from '../metadata-admin/previews/object-fields-io.js';
 import { useSafeFieldLabel } from '@object-ui/i18n';
 import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
+import { DisabledControlReason } from '../metadata-admin/inspectors/_shared.js';
 import { isStudioHiddenSystemField } from './studioHiddenSystemField.js';
 import { injectedSystemColumnDefs, isInjectedColumnDefinition } from '@objectstack/spec/data';
 import { formDndAccessibility, type FormDndLookups, type FormDndSlot } from './formDndAnnouncements.js';
@@ -651,24 +652,42 @@ function Section({
         <div className="ml-auto flex items-center gap-0.5">
           {isDeclared && !readOnly && (
             <>
-              <button
-                type="button"
-                disabled={!canMoveUp}
-                onClick={() => onMove(-1)}
-                aria-label={t('engine.studio.designer.groupUp', locale)}
-                className={cn(iconBtn, 'disabled:opacity-30')}
+              {/* A boundary arrow says why it is off, on hover, focus and
+                  to assistive tech (the header Publish's treatment). */}
+              <DisabledControlReason
+                reason={canMoveUp ? undefined : t('engine.studio.designer.groupUpFirst', locale)}
+                testId="form-designer-group-up-reason"
               >
-                <ChevronUp className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                disabled={!canMoveDown}
-                onClick={() => onMove(1)}
-                aria-label={t('engine.studio.designer.groupDown', locale)}
-                className={cn(iconBtn, 'disabled:opacity-30')}
+                {(describedBy) => (
+                  <button
+                    type="button"
+                    disabled={!canMoveUp}
+                    onClick={() => onMove(-1)}
+                    aria-label={t('engine.studio.designer.groupUp', locale)}
+                    aria-describedby={describedBy}
+                    className={cn(iconBtn, 'disabled:pointer-events-none disabled:opacity-30')}
+                  >
+                    <ChevronUp className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </DisabledControlReason>
+              <DisabledControlReason
+                reason={canMoveDown ? undefined : t('engine.studio.designer.groupDownLast', locale)}
+                testId="form-designer-group-down-reason"
               >
-                <ChevronDown className="h-3.5 w-3.5" />
-              </button>
+                {(describedBy) => (
+                  <button
+                    type="button"
+                    disabled={!canMoveDown}
+                    onClick={() => onMove(1)}
+                    aria-label={t('engine.studio.designer.groupDown', locale)}
+                    aria-describedby={describedBy}
+                    className={cn(iconBtn, 'disabled:pointer-events-none disabled:opacity-30')}
+                  >
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </DisabledControlReason>
               <button
                 type="button"
                 onClick={onDelete}

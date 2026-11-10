@@ -38,7 +38,16 @@
 import { DatasourceSchema, externalBindingDatasourceRefusal, validateDriverConfig } from '@objectstack/spec/data';
 import { MetadataProtectionFields } from '@objectstack/spec/kernel';
 import type { IPubSub } from '@objectstack/spec/contracts';
-import { assertDatasourcePoolSupported } from './datasource-pool-support.js';
+import { unsupportedPoolIssue } from './datasource-pool-support.js';
+import {
+  DATASOURCE_REFUSAL_MESSAGE_MAX,
+  datasourceAdminRefusal,
+  datasourceRefusalText,
+  listedRefusal,
+  refusalLead,
+  thrownRefusalText,
+  type DatasourceRefusalParts,
+} from './datasource-refusal.js';
 import { datasourceConnectivityChanged } from './datasource-connectivity-change.js';
 import { redactDatasourceConfig, restoreRedactedConfig } from './datasource-config-redaction.js';
 import { planCredentialMigration } from './datasource-credential-migration.js';
@@ -160,23 +169,40 @@ const SSL_PRIVATE_KEY = 'key';
  * anything is read, written or probed. The rest of the block (`enabled`,
  * `rejectUnauthorized`, `ca`, `cert`) is stored.
  */
-function inlineSslKeyRefusal(heading: string, body: object): string | undefined {
+function inlineSslKeyRefusal(heading: string, body: object): DatasourceRefusalParts | undefined {
   const ssl = (body as { ssl?: unknown }).ssl;
   if (!ssl || typeof ssl !== 'object') return undefined;
   if ((ssl as Record<string, unknown>)[SSL_PRIVATE_KEY] === undefined) return undefined;
-  return (
-    `${heading}\n`
-    + '`ssl.key`: a TLS client private key is not accepted through this door. It would be stored in cleartext '
-    + 'in the datasource record, and this door stores no credential there: only a `secret` it seals into the '
-    + 'secret store, which takes no TLS key. Leave `ssl.key` out (`enabled`, `rejectUnauthorized`, `ca` and '
-    + '`cert` are stored) and send the request again. Nothing was written or probed.'
-  );
+  return {
+    reason: 'inline_ssl_key',
+    message: `${refusalLead(heading)} \`ssl.key\` (a TLS client private key) is not accepted through this door. Nothing was written or probed.`,
+    hint:
+      'It would be stored in cleartext in the datasource record, and this door stores no credential there: only '
+      + 'a `secret` it seals into the secret store, which takes no TLS key. Leave `ssl.key` out (`enabled`, '
+      + '`rejectUnauthorized`, `ca` and `cert` are stored) and send the request again.',
+  };
 }
 
 /** {@link inlineSslKeyRefusal} for a write door: refuses by throwing (a `400` at the route). */
 function assertNoInlineSslKey(heading: string, body: object): void {
   const refusal = inlineSslKeyRefusal(heading, body);
-  if (refusal) throw new Error(refusal);
+  if (refusal) throw datasourceAdminRefusal(refusal);
+}
+
+/**
+ * [ADR-0015 §3.5] A `pool` block (or a key of one) the driver does not read,
+ * refused at a write door. The account is the pool module's own
+ * ({@link unsupportedPoolIssue}), kept whole in `details.hint`; the line names
+ * the datasource and the driver.
+ */
+function assertPoolSupported(input: { driver: string; pool?: unknown; name: string }): void {
+  const issue = unsupportedPoolIssue(input);
+  if (!issue) return;
+  throw datasourceAdminRefusal({
+    reason: 'pool_unsupported',
+    message: `Invalid datasource '${input.name}': its \`pool\` declares what the '${input.driver}' driver does not read.`,
+    hint: issue,
+  });
 }
 
 /** `ssl` as a read may serve it: the private key withheld, every other member as stored. */
@@ -535,10 +561,11 @@ export function datasourceNotFoundError(name: string): Error {
 function assertSecretNotEmpty(heading: string, secret: SecretInput | undefined): void {
   const value = (secret as { value?: unknown } | null | undefined)?.value;
   if (secret == null || typeof value !== 'string' || value.trim() !== '') return;
-  throw new Error(
-    `${heading}\nThe \`secret\` is empty. Send the credential to store, or leave \`secret\` out (or null) `
-      + 'to keep the stored one. Nothing was written.',
-  );
+  throw datasourceAdminRefusal({
+    reason: 'empty_secret',
+    message: `${refusalLead(heading)} the \`secret\` is empty. Nothing was written.`,
+    hint: 'Send the credential to store, or leave `secret` out (or null) to keep the stored one.',
+  });
 }
 
 /**
@@ -563,17 +590,11 @@ function assertSecretNotEmpty(heading: string, secret: SecretInput | undefined):
  * it relays the `503` and `404` ones; both are required there.
  */
 function boundObjectsError(name: string, count: number, objects: string[] | undefined): Error {
-  const err = new Error(
-    `Cannot remove datasource '${name}': ${count} object(s) are still bound to it.`,
-  ) as Error & { code?: string; status?: number; details?: Record<string, unknown> };
-  err.code = 'DATASOURCE_ADMIN_ERROR';
-  err.status = 400;
-  err.details = {
+  return datasourceAdminRefusal({
     reason: 'objects_bound',
-    count,
-    ...(objects ? { objects: [...objects].sort() } : {}),
-  };
-  return err;
+    message: `Cannot remove datasource '${name}': ${count} object(s) are still bound to it.`,
+    extra: { count, ...(objects ? { objects: [...objects].sort() } : {}) },
+  });
 }
 
 function metadataIncompleteError(message: string, errors: string[]): Error {
@@ -890,7 +911,7 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     try {
       await this.assertValidConfig(input.driver, input.config);
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      return { ok: false, error: thrownRefusalText(err) };
     }
     // [#21058] And the pairing, by the same reasoning one level up: a mongo
     // `url` that names no user (or a composed config with no `username`)
@@ -905,14 +926,14 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     // datasource will.
     const draft = this.toRecord({ ...input, name: PROBE_DRAFT_NAME });
     const keyRefusal = inlineSslKeyRefusal('This connection draft is not a valid datasource.', draft);
-    if (keyRefusal) return { ok: false, error: keyRefusal };
+    if (keyRefusal) return { ok: false, error: datasourceRefusalText(keyRefusal) };
     const refusal = this.recordRefusal(
       this.withSecretBinding({ ...draft, origin: 'runtime' }, secret),
       'This connection draft is not a valid datasource.',
     );
-    if (refusal) return { ok: false, error: refusal };
+    if (refusal) return { ok: false, error: datasourceRefusalText(refusal) };
     const lendRefusal = await this.connectorLendRefusal({ name: PROBE_DRAFT_NAME, external: input.external } as StoredDatasource);
-    if (lendRefusal) return { ok: false, error: lendRefusal };
+    if (lendRefusal) return { ok: false, error: datasourceRefusalText(lendRefusal) };
     const queryTimeoutMs = (input.external as { queryTimeoutMs?: number } | undefined)?.queryTimeoutMs;
     try {
       return await this.config.probe({
@@ -934,22 +955,25 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     this.assertNoDraftCredentialsRef(input);
     this.assertNoUndeclaredTopLevelKey(`Invalid datasource '${input.name}'.`, input);
     assertNoInlineSslKey(`Invalid datasource '${input.name}'.`, input);
-    if (!input.driver) throw new Error('A driver is required to create a datasource.');
+    if (!input.driver) {
+      throw datasourceAdminRefusal({ reason: 'driver_required', message: 'A driver is required to create a datasource.' });
+    }
     await this.assertValidConfig(input.driver, input.config);
     // The wizard is a publish door for `pool` too (#5714). Rejected BEFORE the
     // record is persisted: `tryRegisterPool` swallows its failures into a
     // warning, so a datasource saved with an unhonourable pool would sit in the
     // store with the block still in it, exactly as silently as before.
-    assertDatasourcePoolSupported({ driver: input.driver, pool: input.pool, name: input.name });
+    assertPoolSupported({ driver: input.driver, pool: input.pool, name: input.name });
 
     const existing = await this.config.getDatasourceRecord(input.name);
     if (existing) {
       if (existing.origin === 'code' || existing.origin === undefined) {
-        throw new Error(
-          `Cannot create datasource '${input.name}': a code-defined datasource owns this name (read-only).`,
-        );
+        throw datasourceAdminRefusal({
+          reason: 'code_defined',
+          message: `Cannot create datasource '${input.name}': a code-defined datasource owns this name (read-only).`,
+        });
       }
-      throw new Error(`Datasource '${input.name}' already exists.`);
+      throw datasourceAdminRefusal({ reason: 'already_exists', message: `Datasource '${input.name}' already exists.` });
     }
 
     const record: StoredDatasource = {
@@ -993,7 +1017,10 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     const existing = await this.config.getDatasourceRecord(name);
     if (!existing) throw datasourceNotFoundError(name);
     if (existing.origin !== 'runtime') {
-      throw new Error(`Datasource '${name}' is code-defined and cannot be edited at runtime.`);
+      throw datasourceAdminRefusal({
+        reason: 'code_defined',
+        message: `Datasource '${name}' is code-defined and cannot be edited at runtime.`,
+      });
     }
     // [#28549 · #28612] Whatever else the patch touches, a `label`/`active`-only
     // edit included: that exemption spares a row stored before a gate, and this
@@ -1034,7 +1061,7 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     // before this gate becomes uneditable, including the `active: false` that
     // takes it out of service.
     if (patch.pool !== undefined || patch.driver !== undefined) {
-      assertDatasourcePoolSupported({ driver: merged.driver, pool: merged.pool, name });
+      assertPoolSupported({ driver: merged.driver, pool: merged.pool, name });
     }
     // [#21058] The whole merged record, with the binding it will carry — the
     // existing `credentialsRef` (preserved above), or the one a supplied secret
@@ -1234,7 +1261,10 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     const existing = await this.config.getDatasourceRecord(name);
     if (!existing) throw datasourceNotFoundError(name);
     if (existing.origin !== 'runtime') {
-      throw new Error(`Datasource '${name}' is code-defined and cannot be removed at runtime.`);
+      throw datasourceAdminRefusal({
+        reason: 'code_defined',
+        message: `Datasource '${name}' is code-defined and cannot be removed at runtime.`,
+      });
     }
 
     const bound: { count: number; degraded: boolean; errors: string[]; objects?: string[] } =
@@ -1465,7 +1495,7 @@ export class DatasourceAdminService implements IDatasourceAdminService {
       if (filenameIssue) issues.push(filenameIssue);
     }
     if (issues.length === 0) return;
-    throw new Error(`Invalid configuration for driver '${driver}'.\n${issues.join('\n')}`);
+    throw datasourceAdminRefusal(listedRefusal('invalid_config', `Invalid configuration for driver '${driver}'`, issues));
   }
 
   /**
@@ -1489,19 +1519,18 @@ export class DatasourceAdminService implements IDatasourceAdminService {
    *
    * @returns the refusal message, or `undefined` when the record is valid.
    */
-  private recordRefusal(record: StoredDatasource, heading: string): string | undefined {
+  private recordRefusal(record: StoredDatasource, heading: string): DatasourceRefusalParts | undefined {
     const result = DatasourceSchema.safeParse(record);
     if (result.success) return undefined;
     const detail = result.error.issues
-      .map((issue) => (issue.path.length ? `${issue.path.join('.')}: ${issue.message}` : issue.message))
-      .join('\n');
-    return `${heading}\n${detail}`;
+      .map((issue) => (issue.path.length ? `${issue.path.join('.')}: ${issue.message}` : issue.message));
+    return listedRefusal('invalid_record', refusalLead(heading).slice(0, -1), detail);
   }
 
   /** {@link recordRefusal} for a write door: refuses by throwing (a `400` at the route). */
   private assertValidRecord(record: StoredDatasource): void {
     const refusal = this.recordRefusal(record, `Invalid datasource '${record.name}'.`);
-    if (refusal) throw new Error(refusal);
+    if (refusal) throw datasourceAdminRefusal(refusal);
   }
 
   /**
@@ -1519,20 +1548,30 @@ export class DatasourceAdminService implements IDatasourceAdminService {
    * a restatement of the rule: the predicate is its one copy, and its message
    * names the object, the rule and the fix.
    */
-  private async boundExternalRefusal(record: StoredDatasource): Promise<string | undefined> {
+  private async boundExternalRefusal(record: StoredDatasource): Promise<DatasourceRefusalParts | undefined> {
     const findings: string[] = [];
+    const objects: string[] = [];
     for (const object of await this.config.listObjectsBoundTo(record.name)) {
       const refusal = externalBindingDatasourceRefusal(object.name, object.external, record.name, record);
-      if (refusal?.shape === 'managed') findings.push(`schemaMode: ${refusal.message}`);
+      if (refusal?.shape === 'managed') {
+        findings.push(`schemaMode: ${refusal.message}`);
+        objects.push(String(object.name));
+      }
     }
     if (findings.length === 0) return undefined;
-    return `Invalid datasource '${record.name}'.\n${findings.join('\n')}`;
+    return {
+      reason: 'external_binding_conflict',
+      message:
+        `Invalid datasource '${record.name}': it is managed, and ${objects.length} object(s) bind it with \`external\`.`,
+      hint: findings.join('\n'),
+      extra: { objects: [...objects].sort() },
+    };
   }
 
   /** {@link boundExternalRefusal} for a write door: refuses by throwing (a `400` at the route). */
   private async assertNoExternalBindingConflict(record: StoredDatasource): Promise<void> {
     const refusal = await this.boundExternalRefusal(record);
-    if (refusal) throw new Error(refusal);
+    if (refusal) throw datasourceAdminRefusal(refusal);
   }
 
   /**
@@ -1540,20 +1579,26 @@ export class DatasourceAdminService implements IDatasourceAdminService {
    * credential, or `undefined` when it names none or can. The reason is the
    * one the connect path would record ({@link DatasourceAdminServiceConfig.connectorRefusal}).
    */
-  private async connectorLendRefusal(record: StoredDatasource): Promise<string | undefined> {
+  private async connectorLendRefusal(record: StoredDatasource): Promise<DatasourceRefusalParts | undefined> {
     const connector = borrowedConnectorOf(record.external);
     if (connector === undefined) return undefined;
     const reason = this.config.connectorRefusal
       ? await this.config.connectorRefusal(connector)
       : `this datasource borrows the credential of connector instance '${connector}' (external.connector), but this `
         + 'host lends no connector credentials.';
-    return reason === undefined ? undefined : `Invalid datasource '${record.name}'.\nexternal.connector: ${reason}`;
+    if (reason === undefined) return undefined;
+    return {
+      reason: 'connector_not_lendable',
+      message: `Invalid datasource '${record.name}': connector instance '${connector}' (\`external.connector\`) lends no credential.`,
+      hint: `external.connector: ${reason}`,
+      extra: { connector },
+    };
   }
 
   /** {@link connectorLendRefusal} for a write door: refuses by throwing (a `400` at the route). */
   private async assertConnectorLendable(record: StoredDatasource): Promise<void> {
     const refusal = await this.connectorLendRefusal(record);
-    if (refusal) throw new Error(refusal);
+    if (refusal) throw datasourceAdminRefusal(refusal);
   }
 
   /** `record` as the record judgement must see it: with the binding `secret` will create, when one is supplied. */
@@ -1563,17 +1608,19 @@ export class DatasourceAdminService implements IDatasourceAdminService {
 
   private assertValidName(name: string | undefined): void {
     if (!name || !NAME_RE.test(name)) {
-      throw new Error(
-        `Invalid datasource name '${name ?? ''}': must match /^[a-z_][a-z0-9_]*$/.`,
-      );
+      throw datasourceAdminRefusal({
+        reason: 'invalid_name',
+        message: `Invalid datasource name '${name ?? ''}': must match /^[a-z_][a-z0-9_]*$/.`,
+      });
     }
     // Host-owned reserved name (#3826): the runtime declares and connects
     // `default` itself (DefaultDatasourcePlugin); a runtime-created pool under
     // that name would shadow the primary datasource's row and confuse routing.
     if (name === 'default') {
-      throw new Error(
-        `Datasource name 'default' is reserved for the host's primary datasource. Pick another name.`,
-      );
+      throw datasourceAdminRefusal({
+        reason: 'reserved_name',
+        message: `Datasource name 'default' is reserved for the host's primary datasource. Pick another name.`,
+      });
     }
     // Route-shadowed names (#29164): a literal the admin registrar mounts beside
     // a same-method `/datasources/:name` route captures that path first, so a
@@ -1581,10 +1628,13 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     // (`GET /datasources/drivers` is the driver catalog, not the edit form's
     // detail read). The list is the one the registrar mounts from.
     if (ROUTE_SHADOWED_DATASOURCE_NAMES.includes(name)) {
-      throw new Error(
-        `Datasource name '${name}' is reserved: the datasource admin API serves its own route at `
-          + `'/datasources/${name}', so a datasource of that name could never be read by name. Pick another name.`,
-      );
+      throw datasourceAdminRefusal({
+        reason: 'reserved_name',
+        message: `Datasource name '${name}' is reserved by the datasource admin API. Pick another name.`,
+        hint:
+          `The datasource admin API serves its own route at '/datasources/${name}', so a datasource of that name `
+          + 'could never be read by name.',
+      });
     }
   }
 
@@ -1603,12 +1653,14 @@ export class DatasourceAdminService implements IDatasourceAdminService {
   private assertNoDraftCredentialsRef(input: DatasourceDraft): void {
     const external = input.external as { credentialsRef?: unknown } | undefined;
     if (external?.credentialsRef === undefined) return;
-    throw new Error(
-      `Invalid datasource '${input.name}': \`external.credentialsRef\` is not accepted on create. `
-        + 'It names a credential already stored, and only the reference this door binds a supplied `secret` '
-        + 'under can be stored on a new datasource. Send the credential as `secret`, and leave '
-        + '`external.credentialsRef` out. Nothing was written.',
-    );
+    throw datasourceAdminRefusal({
+      reason: 'credentials_ref_on_create',
+      message:
+        `Invalid datasource '${input.name}': \`external.credentialsRef\` is not accepted on create. Nothing was written.`,
+      hint:
+        'It names a credential already stored, and only the reference this door binds a supplied `secret` under can '
+        + 'be stored on a new datasource. Send the credential as `secret`, and leave `external.credentialsRef` out.',
+    });
   }
 
   /**
@@ -1637,13 +1689,21 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     const present = Object.keys(body).filter((key) => (body as Record<string, unknown>)[key] !== undefined);
     if (present.length === 0) return;
     const result = DatasourceSchema.safeParse(Object.fromEntries(present.map((key) => [key, null])));
-    const detail = result.success
+    const refused = result.success
       ? []
-      : result.error.issues
-          .filter((issue) => issue.code === 'unrecognized_keys' && issue.path.length === 0)
-          .map((issue) => issue.message);
-    if (detail.length === 0) return;
-    throw new Error(`${heading}\n${detail.join('\n')}`);
+      : result.error.issues.filter((issue) => issue.code === 'unrecognized_keys' && issue.path.length === 0);
+    if (refused.length === 0) return;
+    // Key NAMES only, never values: the line cannot echo a credential.
+    const keys = refused.flatMap((issue) => (issue as { keys?: string[] }).keys ?? []);
+    const named = `${refusalLead(heading)} unrecognized key(s) ${keys.map((key) => `\`${key}\``).join(', ')}.`;
+    throw datasourceAdminRefusal({
+      reason: 'undeclared_key',
+      message: named.length <= DATASOURCE_REFUSAL_MESSAGE_MAX
+        ? named
+        : `${refusalLead(heading)} ${keys.length} unrecognized key(s).`,
+      hint: refused.map((issue) => issue.message).join('\n'),
+      extra: { keys },
+    });
   }
 
   /**
