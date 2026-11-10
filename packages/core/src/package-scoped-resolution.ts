@@ -523,7 +523,9 @@ export function packageScopedRefusalMessage(refusal: Omit<PackageScopedRefusal, 
  * name to their own object: two packages' actions of one name on two objects
  * are two different actions, and a read that cannot see the object would pick
  * one. Names each package with the object(s) it binds the name to, in the
- * map's order; `undefined` is an object-less action.
+ * map's order; `undefined` is an object-less action. Where every package binds
+ * it to the one same object (or each holds it object-less), the sentence only
+ * names them, without calling them different actions.
  */
 export function packageScopedActionOwnersSentence(
   objectsByPackage: ReadonlyMap<string, ReadonlyArray<string | undefined>>,
@@ -532,7 +534,10 @@ export function packageScopedActionOwnersSentence(
     const named = [...new Set(objects)].map((object) => (object === undefined ? 'no object' : `object "${object}"`));
     return `package "${packageId}" binds it to ${named.join(' and ')}`;
   });
-  return `Each is a different action: ${owners.join('; ')}.`;
+  const objects = new Set([...objectsByPackage.values()].flatMap((bound) => [...bound]));
+  if (objects.size > 1) return `Each is a different action: ${owners.join('; ')}.`;
+  const sentence = owners.join('; ');
+  return `${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}.`;
 }
 
 /**

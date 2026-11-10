@@ -125,13 +125,29 @@ function isDisabledHolder(registry: ActionHolderRegistry | undefined, packageId:
  * holds the item. One package binding the name to two objects is one holder,
  * and reads as before; so does a package-less item beside one package's.
  *
+ * `objectLessRefused` is what the narrower object-less judge
+ * (`refuseAmbiguousObjectLessAction`, #31697) threw for the same read, if it
+ * refused. Its refusal names only the object-less holders, so it is merged in
+ * (review 6781770671 S5): with two object-less packages and a third bound to
+ * an object, the 409 names all three, and the third's own `/actions` route can
+ * find its holder among the candidates. A holder the narrower judge names that
+ * is not a package (the platform's item) is kept. Where the packages alone are
+ * fewer than two, the narrower refusal is thrown as it was.
+ *
  * @throws {PackageScopedNameRefusedError} when two or more enabled packages hold the name.
+ * @throws `objectLessRefused` when it is set and the packages alone are fewer than two.
  */
-export function refuseActionHeldByPackages(host: Pick<ProtocolHost, 'engine'>, name: string): void {
+export function refuseActionHeldByPackages(host: Pick<ProtocolHost, 'engine'>, name: string, objectLessRefused?: unknown): void {
     const registry = actionHolderRegistry(host);
-    if (!registry) return;
-    const holders = (registry.packageScopedHoldersOf('action', name) ?? []).filter((id) => !isDisabledHolder(registry, id));
-    if (holders.length < 2) return;
+    const holders = registry
+        ? (registry.packageScopedHoldersOf('action', name) ?? []).filter((id) => !isDisabledHolder(registry, id))
+        : [];
+    if (!registry || holders.length < 2) {
+        if (objectLessRefused !== undefined) throw objectLessRefused;
+        return;
+    }
+    const narrower = objectLessRefused === undefined ? undefined : packageScopedRefusalOf(objectLessRefused);
+    const extra = (narrower?.candidates ?? []).filter((candidate) => candidate.kind !== 'package' || !holders.includes(candidate.packageId));
     const objectsByPackage = new Map(holders.map((id) => [id, [actionObjectOf(registry.getPackageScopedItem('action', name, id))]] as const));
     const base: Omit<PackageScopedRefusal, 'message'> = {
         status: 'refused',
@@ -139,7 +155,7 @@ export function refuseActionHeldByPackages(host: Pick<ProtocolHost, 'engine'>, n
         type: 'action',
         name,
         callerPackageId: null,
-        candidates: holders.map((packageId) => ({ kind: 'package' as const, packageId })),
+        candidates: [...holders.map((packageId) => ({ kind: 'package' as const, packageId })), ...extra],
     };
     throw new PackageScopedNameRefusedError({
         ...base,
@@ -243,16 +259,25 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // item the environment's store does not hold (the platform's: host code
     // or a plugin), as the action doors refuse it; the store's own row is the
     // environment's and answers first. A disabled package holds nothing here.
-    // An action bound to an object reads as before (`getItem`).
-    if (!request.packageId && request.type === 'action' && typeof registry?.refuseAmbiguousObjectLessAction === 'function') {
-        await registry.refuseAmbiguousObjectLessAction(request.name, () => host.readItemActiveRows('action', request.name));
+    // [ADR-0150 D3, #32244] An action bound to an object is judged with it:
+    // a name two enabled packages hold on ANY object key — two objects, an
+    // object and none, or one object — is refused the same way, naming each
+    // package with its object ({@link refuseActionHeldByPackages}). The
+    // object-less judge's refusal is merged into that one (review 6781770671
+    // S5), so a third package bound to an object is named beside two
+    // object-less holders; alone, it is thrown as before.
+    if (!request.packageId && request.type === 'action') {
+        let objectLessRefused: unknown;
+        if (typeof registry?.refuseAmbiguousObjectLessAction === 'function') {
+            try {
+                await registry.refuseAmbiguousObjectLessAction(request.name, () => host.readItemActiveRows('action', request.name));
+            } catch (error) {
+                if (packageScopedRefusalOf(error) === undefined) throw error;
+                objectLessRefused = error;
+            }
+        }
+        refuseActionHeldByPackages(host, request.name, objectLessRefused);
     }
-    // [ADR-0150 D3, #32244] …and an action name two enabled packages hold on
-    // ANY object key — two objects, an object and none, or one object — is
-    // refused the same way, naming each package with its object
-    // ({@link refuseActionHeldByPackages}). An action bound to an object read
-    // through `getItem`, which served the first registered.
-    if (!request.packageId && request.type === 'action') refuseActionHeldByPackages(host, request.name);
     const packagelessScopedRead: { item: unknown } | undefined =
         !request.packageId && typeof registry?.readsByPackage === 'function' && registry.readsByPackage(request.type)
             ? { item: registry.resolveItem(request.type, request.name, null, member) }

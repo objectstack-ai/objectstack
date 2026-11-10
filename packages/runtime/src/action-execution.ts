@@ -5955,8 +5955,11 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
  * The refusal stands when a candidate is not a package (the platform's or the
  * environment's item has no address of its own) or two candidates own the
  * route on one rung. No candidate owning the route is no declaration, as when
- * the bare read served another object's action. A candidate read that throws
- * is answered as the bare read's throw would be: its refusal, else an outage.
+ * the bare read served another object's action. A candidate its own address
+ * refuses owns nothing, so another candidate that owns the route answers; with
+ * none, the bare read's refusal stands, since the unread candidate may own it.
+ * A candidate read that throws anything else is an outage, as the bare read's
+ * throw would be.
  */
 async function routeOwnerOfRefusedRead(
     refusal: PackageScopedRefusal,
@@ -5973,14 +5976,22 @@ async function routeOwnerOfRefusedRead(
         return { action: undefined, obj, refusal };
     }
     const owners: any[] = [];
+    let unread = false;
     for (const candidate of refusal.candidates) {
         if (candidate.kind !== 'package') continue;
         let envelope: unknown;
         try {
             envelope = await readAt(candidate.packageId);
         } catch (err: any) {
-            const refused = refusalOf(err);
-            if (refused !== undefined) return { action: undefined, obj, refusal: refused };
+            // [review 6781770671 S1] A candidate its own address refuses
+            // (`not-held-by-qualifier`: the store holds a package's item the
+            // registry does not, so `?package=` names another holder) owns
+            // nothing here. Its refusal is about a package the caller never
+            // named, never this route's answer.
+            if (refusalOf(err) !== undefined) {
+                unread = true;
+                continue;
+            }
             return { action: undefined, obj, degraded: true, reason: err?.message ?? String(err) };
         }
         const item: any = (envelope as { item?: unknown } | null | undefined)?.item;
@@ -5989,7 +6000,9 @@ async function routeOwnerOfRefusedRead(
     const bound = owners.filter((item) => !isObjectLessActionKey(standaloneActionOwnerKey(item)) && standaloneActionOwnerKey(item) === objectName);
     const rung = bound.length > 0 ? bound : owners.filter((item) => isObjectLessActionKey(standaloneActionOwnerKey(item)));
     if (rung.length === 1) return { action: rung[0], obj };
-    if (rung.length === 0) return { action: undefined, obj };
+    // A candidate that could not be read may own the route: with no other
+    // owner, the bare read's refusal stands rather than "no declaration".
+    if (rung.length === 0) return unread ? { action: undefined, obj, refusal } : { action: undefined, obj };
     return { action: undefined, obj, refusal };
 }
 

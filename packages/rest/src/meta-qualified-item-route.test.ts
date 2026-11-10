@@ -421,4 +421,31 @@ describe('#32244 — the bare read of an action name two packages hold answers 4
         expect(single.status, JSON.stringify(single.body)).toBe(200);
         expect(labelOf(single)).toBe('alpha');
     });
+
+    it('[review 6781770671 S2] the layered read `/layers` of a name the registry counts two holders of: 409 naming both with their objects', async () => {
+        shipAction(A, 'account');
+        shipAction(B, 'contact');
+        const answer = await drive('/api/v1/meta/:type/:name/layers', { type: 'action', name: 'approve' });
+        expect([answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(messageOf(answer)).toContain(`package "${A}" binds it to object "account"`);
+        expect(messageOf(answer)).toContain(`package "${B}" binds it to object "contact"`);
+    });
+
+    it('[review 6781770671 S2] the published read `/published` of such a name: 409 too, never one package\'s action', async () => {
+        shipAction(A, 'account');
+        shipAction(B, 'contact');
+        const answer = await drive('/api/v1/meta/:type/:name/published', { type: 'action', name: 'approve' });
+        expect([answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(messageOf(answer)).toContain(`package "${B}" binds it to object "contact"`);
+    });
+
+    it('CONTROL — `/layers` and `/published` of a name one package holds answer as before', async () => {
+        shipAction(A, 'account');
+        const layers = await drive('/api/v1/meta/:type/:name/layers', { type: 'action', name: 'approve' });
+        expect([layers.status, layers.body?.code?.label], JSON.stringify(layers.body)).toEqual([200, 'alpha']);
+        // This harness wires no metadata service, so a read the judge passes
+        // reaches the code-store fallback and answers its 501, never the 409.
+        const published = await drive('/api/v1/meta/:type/:name/published', { type: 'action', name: 'approve' });
+        expect([published.status, codeOf(published)], JSON.stringify(published.body)).toEqual([501, 'NOT_IMPLEMENTED']);
+    });
 });

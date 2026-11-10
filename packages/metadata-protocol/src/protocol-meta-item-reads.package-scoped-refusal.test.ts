@@ -11,7 +11,7 @@ import { describe, it, expect } from 'vitest';
 // module under test reaches it dynamically.
 import '@objectstack/lint';
 import { PackageScopedNameRefusedError, packageScopedRefusalMessage, type PackageScopedRefusal } from '@objectstack/core';
-import { packageScopedRefusalOf, rethrowPackageScopedRefusal } from './protocol-meta-item-reads.js';
+import { packageScopedRefusalOf, refuseActionHeldByPackages, rethrowPackageScopedRefusal } from './protocol-meta-item-reads.js';
 
 const A = 'com.acme.alpha';
 const B = 'com.acme.beta';
@@ -56,5 +56,40 @@ describe('rethrowPackageScopedRefusal — the catch\'s answer', () => {
         expect(() => rethrowPackageScopedRefusal(hostWith([B]), 'action', refused)).not.toThrow();
         // Not for another type: its readers count every holder.
         expect(() => rethrowPackageScopedRefusal(hostWith([B]), 'api', refused)).toThrow(refused);
+    });
+});
+
+describe('[review 6781770671 S5] refuseActionHeldByPackages — the object-less judge\'s refusal merged in', () => {
+    const C = 'com.acme.gamma';
+    const hostHolding = (objects: Record<string, string | undefined>) => ({
+        engine: { registry: {
+            packageScopedHoldersOf: () => Object.keys(objects),
+            getPackageScopedItem: (_t: string, name: string, id: string) => ({ name, ...(objects[id] ? { objectName: objects[id] } : {}) }),
+        } },
+    }) as never;
+    const caught = (run: () => void): any => { try { run(); } catch (error) { return error; } return undefined; };
+
+    it('two object-less packages and a third bound to an object: one refusal naming all three', () => {
+        const narrower = new PackageScopedNameRefusedError(refusalNaming(A, B));
+        const refused = caught(() => refuseActionHeldByPackages(hostHolding({ [A]: undefined, [B]: undefined, [C]: 'account' }), 'approve', narrower));
+        expect(refused).toBeInstanceOf(PackageScopedNameRefusedError);
+        expect(refused.refusal.candidates.map((c: any) => c.packageId)).toEqual([A, B, C]);
+        expect(refused.message).toContain(`package "${C}" binds it to object "account"`);
+    });
+
+    it('a holder the narrower judge names that is not a package (the platform\'s) is kept', () => {
+        const base = {
+            status: 'refused' as const, reason: 'ambiguous-in-environment' as const, type: 'action' as const, name: 'approve',
+            callerPackageId: null, candidates: [{ kind: 'package' as const, packageId: A }, { kind: 'platform' as const }],
+        };
+        const narrower = new PackageScopedNameRefusedError({ ...base, message: packageScopedRefusalMessage(base) });
+        const refused = caught(() => refuseActionHeldByPackages(hostHolding({ [A]: undefined, [C]: 'account' }), 'approve', narrower));
+        expect(refused.refusal.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: C }, { kind: 'platform' }]);
+    });
+
+    it('CONTROL — fewer than two packages: the narrower refusal is thrown as it was; with none, nothing is thrown', () => {
+        const narrower = new PackageScopedNameRefusedError(refusalNaming(A));
+        expect(caught(() => refuseActionHeldByPackages(hostHolding({ [A]: undefined }), 'approve', narrower))).toBe(narrower);
+        expect(caught(() => refuseActionHeldByPackages(hostHolding({ [A]: 'account' }), 'approve'))).toBeUndefined();
     });
 });

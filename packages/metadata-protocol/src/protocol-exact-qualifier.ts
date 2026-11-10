@@ -134,8 +134,9 @@ export type UnjudgeableReadAddress =
  *    ruling (b)), unless the registry judges that read itself. `action` is
  *    such a type: `SchemaRegistry` counts an object-less action's holders
  *    for the bare read (`refuseAmbiguousObjectLessAction`, asked by
- *    `readMetaItem`, #31697), and an action bound to an object reads through
- *    `getItem`, as on `main`.
+ *    `readMetaItem`, #31697), and `readMetaItem` counts the registry's
+ *    package holders of the name on any object key besides
+ *    (`refuseActionHeldByPackages`, #32244).
  */
 function unjudgeableCause(
     host: Pick<ProtocolHost, 'engine'>,
