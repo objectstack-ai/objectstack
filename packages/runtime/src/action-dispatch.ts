@@ -761,6 +761,18 @@ export async function dispatchActionRequest(deps: DomainHandlerDeps, request: Ac
     if (typeof actionName !== 'string' || actionName === '') {
         return deps.error('dispatchAction needs the action\'s name (`actionName`)', 400);
     }
+    // The posture picks which rules run, so a value that is neither is refused
+    // before anything resolves: read as `'rest'`, a misspelt `'AI'` or
+    // `'mcp'` would quietly drop the AI door's three rules.
+    const posture: unknown = request.posture;
+    if (posture !== undefined && posture !== 'rest' && posture !== 'ai') {
+        const message = `\`posture\` must be 'rest' or 'ai' (or absent, which is 'rest'); got ${JSON.stringify(posture)}`;
+        return deps.error(
+            `Invalid action request — ${message}`,
+            VALIDATION_FAILED_STATUS,
+            validationFailureDetails(validationFailure(message, [{ field: 'posture', code: 'invalid_option', message }])) as ActionRefusal['details'],
+        );
+    }
     const headers: Record<string, string> = {};
     for (const [name, value] of Object.entries(request.credentialHeaders ?? {})) {
         if (typeof value === 'string') headers[name.toLowerCase()] = value;
@@ -803,7 +815,7 @@ export async function dispatchActionRequest(deps: DomainHandlerDeps, request: Ac
     if ('refusedBy' in resolution) return deps.errorFromThrown(resolution.refusedBy, 404);
 
     const answer = await runResolvedActionAsRest(deps, context, {
-        posture: request.posture === 'ai' ? 'ai' : 'rest',
+        posture: posture === 'ai' ? 'ai' : 'rest',
         door: 'host',
         objectName,
         actionName,

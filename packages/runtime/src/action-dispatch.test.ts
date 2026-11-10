@@ -207,6 +207,22 @@ describe('dispatchAction answers what the REST /actions door answers', () => {
         expect(rig.ran()).toBe(0);
     });
 
+    it('a posture that is neither rest nor ai is refused 400 VALIDATION_FAILED before anything resolves or runs', async () => {
+        for (const posture of ['AI', 'mcp', '', 1]) {
+            const rig = makeRig([gated]);
+            const answer = await rig.viaHost(HOLDER_EC, 'gated_ping', { posture: posture as any });
+            expect(answer.status).toBe(400);
+            expect(answer.body.error!.code).toBe('VALIDATION_FAILED');
+            expect((answer.body.error as any).details?.fields?.[0]).toMatchObject({ field: 'posture', code: 'invalid_option' });
+            expect(rig.ran()).toBe(0);
+            expect(rig.rows).toHaveLength(0);
+        }
+        // The two named postures and an absent one still run.
+        for (const posture of ['rest', 'ai', undefined] as const) {
+            expect((await makeRig([gated]).viaHost(HOLDER_EC, 'gated_ping', posture === undefined ? {} : { posture })).status).toBe(200);
+        }
+    });
+
     it('an anonymous caller is refused 401 before anything runs, as at the REST door', async () => {
         const rig = makeRig([gated]);
         const restAnswer = await makeRig([gated]).viaRest({}, 'gated_ping');
