@@ -10,10 +10,14 @@ import React, { useEffect } from 'react';
 import type { ObjectGridSchema, DataSource, ListColumn } from '@object-ui/types';
 import { parseFilterAST, type FilterCondition } from '@objectstack/spec/data';
 import type { useSafeFieldLabel } from '@object-ui/react';
-import { formatDate, formatDateTime, formatRelativeDate } from '@object-ui/fields';
-import { buildCategoryOrder, buildCategoryRank, toDisplayDate } from '@object-ui/core';
-import { resolveGridCellRendering, type GridCellFieldLike } from './cellRendererResolution';
-import { useGroupedDataInOptionOrder, usableGroupingFields, type GroupOptionRanks, type ServerGroupSource } from './useGroupedData';
+import { buildCategoryOrder, buildCategoryRank } from '@object-ui/core';
+import { useDisplayLocale } from '@object-ui/i18n';
+import type { GridCellFieldLike } from './cellRendererResolution';
+import { temporalCellFaceOf, type TemporalCellFace } from './temporalCellFace';
+import {
+  useGroupedDataInOptionOrder, usableGroupingFields,
+  type GroupAggregationConfig, type GroupOptionRanks, type ServerGroupSource, type TemporalAggregateFaces,
+} from './useGroupedData';
 import { groupSearchOf, useServerGroupHeaders, useServerGroupRows, type ServerGroupLeaf } from './useServerGrouping';
 import { normalizeColumns } from './objectGridColumns';
 import { honestGroupAggregations } from './recordCurrencyAggregates';
@@ -32,57 +36,40 @@ type GroupingFieldDef = GridCellFieldLike & {
 };
 
 /**
- * [objectui#13234] The face a date-family CELL paints, for one grouping field:
- * the renderer key from the cells' one shared resolve
- * (`resolveGridCellRendering`), and the object field's `format`, which is the
- * `format` the cell's field metadata carries.
+ * The date-family face the cell of `field` paints in this grid: the authored
+ * column's `type` over the object field's, with the object field's `format`
+ * and `widget`, through the cells' one shared resolve.
  */
-interface TemporalGroupFace {
-  rendererType: 'date' | 'datetime';
-  format?: string;
+function gridTemporalFaceOf(
+  field: string,
+  cols: ReadonlyArray<string | ListColumn>,
+  objectFields: Readonly<Record<string, GroupingFieldDef | undefined>> | undefined,
+): TemporalCellFace | undefined {
+  const objectDefField = objectFields?.[field];
+  const colOverride = cols.find(
+    (c): c is ListColumn => typeof c === 'object' && c !== null && c.field === field,
+  );
+  return temporalCellFaceOf({
+    type: colOverride?.type || objectDefField?.type,
+    format: objectDefField?.format,
+    widget: objectDefField?.widget,
+  });
 }
 
-/**
- * [objectui#13234] A `date` / `datetime` group's key, drawn as the grid's cell
- * draws the same value. `undefined` for a key the cell has no face for (empty
- * or unparsable), so the band keeps the group's own label: "(empty)" for an
- * empty key, the stored text otherwise.
- *
- * The formatting CALLS are the cells' own, with the cells' arguments:
- * `DateCellRenderer` in a grid column (`inGridColumn`, objectstack#25884)
- * paints `formatDate(value, format || undefined, …)`, the absolute default
- * face when no `format` is declared;
- * `DateTimeCellRenderer` paints `formatRelativeDate` for `'relative'`, the
- * compact face for no format and for `'short'`, and `formatDateTime` with the
- * authored word otherwise (the compact face's string is the cell's two halves
- * joined by the one space the cell draws between them). No date is formatted
- * here. The face SELECTION is the one part those renderers do not export, and
- * it is restated here only: `groupDateHeading-13234.test.tsx` holds every
- * heading to the cell under it for every face, so a move on either side turns
- * it red.
- *
- * A heading names a DAY, not one row's deadline, so it reads the face's
- * neutral phrase: `dueLike`'s "Overdue" wording and red are a per-row verdict
- * (`settledWhen` is judged per row), and the rows of one group can judge it
- * differently.
- */
-export function temporalGroupHeading(
-  face: TemporalGroupFace,
-  key: unknown,
-  locale: string | undefined,
-): string | undefined {
-  if (typeof key !== 'string' && typeof key !== 'number') return undefined;
-  // The cells' floor: every falsy scalar is empty, the numeric epoch included.
-  if (!key) return undefined;
-  // The cells' validity guard, the shared parse step.
-  if (isNaN(toDisplayDate(key).getTime())) return undefined;
-  if (face.rendererType === 'date') return formatDate(key, face.format || undefined, { locale });
-  // A `datetime` cell renders an INSTANT, from the engine's parse.
-  const instant = new Date(key);
-  const style = !face.format || face.format === 'short' ? 'compact' : face.format;
-  return style === 'relative'
-    ? formatRelativeDate(instant, { locale })
-    : formatDateTime(instant, { style, locale });
+/** Each aggregated field whose cell paints a date-family face, with that face, once. */
+function temporalFacesOfAggregations(
+  aggregations: readonly GroupAggregationConfig[] | undefined,
+  cols: ReadonlyArray<string | ListColumn>,
+  objectFields: Readonly<Record<string, GroupingFieldDef | undefined>> | undefined,
+): Array<[string, TemporalCellFace]> {
+  const out: Array<[string, TemporalCellFace]> = [];
+  for (const agg of aggregations ?? []) {
+    const field = agg?.field;
+    if (typeof field !== 'string' || field === '' || out.some(([seen]) => seen === field)) continue;
+    const face = gridTemporalFaceOf(field, cols, objectFields);
+    if (face) out.push([field, face]);
+  }
+  return out;
 }
 
 export function useObjectGridGrouping({
@@ -192,7 +179,7 @@ export function useObjectGridGrouping({
   }, [schema.grouping, schema.columns, schema.objectName, objectFields, translateOptions, t]);
 
   // [objectui#13234] Per grouping field whose cell paints a date-family face,
-  // that face; `temporalGroupHeading` draws the field's group headings through
+  // that face; `temporalCellText` draws the field's group headings through
   // it. The type is the one `groupValueFormatter` reads (the authored column's
   // `type` over the object field's), taken through the cells' one shared
   // resolve, so a heading is drawn as a date exactly when the cell under it is.
@@ -204,21 +191,11 @@ export function useObjectGridGrouping({
   // the stored key as its label, so its order and count are what they were;
   // only the text in its band changes.
   const temporalGroupFaces = React.useMemo(() => {
-    const faces = new Map<string, TemporalGroupFace>();
+    const faces = new Map<string, TemporalCellFace>();
     const cols: ReadonlyArray<string | ListColumn> = normalizeColumns(schema.columns) ?? [];
     for (const gf of usableGroupingFields(schema.grouping?.fields)) {
-      const objectDefField = objectFields?.[gf.field];
-      const colOverride = cols.find(
-        (c): c is ListColumn => typeof c === 'object' && c !== null && c.field === gf.field,
-      );
-      const { rendererType } = resolveGridCellRendering({
-        type: colOverride?.type || objectDefField?.type,
-        format: objectDefField?.format,
-        widget: objectDefField?.widget,
-      });
-      if (rendererType === 'date' || rendererType === 'datetime') {
-        faces.set(gf.field, { rendererType, format: objectDefField?.format || undefined });
-      }
+      const face = gridTemporalFaceOf(gf.field, cols, objectFields);
+      if (face) faces.set(gf.field, face);
     }
     return faces;
   }, [schema.grouping, schema.columns, objectFields]);
@@ -282,17 +259,33 @@ export function useObjectGridGrouping({
   // amounts in different currencies, so it is dropped before either the
   // server or the client bucketing computes it. Keyed on what it reads, so a
   // host that rebuilds `schema` every render does not re-key the header query.
+  // [objectstack#32119] Per aggregated field whose cell paints a date-family
+  // face, that face, resolved as the group headings' faces are: a `min` /
+  // `max` over it is a time, drawn as the cell draws it, and a `sum` / `avg`
+  // over it is no figure at all, so it is dropped here with the money
+  // aggregates, before either path computes it or the server is asked.
   const groupAggregationKey = JSON.stringify({
     aggregations: schema.aggregations ?? null,
     grouping: usableGroupingFields(schema.grouping?.fields).map((gf) => gf.field),
+    temporal: temporalFacesOfAggregations(schema.aggregations, normalizeColumns(schema.columns) ?? [], objectFields),
   });
   const groupAggregations = React.useMemo(() => {
-    const { aggregations, grouping } = JSON.parse(groupAggregationKey) as {
+    const { aggregations, grouping, temporal } = JSON.parse(groupAggregationKey) as {
       aggregations: ObjectGridSchema['aggregations'] | null;
       grouping: string[];
+      temporal: Array<[string, TemporalCellFace]>;
     };
-    return honestGroupAggregations(aggregations ?? undefined, objectFields, grouping);
+    const temporalFields = new Set(temporal.map(([field]) => field));
+    const honest = honestGroupAggregations(aggregations ?? undefined, objectFields, grouping);
+    if (!honest || temporalFields.size === 0) return honest;
+    const kept = honest.filter(({ field, type }) => !(temporalFields.has(field) && (type === 'sum' || type === 'avg')));
+    return kept.length === honest.length ? honest : kept;
   }, [groupAggregationKey, objectFields]);
+  const displayLocale = useDisplayLocale();
+  const temporalAggregates = React.useMemo((): TemporalAggregateFaces | undefined => {
+    const { temporal } = JSON.parse(groupAggregationKey) as { temporal: Array<[string, TemporalCellFace]> };
+    return temporal.length > 0 ? { faces: new Map(temporal), locale: displayLocale } : undefined;
+  }, [groupAggregationKey, displayLocale]);
   const groupHeaders = useServerGroupHeaders({
     enabled: serverGroupedFetch && !objectTypesPending && groupRowQuery !== null && !groupWhere.error,
     dataSource,
@@ -347,6 +340,7 @@ export function useObjectGridGrouping({
     groupValueFormatter,
     serverGroupSource,
     groupOptionRanks,
+    temporalAggregates,
   );
 
   // Reset grouped pagination to page 1 whenever the grouping config, page size
