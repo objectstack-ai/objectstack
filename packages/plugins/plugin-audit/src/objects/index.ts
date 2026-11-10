@@ -21,3 +21,8 @@ export { SysAuditLog } from './sys-audit-log.object.js';
 export { SysActivity } from './sys-activity.object.js';
 export { SysComment } from './sys-comment.object.js';
 export { SysCommentReaction } from './sys-comment-reaction.object.js';
+// [ADR-0154] The tamper evidence of the ledger: signed checkpoints, signed
+// amendments, and the public halves of the keys that sign them.
+export { SysAuditCheckpoint } from './sys-audit-checkpoint.object.js';
+export { SysAuditAmendment } from './sys-audit-amendment.object.js';
+export { SysAuditSigningKey } from './sys-audit-signing-key.object.js';

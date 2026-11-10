@@ -129,6 +129,11 @@ export class ProtocolClassHeadFacet {
                     success: r?.success !== false,
                     removed: typeof r?.removed === 'number' ? r.removed : 0,
                     ...(r?.error ? { error: r.error } : {}),
+                    // [ADR-0150 D8] The grants the cleanup revoked and reported,
+                    // relayed onto the uninstall's receipt; absent when none.
+                    ...(Array.isArray(r?.reportedGrants) && r.reportedGrants.length > 0
+                        ? { reportedGrants: r.reportedGrants }
+                        : {}),
                 });
             } catch (e: any) {
                 // [#8136] A cleanup is arbitrary plugin code that goes straight
@@ -441,6 +446,21 @@ export class ProtocolClassHeadFacet {
      * scopes on its own — so a peer applies exactly what the writer's own
      * kernel shape would have applied locally.
      *
+     * [#32145] …and prepares the object's storage the way the writer's save
+     * did, through the SAME entry point ({@link ensureObjectStorage}, the
+     * driver's schema sync for an `object` or the target of an
+     * `object_extension`; every other type returns at its guard). The table
+     * already exists in the shared database, but a driver builds its own
+     * per-object registries there and nowhere else — the autonumber counter,
+     * the organization column it stamps on insert and scopes reads on, the
+     * table it knows it manages — so a peer that only registered the object
+     * served it with no number and no organization stamp until a restart's
+     * boot sync. Registry first, storage second, as on the writer; the
+     * writer emits only after its own sync, so the peer's sync finds the
+     * table and its columns in place. A refused sync is reported at `error`
+     * by that entry point and never fails the convergence: the registry is
+     * already healed, as on the writer, whose save answered success.
+     *
      * After convergence the event replays into this replica's LOCAL mutation
      * listeners (never re-published — see
      * {@link notifyMutationListenersLocal}), so boot-cached consumers wired
@@ -463,7 +483,7 @@ export class ProtocolClassHeadFacet {
      * listener that re-reads through `getMetaItems` sees a cold cache too, not
      * only a healed registry.
      */
-    static async applyRemoteMetadataMutation(host: Pick<ProtocolHost, 'applyRegistryWriteThrough' | 'engine' | 'getOverlayRepo' | 'notifyMutationListenersLocal' | 'resolveOverlayPackageBinding' | 'restoreArtifactRegistryView'>, evt: MetadataMutationEvent): Promise<void> {
+    static async applyRemoteMetadataMutation(host: Pick<ProtocolHost, 'applyRegistryWriteThrough' | 'engine' | 'ensureObjectStorage' | 'getOverlayRepo' | 'notifyMutationListenersLocal' | 'resolveOverlayPackageBinding' | 'restoreArtifactRegistryView'>, evt: MetadataMutationEvent): Promise<void> {
         const type = canonicalMetaType(evt.type);
         // [ADR-0131 D6] The registry reflects the ENVIRONMENT row, whatever
         // organization the event names: no write lands organization-scoped
@@ -495,6 +515,9 @@ export class ProtocolClassHeadFacet {
                 packageId,
                 organizationId: null,
             });
+            // [#32145] The writer's save ran this right after its own
+            // write-through; see the docblock.
+            await host.ensureObjectStorage(type, evt.name);
         } else {
             await host.restoreArtifactRegistryView(type, evt.name, null, evt.member);
         }
