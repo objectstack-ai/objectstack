@@ -29,7 +29,7 @@
  */
 
 import { sendError } from '@objectstack/types';
-import { handleMetaReadRouteError } from './package-scoped-refusal-answer.js';
+import { handleRouteError } from './error-response.js';
 import type { MetaRouteScope } from './meta-collection-routes.js';
 import type { MetaItemReadHandler } from './meta-item-read-routes.js';
 import type { RestServer } from './rest-server.js';
@@ -107,7 +107,7 @@ export function registerMetaQualifiedItemRoute(
                 // [#32201] A shareable namespace both owners hold, or `_env`
                 // for a name the environment does not hold: the refusal with
                 // its holders as `details.candidates`.
-                handleMetaReadRouteError(res, error);
+                handleRouteError(res, error, undefined, { packageScopedCandidates: true });
             }
         },
         metadata: {

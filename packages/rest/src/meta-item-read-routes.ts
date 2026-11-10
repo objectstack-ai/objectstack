@@ -130,7 +130,6 @@ import type { MetaRouteScope, TransportScopedMetaRequest } from './meta-collecti
 import * as metaReadGate from './meta-item-read-gate.js';
 import { metaMemberSelector, type MetaReadGatePolicy } from './meta-item-read-gate.js';
 import { measureMetaRead } from './meta-read-timing.js';
-import { handleMetaReadRouteError } from './package-scoped-refusal-answer.js';
 import { sendMetaRepresentation } from './meta-representation-validator.js';
 import { refuseUnknownQueryParams } from './query-allowlist.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
@@ -1189,8 +1188,8 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                     // [#32201, ADR-0150 D5] The package-scoped refusal (the bare
                     // name two packages hold, `?package=` of a package that
                     // holds none of it) carries its holders as
-                    // `details.candidates`; anything else is `handleRouteError`'s.
-                    handleMetaReadRouteError(res, error);
+                    // `details.candidates`; anything else answers as before.
+                    handleRouteError(res, error, undefined, { packageScopedCandidates: true });
                 }
             },
             metadata: {
