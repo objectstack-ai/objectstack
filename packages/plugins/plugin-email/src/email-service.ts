@@ -395,7 +395,7 @@ export function normalizeMessage(
   assertTextField(input.subject, 'subject');
   assertTextField(input.text, 'text');
   assertTextField(input.html, 'html');
-  const subject = (input.subject ?? '').trim();
+  const subject = String(input.subject ?? '').trim();
   if (!subject) throw new Error('VALIDATION_FAILED: subject is required');
   if (!input.text && !input.html) {
     throw new Error('VALIDATION_FAILED: at least one of text or html is required');
