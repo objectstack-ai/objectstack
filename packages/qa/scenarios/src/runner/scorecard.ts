@@ -44,7 +44,7 @@
  *     half with nothing measured is `not-run` in the record, never `fail`.
  */
 
-import type { CardRun, ModeRun, RunHalf, BuildHalf, TurnSummary } from './orchestrate.js';
+import type { CardRun, ModeRun, RunHalf, BuildHalf, OperationResult, TurnSummary } from './orchestrate.js';
 import type { DriverInfo } from './driver.js';
 import { packagesLine, type PackageSource } from './packages.js';
 import { cycleText } from './seed.js';
@@ -66,7 +66,12 @@ export interface HalfScores {
   /** Rows the app took of the rows the runner sent. */
   seed?: { inserted: number; total: number; refused: number };
   ask?: Tally & { leaks: number; notMeasured: number };
-  operations?: Tally & { notMeasured: number };
+  /**
+   * `platformNotMeasured`: measured operations whose platform half met the
+   * build's own lock — graded on the agent half alone, the reason in the
+   * mode's findings ({@link platformNotMeasuredFindings}). Absent ⇒ none.
+   */
+  operations?: Tally & { notMeasured: number; platformNotMeasured?: number };
   /** The models the half's question and operation turns were served ({@link modelTally}). */
   models?: ModelTally;
 }
@@ -157,7 +162,26 @@ export function askTally(r: RunHalf | undefined): HalfScores['ask'] | undefined 
 export function opsTally(r: RunHalf | undefined): HalfScores['operations'] | undefined {
   if (!r) return undefined;
   const measured = r.operations.filter((o) => !o.notMeasured);
-  return { passed: measured.filter((o) => o.grade?.pass).length, total: measured.length, notMeasured: r.operations.length - measured.length };
+  const platformNotMeasured = measured.filter((o) => platformNotMeasuredReason(o) !== undefined).length;
+  return {
+    passed: measured.filter((o) => o.grade?.pass).length,
+    total: measured.length,
+    notMeasured: r.operations.length - measured.length,
+    ...(platformNotMeasured ? { platformNotMeasured } : {}),
+  };
+}
+
+/** Why an operation's platform half was not measured (its `platform:` checks' shared reason), or `undefined`. */
+function platformNotMeasuredReason(o: OperationResult): string | undefined {
+  return o.grade?.checks.find((c) => c.check.startsWith('platform:') && c.notMeasured !== undefined)?.notMeasured;
+}
+
+/** One finding per operation whose platform half was not measured, naming the operation, its persona and the reason. */
+export function platformNotMeasuredFindings(r: RunHalf | undefined, half: string): string[] {
+  return (r?.operations ?? []).flatMap((o) => {
+    const why = o.notMeasured ? undefined : platformNotMeasuredReason(o);
+    return why === undefined ? [] : [`${half}: operation ${o.operation} (as ${o.persona}): platform half not measured, ${why}`];
+  });
 }
 
 export function modelTally(r: RunHalf | undefined): ModelTally | undefined {
@@ -237,8 +261,10 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
       ...m.findings,
       ...bareNameFindings(m.build, 'build'),
       ...requiredCycleFindings(m.build, 'build'),
+      ...platformNotMeasuredFindings(m.run, 'run'),
       ...bareNameFindings(m.iterate?.build, 'iterate build'),
       ...requiredCycleFindings(m.iterate?.build, 'iterate build'),
+      ...platformNotMeasuredFindings(m.iterate?.run, 'iterate run'),
     ],
   };
   if (m.skipped) out.skipped = m.skipped;
@@ -270,7 +296,8 @@ export function cardScorecard(run: CardRun, packages?: PackageSource): CardScore
   };
 }
 
-const cell = (t: (Tally & { notMeasured?: number }) | undefined) => (t ? `${t.passed}/${t.total}${t.notMeasured ? ` · ${t.notMeasured} not measured` : ''}` : '—');
+const cell = (t: (Tally & { notMeasured?: number; platformNotMeasured?: number }) | undefined) =>
+  t ? `${t.passed}/${t.total}${t.notMeasured ? ` · ${t.notMeasured} not measured` : ''}${t.platformNotMeasured ? ` · ${t.platformNotMeasured} platform half not measured` : ''}` : '—';
 const seedCell = (s: HalfScores['seed']) => (s ? `${s.inserted}/${s.total}${s.refused ? ` ⚠ seed: ${s.refused} refused` : ''}` : '—');
 
 /** `42s`, `15m 00s`. */

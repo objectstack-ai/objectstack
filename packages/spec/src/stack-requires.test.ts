@@ -47,6 +47,45 @@ describe('defineStack requires validation', () => {
   });
 });
 
+// The cloud runtime loader's per-environment tiers are `requires` tokens like
+// `governance`: `audit-compliance` and `access-policy-console` are accepted at
+// authoring, while their near-miss spellings are still refused as unknown —
+// the ADR-0112 envelope, one issue per distinct token.
+
+describe('defineStack requires — the cloud-loader tokens audit-compliance and access-policy-console', () => {
+  type Envelope = Error & { code?: string; status?: number; issues?: readonly string[] };
+  const refusalOf = (requires: string[]): Envelope | null => {
+    try {
+      defineStack({ requires });
+      return null;
+    } catch (e) {
+      return e as Envelope;
+    }
+  };
+
+  it.each([['audit-compliance'], ['access-policy-console']])('accepts %s and passes it through untouched', (token) => {
+    expect(refusalOf([token])).toBeNull();
+    expect(defineStack({ requires: [token] }).requires).toEqual([token]);
+  });
+
+  it('accepts both beside the other cloud-loader tokens', () => {
+    const requires = ['ai-seat', 'governance', 'audit-compliance', 'access-policy-console'];
+    expect(defineStack({ requires }).requires).toEqual(requires);
+  });
+
+  it.each([['audit_compliance'], ['auditCompliance'], ['access-policy'], ['access_policy_console']])(
+    'still refuses the near miss %s as an unknown capability',
+    (token) => {
+      const refused = refusalOf([token]);
+      expect(refused).toBeInstanceOf(Error);
+      expect(refused?.code).toBe('STACK_CAPABILITY_UNKNOWN');
+      expect(refused?.status).toBe(422);
+      expect(refused?.issues).toHaveLength(1);
+      expect(refused?.issues?.[0]).toContain(`requires: '${token}' is not a known platform capability`);
+    },
+  );
+});
+
 // #14153 — `defineStack` refuses an auto-launched flow (record_change /
 // schedule / time_relative / api) whose stack does not declare
 // `requires: ['triggers']`. Since #20332 that is one arm of two: the triggers

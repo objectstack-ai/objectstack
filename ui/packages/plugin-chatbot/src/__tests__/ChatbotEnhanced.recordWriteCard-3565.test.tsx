@@ -365,3 +365,150 @@ describe('ChatbotEnhanced — a held decision reads as waiting for approval', ()
     expect(screen.queryByText('Approve and execute')).not.toBeInTheDocument();
   });
 });
+
+/*
+ * objectstack#31025 — 「删除软件包」: the package-removal card lists each object
+ * with its row count, the other items by type and the total, and says whether
+ * the tables are dropped for good (not the recycle bin) or kept. A draft object
+ * and an uncounted one never read as 0. The generic Approve / Deny strip stays
+ * the decision, and an approved removal says removed or partial.
+ */
+describe('ChatbotEnhanced — the package-removal card (objectstack#31025)', () => {
+  const plan = (over: Record<string, unknown> = {}) => ({
+    success: true,
+    status: 'pending_approval',
+    pendingActionId: 'pa_31',
+    packageRemoval: {
+      packageId: 'app_helpdesk',
+      label: 'Helpdesk',
+      objects: [
+        { name: 'hd_ticket', label: 'Ticket', rows: 120 },
+        { name: 'hd_sla', label: 'SLA' },
+        { name: 'hd_note', label: 'Note', draft: true },
+      ],
+      totalRows: 120,
+      uncountedObjects: 1,
+      items: { view: 3, app: 1 },
+      data: 'dropped',
+      recycleBin: false,
+      ...over,
+    },
+    message: 'Queued as pa_31.',
+  });
+
+  const REMOVAL_LABELS = {
+    packageRemovalTitleLabel: (label: string) => `删除软件包 ${label}`,
+    packageRemovalRowsLabel: (count: number) => `${count} 条记录`,
+    packageRemovalDraftLabel: '草稿，尚无数据表',
+    packageRemovalRowsUnknownLabel: '无法获取记录数',
+    packageRemovalItemTypeLabel: (type: string) => ({ view: '视图', app: '应用' })[type] ?? type,
+    packageRemovalTotalLabel: (count: number) => `共 ${count} 条记录`,
+    packageRemovalUncountedLabel: (count: number) => `总数未计入 ${count} 个对象`,
+    packageRemovalPermanentLabel: '这些表会被永久删除，不会进入回收站。',
+    packageRemovalKeptLabel: '数据库表及其中的记录均保留。',
+    packageRemovalRemovedLabel: '软件包已删除。',
+    packageRemovalPartialLabel: (failed: number) => `部分删除：${failed} 项未能移除。`,
+  };
+
+  function renderCard(result: unknown, extra: Record<string, unknown> = {}) {
+    const onToolApprove = vi.fn();
+    render(
+      <ChatbotEnhanced
+        messages={transcript(result, 'delete_package')}
+        onSendMessage={vi.fn()}
+        onToolApprove={onToolApprove}
+        {...LABELS}
+        {...REMOVAL_LABELS}
+        {...extra}
+      />,
+    );
+    return { onToolApprove };
+  }
+
+  it('lists each object with its row count, the other items by type and the total, and keeps the generic decision', () => {
+    const { onToolApprove } = renderCard(plan());
+    expect(screen.getByTestId('package-removal')).toHaveTextContent('删除软件包 Helpdesk');
+    expect(screen.getByTestId('package-removal-object-hd_ticket')).toHaveTextContent('Ticket');
+    expect(screen.getByTestId('package-removal-object-hd_ticket')).toHaveTextContent('120 条记录');
+    expect(screen.getByTestId('package-removal-item-view')).toHaveTextContent('视图');
+    expect(screen.getByTestId('package-removal-item-view')).toHaveTextContent('3');
+    expect(screen.getByTestId('package-removal-item-app')).toHaveTextContent('应用');
+    expect(screen.getByTestId('package-removal-total')).toHaveTextContent('共 120 条记录');
+    fireEvent.click(screen.getByText('Approve and execute'));
+    expect(onToolApprove).toHaveBeenCalledWith('c1', true);
+    expect(screen.getByText('Reject')).toBeInTheDocument();
+    expect(document.body.textContent ?? '').not.toContain('pending_approval');
+  });
+
+  it('a draft object says it has no table and an uncounted one says its rows could not be counted: neither draws a number', () => {
+    renderCard(plan());
+    const draft = screen.getByTestId('package-removal-object-hd_note');
+    expect(draft).toHaveTextContent('草稿，尚无数据表');
+    expect(draft.textContent ?? '').not.toMatch(/\d/);
+    const uncounted = screen.getByTestId('package-removal-object-hd_sla');
+    expect(uncounted).toHaveTextContent('无法获取记录数');
+    expect(uncounted.textContent ?? '').not.toMatch(/\d/);
+  });
+
+  it('says the tables are dropped permanently only when they are dropped', () => {
+    renderCard(plan());
+    expect(screen.getByTestId('package-removal')).toHaveAttribute('data-data', 'dropped');
+    expect(screen.getByTestId('package-removal-permanent')).toHaveTextContent('这些表会被永久删除，不会进入回收站。');
+    expect(screen.queryByTestId('package-removal-kept')).not.toBeInTheDocument();
+  });
+
+  it('CONTROL: kept data draws the kept line and no permanent line', () => {
+    renderCard(plan({ data: 'kept' }));
+    expect(screen.getByTestId('package-removal')).toHaveAttribute('data-data', 'kept');
+    expect(screen.getByTestId('package-removal-kept')).toHaveTextContent('数据库表及其中的记录均保留。');
+    expect(screen.queryByTestId('package-removal-permanent')).not.toBeInTheDocument();
+  });
+
+  it('says the total is short only when some objects could not be counted', () => {
+    renderCard(plan());
+    expect(screen.getByTestId('package-removal-uncounted')).toHaveTextContent('总数未计入 1 个对象');
+  });
+
+  it('CONTROL: every object counted draws no short-total line', () => {
+    renderCard(plan({ objects: [{ name: 'hd_ticket', label: 'Ticket', rows: 120 }], uncountedObjects: 0 }));
+    expect(screen.queryByTestId('package-removal-uncounted')).not.toBeInTheDocument();
+  });
+
+  it('a refusal draws no card', () => {
+    renderCard({ success: false, code: 'PACKAGE_SHIPPED_BY_CODE', error: 'This package ships with the code.' });
+    expect(screen.queryByTestId('package-removal')).not.toBeInTheDocument();
+  });
+
+  it('after approval it says removed, or partial with how many items were left', () => {
+    renderCard(plan(), {
+      toolDecisions: {
+        c1: { state: 'success', decision: 'approved', result: { status: 'removed', packageId: 'app_helpdesk', removed: { object: 3 }, failed: [], data: 'dropped', message: 'Removed.' } },
+      } satisfies Record<string, ToolDecisionState>,
+    });
+    const outcome = screen.getByTestId('package-removal-outcome');
+    expect(outcome).toHaveAttribute('data-state', 'removed');
+    expect(outcome).toHaveTextContent('软件包已删除。');
+  });
+
+  it('a partial removal names the failed count', () => {
+    renderCard(plan(), {
+      toolDecisions: {
+        c1: {
+          state: 'success',
+          decision: 'approved',
+          result: { status: 'partial', packageId: 'app_helpdesk', removed: { object: 2 }, failed: [{ type: 'view', name: 'v1' }], data: 'dropped', message: 'Partly removed.' },
+        },
+      } satisfies Record<string, ToolDecisionState>,
+    });
+    const outcome = screen.getByTestId('package-removal-outcome');
+    expect(outcome).toHaveAttribute('data-state', 'partial');
+    expect(outcome).toHaveTextContent('部分删除：1 项未能移除。');
+  });
+
+  it('a rejection draws no outcome line', () => {
+    renderCard(plan(), {
+      toolDecisions: { c1: { state: 'success', decision: 'rejected', message: 'Rejected.' } } satisfies Record<string, ToolDecisionState>,
+    });
+    expect(screen.queryByTestId('package-removal-outcome')).not.toBeInTheDocument();
+  });
+});

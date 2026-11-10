@@ -620,8 +620,15 @@ export function AuthProvider({
       setError(null);
       try {
         const result = await client.signInWithPhonePassword(phoneNumber, password);
+        if (result.twoFactor) {
+          // Same answer as the email path: the code step follows (objectstack#32107).
+          setTwoFactorChallenge(result.twoFactor);
+          return { twoFactorRequired: true };
+        }
+        setTwoFactorChallenge(null);
         setUser(result.user);
         setSession(result.session);
+        return { twoFactorRequired: false };
       } catch (err) {
         const authError = err instanceof Error ? err : new Error(String(err));
         setError(authError);

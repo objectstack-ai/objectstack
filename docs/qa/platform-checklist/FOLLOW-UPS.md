@@ -939,3 +939,131 @@ the run's boot.
    /api/v1/packages/com.example.showcase`.
 6. **The pair's extension has no name in the list.** The All metadata `object_extension` list
    draws the pair's extension row with "—" in the name column. This is a display issue only.
+
+## 16. Scoped sweep 2026-11-10 — themes 1 and 3 since 18.3.0 (#32019, epic #32022 M1)
+
+**Not a full sweep.** One writer worked sequentially, with no hunter subagents. The scope is
+the epic's theme 1 (ADR-0150 package namespaces) and theme 3 (AI service accounts and
+identity), read from source at `60f8149e` against the 18.3.0 subject `83d7e4ae`. The pass
+enumerated the PRs of those two themes that landed since 18.3.0. It then ran three of the six
+SWEEP.md angles on what they touched:
+
+- angle 3: the route ledgers (`route-ledger.ts`, `auth-route-ledger.ts`);
+- angle 2: the spec and objectql constants that bound each refusal (the refused literals, the
+  one-holder, co-owner and read-by-package type lists), used as `variants`;
+- angle 5: ADR-0150 and ADR-0151 against what the runtime serves.
+
+Angles 1, 4 and 6 (console surfaces, built-in apps, the design system) were not run. The one
+browser clause is the SSO Providers record. So this section supports **no** claim about what
+else is missing. No live run was made: every clause is read from source, and each item's
+`automated.ref` names the pins that hold it today.
+
+- **25 new items**, all `since: "v18.4"` except the one `planned` item, whose `since` is
+  `null`: a planned item's `since` is a target release, and none is chosen.
+  - Theme 1, 17 items (16 active, 1 planned):
+    - `api-backend.meta-qualified-item-read`, `api-backend.actions-namespace-address` and
+      `api-backend.automation-namespace-address`;
+    - `ai.mcp-namespace-faces`;
+    - `platform-core.namespace-object-name-refusal`,
+      `platform-core.namespace-co-owner-name-refusal` and `platform-core.bare-name-one-holder-refusal`;
+    - `cli.address-grammar-reserved-names`;
+    - `access-security.permission-set-package-resolution`,
+      `access-security.permission-set-address-in-execution-context` and
+      `access-security.sharing-queue-assignment-package-resolution`;
+    - `automation.flow-reference-package-resolution`;
+    - `integration-system.job-package-key`;
+    - the upgrade pair `platform-core.activation-ledger-package-key-upgrade` and
+      `platform-core.stored-reference-package-backfill-upgrade`, with `cli.migrate-stored-references`;
+    - planned: `api-backend.client-sdk-namespace-address`.
+  - Theme 3, 8 items (all active):
+    - `identity-auth.ai-service-account-register-and-key` and `identity-auth.ai-service-account-lifecycle`;
+    - `access-security.ai-service-account-agent-ceiling`,
+      `access-security.agent-ceiling-set-assignment-refusal` and `access-security.credential-use-audit-row`;
+    - `identity-auth.scim-refused-audit-row`, `identity-auth.idp-group-permission-set-mapping` and
+      `identity-auth.sso-provider-groups-claim`.
+- **Re-read at the merged base `0f7389cc`.** main moved 31 commits before this landed.
+  Two surfaces first written here as `planned` landed in that time: the qualified
+  `/automation`, hook and connector doors (#32001, #32049), and the context's permission set
+  addresses (#32027). Both items are now active. They are new items, not promotions, because
+  neither reached main as `planned`. #32056 widened the MCP agent ceiling set rule (ADR-0090
+  D10) to four more doors. That rule is not the AI service account's ceiling (ADR-0151 D3), so
+  it has its own item, `access-security.agent-ceiling-set-assignment-refusal`.
+  `access-security.ai-service-account-agent-ceiling` now covers both of its own paths (a set
+  and a position, by insert and by update) and the point where the two rules meet. #31968
+  made `os validate` and `os build` refuse a namespace that spells an address literal. That
+  left `cli.address-grammar-reserved-names` with a fixture no build can produce, so that item
+  now drives the build refusal and hand-edits the artifact for its install leg.
+  `cli.migrate-stored-references` gains the report's new `literalNamespaces` section as a
+  variant. Those six items are read at `0f7389cc`; the rest at `60f8149e`.
+- **The upgrade path.** The epic asks for the upgrade from an 18.3.0 database's stored
+  references, not only fresh installs. The two upgrade items and the CLI item boot this tree
+  on an 18.3.0-shaped SQLite copy, built by one of two routes:
+  - a blank scaffold written by npm `@objectstack/cli@18.3.0`;
+  - or a copy of this tree's own database with the new columns set back to NULL.
+
+  Every dogfood pin named in their `automated.ref` boots a database this tree wrote. None
+  boots a file 18.3.0 wrote, so the first live run of route (a) is new evidence.
+- **Accuracy fixes, each a revision with its history row:**
+  - `platform-core.activation-ledger-row-contract` (rev 10) still said one row per
+    `(metadata_type, name)` over exactly two key parts. The key is now
+    `(metadata_type, package_id, name)`, plus the boot-built package-less partial index.
+  - `ai.skill-instructions-mcp-prompts` (rev 5): a package skill is now listed under its face
+    `NS-NAME`.
+- **`coverage.json`**: the new items are mapped to the kinds they drive. The `queue` and
+  `assignment_rule` waivers were re-audited. They stand, because the new item declares both
+  only to drive the activation door's 409, and the entries now say so.
+
+### 16a. Declared but not landed — written as `planned`, already carded
+
+- The client SDK takes no namespace: `actions.invoke` takes `objectName, actionName`, and
+  `meta.getItem` takes `{ packageId }`. Tracked by #31695 (open).
+- The same-object, same-name action pair's 409 on the bare door is not landed (#31697). The
+  actions item says not to score its absence.
+- Landed before merge, so no longer listed here: the qualified `/automation`, hook and
+  connector doors (#32001, #32049; #31691 is closed) and the context's permission set
+  addresses (#32027, part of #31971). Both are active items now.
+
+### 16b. Measured from source — notes for owners, no card filed
+
+- **The two transports spell the qualified read's 404 differently.** The REST route manager
+  answers `404 ENDPOINT_NOT_FOUND` "Not found" for a middle segment that is no namespace, and
+  a dispatcher host answers `404 ROUTE_NOT_FOUND` (the `ROUTE_LEDGER` note). Each keeps its own
+  unmatched answer, so this is by design. The item accepts either.
+- **`ObjectStoreMetadataActivationStore.setActive` finds its row by `(metadata_type, name)`.**
+  That is narrower than the three-column key. It is consistent today, because no door writes
+  two rows for one name: the catalog door refuses a name two packages hold with 409, and the
+  flow, action and webhook names have one holder. A future writer for an uncovered type that
+  lets two packages each switch one name would need the package in that lookup.
+  `platform-core.activation-ledger-row-contract` source[2] now says this.
+- **`create-key` past the expiry ceiling** answers `400 VALIDATION_FAILED` at `expires_at`,
+  with `POST /keys`'s message, rather than `API_KEY_EXPIRY_TOO_LONG`. The route-ledger row
+  records this as the accepted shape. No action.
+
+- **`assemble-execution-context.test.ts` still calls the addresses "decided but not yet
+  filled".** #32027 fills them. The case passes only because its authz fixture carries no
+  addresses, so it cannot tell the OAuth agent arm (no addresses, by design) from the human
+  arm. A case whose authz carries addresses would pin the agent arm. Until then,
+  `access-security.permission-set-address-in-execution-context` scores that clause from the
+  source and says so.
+- **The MCP ceiling set's refusal sentence says "a person" to an AI service account too.** The
+  rule judges every holder, so granting `mcp_agent_data_read` to an account is refused, which
+  is right, with "…not a permission set for a person…". The wording reads oddly for an agent
+  holder. No action proposed.
+
+### 16c. Fixtures worth adding
+
+- **An 18.3.0 database recipe.** QA record #32093 proved route (a) on a real 18.3.0 database
+  made with npm `create-objectstack@18.3.0`. Its environment fingerprint should become an
+  area-level recipe in `platform-core`, with that provenance. The three upgrade items would
+  then reference it instead of carrying the prose. The same run's item-text findings (PR
+  comment 6765257068) are applied to those three items: the plan order, the index-listing
+  oracle, the rows 18.3.0 cannot write, the fresh-install comparison, the scaffold's
+  `approvals`, the telemetry sibling and `--dev`, and the TTY-only prompt. Its product defects
+  are carded separately: #32094, #32095, #32096.
+- **An OIDC identity provider** (§3, still open). It blocks the SSO leg of
+  `identity-auth.idp-group-permission-set-mapping`. It also gates provider registration for
+  `identity-auth.sso-provider-groups-claim` if registration needs a reachable issuer.
+
+### 16d. Security note
+
+No security finding was made, and none is withheld.
