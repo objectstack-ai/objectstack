@@ -40,6 +40,16 @@
  * makes it unique for every covered type. On a kernel that never seals (no
  * boot-phase hooks) it does not run, because the answer could still change.
  *
+ * On a boot that repairs nothing behind the operator's back it writes nothing
+ * either (#32096): the CLI's one-shot boot (`bootSchemaStack`, under `os
+ * migrate plan` / `apply`, `os migrate stored-references` and every other
+ * command it boots) declares itself with the engine plugin's
+ * `runPlatformMigrations: false`, the signal the platform's boot repairs
+ * already key on (#9380). The backfill is the served boot's upgrade write, so
+ * there it runs as a dry run: it names the rows the next served boot binds, in
+ * one line, and is otherwise silent. It never reaches the declaration boot's
+ * write guard, whose refusal names a plugin bug that does not exist here.
+ *
  * Re-runnable by construction: it reads only rows with no package and writes
  * only `package_id`, so the next boot finds nothing new to bind. It moves no
  * reader or writer onto the package: every consumer still keys a row by type
@@ -107,6 +117,53 @@ const describeDuplicateRow = (row: ActivationLedgerDuplicateRow): string =>
   `row ${row.id} (${row.packageId === undefined ? 'no package' : `package ${row.packageId}`}, ` +
   `${row.active ? 'active' : 'switched off'})`;
 
+/** How the boot that runs {@link backfillActivationLedgerAtBoot} declares itself. */
+export interface BackfillAtBootOptions {
+  /**
+   * The engine plugin's own `runPlatformMigrations` (#9380), passed through.
+   * `false` is the CLI's one-shot boot, which repairs nothing behind the
+   * operator's back: the backfill only says what the next served boot binds
+   * (module doc, #32096). Omitted or `true`: the served boot, which writes.
+   */
+  readonly runPlatformMigrations?: boolean;
+}
+
+/**
+ * The one-shot boot's run (module doc, #32096): the backfill's own dry run,
+ * one line naming the rows the next served boot binds, nothing else. A ledger
+ * this boot cannot read (a database the plan opened empty, a table still
+ * pending `create_table`) is not an upgrade that failed, so it goes to debug.
+ */
+async function previewOnOneShotBoot(
+  engine: Partial<Pick<MetadataActivationStoreEngine, 'find' | 'update'>>,
+  registry: BackfillRegistry,
+  logger: BackfillLogger,
+): Promise<ActivationLedgerBackfillReport | undefined> {
+  let report: ActivationLedgerBackfillReport;
+  try {
+    report = await backfillActivationLedgerPackages(
+      engine as Pick<MetadataActivationStoreEngine, 'find' | 'update'>,
+      activationLedgerHolderOf(registry),
+      { dryRun: true },
+    );
+  } catch (e: unknown) {
+    logger.debug?.(
+      `[ObjectQLPlugin] the ${METADATA_ACTIVATION_TABLE} package backfill preview could not read the ledger on ` +
+        'this one-shot boot; the served boot runs the backfill itself.',
+      { error: e instanceof Error ? e.message : String(e) },
+    );
+    return undefined;
+  }
+  if (report.bound.length > 0) {
+    logger.info(
+      `[ObjectQLPlugin] activation ledger: ${report.bound.length} row(s) name no package, and the next served boot ` +
+        'gives each the package that holds its item (ADR-0150 D8); this one-shot boot writes none — ' +
+        `${report.bound.map((r) => `${describeRow(r)} → ${r.packageId}`).join(', ')}.`,
+    );
+  }
+  return report;
+}
+
 /**
  * Run the backfill once for this boot and say what it did (module doc).
  *
@@ -122,6 +179,7 @@ export async function backfillActivationLedgerAtBoot(
   engine: Partial<Pick<MetadataActivationStoreEngine, 'find' | 'update'>> | undefined,
   registry: BackfillRegistry | undefined,
   logger: BackfillLogger,
+  options: BackfillAtBootOptions = {},
 ): Promise<ActivationLedgerBackfillReport | undefined> {
   if (!engine || typeof engine.find !== 'function' || typeof engine.update !== 'function' || !registry) return undefined;
   // Unsealed, a package of this boot could still register and change who
@@ -135,6 +193,8 @@ export async function backfillActivationLedgerAtBoot(
   }
   // A composition without the ledger object has no rows to bind.
   if (!registered) return undefined;
+
+  if (options.runPlatformMigrations === false) return previewOnOneShotBoot(engine, registry, logger);
 
   let report: ActivationLedgerBackfillReport;
   try {

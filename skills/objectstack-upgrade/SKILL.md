@@ -270,7 +270,7 @@ TypeScript is what breaks — or worse, keeps compiling while reading `undefined
 fixtures, and the project's own AI conventions file. Nothing fails, and the next
 agent to read the repo re-authors the retired shape from it.
 
-→ Moved verbatim to [references/examples-upgrade.md](./references/examples-upgrade.md) § 2.3 A worked R1 — the retired field-mapping `transform`.
+**[2.3 A worked R1 — the retired field-mapping `transform`](./references/examples-upgrade.md#23-a-worked-r1--the-retired-field-mapping-transform)**
 
 <a id="decide-alone-or-ask"></a>
 
@@ -410,7 +410,7 @@ that output as the control.
 > from that `--from`) — or it holds only the next major's step. `todos` is
 > semantic residue, Layer 2's business, not a failure.
 
-→ Moved verbatim to [references/examples-upgrade.md](./references/examples-upgrade.md) § 3.4 The report — the human half.
+**[3.4 The report — the human half](./references/examples-upgrade.md#34-the-report--the-human-half)**
 
 <a id="reverse-check"></a>
 
@@ -454,9 +454,7 @@ recognises it and answers `0`. Nothing gates on it having run.
 
 ---
 
-→ Moved verbatim to [references/examples-upgrade.md](./references/examples-upgrade.md) § The v17-canonical shapes, compiled.
-
----
+**[The v17-canonical shapes, compiled](./references/examples-upgrade.md#the-v17-canonical-shapes-compiled)**
 
 ## Failure modes
 
