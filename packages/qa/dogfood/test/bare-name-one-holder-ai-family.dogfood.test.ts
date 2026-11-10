@@ -378,6 +378,12 @@ describe('agent and skill names held per namespace, a tool name per deployment, 
  * survivor, and `GET /meta/TYPE/NAME/layers?package=<the other>` served the
  * survivor's body as both the code and the effective layer, under the
  * survivor's `packageId`.
+ *
+ * The one narrowing the slots bring is a read of the metadata service naming
+ * a package that holds no slot of the name: it was answered the stored item
+ * (the one holder's, or the survivor), and is now answered nothing. The HTTP
+ * read naming such a package was already refused `409` (ADR-0150 D5) before
+ * the service was asked, and still is.
  */
 describe('the artifact door keeps each namespace\'s agent and skill in the metadata service, and the layered read serves each package its own (#32151)', () => {
   const ALPHA = 'com.qa.bare.alpha';
@@ -395,7 +401,11 @@ describe('the artifact door keeps each namespace\'s agent and skill in the metad
   let stack: VerifyStack;
   let admin: string;
   let dir: string;
-  let metadata: { get(type: string, name: string, packageId?: string): Promise<any>; list(type: string): Promise<any[]> };
+  let metadata: {
+    get(type: string, name: string, packageId?: string): Promise<any>;
+    getDiagnosed(type: string, name: string, packageId?: string): Promise<{ data: unknown; degraded: boolean; errors: string[] }>;
+    list(type: string): Promise<any[]>;
+  };
 
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), 'dogfood-slotted-store-ai-'));
@@ -447,14 +457,33 @@ describe('the artifact door keeps each namespace\'s agent and skill in the metad
     const name = type === 'agent' ? AGENT : SKILL;
     for (const path of [`/meta/${type}/${name}`, `/meta/${type}/${name}/layers`]) {
       const r = await stack.apiAs(admin, 'GET', path);
-      expect(r.status, path).toBe(409);
       const text = await r.text();
+      const body = JSON.parse(text);
+      expect([r.status, codeOf(body)], path).toEqual([409, 'RESOURCE_CONFLICT']);
       for (const holder of [ALPHA, BETA]) expect(text, path).toContain(holder);
     }
     for (const p of ['alpha', 'beta'] as const) {
       const r = await stack.apiAs(admin, 'GET', `/meta/${type}/${name}?package=com.qa.bare.${p}`);
       const it = ((await r.json()) as any)?.item;
       expect([r.status, it?.label, it?._packageId]).toEqual([200, `${p} ${type}`, `com.qa.bare.${p}`]);
+    }
+  });
+
+  it.each(['agent', 'skill'] as const)('%s: a read of the metadata service naming a package that holds no slot of the name answers nothing (BASE: the one holder\'s item, or the survivor of two)', async (type) => {
+    const solo = type === 'agent' ? SOLO_AGENT : SOLO_SKILL;
+    expect(await metadata.get(type, solo, BETA), 'one holder').toBeUndefined();
+    expect(await metadata.getDiagnosed(type, solo, BETA)).toEqual({ data: undefined, degraded: false, errors: [] });
+    expect(await metadata.get(type, type === 'agent' ? AGENT : SKILL, 'com.qa.bare.gamma'), 'two holders').toBeUndefined();
+  });
+
+  it.each(['agent', 'skill'] as const)('CONTROL — %s: `/layers?package=` a package that holds no slot is refused 409 naming the holder (D5), for one holder and for two, as before', async (type) => {
+    for (const [name, pkg, holders] of [
+      [type === 'agent' ? SOLO_AGENT : SOLO_SKILL, BETA, [ALPHA]],
+      [type === 'agent' ? AGENT : SKILL, 'com.qa.bare.gamma', [ALPHA, BETA]],
+    ] as const) {
+      const read = await layers(type, name, pkg);
+      expect([read.status, codeOf(read.body)], JSON.stringify(read.body).slice(0, 300)).toEqual([409, 'RESOURCE_CONFLICT']);
+      for (const holder of holders) expect(JSON.stringify(read.body), name).toContain(holder);
     }
   });
 

@@ -491,7 +491,40 @@ describe('the in-memory store keeps one slot per (package, name) for every names
     }
   });
 
-  it.each(NAMESPACE_SCOPED)('%s: both items are enumerated under the one name; removing either package leaves the other\'s item (BASE: removing the later one left nothing)', async (type) => {
+  it.each(NAMESPACE_SCOPED)('%s: a read naming a package that holds no slot of a one-holder name answers nothing, both faces alike, and no loader is asked (BASE: the one holder\'s item)', async (type) => {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    const name = `shared_${type}`;
+    await manager.register(type, name, shipped(type, A, 'alpha'), { notify: false });
+    expect(await manager.get(type, name, B), 'never another package\'s item').toBeUndefined();
+    expect(await manager.getDiagnosed(type, name, B)).toEqual({ data: undefined, degraded: false, errors: [] });
+    expect(((await manager.get(type, name)) as any)?.label, 'the bare read still serves the one holder').toBe(`alpha ${type}`);
+  });
+
+  /**
+   * [ADR-0150 D4] A package-less row bearing a package-held name is that
+   * holder's customization, never a second item. With two holders there is no
+   * one holder for it to customize: the write lands in the name's bare slot,
+   * `list` enumerates it beside the two package items, and no by-name read
+   * answers it — a read naming a package reads that package's slot, and the
+   * read naming none is refused naming the two package holders only.
+   */
+  it.each(NAMESPACE_SCOPED)('%s: a package-less write under a name two packages hold is stored in the bare slot and listed, and no by-name read answers it', async (type) => {
+    const manager = await twoHolders(type);
+    const name = `shared_${type}`;
+    await manager.register(type, name, { name, label: `env ${type}`, instructions: 'env instructions' }, { notify: false });
+    expect(((await manager.list(type)) as any[]).map((i) => i.label)).toEqual([`alpha ${type}`, `beta ${type}`, `env ${type}`]);
+    expect(await manager.listNames(type)).toEqual([name]);
+    expect(((await manager.get(type, name, A)) as any)?.label).toBe(`alpha ${type}`);
+    expect(((await manager.get(type, name, B)) as any)?.label).toBe(`beta ${type}`);
+    const err = await manager.get(type, name).then(() => undefined, (e: unknown) => e as PackageScopedNameRefusedError);
+    expect([err?.code, err?.refusal.reason]).toEqual(['RESOURCE_CONFLICT', 'ambiguous-in-environment']);
+    expect(err!.refusal.candidates).toEqual([
+      { kind: 'package', packageId: A },
+      { kind: 'package', packageId: B },
+    ]);
+  });
+
+  it.each(NAMESPACE_SCOPED)('%s: both items are enumerated under the one name; removing either package leaves the other\'s item, for items that carry `packageId` (BASE: removing the later one left nothing)', async (type) => {
     const name = `shared_${type}`;
     const labels = async (m: MetadataManager) => ((await m.list(type)) as any[]).map((i) => i.label);
     const first = await twoHolders(type, true);
@@ -505,6 +538,22 @@ describe('the in-memory store keeps one slot per (package, name) for every names
     await second.unregisterPackage(A);
     expect(await labels(second)).toEqual([`beta ${type}`]);
     expect(((await second.get(type, name, B)) as any)?.label).toBe(`beta ${type}`);
+  });
+
+  /**
+   * Today's state, pinned so the carry stays visible: `unregisterPackage`
+   * selects stored items by `packageId` or `package`, and the artifact door's
+   * items carry only the `_packageId` stamp, so it removes none of them — on
+   * main 45f0f81f and on this change alike. Teaching it `_packageId` is its own
+   * card (the seat's carry from #32151); that change flips this pin.
+   */
+  it.each(NAMESPACE_SCOPED)('%s: `unregisterPackage` removes nothing of an item that carries only the `_packageId` stamp (the artifact door\'s shape), on main and here alike', async (type) => {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    const name = `shared_${type}`;
+    await manager.register(type, name, shipped(type, A, 'alpha'), { notify: false });
+    await manager.unregisterPackage(A);
+    expect(((await manager.list(type)) as any[]).map((i) => i.label)).toEqual([`alpha ${type}`]);
+    expect(((await manager.get(type, name, A)) as any)?.label).toBe(`alpha ${type}`);
   });
 
   describe.each(NAMESPACE_SCOPED)('CONTROL — %s, one holder per name: every read is answered the very object registered, as the bare-name map answered it', (type) => {
