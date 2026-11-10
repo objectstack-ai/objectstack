@@ -1,6 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
+// Pay the driver's first load at collection, not inside a clocked `it()`
+// (`check:test-source-alias`).
+import '@objectstack/driver-sql';
 import { DatasourceSchema } from '@objectstack/spec/data';
 import { MetadataProtectionFields } from '@objectstack/spec/kernel';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
@@ -126,7 +129,10 @@ const STORED: StoredDatasource = { name: 'wh', ...BASE, origin: 'runtime' };
 
 async function expectRefusal(res: Response): Promise<string> {
   const raw = await res.text();
-  const body = JSON.parse(raw) as { success: boolean; error?: { code: string; message: string } };
+  const body = JSON.parse(raw) as {
+    success: boolean;
+    error?: { code: string; message: string; details?: { reason?: string; hint?: string } };
+  };
   expect({ status: res.status, success: body.success, code: body.error?.code }).toEqual({
     status: 400,
     success: false,
@@ -134,7 +140,9 @@ async function expectRefusal(res: Response): Promise<string> {
   });
   // Named, never echoed.
   expect(raw).not.toContain(PLACEHOLDER_KEY);
-  return body.error!.message;
+  expect(typeof body.error?.details?.reason).toBe('string');
+  const hint = body.error?.details?.hint;
+  return hint ? `${body.error!.message}\n${hint}` : body.error!.message;
 }
 
 describe('#28633 premise — the keys this card is about are declared by DatasourceSchema', () => {
@@ -284,7 +292,7 @@ describe('ssl.key — a TLS client private key is never stored in cleartext or s
     const message = await expectRefusal(
       await send('POST', '/datasources', { name: 'wh', ...BASE, ssl: { ...SSL, key: PLACEHOLDER_KEY } }),
     );
-    expect(message.split('\n')[0]).toBe("Invalid datasource 'wh'.");
+    expect(message.split('\n')[0]).toMatch(/^Invalid datasource 'wh': `ssl\.key` /);
     expect(message).toContain('`ssl.key`');
     expect(records.has('wh')).toBe(false);
     expect(ops).toEqual([]);

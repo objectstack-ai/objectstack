@@ -1,6 +1,9 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+// Pay the driver's first load at collection, not inside a clocked `it()`
+// (`check:test-source-alias`).
+import '@objectstack/driver-sql';
 import { DatasourceSchema } from '@objectstack/spec/data';
 import {
   DatasourceAdminService,
@@ -8,6 +11,7 @@ import {
   type StoredDatasource,
   type ProbeInput,
 } from '../datasource-admin-service.js';
+import { refusalAccount } from './refusal-account.js';
 
 /**
  * In-memory harness: an editable record store + secret store, with probe and
@@ -238,13 +242,13 @@ describe('createDatasource', () => {
   // a bad config reached the store even after DatasourceSchema's gate landed.
   it('rejects a config its driver would not honour (#4410)', async () => {
     const { service, store } = makeHarness();
-    await expect(
+    expect(await refusalAccount(
       service.createDatasource({
         name: 'reporting',
         driver: 'postgres',
         config: { hostname: 'db.internal', database: 'analytics' },
       }),
-    ).rejects.toThrow(/`hostname` → `host`/);
+    )).toMatch(/`hostname` → `host`/);
     expect(store.size).toBe(0);
   });
 
@@ -252,37 +256,37 @@ describe('createDatasource', () => {
     const { service } = makeHarness({
       seed: [{ name: 'crm_primary', driver: 'sqlite', origin: 'code' }],
     });
-    await expect(
+    expect(await refusalAccount(
       service.createDatasource({
         name: 'crm_primary',
         driver: 'postgres',
         config: { database: 'analytics' },
       }),
-    ).rejects.toThrow(/code-defined/i);
+    )).toMatch(/code-defined/i);
   });
 
   it('rejects a duplicate runtime name', async () => {
     const { service } = makeHarness({
       seed: [{ name: 'reporting', driver: 'postgres', origin: 'runtime' }],
     });
-    await expect(
+    expect(await refusalAccount(
       service.createDatasource({
         name: 'reporting',
         driver: 'postgres',
         config: { database: 'analytics' },
       }),
-    ).rejects.toThrow(/already exists/i);
+    )).toMatch(/already exists/i);
   });
 
   it('rejects an invalid name', async () => {
     const { service } = makeHarness();
-    await expect(
+    expect(await refusalAccount(
       service.createDatasource({
         name: 'Bad-Name',
         driver: 'postgres',
         config: { database: 'analytics' },
       }),
-    ).rejects.toThrow(/must match/i);
+    )).toMatch(/must match/i);
   });
 });
 
@@ -341,9 +345,9 @@ describe('updateDatasource', () => {
     const { service } = makeHarness({
       seed: [{ name: 'crm_primary', driver: 'sqlite', origin: 'code' }],
     });
-    await expect(
+    expect(await refusalAccount(
       service.updateDatasource('crm_primary', { label: 'x' }),
-    ).rejects.toThrow(/code-defined/i);
+    )).toMatch(/code-defined/i);
   });
 
   it('rejects updating a missing datasource with the not-found envelope', async () => {
@@ -371,7 +375,7 @@ describe('removeDatasource', () => {
       seed: [{ name: 'reporting', driver: 'postgres', origin: 'runtime' }],
       boundCounts: { reporting: 3 },
     });
-    await expect(service.removeDatasource('reporting')).rejects.toThrow(/3 object\(s\)/);
+    expect(await refusalAccount(service.removeDatasource('reporting'))).toMatch(/3 object\(s\)/);
     expect(store.has('reporting')).toBe(true);
   });
 
@@ -379,7 +383,7 @@ describe('removeDatasource', () => {
     const { service } = makeHarness({
       seed: [{ name: 'crm_primary', driver: 'sqlite', origin: 'code' }],
     });
-    await expect(service.removeDatasource('crm_primary')).rejects.toThrow(/code-defined/i);
+    expect(await refusalAccount(service.removeDatasource('crm_primary'))).toMatch(/code-defined/i);
   });
 
   it('rejects removing a missing datasource with the not-found envelope', async () => {
@@ -577,7 +581,7 @@ describe('migrateCredential (#8155)', () => {
   it('unbinds the freshly-minted secret when the record write fails', async () => {
     let fail = true;
     const h = makeHarness({ seed: [legacyRow()], failPut: () => fail });
-    await expect(h.service.migrateCredential('warehouse')).rejects.toThrow('metadata store unavailable');
+    expect(await refusalAccount(h.service.migrateCredential('warehouse'))).toMatch('metadata store unavailable');
     fail = false;
     expect(h.secrets.size).toBe(0);
     expect(h.store.get('warehouse')!.config?.password).toBe('hunter2');
