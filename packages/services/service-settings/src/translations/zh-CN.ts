@@ -548,7 +548,7 @@ export const zhCN: PlatformTranslationData = {
         embedder_model: { label: '模型', help: '示例 — OpenAI: text-embedding-3-small · 阿里通义: text-embedding-v3 · 智谱: embedding-3 · 硅基流动: BAAI/bge-m3 · Ollama: bge-m3' },
         embedder_base_url: { label: 'Base URL', help: '端点根路径(不含 /embeddings)。预设会自动填充,可覆盖为代理或自建网关。' },
         embedder_dimensions: { label: '维度', help: '覆盖输出维度(仅 Matryoshka 模型支持)。留空使用模型默认值。' },
-        embedder_batch_size: { label: '批量大小', help: '每次请求发送给嵌入服务商的 chunk 数。命中速率/大小限制时调小。' },
+        embedder_batch_size: { label: '批量大小', help: '每次请求发送给向量化服务商的 chunk 数。命中速率/大小限制时调小。' },
       },
       actions: {
         test: { label: '测试连接' },
