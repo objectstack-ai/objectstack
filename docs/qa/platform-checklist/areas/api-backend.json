@@ -3312,7 +3312,7 @@
       "title": "Error answers made honest on v18: a hook refusal on a hand-built write route answers 400 with the hook's own sentence, a crash answers a generic 500 that withholds the caught message, and a unique-constraint refusal is 409 UNIQUE_VIOLATION with details at the action door, MCP and sandboxed bodies too",
       "since": "v18",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -3327,7 +3327,7 @@
         ]
       },
       "steps": [
-        "POST a /data write route on the object whose hook refuses (POST /api/v1/data/OBJECT, or its /createMany door; not /batch: POST /api/v1/data/OBJECT/batch answers 200 with a per-row report, each refusal in results[i].errors[0] with its code and httpStatus, so it never answers the 400 this item reads, packages/rest/src/batch-routes.ts); read the body",
+        "POST a /data write route on the object whose hook refuses (POST /api/v1/data/OBJECT, or its /createMany door; not /batch: POST /api/v1/data/OBJECT/batch answers 207 Multi-Status with a per-row report when a row fails (200 when none does), each refusal in results[i].errors[0] with its code and httpStatus, so it never answers the 400 this item reads, packages/rest/src/batch-routes.ts); read the body",
         "invoke the script action that inserts a duplicate value: POST /api/v1/actions/OBJECT/ACTION",
         "force a server fault on a storage route (e.g. a malformed adapter config on the scratch boot — QA run #24558 set storage.local_root under /dev/null through PUT /api/settings/storage) and read error.message"
       ],
@@ -3410,6 +3410,12 @@
           "date": "2026-11-04",
           "change": "steps[0] corrected from QA run #29890 (W5-FAIL, at 589049b0): the /batch door is dropped from the doors that answer the clause's 400. It answers 200 with a per-row report (results[i].errors[0]). Read at base f68b47ca",
           "ref": "#29906"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-10",
+          "change": "steps[0]: the per-object /batch door's status for a report with a failed row is 207 Multi-Status, no longer 200 (the bulk doors answer 207 when any row failed and 200 when none did; bulkReportStatus in packages/rest/src/batch-routes.ts). The door still never answers the clause's 400, so it stays out of the doors this item reads. No clause changed",
+          "ref": "#32280"
         }
       ]
     },
