@@ -307,9 +307,14 @@ describe('#4940: what an admin identity operation leaves in sys_audit_log', () =
     expect(JSON.stringify(atRest[0])).not.toContain(token);
 
     // The door's explicit rows: one per mint and per revoke, naming the admin and the connection.
+    // [#32120] Told apart by their `event`: the provisioning call's last-use
+    // stamp is a credential write too, and plugin-audit mirrors it as an
+    // `update` attributed to the connection, whose metadata carries only the
+    // association field (ADR-0118 D5), never an event.
+    const doorEvent = (r: any): boolean => !isGeneric(r) && typeof JSON.parse(String(r.metadata)).event === 'string';
     const explicit = await waitForRows(
       async () => (await findRows(ql, 'sys_audit_log', { object_name: 'sys_scim_connection_credential', record_id: credentialId }))
-        .filter((r) => !isGeneric(r)),
+        .filter(doorEvent),
       (rows) => rows.length === 2,
       'the mint and revoke rows',
     );
@@ -319,6 +324,13 @@ describe('#4940: what an admin identity operation leaves in sys_audit_log', () =
       expect(row.user_id).toBe(adminUserId);
       expect(JSON.parse(String(row.metadata)).connectionId).toBe('okta-dogfood-30958');
     }
+    // [#32120] The last-use stamp's mirrored row: performed by the connection, not by any user.
+    const stampRows = (await findRows(ql, 'sys_audit_log', { object_name: 'sys_scim_connection_credential', record_id: credentialId }))
+      .filter((r) => !isGeneric(r) && !doorEvent(r));
+    expect(stampRows.map((r) => [r.action, r.actor, JSON.parse(String(r.metadata))])).toEqual([
+      ['update', 'svc:scim:okta-dogfood-30958', { scim_connection_id: 'okta-dogfood-30958' }],
+    ]);
+    expect(stampRows[0].user_id ?? null).toBeNull();
 
     // Nowhere else: every ledger row, the activity feed, and the data API's reads.
     const ledgers = JSON.stringify([
