@@ -779,7 +779,10 @@ describe('SettingsNamespacePayloadSchema', () => {
     manifest: {
       namespace: 'ai',
       label: 'AI',
-      specifiers: [{ type: 'select', key: 'provider', label: 'Provider', required: false }],
+      specifiers: [{
+        type: 'select', key: 'provider', label: 'Provider', required: false,
+        options: [{ value: 'openai', label: 'OpenAI' }],
+      }],
     },
     values: { provider: { value: null, source: 'default', locked: false } },
   };
@@ -796,9 +799,12 @@ describe('SettingsNamespacePayloadSchema', () => {
   });
 
   it('refuses a live value outside the closed source set', () => {
-    expect(
-      SettingsNamespacePayloadSchema.safeParse({ ...aiPage, live: { provider: { value: 'openai', source: 'env' } } }).success,
-    ).toBe(false);
+    const result = SettingsNamespacePayloadSchema.safeParse({
+      ...aiPage,
+      live: { provider: { value: 'openai', source: 'env' } },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((i) => i.path.join('.'))).toEqual(['live.provider.source']);
   });
 });
 
