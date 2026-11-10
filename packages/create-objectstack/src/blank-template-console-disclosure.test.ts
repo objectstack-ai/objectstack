@@ -17,19 +17,17 @@
 // endpoint to three items, the third being the project's own app — so the empty
 // `src/apps/` is the entire cause, and an app is the entire remedy.
 //
-// That emptiness is DELIBERATE, and this test does not challenge it. Every
-// scaffolder template in this repo ships objects only: `create-objectstack`'s
-// `blank` ("Minimal starter — one object, REST API, ready to extend") and all
-// three `os init` templates — including the one literally described as "Full
-// application with objects". No `*.app.ts` has ever existed under
-// `src/templates/**` in this repo's history. Apps are what the agent authors in
-// step 2 of the README loop, not what the scaffolder pre-writes into every
-// project forever.
-//
-// What was missing is that nothing the newcomer can reach said so, while the
-// dev-server banner advertises the Console URL on every boot. Hence the pin
-// below: as long as the template ships no app, its README must disclose the
-// Console consequence and name the remedy.
+// The empty `src/apps/` was once kept on purpose: apps were what the agent
+// authors in step 2 of the README loop, and the README disclosed the empty
+// Console instead. The maintainer's card #32152 (2026-11-10, filed on
+// 「立卡处理」) reversed that: a newcomer who opens the Console the dev banner
+// points to must see their own project, so the template now ships the starter
+// app `src/apps/main.app.ts` and the sample object's list view
+// `src/views/note.view.ts` — the files `objectstack generate app main --object
+// note` and `objectstack generate view note` write, with the object referenced
+// as `Note.name` because scaffolding renames it. The README keeps the rule
+// (an object appears in Console navigation only when an app lists it) and how
+// to add more, and no longer claims an empty Console.
 //
 // The assertion is deliberately BIDIRECTIONAL. A one-way "README must say X"
 // check rots the moment someone adds an app to the template — the README would
@@ -70,22 +68,34 @@ describe('blank template — tree and README agree about the Console', () => {
     expect(srcFiles).toContain(path.join('objects', 'note.object.ts'));
   });
 
-  it('ships objects only — no app, no views', () => {
-    // Not a style preference: this is the measured starting point the README
-    // section is written against. Changing it is a product decision, and the
-    // failure message says so rather than inviting a quiet re-baseline.
+  it('ships the starter app and the sample object\'s list view', () => {
+    // The measured starting point the README section is written against:
+    // the first Console visit lists this project's app. Removing it is a
+    // product decision, and the failure message says so rather than inviting
+    // a quiet re-baseline.
     expect(
       appFiles,
-      'The blank template now ships an app. That is a product change, not a ' +
-        'test failure to silence: update the README section "The Console" to ' +
-        'describe what actually renders, then update this expectation.',
-    ).toEqual([]);
+      'The blank template no longer ships its starter app. That is a product ' +
+        'change, not a test failure to silence: update the README section ' +
+        '"The Console" to describe what actually renders, then update this ' +
+        'expectation.',
+    ).toEqual([path.join('apps', 'main.app.ts')]);
+    expect(srcFiles).toContain(path.join('views', 'note.view.ts'));
   });
 
   it('discloses that no app means no Console navigation', () => {
     if (appFiles.length > 0) {
-      // The template ships an app — the "no app" claim must be gone.
+      // The template ships an app — the "no app" claim must be gone, and the
+      // rule plus the app it names must be there for the reader adding more.
       expect(readme).not.toMatch(/ships no app|no app and no views/i);
+      expect(readme, 'README must name the Console path').toMatch(/\/_console\//);
+      expect(
+        readme,
+        'README must state the app -> navigation rule',
+      ).toMatch(/Console navigation only when an app lists it/i);
+      for (const app of appFiles) {
+        expect(readme, `README must name src/${app}`).toContain(`src/${app}`);
+      }
       return;
     }
 
