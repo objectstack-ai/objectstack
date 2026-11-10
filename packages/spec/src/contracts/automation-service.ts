@@ -1070,6 +1070,25 @@ export interface ConnectorSourcePullRequest {
     context?: ExecutionContext;
     /** The environment the mapping and the target are read in, when the caller is environment-scoped. */
     environmentId?: string;
+    /**
+     * The package the caller belongs to, so `mapping` is read by
+     * `(package, name)` (ADR-0150 D3). For a job's pull it is the job's
+     * package, its `appId`. The job binder already requires the mapping to be
+     * declared in the job's own bundle, so read from that package the name
+     * answers the package's own item.
+     *
+     * - A package id: the name resolves from that package — its own mapping,
+     *   else the unique holder in its declared dependency closure plus `sys`,
+     *   else a refusal naming every candidate.
+     * - Absent (omitted, `null` or `''`): the read is by no package, exactly as
+     *   today — the bare name, read as a caller with no package.
+     *
+     * The spelling and value type are the ownership-queue reads' caller
+     * package (`OwnershipQueueCallerPackage`). Optional, so an implementation
+     * written before it still satisfies the contract; such an implementation
+     * reads by no package whatever the caller sends.
+     */
+    callerPackageId?: string | null;
 }
 
 /**
