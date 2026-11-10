@@ -323,7 +323,7 @@ describe('#31696 two packages\' flows of one name — both armed, each its own',
 });
 
 describe('#31696 the activation ledger per slot (epic red line 1)', () => {
-    it('red line: a package-less disable row on P1:F still holds after P2:F arrives — P1:F does not run', async () => {
+    it('red line: a package-less disable row on P1:F still holds after P2:F is installed — P1:F does not run', async () => {
         const store = new InMemoryFlowActivationStore();
         await store.setActive({ name: 'f', active: false });
         engine.setFlowActivationStore(store);
@@ -331,6 +331,8 @@ describe('#31696 the activation ledger per slot (epic red line 1)', () => {
         await engine.hydrateFlowActivations();
         expect((await engine.execute('f')).code).toBe('FLOW_DISABLED');
 
+        // P2:F is a genuine install, after the boot's holders sealed (PR-3's door).
+        engine.sealFlowHolders();
         ship(P2, leaf('f', 'p2'));
         await engine.flowActivationBinds();
         const p1 = await engine.executeSlot(P1, 'f');
@@ -387,6 +389,7 @@ describe('#31696 the activation ledger per slot (epic red line 1)', () => {
         ship(P1, leaf('f', 'p1'));
         ship(P2, leaf('f', 'p2'));
         await engine.hydrateFlowActivations();
+        engine.sealFlowHolders();
         engine.withdrawFlowSlot(P2, 'f');
         // One holder again: the row is its switch, as before slots.
         expect(engine.flowSlotKey(P1, 'f')).toBe('f');
@@ -396,6 +399,60 @@ describe('#31696 the activation ledger per slot (epic red line 1)', () => {
         expect(await store.list()).toEqual([{ name: 'f', active: false }]);
         expect(await engine.executeSlot(P2, 'f')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
         expect(await engine.executeSlot(P1, 'f')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
+    });
+
+    // [M2] During the boot's convergence the "one holder" a second package
+    // meets is whichever registered first: code packages at the boot pull,
+    // installed ones at `kernel:ready` in sorted order. A row is never bound
+    // to it: it fails closed, as a row first read under two holders does.
+    for (const [first, second] of [[P1, P2], [P2, P1]] as const) {
+        it(`boot convergence, two installed packages (${first === P1 ? 'alpha' : 'beta'} first): a package-less disable row is bound to neither — both off, one warning, never bound after the seal`, async () => {
+            const store = new InMemoryFlowActivationStore();
+            await store.setActive({ name: 'f', active: false });
+            engine.setFlowActivationStore(store);
+            // `start()`: the ledger is read before the installed packages register.
+            await engine.hydrateFlowActivations();
+            // `kernel:ready`: the rehydrate registers both.
+            ship(first, leaf('f', first === P1 ? 'p1' : 'p2'));
+            ship(second, leaf('f', second === P1 ? 'p1' : 'p2'));
+            await engine.flowActivationBinds();
+            expect(await engine.executeSlot(P1, 'f')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
+            expect(await engine.executeSlot(P2, 'f')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
+            expect(ran).toEqual([]);
+            expect(await store.list()).toEqual([{ name: 'f', active: false }]);
+            const warned = engineLogger.warn.mock.calls.filter(([message]: [string]) => /names no package/.test(message));
+            expect(warned).toHaveLength(1);
+            expect(warned[0][1]).toMatchObject({ flow: 'f', holders: expect.arrayContaining([P1, P2]) });
+
+            // `kernel:bootstrapped`: sealed. A later re-arrival of the second holder still binds nothing.
+            engine.sealFlowHolders();
+            engine.withdrawFlowSlot(second, 'f');
+            ship(second, leaf('f', second === P1 ? 'p1' : 'p2'));
+            await engine.flowActivationBinds();
+            expect(await store.list()).toEqual([{ name: 'f', active: false }]);
+            expect(await engine.executeSlot(P1, 'f')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
+            expect(await engine.executeSlot(P2, 'f')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
+        });
+    }
+
+    it('boot convergence, a code package then an installed one: the row is not bound to the code package — both off, one warning', async () => {
+        const store = new InMemoryFlowActivationStore();
+        await store.setActive({ name: 'f', active: false });
+        engine.setFlowActivationStore(store);
+        // `start()`: the code package is pulled, then the ledger is read.
+        ship(P1, leaf('f', 'p1'));
+        await engine.hydrateFlowActivations();
+        expect(await engine.executeSlot(P1, 'f')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
+        // `kernel:ready`: the installed package is rehydrated, before the seal.
+        ship(P2, leaf('f', 'p2'));
+        await engine.flowActivationBinds();
+        expect(await engine.executeSlot(P1, 'f')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
+        expect(await engine.executeSlot(P2, 'f')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
+        expect(ran).toEqual([]);
+        expect(await store.list()).toEqual([{ name: 'f', active: false }]);
+        const warned = engineLogger.warn.mock.calls.filter(([message]: [string]) => /names no package/.test(message));
+        expect(warned).toHaveLength(1);
+        expect(warned[0][1]).toMatchObject({ flow: 'f', holders: [P1, P2] });
     });
 
     it('the second holder is off until the bind lands; a bind that fails keeps both off, says so, and binds nothing', async () => {
@@ -411,6 +468,7 @@ describe('#31696 the activation ledger per slot (epic red line 1)', () => {
         engine.setFlowActivationStore(store);
         ship(P1, leaf('f', 'p1'));
         await engine.hydrateFlowActivations();
+        engine.sealFlowHolders();
         ship(P2, leaf('f', 'p2'));
         await Promise.resolve();
         // In flight: the row still names no package, so it keeps both off.
@@ -445,6 +503,7 @@ describe('#31696 the activation ledger per slot (epic red line 1)', () => {
         engine.setFlowActivationStore(store);
         ship(P1, leaf('f', 'p1'));
         await engine.hydrateFlowActivations();
+        engine.sealFlowHolders();
         ship(P2, leaf('f', 'p2'));
         await Promise.resolve();
         expect(await engine.executeSlot(P2, 'f')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
@@ -599,6 +658,7 @@ describe('#31696 R9 — the credential channel reads one package\'s rows for a n
     it('the engine asks the channel by package only for a slot of a name two packages hold', async () => {
         const asked: unknown[][] = [];
         engine.setFlowCredentialSource({
+            readsByPackage: true,
             holds: (...a: unknown[]) => { asked.push(a); return false; },
             held: () => [],
             resolve: async () => undefined,
@@ -611,6 +671,30 @@ describe('#31696 R9 — the credential channel reads one package\'s rows for a n
         // A bare name two packages hold names neither flow's credentials: refused, naming both, never asked.
         expect(() => engine.holdsFlowCredential('f', 'start', 'secret')).toThrow(/held by 2 packages/);
         await expect(engine.resolveFlowCredential('f', 'start', 'secret')).rejects.toMatchObject({ code: 'RESOURCE_CONFLICT' });
+        expect(asked).toHaveLength(2);
+    });
+    it('S3: a source that reads by name alone is never asked for a slot of a shared name: its reads are refused, naming the slot', async () => {
+        const asked: unknown[][] = [];
+        engine.setFlowCredentialSource({
+            holds: (...a: unknown[]) => { asked.push(a); return true; },
+            held: (...a: unknown[]) => { asked.push(a); return [{ nodeId: 'start', key: 'secret' }]; },
+            resolve: async (...a: unknown[]) => { asked.push(a); return 'another-package-secret'; },
+        });
+        ship(P1, leaf('f', 'p1'));
+        // One holder: asked by name, as before.
+        expect(engine.holdsFlowCredential('f', 'start', 'secret')).toBe(true);
+        expect(await engine.resolveFlowCredential('f', 'start', 'secret')).toBe('another-package-secret');
+        expect(asked).toHaveLength(2);
+
+        ship(P2, leaf('f', 'p2'));
+        const key = `${P2}/f`;
+        // Never read as "no credential": held, so the read is asked — and refuses.
+        expect(engine.holdsFlowCredential(key, 'start', 'secret')).toBe(true);
+        const refused = await engine.resolveFlowCredential(key, 'start', 'secret').catch((e: unknown) => e);
+        expect(refused).toMatchObject({ name: 'FlowCredentialUnresolvableError', code: 'SERVICE_UNAVAILABLE', status: 503 });
+        expect((refused as Error).message).toContain(`Flow 'f' of package "${P2}"`);
+        expect((refused as Error).message).toContain(`Package "${P1}" also holds`);
+        // The source was never asked for the shared slot.
         expect(asked).toHaveLength(2);
     });
 });

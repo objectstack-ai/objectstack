@@ -141,13 +141,29 @@ export class FlowActivationProjection {
      * bound to `packageId`, the name's one holder, now that a second holder
      * arrives? Only a row that switches the name off, that this projection
      * has only ever read over one holder, and where the holder has no row of
-     * its own (that row is its switch; the package-less one then switches
-     * nothing).
+     * its own. When it has one, that row is its switch, and the package-less
+     * row is left as it is: once the name is shared, it keeps every other
+     * holder without a row of its own off ({@link hasShared}).
      */
     canBindPackageless(name: string, packageId: string): boolean {
         const packages = this.rows.get(name);
         if (packages?.get('') !== true || packages.has(packageId)) return false;
         return !this.packagelessSharedReported.has(name) && !this.packagelessBinding.has(name);
+    }
+
+    /**
+     * [#31696, ADR-0150 D4, epic red line 1] A second holder of `name` arrives
+     * before the boot's holders have converged, while `packageId` holds it
+     * alone: which package held it first was decided by arrival order, so the
+     * row naming no package is not bound to it. Where {@link
+     * canBindPackageless} would have bound it, the row reads as one first read
+     * under two holders: it keeps every holder without a row of its own off,
+     * it is reported once, and it is never bound later.
+     */
+    refusePackagelessBind(name: string, packageId: string): void {
+        if (!this.canBindPackageless(name, packageId)) return;
+        this.packagelessSharedReported.add(name);
+        this.readers.reportPackagelessOverShared?.({ name });
     }
 
     /** The durable bind of {@link canBindPackageless} has begun. */

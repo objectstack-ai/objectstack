@@ -72,6 +72,7 @@ import { summarizeRun } from './run-summary.js';
 // interpolating it into the log message. See ./thrown-cause-diagnostics.ts.
 import { describeThrownForLog } from './thrown-cause-diagnostics.js';
 import { defaultEnvCredentialResolver, type CredentialResolver } from './credential-resolver.js';
+import { FlowCredentialUnresolvableError } from './flow-credential-channel.js';
 // [#22450] The one bundle-locale negotiation rule (`resolveLocaleAmong`'s five
 // steps: exact → case-insensitive → platform locale table language, so `zh-TW`
 // reaches `zh-Hant` → base language → variant expansion), asked about the
@@ -2689,6 +2690,20 @@ export interface FlowCredentialSource {
     holds(flowName: string, nodeId: string, key: string, flowPackage?: string): boolean;
     held(flowName: string, flowPackage?: string): Array<{ nodeId: string; key: string }>;
     resolve(flowName: string, nodeId: string, key: string, flowPackage?: string): Promise<string | undefined>;
+    /**
+     * [ADR-0150 D8 row R9, #31696] `true` when this source answers
+     * `flowPackage`: given one, only that package's rows answer. The
+     * automation plugin's `FlowCredentialChannel` does. A source that does not
+     * say so (one written before `flowPackage` existed) is never asked for a
+     * flow of a name two packages hold: it would answer every package's rows,
+     * so one package's flow could be signed or verified with another's
+     * secret. Such a flow's credential reads are refused instead, naming the
+     * flow and its package (`holds` answers `true`, so no caller reads the
+     * refusal as "no credential"; `held` and `resolve` throw
+     * `FlowCredentialUnresolvableError`). A flow of a name one package holds
+     * is asked by name, as before.
+     */
+    readonly readsByPackage?: boolean;
 }
 
 /**
@@ -4801,16 +4816,20 @@ export class AutomationEngine implements IAutomationService {
             return packageless;
         }
         const incumbents = this.flowSlots.slotsOf(name);
-        if (incumbents.length === 1 && incumbents[0].packageId !== null) {
-            this.bindPackagelessActivation(name, incumbents[0].packageId);
-        }
+        const incumbent = incumbents.length === 1 ? incumbents[0].packageId : null;
+        // A genuine arrival binds a package-less disable row to the one
+        // holder; one during the boot's convergence never does (M2: the
+        // holder would be the one that arrived first).
+        if (incumbent !== null && this.flowHoldersSealed) this.bindPackagelessActivation(name, incumbent);
         const { key, moved } = this.flowSlots.add({ packageId, name });
         this.moveFlowRecords(moved);
+        if (incumbent !== null && !this.flowHoldersSealed) this.flowLedgerDisabled.refusePackagelessBind(name, incumbent);
         return key;
     }
 
     /**
-     * [#31696, ADR-0150 D4, epic red line 1] A name's one holder is about to
+     * [#31696, ADR-0150 D4, epic red line 1] After the boot's holders have
+     * converged ({@link sealFlowHolders}), a name's one holder is about to
      * get a second: an activation row naming no package was that holder's
      * switch (D8), so it is bound to it — in the ledger first, as the
      * holder's own row, so it stays bound past a restart, and in the
@@ -4863,6 +4882,35 @@ export class AutomationEngine implements IAutomationService {
             })
             .finally(() => this.pendingFlowActivationBinds.delete(write));
         this.pendingFlowActivationBinds.add(write);
+    }
+
+    /**
+     * [#31696, ADR-0150 D4, epic red line 1] Has the boot's set of flow holders
+     * converged ({@link sealFlowHolders})? Until it has, the packages of this
+     * boot are still arriving in an order no operator chose — the code
+     * packages at the boot pull, the installed ones at `kernel:ready`, each in
+     * sorted order — so which one is "the name's one holder" when a second
+     * arrives is decided by arrival, not by the row. A package-less disable
+     * row is bound ({@link bindPackagelessActivation}) only after the seal;
+     * before it, a name that becomes shared reads the row as one first read
+     * under two holders: every holder without a row of its own stays off, it
+     * is said once, and the row is never bound later.
+     */
+    private flowHoldersSealed = false;
+
+    /**
+     * [#31696, ADR-0150 D4] Declare this boot's flow holders converged: every
+     * package of the boot has registered. `AutomationServicePlugin` calls it
+     * at `kernel:bootstrapped`, when the registry seals its bare-name holders,
+     * after every `kernel:ready` rehydrate. From then on a second holder of a
+     * name is a genuine arrival — one holder at that moment, so a
+     * package-less disable row is bound to it ({@link
+     * bindPackagelessActivation}). An engine that is never sealed never binds
+     * such a row: it keeps every holder without a row of its own off.
+     * Idempotent.
+     */
+    sealFlowHolders(): void {
+        this.flowHoldersSealed = true;
     }
 
     /** [#31696] The ledger binds {@link bindPackagelessActivation} has begun and not yet settled. */
@@ -5779,22 +5827,39 @@ export class AutomationEngine implements IAutomationService {
             if (!this.flowSlots.isShared(slot.name)) return [slot.name, undefined];
             return [slot.name, slot.packageId ?? ''];
         };
+        // [S3] A source that does not answer by package is never asked for a
+        // slot of a shared name: it fails closed, naming the slot.
+        const scoped = source?.readsByPackage === true;
+        const unscopedRefusal = (name: string, flowPackage: string) => {
+            const others = this.flowSlots.slotsOf(name)
+                .map((slot) => slot.packageId ?? '')
+                .filter((packageId) => packageId !== flowPackage);
+            return new FlowCredentialUnresolvableError(
+                `Flow '${name}' of package "${flowPackage}": its credentials cannot be read. `
+                    + `${others.map((p) => `Package "${p}"`).join(', ')} also ${others.length === 1 ? 'holds' : 'hold'} a flow `
+                    + `named '${name}', and the flow credential source attached to this engine reads by flow name alone, `
+                    + 'so it could answer another package\'s secret. Nothing was read. Attach a source that reads by '
+                    + 'package (FlowCredentialSource.readsByPackage).',
+            );
+        };
         this.flowCredentialSource = source && {
+            readsByPackage: true,
             holds: (key, nodeId, credentialKey) => {
                 const [name, flowPackage] = at(key);
-                return flowPackage === undefined
-                    ? source.holds(name, nodeId, credentialKey)
-                    : source.holds(name, nodeId, credentialKey, flowPackage);
+                if (flowPackage === undefined) return source.holds(name, nodeId, credentialKey);
+                return scoped ? source.holds(name, nodeId, credentialKey, flowPackage) : true;
             },
             held: (key) => {
                 const [name, flowPackage] = at(key);
-                return flowPackage === undefined ? source.held(name) : source.held(name, flowPackage);
+                if (flowPackage === undefined) return source.held(name);
+                if (!scoped) throw unscopedRefusal(name, flowPackage);
+                return source.held(name, flowPackage);
             },
-            resolve: (key, nodeId, credentialKey) => {
+            resolve: async (key, nodeId, credentialKey) => {
                 const [name, flowPackage] = at(key);
-                return flowPackage === undefined
-                    ? source.resolve(name, nodeId, credentialKey)
-                    : source.resolve(name, nodeId, credentialKey, flowPackage);
+                if (flowPackage === undefined) return source.resolve(name, nodeId, credentialKey);
+                if (!scoped) throw unscopedRefusal(name, flowPackage);
+                return source.resolve(name, nodeId, credentialKey, flowPackage);
             },
         };
     }

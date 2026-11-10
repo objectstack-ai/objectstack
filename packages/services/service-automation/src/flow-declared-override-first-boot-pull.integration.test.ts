@@ -43,6 +43,7 @@ import { join } from 'node:path';
 import { ObjectKernel, ObjectLogger, type Plugin, type PluginContext } from '@objectstack/core';
 import { ObjectQLPlugin, type ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
+import { SysMetadataActivation } from '@objectstack/platform-objects';
 import { defineStack } from '@objectstack/spec';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import { AutomationServicePlugin } from './plugin.js';
@@ -101,8 +102,14 @@ const otherStack = () =>
         { strict: false },
     ) as Record<string, unknown>;
 
-/** Whether, and before or after the shipping package, OTHER is registered. */
-type Second = 'none' | 'before' | 'after';
+/**
+ * Whether, and before or after the shipping package, OTHER is registered —
+ * both as code packages, in `init()` (pulled at `start()`); or [M2, #31696]
+ * at `kernel:ready`, as the install-local rehydrate registers an installed
+ * package: `installed-after` beside the code package BASE, `installed-both`
+ * with BASE installed too, in the order given.
+ */
+type Second = 'none' | 'before' | 'after' | 'installed-after' | 'installed-both' | 'installed-both-reversed';
 
 type Row = 'override' | 'legacy';
 
@@ -164,7 +171,12 @@ afterEach(async () => {
  * Boot the composition on `file`. `start` runs in a plugin that starts after
  * the automation plugin: after the boot pull, before `kernel:ready`.
  */
-async function boot(file: string, start: (ql: ObjectQL, automation: AutomationEngine) => Promise<void>, second: Second = 'none') {
+async function boot(
+    file: string,
+    start: (ql: ObjectQL, automation: AutomationEngine) => Promise<void>,
+    second: Second = 'none',
+    ledger = false,
+) {
     const kernel = new ObjectKernel({ logger: { level: 'fatal' }, gracefulShutdown: false } as never);
     kernels.push(kernel);
     const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: file }, useNullAsDefault: true });
@@ -178,18 +190,28 @@ async function boot(file: string, start: (ql: ObjectQL, automation: AutomationEn
         },
     } as Plugin);
     await kernel.use(new ObjectQLPlugin());
-    await kernel.use(new AutomationServicePlugin({ suspendedRunStore: 'memory' }));
+    // [M2] The activation ledger is attached beside the durable run store only.
+    await kernel.use(new AutomationServicePlugin(ledger ? {} : { suspendedRunStore: 'memory' }));
     await kernel.use({
         name: 'test.shipping-package',
         type: 'standard',
         version: '1.0.0',
         dependencies: ['com.objectstack.engine.objectql', 'com.objectstack.service-automation'],
         async init(ctx: PluginContext) {
+            // [M2] The activation ledger, as `PlatformObjectsPlugin` registers it.
+            if (ledger) ctx.getService<ObjectQL>('objectql').registry.registerObject(SysMetadataActivation as never, 'qa-31696-ledger', 'qa-31696-ledger');
             const manifests = ctx.getService<{ register(m: unknown): Promise<void> }>('manifest');
             const registerStack = (stack: Record<string, unknown>) => manifests.register({ ...(stack.manifest as object), ...stack });
             if (second === 'before') await registerStack(otherStack());
-            await registerStack(shippingStack());
+            if (!second.startsWith('installed-both')) await registerStack(shippingStack());
             if (second === 'after') await registerStack(otherStack());
+            if (second.startsWith('installed-')) {
+                ctx.hook('kernel:ready', async () => {
+                    if (second === 'installed-both') await registerStack(shippingStack());
+                    await registerStack(otherStack());
+                    if (second === 'installed-both-reversed') await registerStack(shippingStack());
+                });
+            }
             const ql = () => ctx.getService<ObjectQL>('objectql');
             const automation = () => ctx.getService<AutomationEngine>('automation');
             automation().registerTrigger(objectqlRecordTrigger(ql, automation, fired));
@@ -398,6 +420,45 @@ describe('[#31696] a name a second package also ships: each package\'s flow is a
         expect(String(overlay[0][0])).toContain('customizes neither and is not armed');
         expect(overlay[0][1]).toMatchObject({ flow: FLOW, holders: [BASE, OTHER].sort() });
     });
+
+    /**
+     * [M2, #31696] A package-less disable row in the activation ledger, read
+     * by a boot that reassembles the clash: the code packages are pulled at
+     * `start()`, the ledger is read, and the installed packages register at
+     * `kernel:ready`. Whichever package registers first is not "the name's
+     * one holder" the row was the switch of: the row is bound to neither, so
+     * both flows stay off, and the ledger row still names no package.
+     */
+    async function ledgerBoot(second: Second) {
+        const dir = mkdtempSync(join(tmpdir(), 'qa-31696-'));
+        dirs.push(dir);
+        const file = join(dir, 'store.db');
+        const first = await boot(file, async () => {}, 'none', true);
+        // Written after the first boot's seal, so its backfill does not bind it: a row of an older release.
+        await first.kernel.getService<ObjectQL>('objectql')
+            .insert('sys_metadata_activation', { metadata_type: 'flow', name: FLOW, active: false }, { context: SYS } as never);
+        await first.kernel.shutdown();
+        kernels.splice(kernels.indexOf(first.kernel), 1);
+        const warn = vi.spyOn(ObjectLogger.prototype, 'warn');
+        const measured = await boot(file, async () => {}, second, true);
+        await measured.automation.flowActivationBinds();
+        const ledger = (await measured.kernel.getService<ObjectQL>('objectql')
+            .find('sys_metadata_activation', { where: { metadata_type: 'flow', name: FLOW }, context: SYS } as never)) as Array<Record<string, unknown>>;
+        return { ...measured, warn, ledger };
+    }
+    for (const second of ['installed-after', 'installed-both', 'installed-both-reversed'] as const) {
+        it(`M2: a package-less disable row is bound to no package by the boot (${second}): both off, the row names no package`, async () => {
+            const { automation, ledger, warn } = await ledgerBoot(second);
+            expect(automation.getFlowSlots(FLOW).map((slot) => slot.packageId).sort()).toEqual([BASE, OTHER].sort());
+            expect(await automation.executeSlot(BASE, FLOW)).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
+            expect(await automation.executeSlot(OTHER, FLOW)).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
+            expect(ledger).toHaveLength(1);
+            expect(ledger[0].package_id ?? null).toBeNull();
+            const said = warn.mock.calls.filter(([message]) =>
+                String(message).includes(`The flow "${FLOW}" is switched off by an activation row that names no package`));
+            expect(said.length).toBeGreaterThan(0);
+        });
+    }
 
     it('CONTROL: a name the resolver serves (one package and a package-less row) keeps its line byte for byte', async () => {
         const { automation, collisions, collisionMeta, refusals } = await measuredBoot(['legacy'], async () => {});

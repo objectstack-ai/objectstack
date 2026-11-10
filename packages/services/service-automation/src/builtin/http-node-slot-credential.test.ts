@@ -62,6 +62,7 @@ function channel(rows: Array<{ flow: string; node: string; key: string; packageI
     const match = (f: string, n: string, k: string, p?: string) =>
         rows.filter((r) => r.flow === f && r.node === n && r.key === k && (p === undefined || r.packageId === p));
     const source: FlowCredentialSource = {
+        readsByPackage: true,
         holds: (f, n, k, p) => { asked.push(p); return match(f, n, k, p).length > 0; },
         held: () => [],
         resolve: async (f, n, k, p) => match(f, n, k, p).slice(-1)[0]?.value,
@@ -117,5 +118,22 @@ describe('[#31696] the http node signs with its own package\'s secret when two p
 
         // The channel was only ever asked for one package.
         expect(held.asked).toEqual([P1, P2]);
+    });
+
+    it('S3: a source that reads by name alone never signs P1\'s request with P2\'s secret: the node is refused, nothing is sent', async () => {
+        const held = channel([{ flow: 'f', node: 'call', key: 'signingSecret', packageId: P2, value: P2_HELD }]);
+        const { readsByPackage: _scoped, ...byNameAlone } = held.source;
+        const engine = engineWithBoth({
+            ...byNameAlone,
+            // Reads by name alone: every package's rows answer.
+            holds: (f, n, k) => byNameAlone.holds(f, n, k),
+            resolve: (f, n, k) => byNameAlone.resolve(f, n, k),
+        });
+        const one = await engine.executeSlot(P1, 'f');
+        expect(one.success).toBe(false);
+        expect(one.error).toContain('could not be read');
+        expect(one.error).toContain(`Flow 'f' of package "${P1}"`);
+        expect(received).toEqual([]);
+        expect(held.asked).toEqual([]);
     });
 });

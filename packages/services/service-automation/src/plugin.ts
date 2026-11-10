@@ -1921,11 +1921,18 @@ export class AutomationServicePlugin implements Plugin {
         // flow's credentials from it at verification and execution, and the
         // metadata save door stores them in it (registered at `start()`).
         // [ADR-0150 D8 row R9, #31696] Each row it writes names the flow's one
-        // package holder, the engine's answer.
+        // package holder, the engine's answer. Under a name two or more
+        // packages hold (the same answer, refused), a write touches only the
+        // rows naming no package, and one that sets or clears a credential is
+        // refused, naming every holder.
         const engine = this.engine;
         this.credentialChannel = new FlowCredentialChannel(
             () => this.resolveDataEngine(ctx),
             (name) => engine.flowHolderPackage(name),
+            (name) => {
+                const answer = engine.flowHolder(name);
+                return answer?.status === 'refused' ? answer : undefined;
+            },
         );
         this.engine.setFlowCredentialSource(this.credentialChannel);
 
@@ -2667,6 +2674,14 @@ export class AutomationServicePlugin implements Plugin {
         // startup summary. The warn matters for embedded hosts and tests.
         ctx.hook('kernel:bootstrapped', async () => {
             if (!this.engine) return;
+
+            // [#31696, ADR-0150 D4] Every package of this boot has registered —
+            // the code packages at the boot pull, the installed ones at the
+            // `kernel:ready` rehydrate — so the flow holders have converged, as
+            // the registry's bare-name holders seal now. Only from here is a
+            // second holder of a name a genuine arrival, to which a
+            // package-less disable row may be bound (`sealFlowHolders`).
+            this.engine.sealFlowHolders();
 
             // ── ADR-0018 §M1 node-type audit, at the ONE moment it can be true
             // (#4771). The vocabulary is open by design: a plugin contributes
