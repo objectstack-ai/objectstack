@@ -179,11 +179,18 @@ export interface AuthContextValue {
   /** Switch the active organization (workspace) */
   switchOrganization: (orgId: string) => Promise<void>;
   /**
-   * Create a new organization. `timezone` is the creator's IANA zone, sent as
-   * the `timezone` query parameter, never in the body; see
+   * Create a new organization. `timezone` is the creator's IANA zone and
+   * `edition: 'developer'` asks for a Developer Edition organization; both
+   * are sent as query parameters, never in the body. See
    * `AuthClient.createOrganization` (objectui#11908).
    */
-  createOrganization: (data: { name: string; slug: string; logo?: string; timezone?: string }) => Promise<AuthOrganization>;
+  createOrganization: (data: {
+    name: string;
+    slug: string;
+    logo?: string;
+    timezone?: string;
+    edition?: 'developer';
+  }) => Promise<AuthOrganization>;
   /**
    * Refresh the organizations list. Returns the freshly fetched list so
    * callers that need it right away (e.g. the first-run wizard's rename
