@@ -246,13 +246,17 @@ describe('#13953 — the run-lifecycle doors require the platform operator', () 
             // (commit 266436a7f) and clone (#12156) arms do, and BOTH route arms repeat
             // the exclusion so gate and route cannot drift. Over-blocking an
             // execution door is the one thing the ruling commit 266436a7f landed did not do.
+            // The path is that door's, past its two-part bound: the door declines
+            // it, so neither the flow `runs` (which it ran before the bound) nor
+            // the cancel runs, and the gate never claims it (no 403).
             const h = makeDispatcher();
-            const { response } = await h.dispatcher.handleAutomation(
+            const { handled, response } = await h.dispatcher.handleAutomation(
                 'trigger/runs/run_7/cancel', 'POST', undefined, USER_CTX(), undefined,
             );
 
+            expect(handled).toBe(false);
             expect(statusOf(response)).not.toBe(403);
-            expect(h.execute).toHaveBeenCalledTimes(1);
+            expect(h.execute).not.toHaveBeenCalled();
             expect(h.cancelRun).not.toHaveBeenCalled();
         });
     });
