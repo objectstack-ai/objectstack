@@ -265,7 +265,9 @@ const orgCtx = (tenantId?: string) => ({
  *
  * Scoped to the #8287 suite below on purpose: the older suite's reads are the
  * file's share of the frozen TEST_DEBT number, and pressing that number down is
- * a separate improvement to bank, not a rider on this repair.
+ * a separate improvement to bank, not a rider on this repair. [#32281] The two
+ * older cases that suite rewrote (a body naming another user or a known secret,
+ * now refused) read through it too, and the ledger was re-recorded.
  */
 function responseOf(res: HttpDispatcherResult): NonNullable<HttpDispatcherResult['response']> {
   const { response } = res;
@@ -434,9 +436,9 @@ describe('HttpDispatcher.handleKeys — unknown body keys (#32281)', () => {
   function countingKernel() {
     const { kernel, rows } = makeKernel();
     const looked: string[] = [];
-    const counted: any = {
-      getService: (n: string) => { looked.push(n); return kernel.getService(n); },
-      getServiceAsync: async (n: string) => { looked.push(n); return kernel.getServiceAsync(n); },
+    const counted = {
+      getService: (n: string): unknown => { looked.push(n); return kernel.getService(n); },
+      getServiceAsync: async (n: string): Promise<unknown> => { looked.push(n); return kernel.getServiceAsync(n); },
     };
     return { kernel: counted, rows, looked };
   }
