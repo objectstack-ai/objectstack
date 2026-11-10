@@ -339,6 +339,26 @@ describe('#32183 — a disabled package holds no name: the by-name read judges t
             }
         });
 
+        it(`${type}: only disabled holders — the layered view serves none of their layers, at any address`, async () => {
+            ship(type, 'solo', B);
+            ship(type, 'pair', B);
+            ship(type, 'pair', C);
+            registry.disablePackage(B);
+            registry.disablePackage(C);
+            for (const [name, query] of [['solo', undefined], ['solo', { package: C }], ['solo', { package: A }], ['pair', undefined]] as const) {
+                const layers = await read(`/${type}/${name}/layers`, query);
+                expect([layers.status, name, query], JSON.stringify(layers.body)).toEqual([404, name, query]);
+                for (const label of [`beta ${type}`, `gamma ${type}`]) expect(JSON.stringify(layers.body ?? null)).not.toContain(label);
+                const plain = await read(`/${type}/${name}`, query);
+                expect([plain.status, name, query], JSON.stringify(plain.body)).toEqual([404, name, query]);
+                for (const id of [B, C]) expect(JSON.stringify(plain.body ?? null)).not.toContain(id);
+            }
+            // CONTROL: enabled, the same layered read serves the holder's code layer.
+            registry.enablePackage(B);
+            const served = await read(`/${type}/solo/layers`);
+            expect(served.status, JSON.stringify(served.body)).toBe(200);
+        });
+
         it(`${type}: parity — the bare read and the list agree on the holders, through disable and enable`, async () => {
             ship(type, 'shared', A);
             ship(type, 'shared', B);

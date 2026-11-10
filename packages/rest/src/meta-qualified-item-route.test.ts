@@ -241,9 +241,12 @@ describe('a shareable namespace two packages share (ADR-0150 D2)', () => {
  */
 describe('#32183 — a disabled package holds no name: the by-name read judges the served holders', () => {
     const LIST = '/api/v1/meta/:type';
+    const LAYERS = '/api/v1/meta/:type/:name/layers';
     // A signed-in caller: a `book` read asks for one (`meta-item-read-gate.ts`, the docs sign-in gate).
+    // The engine is wired, so the layered view's disabled-package step (1b) can ask its registry.
     beforeEach(() => {
         (rest as any).resolveExecCtx = async () => ({ isSystem: true, userId: 'u1' });
+        (rest as any).objectQLProvider = async () => ({ registry });
     });
     const listedHolders = async (type: string, name: string): Promise<unknown[]> => {
         const { body } = await drive(LIST, { type });
@@ -284,6 +287,26 @@ describe('#32183 — a disabled package holds no name: the by-name read judges t
                 expect([answer.status, params, query], JSON.stringify(answer.body)).toEqual([404, params, query]);
                 expect(JSON.stringify(answer.body ?? null)).not.toContain(B);
             }
+        });
+
+        it(`${type}: only disabled holders — the layered view serves none of their layers, at any address`, async () => {
+            ship(type, 'solo', B);
+            ship(type, 'pair', B);
+            ship(type, 'pair', C);
+            registry.disablePackage(B);
+            registry.disablePackage(C);
+            for (const [name, query] of [['solo', {}], ['solo', { package: C }], ['solo', { package: A }], ['pair', {}]] as const) {
+                const layers = await drive(LAYERS, { type, name }, query);
+                expect([layers.status, name, query], JSON.stringify(layers.body)).toEqual([404, name, query]);
+                for (const label of [`beta ${type}`, `gamma ${type}`]) expect(JSON.stringify(layers.body ?? null)).not.toContain(label);
+                const plain = await drive(ITEM, { type, name }, query);
+                expect([plain.status, name, query], JSON.stringify(plain.body)).toEqual([404, name, query]);
+                for (const id of [B, C]) expect(JSON.stringify(plain.body ?? null)).not.toContain(id);
+            }
+            // CONTROL: enabled, the same layered read serves the holder's code layer.
+            registry.enablePackage(B);
+            const served = await drive(LAYERS, { type, name: 'solo' });
+            expect(served.status, JSON.stringify(served.body)).toBe(200);
         });
 
         it(`${type}: parity — the bare read and the list agree on the holders, through disable and enable`, async () => {

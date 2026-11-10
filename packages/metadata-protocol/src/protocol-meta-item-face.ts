@@ -10,7 +10,8 @@
  *
  * A MOVE, not a redesign. The function below is the body of the
  * `ObjectStackProtocolImplementation` method of the same name as it stood,
- * re-indented one level and otherwise unedited.
+ * re-indented one level and otherwise unedited. Since then, [#32183] added
+ * one arm: a name only disabled packages hold reads as their withheld item.
  *
  * ## How the moved body reaches the class
  *
@@ -48,6 +49,21 @@ export interface MetaItemFaceHost {
     readonly readMetaItem: ObjectStackProtocolImplementation['readMetaItem'];
 }
 
+/**
+ * [#32183] The package holding `(type, name)` when every package that holds
+ * it is disabled; `undefined` when none holds it or an enabled one does.
+ * Read over every holder (`includeDisabledPackages`). Optional-called, as
+ * {@link isItemOfDisabledPackage} is: a registry without the two reads hides
+ * nothing more.
+ */
+function disabledOnlyHolderOf(registry: any, type: string, name: string): string | undefined {
+    if (typeof registry?.packageScopedHoldersOf !== 'function' || typeof registry?.isPackageDisabled !== 'function') {
+        return undefined;
+    }
+    const holders: readonly string[] = registry.packageScopedHoldersOf(type, name, null, { includeDisabledPackages: true }) ?? [];
+    return holders.length > 0 && holders.every((id) => registry.isPackageDisabled(id) === true) ? holders[0] : undefined;
+}
+
 /** The body of `ObjectStackProtocolImplementation#readMetaItemFace`; the method's docblock there is its contract. */
 export async function readMetaItemFace(
     this: Pick<MetaItemFaceHost, 'engine' | 'readMetaItem'>,
@@ -65,11 +81,23 @@ export async function readMetaItemFace(
     // into a disabled package, as the served list does.
     const withheldAction = request.type === 'action' && face === 'served'
         && isActionWithheldByDisabledPackage(this.engine?.registry, answer?.item);
-    if (request.type === 'object' || request.type === 'package'
-        || (!withheldAction && !isItemOfDisabledPackage(this.engine?.registry, answer?.item))) {
+    // [#32183] A name only disabled packages hold resolves to nothing: the
+    // read judges a name's holders over the served set. Its answer is that
+    // package's withheld item, the shape a disabled holder's read had, so
+    // every door that asks the envelope whether a disable withheld the item
+    // (the layered view's step 1b, `/published`) keeps answering the missing
+    // name and never serves that package's layers.
+    const disabledOnlyHolder = request.type !== 'object' && request.type !== 'package' && answer?.item == null
+        ? disabledOnlyHolderOf(this.engine?.registry, request.type, request.name)
+        : undefined;
+    if (disabledOnlyHolder === undefined && (request.type === 'object' || request.type === 'package'
+        || (!withheldAction && !isItemOfDisabledPackage(this.engine?.registry, answer?.item)))) {
         return answer;
     }
     if (request.state === 'draft') throw noPendingDraftError(request.type, request.name);
     const { item: _withheld, registration: _servedOnly, ...envelope } = answer as typeof answer & { registration?: unknown };
-    return { ...envelope, item: undefined };
+    const withheld = { ...envelope, item: undefined };
+    // Not every arm of the read's envelope declares `packageId`; each may carry it.
+    if (disabledOnlyHolder !== undefined) (withheld as { packageId?: string }).packageId = disabledOnlyHolder;
+    return withheld;
 }
