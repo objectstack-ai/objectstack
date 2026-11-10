@@ -21,6 +21,8 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+// Pays `@objectstack/metadata`'s first load at collection: `standalone-stack.ts` imports it dynamically (check:test-source-alias).
+import '@objectstack/metadata';
 import { ObjectQL, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { PackageScopedNameRefusedError } from '@objectstack/core';
