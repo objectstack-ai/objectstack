@@ -114,7 +114,19 @@ export const SysSsoProvider = ObjectSchema.create({
         { name: 'domain', label: 'Email Domain', type: 'text', required: true, helpText: 'Users with this email domain are routed to this IdP, e.g. acme.com.' },
         { name: 'clientId', label: 'Client ID', type: 'text', required: true, helpText: 'OAuth client ID issued by the IdP for this system.' },
         { name: 'clientSecret', label: 'Client Secret', type: 'password', required: true, helpText: 'OAuth client secret (stored encrypted by better-auth).' },
-        { name: 'discoveryEndpoint', label: 'Discovery URL', type: 'text', required: false, helpText: 'Optional. OIDC discovery document URL. Leave blank to derive `<issuer>/.well-known/openid-configuration`.' },
+        // The two endpoints a registration can name explicitly (#32297). The bridge
+        // passes each under the same name into `oidcConfig`, and an endpoint the
+        // registration names is trusted for that registration (plugin-auth
+        // `AuthManager.ssoDiscoveryTrustedOrigins` reads the issuer, the discovery
+        // URL and the userinfo URL alike), so both help texts say so: it is the
+        // remedy the refusal of an untrusted discovery endpoint names.
+        { name: 'discoveryEndpoint', label: 'Discovery URL', type: 'url', required: false, helpText: 'Optional. OIDC discovery document URL (https). Leave blank to derive `<issuer>/.well-known/openid-configuration`. An endpoint named here is trusted for this provider.' },
+        { name: 'userInfoEndpoint', label: 'Userinfo URL', type: 'url', required: false, helpText: 'Optional. OIDC userinfo endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a userinfo host the server does not trust.' },
+        // The OIDC userinfo opt-out, stored as the provider's `skip_user_info`
+        // (plugin-auth `sso-sign-in-options.ts`): claims come from the verified
+        // ID token only. Off by default, as the column is, and labelled as the column
+        // is, so the register form and Edit Sign-In Options name it alike.
+        { name: 'skipUserInfo', label: 'Read Claims From the ID Token Only', type: 'boolean', required: false, helpText: 'Optional. Read the user’s claims from the verified ID token only and never call the userinfo endpoint. Microsoft Entra ID: turn this on to map "preferred_username", which its userinfo endpoint does not return.' },
         { name: 'scopes', label: 'Scopes', type: 'text', required: false, placeholder: 'openid email profile', helpText: 'Optional. Space- or comma-separated OAuth scopes. Defaults to "openid email profile".' },
         // No "Map: User ID claim" param here on purpose. `@better-auth/sso@1.7.0-rc.2`
         // retired the capability: `oidcConfig.mapping` is a `z.strictObject` with no
@@ -126,7 +138,13 @@ export const SysSsoProvider = ObjectSchema.create({
         // it already defaults to, and anything else answers 400 (see the guard in
         // plugin-auth `register-sso-provider.ts`, which stays as belt-and-braces for
         // non-form callers). Removing it restores declared = enforced.
-        { name: 'mapEmail', label: 'Map: Email claim', type: 'text', required: false, placeholder: 'email', helpText: 'Optional. Claim mapped to email. Defaults to "email".' },
+        // The Entra ID hint is static help text, as the SAML rows below carry
+        // theirs (#32297): an action param's `helpText` binds only `record`, its
+        // `visible` predicate reads `current_user` / `data` / `features`, and
+        // neither reads the dialog's own values, so a hint keyed on the issuer
+        // host the admin types has no declarable form. The claim is never set
+        // for the admin: blank still maps "email".
+        { name: 'mapEmail', label: 'Map: Email claim', type: 'text', required: false, placeholder: 'email', helpText: 'Optional. Claim mapped to email. Defaults to "email". Microsoft Entra ID (issuer on login.microsoftonline.com): users without a mailbox carry no "email" claim, so map "preferred_username" (or "upn") and turn on Read Claims From the ID Token Only.' },
         { name: 'mapName', label: 'Map: Name claim', type: 'text', required: false, placeholder: 'name', helpText: 'Optional. Claim mapped to display name. Defaults to "name".' },
         // The groups claim: stored as the provider's `mapping.extraFields.groups`,
         // the member an SSO sign-in reads the user's IdP groups from to grant

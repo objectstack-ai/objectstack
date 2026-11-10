@@ -2160,7 +2160,15 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           },
           discoveryEndpoint: {
             label: "发现文档 URL",
-            helpText: "可选。OIDC 发现文档 URL。留空则推导为 `<issuer>/.well-known/openid-configuration`。"
+            helpText: "可选。OIDC 发现文档 URL（https）。留空则推导为 `<issuer>/.well-known/openid-configuration`。在此填写的端点会被此提供方信任。"
+          },
+          userInfoEndpoint: {
+            label: "Userinfo 端点 URL",
+            helpText: "可选。OIDC userinfo 端点 URL（https），取代发现文档中给出的端点。在此填写的端点会被此提供方信任：当注册因发现文档给出的 userinfo 主机不受服务器信任而被拒绝时，请在此填写。"
+          },
+          skipUserInfo: {
+            label: "仅从 ID 令牌读取声明",
+            helpText: "可选。仅从已验证的 ID 令牌读取用户的声明，从不调用 userinfo 端点。Microsoft Entra ID：开启此项才能映射 “preferred_username”，其 userinfo 端点不返回该声明。"
           },
           scopes: {
             label: "授权范围",
@@ -2169,7 +2177,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           },
           mapEmail: {
             label: "映射：邮箱 claim",
-            helpText: "可选。映射到邮箱的 claim。默认为 “email”。",
+            helpText: "可选。映射到邮箱的 claim。默认为 “email”。Microsoft Entra ID（颁发者位于 login.microsoftonline.com）：没有邮箱的用户不携带 “email” claim，请映射 “preferred_username”（或 “upn”），并开启“仅从 ID 令牌读取声明”。",
             placeholder: "email"
           },
           mapName: {

@@ -2160,7 +2160,15 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           },
           discoveryEndpoint: {
             label: "URL de descubrimiento",
-            helpText: "Opcional. URL del documento de descubrimiento OIDC. Déjelo en blanco para derivar `<issuer>/.well-known/openid-configuration`."
+            helpText: "Opcional. URL del documento de descubrimiento OIDC (https). Déjelo en blanco para derivar `<issuer>/.well-known/openid-configuration`. Un endpoint indicado aquí se considera de confianza para este proveedor."
+          },
+          userInfoEndpoint: {
+            label: "URL de userinfo",
+            helpText: "Opcional. URL del endpoint userinfo de OIDC (https), que se usa en lugar del que indica el documento de descubrimiento. Un endpoint indicado aquí se considera de confianza para este proveedor: indíquelo cuando el registro se rechace porque el documento de descubrimiento nombra un host de userinfo en el que el servidor no confía."
+          },
+          skipUserInfo: {
+            label: "Leer las notificaciones solo del token de ID",
+            helpText: "Opcional. Leer las notificaciones del usuario solo del token de ID verificado y no llamar nunca al endpoint userinfo. Microsoft Entra ID: actívelo para asignar «preferred_username», que su endpoint userinfo no devuelve."
           },
           scopes: {
             label: "Ámbitos (scopes)",
@@ -2169,7 +2177,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           },
           mapEmail: {
             label: "Mapeo: reclamo de correo",
-            helpText: "Opcional. Reclamo asignado al correo. Valor predeterminado: «email».",
+            helpText: "Opcional. Reclamo asignado al correo. Valor predeterminado: «email». Microsoft Entra ID (emisor en login.microsoftonline.com): los usuarios sin buzón no llevan el reclamo «email», así que asigne «preferred_username» (o «upn») y active «Leer las notificaciones solo del token de ID».",
             placeholder: "email"
           },
           mapName: {

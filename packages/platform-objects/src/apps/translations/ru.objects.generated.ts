@@ -2160,7 +2160,15 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
           },
           discoveryEndpoint: {
             label: "URL обнаружения",
-            helpText: "Необязательно. URL документа обнаружения OIDC. Оставьте пустым, чтобы вывести `<issuer>/.well-known/openid-configuration`."
+            helpText: "Необязательно. URL документа обнаружения OIDC (https). Оставьте пустым, чтобы вывести `<issuer>/.well-known/openid-configuration`. Указанной здесь конечной точке доверяют для этого поставщика."
+          },
+          userInfoEndpoint: {
+            label: "URL userinfo",
+            helpText: "Необязательно. URL конечной точки userinfo OIDC (https), используемый вместо указанного в документе обнаружения. Указанной здесь конечной точке доверяют для этого поставщика: укажите её, если регистрация отклонена, потому что документ обнаружения называет хост userinfo, которому сервер не доверяет."
+          },
+          skipUserInfo: {
+            label: "Читать утверждения только из ID-токена",
+            helpText: "Необязательно. Читать утверждения пользователя только из проверенного ID-токена и никогда не вызывать конечную точку userinfo. Microsoft Entra ID: включите, чтобы сопоставить \"preferred_username\", которое его конечная точка userinfo не возвращает."
           },
           scopes: {
             label: "Области доступа",
@@ -2169,7 +2177,7 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
           },
           mapEmail: {
             label: "Сопоставление: утверждение почты",
-            helpText: "Необязательно. Утверждение, сопоставляемое с почтой. По умолчанию \"email\".",
+            helpText: "Необязательно. Утверждение, сопоставляемое с почтой. По умолчанию \"email\". Microsoft Entra ID (издатель на login.microsoftonline.com): у пользователей без почтового ящика нет утверждения \"email\", поэтому сопоставьте \"preferred_username\" (или \"upn\") и включите \"Читать утверждения только из ID-токена\".",
             placeholder: "email"
           },
           mapName: {
