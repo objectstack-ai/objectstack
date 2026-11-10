@@ -467,8 +467,8 @@ describe('HttpDispatcher.handleKeys — unknown body keys (#32281)', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('VALIDATION_FAILED');
-    expect(res.body.error.details.fields.map((f: any) => f.field)).toEqual(['scopes', 'user_id', 'nmae']);
-    expect(res.body.error.details.fields.every((f: any) => f.code === 'unknown_field')).toBe(true);
+    expect(res.body.error.details.fields).toEqual(['scopes', 'user_id', 'nmae'].map((field) =>
+      expect.objectContaining({ field, code: 'unknown_field' })));
     expect(rows).toHaveLength(0);
   });
 
