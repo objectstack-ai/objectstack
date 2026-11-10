@@ -3222,6 +3222,9 @@ describe('AuthManager', () => {
         degradedTenancy: false,
         // [#25292] `OS_CLOUD_MANAGED` is unset here, so not managed.
         cloudManaged: false,
+        // No `developerEditionCreate` host option here, so no Developer
+        // Edition choice is advertised.
+        developerEditionCreate: false,
         privacyUrl: 'https://objectstack.ai/privacy',
         termsUrl: 'https://objectstack.ai/terms',
       });
@@ -3246,6 +3249,18 @@ describe('AuthManager', () => {
         resetCloudManagedForTesting();
       }
       expect((manager.getPublicConfig() as any).features.cloudManaged).toBe(false);
+    });
+
+    // `features.developerEditionCreate` is the host option advertised as is:
+    // true only where the host set it, false otherwise (never absent, so the
+    // served key set stays the registry's).
+    it('serves features.developerEditionCreate from the host option', () => {
+      const base = { secret: 'test-secret-at-least-32-chars-long', baseUrl: 'http://localhost:3000' };
+      const served = (options: Partial<ConstructorParameters<typeof AuthManager>[0]>) =>
+        (new AuthManager({ ...base, ...options }).getPublicConfig() as any).features.developerEditionCreate;
+      expect(served({ developerEditionCreate: true })).toBe(true);
+      expect(served({ developerEditionCreate: false })).toBe(false);
+      expect(served({})).toBe(false);
     });
 
     // Enterprise SSO (@better-auth/sso) is opt-in: the plugin is only wired
