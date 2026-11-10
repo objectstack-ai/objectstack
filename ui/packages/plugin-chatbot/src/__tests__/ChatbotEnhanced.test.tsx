@@ -2028,8 +2028,10 @@ describe('one plan card per build turn — the newest propose_blueprint result',
     );
     expect(screen.getAllByTestId('proposed-plan')).toHaveLength(1);
     expect(titles()).toEqual(['Proposed plan · App 4']);
-    // The earlier results do not fall back to the unstructured confirm card.
+    // The earlier results draw as a completed step: no unstructured confirm
+    // card, nothing awaiting the user, one "Build it".
     expect(screen.queryByTestId('proposed-plan-fallback')).toBeNull();
+    expect(screen.getByTestId('tool-phase-line')).toHaveTextContent(/^Completed/);
     expect(screen.getAllByTestId('proposed-plan-approve')).toHaveLength(1);
   });
 

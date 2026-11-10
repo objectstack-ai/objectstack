@@ -79,6 +79,14 @@ function drawn(messages: React.ComponentProps<typeof ChatbotEnhanced>['messages'
   return screen.queryAllByTestId('proposed-plan-title').map((el) => el.textContent);
 }
 
+/** The replaced plans draw as completed steps: no fallback confirm card, nothing awaiting. */
+function expectReplacedPlansCompleted() {
+  expect(screen.queryByTestId('proposed-plan-fallback')).toBeNull();
+  const steps = screen.getAllByTestId('tool-phase-line');
+  expect(steps.length).toBeGreaterThan(0);
+  for (const step of steps) expect(step).toHaveTextContent(/^Completed/);
+}
+
 /** API mode: the hydrated thread through the store and back, as `ChatPane` renders it. */
 function throughStore(hydrated: ReturnType<typeof hydratedMessagesToChatMessages>) {
   const { result } = renderHook(() => useObjectChat({ api: API, conversationId: 'c1', initialMessages: hydrated }));
@@ -95,9 +103,9 @@ describe('one plan card per build turn survives a reload', () => {
     // The stored turn really is four assistant messages, one plan each.
     expect(hydrated.filter((m) => m.role === 'assistant')).toHaveLength(4);
     expect(drawn(hydrated)).toEqual(['Proposed plan · App 4']);
-    expect(screen.queryByTestId('proposed-plan-fallback')).toBeNull();
+    expectReplacedPlansCompleted();
     expect(drawn(throughStore(hydrated))).toEqual(['Proposed plan · App 4']);
-    expect(screen.queryByTestId('proposed-plan-fallback')).toBeNull();
+    expectReplacedPlansCompleted();
   });
 
   it('PRESERVATION — server history: a plan from a previous turn keeps its card', () => {
@@ -137,7 +145,7 @@ describe('one plan card per build turn survives a reload', () => {
     for (const messages of [hydrated, throughStore(hydrated)]) {
       expect(drawn(messages)).toHaveLength(1);
       expect(within(screen.getByTestId('proposed-plan')).getByText('Plan 4')).toBeInTheDocument();
-      expect(screen.queryByTestId('proposed-plan-fallback')).toBeNull();
+      expectReplacedPlansCompleted();
     }
   });
 });

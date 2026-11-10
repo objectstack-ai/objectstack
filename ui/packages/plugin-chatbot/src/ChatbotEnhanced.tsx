@@ -1254,7 +1254,9 @@ export function isProposalResult(result: unknown): boolean {
   );
 }
 
-export function getToolState(tool: ChatbotEnhancedToolInvocation): ToolSummaryState {
+export function getToolState(
+  tool: ChatbotEnhancedToolInvocation & { planSuperseded?: true },
+): ToolSummaryState {
   const state =
     tool.state ??
     (tool.errorText
@@ -1271,8 +1273,9 @@ export function getToolState(tool: ChatbotEnhancedToolInvocation): ToolSummarySt
   }
   if (state === 'output-available') {
     // A returned-but-not-applied confirm preview is AWAITING the user, not done
-    // (#772): the change only commits when they approve on the next turn.
-    return isProposalResult(tool.result) ? 'awaiting' : 'completed';
+    // (#772): the change only commits when they approve on the next turn. A
+    // plan a newer plan of the same turn replaced awaits nothing: it is done.
+    return isProposalResult(tool.result) && !tool.planSuperseded ? 'awaiting' : 'completed';
   }
   return 'running';
 }
@@ -3329,7 +3332,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
         approved: approvedPlanIds.has(tool.toolCallId),
       });
       const headerState =
-        state === 'output-available' && isProposalResult(tool.result)
+        state === 'output-available' && isProposalResult(tool.result) && !tool.planSuperseded
           ? PROPOSAL_HEADER_STATE[proposalCardState]
           : state;
       const titleNode = (
