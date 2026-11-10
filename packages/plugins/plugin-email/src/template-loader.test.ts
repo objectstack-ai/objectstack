@@ -37,6 +37,8 @@ import {
   EmailTemplateAmbiguousError,
   createRegistryEmailTemplateLoader,
 } from './template-loader.js';
+import { PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE } from '@objectstack/core';
+import { BUILTIN_AUTH_TEMPLATES } from './templates/auth-templates.js';
 
 type AnyRecord = Record<string, any>;
 
@@ -330,9 +332,7 @@ describe('createRegistryEmailTemplateLoader — the name resolves by (package, n
 });
 
 describe('the auth mails the platform sends are the platform-requested email template names (ADR-0150 D3 Exceptions, #31699)', () => {
-  it('core\'s list is exactly the names of the built-in auth templates, so every one keeps one overriding package', async () => {
-    const { PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE } = await import('@objectstack/core');
-    const { BUILTIN_AUTH_TEMPLATES } = await import('./templates/auth-templates.js');
+  it('core\'s list is exactly the names of the built-in auth templates, so every one keeps one overriding package', () => {
     expect([...(PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE.email_template ?? [])].sort())
       .toEqual([...new Set(BUILTIN_AUTH_TEMPLATES.map((t) => t.name))].sort());
   });
