@@ -492,7 +492,14 @@ describe('[#32162] the held-grants read is the landing package\'s own set', () =
     });
 
     it('an error that is not a refusal is not read as nothing held', async () => {
-        const host = { ...hostOver({}).host, readMetaItem: async () => { throw new Error('store down'); } };
+        // Only the held-grants read fails: the object read before it answers nothing.
+        const host = {
+            ...hostOver({}).host,
+            readMetaItem: async (req: { type: string }) => {
+                if (req.type === 'permission') throw new Error('store down');
+                return undefined;
+            },
+        };
         await expect(judge(host, ['qa_gone'], ALPHA)).rejects.toThrow('store down');
     });
 
