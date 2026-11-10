@@ -20,6 +20,9 @@
  *   - that action runs on its own package's address too, though its package is
  *     not the artifact's own id (alpha; the artifact takes beta's, the last
  *     input's manifest).
+ *   - NARROWING: the artifact's own id (beta's address, `packageId:
+ *     app:<beta>`) no longer reaches alpha's action; it did when every action
+ *     sat under the artifact's id.
  *
  * ## The boot defect this also holds
  *
@@ -160,6 +163,20 @@ describe('[ADR-0150 D4] the composed artifact of two namespaces\' same-named obj
             const answer = await post(booted!.kernel, `/actions/alpha/global/${SOLO}`);
             expect(answer.status, answer.message).toBe(200);
             expect(answer.text).toContain('"from":"alpha-solo"');
+        });
+
+        it('NARROWING — the artifact\'s own id no longer reaches another package\'s action (base: 200, every action bound under the artifact\'s id)', async () => {
+            // The artifact takes beta's manifest (the last input's), so beta's
+            // address and `packageId: app:<beta>` qualified by the artifact's
+            // own id; alpha's one-holder action is alpha's alone now.
+            const answer = await post(booted!.kernel, `/actions/beta/global/${SOLO}`);
+            expect(answer.status, answer.message).toBe(404);
+            expect(answer.text).not.toContain('"from"');
+            const direct = await booted!.engine
+                .executeAction('global', SOLO, { params: {} }, { packageId: `app:${BETA}` })
+                .then((value: unknown) => ({ value }), (error: Error) => ({ error: error.message }));
+            expect(direct).toHaveProperty('error');
+            expect(JSON.stringify(direct)).not.toContain('alpha-solo');
         });
     });
 });
