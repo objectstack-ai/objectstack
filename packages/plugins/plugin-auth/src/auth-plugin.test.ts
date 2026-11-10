@@ -412,12 +412,13 @@ describe('AuthPlugin', () => {
 
       // Host-defaulted base URL on port 3000, but server will be on 3002
       const registeredAuthManager = (mockContext.registerService as any).mock.calls[0][1];
-      const setRuntimeSpy = vi.spyOn(registeredAuthManager, 'setRuntimeBaseUrl');
+      const baseUrlPatchSpy = vi.spyOn(registeredAuthManager, 'applyConfigPatch');
 
       await localPlugin.start(mockContext);
       await localHookCapture.trigger('kernel:ready');
+      await localHookCapture.trigger('kernel:listening');
 
-      expect(setRuntimeSpy).toHaveBeenCalledWith('http://localhost:3002');
+      expect(baseUrlPatchSpy).toHaveBeenCalledWith({ baseUrl: 'http://localhost:3002' });
       expect(mockContext.logger.info).toHaveBeenCalledWith(
         expect.stringContaining('Auth baseUrl auto-updated to http://localhost:3002'),
       );
@@ -447,12 +448,13 @@ describe('AuthPlugin', () => {
       });
 
       const registeredAuthManager = (mockContext.registerService as any).mock.calls[0][1];
-      const setRuntimeSpy = vi.spyOn(registeredAuthManager, 'setRuntimeBaseUrl');
+      const baseUrlPatchSpy = vi.spyOn(registeredAuthManager, 'applyConfigPatch');
 
       await localPlugin.start(mockContext);
       await localHookCapture.trigger('kernel:ready');
+      await localHookCapture.trigger('kernel:listening');
 
-      expect(setRuntimeSpy).not.toHaveBeenCalled();
+      expect(baseUrlPatchSpy).not.toHaveBeenCalled();
     });
 
     it('should auto-detect baseUrl when no baseUrl configured (uses default fallback)', async () => {
@@ -479,12 +481,13 @@ describe('AuthPlugin', () => {
       });
 
       const registeredAuthManager = (mockContext.registerService as any).mock.calls[0][1];
-      const setRuntimeSpy = vi.spyOn(registeredAuthManager, 'setRuntimeBaseUrl');
+      const baseUrlPatchSpy = vi.spyOn(registeredAuthManager, 'applyConfigPatch');
 
       await localPlugin.start(mockContext);
       await localHookCapture.trigger('kernel:ready');
+      await localHookCapture.trigger('kernel:listening');
 
-      expect(setRuntimeSpy).toHaveBeenCalledWith('http://localhost:3002');
+      expect(baseUrlPatchSpy).toHaveBeenCalledWith({ baseUrl: 'http://localhost:3002' });
     });
 
     it('should throw error if auth not initialized', async () => {
@@ -2233,14 +2236,14 @@ describe('AuthPlugin', () => {
  * A configured base URL is the deployment's public origin and is kept as
  * written. Only a base URL nobody configured (no `baseUrl` option, or one the
  * host filled from its own loopback fallback and marked `baseUrlDefaulted`)
- * has its port corrected to the one the HTTP server bound on `kernel:ready`.
+ * has its port corrected to the one the HTTP server bound, on `kernel:listening`.
  * Behind a proxy (`OS_AUTH_URL=http://localhost`, app on :3000) a corrected
  * origin would send invite links and auth mail to the unpublished port.
  */
 describe('AuthPlugin base URL port correction honours a configured origin', () => {
   const SECRET = 'test-secret-at-least-32-chars-long';
 
-  /** Boots the plugin through `kernel:ready` against a server bound to `boundPort`. */
+  /** Boots the plugin through `kernel:listening` against a server bound to `boundPort`. */
   async function bootAgainstPort(options: AuthPluginOptions, boundPort: number) {
     const handlers = new Map<string, Array<() => Promise<void>>>();
     const registered = new Map<string, any>();
@@ -2270,42 +2273,44 @@ describe('AuthPlugin base URL port correction honours a configured origin', () =
     const plugin = new AuthPlugin({ secret: SECRET, ...options });
     await plugin.init(ctx);
     const authManager = registered.get('auth') as AuthManager;
-    const setRuntimeBaseUrl = vi.spyOn(authManager, 'setRuntimeBaseUrl');
+    const baseUrlPatch = vi.spyOn(authManager, 'applyConfigPatch');
     await plugin.start(ctx);
     for (const h of handlers.get('kernel:ready') ?? []) await h();
-    return { authManager, setRuntimeBaseUrl };
+    // The correction is registered FROM `kernel:ready`, so it is read after.
+    for (const h of handlers.get('kernel:listening') ?? []) await h();
+    return { authManager, baseUrlPatch };
   }
 
   it('keeps a configured http://localhost as written: the invite link carries no bound port', async () => {
-    const { authManager, setRuntimeBaseUrl } = await bootAgainstPort({ baseUrl: 'http://localhost' }, 3000);
+    const { authManager, baseUrlPatch } = await bootAgainstPort({ baseUrl: 'http://localhost' }, 3000);
 
-    expect(setRuntimeBaseUrl).not.toHaveBeenCalled();
+    expect(baseUrlPatch).not.toHaveBeenCalled();
     expect(authManager.getConsoleUrl(invitationAcceptPath('inv_1')))
       .toBe(`http://localhost/_console${invitationAcceptPath('inv_1')}`);
     expect(authManager.getConsoleUrl('/login')).toBe('http://localhost/_console/login');
   });
 
   it('keeps a configured http://localhost:4000 on a server bound to 3000', async () => {
-    const { authManager, setRuntimeBaseUrl } = await bootAgainstPort({ baseUrl: 'http://localhost:4000' }, 3000);
+    const { authManager, baseUrlPatch } = await bootAgainstPort({ baseUrl: 'http://localhost:4000' }, 3000);
 
-    expect(setRuntimeBaseUrl).not.toHaveBeenCalled();
+    expect(baseUrlPatch).not.toHaveBeenCalled();
     expect(authManager.getConsoleUrl('/login')).toBe('http://localhost:4000/_console/login');
   });
 
   it('CONTROL: a host-defaulted base URL is still corrected to the bound port', async () => {
-    const { authManager, setRuntimeBaseUrl } = await bootAgainstPort(
+    const { authManager, baseUrlPatch } = await bootAgainstPort(
       { baseUrl: 'http://localhost:0', baseUrlDefaulted: true },
       41303,
     );
 
-    expect(setRuntimeBaseUrl).toHaveBeenCalledWith('http://localhost:41303');
+    expect(baseUrlPatch).toHaveBeenCalledWith({ baseUrl: 'http://localhost:41303' });
     expect(authManager.getConsoleUrl('/login')).toBe('http://localhost:41303/_console/login');
   });
 
   it('CONTROL: no base URL at all is still corrected to the bound port', async () => {
-    const { authManager, setRuntimeBaseUrl } = await bootAgainstPort({}, 3002);
+    const { authManager, baseUrlPatch } = await bootAgainstPort({}, 3002);
 
-    expect(setRuntimeBaseUrl).toHaveBeenCalledWith('http://localhost:3002');
+    expect(baseUrlPatch).toHaveBeenCalledWith({ baseUrl: 'http://localhost:3002' });
     expect(authManager.getConsoleUrl('/login')).toBe('http://localhost:3002/_console/login');
   });
 });

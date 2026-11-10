@@ -400,7 +400,7 @@ export interface AuthPluginOptions extends Partial<AuthConfig> {
    * `http://localhost:<port>` itself.
    *
    * Only such a base URL, or no `baseUrl` at all, has its port corrected on
-   * `kernel:ready` to the one the HTTP server actually bound (a dev server that
+   * `kernel:listening` to the one the HTTP server actually bound (a dev server that
    * shifted off a busy port, or `--port 0`). A configured `baseUrl` is the
    * deployment's public origin and is kept as written, `http://localhost`
    * included: behind a proxy that publishes `http://localhost` while the app
@@ -1517,9 +1517,19 @@ export class AuthPlugin implements Plugin {
           // getPort() is optional on IHttpServer; duck-type check for it.
           const serverWithPort = httpServer as IHttpServer & { getPort?: () => number };
           const baseUrlConfigured = !!this.options.baseUrl && this.options.baseUrlDefaulted !== true;
-          if (!baseUrlConfigured && this.authManager && typeof serverWithPort.getPort === 'function') {
-            const actualPort = serverWithPort.getPort();
-            if (actualPort) {
+          const authManager = this.authManager;
+          if (!baseUrlConfigured && authManager && typeof serverWithPort.getPort === 'function') {
+            // Read the port on `kernel:listening`, not here. The transport
+            // opens its socket from a `kernel:listening` handler it registers in
+            // its own `start()` (HonoServerPlugin), so on `kernel:ready`
+            // `getPort()` answers the REQUESTED port — `0` for `--port 0`, the
+            // busy port a dev server is about to shift off — never the bound
+            // one. A handler registered from this `kernel:ready` hook lands
+            // after every `start()`-registered `kernel:listening` handler, so
+            // it reads the bound port whichever plugin was used first.
+            ctx.hook('kernel:listening', async () => {
+              const actualPort = serverWithPort.getPort!();
+              if (!actualPort) return;
               const configuredUrl = this.options.baseUrl || 'http://localhost:3000';
               const configuredOrigin = new URL(configuredUrl).origin;
               const actualUrl = `http://localhost:${actualPort}`;
@@ -1530,12 +1540,17 @@ export class AuthPlugin implements Plugin {
               // with a localhost URL, which would break OAuth callback URLs.
               const configuredIsLocalhost = configuredOrigin.startsWith('http://localhost');
               if (configuredIsLocalhost && configuredOrigin !== actualUrl) {
-                this.authManager.setRuntimeBaseUrl(actualUrl);
+                // A config patch, not `setRuntimeBaseUrl`: by now a
+                // `kernel:ready` hook (the development admin seed's sign-up)
+                // may have built the better-auth instance, which
+                // `setRuntimeBaseUrl` declines to touch. The patch discards
+                // that instance, and the next caller builds it on this origin.
+                authManager.applyConfigPatch({ baseUrl: actualUrl });
                 ctx.logger.info(
                   `Auth baseUrl auto-updated to ${actualUrl} (configured: ${configuredUrl})`,
                 );
               }
-            }
+            });
           }
 
           // Route registration errors should propagate (server misconfiguration)
