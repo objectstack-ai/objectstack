@@ -57,6 +57,9 @@ import { createDispatcherPlugin } from '../dispatcher-plugin.js';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import { bindTestSecurityCatalog } from '../security/security-catalog.testkit.js';
 import { installDefaultOrganization } from '../default-organization.testkit.js';
+// Paid at collection, not inside a clocked case: the dispatcher's package domain
+// reaches it through a dynamic import (check:test-source-alias).
+import '@objectstack/metadata';
 
 const PREFIX = '/api/v1';
 /** `registry.registerObject` requires a package id (see the sibling real-stack tests). */
@@ -176,8 +179,8 @@ async function boot(): Promise<Rig> {
 
 /** The ledger rows of one item, in storage order, as the table holds them. */
 async function ledgerRows(engine: ObjectQL, metadataType: string, name: string) {
-    const rows = await engine.find(LEDGER, { where: { metadata_type: metadataType, name }, context: SYSTEM } as any);
-    return (rows as any[]).map((r) => ({ id: r.id, package_id: r.package_id ?? null, active: r.active === true || r.active === 1 }));
+    const rows = await engine.find(LEDGER, { where: { metadata_type: metadataType, name } });
+    return rows.map((r) => ({ id: r.id, package_id: r.package_id ?? null, active: r.active === true || r.active === 1 }));
 }
 
 /** The operator's remedy, in the database: delete the row that should not apply. */
