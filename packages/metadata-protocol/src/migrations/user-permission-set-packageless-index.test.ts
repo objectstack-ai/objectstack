@@ -6,9 +6,11 @@ import { inspect } from 'node:util';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import {
+    USER_PERMISSION_SET_OLD_KEY_INDEX_NAME,
     USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME,
     USER_PERMISSION_SET_PACKAGELESS_SHADOW_COLUMN,
     USER_PERMISSION_SET_TABLE,
+    buildUserPermissionSetOldKeySql,
     buildUserPermissionSetPackagelessDuplicateProbeSql,
     buildUserPermissionSetPackagelessIndexSql,
     buildUserPermissionSetPackagelessMariaDbKeySql,
@@ -234,17 +236,65 @@ describe('the MySQL-family arms (statement and verdict)', () => {
             .toEqual({ status: 'created' });
     });
 
-    it('a server with no form at all is unsupported, reported at error, and names what still guards', async () => {
+    /** A server with no guard form: the guard's CREATE is a syntax error, the old key's plain CREATE runs. */
+    const noGuardForm = (oldKey: (sql: string) => unknown = () => []) => {
+        const ran: string[] = [];
         const exec: IndexExec = async (sql) => {
-            if (sql.startsWith('CREATE')) throw new Error("You have an error in your SQL syntax; check the manual near '(CASE WHEN'");
+            if (sql.startsWith('CREATE')) {
+                ran.push(sql);
+                if (sql.includes(USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME)) {
+                    throw new Error("You have an error in your SQL syntax; check the manual near '(CASE WHEN'");
+                }
+                return oldKey(sql);
+            }
             return presentTable(sql);
         };
+        return { exec, ran };
+    };
+
+    it('[MF6] a server with no form at all keeps the old three-column key in its place: built where missing, reported at error', async () => {
+        const { exec, ran } = noGuardForm();
         const log = { warn: vi.fn(), error: vi.fn() };
         const result = await ensureUserPermissionSetPackagelessIndex(exec, log, { client: 'mysql2' });
-        expect(result.status).toBe('unsupported');
+        expect(result).toMatchObject({ status: 'unsupported', oldKey: 'kept' });
+        expect(ran.at(-1)).toBe(buildUserPermissionSetOldKeySql('mysql2'));
+        expect(buildUserPermissionSetOldKeySql('mysql2')).toBe(
+            `CREATE UNIQUE INDEX ${USER_PERMISSION_SET_OLD_KEY_INDEX_NAME} ON ${USER_PERMISSION_SET_TABLE} (user_id, permission_set, organization_id)`,
+        );
+        expect(log.error).toHaveBeenCalledTimes(1);
         const message = String(log.error.mock.calls[0]?.[0] ?? '');
         expect(message).toContain('is NOT enforced by an index of its own');
-        expect(message).toContain('keeps its old (user_id, permission_set, organization_id) index');
+        expect(message).toContain(`'${USER_PERMISSION_SET_OLD_KEY_INDEX_NAME}' stands in its place`);
+        expect(message).toContain("a second package's set of the same name");
+    });
+
+    it('[MF6] an old key already there (an upgraded database, ER_DUP_KEYNAME) is kept as it is', async () => {
+        const { exec } = noGuardForm(() => {
+            throw Object.assign(new Error(`Duplicate key name '${USER_PERMISSION_SET_OLD_KEY_INDEX_NAME}'`), { errno: 1061 });
+        });
+        const log = { warn: vi.fn(), error: vi.fn() };
+        expect(await ensureUserPermissionSetPackagelessIndex(exec, log, { client: 'mysql2' }))
+            .toMatchObject({ status: 'unsupported', oldKey: 'kept' });
+        expect(String(log.error.mock.calls[0]?.[0] ?? '')).toContain('stands in its place');
+    });
+
+    it('[MF6] an old key that cannot be built either says nothing guards, with its own driver text', async () => {
+        const { exec } = noGuardForm(() => {
+            throw Object.assign(new Error("Duplicate entry 'u1-sales_rep-org_1' for key"), { errno: 1062 });
+        });
+        const log = { warn: vi.fn(), error: vi.fn() };
+        const result = await ensureUserPermissionSetPackagelessIndex(exec, log, { client: 'mysql2' });
+        expect(result).toMatchObject({ status: 'unsupported', oldKey: 'failed' });
+        expect(result.oldKeyDetail).toContain('Duplicate entry');
+        const message = String(log.error.mock.calls[0]?.[0] ?? '');
+        expect(message).toContain('could not be built in its place either');
+        expect(message).toContain('revoking one leaves the other granting');
+    });
+
+    it('the old key statement elsewhere is idempotent by IF NOT EXISTS', () => {
+        expect(buildUserPermissionSetOldKeySql('pg')).toBe(
+            `CREATE UNIQUE INDEX IF NOT EXISTS ${USER_PERMISSION_SET_OLD_KEY_INDEX_NAME} ON ${USER_PERMISSION_SET_TABLE} (user_id, permission_set, organization_id)`,
+        );
     });
 });
 

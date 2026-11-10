@@ -58,7 +58,11 @@ const oldUnique = { name: OLD_UNIQUE, key: { user_id: 1, permission_set: 1, orga
  * A stateful recording `Db`: `indexes()` answers what was seeded plus what the
  * sync created since, and `dropIndex` removes one.
  */
-function statefulDb(seed: Array<Record<string, unknown>>, collection = GRANTS) {
+function statefulDb(
+  seed: Array<Record<string, unknown>>,
+  collection = GRANTS,
+  refuse: (name: string) => Error | undefined = () => undefined,
+) {
   const live = new Map<string, Record<string, unknown>>(seed.map((i) => [i.name as string, i]));
   const ops: string[] = [];
   const created: Array<{ spec: Record<string, unknown>; options: Record<string, unknown> }> = [];
@@ -67,6 +71,8 @@ function statefulDb(seed: Array<Record<string, unknown>>, collection = GRANTS) {
     createCollection: async () => {},
     collection: () => ({
       createIndex: async (spec: Record<string, unknown>, options: Record<string, unknown>) => {
+        const refusal = refuse(options.name as string);
+        if (refusal) throw refusal;
         created.push({ spec, options });
         const name = options.name as string;
         if (!live.has(name)) {
@@ -131,6 +137,49 @@ describe('the widening arm — an upgraded grant collection (recording Db, runs 
     const { db, ops } = statefulDb([oldUnique], 'lead');
     await syncCollectionSchema(db, 'lead', { ...grantSchema, name: 'lead' }, { logger: { warn: vi.fn() } });
     expect(ops).not.toContain(`drop ${OLD_UNIQUE}`);
+  });
+});
+
+/** What the server answers when it refuses an index: the driver's `MongoServerError` shape. */
+const serverError = (code: number, codeName: string) => Object.assign(new Error(`${codeName} (${code})`), { code, codeName });
+
+describe('[SF8] the guard refused at sync is said at error, never skipped silently (recording Db, runs on every lane)', () => {
+  it('a duplicate (E11000): one error line naming the guard and the listing aggregation; the sync goes on and the old unique is kept', async () => {
+    const { db, ops, names } = statefulDb([oldUnique], GRANTS, (name) =>
+      name === GUARD ? serverError(11000, 'DuplicateKey') : undefined);
+    const logger = { warn: vi.fn(), error: vi.fn() };
+    await expect(syncCollectionSchema(db, GRANTS, grantSchema, { logger })).resolves.toBeUndefined();
+
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    const [message, meta] = logger.error.mock.calls[0];
+    expect(message).toContain(`'${GUARD}' on (user_id, permission_set, organization_id), so that key is NOT enforced`);
+    expect(message).toContain(`db.${GRANTS}.aggregate(`);
+    expect(message).toContain('"permission_set_package":null');
+    expect(meta).toMatchObject({ collection: GRANTS, index: GUARD, code: 11000 });
+    // The declared key is still built, and the widening arm keeps the old unique: the guard is missing.
+    expect(names()).toEqual(expect.arrayContaining([NEW_UNIQUE, OLD_UNIQUE]));
+    expect(names()).not.toContain(GUARD);
+    expect(ops).not.toContain(`drop ${OLD_UNIQUE}`);
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('an options conflict (85): one error line naming the guard; the old unique is kept', async () => {
+    const { db, ops } = statefulDb([oldUnique], GRANTS, (name) =>
+      name === GUARD ? serverError(85, 'IndexOptionsConflict') : undefined);
+    const logger = { warn: vi.fn(), error: vi.fn() };
+    await syncCollectionSchema(db, GRANTS, grantSchema, { logger });
+
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error.mock.calls[0][0]).toContain(`db.${GRANTS}.getIndexes()`);
+    expect(logger.error.mock.calls[0][1]).toMatchObject({ index: GUARD, code: 85 });
+    expect(ops).not.toContain(`drop ${OLD_UNIQUE}`);
+  });
+
+  it('CONTROL — a declared index the server refuses with E11000 still fails the sync, as before', async () => {
+    const { db } = statefulDb([], GRANTS, (name) => (name === NEW_UNIQUE ? serverError(11000, 'DuplicateKey') : undefined));
+    const logger = { warn: vi.fn(), error: vi.fn() };
+    await expect(syncCollectionSchema(db, GRANTS, grantSchema, { logger })).rejects.toMatchObject({ code: 11000 });
+    expect(logger.error).not.toHaveBeenCalled();
   });
 });
 

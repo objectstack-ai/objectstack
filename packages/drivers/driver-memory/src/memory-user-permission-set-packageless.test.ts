@@ -10,7 +10,7 @@
  * per `(user_id, permission_set, organization_id)`
  * (`metadata-protocol`'s `user-permission-set-packageless-index.ts`,
  * `driver-mongodb`'s `RUNTIME_OWNED_UNIQUES`). This driver has no raw-SQL seam
- * for the `kernel:ready` migration and no runtime-owned uniques, so the guard is
+ * for metadata-protocol's migration and no runtime-owned uniques, so the guard is
  * not built here (the activation ledger's guard has the same exemption).
  *
  * The epic seat's condition 3 on #32164 asked to MEASURE whether this driver's

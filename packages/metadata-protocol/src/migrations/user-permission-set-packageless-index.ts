@@ -24,9 +24,23 @@
  * non-tenant column nor `WHERE`, so the declared surface cannot carry it. It is
  * the activation ledger's package-less index applied to this table
  * (`activation-ledger-packageless-index.ts`, whose docblock carries the full
- * argument and the per-dialect measurements): a runtime-managed `kernel:ready`
- * migration that ADDS an index beside the declared key and replaces nothing.
- * The epic seat ruled the route on #32164 (comment 6770072902).
+ * argument and the per-dialect measurements): a runtime-managed migration that
+ * ADDS an index beside the declared key and replaces nothing. The epic seat
+ * ruled the route on #32164 (comment 6770072902).
+ *
+ * ## When — at schema sync, not `kernel:ready`
+ *
+ * The old key stood from the table's first DDL, so this one must too (epic
+ * ruling on #32164, MF6). `metadata-protocol`'s assembly runs it on
+ * `objectql:schema-synced`, which `ObjectQLPlugin` triggers when each schema
+ * sync pass's DDL is done: inside the boot's schema-migration lock, before any
+ * later plugin's `start()` writes a grant, and on a `bootPhaseHooks: false`
+ * host too, which withholds `kernel:ready`. Built at `kernel:ready`, a fresh
+ * database took every bootstrap grant (each one package-less before the
+ * holders are sealed) with no key over them, and a `bootPhaseHooks: false` host
+ * never built it. `kernel:ready` still runs it when no sync pass settled it: a
+ * `skipSchemaSync` boot, whose out-of-band DDL owns this index as it owns every
+ * table, or a table registered after the last pass.
  *
  * ## The index, per dialect
  *
@@ -63,10 +77,24 @@
  * `driver-sql`'s widening arm (`widenedUniqueReplacements`) and
  * `driver-mongodb`'s (`retireWidenedUniques`) offer to retire the old
  * three-column key — create-before-drop, categorized `safe` — only once this
- * index stands, because the gained column is nullable. This index is built at
- * `kernel:ready`, after the boot's schema sync, so on an upgraded database the
- * old key is retired by the NEXT sync that runs safe drift (dev `autoMigrate:
- * 'safe'`, or `os migrate apply`); until then it keeps refusing what it refused.
+ * index stands, because the gained column is nullable. On SQL the drift plan is
+ * read during the table's sync, before this index is built, so on an upgraded
+ * database the old key is retired by the NEXT sync that runs safe drift (dev
+ * `autoMigrate: 'safe'`, or `os migrate apply`); until then it keeps refusing
+ * what it refused.
+ *
+ * ## A dialect with no form keeps the old key (epic ruling, MF6)
+ *
+ * MySQL before 8.0.13 and MariaDB before 10.3 have no partial index, no
+ * functional key part and no INVISIBLE column, so this index cannot be built
+ * there (`'unsupported'`). There the old three-column key stays until it can:
+ * an upgraded database keeps it (the widening arm offers nothing while this
+ * index is missing), and a database that never had it gets it, under the name
+ * `driver-sql` generates for it ({@link USER_PERMISSION_SET_OLD_KEY_INDEX_NAME}),
+ * so the widening arm reads it as the superseded key and retires it once this
+ * index stands. It refuses everything this index would, and also one user's
+ * grant of a second package's set of the same name in one organization, which
+ * the declared key admits: a declared limit of those servers.
  *
  * ## Refuse, never keep-one (ADR-0120 D4; epic condition 2)
  *
@@ -107,6 +135,14 @@ export const USER_PERMISSION_SET_TABLE = 'sys_user_permission_set';
  * the widening arm read this index as the superseded one.
  */
 export const USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME = 'uniq_sys_user_permission_set_packageless';
+
+/**
+ * The old three-column key's name: what `driver-sql`'s `buildIndexName` generates
+ * for `(user_id, permission_set, organization_id)` on this table (pinned against
+ * it in `plugin-security`'s `user-permission-set-guard-at-schema-sync.test.ts`).
+ * Built only where this index cannot be (module doc, "A dialect with no form").
+ */
+export const USER_PERMISSION_SET_OLD_KEY_INDEX_NAME = 'uniq_sys_user_permission_set_ac248331';
 
 /** The key columns, in key order — the old key's, so the widening arm reads this index as its guard. */
 export const USER_PERMISSION_SET_PACKAGELESS_INDEX_COLUMNS = ['user_id', 'permission_set', 'organization_id'] as const;
@@ -172,6 +208,19 @@ export function buildUserPermissionSetPackagelessIndexSql(client?: string): stri
     );
 }
 
+/**
+ * The old three-column key, for a dialect this index has no form on (module doc,
+ * "A dialect with no form"). No `IF NOT EXISTS` on MySQL, where an existing
+ * index answers ER_DUP_KEYNAME.
+ */
+export function buildUserPermissionSetOldKeySql(client?: string): string {
+    const ifNotExists = catalogFamilyOf(client) === 'mysql' ? '' : 'IF NOT EXISTS ';
+    return (
+        `CREATE UNIQUE INDEX ${ifNotExists}${USER_PERMISSION_SET_OLD_KEY_INDEX_NAME} ON ${USER_PERMISSION_SET_TABLE} ` +
+        `(${USER_PERMISSION_SET_PACKAGELESS_INDEX_COLUMNS.join(', ')})`
+    );
+}
+
 /** The fallback "is this table here?" statement, for a dialect `read-probe.ts` has no catalog arm for. */
 export function buildUserPermissionSetPresenceSql(): string {
     return `SELECT 1 FROM ${USER_PERMISSION_SET_TABLE} WHERE 1 = 0`;
@@ -199,6 +248,14 @@ export interface EnsureUserPermissionSetPackagelessIndexResult {
     status: EnsureUserPermissionSetPackagelessIndexStatus;
     /** Driver error text, when there was one. */
     detail?: string;
+    /**
+     * On `'unsupported'` only: whether the old three-column key stands in its
+     * place (`'kept'`: built now or already there) or could not be built
+     * (`'failed'`, its driver text in `oldKeyDetail`). Module doc, "A dialect
+     * with no form".
+     */
+    oldKey?: 'kept' | 'failed';
+    oldKeyDetail?: string;
 }
 
 /** Resolve the raw-SQL seam (and dialect) for `sys_user_permission_set`. @see resolveIndexSeamForTable */
@@ -284,10 +341,68 @@ export async function ensureUserPermissionSetPackagelessIndex(
                 ? describeDuplicateKeys(await countDuplicateKeys(exec, buildUserPermissionSetPackagelessDuplicateProbeSql())) +
                   (await nameDuplicateKeys(exec))
                 : '';
+        if (status === 'unsupported') {
+            const kept = await keepOldKey(exec, opts.client);
+            reportUnsupported(detail, logger, kept);
+            return { status, detail, ...kept };
+        }
         // `duplicates` reads " (N duplicated keys, held by M rows): user_id=…; …" — the count, then the keys.
         reportDegradation(status, detail, logger, duplicates);
         return { status, detail };
     }
+}
+
+/** Build (or find) the old three-column key where this index has no form. */
+async function keepOldKey(
+    exec: IndexExec,
+    client: string | undefined,
+): Promise<{ oldKey: 'kept' | 'failed'; oldKeyDetail?: string }> {
+    try {
+        await exec(buildUserPermissionSetOldKeySql(client));
+        return { oldKey: 'kept' };
+    } catch (err: unknown) {
+        if (isDuplicateKeyName(err)) return { oldKey: 'kept' };
+        return { oldKey: 'failed', oldKeyDetail: operatorFacingErrorText(err) };
+    }
+}
+
+/**
+ * The `'unsupported'` line: what still guards (the old key, kept or built), or,
+ * when that key could not be built either, that nothing does. `error` either
+ * way: the declared key alone admits what the old key refused.
+ */
+function reportUnsupported(
+    detail: string,
+    logger: IndexMigrationLogger | undefined,
+    kept: { oldKey: 'kept' | 'failed'; oldKeyDetail?: string },
+): void {
+    const key = `(${USER_PERMISSION_SET_PACKAGELESS_INDEX_COLUMNS.join(', ')}) WHERE ${USER_PERMISSION_SET_PACKAGELESS_ROW_SCOPE}`;
+    const head =
+        `[metadata-protocol] this database cannot build '${USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME}' on ` +
+        `"${USER_PERMISSION_SET_TABLE}" — it has no partial index, no functional key part and no INVISIBLE ` +
+        `column (MySQL before 8.0.13, or MariaDB before 10.3) — so ${key} is NOT enforced by an index of its own. `;
+    if (kept.oldKey === 'kept') {
+        logProblem(
+            logger,
+            head +
+                `The old (user_id, permission_set, organization_id) index '${USER_PERMISSION_SET_OLD_KEY_INDEX_NAME}' ` +
+                'stands in its place (kept, or built where it was missing) and refuses every second grant naming no ' +
+                'package, but it also refuses one user a second package\'s set of the same name in one organization, ' +
+                'which the declared key admits. Upgrade to MySQL 8.0.13+ or MariaDB 10.3+ and restart to build the ' +
+                'index; the next safe sync then retires the old one.',
+            detail,
+        );
+        return;
+    }
+    logProblem(
+        logger,
+        head +
+            `The old (user_id, permission_set, organization_id) index '${USER_PERMISSION_SET_OLD_KEY_INDEX_NAME}' could ` +
+            'not be built in its place either, so two grants of one permission set naming no package can coexist for ' +
+            'one user in one organization, and revoking one leaves the other granting. Fix the cause below, or list ' +
+            `the duplicates with: ${buildUserPermissionSetPackagelessDuplicateProbeSql()}, then restart.`,
+        kept.oldKeyDetail ?? detail,
+    );
 }
 
 /**
@@ -296,7 +411,7 @@ export async function ensureUserPermissionSetPackagelessIndex(
  * of one set can coexist for one user in one organization.
  */
 function reportDegradation(
-    status: PartialIndexStatus,
+    status: Exclude<PartialIndexStatus, 'unsupported'>,
     detail: string,
     logger: IndexMigrationLogger | undefined,
     duplicates: string,
@@ -306,20 +421,6 @@ function reportDegradation(
     const consequence =
         'two grants of one permission set naming no package can coexist for one user in one organization, and ' +
         'revoking one leaves the other granting';
-
-    if (status === 'unsupported') {
-        logProblem(
-            logger,
-            `[metadata-protocol] this database cannot build '${USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME}' on ` +
-                `"${USER_PERMISSION_SET_TABLE}" — it has no partial index, no functional key part and no INVISIBLE ` +
-                `column (MySQL before 8.0.13, or MariaDB before 10.3) — so ${key} is NOT enforced by an index of its ` +
-                'own. A database an earlier release built keeps its old (user_id, permission_set, organization_id) ' +
-                'index, which "os migrate plan" does not offer to retire safely while this index is missing; on any ' +
-                `other, ${consequence}. Watch for duplicates with: ${duplicateQuery}`,
-            detail,
-        );
-        return;
-    }
 
     if (status === 'conflict') {
         logProblem(

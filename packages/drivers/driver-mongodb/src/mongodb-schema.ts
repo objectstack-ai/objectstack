@@ -296,11 +296,72 @@ async function retireWidenedUniques(
 /** Where {@link syncCollectionSchema} reports what it changed beyond creating indexes. */
 export interface SchemaSyncLogger {
   warn: (msg: string, meta?: Record<string, unknown>) => void;
+  /**
+   * A guarantee left unenforced ({@link reportRuntimeOwnedUniqueFailure}). A
+   * logger without it gets that line at `warn`.
+   */
+  error?: (msg: string, meta?: Record<string, unknown>) => void;
 }
 
 const CONSOLE_SCHEMA_SYNC_LOGGER: SchemaSyncLogger = {
   warn: (msg, meta) => console.warn(msg, meta ?? ''),
+  error: (msg, meta) => console.error(msg, meta ?? ''),
 };
+
+/**
+ * [#32164 SF8] A runtime-owned unique ({@link RUNTIME_OWNED_UNIQUES}) the server
+ * refused to build, said at `error` and never skipped silently: the collection
+ * then looks healthy while the guarantee the unique exists for is not enforced.
+ * The sync goes on (the declared indexes and the widening arm still run), and
+ * the widening arm keeps any older unique this one stands in for, because it
+ * retires one only once this one is present. Tried again at the next sync.
+ *
+ * - A duplicate (`E11000`, 11000): existing documents violate it. Nothing is
+ *   deleted or rewritten; the line carries the aggregation that lists them.
+ * - An options or key-spec conflict (85, 86): an index of that name or key
+ *   already stands with other options. The line names it for an operator to
+ *   inspect and drop.
+ * - Anything else: the server's text.
+ */
+function reportRuntimeOwnedUniqueFailure(
+  collectionName: string,
+  spec: IndexSpecification,
+  options: CreateIndexesOptions,
+  error: any,
+  logger: SchemaSyncLogger,
+): void {
+  const fields = Object.keys(spec as Record<string, unknown>);
+  const name = String(options.name);
+  const code = typeof error?.code === 'number' ? error.code : undefined;
+  const head =
+    `[driver-mongodb] ${collectionName}: could not build the runtime-owned unique index '${name}' on ` +
+    `(${fields.join(', ')}), so that key is NOT enforced: two documents it exists to keep to one can coexist. ` +
+    `Any older unique it stands in for is kept until it is built. `;
+  let cause: string;
+  if (code === 11000) {
+    const pipeline = [
+      { $match: options.partialFilterExpression ?? {} },
+      { $group: { _id: Object.fromEntries(fields.map((f) => [f, '$' + f])), documents: { $sum: 1 } } },
+      { $match: { documents: { $gt: 1 } } },
+    ];
+    cause =
+      'Existing documents violate it. Nothing is deleted or rewritten: resolve the duplicates, listed by ' +
+      `db.${collectionName}.aggregate(${JSON.stringify(pipeline)}), then restart.`;
+  } else if (code === 85 || code === 86) {
+    cause =
+      `An index of that name or key already stands with other options. Inspect db.${collectionName}.getIndexes(), ` +
+      'drop the one that is not this index, then restart.';
+  } else {
+    cause = 'Fix the cause the server gave, then restart.';
+  }
+  (logger.error ?? logger.warn)(head + cause, {
+    collection: collectionName,
+    index: name,
+    key: fields,
+    code,
+    error: String(error?.message ?? error),
+  });
+}
 
 /**
  * ObjectStack field definition (subset needed for schema sync).
@@ -720,7 +781,12 @@ export async function syncCollectionSchema(
   // Runtime-owned uniques the declared surface cannot express (see
   // {@link RUNTIME_OWNED_UNIQUES}) — built here because this driver has no
   // raw-SQL seam for `metadata-protocol`'s `kernel:ready` index migrations.
-  for (const owned of RUNTIME_OWNED_UNIQUES[collectionName] ?? []) indexOps.push(owned);
+  const runtimeOwned = new Set<string>();
+  for (const owned of RUNTIME_OWNED_UNIQUES[collectionName] ?? []) {
+    indexOps.push(owned);
+    runtimeOwned.add(owned.options.name as string);
+  }
+  const logger = opts.logger ?? CONSOLE_SCHEMA_SYNC_LOGGER;
 
   // Create indexes (idempotent — MongoDB ignores duplicates)
   for (const { spec, options } of indexOps) {
@@ -732,6 +798,12 @@ export async function syncCollectionSchema(
         || error?.codeName === 'IndexOptionsConflict' || error?.codeName === 'IndexKeySpecsConflict';
       if (conflict && options.partialFilterExpression !== undefined
         && await rebuildLegacySparseUnique(collection, spec, options)) {
+        continue;
+      }
+      // [#32164 SF8] A runtime-owned unique is reported at `error`, whatever
+      // refused it, and the sync goes on. See {@link reportRuntimeOwnedUniqueFailure}.
+      if (runtimeOwned.has(options.name as string)) {
+        reportRuntimeOwnedUniqueFailure(collectionName, spec, options, error, logger);
         continue;
       }
       // Index already exists with different options — skip silently
@@ -750,7 +822,7 @@ export async function syncCollectionSchema(
     collectionName,
     schema,
     new Set(indexOps.map((o) => o.options.name as string)),
-    opts.logger ?? CONSOLE_SCHEMA_SYNC_LOGGER,
+    logger,
   );
 }
 

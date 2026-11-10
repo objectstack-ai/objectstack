@@ -80,7 +80,10 @@ export {
     buildUserPermissionSetPackagelessIndexSql,
     buildUserPermissionSetPackagelessDuplicateProbeSql,
     resolveUserPermissionSetIndexSeam,
+    buildUserPermissionSetOldKeySql,
     USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME,
+    USER_PERMISSION_SET_PACKAGELESS_INDEX_COLUMNS,
+    USER_PERMISSION_SET_OLD_KEY_INDEX_NAME,
 } from './migrations/user-permission-set-packageless-index.js';
 export type {
     EnsureUserPermissionSetPackagelessIndexResult,

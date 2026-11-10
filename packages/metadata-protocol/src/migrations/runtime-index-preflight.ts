@@ -7,7 +7,8 @@
  *
  * Three migrations in this directory tighten an existing UNIQUE index into a
  * NULL-safe (and sometimes row-scoped) form at `kernel:ready`, and two more
- * add a row-scoped one beside a declared key:
+ * add a row-scoped one beside a declared key (the grant's at schema sync,
+ * #32164):
  *
  * | migration | table | index(es) |
  * |---|---|---|
