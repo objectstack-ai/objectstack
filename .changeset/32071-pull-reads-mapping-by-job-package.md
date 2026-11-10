@@ -22,6 +22,8 @@ What moves (first-party count 0 for each: no example app or first-party package 
 3. **BREAKING** — a job in one package body pulling a mapping filed under the artifact's top level (a mapping no body declares, filed under the top-level id, which is no package): it pulled through that mapping. It is now refused, `409 RESOURCE_CONFLICT` (`outside-closure`) naming the top-level id. No dependency can reach a top-level id, so the fix is to move the mapping into the job's package body, or move the job to the top level (a top-level job reads with no package).
 4. ADR-0150 D3 (a), a package caller whose mapping name only the environment holds, is refused naming the environment. No job reaches it: the binder schedules a pull only when the artifact itself declares the mapping. A direct `pullConnectorSource` call that passes a package can.
 
+One refusal becomes a miss, nothing pulled either way: a job whose own package is disabled, with a second, enabled package holding the same mapping name, was refused `409 RESOURCE_CONFLICT` (`mapping_name_refused`, naming both, the unreleased answer of the entry this one supersedes); its own disabled mapping is now what it reads, and that is answered `404 MAPPING_NOT_FOUND`, as every read answers a disabled package's mapping.
+
 A runtime row stored under a package mapping's name is that mapping's overlay (ADR-0005) and is served as before, whichever caller asks.
 
 Supersedes, in the same release: the `32071-mapping-name-by-package` entry's "the pull does not yet read the `callerPackageId` its request carries": it now reads it.

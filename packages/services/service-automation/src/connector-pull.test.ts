@@ -709,6 +709,15 @@ describe('[#32071] connector pull — a package caller reads the mapping from it
         expect(h.handler).not.toHaveBeenCalled();
     });
 
+    it('a disabled package\'s own mapping beside an enabled holder: its caller reads its own, withheld — 404 (no package: 409)', async () => {
+        // The one refusal that becomes a miss (declared in the changeset):
+        // the caller's own item is step 1, then withheld as disabled.
+        const h = overRegistry((r) => { install(r, ALPHA); install(r, CALLER); ship(r, ALPHA); ship(r, CALLER); r.disablePackage(CALLER); });
+        expect(answerOf(await pullError(h)), 'no-package (Part A)').toBe('409 mapping_name_refused');
+        expect(answerOf(await pullError(h, CALLER))).toBe('404 mapping_not_found');
+        expect(h.handler).not.toHaveBeenCalled();
+    });
+
     it('a disabled closure holder\'s mapping answers mapping_not_found, as the no-package read does', async () => {
         const h = overRegistry((r) => { install(r, ALPHA); install(r, CALLER, [ALPHA]); ship(r, ALPHA); r.disablePackage(ALPHA); });
         expect(answerOf(await pullError(h)), 'no-package (main)').toBe('404 mapping_not_found');

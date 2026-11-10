@@ -566,6 +566,9 @@ describe('ConnectorSourcePullRequest — carries the caller package (ADR-0150 D3
     // Where the value comes from, and the ruling it serves.
     expect(doc).toContain('ADR-0150 D3');
     expect(doc).toMatch(/the package[\s*]+that declares the job/);
+    // [#32071] A residual top-level job names no package; a disabled package's mapping is not found.
+    expect(doc).toMatch(/top-level job no package body of its artifact[\s*]+declares belongs to no package and sends none/);
+    expect(doc).toMatch(/A disabled package's mapping, when it is the one the[\s*]+name reaches, is not found/);
     // The precedent the spelling follows.
     expect(doc).toContain('OwnershipQueueCallerPackage');
   });
