@@ -11,7 +11,7 @@ import { renderHook, waitFor, act } from '@testing-library/react';
 // The chat surface derives the draft/plan affordance cards from the tool result
 // via these mappers — round-tripping our cache through them is the real
 // production path (live render → cache → cache-fallback reload).
-import { uiMessageToChatMessage } from '@object-ui/plugin-chatbot';
+import { uiMessageToChatMessage, type AnswerSource } from '@object-ui/plugin-chatbot';
 // objectui#9232 — the cache round trip is only proven by driving the affordance
 // it exists to restore, so the test mounts the real HITL hook over the restored
 // messages and presses Approve. `hydratedMessagesToChatMessages` is the
@@ -575,7 +575,7 @@ describe('sanitizeChatMessagesForCache — affordance cards survive a cache roun
 // above. It rides inside the cached `output`, beside any envelope, so a turn
 // that also waits on an approval keeps both.
 describe('sanitizeChatMessagesForCache — the answer source survives a cache round-trip (objectstack#31868)', () => {
-  const answerSource = {
+  const answerSource: AnswerSource = {
     object: 'opportunity',
     label: 'Opportunities',
     filter: { stage: 'won', amount: { $gte: 1000 } },
