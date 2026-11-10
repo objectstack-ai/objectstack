@@ -914,6 +914,7 @@
     "defineSeed (function)",
     "deriveFieldGroupLayout (function)",
     "deriveInlineGridColumns (function)",
+    "deriveInlineGridSortField (function)",
     "deriveInlineRowFormFields (function)",
     "deriveRecordFlowSurface (function)",
     "deriveRecordSurface (function)",

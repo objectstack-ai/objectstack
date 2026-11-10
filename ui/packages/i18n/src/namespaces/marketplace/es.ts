@@ -149,6 +149,13 @@ const es = {
         unmanagedHint: "Se copia una sola vez en este runtime como sus propios metadatos: cada elemento se puede editar aquí y la copia no recibe actualizaciones.",
         required: "Elige un modo de instalación para instalar este paquete.",
       },
+      targetNamespace: {
+        label: "Espacio de nombres de destino",
+        placeholder: "p. ej., crm_copy",
+        hint: "El espacio de nombres en el que se escriben los metadatos de esta copia. Edítalo para instalar con otro nombre.",
+        noDefault: "No se pudo leer un espacio de nombres predeterminado. Escribe el espacio de nombres que debe usar esta copia.",
+        taken: "El espacio de nombres \"{{namespace}}\" pertenece a otro paquete. Elige otro nombre e instala de nuevo.",
+      },
       unmanagedSuccess: "v{{version}} de \"{{name}}\" copiado en este runtime como sus propios metadatos, en la base {{base}}. La copia se puede editar y no recibe actualizaciones.",
       unmanagedStrippedLocks: "El paquete bloqueaba estos elementos. La copia se puede editar, así que sus bloqueos no se copiaron:",
       unmanagedIgnored: "Este runtime no admite instalaciones no administradas, así que \"{{name}}\" se instaló como administrado (registrado como código) en lugar de copiarse. Actualiza el runtime, luego desinstala el paquete y vuelve a instalarlo como copia no administrada.",

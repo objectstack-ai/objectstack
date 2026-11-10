@@ -6621,6 +6621,7 @@ export class ObjectStackProtocolImplementation implements
             isShippedFlowName: (...a) => this.isShippedFlowName(...a),
             isUnservedSealedOverlay: (...a) => this.isUnservedSealedOverlay(...a),
             packagedArtifactOwner: (...a) => this.packagedArtifactOwner(...a),
+            shippedArtifactsOf: (...a) => this.shippedArtifactsOf(...a),
         };
         return declinesStoredRow.call(host, type, name, row);
     }

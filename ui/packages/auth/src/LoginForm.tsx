@@ -429,7 +429,15 @@ export function LoginForm({
     const identifier = email.trim();
     try {
       if (formMode === 'phone-otp') {
-        await signInWithPhoneOtp(phone.trim(), otpCode.trim());
+        const { twoFactorRequired } = await signInWithPhoneOtp(phone.trim(), otpCode.trim());
+        if (twoFactorRequired) {
+          // Code accepted; the account has an enrolled second factor. The
+          // provider holds the challenge and this form draws the same code
+          // step the password paths reach. The SMS code is spent, and the
+          // host hears `onSuccess` only once the second factor is verified.
+          setOtpCode('');
+          return;
+        }
       } else {
         // Unified identifier: a phone-shaped entry routes to phone+password.
         // Normalize identically to the backend (strip formatting, no country

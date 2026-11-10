@@ -6668,6 +6668,172 @@
           "ref": "#32020"
         }
       ]
+    },
+    {
+      "id": "records-forms.action-preflight-panel",
+      "title": "An action's param dialog runs its declared preflight read: the panel moves from loading to ready with the declared fields, a seeded param is drawn read-only from the answer and submitted as it, and a failed read draws the error panel, leaves the seed empty and holds Confirm",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), signed in through the form"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin`",
+          "two scratch actions on showcase_task, saved before the browser leg. qa_pf_probe: PUT /api/v1/meta/action/qa_pf_probe with { name: 'qa_pf_probe', label: 'QA preflight probe', objectName: 'showcase_task', operation: 'update', execution: 'perRecord', locations: ['record_header'], params: [{ name: 'estimate_hours', label: 'Estimate (h)', type: 'number', required: true }, { name: 'notes', label: 'Notes', type: 'textarea', required: true }], preflight: { read: { url: '/api/v1/data/showcase_task/${ctx.recordId}' }, path: 'record', fields: [{ path: 'title', label: 'Title' }, { path: 'status', label: 'Status' }], seed: [{ param: 'notes', path: 'title' }] } }. qa_pf_fail: the same body named qa_pf_fail, labelled 'QA preflight fail', with read.url '/api/v1/data/showcase_task/qa-missing-${ctx.recordId}' (a record that does not exist, so the read answers 404)",
+          "`path` selects the record in the read's answer: run `GET /api/v1/data/showcase_task/ID` once with curl. GetDataResponseSchema answers `{ object, id, record }`; if the door wraps it in `{ success, data }`, save both actions with path 'data.record' instead of 'record' (packages/spec/src/api/protocol.zod.ts#GetDataResponseSchema)",
+          "one seeded showcase_task with a title; record its id, title and estimate_hours"
+        ],
+        "knownGaps": [
+          "the panel's `waiting` state (a URL hole on a param not yet filled), a stale answer dropped after the URL moved on, and the seed cleared on a URL change have no live leg here: a `${param.X}` hole needs a query parameter the record read accepts, and GET /api/v1/data/OBJECT/ID refuses every parameter but select and expand (packages/rest/src/rest-server.ts#DATA_RECORD_READ_PARAMS). acceptance[4] scores them from the pins"
+        ]
+      },
+      "steps": [
+        "open the task's record page; press QA preflight probe in the record header with the network panel recording",
+        "screenshot the dialog as soon as it opens, then again once the read answers; read the panel's data-status at each",
+        "read the Notes param: its control, its value and its hint",
+        "type 3 into Estimate (h) and Confirm; capture the dispatch request and its answer; GET the task",
+        "open QA preflight fail on the same record; screenshot once the read answers; press Confirm with Estimate (h) filled"
+      ],
+      "acceptance": [
+        {
+          "clause": "the dialog sends one GET to the filled URL and draws the panel: data-status loading, then ready with the declared Title and Status values",
+          "oracle": "dom",
+          "verify": "[data-testid=action-preflight-panel] under the heading 'Before you confirm'; data-status moves loading → ready; the panel shows the task's title and status; the network panel holds one GET /api/v1/data/showcase_task/ID (ui/packages/app-shell/src/views/ActionParamDialog.tsx#PreflightPanel)",
+          "evidence": "the two screenshots, the data-status values and the GET"
+        },
+        {
+          "clause": "the seeded param is drawn read-only with the answer's value under its own hint",
+          "oracle": "dom",
+          "verify": "Notes shows the task's title, is not editable, and carries 'Filled in by the check (read-only)' (ui/packages/i18n/src/locales/en.ts actionDialog.preflight.seededHint)",
+          "evidence": "the screenshot and the control's DOM"
+        },
+        {
+          "clause": "Confirm submits the typed and the seeded value, and the record holds both",
+          "oracle": "network",
+          "verify": "the dispatch carries estimate_hours 3 and notes equal to the title; the GET afterwards shows both written",
+          "evidence": "the dispatch request body and the GET"
+        },
+        {
+          "clause": "a failed read draws the error panel, leaves the seed empty, and Confirm does not run",
+          "oracle": "dom",
+          "verify": "data-status failed with 'This check could not be completed. The values it fills stay empty. Close this dialog and try again.'; Notes is empty; Confirm marks Notes required and sends no dispatch request",
+          "evidence": "the screenshot and the network panel after Confirm"
+        },
+        {
+          "clause": "the pins pass at the run subject sha: waiting for the params a URL reads, the stale answer dropped, the seed cleared on a URL change, refused and unbound blocks never read, and the panel's field labels resolved from the bundle",
+          "oracle": "test",
+          "verify": "run each file in automated.ref with its package's vitest; each reports ≥1 test and 0 failed",
+          "evidence": "the vitest summary line per file, with the subject sha"
+        }
+      ],
+      "negative": [
+        "a seeded param the user can type into is a FAIL: the answer fills it",
+        "a dispatch sent after a failed read is a FAIL",
+        "a panel that shows ready before the GET answers is a FAIL"
+      ],
+      "traps": [
+        "hydration-race",
+        "automation-input"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/app-shell/src/views/ActionParamDialog.preflight-31808.test.tsx, ui/packages/core/src/actions/__tests__/ActionRunner.preflightRead-31808.test.ts, ui/packages/i18n/src/__tests__/useObjectLabel-actionPreflight-31937.test.tsx; no live spec opens the dialog"
+      },
+      "source": [
+        "ui/packages/app-shell/src/views/ActionParamDialog.tsx#PreflightPanel",
+        "ui/packages/app-shell/src/views/ActionParamDialog.tsx#preflightHoleParams",
+        "packages/spec/src/system/i18n-resolver.ts#resolveActionPreflight (the bundle key objects.OBJECT._actions.ACTION.preflight.fields.PATH)",
+        "packages/rest/src/rest-server.ts#DATA_RECORD_READ_PARAMS",
+        "#31808",
+        "#31937"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — the console half of an action's `preflight` read (#31808) and its bundle labels (#31937). Scoped sweep #32269 (epic #32022 M3, theme 6: action preflight and page bindings), read from source at 9091955b; no live run made",
+          "ref": "#32269"
+        }
+      ]
+    },
+    {
+      "id": "records-forms.list-link-filter-refused-whole",
+      "title": "A list link whose filter names a field the reader cannot filter on is refused whole: the list opens on the view's own filter, the address bar loses uf__filter, and one notice says why",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), signed in through the form"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin`",
+          "two links to the showcase_task list, each with uf__filter set to the URL-encoded JSON envelope: GOOD = { logic: 'and', conditions: [{ field: 'priority', operator: 'equals', value: 'high' }] }; BAD = GOOD with a second condition { field: 'qa_ghost', operator: 'equals', value: 'x' } (a field the object does not declare)"
+        ]
+      },
+      "steps": [
+        "open /_console/apps/showcase_app/showcase_task?uf__filter=GOOD with the network panel recording; read the list query and the address bar",
+        "open /_console/apps/showcase_app/showcase_task?uf__filter=BAD; read the toast, the list query and the address bar"
+      ],
+      "acceptance": [
+        {
+          "clause": "a link whose every condition passes is applied as written, with no notice",
+          "oracle": "network",
+          "verify": "the list query carries a filter on priority = high; the address bar keeps uf__filter; no warning toast",
+          "evidence": "the list request and the URL"
+        },
+        {
+          "clause": "one condition the gate drops refuses the whole filter: the list query carries no filter at all",
+          "oracle": "network",
+          "verify": "the list request for BAD carries no filter (not even priority = high) (ui/packages/app-shell/src/views/objectViewListUrlState.ts#useObjectViewListUrlState)",
+          "evidence": "the list request"
+        },
+        {
+          "clause": "the address bar loses uf__filter and one warning says the link's filter was not applied",
+          "oracle": "dom",
+          "verify": "the URL has no uf__filter; one toast reads 'This link’s filter was not applied. It names a field you can’t filter on here, so the list shows the view without it.' (ui/packages/i18n/src/locales/en.ts console.objectView.linkFilterRefused)",
+          "evidence": "the URL and a screenshot with the toast"
+        },
+        {
+          "clause": "the pins pass at the run subject sha: an OR filter is refused whole too, and the reader's own stored filter keeps its per-entry drop with no notice",
+          "oracle": "test",
+          "verify": "run ui/packages/app-shell/src/views/ObjectView.listUrlState-11860.test.tsx with the app-shell vitest; it reports ≥1 test and 0 failed",
+          "evidence": "the vitest summary line, with the subject sha"
+        }
+      ],
+      "negative": [
+        "BAD opening on priority = high alone is a FAIL: a dropped AND condition widens the list without saying so",
+        "a second toast on a re-render is a FAIL: the notice is owed once"
+      ],
+      "traps": [
+        "hydration-race",
+        "shared-browser-tab"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/app-shell/src/views/ObjectView.listUrlState-11860.test.tsx (the link-filter-judged-whole cases); no live spec opens a list link"
+      },
+      "source": [
+        "ui/packages/app-shell/src/views/objectViewListUrlState.ts#useObjectViewListUrlState",
+        "ui/packages/app-shell/src/views/userFilterUrlState.ts#LIST_FILTER_PARAM",
+        "#31869"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — a list link's filter judged whole (#31869). Scoped sweep #32269 (epic #32022 M3, theme 7: AI data tools and MCP), read from source at 9091955b; no live run made",
+          "ref": "#32269"
+        }
+      ]
     }
   ]
 }
