@@ -317,10 +317,20 @@ export async function runRegisterSamlProviderFromForm(
     spMetadata: { entityID: spMetadataUrl },
   };
   if (identifierFormat) samlConfig.identifierFormat = identifierFormat;
-  // Same member as the OIDC form's: a SAML attribute name under
-  // `mapping.extraFields.groups`. Blank sends no mapping, as before.
-  const mapGroups = str(body?.mapGroups);
-  if (mapGroups) samlConfig.mapping = mappingWithGroupsClaim(undefined, mapGroups);
+  // Who a sign-in resolves to: the assertion attributes the vendor reads the
+  // user's email and name from (`mapping.email` / `firstName` / `lastName` /
+  // `name`, see "The attribute mapping" below), and, as on the OIDC form, the
+  // groups attribute under `mapping.extraFields.groups`. A blank field sends no
+  // member, so the vendor's default applies to it; a form with none of them
+  // sends no mapping, as before.
+  const attributes = mappingWithAttributes(undefined, {
+    email: str(body?.mapEmail),
+    firstName: str(body?.mapFirstName),
+    lastName: str(body?.mapLastName),
+    name: str(body?.mapName),
+  });
+  const mapping = mappingWithGroupsClaim(attributes, str(body?.mapGroups));
+  if (Object.keys(mapping).length > 0) samlConfig.mapping = mapping;
 
   const headers = forwardAuthHeaders(request, origin);
 
@@ -673,11 +683,17 @@ export function createEngineSsoProviderConfigReader(getEngine: () => SsoProvider
 
 type SsoGroupsClaimProtocol = 'oidc' | 'saml';
 
+/** A bridge's refusal, in the `{ success, error }` envelope every bridge here answers. */
+interface SsoBridgeRefusal {
+  status: number;
+  body: { success: false; error: { code: string; message: string } };
+}
+
 /** A provider's protocol and stored mapping, or why there is none. */
 async function readProviderMapping(
   read: SsoProviderConfigReader,
   providerId: string,
-): Promise<{ ok: true; protocol: SsoGroupsClaimProtocol; mapping: unknown } | { ok: false; refusal: SsoGroupsClaimResult }> {
+): Promise<{ ok: true; protocol: SsoGroupsClaimProtocol; mapping: unknown } | { ok: false; refusal: SsoBridgeRefusal }> {
   const stored = await read(providerId);
   if (!stored) {
     return { ok: false, refusal: { status: 404, body: { success: false, error: { code: 'RESOURCE_NOT_FOUND', message: `SSO provider "${providerId}" was not found.` } } } };
@@ -692,7 +708,7 @@ async function readProviderMapping(
     ok: false,
     refusal: {
       status: 400,
-      body: { success: false, error: { code: 'INVALID_REQUEST', message: `SSO provider "${providerId}" has no OIDC or SAML configuration to map groups in.` } },
+      body: { success: false, error: { code: 'INVALID_REQUEST', message: `SSO provider "${providerId}" has no OIDC or SAML configuration to map anything in.` } },
     },
   };
 }
@@ -778,4 +794,197 @@ export async function runSetSsoGroupsClaim(
   const saved = await readProviderMapping(read, providerId);
   if (!saved.ok) return saved.refusal;
   return { status: 200, body: { success: true, data: { providerId, groupsClaim: groupsClaimOfMapping(saved.mapping) } } };
+}
+
+
+// ── The attribute mapping (who a sign-in resolves to) ───────────────────────
+//
+// `@better-auth/sso` reads the user's email and name off the IdP's answer
+// through the provider's own `mapping` (measured on 1.7.12, `dist/index.mjs`):
+//
+//  - SAML: email = attribute `mapping.email` (default `email`), else the
+//    NameID; name = `mapping.firstName` (default `givenName`) + `mapping.lastName`
+//    (default `surname`), else `mapping.name` (default `displayName`), else the
+//    NameID. An IdP whose attribute names differ from those defaults — Okta's
+//    `name`, Entra ID's claim URIs (`http://schemas.xmlsoap.org/ws/2005/05/
+//    identity/claims/givenname`, …) — names every user after their NameID until
+//    the provider maps them.
+//  - OIDC: email = claim `mapping.email` (default `email`), name = claim
+//    `mapping.name` (default `name`). The OIDC mapping has no first/last-name
+//    member (`oidcMappingSchema` is strict).
+//
+// The register forms write these members; the two bridges below show and change
+// them on a provider that already exists, the way the groups-claim bridges show
+// and change `extraFields.groups`, and for the same reasons: the stored blob is
+// `internal`, `/sso/get-provider` answers no mapping, and `/sso/update-provider`
+// replaces the whole mapping it is handed — so the set bridge hands it the
+// stored mapping with only the members it was given changed (`extraFields`,
+// `emailVerified` and `image` are carried as stored).
+//
+// The email member decides which local account a signed assertion is linked to
+// (account linking is by email), so both bridges are platform-admin gated, as
+// the register forms are, and the edit is not offered to an AI caller.
+
+/** One member of an attribute mapping the bridges below show and change. */
+export type SsoAttributeMappingMember = 'email' | 'firstName' | 'lastName' | 'name';
+
+/**
+ * The members each protocol's mapping carries, in display order — the vendor's
+ * own `samlMappingSchema` / `oidcMappingSchema` members for the user's email
+ * and name.
+ */
+export const SSO_ATTRIBUTE_MAPPING_MEMBERS: Readonly<Record<SsoGroupsClaimProtocol, readonly SsoAttributeMappingMember[]>> = {
+  saml: ['email', 'firstName', 'lastName', 'name'],
+  oidc: ['email', 'name'],
+};
+
+const ALL_ATTRIBUTE_MEMBERS = SSO_ATTRIBUTE_MAPPING_MEMBERS.saml;
+
+/**
+ * `mapping` with the given members set, or removed where the value is blank. A
+ * copy: a member not named in `attributes`, and every other member of the
+ * mapping (`extraFields`, `emailVerified`, `image`), is kept as it was.
+ */
+export function mappingWithAttributes(
+  mapping: unknown,
+  attributes: Partial<Record<SsoAttributeMappingMember, string>>,
+): Record<string, unknown> {
+  const next: Record<string, unknown> = isPlainObject(mapping) ? { ...mapping } : {};
+  for (const member of ALL_ATTRIBUTE_MEMBERS) {
+    if (!(member in attributes)) continue;
+    const value = attributes[member]?.trim() ?? '';
+    if (value) next[member] = value;
+    else delete next[member];
+  }
+  return next;
+}
+
+/** The email and name members a stored mapping names, `null` for each it leaves to the vendor's default. */
+export interface SsoAttributeMapping {
+  email: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  name: string | null;
+}
+
+/** Read the attribute members off a stored mapping; a member the protocol does not carry reads `null`. */
+export function attributeMappingOf(mapping: unknown, protocol: SsoGroupsClaimProtocol): SsoAttributeMapping {
+  const carried = new Set(SSO_ATTRIBUTE_MAPPING_MEMBERS[protocol]);
+  const read = (member: SsoAttributeMappingMember): string | null => {
+    const value = carried.has(member) && isPlainObject(mapping) ? mapping[member] : undefined;
+    return typeof value === 'string' && value.trim() !== '' ? value : null;
+  };
+  return { email: read('email'), firstName: read('firstName'), lastName: read('lastName'), name: read('name') };
+}
+
+/** The two attribute-mapping bridges' answer: the provider, its protocol and its mapped members, nothing else. */
+export interface SsoAttributeMappingResult {
+  status: number;
+  body: {
+    success: boolean;
+    data?: { providerId: string; protocol: SsoGroupsClaimProtocol } & SsoAttributeMapping;
+    error?: { code: string; message: string };
+  };
+}
+
+const invalidAttributeMapping = (message: string): SsoBridgeRefusal => ({
+  status: 400,
+  body: { success: false, error: { code: 'INVALID_REQUEST', message } },
+});
+
+/** The body both bridges read: `providerId`, and for the set bridge the members to change. */
+async function readAttributeMappingBody(
+  request: Request,
+): Promise<{ ok: true; providerId: string; body: Record<string, unknown> } | { ok: false; refusal: SsoBridgeRefusal }> {
+  const read = await readFormBody(request);
+  if (!read.ok) return { ok: false, refusal: read.refusal as SsoBridgeRefusal };
+  const body: Record<string, unknown> = isPlainObject(read.body) ? read.body : {};
+  const providerId = typeof body.providerId === 'string' ? body.providerId.trim() : '';
+  if (!providerId) return { ok: false, refusal: invalidAttributeMapping('Missing required field: providerId') };
+  return { ok: true, providerId, body };
+}
+
+/**
+ * Show a provider's attribute mapping. Body: `{ providerId }`. Answers
+ * `{ providerId, protocol, email, firstName, lastName, name }`, each member
+ * `null` where the provider leaves it to the vendor's default (and
+ * `firstName` / `lastName` always `null` for OIDC); `404 RESOURCE_NOT_FOUND`
+ * for an unknown provider.
+ */
+export async function runShowSsoAttributeMapping(request: Request, read: SsoProviderConfigReader): Promise<SsoAttributeMappingResult> {
+  const body = await readAttributeMappingBody(request);
+  if (!body.ok) return body.refusal;
+  const stored = await readProviderMapping(read, body.providerId);
+  if (!stored.ok) return stored.refusal;
+  return {
+    status: 200,
+    body: { success: true, data: { providerId: body.providerId, protocol: stored.protocol, ...attributeMappingOf(stored.mapping, stored.protocol) } },
+  };
+}
+
+/**
+ * Change a provider's attribute mapping. Body: `{ providerId, email?,
+ * firstName?, lastName?, name? }`, each the IdP attribute (SAML) or claim
+ * (OIDC) name. A member that is absent or `null` keeps its stored value; a
+ * blank one is removed, so the vendor's default applies to it again; at least
+ * one member must be given. `firstName` / `lastName` on an OIDC provider are
+ * refused (its mapping has no such member). Writes through the vendor's own
+ * `/sso/update-provider`, handing it the stored mapping with only those members
+ * changed, and answers the mapping now stored, read back.
+ */
+export async function runSetSsoAttributeMapping(
+  handle: AuthRequestHandler,
+  request: Request,
+  read: SsoProviderConfigReader,
+): Promise<SsoAttributeMappingResult> {
+  const parsed = await readAttributeMappingBody(request);
+  if (!parsed.ok) return parsed.refusal;
+  const { providerId, body } = parsed;
+
+  const given: Partial<Record<SsoAttributeMappingMember, string>> = {};
+  for (const member of ALL_ATTRIBUTE_MEMBERS) {
+    const value = body[member];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== 'string') {
+      return invalidAttributeMapping(`${member} must be text: the name of the IdP attribute or claim it is read from.`);
+    }
+    given[member] = value;
+  }
+  if (Object.keys(given).length === 0) {
+    return invalidAttributeMapping('Nothing to change: give at least one of email, firstName, lastName or name.');
+  }
+
+  const stored = await readProviderMapping(read, providerId);
+  if (!stored.ok) return stored.refusal;
+  const carried = new Set(SSO_ATTRIBUTE_MAPPING_MEMBERS[stored.protocol]);
+  const foreign = Object.keys(given).filter((member) => !carried.has(member as SsoAttributeMappingMember));
+  if (foreign.length > 0) {
+    return invalidAttributeMapping(
+      `SSO provider "${providerId}" is an OIDC provider, whose mapping reads the user's name from one claim: map "name", not ${foreign.join(' or ')}.`,
+    );
+  }
+
+  const rw = rewriteSsoAdminUrl(request, /\/admin\/sso\/set-attribute-mapping$/, '/sso/update-provider');
+  if (!rw) return invalidAttributeMapping('Bad request URL');
+  const headers = forwardAuthHeaders(request, rw.origin);
+  const configKey = stored.protocol === 'saml' ? 'samlConfig' : 'oidcConfig';
+  const update = { providerId, [configKey]: { mapping: mappingWithAttributes(stored.mapping, given) } };
+
+  // [#22398] As for the groups claim: only the inner route's status comes back,
+  // never its body, which can describe the stored configuration.
+  const resp = await handle(new Request(inProcessRedispatchUrl(rw.innerUrl, headers), { method: 'POST', headers, body: JSON.stringify(update) }));
+  await resp.text().catch(() => '');
+  if (!resp.ok) {
+    return {
+      status: resp.status,
+      body: { success: false, error: { code: standardErrorCodeForHttpStatus(resp.status), message: `The attribute mapping of SSO provider "${providerId}" was not saved: the provider update was refused (HTTP ${resp.status}).` } },
+    };
+  }
+
+  const saved = await readProviderMapping(read, providerId);
+  if (!saved.ok) return saved.refusal;
+  return {
+    status: 200,
+    body: { success: true, data: { providerId, protocol: saved.protocol, ...attributeMappingOf(saved.mapping, saved.protocol) } },
+  };
 }

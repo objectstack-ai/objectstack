@@ -43,7 +43,8 @@
  */
 
 import { INTERNAL_ERROR_MESSAGE, declaresServerFault, looksLikeInternalErrorLeak } from '@objectstack/types';
-import type { GetMetaItemsRequest } from '@objectstack/spec/api';
+import { PackageScopedNameRefusedError } from '@objectstack/core';
+import type { GetMetaItemRequest } from '@objectstack/spec/api';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import {
     boundedDeclaredUserMessage,
@@ -60,7 +61,7 @@ import { datasetSelectionRefusal } from './analytics-selection-door.js';
 import { datasetQueryBodyRefusal } from './analytics-dataset-body-door.js';
 import { logError } from './log.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
-import { mayReadPendingDrafts, type RestServer } from './rest-server.js';
+import { mayReadPendingDrafts, metaItemPackageBinding, type RestServer } from './rest-server.js';
 
 /**
  * The `RestServer` members {@link registerAnalyticsEndpoints} reads — every
@@ -180,7 +181,9 @@ export function registerAnalyticsEndpoints(this: AnalyticsRouteHost, basePath: s
                 // [#6877] A repeated `?preview=draft&preview=draft` stopped
                 // equalling `'draft'`, so the Studio preview silently ran
                 // over PUBLISHED rows and looked like the draft had no data.
-                if (refuseRepeatedQueryParams(req, res, ['preview'])) return;
+                // [#32072] …and `?package=`, the exact qualifier below, for
+                // the same reason: a repeated value names no one package.
+                if (refuseRepeatedQueryParams(req, res, ['preview', 'package'])) return;
                 // [#20338] …for a caller who may read drafts: both halves
                 // serve unpublished work (a draft definition, a pending
                 // seed's rows). Anyone else runs over the published
@@ -195,7 +198,44 @@ export function registerAnalyticsEndpoints(this: AnalyticsRouteHost, basePath: s
                 let dataset = body.dataset;
                 if (!dataset && body.datasetName) {
                     const p = await this.resolveProtocol(environmentId, req);
-                    const datasetRequest: GetMetaItemsRequest = { type: 'dataset', previewDrafts };
+                    // [#32072, ADR-0150 D3/D5] The saved dataset is read BY
+                    // NAME, through the protocol's one by-name read, never
+                    // picked out of the list. `dataset` is one of the types
+                    // whose by-name readers consult `(package, name)`
+                    // (`PACKAGE_SCOPED_READ_TYPES`, objectql), so that read is
+                    // the package-scoped resolver's:
+                    //  - a bare name is a caller with no package: the
+                    //    environment's own item, else the one package holder;
+                    //    a name two packages hold is refused naming both
+                    //    (`409 RESOURCE_CONFLICT`). The `list.find` that stood
+                    //    here served the first one listed;
+                    //  - `?package=X` is the exact qualifier `/meta` reads
+                    //    under the same name ({@link metaItemPackageBinding}):
+                    //    X's dataset, or a refusal naming its holders — never
+                    //    another package's, and not a dependency closure.
+                    // With one holder the item is the one the list carried, so
+                    // the answer does not move (step-0 reading: every saved
+                    // dataset of the booted showcase, byte for byte).
+                    //
+                    // A protocol with no by-name read has no resolver to ask,
+                    // so the door fails CLOSED: `503`, never a first match
+                    // (epic ruling 6729233545).
+                    if (typeof p?.getMetaItem !== 'function') {
+                        throw Object.assign(
+                            new Error(
+                                `The dataset "${body.datasetName}" could not be resolved: this deployment's metadata `
+                                + 'protocol has no by-name read. This is a server-side fault, not a missing dataset.',
+                            ),
+                            { code: 'SERVICE_UNAVAILABLE', status: 503, refusal: true },
+                        );
+                    }
+                    const packageId = metaItemPackageBinding(req.query?.package);
+                    const datasetRequest: GetMetaItemRequest = {
+                        type: 'dataset',
+                        name: body.datasetName,
+                        ...(packageId !== undefined ? { packageId } : {}),
+                        ...(previewDrafts ? { previewDrafts } : {}),
+                    };
                     // [#31774] A read that FAILED is not a read that came
                     // back without the name. The `.catch(() => null)` that
                     // stood here turned a metadata-store outage into an
@@ -217,12 +257,20 @@ export function registerAnalyticsEndpoints(this: AnalyticsRouteHost, basePath: s
                     // caller, through that arm.
                     //
                     // Unchanged: a read that succeeds without the name is the
-                    // `404` below, and a protocol with no `getMetaItems` at
-                    // all reads no list and answers that same `404`.
-                    let items: any;
+                    // `404` below. [#32072] The resolver's refusal is not a
+                    // failed read: it is rethrown as thrown, a declared
+                    // `409 RESOURCE_CONFLICT` naming every candidate, which
+                    // the catch below answers through its ADR-0112 arm. It is
+                    // told apart by class OR by shape, the `/meta`
+                    // dispatcher's predicate ({@link isPackageScopedRefusal}),
+                    // so a refusal from another copy of `@objectstack/core`
+                    // is still a 409 and never a 503.
+                    let read: any;
                     try {
-                        items = await p.getMetaItems?.(datasetRequest);
+                        read = await p.getMetaItem(datasetRequest);
                     } catch (readError) {
+                        if (readError instanceof PackageScopedNameRefusedError) throw readError;
+                        if (isPackageScopedRefusal(readError)) throw new PackageScopedNameRefusedError(readError.refusal);
                         throw Object.assign(
                             new Error(
                                 `The dataset "${body.datasetName}" could not be resolved: the dataset read failed. `
@@ -231,8 +279,7 @@ export function registerAnalyticsEndpoints(this: AnalyticsRouteHost, basePath: s
                             { code: 'SERVICE_UNAVAILABLE', status: 503, refusal: true, cause: readError },
                         );
                     }
-                    const list = Array.isArray(items?.items) ? items.items : (Array.isArray(items) ? items : []);
-                    dataset = list.find((d: any) => d?.name === body.datasetName);
+                    dataset = read?.item;
                     if (!dataset) {
                         return res.status(404).json({ code: 'NOT_FOUND', message: `Dataset "${body.datasetName}" not found.` });
                     }
@@ -602,4 +649,17 @@ export function registerAnalyticsEndpoints(this: AnalyticsRouteHost, basePath: s
         },
         metadata: { summary: 'Run a semantic-layer dataset (preview/query)', tags: ['analytics'] },
     });
+}
+
+/**
+ * [#32072] A package-scoped resolver's refusal, by class or by shape: `code`
+ * `RESOURCE_CONFLICT` with a `refusal` whose `status` is `'refused'`. The same
+ * predicate the `/meta` dispatcher reads (`isPackageScopedRefusal` in
+ * `@objectstack/runtime`'s `domains/meta.ts`), so one refusal is a 409 at both
+ * doors whichever copy of the class threw it.
+ */
+function isPackageScopedRefusal(e: unknown): e is { code: 'RESOURCE_CONFLICT'; refusal: PackageScopedNameRefusedError['refusal'] } {
+    if (e instanceof PackageScopedNameRefusedError) return true;
+    const thrown = e as { code?: unknown; refusal?: { status?: unknown } } | null | undefined;
+    return thrown?.code === 'RESOURCE_CONFLICT' && thrown.refusal?.status === 'refused';
 }
