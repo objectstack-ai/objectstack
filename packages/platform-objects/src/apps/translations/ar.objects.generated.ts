@@ -2208,6 +2208,26 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
             helpText: "اختياري. تنسيق NameID المطلوب في SAML. القيمة الافتراضية هي التنسيق المُهيَّأ لدى مزوّد الهوية.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          mapEmail: {
+            label: "التعيين: سمة البريد الإلكتروني",
+            helpText: "اختياري. سمة التأكيد المعيَّنة لبريد المستخدم الإلكتروني. القيمة الافتراضية \"email\"، ثم NameID. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          mapFirstName: {
+            label: "التعيين: سمة الاسم الأول",
+            helpText: "اختياري. سمة التأكيد المعيَّنة للاسم الأول للمستخدم. القيمة الافتراضية \"givenName\". Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          mapLastName: {
+            label: "التعيين: سمة اسم العائلة",
+            helpText: "اختياري. سمة التأكيد المعيَّنة لاسم عائلة المستخدم. القيمة الافتراضية \"surname\". Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          mapName: {
+            label: "التعيين: سمة الاسم المعروض",
+            helpText: "اختياري. سمة التأكيد المعيَّنة للاسم الكامل للمستخدم، وتُستخدم عند غياب سمتي الاسم الأول واسم العائلة. القيمة الافتراضية \"displayName\"، ثم NameID. Okta: name. Entra ID: http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          },
           mapGroups: {
             label: "التعيين: سمة المجموعات",
             helpText: "اختياري. سمة التأكيد التي تحمل مجموعات المستخدم. يمنح كل تسجيل دخول مجموعات الأذونات المعيَّنة لتلك المجموعات. اتركه فارغًا لعدم تعيين أي مجموعات.",
@@ -2267,6 +2287,57 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "تم",
           fields: {
             groupsClaim: "مطالبة المجموعات"
+          }
+        }
+      },
+      show_sso_attribute_mapping: {
+        label: "عرض تعيين السمات",
+        resultDialog: {
+          title: "تعيين السمات",
+          description: "سمات مزوّد الهوية (SAML) أو المطالبات (OIDC) التي يقرأ منها هذا الموفّر البريد الإلكتروني للمستخدم واسمه عند كل تسجيل دخول. القيمة الفارغة تعني الافتراضي: البريد من \"email\" (SAML: ثم NameID)؛ والاسم من \"givenName\" + \"surname\"، ثم \"displayName\" (OIDC: \"name\"). ينطبق الاسم الأول واسم العائلة على SAML فقط. غيّره عبر \"تعديل تعيين السمات\".",
+          acknowledge: "تم",
+          fields: {
+            protocol: "البروتوكول",
+            email: "البريد الإلكتروني",
+            firstName: "الاسم الأول",
+            lastName: "اسم العائلة",
+            name: "الاسم المعروض"
+          }
+        }
+      },
+      edit_sso_attribute_mapping: {
+        label: "تعديل تعيين السمات",
+        params: {
+          email: {
+            label: "سمة البريد الإلكتروني",
+            helpText: "سمة مزوّد الهوية أو المطالبة المعيَّنة لبريد المستخدم الإلكتروني. اتركها دون تغيير للإبقاء على القيمة الحالية؛ امسحها للعودة إلى الافتراضي (\"email\"). Entra ID SAML: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          firstName: {
+            label: "سمة الاسم الأول (SAML)",
+            helpText: "SAML فقط. سمة التأكيد المعيَّنة للاسم الأول للمستخدم. اتركها دون تغيير للإبقاء على القيمة الحالية. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          lastName: {
+            label: "سمة اسم العائلة (SAML)",
+            helpText: "SAML فقط. سمة التأكيد المعيَّنة لاسم عائلة المستخدم. اتركها دون تغيير للإبقاء على القيمة الحالية. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          name: {
+            label: "سمة الاسم المعروض",
+            helpText: "سمة مزوّد الهوية أو المطالبة المعيَّنة للاسم الكامل للمستخدم (SAML: تُستخدم عند غياب الاسم الأول واسم العائلة). اتركها دون تغيير للإبقاء على القيمة الحالية. Okta SAML: name. Entra ID: http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          }
+        },
+        resultDialog: {
+          title: "تم حفظ تعيين السمات",
+          description: "السمات أو المطالبات التي يقرأ منها هذا الموفّر الآن البريد الإلكتروني للمستخدم واسمه عند كل تسجيل دخول. القيمة الفارغة تعني تطبيق الافتراضي.",
+          acknowledge: "تم",
+          fields: {
+            email: "البريد الإلكتروني",
+            firstName: "الاسم الأول",
+            lastName: "اسم العائلة",
+            name: "الاسم المعروض"
           }
         }
       }

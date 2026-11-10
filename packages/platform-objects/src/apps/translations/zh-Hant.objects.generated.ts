@@ -2208,6 +2208,26 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
             helpText: "可選。請求的 SAML NameID 格式。預設為 IdP 設定的格式。",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          mapEmail: {
+            label: "對應：電子郵件屬性",
+            helpText: "可選。對應到使用者電子郵件的斷言屬性。預設為「email」，其次為 NameID。Entra ID：http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          mapFirstName: {
+            label: "對應：名字屬性",
+            helpText: "可選。對應到使用者名字的斷言屬性。預設為「givenName」。Entra ID：http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          mapLastName: {
+            label: "對應：姓氏屬性",
+            helpText: "可選。對應到使用者姓氏的斷言屬性。預設為「surname」。Entra ID：http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          mapName: {
+            label: "對應：顯示名稱屬性",
+            helpText: "可選。對應到使用者全名的斷言屬性，在缺少名字與姓氏屬性時使用。預設為「displayName」，其次為 NameID。Okta：name。Entra ID：http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          },
           mapGroups: {
             label: "對應：群組屬性",
             helpText: "可選。攜帶使用者所屬群組的斷言屬性。每次登入都會授予對應到這些群組的權限集。留空則不對應任何群組。",
@@ -2267,6 +2287,57 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "完成",
           fields: {
             groupsClaim: "群組 claim"
+          }
+        }
+      },
+      show_sso_attribute_mapping: {
+        label: "檢視屬性對應",
+        resultDialog: {
+          title: "屬性對應",
+          description: "此提供者在每次登入時讀取使用者電子郵件與姓名所用的 IdP 屬性（SAML）或 claim（OIDC）。空白表示使用預設值：電子郵件取自「email」（SAML 其次為 NameID）；姓名取自「givenName」+「surname」，其次為「displayName」（OIDC 為「name」）。名字與姓氏僅適用於 SAML。可透過「編輯屬性對應」變更。",
+          acknowledge: "完成",
+          fields: {
+            protocol: "通訊協定",
+            email: "電子郵件",
+            firstName: "名字",
+            lastName: "姓氏",
+            name: "顯示名稱"
+          }
+        }
+      },
+      edit_sso_attribute_mapping: {
+        label: "編輯屬性對應",
+        params: {
+          email: {
+            label: "電子郵件屬性",
+            helpText: "對應到使用者電子郵件的 IdP 屬性或 claim。不變更則保留目前的值；清空則恢復預設值（「email」）。Entra ID SAML：http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          firstName: {
+            label: "名字屬性（SAML）",
+            helpText: "僅限 SAML。對應到使用者名字的斷言屬性。不變更則保留目前的值。Entra ID：http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          lastName: {
+            label: "姓氏屬性（SAML）",
+            helpText: "僅限 SAML。對應到使用者姓氏的斷言屬性。不變更則保留目前的值。Entra ID：http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          name: {
+            label: "顯示名稱屬性",
+            helpText: "對應到使用者全名的 IdP 屬性或 claim（SAML：在缺少名字與姓氏時使用）。不變更則保留目前的值。Okta SAML：name。Entra ID：http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          }
+        },
+        resultDialog: {
+          title: "屬性對應已儲存",
+          description: "此提供者此後每次登入時讀取使用者電子郵件與姓名所用的屬性或 claim。空白表示使用預設值。",
+          acknowledge: "完成",
+          fields: {
+            email: "電子郵件",
+            firstName: "名字",
+            lastName: "姓氏",
+            name: "顯示名稱"
           }
         }
       }

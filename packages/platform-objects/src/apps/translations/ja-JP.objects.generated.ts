@@ -2208,6 +2208,26 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
             helpText: "任意。要求する SAML NameID フォーマット。既定では IdP に設定されたフォーマットを使用します。",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          mapEmail: {
+            label: "マッピング: メール属性",
+            helpText: "任意。ユーザーのメールアドレスにマッピングするアサーション属性です。既定は「email」、なければ NameID です。Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          mapFirstName: {
+            label: "マッピング: 名属性",
+            helpText: "任意。ユーザーの名にマッピングするアサーション属性です。既定は「givenName」です。Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          mapLastName: {
+            label: "マッピング: 姓属性",
+            helpText: "任意。ユーザーの姓にマッピングするアサーション属性です。既定は「surname」です。Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          mapName: {
+            label: "マッピング: 表示名属性",
+            helpText: "任意。ユーザーのフルネームにマッピングするアサーション属性で、名と姓の属性がない場合に使われます。既定は「displayName」、なければ NameID です。Okta: name。Entra ID: http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          },
           mapGroups: {
             label: "マッピング: グループ属性",
             helpText: "任意。ユーザーのグループを含むアサーション属性。サインインのたびに、それらのグループにマッピングされた権限セットが付与されます。空欄の場合、グループはマッピングされません。",
@@ -2267,6 +2287,57 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "完了",
           fields: {
             groupsClaim: "グループクレーム"
+          }
+        }
+      },
+      show_sso_attribute_mapping: {
+        label: "属性マッピングを表示",
+        resultDialog: {
+          title: "属性マッピング",
+          description: "このプロバイダーがサインインのたびにユーザーのメールアドレスと名前を読み取る IdP 属性（SAML）またはクレーム（OIDC）です。空の場合は既定値が使われます: メールアドレスは「email」（SAML ではなければ NameID）、名前は「givenName」+「surname」、なければ「displayName」（OIDC では「name」）。名と姓は SAML にのみ適用されます。「属性マッピングを編集」で変更できます。",
+          acknowledge: "完了",
+          fields: {
+            protocol: "プロトコル",
+            email: "メール",
+            firstName: "名",
+            lastName: "姓",
+            name: "表示名"
+          }
+        }
+      },
+      edit_sso_attribute_mapping: {
+        label: "属性マッピングを編集",
+        params: {
+          email: {
+            label: "メール属性",
+            helpText: "ユーザーのメールアドレスにマッピングする IdP 属性またはクレームです。変更しなければ現在の値が保持されます。空にすると既定値（「email」）に戻ります。Entra ID SAML: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          firstName: {
+            label: "名属性 (SAML)",
+            helpText: "SAML のみ。ユーザーの名にマッピングするアサーション属性です。変更しなければ現在の値が保持されます。Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          lastName: {
+            label: "姓属性 (SAML)",
+            helpText: "SAML のみ。ユーザーの姓にマッピングするアサーション属性です。変更しなければ現在の値が保持されます。Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          name: {
+            label: "表示名属性",
+            helpText: "ユーザーのフルネームにマッピングする IdP 属性またはクレームです（SAML: 名と姓がない場合に使用）。変更しなければ現在の値が保持されます。Okta SAML: name。Entra ID: http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          }
+        },
+        resultDialog: {
+          title: "属性マッピングを保存しました",
+          description: "このプロバイダーが今後サインインのたびにユーザーのメールアドレスと名前を読み取る属性またはクレームです。空の場合は既定値が使われます。",
+          acknowledge: "完了",
+          fields: {
+            email: "メール",
+            firstName: "名",
+            lastName: "姓",
+            name: "表示名"
           }
         }
       }
