@@ -5,7 +5,7 @@
 
 feat(ui): a dashboard render sends its dataset queries as one batch request
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 A dashboard used to send one `POST /api/v1/analytics/dataset/query` per dataset-bound widget. It now sends the queries one render asks as one `POST /api/v1/analytics/dataset/query/batch` per package, through the batch door `@objectstack/rest` serves. Nothing to author and nothing to change in a host.
