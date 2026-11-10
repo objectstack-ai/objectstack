@@ -348,20 +348,24 @@ function organizationOf(context: unknown): string | undefined {
  * refuses the pull here, before anything is read.
  */
 async function openSyncRun(deps: ConnectorPullDeps, opts: ConnectorPullOptions): Promise<SyncRunHandle> {
-    const scope: SyncRunScope = { mapping: opts.mapping, organizationId: organizationOf(opts.context) };
+    const requested: SyncRunScope = { mapping: opts.mapping, organizationId: organizationOf(opts.context) };
     const progress: SyncRunCounts = { read: 0, created: 0, updated: 0, refused: 0 };
     const ledger = deps.runs;
     if (!ledger) {
         return {
-            id: undefined, scope, progress,
+            id: undefined, scope: requested, progress,
             describe: async () => {},
             lastCommitted: async () => undefined,
             commit: async () => {},
         };
     }
     let id: string;
+    let scope: SyncRunScope;
     try {
-        id = await ledger.open(scope, new Date());
+        const opened = await ledger.open(requested, new Date());
+        id = opened.id;
+        // The run is scoped by the organization its row holds, not the one asked for.
+        scope = { mapping: opts.mapping, ...(opened.organizationId ? { organizationId: opened.organizationId } : {}) };
     } catch {
         // The engine's own message may name the row it was handed.
         throw new ConnectorPullError(

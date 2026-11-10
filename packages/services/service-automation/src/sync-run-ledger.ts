@@ -72,10 +72,22 @@ export interface SyncRunScope {
     organizationId?: string;
 }
 
+/** A run as {@link SyncRunLedger.open} wrote it. */
+export interface SyncRunOpened {
+    id: string;
+    /**
+     * The organization the row was STORED with, which every later read and
+     * write of the run is scoped by: the engine may stamp one the writer did
+     * not send (under `single`, the Default Organization, ADR-0131 D10), and a
+     * scope re-derived from the job's context would then miss the row.
+     */
+    organizationId?: string;
+}
+
 /** The run record's store. {@link ObjectStoreSyncRunLedger} is the one implementation. */
 export interface SyncRunLedger {
-    /** Write a `running` row and answer its id. */
-    open(scope: SyncRunScope, startedAt: Date): Promise<string>;
+    /** Write a `running` row; answer its id and the organization it was stored with. */
+    open(scope: SyncRunScope, startedAt: Date): Promise<SyncRunOpened>;
     /** Say what the run reads, once the mapping's source is known. */
     describe(runId: string, description: SyncRunDescription): Promise<void>;
     /** The position the latest committed run of `scope` stored, if any. */
@@ -133,7 +145,7 @@ const text = (v: unknown): string | undefined => (typeof v === 'string' && v.len
 export class ObjectStoreSyncRunLedger implements SyncRunLedger {
     constructor(private readonly engine: SyncRunLedgerEngine) {}
 
-    async open(scope: SyncRunScope, startedAt: Date): Promise<string> {
+    async open(scope: SyncRunScope, startedAt: Date): Promise<SyncRunOpened> {
         const id = nextSyncRunId();
         await this.engine.insert(SYNC_RUN_OBJECT, {
             id,
@@ -147,7 +159,13 @@ export class ObjectStoreSyncRunLedger implements SyncRunLedger {
             refused_count: 0,
             holds_position: false,
         }, { context: SYSTEM_CONTEXT });
-        return id;
+        // Read back the organization the row holds: the one the run is scoped by.
+        const stored = rowsOf(await this.engine.find(SYNC_RUN_OBJECT, {
+            where: { id }, fields: ['id', 'organization_id'], limit: 1, context: SYSTEM_CONTEXT,
+        }))[0];
+        if (!stored) throw new Error(`${SYNC_RUN_OBJECT}: the run row ${id} was not found after it was written`);
+        const organizationId = text(stored.organization_id);
+        return { id, ...(organizationId ? { organizationId } : {}) };
     }
 
     async describe(runId: string, d: SyncRunDescription): Promise<void> {
