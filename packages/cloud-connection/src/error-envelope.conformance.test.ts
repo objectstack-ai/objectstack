@@ -61,6 +61,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+// The install-local plugin reaches `@objectstack/runtime` through a lazy `import()`;
+// its first load is paid here, at module top, never inside a clocked `it`.
+import '@objectstack/runtime';
 import { BaseResponseSchema, ApiErrorSchema, envelopeViolations } from '@objectstack/spec/api';
 import { CloudConnectionPlugin } from './cloud-connection-plugin.js';
 import { MarketplaceProxyPlugin } from './marketplace-proxy-plugin.js';
