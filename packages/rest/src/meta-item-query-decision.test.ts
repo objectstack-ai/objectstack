@@ -16,6 +16,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// The route modules load ObjectQL lazily; pay that load at collection, never in a clocked case.
+import '@objectstack/objectql';
 // `.js` on purpose — NodeNext resolution requires the extension.
 import {
     META_ITEM_LAYERS_PARAMS,

@@ -27,6 +27,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// The dispatcher's package store loads the metadata service lazily; pay that load at collection, never in a clocked case.
+import '@objectstack/metadata';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from '@objectstack/rest';
 import { HttpDispatcher } from '../http-dispatcher.js';
