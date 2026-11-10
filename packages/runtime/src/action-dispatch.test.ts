@@ -25,6 +25,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { actionsDoorAnswerOf } from '@objectstack/types';
+import { assertEngineFindOnePredicate } from '@objectstack/objectql';
 
 import { HttpDispatcher } from './http-dispatcher.js';
 import { callData, invokeBusinessAction } from './action-execution.js';
@@ -70,7 +71,7 @@ function makeRig(actions: any[], opts: RigOptions = {}) {
         describeDisabledAction: (name: string) => `The action '${name}' is turned off for this deployment.`,
         listRegisteredActions: () => actions.map((a) => ({ objectName: OBJECT, actionName: a.target ?? a.name })),
         find: vi.fn(async () => []),
-        findOne: vi.fn(async () => null),
+        findOne: vi.fn(async (object: string, query: any) => { assertEngineFindOnePredicate(object, query); return null; }),
         insert: vi.fn(), update: vi.fn(), delete: vi.fn(),
     };
     const metadata: any = {

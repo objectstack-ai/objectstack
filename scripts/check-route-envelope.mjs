@@ -1027,9 +1027,14 @@ const DISPATCHER_DOMAINS = {
   // `deps.error` takes headers, so each spreads the helper's own envelope and
   // adds `headers` (since #27738 an enveloped non-2xx refusal is built by
   // `apiErrorResponse`, which takes none either, and is spread the same way).
+  //
+  // [#31923] 3 → 1: the two api-forward relays moved, with the rest of the
+  // admitted sequence, to `src/action-dispatch.ts` (`restAnswerOf`), which
+  // the REST door, MCP `run_action` and `dispatchAction` share. They are
+  // still spreads of `deps.success` / `apiErrorResponse` / `deps.error`.
   'actions.ts': {
-    handBuilt: 3,
-    note: 'one 405 for every verb but POST, which must carry an `Allow:` header (`deps.error` takes none); and the two answers of the same-origin api forward — the 2xx relay (`deps.success` spread) and the non-2xx relay (`apiErrorResponse` for an enveloped refusal, else `deps.error`, spread) — which must carry the target\'s Set-Cookie / set-auth-token / set-admin-session-token headers (neither helper takes any); every body is the helper\'s own declared envelope',
+    handBuilt: 1,
+    note: 'one 405 for every verb but POST, which must carry an `Allow:` header (`deps.error` takes none); the api-forward relays live in `src/action-dispatch.ts` since #31923; every body is the helper\'s own declared envelope',
   },
   // [#12160] Not a domain either — the ADR-0126 §5 activation write-authority
   // gates, shared by the `/automation` toggle door, the `/actions` activation
