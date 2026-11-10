@@ -1,9 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * A read-only value the caller sent on create, that a `beforeInsert` hook
- * stamped over, is reported under `droppedFields` reason `readonly` — the
- * report the static strip gives the same value when no hook stamps it.
+ * An audit column the caller sent on create, that the audit binder stamped
+ * over, is reported under `droppedFields` reason `readonly` — as an update
+ * already reports the same forgery. Any other read-only key an app's hook
+ * assigns stays the hook's write and is not reported; that half is pinned in
+ * `engine-insert-readonly-hook-input.test.ts` and
+ * `engine-per-row-dropped-fields.test.ts`, unchanged.
  *
  * The platform's own case is `created_by`: the audit binder stamps it from the
  * session, so a forged value was stored as the caller's id with no report,
@@ -24,7 +27,7 @@ import { ObjectQL } from './engine.js';
 
 const REAL_USER = 'real_user';
 
-describe('insert: a read-only value a hook stamped over is reported, not lost silently', () => {
+describe('insert: an audit column the audit binder stamped over is reported, not lost silently', () => {
   let kernel: ObjectKernel;
 
   beforeEach(() => {
@@ -89,6 +92,13 @@ describe('insert: a read-only value a hook stamped over is reported, not lost si
     const dropped = await create(objectql, { title: 'b', created_by: REAL_USER });
     expect(captured.at(-1)!.created_by).toBe(REAL_USER);
     expect(dropped).toEqual([]);
+  });
+
+  it('the rest of the audit family behaves the same way: a forged created_at is stamped and reported', async () => {
+    const { objectql, captured } = await boot();
+    const dropped = await create(objectql, { title: 'a2', created_at: '1999-01-01T00:00:00.000Z' });
+    expect(captured.at(-1)!.created_at).not.toBe('1999-01-01T00:00:00.000Z');
+    expect(dropped).toEqual([{ object: 'stamp_note', fields: ['created_at'], reason: 'readonly' }]);
   });
 
   it('it rides the same event as the strip\'s own drops, one event per reason', async () => {

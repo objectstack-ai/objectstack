@@ -686,10 +686,11 @@ export class InsertFacet {
       // The per-key rule is `handBackWithheldInsertReadonly`'s. A culled row is
       // handed back too: it ran no hook, so it gets its caller's row back whole.
       //
-      // A withheld value a hook wrote over is recorded per row
-      // (`insertSuperseded`) and reported beside the strips' drops, never
-      // refused: under `strictReadonlyWrites` the hook's stamp still stands, as
-      // before. See `handBackWithheldInsertReadonly`.
+      // A withheld audit provenance value a hook stamped over (the audit
+      // binder's `created_by`) is recorded per row (`insertSuperseded`) and
+      // reported beside the strips' drops, never refused: under
+      // `strictReadonlyWrites` the stamp still stands, as before. See
+      // `handBackWithheldInsertReadonly`.
       const insertSuperseded: string[][] = rowHookContexts.map(() => []);
       for (let i = 0; i < rowHookContexts.length; i++) {
         const withheld = insertWithheld[i];
@@ -1228,9 +1229,9 @@ export class InsertFacet {
             object, [...new Set(insertDrops.flatMap((d) => d.fields))], insertDrops, 'insert',
           );
         }
-        // The listener also hears every caller value a hook stamp wrote over
-        // (`insertSuperseded`), on the rows that are written, under the same
-        // `readonly` reason.
+        // The listener also hears every audit provenance value a stamp wrote
+        // over (`insertSuperseded`), on the rows that are written, under the
+        // same `readonly` reason.
         const reportedReadonly = [...insertDropped];
         insertSuperseded.forEach((keys, i) => {
           if (rowErrors[i] !== undefined) return;
