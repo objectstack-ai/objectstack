@@ -2574,6 +2574,386 @@
           "ref": "#32019"
         }
       ]
+    },
+    {
+      "id": "integration-system.federation-only-driver-catalog",
+      "title": "The driver catalog marks oracle and mssql federation-only, and Studio's New datasource dialog offers them External and Validate only, saying why Managed is not offered",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), over REST and in Setup"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin`"
+        ]
+      },
+      "steps": [
+        "GET /api/v1/datasources/drivers; record the oracle, mssql and postgres entries",
+        "open /_console/apps/setup/metadata/datasource and the New datasource dialog; pick PostgreSQL, set Schema mode to Managed, then pick Oracle; read the Schema mode options and the sentence under them",
+        "pick SQL Server, then PostgreSQL again; read the options each time"
+      ],
+      "acceptance": [
+        {
+          "clause": "the catalog marks exactly the federation-only drivers, and the key is absent elsewhere",
+          "oracle": "api",
+          "verify": "oracle and mssql carry federationOnly: true; postgres, mysql and sqlite carry no federationOnly key (absent, never false) (packages/services/service-datasource/src/driver-catalog.ts, read from the spec's FEDERATION_ONLY_DRIVER_IDS)",
+          "evidence": "the three entries"
+        },
+        {
+          "clause": "a federation-only driver is offered External and Validate only, with the sentence that says why",
+          "oracle": "dom",
+          "verify": "for Oracle and SQL Server the Schema mode list holds 'External: read an existing database' and 'Validate only', no Managed; [data-testid=datasource-schema-mode-federation-only] reads 'Managed is not offered: this driver only connects to a database another system owns, and ObjectStack never creates or changes its tables.' (ui/packages/app-shell/src/views/metadata-admin/datasource/DatasourceResourcePage.tsx)",
+          "evidence": "a screenshot of the open list and the sentence"
+        },
+        {
+          "clause": "switching from a managed draft to a federation-only driver moves the mode to External, and a managed driver gets all three back with no sentence",
+          "oracle": "dom",
+          "verify": "after PostgreSQL + Managed, picking Oracle shows External selected; picking PostgreSQL again lists Managed and the sentence is gone",
+          "evidence": "the selected mode after each switch"
+        }
+      ],
+      "negative": [
+        "Managed offered for oracle or mssql is a FAIL: the spec refuses that datasource",
+        "federationOnly: false on any entry is a FAIL: the key is present only when true"
+      ],
+      "traps": [
+        "hydration-race"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/services/service-datasource/src/__tests__/driver-catalog.test.ts, ui/packages/app-shell/src/views/metadata-admin/datasource/DatasourceResourcePage.newDatasourceModes-30327.test.tsx; no live spec opens the dialog on a federation-only driver"
+      },
+      "source": [
+        "packages/services/service-datasource/src/driver-catalog.ts",
+        "ui/packages/app-shell/src/views/metadata-admin/datasource/DatasourceResourcePage.tsx#schemaModesFor",
+        "ui/packages/i18n/src/namespaces/studio/en.ts (engine.datasource.schemaModeFederationOnly)",
+        "docs/adr/0015-external-datasource-federation.md §4.6",
+        "#31389"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — the federation-only drivers in the catalog and the New datasource dialog (#31389). Scoped sweep #32269 (epic #32022 M3, theme 8: federation and CLI), read from source at 9091955b; no live run made",
+          "ref": "#32269"
+        }
+      ]
+    },
+    {
+      "id": "integration-system.federation-only-managed-refusal",
+      "title": "A managed datasource on a federation-only driver is refused at the admin door and at build, naming schemaMode and the fix; an oracle config refuses an inline password and a URL with the sentence that says what to write",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), over REST",
+        "a developer running os validate"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin`. No Oracle or SQL Server is needed: every call below is refused before any connection",
+          "a scratch app directory outside examples/ whose stack declares datasources: [{ name: 'qa_ora', driver: 'oracle', config: { host: 'oracle.qa.invalid', serviceName: 'FREEPDB1', username: 'qa' } }] (no schemaMode, so managed by default)"
+        ]
+      },
+      "steps": [
+        "POST /api/v1/datasources { name: 'qa_ora_managed', driver: 'oracle', config: { host: 'oracle.qa.invalid', serviceName: 'FREEPDB1', username: 'qa' } }; then GET /api/v1/datasources",
+        "POST /api/v1/datasources { name: 'qa_mssql_managed', driver: 'mssql', schemaMode: 'managed', config: { host: 'mssql.qa.invalid', database: 'qa', username: 'qa' } }",
+        "POST the oracle body with config.password 'x'; then with config.url 'oracle://qa@oracle.qa.invalid/FREEPDB1' in place of host and serviceName",
+        "run `os validate` in the scratch app directory"
+      ],
+      "acceptance": [
+        {
+          "clause": "a managed oracle datasource is refused 400 at schemaMode with the federation-only sentence, and nothing is stored",
+          "oracle": "api",
+          "verify": "400; the message opens \"Invalid datasource 'qa_ora_managed'.\" and carries \"schemaMode: the 'oracle' driver serves federation only\" and \"Set `schemaMode: 'external'`\"; the GET lists no qa_ora_managed (packages/spec/src/data/datasource.zod.ts#federationOnlyDriverOnManagedRefusal)",
+          "evidence": "status, body and the GET"
+        },
+        {
+          "clause": "the same refusal names mssql when it is declared managed explicitly",
+          "oracle": "api",
+          "verify": "400 with \"the 'mssql' driver serves federation only\"",
+          "evidence": "status and body"
+        },
+        {
+          "clause": "an oracle config refuses an inline password and a scheme URL, each with what to write instead",
+          "oracle": "api",
+          "verify": "both answer 400 \"Invalid configuration for driver 'oracle'.\"; the url one says 'Oracle has no `scheme://` connection URL' and names connectString or host, port and serviceName (packages/spec/src/data/driver/oracle.zod.ts#OracleConfigSchema); the password one tells the author to bind the secret",
+          "evidence": "both bodies"
+        },
+        {
+          "clause": "the build door refuses the same declaration",
+          "oracle": "build",
+          "verify": "os validate exits non-zero naming the qa_ora datasource, schemaMode and the federation-only sentence",
+          "evidence": "the exit code and the output"
+        }
+      ],
+      "negative": [
+        "a managed oracle or mssql datasource stored, or a connection attempted before the refusal, is a FAIL",
+        "a refusal that names no field is a FAIL: schemaMode is the located path"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/spec/src/data/driver/config-registry.test.ts (the federation-only refusal at parse), packages/drivers/driver-sql/src/sql-driver-oracle-dialect.test.ts (DDL refused as federation-only); no pin drives the admin door or os validate with it"
+      },
+      "source": [
+        "packages/spec/src/data/datasource.zod.ts#federationOnlyDriverOnManagedRefusal",
+        "packages/spec/src/data/driver/oracle.zod.ts#OracleConfigSchema",
+        "packages/services/service-datasource/src/datasource-admin-service.ts (assertValidConfig, then the record judged against DatasourceSchema before anything is stored)",
+        "docs/adr/0015-external-datasource-federation.md §4.6"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0015 §4.6: a federation-only driver never holds a managed datasource. Scoped sweep #32269 (epic #32022 M3, theme 8: federation and CLI), read from source at 9091955b; no live run made",
+          "ref": "#32269"
+        }
+      ]
+    },
+    {
+      "id": "integration-system.oracle-federated-read-write",
+      "title": "An Oracle datasource reads its tables as objects, refuses an empty-string comparand (Oracle stores '' as NULL), writes only under the double opt-in, and refuses upsert as a capability gap",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), over REST"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "an Oracle Database (Oracle Database Free 23ai qualifies) with a login and one table QA_TICKET (ID NUMBER primary key, TITLE VARCHAR2, NOTE VARCHAR2 with at least one NULL) holding a few rows, bound through POST /api/v1/datasources { name: 'qa_oracle_fed', driver: 'oracle', schemaMode: 'external', config: { host: HOST, port: 1521, serviceName: SERVICE, username: USER }, secret: PASSWORD, external: { allowWrites: true } } (the password in the top-level `secret`, never in `config`, so the door binds external.credentialsRef), then its tables imported as objects through Sync objects (integration-system.external-schema-introspection)",
+          "a second import of the same table with the object's external.writable left off, for the opt-in leg"
+        ],
+        "knownGaps": [
+          "BLOCKED(fixture) until a run provisions a credentialed Oracle Database. The one fixture command, `node scripts/qa/qa-fixture.mjs external-database` (#32233, merged as #32277), provisions PostgreSQL only: it replays its recipe on a local PostgreSQL install or takes OS_TEST_EXTERNAL_DB_URL, and refuses any URL that is not postgres:// (scripts/qa/qa-fixture.mjs, the external-database step). No CI job runs Oracle Database; the driver's live suite reads OS_TEST_ORACLE_URL. The run that brings a reachable Oracle Database with a login records the recipe at the area level and lifts `blocked` in the same revision. FOLLOW-UPS §18c"
+        ]
+      },
+      "steps": [
+        "GET /api/v1/data/QA_TICKET_OBJECT; then with a filter NOTE = ''; then with NOTE $null true",
+        "POST a row to the writable object; PATCH it; DELETE it",
+        "POST a row to the object whose external.writable is off"
+      ],
+      "acceptance": [
+        {
+          "clause": "the imported object lists the table's rows through the data door",
+          "oracle": "api",
+          "verify": "the list answers every row with its columns",
+          "evidence": "the list body"
+        },
+        {
+          "clause": "an empty-string comparand is refused INVALID_FILTER 400, naming the $null remedy",
+          "oracle": "api",
+          "verify": "400 INVALID_FILTER saying Oracle stores '' as NULL and to use { \"$null\": true }; the $null filter answers the NULL rows (packages/drivers/driver-sql/src/sql-driver-oracle-dialect.ts#assertOracleComparandNotEmptyString)",
+          "evidence": "both answers"
+        },
+        {
+          "clause": "create, update and delete work under the double opt-in; without the object's opt-in a write is refused 403",
+          "oracle": "api",
+          "verify": "the writable object takes all three; the other answers 403 EXTERNAL_WRITE_FORBIDDEN (packages/spec/src/shared/external-errors.ts#ExternalWriteForbiddenError)",
+          "evidence": "the four answers"
+        },
+        {
+          "clause": "the pins pass at the run subject sha: upsert is refused NOT_IMPLEMENTED 501 before any statement, DDL is refused as federation-only, and the dialect binds dates and day values as it declares",
+          "oracle": "test",
+          "verify": "run each file in automated.ref with the driver-sql vitest; the dialect file reports ≥1 test and 0 failed, and the conformance file runs (not skipped) only with OS_TEST_ORACLE_URL set",
+          "evidence": "the vitest summary lines, with the subject sha and whether OS_TEST_ORACLE_URL was set"
+        }
+      ],
+      "negative": [
+        "a NOTE = '' filter answering 200 with zero rows is a FAIL: that is the silent wrong answer the refusal exists for",
+        "a write landing without both opt-ins is a FAIL"
+      ],
+      "blocked": {
+        "by": "fixture",
+        "ref": "fixture gap: no credentialed Oracle Database; qa-fixture external-database is PostgreSQL only (FOLLOW-UPS §18c, #32233)"
+      },
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/drivers/driver-sql/src/sql-driver-oracle-dialect.test.ts, packages/drivers/driver-sql/src/sql-driver-oracle-federation-conformance.test.ts (live, skipped without OS_TEST_ORACLE_URL)"
+      },
+      "source": [
+        "packages/drivers/driver-sql/src/sql-driver-oracle-dialect.ts#assertOracleComparandNotEmptyString",
+        "packages/drivers/driver-sql/src/sql-driver-oracle-dialect.ts#oracleUpsertUnsupportedError",
+        "packages/drivers/driver-sql/src/sql-driver-oracle-introspection.ts",
+        "packages/spec/src/shared/external-errors.ts#ExternalWriteForbiddenError",
+        "docs/adr/0015-external-datasource-federation.md §4.6"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — the Oracle federation dialect: reads, the empty-string refusal, gated writes and the upsert gap. Blocked(fixture): no credentialed Oracle. Scoped sweep #32269 (epic #32022 M3, theme 8: federation and CLI), read from source at 9091955b; no live run made",
+          "ref": "#32269"
+        }
+      ]
+    },
+    {
+      "id": "integration-system.oracle-raw16-uuid-reference",
+      "title": "An Oracle RAW(16) key reads as a lower-case uuid, is filtered and written by that text, a reference over it resolves, and a comparand or written value that is not uuid text is refused",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), over REST"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the Oracle datasource of integration-system.oracle-federated-read-write, with two more tables: QA_PARENT (ID RAW(16) DEFAULT SYS_GUID() primary key, NAME VARCHAR2) and QA_CHILD (ID NUMBER primary key, PARENT_ID RAW(16) referencing QA_PARENT), both imported; the draft maps PARENT_ID to a lookup to the QA_PARENT object"
+        ],
+        "knownGaps": [
+          "BLOCKED(fixture) until a run provisions a credentialed Oracle Database. The one fixture command, `node scripts/qa/qa-fixture.mjs external-database` (#32233, merged as #32277), provisions PostgreSQL only: it replays its recipe on a local PostgreSQL install or takes OS_TEST_EXTERNAL_DB_URL, and refuses any URL that is not postgres:// (scripts/qa/qa-fixture.mjs, the external-database step). No CI job runs Oracle Database; the driver's live suite reads OS_TEST_ORACLE_URL. The run that brings a reachable Oracle Database with a login records the recipe at the area level and lifts `blocked` in the same revision. FOLLOW-UPS §18c"
+        ]
+      },
+      "steps": [
+        "GET the QA_PARENT list; record one id",
+        "GET QA_PARENT by that id; GET the list filtered ID = that id, then ID = 'not-a-uuid'",
+        "GET the QA_CHILD list with the lookup expanded",
+        "POST a QA_CHILD row with PARENT_ID set to the recorded id; then with 'not-a-uuid'"
+      ],
+      "acceptance": [
+        {
+          "clause": "a RAW(16) key reads back as lower-case hyphenated uuid text, and that text finds the row by id and by filter",
+          "oracle": "api",
+          "verify": "ids match 8-4-4-4-12 lower-case hex; the by-id GET and the filter both answer the row (packages/drivers/driver-sql/src/sql-driver-oracle-dialect.ts#oracleRaw16AsUuid, #oracleUuidRawBinding)",
+          "evidence": "the id, the by-id answer and the filter answer"
+        },
+        {
+          "clause": "a reference over a RAW(16) key resolves, and a written uuid lands",
+          "oracle": "api",
+          "verify": "the expanded lookup carries the parent row; the POST with the recorded id answers 201 and reads back with that id (packages/spec/src/data/type-compat.ts: RAW(16) backs lookup, master_detail and user exactly)",
+          "evidence": "the expanded list and the POST"
+        },
+        {
+          "clause": "a comparand that is not uuid text is refused INVALID_FILTER 400, and a written one VALIDATION_ERROR 400",
+          "oracle": "api",
+          "verify": "both say the value 'is not a uuid' and that the column is a RAW(16) uuid on an Oracle table (packages/drivers/driver-sql/src/sql-driver-oracle-dialect.ts#assertOracleUuidComparand)",
+          "evidence": "both answers"
+        }
+      ],
+      "negative": [
+        "a non-uuid comparand answering 200 with zero rows is a FAIL: it is refused, never silently unmatched"
+      ],
+      "blocked": {
+        "by": "fixture",
+        "ref": "fixture gap: no credentialed Oracle Database; qa-fixture external-database is PostgreSQL only (FOLLOW-UPS §18c, #32233)"
+      },
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/drivers/driver-sql/src/sql-driver-oracle-dialect.test.ts, packages/spec/src/data/type-compat.test.ts, packages/drivers/driver-sql/src/sql-driver-oracle-federation-conformance.test.ts (live, skipped without OS_TEST_ORACLE_URL)"
+      },
+      "source": [
+        "packages/drivers/driver-sql/src/sql-driver-oracle-dialect.ts#oracleRaw16AsUuid",
+        "packages/drivers/driver-sql/src/sql-driver-oracle-dialect.ts#oracleUuidRawBinding",
+        "packages/drivers/driver-sql/src/sql-driver-oracle-dialect.ts#assertOracleUuidComparand",
+        "packages/spec/src/data/type-compat.ts (the oracle uuid demotion, references exact)",
+        "#31390",
+        "#31786"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — Oracle RAW(16) uuid keys and the references over them (#31390, #31786). Blocked(fixture): no credentialed Oracle. Scoped sweep #32269 (epic #32022 M3, theme 8: federation and CLI), read from source at 9091955b; no live run made",
+          "ref": "#32269"
+        }
+      ]
+    },
+    {
+      "id": "integration-system.mssql-federated-read-write",
+      "title": "A SQL Server datasource reads its tables as objects, matches a uniqueidentifier column in text operators by the lower-case text every read answers, keeps case-exact matching exact, and writes only under the double opt-in",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), over REST"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a SQL Server 2017 or later (the TRANSLATE floor) with a login and one table qa_device (id uniqueidentifier DEFAULT NEWID() primary key, label nvarchar with mixed-case values) holding a few rows, bound through POST /api/v1/datasources { name: 'qa_mssql_fed', driver: 'mssql', schemaMode: 'external', config: { host: HOST, port: 1433, database: DATABASE, username: USER }, secret: PASSWORD, external: { allowWrites: true } } (the password in the top-level `secret`, never in `config`, so the door binds external.credentialsRef), then its tables imported as objects through Sync objects (integration-system.external-schema-introspection)"
+        ],
+        "knownGaps": [
+          "BLOCKED(fixture) until a run provisions a credentialed SQL Server. The one fixture command, `node scripts/qa/qa-fixture.mjs external-database` (#32233, merged as #32277), provisions PostgreSQL only: it replays its recipe on a local PostgreSQL install or takes OS_TEST_EXTERNAL_DB_URL, and refuses any URL that is not postgres:// (scripts/qa/qa-fixture.mjs, the external-database step). No CI job runs SQL Server; the driver's live suite reads OS_TEST_MSSQL_URL. The run that brings a reachable SQL Server with a login records the recipe at the area level and lifts `blocked` in the same revision. FOLLOW-UPS §18c"
+        ]
+      },
+      "steps": [
+        "GET the qa_device list; record one id as read",
+        "filter id $contains the id's first 8 characters as read (lower-case)",
+        "filter label $contains a fragment in the wrong case, then $icontains the same fragment",
+        "POST, PATCH and DELETE a row"
+      ],
+      "acceptance": [
+        {
+          "clause": "a uniqueidentifier reads lower-case, and a lower-case fragment copied from a read matches it in a text operator",
+          "oracle": "api",
+          "verify": "the id is lower-case; the $contains filter answers that row (packages/drivers/driver-sql/src/sql-driver-predicate-emitters.ts, the uniqueidentifier text match)",
+          "evidence": "the id and the filter answer"
+        },
+        {
+          "clause": "the case-exact operator stays exact and the folding one folds",
+          "oracle": "api",
+          "verify": "the wrong-case $contains answers no row; $icontains answers it (packages/core/src/utils/text-match-sql.ts#mssqlCaseExactSql, #mssqlAsciiLowerSql)",
+          "evidence": "both answers"
+        },
+        {
+          "clause": "create, update and delete work under the double opt-in",
+          "oracle": "api",
+          "verify": "each answers 2xx and the list reflects it; without the object's external.writable a write answers 403 EXTERNAL_WRITE_FORBIDDEN",
+          "evidence": "the answers"
+        },
+        {
+          "clause": "the pins pass at the run subject sha: the mssql dialect, the analytics text-match parity on mssql and oracle, and the SQL Server row window",
+          "oracle": "test",
+          "verify": "run each file in automated.ref with its package's vitest; each non-live file reports ≥1 test and 0 failed; the conformance file runs only with OS_TEST_MSSQL_URL set",
+          "evidence": "the vitest summary lines, with the subject sha"
+        }
+      ],
+      "negative": [
+        "a lower-case fragment of a read id matching nothing is a FAIL: the match reads the text the read answers"
+      ],
+      "blocked": {
+        "by": "fixture",
+        "ref": "fixture gap: no credentialed SQL Server; qa-fixture external-database is PostgreSQL only (FOLLOW-UPS §18c, #32233)"
+      },
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/drivers/driver-sql/src/sql-driver-mssql-dialect.test.ts, packages/services/service-analytics/src/__tests__/text-match-mssql-oracle.test.ts, packages/drivers/driver-sql/src/sql-driver-mssql-federation-conformance.test.ts (live, skipped without OS_TEST_MSSQL_URL)"
+      },
+      "source": [
+        "packages/drivers/driver-sql/src/sql-driver-predicate-emitters.ts (mssqlGuidText)",
+        "packages/drivers/driver-sql/src/sql-driver-mssql-introspection.ts",
+        "packages/core/src/utils/text-match-sql.ts#mssqlCaseExactSql",
+        "packages/core/src/utils/mssql-window-sql.ts#mssqlWindowSql",
+        "packages/spec/src/data/driver/mssql.zod.ts",
+        "#31395",
+        "#31623",
+        "#31625",
+        "#31770"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — the SQL Server federation dialect: uniqueidentifier text matching, case-exact parity and gated writes. Blocked(fixture): no credentialed SQL Server. Scoped sweep #32269 (epic #32022 M3, theme 8: federation and CLI), read from source at 9091955b; no live run made",
+          "ref": "#32269"
+        }
+      ]
     }
   ]
 }

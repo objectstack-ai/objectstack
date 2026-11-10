@@ -131,6 +131,14 @@ const en = {
           unmanagedHint: 'Copied once into this runtime as its own metadata: every item is editable here, and the copy receives no upgrade.',
           required: 'Choose an install mode to install this package.',
         },
+        // objectstack#32040 — the namespace a hosted unmanaged copy takes (MarketplacePackagePage).
+        targetNamespace: {
+          label: 'Target namespace',
+          placeholder: 'e.g. crm_copy',
+          hint: 'The namespace this copy\'s metadata is written under. Edit it to install under another name.',
+          noDefault: 'No default namespace could be read. Type the namespace this copy should take.',
+          taken: 'The namespace "{{namespace}}" belongs to another package. Choose another name and install again.',
+        },
         unmanagedSuccess: 'Copied v{{version}} of "{{name}}" into this runtime as its own metadata, in the base {{base}}. The copy is editable and receives no upgrade.',
         unmanagedStrippedLocks: 'The package locked these items. The copy is editable, so their locks were not copied:',
         unmanagedIgnored: 'This runtime does not support unmanaged installs, so "{{name}}" was installed managed (registered as code) instead of copied. Upgrade the runtime, then uninstall the package and install it again as an unmanaged copy.',

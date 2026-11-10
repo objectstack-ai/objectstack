@@ -274,7 +274,9 @@ describe('#4940: what an admin identity operation leaves in sys_audit_log', () =
     });
     expect(minted.status, await minted.clone().text()).toBe(200);
     expect(minted.headers.get('cache-control')).toBe('no-store');
-    const { token, credentialId } = (await minted.json()).data as { token: string; credentialId: string };
+    const { token, credentialId, tokenHint } = (await minted.json()).data as { token: string; credentialId: string; tokenHint: string };
+    // [#32120] The non-secret hint answered beside the token: its last four characters.
+    expect(tokenHint).toBe(token.slice(-4));
 
     const provision = (localPart: string) =>
       stack.api('/auth/scim/v2/Users', {
@@ -305,9 +307,14 @@ describe('#4940: what an admin identity operation leaves in sys_audit_log', () =
     expect(JSON.stringify(atRest[0])).not.toContain(token);
 
     // The door's explicit rows: one per mint and per revoke, naming the admin and the connection.
+    // [#32120] Told apart by their `event`: the provisioning call's last-use
+    // stamp is a credential write too, and plugin-audit mirrors it as an
+    // `update` attributed to the connection, whose metadata carries only the
+    // association field (ADR-0118 D5), never an event.
+    const doorEvent = (r: any): boolean => !isGeneric(r) && typeof JSON.parse(String(r.metadata)).event === 'string';
     const explicit = await waitForRows(
       async () => (await findRows(ql, 'sys_audit_log', { object_name: 'sys_scim_connection_credential', record_id: credentialId }))
-        .filter((r) => !isGeneric(r)),
+        .filter(doorEvent),
       (rows) => rows.length === 2,
       'the mint and revoke rows',
     );
@@ -317,6 +324,13 @@ describe('#4940: what an admin identity operation leaves in sys_audit_log', () =
       expect(row.user_id).toBe(adminUserId);
       expect(JSON.parse(String(row.metadata)).connectionId).toBe('okta-dogfood-30958');
     }
+    // [#32120] The last-use stamp's mirrored row: performed by the connection, not by any user.
+    const stampRows = (await findRows(ql, 'sys_audit_log', { object_name: 'sys_scim_connection_credential', record_id: credentialId }))
+      .filter((r) => !isGeneric(r) && !doorEvent(r));
+    expect(stampRows.map((r) => [r.action, r.actor, JSON.parse(String(r.metadata))])).toEqual([
+      ['update', 'svc:scim:okta-dogfood-30958', { scim_connection_id: 'okta-dogfood-30958' }],
+    ]);
+    expect(stampRows[0].user_id ?? null).toBeNull();
 
     // Nowhere else: every ledger row, the activity feed, and the data API's reads.
     const ledgers = JSON.stringify([
@@ -329,6 +343,14 @@ describe('#4940: what an admin identity operation leaves in sys_audit_log', () =
     const listed = await list.text();
     expect(list.status, listed).toBe(200);
     expect(listed).toContain(credentialId);
+    // [#32120] The list door serves the hint and the last use the provisioning
+    // call stamped, so two credentials of one connection can be told apart.
+    const listedRow = (((JSON.parse(listed) as { records?: Array<Record<string, unknown>> }).records) ?? [])
+      .find((r) => r.id === credentialId);
+    expect(listedRow, listed.slice(0, 500)).toBeDefined();
+    expect(listedRow!.token_hint).toBe(tokenHint);
+    expect(listedRow!.last_used_at, listed.slice(0, 500)).toBeTruthy();
+    expect(listedRow).not.toHaveProperty('token_digest');
     // Export is refused outright, even to the platform admin: no permission set
     // grants `allowExport` on this engine-owned object (measured 403). Pinned so a
     // future grant has to come back here and show the export serves no secret.

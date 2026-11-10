@@ -90,7 +90,8 @@
  * binds each one to its one holder and reports the rest, never guessing.
  *
  * An item that already holds more than one row a write could mean (two naming
- * no package, or one naming none beside one naming the write's package) is the
+ * no package; or, for a store addressed by name, one naming none beside one
+ * naming the write's package) is the
  * same question at both ends: the backfill reports it at boot and binds none
  * of its rows, and `setActive` refuses the switch and writes none of them
  * ({@link addressedLedgerRow}). Either way the operator deletes the row that
@@ -141,6 +142,40 @@ export interface MetadataActivationWriteOptions {
      * context, and the row names nobody.
      */
     context?: MetadataActivationWriteContext;
+    /**
+     * [ADR-0150 D4, D8 row R4] Only for a store whose rows are addressed by
+     * `(package, name)` ({@link MetadataActivationRowAddressing}), and only for
+     * a row that names a package: where that package holds no row of the name
+     * yet and a row naming no package does, the write turns THAT row into the
+     * package's row, instead of adding a second row beside it.
+     *
+     * The caller passes it when the package is the name's one holder, which is
+     * exactly when the row naming no package is that package's switch (D8: a
+     * package-less row binds to the name's one holder). Never for a name two
+     * packages hold: there the row is neither's, and nothing picks.
+     */
+    adoptPackageless?: boolean;
+}
+
+/**
+ * [ADR-0150 D4] How a store finds the row a write is for.
+ *
+ *  - `'name'` — by `(metadata_type, name)`, one row per name: the write
+ *    re-attributes that row to the package it names. The bare path, kept
+ *    (ADR-0150 red line 3) for every type whose readers still consult the
+ *    ledger by name.
+ *  - `'package-and-name'` — by `(metadata_type, package_id, name)`, the
+ *    object's declared unique key: two packages each keep their own row of one
+ *    name, and a write for one never touches the other's. A type moves here in
+ *    its own ADR-0150 child, once its readers consult the ledger by
+ *    `(package, name)` (flows: #31696).
+ */
+export type MetadataActivationRowAddressing = 'name' | 'package-and-name';
+
+/** Options for constructing a {@link MetadataActivationStore}. */
+export interface MetadataActivationStoreOptions {
+    /** Default `'name'`: see {@link MetadataActivationRowAddressing}. */
+    addressing?: MetadataActivationRowAddressing;
 }
 
 /**
@@ -232,16 +267,45 @@ function refuseEmptyPackageId(row: MetadataActivationRow, subject: string): void
  */
 export class InMemoryMetadataActivationStore implements MetadataActivationStore {
     private readonly rows = new Map<string, MetadataActivationRow>();
+    private readonly addressing: MetadataActivationRowAddressing;
+
+    constructor(options?: MetadataActivationStoreOptions) {
+        this.addressing = options?.addressing ?? 'name';
+    }
 
     async list(): Promise<MetadataActivationRow[]> {
         return [...this.rows.values()];
     }
 
-    /** The caller is not recorded: a map has no `created_by` to stamp. */
-    async setActive(row: MetadataActivationRow, _options?: MetadataActivationWriteOptions): Promise<void> {
+    /**
+     * The caller is not recorded: a map has no `created_by` to stamp. Rows are
+     * found as the durable store finds them ({@link MetadataActivationRowAddressing},
+     * {@link MetadataActivationWriteOptions.adoptPackageless}).
+     */
+    async setActive(row: MetadataActivationRow, options?: MetadataActivationWriteOptions): Promise<void> {
         refuseEmptyPackageId(row, `'${row.name}'`);
-        this.rows.set(row.name, { ...row });
+        if (this.addressing === 'name') {
+            this.rows.set(row.name, { ...row });
+            return;
+        }
+        const own = activationRowKey(row.name, row.packageId);
+        const packageless = activationRowKey(row.name, undefined);
+        if (row.packageId !== undefined && options?.adoptPackageless && !this.rows.has(own) && this.rows.has(packageless)) {
+            this.rows.delete(packageless);
+        }
+        this.rows.set(own, { ...row });
     }
+}
+
+/** The in-memory key of a row addressed by `(package, name)`. */
+function activationRowKey(name: string, packageId: string | undefined): string {
+    return JSON.stringify([packageId ?? null, name]);
+}
+
+/** Does a stored `package_id` name the package `packageId` (`undefined`: none)? */
+function storedPackageIs(stored: unknown, packageId: string | undefined): boolean {
+    const own = typeof stored === 'string' && stored !== '' ? stored : undefined;
+    return own === packageId;
 }
 
 /** One stored ledger row as a driver returns it: the columns this module reads. */
@@ -276,49 +340,75 @@ function describeLedgerRow(row: StoredLedgerRow & { id: NonNullable<unknown> }):
 
 /**
  * [ADR-0150 D4, D8 row R4] The one stored row a `setActive` write updates, or
- * `undefined` when there is none and the write inserts.
+ * `undefined` when there is none and the write inserts. Which rows a write
+ * could mean depends on how the store addresses them
+ * ({@link MetadataActivationRowAddressing}):
  *
- * The rows a write could mean are the item's rows that name no package and,
- * when the write names a package, that package's own row: exactly the rows
- * {@link backfillActivationLedgerPackages} reports for an item with more than
- * one, so the boot and the door agree on what a duplicate is. With none of
- * those, the item's one row of another package is re-addressed to the write's
- * package, as the bare path always has.
+ *  - `'name'` (the bare path): the item's rows that name no package and, when
+ *    the write names a package, that package's own row: exactly the rows
+ *    {@link backfillActivationLedgerPackages} reports for an item with more
+ *    than one, so the boot and the door agree on what a duplicate is. With
+ *    none of those, the item's one row of another package is re-addressed to
+ *    the write's package, as the bare path always has (the row is the name's
+ *    switch, and its readers consult it by name).
+ *  - `'package-and-name'`: the row naming the write's package (none: the rows
+ *    naming none). With no such row and
+ *    {@link MetadataActivationWriteOptions.adoptPackageless}, the rows naming
+ *    no package. Another package's row is never a candidate: with no row of
+ *    its own to write, the package gets one beside the other's.
  *
- * More than one such row is refused, naming every one of them, and nothing is
- * written:
+ * More than one candidate is refused, naming every one of them, and nothing
+ * is written:
  *
  *  - two or more naming no package: updating the first would bind it to the
- *    write's package, out of the package-less index's reach, so the next boot
- *    would build the index over the pair and the duplicate would never be
- *    reported again; a write naming no package would flip one of two switches,
- *    picked by storage order, while the other kept applying;
- *  - one naming no package beside the write's package's own row: name-keyed
- *    readers apply whichever they read (the catalog every switched-off row of
- *    the name, the action projection the last row it reads), so the switch the
- *    administrator throws need not be the one that applies, and binding the
- *    package-less row would collide with the other under the declared key;
- *  - two or more of other packages and none of the write's: re-addressing one
- *    of them would be picked by storage order.
+ *    write's package (by name, or by adopting it), out of the package-less
+ *    index's reach, so the next boot would build the index over the pair and
+ *    the duplicate would never be reported again; a write naming no package
+ *    would flip one of two switches, picked by storage order, while the other
+ *    kept applying;
+ *  - by name, one naming no package beside the write's package's own row:
+ *    name-keyed readers apply whichever they read (the catalog every
+ *    switched-off row of the name, the action projection the last row it
+ *    reads), so the switch the administrator throws need not be the one that
+ *    applies, and binding the package-less row would collide with the other
+ *    under the declared key (by package and name, the write's own row is its
+ *    switch, so that shape writes it);
+ *  - by name, two or more of other packages and none of the write's:
+ *    re-addressing one of them would be picked by storage order.
  *
  * The answer is `409 RESOURCE_CONFLICT`, the ADR-0112 member the ADR-0150
  * refusals to pick one of several holders answer
- * (`PackageScopedNameRefusedError`, `../package-scoped-resolution.ts`): the request names one item and the
- * ledger holds more than one switch for it. A door relays it as it relays any
- * declared refusal of this store, and writes nothing in process either, since
- * every door writes the durable row first.
+ * (`PackageScopedNameRefusedError`, `../package-scoped-resolution.ts`): the
+ * request names one item and the ledger holds more than one switch for it. A
+ * door relays it as it relays any declared refusal of this store, and writes
+ * nothing in process either, since every door writes the durable row first.
  */
 function addressedLedgerRow(
     rows: readonly StoredLedgerRow[],
-    write: { readonly metadataType: string; readonly name: string; readonly packageId: string | null; readonly active: boolean },
+    write: {
+        readonly metadataType: string;
+        readonly name: string;
+        readonly packageId: string | null;
+        readonly active: boolean;
+        readonly addressing: MetadataActivationRowAddressing;
+        readonly adoptPackageless: boolean;
+    },
 ): (StoredLedgerRow & { id: NonNullable<unknown> }) | undefined {
     const addressable = rows.filter(
         (r): r is StoredLedgerRow & { id: NonNullable<unknown> } => r !== null && typeof r === 'object' && r.id != null,
     );
-    const meant = addressable.filter(
-        (r) => namesNoPackage(r) || (write.packageId !== null && r.package_id === write.packageId),
-    );
-    const candidates = meant.length > 0 ? meant : addressable;
+    let candidates: Array<StoredLedgerRow & { id: NonNullable<unknown> }>;
+    if (write.addressing === 'package-and-name') {
+        const own = addressable.filter((r) => storedPackageIs(r.package_id, write.packageId ?? undefined));
+        candidates = own.length > 0 || write.packageId === null || !write.adoptPackageless
+            ? own
+            : addressable.filter((r) => storedPackageIs(r.package_id, undefined));
+    } else {
+        const meant = addressable.filter(
+            (r) => namesNoPackage(r) || (write.packageId !== null && r.package_id === write.packageId),
+        );
+        candidates = meant.length > 0 ? meant : addressable;
+    }
     if (candidates.length <= 1) return candidates[0];
     throw Object.assign(
         new Error(
@@ -356,6 +446,8 @@ export class ObjectStoreMetadataActivationStore implements MetadataActivationSto
          * argument.
          */
         private readonly metadataType: string,
+        /** Default `'name'`: see {@link MetadataActivationRowAddressing}. */
+        private readonly options?: MetadataActivationStoreOptions,
     ) {}
 
     /**
@@ -380,21 +472,29 @@ export class ObjectStoreMetadataActivationStore implements MetadataActivationSto
      * store controls: there is no id to collide on, so an insert-and-catch
      * could not tell "already there" from a real store failure.
      *
-     * The write still addresses the row by `(metadata_type, name)`: the bare
-     * path, kept (ADR-0150 red line 3). This is the ledger's only writer, and it
-     * inserts only where that read finds nothing, so it keeps one row per
+     * By default the write addresses the row by `(metadata_type, name)`: the
+     * bare path, kept (ADR-0150 red line 3). This is the ledger's only writer,
+     * and it inserts only where that read finds nothing, so it keeps one row per
      * `(metadata_type, name)`. The wider index permits a second package's row
      * of the same name; nothing writes one until a type's own readers consult
      * the ledger by `(package, name)` (that type's ADR-0150 child).
      *
-     * ⛔ It updates the ONE row the read finds, never the first of several
-     * ({@link addressedLedgerRow}). Rows stored before the package-less index
-     * stood can hold two package-less rows for one item, and updating the first
-     * with the write's package would take it out of that index's reach: the
-     * next boot would build the index over the pair, and the duplicate would
-     * never be reported again. So a write that finds more than one row it could
-     * mean is refused `409 RESOURCE_CONFLICT`, naming every one of them, and
-     * nothing is written; the operator deletes the row that should not apply.
+     * A store constructed with `addressing: 'package-and-name'` is that child's
+     * store: it reads the name's rows and writes the one whose `package_id` is
+     * the row's package (none: the one with none), so one package's write never
+     * re-attributes another package's row. With
+     * {@link MetadataActivationWriteOptions.adoptPackageless}, a package with no
+     * row of its own takes the row naming no package over.
+     *
+     * ⛔ In either mode it updates the ONE row the write could mean, never the
+     * first of several ({@link addressedLedgerRow}). Rows stored before the
+     * package-less index stood can hold two package-less rows for one item, and
+     * giving the first the write's package (by name, or by adopting it) would
+     * take it out of that index's reach: the next boot would build the index
+     * over the pair, and the duplicate would never be reported again. So a write
+     * that finds more than one row it could mean is refused
+     * `409 RESOURCE_CONFLICT`, naming every one of them, and nothing is written;
+     * the operator deletes the row that should not apply.
      *
      * `packageId` absent writes NO package (`null`), the ledger's spelling for
      * an item no package ships. An empty string is refused before anything is
@@ -415,7 +515,14 @@ export class ObjectStoreMetadataActivationStore implements MetadataActivationSto
         });
         const current = addressedLedgerRow(
             Array.isArray(existing) ? (existing as StoredLedgerRow[]) : [],
-            { metadataType: this.metadataType, name: row.name, packageId, active: row.active },
+            {
+                metadataType: this.metadataType,
+                name: row.name,
+                packageId,
+                active: row.active,
+                addressing: this.options?.addressing ?? 'name',
+                adoptPackageless: options?.adoptPackageless === true,
+            },
         );
 
         if (current) {

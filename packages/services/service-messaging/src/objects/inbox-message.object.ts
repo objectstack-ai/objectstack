@@ -112,5 +112,15 @@ export const InboxMessage = ObjectSchema.create({
             label: 'Created At',
             readonly: true,
         }),
+
+        // [#32240] Written once, by the inbox channel, at delivery; read by
+        // the reader-locale middleware (`inbox-reader-locale.ts`). Keys and
+        // params only, never text rendered in another language.
+        keyed_text: Field.json({
+            label: 'Text Keys',
+            readonly: true,
+            description:
+                'The catalog keys and params the title and body were rendered from at delivery. A read re-renders the title and body from them in the reader\'s language; null when the notification carried no keys, and the stored title and body are then served as written.',
+        }),
     },
 });
