@@ -1283,6 +1283,27 @@ describe('DatasetWidget — the dashboard\'s package on its dataset query (objec
     expect(src.queryDataset.mock.calls[0]).toHaveLength(2);
   });
 
+  it('a dashboard in P whose dataset only P\'s dependency holds sends ?package=P and shows the 409, never retried bare (interim, ruling A)', async () => {
+    // `?package=` is the exact qualifier (ADR-0150 D5), not the D3 closure
+    // read: the server refuses a package that does not hold the name, naming
+    // the holder. Follow-ups #32310 / #32311 restore the dependency case.
+    const src = {
+      queryDataset: vi.fn(async (_dataset: string, _selection: unknown, options?: { packageId?: string }) => {
+        if (options?.packageId === undefined) return { rows: [{ revenue: 999 }] };
+        throw new Error(
+          `Dataset query failed: 409 Conflict — dataset "sales" is not held by package "${options.packageId}", which the `
+          + 'address names exactly (ADR-0150 D5): it is held by package "com.acme.lib". Address it by its holder.',
+        );
+      }),
+    };
+    render(<DashboardRenderer schema={salesDashboard('com.acme.app')} dataSource={src} />);
+    const alert = await screen.findByText(/is not held by package "com\.acme\.app"/);
+    expect(alert.textContent).toContain('com.acme.lib');
+    expect(screen.queryByText('999')).not.toBeInTheDocument();
+    expect(src.queryDataset).toHaveBeenCalledTimes(1);
+    expect(src.queryDataset.mock.calls[0][2]).toEqual({ packageId: 'com.acme.app' });
+  });
+
   it('a widget with no package, where two packages hold the name, shows the conflict naming both, queried once', async () => {
     const src = twoHolderSource();
     render(<DatasetWidget widget={{ type: 'metric', dataset: 'sales', values: ['revenue'] }} dataSource={src} />);
