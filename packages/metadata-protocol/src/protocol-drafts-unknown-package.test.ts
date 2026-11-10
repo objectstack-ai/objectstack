@@ -54,6 +54,8 @@ describe('[#29180] listDrafts — a package filter that names no package', () =>
             expect(err.status).toBe(400);
             expect(err.code).toBe('INVALID_REQUEST');
             expect(String(err.message)).toMatch(new RegExp(`^'${UNKNOWN.replace(/\./g, '\\.')}' is not an installed package,`));
+            expect(String(err.message)).toContain("omit `package` to list every package's drafts.");
+            expect(String(err.message)).not.toContain('omit packageId');
         }
     });
 
