@@ -62,26 +62,35 @@ export const ClientBrief = ObjectSchema.create({
   sharingModel: 'public_read',
 
   fields: {
-    title: Field.text({ label: 'Title', required: true, searchable: true, maxLength: 160 }),
-    summary: Field.text({ label: 'Client Summary', maxLength: 2000 }),
-    project: Field.lookup('showcase_project', { label: 'Project' }),
+    title: Field.text({ label: 'Title', required: true, searchable: true, maxLength: 160, group: 'brief' }),
+    summary: Field.text({ label: 'Client Summary', maxLength: 2000, group: 'brief' }),
+    project: Field.lookup('showcase_project', { label: 'Project', group: 'brief' }),
     status: Field.select({
       label: 'Status',
       options: [
         { label: 'Draft', value: 'draft', default: true, color: '#94A3B8' },
         { label: 'Published', value: 'published', color: '#10B981' },
       ],
+      group: 'brief',
     }),
     // ── The redacted half ────────────────────────────────────────────────
     // Never served through a share token (see `redactFields` below). Ordinary
     // API access by an entitled member is unaffected — redaction applies only
     // when the request principal is `kind:'share-link'`.
-    internal_notes: Field.text({ label: 'Internal Notes', maxLength: 2000 }),
-    deal_value: Field.currency({ label: 'Deal Value', min: 0 }),
+    internal_notes: Field.text({ label: 'Internal Notes', maxLength: 2000, group: 'internal' }),
+    deal_value: Field.currency({ label: 'Deal Value', min: 0, group: 'internal' }),
     // Owner anchor — auto-stamped on insert; the `public_read` OWD reads it to
     // decide who may WRITE the row.
-    owner_id: Field.lookup('sys_user', { label: 'Owner' }),
+    owner_id: Field.lookup('sys_user', { label: 'Owner', group: 'brief' }),
   },
+
+  // ADR-0085 §5: the form, detail and drawer layout is derived from these
+  // groups, so each field is placed in a named section rather than left to the
+  // untitled fallback, which the field-no-consumers rule credits to no one (#32168).
+  fieldGroups: [
+    { key: 'brief', label: 'Client Brief' },
+    { key: 'internal', label: 'Internal Only' },
+  ],
 
   // ── The link axis (ADR-0047) ───────────────────────────────────────────
   publicSharing: {
