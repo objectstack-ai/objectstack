@@ -599,7 +599,7 @@ three commands since the split.
 `objectExtensions` entry's fields land in the object it extends, so the rule
 judges each field it adds by name and label, the entry's own `label`, and each
 `fieldPatches` relabel, with the messages the object's own declarations get and
-located at the entry (`objectExtensions[0].fields.role.name`). The
+located at the entry (`objectExtensions[0].fields.FIELD.name`). The
 `object_extension` publish door (Studio's add-field on a customization package,
 `/api/v1/meta`) runs the same rule. A field an extension adds to a `sys_*`
 object is judged too: the system-object exemption covers the platform's own
