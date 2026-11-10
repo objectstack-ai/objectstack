@@ -637,6 +637,7 @@ export const ShowcaseTranslationBundle = {
           churn_reason_present: { message: '客户标记为流失时必须填写流失原因。' },
           churn_reason_absent: { message: '只有客户已流失时才能填写流失原因。' },
         },
+        _sections: { profile: { label: '客户概况' }, contact: { label: '联系方式与地址' }, tax_support: { label: '税务与服务' } },
       },
       showcase_contact: {
         label: '联系人',
@@ -741,6 +742,7 @@ export const ShowcaseTranslationBundle = {
           deal_value: { label: '交易金额' },
           owner_id: { label: '负责人' },
         },
+        _sections: { brief: { label: '客户简报' }, internal: { label: '仅内部可见' } },
       },
       showcase_invoice: {
         label: '发票',
@@ -806,6 +808,7 @@ export const ShowcaseTranslationBundle = {
           rejected_count: { label: '已驳回行数' },
           over_limit_count: { label: '超过 $500' },
         },
+        _sections: { report: { label: '报销单' }, totals: { label: '汇总' } },
       },
       // See the `en` side for why this entry translates exactly ONE field and
       // no more (check-i18n-coverage is a two-sided ratchet). The line's other
@@ -852,18 +855,22 @@ export const ShowcaseTranslationBundle = {
       showcase_product: {
         label: '产品', pluralLabel: '产品',
         fields: { name: { label: '名称' }, sku: { label: 'SKU' }, description: { label: '描述' }, unit_price: { label: '单价' }, active: { label: '启用' } },
+        _sections: { product: { label: '产品' }, pricing: { label: '定价' } },
       },
       showcase_team: {
         label: '团队', pluralLabel: '团队',
         fields: { name: { label: '团队名称' }, lead: { label: '负责人' }, capacity_hours: { label: '产能(小时)' } },
+        _sections: { team: { label: '团队' } },
       },
       showcase_project_membership: {
         label: '成员', pluralLabel: '成员',
         fields: { team: { label: '团队' }, project: { label: '项目' }, engagement: { label: '协作职能' }, allocation_percent: { label: '分配比例' } },
+        _sections: { membership: { label: '成员关系' } },
       },
       showcase_category: {
         label: '分类', pluralLabel: '分类',
         fields: { name: { label: '名称' }, parent: { label: '上级' }, color: { label: '颜色' }, sort_order: { label: '排序' } },
+        _sections: { category: { label: '分类' }, display: { label: '显示' } },
       },
       // `_views` only: this object has no zh-CN block of its own, and its
       // object/field debt is inside the ratchet's baseline. Translating the
@@ -944,6 +951,7 @@ export const ShowcaseTranslationBundle = {
             options: { standard: '标准', restricted: '受限（仅管理员）' },
           },
         },
+        _sections: { selection: { label: '级联选择' } },
       },
       // `_sections` only, on the same footing as the two `_views`-only blocks
       // above: this ADR-0085 fixture has no zh-CN block of its own and its
@@ -957,6 +965,24 @@ export const ShowcaseTranslationBundle = {
           basics: { label: '基本信息' },
           money: { label: '财务信息' },
         },
+      },
+      // #32168: these five objects have no zh-CN block of their own either, so each
+      // carries only the `fieldGroups` headings it newly declares, on the footing of
+      // showcase_semantic_zoo above: translated at birth so the ratchet does not widen.
+      showcase_announcement: {
+        _sections: { announcement: { label: '公告' } },
+      },
+      showcase_private_note: {
+        _sections: { note: { label: '笔记' } },
+      },
+      showcase_ext_customer: {
+        _sections: { customer: { label: '客户' } },
+      },
+      showcase_ext_order: {
+        _sections: { order: { label: '订单' } },
+      },
+      showcase_semantic_zoo_legacy: {
+        _sections: { details: { label: '详细信息' } },
       },
       showcase_field_zoo: {
         label: '字段动物园', pluralLabel: '字段动物园',
@@ -1051,6 +1077,22 @@ export const ShowcaseTranslationBundle = {
           showcase_zoo_t_or: { label: 'OR —— select || rating' },
           showcase_zoo_t_not: { label: 'NOT —— !boolean' },
           showcase_zoo_t_ternary: { label: '三元 —— rating ? :' },
+        },
+        // The `fieldGroups` headings mirror the zoo's own family comments (#32168).
+        _sections: {
+          core_text: { label: '基础文本' },
+          rich_content: { label: '富文本内容' },
+          numbers: { label: '数值' },
+          date_time: { label: '日期与时间' },
+          logic: { label: '逻辑' },
+          selection: { label: '选择' },
+          relational: { label: '关联' },
+          user: { label: '用户' },
+          media: { label: '媒体' },
+          calculated: { label: '计算与系统' },
+          embedded: { label: '嵌入式结构值' },
+          enhanced: { label: '增强类型' },
+          ai_ml: { label: 'AI / 机器学习' },
         },
       },
     },

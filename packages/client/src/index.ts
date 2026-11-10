@@ -1445,7 +1445,12 @@ export interface AuthPasswordChangeResult {
  * `callbackURL`.
  */
 export interface AuthEmailVerificationResult {
-    /** Always `true`; a bad or expired token is a 401 raised by `this.fetch`. */
+    /**
+     * Always `true`; a bad or expired token is a 401 raised by `this.fetch`.
+     * A request that would sign in an account with an enrolled second factor
+     * answers the two-factor challenge (`twoFactorRedirect`) instead of this
+     * receipt: no one-time code or sign-in link alone signs such an account in.
+     */
     status: true;
     /**
      * The updated user when the token was minted by `changeEmail` (the address
