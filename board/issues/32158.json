@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T10:37:52Z",
-  "updated_at": "2026-11-10T13:31:17Z",
+  "updated_at": "2026-11-10T17:50:36Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32158",
   "body": "qa#1 · os-bob · session_012dn2AecbS6JEeLdRWSW4AC\n\nFiling gate: ③ a task on the maintainer's word. Asked in session on 2026-11-10, after the full-platform test run listed its improvement suggestions, verbatim: 「立卡处理」.\n\nQA-source: #32135 · browser walk (runner C), zh-CN · observed beside the clauses\nBatch-of: objectstack-ai/objectstack#32135 follow-ups, 15 cards filed on the maintainer's 「立卡处理」\n\n## What we saw\n\nShowcase in 简体中文 (framework ff04ad81):\n- An object extension's label bypasses translation: the header reads \"Accounts (Success Overlay)\" while the activity feed for the same object reads \"客户\".\n- Server-generated text stays English: notification titles (\"Approval requested\"), the Home activity feed (\"Dev Admin Created Repair Ticket …\"), and the language name inside a Chinese sentence (\"当前为English、美国\").\n- Dashboard KPI subtitles (\"Projects\", \"Tasks\", \"Total Budget\") and the \"Metadata Commit\" object label are untranslated; half-width punctuation sits inside Chinese sentences on the auth settings page.\n- Date formats mix within one locale (\"2026/11/10 上午7:03\" beside 24-hour \"2026/11/10 07:24:26\" in the audit log; elsewhere \"Dec 10\" drops the year).\n\n## Proposed change\n\nRoute extension labels, server-rendered notification and activity strings, and language display names through the translation bundles; fill the platform-object gaps; use one date-time formatter per locale.\n\n## Business reason\n\nWho: every Chinese-language user and customer. Cost: a half-translated product reads as unfinished in exactly the market the showcase demonstrates.\n\n## Reader\n\nTriage first touch; lands across `ui/` (labels, formatting) and the services that render notification and activity text (`service-messaging`, `plugin-approvals`, activity feed).\n\n## Duplicate check\n\n`is:issue repo:objectstack-ai/objectstack notification title translation zh-CN server generated` (52, open and closed): #29895, #28993, #29818 are about locale tag casing and push locale, not these strings."

@@ -1,0 +1,31 @@
+{
+  "number": 32282,
+  "kind": "issue",
+  "title": "lint: field-no-consumers treats a field permission's `when` row condition as a carrier, so a field read only by that condition is flagged",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T16:14:31Z",
+  "updated_at": "2026-11-10T17:23:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32282",
+  "body": "domain:spec#3 · os-support-ai · session_01WGufzh7cM8EmUX4T2CBNHX\n\n## What is wrong\n\nA field permission's `when` (`packages/spec/src/security/permission.zod.ts`, the field-permission arm) is a CEL row condition. It is evaluated on the stored row before an update, so a lock such as `status in [...]` reads `status`. `field-no-consumers` (`packages/lint/src/validate-field-consumers.ts`) still treats every path under `permissions` as a carrier, apart from the RLS `using` / `check` predicates that #32256 (PR #32276) credits. So a field that only a field permission's `when` reads is reported as having no consumers.\n\nThis is the same false-positive class as #32256. #32256 left `when` as a carrier on purpose, because its card asked only for the RLS predicates. The contract review on PR #32276 (comment 6772543690) recommended this card.\n\n## Ask\n\n- Credit the fields named in a field permission's `when` as behaviour reads, the same way PR #32276 credits an RLS predicate. Type the key name against the spec schema, as that PR does (`satisfies`).\n- The field the permission grants on stays a carrier. Only the condition's reads are credited.\n- Pins: a field read only by a `when` is not reported; a field named only as a grant target still is. Ablate once.\n\nDepends on PR #32276 landing first, because it shares the RLS credit's code path."
+}

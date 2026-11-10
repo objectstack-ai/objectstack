@@ -1,0 +1,33 @@
+{
+  "number": 32321,
+  "kind": "pull_request",
+  "title": "fix(app-shell): sign-out saves the last list change before the session ends",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T18:31:14Z",
+  "updated_at": "2026-11-10T19:15:57Z",
+  "closed_at": "2026-11-10T19:15:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-10T19:15:54Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32321",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBQR5ZWiRyNSRJbqjqJMoVqZ)_\n\nFixes #32298\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：退出登录时，列表偏好（`ui.list.<对象>` 行）里还在 500 ms 防抖中的保存，现在会在会话结束**之前**发出并等它返回；已经发出、尚未返回的保存也一起等。\n- 为什么改：卡片第 2 条成立。原来 `signOut()` 先结束会话，等 React 卸下列表偏好 family 时才发这次保存，真实服务器会以「无会话」拒收，用户退出前最后一次列表改动在所有设备上丢失；单测断言的正是这次保存，没有任何东西等它，于是在合并队列里偶发变红。\n- 风险与回滚：只动私有包 `@object-ui/app-shell` 的 `ListPreferencesProvider`，复用已有的 `registerBeforeSignOut`（`runBeforeSignOut` 最多等 3 s，从不拒绝，不会卡住退出）；回滚即 revert 本 PR。\n- 先看：`ui/packages/app-shell/src/context/ListPreferencesProvider.tsx` 里的 before-sign-out 步骤和 `inFlightRef`。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/app-shell/src/context/__tests__/signOutPurge.test.tsx`，预期 5/5 绿；新用例在旧代码上必红（`['session ended', 'save sent']`）。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- **Sign-out saves the last list change while the session still exists.** `ListPreferencesProvider` registers one before-sign-out step (it already registered one that drops pending list-filter writes; this is the same step, extended). The step sends every `ui.list.<object>` save still waiting on its 500 ms debounce and then waits for every save already sent, tracked in a new `inFlightRef` set that `flushOne` fills and each save's settle empties. `runBeforeSignOut` bounds the wait (`BEFORE_SIGN_OUT_TIMEOUT_MS`) and never rejects, so sign-out is never held back.\n- **Unchanged:** the debounce, the flush when the family detaches (it still covers a session that ends without `signOut()`, where nothing can be saved first), the list-filter discard, and the purge.\n- No changeset: `@object-ui/app-shell` is private (`\"private\": true`), and no published package's source moves.\n\n## Why\n\nThe product path, read at `origin/main` `60b99f8f`: `AuthProvider.signOut()` awaits `runBeforeSignOut()`, then `client.signOut()` (the session ends, `TokenStorage` is cleared), then `setUser(null)`. The list-state save that was still waiting on its debounce was sent only from the cleanup of the effect keyed on `family`, which runs once the console's bridge detaches the family after the user goes, so after the session had ended. `signOut()` neither sent it earlier nor waited for it. On a real server that write arrives unauthenticated and is refused (`createObjectStackUserPreferenceFamily.save` reports it to `onError` and swallows it), so a list change made in the last 500 ms before sign-out was lost on every device. That is the card's item 2.\n\nThe test's assertion (`expect(family.save).toHaveBeenCalled()`, \"sent by its debounce or by the flush when the user goes\") depended on that React re-render cascade having run inside the `act` that wraps `signOut()`. The save is now part of `signOut()` itself, awaited before the session ends, so the case no longer depends on when the cascade runs.\n\n## Verification\n\n- New case `signOut() saves the last list change under the session, before the session ends` in `signOutPurge.test.tsx`: the server-save stub settles in a later task, and the case records the order of events. Old code (product file at `60b99f8f`, new test): **red**, `expected [ 'session ended', 'save sent' ] to deeply equal [ 'save sent', 'save settled', 'session ended' ]`, so the save went out after the session ended and had not settled when `signOut()` returned. This branch: **green**, same stub.\n- The file 5/5, and 3 runs with `--sequence.shuffle` (seeds 1794333720007, 1794333729248, 1794333738136) 5/5 each.\n- Not reproduced locally: the queue's exact red on the existing case (save never called). The existing case was green in 20 runs on the old code with six busy-loop processes pinning the 4 cores, and with the session read, the family load and `client.signOut` each delayed (0 to 600 ms). The fix removes what the assertion was waiting on rather than a measured trigger; said here instead of claimed.\n- Gates, under `os-verify-lock`: vitest of the file and of `packages/app-shell/src/context/` exit 0; `type-check` of `@object-ui/app-shell` exit 0 (the first run caught a TS2349 in the new case, fixed in the second commit); `dispatch-gates --commands` derived 27, all 27 run, all exit 0; `--ran`: 27 accounted, 0 NOT-MEASURED. eslint on the two files: 0 errors, the 11 warnings all on lines this PR does not touch.\n\n## Acceptance notes\n\n- `FavoritesProvider`, `RecentItemsProvider` and `FlowPaletteRecentsProvider` flush their debounced saves only on unmount (`useEffect(() => () => { void flusher.flush(); }, [flusher])`), which on sign-out also runs after the session has ended. Same shape, not measured on a server here, not touched (scope is this card); reported to the seat.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes. (eslint on the two files)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (nothing publishes: private package)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (the 维护者速读 section is the dispatch's required Chinese summary)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WGufzex3pg46YveDw9mHYr\n"
+}

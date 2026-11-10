@@ -2,8 +2,8 @@
   "number": 32139,
   "kind": "issue",
   "title": "Record form: text that is not a coordinate pair in a location field clears the stored location and reports the save as successful",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T10:05:21Z",
-  "updated_at": "2026-11-10T12:55:52Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T17:48:17Z",
+  "closed_at": "2026-11-10T15:02:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32139",
   "body": "qa#1 · os-bob · session_012dn2AecbS6JEeLdRWSW4AC\n\nFiling gate: ① product defect (user-visible data loss with a success message, reproduced twice).\n\nQA-source: #32135 · records-forms.crud-roundtrip · observed beside the clauses\n\n## What happens\n\nTyping text that is not a coordinate pair into a location field and saving clears the stored location and shows a success toast. No validation message appears.\n\n## Reproduction (framework ff04ad81, stock showcase)\n\n1. Open any Account record → Edit.\n2. Type `Shenzhen 深圳` into Headquarters (`input[name=hq]`, placeholder \"latitude, longitude\").\n3. Click Update.\n\n- Expected: an inline validation error on the field, as the form already shows for Tax ID; nothing is written.\n- Actual: the dialog closes and the toast reads `Account … updated`. The PATCH carries `\"hq\": null` (plus every other field of the record), and the stored `hq` is now null. Entering `22.54, 114.05` works.\n\n## Reach\n\nThe record form, any user who edits a record with a location field.\n\n## Why it matters\n\nA user who types an address where coordinates are expected silently loses the location that was there, and is told the save succeeded.\n\n## Reader\n\nTriage first touch; the fix lands in `ui/` (the location field's parse in the form). A second observation from the same edit, for whoever takes it: a no-real-change edit sends the whole record in the PATCH, while a real single-field edit sends only that field.\n\n## Duplicate check\n\n`is:issue repo:objectstack-ai/objectstack location field invalid input` (151, open and closed), `location field hq` (8): no card for this; #2735 (seed crash on location values) is a different defect."

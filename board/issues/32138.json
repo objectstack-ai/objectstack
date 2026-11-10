@@ -2,8 +2,8 @@
   "number": 32138,
   "kind": "issue",
   "title": "Console: after the session ends server-side, in-app navigation shows \"Page Not Found\" or \"check your connection\" instead of returning to the login page",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T10:04:47Z",
-  "updated_at": "2026-11-10T12:23:10Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T17:47:22Z",
+  "closed_at": "2026-11-10T14:53:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32138",
   "body": "qa#1 · os-bob · session_012dn2AecbS6JEeLdRWSW4AC\n\nFiling gate: ① product defect (user-visible, reproduced three times through the console).\n\nQA-source: #32135 · platform-core.console-login · clause 3\n\n## What happens\n\nWhen a console session ends on the server (sign-out elsewhere, expiry, revocation), the next in-app navigation keeps the whole signed-in shell and tells the user the page is missing or the network is down. It never returns them to the login page until they reload.\n\n## Reproduction (framework ff04ad81, stock showcase, own port and DB)\n\n1. Sign in through the form at `/_console/login` (admin, or `auditor.demo@example.com` / `showcase123`) and wait for `/_console/home`.\n2. End the session server-side: `POST /api/v1/auth/sign-out` → 200.\n3. Without reloading, click the \"Showcase\" tile on Home, or any sidebar link.\n\n- Expected: the console sends the user to the login page (with `?redirect=`), or shows a re-authentication prompt.\n- Actual: every API call answers 401; the sidebar, avatar and notification badge stay; the main area reads \"Page Not Found — The page \\\"showcase_capability_map\\\" could not be found. It may have been removed or renamed.\" Object lists read \"Couldn't load records … Check your connection and try again\" with a Retry button. Only a full page reload goes to `/login?redirect=…`.\n- Reproduced three times, two personas, ref-targeted clicks.\n\n## Reach\n\nThe console itself, every signed-in user. No stale records are shown, but a 401 is presented as a missing page or a network fault.\n\n## Why it matters\n\nA user whose session ended (timeout, password change, admin revoke) is told the app is broken instead of being asked to sign in again; support will chase a \"page removed\" that never happened.\n\n## Reader\n\nTriage first touch; the fix lands in `ui/` (the console's handling of a 401 on in-app navigation, which today only the full-reload path redirects).\n\n## Duplicate check\n\n`is:issue repo:objectstack-ai/objectstack session expired page not found` (152 hits, open and closed), `sign-out shell 401 redirect login` (31), `session expiry console redirect` (64): no card for this behaviour; closest are #29174 (redirect carries the previous user's filters) and #29971 (mobile hand-off lands on 页面不存在), both different."

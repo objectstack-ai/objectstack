@@ -1,0 +1,33 @@
+{
+  "number": 32328,
+  "kind": "issue",
+  "title": "Queue-flake anchor: packages/app-shell/src/context/__tests__/signOutPurge.test.tsx",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [
+    "finding",
+    "queue-flake-anchor"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T18:49:08Z",
+  "updated_at": "2026-11-10T18:58:46Z",
+  "closed_at": "2026-11-10T18:58:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32328",
+  "body": "`packages/app-shell/src/context/__tests__/signOutPurge.test.tsx` has ejected **2 pull requests** from the merge\nqueue within a rolling 24 hours — **2 independent hits** once\nGitHub's speculative stacking is accounted for. This issue is the single place for\nthat conversation; it is refreshed by the merge-queue-triage workflow on every\nfurther ejection.\n\n| PR | stack | queue build |\n|---|---|---|\n| #32272 | independent | [42855434325](https://github.com/objectstack-ai/objectstack/actions/runs/42855434325) |\n| #32304 | independent | [42875304303](https://github.com/objectstack-ai/objectstack/actions/runs/42875304303) |\n\n**This issue is a NAME, not a diagnosis.** The workflow that files it reads the\nfailing test file path out of the job logs and counts PRs; it does not\nknow whether this is a flake, a load/timing cliff, a semantic conflict between\nqueued PRs, or a real regression, and it does not act on any of those. No test is\nskipped, quarantined or re-queued by it, and no PR is labelled by it — weakening\na gate stays a human act.\n\nWhat to do with it: read one victim PR's triage comment for the failure REASON\nline beside the FAIL line (a timeout and an assertion are the same FAIL line and\nopposite diagnoses), decide the cause, and close this issue with the fix or with\nthe reason it is not one.\n\nA later queue build that went green on the same `main` is a control only if its\naffected-only selection ran the failing package; a green group that never selected\nit carried the same tree without testing it.\n\nLast refreshed by queue build [42875304303](https://github.com/objectstack-ai/objectstack/actions/runs/42875304303) (PR #32304).\n\n---\n_Filed by the merge-queue-triage workflow (#4859, aggregation #10128)._\n\n<!-- queue-signature-anchor:packages/app-shell/src/context/__tests__/signOutPurge.test.tsx -->"
+}

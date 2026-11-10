@@ -1,0 +1,33 @@
+{
+  "number": 32283,
+  "kind": "issue",
+  "title": "ui: the inline grid renderer keeps its own SORT_FIELD_NAMES list instead of the spec's deriveInlineGridSortField, and nothing pins the two equal",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p3",
+    "tech-debt"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T16:14:58Z",
+  "updated_at": "2026-11-10T19:36:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32283",
+  "body": "domain:spec#3 · os-support-ai · session_01WGufzh7cM8EmUX4T2CBNHX\n\n## What is wrong\n\nPR #32276 (#32256) publishes `deriveInlineGridSortField(def)` from `@objectstack/spec/data`. It picks the inline grid's line-position field: the first field, in field order, whose name is in the spec's private `INLINE_GRID_SORT_FIELDS`. The lint rule `field-no-consumers` now credits that field through the helper.\n\nThe renderer does not call the helper. `ui/packages/plugin-form/src/deriveMasterDetail.ts` L55 keeps its own `SORT_FIELD_NAMES` literal (`position, sort_order, sequence, line_no, line_number, sort`), and L535 applies the same first-match rule. Nothing pins the two lists equal. If either list changes alone, lint credits one field while the grid orders by another. The contract review on PR #32276 (comment 6772543690) raised this as a follow-up.\n\n## Ask\n\n- Make `deriveDetail` in `deriveMasterDetail.ts` call `deriveInlineGridSortField` from `@objectstack/spec/data`, and delete the local `SORT_FIELD_NAMES`. `plugin-form` already depends on `@objectstack/spec`.\n- Keep the existing behaviour: `MasterDetailForm.tsx` uses `sortField` on the authored and derived branches and in `$orderby`. Pin one child with a sort-named field and one without.\n\nDepends on PR #32276 landing first, because the helper does not exist on `main` until then."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 32280,
+  "kind": "issue",
+  "title": "rest: a batch, updateMany or deleteMany whose rows failed answers HTTP 200 with success:false; answer 207 so a raw client can tell",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T16:12:53Z",
+  "updated_at": "2026-11-10T19:43:24Z",
+  "closed_at": "2026-11-10T19:40:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32280",
+  "body": "domain:server#2 · os-support-ai · session_01WGufziCTpjnYbdh76SAWwb\n\nFiling gate: ④ per-layer child of #32169 (p2, filed on the maintainer's 「立卡处理」 after the 2026-11-10 platform test run #32135). Split by the seat on the card thread's phase-1 report, measured on a live showcase at `origin/main` `bb472154` (report: `/mnt/project-files/server-orders/seat2/32169-phase1-report.md`, project files).\nReader: the next `domain:server` seat that claims it.\n\n## What happens\n\n`POST /data/:object/batch` (update/delete/create, `atomic` or not), `/updateMany` and `/deleteMany` answer **200** `{success:false, total, succeeded:0, failed:N, results:[…]}` when every row failed (`packages/rest/src/batch-routes.ts`, ~L503 and the many-handlers). `createMany` with a bad row answers **400** for the whole call, so the bulk family disagrees with itself.\n\nThe SDK's shared `fetch` throws on any non-2xx (`packages/client/src/index.ts` ~L8309), and the console's `updateMany`/`deleteMany` ride it, so a 4xx would turn today's per-row `results` into a thrown error.\n\n## Expected\n\nAnswer **207 Multi-Status** with the body unchanged when rows failed (seat's reading: when `failed > 0`; the claiming seat confirms or narrows to `succeeded === 0`). 207 keeps `res.ok` true, so the SDK and console keep working, and a raw HTTP client can branch on it.\n\nClause-②: yes (narrowing): a changed status a client could branch on. BREAKING obligations apply (`!` title, banner, ADR-0087 disposition, dogfood battery). Metadata-protocol: none.\nBusiness reason: integrations that read only the HTTP status today count an all-failed batch as success."
+}

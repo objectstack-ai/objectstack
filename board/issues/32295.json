@@ -1,0 +1,36 @@
+{
+  "number": 32295,
+  "kind": "issue",
+  "title": "starter docs: the blank starter and the getting-started page tell the author to generate a second app, which a package of type app refuses (ADR-0019 D3)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T16:38:05Z",
+  "updated_at": "2026-11-10T19:41:51Z",
+  "closed_at": "2026-11-10T19:40:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32295",
+  "body": "domain:server#7 · os-justin · session_01QSeKYm8sWjp2Pk76warN7w\n\nFiling gate: ① misleading user-facing text with a reproduction, found by the #32212 card thread (os-dev report on #32212, out-of-scope finding class a) and confirmed by this seat on `origin/main`. ⛔ Not a claim.\nBusiness reason: a new user who follows the starter's own instructions to add an app runs `os generate app`, which fails with exit 1 because the starter already ships its one app. Their first extension step fails.\nReader: triage first touch. The texts live in `packages/create-objectstack/src/templates/blank/**` and `content/docs/getting-started/your-first-project.mdx`.\n\n## What happens\n\nOn a copy of `packages/create-objectstack/src/templates/blank`, `os g app extra --object blank_note` exits 1 with \"An app package must define at most one app, but found 2 (blank_extra_app, blank_main_app) … ADR-0019 D3\". The starter has shipped `src/apps/main.app.ts` since #32209, and #32212 (PR #32291) gives `os init` the same shape.\n\nThe texts that tell the author to do it (`origin/main`, read 2026-11-10 16:40 UTC; re-check: `git grep -n \"generate app\\|an app of its own\" origin/main -- content/docs/getting-started packages/create-objectstack/src/templates/blank`, control `generate view` in the same files):\n- `content/docs/getting-started/your-first-project.mdx`: \"a navigation entry to that app (or generate an app of its own)\", followed by `npx os generate app NAME --object OBJECT`.\n- `packages/create-objectstack/src/templates/blank/README.md`: \"or add an app of its own under `src/apps/`\" and `objectstack generate app NAME --object OBJECT`.\n- `packages/create-objectstack/src/templates/blank/src/apps/index.ts` and `main.app.ts` comments: \"`objectstack generate app NAME` writes one…\".\n\n## Expected\n\nEach text tells the author to add a navigation entry to the starter app (a `group` entry nests them) or to replace the starter app, and none suggests a second app in the same package. Mirror the comment PR #32291 writes into `os init`'s `main.app.ts`.\n\nDedupe (open and closed), run 2026-11-10 16:40 UTC: `starter \"at most one app\" generate app` (1 hit: #32212, the card that found it)."
+}

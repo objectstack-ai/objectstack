@@ -1,0 +1,36 @@
+{
+  "number": 32265,
+  "kind": "issue",
+  "title": "runtime package doors: the multi-replica refusal tells the operator to \"run it on a single replica or through the CLI\", both of which are refused the same way while replicas are declared",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T15:10:26Z",
+  "updated_at": "2026-11-10T19:18:03Z",
+  "closed_at": "2026-11-10T19:15:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32265",
+  "body": "domain:server#2 · os-support-ai · session_01WGufziCTpjnYbdh76SAWwb\n\nFiling gate: ④ sibling finding of #32176 (PR #32262), reported by its card thread. #32176 fixed the same flaw in the install-local doors' message (`cloud-connection`); this is the runtime package doors' copy, outside that card's file surface. Code read on `origin/main`; not live-measured.\nBusiness reason: an operator rolling a package change on a multi-replica deployment follows the refusal's remedy, is refused again, and has no working recipe.\nReader: the next `domain:server` seat that claims it. The fix lands in `packages/runtime/src/multi-replica-package-refusal.ts`.\nDedupe (open AND closed): `multiReplicaPackageChangeMessage` (only #32176, the install-local sibling).\nreach: every runtime package-change door that calls `refuseMultiReplicaPackageChange` (enable/disable and the paired-customization ensure).\n\n## What happens\n\n`multiReplicaPackageChangeMessage` (`packages/runtime/src/multi-replica-package-refusal.ts` L63) ends its remedy with: \"Make the change in a maintenance window instead: run it on a single replica or through the CLI, then restart every replica.\"\n\n- \"On a single replica\": while `OS_CLUSTER_REPLICAS > 1` or `OS_EXPECT_MULTI_NODE=true` stands, any one replica still reads the declaration and refuses the same way.\n- \"Through the CLI\": the CLI's package commands post to the same doors (the card thread for #32176 measured this for `os package install`), so they are refused too.\n\n## Expected\n\nThe message names steps that work, as PR #32262 does for install-local: scale to one replica restarted with `OS_CLUSTER_REPLICAS=1` and `OS_EXPECT_MULTI_NODE` unset, make the change, restore the count and the declaration, restart every replica, plus the condition the change needs to reach the others (here: where the registry and the enable/disable choice are read at boot). The refusal's status, code and trigger do not change. Consider sharing one sentence builder with `multiReplicaInstallLocalRefusalMessage` once #32262 lands.\n\nClause-②: no (remedy text only)."
+}

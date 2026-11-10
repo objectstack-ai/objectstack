@@ -1,0 +1,37 @@
+{
+  "number": 32269,
+  "kind": "issue",
+  "title": "Checklist sweep M3: action preflight and page bindings, AI data tools and MCP, federation and CLI (since 18.3.0)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "enhancement",
+    "pm:blocking",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T15:40:44Z",
+  "updated_at": "2026-11-10T18:06:43Z",
+  "closed_at": "2026-11-10T17:41:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32269",
+  "body": "domain:devx#2 · os-support-ai · session_01WGufzjFj4aaaJk1VJLqRdC\n\nFiling gate: ③ a task on the maintainer's word: epic #32022 \"Ownership\", the maintainer in the `qa#2` seat session, verbatim 「你可以再开一个 devx 座位，处理相关清单卡」 then 「相关卡立一个专题」; the epic's Milestones table has this seat card M3 once M1 lands (M1 #32019 closed 2026-11-10).\n\nBlocked-by: #32020\n\nParent: the checklist epic #32022. Milestone M3. It waits on M2 because both write the same area files (one writer per area file, SWEEP.md).\n\n## What\n\nAuthor the platform-checklist items for the last three themes that landed after 18.3.0 (`83d7e4ae`), with the `checklist-author` skill and the six angles in `docs/qa/platform-checklist/SWEEP.md`:\n\n- **Theme 6, action preflight and page API bindings**: `ActionSchema.preflight` and its panel in the param dialog; the row-table page block; api-bound elements re-reading after their own action; AI pending actions held for approval.\n- **Theme 7, AI data tools and MCP**: `list_datasets` and `query_dataset` (service and MCP, under `data:read`); the dataset member vocabulary; `read_file` PDF and Word extraction with its budget and cap; the MCP tool-call interceptor; chat answers linking the filtered list they counted.\n- **Theme 8, federation and CLI**: SQL Server and Oracle as federation-only dialects (connection form included); Oracle `RAW(16)` uuid lookups; `os deploy --dry-run` and `--json`; `os validate --target`; the package upgrade plan's `.custom` override advice.\n\n## Rules\n\n- New items carry `since: \"v18.4\"`. A declared-but-absent capability is a `status: \"planned\"` item, never coverage.\n- Every item's `source[]` cites the files it exercises. Every item follows README.md \"Item anatomy\". An item that needs a credentialed external database states its fixture (`scripts/qa/qa-fixture.mjs external-database`, #32233); without one it is `blocked` with the reason, never faked.\n- `coverage.json` is reconciled. `node scripts/check-platform-checklist.mjs` is green.\n- Defects or doc drift go to `FOLLOW-UPS.md` per SWEEP.md. Security findings follow `.claude/skills/pm-dispatch/references/security-findings.md`.\n\n## File surface\n\n`docs/qa/platform-checklist/areas/*.json`, `docs/qa/platform-checklist/coverage.json`, `docs/qa/platform-checklist/FOLLOW-UPS.md`. No product code.\n\n## Premise re-check\n\n```bash\ngit log --oneline 83d7e4ae..origin/main | grep -ciE 'preflight|row-table|list_datasets|query_dataset|read_file|interceptor|oracle|sql ?server|mssql|deploy --dry-run|validate --target'\nnode scripts/checklist-select.mjs since:v18.4 --json   # none of the selected items covers themes 6, 7 or 8\n```\n\n## Done when\n\n`since:v18.4` selects the new items for themes 6, 7 and 8, the checker is green, and the PR has merged."
+}

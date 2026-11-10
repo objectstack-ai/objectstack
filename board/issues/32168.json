@@ -2,8 +2,8 @@
   "number": 32168,
   "kind": "issue",
   "title": "QA ledger fixes from the 2026-11-10 full run: eight stale steps or baselines, the smoke config's reused-server trap, four recurring fixtures, and 76 showcase author-time warnings",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:devx",
     "enhancement",
-    "pm:dispatched",
     "priority:p1",
     "tests"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T10:42:10Z",
-  "updated_at": "2026-11-10T13:42:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T15:09:15Z",
+  "closed_at": "2026-11-10T15:06:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32168",
   "body": "qa#1 · os-bob · session_012dn2AecbS6JEeLdRWSW4AC\n\nFiling gate: ③ a task on the maintainer's word. Asked in session on 2026-11-10, after the full-platform test run listed its improvement suggestions, verbatim: 「立卡处理」.\n\nQA-source: #32135 · checklist-accuracy notes and fixture gaps\nBatch-of: objectstack-ai/objectstack#32135 follow-ups, 15 cards filed on the maintainer's 「立卡处理」\n\n## What we saw\n\nFrom the run record #32135 (checklist-accuracy section):\n- platform-core.seed-integrity baseline says 132 rows / 19 datasets; the boot reads 138 / 20 and `showcase_invoice_line` authors 7 lines.\n- identity-auth.session-list-revoke step 3: revoke takes `list-sessions`' `token`, not the `set-auth-token` bearer.\n- integration-system.webhook-lifecycle: redeliver's key is `deliveryId`; secrets go in `signing_secret` / `headers_secret`; the column is `active`.\n- api-backend.aggregate-contract-matrix: no null `annual_revenue` in the seed, so count-`*` vs count-field cannot discriminate.\n- platform-core.console-login step 5 should name both an in-app navigation and a reload.\n- records-forms.crud-roundtrip: `hq` is a location field; name a rule-free text field for the single-field edit.\n- `examples/app-showcase/playwright.config.ts` reuses an existing server without `OS_TRUSTED_APP_SCHEMES`, so `mobile-signin-handoff.spec.ts` fails by construction on a reused boot.\n- Four fixtures keep blocking high-value items: the contributor-bound member, a walled boot, a credentialed external database, a broken-upstream scratch app.\n- The showcase boots with 76 author-time warnings (inert fields, approver nodes routing only to groups, an object with no resolvable title).\n\n## Proposed change\n\nRevise the named items (bump revision, add history), make the smoke spec skip with a reason when the reused server lacks the scheme, turn the four fixtures into one-command recipes, and bring the showcase's warnings to zero or to an explicit, reasoned allow-list.\n\n## Business reason\n\nWho: every QA runner and every agent that reads the showcase as the reference app. Cost: each run re-discovers the same stale steps, and a reference app with 76 warnings teaches that warnings are normal.\n\n## Reader\n\nTriage first touch; `docs/qa/platform-checklist` and `examples/app-showcase` (domain:devx).\n\n## Duplicate check\n\n`is:issue repo:objectstack-ai/objectstack showcase author-time warnings field-no-consumers` (11, open and closed): no card for these."

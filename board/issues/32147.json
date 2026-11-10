@@ -2,8 +2,8 @@
   "number": 32147,
   "kind": "issue",
   "title": "SSO with Microsoft Entra ID (OIDC): registration is refused (userinfo on graph.microsoft.com), the groups claim never reaches the group mapping (userinfo replaces the id_token), and mailbox-less users fail with missing_user_info",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bob",
@@ -13,18 +13,23 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T10:08:25Z",
-  "updated_at": "2026-11-10T12:01:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T19:09:25Z",
+  "closed_at": "2026-11-10T18:12:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32147",
   "body": "## Edition / version\nObjectOS Enterprise, cloud `main` built image (framework pin `e24136c2`, `@better-auth/sso` 1.7.12), licensed. Live Microsoft Entra ID test tenant: app registration with `groupMembershipClaims: SecurityGroup` and optional id-token claims `email`, `upn`, `given_name`, `family_name`. Browser walk-through for objectstack-ai/cloud#3666.\n\n## 1. Registration is refused\nSetup → SSO Providers → Register SSO Provider, issuer `https://login.microsoftonline.com/<tenant>/v2.0`. The toast reads:\n\n> Untrusted OIDC discovery URL: The userinfo_endpoint \"https://graph.microsoft.com/oidc/userinfo\" is not trusted by your trusted origins configuration.\n\n`AuthManager.ssoDiscoveryTrustedOrigins` auto-trusts only the origins written in the request body (issuer and explicit `oidcConfig` endpoints). Entra's discovery document puts `userinfo_endpoint` on a different host, so it is refused, and the form has no field to name it. The workaround used for the rest of this run was `OS_TRUSTED_ORIGINS=https://graph.microsoft.com`, which also widens the CSRF allow-list. Okta did not hit this because all its endpoints share the issuer host.\n\n**Expected:** trust the public-routable origins of the endpoints in the fetched discovery document of the issuer being registered, or at least a known IdP list. Today every Entra customer hits this on day one.\n\n## 2. Group → permission-set mapping never applies for Entra OIDC\n- With the mapping `providerId: entra-oidc`, `groupExternalId: <group object id>`, a JIT sign-in of a group member creates the account but grants **nothing**.\n- Cause: when a provider has a `userInfoEndpoint`, `@better-auth/sso` builds `userInfo` (and `mapping.extraFields`, where the groups claim is read) **only from the userinfo response** and ignores the verified id_token. Entra's userinfo returns `sub`, `name`, `given_name`, `family_name`, `picture`, `email` — no `groups`.\n- **Confirmed** by removing `userInfoEndpoint` from the stored `oidc_config` (diagnostic only): the next member signed in → granted; a re-login of an existing member → granted; after removing the member from the group in Entra and re-login → grant removed. So the projection itself works; the claim never reaches it.\n\n**Expected:** read `extraFields` (and the standard claims as fallback) from the verified id_token when userinfo does not carry them, or let the provider opt out of userinfo. Also note that Entra replaces `groups` with an overage pointer (`_claim_names`) above ~200 groups, which needs handling or documenting.\n\n## 3. Users without a mailbox cannot sign in\nEntra omits `email` from the id_token and userinfo when the user has no `mail` attribute, which is common for cloud-only or unlicensed users. Sign-in ends with `error=invalid_provider&error_description=missing_user_info`, which the login page shows as \"the sign-in link expired\" (#32087). Setting `mail` on the users fixed it.\n\n**Expected:** a documented \"Map: Email claim\" value for Entra (`preferred_username` / `upn`), the form suggesting it for `login.microsoftonline.com` issuers, and a refusal that names the missing claim.\n\n## What works with Entra OIDC (once registered)\n- SP-initiated sign-in, including MFA at Entra.\n- JIT off → `SELF_REGISTRATION_CLOSED`.\n- JIT on → account created as IdP-Provisioned with the right name.\n- Sign-out ends the local session, but Entra's session lets the next SSO in without a password (#32087)."

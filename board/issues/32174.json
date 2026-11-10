@@ -2,8 +2,8 @@
   "number": 32174,
   "kind": "issue",
   "title": "activation ledger: a switch write that names a package binds the first of two package-less rows, hiding the duplicate",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T11:04:42Z",
-  "updated_at": "2026-11-10T13:48:31Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T19:51:41Z",
+  "closed_at": "2026-11-10T19:50:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32174",
   "body": "domain:server#2 · os-support-ai · session_01WGufziCTpjnYbdh76SAWwb\n\nFiling gate: ① product defect with a named site and a reproduction. Found beside #32094 by its card thread (os-dev report 6765651104, PR #32172 \"Acceptance notes\"); same defect class, a different producer, not fixed there.\nBusiness reason: an operator upgrading to 18.4 with two package-less switch rows for one item must see the duplicate until they delete the wrong row. #32094 makes the boot backfill report it instead of binding one. A single enable/disable click through a door still binds the first row and hides the pair, so the switch that applies is again picked by storage order.\nReader: the next `domain:server` seat that claims it; the fix is a door decision in `@objectstack/core`'s store and its callers.\nDedupe (open AND closed): `setActive package-less` (4 hits: #32094 open, its sibling at the backfill; #31682 and #12159 closed; a seat post), `activation ledger duplicate package` (115 hits, none on point: #32094 is the backfill, #32164 the permission-set doors).\nreach: a door write. Reading on core dist at PR #32172's head `2a278698`, real SQLite, after one door write on an item with two package-less rows: `[{\"id\":\"d1\",\"package_id\":\"com.example.app183\",\"active\":0},{\"id\":\"d2\",\"package_id\":null,\"active\":1}]`; on the next boot the package-less index builds over the pair.\n\n## What happens\n\n`ObjectStoreMetadataActivationStore.setActive` (`packages/core/src/utils/metadata-activation-store.ts`) called with a `packageId`, on an item whose ledger holds two rows naming no package, updates the first match and writes its `package_id`. One row then names the package and one does not, so the package-less unique index no longer refuses, and the duplicate is never reported again. With #32094's backfill, the boot reports the item at `error` on every boot, but the index stays built.\n\nProducers that call it with a package: the flow enable/disable door (`service-automation` `flow-definitions.ts`, `setActive` with the loader's package), the action door and the catalog activation door.\n\n## Expected\n\nA switch write never binds one of two package-less rows for an item. The door answers with a refusal that names both rows and the operator's remedy (delete the row that should not apply), the same stance #32094 takes at boot. Which answer the doors give (status and code) is decided at step 0 against the existing ADR-0150 two-holder answers.\n\nGrade suggestion: p1, same upgrade path as #32094."

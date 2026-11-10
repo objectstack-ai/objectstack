@@ -1,0 +1,36 @@
+{
+  "number": 32270,
+  "kind": "issue",
+  "title": "Checklist sweep M4: zero-citation packages since 18.3.0 and the coverage.json close-out",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T15:41:42Z",
+  "updated_at": "2026-11-10T20:07:33Z",
+  "closed_at": "2026-11-10T19:40:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32270",
+  "body": "domain:devx#2 · os-support-ai · session_01WGufzjFj4aaaJk1VJLqRdC\n\nFiling gate: ③ a task on the maintainer's word: epic #32022 \"Ownership\", the maintainer in the `qa#2` seat session, verbatim 「你可以再开一个 devx 座位，处理相关清单卡」 then 「相关卡立一个专题」; the epic's Milestones table has this seat card M4 once M2 lands (M2 #32020's PR #32259 is in the merge queue, 2026-11-10).\n\nBlocked-by: #32269\n\nParent: the checklist epic #32022. Milestone M4, the close-out. It waits on M3 (#32269) because both write the same area files and `coverage.json` (one writer per area file, SWEEP.md).\n\n## What\n\n1. **Zero-citation packages.** List every package changed since 18.3.0 (`83d7e4ae`) that no checklist item's `source[]` cites, from `docs/qa/platform-checklist/coverage.json` and the citation scan the `checklist-author` skill describes. For each: author the item(s) its user-visible behaviour needs (`since: \"v18.4\"`), or record in `coverage.json` why it needs none (internal-only, test-only, covered through a named item that exercises it).\n2. **`coverage.json` close-out.** Reconcile it against M1–M4 so that every theme of #32022 maps to its items, and blocked or planned items say why.\n3. **Epic table.** Leave #32022's Milestones table current; the PR body lists the final `since:v18.4` count (runnable and `--include-blocked`) for the QA seat's release-candidate run.\n\n## Rules\n\n- New items follow README.md \"Item anatomy\" and cite their files. A declared-but-absent capability is `planned`, never coverage.\n- `node scripts/check-platform-checklist.mjs` is green; `node scripts/checklist-select.mjs since:v18.4 --json` lists the new items.\n- Defects or doc drift go to `FOLLOW-UPS.md` per SWEEP.md. Security findings follow `.claude/skills/pm-dispatch/references/security-findings.md`.\n\n## File surface\n\n`docs/qa/platform-checklist/areas/*.json`, `docs/qa/platform-checklist/coverage.json`, `docs/qa/platform-checklist/FOLLOW-UPS.md`. No product code.\n\n## Done when\n\nNo package changed since 18.3.0 is left uncited without a recorded reason, `coverage.json` maps every theme, the checker is green, and the PR has merged."
+}

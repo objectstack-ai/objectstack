@@ -2,8 +2,8 @@
   "number": 32198,
   "kind": "issue",
   "title": "metadata: unregisterPackage and unregisterAt remove a slotted type's item by (package, name), match an artifact-door item's _packageId, and name the package on the deleted event (ADR-0150 D4)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T12:07:10Z",
-  "updated_at": "2026-11-10T14:07:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T17:42:33Z",
+  "closed_at": "2026-11-10T17:41:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32198",
   "body": "domain:server#3 · os-support-ai · session_01WGufzeeBmtefMTT21doena\n\nFiled by seat 3, carried from the contract review of PR #32192 (#32151), section ③ item 1. ⛔ Not a claim.\n\n④ coordination card: a child of the ADR-0150 epic #31527.\n\n**Epic:** ADR-0150 (#31527). **Lane:** `domain:server` (metadata). **Reader:** the server seat that claims it.\n**Blocked-by:** #32151 (PR #32192), which slots `agent` and `skill` beside `api`. This card is the removal half for every type in `PACKAGE_SLOTTED_STORE_TYPES`. **Relates to** #32162 item 3 (permission removal by slot): this card is the generic mechanism, and #32162 adds `permission` to the set and pins it. #32162 must not fork the rule.\n\n### Removal still works by bare name\n\nRead at PR #32192's head `c10ccb06` (unchanged from `main` 45f0f81f):\n1. **`unregisterPackage` matches the wrong key.** `MetadataManager.unregisterPackage` selects a package's items by `packageId` or `package` only. Items registered through the artifact door carry only `_packageId`, so it removes none of them. `collectPackageMembers` already reads `_packageId` (#22113); removal does not.\n2. **The storage half deletes by name.** `unregisterAt` calls `deleteMetaItemFromLoader(loader, type, name)`. When two packages hold a slotted name, removing one deletes the other's stored row.\n3. **The event names no package.** The `deleted` event carries the bare name while the other holder remains, so a listener drops both.\n4. **Public `unregister(type, name)`** removes every slot of the name. It takes no package.\n\n`unregisterPackage` is on the spec contract (`IMetadataService.unregisterPackage?`), a published in-process API. No in-tree production caller exists today (the objectql `MetadataFacade` override clears `SchemaRegistry`), so first-party reach is 0.\n\n### Do\n\n1. `unregisterPackage(P)` selects by `packageId`, `package` or `_packageId`, the key `collectPackageMembers` reads.\n2. For a slotted type, removal deletes P's slot only, in memory and in storage (`deleteMetaItemFromLoader` by `(package, name)`, or by the row's package column). Pin it: removing P1 leaves P2's same-named item in the store and in the loader rows, for `api`, `agent` and `skill`.\n3. The `deleted` event carries the package for a slotted type.\n4. `unregister(type, name)` takes an optional package. With none, a two-holder slotted name is refused (D3, 409 naming both); it never removes both. One holder: unchanged.\n5. Non-slotted types: unchanged. Pin it with a CONTROL.\n\n**Clause-②:** the seat declares it. Item 1 newly removes artifact-door items that `main` left behind, and item 4's refusal is a narrowing. Each needs FROM → TO. First-party census: 0 callers.\n**Dedupe** (open and closed, `unregisterPackage _packageId`, `unregisterPackage package name`): #22113 (closed) taught publish/revert `_packageId` and not removal. #32162 covers permission only.\n**Business reason:** without this, uninstalling one of two packages that each ship a same-named agent, skill or api deletes the other package's stored item, or removes nothing at all.\n**Epic red-line review before landing.**"

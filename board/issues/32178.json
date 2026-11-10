@@ -2,8 +2,8 @@
   "number": 32178,
   "kind": "issue",
   "title": "pm-dispatch security-findings: creating a security advisory names no collaborators — drop the advisory_collaborators_add step from §3 and from the relay's create/report output",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T11:12:54Z",
-  "updated_at": "2026-11-10T12:15:54Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T17:48:58Z",
+  "closed_at": "2026-11-10T14:54:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32178",
   "body": "qa#1 · os-bob · session_012dn2AecbS6JEeLdRWSW4AC\n\nFiling gate: ③ a task on the maintainer's word. In session on 2026-11-10, after the QA seat created five draft advisories and was refused by its session's permission check when it went on to add collaborators, the maintainer wrote, verbatim: 「创建安全公告不需要指定协作者，立卡修订skills」.\n\n## What the text says today\n\n- `.claude/skills/pm-dispatch/references/security-findings.md` §3: \"首选中继 `advisory_create` 建草稿公告,再 `advisory_collaborators_add` 带具名账号进公告。\" — collaborator add is written as the second step of every advisory.\n- The relay's own output after a create or report tells the seat to do it: `scripts/pm/fleet-write/ops.mjs` (the `created … — add whoever works it with advisory_collaborators_add` and `reported … — add w…` lines, and the header block describing `advisory_report` / `advisory_create` as followed by `advisory_collaborators_add`), echoed by `dispatch.mjs` as \"add whoever works it with advisory_collaborators_add\".\n\n## Change\n\n- §3 of `security-findings.md`: creating an advisory is one step, `advisory_create` (or `advisory_report`); no collaborator is named at creation.\n- The relay's create/report output and the ops header stop prescribing `advisory_collaborators_add` as a follow-up.\n- Whether `advisory_collaborators_add` stays as an available op (for a maintainer who asks for it) or retires is the skills seat's call under startup focus; either way no text routes a finding seat to it by default.\n\n## Business reason\n\nWho: every seat that finds a security issue. Scenario: the finding seat creates the draft advisory and is done; maintainers and security managers already see drafts. Cost of not doing it: each finding costs an extra relay write per advisory, and in this session the step was refused by the session's permission check (it grants access), leaving the seat to report a blocked step that was never needed.\n\n## Reader\n\nTriage first touch; `domain:skills` (`.claude/**` is a governed surface — the PR lands by its tier) plus the relay's printed text in `scripts/pm/fleet-write/`.\n\n## Related, observed in the same session (for the same reader to judge)\n\n`advisory_list` through the relay failed at its execute step (run 42795023621, exit 5) while `advisory_create` with the same `repository-advisories` grant succeeded five times (runs 42795163131, 42795304535, 42795413628, 42795515228, 42799867145). Both runs log `Unexpected input(s) 'permission-repository-advisories'` from the token action. So a seat cannot list existing advisories to check for duplicates before creating one.\n\n## Duplicate check\n\n`is:issue repo:objectstack-ai/objectstack advisory collaborators` (8, open and closed): #29160 built the collaborators op, #29410 the create op, #29111 the security-findings rule; all closed, none removes the step."

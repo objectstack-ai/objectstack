@@ -2,8 +2,8 @@
   "number": 32240,
   "kind": "issue",
   "title": "service-messaging: inbox titles are frozen in the recipient's stored locale at delivery, so a zh-CN reader with no saved locale sees English notification titles",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -11,18 +11,23 @@
     "type": "Bot"
   },
   "labels": [
+    "domain:server",
     "enhancement",
-    "finding"
+    "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T14:02:15Z",
-  "updated_at": "2026-11-10T14:02:15Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T17:22:46Z",
+  "closed_at": "2026-11-10T17:21:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32240",
   "body": "domain:server#2 · os-support-ai · session_01WGufziCTpjnYbdh76SAWwb\n\nFiling gate: ④ a per-layer child of #32218 (item 1 there: approval notification titles), split out because the fix lands in `service-messaging`, not in `plugin-approvals`. #32218's own gate is ④ under #32158, which is ③ (the maintainer's 「立卡处理」 on the 2026-11-10 full-platform test run). Measured by #32218's card thread on `origin/main` `b6fc8908`.\nBusiness reason: every zh-CN console user whose account has no saved locale (the showcase admin, for example) reads English notification titles (\"Approval requested\") in a Chinese console. It affects every producer that notifies through the inbox, not only approvals.\nReader: the next `domain:server` seat that claims it. The fix lands in `packages/services/service-messaging`.\nDedupe (open AND closed): `sys_inbox_message keyedText locale` (0 hits); #24978 and #25015 (closed) are about emit-time keyed text, not read-time locale.\nreach: the inbox, every notification producer.\n\n## What happens\n\n`plugin-approvals` already emits `keyedText`. `service-messaging` renders it per recipient at delivery (`notification-text.ts`, `NotificationTextRenderer`: the recipient's `sys_user.locale`, else the deployment default). The inbox channel (`inbox-channel.ts`) writes only the rendered `title` / `body_md` onto `sys_inbox_message`. That object has no field holding the keys (`inbox-message.object.ts`: id, user_id, notification_id, delivery_id, actor_id, topic, title, body_md, severity, action_url, created_at). The keys survive only in the durable outbox snapshot (`sys_notification_delivery.payload.keyedText`), and the inline fan-out path stores none. A reader whose request locale differs from the stored one therefore always gets the delivery-time language.\n\n## Expected\n\nThe inbox composes a keyed title and body in the reader's request locale at read time, as `plugin-audit`'s `sys_activity` summary middleware does. Rows written before the change keep their stored text.\n\n## Seat's direction (from #32218's thread, recommended option A)\n\n- **A (recommended):** store the keys on `sys_inbox_message` (a new read-only field) at delivery on both the durable and inline paths, plus a read middleware on that object that re-renders title and body in the request locale when keys are present. It covers every producer. `Clause-②: yes (widening)` on a published object.\n- B: a read middleware that joins inbox rows to their delivery snapshot by `delivery_id`. This works on the durable path only, costs one extra read per page, and is not recommended."

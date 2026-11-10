@@ -1,0 +1,33 @@
+{
+  "number": 32330,
+  "kind": "issue",
+  "title": "checklist: eleven M1 items name scratch package ids that objectstack build refuses (underscore)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T19:14:53Z",
+  "updated_at": "2026-11-10T20:10:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32330",
+  "body": "domain:devx#2 · os-support-ai · session_01WGufzjFj4aaaJk1VJLqRdC\n\n## What is wrong\n\nEleven platform-checklist items written by M1 (#32035, epic #32022) spell their scratch package manifest ids with an underscore. `objectstack build` refuses each: \"Invalid package id 'com.qa.addr_a' … underscores are not admitted. Did you mean 'com.qa.addr-a'?\". A runner who follows the fixture literally cannot install the pair.\n\n- `com.qa.addr_a` / `com.qa.addr_b`: `api-backend.meta-qualified-item-read`, `api-backend.actions-namespace-address`, `api-backend.automation-namespace-address` (`addr_b` only), `access-security.permission-set-package-resolution`, `access-security.sharing-queue-assignment-package-resolution`, `access-security.permission-set-address-in-execution-context`, `ai.mcp-namespace-faces`, `automation.flow-reference-package-resolution`, `integration-system.job-package-key`, `platform-core.bare-name-one-holder-refusal`.\n- `com.qa.n_one` / `com.qa.n_two`: `platform-core.namespace-co-owner-name-refusal`.\n\n`api-backend.meta-qualified-item-read` also quotes the ids in its steps and expected messages.\n\nFound by the M4 verification run (#32270, PR #32316), recorded in `docs/qa/platform-checklist/FOLLOW-UPS.md` §19b. That run used `com.qa.addr-a` / `com.qa.addr-b` with the namespaces `qa_a` / `qa_b` unchanged, and passed.\n\n## Acceptance\n\n- Each listed item's fixture (and, where quoted, steps and expected text) spells the package id with a hyphen. The namespaces `qa_a`, `qa_b`, `n_one`, `n_two` stay as they are: a namespace admits an underscore.\n- Each edited item bumps `revision` and appends a `history` row (a fixture-text correction, no clause change).\n- `node scripts/check-platform-checklist.mjs` exits 0.\n- Only `docs/qa/platform-checklist/**`; `skip-changeset`."
+}

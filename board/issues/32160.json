@@ -2,8 +2,8 @@
   "number": 32160,
   "kind": "issue",
   "title": "plugin-security: package uninstall revokes only the grants bound to that package's permission set (ADR-0150 D8; before #31698 PR-2)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,8 +14,6 @@
     "area:devpath",
     "domain:server",
     "enhancement",
-    "pm:blocking",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -24,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T10:39:06Z",
-  "updated_at": "2026-11-10T13:21:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T14:47:38Z",
+  "closed_at": "2026-11-10T14:40:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32160",
   "body": "domain:server#3 · os-support-ai · session_01WGufzeeBmtefMTT21doena\n\nFiled verbatim by seat 3 from the epic seat's draft (`epic:#31527#1`, /mnt/project-files/epic-31527/31698-carriers.md), with the maintainer's approval on seat 3's decision card (option 「允许，3 号席位立卡」, 2026-11-10, this account's project thread). ⛔ Not a claim.\nRuling-ref: 6764938596 (epic, on #31698: ruling A agreed, the carrier rulings); seat 3 step-0 ruling on #31698.\n\n④ coordination card: a child of the ADR-0150 epic #31527, a precondition of #31698 PR-2.\n\n**Epic:** ADR-0150 (#31527). **Blocks:** #31698 (PR-2, the permission set narrowing). **Lane:** `domain:server`, plugin-security. **Reader:** the server seat that claims it, then #31698's seat.\n**Found by** #31698 PR-2 step 0 (seat 3, premise fork F1). It was measured on `main` 45f0f81f with booted showcase plus two install-local packages of two namespaces, each holding `qa_removal_set`, under a throwaway probe of the switch. Readings: `/mnt/project-files/server-orders/seat3/31698-step0.md`.\n\n### Uninstall revokes by `(package, name)`\n\n**Today:** `cleanup-package-permissions.ts` · `cleanupPackagePermissions` deletes every `sys_user_permission_set` row `{ permission_set: name }` with no `permission_set_package` filter. Its comment rests on \"a name belongs to one holder\". Once two namespaces may each hold a name, uninstalling gamma answered `removed: 2` and also revoked a user's grant of **delta's** set, while delta still holds it.\n**Not live today:** install refuses a second holder of a permission set until #31698 narrows. The defect becomes reachable at the narrowing, so this card lands first.\n\n**Do:**\n1. Revoke only the grants whose `permission_set_package` is the uninstalled package.\n2. **A null-column grant of the name.** This stance is the epic seat's ruling.\n   - **The uninstalled package was the name's one holder:** revoke it, as today. It was that package's switch (D8).\n   - **Another package still holds the name:** the row was already ambiguous (D4). The uninstall never binds it to the remaining holder, because that would hand the user another package's set (red line 1). Revoke it. The uninstall receipt and one warning name the user, the organization and the set, and say that the operator re-grants with the package named. Revoking is fail-closed: it grants no access that was never bound.\n3. **Pins:**\n   - Two holders, each with a bound grant: uninstalling one leaves the other's grant.\n   - A null-column grant with one holder is revoked, as today.\n   - A null-column grant with two holders is revoked and reported, never bound.\n   - Ablating the package filter turns the first pin red.\n\n**Clause-②:** the seat declares it. With one holder, every uninstall answer is unchanged. First-party census: 0 pairs (step 0).\n**Dedupe** (open and closed, `cleanupPackagePermissions`): 5 hits, none for this. #18023, #23056, #15196, #25223 and #15204 are older and cover unrelated scopes.\n**Business reason:** without this, the permission set narrowing lets one package's uninstall silently revoke users' access to another installed package's set.\n**Epic red-line review before landing.**"

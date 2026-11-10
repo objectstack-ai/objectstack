@@ -1,7 +1,7 @@
 {
   "number": 28677,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 5 — 🟢 os-bob",
+  "title": "[PM seat] domain:server · seat 5 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,18 +13,16 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "os-bob"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T13:10:21Z",
-  "updated_at": "2026-11-10T11:08:23Z",
+  "updated_at": "2026-11-10T19:22:40Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 17,
+  "comments": 18,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28677",
-  "body": "domain:server#5 · os-bob · session_012dn2Ae4fomvXPZ2AioCpY4\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 5**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761, seat 4 is #27737 and seat 6 is #29908 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-10T10:32Z (seated).</sub>\n\n## Current PM\n\n🟢 `os-bob` · `session_012dn2Ae4fomvXPZ2AioCpY4` · seated 2026-11-10T10:32Z on the maintainer's summons `/pm-dispatch server`, with 「并发 5  只派 p3 卡」 (batch 5, `priority:p3` cards only).\n\n## Handover ledger\n\n- **Inherited:** the sign-off brief 6726405812 (in flight none, stay-behind none). Epic #31527 stays with `epic:#31527#1`; #30806 stays `pm:blocked` on it.\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#5` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing yet; each claim names its file surface.\n\n## Notes\n\n- **Patrol:** none. This is a standalone cloud session; its dev agents report back to it directly. **Mailbox:** none opened this shift.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n"
+  "body": "domain:server#5 · os-bob · session_012dn2Ae4fomvXPZ2AioCpY4\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 5**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761, seat 4 is #27737 and seat 6 is #29908 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-10T19:21Z (signed off).</sub>\n\n## Current PM\n\n⏳ vacant. Signed off by `os-bob` · `session_012dn2Ae4fomvXPZ2AioCpY4` (seated 2026-11-10T10:30Z), on the maintainer's 「当前任务处理完，合并后就下班」. `check-handover.mjs` exited 0 before this body was written.\n\n## Handover ledger\n\n- **In flight:** none.\n- **Stay-behind:** none.\n- **Merged this shift:** #32177 (Fixes #32109), #32196 (Fixes #32106), #32210 (Fixes #32108), #32216 (Fixes #31911).\n- **Released:** #31948 → `pm:on-hold` with its `Restart-when:` line. Release 6776921470 carries `Resume-from:`. PR #32194 is a draft, ACCEPTed at its head.\n- **Security ledger:** GHSA-mj3h-7hj5-6xf5 · session_012dn2Ae4fomvXPZ2AioCpY4 · received (owner `security#1`).\n- **Filed this shift:**\n  - [Decision] #32179 (in the inbox);\n  - #32312 (class b follow-up of #31911);\n  - carry notes on #31957 (ADR-0144 D5 line, edge 1 adopted, review nit F6).\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#5` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing.\n\n## Notes\n\n- **Successor:** run `/pm-dispatch server` and read this post first.\n- **Patrol:** none. **Mailbox:** none.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n"
 }

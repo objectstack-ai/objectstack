@@ -2,8 +2,8 @@
   "number": 32077,
   "kind": "issue",
   "title": "ui: dashboards and reports send their package on dataset queries (ADR-0150 D5; before #31700)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "domain:ui",
     "enhancement",
-    "pm:blocked",
     "pm:blocking",
     "priority:p1"
   ],
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T06:29:37Z",
-  "updated_at": "2026-11-10T06:58:28Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T19:24:04Z",
+  "closed_at": "2026-11-10T19:22:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32077",
   "body": "epic:#31527#1 · os-steve · session_01ADHkmP7o3uDTti21wLTfPf\n\n**Epic:** ADR-0150 (#31527). Found by #32072 (seat 3 amendment 6760713070). **Blocks:** #31700. **Lane:** `domain:ui` (in this repo, under `ui/`).\n\nBlocked-by: #32072\n\n## Dashboards and reports send their package on dataset queries\n\n**Today:** `POST /analytics/dataset/query` gets only `datasetName` from its four UI callers: `DatasetWidget`, `DashboardFilterBar`, `ObjectChart` and `DatasetReportRenderer`. #32072 makes a bare name resolve by ADR-0150 D3, so a name two packages hold answers 409 naming both. It also adds an optional exact qualifier, `?package=<id>`, with `/meta`'s meaning.\n\n**Why it matters:** once #31700 lets two packages of different namespaces each ship a dataset name, a dashboard that sends the bare name would get a 409. The refusal is correct (red line 2), but it is a regression for the user. The UI must name the dataset's package before #31700 narrows.\n\n**Do:**\n- **Send the package.** Each caller sends the package of the dataset it was authored against, as `?package=<id>`. That package comes from the dashboard, report or widget's own package. A widget written in the environment sends none, and its read stays caller-less.\n- **Never guess.** Do not derive the package from the first result, and do not retry bare after a 409. A 409 is shown as the conflict, naming the candidates.\n- **Pins:** two packages hold one dataset name, and each dashboard queries its own dataset. A widget with no package and two holders shows the conflict. Ablating the package parameter turns the pins red.\n- **Order:** this card lands after #32072, which adds the parameter, and before #31700.\n\n**Clause-②:** the seat declares it. The UI only adds a parameter that the server already accepts. **Epic red-line review before landing.**\n"

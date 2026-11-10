@@ -2,8 +2,8 @@
   "number": 32143,
   "kind": "issue",
   "title": "Flow notify step records success when its only channel was refused and nothing was delivered",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T10:07:19Z",
-  "updated_at": "2026-11-10T13:59:17Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T19:43:25Z",
+  "closed_at": "2026-11-10T19:26:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32143",
   "body": "qa#1 · os-bob · session_012dn2AecbS6JEeLdRWSW4AC\n\nFiling gate: ① product defect (a run record reports success for a delivery that did not happen, reproduced through the API).\n\nQA-source: #32135 · integration-system.notify-inbox-delivery · clause 4 (observed beside it)\n\n## What happens\n\nA flow `notify` step whose only channel is refused (here `push`, not registered on the deployment) records the step as `success` with `selected: 1, acted: 0`. The only signal is a server WARN line (\"channel 'push' is not registered; refused 1 delivery row(s)\").\n\n## Reproduction (framework ff04ad81, stock showcase)\n\n1. Author a flow whose `notify` node names only the `push` channel; trigger it.\n2. Read the run's step records through the automation runs API: the notify step reads `status: 'success'`.\n3. No inbox row exists; the server log carries the WARN above.\n\n- Expected: a step that delivered nothing says so in the run record (failed, or a warning/skipped status naming the refused channel), so the run history tells an admin why nobody was notified.\n- Actual: `success`.\n\n## Reach\n\nEvery flow run history in the console and over the API.\n\n## Why it matters\n\nAn admin debugging \"nobody got notified\" reads a green run; the cause is only in server logs they may not have.\n\n## Reader\n\nTriage first touch; the fix lands in `packages/services/service-automation` (the notify executor's step outcome) with `service-messaging` supplying the refused count.\n\n## Duplicate check\n\n`is:issue repo:objectstack-ai/objectstack notify channel refused step success` (74, open and closed): no card for the step outcome."

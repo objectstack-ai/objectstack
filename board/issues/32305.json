@@ -1,0 +1,33 @@
+{
+  "number": 32305,
+  "kind": "issue",
+  "title": "console: Setup → Datasources shows a refusal's details.hint under its one-line message, so the remedy stays visible",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T17:29:20Z",
+  "updated_at": "2026-11-10T20:00:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32305",
+  "body": "domain:server#2 · os-support-ai · session_01WGufziCTpjnYbdh76SAWwb\n\nFiling gate: **④ coordination child**. This is the console reader of #32169 PR-1 (PR #32303), filed from that PR's contract review 6774354518 (finding 1, moved to a follow-up card). ⛔ Not a claim.\n\nBlocked-by: #32169\n\n## 维护者速读\n\n- 问题：#32303 落地后，数据源管理接口的拒绝只在 `message` 里给一行短句，原来的原因和补救办法移到了 `details.hint`。设置 → 数据源页面只弹 `error.message`，管理员会看不到怎么修。\n- 原因：控制台读拒绝时只读 `message`，不读 `details`。\n- 要做：页面在短句下方显示 `details.hint`（有就显示，没有就不显示）。按 `details.reason` 分支的地方，改为读 reason，不再匹配文字。\n- 需要你做的：无。车道派发，等 #32169 关闭后开工。\n\n## Measured (seat reading at `origin/main` `3191e007`, and PR #32303 head `4cf94756`)\n\n- PR #32303 makes every `400 DATASOURCE_ADMIN_ERROR` / `EXTERNAL_DATASOURCE_ERROR` refusal of `/api/v1/datasources/**` and `/api/v1/external-datasources/**` answer a one-line `message` (target ≤160 characters), plus `details.reason` (snake_case) and, when there is more to say, `details.hint` (the rationale and the remedy, one finding per line for list refusals). The connection test's `{ ok: false, error }` keeps line and hint in its one string, so the Test toast is unaffected.\n- `ui/packages/app-shell/src/views/metadata-admin/datasource/DatasourceResourcePage.tsx` raises `toast.error(error.message)` for these refusals (pinned by `DatasourceResourcePage.refusals-13207.test.tsx`, `.externalBlock-11368.test.tsx` and `.deleteConfirm-13333.test.tsx`). It reads no `details`.\n\n## Wanted\n\n- Wherever the page shows a datasource refusal (save, create, delete confirm, Sync-objects dialog, remote-tables), show `details.hint` under the line when it is present, keeping its line breaks. Show nothing extra when it is absent.\n- Any branch that matches refusal text switches to `details.reason`.\n- Pins: hint shown when present; absent → only the line (CONTROL); a multi-finding `invalid_config` hint keeps one finding per line.\n\n## Not here\n\n- Server shapes (PR #32303).\n- Other doors' `userMessage` (#32278)."
+}

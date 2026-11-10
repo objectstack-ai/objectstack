@@ -1,0 +1,37 @@
+{
+  "number": 32267,
+  "kind": "pull_request",
+  "title": "fix(service-automation): http node failures name the target host and the underlying cause",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T15:16:57Z",
+  "updated_at": "2026-11-10T16:13:49Z",
+  "closed_at": "2026-11-10T16:13:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-10T16:13:46Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32267",
+  "body": "Part of #32161\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:流程里 http 节点连不上对方时,运行记录里的错误现在写明目标主机和真实原因(如域名解析失败、连接被拒、TLS 错误)。\n- 为什么改:原先只写「fetch failed」,管理员无法判断是域名、对端、代理还是证书问题。\n- 风险与回滚:只改失败时的一行文字;超时(timeout after Nms)和 HTTP 状态码文字不变;回滚即还原 http-nodes.ts 一个文件。\n- 先看:packages/services/service-automation/src/builtin/http-nodes.ts 的 describeFetchFailure(风险 hunk:对 url、查询串、用户名密码的脱敏)。\n- 两分钟验证:pnpm --filter @objectstack/service-automation exec vitest run --maxWorkers=2 src/builtin/http-nodes.test.ts,预期 15 个全过。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nA failed `http` node (inline arm) used to record `http: fetch failed`, dropping `err.cause` and the target. The error now reads `http: fetch failed — HOST: CODE cause message` (cause text capped at 200 characters), for example `http: fetch failed — no-such-host.invalid: ENOTFOUND getaddrinfo ENOTFOUND no-such-host.invalid`.\n\n- Only the host is named, never the path, query or userinfo. Undici's credentials-in-URL TypeError quotes the whole URL (password included), so every occurrence of the url, its href, query, username and password is scrubbed to the host.\n- Unchanged: `http: timeout after Nms` on abort, `HTTP STATUS` on a non-2xx, and the durable arm's enqueue error.\n- The message is built in `builtin/http-nodes.ts`, as the premise reading said; no other site builds it.\n- Changeset: `.changeset/32161-http-node-failure-cause.md` (patch).\n\nThis PR is `Part of #32161`: two items on the card stay open and are reported as questions, not implemented (the save waits for after-flows; execution vs wait time on resumed runs).\n\n## Tests\n\n- `http-nodes.test.ts`, new describe, real `fetch` against real failures: unknown host (ENOTFOUND, host named), refused port (ECONNREFUSED, host:port named), query secret, path secret and userinfo password absent from the message, timeout still `http: timeout after 50ms`, a cause-less error keeps its message plus host.\n- 15/15 in the file; 127/127 across `src/builtin/http*`, `run-summary`, `connector-read-withheld-text`. `pnpm --filter @objectstack/service-automation typecheck` exit 0.\n- Ablation, once, after committing the fix: anchor `describeFetchFailure(err, url);` replaced by the old `e?.message ?? String(err);` through `scripts/ablation-replace.mjs` (anchor 1 hit, mutation landed on disk). Result: 4 red (unknown host, refused port, secret scrub, cause-less); the timeout test stayed green, as it should. Restored: `git diff HEAD` empty. Source-level import, no dist in the path.\n\n## Acceptance notes\n\n- NOT MEASURED locally: `pnpm check:query-options-erasure` (timed out at 300 s, exit 124, whole-repo lint-based gate; CI runs it).\n- No out-of-scope findings filed.\n\n## Verification\n\n<details><summary>Gate readings (head 9796e6e14)</summary>\n\n`pnpm lint` exit 0 on this head. Derived local families via `dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: all run exited 0 except the timeout above; self-test and CI-only families left to CI.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QSeKYm8sWjp2Pk76warN7w\n"
+}

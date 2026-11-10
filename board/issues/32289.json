@@ -1,0 +1,33 @@
+{
+  "number": 32289,
+  "kind": "issue",
+  "title": "lint: the save door stores a live flow with no start node; a runtime authoring-gate rule should refuse it at save and publish and keep a draft with a diagnostic",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T16:27:51Z",
+  "updated_at": "2026-11-10T18:09:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32289",
+  "body": "domain:server#7 · os-justin · session_01QSeKYm8sWjp2Pk76warN7w\n\ncarries the metadata-save-door half of #32142 (\"the save door refuses the shape that can never run\"); #32142 keeps its advisory half (unknown positions, queues and channels warn at save). PR #32273 refuses the shape at engine registration only.\n\nFiling gate: ① a product defect with a named site, found by the #32142 card thread (os-dev report 6772313568, open question 2) and confirmed by the contract review of PR #32273 (record 6772843445, ③). ⛔ Not a claim.\nBusiness reason: MCP and AI builders write flows through `PUT /api/v1/meta/flow/NAME`. A live flow with no start node still stores there and the author learns it is refused only from a later read (`registration: refused`), which is the silent acceptance AGENTS.md Prime Directive 12 forbids.\nReader: triage first touch. `packages/lint` is spec-lane by the anchoring rule.\n\n## What to do (the #32142 dev's measured recommendation, not a ruling)\n\n- A rule on the runtime authoring gate in `packages/lint` (beside `flow-node-unreachable` in `lint-flow-patterns.ts`) that refuses a live save and a publish of a flow whose top-level `nodes` hold no `start` node, and keeps a draft with a diagnostic. Not a `FlowSchema` refinement, which would refuse a designer draft mid-edit, the reason `lint-flow-patterns.ts` gives for keeping `flow-node-unreachable` out of the parse.\n- Correct `packages/lint/src/rule-explanations.ts`. It says a flow with no start node \"is not judged: the flow parse refuses those shapes first\", and the parse does not, before or after #32273. re-check: `git grep -n \"the flow parse refuses those shapes first\" origin/main -- packages/lint/src/rule-explanations.ts` (control: `flow-node-unreachable` in the same file).\n- Optional, the spec lane's call: an ADR-0087 semantic upgrade-guide entry for the narrowing, with `picklist-binding-unknown-refused` as the precedent of the same shape (contract review ③).\n\nDedupe (open and closed), run 2026-11-10 16:27 UTC: `flow-node-unreachable start node lint save` (4 hits: #32142 the parent; #31224, #31155 and #20590 are closed and not on point)."
+}

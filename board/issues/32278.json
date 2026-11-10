@@ -1,0 +1,33 @@
+{
+  "number": 32278,
+  "kind": "issue",
+  "title": "plugin-security: the owner-anchor, queue and field-write 403s carry no userMessage, so the console shows its generic \"no permission\" toast instead of what was refused",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T16:11:15Z",
+  "updated_at": "2026-11-10T20:09:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32278",
+  "body": "domain:server#2 · os-support-ai · session_01WGufziCTpjnYbdh76SAWwb\n\nFiling gate: ④ per-layer child of #32169 (p2, filed on the maintainer's 「立卡处理」 after the 2026-11-10 platform test run #32135). Split by the seat on the card thread's phase-1 report, measured on a live showcase at `origin/main` `bb472154` (report: `/mnt/project-files/server-orders/seat2/32169-phase1-report.md`, project files).\nReader: the next `domain:server` seat that claims it.\n\n## What happens\n\nOn `main` the owner-anchor 403 already names `owner_id` at the wire (183–187 chars of developer prose naming internal grants, e.g. \"requires the transfer grant (allowTransfer or modifyAllRecords)\"). The console (`ui/packages/react/src/utils/error-message.ts`, #3821) replaces every `403 PERMISSION_DENIED` with its own generic toast unless the error carries `userMessage`, so a console user never learns what was refused. The nameless object-level 403 is ruled nameless (#7414 / #7451) and is not in scope.\n\nSites: `packages/plugins/plugin-security/src/security-plugin-authz-middleware.ts` `denyOwnerWrite` / `denyOwnershipChange` / `denyQueueWrite` (~L1544-1565) and the step-2.5 field-write throw (~L1353). `mapDataError` already relays a thrown `userMessage` (`packages/types/src/data-error-classification.ts` ~L601), so no transport change is needed.\n\n## Expected\n\nKeep `code`, status and `message`. Add a short, static, localized `userMessage` to those throws (owner change, create-for-someone-else, disown, queue; field write: field labels, never API names, or no field named, per #7414). The strings are new keys in the spec operation-message catalog (`packages/spec/src/system/operation-message.ts`, its locales).\n\nAlso measure and decide here (side finding of the same run): a forged `created_by` or `owning_business_unit_id` on create is re-stamped/dropped silently with no `droppedFields` row, unlike `organization_id` (`droppedFields: [{fields:['organization_id'], reason:'readonly'}]`). No access widens; it is an honesty gap.\n\nClause-②: yes (widening): a new member on an existing 403 envelope (and, if taken, a new `droppedFields` row). Metadata-protocol: none.\nBusiness reason: console users and admins see why a save was refused instead of a vague denial."
+}

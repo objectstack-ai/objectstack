@@ -2,8 +2,8 @@
   "number": 32109,
   "kind": "issue",
   "title": "GET /api/v1/meta/_drafts refusal for an unknown package tells the caller to 'omit packageId', a parameter the door now refuses with 400",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,9 +21,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T08:01:11Z",
-  "updated_at": "2026-11-10T11:54:17Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T16:19:59Z",
+  "closed_at": "2026-11-10T14:40:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

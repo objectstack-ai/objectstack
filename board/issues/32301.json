@@ -1,0 +1,35 @@
+{
+  "number": 32301,
+  "kind": "pull_request",
+  "title": "feat(auth,app-shell): the create-organization dialog draws the host's organization-create choices",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T17:23:46Z",
+  "updated_at": "2026-11-10T18:25:48Z",
+  "closed_at": "2026-11-10T18:25:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-10T18:25:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32301",
+  "body": "domain:ui#2 · os-support-ai · session_01WGufzge2QyZEws46ctq8zW\n<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBXhGm3ADKLojQ2JHUkVsYbZ)_\n\nFixes #31988\n\nClause-②: yes (widening): `@object-ui/auth` declares the optional `features.organizationEditions` and widens `createOrganization`'s `edition` from 'developer' to string; every value accepted before is still accepted\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：宿主在 `/auth/config` 下发 `features.organizationEditions` 时，新建组织对话框在名称下方逐条画出选项（宿主给的标签和说明原样显示），全部默认不勾选、最多勾一个；勾选的 `edition` 随建组织请求发出，slug 冲突重试时保留。`@object-ui/auth` 为该列表加了类型，`createOrganization` 的 `edition` 改收任意下发值。\n- 为什么改：云端开发者版的建组织入口（`?edition=developer`）已落地，控制台此前无法触达；按裁决 6760436953（D→B）与 ADR-0060，文案全部来自宿主，控制台不写产品词。\n- 风险与回滚：未下发列表或列表为空时对话框与请求完全不变（有测试钉住）；零新增文案，eager `en` 包未动；回滚即整体 revert 本 PR。\n- 先看：`ui/packages/app-shell/src/console/organizations/CreateWorkspaceDialog.tsx`（选项块与 `createWithGeneratedSlug` 的 edition 参数）、`ui/packages/auth/src/types.ts`（`organizationEditions` 声明与 `edition` 放宽）。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/app-shell/src/console/organizations/__tests__/CreateWorkspaceDialog.test.tsx`，预期 29 项全过，其中 7 项属于 `objectstack#31988` 分组。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- **`CreateWorkspaceDialog`** reads `features.organizationEditions` from the `getAuthConfig()` call it already makes. With a non-empty list it draws one choice per entry under the name field: a checkbox labelled with the host's `label`, described by the host's `hint`, both shown as given. Every choice is unchecked when the dialog opens (the contract's renderer rule), and at most one is checked: checking another replaces it, unchecking clears it. The checked choice's `edition` goes to `createOrganization` and rides every attempt of the slug-collision retry. With the list absent or empty, or nothing checked, the dialog and its create call are what they were.\n- **No product words, no new strings.** The words are the host's. `memberLimit` is not drawn separately: the host's hint already states the cap in every fixture this repo carries (plugin-auth's request-language test serves \"Host hint, up to 5 members\"), and the contract makes mentioning it optional. So the console adds no generic plural string, and the eager `en` pack is untouched.\n- **`@object-ui/auth`:** `AuthPublicConfig.features.organizationEditions` is declared, typed from `@objectstack/spec/api`'s `OrganizationEditionChoice`. `createOrganization`'s `edition` widens from the literal `'developer'` to `string` in the four places that spell it, because the contract allows any snake_case edition value and the dialog sends the served one unchanged. The query wire is unchanged (pinned by the existing client tests, plus one new case for a non-`developer` value).\n- **`SetupPage.tsx`** (first organization) is out of scope: it calls `createOrganization` directly and does not share the dialog component.\n- Changeset: `@object-ui/auth` patch. `@object-ui/app-shell` is private, so it has no row.\n\n## Tests\n\n- `CreateWorkspaceDialog.test.tsx`, new top-level `describe` \"draws the host's organization-create choices (objectstack#31988)\" in the existing harness file, 7 cases: list absent and list empty draw no choice and send no edition; a served list draws one unchecked choice per entry with the host's label and accessible description; not picking sends no edition; picking sends the picked value and picking another replaces it; unchecking returns to no edition; the picked edition survives a slug retry.\n- `createOrganization-timezone-11908.test.ts`: one new case, a served value other than `developer` rides `?edition=` unchanged.\n- Ablation (`scripts/ablation-replace.mjs`, on `e9c35ce6`): replacing the dialog's `edition` argument to `createWithGeneratedSlug` with `undefined` turned 2 pins red (\"picking one…\", \"the picked edition survives a slug retry\"); restore proved blob equals HEAD and `git diff HEAD` empty. The one later commit (`7c8d2812`) changes only a type import.\n\n## Acceptance notes\n\n- `features.developerEditionCreate` is still declared on the client type; the dialog reads the list, as the order asks. Its doc comment now says so.\n\n## Verification\n\nAll local readings on head `7c8d2812` unless named.\n\n<details><summary>Tests and type-check</summary>\n\n- `pnpm --dir ui exec vitest run packages/app-shell/src/console/organizations/ packages/auth/src/`: Test Files 62 passed (62), Tests 613 passed (613) (on `e9c35ce6`); dialog file re-run on `7c8d2812`: 29 passed.\n- `pnpm --dir ui/packages/auth run type-check && pnpm --dir ui/packages/app-shell run type-check`: VERDICT command-exit 0.\n\n</details>\n\n<details><summary>Gates</summary>\n\n- `pnpm --dir ui run check:spec-symbols`: green (first run caught a locally re-derived `OrganizationEditionChoice`; fixed in `7c8d2812` by importing the spec type).\n- ADR-0060 product-neutral ratchet (`product-neutral-renderer.ratchet.test.ts`): 34 passed.\n- `pnpm --dir ui run check:eager-closure` after a console build: green; `i18n-locale-en` 60.4 KB / 60.5 KB, unchanged by this diff (no key added).\n- `dispatch-gates.mjs --commands`: 37 derived, all exit 0; `--ran` reconciliation: \"37 run, 0 NOT-MEASURED (a DERIVED zero)\".\n\n</details>\n\n<details><summary>Browser</summary>\n\nCRM dev boot plus the console Vite server; `/api/v1/auth/config` intercepted to serve `multiOrgEnabled: true` and, for the \"with list\" shots, a two-entry `organizationEditions` with host-shaped words. Opened through `/organizations?create=1`. Without the list the dialog shows only the name field (0 checkboxes); with it, 2 checkboxes, both `data-state=unchecked`, label and hint as served, in en and zh-CN. Shots: en and zh-CN, each with no list, with the list, and with one choice picked.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WGufzge2QyZEws46ctq8zW)_\n"
+}

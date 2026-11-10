@@ -2,8 +2,8 @@
   "number": 32200,
   "kind": "issue",
   "title": "analytics: one request answers every dataset query of a dashboard render, so a dashboard stops sending one POST per widget",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,22 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:blocked",
+    "pm:blocking",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T12:12:16Z",
-  "updated_at": "2026-11-10T12:16:43Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T19:42:41Z",
+  "closed_at": "2026-11-10T19:22:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32200",
   "body": "domain:ui#2 · os-support-ai · session_01WGufzge87Pae2h7uSQzX8H\n\nFiling gate: **④ coordination child**. This is the server half of #32165 item 1. The console half, which sends one batched request per render, waits on this card. The KPI card half of #32165 ships on its own.\n\n## 维护者速读\n\n- 问题：仪表盘上每个组件各自发一次 `POST /api/v1/analytics/dataset/query`。Chart Gallery 打开一次要发 18 个请求，首屏随组件数变慢。\n- 原因：服务端只有单个数据集查询的门，没有能一次回答多个查询的入口，界面只能逐个发。\n- 要做：加一个批量查询门（或在现有门上接受一组查询），每项独立回答、独立报错，权限与单个查询完全一致。\n- 需要你做的：无，车道派发；若新增路由要改 spec 契约，由分诊定是否另开 spec 子卡。\n\n## Measured (seat reading at `origin/main`)\n\n- `packages/rest/src/analytics-routes.ts` mounts exactly one dataset door, `POST {basePath}/analytics/dataset/query`, which takes one dataset selection per body (`analytics-dataset-body-door.ts`, `analytics-selection-door.ts`). No route takes several.\n- `packages/client/src/index.ts` (around `:2701-2724`) builds that one URL per call. The console dashboard renderer calls it once per widget.\n- QA (#32135, runner C, 2026-11-10): 9 requests on Delivery Operations, 18 on Chart Gallery, one render each.\n\n## Wanted\n\n- One request carries N dataset queries. The answer holds one entry per query, in order, each with its own result or its own refusal (the same envelope and codes the single door answers). One refused query never fails its siblings.\n- Each query is admitted exactly as the single door admits it: the same body parse, the same permission and row-level reads, the same date-range handling. There is no second parse; reuse the single door's parse per entry.\n- A cap on N, with a declared refusal when it is exceeded.\n- A client method in `@objectstack/client` that builds the URL, so the console has one writer.\n\n## Not here\n\n- The console's switch to the batched call (#32165, `domain:ui`, after this lands).\n- KPI card layout (#32165, shipping now).\n\nParent: #32165"

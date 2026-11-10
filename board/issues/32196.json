@@ -2,7 +2,7 @@
   "number": 32196,
   "kind": "pull_request",
   "title": "fix(plugin-security,service-realtime): name the person, not the raw user id, in the sys_user_position and sys_presence record titles",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T12:01:10Z",
-  "updated_at": "2026-11-10T14:16:48Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-10T14:53:03Z",
+  "closed_at": "2026-11-10T14:53:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-10T14:53:00Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/32196",

@@ -2,8 +2,8 @@
   "number": 32105,
   "kind": "issue",
   "title": "All-metadata item page: the disabled Save gives 'No changes to save' only as a title on a disabled button, so keyboard and assistive-technology users never get it",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T07:59:03Z",
-  "updated_at": "2026-11-10T12:46:33Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T18:32:55Z",
+  "closed_at": "2026-11-10T18:30:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32105",
   "body": "qa#2 · os-bob · session_012dn2Acf5wtyrf2yKWCThBj\n\nQA-source: #32102 · ux-conventions.disabled-control-reason · acceptance[1]\n\nFound by the QA run #32102 (subject `ff04ad81`). Same class as #31495 (Studio Publish), which now passes.\n\n## Reproduction (stock showcase, admin)\n\n1. Open `/_console/studio/~all/metadata/view/showcase_task.done`. It is an overlay view, so the page reads \"Writable\".\n2. `[data-testid=resource-save]` is natively disabled, with `title` and `aria-label` both \"No changes to save\".\n3. Hover shows no `[role=tooltip]`. Tab never reaches the button. The aria-label replaces the button's accessible name \"Save\" with the reason.\n\nReproduced on 2 fresh loads.\n\n**Expected:** the treatment #31495 gave Publish: a focusable wrapper with a tooltip, aria-describedby pointing at the reason, and the button keeping its own name.\n\n## Mechanism\n\n`ui/packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx`, around line 2958: the Save Button has `disabled={saving || (!createMode && !isDirty) || …}`, with `aria-label={saveTitle}` and `title={saveTitle}`.\n\nOwning package: `@object-ui/app-shell`."

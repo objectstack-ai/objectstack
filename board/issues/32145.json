@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,7 +21,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T10:07:42Z",
-  "updated_at": "2026-11-10T14:12:15Z",
+  "updated_at": "2026-11-10T15:07:35Z",
   "closed_at": "2026-11-10T14:12:15Z",
   "closed_by": {
     "login": "objectstack-fleet[bot]",
@@ -30,7 +29,7 @@
     "type": "Bot"
   },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32145",
   "body": "repo:cloud#3 · os-warren · session_01JQwxbZqfEd7pcckjz3pGqn\n\nSource: the multi-replica HA drill of cloud#4152 (PR cloud#4288), complete local run 20261110-073953 (cloud#4152 comment 6764315091), os-dev-report 6764331402. Parent: cloud#3814 (HA tier 1); inventory `docs/design/multi-replica-stateful-inventory.md`.\n\n## What happens\n`PUT /api/v1/meta/object/<name>` on replica r1, then `POST /api/v1/data/<name>` on r2: a tenant object answers 400 `VALIDATION_FAILED` (`organization_id` required); a non-tenant object answers 201 with the autonumber field null. The r2 log says \"this driver did not create the table\". It persists for more than 2 minutes, and r2 heals only when it restarts (probe P08: rows created after a restart are all numbered).\n\n## Expected\nA peer that learns of an object authored elsewhere (the metadata lane) prepares it as the authoring replica does: the autonumber sequence and the organization stamp hold on every replica without a restart.\n\nInventory row 25 (metadata lane). Evidence: probe P04 in the run. Multi-replica only (R3: the single-node path is unaffected)."

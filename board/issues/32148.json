@@ -13,18 +13,18 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
+    "needs-user-decision",
     "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T10:08:35Z",
-  "updated_at": "2026-11-10T12:01:36Z",
+  "updated_at": "2026-11-10T14:46:38Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32148",
   "body": "## Edition / version\nObjectOS Enterprise, cloud `main` built image (framework pin `e24136c2`, `@better-auth/scim` 1.7.12), licensed. Local SCIM run with Entra ID's request shapes (objectstack-ai/cloud#3667), on the same stack where Entra ID SSO with JIT had already created accounts.\n\n## Steps (measured)\n1. Entra ID SSO with JIT is on. `objectos-entra2@<tenant>` signs in once → account `idp_provisioned`, linked to the SSO provider.\n2. The admin then turns on SCIM. Entra's provisioning cycle does exactly what it always does:\n   - `GET /Users?filter=userName eq \"objectos-entra2@…\"` → 200, **0 results**: SCIM only sees its own `sys_scim_user` rows;\n   - `POST /Users` with that userName and email → **409** `A Better Auth User already uses this email` (`scimType: uniqueness`).\n3. Entra (and Okta, which issues the same lookup + create) marks that user's provisioning as failed. Deactivation and group pushes then never reach the account. So the leaver lifecycle doesn't cover anyone who signed in before SCIM was enabled. \"Turn on SSO first, add SCIM later\" is the usual rollout order.\n\nEverything else in Entra's shapes passed on the same run:\n- the test-connection probe;\n- create with the enterprise extension;\n- `Replace`/`Add` ops, including `emails[type eq \"work\"].value` and an enterprise attribute path;\n- group create with `externalId`, `Add` members, `Remove` members with a value array;\n- `active: \"False\"`;\n- DELETE.\n\n## Expected\nA defined adoption rule. For example, a SCIM create (or a GET-by-userName lookup) **links** to an existing account when all of these hold:\n- the account is `idp_provisioned`;\n- it is in the connection's organization;\n- its email is in a domain verified by an SSO provider of that organization.\n\nOtherwise it refuses as today. Alternatively, an admin action \"link this account to SCIM connection X\". Plus a doc line in cloud's `scim-okta.md` / `scim-entra-id.md` on what happens to existing users. Plain email matching without those conditions would be an account-takeover path, so it must not be the rule.\n\nAlso minor: the 409 detail names the vendor (\"A Better Auth User\"). It should say \"an account with this email already exists\"."

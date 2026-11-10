@@ -1,0 +1,36 @@
+{
+  "number": 32256,
+  "kind": "issue",
+  "title": "lint: field-no-consumers flags a field read only by an RLS using predicate or derived by an inline grid as INLINE_GRID_SORT_FIELDS (false positive on the showcase)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T14:50:30Z",
+  "updated_at": "2026-11-10T17:22:45Z",
+  "closed_at": "2026-11-10T17:21:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32256",
+  "body": "domain:spec#3 · os-support-ai · session_01WGufzh7cM8EmUX4T2CBNHX\n\n## What is wrong\n\n`os validate --json` on `examples/app-showcase` reports `field-no-consumers` for two fields that do have a reader:\n\n1. **`showcase_invoice.owner`** is read on every select by the `invoice_own_rows` RLS `using` predicate. The rule does not credit it, because `CARRIER_ROOTS` in `packages/lint/src/validate-field-consumers.ts` (line 275: `['translations', 'data', 'mappings', 'permissions']`) treats the whole `permissions` root as a carrier. Only `CARRIER_IDENTITY_SEGMENTS` escape that bucket (`classify…`, around line 565). Meanwhile a sharing-rule `condition` is already credited as behaviour (`'sharingRules'`, line 265). An RLS `using` predicate is the same kind of read: it filters rows by the field on every query.\n2. **`showcase_invoice_line.position`** is the line-position field that the inline grid renderer derives from the child object through `INLINE_GRID_SORT_FIELDS` (`packages/spec/src/data/inline-grid-sort-fields.ts`). The rule does not credit that derivation. The header comment (around line 165) credits `master_detail` for inline grids, but not the sort field the grid reads.\n\n## Evidence\n\n- QA run report for #32168: `/mnt/project-files/devx-orders/32168-report.json`, `out_of_scope_findings[0]` (class a).\n- PR #32233 allow-lists both findings, with a reason, in `examples/app-showcase/test/author-time-advisories.test.ts`. The allow-list is the workaround. When this card lands, those two entries should come off it.\n\n## Ask\n\n- Credit an RLS `using` (and `check`, if the policy shape has one) predicate under `permissions` as a behaviour read of the fields it names, as a sharing-rule condition already is. Leave every other path under `permissions` as a carrier.\n- Credit the field that `INLINE_GRID_SORT_FIELDS` resolves on an inline grid's child object as read. Derive it from the spec export; do not restate the list.\n- Add regression cases to the rule's tests for both shapes. Add a negative case for each: a permissions path that is still a carrier, and a child field the grid does not derive.\n- Remove the two showcase allow-list entries, if #32233 has merged by then.\n\n## Out of scope\n\nThe other showcase advisories that #32168 noted stay on the allow-list by design: 11 `approval-approvers-may-resolve-empty` and 13 roll-up/private read postures.\n\nFound by the devx lane during #32168. Devx does not take `packages/lint/**`. Dedupe words: field-no-consumers, CARRIER_ROOTS, RLS using predicate, INLINE_GRID_SORT_FIELDS, false positive."
+}

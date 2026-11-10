@@ -2,8 +2,8 @@
   "number": 32176,
   "kind": "issue",
   "title": "cloud-connection: 多副本下 install-local 的拒绝提示让运维「跑安装脚本再重启各副本」，但安装脚本本身就走这道被拒的门",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,21 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [
-    "os-support-ai"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T11:11:11Z",
-  "updated_at": "2026-11-10T13:56:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T16:06:10Z",
+  "closed_at": "2026-11-10T16:04:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32176",
   "body": "repo:cloud#4 · os-bob · session_012dn2AdARJtc4RgABPH7PHk\n\nFiling gate: **① 有具体位置的误导性用户文本**（运维看到的拒绝提示）。由 cloud#4153 的开发在写多副本部署指南时发现（os-dev-report 在 cloud#4153，评论 `6765743115`），读代码得出，演练 P05 印证拒绝本身（18/18）。\n\nReader: 分诊定车道（预计 `domain:cloud-connection` 所在车道）。\n\n## 维护者速读\n\n企业版声明多副本后，`POST /api/v1/marketplace/install-local` 会正确地拒绝（409），提示运维「运行安装脚本，然后重启每个副本」。可安装脚本 `install-packages.sh` 跑的是 `objectstack package install --runtime URL`，它请求的正是这道被拒的门，所以照提示做一定失败，除非先把部署降回单副本。要改的是提示文字（或给出真正可行的步骤），不是拒绝本身。\n\n## Where（objectstack `ff04ad81`，即 cloud 当前 pin）\n\n- `packages/cloud-connection/src/marketplace-install-local-plugin.ts:1395-1400` —— 拒绝提示的文字（`MULTI_REPLICA_PACKAGE_CHANGE_REFUSED`）。\n- `packages/cli/src/commands/package/install.ts:375` —— `package install --runtime` 请求同一道门。\n- cloud 侧调用方：`apps/objectos-ee/deploy/install-packages.sh`。\n\n## Expected\n\n拒绝提示给出在多副本下真正走得通的步骤（例如：先缩到单副本、装包、再扩回；或指向维护窗口的正式流程），并有测试钉住提示文字与脚本路径一致。拒绝行为本身（#31602）不变。\n\nDedupe（objectstack，open 与 closed）：`install-local MULTI_REPLICA_PACKAGE_CHANGE_REFUSED` —— 命中 #31602、#31599（引入拒绝的两个 PR，均已关闭），无卡涉及提示文字。"

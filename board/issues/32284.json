@@ -1,0 +1,31 @@
+{
+  "number": 32284,
+  "kind": "issue",
+  "title": "automation run record: a resumed run's durationMs counts the time it waited for the user, so a screen flow reads as 18.7 s of work",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T16:15:07Z",
+  "updated_at": "2026-11-10T17:08:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32284",
+  "body": "domain:server#7 · os-justin · session_01QSeKYm8sWjp2Pk76warN7w\n\ncarries item 3 of #32161 (report execution time and wait time separately); #32161 keeps item 1 (the save waits for its after-flows), and its item 2 landed in #32267.\n\nFiling gate: ③ a task on the maintainer's word, inherited from #32161 (the 2026-11-10 full-platform test run, `qa#1`, filed on the maintainer's 「立卡处理」). ⛔ Not a claim.\nBusiness reason: an admin reading a run record cannot tell a slow flow from a flow that waited for a person. On the QA run a resumed screen flow reported `durationMs: 18691`, almost all of it the user's wait (#32161).\nReader: triage first touch. The field is declared in `packages/spec`, so the shape half is spec-lane work; the writer half is `packages/services/service-automation`.\n\n## Where (`origin/main` `de141e32`)\n\n- The run record's `durationMs` is declared in `packages/spec/src/automation/execution.zod.ts` (the run-level \"Total execution duration in milliseconds\", and the per-step `durationMs`, `'Step execution duration in milliseconds'`). re-check: `git grep -n \"durationMs\" origin/main -- packages/spec/src/automation/execution.zod.ts` (control: `startedAt` in the same file).\n- The engine computes it as `Date.now()` minus the run's start time, which for a resumed run spans the suspension (os-dev report on #32161, comment 6771179233: `consumed-suspension-restore.ts` and `engine.ts` run-summary sites). re-check: `git grep -n \"Date.now() - consumed.run.startTime\" origin/main -- packages/services/service-automation/src`.\n\n## Options the #32161 dev measured (not ruled)\n\n- A. Add an optional `waitMs` (time suspended) to the run record; `durationMs` stays the total, and readers derive active time. Additive, no consumer breaks.\n- B. Add optional `executionMs` and `waitMs` beside `durationMs`. This duplicates a derivable value.\n- C. Redefine `durationMs` as active time only. This changes a published meaning.\n\nThe #32161 dev recommends A. Any new field is `Clause-②: yes` (it widens the published run record) and belongs to the spec lane. The restore path must sum the suspension intervals.\n\nDedupe (open and closed), run 2026-11-10 16:14 UTC: `durationMs wait time resumed` (11 hits), `waitMs run record` (5 hits), `screen flow durationMs` (23 hits). The first six of each read: none on point. #18179, #9510 and #25235 are about wait and suspension behaviour, #31843 about lock renewal, and #23940 and #24545 are QA run records. `waitMs` exists in `packages/spec` only in `contracts/cluster-service.ts` (lock waits), which is unrelated."
+}

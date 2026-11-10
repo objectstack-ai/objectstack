@@ -2,8 +2,8 @@
   "number": 32033,
   "kind": "issue",
   "title": "plugin-chatbot: one turn with several propose_blueprint results renders a \"Proposed plan\" card for each (×4), though the runtime builds only the newest",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ai",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T01:37:27Z",
-  "updated_at": "2026-11-10T14:07:49Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T17:50:31Z",
+  "closed_at": "2026-11-10T14:53:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32033",
   "body": "repo:cloud#3 · os-warren · session_01JQwxbZqfEd7pcckjz3pGqn\n\n## Problem\n\nIn one AI Studio build turn, the console showed the same \"Proposed plan\" card four times (cloud#4213, seen with DeepSeek). The model called `propose_blueprint` more than once in the turn. The console draws a plan card for every one of those results. The runtime, however, only ever builds the newest plan in the window (`collectPendingBlueprint` in service-ai). So the extra cards show plans that will never be built, and they read as if they still need the user's attention.\n\nThe sites, read at cloud's pin `e24136c2`:\n\n- `ui/packages/plugin-chatbot/src/mapMessages.ts:1386` extracts `proposedPlan` from every `propose_blueprint` result.\n- `ui/packages/plugin-chatbot/src/ChatbotEnhanced.tsx:3810` renders one plan card per tool invocation.\n- The hydration twin is at `ui/packages/app-shell/src/console/ai/AiChatPage.tsx:277`.\n\nNone of them de-duplicates by plan identity within a turn.\n\n## Expected\n\nWithin one assistant turn, the console renders the plan once: the newest `propose_blueprint` result, which is the one the runtime will build. Earlier results in that same turn are collapsed or marked superseded. This holds on both the live stream and the hydrated history. Keying on plan identity (service-ai exports `blueprintIdentity`) would also collapse exact repeats.\n\n## Acceptance\n\n- A test where a turn has 4 `propose_blueprint` results renders exactly one live plan card, on both the live and hydrated paths.\n- A plan from a previous turn is unaffected.\n\n## Consumer\n\nThis is the console half of cloud#4213. The cloud half (the confirm gate re-proposing an already-applied change) is cloud PR objectstack-ai/cloud#4241. It was found by the cloud#4213 dev (report 6756380954), read from code and not run."

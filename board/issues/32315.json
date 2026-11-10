@@ -1,0 +1,35 @@
+{
+  "number": 32315,
+  "kind": "pull_request",
+  "title": "fix(pm): advisory_list admits the null dates the platform declares, and names the failing field",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T18:17:16Z",
+  "updated_at": "2026-11-10T19:02:06Z",
+  "closed_at": "2026-11-10T19:02:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-10T19:02:04Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32315",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"huangyiirene\"} -->\n_Requested by **Irene** · [project thread](https://claude.ai/code/project/chan_01TJXtQ1tVD26ecLDZxFS67x?thread=cmsg_01TJXtQ1tVD26ecLDZxFS67xSfXJYRX1ckSy1GzGhNKjDZ)_\n\nFixes #32217\n\n## 维护者速读\n\n- 改了什么：relay 的 `advisory_list` 字段围栏现在接受平台声明可为 null 的 `created_at` / `updated_at`，其余越界值照旧拒绝；拒绝句改为点名失败的字段（从不带值）。\n- 为什么改：run 42795023621 里平台已答 200，是 relay 自己的围栏拒绝了列表（exit 5），而平台 schema 把这两个日期声明为 nullable，围栏比它自称的\"声明形状\"更窄。\n- 风险与回滚：只动 `scripts/pm/fleet-write/{ops,validate,execute}.mjs`，不发布任何包，不改 workflow、不改授权；回滚即 revert 本 PR。\n- 先看：`ops.mjs` 的 `ADVISORY_LIST_FIELD_SHAPES` / `advisoryListFieldSentence` / `advisoryListPageFailure`。\n- 两分钟验证：`node scripts/pm/fleet-write/validate.mjs --self-test` 与 `execute.mjs --self-test` 全绿。\n- 需要你做的：无；合入后由席位经 relay 跑一次 `advisory_list` 作为验收。\n\n## What changes\n\n`scripts/pm/fleet-write/ops.mjs`: the listing's page fence now judges each of `severity`, `created_at` and `updated_at` against `ADVISORY_LIST_FIELD_SHAPES`, which admits `null` for all three (it already did for `severity`), keeps refusing every other off-shape value and a field the advisory lacks, and names every failing field, by name and in that order, through `advisoryListFieldSentence`. The sentence never carries a value, an id, a state or a count. `validate.mjs` and `execute.mjs` pin both halves.\n\n## Why\n\nThe measured cause, from run 42795023621's execute step (job 129757874215):\n\n```\n✗ action 1 advisory_list: GET /repos/objectstack-ai/objectstack/security-advisories?state={triage,draft,closed}&per_page=100 -> REFUSED at the relay's fence on the listing, nothing sealed or emitted — a page of the listing lists an advisory whose severity or dates are not of the field's declared shape\nfleet-write/execute: ✗ stopped at action 1 (advisory_list); 0 later action(s) NOT attempted.\n##[error]Process completed with exit code 5.\n```\n\n- The platform answered: the row carries no platform text and no access remedy, which `execute.mjs` appends only to a non-2xx answer, and the page passed the status, list, id and state fences. So the grant, the query, the mint and the token action's `permission-repository-advisories` warning are not the cause, and the platform refused nothing.\n- The failing fence was the relay's own field fence. The platform's `repository-advisory` schema (github/rest-api-description) declares `created_at` and `updated_at` as `\"format\": \"date-time\", \"nullable\": true`, but the fence refused `null` for both, and `validate.mjs` pinned `created_at: null` as a refusal. The fence was narrower than the declared shape its own sentence names.\n- The old sentence covered three fields, so the log cannot say which one tripped. A null date is the one value the platform declares that the fence refused; `severity` already admitted `null`. The new sentence names the field, so if the acceptance run still trips, its log says which field to measure.\n\n## Verification\n\nSelf-test counts, before (origin/main 60b99f8fd) and after:\n\n| self-test | before | after |\n|:---|---:|---:|\n| `node scripts/pm/fleet-write/validate.mjs --self-test` | 375 cases, 19 batteries | 377 cases, 19 batteries |\n| `node scripts/pm/fleet-write/execute.mjs --self-test` | 333 cases, 26 batteries | 334 cases, 26 batteries |\n| `node scripts/pm/fleet-write/dispatch.mjs --self-test` | 358 cases, 30 batteries | 358 cases, 30 batteries |\n\n- `validate.mjs`: the field-fence case drops `created_at: null` from the refusals and now expects the per-field sentence; a new case holds null `created_at`, null `updated_at` and an all-null advisory, while a missing field still fails naming it; a new case pins that the refusal names every failing field in declared order and no value.\n- `execute.mjs`: the field-fenced runs expect the per-field sentence (no `null` among them); a new run lands a listing whose advisories carry null dates and null severity, and the seat opens the nulls as answered. The battery's marker sweep counts that run (39 → 40 runs, no leak).\n- Ablation: with null removed from the date shape on the committed fix, `validate.mjs` and `execute.mjs` each go red on the new case (1 failure each); restored, both green.\n- Gates on head 62949003: `dispatch-gates --commands` (39 commands) and every command it lists, plus the three fleet-write self-tests and `check-commit-card-trailers`: 43 of 43 exit 0.\n\nAcceptance run: the relay executes from `main`, so the acceptance `advisory_list` runs after this merges; its run id goes on the card.\n\nTier: `check-governed-merges.mjs --test` reads 0 of 3 paths governed, and `dispatch-gates --tier` derives no path mandate. The maintainer's standing order waives a mandated tier for card threads; the seat runs any review of record.\n\nChangeset: none (`skip-changeset`): `scripts/pm/**` publishes nothing.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; eslint passes on the three changed files.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (publishes nothing)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01J8VVAnXM5B2pawvr6tFwpg)_\n"
+}

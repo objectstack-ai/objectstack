@@ -2,8 +2,8 @@
   "number": 32020,
   "kind": "issue",
   "title": "Checklist sweep M2: multi-replica on Redis, recycle bin, multi-currency amounts (since 18.3.0)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,7 @@
   "labels": [
     "domain:devx",
     "enhancement",
-    "pm:dispatched",
+    "pm:blocking",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T00:46:18Z",
-  "updated_at": "2026-11-10T14:14:20Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T16:07:56Z",
+  "closed_at": "2026-11-10T16:04:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32020",
   "body": "qa#2 · os-bob · session_012dn2Acf5wtyrf2yKWCThBj\n\nBlocked-by: #32019\n\nParent: the checklist epic, linked as this card's parent issue. Milestone M2. It waits on M1 because both write the same area files (one writer per area file, SWEEP.md).\n\n## What\n\nAuthor the platform-checklist items for three of the themes that landed after 18.3.0 (`83d7e4ae`), with the `checklist-author` skill and the six angles in `docs/qa/platform-checklist/SWEEP.md`:\n\n- **Theme 2, multi-replica on the Redis cluster driver**: the refusals under declared multi-replica (a database local to each replica in `os serve`, a local storage root not declared shared, a missing `OS_AUTH_SECRET` in `os start`, runtime package changes, marketplace install-local); membership heartbeat keys and `readClusterMembers()`; settings changes reaching every replica; one shared Redis cache across nodes; `/ready` reporting cluster driver health.\n- **Theme 4, recycle bin**: the REST doors; a delete answer naming the entry to undo; the Setup page that restores deleted records or empties the bin; undo of a business-record delete from its toast.\n- **Theme 5, multi-currency record-mode amounts**: the home amount with the rate and date it was converted at; the preview, including the unreadable-rate message; the Studio `homeAmount` editor; a master_detail child's amount following its parent's currency; `409 currency_field_repointed`; the showcase invoice as the live example.\n\n## Rules\n\n- New items carry `since: \"v18.4\"`. A declared-but-absent capability is a `status: \"planned\"` item, never coverage.\n- Every item's `source[]` cites the files it exercises. Every item follows README.md \"Item anatomy\". Multi-replica items that need two replicas and Redis state their fixture; without one they are `blocked` with the reason, never faked.\n- `coverage.json` is reconciled. `node scripts/check-platform-checklist.mjs` is green.\n- Defects or doc drift go to `FOLLOW-UPS.md` per SWEEP.md. Security findings follow `.claude/skills/pm-dispatch/references/security-findings.md`.\n\n## File surface\n\n`docs/qa/platform-checklist/areas/*.json`, `docs/qa/platform-checklist/coverage.json`, `docs/qa/platform-checklist/FOLLOW-UPS.md`. No product code.\n\n## Premise re-check\n\n```bash\ngit log --oneline 83d7e4ae..origin/main | grep -ciE 'replica|recycle|home amount|currency'\n```\n\n## Done when\n\n`since:v18.4` selects the new items for themes 2, 4 and 5, the checker is green, and the PR has merged."

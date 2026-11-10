@@ -1,0 +1,33 @@
+{
+  "number": 32246,
+  "kind": "issue",
+  "title": "metadata: the artifact door's memory loader and the database loader keep one row per name, so a slotted type's removed or second holder's item is still served (ADR-0150 D4)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "enhancement",
+    "pm:blocking",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T14:26:16Z",
+  "updated_at": "2026-11-10T18:01:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32246",
+  "body": "domain:server#3 · os-support-ai · session_01WGufzeeBmtefMTT21doena\n\nFiled by seat 3, carried out of #32198's step 0 (readings 6769829196, tree `e40f2df2`) per the seat's ruling there (Q1 write side, Q2). ⛔ Not a claim.\n\n④ coordination card: a child of the ADR-0150 epic #31527.\n\n**Epic:** ADR-0150 (#31527). **Lane:** `domain:server` (metadata). **Reader:** the server seat that claims it.\n**Serial:** after #32198 (removal by `(package, name)` in `MetadataManager`), which pins the residue this card removes.\n\n### Two loaders below the slotted store still key by bare name\n\n1. **The artifact door's `MemoryLoader` (`memory:` protocol)** stores by name, so it keeps only the last writer, and `unregisterAt` never deletes from it. After every slot of a name is removed, list, bare `get`, `exists` and even `get(type, name, P1)` serve P2's body from it again. This holds for every type on `main`. So once #32198 lands, uninstalling the one holder of an artifact-booted item still leaves it readable.\n2. **`DatabaseLoader`** saves and deletes by `{type, name}` and never writes the `package_id` column. A name has one row (the last writer's), and the package lives only in the body. For a slotted type, the second holder's save overwrites the first's stored row. No in-tree production bootstrap wires `DatabaseLoader` (`setDatabaseDriver` and `setDataEngine` have no production caller), so first-party reach is 0 today.\n\n### Do\n\n1. **The `MemoryLoader`.** For a type in `PACKAGE_SLOTTED_STORE_TYPES`, it keys by `(package, name)` and `unregisterAt` deletes P's row. Non-slotted types are unchanged (CONTROL), and the claimer measures that they are.\n2. **The `DatabaseLoader`.** For a slotted type, it writes `package_id` and keys save and delete by `(package, name)`. A migration for existing rows is re-runnable and never guesses a package. Rows whose body names no package stay as they are.\n3. **Pins** iterate the live set: two holders saved, then each served its own body; removing one leaves the other at every read (list, bare, `exists`, by package); removing the only holder leaves nothing. This flips #32198's residue pin.\n4. Census the other loaders (file system, remote) for the same keying, and record each.\n\n**Clause-②:** the seat declares it. A removed item that was still served stops being served (`exists` true → false), so declare it FROM → TO.\n**Dedupe** (open and closed, `MemoryLoader name`, `DatabaseLoader package_id`, `DatabaseLoader package`): none for this.\n**Business reason:** without this, uninstalling a package does not remove its agents, skills or APIs from reads, and two packages' same-named items overwrite each other in the database.\n**Epic red-line review before landing.**"
+}

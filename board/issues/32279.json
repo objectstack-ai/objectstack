@@ -1,0 +1,33 @@
+{
+  "number": 32279,
+  "kind": "issue",
+  "title": "spec + rest: retired-key, aggregation and filter-comparand refusals answer 300-1300 character messages; split each into a short head and a rationale the door answers as a hint",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T16:12:17Z",
+  "updated_at": "2026-11-10T19:41:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32279",
+  "body": "domain:server#2 · os-support-ai · session_01WGufziCTpjnYbdh76SAWwb\n\nFiling gate: ④ per-layer child of #32169 (p2, filed on the maintainer's 「立卡处理」 after the 2026-11-10 platform test run #32135). Split by the seat on the card thread's phase-1 report, measured on a live showcase at `origin/main` `bb472154` (report: `/mnt/project-files/server-orders/seat2/32169-phase1-report.md`, project files).\nReader: the next `domain:server` seat that claims it.\n\n## What happens\n\nData-door refusals carry the spec's full prescription in `message` / `fields[].message`: `array_agg` 1021 chars, `string_agg` 1249, `aggregations[].distinct` 1078, retired `joins` / `cursor` / `distinct` 763 / 623 / 644, `where` comparand shapes 314–391, `GET ?filter=` `INVALID_FILTER` 348–433. A UI toast cannot show them. The text lives in spec (`packages/spec/src/data/query.zod.ts`, `filter-save-door-refusals.ts`, `filter-comparand-shape.ts`) and is shared with `os compile`, the save doors and `os migrate`, which print it to authors; spec tests pin substrings.\n\n## Expected\n\nEach such spec message gets a `{ head, rationale }` split at its source (head: one line naming the refused key or shape and the fix). The query door answers `head` in `message` / `fields[].message` and the rationale in `fields[].hint` / `details.hint`. Authoring surfaces keep printing both. Do not cut by sentence in rest: in several messages the field or the fix is in sentence 2.\n\nClause-②: yes (widening): a shorter `message` with the same status and code, plus a new `hint` member. Metadata-protocol: none (no accepted value changes). The service-datasource half of the same item ships with #32169's PR-1.\nBusiness reason: SDK users, console toasts and AI clients get a readable refusal; authors keep the full prescription."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 32304,
+  "kind": "pull_request",
+  "title": "docs(automation): a start-less flow is refused at the save and answers 404 at the trigger, not 422",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T17:26:21Z",
+  "updated_at": "2026-11-10T19:15:56Z",
+  "closed_at": "2026-11-10T19:15:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-10T19:15:54Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32304",
+  "body": "Fixes #32288\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:触发表与客户端注释不再承诺「已存储的无 start 流程触发时回 422 FLOW_NO_START_NODE」,改写为:保存时 400,已存储行不挂载、触发回 404。\n- 为什么改:PR #32273 之后没有任何入口能让引擎回这个 422,文档教的是已不存在的路径。\n- 风险与回滚:纯文字(含 @objectstack/client 的注释,patch);不动任何联合类型、台账或代码行为;回滚即 revert。\n- 先看:`content/docs/automation/flows.mdx` 的触发状态表两行(404 行与 FLOW_NO_START_NODE 行)。\n- 两分钟验证:`git grep -n \"FLOW_NO_START_NODE\" -- content/docs/api packages/client/src/index.ts`,预期只剩 client-sdk 之外无「触发时 422」的承诺。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `flows.mdx`: the `404` row now says a stored flow with no `start` node is never armed and answers there; the `422 FLOW_NO_START_NODE` row stays as a defensive exit no door reaches today and names the save-time `400 VALIDATION_FAILED` and the `registration: refused` read.\n- `plugin-endpoints.mdx`, `declarative-endpoints.mdx`: the `422 FLOW_NO_START_NODE` item is dropped from the list of statuses a caller meets; the `404` item names the stored start-less flow.\n- `client-sdk.mdx`: `FLOW_NO_START_NODE` dropped from the two caller-meets lists.\n- `packages/client/src/index.ts`: the `automation.trigger` / `execute` / scoped `execute` docblocks, prose only.\n- `.changeset/32288-flow-no-start-docs.md`: patch, `@objectstack/client`.\n- `content/docs/ui/actions.mdx` (the `flow` action row) and `content/docs/protocol/kernel/http-protocol.mdx` (the `type: 'flow'` row): the same rewrite, added in rework round 1 after the claim was widened (card comment, seat amendment).\n- `packages/runtime/src/domains/automation.ts`: three route docblocks; `packages/services/service-automation/src/engine.ts`: the comment above the `FLOW_NO_START_NODE` exit; `packages/services/service-automation/README.md`: one line. Comments and prose only.\n- `.changeset/32288-flow-no-start-docs-runtime.md`: patch, `@objectstack/runtime` and `@objectstack/service-automation`.\n- Not touched, by the card's fence: `FLOW_NO_START_NODE` in every union, ledger and client type (keep-or-retire is an open ruling).\n\n## Tests\n\nDoc-only diff; no test or ablation owed.\n\n## Acceptance notes\n\n- The places first listed here as left (`actions.mdx`, `http-protocol.mdx`, the runtime route docblocks, the service-automation README and `execute()` comment) were added to this PR in rework round 1; none is left.\n- The `validateStartNode` refusal text is unchanged: it explains why the flow is refused (every run of it would fail), and tests pin it.\n\n## Verification\n\n- `check-affected-docs`, `check-drift-comment`, `check-empty-changeset`, `check-changeset-no-major`, `check:doc-anchors`, `check:doc-authoring`, `check:docs-single-h1`, `check:corpus-claim-drift`, `check-doc-route-spelling --advisory`: exit 0.\n- NOT MEASURED: `check:docs-transcript-drift` (lint dist not built), client `tsc` (deps unbuilt; docblock-only change), `pnpm lint` (CI owns the repo scan).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QSeKYm8sWjp2Pk76warN7w\n\n<!-- signed: domain:server#7 · os-justin · session_01QSeKYm8sWjp2Pk76warN7w -->\n\n"
+}

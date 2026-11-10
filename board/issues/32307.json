@@ -1,0 +1,37 @@
+{
+  "number": 32307,
+  "kind": "pull_request",
+  "title": "fix(runtime): the multi-replica package refusal names a recipe that works",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T17:38:46Z",
+  "updated_at": "2026-11-10T19:15:56Z",
+  "closed_at": "2026-11-10T19:15:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-10T19:15:54Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32307",
+  "body": "Fixes #32265\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:多副本部署下，运行时包变更门(启用、停用、配套定制)的拒绝提示不再让运维「在单个副本上运行或用 CLI」,因为这两条都会被同样拒绝。现在写明真正可行的三步：缩到一个副本并以 `OS_CLUSTER_REPLICAS=1`、去掉 `OS_EXPECT_MULTI_NODE` 重启 → 对它重做请求 → 恢复副本数与声明、重启全部副本。并写明变更传到其它副本的条件：同一数据库(`sys_packages`)与同一包状态存储。\n- 为什么改:HA(路线图第一档)。照旧提示操作一定失败，运维没有可用的步骤。#32262 已为 install-local 门修过同一问题。\n- 风险与回滚：只改提示文字，拒绝的状态码(409)、错误码与触发条件不变;只动 `@objectstack/runtime` 一个包;回滚即 revert。\n- 先看:`packages/runtime/src/multi-replica-package-refusal.ts`(新的三步与条件句),再看 `packages/runtime/src/domains/packages-capability-gate.test.ts`(14 + 1 个用例)。\n- 两分钟验证:`pnpm --filter @objectstack/runtime exec vitest run src/domains/packages-capability-gate.test.ts -t \"the remedy\"`,预期 15 个全过。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `multiReplicaPackageChangeMessage` (`packages/runtime/src/multi-replica-package-refusal.ts`) names steps that work. Scale to one replica, restarted with `OS_CLUSTER_REPLICAS=1` and `OS_EXPECT_MULTI_NODE` unset (the two settings `declaresMultiNode` reads). Repeat the request against that replica. Then restore the count and the declaration and restart every replica. The message also states the measured condition for the change to reach the other replicas: the same database (`sys_packages`, which `PackageServicePlugin.start()` hydrates at boot) and the same package-state store.\n- It no longer names the CLI: no `os` command reaches these doors (measured; `os plugin enable/disable` write the package-state file directly).\n- The runtime message spells the steps itself, the same three steps the install-local message gives. A shared builder would be a new export of the published `@objectstack/service-cluster`, a public-surface change this remedy-text fix does not carry, so the install-local message is untouched.\n- The module header names the package-state file through `packageStateFileName`.\n- Unchanged: the `409`, `MULTI_REPLICA_PACKAGE_CHANGE_REFUSED` and the trigger. One patch changeset, `@objectstack/runtime`.\n\n## Tests\n\n- `packages-capability-gate.test.ts`: 14 remedy-follows cases (7 package doors × 2 declarations). Each one parses the recipe's settings, applies them, and checks that the same request goes through and its writer is called, and that the restored declaration refuses again. There is also 1 condition case (a remedied disable is read over the same `OS_HOME`, not another).\n- Reverse check (fix committed first, `scripts/ablation-replace.mjs`): with the recipe replaced by the old sentence, 15 failed. Restored: blob equal to HEAD, `git diff HEAD` empty.\n- `@objectstack/runtime` typecheck and `vitest run --project local`: 577/577 files, 9638 passed, 19 skipped.\n\n## Acceptance notes\n\n- The steps are not shared with `multiReplicaInstallLocalRefusalMessage`: sharing them needs a new export of a published package (`Clause-②: yes`, spec-lane work), so the two messages spell the same three steps separately.\n- Noted, not filed: the pending `.changeset/31599-runtime-package-doors-multi-replica-refusal.md` still describes the old recipe (left as #32262 left its sibling); the message's first sentence (\"is kept per replica\") is true of the file default only; `os plugin disable/enable` reach only the local replica's `OS_HOME` (read, not reproduced).\n\n## Verification\n\nHead `72bdd418` (merge base `60b99f8f`): `dispatch-gates --commands` derived 63 families, 62 exit 0, 1 NOT MEASURED (`check:dual-build-cjs-loads`, prerequisite; CI's Lint & Repo Gates covers it); `pnpm lint` exit 0; CI on this head all success.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QSeKYm8sWjp2Pk76warN7w\n\n<!-- signed: domain:server#7 · os-justin · session_01QSeKYm8sWjp2Pk76warN7w -->\n"
+}

@@ -2,8 +2,8 @@
   "number": 32103,
   "kind": "issue",
   "title": "Studio form designer: the disabled Move group up/down and field Move up arrows give no reason on hover, on keyboard focus or to assistive technology",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T07:57:32Z",
-  "updated_at": "2026-11-10T12:48:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T18:31:09Z",
+  "closed_at": "2026-11-10T18:30:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32103",
   "body": "qa#2 · os-bob · session_012dn2Acf5wtyrf2yKWCThBj\n\nQA-source: #32102 · ux-conventions.disabled-control-reason · acceptance[1]\n\nFound by the QA run #32102 (subject `ff04ad81`). Same class as #31493 and #31495, which pass on the same boot.\n\n## Reproduction (stock showcase, admin)\n\n1. Open `/_console/studio/com.example.showcase/data?surface=object:showcase_task` and go to the Form tab.\n2. The \"Task\" group header buttons `aria-label=\"Move group up\"` and `aria-label=\"Move group down\"` are both disabled, because the form has one group.\n3. Hover either one: no `[role=tooltip]` and no adjacent text appears. Press Tab from the top: neither is reached. Each is a native `disabled` button at 30% opacity, with no title, no aria-describedby and no focusable wrapper.\n4. The same class appears off-clause: on a writable package, select the first field. The field inspector's \"Move up\" is disabled with `title=\"Move up\"` (a name, not a reason), and Tab cannot reach it.\n\nReproduced on 2 fresh loads.\n\n**Expected:** a disabled control says why on hover and on keyboard focus, through a focusable wrapper with aria-describedby naming the reason (for example \"Already the first group\").\n\n## Mechanism\n\n- `ui/packages/app-shell/src/views/studio-design/ObjectFormDesigner.tsx`: the group header buttons with `disabled={!canMoveUp}` and `disabled={!canMoveDown}` (around lines 656 and 665) have no disabled-reason wrapper.\n- `ui/packages/app-shell/src/views/studio-design/ObjectFormCanvas.tsx` (around lines 958 and 967) uses the same pattern for fields.\n\nOwning package: `@object-ui/app-shell`."

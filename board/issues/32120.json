@@ -2,8 +2,8 @@
   "number": 32120,
   "kind": "issue",
   "title": "sys_scim_connection_credential: two credentials of one connection cannot be told apart (no token hint, no last use)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T08:46:02Z",
-  "updated_at": "2026-11-10T12:25:37Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T17:50:03Z",
+  "closed_at": "2026-11-10T17:41:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32120",
   "body": "repo:cloud#3 · os-warren · session_01JQwxbZqfEd7pcckjz3pGqn\n\nBlocks cloud#4278 (p2, SCIM provisioning console); drafted by the cloud#4278 card thread (session_01JQwxbY3zqaaaSj7tJsov3a) and filed by the seat.\n\nEdition / version: framework pin 99992ddf. Consumer: cloud SCIM provisioning console \"Connections\" grid and the open Setup → SCIM Credentials list; cloud#4278 item 3.\n\nMeasured on cloud#4278 (local SCIM run, two mints for `okta-test`): the two rows show the same connection id, label and created minute, both Active. The documented rotation (\"mint a second credential, move the IdP to it, then revoke the old one\", the mint action's own `helpText`) cannot be followed safely, because nothing says which row the IdP is using.\n\nWhy (code): the object's fields are `connection_id`, `provisioning_domain_id`, `organization_id`, `label`, `token_digest` (internal), `active`, `expires_at`, `user_id`, timestamps. Every bearer starts with the constant `oss_scim_`, so a prefix tells nothing apart; there is no suffix hint. `verifyScimBearerToken` in `plugin-auth/src/scim-connection-service.ts` reads the row by digest and writes nothing back, so there is no last-use time.\n\nSeam: `runtime: scim-connection-service verifyScimBearerToken` → `object: sys_scim_connection_credential` (no consumer field yet).\n\nExpected: (a) a non-secret `token_hint` (e.g. the last 4 characters of the bearer, stored at mint, shown in the mint result dialog too so the admin can match it to what they pasted into the IdP); (b) `last_used_at`, written by the verifier on a successful verify, throttled (e.g. at most once a minute per credential) so a busy IdP does not write on every request. Both readable through the list door, both in the `all` list view. Never the bearer, never the digest.\n\nDedupe words: \"scim credential last_used_at\", \"scim token hint\", \"scim rotation which credential\", \"sys_scim_connection_credential last used\"."

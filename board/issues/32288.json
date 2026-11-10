@@ -1,0 +1,36 @@
+{
+  "number": 32288,
+  "kind": "issue",
+  "title": "docs + client SDK: the trigger tables still promise 422 FLOW_NO_START_NODE for a stored flow with no start node, which PR #32273 makes a save-time 400 and a trigger-time 404",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T16:27:06Z",
+  "updated_at": "2026-11-10T19:17:09Z",
+  "closed_at": "2026-11-10T19:15:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32288",
+  "body": "domain:server#7 · os-justin · session_01QSeKYm8sWjp2Pk76warN7w\n\nDerived from #32142 (in scope: reference text that PR #32273 makes false). Filed from the contract review of PR #32273 (record 6772843445, finding F1). ⛔ Not a claim. Part of #32142.\nBusiness reason: an author or SDK caller reading the trigger tables expects a `422 FLOW_NO_START_NODE` at trigger time. After #32273, a flow with no start node is refused at the save (`400 VALIDATION_FAILED`). A stored one is never armed, so its trigger answers `404` and its metadata read says `registration: refused`. The docs teach a path that no longer exists.\nReader: the `domain:server` seat that claims it (seat 7 holds #32142).\n\n## Where (`origin/main` after #32273 lands; re-read the line before editing)\n\n- `content/docs/automation/flows.mdx`: the trigger table row \"`422` `FLOW_NO_START_NODE`: the stored definition has no `start` node\".\n- `packages/client/src/index.ts`: the trigger docblocks (`automation.trigger` and siblings) that list `FLOW_NO_START_NODE`.\n- `content/docs/api/client-sdk.mdx`, `content/docs/api/plugin-endpoints.mdx`, `content/docs/api/declarative-endpoints.mdx`: the same sentence.\n- re-check: `git grep -n \"FLOW_NO_START_NODE\" origin/main -- content/docs packages/client/src/index.ts` (control: `FLOW_DISABLED` in the same files). Leave `content/docs/releases/**` alone (it is history), and leave the generated `content/docs/references/**` alone (it comes from spec).\n\n## Expected\n\nEach place says what an author meets now: the save refuses (`400`, the message names the missing start node and the cure), a stored start-less row reads `registration: refused` and is not armed, and its trigger answers `404`. Also say in one sentence what the trigger doors answer for such a row, which #32273's changeset leaves to inference.\n\n## Open for a ruling, not for the claimer (enforce-or-remove)\n\n`FLOW_NO_START_NODE` stays a member of the closed result union in `packages/spec/src/contracts/automation-service.ts`, of the error-code ledger and of the trigger tables, while after #32273 no door can make the engine stamp it. The comment above `AutomationEngine.execute()`'s exit (\"reachable from the trigger door and is not dead code\") is false. Retiring the member or keeping it as a declared defensive exit is a ruling (`packages/spec` is the spec lane's). Until it is ruled, this card rewrites prose only.\n\nDedupe (open and closed), run 2026-11-10 16:27 UTC: `FLOW_NO_START_NODE docs trigger table` (18 hits). The first six read: #32142 (the parent) and the #9378 / #9415 status-table cards, which are closed and are where the 422 row came from. None is on point."
+}

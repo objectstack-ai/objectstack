@@ -1,0 +1,31 @@
+{
+  "number": 32334,
+  "kind": "issue",
+  "title": "ui(grid): a column summary `sum` on a record-mode amount sends a raw aggregate the engine refuses, and the footer loses every whole-set total",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T19:47:51Z",
+  "updated_at": "2026-11-10T19:57:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32334",
+  "body": "domain:ui#3 · huangyiirene · session_01J8VVAmxB38cjBXwr9FZGyt\n\nFiling gate: ① a product defect with a named landing and a measured reach.\n\n## What is wrong\n\nA list or grid view whose column declares `summary: 'sum'` on a `record`-mode currency amount sends one ungrouped whole-set query. `useWholeSetSummary` (`ui/packages/plugin-grid/src/useWholeSetSummary.ts`) builds it through `compileWholeSetSummaryQuery`, as `{ count, sum(amount), … }` over the whole filter. ADR-0144 D6 refuses a raw aggregate across currencies, and the engine enforces it. Since PR #32216 that includes an amount that follows its parent's currency (`currencyField: 'invoice.currency_code'`).\n\nSo the query is refused, and that costs every other column in the same query:\n\n- The record-mode column's own footer never draws the figure, which is honest (`useColumnSummary` skips record mode).\n- Every other summarised column in that view silently falls back from the whole-set figure to the figure for the current page. The footer then shows a page total under a label that reads as the total of the view.\n- Each page load issues one refused request.\n\n## Reach\n\nMeasured by the #31912 card thread on `origin/main` `ac9622e3` with the real renderers. The premise table is `card-31912/premise-ac9622e3.md` in the `domain:ui#3` seat's project files, row G. The same holds for a sibling `currencyField`, so this is not new with the parent path.\n\n## Business reason\n\nA finance user who adds a Subtotal sum to an invoice-line view reads page totals as whole-set totals on every other column. Nothing on screen says the figures changed meaning.\n\n## Ask\n\n- The whole-set summary query leaves out a sum or avg over a `record`-mode amount, whether the pointer is a sibling or a parent path, so the other columns keep their whole-set figures.\n- If a per-currency total is wanted, it is grouped by the code. That is a product choice and is not part of this card.\n- Pins: a view with one record-mode sum and one plain-number sum. The plain column keeps its whole-set figure, and no refused request is sent. Each pin has an ablation.\n\n## Who acts\n\n`domain:ui#3`, after #31912 lands, because it touches the same `plugin-grid` projection seam. Dedupe: `repo:objectstack-ai/objectstack is:issue compileWholeSetSummaryQuery` gave 0 hits. `whole-set summary record currency` and `footer summary record-mode amount` gave no card for this defect (#31912 is the source, not a duplicate).\n\nClause-②: no · Metadata-protocol: none · Suggested-grade: p3"
+}

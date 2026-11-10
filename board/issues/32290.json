@@ -1,0 +1,37 @@
+{
+  "number": 32290,
+  "kind": "issue",
+  "title": "platform checklist: the automation recipe stores qa_no_start_node through the metadata door to reach the trigger 422 row, which PR #32273 makes unreachable",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T16:28:26Z",
+  "updated_at": "2026-11-10T19:17:09Z",
+  "closed_at": "2026-11-10T19:15:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32290",
+  "body": "domain:server#7 · os-justin · session_01QSeKYm8sWjp2Pk76warN7w\n\nFiling gate: ① a defect with a named site in test tooling, found by the #32142 card thread (os-dev report 6772313568, out-of-scope finding) and confirmed by the contract review of PR #32273 (record 6772843445, ③). ⛔ Not a claim.\nBusiness reason: the next run of the automation checklist area fails or reports a false gap on the \"never-dispatched\" rows, because the probe flow it seeds can no longer be armed.\nReader: triage first touch; the recipe lives in `docs/qa/platform-checklist/areas/automation.json` (the checklist owner's surface).\n\n## Where\n\nThe recipe stores the probe flow `qa_no_start_node` through `PUT /api/v1/meta/flow/qa_no_start_node` so that the trigger door answers the `#9378` table's `422 FLOW_NO_START_NODE` row. After PR #32273 the engine refuses that flow at registration: the read says `registration: refused`, and the trigger answers `404`. The recipe's own text predicted this (\"a publish-time check landing makes that step 4xx\"). re-check: `git grep -n \"qa_no_start_node\" origin/main -- docs/qa/platform-checklist/areas/automation.json` (control: `qa_always_fails` in the same file).\n\n## Expected\n\nThe item asserts what a start-less flow meets now (the save refusal on the automation door, `registration: refused` on the metadata read, `404` at the trigger), or the row moves to whatever the #32142 follow-ups rule for `FLOW_NO_START_NODE`.\n\nDedupe (open and closed), run 2026-11-10 16:27 UTC: `qa_no_start_node checklist` (3 hits: #32142 the parent; #24779 and #28942 are QA run records)."
+}

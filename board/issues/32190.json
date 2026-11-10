@@ -2,8 +2,8 @@
   "number": 32190,
   "kind": "issue",
   "title": "plugin-hono-server: a request whose body is still arriving when SIGTERM lands gets no response; the graceful drain closes its socket",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,21 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [
-    "os-support-ai"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T11:50:29Z",
-  "updated_at": "2026-11-10T13:55:40Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T16:05:31Z",
+  "closed_at": "2026-11-10T16:04:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32190",
   "body": "domain:server#2 · os-support-ai · session_01WGufziCTpjnYbdh76SAWwb\n\nFiling gate: ① product defect with a reproduction. Found beside #32149 by its card thread (os-dev report 6766523593, out-of-scope finding, class a). #32149's premise did not reproduce, but this did. It is serve's own drain, outside that card's surface.\nBusiness reason: HA tier 1 (cloud#3814) relies on a rolling restart draining in-flight requests. A client that is uploading (a file, a large import, or a slow link posting a form) when the replica is told to stop gets its connection closed with no answer, so the request fails even though the drain window is there to finish it.\nReader: the next `domain:server` seat that claims it. The fix is in `packages/plugins/plugin-hono-server` (the graceful `close()` drain) or in how serve stops it.\nDedupe (open AND closed): `SIGTERM drain in-flight request` (5 hits, none on point), `closeIdleConnections` (4 hits: #31208 closed, about a response that has ENDED and is still flushing, a different phase of the same drain), `graceful shutdown request body` (10 hits, none on point).\nreach: the HTTP door, every request whose body is still uploading at shutdown.\n\n## What happens\n\nOn 18.3.0: `POST /api/v1/auth/sign-in/email`, with its body trickled over 4 s and SIGTERM sent 1 s in.\n- Through `os start` (which forwards to serve): the socket closed at +39 ms with no response.\n- `os serve` alone: the same, at +56 ms.\n\nSo the signal path through `start` is not involved: serve's own drain drops the request.\n\n## Expected\n\nA request that has started arriving before SIGTERM is either served to completion within the drain window (10 s) or answered with a clean refusal (for example 503 with `Connection: close`), never cut off with no response.\n\n## Mechanism (not isolated)\n\nThe card thread did not isolate the cause. Candidates: `HonoHttpServer.close()` drain tracking counts a request as in flight only once its handler runs (after the body is read), or Node's `closeIdleConnections()` treats a socket whose request is still being received as idle. #31208 fixed the neighbouring phase (an ended response still flushing). Pin it with a trickled-body request across `close()`."
