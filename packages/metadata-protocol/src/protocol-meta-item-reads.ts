@@ -39,7 +39,7 @@ import {
 } from './protocol-bundle-members.js';
 import { packagelessContentPackage } from './protocol-environment-rows.js';
 import type { ProtocolHost } from './protocol-host.js';
-import { admitExactQualifier, exactQualifierItem } from './protocol-exact-qualifier.js';
+import { admitExactQualifier, exactQualifierItem, refuseUnjudgeableByNameRead } from './protocol-exact-qualifier.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import {
     bundleMemberOf,
@@ -104,6 +104,12 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // below changes. A read that names a package (`?package=`) keeps
     // `getItem`'s prefer-local read: that address is the exact qualifier of
     // child G1 (ADR-0150 D5), not a caller.
+    // [ADR-0150 D3, epic #31527] On an engine whose registry has no
+    // package-scoped resolver, the read that names no package of a type
+    // ADR-0150 addresses by `(package, name)` cannot be judged: nothing can
+    // count its holders, and `getItem` would serve the first match. Refused
+    // here, before any layer is read ({@link refuseUnjudgeableByNameRead}).
+    if (!request.packageId) refuseUnjudgeableByNameRead(host, request, { kind: 'none' });
     const registry = host.engine?.registry;
     const packagelessScopedRead: { item: unknown } | undefined =
         !request.packageId && typeof registry?.readsByPackage === 'function' && registry.readsByPackage(request.type)
