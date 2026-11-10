@@ -3330,7 +3330,7 @@ describe('AuthManager', () => {
           expect(logger.error).toHaveBeenCalledTimes(1);
         });
 
-        it('an option that throws: same fail-soft answer, one error naming it', () => {
+        it('an option that throws: same fail-soft answer, one error naming its class, the message in the meta', () => {
           const { manager, logger } = withLogger(() => { throw new Error('copy bundle missing'); });
           const served = (manager.getPublicConfig() as any).features;
           expect(served).not.toHaveProperty('organizationEditions');
@@ -3338,8 +3338,75 @@ describe('AuthManager', () => {
           expect(logger.error).toHaveBeenCalledTimes(1);
           expect(logger.error.mock.calls[0]![1]).toEqual({
             option: 'AuthManagerOptions.organizationEditions',
-            firstIssue: 'the option threw: copy bundle missing',
+            firstIssue: 'the option threw (Error)',
+            error: 'copy bundle missing',
           });
+        });
+
+        // The host's only input is an anonymous caller's accept-language. A host
+        // that quotes it in its error must not grow the memo or the log per
+        // distinct header.
+        it('a throw quoting the caller\'s header: two different messages, one memo entry, one error line', () => {
+          const { manager, logger } = withLogger(({ acceptLanguage }) => {
+            throw new Error(`no copy for ${acceptLanguage}`);
+          });
+          const ask = (language: string) =>
+            manager.getPublicConfig(new Request('http://localhost/x', { headers: { 'accept-language': language } }));
+          ask('xx-AAAA');
+          ask('yy-BBBB');
+          expect(logger.error).toHaveBeenCalledTimes(1);
+          expect(logger.error.mock.calls[0]![1]).toMatchObject({ error: 'no copy for xx-AAAA' });
+          expect((manager as any).reportedOrganizationEditionFailures.size).toBe(1);
+        });
+
+        it('the memo and the error log stop at 32 distinct failures', () => {
+          let n = 0;
+          const { manager, logger } = withLogger(() => {
+            const error = new Error('varies');
+            error.name = `HostError${n++}`;
+            throw error;
+          });
+          for (let i = 0; i < 40; i++) manager.getPublicConfig();
+          expect(logger.error).toHaveBeenCalledTimes(32);
+          expect((manager as any).reportedOrganizationEditionFailures.size).toBe(32);
+        });
+
+        it('a host logger that throws cannot escape getPublicConfig()', () => {
+          const logger = {
+            info: vi.fn(),
+            warn: vi.fn(() => { throw new Error('logger down'); }),
+            error: vi.fn(() => { throw new Error('logger down'); }),
+          };
+          const manager = new AuthManager({
+            ...base, logger, organizationEditions: () => [{ ...developer, hint: '' }],
+          } as any);
+          let served: any;
+          expect(() => { served = (manager.getPublicConfig() as any).features; }).not.toThrow();
+          expect(served).not.toHaveProperty('organizationEditions');
+          expect(served.developerEditionCreate).toBe(false);
+          expect(logger.error).toHaveBeenCalledTimes(1);
+        });
+
+        it('an option that answers a rejecting promise: refused by name, the rejection handled', async () => {
+          const unhandled: unknown[] = [];
+          const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+          process.on('unhandledRejection', onUnhandled);
+          try {
+            const { manager, logger } = withLogger(
+              (() => Promise.reject(new Error('bundle load failed'))) as any,
+            );
+            const served = (manager.getPublicConfig() as any).features;
+            expect(served).not.toHaveProperty('organizationEditions');
+            expect(served.developerEditionCreate).toBe(false);
+            expect(logger.error.mock.calls[0]![1]).toEqual({
+              option: 'AuthManagerOptions.organizationEditions',
+              firstIssue: 'the option answered a promise; it must answer the list synchronously',
+            });
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            expect(unhandled).toEqual([]);
+          } finally {
+            process.off('unhandledRejection', onUnhandled);
+          }
         });
       });
     });

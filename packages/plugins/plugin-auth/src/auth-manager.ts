@@ -793,10 +793,12 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * {@link onOrganizationCreated} provisioning); setting it anywhere else
    * offers a choice the server ignores. The answer is checked against the
    * public contract (`features.organizationEditions`: well-formed entries,
-   * each `edition` used once) before it is served. An answer that fails it, or
-   * an option that throws, serves no choices (and a false
-   * `developerEditionCreate`) and is reported once at `error` naming this
-   * option and the first issue: the rest of the public config, which the
+   * each `edition` used once) before it is served. An answer that fails it,
+   * an option that throws, or one that answers a promise (the option is
+   * synchronous) serves no choices (and a false `developerEditionCreate`) and
+   * is reported once at `error` naming this option and the first issue (a
+   * throw by its error class, its message in the log meta; at most 32
+   * distinct failures per process): the rest of the public config, which the
    * login page and the sign-in checks read, is never failed by it.
    */
   organizationEditions?: (request: { acceptLanguage?: string }) => readonly OrganizationEditionChoice[];
@@ -1627,6 +1629,24 @@ export function acceptLanguageHeader(source: unknown): string | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * [#32074] How many distinct `AuthManagerOptions.organizationEditions` failures
+ * one process reports before it stops logging new ones. Each key is already
+ * bounded text, so this is the backstop against a host whose error class names
+ * vary without limit: the memo and the error log stay finite whatever an
+ * anonymous `/auth/config` caller sends.
+ */
+const MAX_REPORTED_ORGANIZATION_EDITION_FAILURES = 32;
+
+/** Whether a host answer is a promise-like value (a `then` method), which a synchronous option must not answer. */
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return (
+    (typeof value === 'object' || typeof value === 'function')
+    && value !== null
+    && typeof (value as { then?: unknown }).then === 'function'
+  );
 }
 
 /** [#24243] The standard ADR-0112 code the slug guard's read fault answers with — the status's own name. */
@@ -5036,6 +5056,11 @@ export class AuthManager {
   /**
    * Each distinct `organizationEditions` failure already reported, so a host
    * answer that keeps failing is said once per process, not once per request.
+   * Every key is bounded text: a schema issue's path and zod message (neither
+   * carries the input value), or a constant naming the throw's error class.
+   * The host's own error message, which may quote the caller's
+   * `accept-language`, never becomes a key; it travels in the log meta only.
+   * The set also stops growing at {@link MAX_REPORTED_ORGANIZATION_EDITION_FAILURES}.
    */
   private readonly reportedOrganizationEditionFailures = new Set<string>();
 
@@ -5047,40 +5072,64 @@ export class AuthManager {
    *
    * Fail-soft by ruling: `getPublicConfig()` also feeds the login page, the
    * `kernel:ready` sign-up reads and the sign-in-method floor, so a host answer
-   * that throws or fails the schema (one blank translated hint) must not take
-   * those down. It serves no choices instead (the key absent, the derived
-   * `developerEditionCreate` false) and reports the failure once, at `error`,
-   * naming the host option and the first issue.
+   * that throws, answers a promise, or fails the schema (one blank translated
+   * hint) must not take those down. It serves no choices instead (the key
+   * absent, the derived `developerEditionCreate` false) and reports the
+   * failure once, at `error`, naming the host option and the first issue.
    */
   private resolveOrganizationEditions(request: unknown): OrganizationEditionChoice[] | undefined {
     const host = this.config.organizationEditions;
     if (!host) return undefined;
-    let reason: string;
     try {
-      const answer = host({ acceptLanguage: acceptLanguageHeader(request) });
+      const answer: unknown = host({ acceptLanguage: acceptLanguageHeader(request) });
+      if (isThenable(answer)) {
+        // The option is synchronous by type. A promise is refused, and its
+        // rejection is handled here so it cannot surface as an unhandled one.
+        void Promise.resolve(answer).catch(() => undefined);
+        this.reportOrganizationEditionFailure(
+          'the option answered a promise; it must answer the list synchronously',
+        );
+        return undefined;
+      }
       const checked = AuthFeaturesConfigSchema.shape.organizationEditions.safeParse(answer);
       if (checked.success) return checked.data && checked.data.length > 0 ? checked.data : undefined;
       const first = checked.error.issues[0];
-      reason = first ? `${first.path.join('.') || '(list)'}: ${first.message}` : 'invalid';
+      this.reportOrganizationEditionFailure(
+        first ? `${first.path.join('.') || '(list)'}: ${first.message}` : 'invalid',
+      );
     } catch (error) {
-      reason = `the option threw: ${error instanceof Error ? error.message : String(error)}`;
+      const errorClass = error instanceof Error ? error.name : typeof error;
+      this.reportOrganizationEditionFailure(`the option threw (${errorClass})`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
-    this.reportOrganizationEditionFailure(reason);
     return undefined;
   }
 
-  private reportOrganizationEditionFailure(reason: string): void {
-    if (this.reportedOrganizationEditionFailures.has(reason)) return;
-    this.reportedOrganizationEditionFailures.add(reason);
-    const message =
-      '[AuthManager] AuthManagerOptions.organizationEditions answered a list that is not a valid '
-      + 'features.organizationEditions value, so /auth/config serves no organization-create choices '
-      + '(and developerEditionCreate is false) until the host option is fixed: each entry needs a '
-      + 'snake_case edition used once, a non-blank label and hint, and an optional positive whole '
-      + 'memberLimit. Each distinct failure is reported once per process.';
-    const meta = { option: 'AuthManagerOptions.organizationEditions', firstIssue: reason };
-    if (this.config.logger) this.audienceLogError(message, meta);
-    else console.error(message, meta);
+  /**
+   * Reports one `organizationEditions` failure at `error`, once per distinct
+   * `reason` and at most {@link MAX_REPORTED_ORGANIZATION_EDITION_FAILURES}
+   * times per process. Never throws: a host logger that throws is swallowed
+   * here, so it cannot escape `getPublicConfig()` either.
+   */
+  private reportOrganizationEditionFailure(reason: string, detail?: { error: string }): void {
+    try {
+      if (this.reportedOrganizationEditionFailures.has(reason)) return;
+      if (this.reportedOrganizationEditionFailures.size >= MAX_REPORTED_ORGANIZATION_EDITION_FAILURES) return;
+      this.reportedOrganizationEditionFailures.add(reason);
+      const message =
+        '[AuthManager] AuthManagerOptions.organizationEditions answered a list that is not a valid '
+        + 'features.organizationEditions value, so /auth/config serves no organization-create choices '
+        + '(and developerEditionCreate is false) until the host option is fixed: each entry needs a '
+        + 'snake_case edition used once, a non-blank label and hint, and an optional positive whole '
+        + 'memberLimit, answered synchronously. Each distinct failure is reported once per process.';
+      const meta = { option: 'AuthManagerOptions.organizationEditions', firstIssue: reason, ...detail };
+      if (this.config.logger) this.audienceLogError(message, meta);
+      else console.error(message, meta);
+    } catch {
+      // A logger fault must not fail the public config; the choices are
+      // already withheld, which is the fail-soft answer.
+    }
   }
 
   /**
