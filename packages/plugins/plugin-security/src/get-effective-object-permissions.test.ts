@@ -700,7 +700,7 @@ describe('[#20083] parity: can() over the member\'s map answers what checkObject
  * while the slot `/auth/me/permissions` serves (`servedObjectPermissions`)
  * reads `allowTransfer` only with edit.
  */
-describe('a transfer grant without edit: can() in an expression keeps it, the served hint does not', () => {
+describe('a transfer grant without edit: can() evaluated on the server keeps it, the served hint does not', () => {
   const OBJECTS: Record<string, any> = {
     crm_account: { name: 'crm_account', label: 'Account', fields: { name: { type: 'text' } } },
   };
@@ -711,7 +711,7 @@ describe('a transfer grant without edit: can() in an expression keeps it, the se
     ['the transfer grant alone', { allowTransfer: true }],
     ['read and the transfer grant', { allowRead: true, allowTransfer: true }],
   ] as const) {
-    it(`${label}: can(object, 'transfer') is true in an expression, /me/permissions serves allowTransfer false`, async () => {
+    it(`${label}: can(object, 'transfer') is true in a server-evaluated expression, /me/permissions serves allowTransfer false`, async () => {
       const sets = [PermissionSetSchema.parse({ name: 'transfer_no_edit', label: 'transfer_no_edit', objects: { crm_account: entry } })];
       const { svc, plugin } = await locate({ schemas: OBJECTS });
       vi.spyOn(plugin as any, 'resolvePermissionSetsForContext').mockResolvedValue(sets);
