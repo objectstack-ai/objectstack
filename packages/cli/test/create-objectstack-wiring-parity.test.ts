@@ -121,9 +121,10 @@ describe('[#20333] the blank template ships every wired barrel', () => {
   // and views barrels carry the export lines `os g app` / `os g view` append
   // after the empty barrel. The barrel compared is what `os init` writes
   // before those lines: the empty barrel itself, byte for byte.
-  const GENERATED_EXPORT_LINE = /^export \{ default as \w+ \} from '\.\/[\w.-]+';$/;
+  // One `export { default as … } from './…';` line, as `os generate` appends it.
+  const GENERATED_EXPORT = /^export \{ default as \w+ \} from '\.\/[\w.-]+';$/;
   const withoutGeneratedExports = (source: string): string =>
-    source.split('\n').filter((line) => !GENERATED_EXPORT_LINE.test(line)).join('\n');
+    source.split('\n').filter((line) => !GENERATED_EXPORT.test(line)).join('\n');
   const barrels = SCAFFOLD_WIRED_BARRELS.map((b) => {
     const file = `${b.dir}/index.ts`;
     const render = TEMPLATES.app.srcFiles[file];
@@ -148,8 +149,8 @@ describe('[#20333] the blank template ships every wired barrel', () => {
   // verbatim, then one `export { default as … } from './…';` line per
   // scaffold. Every other wired barrel stays byte-identical. So the binding
   // holds either way: the barrel `os init` writes is the template's prefix,
-  // and nothing but generator export lines follows it.
-  const GENERATED_EXPORT = /^export \{ default as \w+ \} from '\.\/[\w.-]+';$/;
+  // and nothing but generator export lines follows it (`GENERATED_EXPORT`,
+  // above).
 
   it.each(empty.map((b) => [b.file, b] as const))(
     '%s is the one `os init` writes, plus only the export lines `os generate` appends',
