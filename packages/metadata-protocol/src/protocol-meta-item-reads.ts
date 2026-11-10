@@ -105,6 +105,15 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // `getItem`'s prefer-local read: that address is the exact qualifier of
     // child G1 (ADR-0150 D5), not a caller.
     const registry = host.engine?.registry;
+    // [ADR-0150 D5, #31697] An object-less action two packages hold — two
+    // namespaces may, once the action's one-holder rule narrowed to the
+    // namespace — is refused here when the read names no package, naming
+    // each (a thrown `409 RESOURCE_CONFLICT`), before any layer is read; it
+    // served the first registered. An action bound to an object reads as
+    // before (`getItem`).
+    if (!request.packageId && request.type === 'action' && typeof registry?.refuseAmbiguousObjectLessAction === 'function') {
+        registry.refuseAmbiguousObjectLessAction(request.name);
+    }
     const packagelessScopedRead: { item: unknown } | undefined =
         !request.packageId && typeof registry?.readsByPackage === 'function' && registry.readsByPackage(request.type)
             ? { item: registry.resolveItem(request.type, request.name, null, member) }

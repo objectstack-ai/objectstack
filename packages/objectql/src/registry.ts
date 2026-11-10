@@ -67,7 +67,7 @@ import { applyProtection } from '@objectstack/spec/shared';
 // (`id || name`). The install gate's co-ownership set must name packages by the
 // same string the artifact loader ordered them by, or a co-owner would be
 // admitted — or refused — under a key nothing else in the path uses.
-import { artifactPackageId, declaredDependencyIds, type SecurityCatalogType } from '@objectstack/core';
+import { artifactPackageId, declaredDependencyIds, PackageScopedNameRefusedError, type SecurityCatalogType } from '@objectstack/core';
 // One name, one holder for positions, permission sets and capabilities — the
 // rule, the holders and the one place a declaration is read from (module doc).
 import {
@@ -166,7 +166,8 @@ import {
   type PackageScopedRegistry,
   type PackageScopedResolution,
 } from './package-scoped-resolver.js';
-import { standaloneActionOwnerKey, isObjectLessActionKey } from './action-governance.js';
+import { standaloneActionOwnerKey, isObjectLessActionKey, GLOBAL_ACTION_OBJECT_KEY } from './action-governance.js';
+import { resolveActionByPackage } from './action-package-addressing.js';
 import { recordCurrencySummaryRefusal } from './record-currency-aggregate-door.js';
 
 /**
@@ -8714,6 +8715,25 @@ export class SchemaRegistry {
   resolveItem<T>(type: string, name: string, callerPackageId?: string | null, member?: string): T | undefined {
     if (!isPackageScopedReadType(type)) return this.getItem<T>(type, name, callerPackageId ?? undefined, member);
     return readPackageScopedItem<T>(this, { type, name, callerPackageId, member });
+  }
+
+  /**
+   * [ADR-0150 D5, #31697] The by-name read of an action that names no package
+   * and no object (`GET /meta/action/NAME`): when two or more packages hold an
+   * OBJECT-LESS action of `name` — two namespaces may, once the action's
+   * one-holder rule narrowed to the namespace — the read is refused naming
+   * each (`409 RESOURCE_CONFLICT`), never the first registered. Resolved by
+   * the ONE rule over the object-less holders ({@link resolveActionByPackage}
+   * for a caller with no package): the environment's own item, else the one
+   * package holder, answers as before. ⛔ An action bound to an object is not
+   * judged here: its by-name read stays {@link getItem}'s (seat ruling on
+   * #31697, Q1 A).
+   *
+   * @throws {PackageScopedNameRefusedError} when the object-less holders refuse.
+   */
+  refuseAmbiguousObjectLessAction(name: string): void {
+    const resolution = resolveActionByPackage(this, { objectName: GLOBAL_ACTION_OBJECT_KEY, actionName: name, callerPackageId: null });
+    if (resolution.status === 'refused') throw new PackageScopedNameRefusedError(resolution);
   }
 
   /** The bare-slot entries of `(type, name)`: one, or a bundle's members, canonical first. */

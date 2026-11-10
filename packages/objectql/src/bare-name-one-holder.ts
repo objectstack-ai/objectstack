@@ -33,10 +33,11 @@
  *    package's dataset;
  *  - `api` — the endpoint matcher keeps ONE api per name, the last-registered,
  *    so the other package's declared path answers `404`;
- *  - `action`, object-less only — `/actions/global/NAME` runs the
- *    last-registered package's handler while `/meta/action/NAME` serves the
- *    first-registered package's declaration, so the button a client draws and
- *    the code that runs come from two packages;
+ *  - `action`, object-less only — `/actions/global/NAME` ran the
+ *    last-registered package's handler while `/meta/action/NAME` served the
+ *    first-registered package's declaration, so the button a client drew and
+ *    the code that ran came from two packages (since narrowed to the
+ *    namespace: "The narrowing");
  *  - `function` — the engine's function registry keeps one function per name,
  *    the last-registered, and a flow `script` node's `function` and an
  *    action's `target` resolve it with no package;
@@ -140,6 +141,13 @@
  * built-in name (D9: the refusal narrows, it does not go). `agent` and `skill`
  * narrowed first (#31701): `/meta/agent|skill/NAME` read through
  * `readPackageScopedItem`, and the MCP prompt and agent faces are `NS-NAME`.
+ * The object-less `action` followed (#31697): a call that names no package —
+ * the engine's `executeAction`, the bare `/actions` door and MCP's bare
+ * `run_action` — is refused `409 RESOURCE_CONFLICT` naming every holder of the
+ * name, and the namespace-qualified address (`/actions/NS/global/NAME`,
+ * `run_action` with `namespace`) reaches each. The same 409 answers two
+ * packages' same-named action bound to ONE object (epic ruling record
+ * 6729825528, letter A), which this rule never covered.
  *
  * ## What it deliberately does not judge
  *
@@ -262,12 +270,13 @@ export const BUILT_IN_BARE_NAMES: Readonly<Record<BareNameOneHolderType, Readonl
  * narrowed from the deployment to the namespace (module doc, "The narrowing").
  * Each type joins in its own trailing change, once its by-name readers, its
  * AI faces and its stored references all carry the package: the AI family's
- * `agent` and `skill` first (#31701). A type not listed here keeps one package
- * holder per deployment.
+ * `agent` and `skill` first (#31701), then the object-less `action` (#31697).
+ * A type not listed here keeps one package holder per deployment.
  */
 export const NAMESPACE_SCOPED_BARE_NAME_TYPES: readonly BareNameOneHolderType[] = Object.freeze([
   'agent',
   'skill',
+  'action',
 ]);
 
 /** Has `type`'s one-holder rule narrowed to the namespace ({@link NAMESPACE_SCOPED_BARE_NAME_TYPES})? */

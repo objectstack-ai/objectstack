@@ -36,6 +36,9 @@ import type { ObjectQL } from './engine.js';
 import { standaloneActionOwnerKey } from './action-governance.js';
 import { actionHandlerCoordinate, ENVIRONMENT_ACTION_COORDINATE, isSharedHandlerCoordinate } from './action-handler-coordinate.js';
 
+/** The owner label the engine plugin's authored-action resync registers environment-authored handlers under. */
+const ENVIRONMENT_ACTION_OWNER = 'metadata-service';
+
 /**
  * One registered action handler. [#30065] `override` marks a declared action
  * override's handler ({@link ActionsFacet.registerActionOverride}); `beneath`
@@ -72,6 +75,33 @@ class ActionHandlerAmbiguityError extends Error {
       `Action handler '${key}' is ambiguous for package '${packageId}': it registers none of its own, and `
       + `${owners.length} shared handlers are registered (${owners.map((o) => `'${o}'`).join(', ')}). Refusing rather than `
       + 'running one of them. Register the handler from the package that declares the action, or from one owner.',
+    );
+    this.name = 'ActionHandlerAmbiguityError';
+    this.owners = owners;
+  }
+}
+
+/**
+ * [ADR-0150 D5, #31697; epic ruling record 6729825528, letter A] A call that
+ * names no package reached a key two or more owners hold a handler under — two
+ * packages' same-named action on one object, or a package's beside host code,
+ * a plugin or the environment's: the refusal names every owner and runs none
+ * of them. A package-qualified call (`executeAction`'s `packageId`) reaches
+ * each. `RESOURCE_CONFLICT` / 409, the code {@link ActionHandlerAmbiguityError}
+ * answers; no code minted. ⛔ Unexported: a consumer compares `code`.
+ */
+class UnqualifiedActionHandlerAmbiguityError extends Error {
+  readonly code = 'RESOURCE_CONFLICT';
+  readonly status = 409;
+  readonly httpStatus = 409;
+  /** Every owner holding a handler under the key, one per package coordinate, in registration order. */
+  readonly owners: readonly string[];
+
+  constructor(key: string, owners: readonly string[]) {
+    super(
+      `Action handler '${key}' is ambiguous for a call that names no package: ${owners.length} owners register one `
+      + `(${owners.map((o) => `'${o}'`).join(', ')}). Refusing rather than running one of them. Call it by its `
+      + 'package-qualified address, or rename one of the two actions.',
     );
     this.name = 'ActionHandlerAmbiguityError';
     this.owners = owners;
@@ -130,20 +160,19 @@ export class ActionsFacet {
       this.logger.debug('Registered action beneath an override', { objectName, actionName, package: packageName, override: replaced.package });
       return;
     }
-    // [#31673, interim until #31697] The UNQUALIFIED slot — what a call that
-    // names no package runs — keeps today's answer exactly: the last
-    // registration under `OBJECT:NAME` runs, and a replacement of another
-    // owner's handler is warned naming both (#24472; ruling 6262054499,
-    // "report first"). Refusing that call when two packages hold one object
-    // and name is the action backstop's decision (#31697), not this one.
+    // The UNQUALIFIED slot keeps the last registration under `OBJECT:NAME`,
+    // and a replacement of another owner's handler is warned naming both
+    // (#24472). [ADR-0150 D5, #31697; ruling record 6729825528, letter A] A
+    // call that names no package no longer runs that last registration while
+    // two owners hold the key: it is refused naming both (`executeAction`),
+    // and a package-qualified call reaches each.
     if (replaced !== undefined && replaced.package !== packageName) {
       const by = (name: string | undefined) => (name ? `by package '${name}'` : 'with no package');
       this.logger.warn(
-        `Action handler '${key}' registered ${by(packageName)} replaces the one registered ${by(replaced.package)}: `
-        + `the action door now runs the handler registered ${by(packageName)}, whichever declaration object `
-        + `'${objectName}' lists${packageName ? `, and withdrawing package '${packageName}' leaves the action with no handler` : ''}. `
-        + `Two owners share one handler key only when both declare action '${actionName}' on object `
-        + `'${objectName}' — rename one of them.`,
+        `Action handler '${key}' registered ${by(packageName)} is a second owner beside the one registered `
+        + `${by(replaced.package)}: a call that names no package is refused naming both, and each runs only by its `
+        + `package-qualified address. Two owners share one handler key only when both declare action `
+        + `'${actionName}' on object '${objectName}' — rename one of them.`,
         { objectName, actionName, package: packageName, replacedPackage: replaced.package },
       );
     }
@@ -242,15 +271,57 @@ export class ActionsFacet {
   /** The body of `ObjectQL#executeAction`; the method's docblock there is its contract. */
   static async executeAction(this: Pick<ActionsHost, 'actions' | 'packageActions'>, objectName: string, actionName: string, ctx: any, options?: ExecuteActionOptions): Promise<any> {
     const key = `${objectName}:${actionName}`;
-    // [#31673, interim until #31697] A call that names no package runs the
-    // unqualified slot's handler — today's answer, unchanged.
+    // [ADR-0150 D5, #31697; ruling record 6729825528, letter A] A call that
+    // names no package runs the unqualified slot's handler only while ONE
+    // owner holds the key; two or more are refused naming each, never a pick
+    // by registration order ({@link unqualifiedHandler}).
     const entry = options?.packageId === undefined
-      ? this.actions.get(key)
+      ? ActionsFacet.unqualifiedHandler.call(this, key)
       : ActionsFacet.packageScopedHandler.call(this, key, options.packageId);
     if (!entry) {
       throw new Error(`Action '${actionName}' on object '${objectName}' not found`);
     }
     return entry.handler(ctx);
+  }
+
+  /**
+   * [ADR-0150 D5, #31697] The handler a call that names no package runs under
+   * `key`: the unqualified slot's, while ONE code owner holds the key. Two or
+   * more — two packages' same-named action on one object, or a package's
+   * beside host code or a plugin — are refused naming every owner
+   * ({@link UnqualifiedActionHandlerAmbiguityError}, 409 `RESOURCE_CONFLICT`):
+   * the last registration is no answer (epic ruling record 6729825528).
+   *
+   * The owners are read per package coordinate's slot
+   * ({@link codeOwnerOf}): the handler's own owner, or — under an
+   * environment-authored handler — the code owner beneath it. ⛔ The
+   * environment's resync ({@link ENVIRONMENT_ACTION_OWNER}) is never a second
+   * owner: a row it binds customizes the holder whose key it sits on (a
+   * declared override, ADR-0146 D9) or is re-judged by the next resync once a
+   * package ships the name (#30542), as an environment row over a held name is
+   * that holder's overlay (ADR-0150 D4).
+   */
+  static unqualifiedHandler(this: Pick<ActionsHost, 'actions' | 'packageActions'>, key: string): ActionHandlerEntry | undefined {
+    const owners = new Set<string>();
+    for (const slot of this.packageActions.values()) {
+      const owner = ActionsFacet.codeOwnerOf(slot.get(key));
+      if (owner !== undefined) owners.add(owner);
+    }
+    if (owners.size > 1) throw new UnqualifiedActionHandlerAmbiguityError(key, [...owners]);
+    return this.actions.get(key);
+  }
+
+  /**
+   * [#31697] The code owner of a handler stack: the first entry, top down
+   * through the handlers an override was bound over (`beneath`), that the
+   * environment's resync did not register — its owner label, `(host code, no
+   * owner)` for none — or `undefined` when every entry is the environment's.
+   */
+  static codeOwnerOf(entry: ActionHandlerEntry | undefined): string | undefined {
+    for (let at = entry; at !== undefined; at = at.beneath) {
+      if (at.package !== ENVIRONMENT_ACTION_OWNER) return at.package ?? '(host code, no owner)';
+    }
+    return undefined;
   }
 
   /**
