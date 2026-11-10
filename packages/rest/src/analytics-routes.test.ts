@@ -613,6 +613,26 @@ describe('[#32310] POST /analytics/dataset/query?callerPackage= — the dataset 
     expect(bare.body.data.results[0]).toEqual(dependency);
   });
 
+  it('batch: an uninstalled caller package is each query\'s `?package=` answer, and a protocol with no caller resolution is each query\'s 503', async () => {
+    ship('sales', A);
+    const viaArm = await sendBatch({ callerPackage: 'com.acme.ghost' }, ['sales', 'nowhere']);
+    const viaQualifier = await sendBatch({ package: 'com.acme.ghost' }, ['sales', 'nowhere']);
+    expect(viaArm.status).toBe(200);
+    expect(viaArm.body.data.results).toEqual(viaQualifier.body.data.results);
+    expect(viaArm.body.data.results.map((r: any) => r.status)).toEqual([409, 404]);
+    expect(viaArm.queryDataset).not.toHaveBeenCalled();
+    const bare = { ...mockProtocol(), ...savedDatasets([{ ...inlineDataset }]) };
+    const queryDataset = vi.fn();
+    const { rest } = buildServer(async () => ({ queryDataset }), bare);
+    const batch = rest.getRoutes().find((r) => r.method === 'POST' && r.path.endsWith('/analytics/dataset/query/batch'));
+    const res = mockRes();
+    await batch!.handler({ method: 'POST', params: {}, query: { callerPackage: P }, headers: {}, body: { queries: [{ datasetName: 'sales', selection }] } } as any, res);
+    expect(res.statusCode).toBe(200);
+    expect([res.body.data.results[0].status, res.body.data.results[0].error.code]).toEqual([503, 'SERVICE_UNAVAILABLE']);
+    expect(bare.getMetaItem).not.toHaveBeenCalled();
+    expect(queryDataset).not.toHaveBeenCalled();
+  });
+
   it('batch: a malformed arm refuses the whole batch 400 before any query runs', async () => {
     ship('sales', A);
     for (const query of [

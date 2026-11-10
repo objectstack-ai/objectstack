@@ -1936,6 +1936,13 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 if (callerQuery) query = callerQuery;
             } catch (e) {
                 if (isPackageScopedRefusal(e)) return { handled: true, response: packageScopedRefusalAnswer(deps, e) };
+                // The arm's fail-closed refusal (a protocol or registry that
+                // cannot resolve by caller): its own `503`, answered here as
+                // `RestServer` answers it, never left to an outer catch.
+                if ((e as { code?: unknown; status?: unknown })?.code === 'SERVICE_UNAVAILABLE'
+                    && (e as { status?: unknown }).status === 503) {
+                    return { handled: true, response: deps.errorFromThrown(e, 503) };
+                }
                 throw e;
             }
         }

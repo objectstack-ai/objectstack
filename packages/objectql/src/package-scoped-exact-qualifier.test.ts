@@ -703,6 +703,17 @@ describe('[#32310] the caller arm resolves a dataset from the reader\'s package 
     expect(exact.refusal.reason).toBe('not-held-by-qualifier');
   });
 
+  it('a registry that cannot judge the name fails closed: 503, never a first match (#32277\'s rule guards the arm)', () => {
+    ship('dataset', 'pipeline', A);
+    // The exact qualifier's reads gone: the registry cannot say who holds the name.
+    Object.defineProperty(registry, 'getPackageScopedItem', { value: undefined, configurable: true });
+    let thrown: any;
+    try {
+      protocol.resolveCallerPackageAddress({ type: 'dataset', name: 'pipeline', callerPackageId: P });
+    } catch (e) { thrown = e; }
+    expect([thrown?.status, thrown?.code]).toEqual([503, 'SERVICE_UNAVAILABLE']);
+  });
+
   it('a `sys` package is in every caller\'s closure', async () => {
     ship('dataset', 'audit', SYS);
     expect(protocol.resolveCallerPackageAddress({ type: 'dataset', name: 'audit', callerPackageId: P }))

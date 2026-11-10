@@ -507,6 +507,19 @@ describe('[#32310] GET /meta/dataset/:name?callerPackage= on the dispatcher (ADR
         }
     });
 
+    it('a protocol with no caller resolution fails closed: 503, never the bare read', async () => {
+        ship('dataset', 'pipeline', A);
+        const proto = ObjectStackProtocolImplementation.prototype as unknown as Record<string, unknown>;
+        const original = Object.getOwnPropertyDescriptor(proto, 'resolveCallerPackageAddress')!;
+        Object.defineProperty(proto, 'resolveCallerPackageAddress', { value: undefined, configurable: true });
+        try {
+            const answer = await read('/dataset/pipeline', { callerPackage: P });
+            expect([answer.status, answer.body?.error?.code], JSON.stringify(answer.body)).toEqual([503, 'SERVICE_UNAVAILABLE']);
+        } finally {
+            Object.defineProperty(proto, 'resolveCallerPackageAddress', original);
+        }
+    });
+
     it('an uninstalled caller package answers what `?package=` naming it answers', async () => {
         ship('dataset', 'pipeline', A);
         const viaArm = await read('/dataset/pipeline', { callerPackage: 'com.acme.ghost' });

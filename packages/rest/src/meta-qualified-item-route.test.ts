@@ -462,6 +462,19 @@ describe('[#32310] GET /meta/dataset/:name?callerPackage= (ADR-0150 D3)', () => 
         }
     });
 
+    it('a protocol with no caller resolution fails closed: 503, never the bare read', async () => {
+        ship('dataset', 'pipeline', A);
+        const proto = ObjectStackProtocolImplementation.prototype as unknown as Record<string, unknown>;
+        const original = Object.getOwnPropertyDescriptor(proto, 'resolveCallerPackageAddress')!;
+        Object.defineProperty(proto, 'resolveCallerPackageAddress', { value: undefined, configurable: true });
+        try {
+            const answer = await drive(ITEM, { type: 'dataset', name: 'pipeline' }, { callerPackage: P });
+            expect([answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([503, 'SERVICE_UNAVAILABLE']);
+        } finally {
+            Object.defineProperty(proto, 'resolveCallerPackageAddress', original);
+        }
+    });
+
     it('CONTROL: the bare read and `?package=` answer as before', async () => {
         ship('dataset', 'pipeline', A);
         expect(labelOf(await drive(ITEM, { type: 'dataset', name: 'pipeline' }))).toBe('alpha dataset');
