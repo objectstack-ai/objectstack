@@ -14,6 +14,7 @@ import type { CurrencyConfig } from '@objectstack/spec/data';
 import { resolveFieldScale } from '@objectstack/spec/data';
 import { useLocalization, useDisplayLocale, resolveFieldCurrency, recordCurrencyField, createSafeTranslation } from '@object-ui/i18n';
 import { formatCurrency, formatPercent, percentCellScale } from '@object-ui/fields';
+import { temporalCellFaceOf, temporalCellText, temporalExtreme, temporalInstant } from './temporalCellFace';
 
 /**
  * Aggregation functions for the column footer — the spec's `ColumnSummary`
@@ -48,6 +49,11 @@ export type ColumnSummarySetting = NonNullable<ListColumn['summary']>;
 
 export interface ColumnSummaryResult {
   field: string;
+  /**
+   * The figure. For a `min` / `max` over a `date` / `datetime` column it is
+   * the extreme's instant in epoch milliseconds; `label` carries it as the
+   * column's cell draws it (objectstack#32119).
+   */
   value: number | null;
   label: string;
 }
@@ -345,6 +351,17 @@ const WELL_FORMED_CURRENCY_CODE = /^[A-Za-z]{3}$/;
  * ordinary German number — for a value three orders of magnitude away — and
  * the arms below include a currency total.
  */
+function joinSummaryLabel(type: string, formatted: string, t: SummaryTranslate, pageOnly: boolean): string {
+  const labelKey = TYPE_LABEL_KEYS[type as ColumnSummaryType];
+  // `|| type` is the backstop for an aggregation with no key — it echoes the
+  // raw kind, as before, never a half-resolved `grid.summary.<junk>`.
+  const label = labelKey ? t(labelKey) : type;
+  // The page scope is its own whole pattern, not a suffix glued onto the
+  // label: where the scope sits, and its brackets, are the translator's, as
+  // the separator is (objectui#4024).
+  return t(pageOnly ? 'grid.summary.pagePattern' : 'grid.summary.pattern', { label, value: formatted });
+}
+
 function formatSummaryLabel(
   type: string,
   value: number | null,
@@ -379,15 +396,7 @@ function formatSummaryLabel(
   pageOnly: boolean,
 ): string {
   if (value === null) return '';
-  const labelKey = TYPE_LABEL_KEYS[type as ColumnSummaryType];
-  // `|| type` is the backstop for an aggregation with no key — it echoes the
-  // raw kind, as before, never a half-resolved `grid.summary.<junk>`.
-  const label = labelKey ? t(labelKey) : type;
-  // The page scope is its own whole pattern, not a suffix glued onto the
-  // label: where the scope sits, and its brackets, are the translator's, as
-  // the separator is (objectui#4024).
-  const join = (formatted: string): string =>
-    t(pageOnly ? 'grid.summary.pagePattern' : 'grid.summary.pattern', { label, value: formatted });
+  const join = (formatted: string): string => joinSummaryLabel(type, formatted, t, pageOnly);
 
   if (PERCENT_TYPES.has(type)) {
     return join(`${value.toLocaleString(displayLocale, { maximumFractionDigits: 1 })}%`);
@@ -508,7 +517,7 @@ function formatSummaryLabel(
 }
 
 /** The `objectSchema.fields` slice the footer formats with. */
-type SummaryFieldMetadata = Record<string, { type?: string; currency?: string; defaultCurrency?: string; currencyConfig?: CurrencyConfig; precision?: number | null; scale?: number | null; max?: number }>;
+type SummaryFieldMetadata = Record<string, { type?: string; format?: string | null; widget?: string | null; currency?: string; defaultCurrency?: string; currencyConfig?: CurrencyConfig; precision?: number | null; scale?: number | null; max?: number }>;
 
 /**
  * Which rows the footer's figures describe (objectui#12081 item 3).
@@ -628,6 +637,38 @@ export function useScopedColumnSummary(
       // counts stand); the consolidated figure is the home field's, and a
       // per-currency figure is the header of a group bucketed by the code.
       if (!NON_NUMERIC_TYPES.has(config.type) && recordCurrencyField(fieldMetadata?.[targetField])) continue;
+
+      // objectstack#32119 — a column whose cell paints a date-family face
+      // holds times, not numbers: its `min` / `max` is the extreme time, drawn
+      // as the cell draws it (one face resolve and one formatter with the
+      // group headers, `./temporalCellFace`), and a `sum` / `avg` is no figure,
+      // so it draws nothing. Read as numbers, an ISO instant parsed to its
+      // year (`Max: 2,026`).
+      const temporalFace = NON_NUMERIC_TYPES.has(config.type)
+        ? undefined
+        : temporalCellFaceOf({
+          type: col.type ?? fieldMetadata?.[targetField]?.type,
+          format: fieldMetadata?.[targetField]?.format,
+          widget: fieldMetadata?.[targetField]?.widget,
+        });
+      if (temporalFace) {
+        if (config.type !== 'min' && config.type !== 'max') continue;
+        // The whole set's extreme when the server answered one; otherwise the
+        // rows', labelled as the page's under the `whole` scope.
+        const whole: unknown = scope === 'whole' && wholeRow
+          ? deriveColumnSummary(wholeRow, col.summary as ColumnSummarySetting, col.field)
+          : undefined;
+        const fromWhole = temporalInstant(whole) !== undefined;
+        const raw = fromWhole ? whole : temporalExtreme(data.map((r) => r[targetField]), config.type);
+        const text = temporalCellText(temporalFace, raw, displayLocale);
+        if (text === undefined) continue;
+        summaries.set(col.field, {
+          field: col.field,
+          value: temporalInstant(raw) ?? null,
+          label: joinSummaryLabel(config.type, text, t, scope === 'page' || (scope === 'whole' && !fromWhole)),
+        });
+        continue;
+      }
 
       // objectui#12081 item 3 — the whole matched set's figure, read off the
       // server's answer through the spec's own read-back (the four derived

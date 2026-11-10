@@ -151,6 +151,18 @@ import {
 } from './validate-external-owner-sharing.js';
 
 export const SECURITY_OWD_UNSET = 'security-owd-unset';
+
+/**
+ * [ADR-0153 D4] The fix-line `security-owd-unset` gives a `synced` object. A
+ * pull writes its rows with no person owner (attribution is the run, never an
+ * owner), so an owner-scoped model hides every row from a member no sharing
+ * rule reaches; the recommendation is a model that does not, and members never
+ * write the object whatever the model says.
+ */
+export const SYNCED_OBJECT_WAY_OUT =
+  "declare sharingModel: 'public_read' (recommended: a pulled row has no person owner, so on 'private' a " +
+  "member reads only the rows a sharing rule grants; members never write a synced object either way), or " +
+  "'private' with a sharing rule that grants read";
 export const SECURITY_OWD_ALIAS = 'security-owd-alias';
 export const SECURITY_WILDCARD_VAMA = 'security-wildcard-vama';
 export const SECURITY_ANCHOR_HIGH_PRIVILEGE = 'security-anchor-high-privilege';
@@ -876,9 +888,14 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
         //    (#27425), whatever the binding's writability. The publish gate
         //    sees no datasources, so there an allowWrites: false datasource
         //    reads as writable; both doors still never say 'private'.
+        // [ADR-0153 D4] A `synced` object's rows are pulled with no person
+        // owner, so 'private' reads none of them to a member that no sharing
+        // rule reaches: its fix-it names models that do not hide owner-less
+        // rows, as the read-only external one does.
         // Every other object, an external one that declares its owner
         // included, keeps the 'private' recommendation.
-        const ownershipGap = externalOwnershipGap(obj, readOnlyDatasources);
+        const synced = obj.managedBy === 'synced';
+        const ownershipGap = synced ? undefined : externalOwnershipGap(obj, readOnlyDatasources);
         findings.push({
           severity: 'error',
           rule: SECURITY_OWD_UNSET,
@@ -891,14 +908,16 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
           message:
             `custom object declares no sharingModel (OWD); the runtime falls back to 'private', ` +
             `but the baseline must be an authored decision`,
-          hint: ownershipGap
-            ? `${PUBLIC_READ_WRITE_WAY_OUT}, or ` +
-              `${declareOwnershipColumnWayOut(ownershipGap.column, ownershipGap.mapped)} ` +
-              `and declare sharingModel: 'private' or 'public_read'; 'controlled_by_parent' for master-detail children`
-            : hasUnprovableOwnerAnchor(obj)
-              ? READ_ONLY_EXTERNAL_WAY_OUT
-              : `declare sharingModel: 'private' (owner + shares; recommended), 'public_read', ` +
-                `'public_read_write', or 'controlled_by_parent' (master-detail children)`,
+          hint: synced
+            ? SYNCED_OBJECT_WAY_OUT
+            : ownershipGap
+              ? `${PUBLIC_READ_WRITE_WAY_OUT}, or ` +
+                `${declareOwnershipColumnWayOut(ownershipGap.column, ownershipGap.mapped)} ` +
+                `and declare sharingModel: 'private' or 'public_read'; 'controlled_by_parent' for master-detail children`
+              : hasUnprovableOwnerAnchor(obj)
+                ? READ_ONLY_EXTERNAL_WAY_OUT
+                : `declare sharingModel: 'private' (owner + shares; recommended), 'public_read', ` +
+                  `'public_read_write', or 'controlled_by_parent' (master-detail children)`,
         });
       } else if (typeof owd === 'string' && OWD_ALIAS_FIX[owd]) {
         // Reachable ONLY through the unparsed doors (`os lint` on a raw

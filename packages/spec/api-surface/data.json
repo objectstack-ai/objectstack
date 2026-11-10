@@ -438,6 +438,7 @@
     "LocationValue (type)",
     "LocationValueSchema (const)",
     "LogicalOperatorKey (type)",
+    "MANAGED_BY_WRITE_LOCKED_BUCKETS (const)",
     "MANAGED_WRITE_VERB_AFFORDANCE (const)",
     "MASKED_ON_READ_FIELD_TYPES (const)",
     "MAX_BULK_PER_ROW_HOOK_ROWS (const)",

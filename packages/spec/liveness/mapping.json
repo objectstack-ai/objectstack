@@ -93,6 +93,90 @@
               "note": "Read by the executor: the read action's query parameter that receives that starting point (`query[param]` on both `rest` and `openapi`)."
             }
           }
+        },
+        "paging": {
+          "status": "planned",
+          "verifiedAt": "2026-11-10",
+          "authorWarn": true,
+          "authorHint": "Keep it, but nothing reads it yet: the sync-in pull that honours it is the P2 engine card of ADR-0153, so until that release a pull still makes one action call and reads one response, whatever paging you declare.",
+          "note": "PLANNED RECORD (ADR-0153 D2, the P2 spec card #32061): the connector's declared paging convention, `{ style, param?, nextPath? }` — `page` / `offset` / `cursor` send `param`, `cursor` reads the next cursor at `nextPath`, `none` states that one response is the whole set (the one way to say a single response is complete, which D3's full-pull mark needs). Refused at parse when it is unusable: `param` missing beside page/offset/cursor, `nextPath` missing beside cursor, either present beside none. READ BY NOTHING YET: packages/services/service-automation/src/connector-pull.ts#pullConnectorSource still makes ONE action call (its header: \"One response per pull\"). The paging loop, its one commit after the last page and `paging_cursor_repeated` are the P2 engine card's (#32062), which flips this row (and its children) to `live` citing the loop and drops `authorWarn` / `authorHint` in the same edit.",
+          "children": {
+            "style": {
+              "status": "planned",
+              "verifiedAt": "2026-11-10",
+              "note": "Planned with its container `paging` (see that row): which convention the read action pages by."
+            },
+            "param": {
+              "status": "planned",
+              "verifiedAt": "2026-11-10",
+              "note": "Planned with its container `paging` (see that row): the query parameter that receives the page, offset or cursor."
+            },
+            "nextPath": {
+              "status": "planned",
+              "verifiedAt": "2026-11-10",
+              "note": "Planned with its container `paging` (see that row): where the next cursor, or the \"more pages\" marker, is read."
+            }
+          }
+        },
+        "deletePolicy": {
+          "status": "planned",
+          "verifiedAt": "2026-11-10",
+          "authorWarn": true,
+          "authorHint": "Keep it, but nothing reads it yet: the sync-in pull that honours it is the P2 engine card of ADR-0153, so until that release a pull marks no deleted row, whichever policy you set.",
+          "note": "PLANNED RECORD (ADR-0153 D3, the P2 spec card #32061): what a pull does with a row the source no longer has — `'mark'` stamps `_sync_deleted_at` and clears it if the row comes back, `'ignore'` leaves the row. Declared with NO schema `.default()` so an authored value stays distinguishable from an absent one (absent reads as `'mark'`), which is what lets this row warn the author at all. READ BY NOTHING YET: the delete marking, its completeness rule and the incremental-`mark` refusal are the P2 engine card's (#32062), which flips this row to `live` and drops `authorWarn` / `authorHint`."
+        },
+        "deletedField": {
+          "status": "planned",
+          "verifiedAt": "2026-11-10",
+          "authorWarn": true,
+          "authorHint": "Keep it, but nothing reads it yet: the sync-in pull that honours it is the P2 engine card of ADR-0153, so until that release a pull does not read this field, so a source soft-delete is not marked.",
+          "note": "PLANNED RECORD (ADR-0153 D3, the P2 spec card #32061): the source soft-delete field an incremental pull reads to learn of a delete it cannot see as an absence. READ BY NOTHING YET: the P2 engine card (#32062) reads it with the delete marking and flips this row to `live`."
+        }
+      }
+    },
+    "datasourceSource": {
+      "status": "planned",
+      "verifiedAt": "2026-11-10",
+      "authorWarn": true,
+      "authorHint": "Keep it, but nothing reads it yet: the windowed reader that pulls a federated object is the P2 engine card of ADR-0153, so until that release no job pulls this mapping and the binder does not schedule it.",
+      "note": "PLANNED RECORD (ADR-0153 D1, the P2 spec card #32061): a federated object (ADR-0015) as the pull's source, the sibling of `connectorSource` and exclusive with it (refused at parse). What lands LIVE with the key are its build refusals, in packages/spec/src/stack.zod.ts#collectSourcedMappingErrors (`defineStack`, so `os validate`): the source is a declared federated object; its `external.columnMap` maps a column onto `id` (`source_key_missing`) of a string or exact integer type (`source_key_not_exact`); `watermark.field` is a datetime, a date or a `scale: 0` number of an exact precision (`watermark_not_exact`); a `fieldMapping` entry copies it unchanged onto a target field of its type (`watermark_field_unmapped`); and the target is `managedBy: 'synced'`. The `mode: 'upsert'` + `upsertKey` rule is the mapping's own parse refinement. READ BY NOTHING YET: the windowed read (built-in and floored paths), the commit and the delete marking are the P2 engine card's (#32062), which flips this row and its children to `live` citing the reader and drops `authorWarn` / `authorHint` in the same edit.",
+      "children": {
+        "object": {
+          "status": "planned",
+          "verifiedAt": "2026-11-10",
+          "note": "Planned with its container `datasourceSource` (see that row): the federated object the pull reads. Judged at build: it is declared, and it carries an `external` binding."
+        },
+        "watermark": {
+          "status": "planned",
+          "verifiedAt": "2026-11-10",
+          "note": "Planned with its container `datasourceSource` (see that row): the field the read windows are cut on and the lowest value read.",
+          "children": {
+            "field": {
+              "status": "planned",
+              "verifiedAt": "2026-11-10",
+              "note": "Planned with its container (see `datasourceSource`). Judged at build: a datetime, date or `scale: 0` number field of the source object, exact as an integer, copied unchanged onto a target field of its type."
+            },
+            "start": {
+              "status": "planned",
+              "verifiedAt": "2026-11-10",
+              "note": "Planned with its container (see `datasourceSource`): where the first pull and every full pull start."
+            }
+          }
+        },
+        "full": {
+          "status": "planned",
+          "verifiedAt": "2026-11-10",
+          "note": "Planned with its container `datasourceSource` (see that row): re-read from `watermark.start` on every run, the read that can mark deletes by absence (D3)."
+        },
+        "deletePolicy": {
+          "status": "planned",
+          "verifiedAt": "2026-11-10",
+          "note": "Planned with its container `datasourceSource` (see that row), and the same key as `connectorSource.deletePolicy` (ADR-0153 D3, no schema default; absent reads as `'mark'`)."
+        },
+        "deletedField": {
+          "status": "planned",
+          "verifiedAt": "2026-11-10",
+          "note": "Planned with its container `datasourceSource` (see that row), and the same key as `connectorSource.deletedField` (ADR-0153 D3)."
         }
       }
     },
