@@ -2906,7 +2906,7 @@ const fr = {
         ssoAccountNotInvited: "Votre compte n'est pas encore configuré sur ce système. Demandez à votre administrateur de vous inviter.",
         ssoAccountNotLinked: "Un compte associé à votre adresse e-mail existe déjà ici, mais il n'est pas relié à l'authentification unique. Connectez-vous autrement ou demandez à votre administrateur de le relier.",
         ssoResponseRejected: "Le service de connexion de votre organisation a envoyé une réponse que ce système n'a pas pu accepter. Demandez à votre administrateur de vérifier la configuration de l'authentification unique.",
-        ssoSignInNotFound: "Cette connexion a pris trop de temps ou a été lancée dans une autre fenêtre du navigateur. Recommencez depuis cette page.",
+        ssoStartFromLoginPage: "La connexion doit commencer sur la page de connexion de ce système. Saisissez ici votre adresse e-mail professionnelle et choisissez « Se connecter avec le SSO ».",
         ssoTechnicalDetails: "Détails techniques",
         twoFactorInvalidCode: "Ce code n'est pas valide. Vérifiez votre application d'authentification et réessayez.",
         twoFactorInvalidBackupCode: "Ce code de secours n'est pas valide ou a déjà été utilisé.",

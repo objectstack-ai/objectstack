@@ -3483,7 +3483,7 @@ const en = {
         ssoAccountNotInvited: "Your account isn't set up for this system yet. Ask your administrator to invite you.",
         ssoAccountNotLinked: "An account with your email already exists here, but it isn't connected to single sign-on. Sign in another way, or ask your administrator to connect it.",
         ssoResponseRejected: "Your organization's sign-in service sent a response this system could not accept. Ask your administrator to check the single sign-on setup.",
-        ssoSignInNotFound: "This sign-in took too long or was started in another browser window. Start again from this page.",
+        ssoStartFromLoginPage: "Sign-in has to start from this system's login page. Enter your work email here and choose Sign in with SSO.",
         ssoTechnicalDetails: "Technical details",
         // objectstack#29105 — refusals of the two-factor sign-in step, by the
         // server's code (`signInRefusalMessages`).

@@ -2844,7 +2844,7 @@ const de = {
         ssoAccountNotInvited: "Ihr Konto ist für dieses System noch nicht eingerichtet. Bitten Sie Ihren Administrator um eine Einladung.",
         ssoAccountNotLinked: "Für Ihre E-Mail-Adresse gibt es hier bereits ein Konto, das aber nicht mit Single Sign-on verbunden ist. Melden Sie sich auf andere Weise an oder bitten Sie Ihren Administrator, es zu verbinden.",
         ssoResponseRejected: "Der Anmeldedienst Ihrer Organisation hat eine Antwort gesendet, die dieses System nicht annehmen konnte. Bitten Sie Ihren Administrator, die Single-Sign-on-Einrichtung zu prüfen.",
-        ssoSignInNotFound: "Diese Anmeldung hat zu lange gedauert oder wurde in einem anderen Browserfenster gestartet. Beginnen Sie auf dieser Seite erneut.",
+        ssoStartFromLoginPage: "Die Anmeldung muss auf der Anmeldeseite dieses Systems beginnen. Geben Sie hier Ihre geschäftliche E-Mail-Adresse ein und wählen Sie „Mit SSO anmelden“.",
         ssoTechnicalDetails: "Technische Details",
         twoFactorInvalidCode: "Dieser Code ist ungültig. Prüfen Sie Ihre Authenticator-App und versuchen Sie es erneut.",
         twoFactorInvalidBackupCode: "Dieser Backup-Code ist ungültig oder wurde bereits verwendet.",

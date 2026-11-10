@@ -2914,7 +2914,7 @@ const zhHant = {
         ssoAccountNotInvited: "你的帳號尚未在本系統中開通。請聯絡管理員邀請你。",
         ssoAccountNotLinked: "本系統中已有使用你信箱的帳號，但它尚未連結單點登入。請改用其他方式登入，或請管理員為你連結。",
         ssoResponseRejected: "你所在組織的登入服務傳回了本系統無法接受的回應。請聯絡管理員檢查單點登入設定。",
-        ssoSignInNotFound: "這次登入耗時過長，或是在另一個瀏覽器視窗中發起的。請從本頁面重新開始。",
+        ssoStartFromLoginPage: "登入需要從本系統的登入頁發起。請在此輸入你的工作信箱，然後選擇「使用 SSO 登入」。",
         ssoTechnicalDetails: "技術詳情",
         twoFactorInvalidCode: '驗證碼無效，請檢查身份驗證器應用後重試。',
         twoFactorInvalidBackupCode: '該備用碼無效或已被使用。',

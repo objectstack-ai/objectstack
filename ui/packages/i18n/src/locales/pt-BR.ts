@@ -2905,7 +2905,7 @@ const pt = {
         ssoAccountNotInvited: "Sua conta ainda não está configurada neste sistema. Peça ao seu administrador para convidar você.",
         ssoAccountNotLinked: "Já existe uma conta com seu e-mail aqui, mas ela não está conectada ao logon único. Entre de outra forma ou peça ao seu administrador para conectá-la.",
         ssoResponseRejected: "O serviço de login da sua organização enviou uma resposta que este sistema não pôde aceitar. Peça ao seu administrador para verificar a configuração do logon único.",
-        ssoSignInNotFound: "Este login demorou demais ou foi iniciado em outra janela do navegador. Comece novamente por esta página.",
+        ssoStartFromLoginPage: "O login precisa começar pela página de acesso deste sistema. Informe aqui seu e-mail de trabalho e escolha “Entrar com SSO”.",
         ssoTechnicalDetails: "Detalhes técnicos",
         twoFactorInvalidCode: "Esse código não é válido. Verifique seu aplicativo autenticador e tente novamente.",
         twoFactorInvalidBackupCode: "Esse código de backup não é válido ou já foi usado.",

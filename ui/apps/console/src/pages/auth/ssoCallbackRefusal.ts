@@ -41,10 +41,10 @@ const RESPONSE_REJECTED: RefusalCopy = {
     "Your organization's sign-in service sent a response this system could not accept. Ask your administrator to check the single sign-on setup.",
 };
 
-const SIGN_IN_NOT_FOUND: RefusalCopy = {
-  key: 'auth.login.errors.ssoSignInNotFound',
+const START_FROM_LOGIN_PAGE: RefusalCopy = {
+  key: 'auth.login.errors.ssoStartFromLoginPage',
   defaultValue:
-    'This sign-in took too long or was started in another browser window. Start again from this page.',
+    "Sign-in has to start from this system's login page. Enter your work email here and choose Sign in with SSO.",
 };
 
 const GENERIC: RefusalCopy = {
@@ -55,18 +55,26 @@ const GENERIC: RefusalCopy = {
 
 /**
  * Callback `error` code → the end-user sentence. Keys are the codes the
- * server actually redirects with, as written: the audience gate's
- * ADR-0112 code for an uninvited person under `invite_only` with
- * just-in-time provisioning off, better-auth's lowercase OAuth callback codes,
- * and `@better-auth/sso`'s SAML codes. A code missing here keeps the generic
- * sentence.
+ * server actually redirects with, as written:
+ *
+ *  - `SELF_REGISTRATION_CLOSED`: the audience gate refused a person with no
+ *    account and no invitation (`invite_only`, just-in-time provisioning off);
+ *  - `account_not_linked`: better-auth refused to attach the sign-in to a
+ *    local account with the same email;
+ *  - `saml_error`, `invalid_saml_response`: `@better-auth/sso` refused the
+ *    SAML response (an unverifiable signature, a wrong audience or recipient);
+ *  - `state_not_found`: the OIDC callback carried no `state`, which is an
+ *    identity-provider-initiated sign-in the provider does not allow, or a
+ *    callback URL opened again later.
+ *
+ * A code missing here keeps the generic sentence.
  */
 const SSO_CALLBACK_REFUSALS: Readonly<Record<string, RefusalCopy>> = {
   SELF_REGISTRATION_CLOSED: ACCOUNT_NOT_INVITED,
   account_not_linked: ACCOUNT_NOT_LINKED,
   saml_error: RESPONSE_REJECTED,
   invalid_saml_response: RESPONSE_REJECTED,
-  state_not_found: SIGN_IN_NOT_FOUND,
+  state_not_found: START_FROM_LOGIN_PAGE,
 };
 
 /**

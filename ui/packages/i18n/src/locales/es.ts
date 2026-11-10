@@ -2910,7 +2910,7 @@ const es = {
         ssoAccountNotInvited: "Tu cuenta aún no está configurada en este sistema. Pide a tu administrador que te invite.",
         ssoAccountNotLinked: "Ya existe aquí una cuenta con tu correo, pero no está conectada al inicio de sesión único. Inicia sesión de otra forma o pide a tu administrador que la conecte.",
         ssoResponseRejected: "El servicio de inicio de sesión de tu organización envió una respuesta que este sistema no pudo aceptar. Pide a tu administrador que revise la configuración del inicio de sesión único.",
-        ssoSignInNotFound: "Este inicio de sesión tardó demasiado o se inició en otra ventana del navegador. Vuelve a empezar desde esta página.",
+        ssoStartFromLoginPage: "El inicio de sesión debe empezar en la página de acceso de este sistema. Introduce aquí tu correo de trabajo y elige «Iniciar sesión con SSO».",
         ssoTechnicalDetails: "Detalles técnicos",
         twoFactorInvalidCode: "Ese código no es válido. Revise su aplicación de autenticación e inténtelo de nuevo.",
         twoFactorInvalidBackupCode: "Ese código de respaldo no es válido o ya se ha utilizado.",

@@ -2844,7 +2844,7 @@ const ko = {
         ssoAccountNotInvited: "아직 이 시스템에 계정이 준비되지 않았습니다. 관리자에게 초대를 요청하세요.",
         ssoAccountNotLinked: "이 이메일을 사용하는 계정이 이미 있지만 싱글 사인온과 연결되어 있지 않습니다. 다른 방법으로 로그인하거나 관리자에게 연결을 요청하세요.",
         ssoResponseRejected: "소속 조직의 로그인 서비스가 이 시스템에서 받아들일 수 없는 응답을 보냈습니다. 관리자에게 싱글 사인온 설정을 확인해 달라고 요청하세요.",
-        ssoSignInNotFound: "로그인 시간이 너무 오래 걸렸거나 다른 브라우저 창에서 시작되었습니다. 이 페이지에서 다시 시작하세요.",
+        ssoStartFromLoginPage: "로그인은 이 시스템의 로그인 페이지에서 시작해야 합니다. 여기에 회사 이메일을 입력하고 “SSO로 로그인”을 선택하세요.",
         ssoTechnicalDetails: "기술 세부 정보",
         twoFactorInvalidCode: "코드가 올바르지 않습니다. 인증 앱을 확인한 후 다시 시도하세요.",
         twoFactorInvalidBackupCode: "백업 코드가 올바르지 않거나 이미 사용되었습니다.",

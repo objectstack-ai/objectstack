@@ -75,11 +75,11 @@ describe('LoginPage — OAuth callback error banner', () => {
 /**
  * objectstack#32087 — each refusal the server lands here with reads as its own
  * end-user sentence, never as an expired link. The `error` / `error_description`
- * pairs are the ones the server redirects with, measured against plugin-auth's
- * real SAML ACS pipeline (`sso-saml-refusal-landing.test.ts` drives the same
- * one) and better-auth's OAuth callback: the audience gate's code with its
- * administrator-facing message, the vendor's lowercase codes, and a code this
- * page has no sentence for.
+ * pairs are the ones the server redirects with: the first three measured
+ * through plugin-auth's real SAML ACS pipeline (the one
+ * `sso-saml-refusal-landing.test.ts` drives), with the audience gate's code
+ * carrying its administrator-facing message; `state_not_found` is the OIDC
+ * callback's answer to a request with no `state`.
  */
 describe('LoginPage — a refused single sign-on names its own cause (objectstack#32087)', () => {
   const SELF_REGISTRATION_CLOSED_MESSAGE =
@@ -112,7 +112,8 @@ describe('LoginPage — a refused single sign-on names its own cause (objectstac
     },
     {
       code: 'state_not_found',
-      sentence: 'This sign-in took too long or was started in another browser window. Start again from this page.',
+      sentence:
+        "Sign-in has to start from this system's login page. Enter your work email here and choose Sign in with SSO.",
     },
   ];
 
