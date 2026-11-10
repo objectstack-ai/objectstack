@@ -93,6 +93,27 @@ export function servedHolderAddressOf(registry: any, type: string, name: string)
     return served[0];
 }
 
+/**
+ * [#32183, contract review M4] Whether `copy`, the metadata service's copy of
+ * a name read at `address` (the served holder {@link servedHolderAddressOf}
+ * answers), is another holder's: stamped (`_packageId`) with a package that
+ * holds the name in the registry, a disabled one included, other than
+ * `address`. The metadata manager keys most types by name alone, so for a
+ * name two packages ship it keeps the body registered last, which can be the
+ * disabled holder's. The plain read replaces such a copy with the addressed
+ * holder's item (`exactQualifierItem`). The layered read's code layer and the
+ * bare `/published` exit ask this, so neither serves it. A copy stamped with
+ * no holder of the name (a provenance sentinel, a customization pair) is not
+ * another holder's.
+ */
+export function isAnotherHoldersCopy(registry: any, type: string, name: string, address: string, copy: unknown): boolean {
+    const stamp = (copy as { _packageId?: unknown } | null | undefined)?._packageId;
+    if (typeof stamp !== 'string' || stamp === '' || stamp === address) return false;
+    if (typeof registry?.packageScopedHoldersOf !== 'function') return false;
+    const every: readonly string[] = registry.packageScopedHoldersOf(type, name, null, { includeDisabledPackages: true }) ?? [];
+    return every.includes(stamp);
+}
+
 /** The body of `ObjectStackProtocolImplementation#readMetaItemFace`; the method's docblock there is its contract. */
 export async function readMetaItemFace(
     this: Pick<MetaItemFaceHost, 'engine' | 'readMetaItem'>,

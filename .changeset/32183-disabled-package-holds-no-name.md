@@ -9,6 +9,8 @@
 '@objectstack/metadata-protocol': patch
 '@objectstack/service-automation': patch
 '@objectstack/plugin-approvals': patch
+'@objectstack/rest': patch
+'@objectstack/metadata': patch
 ---
 
 fix(objectql, metadata-protocol)!: by-name doors judge a name's holders over the served set, so a disabled package's item is not a holder (ADR-0150 D3, #32183)
@@ -17,13 +19,14 @@ Clause-②: no (narrowing) — for a name that only disabled packages hold, `Sch
 Metadata-protocol: none
 Skills-docs: none — `content/docs/deployment/marketplace-handbook.mdx` already says a disabled module is hidden, and no skill or doc teaches the by-name answer for a name a disabled package holds.
 
-<!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape beyond one optional parameter and one optional query member. The moved answers are reads of registered items under a reversible package state, so there is nothing for a migration to rewrite and no tombstone. -->
+<!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape beyond optional parameters (the flow and connector resolvers' `options`, `MetadataManager.getPublished`'s `packageId`) and one optional query member. The moved answers are reads of registered items under a reversible package state, so there is nothing for a migration to rewrite and no tombstone. -->
 
 **BREAKING** answer narrowing at exported in-process APIs of `@objectstack/objectql`, for a name only disabled packages hold, and for a package caller that reaches a name only through a disabled package.
 
 - **Before → after.** `SchemaRegistry.resolveItem(type, name)`, `MetadataFacade.get` / `getEntry` and `SchemaRegistry.getApp(name)`: the disabled package's body → `undefined`. `MetadataFacade.exists`: true → false. First-party callers: 0. `MetadataFacade` is never constructed in-tree, `getApp` has no caller, and the one door that reads `resolveItem` (the protocol's by-name read) already withheld the body.
 - **Before → after, the resolver primitives**, same name: `SchemaRegistry.packageScopedHoldersOf(type, name)`: `[DISABLED]` → `[]`. `resolvePackageScopedName`, `readPackageScopedItem` and `resolveActionByPackage`, a caller with no package or outside the holder's closure: resolved to the disabled holder → not-found. First-party callers whose answer moves: 0 (no first-party app disables a package at boot).
 - **Before → after, served → refused.** A package caller whose declared closure holds the name only through a disabled package, while an enabled package outside the closure holds it: the disabled package's body → refused `outside-closure`, naming the enabled holder. At `resolvePackageScopedName`, `SchemaRegistry.resolveItem(type, name, callerPackageId)` and `resolveActionByPackage`. First-party callers: 0.
+- **Added, `@objectstack/metadata`.** `MetadataManager.getPublished(type, name, packageId?)`: an optional `packageId`, read as `get` reads it. Without it, every answer is unchanged.
 - **Unchanged.** A caller inside the disabled package still reads its own item. Re-enabling the package serves it again. A consumer that needs a disabled package's body names the package (`SchemaRegistry.getPackageScopedItem(type, name, packageId)`), or reads the holders with `includeDisabledPackages: true`.
 
 **Every moved answer, before → after.** First-party count 0 for each: showcase (22 packages, 205 package-scoped names), crm (18, 35) and multi-package (16, 27) hold no name that two packages share, and disable none at boot.
@@ -31,7 +34,8 @@ Skills-docs: none — `content/docs/deployment/marketplace-handbook.mdx` already
 Widening:
 
 - Bare `GET /meta/:type/:name` for every type of `PACKAGE_SCOPED_READ_TYPES`, on both transports, and the doors that read it (MCP `agent_prompt`, the dataset query door with a bare `datasetName`, the import door's `mappingName`, the connector pull). Two holders, one disabled: 409 naming both → 200 with the enabled holder's item.
-- Bare `GET /meta/:type/:name/layers` (and `?layers=true`) and `/published`, on both transports, the same name: 409 naming both → 200 with the enabled holder's layers, read at its address (its code layer, its stored overlay row, its lock), whichever holder registered first. A stored row bound to the disabled holder is read by none of them, and rows bound to each holder no longer make the layered read refuse.
+- Bare `GET /meta/:type/:name/layers` (and `?layers=true`), on both transports, the same name: 409 naming both → 200 with the enabled holder's layers, read at its address (its code layer, its stored overlay row, its lock), whichever holder registered first or last. A stored row bound to the disabled holder is read by none of them, and rows bound to each holder no longer make the layered read refuse. The metadata service's copy of a type it keys by name alone is the body registered last, and when that copy is the disabled holder's it is never the code layer.
+- Bare `GET /meta/:type/:name/published`, on both transports, the same name: 409 naming both → the enabled holder's stored row if it has one. Otherwise → the metadata service's copy, read at the enabled holder's package. A type the service stores per `(package, name)` (`agent`, `skill`, `api`, `action`) answers that package's copy and is never refused naming the disabled holder. A copy stamped with the disabled holder is replaced by the enabled holder's code layer. Otherwise → 404, as `/published` answers an item the metadata service does not hold (a package registered only through the `manifest` service).
 - Two co-owners of a shareable namespace, one disabled, `GET /meta/:type/:ns/:name` and the bare read: 409 `ambiguous-in-namespace` → 200 with the enabled co-owner's item.
 - `resolveActionByPackage`, and the REST route rung for a caller's package (`resolveRouteActionDeclaration`), a caller with no package or one whose closure holds both: refused → the enabled holder's declaration and its handler.
 - The security catalog, a permission-set reference with no package column: refused → the enabled holder's set. `holdsPlatformPermissionSet` for that name: false → the enabled holder's platform verdict.

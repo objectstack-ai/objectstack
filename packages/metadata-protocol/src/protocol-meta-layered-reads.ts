@@ -63,7 +63,7 @@ import { boundPackageOf } from './protocol-package-bindings.js';
 import type { RowlessExpandedView } from './protocol-stored-overlay-types.js';
 import { type ServedOverrideRow, isServedOverrideRowOf } from './served-override.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
-import { servedHolderAddressOf } from './protocol-meta-item-face.js';
+import { isAnotherHoldersCopy, servedHolderAddressOf } from './protocol-meta-item-face.js';
 import { packagelessAddressAmbiguityRefusal } from './sys-metadata-repository.js';
 
 /** The body of `ObjectStackProtocolImplementation#packagelessLayeredReadRefusal`; the method's docblock there is its contract. */
@@ -150,10 +150,8 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     // ({@link servedHolderAddressOf}): its code layer, its overlay rows and its
     // lock. The code layer is otherwise the first composite in registration
     // order, which can be the disabled holder's.
-    if (!request.packageId) {
-        const servedAddress = servedHolderAddressOf(host.engine?.registry, request.type, request.name);
-        if (servedAddress !== undefined) request = { ...request, packageId: servedAddress };
-    }
+    const servedAddress = request.packageId ? undefined : servedHolderAddressOf(host.engine?.registry, request.type, request.name);
+    if (servedAddress !== undefined) request = { ...request, packageId: servedAddress };
     // [#26699] Ruling 6116165299 (Q2 i), extended to this read by the
     // option-A ruling on #26649: ONE member of a bundled type, the
     // selector's or else the canonical one, read exactly as
@@ -201,7 +199,14 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
             // `effective` is `overlay ?? code`, so an object with no
             // overlay row — the ordinary shape — is corrected by this
             // single fold on both layers the diagnostic reports.
-            if (isWantedMember(fromService.data)) {
+            // [#32183, contract review M4] …and, read at the served holder's
+            // address, when it is that holder's: the service keys most types
+            // by name alone, so its copy can be the body a disabled holder
+            // registered last ({@link isAnotherHoldersCopy}). The artifact
+            // lookup below reads the served holder's.
+            if (isWantedMember(fromService.data)
+                && !(servedAddress !== undefined
+                    && isAnotherHoldersCopy(host.engine?.registry, request.type, request.name, servedAddress, fromService.data))) {
                 code = host.foldObjectExtendersFromRegistry(
                     request.type, request.name, fromService.data,
                 );

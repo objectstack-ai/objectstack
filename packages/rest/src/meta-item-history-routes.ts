@@ -1285,6 +1285,14 @@ export function registerMetaItemPublishedRoute(this: MetaItemPublishedRouteHost,
                     // that same field. An object is the layered read's own
                     // refusal below; `package` is never hidden.
                     let withheld = false;
+                    // [#32183, contract review M4] The package the plain read
+                    // answered, for a name of a type the registry reads by
+                    // package that only disabled packages hold besides it (the
+                    // read the protocol takes at that package's address,
+                    // `servedHolderAddressOf`), and every registry holder of
+                    // the name. Two served holders are refused above.
+                    let mixedOwner: string | undefined;
+                    let mixedHolders: readonly string[] = [];
                     if (publishedMetaType !== 'object' && publishedMetaType !== 'package'
                         && typeof publishedProtocol?.getMetaItem === 'function') {
                         // [#30218] The REQUEST's environment's engine,
@@ -1297,15 +1305,34 @@ export function registerMetaItemPublishedRoute(this: MetaItemPublishedRouteHost,
                         if (typeof registry?.isPackageDisabled === 'function') {
                             const envelope = await publishedProtocol.getMetaItem({ type, name });
                             withheld = registry.isPackageDisabled(envelope?.packageId) === true;
+                            const owner = envelope?.packageId;
+                            const ownerType = canonicalMetaUrlType(type);
+                            if (!withheld && typeof owner === 'string' && typeof registry.packageScopedHoldersOf === 'function'
+                                && typeof registry.readsByPackage === 'function' && registry.readsByPackage(ownerType) === true) {
+                                const holders: readonly string[] = registry.packageScopedHoldersOf(
+                                    ownerType, name, null, { includeDisabledPackages: true },
+                                ) ?? [];
+                                if (holders.length > 1 && holders.includes(owner)
+                                    && holders.every((holder) => holder === owner || registry.isPackageDisabled(holder) === true)) {
+                                    mixedOwner = owner;
+                                    mixedHolders = holders;
+                                }
+                            }
                         }
                     }
                     let publishedOverlay: unknown;
+                    // [#32183, contract review M4] The layered read's code
+                    // layer, read at the plain read's address: what the
+                    // snapshot exit below serves for a mixed name when the
+                    // metadata service's copy is another holder's.
+                    let publishedCode: unknown;
                     if (!withheld && typeof publishedProtocol?.getMetaItemLayered === 'function') {
                         try {
                             const layered = await publishedProtocol.getMetaItemLayered({
                                 type,
                                 name,
                             });
+                            publishedCode = layered?.code ?? undefined;
                             if (layered?.overlay !== undefined && layered?.overlay !== null) {
                                 // [#21002, #21986, ADR-0126 §2, ADR-0062 D4]
                                 // When the layered read put a code layer
@@ -1388,9 +1415,25 @@ export function registerMetaItemPublishedRoute(this: MetaItemPublishedRouteHost,
                     // CANONICAL types; handed the raw segment it answered
                     // 404 for a recognised plural and 200 for the singular
                     // twin of the same code-published item.
-                    const data = withheld
+                    //
+                    // [#32183, contract review M4] For a mixed name, the
+                    // metadata service is read at the plain read's package,
+                    // so a type it stores per `(package, name)` answers that
+                    // package's copy and never refuses naming a disabled
+                    // holder. A type it keys by name alone keeps the body
+                    // registered last, which can be the disabled holder's:
+                    // a copy stamped with another holder of the name is never
+                    // served, and the layered read's code layer at the plain
+                    // read's address is served in its place (the protocol's
+                    // `isAnotherHoldersCopy`; this package does not depend on
+                    // `@objectstack/metadata-protocol`).
+                    let data = withheld
                         ? undefined
-                        : await (svc as any).getPublished(canonicalMetaUrlType(type), name);
+                        : await (svc as any).getPublished(canonicalMetaUrlType(type), name, ...(mixedOwner !== undefined ? [mixedOwner] : []));
+                    const stamp = (data as { _packageId?: unknown } | null | undefined)?._packageId;
+                    if (mixedOwner !== undefined && typeof stamp === 'string' && stamp !== mixedOwner && mixedHolders.includes(stamp)) {
+                        data = publishedCode;
+                    }
                     // The 404 this route could never produce before. An
                     // item that exists but was never published still
                     // answers 200 with its current definition — that is

@@ -2488,9 +2488,14 @@ export class MetadataManager implements IMetadataService {
    * ⛔ Not caught: a throwing redactor fails the read rather than serving the
    * material it exists to withhold (the metadata protocol's
    * `redactMetadataItem` takes the same position).
+   *
+   * [#32183] `packageId`, when given, is read as {@link get} reads it: the
+   * package's own copy of a type stored per `(package, name)`. Both `/published`
+   * doors pass it for a name a disabled package also holds, so the store's own
+   * two-holder refusal never names a package the registry does not serve.
    */
-  async getPublished(type: string, name: string): Promise<unknown | undefined> {
-    const item = await this.get(type, name);
+  async getPublished(type: string, name: string, packageId?: string | null): Promise<unknown | undefined> {
+    const item = await this.get(type, name, packageId);
     if (!item) return undefined;
 
     const meta = item as any;
