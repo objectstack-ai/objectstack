@@ -583,6 +583,7 @@ describe('sanitizeChatMessagesForCache — the answer source survives a cache ro
     groupBy: ['owner'],
     aggregations: [{ function: 'sum', field: 'amount' }],
     records: 7,
+    line: 'Summed the amount of 7 won opportunities',
   };
 
   function roundTrip(toolInvocations: Parameters<typeof sanitizeChatMessagesForCache>[0][number]['toolInvocations']) {
