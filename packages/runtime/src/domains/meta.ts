@@ -419,7 +419,7 @@ function fieldVisibilityFaultResponse(deps: DomainHandlerDeps, objectName: strin
  * resolve its posture unconditionally, before its fetch.
  */
 export async function resolveObjectMasker(
-    deps: DomainHandlerDeps,
+    deps: Pick<DomainHandlerDeps, 'resolveService'>,
     context: HttpProtocolContext,
     metaType: string,
 ): Promise<(objectName: string) => Promise<ObjectSchemaMaskPosture>> {
