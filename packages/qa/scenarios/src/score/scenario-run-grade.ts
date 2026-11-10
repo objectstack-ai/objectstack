@@ -50,7 +50,7 @@ export interface TruthFigure {
   /**
    * The figure counts the one row that answers a "who" question: a reply also
    * meets it by naming one of these, a whole word and any letter case
-   * ({@link namesIn}). Absent ⇒ only the number meets it.
+   * ({@link mentions}). Absent ⇒ only the number meets it.
    */
   names?: readonly string[];
 }
@@ -168,7 +168,7 @@ function roundsTo(r: Reading, v: number): boolean {
  * ends with a Latin letter or a digit (`Ella Ma` is not inside `Ella Mason`);
  * written without spaces around it, a CJK name needs no boundary.
  */
-function namesIn(text: string, name: string): boolean {
+function mentions(text: string, name: string): boolean {
   const n = name.trim();
   if (n === '') return false;
   const word = /[\p{Script=Latin}\p{N}]/u;
@@ -182,7 +182,7 @@ function namesIn(text: string, name: string): boolean {
 function meets(f: TruthFigure, text: string, readings: readonly Reading[]): boolean {
   if (readings.some((r) => near(r.value, f.value, f.tol ?? 0))) return true;
   if (f.rounded === true && readings.some((r) => roundsTo(r, f.value))) return true;
-  return (f.names ?? []).some((n) => namesIn(text, n));
+  return (f.names ?? []).some((n) => mentions(text, n));
 }
 
 /** A tool output as the text the model was given. */
