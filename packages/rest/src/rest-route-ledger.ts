@@ -417,6 +417,9 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
 
   // ── analytics (semantic layer) ────────────────────────────────────────────
   { route: 'POST /api/v1/analytics/dataset/query', family: 'analytics', source: 'route-manager', disposition: 'sdk', client: 'analytics.queryDataset' },
+  // [#32200] The batch dataset-query door.
+  { route: 'POST /api/v1/analytics/dataset/query/batch', family: 'analytics', source: 'route-manager', disposition: 'sdk', client: 'analytics.queryDatasetBatch',
+    note: 'several single-door bodies in one request, each judged by the single door\'s own per-body judgment as the same caller; answers the `{ success, data: { results } }` envelope (`DatasetQueryBatchResponseSchema`, the whole body, so not named as `responseSchema`, which names a payload), one entry per query in request order. Pinned in `analytics-dataset-batch-door.test.ts`' },
 
   // ── security explain (ADR-0090 D6) ────────────────────────────────────────
   { route: 'GET /api/v1/security/explain', family: 'security-explain', source: 'route-manager', disposition: 'sdk', client: 'security.explain',

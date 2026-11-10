@@ -177,7 +177,8 @@ describe('showcase: parent-scoped readonlyWhen is server-enforced (#4889)', () =
       ],
       options: { continueOnError: true },
     });
-    expect(res.status).toBe(200);
+    // A row failed, so the per-row report answers 207 Multi-Status.
+    expect(res.status).toBe(207);
     const body: any = await res.json();
     expect([body.total, body.succeeded, body.failed], JSON.stringify(body)).toEqual([3, 2, 1]);
     expect(resultFor(body, before)?.success).toBe(true);
@@ -200,7 +201,7 @@ describe('showcase: parent-scoped readonlyWhen is server-enforced (#4889)', () =
         { id: after, data: { quantity: 7 } },
       ],
     });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(207);
     const body: any = await res.json();
     expect(resultFor(body, before)?.success, JSON.stringify(body)).toBe(true);
     const tail = (body.results ?? [])[2];

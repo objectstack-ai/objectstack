@@ -173,8 +173,9 @@ describe('a grant naming an agent ceiling set is refused at every write door of 
   });
 
   it('updateMany and the per-object batch fail the row naming an agent ceiling set in their per-row report, and store none', async () => {
-    // These two doors answer a per-row outcome report: the request is `200`,
-    // and the refused row carries the single-record door's code and status.
+    // These two doors answer a per-row outcome report: the request is `207`
+    // (a row failed), and the refused row carries the single-record door's
+    // code and status.
     const doors: Array<[string, () => Promise<Response>]> = [
       ['updateMany', () => stack.apiAs(admin, 'POST', `${GRANTS}/updateMany`, {
         records: [{ id: grantId, data: { permission_set: MCP_AGENT_PERMISSION_SET_READ } }],
@@ -187,7 +188,7 @@ describe('a grant naming an agent ceiling set is refused at every write door of 
       const res = await call();
       const body = (await res.json()) as any;
       const text = JSON.stringify(body);
-      expect(res.status, `${door}: ${text}`).toBe(200);
+      expect(res.status, `${door}: ${text}`).toBe(207);
       expect(body, `${door}: ${text}`).toMatchObject({ success: false, total: 1, succeeded: 0, failed: 1 });
       expect(body.results?.[0]?.errors?.[0], `${door}: ${text}`).toMatchObject({ code: 'VALIDATION_FAILED', httpStatus: 400 });
     }

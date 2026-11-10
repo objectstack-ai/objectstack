@@ -2954,6 +2954,111 @@
           "ref": "#32269"
         }
       ]
+    },
+    {
+      "id": "integration-system.push-device-registry-and-relay-boot",
+      "title": "Mobile push: a device registers under the caller's session with its server origin, the push service boots on the hosted relay only where requires names push, and an air-gapped or unrequested push key says why at boot",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123): the device calls",
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user, password changed so the session is not held: the other-user DELETE",
+        "operator (local shell): the three scratch boots"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "leg 1: a stock showcase boot on its own port and file DB (dogfood §0), OS_PORT exported. The device routes need no push service: the registry is service-messaging's, and messaging is on the always-on slate (packages/spec/src/kernel/platform-capabilities.ts#PLATFORM_ALWAYS_ON_CAPABILITIES)",
+          "sys_user_device has no REST surface (apiEnabled false, apiMethods [], packages/services/service-messaging/src/objects/user-device.object.ts#UserDevice): read its rows from the boot's DB file with a SQLite client while the server runs, as identity-auth.two-factor-backup-codes fixtures.requires[2] reads sys_two_factor",
+          "legs 2-4: a scratch copy of the showcase app outside examples/. For legs 2 and 3 its objectstack.config.ts appends 'push' to `requires`; for leg 4 it keeps the stock `requires` and adds a top-level `push: {}`. Booted with os serve (or os dev) at --log-level info, so the plugin's info lines print; OS_CLOUD_URL unset for legs 2 and 4, OS_CLOUD_URL=off for leg 3"
+        ],
+        "knownGaps": [
+          "no leg delivers a push. The relay needs a server bound to the cloud (the cloud-binding service, Setup → Cloud connection) and the direct transport needs an APNs key or a Firebase project, so the relay request, the origin each push carries (PushDeliveryDataSchema.origin) and the dead-token retirement are held by the pins in automated.ref only",
+          "the Console's registration runs only inside the mobile shell: ui/apps/console/src/nativePushRegistration.ts#useNativePushRegistration reads the native bridge through ui/packages/mobile/src/nativeHost.ts#nativeGetPushToken, sends the page origin only when the request grammar accepts it (#registrationOrigin), and unregisters before sign-out through @object-ui/auth's registerBeforeSignOut. No stock fixture provides the bridge in a browser, so that half is the pins' too",
+          "the scratch boots' lines are read from source (push-plugin.ts, capability-arg.ts, serve.ts) and have not been booted for this item"
+        ]
+      },
+      "steps": [
+        "leg 1, as the admin: POST /api/v1/notifications/devices { token: 'qa-token-<run>', platform: 'ios', origin: 'http://localhost:<OS_PORT>' }; keep the answer's deviceId (DID)",
+        "POST the same body with deviceId: DID and token 'qa-token-<run>-2'; read the admin's sys_user_device rows from the DB file",
+        "POST { token: 't', platform: 'web' } (no vendor), then { token: 't', platform: 'ios', origin: 'http://my_svc:3000' }, then { token: 't', platform: 'ios', origin: 'http://localhost:3000/' }; count the rows again",
+        "as the org member, DELETE /api/v1/notifications/devices/DID; then as the admin DELETE it, and once more",
+        "leg 2: boot the scratch copy with 'push' in requires and OS_CLOUD_URL unset; read the boot log through the ready banner",
+        "leg 3: boot it again with OS_CLOUD_URL=off; read the exit code and the error",
+        "leg 4: boot the copy that sets `push: {}` with no 'push' in requires; read the boot log"
+      ],
+      "acceptance": [
+        {
+          "clause": "a registration belongs to the session's user, and re-registering a deviceId refreshes that one device",
+          "oracle": "api",
+          "verify": "the first POST answers 200 carrying a deviceId (DID); the second answers the same DID; the admin holds one sys_user_device row for DID, carrying the second token, vendor apns (derived from platform ios) and origin http://localhost:<OS_PORT> (packages/services/service-messaging/src/device-registry.ts#DeviceRegistry)",
+          "evidence": "both answers and the row read"
+        },
+        {
+          "clause": "the registration grammar refuses a web device with no vendor and an origin that is not a canonical http(s) origin, each 400 naming the member, and writes nothing",
+          "oracle": "api",
+          "verify": "the web POST answers 400 VALIDATION_FAILED naming vendor ('A web device registration names its vendor (apns or fcm): web has no default vendor.'); the underscore host and the trailing slash each answer 400 VALIDATION_FAILED 'Invalid device registration body: origin: …' (packages/spec/src/system/push-server-origin.ts#PUSH_SERVER_ORIGIN_PATTERN, read by packages/spec/src/api/protocol.zod.ts#RegisterDeviceRequestSchema); the row count is unchanged",
+          "evidence": "the three answers and the counts before and after"
+        },
+        {
+          "clause": "a device is removed only by its owner, and another user's id and a removed id read the same 404",
+          "oracle": "api",
+          "verify": "the member's DELETE answers 404 NOT_FOUND 'Device not found.' and the row stays; the admin's DELETE answers 200 { success: true } and the row is gone; the repeat answers the same 404 (packages/services/service-messaging/src/device-registry.ts#deviceNotFoundError)",
+          "evidence": "the three answers and the row read after each"
+        },
+        {
+          "clause": "with 'push' in requires the push service boots on the hosted relay, and an unbound server is told once at ready that nothing is delivered yet",
+          "oracle": "log",
+          "verify": "the boot log reads 'PushServicePlugin: push service registered (apns, fcm through the hosted push relay)', and after kernel:ready the warning 'PushServicePlugin: this server is not bound to the cloud, so the hosted push relay delivers nothing until it is. …'; the server stays up (packages/services/service-push/src/push-plugin.ts#PushServicePlugin). The push channel mounts lazily, on the first delivery that needs it, so its own '[messaging] push channel registered …' line is not expected at boot",
+          "evidence": "the two log lines"
+        },
+        {
+          "clause": "on a deployment that declared no control plane, a requested push refuses the boot instead of mounting a channel whose pushes would look sent",
+          "oracle": "log",
+          "verify": "the boot exits 1 with 'Capability \"push\" (@objectstack/service-push) failed to start: PushServicePlugin: the hosted push relay … cannot be reached from a deployment that declared it has no control plane …', ending 'On objectstack serve this is the stack definition's push key, and an absent key reads as the relay too.' (packages/services/service-push/src/capability-arg.ts#resolvePushCapabilityArg, and the fail-fast for a declared capability in packages/cli/src/commands/serve.ts)",
+          "evidence": "the exit code and the error text"
+        },
+        {
+          "clause": "a push key with no 'push' in requires is named at boot, and nothing push mounts",
+          "oracle": "log",
+          "verify": "the boot prints \"⚠ The stack definition sets a push key, but requires does not name 'push', so the push service is not started and the key is not read. Add 'push' to requires to turn mobile push on.\" (packages/cli/src/commands/serve.ts#formatUnrequestedPushKeyWarning), and no PushServicePlugin or push-channel line follows",
+          "evidence": "the boot log"
+        }
+      ],
+      "negative": [
+        "a registration whose owner is read from the body (a userId member honoured) is a FAIL: the owner is the session's user",
+        "a leg-3 boot that reaches the ready banner with a push service registered is a FAIL: every push on an air-gapped deployment would look sent"
+      ],
+      "traps": [
+        "wrong-persona",
+        "stale-dist",
+        "absence-inference"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/services/service-push/src/push-plugin.test.ts, packages/services/service-push/src/capability-arg.test.ts, packages/services/service-messaging/src/push-channel.test.ts and packages/services/service-messaging/src/device-registry.integration.test.ts; no live spec boots push"
+      },
+      "source": [
+        "packages/services/service-push/src/push-plugin.ts#PushServicePlugin and #PUSH_RELAY_AIR_GAPPED_MESSAGE",
+        "packages/services/service-push/src/capability-arg.ts#resolvePushCapabilityArg",
+        "packages/services/service-messaging/src/device-registry.ts#DeviceRegistry and packages/services/service-messaging/src/push-channel.ts",
+        "packages/runtime/src/domains/notifications.ts (POST /devices, DELETE /devices/:deviceId)",
+        "packages/spec/src/api/protocol.zod.ts#RegisterDeviceRequestSchema and packages/spec/src/system/push-server-origin.ts#PUSH_SERVER_ORIGIN_PATTERN",
+        "packages/cli/src/commands/serve.ts#formatUnrequestedPushKeyWarning",
+        "ui/apps/console/src/nativePushRegistration.ts#useNativePushRegistration and ui/packages/mobile/src/nativeHost.ts#nativeGetPushToken (the shell half, pins only)",
+        "#29794 (the push channel), #29968 (requires push under os serve), #30534 (the shell registers its token), #30705 (the device origin), #30749 (the hosted relay)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — the push device registry, the hosted-relay boot and its two boot refusals (#29794, #29968, #30534, #30705, #30749). Scoped sweep #32270 (epic #32022 M4, the zero-citation close-out), read from source at 60b99f8f; no live run made",
+          "ref": "#32270"
+        }
+      ]
     }
   ]
 }

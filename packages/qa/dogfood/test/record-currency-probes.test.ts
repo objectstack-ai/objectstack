@@ -12,6 +12,13 @@
 //    the app registers.
 //  - The write side: an amount with no code is refused
 //    `ERR_CURRENCY_CODE_REQUIRED` / 400, and the table stays empty.
+//  - [ADR-0144 D2 and D6, amended 2026-11-09 by #31743] A line whose amount
+//    follows its bill's currency (`currencyField: 'bill.currency_code'`): a
+//    `summary` through that `master_detail` registers and totals each bill's
+//    own lines (PROBE-R's 15100 becomes USD 100 and JPY 15000), a raw
+//    aggregate over the line amount is refused whatever it groups by, a line
+//    under a bill with no code is refused, and the bill's code locks while a
+//    line follows it.
 //
 // The engine-door cells over the in-memory aggregation face live beside the
 // guards in `packages/objectql/src/record-currency-guards.test.ts`. ⛔ No
@@ -24,6 +31,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import type { EngineAggregateOptions } from '@objectstack/spec/data';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
+import { resolveThrownHttpError } from '@objectstack/types';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const DRIVERS = [
@@ -148,5 +156,60 @@ describe.each(DRIVERS)('record-currency probes: $name', ({ make }) => {
       code: 'INVALID_METADATA', status: 422, name: 'RecordCurrencySummaryRefusedError',
     });
     expect(String(err.message)).toContain('rolls up sum(fx_bill_line.amount)');
+  });
+
+  it('[ADR-0144 D2, D6 amended] a line following its bill\'s currency rolls up per bill; raw aggregates refuse; the bill\'s code locks', async () => {
+    const bill = {
+      name: 'fx_pbill',
+      label: 'FX path bill',
+      fields: {
+        name: { name: 'name', type: 'text' },
+        currency_code: CODE,
+        subtotal: {
+          name: 'subtotal',
+          type: 'summary',
+          currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' },
+          summaryOperations: { object: 'fx_pbill_line', field: 'amount', function: 'sum' },
+        },
+      },
+    };
+    const line = {
+      name: 'fx_pbill_line',
+      label: 'FX path bill line',
+      fields: {
+        name: { name: 'name', type: 'text' },
+        bill: { name: 'bill', type: 'master_detail', reference: 'fx_pbill' },
+        amount: { name: 'amount', type: 'currency', currencyConfig: { currencyMode: 'record', currencyField: 'bill.currency_code' } },
+      },
+    };
+    await boot([bill, line]);
+    const usd = await engine.insert('fx_pbill', { name: 'b1', currency_code: 'USD' }, SYS);
+    const jpy = await engine.insert('fx_pbill', { name: 'b2', currency_code: 'JPY' }, SYS);
+    const blank = await engine.insert('fx_pbill', { name: 'b3' }, SYS);
+    await engine.insert('fx_pbill_line', { name: 'l1', bill: usd.id, amount: 100 }, SYS);
+    await engine.insert('fx_pbill_line', { name: 'l2', bill: jpy.id, amount: 15000 }, SYS);
+
+    // PROBE-R stored 15100 under one label; each bill now totals its own lines, in its own currency.
+    const bills = await engine.find('fx_pbill', { fields: ['id', 'currency_code', 'subtotal'] }, SYS) as Array<Record<string, unknown>>;
+    expect(Object.fromEntries(bills.filter((b) => b.currency_code).map((b) => [b.currency_code, Number(b.subtotal)]))).toEqual({ USD: 100, JPY: 15000 });
+
+    const blankLine = await refusalOf(() => engine.insert('fx_pbill_line', { name: 'l3', bill: blank.id, amount: 5 }, SYS));
+    expect(envelope(blankLine)).toEqual({ code: 'ERR_CURRENCY_CODE_REQUIRED', status: 400, field: 'bill.currency_code' });
+
+    for (const groupBy of [undefined, ['bill.currency_code'], ['bill']]) {
+      const err = await refusalOf(() => engine.aggregate('fx_pbill_line', aggregateQuery({
+        ...(groupBy ? { groupBy } : {}),
+        aggregations: [{ function: 'sum', field: 'amount', alias: 'v' }],
+      }), SYS));
+      expect(envelope(err), JSON.stringify(groupBy)).toEqual({ code: 'INVALID_FIELD', status: 400, field: 'amount' });
+    }
+
+    const locked = await refusalOf(() => engine.update('fx_pbill', { id: usd.id, currency_code: 'EUR' }, SYS));
+    expect({ code: resolveThrownHttpError(locked).code, status: resolveThrownHttpError(locked).status }).toEqual({ code: 'VALIDATION_FAILED', status: 400 });
+    expect((locked as { fields?: Array<{ field: string; code: string }> }).fields?.map((f) => [f.field, f.code])).toEqual([['currency_code', 'invalid_value']]);
+    const [stillUsd] = await engine.find('fx_pbill', { where: { id: usd.id }, fields: ['currency_code'] }, SYS) as Array<Record<string, unknown>>;
+    expect(stillUsd?.currency_code).toBe('USD');
+    // The control: a bill no line follows changes its code.
+    await engine.update('fx_pbill', { id: blank.id, currency_code: 'EUR' }, SYS);
   });
 });

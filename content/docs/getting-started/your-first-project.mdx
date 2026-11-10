@@ -283,11 +283,13 @@ Console — data browser, metadata explorer, API docs — is served at
 boot.** Next to the platform's own apps you will see **Main**, from
 `src/apps/main.app.ts`; its `Notes` entry opens the list that
 `src/views/note.view.ts` declares for `my_app_note`. **An object appears in
-Console navigation only when an app lists it**, so for each object you add, add
-a navigation entry to that app (or generate an app of its own) and a view:
-`npx os generate app NAME --object OBJECT` and `npx os generate view OBJECT`
-write the file and its export line, and the Console shows it after the dev
-server rebuilds. Or describe the app you want to your coding agent —
+Console navigation only when an app lists it**, and a package whose manifest
+type is `app` holds at most one app, so `main.app.ts` is the one: for each
+object you add, add a navigation entry for it to that app (a `group` entry with
+children nests them) rather than a second app, and give it a list view.
+`npx os generate view OBJECT` writes the view and its export line, and the
+Console shows it after the dev server rebuilds. Or describe the app you want to
+your coding agent —
 [Build with Claude Code](/docs/getting-started/build-with-claude-code).
 </Callout>
 
