@@ -1058,13 +1058,15 @@ export const LifecycleSchema = lazySchema(() => strictObject({
   }, {
     valueFields: z.array(z.string()).describe(
       'Columns that enter each sealed row as salted commitments instead of in clear, so a checkpoint never ' +
-      'carries their values; every other declared column enters in clear. Each must name a declared field.',
+      'carries their values; every other declared column enters in clear. Each must name a declared field ' +
+      'other than `id` and `created_at`, which order the leaves.',
     ),
   }).optional().describe(
     'Seals the rows into signed, chained checkpoints (ADR-0154), so a change, insert or delete made outside ' +
-    "the platform shows. Only `class: 'audit'` may declare it, and not beside `retention.onlyWhen`, a `ttl` " +
-    "on another field than `created_at`, or rotation `storage`. A deployment with no crypto provider seals " +
-    'nothing and reports that once at error.',
+    "the platform shows. Only `class: 'audit'` may declare it, and not beside a `retention` or `ttl` " +
+    "`onlyWhen`, a `ttl` on another field than `created_at`, or rotation `storage`. Until expiry amendments " +
+    'ship (ADR-0154 P4), the retention sweeper still deletes sealed rows, which then read as missing. A ' +
+    'deployment with no crypto provider seals nothing and reports that at error.',
   ),
   reclaim: z.boolean().optional().describe('Run driver space reclamation (SQLite incremental_vacuum) after sweeping this object. Default true for non-record classes.'),
 }).superRefine((lc, ctx) => {
@@ -1162,6 +1164,9 @@ export const LifecycleSchema = lazySchema(() => strictObject({
     }
     if (lc.retention?.onlyWhen) {
       refuse(['retention', 'onlyWhen'], 'lifecycle.retention.onlyWhen cannot be combined with seal — it deletes part of a sealed window');
+    }
+    if (lc.ttl?.onlyWhen) {
+      refuse(['ttl', 'onlyWhen'], 'lifecycle.ttl.onlyWhen cannot be combined with seal — it deletes part of a sealed window');
     }
     if (lc.ttl && lc.ttl.field !== 'created_at') {
       refuse(['ttl', 'field'], `lifecycle.ttl on '${lc.ttl.field}' cannot be combined with seal — its cutoff is not a created_at window; measure the ttl from created_at`);
@@ -2987,8 +2992,9 @@ function refuseAttachedBlockConflicts(attachedOnRead: unknown, fields: unknown, 
  * [ADR-0154 D10] Each `lifecycle.seal.valueFields` name is a field this object
  * declares: a sealed checkpoint commits that column's value instead of carrying
  * it, and a name that matches no column would commit nothing while the author
- * believes the column is kept out of the checkpoint. One located issue per
- * unknown name, at `['lifecycle', 'seal', 'valueFields', <index>]`.
+ * believes the column is kept out of the checkpoint. `id` and `created_at`
+ * order each leaf, so neither can be committed. One located issue per refused
+ * name, at `['lifecycle', 'seal', 'valueFields', <index>]`.
  *
  * Judged here, in the object's `superRefine` beside
  * {@link refuseAttachedBlockConflicts}, for the reason given there: only the
@@ -3001,6 +3007,10 @@ function refuseUndeclaredSealValueFields(lifecycle: unknown, fields: unknown, ct
   if (!seal || !Array.isArray(seal.valueFields)) return;
   const declared = fields !== null && typeof fields === 'object' ? fields : {};
   seal.valueFields.forEach((name, index) => {
+    if (name === 'id' || name === 'created_at') {
+      ctx.addIssue({ code: 'custom', path: ['lifecycle', 'seal', 'valueFields', index], message: `lifecycle.seal.valueFields cannot name '${name}': it orders each sealed leaf, so it enters in clear (ADR-0154 D10).` });
+      return;
+    }
     if (typeof name !== 'string' || Object.prototype.hasOwnProperty.call(declared, name)) return;
     ctx.addIssue({
       code: 'custom',

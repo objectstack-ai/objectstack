@@ -47,7 +47,7 @@ import { dropAuditSealSecret, writeAuditSealSecret, type SealStorageDriver, type
  *
  * A pass, per sealed object:
  *
- *  1. **Late rows first.** It re-counts the windows of the last
+ *  1. **Late rows first.** It re-counts each window of the last
  *     {@link AUDIT_SEAL_LATE_HORIZON_MS} it has sealed: a window whose stored
  *     row count differs from what its checkpoints list is read, and each row
  *     no checkpoint lists goes into a `late` checkpoint of its chain.
@@ -75,6 +75,8 @@ export const AUDIT_SEAL_LATE_HORIZON_MS = 7 * 24 * 60 * 60 * 1000;
 export const AUDIT_SEALER_LOCK = 'audit.sealer';
 
 const LOCK_TTL_MS = 60_000;
+/** A fault that keeps a sealed object unsealed is reported again after this long (S4). */
+const REPORT_REPEAT_MS = 60 * 60 * 1000;
 const PAGE_SIZE = 500;
 /** Windows sealed per object per pass; a backlog continues on the next pass, which follows at once. */
 const MAX_WINDOWS_PER_PASS = 24;
@@ -174,7 +176,8 @@ function acquireInProcessLock(): LockHandle | null {
 
 export class AuditSealer {
   private loop: DispatchLoop | undefined;
-  private readonly reported = new Set<string>();
+  /** When each cause was last reported, by cause. */
+  private readonly reported = new Map<string, number>();
   private readonly now: () => number;
 
   constructor(private readonly options: AuditSealerOptions) {
@@ -189,7 +192,7 @@ export class AuditSealer {
       maxIdleIntervalMs: 5 * 60 * 1000,
       nextDueAt: async () => windowOf(this.now() - AUDIT_SEAL_SETTLE_MS) + AUDIT_SEAL_WINDOW_MS + AUDIT_SEAL_SETTLE_MS,
       runTick: () => this.runPass(),
-      onTickError: (err) => this.reportOnce(`pass:${faultOf(err)}`, () =>
+      onTickError: (err) => this.report(`pass:${faultOf(err)}`, () =>
         `AuditSealer: a sealing pass FAILED (${faultOf(err)}) — rows of the sealed objects are not being sealed ` +
         'until a pass succeeds; it is retried on the next pass. Fix the fault named here.'),
     });
@@ -202,14 +205,18 @@ export class AuditSealer {
     await loop?.stop();
   }
 
-  /** Report at `error`, once per cause. No error object rides along: its message may quote a statement. */
-  private reportOnce(cause: string, message: () => string): void {
-    if (this.reported.has(cause)) return;
-    this.reported.add(cause);
+  /**
+   * Report at `error`, once per cause per {@link REPORT_REPEAT_MS} while it
+   * lasts. No error object rides along: its message may quote a statement.
+   */
+  private report(cause: string, message: () => string): void {
+    const last = this.reported.get(cause);
+    if (last !== undefined && this.now() - last < REPORT_REPEAT_MS) return;
+    this.reported.set(cause, this.now());
     this.options.logger.error(message());
   }
 
-  /** The sealed objects the registry holds that can be sealed; each that cannot is reported once. */
+  /** The sealed objects the registry holds that can be sealed; each that cannot is reported. */
   private plans(): SealPlan[] {
     const plans: SealPlan[] = [];
     for (const object of this.options.engine.registry.getAllObjects()) {
@@ -224,15 +231,19 @@ export class AuditSealer {
         if (refused.length > 0) {
           reason = `its column(s) ${refused.map((c) => `'${c.column}' (type '${c.type ?? 'none'}')`).join(', ')} ` +
             'have no canonical rule';
+        } else if (!Object.prototype.hasOwnProperty.call(fields, 'tenant_id')) {
+          // S3: a chain is the row's own `tenant_id`; without the column every organization would share one.
+          reason = "it declares no 'tenant_id' field, so its rows cannot be chained per organization";
         }
       } catch (err) {
         reason = (err as Error).message;
       }
       if (reason !== null || columns === null) {
-        this.reportOnce(`plan:${object.name}`, () =>
+        this.report(`plan:${object.name}`, () =>
           `AuditSealer: '${object.name}' declares lifecycle.seal but cannot be sealed: ${reason}. Its rows are NOT ` +
           'being sealed — no checkpoint covers them, so a change made outside the platform would not show. Fix: ' +
-          'give the object only columns of a type with a canonical rule (ADR-0154 D1), or remove lifecycle.seal.');
+          "give the object a 'tenant_id' field and only columns of a type with a canonical rule (ADR-0154 D1, D5), " +
+          'or remove lifecycle.seal.');
         continue;
       }
       plans.push({ name: object.name, fields, columns, ...(lifecycle.archive?.to ? { archiveTo: lifecycle.archive.to } : {}) });
@@ -249,7 +260,7 @@ export class AuditSealer {
     }
     if (cluster?.lock) return cluster.lock.acquire(AUDIT_SEALER_LOCK, { ttlMs: LOCK_TTL_MS, waitMs: 0 });
     if (!this.reported.has('in-process-lock')) {
-      this.reported.add('in-process-lock');
+      this.reported.set('in-process-lock', this.now());
       this.options.logger.info(
         'AuditSealer: no cluster service is registered, so the audit.sealer lock is held in-process only — ' +
           'cross-replica exclusion is off by the host\'s declaration. The checkpoint table\'s unique ' +
@@ -265,7 +276,7 @@ export class AuditSealer {
     if (plans.length === 0) return 0;
     const signer = this.options.signer();
     if (!this.options.crypto || !signer) {
-      this.reportOnce('no-crypto', () =>
+      this.report('no-crypto', () =>
         `AuditSealer: ${plans.map((p) => `'${p.name}'`).join(', ')} declare(s) lifecycle.seal, but this deployment has ` +
         `no ${this.options.crypto ? 'checkpoint signer' : 'crypto provider'} — rows of the sealed objects are NOT ` +
         'being sealed, so a change made outside the platform would not show while everything looks healthy. Fix: ' +
@@ -277,14 +288,15 @@ export class AuditSealer {
     try {
       let written = 0;
       for (const plan of plans) {
-        // One object's fault never stops another's sealing; each cause is reported once.
+        // One object's fault never stops another's sealing; it is reported while it lasts.
         let pass: ObjectPass | undefined;
         try {
           pass = new ObjectPass(this.options, plan, lock, signer, this.now());
           await pass.run();
+          for (const cause of this.reported.keys()) if (cause.startsWith(`object:${plan.name}:`)) this.reported.delete(cause);
         } catch (err) {
           const fault = faultOf(err);
-          this.reportOnce(`object:${plan.name}:${fault}`, () =>
+          this.report(`object:${plan.name}:${fault}`, () =>
             `AuditSealer: sealing '${plan.name}' FAILED (${fault}) — its rows from this point on are not being ` +
             'sealed until a pass gets past it; each pass retries. Fix the fault named here.');
         } finally {
@@ -387,12 +399,10 @@ class ObjectPass {
       byWindow.set(start, [...(byWindow.get(start) ?? []), row]);
     }
     const resumed = new Set((byWindow.get(lastWindow) ?? []).filter((r) => r.kind === 'window').map((r) => String(r.chain_key)));
-    if (from >= to) return resumed;
     const listedCount = (rows: readonly Row[]) => rows.reduce((sum, r) => sum + Number(r.leaf_count), 0);
-    if ((await this.countRows(from, to)) === listedCount(listed.filter((r) => Date.parse(canonicalDatetime(r.window_start)) >= from))) {
-      return resumed;
-    }
     for (let start = from; start < to; start += AUDIT_SEAL_WINDOW_MS) {
+      // S6: each window re-counted on its own, so a delete in one cannot hide a late row in another.
+      await this.lock.renew(LOCK_TTL_MS);
       const holders = byWindow.get(start) ?? [];
       if ((await this.countRows(start, start + AUDIT_SEAL_WINDOW_MS)) === listedCount(holders)) continue;
       const ids = new Set(holders.flatMap((r) => checkpointBodyFromRow(r).row_ids));
@@ -459,14 +469,19 @@ class ObjectPass {
   private async readWindow(start: number, accept: (row: Row) => boolean): Promise<Map<string, ChainLeaves>> {
     const chains = new Map<string, ChainLeaves>();
     const seen = new Set<string>();
+    const range = { created_at: { $gte: iso(start), $lt: iso(start + AUDIT_SEAL_WINDOW_MS) } };
     for (const store of this.stores()) {
-      for (let offset = 0; ; offset += PAGE_SIZE) {
+      // S2: keyset paging on (created_at, id), each bound the driver's own spelling of the last row's
+      // values: an offset would skip rows when the Archiver deletes earlier ones between pages.
+      for (let after: Row | undefined; ;) {
         await this.lock.renew(LOCK_TTL_MS); // a large window outlasts one lease
         const rows = await this.find(store, {
-          where: { created_at: { $gte: iso(start), $lt: iso(start + AUDIT_SEAL_WINDOW_MS) } },
+          where: after === undefined ? range : { $and: [range, { $or: [
+            { created_at: { $gt: after.created_at } },
+            { $and: [{ created_at: after.created_at }, { id: { $gt: after.id } }] },
+          ] }] },
           orderBy: [{ field: 'created_at', order: 'asc' }, { field: 'id', order: 'asc' }],
           limit: PAGE_SIZE,
-          offset,
         });
         for (const row of rows) {
           const id = rowIdOf(row);
@@ -484,6 +499,7 @@ class ObjectPass {
           chain.leaves.push({ id, at, hash: leafHash(leaf) });
         }
         if (rows.length < PAGE_SIZE) break;
+        after = rows[rows.length - 1];
       }
     }
     return chains;
@@ -540,9 +556,10 @@ class ObjectPass {
     await this.lock.renew(LOCK_TTL_MS);
     const handle = await crypto!.encrypt(encodeCheckpointSeed(chain.seed), context);
     await writeAuditSealSecret(engine, handle, context);
+    let signed: { body: CheckpointSignedBody; keyId: string; signature: string };
     try {
       const sealedAt = iso((this.options.now ?? Date.now)());
-      const { body, keyId, signature } = await this.signBody((signingKeyId) => ({
+      signed = await this.signBody((signingKeyId) => ({
         sealed_object: this.plan.name,
         tenant_id: chain.tenantId,
         sequence,
@@ -562,15 +579,42 @@ class ObjectPass {
         signing_key_id: signingKeyId,
       }));
       if (!this.lock.isHeld()) throw new Error('the audit.sealer lock lapsed before the checkpoint was written');
-      await engine.insert(AUDIT_CHECKPOINT_OBJECT, checkpointRow(body, { id: randomUUID(), signature }), { context: { isSystem: true } });
-      this.heads.set(chainKey, { sequence, digest: checkpointDigest(body) });
-      this.written += 1;
-      await this.deliver(body, keyId, signature);
+      // S1: the chain's window head, re-read under the lease: a window another sealer sealed (or passed)
+      // since this pass began is not sealed again. Windows of a chain are sealed oldest first.
+      if (kind === 'window' && (await this.storedCheckpoint(chainKey, { kind: 'window', window_start: { $gte: iso(start) } }))) {
+        throw new Error(`chain '${chainKey}' already holds a window checkpoint at or after ${iso(start)}; it is not sealed twice`);
+      }
     } catch (err) {
+      // No insert was attempted, so nothing names the seed.
       await dropAuditSealSecret(engine, handle.id);
       this.heads.delete(chainKey);
       throw err;
     }
+    const { body, keyId, signature } = signed;
+    try {
+      await engine.insert(AUDIT_CHECKPOINT_OBJECT, checkpointRow(body, { id: randomUUID(), signature }), { context: { isSystem: true } });
+    } catch (err) {
+      // M1: an insert can reject after its row is stored (an afterInsert hook that throws, a lost
+      // acknowledgement), so the seed is kept either way: a stored checkpoint whose seed was dropped could
+      // never be recomputed. Unstored, the seed is an orphan for `os secret orphans`.
+      const stored = await this.storedCheckpoint(chainKey, { sequence }).catch(() => undefined);
+      if (stored?.seed_handle !== handle.id) {
+        this.heads.delete(chainKey);
+        throw err;
+      }
+      this.options.logger.warn(`AuditSealer: the checkpoint insert reported a failure (${faultOf(err)}) after its row was stored; it stands`, {
+        sealed_object: this.plan.name, chain_key: chainKey, sequence,
+      });
+    }
+    this.heads.set(chainKey, { sequence, digest: checkpointDigest(body) });
+    this.written += 1;
+    await this.deliver(body, keyId, signature);
+  }
+
+  /** This chain's stored checkpoint matching `where`, if any. */
+  private async storedCheckpoint(chainKey: string, where: Row): Promise<Row | undefined> {
+    const [row] = await this.checkpoints.find(AUDIT_CHECKPOINT_OBJECT, { where: { sealed_object: this.plan.name, chain_key: chainKey, ...where }, limit: 1 });
+    return row;
   }
 
   private async deliver(body: CheckpointSignedBody, keyId: string, signature: string): Promise<void> {

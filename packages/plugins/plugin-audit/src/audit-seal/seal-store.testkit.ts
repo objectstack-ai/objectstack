@@ -16,10 +16,13 @@ function comparable(value: unknown): unknown {
 
 function matches(row: Row, where: Record<string, unknown> = {}): boolean {
   return Object.entries(where).every(([field, cond]) => {
+    if (field === '$and') return (cond as Row[]).every((w) => matches(row, w));
+    if (field === '$or') return (cond as Row[]).some((w) => matches(row, w));
     const value = comparable(row[field]);
     if (cond !== null && typeof cond === 'object' && !Array.isArray(cond)) {
       const ops = cond as Record<string, unknown>;
       if ('$gte' in ops && !((value as number) >= (comparable(ops.$gte) as number))) return false;
+      if ('$gt' in ops && !((value as number) > (comparable(ops.$gt) as number))) return false;
       if ('$lt' in ops && !((value as number) < (comparable(ops.$lt) as number))) return false;
       return true;
     }

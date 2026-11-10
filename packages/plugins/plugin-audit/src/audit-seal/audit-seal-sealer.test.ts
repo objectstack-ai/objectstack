@@ -43,6 +43,12 @@ function setup(options: { objects?: unknown[]; crypto?: boolean; signer?: IAudit
   return { ...store, crypto, logger, signer, clock, sealer, checkpoints };
 }
 
+/** A cluster double that grants every acquire its own held lease, and counts renewals. */
+function grantingCluster() {
+  const cluster = { renews: 0, lock: { acquire: async () => ({ key: AUDIT_SEALER_LOCK, fencingToken: 1n, renew: async () => void (cluster.renews += 1), release: async () => {}, isHeld: () => true }) } };
+  return cluster as unknown as IClusterService & { renews: number };
+}
+
 describe('windows: the backlog oldest first, one checkpoint per chain per window (D3, D5)', () => {
   it('seals every due window that holds a row, skips the empty one and the one not yet settled', async () => {
     const s = setup();
@@ -86,6 +92,20 @@ describe('windows: the backlog oldest first, one checkpoint per chain per window
     expect(s.checkpoints().map((c) => [c.window_start, c.row_ids])).toEqual([[at(7, 0), ['cold']], [at(8, 0), ['both', 'hot']]]);
   });
 
+  it('pages a window by (created_at, id), so rows the Archiver moves between pages are not skipped (S2)', async () => {
+    const s = setup();
+    const rows = Array.from({ length: 510 }, (_, i) => row(`r${String(i).padStart(3, '0')}`, new Date(DAY0 + 8 * H + i * 5_000).toISOString()));
+    s.hot.table('ledger_probe').push(...rows);
+    const find = s.hot.find.bind(s.hot);
+    s.hot.find = async (object, query) => {
+      const page = await find(object, query);
+      if (page.length === 500) s.archive.table('ledger_probe').push(...s.hot.table('ledger_probe').splice(0, 10)); // copied, then deleted
+      return page;
+    };
+    await s.sealer.runPass();
+    expect(s.checkpoints().flatMap((c) => c.row_ids)).toEqual(rows.map((r) => r.id));
+  });
+
   it('writes nothing on a second pass with nothing new', async () => {
     const s = setup();
     s.hot.table('ledger_probe').push(row('r1', at(8, 10)));
@@ -108,6 +128,19 @@ describe('late rows: re-counted and sealed as late, before the pass seals its wi
     ]);
   });
 
+  it('re-counts each window of the horizon on its own, renewing the lease, so a delete in one cannot mask a late row in another (S6)', async () => {
+    const cluster = grantingCluster();
+    const s = setup({ cluster });
+    s.hot.table('ledger_probe').push(row('r1', at(8, 10)), row('r2', at(8, 20)), row('r3', at(9, 5)));
+    await s.sealer.runPass();
+    s.hot.table('ledger_probe').splice(0, 1);
+    s.hot.table('ledger_probe').push(row('late', at(9, 30)));
+    cluster.renews = 0;
+    expect(await s.sealer.runPass()).toBe(1);
+    expect(s.checkpoints().slice(2).map((c) => [c.kind, c.window_start, c.row_ids])).toEqual([['late', at(9, 0), ['late']]]);
+    expect(cluster.renews).toBeGreaterThanOrEqual(166); // one per window from 7d back to the last sealed one
+  });
+
   it("resumes a window a stopped pass left: the chain it never reached gets a window checkpoint, not a late one", async () => {
     const s = setup();
     s.hot.table('ledger_probe').push(row('a', at(8, 10)), row('b', at(8, 20), 'org_b'));
@@ -123,7 +156,7 @@ describe('late rows: re-counted and sealed as late, before the pass seals its wi
     expect(await s.sealer.runPass()).toBe(1);
     expect(await s.sealer.runPass()).toBe(1);
     expect(s.checkpoints().map((c) => [c.tenant_id, c.kind, c.row_ids])).toEqual([['org_a', 'window', ['a']], ['org_b', 'window', ['b']]]);
-    expect(s.hot.table('sys_secret')).toHaveLength(3); // the key's half and two seeds; the failed write's seed was dropped
+    expect(s.hot.table('sys_secret')).toHaveLength(4); // the key's half, two seeds, and the unstored write's seed kept as an orphan (M1)
   });
 });
 
@@ -176,6 +209,26 @@ describe('the lock: audit.sealer, its fencing token on each checkpoint (D3, Q2 (
     expect(info).toHaveLength(1);
     expect(info[0].message).toMatch(/in-process only/);
     expect(BigInt(s.checkpoints()[0].fencing_token)).toBeGreaterThan(0n);
+  });
+
+  it('refuses a window checkpoint the chain head, re-read under the lease, already covers: two sealers whose leases overlap (S1)', async () => {
+    const cluster = grantingCluster();
+    const s = setup({ cluster });
+    const other = new AuditSealer({ engine: s.engine, crypto: s.crypto, signer: () => s.signer, cluster: () => cluster, logger: s.logger, now: () => s.clock.now });
+    s.hot.table('ledger_probe').push(row('r1', at(8, 10)));
+    const find = s.hot.find.bind(s.hot);
+    let raced = false;
+    s.hot.find = async (object, query) => {
+      const page = await find(object, query);
+      if (object === 'ledger_probe' && query.limit === 500 && !raced) {
+        raced = true;
+        await other.runPass(); // seals the window this pass has just read, before this pass writes it
+      }
+      return page;
+    };
+    expect(await s.sealer.runPass()).toBe(0);
+    expect(s.checkpoints().map((c) => [c.window_start, c.sequence])).toEqual([[at(8, 0), 0]]);
+    expect(s.logger.lines.filter((l) => l.level === 'error').map((l) => l.message)).toEqual([expect.stringMatching(/already holds a window checkpoint at or after/)]);
   });
 });
 
@@ -232,6 +285,21 @@ describe('what the sealer writes, and where (ruling 3d)', () => {
     expect(s.checkpoints().map((c) => c.seed_handle).sort()).toEqual(s.hot.table('sys_secret').filter((r) => r.namespace === 'ledger_probe').map((r) => r.id).sort());
   });
 
+  it('keeps the seed of a checkpoint whose insert stored its row and then rejected, and the checkpoint stands (M1)', async () => {
+    const s = setup();
+    const insert = s.engine.insert.bind(s.engine);
+    s.engine.insert = async (object, r, o) => {
+      const stored = await insert(object, r, o);
+      if (object === 'sys_audit_checkpoint') throw new Error('afterInsert hook failed');
+      return stored;
+    };
+    s.hot.table('ledger_probe').push(row('r1', at(8, 10)));
+    expect(await s.sealer.runPass()).toBe(1);
+    expect(s.hot.table('sys_secret').filter((r) => r.namespace === 'ledger_probe').map((r) => r.id)).toEqual([s.checkpoints()[0].seed_handle]);
+    expect(s.logger.lines.filter((l) => l.level !== 'info').map((l) => [l.level, l.message])).toEqual([['warn', expect.stringMatching(/afterInsert hook failed.*after its row was stored; it stands/)]]);
+    expect(await s.sealer.runPass()).toBe(0);
+  });
+
   it('refuses an organization id too long for the seed coordinate before anything is sealed (Q6 (a))', async () => {
     const s = setup();
     s.hot.table('ledger_probe').push(row('r1', at(8, 10), 'o'.repeat(130)));
@@ -255,7 +323,7 @@ describe('what the sealer writes, and where (ruling 3d)', () => {
   });
 });
 
-describe('when it cannot seal it says so, once, at error (D3, Q5 (a))', () => {
+describe('when it cannot seal it says so at error, again each hour while it lasts (D3, Q5 (a), S4)', () => {
   it('with no crypto provider: one line naming the consequence and the fix, and nothing written', async () => {
     const s = setup({ crypto: false });
     s.hot.table('ledger_probe').push(row('r1', at(8, 10)));
@@ -277,6 +345,25 @@ describe('when it cannot seal it says so, once, at error (D3, Q5 (a))', () => {
     expect(errors).toHaveLength(1);
     expect(errors[0].message).toMatch(/'ledger_probe'.*'total' \(type 'formula'\).*NOT being sealed/);
     expect(s.hot.table('sys_audit_checkpoint')).toEqual([]);
+  });
+
+  it('with no tenant_id field: one line naming it, and the object is not folded into the deployment chain (S3)', async () => {
+    const fields = Object.fromEntries(Object.entries(LEDGER.fields).filter(([name]) => name !== 'tenant_id'));
+    const s = setup({ objects: [{ ...LEDGER, fields }] });
+    s.hot.table('ledger_probe').push(row('r1', at(8, 10), null));
+    await s.sealer.runPass();
+    expect(s.logger.lines.filter((l) => l.level === 'error').map((l) => l.message)).toEqual([expect.stringMatching(/'ledger_probe'.*no 'tenant_id' field.*NOT being sealed/)]);
+    expect(s.hot.table('sys_audit_checkpoint')).toEqual([]);
+  });
+
+  it('reports a stalled object again after an hour, and not on every pass before it (S4)', async () => {
+    const s = setup();
+    s.hot.create = async () => { throw new Error('disk full'); };
+    s.hot.table('ledger_probe').push(row('r1', at(8, 10)));
+    const errorsAfterPass = async () => (await s.sealer.runPass(), s.logger.lines.filter((l) => l.level === 'error').length);
+    expect([await errorsAfterPass(), await errorsAfterPass()]).toEqual([1, 1]);
+    s.clock.now += H;
+    expect(await errorsAfterPass()).toBe(2);
   });
 
   it("quotes a driver's reason, never its statement, whose values can hold a sealed secret's ciphertext", async () => {

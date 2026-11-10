@@ -172,6 +172,11 @@ export class LocalCheckpointSigner implements IAuditCheckpointSigner {
     const key: SigningKeyRow = { fingerprint, public_key: raw.toString('base64'), private_handle: handle.id };
     try {
       await writeAuditSigningKeyChange(engine, { newFingerprint: fingerprint, retiredFingerprint: null });
+    } catch (err) {
+      await dropAuditSealSecret(engine, handle.id); // no key row was attempted, so nothing names the half
+      throw err;
+    }
+    try {
       await engine.insert(AUDIT_SIGNING_KEY_OBJECT, {
         id: randomUUID(),
         ...key,
@@ -180,8 +185,10 @@ export class LocalCheckpointSigner implements IAuditCheckpointSigner {
         retired_at: null,
       }, { context: { isSystem: true } });
     } catch (err) {
-      await dropAuditSealSecret(engine, handle.id);
-      throw err;
+      // M1: an insert can reject after its row is stored, so the half is kept either way: an active key
+      // row naming a dropped half would stop all signing. Unstored, it is an orphan for `os secret orphans`.
+      const [stored] = await this.keys().find(AUDIT_SIGNING_KEY_OBJECT, { where: { fingerprint }, limit: 1 }).catch(() => []);
+      if (keyRowOf(stored)?.private_handle !== handle.id) throw err;
     }
     return key;
   }

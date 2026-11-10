@@ -71,6 +71,21 @@ describe('the first signature creates the deployment key (D6, Q4 (a))', () => {
     expect(hot.table('sys_secret')).toEqual([]);
     expect(hot.table('sys_audit_signing_key')).toEqual([]);
   });
+
+  it('keeps the private half when the key-row insert stores its row and then rejects, and signs with that key (M1)', async () => {
+    const { signer, hot, engine } = setup();
+    const insert = engine.insert.bind(engine);
+    engine.insert = async (object, row, options) => {
+      const stored = await insert(object, row, options);
+      if (object === 'sys_audit_signing_key') throw new Error('afterInsert hook failed');
+      return stored;
+    };
+    const { keyId, signature } = await signer.sign(BYTES);
+    const [key] = hot.table('sys_audit_signing_key');
+    expect(hot.table('sys_secret').map((r) => r.id)).toEqual([key.private_handle]);
+    expect(keyId).toBe(key.fingerprint);
+    expect(verify(null, BYTES, publicKeyOf(key.public_key as string), Buffer.from(signature, 'base64'))).toBe(true);
+  });
 });
 
 describe('a key row is trusted only through its wrapped private half (D6)', () => {

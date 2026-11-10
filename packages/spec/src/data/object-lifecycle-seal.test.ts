@@ -120,6 +120,19 @@ describe('ObjectSchema lifecycle.seal — what it refuses (ADR-0154 D10)', () =>
       .toEqual([{ code: 'custom', path: ['lifecycle', 'ttl', 'field'] }]);
   });
 
+  it('refuses ttl.onlyWhen beside it, at lifecycle.ttl.onlyWhen', () => {
+    expect(refusals(ledger({ class: 'audit', seal: SEALED.seal, ttl: { field: 'created_at', expireAfter: '30d', onlyWhen: { action: 'delete' } } })))
+      .toEqual([{ code: 'custom', path: ['lifecycle', 'ttl', 'onlyWhen'] }]);
+  });
+
+  it('refuses id or created_at as a value field, at its index: they order the leaves', () => {
+    expect(refusals(ledger({ ...SEALED, seal: { valueFields: ['id', 'old_value', 'created_at'] } })))
+      .toEqual([
+        { code: 'custom', path: ['lifecycle', 'seal', 'valueFields', 0] },
+        { code: 'custom', path: ['lifecycle', 'seal', 'valueFields', 2] },
+      ]);
+  });
+
   it('refuses rotation storage beside it, at lifecycle.storage', () => {
     expect(refusals(ledger({ class: 'audit', seal: SEALED.seal, storage: { strategy: 'rotation', shards: 7, unit: 'day' } })))
       .toEqual([{ code: 'custom', path: ['lifecycle', 'storage'] }]);

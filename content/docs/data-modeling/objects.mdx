@@ -230,18 +230,21 @@ lifecycle: {
   first, archived rows included.
 - `valueFields` names the columns that enter a checkpoint as salted
   commitments instead of in clear, so a checkpoint never carries their values.
-  Each must be a declared field (refused at parse time otherwise). The object
-  must declare `id` and `created_at`, and both stay in clear: a sealed object
-  that does not, or names either in `valueFields`, is not sealed.
+  Each must be a declared field other than `id` and `created_at` (refused at
+  parse time otherwise). Both must be in the object's registered fields, with
+  `tenant_id`, which keys each checkpoint chain: an object without one of the
+  three is not sealed.
 - Every column must have a type with one canonical spelling. A column of type
   `password`, `secret`, `formula`, `summary`, `image`, `file`, `avatar`,
   `video` or `audio` has none, and an object that declares one is not sealed.
 - Refused at parse time beside `seal`: a `class` other than `audit`,
-  `retention.onlyWhen`, a `ttl` on a field other than `created_at`, and
-  rotation `storage`. Each deletes part of a sealed hour.
+  `retention.onlyWhen`, `ttl.onlyWhen`, a `ttl` on a field other than
+  `created_at`, and rotation `storage`. Each deletes part of a sealed hour.
+  Until expiry amendments ship (ADR-0154 P4), the retention sweeper still
+  deletes sealed rows, which then read as missing.
 - Sealing needs a crypto provider, which the host passes to `AuditPlugin` as
-  `cryptoProvider`. Without one, nothing is sealed and the plugin says so once
-  at `error`.
+  `cryptoProvider`. Without one, nothing is sealed and the plugin says so at
+  `error`, again each hour while it lasts.
 
 Operations knobs live in the `lifecycle` settings namespace: a runtime
 `enabled` switch, tenant-scoped `retention_overrides` (a regulated tenant
