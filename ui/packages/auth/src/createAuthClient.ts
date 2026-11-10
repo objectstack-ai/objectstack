@@ -11,7 +11,7 @@ import { organizationClient, twoFactorClient } from 'better-auth/client/plugins'
 import type {
   AuthClient, AuthClientConfig, AuthUser, AuthClientSession, SignInCredentials, SignUpData,
   AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthPublicConfig,
-  SignInWithProviderOptions, SignInTwoFactorCodeKind, TwoFactorMethod,
+  SignInWithProviderOptions, SignInTwoFactorCodeKind, TwoFactorChallenge, TwoFactorMethod,
 } from './types.js';
 import { AUTH_INVITATION_STATUSES, isAuthInvitationStatus } from './invitation-status.js';
 
@@ -448,6 +448,30 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
   // to the ObjectUI AuthClient contract.
 
   /**
+   * objectstack#29105 — the one reader of better-auth's two-factor challenge.
+   * For an account with two-factor sign-in on, the `twoFactor()` plugin's
+   * after-hook (matched on `/sign-in/email`, `/sign-in/username` and
+   * `/sign-in/phone-number`) deletes the session the credential step made,
+   * holds the pending sign-in in a signed `two_factor` cookie and answers
+   * `{ twoFactorRedirect: true, twoFactorMethods }`. The same answer still
+   * carries `set-auth-token` naming the DELETED session (measured: it
+   * resolves to no session), which `bearerFetch` has just stored; it is
+   * dropped here, because no credential exists until the code is verified.
+   * Answers the challenge, or `null` when the answer is not one.
+   */
+  function readTwoFactorChallenge(data: unknown): TwoFactorChallenge | null {
+    const challenge = data as { twoFactorRedirect?: boolean; twoFactorMethods?: unknown } | null | undefined;
+    if (challenge?.twoFactorRedirect !== true) return null;
+    TokenStorage.clear();
+    const methods = Array.isArray(challenge.twoFactorMethods)
+      ? challenge.twoFactorMethods.filter(
+          (m): m is TwoFactorMethod => m === 'totp' || m === 'otp',
+        )
+      : [];
+    return { methods };
+  }
+
+  /**
    * POST one of the phoneNumber plugin's endpoints (framework#2780) and
    * return the parsed JSON. Throws an Error carrying the better-auth `code`
    * and HTTP `status` so the forms can special-case the per-number cooldown
@@ -556,23 +580,9 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       if (error) {
         throw toAuthError(error);
       }
-      // objectstack#29105 — an account with two-factor sign-in on: the server
-      // accepted the password, deleted the session it had just made, and holds
-      // the pending sign-in in a signed `two_factor` cookie; the caller asks
-      // for the code. The same answer still carries `set-auth-token` naming
-      // the DELETED session (measured: it resolves to no session), which
-      // `bearerFetch` has just stored. Drop it: no credential exists until
-      // the code is verified.
-      const challenge = data as unknown as { twoFactorRedirect?: boolean; twoFactorMethods?: unknown };
-      if (challenge?.twoFactorRedirect === true) {
-        TokenStorage.clear();
-        const methods = Array.isArray(challenge.twoFactorMethods)
-          ? challenge.twoFactorMethods.filter(
-              (m): m is TwoFactorMethod => m === 'totp' || m === 'otp',
-            )
-          : [];
-        return { twoFactor: { methods } };
-      }
+      // objectstack#29105 — two-factor sign-in on: the caller asks for the code.
+      const twoFactor = readTwoFactorChallenge(data);
+      if (twoFactor) return { twoFactor };
       const payload = data as unknown as { user: AuthUser; session: AuthClientSession };
       // Persist token for cross-origin session persistence
       if (payload.session?.token) {
@@ -850,8 +860,11 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       // Phone + password sign-in (better-auth `/sign-in/phone-number`). Needs
       // no SMS service — gated server-side by `features.phoneNumber` (plugin
       // on), NOT `features.phoneNumberOtp`. Response: `{ token, user }`, mirror
-      // of signInWithPhoneOtp.
+      // of signInWithPhoneOtp — or, for an account with two-factor sign-in on,
+      // the same challenge the email path answers (objectstack#32107).
       const payload = await postPhoneNumberEndpoint('/sign-in/phone-number', { phoneNumber, password });
+      const twoFactor = readTwoFactorChallenge(payload);
+      if (twoFactor) return { twoFactor };
       const token = typeof payload.token === 'string' ? payload.token : undefined;
       const user = (payload.user ?? null) as AuthUser | null;
       if (!token || !user) {

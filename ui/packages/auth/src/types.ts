@@ -180,7 +180,7 @@ export interface TwoFactorChallenge {
   methods: TwoFactorMethod[];
 }
 
-/** What `AuthClient.signIn` answers: a session, or a pending two-factor challenge. */
+/** What a password sign-in (`AuthClient.signIn`, `signInWithPhonePassword`) answers: a session, or a pending two-factor challenge. */
 export type SignInResult =
   | { user: AuthUser; session: AuthClientSession; twoFactor?: undefined }
   | { twoFactor: TwoFactorChallenge; user?: undefined; session?: undefined };
@@ -459,8 +459,13 @@ export interface AuthClient {
   sendPhoneOtp: (phoneNumber: string) => Promise<void>;
   /** framework#2780 — verify a phone OTP; signs in the number's user. */
   signInWithPhoneOtp: (phoneNumber: string, code: string) => Promise<{ user: AuthUser; session: AuthClientSession }>;
-  /** framework#2780 — sign in with phone number + password (no SMS; gated by `features.phoneNumber`). */
-  signInWithPhonePassword: (phoneNumber: string, password: string) => Promise<{ user: AuthUser; session: AuthClientSession }>;
+  /**
+   * framework#2780 — sign in with phone number + password (no SMS; gated by
+   * `features.phoneNumber`). For an account with two-factor sign-in on, the
+   * answer is a `twoFactor` challenge instead of a session, as `signIn`
+   * answers (objectstack#32107): finish it with `verifySignInTwoFactor`.
+   */
+  signInWithPhonePassword: (phoneNumber: string, password: string) => Promise<SignInResult>;
   /** framework#2780 — request a password-reset OTP SMS for the phone number. */
   requestPhonePasswordReset: (phoneNumber: string) => Promise<void>;
   /** framework#2780 — reset the password using a phone OTP. */
