@@ -38,18 +38,21 @@
  *   The scope is read by plugin-security's `externalOrganizationScopeOf`, the
  *   one reading the wall and the boot refusal use.
  *
- * ## What it does not do yet, and says so
+ * ## Where a run starts, and what it commits (ADR-0153 D2, D7)
  *
- * - **No committed position is kept.** The read position a run commits is
- *   stored on `sys_sync_run` (ADR-0153 D7), which lands in its own change. Until
- *   then every run reads from `watermark.start`, so an incremental pull reads
- *   what a `full` one reads. The keyed upsert keeps the rows right, and no row
- *   is ever passed, but every run rewrites every row of the target: record
- *   automations run, audit rows are written and `updated_at` moves for each
- *   one, on every run. The result still reports the position this run would
- *   commit.
- * - Delete marking (D3), the provenance columns (D4) and drift (D6) are later
- *   changes; their keys stay `planned` in the liveness ledger.
+ * The read position is kept on `sys_sync_run` (`./sync-run-ledger.ts`), per
+ * mapping and organization. A run starts from the position the latest
+ * committed run stored, when that run read the same source object on the same
+ * `watermark.field`, and never below `watermark.start`; otherwise, and on
+ * every run of a mapping that declares `full: true`, from `watermark.start`.
+ * It stores the position it reached at each window's end (invariant 8), so a
+ * run that stops part-way keeps its last finished window's position and the
+ * next run reads on from there, re-reading only rows that share that canon
+ * step (the keyed upsert makes that harmless). A position that cannot be
+ * stored stops the pull (`run_record_unavailable`).
+ *
+ * Delete marking (D3), the provenance columns (D4) and drift (D6) are later
+ * changes; their keys stay `planned` in the liveness ledger.
  *
  * ## Every read names its own `limit`
  *
@@ -76,9 +79,10 @@ import { needsExternalDriverFloor, resolveExternalRowCap } from '@objectstack/ob
 import { EXTERNAL_SCOPE_REMEDY, externalOrganizationScopeOf } from '@objectstack/plugin-security';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { resolveQueryReadLimits, resolveTenancyPosture } from '@objectstack/types';
-import type { ConnectorPullDeps, ConnectorPullOptions } from './connector-pull.js';
+import type { ConnectorPullDeps, ConnectorPullOptions, SyncRunHandle } from './connector-pull.js';
 import {
     BUILTIN_PAGE_SIZE,
+    canonOf,
     canonOfStart,
     readSourceInWindows,
     spellCanon,
@@ -156,12 +160,15 @@ function watermarkKindOf(field: Rec | undefined): SyncWatermarkKind | undefined 
  * Pull one mapping's `datasourceSource`. Throws {@link ConnectorPullError} on
  * every refusal: before the first read for a binding no pull could honour,
  * part-way for a value or a window the read cannot get past (the windows read
- * to their end before it stay written).
+ * to their end before it stay written, with the position they committed).
+ * `run` is the pull's run record (`./connector-pull.ts` opens and closes it):
+ * the position is read from it and committed through it.
  */
 export async function pullDatasourceSource(
     deps: ConnectorPullDeps,
     opts: ConnectorPullOptions,
     artifact: MappingArtifactLike & { datasourceSource: Rec },
+    run: SyncRunHandle,
 ): Promise<DatasourcePullResult> {
     const { protocol, logger } = deps;
     const { context, environmentId } = opts;
@@ -282,8 +289,24 @@ export async function pullDatasourceSource(
     const windowSource: SyncWindowSource = {
         mapping, object: sourceObject, datasource, field: wmName, kind, key: 'id', ...(scope ? { scope } : {}),
     };
-    // No committed position is stored until `sys_sync_run` (D7): every run starts at `watermark.start`.
-    const from = canonOfStart(windowSource, wm.start);
+    // [D7] Where the run starts: the position the latest committed run of this
+    // mapping in this organization stored, when it read this source object on
+    // this field, and never below `watermark.start`. `full: true`, a first run,
+    // or a position from another source or field starts at `watermark.start`.
+    const start = canonOfStart(windowSource, wm.start);
+    const previous = ds.full === true ? undefined : await run.lastCommitted();
+    let from = start;
+    let resumed: string | undefined;
+    if (previous && previous.source === sourceObject && previous.watermarkField === wmName) {
+        const reading = canonOf(kind, previous.position);
+        if (reading.ok) {
+            from = Math.max(reading.canon, start);
+            resumed = previous.runId;
+        }
+    }
+    await run.describe({
+        sourceKind: 'datasource', source: sourceObject, datasource, readPath, watermarkField: wmName, from: spellCanon(kind, from),
+    });
     const limits = resolveQueryReadLimits();
     const pageSize = Math.min(BUILTIN_PAGE_SIZE, limits.maxPageSize ?? Infinity, limits.rowBudget ?? Infinity);
     const windowLimit = resolveExternalRowCap(isPlainObject(datasourceDef.external) ? datasourceDef.external.rowCap : undefined);
@@ -338,14 +361,23 @@ export async function pullDatasourceSource(
         });
         const batch = refuseBlankMatchKeys(ran, mapping, matchFields).summary;
         addBatch(summary, batch);
+        // [D7] What a run that stops part-way is closed with.
+        run.progress.read += rows.length;
+        run.progress.created = summary.created;
+        run.progress.updated = summary.updated;
+        run.progress.refused = summary.errors;
         return rows.map((_, i) => isWritten(batch.results[i]));
     };
+    // [D7, invariant 8] Called only at a window's end: the position is stored
+    // before the next window is read, so a run that stops keeps it.
+    const commit = async (position: number): Promise<void> => run.commit(spellCanon(kind, position));
 
     logger.info(
         `[Automation] datasource pull: mapping "${mapping}" ← ${sourceObject} (datasource '${datasource}', ${readPath} read, `
-        + `windows on ${wmName} from ${JSON.stringify(spellCanon(kind, from))})`,
+        + `windows on ${wmName} from ${JSON.stringify(spellCanon(kind, from))}, `
+        + `${resumed ? `the position run ${resumed} committed` : ds.full === true ? 'watermark.start: full: true' : 'watermark.start'})`,
     );
-    const report = await readSourceInWindows(windowSource, { find, write, commit: async () => {} }, {
+    const report = await readSourceInWindows(windowSource, { find, write, commit }, {
         path: readPath, from, pageSize,
     });
 

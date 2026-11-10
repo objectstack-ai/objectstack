@@ -286,18 +286,28 @@ export const OrdersPullJob = defineJob({
     a walled tenancy posture the run reads only the job's organization's rows of a
     source that declares its own `organization_id`, reads a shared source whole,
     and refuses a source that states no organization scope.
-  - **Until the read position is stored, every `datasourceSource` run reads from
-    `watermark.start`.** The upsert keeps the copy right, but every run rewrites
-    every row of the target: record automations run, audit rows are written and
-    `updated_at` moves on each one. `full` and the delete keys change nothing yet,
-    and `os validate` says so.
+  - **A `datasourceSource` run reads on from where the last one stopped.** At the
+    end of each window it stores the read position it reached (on the run's
+    `sys_sync_run` row), and the next run of the mapping in the same
+    organization starts there, so it reads only rows written since, plus those
+    sharing that last position, which the upsert writes again harmlessly. A
+    run that is refused or stopped part-way keeps the position of its last
+    finished window. The first run, and every run of a mapping that declares
+    `full: true`, reads from `watermark.start`; a run never reads below it. The
+    delete keys change nothing yet, and `os validate` says so.
 - **How a run is recorded.** A pull the platform refuses — the mapping is gone,
   two packages hold a mapping under its name, the connector is degraded, the input breaks the read action's declared
   `inputSchema`, the upstream answered `ok: false` — rejects, so the
   run is `failed` and the `retryPolicy` applies. A pull whose rows the import
   runner refused completes as `degraded`, with the counts as its reason; retrying
   would refuse the same rows. Otherwise the run is `success`, including a pull
-  that found nothing new.
+  that found nothing new. Every pull also leaves one `sys_sync_run` row in the
+  job's organization: the mapping, where it read from and from which position,
+  the rows read, created, updated and refused, the position it committed, and
+  how it ended (`completed`, `degraded` or `failed` with the refusal's reason).
+  A pull still `running` when the server stopped is closed `failed`
+  (`interrupted`) at the next start. Rows are kept 30 days, except the one
+  holding each mapping's read position.
 - **Which mapping a name reads.** The pull reads its mapping naming no package
   (ADR-0150 D3): the environment's own, else the one package that holds the name.
   When two packages hold the name the pull is refused before any call or write,

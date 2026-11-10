@@ -43,7 +43,14 @@ export type ConnectorPullRefusalReason =
     | 'source_key_missing'
     | 'source_binding_invalid'
     | 'source_organization_scope_unstated'
-    | 'job_organization_missing';
+    | 'job_organization_missing'
+    /**
+     * [ADR-0153 D7] The run record (`sys_sync_run`) could not be written:
+     * opened before the mapping is read (nothing was read), or given the read
+     * position at a window's end (the windows finished before stay written,
+     * and the next run reads again from the last position stored).
+     */
+    | 'run_record_unavailable';
 
 /**
  * A refused pull. `code` + `status` are the ADR-0112 pair a door would put on
