@@ -8585,12 +8585,27 @@ export class SchemaRegistry {
    * reads it. A package holding a member its dependency also holds is a
    * holder (a clash, refused by the resolver, never folded away).
    *
+   * [#32183, ADR-0150 D3] The SERVED holders: a package that is disabled
+   * ({@link isPackageDisabled}, the predicate {@link listItems} hides its
+   * items by) holds no name, so a by-name door judges the same holders the
+   * list shows. Disable is reversible: its items stay registered, and its
+   * holding counts again on enable. The caller's own holding stays, as for a
+   * bundle addition, so a caller inside a disabled package answers as before.
+   * The disabled holders leave the set the bundle-addition rule settled: a
+   * disable never promotes a dependent's addition to a holder of the name.
+   * `options.includeDisabledPackages` reads every holder, disabled or not —
+   * the read a DURABLE judgment takes (a backfill binding a stored row, the
+   * stored-reference report, the load audit), because a binding must not
+   * move with a reversible disable. The install gate reads its own set
+   * (`bareNamePackageHolders`) and is not this read.
+   *
    * @param callerPackageId - The package a bare read is made from. Its own
    *   holding stays in the set even when it is an addition, so its step 1
    *   (its own item, ADR-0150 D3) answers as before: the addition only stops
    *   counting toward OTHER callers' ambiguity (epic seat review 6729484996).
    */
-  packageScopedHoldersOf(type: string, name: string, callerPackageId?: string | null): string[] {
+  packageScopedHoldersOf(type: string, name: string, callerPackageId?: string | null,
+    options?: { includeDisabledPackages?: boolean }): string[] {
     const collection = this.metadata.get(type);
     if (!collection) return [];
     const composite = this.compositeHoldersOf(collection, name);
@@ -8600,11 +8615,14 @@ export class SchemaRegistry {
       const bound = this.overlaySlotBinding(item, name, collection, compositeSet);
       if (typeof bound === 'string') holders.add(bound);
     }
+    const served = (ids: string[]): string[] => options?.includeDisabledPackages === true
+      ? ids
+      : ids.filter((id) => id === callerPackageId || !this.isPackageDisabled(id));
     const disc = ITEM_KEY_DISCRIMINATORS[type];
-    if (!disc || holders.size < 2) return [...holders];
+    if (!disc || holders.size < 2) return served([...holders]);
     const membersOf = new Map<string, Set<string>>();
     for (const id of holders) membersOf.set(id, this.bundleMembersHeldBy(type, collection, name, id, compositeSet, disc));
-    return [...holders].filter((id) => id === callerPackageId || !this.isBundleAddition(id, membersOf));
+    return served([...holders].filter((id) => id === callerPackageId || !this.isBundleAddition(id, membersOf)));
   }
 
   /**
@@ -10213,8 +10231,13 @@ export class SchemaRegistry {
         ...this.getAllPackages().filter((row) => !pending.has(artifactPackageId(row.manifest) ?? '')),
         ...pending.values(),
       ],
+      // [#32183] The load audit is a durable judgment: every holder,
+      // disabled or not, so its verdict never moves with a reversible disable.
       packageScopedHoldersOf: (type, name) => [
-        ...new Set([...this.packageScopedHoldersOf(type, name), ...pendingHolders(type, name)]),
+        ...new Set([
+          ...this.packageScopedHoldersOf(type, name, undefined, { includeDisabledPackages: true }),
+          ...pendingHolders(type, name),
+        ]),
       ],
       getPackageScopedItem: <T>(type: string, name: string, packageId: string, member?: string): T | undefined =>
         pendingHolders(type, name).has(packageId)

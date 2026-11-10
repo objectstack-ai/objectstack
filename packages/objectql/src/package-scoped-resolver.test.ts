@@ -842,3 +842,92 @@ describe('R2 — a residual owner (ADR-0130 D4) reaches what it declares through
     expect(resolve('flow', 'send_email', P)).toMatchObject({ status: 'refused', reason: 'outside-closure' });
   });
 });
+
+describe('#32183 — a disabled package holds no name for a by-name read (the served holders)', () => {
+  const D = 'com.acme.addon';
+
+  for (const type of ['flow', 'app', 'page'] as const) {
+    it(`${type}: two holders, one disabled — the enabled holder answers a caller with no package`, () => {
+      install(A);
+      install(B);
+      ship(type, 'shared', A);
+      ship(type, 'shared', B);
+      expect(resolve(type, 'shared')).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment' });
+      registry.disablePackage(B);
+      expect(registry.packageScopedHoldersOf(type, 'shared')).toEqual([A]);
+      expect(resolve(type, 'shared')).toMatchObject({ status: 'resolved', via: 'unique-holder', holder: { kind: 'package', packageId: A } });
+      expect(label(resolve(type, 'shared'))).toBe(`alpha ${type}`);
+      // The served list shows the same holder.
+      expect(registry.listItems<{ _packageId?: string }>(type).map((i) => i._packageId)).toEqual([A]);
+    });
+  }
+
+  it('a caller outside both closures is refused naming the enabled holder only', () => {
+    install(A);
+    install(B);
+    install(C);
+    ship('flow', 'shared', A);
+    ship('flow', 'shared', B);
+    registry.disablePackage(B);
+    expect(resolve('flow', 'shared', C)).toMatchObject({
+      status: 'refused', reason: 'outside-closure', candidates: [{ kind: 'package', packageId: A }],
+    });
+  });
+
+  it("the caller's own holding stays when its package is disabled: it answers its own item, as before", () => {
+    install(A);
+    install(B);
+    ship('flow', 'shared', A);
+    ship('flow', 'shared', B);
+    registry.disablePackage(B);
+    expect(registry.packageScopedHoldersOf('flow', 'shared', B)).toEqual([A, B]);
+    expect(resolve('flow', 'shared', B)).toMatchObject({ status: 'resolved', via: 'own', holder: { kind: 'package', packageId: B } });
+  });
+
+  it('only disabled holders: no holder, and not-found — the disabled package is named nowhere', () => {
+    install(B);
+    ship('flow', 'shared', B);
+    registry.disablePackage(B);
+    expect(registry.packageScopedHoldersOf('flow', 'shared')).toEqual([]);
+    expect(resolve('flow', 'shared')).toEqual({ status: 'not-found' });
+    install(C);
+    expect(resolve('flow', 'shared', C)).toEqual({ status: 'not-found' });
+  });
+
+  it('`includeDisabledPackages` reads every holder: the read a durable judgment takes', () => {
+    install(A);
+    install(B);
+    ship('flow', 'shared', A);
+    ship('flow', 'shared', B);
+    ship('flow', 'only_beta', B);
+    registry.disablePackage(B);
+    expect(registry.packageScopedHoldersOf('flow', 'shared', undefined, { includeDisabledPackages: true })).toEqual([A, B]);
+    expect(resolvePackageScopedName(registry, { type: 'flow', name: 'shared', callerPackageId: null, includeDisabledPackages: true }))
+      .toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment' });
+    expect(resolvePackageScopedName(registry, { type: 'flow', name: 'only_beta', callerPackageId: null, includeDisabledPackages: true }))
+      .toMatchObject({ status: 'resolved', holder: { kind: 'package', packageId: B } });
+  });
+
+  it('disable is reversible: on enable the package holds the name again', () => {
+    install(A);
+    install(B);
+    ship('flow', 'shared', A);
+    ship('flow', 'shared', B);
+    registry.disablePackage(B);
+    expect(registry.packageScopedHoldersOf('flow', 'shared')).toEqual([A]);
+    registry.enablePackage(B);
+    expect(registry.packageScopedHoldersOf('flow', 'shared')).toEqual([A, B]);
+    expect(resolve('flow', 'shared')).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment' });
+  });
+
+  it("a disabled base never promotes a dependent's bundle addition to a holder of the name", () => {
+    install(A);
+    install(D, [A]);
+    ship('email_template', 'welcome', A);
+    registry.registerItem('email_template', { ...body('email_template', 'welcome', 'addon-fr'), locale: 'fr-FR' }, 'name' as never, D);
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([A]);
+    registry.disablePackage(A);
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([]);
+    expect(resolve('email_template', 'welcome')).toEqual({ status: 'not-found' });
+  });
+});

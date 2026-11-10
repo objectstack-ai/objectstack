@@ -5539,6 +5539,9 @@ async function resolveRouteActionByPackage(deps: ActionExecutionDeps,
             ...(resolution.holder.kind === 'package' ? { packageId } : {}),
         });
     } catch (err: any) {
+        // [#32183] A package-scoped refusal is an answer about the name, not a
+        // read that failed: the declared 409, naming every candidate.
+        if (err instanceof PackageScopedNameRefusedError) return { action: undefined, obj, refusal: err.refusal };
         return { action: undefined, obj, degraded: true, reason: err?.message ?? String(err) };
     }
     const item: any = (envelope as { item?: unknown } | null | undefined)?.item;

@@ -211,8 +211,14 @@ export interface SecurityCatalogMetadataService {
  * `getPackage`/`getAllPackages` (`PackageClosureRegistry`).
  */
 export interface SecurityCatalogPackageScopedRegistry extends PackageClosureRegistry {
-  /** Every package holding `(type, name)`, each once; the caller's own bundle addition counts for it. */
-  packageScopedHoldersOf(type: string, name: string, callerPackageId?: string | null): readonly string[];
+  /**
+   * Every package holding `(type, name)`, each once; the caller's own bundle
+   * addition counts for it. [#32183] A disabled package holds no name (the
+   * caller's own holding aside) unless `options.includeDisabledPackages` asks
+   * for every holder.
+   */
+  packageScopedHoldersOf(type: string, name: string, callerPackageId?: string | null,
+    options?: { includeDisabledPackages?: boolean }): readonly string[];
   /** A package holder's item, with whatever binds to it (its ADR-0005 overlay). */
   getPackageScopedItem(type: string, name: string, packageId: string): unknown;
   /** The environment's own item of the name, bound to no package. */
@@ -586,6 +592,18 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
       }
       const definition = servable(item, name);
       if (definition) return { status: 'resolved', entry: entry('permission', definition, 'registry') };
+      // [#32183] A column naming a package that still holds the set but is
+      // disabled confers nothing, and is not stale: the disable is
+      // reversible, and the column binds that package. Never re-targeted to
+      // another holder of the name.
+      let heldDisabled: boolean;
+      try {
+        heldDisabled = registry.isPackageDisabled(exact)
+          && scope.packageScopedHoldersOf('permission', name, null, { includeDisabledPackages: true }).includes(exact);
+      } catch (error) {
+        throw unreadable('registry', 'permission', error);
+      }
+      if (heldDisabled) return { status: 'not-found' };
       // A stale column — the set moved to another package on an upgrade, or
       // was renamed and its name taken by another — is read as an unbound
       // row: the rule below grants the one holder and refuses two, naming
@@ -630,6 +648,15 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
       const definition = servable(outcome.item, name);
       return definition ? { status: 'resolved', entry: entry('permission', definition, 'registry') } : { status: 'not-found' };
     }
+    // [#32183] The registry still holds the name, in disabled packages only:
+    // not-found, never the metadata service's by-name body in their place.
+    let heldOnlyDisabled: boolean;
+    try {
+      heldOnlyDisabled = scope.packageScopedHoldersOf('permission', name, null, { includeDisabledPackages: true }).length > 0;
+    } catch (error) {
+      throw unreadable('registry', 'permission', error);
+    }
+    if (heldOnlyDisabled) return { status: 'not-found' };
     // The registry holds the name nowhere. The metadata service reads by name
     // only, so its body is the environment's: it answers a caller with no
     // package, and for a package's reference it is the D3 (a) refusal, naming
@@ -860,6 +887,7 @@ export function holdsPlatformPermissionSet(engine: unknown, held: HeldPermission
   if (!registry || !PACKAGE_SCOPED_HOLDER_READS.every((member) => typeof registry[member] === 'function')) return true;
   const scope = registry as unknown as SecurityCatalogPackageScopedRegistry;
   let outcome: PackageScopedResolution;
+  let heldOnlyDisabled = false;
   try {
     outcome = resolvePackageScopedHolders(
       { type: 'permission', name, callerPackageId: null },
@@ -870,10 +898,15 @@ export function holdsPlatformPermissionSet(engine: unknown, held: HeldPermission
       },
       (callerPackageId) => packageResolutionClosure(scope, callerPackageId),
     );
+    // [#32183] A name only disabled packages hold is held, and served by no
+    // one: never the environment's by-name answer.
+    if (outcome.status === 'not-found') {
+      heldOnlyDisabled = scope.packageScopedHoldersOf('permission', name, null, { includeDisabledPackages: true }).length > 0;
+    }
   } catch {
     return false;
   }
-  if (outcome.status === 'refused') return false;
+  if (outcome.status === 'refused' || heldOnlyDisabled) return false;
   if (outcome.status !== 'resolved' || outcome.holder.kind !== 'package') return true;
   const packageId = outcome.holder.packageId;
   const disabled = typeof registry.isPackageDisabled === 'function'

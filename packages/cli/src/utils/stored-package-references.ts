@@ -259,9 +259,13 @@ function fieldsOf(reference: StoredPackageReference, packageColumnPresent = true
   return [...fields];
 }
 
-/** Ask the one rule, as the reference's backfill asks it. */
+/**
+ * Ask the one rule, as the reference's backfill asks it: over every holder, a
+ * disabled package's included (#32183), since a binding never moves with a
+ * reversible disable.
+ */
 function ask(registry: StoredReferenceRegistry, type: ReferencedType, name: string, callerPackageId: string | null): PackageScopedResolution {
-  return resolvePackageScopedName(registry, { type, name, callerPackageId });
+  return resolvePackageScopedName(registry, { type, name, callerPackageId, includeDisabledPackages: true });
 }
 
 /** The report's reading of a refusal (module doc). */

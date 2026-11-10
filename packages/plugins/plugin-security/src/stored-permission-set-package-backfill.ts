@@ -140,7 +140,8 @@ export type StoredReferenceHolder =
 
 /** The registry reads the rule is asked over — ObjectQL's `SchemaRegistry` carries every one. */
 export interface PermissionSetHolderRegistry extends PackageClosureRegistry {
-  packageScopedHoldersOf(type: string, name: string, callerPackageId?: string | null): readonly string[];
+  packageScopedHoldersOf(type: string, name: string, callerPackageId?: string | null,
+    options?: { includeDisabledPackages?: boolean }): readonly string[];
   getPackageScopedItem(type: string, name: string, packageId: string): unknown;
   getEnvironmentScopedItem(type: string, name: string): unknown;
 }
@@ -180,7 +181,8 @@ export function permissionSetHolderOf(registry: PermissionSetHolderRegistry): Pe
       resolvePackageScopedHolders(
         { type: 'permission', name, callerPackageId },
         {
-          packageHolders: registry.packageScopedHoldersOf('permission', name, callerPackageId),
+          // [#32183] A binding never moves with a reversible disable: every holder.
+          packageHolders: registry.packageScopedHoldersOf('permission', name, callerPackageId, { includeDisabledPackages: true }),
           packageItem: (packageId) => registry.getPackageScopedItem('permission', name, packageId),
           environmentItem: () => registry.getEnvironmentScopedItem('permission', name),
         },
