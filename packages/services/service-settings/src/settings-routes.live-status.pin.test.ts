@@ -12,6 +12,7 @@ import { SettingsNamespacePayloadSchema } from '@objectstack/spec/system';
 import { SettingsService } from './settings-service.js';
 import { registerSettingsRoutes } from './settings-routes.js';
 import { mailSettingsManifest } from './manifests/mail.manifest.js';
+import { aiSettingsManifest } from './manifests/ai.manifest.js';
 import {
   SETTINGS_LIVE_STATUS_BANNER_ID,
   type SettingsLiveStatus,
@@ -36,15 +37,18 @@ class MockHttp implements IHttpServer {
 
 const admin = () => ({ enforced: true, permissions: ['manage_platform_settings'], userId: 'usr_admin' });
 
-function rig() {
+function rig(
+  manifest = mailSettingsManifest,
+  contextFromRequest: () => Record<string, unknown> = admin,
+) {
   const http = new MockHttp();
   const logger = { warn: vi.fn(), error: vi.fn() };
   const svc = new SettingsService({ env: {}, logger });
-  svc.registerManifest(mailSettingsManifest);
-  registerSettingsRoutes(http, svc, { contextFromRequest: admin });
+  svc.registerManifest(manifest);
+  registerSettingsRoutes(http, svc, { contextFromRequest: contextFromRequest as any });
   const read = async () => {
     const req: IHttpRequest = {
-      params: { namespace: 'mail' }, query: {}, body: undefined, headers: {}, method: 'GET', path: '/',
+      params: { namespace: manifest.namespace }, query: {}, body: undefined, headers: {}, method: 'GET', path: '/',
     };
     const state: { status: number; body?: any } = { status: 200 };
     const res: IHttpResponse = {
@@ -117,5 +121,148 @@ describe('GET /api/settings/:namespace — the live-status statement', () => {
   it('refuses a provider for a namespace that is not registered', () => {
     const { svc } = rig();
     expect(() => svc.registerLiveStatus('nope', () => undefined)).toThrow(UnknownNamespaceError);
+  });
+});
+
+// #32052 — the page also serves, machine-readable, the value a key has in the
+// RUNNING system, as the runtime that decides it states it: the AI runtime's
+// provider may come from saved settings or from boot environment variables,
+// and `values.provider` (what is stored) cannot tell those apart from "none".
+describe('GET /api/settings/:namespace — the live values the runtime states', () => {
+  /** A credential the runtime holds; it must never reach the served body. */
+  const SECRET = 'sk-live-0123456789abcdefSECRET';
+
+  it('serves the runtime\'s value and its source as `live`, beside the banner', async () => {
+    const { svc, read } = rig(aiSettingsManifest);
+    svc.registerLiveStatus('ai', () => ({
+      label: 'Built-in AI: OpenAI', bannerText: 'Detected from the environment.', bannerSeverity: 'info',
+      values: { provider: { value: 'openai', source: 'environment' } },
+    }));
+    const { status, body } = await read();
+    expect(status).toBe(200);
+    expect(body.data.live).toEqual({ provider: { value: 'openai', source: 'environment' } });
+    // Stored and live stay two answers: nothing is saved, the runtime uses OpenAI.
+    expect(body.data.values.provider.value ?? null).toBeNull();
+    expect(body.data.manifest.specifiers[0]).toMatchObject({ type: 'info_banner', id: SETTINGS_LIVE_STATUS_BANNER_ID });
+    expect(SettingsNamespacePayloadSchema.safeParse(body.data).success).toBe(true);
+  });
+
+  it('serves "none" only when the runtime states it, and nothing when nobody states anything', async () => {
+    const { svc, read } = rig(aiSettingsManifest);
+    // No runtime registered (this repo alone): not stated, which is not "none".
+    expect('live' in (await read()).body.data).toBe(false);
+    // A statement with only a banner states no value either.
+    svc.registerLiveStatus('ai', () => ({ label: 'L', bannerText: 't', bannerSeverity: 'info' }));
+    expect('live' in (await read()).body.data).toBe(false);
+    svc.registerLiveStatus('ai', () => ({
+      label: 'The built-in AI is off', bannerText: 'No provider is configured.', bannerSeverity: 'warning',
+      values: { provider: { value: null, source: 'none' } },
+    }));
+    const { body } = await read();
+    expect(body.data.live).toEqual({ provider: { value: null, source: 'none' } });
+    expect(SettingsNamespacePayloadSchema.safeParse(body.data).success).toBe(true);
+  });
+
+  it('⛔ serves only the value and its source: a credential the runtime attaches never leaves', async () => {
+    const { svc, read } = rig(aiSettingsManifest);
+    svc.registerLiveStatus('ai', () => ({
+      label: 'Built-in AI: OpenAI', bannerText: 'Detected from the environment.', bannerSeverity: 'info',
+      values: {
+        provider: { value: 'openai', source: 'environment', apiKey: SECRET, keyPrefix: SECRET.slice(0, 7) },
+      } as any,
+    }));
+    const { status, body } = await read();
+    expect(status).toBe(200);
+    expect(body.data.live).toEqual({ provider: { value: 'openai', source: 'environment' } });
+    expect(JSON.stringify(body)).not.toContain(SECRET);
+    expect(JSON.stringify(body)).not.toContain(SECRET.slice(0, 7));
+  });
+
+  it('⛔ leaves out a value that is not one of the key\'s options, so a credential cannot be served as one', async () => {
+    const { svc, read, logger } = rig(aiSettingsManifest);
+    svc.registerLiveStatus('ai', () => ({
+      label: 'Built-in AI', bannerText: 'In use.', bannerSeverity: 'info',
+      values: { provider: { value: SECRET, source: 'environment' } },
+    }));
+    const { status, body } = await read();
+    expect(status).toBe(200);
+    expect('live' in body.data).toBe(false);
+    expect(JSON.stringify(body)).not.toContain(SECRET);
+    // The banner the runtime stated stands; the dropped value is said once, without itself.
+    expect(body.data.manifest.specifiers[0]).toMatchObject({
+      type: 'info_banner', id: SETTINGS_LIVE_STATUS_BANNER_ID, label: 'Built-in AI', bannerSeverity: 'info',
+    });
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(String(logger.warn.mock.calls[0][0])).toContain("'provider'");
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain(SECRET);
+  });
+
+  it.each([
+    ['a key with no option table (a credential)', { openai_api_key: { value: SECRET, source: 'environment' } }],
+    ['a key with no option table (free text)', { openai_model: { value: 'gpt-4o', source: 'environment' } }],
+    ['a key the namespace does not declare', { api_key: { value: 'openai', source: 'environment' } }],
+    ['a source outside the closed set', { provider: { value: 'openai', source: 'env' } }],
+    ['a value under source "none"', { provider: { value: 'openai', source: 'none' } }],
+    ['no value under a source other than "none"', { provider: { value: null, source: 'settings' } }],
+    ['an entry that is not { value, source }', { provider: 'openai' }],
+  ])('leaves out an entry naming %s, keeping the stated banner', async (_what, values) => {
+    const { svc, read, logger } = rig(aiSettingsManifest);
+    svc.registerLiveStatus('ai', () => ({
+      label: 'Built-in AI', bannerText: 'In use.', bannerSeverity: 'info', values: values as any,
+    }));
+    const { status, body } = await read();
+    expect(status).toBe(200);
+    expect('live' in body.data).toBe(false);
+    expect(JSON.stringify(body)).not.toContain(SECRET);
+    expect(body.data.manifest.specifiers[0]).toMatchObject({
+      id: SETTINGS_LIVE_STATUS_BANNER_ID, label: 'Built-in AI', bannerSeverity: 'info',
+    });
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain(SECRET);
+  });
+
+  it('serves the valid entry and drops only the invalid one beside it', async () => {
+    const { svc, read, logger } = rig(aiSettingsManifest);
+    svc.registerLiveStatus('ai', () => ({
+      label: 'Built-in AI: Anthropic', bannerText: 'Saved in settings.', bannerSeverity: 'success',
+      values: {
+        provider: { value: 'anthropic', source: 'settings' },
+        embedder_provider: { value: SECRET, source: 'environment' },
+      },
+    }));
+    const { status, body } = await read();
+    expect(status).toBe(200);
+    expect(body.data.live).toEqual({ provider: { value: 'anthropic', source: 'settings' } });
+    expect(body.data.manifest.specifiers[0]).toMatchObject({
+      id: SETTINGS_LIVE_STATUS_BANNER_ID, label: 'Built-in AI: Anthropic', bannerSeverity: 'success',
+    });
+    expect(JSON.stringify(body)).not.toContain(SECRET);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(String(logger.warn.mock.calls[0][0])).toContain("'embedder_provider'");
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain(SECRET);
+    expect(SettingsNamespacePayloadSchema.safeParse(body.data).success).toBe(true);
+  });
+
+  it('serves no live values when the provider throws: the error banner alone', async () => {
+    const { svc, read } = rig(aiSettingsManifest);
+    svc.registerLiveStatus('ai', () => { throw new Error('boom'); });
+    const { body } = await read();
+    expect('live' in body.data).toBe(false);
+    expect(body.data.manifest.specifiers[0]).toMatchObject({ id: SETTINGS_LIVE_STATUS_BANNER_ID, bannerSeverity: 'error' });
+  });
+
+  it('⛔ is behind the page\'s own gate: a caller without its read permission is refused and the runtime is never asked', async () => {
+    const provider = vi.fn(() => ({
+      label: 'Built-in AI: OpenAI', bannerText: 'Detected from the environment.', bannerSeverity: 'info' as const,
+      values: { provider: { value: 'openai', source: 'environment' as const } },
+    }));
+    const member = () => ({ enforced: true, permissions: ['setup.access'], userId: 'usr_member' });
+    const { svc, read } = rig(aiSettingsManifest, member);
+    svc.registerLiveStatus('ai', provider);
+    const { status, body } = await read();
+    expect(status).toBe(403);
+    expect(body.error?.code ?? body.code).toBe('SETTINGS_FORBIDDEN');
+    expect(JSON.stringify(body)).not.toContain('openai');
+    expect(provider).not.toHaveBeenCalled();
   });
 });

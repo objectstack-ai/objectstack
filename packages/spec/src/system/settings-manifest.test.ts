@@ -774,6 +774,32 @@ describe('SettingsNamespacePayloadSchema', () => {
     });
     expect(parsed.values.smtp_host.value).toBe('smtp.example.com');
   });
+
+  const aiPage = {
+    manifest: {
+      namespace: 'ai',
+      label: 'AI',
+      specifiers: [{ type: 'select', key: 'provider', label: 'Provider', required: false }],
+    },
+    values: { provider: { value: null, source: 'default', locked: false } },
+  };
+
+  it('accepts the live values a runtime states, and a payload without them', () => {
+    const parsed = SettingsNamespacePayloadSchema.parse({
+      ...aiPage,
+      live: { provider: { value: 'openai', source: 'environment' } },
+    });
+    expect(parsed.live?.provider).toEqual({ value: 'openai', source: 'environment' });
+    expect(SettingsNamespacePayloadSchema.parse({ ...aiPage, live: { provider: { value: null, source: 'none' } } }).live)
+      .toEqual({ provider: { value: null, source: 'none' } });
+    expect(SettingsNamespacePayloadSchema.parse(aiPage).live).toBeUndefined();
+  });
+
+  it('refuses a live value outside the closed source set', () => {
+    expect(
+      SettingsNamespacePayloadSchema.safeParse({ ...aiPage, live: { provider: { value: 'openai', source: 'env' } } }).success,
+    ).toBe(false);
+  });
 });
 
 describe('SettingsActionResultSchema', () => {

@@ -60,6 +60,7 @@ export {
   type SettingsActionHandler,
   type SettingsLiveStatus,
   type SettingsLiveStatusProvider,
+  type SettingsLiveValue,
   // The options a select key serves from the running system, not its manifest.
   type SettingsOptionSource,
   type SettingsOptionSourceAnswer,

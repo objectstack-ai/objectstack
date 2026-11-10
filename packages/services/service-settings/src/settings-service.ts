@@ -34,6 +34,7 @@ import {
   type SettingsActionHandler,
   type SettingsLiveStatus,
   type SettingsLiveStatusProvider,
+  type SettingsLiveValue,
   type SettingsOptionSource,
   type SettingsOptionSourceAnswer,
   type SettingsWritePredicate,
@@ -2191,21 +2192,37 @@ export class SettingsService {
   /**
    * The namespace's live-status statement as an `info_banner` specifier, ready
    * to head the page, or `undefined` when no provider is registered or the
-   * provider has nothing to state.
-   *
-   * Asked on every page read and never cached, so the statement follows a
-   * runtime swap (a transport rebuilt from this very namespace). A provider
-   * that throws is not passed over in silence: the page then says the live
-   * status could not be read, because a missing statement reads as "nothing
-   * to worry about".
+   * provider has nothing to state. The banner half of {@link liveStatementOf}.
    */
   async liveStatusOf(
     namespace: string,
     ctx: SettingsContext = {},
     display: SettingsDisplayOptions = {},
   ): Promise<SettingsManifest['specifiers'][number] | undefined> {
+    return (await this.liveStatementOf(namespace, ctx, display)).banner;
+  }
+
+  /**
+   * The namespace's live-status statement, from ONE call of its provider: the
+   * `info_banner` specifier that heads the page (`banner`), and the values its
+   * keys have in the running system (`live`, see {@link SettingsLiveStatus.values}).
+   * Both are absent when no provider is registered or it has nothing to state;
+   * `live` is absent too when the statement names no values.
+   *
+   * Asked on every page read and never cached, so the statement follows a
+   * runtime swap (a transport rebuilt from this very namespace). A provider
+   * that throws is not passed over in silence: the page then says the live
+   * status could not be read, because a missing statement reads as "nothing
+   * to worry about". A stated value the page cannot serve is left out of
+   * `live` and logged once, without the value ({@link servedLiveValues}).
+   */
+  async liveStatementOf(
+    namespace: string,
+    ctx: SettingsContext = {},
+    display: SettingsDisplayOptions = {},
+  ): Promise<{ banner?: SettingsManifest['specifiers'][number]; live?: Record<string, SettingsLiveValue> }> {
     const provider = this.liveStatusProviders.get(namespace);
-    if (!provider) return undefined;
+    if (!provider) return {};
     let status: SettingsLiveStatus | undefined;
     try {
       status = await provider({
@@ -2226,8 +2243,19 @@ export class SettingsService {
         bannerSeverity: 'error',
       };
     }
-    if (!status) return undefined;
-    return {
+    let live: Record<string, SettingsLiveValue> | undefined;
+    if (status?.values !== undefined) {
+      const { served, dropped } = this.servedLiveValues(namespace, status.values);
+      if (dropped.length > 0) {
+        this.logger?.warn?.(
+          `SettingsService: the live status of settings namespace '${namespace}' states values this page `
+          + `cannot serve; they are left out, so those keys read as not stated: ${dropped.join('; ')}`,
+        );
+      }
+      if (Object.keys(served).length > 0) live = served;
+    }
+    if (!status) return {};
+    const banner = {
       type: 'info_banner',
       id: SETTINGS_LIVE_STATUS_BANNER_ID,
       label: status.label,
@@ -2235,6 +2263,60 @@ export class SettingsService {
       bannerText: status.bannerText,
       bannerSeverity: status.bannerSeverity,
     } as SettingsManifest['specifiers'][number];
+    return live ? { banner, live } : { banner };
+  }
+
+  /**
+   * The live values a provider stated, as the page serves them: each entry
+   * rebuilt from its `value` and `source` alone, so nothing else a runtime
+   * attaches (a key it holds, a prefix of one) is ever served. An entry that
+   * is not servable is left out and named in `dropped`, by its key and why,
+   * never by its value: the key is not an option-bearing key of the
+   * namespace, the value is not one its option table admits, or `value` and
+   * `source` disagree about "none". The value is kept out of `dropped`
+   * because an entry this wrong may be carrying the very credential the rule
+   * keeps off the page.
+   */
+  private servedLiveValues(
+    namespace: string,
+    values: unknown,
+  ): { served: Record<string, SettingsLiveValue>; dropped: string[] } {
+    const served: Record<string, SettingsLiveValue> = {};
+    const dropped: string[] = [];
+    if (!values || typeof values !== 'object' || Array.isArray(values)) {
+      return { served, dropped: ['the live values are not an object keyed by setting key'] };
+    }
+    const reg = this.registry.get(namespace);
+    for (const [key, entry] of Object.entries(values as Record<string, unknown>)) {
+      const why = this.liveValueMiss(namespace, reg, key, entry);
+      if (why) {
+        dropped.push(`'${key}' ${why}`);
+        continue;
+      }
+      const { value, source } = entry as SettingsLiveValue;
+      served[key] = { value, source };
+    }
+    return { served, dropped };
+  }
+
+  /** Why one stated live value cannot be served, or `undefined` when it can. */
+  private liveValueMiss(
+    namespace: string,
+    reg: RegisteredManifest | undefined,
+    key: string,
+    entry: unknown,
+  ): string | undefined {
+    if (!reg?.scopes.has(key)) return 'is not a key of this namespace';
+    const table = this.optionTableOf(namespace, key, reg.optionTables.get(key) ?? []);
+    if (!table.sourced && table.allowed.length === 0) return 'has no option table to serve a value from';
+    if (!entry || typeof entry !== 'object') return 'is not stated as { value, source }';
+    const { value, source } = entry as { value?: unknown; source?: unknown };
+    if (source !== 'settings' && source !== 'environment' && source !== 'none') {
+      return "names no source this page serves ('settings', 'environment' or 'none')";
+    }
+    if (source === 'none') return value === null ? undefined : "states a value under source 'none'";
+    if (typeof value !== 'string' || table.judge(value) !== null) return 'states a value that is not one of its options';
+    return undefined;
   }
 
   // ---------------------------------------------------------------------

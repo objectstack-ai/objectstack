@@ -308,15 +308,25 @@ export function registerSettingsRoutes(
       // `getNamespace`, which in-process consumers call to read values: the
       // mail plugin reads `getNamespace('mail')` while rebuilding the very
       // transport its statement waits on.
-      const liveStatus = await service.liveStatusOf(ns, ctx, { locale: requestLocaleOf(req) });
-      const manifest = liveStatus
-        ? { ...payload.manifest, specifiers: [liveStatus, ...payload.manifest.specifiers] }
+      //
+      // [#32052] The same statement may state the value a key has in the
+      // running system (`live`): machine-readable, beside `values`, which only
+      // says what is stored. Served after `getNamespace`, so behind the page's
+      // own read gate; absent when nothing states it ("unknown", not "none").
+      const { banner, live } = await service.liveStatementOf(ns, ctx, { locale: requestLocaleOf(req) });
+      const manifest = banner
+        ? { ...payload.manifest, specifiers: [banner, ...payload.manifest.specifiers] }
         : payload.manifest;
       // #7522 — redact BEFORE the payload leaves the process. `values.<key>.value`
       // and every `cascadeChain` entry of a secret-backed key are masked;
       // `source`, `locked` and `lockedReason` are untouched, so the console's
       // "configured" state and the env-lock affordances read the same as before.
-      sendOk(res, { ...payload, manifest, values: redactSecretValues(payload.values, service.secretKeysOf(ns)) });
+      sendOk(res, {
+        ...payload,
+        manifest,
+        values: redactSecretValues(payload.values, service.secretKeysOf(ns)),
+        ...(live ? { live } : {}),
+      });
     },
     refuse(res, err) {
       if (err instanceof SettingsForbiddenError) {
