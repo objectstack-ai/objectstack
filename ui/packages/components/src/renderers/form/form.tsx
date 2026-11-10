@@ -1377,8 +1377,12 @@ function stripRegisteredFieldProps(type: string, props: RenderFieldProps): Rende
 /** The registered widgets whose pick writes `lookupAutofill` targets through `onAutofill`. */
 const LOOKUP_AUTOFILL_WIDGET_TYPES: ReadonlySet<string> = new Set(['lookup', 'master_detail']);
 
-/** The registered widgets that fire `onInvalidInputChange`: the date picker's two faces. */
-const INVALID_INPUT_REPORTING_WIDGET_TYPES: ReadonlySet<string> = new Set(['date', 'datetime']);
+/**
+ * The registered widgets that fire `onInvalidInputChange`: the date picker's two
+ * faces, and the location box, whose refused coordinate text is never written
+ * (objectstack#32139).
+ */
+const INVALID_INPUT_REPORTING_WIDGET_TYPES: ReadonlySet<string> = new Set(['date', 'datetime', 'location']);
 
 /**
  * FullscreenTextarea — `<Textarea>` with a top-right "expand" button that

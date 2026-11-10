@@ -9,6 +9,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createAuthenticatedFetch, ActiveOrganizationStorage } from '../createAuthenticatedFetch';
 import { TokenStorage } from '../createAuthClient';
+import { sessionEndEvents } from '../session-end-events';
 
 const API_URL = 'http://localhost/api/v1/meta/object/account';
 
@@ -157,5 +158,45 @@ describe('createAuthenticatedFetch', () => {
     const calls = stubFetch();
     await createAuthenticatedFetch()(API_URL, { headers: { 'X-Tenant-ID': 'org-caller' } });
     expect(calls[0].headers.get('X-Tenant-ID')).toBe('org-42');
+  });
+});
+
+describe('a 401 on an API call is reported as a possible session end (objectstack#32138)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function answer(status: number) {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status })));
+  }
+
+  it('reports a 401 answered to an API call, and still hands the caller the response', async () => {
+    const heard = vi.fn();
+    const unsubscribe = sessionEndEvents.subscribe(heard);
+    answer(401);
+    const res = await createAuthenticatedFetch()(API_URL);
+    unsubscribe();
+    expect(heard).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(401);
+  });
+
+  it.each([200, 403, 404, 500])('reports nothing for a %i', async (status) => {
+    const heard = vi.fn();
+    const unsubscribe = sessionEndEvents.subscribe(heard);
+    answer(status);
+    await createAuthenticatedFetch()(API_URL);
+    unsubscribe();
+    expect(heard).not.toHaveBeenCalled();
+  });
+
+  it('reports nothing for a 401 from a non-API URL, nor from a cross-origin URL under sameOriginOnly', async () => {
+    const heard = vi.fn();
+    const unsubscribe = sessionEndEvents.subscribe(heard);
+    answer(401);
+    await createAuthenticatedFetch()('http://localhost/static/logo.png');
+    await createAuthenticatedFetch({ sameOriginOnly: true })('https://partner.example.com/api/v1/x');
+    unsubscribe();
+    expect(heard).not.toHaveBeenCalled();
   });
 });

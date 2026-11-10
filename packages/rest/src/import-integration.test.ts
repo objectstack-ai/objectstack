@@ -31,6 +31,7 @@ import { MetadataManager } from '@objectstack/metadata';
 import { RestServer } from './rest-server';
 import { loadExcelJs } from './xlsx-module.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
+import { resolveNamedMapping } from './import-mapping.js';
 
 // ---------------------------------------------------------------------------
 // The real backend: better-sqlite3 `:memory:`, constructed the canonical way
@@ -624,6 +625,55 @@ describe('import route — named mapping artifact (#2611)', () => {
     const res = await call(route, { format: 'csv', csv: 'ID\nx', mappingName: 'task_json_mapping' });
     expect(res._status).toBe(400);
     expect(res._json.code).toBe('MAPPING_FORMAT_MISMATCH');
+  });
+
+  // [#32071, ADR-0150 D3] `mapping` is addressed by `(package, name)`, and the
+  // door names no package: a name two packages hold is refused naming both,
+  // and one holder answers as before — including one package's mapping into
+  // an object another package (or none) owns.
+  describe('a mapping name held by packages (#32071)', () => {
+    const ALPHA = 'com.acme.alpha';
+    const BETA = 'com.acme.beta';
+    const shipMapping = (packageId: string) => {
+      engine.registry.installPackage(
+        { id: packageId, name: packageId, version: '1.0.0', namespace: packageId.split('.').pop() } as any, 'code',
+      );
+      engine.registry.registerItem(
+        'mapping',
+        { ...TASK_CSV_MAPPING, name: 'task_pkg_feed', label: `${packageId} feed` } as any,
+        'name',
+        packageId,
+      );
+    };
+    const CSV = 'ID,Task Title\nk1,一';
+
+    it('two holders: 409 RESOURCE_CONFLICT naming both, never 404 and never the first holder; nothing written', async () => {
+      shipMapping(ALPHA);
+      shipMapping(BETA);
+      const res = await call(route, { format: 'csv', csv: CSV, mappingName: 'task_pkg_feed' });
+      expect(res._status).toBe(409);
+      expect(res._json.code).toBe('RESOURCE_CONFLICT');
+      expect(res._json.error).toContain(ALPHA);
+      expect(res._json.error).toContain(BETA);
+      expect(await engine.findOne('task', { where: { id: 'k1' } })).toBeFalsy();
+    });
+
+    it('a refusal recognised by shape (a plain object, no class): answered with its own 409 and sentence, never 404', async () => {
+      const message = `The mapping 'task_pkg_feed' is held by ${ALPHA} and ${BETA}. Nothing picks one of them: address it by its package.`;
+      const res = await resolveNamedMapping(
+        { getMetaItem: () => Promise.reject({ code: 'RESOURCE_CONFLICT', status: 409, message, refusal: { status: 'refused', message } }) },
+        { mappingName: 'task_pkg_feed', objectName: 'task', detectedFormat: 'csv' },
+      );
+      expect(res).toEqual({ ok: false, status: 409, code: 'RESOURCE_CONFLICT', error: message });
+    });
+
+    it('CONTROL: one package holder of a mapping into an object no package owns imports as before', async () => {
+      shipMapping(ALPHA);
+      const res = await call(route, { format: 'csv', csv: CSV, mappingName: 'task_pkg_feed' });
+      expect(res._status).toBeUndefined(); // the success answer sets no status: 200
+      expect(res._json).toMatchObject({ total: 1, ok: 1 });
+      expect(await engine.findOne('task', { where: { id: 'k1' } })).toMatchObject({ title: '一' });
+    });
   });
 });
 
