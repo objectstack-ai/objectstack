@@ -22,6 +22,7 @@ import {
   fieldPermissionVote,
   holdsSuperuserBypass,
   registryObjectPackageDisabled,
+  servedObjectPermissions,
 } from './effective-object-permissions.js';
 
 describe('buildEffectiveObjectPermissions', () => {
@@ -273,25 +274,24 @@ describe('[#20134] super-user wildcard: every bit it grants, per set', () => {
   });
 
   it('a set that names the object contributes its explicit entry, never its own wildcard\'s grants', () => {
-    // The wildcard carries edit beside its transfer grant: `transfer` follows edit.
     const map: any = buildEffectiveObjectPermissions(
-      [{ objects: { '*': { viewAllRecords: true, allowEdit: true, allowTransfer: true }, crm_account: { allowRead: true } } }],
+      [{ objects: { '*': { viewAllRecords: true, allowTransfer: true }, crm_account: { allowRead: true } } }],
       source,
     );
     expect(map.crm_account).not.toHaveProperty('allowTransfer');
-    expect(map.crm_lead).toMatchObject({ allowRead: true, allowEdit: true, allowTransfer: true });
+    expect(map.crm_lead).toMatchObject({ allowRead: true, allowTransfer: true });
   });
 
   it('ANOTHER set\'s super-user wildcard widens a present entry, bit by bit', () => {
     const map: any = buildEffectiveObjectPermissions(
       [
         { objects: { crm_account: { allowRead: true } } },
-        { objects: { '*': { viewAllRecords: true, allowEdit: true, allowTransfer: true, allowExport: true } } },
+        { objects: { '*': { viewAllRecords: true, allowTransfer: true, allowExport: true } } },
       ],
       source,
     );
     // Unrestricted and export-allowed, so annotate has nothing to add to it.
-    expect(map.crm_account).toEqual({ allowRead: true, allowEdit: true, allowTransfer: true, allowExport: true });
+    expect(map.crm_account).toEqual({ allowRead: true, allowTransfer: true, allowExport: true });
   });
 
   it('a super-user wildcard carrying `allowExport` seeds every registered object — annotate keeps its own skip', () => {
@@ -644,9 +644,11 @@ describe('[#30440] a guarded managed object grants no verb its write guard refus
     expect(can(map.sys_feed_note)).toEqual({ allowRead: true, allowCreate: false, allowEdit: true, allowDelete: true, allowTransfer: true });
   });
 
-  it('a plain allowTransfer with edit on an object not opting edit in answers no transfer; opting edit in keeps it', () => {
-    const entry = { allowRead: true, allowEdit: true, allowTransfer: true };
-    const map: any = buildEffectiveObjectPermissions([{ objects: { sys_automation_run: entry, sys_user: entry } }], source);
+  it('a plain allowTransfer on an object not opting edit in answers no transfer; opting edit in keeps it', () => {
+    const map: any = buildEffectiveObjectPermissions(
+      [{ objects: { sys_automation_run: { allowRead: true, allowTransfer: true }, sys_user: { allowRead: true, allowTransfer: true } } }],
+      source,
+    );
     expect(objectPermissionGrants(map.sys_automation_run, 'allowTransfer')).toBe(false);
     expect(objectPermissionGrants(map.sys_automation_run, 'allowRead')).toBe(true);
     expect(objectPermissionGrants(map.sys_user, 'allowTransfer')).toBe(true);
@@ -674,12 +676,14 @@ describe('[#30440] a guarded managed object grants no verb its write guard refus
 });
 
 /**
- * [Ruling of record 6755714726 on #32004] The map's `transfer` answers whether
- * the record could be edited and its owner changed — the answer
- * `security.explain` gives — so `allowTransfer` reads `true` only with edit, on
- * every object: a guarded managed object opting `edit` in, and an ordinary one.
+ * [Ruling of record 6755714726 on #32004] The SERVED slot's `transfer` answers
+ * whether the record could be edited and its owner changed — the answer
+ * `security.explain` gives — so `servedObjectPermissions` reads `allowTransfer`
+ * `true` only with edit, on every object: a guarded managed object opting `edit`
+ * in, and an ordinary one. The map `buildEffectiveObjectPermissions` builds —
+ * the one `current_user.can()` reads — keeps the transfer grant as granted.
  */
-describe('a transfer is granted only with edit, on every object', () => {
+describe('the served slot grants a transfer only with edit, on every object; the base map keeps the grant', () => {
   const SCHEMAS: Record<string, any> = {
     sys_user: { name: 'sys_user', managedBy: 'better-auth', userActions: { edit: true } },
     crm_lead: { name: 'crm_lead' },
@@ -694,39 +698,58 @@ describe('a transfer is granted only with edit, on every object', () => {
 
   for (const [label, entry, transfers] of SHAPES) {
     for (const object of Object.keys(SCHEMAS)) {
-      it(`${label} on ${object}: transfer ${transfers}`, () => {
-        const map: any = buildEffectiveObjectPermissions([{ objects: { [object]: { ...entry } } }], source);
-        expect(objectPermissionGrants(map[object], 'allowTransfer')).toBe(transfers);
-        // Every other verb reads as the entry granted it.
-        expect(objectPermissionGrants(map[object], 'allowEdit')).toBe(entry.allowEdit === true);
-        expect(objectPermissionGrants(map[object], 'allowRead')).toBe(entry.allowRead === true);
+      it(`${label} on ${object}: served transfer ${transfers}, base transfer as granted`, () => {
+        const base: any = buildEffectiveObjectPermissions([{ objects: { [object]: { ...entry } } }], source);
+        const served: any = servedObjectPermissions(base);
+        expect(objectPermissionGrants(served[object], 'allowTransfer')).toBe(transfers);
+        expect(objectPermissionGrants(base[object], 'allowTransfer')).toBe(entry.allowTransfer === true);
+        // Every other verb reads as the entry granted it, in both.
+        for (const map of [base, served]) {
+          expect(objectPermissionGrants(map[object], 'allowEdit')).toBe(entry.allowEdit === true);
+          expect(objectPermissionGrants(map[object], 'allowRead')).toBe(entry.allowRead === true);
+        }
       });
     }
   }
 
   it('edit from one set and the transfer grant from another compose', () => {
-    const map: any = buildEffectiveObjectPermissions(
+    const served: any = servedObjectPermissions(buildEffectiveObjectPermissions(
       [{ objects: { crm_lead: { allowRead: true, allowEdit: true } } }, { objects: { crm_lead: { allowTransfer: true } } }],
       source,
-    );
-    expect(objectPermissionGrants(map.crm_lead, 'allowTransfer')).toBe(true);
+    ));
+    expect(objectPermissionGrants(served.crm_lead, 'allowTransfer')).toBe(true);
   });
 
-  it('a plain wildcard\'s transfer grant follows its edit, the `*` entry included', () => {
-    const map: any = buildEffectiveObjectPermissions([{ objects: { '*': { allowRead: true, allowTransfer: true } } }], source);
-    expect(objectPermissionGrants(map['*'], 'allowTransfer')).toBe(false);
-    expect(objectPermissionGrants(map.crm_lead, 'allowTransfer')).toBe(false);
-    expect(objectPermissionGrants(map.crm_lead, 'allowRead')).toBe(true);
+  it('a plain wildcard\'s transfer grant follows its edit in the served slot, the `*` entry included', () => {
+    const served: any = servedObjectPermissions(
+      buildEffectiveObjectPermissions([{ objects: { '*': { allowRead: true, allowTransfer: true } } }], source),
+    );
+    expect(objectPermissionGrants(served['*'], 'allowTransfer')).toBe(false);
+    expect(objectPermissionGrants(served.crm_lead, 'allowTransfer')).toBe(false);
+    expect(objectPermissionGrants(served.crm_lead, 'allowRead')).toBe(true);
+  });
+
+  it('the served slot differs from the base map in that one bit alone, and never mutates it', () => {
+    const base: any = buildEffectiveObjectPermissions(
+      [{ objects: { crm_lead: { allowRead: true, allowTransfer: true }, sys_user: { allowRead: true } } }],
+      source,
+    );
+    const before = JSON.stringify(base);
+    const served: any = servedObjectPermissions(base);
+    expect(JSON.stringify(base)).toBe(before);
+    expect(served.crm_lead).toEqual({ ...base.crm_lead, allowTransfer: false });
+    expect(served.sys_user).toEqual(base.sys_user);
+    expect(served.crm_lead).not.toBe(base.crm_lead);
   });
 
   it('an entry that carries no transfer grant gains no key', () => {
-    const map: any = buildEffectiveObjectPermissions([{ objects: { crm_lead: { allowRead: true } } }], source);
-    expect(map.crm_lead).not.toHaveProperty('allowTransfer');
+    const served: any = servedObjectPermissions(buildEffectiveObjectPermissions([{ objects: { crm_lead: { allowRead: true } } }], source));
+    expect(served.crm_lead).not.toHaveProperty('allowTransfer');
   });
 
-  it('CONTROL: modifyAllRecords grants edit, so it keeps transfer', () => {
-    const map: any = buildEffectiveObjectPermissions([{ objects: { crm_lead: { modifyAllRecords: true } } }], source);
-    expect(objectPermissionGrants(map.crm_lead, 'allowTransfer')).toBe(true);
+  it('CONTROL: modifyAllRecords grants edit, so the served slot keeps transfer', () => {
+    const served: any = servedObjectPermissions(buildEffectiveObjectPermissions([{ objects: { crm_lead: { modifyAllRecords: true } } }], source));
+    expect(objectPermissionGrants(served.crm_lead, 'allowTransfer')).toBe(true);
   });
 });
 

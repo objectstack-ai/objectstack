@@ -853,7 +853,10 @@ export interface ISecurityService {
    * effective API-operation set annotated. Byte-for-byte the `objects` slot of
    * the published `/auth/me/permissions` response
    * (`GetEffectivePermissionsResponseSchema`), because it is the same answer
-   * computed once rather than twice.
+   * computed once rather than twice — but for one bit the served slot derives
+   * from it: there, `allowTransfer` follows edit (ruling of record 6755714726,
+   * a client-hint carrier), while this map keeps the transfer grant the
+   * predicate reads.
    *
    * **Why the map, when {@link resolvePermissionSetsForContext} already hands
    * over the sets.** That method's note — the merge stays with the CALLER,

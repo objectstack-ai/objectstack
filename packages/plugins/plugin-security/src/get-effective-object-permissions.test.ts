@@ -29,7 +29,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { buildEffectiveObjectPermissions, engineExternalWriteForbidden, registryObjectPackageDisabled } from '@objectstack/core';
+import { buildEffectiveObjectPermissions, engineExternalWriteForbidden, registryObjectPackageDisabled, servedObjectPermissions } from '@objectstack/core';
 import { ExpressionEngine, toEvalPermissions } from '@objectstack/formula';
 import { SysAttachment, SysMember, SysSecret, SysUser, SysUserPreference } from '@objectstack/platform-objects';
 import type { ISecurityService } from '@objectstack/spec/contracts';
@@ -356,9 +356,6 @@ describe('[#18783] the engine is handed the same producer', () => {
  *    model. There the pin holds the refuse direction only — the map never grants
  *    what the evaluator refuses. [#30440] `transfer` is one of them: an owner
  *    change is an update, which the guard refuses unless the object opts `edit` in.
- *  - [Ruling of record 6755714726 on #32004] `transfer` is compared with the
- *    owner-change door's two halves, edit AND the evaluator's `transfer` cell:
- *    the map grants a transfer only with edit, on every object.
  *
  * [#20134] Subjects whose sets carry a SUPER-USER wildcard are held by the same
  * table, one row per shape: the shipped platform admin and walled org admin, a
@@ -531,13 +528,7 @@ describe('[#20083] parity: can() over the member\'s map answers what checkObject
         for (const verb of OBJECT_PERMISSION_VERB_NAMES) {
           const target = resolveObjectPermissionVerb(verb)!;
           const map = can(permissions, schema.name, verb);
-          // [Ruling of record 6755714726 on #32004] The map's `transfer` is the
-          // owner-change door's answer: edit AND the transfer grant the
-          // evaluator's `transfer` cell reads.
-          const server = target === 'allowTransfer'
-            ? evaluator.checkObjectPermission('transfer', schema.name, sets, { isPrivate })
-              && evaluator.checkObjectPermission('update', schema.name, sets, { isPrivate })
-            : evaluator.checkObjectPermission(OPERATION[target], schema.name, sets, { isPrivate });
+          const server = evaluator.checkObjectPermission(OPERATION[target], schema.name, sets, { isPrivate });
           cells += 1;
           if (map === server) continue;
           // The managed-write clamp may only NARROW, and only on its own verbs.
@@ -697,5 +688,49 @@ describe('[#20083] parity: can() over the member\'s map answers what checkObject
     // …and the private object stays out of a plain wildcard's reach on both sides.
     expect(evaluator.checkObjectPermission('find', 'crm_secret', sets, { isPrivate: true })).toBe(false);
     expect(can(permissions, 'crm_secret', 'read')).toBe(false);
+  });
+});
+
+/**
+ * [Ruling of record 6755714726 on #32004] The ruling aligns explain, the client
+ * hint and ADR-0142's text with the owner-change door, and leaves enforcement
+ * unchanged. `current_user.can(object, 'transfer')` is a server-side predicate
+ * (an option's `visibleWhen`, a CEL `defaultValue`, a `formula`), not a
+ * carrier: it keeps the transfer grant the evaluator's `transfer` cell reads,
+ * while the slot `/auth/me/permissions` serves (`servedObjectPermissions`)
+ * reads `allowTransfer` only with edit.
+ */
+describe('a transfer grant without edit: can() in an expression keeps it, the served hint does not', () => {
+  const OBJECTS: Record<string, any> = {
+    crm_account: { name: 'crm_account', label: 'Account', fields: { name: { type: 'text' } } },
+  };
+  const evaluate = (permissions: ReturnType<typeof toEvalPermissions>, source: string) =>
+    ExpressionEngine.evaluate<boolean>({ dialect: 'cel', source }, { user: { id: 'u_transfer' }, permissions } as any);
+
+  for (const [label, entry] of [
+    ['the transfer grant alone', { allowTransfer: true }],
+    ['read and the transfer grant', { allowRead: true, allowTransfer: true }],
+  ] as const) {
+    it(`${label}: can(object, 'transfer') is true in an expression, /me/permissions serves allowTransfer false`, async () => {
+      const sets = [PermissionSetSchema.parse({ name: 'transfer_no_edit', label: 'transfer_no_edit', objects: { crm_account: entry } })];
+      const { svc, plugin } = await locate({ schemas: OBJECTS });
+      vi.spyOn(plugin as any, 'resolvePermissionSetsForContext').mockResolvedValue(sets);
+      const map: any = await svc.getEffectiveObjectPermissions!({ userId: 'u_transfer' });
+
+      expect(evaluate(toEvalPermissions(map), "current_user.can('crm_account', 'transfer')")).toMatchObject({ ok: true, value: true });
+      expect(new PermissionEvaluator().checkObjectPermission('transfer', 'crm_account', sets)).toBe(true);
+      expect(servedObjectPermissions(map).crm_account.allowTransfer).toBe(false);
+    });
+  }
+
+  it('CONTROL: edit and the transfer grant answer true in both', async () => {
+    const sets = [PermissionSetSchema.parse({
+      name: 'edit_transfer', label: 'edit_transfer', objects: { crm_account: { allowRead: true, allowEdit: true, allowTransfer: true } },
+    })];
+    const { svc, plugin } = await locate({ schemas: OBJECTS });
+    vi.spyOn(plugin as any, 'resolvePermissionSetsForContext').mockResolvedValue(sets);
+    const map: any = await svc.getEffectiveObjectPermissions!({ userId: 'u_transfer' });
+    expect(evaluate(toEvalPermissions(map), "current_user.can('crm_account', 'transfer')")).toMatchObject({ ok: true, value: true });
+    expect(servedObjectPermissions(map).crm_account.allowTransfer).toBe(true);
   });
 });
