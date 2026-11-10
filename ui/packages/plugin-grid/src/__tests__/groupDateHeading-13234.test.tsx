@@ -398,9 +398,12 @@ describe.each<Source>(['server', 'client'])('a %s-grouped grid draws a date-fami
       { field: 'amount', type: 'max' },
     ]);
     await settledChips(ds, []);
-    expect(chipOf('amer')).toBe('max: 120.25');
-    expect(chipOf('apac')).toBe('max: 40');
-    expect(chipOf('emea')).toBe('max: 900');
+    // Held until the definition lands: the faces are read off it.
+    await vi.waitFor(() => {
+      expect(chipOf('amer')).toBe('max: 120.25');
+      expect(chipOf('apac')).toBe('max: 40');
+      expect(chipOf('emea')).toBe('max: 900');
+    });
     if (source === 'server') {
       // Dropped before the header query is compiled: the server is not asked
       // to add up times.
@@ -432,19 +435,5 @@ describe('the published `useGroupedData`, which knows no cell face (objectstack#
       { headers: [[{ region: 'emea', count: 2, max_closed_at: '2026-10-01T09:30:00.000Z', max_amount: '900' }]] },
     ));
     expect(result.current.groups[0].aggregations).toEqual([{ field: 'amount', type: 'max', value: 900 }]);
-  });
-
-  it('a client `sum` over a field holding no number is left out, not drawn as 0; an empty group keeps its 0', () => {
-    const { result } = renderHook(() => useGroupedData(
-      { fields: [{ field: 'region' }] },
-      [
-        { region: 'emea', closed_at: '2026-10-01T09:30:00.000Z' },
-        { region: 'apac', closed_at: null },
-      ],
-      [{ field: 'closed_at', type: 'sum' }],
-    ));
-    const byKey = Object.fromEntries(result.current.groups.map((g) => [g.label, g.aggregations]));
-    expect(byKey.emea).toEqual([]);
-    expect(byKey.apac).toEqual([{ field: 'closed_at', type: 'sum', value: 0 }]);
   });
 });

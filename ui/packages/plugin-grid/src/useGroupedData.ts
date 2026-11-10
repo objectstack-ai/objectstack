@@ -226,19 +226,13 @@ function temporalAggregateOf(
   return { field, type, value: instant, display };
 }
 
-/** Whether `value` is a stored value at all (not an empty cell). */
-function isFilled(value: unknown): boolean {
-  return value !== null && value !== undefined && value !== '';
-}
-
 /**
  * Compute aggregation results for a set of rows.
  *
  * A `min` / `max` over a date-family field (`temporal`) is the extreme
  * instant, drawn as the cell draws it, and `null` over a group with no time
- * in it. A numeric aggregate over a field whose filled values are none of
- * them numbers is left out rather than drawn as a number nobody computed
- * (objectstack#32119).
+ * in it (objectstack#32119); read as numbers, every stored time is dropped
+ * as non-finite and the group drew `0`.
  */
 function computeAggregations(
   rows: any[],
@@ -265,11 +259,9 @@ function computeAggregations(
       const result = temporalAggregateOf(field, type, raw, temporal!, face);
       return result ? [result] : [];
     }
-    const filled = rows.map((r) => r[field]).filter(isFilled);
-    const nums = filled
-      .map((v) => Number(v))
+    const nums = rows
+      .map((r) => Number(r[field]))
       .filter((n) => Number.isFinite(n));
-    if (filled.length > 0 && nums.length === 0) return [];
 
     let value: number;
     switch (type) {
