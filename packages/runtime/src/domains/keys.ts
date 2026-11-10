@@ -20,9 +20,14 @@
  *    right after the anonymous decision, before the body is read. A key acts
  *    as its owner for data and automation; managing credentials stays with
  *    the owner's own sign-in.
- *  - Body is whitelisted to `name` (+ optional `expires_at`); any
- *    `key` / `id` / `user_id` / `revoked` in the body is ignored, so a
- *    caller cannot forge a known-secret or escalate.
+ *  - [#32281] The body is `{ name?, expires_at? }` and nothing else. Any other
+ *    key (`key` / `id` / `user_id` / `userId` / `revoked` / `scopes` / an
+ *    organization, or a typo) is REFUSED `400 VALIDATION_FAILED` with one
+ *    `fields[]` entry per key, before anything is read or written. It used to
+ *    be dropped silently: no access widened, but a caller who asked for a key
+ *    for another user, or with scopes, was answered 201 and told nothing. The
+ *    row is still built from server-controlled values only (below), so the
+ *    refusal is the caller's answer, not the forgery guard.
  *  - [#23367, ruling A] The API-key lifecycle policy (the auth service's
  *    `resolveApiKeyLifecyclePolicy`, the same source the key-admission seam
  *    reads): a signing that names no `expires_at` gets the default life (90
@@ -60,6 +65,7 @@ import { buildApiError } from '../error-envelope.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 import { readDispatchedBody } from '../deferred-request-body.js';
+import { validationFailure, validationFailureDetails, VALIDATION_FAILED_STATUS } from '../validation-failure.js';
 
 /** [#23367] The ceiling refusal, as its wire pair (ADR-0112 ledger, `@objectstack/runtime`). */
 const API_KEY_EXPIRY_TOO_LONG = { code: 'API_KEY_EXPIRY_TOO_LONG', status: 400 } as const;
@@ -69,6 +75,50 @@ const API_KEY_EXPIRY_TOO_LONG = { code: 'API_KEY_EXPIRY_TOO_LONG', status: 400 }
  * never reads the path): the `Allow` value of its 405.
  */
 const KEYS_ALLOWED_METHODS = 'POST';
+
+/**
+ * [#32281] The body keys `POST /keys` reads — the whole accepted set. A key
+ * outside it is refused by {@link refuseUnreadKeysBody}, never dropped.
+ */
+const KEYS_MINT_BODY_KEYS: readonly string[] = ['name', 'expires_at'];
+
+/**
+ * [#32281] Refuse a mint body that carries anything `POST /keys` does not read,
+ * or that is not an object at all, with `400 VALIDATION_FAILED` and a
+ * `fields[]` entry per key (the shared `validationFailure` shape every other
+ * door answers). `undefined` when the body is acceptable: absent, `null`, or an
+ * object whose keys all belong to {@link KEYS_MINT_BODY_KEYS}.
+ *
+ * The message names what the door does instead, because the keys a caller
+ * most often sends here (`user_id`, `scopes`, an organization) are requests
+ * this door will never honour: a key is minted for the caller, in the
+ * caller's active organization, acting with the caller's access.
+ */
+function refuseUnreadKeysBody(deps: DomainHandlerDeps, body: unknown): HttpDispatcherResult | undefined {
+    if (body === undefined || body === null) return undefined;
+    const refuse = (message: string, fields: Array<{ field: string; code: string; message: string }>): HttpDispatcherResult => ({
+        handled: true,
+        response: deps.error(message, VALIDATION_FAILED_STATUS, validationFailureDetails(validationFailure(message, fields))),
+    });
+    if (typeof body !== 'object' || Array.isArray(body)) {
+        return refuse('Invalid API key request body: expected an object { name?, expires_at? }. Nothing was created.', [
+            { field: '(body)', code: 'invalid_type', message: 'expected an object' },
+        ]);
+    }
+    const unread = Object.keys(body).filter((k) => !KEYS_MINT_BODY_KEYS.includes(k));
+    if (unread.length === 0) return undefined;
+    return refuse(
+        `Unknown key${unread.length > 1 ? 's' : ''} ${unread.map((k) => `\`${k}\``).join(', ')} in the API key request: `
+        + 'POST /keys reads only `name` and `expires_at`. A key is always created for the signed-in caller, in their '
+        + 'active organization, acting with their access. Nothing was created.',
+        // `unknown_field` — the ADR-0114 catalog member for "a key the target does not declare".
+        unread.map((k) => ({
+            field: k,
+            code: 'unknown_field',
+            message: 'not read by POST /keys — its body is { name?, expires_at? }',
+        })),
+    );
+}
 
 /**
  * The refusal a principal not admitted by a signed-in session receives. It
@@ -166,7 +216,12 @@ export async function handleKeysRequest(
         };
     }
 
-    // ── Whitelist the body. Only `name` and optional `expires_at`. ──
+    // ── The body is `name` and optional `expires_at`; anything else is refused. ──
+    // [#32281] Ahead of every read and write below: nothing is resolved,
+    // looked up or minted for a body that asks for something this door does
+    // not do.
+    const unreadBody = refuseUnreadKeysBody(deps, body);
+    if (unreadBody) return unreadBody;
     const rawName = typeof body?.name === 'string' ? body.name.trim() : '';
     const name = rawName || 'API Key';
 
@@ -322,7 +377,8 @@ export async function handleKeysRequest(
 
     // Server-controlled row. user_id is pinned to the caller; only the hash
     // is persisted. NOTHING from the body can set key/id/user_id/revoked/
-    // active_organization_id.
+    // active_organization_id (a body naming any of them was refused above;
+    // the row would not read them even if it were not).
     const row: Record<string, unknown> = {
         name,
         key: generated.hash,

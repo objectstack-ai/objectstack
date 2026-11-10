@@ -88,6 +88,7 @@ import { EndpointMatcher } from './endpoint-matcher.js';
 import {
   PACKAGE_SLOTTED_STORE_TYPES,
   readStoreEntry,
+  recordStoreWrite,
   storedItemPackageId as indexedItemPackageId,
   storedNameOf,
   storeKeysNamed,
@@ -981,6 +982,7 @@ export class MetadataManager implements IMetadataService {
     const existed = typeStore.has(key) || replaces.length > 0;
     for (const replaced of replaces) typeStore.delete(replaced);
     typeStore.set(key, data);
+    recordStoreWrite(typeStore, key);
     return existed;
   }
 

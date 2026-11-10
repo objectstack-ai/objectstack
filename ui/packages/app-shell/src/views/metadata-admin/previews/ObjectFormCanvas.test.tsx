@@ -2,6 +2,8 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
+import '@testing-library/jest-dom/vitest';
+import userEvent from '@testing-library/user-event';
 import { ObjectFormCanvas } from './ObjectFormCanvas';
 import { assistantBus } from '../../../assistant/assistantBus';
 import { useAiSurfaceEnabled } from '../../../hooks/useAiSurface';
@@ -377,5 +379,40 @@ describe('ObjectFormCanvas — Ask AI entry point', () => {
     render(<ObjectFormCanvas objectName="x" draft={{ name: 'x', fields: {} }} onPatch={vi.fn()} />);
     expect(screen.queryByText('Generate fields with AI')).not.toBeInTheDocument();
     expect(screen.getByText('Add field')).toBeInTheDocument();
+  });
+});
+
+/**
+ * objectstack#32103 — the boundary section arrows ("Move section up" on the
+ * first section, "Move section down" on the last) were natively disabled with
+ * no reason. Each now sits in a focusable wrapper described by the reason
+ * (`DisabledControlReason`); focusing it also reveals the hover-only row.
+ */
+describe('ObjectFormCanvas — a disabled section arrow says why (objectstack#32103)', () => {
+  const describedBy = (el: HTMLElement) =>
+    document.getElementById(el.getAttribute('aria-describedby') ?? '') as HTMLElement | null;
+
+  it('Tab reaches the first section’s disabled up arrow, which gives the reason and keeps its name', async () => {
+    const user = userEvent.setup();
+    render(<ObjectFormCanvas objectName="account" draft={draftWithGroups()} onPatch={vi.fn()} />);
+    const [firstUp, secondUp] = screen.getAllByRole('button', { name: 'Move section up' });
+    expect(firstUp).toBeDisabled();
+    expect(describedBy(firstUp)).toHaveTextContent('Already the first section');
+    const wrapper = firstUp.parentElement as HTMLElement;
+    expect(wrapper).toHaveAttribute('data-disabled-reason');
+
+    // Start on the header's button just before the arrow, and Tab once.
+    const header = (wrapper.parentElement as HTMLElement).parentElement as HTMLElement;
+    const buttons = within(header).getAllByRole('button');
+    buttons[buttons.indexOf(firstUp) - 1].focus();
+    await user.tab();
+    expect(wrapper).toHaveFocus();
+    expect(describedBy(wrapper)).toHaveTextContent('Already the first section');
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Already the first section');
+
+    // CONTROL — a section that can move up is a plain button with no reason.
+    expect(secondUp).toBeEnabled();
+    expect(secondUp).not.toHaveAttribute('aria-describedby');
+    expect(secondUp.parentElement).not.toHaveAttribute('data-disabled-reason');
   });
 });

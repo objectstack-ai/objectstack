@@ -102,7 +102,8 @@ async function resolveActiveOrganizationId(
  * @param request the raw Web `Request` — its headers carry the caller's session
  *                cookie / bearer + Origin; its body carries the flat form
  *                fields ({ providerId, issuer, domain, clientId, clientSecret,
- *                discoveryEndpoint?, scopes?, mapEmail?, mapName? }).
+ *                discoveryEndpoint?, userInfoEndpoint?, scopes?, mapEmail?,
+ *                mapName?, mapGroups?, skipUserInfo? }).
  *                `mapId` is NOT among them any more: #8222 removed it from the
  *                `register_sso_provider` action, so the admin form no longer
  *                offers a user-ID claim mapping. The guard below is kept as
@@ -125,6 +126,7 @@ export async function runRegisterSsoProviderFromForm(
   const clientId = str(body?.clientId);
   const clientSecret = str(body?.clientSecret);
   const discoveryEndpoint = str(body?.discoveryEndpoint);
+  const userInfoEndpoint = str(body?.userInfoEndpoint);
   const scopesRaw = str(body?.scopes);
 
   const missing = (
@@ -147,6 +149,11 @@ export async function runRegisterSsoProviderFromForm(
 
   const oidcConfig: Record<string, unknown> = { clientId, clientSecret };
   if (discoveryEndpoint) oidcConfig.discoveryEndpoint = discoveryEndpoint;
+  // An explicit userinfo endpoint: `/sso/register` keeps it over the one the
+  // discovery document names, and trusts its origin for this registration
+  // (`AuthManager.ssoDiscoveryTrustedOrigins`), the remedy the refusal of an
+  // untrusted discovery endpoint names.
+  if (userInfoEndpoint) oidcConfig.userInfoEndpoint = userInfoEndpoint;
   oidcConfig.scopes = scopesRaw ? scopesRaw.split(/[\s,]+/).filter(Boolean) : ['openid', 'email', 'profile'];
 
   // `oidcConfig.mapping` is a `z.strictObject`. Measured 2026-08-20 against the
@@ -198,6 +205,11 @@ export async function runRegisterSsoProviderFromForm(
     str(body?.mapGroups),
   );
 
+  // The OIDC userinfo opt-out (`sso-sign-in-options.ts`): a provider additional
+  // field, sent at the top level of the register body where the vendor reads
+  // it. Claims then come from the verified ID token only.
+  const skipUserInfo = body?.skipUserInfo === true || body?.skipUserInfo === 'true';
+
   // Re-dispatch to the real /sso/register (same origin, sibling path) so the
   // admin gate + public-IdP trustedOrigins allowance + discovery hydration run.
   let innerUrl: string;
@@ -226,7 +238,14 @@ export async function runRegisterSsoProviderFromForm(
   const innerReq = new Request(inProcessRedispatchUrl(innerUrl, headers), {
     method: 'POST',
     headers,
-    body: JSON.stringify({ providerId, issuer, domain, oidcConfig, ...(organizationId ? { organizationId } : {}) }),
+    body: JSON.stringify({
+      providerId,
+      issuer,
+      domain,
+      oidcConfig,
+      ...(skipUserInfo ? { skipUserInfo: true } : {}),
+      ...(organizationId ? { organizationId } : {}),
+    }),
   });
 
   const resp = await handle(innerReq);
@@ -632,6 +651,16 @@ export function groupsClaimOfMapping(mapping: unknown): string | null {
   const extra = isPlainObject(mapping) ? mapping.extraFields : undefined;
   const claim = isPlainObject(extra) ? extra[GROUPS_EXTRA_FIELD] : undefined;
   return typeof claim === 'string' && claim.trim() !== '' ? claim : null;
+}
+
+/**
+ * The claim a stored OIDC config's mapping reads the email address from
+ * (`mapping.email`), or the vendor's default `email` when it names none.
+ */
+export function emailClaimOfStoredOidcConfig(config: unknown): string {
+  const parsed = parseStoredConfig(config);
+  const claim = isPlainObject(parsed?.mapping) ? parsed!.mapping.email : undefined;
+  return typeof claim === 'string' && claim.trim() !== '' ? claim : 'email';
 }
 
 /** A stored protocol blob (JSON text, or an object on a driver that hands one back); `null` when unusable. */
