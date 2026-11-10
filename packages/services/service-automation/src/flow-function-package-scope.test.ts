@@ -83,7 +83,8 @@ const install = (id: string, deps: string[] = []) => registry.installPackage(man
 
 /** `holder`'s function `name`, registered as `AppPlugin` registers a package's `functions` (owner `app:<id>`), or owner-less (the platform). */
 function holds(holder: string | null, name = FN, effect?: 'writes') {
-    const fn = async () => { ran.push(holder ?? 'platform'); return holder ?? 'platform'; };
+    // A flow function returns its result; the registry's handler type is the hook one.
+    const fn = (async () => { ran.push(holder ?? 'platform'); return holder ?? 'platform'; }) as never;
     if (holder === null) ql.registerFunction(name, fn, effect ? { effect } : undefined);
     else ql.registerFunction(name, fn, { packageId: `app:${holder}`, ...(effect ? { effect } : {}) });
 }
