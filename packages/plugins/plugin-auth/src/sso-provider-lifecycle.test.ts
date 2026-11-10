@@ -607,6 +607,7 @@ const certificate = (i = 0) => certs[i]!;
 describe('a registered provider is edited in place, without unlinking anyone', () => {
   const SAML = 'acme-saml';
   const ENTITY = 'https://saml.acme.example/entity';
+  const SAML_MAPPING = { email: 'email', name: 'displayName', extraFields: { groups: 'memberOf', department: 'dept' } };
 
   async function samlStage(opts: { linked: boolean }) {
     const s = await stage();
@@ -621,6 +622,7 @@ describe('a registered provider is edited in place, without unlinking anyone', (
         callbackUrl: `${AUTH}/sso/saml2/sp/acs/${SAML}`,
         idpMetadata: { entityID: ENTITY },
         spMetadata: { entityID: `${AUTH}/sso/saml2/sp/metadata?providerId=${SAML}` },
+        mapping: SAML_MAPPING,
       },
     });
     if (opts.linked) {
@@ -647,6 +649,8 @@ describe('a registered provider is edited in place, without unlinking anyone', (
     });
     expect(text).not.toContain(certificate(1).slice(0, 40));
     expect((await stored()).saml.cert).toBe(certificate(1));
+    // The attribute mapping is never sent by the edit door, so the stored one stands.
+    expect((await stored()).saml.mapping).toEqual(SAML_MAPPING);
     // Nobody was unlinked.
     expect(await rows(s, 'sys_account', { provider_id: SAML })).toHaveLength(1);
   }, 30_000);
@@ -718,6 +722,7 @@ describe('a registered provider is edited in place, without unlinking anyone', (
         jwksEndpoint: `https://${OIDC}.idp.example/jwks`,
         pkce: true,
         scopes: ['openid', 'email'],
+        mapping: { email: 'email', name: 'name', extraFields: { groups: 'groups', department: 'dept' } },
       },
     });
     const mia = await ssoOnlyUser(s, 'mia@acme.example');
@@ -746,6 +751,7 @@ describe('a registered provider is edited in place, without unlinking anyone', (
     const provider = await ctx.adapter.findOne({ model: 'ssoProvider', where: [{ field: 'providerId', value: OIDC }] });
     const oidc = JSON.parse(provider.oidcConfig);
     expect(oidc).toMatchObject({ clientId: 'acme-client', clientSecret: 'new-client-secret-32085', scopes: ['openid', 'email', 'profile', 'groups'] });
+    expect(oidc.mapping).toEqual({ email: 'email', name: 'name', extraFields: { groups: 'groups', department: 'dept' } });
     expect(await rows(s, 'sys_account', { provider_id: OIDC })).toHaveLength(1);
 
     // The client ID is the provider identity: refused while Mia is linked.
