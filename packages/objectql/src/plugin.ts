@@ -483,6 +483,28 @@ const SKIP_SCHEMA_SYNC_ENGINE_KEY = 'skipSchemaSync';
  */
 export const OBJECTQL_DRIVERS_READY_HOOK = 'objectql:drivers-ready';
 
+/**
+ * [#32164] The kernel-bus event every schema-sync pass of this plugin triggers
+ * when its DDL is done, with the live engine as its one argument: each boot
+ * phase that syncs (`start()`'s first and third phases, inside the boot's
+ * schema-migration lock) and each `metadata:reloaded` re-sync. Never on a
+ * `skipSchemaSync` boot, which runs no DDL.
+ *
+ * It exists for the runtime-managed indexes the declared index surface cannot
+ * spell and a table must not stand without: the first is
+ * `sys_user_permission_set`'s package-less guard (metadata-protocol's
+ * `user-permission-set-packageless-index.ts`). Built from a `kernel:ready`
+ * handler, such an index would be missing while every later plugin's `start()`
+ * writes, and on a `bootPhaseHooks: false` host, which withholds
+ * `kernel:ready`, always. This event is dispatched by the plugin, not the
+ * kernel, so `bootPhaseHooks: false` does not withhold it.
+ *
+ * Not in `IPluginLifecycleEvents`: the bus is open to custom names. A handler's
+ * throw propagates into the pass, so a handler that must never fail a boot
+ * catches its own errors.
+ */
+export const OBJECTQL_SCHEMA_SYNCED_HOOK = 'objectql:schema-synced';
+
 export class ObjectQLPlugin implements Plugin {
   name = 'com.objectstack.engine.objectql';
   type = 'objectql' as const;
@@ -2844,6 +2866,12 @@ export class ObjectQLPlugin implements Plugin {
     } else if (synced > 0 || skipped > 0) {
       ctx.logger.info('Schema sync complete', { synced, skipped, total: allObjects.length });
     }
+
+    // [#32164] This pass's DDL is done: the indexes a table must not stand
+    // without are built now, before any later plugin's `start()` writes. See
+    // {@link OBJECTQL_SCHEMA_SYNCED_HOOK}. Spelled as the literal, as the
+    // drivers-ready trigger above is, for the settings bind-window guard.
+    await ctx.trigger('objectql:schema-synced', this.ql);
   }
 
   /**

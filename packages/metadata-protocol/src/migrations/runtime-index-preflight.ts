@@ -6,8 +6,9 @@
  * ## The gap this closes
  *
  * Three migrations in this directory tighten an existing UNIQUE index into a
- * NULL-safe (and sometimes row-scoped) form at `kernel:ready`, and a fourth
- * adds a row-scoped one beside a declared key:
+ * NULL-safe (and sometimes row-scoped) form at `kernel:ready`, and two more
+ * add a row-scoped one beside a declared key (the grant's at schema sync,
+ * #32164):
  *
  * | migration | table | index(es) |
  * |---|---|---|
@@ -15,6 +16,7 @@
  * | `ensureSysSettingIdentityIndex` | `sys_setting` | row identity |
  * | `ensureNotificationPreferenceIdentityIndex` | `sys_notification_preference` | one global default per key |
  * | `ensureActivationLedgerPackagelessIndex` | `sys_metadata_activation` | one package-less row per (type, name) — ADDED, not tightened |
+ * | `ensureUserPermissionSetPackagelessIndex` | `sys_user_permission_set` | one package-less grant per (user, set, organization) — ADDED, not tightened |
  *
  * A third, `ensureViewDefinitionActiveIndex` (`sys_view_definition`), retired
  * with its table under ADR-0131 D13: no writer or reader of that table's rows
@@ -110,6 +112,14 @@ import {
     buildActivationLedgerPackagelessDuplicateProbeSql,
     buildActivationLedgerPresenceSql,
 } from './activation-ledger-packageless-index.js';
+import {
+    USER_PERMISSION_SET_PACKAGELESS_INDEX_COLUMNS,
+    USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME,
+    USER_PERMISSION_SET_PACKAGELESS_ROW_SCOPE,
+    USER_PERMISSION_SET_TABLE,
+    buildUserPermissionSetPackagelessDuplicateProbeSql,
+    buildUserPermissionSetPresenceSql,
+} from './user-permission-set-packageless-index.js';
 
 /** The column every one of the duplicate-listing queries counts into. */
 const DUPLICATE_ROWS_COLUMN = 'duplicate_rows';
@@ -253,6 +263,17 @@ export function runtimeIndexProbes(opts: { client?: string } = {}): RuntimeIndex
             rowScope: ACTIVATION_LEDGER_PACKAGELESS_ROW_SCOPE,
             presenceSql: buildActivationLedgerPresenceSql(),
             duplicateSql: buildActivationLedgerPackagelessDuplicateProbeSql(),
+        },
+        {
+            // [ADR-0150 D4, #32164] The ledger's case on the grant table: its
+            // own name, added beside the declared key.
+            migration: 'ensureUserPermissionSetPackagelessIndex',
+            table: USER_PERMISSION_SET_TABLE,
+            index: USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME,
+            keyParts: [...USER_PERMISSION_SET_PACKAGELESS_INDEX_COLUMNS],
+            rowScope: USER_PERMISSION_SET_PACKAGELESS_ROW_SCOPE,
+            presenceSql: buildUserPermissionSetPresenceSql(),
+            duplicateSql: buildUserPermissionSetPackagelessDuplicateProbeSql(),
         },
     ];
 }

@@ -46,6 +46,10 @@ import {
     ensureActivationLedgerPackagelessIndex,
     resolveActivationLedgerIndexSeam,
 } from './migrations/activation-ledger-packageless-index.js';
+import {
+    ensureUserPermissionSetPackagelessIndex,
+    resolveUserPermissionSetIndexSeam,
+} from './migrations/user-permission-set-packageless-index.js';
 import { createRecordedBySentinelPlan } from './migrations/recorded-by-sentinel.js';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import type { MetadataAuthoringChannel } from './protocol.js';
@@ -307,6 +311,40 @@ export function assembleMetadataProtocol(
             // different tables and one that could not be armed must not skip the
             // other.
             if (shouldRunPlatformMigrations(environmentId, options.runPlatformMigrations)) {
+                // [#32164, epic ruling MF6] `sys_user_permission_set`'s
+                // package-less guard is built at SCHEMA SYNC, not with the
+                // repairs below: the old three-column key it stands in for
+                // existed from the table's first DDL, so the guard must exist
+                // before any later plugin's `start()` writes a grant, and on a
+                // `bootPhaseHooks: false` host too, which withholds
+                // `kernel:ready`. `objectql:schema-synced` is what
+                // `ObjectQLPlugin` triggers when a sync pass's DDL is done
+                // (objectql's `OBJECTQL_SCHEMA_SYNCED_HOOK`, spelled as the
+                // literal because `@objectstack/objectql` depends on this
+                // package; plugin-security's
+                // `user-permission-set-guard-at-schema-sync.test.ts` boots both
+                // and goes red if the two ever differ). Settled once the
+                // migration answers anything but "no table / no driver yet", so
+                // a later pass and the `kernel:ready` second chance below
+                // neither rebuild it nor report a refusal twice in one boot.
+                let grantGuardSettled = false;
+                const ensureGrantGuard = async (): Promise<void> => {
+                    if (grantGuardSettled) return;
+                    try {
+                        const seam = resolveUserPermissionSetIndexSeam(ql);
+                        const { status } = await ensureUserPermissionSetPackagelessIndex(seam?.exec, ctx.logger, {
+                            client: seam?.client,
+                        });
+                        if (status !== 'absent' && status !== 'no-driver') grantGuardSettled = true;
+                    } catch (e: unknown) {
+                        grantGuardSettled = true;
+                        ctx.logger.error(
+                            '[metadata-protocol] permission-set grant index migration skipped — the index that keeps one grant per (user_id, permission_set, organization_id) among grants naming no package was not ensured this boot, so two such grants can coexist for one user in one organization',
+                            e instanceof Error ? e : new Error(String(e)),
+                        );
+                    }
+                };
+                (ctx as any)?.hook?.('objectql:schema-synced', ensureGrantGuard);
                 (ctx as any)?.hook?.('kernel:ready', async () => {
                     try {
                         // [#17175] The SEAM, not the bare exec: the presence
@@ -381,6 +419,14 @@ export function assembleMetadataProtocol(
                             { error: e instanceof Error ? e.message : String(e) },
                         );
                     }
+                    // `sys_user_permission_set`'s package-less guard (ADR-0150
+                    // D4, #32164), the second chance: a no-op once a schema
+                    // sync pass settled it (above). It still runs on a
+                    // `skipSchemaSync` boot, which triggers no sync pass, and
+                    // for a table no pass found. The table belongs to
+                    // `plugin-security`, so it may be absent here (a silent
+                    // no-op).
+                    await ensureGrantGuard();
                 });
             }
 
