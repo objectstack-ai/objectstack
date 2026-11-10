@@ -353,7 +353,7 @@ describe('deleting an SSO provider names what it removes, and removes what the p
 
   const remove = (s: Stage, providerId: string, cookie?: string) => postJson(s, '/sso/delete-provider', { providerId }, cookie);
 
-  it('the preflight read names the users unlinked, those who lose access, and the mappings and grants removed', async () => {
+  it('the preflight read names the users unlinked, those with no other sign-in method linked, and the mappings and grants removed', async () => {
     const { s } = await arrange();
     const res = await bridge(s, 'GET', `/admin/sso/delete-impact?providerId=${PROVIDER}`);
     const body = (await res.json()) as any;
@@ -367,7 +367,7 @@ describe('deleting an SSO provider names what it removes, and removes what the p
         groupMappings: 2,
         projectedGrants: 2,
         summary:
-          "Deleting SSO provider 'acme-okta' unlinks 2 users from it; 1 of them has no password or other sign-in method linked and loses access. "
+          "Deleting SSO provider 'acme-okta' unlinks 2 users from it; 1 of them has no other sign-in method linked (no password, no other provider). "
           + 'It also removes 2 IdP group mappings and the 2 permission-set grants they gave.',
       },
     });
@@ -405,7 +405,7 @@ describe('deleting an SSO provider names what it removes, and removes what the p
         removedGrants: 2,
         dependentsRemoved: true,
         message:
-          "Deleting SSO provider 'acme-okta' unlinked 2 users from it; 1 of them has no password or other sign-in method linked and lost access. "
+          "Deleting SSO provider 'acme-okta' unlinked 2 users from it; 1 of them had no other sign-in method linked (no password, no other provider). "
           + 'It removed 2 IdP group mappings and the 2 permission-set grants they gave.',
       },
     });
@@ -493,6 +493,8 @@ describe('an email domain another provider serves is refused on register and on 
       expect(res.status, `${domain}: ${JSON.stringify(body)}`).toBe(409);
       expect(body).toMatchObject({ code: 'RESOURCE_CONFLICT', field: 'domain', heldBy: PROVIDER });
       expect(body.message).toContain(`SSO provider '${PROVIDER}'`);
+      expect(body.message).toContain('would not be reached by address');
+      expect(body.message).toContain('Register it under its own domain entry');
     }
     expect((await rows(s, 'sys_sso_provider')).map((r) => r.provider_id)).toEqual([PROVIDER]);
   }, 30_000);

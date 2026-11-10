@@ -2254,7 +2254,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "SSO プロバイダーを削除",
-        description: "この SSO プロバイダーを削除しますか？リンクされているすべてのユーザーのリンクが解除され、パスワードや他のサインイン方法を持たないユーザーはサインインできなくなります。IdP グループマッピングと、それによって付与された権限セットも一緒に削除されます。この操作は元に戻せません。",
+        description: "この SSO プロバイダーを削除しますか？リンクされているすべてのユーザーのリンクが解除されます。これには、他のサインイン方法がリンクされていないユーザー（パスワードも他のプロバイダーもないユーザー）も含まれます。IdP グループマッピングと、それによって付与された権限セットも一緒に削除されます。この操作は元に戻せません。",
         resultDialog: {
           title: "SSO プロバイダーを削除しました",
           acknowledge: "完了",
@@ -2266,7 +2266,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           fields: {
             summary: "この削除で削除されるもの",
             linkedUsers: "リンクが解除されるユーザー",
-            usersWithoutOtherSignIn: "サインインできなくなるユーザー"
+            usersWithoutOtherSignIn: "他のサインイン方法がリンクされていないユーザー"
           }
         }
       },

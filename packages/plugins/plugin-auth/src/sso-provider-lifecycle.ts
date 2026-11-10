@@ -16,8 +16,8 @@
  *   - **before**, the confirmation reads {@link readSsoProviderDeleteImpact}
  *     through `GET /admin/sso/delete-impact` (the delete action's preflight):
  *     how many users the delete unlinks, how many of them have no other sign-in
- *     method linked (no password, no other provider) and so lose access, and
- *     the group mappings and projected grants that go with it;
+ *     method linked (no password, no other provider), and the group mappings
+ *     and projected grants that go with it;
  *   - **on the door itself**, the global before-hook counts the same, after the
  *     sign-in method floor and before the vendor's first write
  *     ({@link stageSsoProviderDeleteImpact}), so every caller of the vendor
@@ -42,8 +42,10 @@
  * Sign-in routes an email address to a provider by its domain
  * (`/sign-in/sso`: the provider whose `domain` equals the address's domain,
  * else the first whose comma-separated list matches it), so a second provider
- * registered for a domain another already serves can never be reached by
- * address. {@link findSsoDomainClaim} finds the provider already serving any
+ * registered for a domain entry another already serves would not be reached
+ * by address. (An IdP-initiated SAML sign-in reaches a provider through its
+ * own ACS URL, without address routing; the refusal is about the address
+ * route.) {@link findSsoDomainClaim} finds the provider already serving any
  * of the requested domains, and the before-hook refuses the register (and a
  * domain edit on `/sso/update-provider`) with `409 RESOURCE_CONFLICT` naming
  * it. Only an exact domain entry collides: a provider for `eng.acme.com` beside
@@ -154,8 +156,9 @@ export function ssoDomainClaimedRefusal(claim: SsoDomainClaim, nameHolder: boole
     field: 'domain',
     message:
       `The email domain '${claim.domain}' is already served by ${holder}. Sign-in routes an address to one provider `
-      + 'by its domain, so a second provider for it could never be reached. Use a domain no other provider lists, '
-      + `or remove '${claim.domain}' from that provider first.`,
+      + `by its domain, so a second provider for '${claim.domain}' would not be reached by address. `
+      + `Register it under its own domain entry (a subdomain such as 'sso.${claim.domain}' is accepted), `
+      + `edit '${claim.domain}' off the provider that serves it, or delete that provider first.`,
     ...(nameHolder ? { heldBy: claim.providerId } : {}),
   };
 }
@@ -167,7 +170,7 @@ export interface SsoProviderDeleteImpact {
   providerId: string;
   /** Users with an account linked through the provider: the vendor's delete unlinks each one. */
   linkedUsers: number;
-  /** Of those, the users with no other account linked (no password, no other provider): they lose access. */
+  /** Of those, the users with no other sign-in method linked: no password and no other provider account. */
   usersWithoutOtherSignIn: number;
   /** The provider's `sys_idp_group_mapping` rows. */
   groupMappings: number;
@@ -213,13 +216,12 @@ export async function readSsoProviderDeleteImpact(engine: IDataEngine, providerI
 
 const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
 
-/** The unlink half of the sentence: how many users, and how many of them lose access. */
+/** The unlink half of the sentence: how many users, and how many of them have no other sign-in method linked. */
 function unlinkSentence(impact: SsoProviderDeleteImpact, done: boolean): string {
   const head = `Deleting SSO provider '${impact.providerId}' ${done ? 'unlinked' : 'unlinks'} ${plural(impact.linkedUsers, 'user')} from it`;
   if (impact.linkedUsers === 0) return `${head}.`;
   const n = impact.usersWithoutOtherSignIn;
-  const lose = done ? 'lost' : n === 1 ? 'loses' : 'lose';
-  return `${head}; ${n} of them ${n === 1 ? 'has' : 'have'} no password or other sign-in method linked and ${lose} access.`;
+  return `${head}; ${n} of them ${done ? 'had' : n === 1 ? 'has' : 'have'} no other sign-in method linked (no password, no other provider).`;
 }
 
 /** One English sentence naming what a delete removes (or removed); the counts themselves ride beside it. */

@@ -2254,7 +2254,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "SSO 공급자 삭제",
-        description: "이 SSO 공급자를 삭제하시겠습니까? 연결된 모든 사용자의 연결이 해제되며, 비밀번호나 다른 로그인 방법이 없는 사용자는 더 이상 로그인할 수 없습니다. IdP 그룹 매핑과 이를 통해 부여된 권한 집합도 함께 제거됩니다. 이 작업은 되돌릴 수 없습니다.",
+        description: "이 SSO 공급자를 삭제하시겠습니까? 연결된 모든 사용자의 연결이 해제되며, 여기에는 다른 로그인 방법이 연결되지 않은 사용자(비밀번호도, 다른 공급자도 없음)도 포함됩니다. IdP 그룹 매핑과 이를 통해 부여된 권한 집합도 함께 제거됩니다. 이 작업은 되돌릴 수 없습니다.",
         resultDialog: {
           title: "SSO 공급자 삭제됨",
           acknowledge: "완료",
@@ -2266,7 +2266,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
           fields: {
             summary: "이 삭제로 제거되는 항목",
             linkedUsers: "연결이 해제되는 사용자",
-            usersWithoutOtherSignIn: "로그인할 수 없게 되는 사용자"
+            usersWithoutOtherSignIn: "다른 로그인 방법이 연결되지 않은 사용자"
           }
         }
       },

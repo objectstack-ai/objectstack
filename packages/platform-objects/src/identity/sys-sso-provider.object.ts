@@ -265,12 +265,12 @@ export const SysSsoProvider = ObjectSchema.create({
       // confirmation names the count before anyone confirms: the preflight
       // reads plugin-auth's `/admin/sso/delete-impact` (platform-admin gated,
       // ADR-0068 D4) and shows how many users the delete unlinks, how many of
-      // them have no other sign-in method and lose access, and the group
-      // mappings and projected grants removed with it. The door counts again
+      // them have no other sign-in method linked (no password, no other
+      // provider), and the group mappings and projected grants removed with it. The door counts again
       // when it runs and names what it removed in its answer, shown by
       // `resultDialog`.
       description:
-        'Delete this SSO provider? Every user linked to it is unlinked, and a user with no password or other sign-in method loses access. Its IdP group mappings and the permission-set grants they gave are removed with it. This cannot be undone.',
+        'Delete this SSO provider? Every user linked to it is unlinked, including users with no other sign-in method linked (no password, no other provider). Its IdP group mappings and the permission-set grants they gave are removed with it. This cannot be undone.',
       refreshAfter: true,
       params: [
         { name: 'providerId', field: 'provider_id', defaultFromRow: true, required: true },
@@ -281,7 +281,7 @@ export const SysSsoProvider = ObjectSchema.create({
         fields: [
           { path: 'summary', label: 'What this delete removes', format: 'text' },
           { path: 'linkedUsers', label: 'Users unlinked', format: 'text' },
-          { path: 'usersWithoutOtherSignIn', label: 'Users who lose access', format: 'text' },
+          { path: 'usersWithoutOtherSignIn', label: 'Users with no other sign-in method linked', format: 'text' },
         ],
       },
       resultDialog: {
@@ -296,7 +296,7 @@ export const SysSsoProvider = ObjectSchema.create({
       ai: {
         exposed: true,
         description:
-          'Delete an SSO provider (the record; param: its providerId). It unlinks every user who signed in through it, and users with no password or other sign-in method lose access; its IdP group mappings and the grants they gave are removed. Ask the human to confirm before calling, naming those counts.',
+          'Delete an SSO provider (the record; param: its providerId). It unlinks every user who signed in through it, including users with no other sign-in method linked (no password, no other provider); its IdP group mappings and the grants they gave are removed. Ask the human to confirm before calling, naming those counts.',
         requiresConfirmation: true,
       },
     },

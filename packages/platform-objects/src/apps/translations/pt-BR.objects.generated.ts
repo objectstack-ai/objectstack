@@ -2254,7 +2254,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "Excluir provedor de SSO",
-        description: "Excluir este provedor de SSO? Todo usuário vinculado a ele é desvinculado, e um usuário sem senha ou outro método de entrada perde o acesso. Os mapeamentos de grupos do IdP e os conjuntos de permissões concedidos por eles são removidos junto. Esta ação não pode ser desfeita.",
+        description: "Excluir este provedor de SSO? Todo usuário vinculado a ele é desvinculado, inclusive usuários sem outro método de entrada vinculado (sem senha, sem outro provedor). Os mapeamentos de grupos do IdP e os conjuntos de permissões concedidos por eles são removidos junto. Esta ação não pode ser desfeita.",
         resultDialog: {
           title: "Provedor de SSO excluído",
           acknowledge: "Concluído",
@@ -2266,7 +2266,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           fields: {
             summary: "O que esta exclusão remove",
             linkedUsers: "Usuários desvinculados",
-            usersWithoutOtherSignIn: "Usuários que perdem o acesso"
+            usersWithoutOtherSignIn: "Usuários sem outro método de entrada vinculado"
           }
         }
       },

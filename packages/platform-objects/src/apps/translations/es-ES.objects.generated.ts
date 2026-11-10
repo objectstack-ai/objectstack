@@ -2254,7 +2254,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "Eliminar proveedor SSO",
-        description: "¿Eliminar este proveedor SSO? Todos los usuarios vinculados a él quedan desvinculados, y un usuario sin contraseña ni otro método de inicio de sesión pierde el acceso. Sus asignaciones de grupos del IdP y los conjuntos de permisos que otorgaron se eliminan con él. Esta acción no se puede deshacer.",
+        description: "¿Eliminar este proveedor SSO? Todos los usuarios vinculados a él quedan desvinculados, incluidos los usuarios sin otro método de inicio de sesión vinculado (sin contraseña ni otro proveedor). Sus asignaciones de grupos del IdP y los conjuntos de permisos que otorgaron se eliminan con él. Esta acción no se puede deshacer.",
         resultDialog: {
           title: "Proveedor SSO eliminado",
           acknowledge: "Hecho",
@@ -2266,7 +2266,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           fields: {
             summary: "Qué elimina esta eliminación",
             linkedUsers: "Usuarios desvinculados",
-            usersWithoutOtherSignIn: "Usuarios que pierden el acceso"
+            usersWithoutOtherSignIn: "Usuarios sin otro método de inicio de sesión vinculado"
           }
         }
       },

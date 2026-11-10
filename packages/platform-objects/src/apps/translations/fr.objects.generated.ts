@@ -2254,7 +2254,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "Supprimer le fournisseur SSO",
-        description: "Supprimer ce fournisseur SSO ? Chaque utilisateur qui y est lié est dissocié, et un utilisateur sans mot de passe ni autre méthode de connexion perd l’accès. Ses mappages de groupes IdP et les ensembles d’autorisations qu’ils ont accordés sont supprimés avec lui. Cette action est irréversible.",
+        description: "Supprimer ce fournisseur SSO ? Chaque utilisateur qui y est lié est dissocié, y compris les utilisateurs sans autre méthode de connexion liée (ni mot de passe, ni autre fournisseur). Ses mappages de groupes IdP et les ensembles d’autorisations qu’ils ont accordés sont supprimés avec lui. Cette action est irréversible.",
         resultDialog: {
           title: "Fournisseur SSO supprimé",
           acknowledge: "Terminé",
@@ -2266,7 +2266,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
           fields: {
             summary: "Ce que cette suppression retire",
             linkedUsers: "Utilisateurs dissociés",
-            usersWithoutOtherSignIn: "Utilisateurs qui perdent l’accès"
+            usersWithoutOtherSignIn: "Utilisateurs sans autre méthode de connexion liée"
           }
         }
       },

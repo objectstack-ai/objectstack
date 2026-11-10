@@ -2254,7 +2254,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "Delete SSO Provider",
-        description: "Delete this SSO provider? Every user linked to it is unlinked, and a user with no password or other sign-in method loses access. Its IdP group mappings and the permission-set grants they gave are removed with it. This cannot be undone.",
+        description: "Delete this SSO provider? Every user linked to it is unlinked, including users with no other sign-in method linked (no password, no other provider). Its IdP group mappings and the permission-set grants they gave are removed with it. This cannot be undone.",
         resultDialog: {
           title: "SSO provider deleted",
           acknowledge: "Done",
@@ -2266,7 +2266,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           fields: {
             summary: "What this delete removes",
             linkedUsers: "Users unlinked",
-            usersWithoutOtherSignIn: "Users who lose access"
+            usersWithoutOtherSignIn: "Users with no other sign-in method linked"
           }
         }
       },

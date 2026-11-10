@@ -2254,7 +2254,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "SSO-Anbieter löschen",
-        description: "Diesen SSO-Anbieter löschen? Jeder damit verknüpfte Benutzer wird getrennt, und Benutzer ohne Passwort oder andere Anmeldemethode verlieren den Zugang. Seine IdP-Gruppenzuordnungen und die damit vergebenen Berechtigungssätze werden mit entfernt. Dies kann nicht rückgängig gemacht werden.",
+        description: "Diesen SSO-Anbieter löschen? Jeder damit verknüpfte Benutzer wird getrennt, auch Benutzer ohne andere verknüpfte Anmeldemethode (kein Passwort, kein anderer Anbieter). Seine IdP-Gruppenzuordnungen und die damit vergebenen Berechtigungssätze werden mit entfernt. Dies kann nicht rückgängig gemacht werden.",
         resultDialog: {
           title: "SSO-Anbieter gelöscht",
           acknowledge: "Fertig",
@@ -2266,7 +2266,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           fields: {
             summary: "Was dieses Löschen entfernt",
             linkedUsers: "Getrennte Benutzer",
-            usersWithoutOtherSignIn: "Benutzer, die den Zugang verlieren"
+            usersWithoutOtherSignIn: "Benutzer ohne andere verknüpfte Anmeldemethode"
           }
         }
       },

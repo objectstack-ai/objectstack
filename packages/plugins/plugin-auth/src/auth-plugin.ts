@@ -5168,8 +5168,9 @@ export class AuthPlugin implements Plugin {
     //     the identity-while-linked refusal all run) and answers the names of
     //     the fields it changed, never a value (`register-sso-provider.ts`);
     //   • delete impact — the delete action's preflight: how many users the
-    //     delete unlinks, how many of them lose access, and the group mappings
-    //     and projected grants that go with it (`sso-provider-lifecycle.ts`).
+    //     delete unlinks, how many of them have no other sign-in method
+    //     linked, and the group mappings and projected grants that go with it
+    //     (`sso-provider-lifecycle.ts`).
     rawApp.post(`${basePath}/admin/sso/update-provider`, async (c: any) => {
       try {
         const gated = await gateAdmin(c);

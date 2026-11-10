@@ -5751,7 +5751,7 @@ export class AuthManager {
    * domain edit on `/sso/update-provider`, onto a domain another provider
    * already serves (`409 RESOURCE_CONFLICT`, `field: 'domain'`), before the
    * vendor writes. Sign-in routes an address to a provider by its domain, so
-   * the second provider could never be reached by address
+   * the second provider would not be reached by address
    * (`sso-provider-lifecycle.ts` `findSsoDomainClaim`).
    *
    * Asked only of an authenticated caller whose body carries a domain: what

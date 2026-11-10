@@ -2254,7 +2254,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "删除 SSO 提供方",
-        description: "删除此 SSO 提供方？关联到它的每个用户都会被解除关联，没有密码或其他登录方式的用户将无法再登录。它的 IdP 组映射以及由这些映射授予的权限集也会一并移除。此操作无法撤销。",
+        description: "删除此 SSO 提供方？关联到它的每个用户都会被解除关联，包括没有关联其他登录方式（没有密码，也没有其他提供方）的用户。它的 IdP 组映射以及由这些映射授予的权限集也会一并移除。此操作无法撤销。",
         resultDialog: {
           title: "SSO 提供方已删除",
           acknowledge: "完成",
@@ -2266,7 +2266,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           fields: {
             summary: "此次删除将移除的内容",
             linkedUsers: "被解除关联的用户",
-            usersWithoutOtherSignIn: "将无法登录的用户"
+            usersWithoutOtherSignIn: "没有关联其他登录方式的用户"
           }
         }
       },
