@@ -366,6 +366,14 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
     fate: 'column-drop',
     citation: `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}: the settings global rung's tenant-less holder (C6, record 6051723395)`,
   },
+  ...['sys_audit_amendment', 'sys_audit_checkpoint', 'sys_audit_signing_key'].map(
+    (object): InventoryEntry => ({
+      object,
+      census: PMAIN,
+      fate: 'column-drop',
+      citation: `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}: the audit ledger's checkpoints, amendments and signing keys (ADR-0154)`,
+    }),
+  ),
   {
     object: 'sys_metadata',
     census: P1,

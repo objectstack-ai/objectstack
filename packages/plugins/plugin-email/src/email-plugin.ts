@@ -28,6 +28,9 @@ import {
   isEmailTransportProvider,
   unsupportedProviderFix,
   type EmailTransportProvider,
+  type MakeTransportOptions,
+  type SmtpConnectPolicy,
+  type SmtpTransportOptions,
 } from './transports/index.js';
 import { BUILTIN_AUTH_TEMPLATES } from './templates/auth-templates.js';
 import type {
@@ -79,6 +82,13 @@ export interface EmailServicePluginOptions {
    * loudly rather than degrade to a LogTransport that reports success.
    */
   providerOptions?: Record<string, unknown>;
+  /**
+   * Where every SMTP transport this plugin builds may connect: the one built
+   * at boot, the one built from saved `mail` settings and the one a `mail/test`
+   * press builds. Applied last, after any `transportOptions`. Absent: SMTP
+   * connects as it does without it. See {@link SmtpConnectPolicy}.
+   */
+  smtpConnect?: SmtpConnectPolicy;
   /** Default `From` address applied when `input.from` is omitted. */
   defaultFrom?: EmailAddress;
   /** Persist each attempt to sys_email. Default true when ObjectQL engine present. */
@@ -533,7 +543,7 @@ export class EmailServicePlugin implements Plugin {
     if (this.options.transport) return this.options.transport;
     const provider = this.options.provider ?? 'log';
     if (provider === 'log') return new LogTransport(ctx.logger);
-    const transport = makeTransport({
+    const transport = this.buildTransport({
       provider,
       apiKey: this.options.apiKey,
       options: this.options.providerOptions,
@@ -541,6 +551,22 @@ export class EmailServicePlugin implements Plugin {
     });
     if (transport instanceof SmtpTransport) this.liveSmtp = transport;
     return transport;
+  }
+
+  /**
+   * Every provider transport this plugin builds goes through here or
+   * {@link buildSmtpTransport}, so the host's `smtpConnect` reaches each SMTP
+   * one.
+   */
+  private buildTransport(input: Omit<MakeTransportOptions, 'smtpConnect'>): IEmailTransport {
+    const { smtpConnect } = this.options;
+    return makeTransport({ ...input, ...(smtpConnect !== undefined ? { smtpConnect } : {}) });
+  }
+
+  /** An SMTP transport from `mail` settings, carrying the host's `smtpConnect`. */
+  private buildSmtpTransport(smtp: SmtpTransportOptions, logger: PluginContext['logger']): SmtpTransport {
+    const { smtpConnect } = this.options;
+    return new SmtpTransport({ ...smtp, logger, ...(smtpConnect !== undefined ? { connect: smtpConnect } : {}) });
   }
 
   async init(ctx: PluginContext): Promise<void> {
@@ -880,7 +906,7 @@ export class EmailServicePlugin implements Plugin {
                   return { ok: false, severity: 'error', message: 'SMTP host is required — nothing was sent.' };
                 }
                 try {
-                  tempSmtp = new SmtpTransport({ ...smtp, logger: ctx.logger });
+                  tempSmtp = this.buildSmtpTransport(smtp, ctx.logger);
                   target = new EmailService({
                     transport: tempSmtp,
                     defaultFrom: merged.from_email
@@ -936,7 +962,7 @@ export class EmailServicePlugin implements Plugin {
                   return { ok: false, severity: 'error', message: `${provider}: api_key is required.` };
                 }
                 try {
-                  const transport = makeTransport({
+                  const transport = this.buildTransport({
                     provider,
                     apiKey,
                     logger: ctx.logger,
@@ -1588,7 +1614,7 @@ export class EmailServicePlugin implements Plugin {
         return;
       }
       try {
-        const transport = new SmtpTransport({ ...smtp, logger: ctx.logger });
+        const transport = this.buildSmtpTransport(smtp, ctx.logger);
         this.service.setTransport(transport);
         this.liveSmtp = transport;
         ctx.logger.info(
@@ -1654,7 +1680,7 @@ export class EmailServicePlugin implements Plugin {
     }
 
     try {
-      const transport = makeTransport({
+      const transport = this.buildTransport({
         provider,
         apiKey,
         logger: ctx.logger,
