@@ -333,6 +333,21 @@ describe('a summary roll-up over a record-mode amount is refused at registration
     expect(engine.registry.getObject('fx_parent')).toBeUndefined();
   });
 
+  it('[ADR-0144 D2 and D6, amended] a single save naming `againstRegistry` is asked this door too, once the cold boot has sealed the registry', async () => {
+    const { engine } = await bootEngine();
+    engine.registry.registerObject(LINE as any);
+    // Cold boot (unsealed): the option changes nothing.
+    expect(engine.registry.objectRegistrationRefusal(parentWith('sum') as any, undefined, 'own', { againstRegistry: true })).toBeNull();
+    engine.registry.sealBareNameHolders();
+    // Sealed, a batch's question (no option) still leaves it to the registration…
+    expect(engine.registry.objectRegistrationRefusal(parentWith('sum') as any)).toBeNull();
+    // …and a single save's question answers what the registration throws, registering nothing.
+    const asked = engine.registry.objectRegistrationRefusal(parentWith('sum') as any, undefined, 'own', { againstRegistry: true }) as any;
+    expect(envelopeOf(asked)).toEqual(INVALID_METADATA);
+    expect(asked?.name).toBe('RecordCurrencySummaryRefusedError');
+    expect(engine.registry.getObject('fx_parent')).toBeUndefined();
+  });
+
   it('the child registering after the parent is refused, naming the same roll-up', async () => {
     const { engine } = await bootEngine();
     engine.registry.registerObject(parentWith('sum') as any);

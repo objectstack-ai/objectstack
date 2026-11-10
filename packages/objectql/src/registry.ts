@@ -5222,7 +5222,9 @@ export class SchemaRegistry {
    * asked of a draft before its batch registers it answers both ways wrong —
    * it refuses a draft whose sibling in the same batch takes the child amount
    * out of record-currency mode, and it passes one whose sibling completes the
-   * pair. It stays the registration's own question. The single-owner rule is
+   * pair. It stays the registration's own question, except for a single save
+   * that names `againstRegistry` on a sealed registry (see that option). The
+   * single-owner rule is
    * the protocol's (`classifyObjectContribution`), and a code package's action
    * parse never judges a tenant-authored body.
    */
@@ -5230,8 +5232,22 @@ export class SchemaRegistry {
     schema: ServiceObject,
     packageId?: string,
     ownership: ObjectOwnership = 'own',
+    options: {
+      /**
+       * [ADR-0144 D2 and D6, amended] The caller is a SINGLE save that makes
+       * the body live in the same breath (the `/meta` save door, not a batch
+       * publish, an install or a migration pass): no sibling of a batch can
+       * still change the other end of a pair, so the doors that read the
+       * registry's other objects are asked too — D6's roll-up half and its
+       * follow door — once the cold boot has sealed the registry. A refused
+       * save is then answered with the door's own envelope and stores nothing,
+       * instead of being stored and refused, logged, at the write-through.
+       */
+      againstRegistry?: boolean;
+    } = {},
   ): Error | null {
-    const door = this.judgeRegistrationDoors(schema, packageId, ownership, { bodyOnly: true });
+    const againstRegistry = options.againstRegistry === true && this.bareNameHoldersAreSealed;
+    const door = this.judgeRegistrationDoors(schema, packageId, ownership, { bodyOnly: !againstRegistry });
     return 'refusal' in door ? door.refusal : null;
   }
 

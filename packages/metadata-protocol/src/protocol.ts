@@ -3150,9 +3150,10 @@ export class ObjectStackProtocolImplementation implements
     private objectRegistrationRefusal(
         body: unknown,
         layer: ReturnType<ObjectStackProtocolImplementation['classifyObjectContribution']>,
+        options: { againstRegistry?: boolean } = {},
     ): Error | null {
         // [#29985 codemod] The body moved to `protocol-discovery-and-bases.ts`; it reaches this class through `protocol-host.ts`.
-        return ProtocolDiscoveryAndBasesFacet.objectRegistrationRefusal(protocolHost(this), body, layer);
+        return ProtocolDiscoveryAndBasesFacet.objectRegistrationRefusal(protocolHost(this), body, layer, options);
     }
 
     /** Docblock and body: {@link ProtocolDiscoveryAndBasesFacet.restoreTranslatedObjectEchoes} in `protocol-discovery-and-bases.ts` [#29985 codemod]. */

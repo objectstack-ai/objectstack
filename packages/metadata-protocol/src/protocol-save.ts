@@ -1475,8 +1475,23 @@ export class ProtocolSaveFacet {
                 // The body is the one this save stores: the read's injected
                 // columns already came off it above. See
                 // {@link objectRegistrationRefusal}.
+                //
+                // [ADR-0144 D2 and D6, amended] A published save through the
+                // `/meta` doors (`meta-envelope`, `meta-dispatch`) is one object
+                // made live at once, so it also asks the doors that read the
+                // registry's other objects (the record-currency roll-up and
+                // follow doors), on a sealed registry: refused there, the row
+                // was stored, answered `200` and left unregistered. A draft
+                // publishes later inside a batch, and the batch faces
+                // (duplicate, imports, install, migration passes) save in an
+                // order a later sibling can still complete, so they keep the
+                // body-only question (#29673's reason).
                 if (objectRegistrationLayer) {
-                    const registration = host.objectRegistrationRefusal(request.item, objectRegistrationLayer);
+                    const singleLiveSave = mode === 'publish'
+                        && (request.writeFace === 'meta-envelope' || request.writeFace === 'meta-dispatch');
+                    const registration = host.objectRegistrationRefusal(
+                        request.item, objectRegistrationLayer, { againstRegistry: singleLiveSave },
+                    );
                     if (registration) throw registration;
                 }
                 if (singularType === 'view') {
