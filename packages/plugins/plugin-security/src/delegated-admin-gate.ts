@@ -1812,8 +1812,12 @@ export class DelegatedAdminGate {
         // name resolves to with no caller: each must be allowlisted.
         for (const judged of [setRow ?? { name: setName }, ...(alsoStored ?? [])]) {
           if (!scopeAllows(s, judged)) {
+            // The package is named only when the allowlist names the set's
+            // name at another holder — the one case the name alone misleads.
+            const atHolder = judged.packageId && s.scope.assignablePermissionSets.includes(setName)
+              ? ` of package '${judged.packageId}'` : '';
             return outsideScope(setNamed
-              ? `permission set '${setName}'${judged.packageId ? ` of package '${judged.packageId}'` : ''} is not in the scope's allowlist`
+              ? `permission set '${setName}'${atHolder} is not in the scope's allowlist`
               : "the grant's permission set is not in the scope's allowlist");
           }
         }
