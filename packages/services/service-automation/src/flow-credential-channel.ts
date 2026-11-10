@@ -191,7 +191,7 @@ export class FlowCredentialChannel implements FlowCredentialSource {
      * @param sharedRefusalOf [ADR-0150 D8 row R9, #31696] The refusal of `name` for a writer with no package
      *   when two or more packages hold it (the engine's `flowHolder`), else `undefined`. The save door names
      *   no package, so under such a name a write reads, updates and deletes only the rows naming no package,
-     *   never a holder's, and a save that sets or clears a credential is refused ({@link store}).
+     *   never a holder's, and a save that sets a credential, or clears one where a row stands, is refused ({@link store}).
      * @param holderOf [ADR-0150 D8 row R9, #31696] The one package holding the flow a write names (the
      *   engine's `flowHolderPackage`), stamped on every row the write door writes as `flow_package`. `null`
      *   (an environment-authored flow, a shared name, no reader) stamps none: such a row answers only a read
@@ -383,8 +383,8 @@ export class FlowCredentialChannel implements FlowCredentialSource {
      * [ADR-0150 D8 row R9, #31696] Under a name two or more packages hold, the
      * save is no holder's write (the door names no package): it reads,
      * updates and deletes only the rows naming no package, so a save never
-     * rewrites or removes another package's credential. A save that sets or
-     * clears a credential there is refused with {@link
+     * rewrites or removes another package's credential. A save that sets a
+     * credential there, or clears one where a row of any package stands, is refused with {@link
      * PackageScopedNameRefusedError} (409), naming every holder, before
      * anything is written: a row it wrote would collide with a holder's row at
      * the same position (one row per position and state), or serve neither
@@ -394,9 +394,7 @@ export class FlowCredentialChannel implements FlowCredentialSource {
         const positions = flowCredentialPositions(args.body);
         const explicit = positions.filter((p) => p.form === 'value');
         const shared = this.sharedRefusalOf?.(args.name);
-        if (shared && positions.some((p) => p.form === 'value' || p.form === 'cleared')) {
-            throw sharedNameWriteRefusal(args.name, shared);
-        }
+        if (shared && explicit.length > 0) throw sharedNameWriteRefusal(args.name, shared);
         // The rows this write may touch: every row of the name, or under a
         // shared name only the rows naming no package.
         const scope = shared ? '' : undefined;
@@ -406,6 +404,13 @@ export class FlowCredentialChannel implements FlowCredentialSource {
             // the composition's old behaviour; one WITH a credential is refused.
             if (explicit.length > 0) this.requireEngine(args.name);
             return stripFlowCredentialValues(args.body);
+        }
+        // A clear where some package's row stands would leave that credential in force: refused. A clear where
+        // no row stands touches nothing, so it saves.
+        const cleared = positions.filter((p) => p.form === 'cleared').map((p) => positionKey(p.nodeId, p.key));
+        if (shared && cleared.length > 0) {
+            const standing = await this.readRows(engine, args.name, args.state);
+            if (cleared.some((k) => standing.has(k))) throw sharedNameWriteRefusal(args.name, shared);
         }
         const rows = await this.readRows(engine, args.name, args.state, scope);
 

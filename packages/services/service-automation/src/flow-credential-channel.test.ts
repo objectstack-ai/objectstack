@@ -344,6 +344,17 @@ describe('[ADR-0150 D8 row R9, #31696] under a flow name two packages hold, a sa
         expect(await channel.resolve('pin_inbound', 'callout', 'signingSecret', P2)).toBe(SIGN);
     });
 
+    it('a clear where no row of any package stands touches nothing, so it saves; one where a holder\'s row stands is refused', async () => {
+        const ql = await boot();
+        const before = await twoPackagesRows(ql);
+        const channel = new FlowCredentialChannel(() => ql as never, shared, () => null);
+        await expect(channel.store({ name: 'pin_inbound', state: 'active', body: inbound({ nested: '' }) })).resolves.toBeDefined();
+        expect(await channelRows(ql)).toEqual(before);
+        const refused = await channel.store({ name: 'pin_inbound', state: 'active', body: inbound({ hook: '' }) }).catch((e: unknown) => e);
+        expect(refused).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+        expect(await channelRows(ql)).toEqual(before);
+    });
+
     it('CONTROL: under a name one package holds, the same save rotates, clears and drops as before', async () => {
         const ql = await boot();
         const channel = new FlowCredentialChannel(() => ql as never, () => undefined, () => P1);
