@@ -19,7 +19,7 @@
         "boot examples/app-showcase via `objectstack dev --ui --seed-admin -p <port> -d file:/tmp/<run>/data.db`",
         "poll GET http://localhost:<port>/api/v1/health until 200; record time-to-healthy",
         "GET /api/v1/ready and record the status (the readiness probe is a separate route — packages/runtime/src/route-ledger.ts)",
-        "read the FULL boot log: capture the Flows: banner, any ⚠ lines, any ERROR-level lines, and the seed outcome. ⚠️ at the default log level (warn) SeedLoader prints NO success line, so a grep for one finds nothing on a healthy boot. Read the ready banner's `Seeds:` row instead — it is immune to the level (packages/runtime/src/seed-summary.ts), e.g. `Seeds:   com.example.showcase 132 rows`, and turns yellow with ⚠ and an `N ok / M errors` or `lost links` count when rows were dropped. `--log-level info` additionally prints `[Seeder] Seed loading complete {inserted, updated, skipped, errored}`; a load that dropped records logs `[Seeder] Seed loading completed with N dropped record(s)…` at warn and is visible at either level. `os dev` compiles before it serves (the default since #26130), and the compile prints its author-time lint findings as ⚠ lines first (65 on the stock showcase at 756220c4): they are build advisories, not boot lines, so start the ⚠ read at the server's startup, after the compile output. ⚠️ /api/v1/health answers 200 as soon as the port is bound, BEFORE the ready banner (`Flows:`, `Seeds:`) is printed (packages/cli/src/commands/serve.ts prints the banner after the bind), so a log cut at the health-green line can stop short of the very lines this step reads: capture the boot log to its own file, wait for the banner's last line (`Press Ctrl+C to stop`), and end the boot window at the first NON-health request the run issues",
+        "read the FULL boot log: capture the Flows: banner, any ⚠ lines, any ERROR-level lines, and the seed outcome. ⚠️ at the default log level (warn) SeedLoader prints NO success line, so a grep for one finds nothing on a healthy boot. Read the ready banner's `Seeds:` row instead — it is immune to the level (packages/runtime/src/seed-summary.ts), e.g. `Seeds:   com.example.showcase 138 rows`, and turns yellow with ⚠ and an `N ok / M errors` or `lost links` count when rows were dropped. `--log-level info` additionally prints `[Seeder] Seed loading complete {inserted, updated, skipped, errored}`; a load that dropped records logs `[Seeder] Seed loading completed with N dropped record(s)…` at warn and is visible at either level. `os dev` compiles before it serves (the default since #26130), and the compile prints its author-time lint findings as ⚠ lines first (65 on the stock showcase at 756220c4): they are build advisories, not boot lines, so start the ⚠ read at the server's startup, after the compile output. ⚠️ /api/v1/health answers 200 as soon as the port is bound, BEFORE the ready banner (`Flows:`, `Seeds:`) is printed (packages/cli/src/commands/serve.ts prints the banner after the bind), so a log cut at the health-green line can stop short of the very lines this step reads: capture the boot log to its own file, wait for the banner's last line (`Press Ctrl+C to stop`), and end the boot window at the first NON-health request the run issues",
         "GET /_console/ and confirm the console shell HTML is served (200, text/html)",
         "GET /api/v1/meta/app?id=showcase_app and capture the merged app/nav metadata (?id= matches the App document's NAME, never the package id — ?id=com.example.showcase answers an empty items array, which reads exactly like missing metadata)",
         "cross-check the nav payload: the grp_data group lists the seeded objects (showcase_project, showcase_task, showcase_account, showcase_contact, showcase_invoice, showcase_field_zoo, …)"
@@ -146,7 +146,7 @@
       "title": "Seed integrity: row counts match the authored seed, values land verbatim, replay is idempotent",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P0",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -158,11 +158,11 @@
       },
       "steps": [
         "after a clean fresh boot, derive the expected per-object row counts from the app's own seed module (examples/app-showcase/src/data/seed/index.ts — count the records arrays; re-derive rather than trusting a stale list if seeds changed)",
-        "baseline for cross-checking the derivation — all 19 datasets of ShowcaseSeedData, 132 rows, read at 9753d163 (QA run #25812 counted the same 19/19 and 132 at 6679644a): showcase_account=14, showcase_contact=32 (8 named + 24 bulk prospects), showcase_inquiry=3, showcase_product=4, showcase_project=5, showcase_task=10, showcase_category=4, showcase_business_unit=9, sys_business_unit=5, showcase_team=2, showcase_project_membership=3 (mode ignore), showcase_field_zoo=2, showcase_invoice=12, showcase_invoice_line=5, showcase_expense_report=4, showcase_expense_line=13, showcase_preference=1, showcase_announcement=2, showcase_client_brief=2",
+        "baseline for cross-checking the derivation — all 20 datasets of ShowcaseSeedData, 138 rows, counted at 8523ef9a by importing the module (QA run #32135's boot banner read the same 138 at ff04ad81): showcase_account=14, showcase_contact=32 (8 named + 24 bulk prospects), showcase_inquiry=3, showcase_product=4, showcase_project=5, showcase_task=10, showcase_category=4, showcase_business_unit=9, sys_business_unit=5, showcase_team=2, showcase_project_membership=3, showcase_field_zoo=2, sys_exchange_rate=4 (two rates each for EUR and JPY), showcase_invoice=12, showcase_invoice_line=7, showcase_expense_report=4, showcase_expense_line=13, showcase_preference=1, showcase_announcement=2, showcase_client_brief=2",
         "for each seeded object, GET /api/v1/data/<object>?$top=1 and read the server total; build the expected-vs-actual table",
         "GET the Field Zoo 'Specimen — Full' row and spot-diff authored values (f_multiselect ['red','green'] as a set, f_lookup resolving to the Northwind account id, f_json nested object intact, f_time in its canonical stored form — authored '14:30', served '14:30:00', which is equal and not a drift; packages/core/src/utils/temporal-storage-form.ts#canonicalTimeOfDay)",
-        "read the seed outcome: every seed source reports success and none reports a rejection or a partial load. ⚠️ at the default log level (warn) SeedLoader prints NO success line, so a grep for one finds nothing on a healthy boot. Read the ready banner's `Seeds:` row instead — it is immune to the level (packages/runtime/src/seed-summary.ts), e.g. `Seeds:   com.example.showcase 132 rows`, and turns yellow with ⚠ and an `N ok / M errors` or `lost links` count when rows were dropped. `--log-level info` additionally prints `[Seeder] Seed loading complete {inserted, updated, skipped, errored}`; a load that dropped records logs `[Seeder] Seed loading completed with N dropped record(s)…` at warn and is visible at either level",
-        "restart the server against the SAME file DB; re-run the count sweep and diff against the first sweep (upsert mode must no-op, not duplicate)"
+        "read the seed outcome: every seed source reports success and none reports a rejection or a partial load. ⚠️ at the default log level (warn) SeedLoader prints NO success line, so a grep for one finds nothing on a healthy boot. Read the ready banner's `Seeds:` row instead — it is immune to the level (packages/runtime/src/seed-summary.ts), e.g. `Seeds:   com.example.showcase 138 rows`, and turns yellow with ⚠ and an `N ok / M errors` or `lost links` count when rows were dropped. `--log-level info` additionally prints `[Seeder] Seed loading complete {inserted, updated, skipped, errored}`; a load that dropped records logs `[Seeder] Seed loading completed with N dropped record(s)…` at warn and is visible at either level",
+        "restart the server against the SAME file DB; re-run the count sweep and diff against the first sweep. Every dataset replays create-only: no dataset declares mode 'upsert', so each takes the seed default `ignore` (the seed module's own comment says why), and a replay matches each row by its externalId and leaves it as it is — no row is added, none is rewritten"
       ],
       "acceptance": [
         {
@@ -184,7 +184,7 @@
           "evidence": "the log excerpt"
         },
         {
-          "clause": "seed replay is idempotent: a restart against the same DB changes no count (upsert with externalId no-ops on unchanged rows)",
+          "clause": "seed replay is idempotent: a restart against the same DB changes no count (every dataset is create-only, the seed default `ignore`: each authored row is matched by its externalId and left as it is)",
           "oracle": "api",
           "verify": "second count sweep diffs empty against the first",
           "evidence": "both sweeps"
@@ -198,7 +198,7 @@
       ],
       "negative": [
         "a count of 0 on any nav-visible object is a FAIL against the seed, never 'feature has nothing to show' (seed-data-thin trap: check row counts vs the built artifact, read the boot log)",
-        "counts that GROW on restart are a FAIL of upsert idempotence even though every row individually looks valid"
+        "counts that GROW on restart are a FAIL of replay idempotence (the externalId match) even though every row individually looks valid"
       ],
       "traps": ["seed-data-thin", "single-datapoint"],
       "source": [
@@ -234,6 +234,12 @@
           "date": "2026-10-28",
           "change": "acceptance[1].verify names the masked field. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26481, priority:P0, at 756220c4; wave anchor #25807, slice B): f_password read back as the mask '••••••••', so a literal Specimen diff showed one difference that is the field's declared behaviour. Re-read at base fd246c22: examples/app-showcase/src/data/objects/field-zoo.object.ts (f_password, 'Password (masked on read)'), examples/app-showcase/src/data/seed/index.ts. The clause is unchanged",
           "ref": "#25807"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-10",
+          "change": "steps[1], steps[4] and steps[5], acceptance[3].clause and negative[1] corrected. Checklist-accuracy findings of QA run #32135 (the maintainer-named full-platform run at ff04ad81; card #32168). (1) steps[1]'s baseline said 19 datasets and 132 rows, and the run's boot read 138: ShowcaseSeedData now carries 20 datasets and 138 rows, because sys_exchange_rate (4 rows) was added and showcase_invoice_line authors 7 lines, not 5. Counted at base 8523ef9a by importing ShowcaseSeedData (examples/app-showcase/src/data/seed/index.ts) and summing each records array; steps[4]'s banner example follows. (2) steps[5], acceptance[3] and negative[1] called the replay an upsert, but no dataset declares mode 'upsert': each takes the seed default `ignore` (create-only), as the seed module's comment says. The assertion is unchanged: a restart changes no count",
+          "ref": "#32168"
         }
       ]
     },
@@ -242,7 +248,7 @@
       "title": "Seeded admin signs in through the console; the session survives reload and re-authenticates cleanly after expiry",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P0",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -251,8 +257,8 @@
         "sign in with the seeded admin credentials — drive the React controlled inputs with the native setter + input/change events, or POST the auth endpoint from the page (dogfood skill §4; naive fills submit empty)",
         "screenshot the post-login shell; capture the first authed API responses",
         "reload the page; capture the first authed API request after reload",
-        "expire the session SERVER-side: POST /api/v1/auth/sign-out; then trigger an authed navigation/API call. ⛔ Do NOT use a clearCookies() gesture: the console authenticates with a bearer token in localStorage under `auth-session-token`, sent as an Authorization header, so clearing cookies expires NOTHING and the shell legitimately keeps rendering authed data — which reads exactly like the dead-shell failure clause 3 exists to catch (this nearly produced a false P0). Clearing localStorage as well is the client-side equivalent",
-        "observe the console's reaction (redirect to login vs dead shell); screenshot",
+        "expire the session SERVER-side: POST /api/v1/auth/sign-out. Then drive BOTH legs, each scored on its own, in this order: (a) an IN-APP navigation with no reload — click a tile on Home (the Showcase app) or a sidebar link, which the console routes client-side; then (b) a full page RELOAD. They are different code paths and can disagree: the reload reads the session afresh at page load, while the in-app navigation only meets the 401s its data calls answer (QA run #32135: the reload went to /_console/login?redirect=…, the in-app navigation kept the full shell over 'Page Not Found', #32138). ⛔ Do NOT use a clearCookies() gesture: the console authenticates with a bearer token in localStorage under `auth-session-token`, sent as an Authorization header, so clearing cookies expires NOTHING and the shell legitimately keeps rendering authed data — which reads exactly like the dead-shell failure clause 3 exists to catch (this nearly produced a false P0). Clearing localStorage as well is the client-side equivalent",
+        "observe the console's reaction after EACH leg of steps[4] (redirect to login vs dead shell); screenshot each",
         "sign in again and verify the console restores a working session on the same route",
         "negative pass: sign out, then attempt login with a wrong password; capture the auth response and the UI"
       ],
@@ -276,10 +282,10 @@
           "evidence": "the 401 trace"
         },
         {
-          "clause": "the console reacts to expiry by returning the user to login (or an explicit re-auth prompt) — never a dead shell rendering stale data as if authed",
+          "clause": "the console reacts to expiry by returning the user to login (or an explicit re-auth prompt) on BOTH legs of steps[4], the in-app navigation and the reload — never a dead shell rendering stale data, or a 'not found' or connection error, as if the user were still signed in",
           "oracle": "screenshot",
-          "verify": "post-expiry screenshot shows the login/re-auth surface",
-          "evidence": "screenshot"
+          "verify": "one post-expiry screenshot per leg, each showing the login/re-auth surface. The reload leg passing never scores the in-app leg: QA run #32135 met exactly that split (the reload redirected; the in-app navigation kept the sidebar and avatar over 'Page Not Found' and 'Couldn't load records', #32138)",
+          "evidence": "a screenshot per leg"
         },
         {
           "clause": "re-authentication after expiry restores a working session: the same authed calls return 200 again and the shell renders current data",
@@ -302,7 +308,8 @@
         { "revision": 1, "date": "2026-08-07", "change": "initial", "ref": "#3358" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 3, "date": "2026-08-18", "change": "corrected step 5's expiry gesture and the clause-2 ?id= example. The console authenticates by bearer token in localStorage (auth-session-token), so the documented clearCookies() gesture expires nothing and leaves a fully authed shell rendering — the exact shape of the c3 failure mode, which nearly produced a false P0 (#9453 CF-8). True expiry is POST /api/v1/auth/sign-out. Also corrected ?id=com.example.showcase to the app name showcase_app (#9334)", "ref": "#9386" },
-        { "revision": 4, "date": "2026-10-01", "change": "checklist-accuracy findings of QA run #21056: acceptance[2].verify still said 'after clearing cookies', contradicting the rev-3 sign-out in steps[4]; acceptance[0] asked for 'nav + header', but the post-login landing /_console/home renders the header and the launcher with no sidebar by design", "ref": "#21060" }
+        { "revision": 4, "date": "2026-10-01", "change": "checklist-accuracy findings of QA run #21056: acceptance[2].verify still said 'after clearing cookies', contradicting the rev-3 sign-out in steps[4]; acceptance[0] asked for 'nav + header', but the post-login landing /_console/home renders the header and the launcher with no sidebar by design", "ref": "#21060" },
+        { "revision": 5, "date": "2026-11-10", "change": "steps[4], steps[5] and acceptance[3] name both expiry legs. Checklist-accuracy finding of QA run #32135 (at ff04ad81; card #32168): after the server-side sign-out, an in-app navigation and a full reload behave differently — the reload returned to /_console/login?redirect=…, the in-app navigation kept the signed-in shell over 'Page Not Found' (the product defect #32138) — and steps[4] said only 'an authed navigation/API call', so a run could score the clause on whichever leg it happened to drive. Each leg is now driven and screenshotted, and the clause holds only when both return to login. Not loosened: the reload leg passing no longer stands for the in-app one", "ref": "#32168" }
       ]
     },
     {

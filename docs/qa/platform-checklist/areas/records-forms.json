@@ -187,7 +187,7 @@
       "title": "Create → read → update → delete a record through the console UI",
       "since": "v15",
       "status": "active",
-      "revision": 17,
+      "revision": 18,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -212,7 +212,7 @@
         "click New; fill name with a distinctive value (os-qa-<runid>), industry, status=active; leave website empty; submit — the create form's button reads 'Create', not 'Save' (ui/packages/plugin-form: form.create / form.update)",
         "capture the create request/response (expect POST /api/v1/data/showcase_account). The payload also carries the select defaults of fields the step leaves untouched — sales_region:'amer' (its AMER option is default:true, examples/app-showcase/src/data/objects/account.object.ts) — so expect that key in the body you diff (QA run #24556)",
         "re-read server-side: GET /api/v1/data/showcase_account?$filter=[[\"name\",\"=\",\"os-qa-<runid>\"]] — field-by-field vs the submitted payload",
-        "open the record detail; edit exactly one field (annual_revenue); submit it (an edit form's button reads 'Update'); capture the PATCH /api/v1/data/showcase_account/<id>; re-read the full row via GET /api/v1/data/showcase_account/<id>",
+        "open the record detail; edit exactly one field, annual_revenue, to a new positive number; submit it (an edit form's button reads 'Update'); capture the PATCH /api/v1/data/showcase_account/<id>; re-read the full row via GET /api/v1/data/showcase_account/<id>. annual_revenue is the field because showcase_account has no rule-free TEXT field the later steps can spare: `name` is the key steps[3] and steps[8] filter on, and tax_id, billing_email and churn_reason are each judged by a validation rule (account.object.ts: tax_id_format, billing_email_format, churn_reason_consistency); annual_revenue carries none (its only constraint is the field's min 0). ⛔ Not `hq`: it is a location field (Field.location), whose input takes 'latitude, longitude', and text that is not a coordinate pair clears the stored value while the save still reports success (#32139) — a defect of its own, not this clause's subject",
         "read the record's field-change history on the record page's timeline stream, under its Changes chip (变更). Record page v3 draws no tab named History at any width (#27055). The stream's whole face, with its chips, is the 动态 (Activity) tab: open it from the header of the 动态 panel, the first panel of the record page's right column (below the details in one column under 760 px, ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor), or by ?related=timeline (#27524). At 1440 px the page also draws a top-level tab row — Overview, Activity (动态), then its panels (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row) — and its Activity tab is the same door as ?related=timeline. The panel itself shows only the newest lines, with no chips, and can lag the update line until a fresh read (QA run #28545): read the change lines on the Activity tab after a reload, not off the panel. Screenshot first, then read the change lines",
         "clone the record: POST /api/v1/data/showcase_account/<id>/clone (optionally with {overrides:{name:'os-qa-<runid>-clone'}}); capture the 201 result (new id ≠ source, sourceId, record); re-read the clone via GET /api/v1/data/showcase_account/<new id>",
         "RLS probe on clone: as a persona WITHOUT read on the source row (a permission-zoo persona, or a non-owner under owner-RLS), POST the same clone route and capture the refusal — expect 404 RECORD_NOT_FOUND, never a silent duplicate (record blocked(fixture) if no non-reading persona is bound on this boot)",
@@ -385,6 +385,12 @@
           "date": "2026-11-01",
           "change": "QA run #28545 (W3-C1R) finding: at 1440 px the record page also has a top-level Activity tab, the same face as ?related=timeline, and steps[5] named only the panel header and the query. steps[5] now names the tab row (RecordPageColumns.tsx: Overview, Activity, then the panels), and steps[5] and acceptance[4].verify say to read the change lines on the full stream after a fresh read, because the right-column panel lagged the update line in #28545. The tab row is read from source; the lag is #28545's live reading. No clause weakened. Read from source at base 6b9c1ca991. Wave anchor #27377, wave-3 accuracy slice S9 (#28641); finding parked in anchor comment 6554042054",
           "ref": "#28545"
+        },
+        {
+          "revision": 18,
+          "date": "2026-11-10",
+          "change": "steps[4] says why annual_revenue is the single-field edit and steers off `hq`. Checklist-accuracy finding of QA run #32135 (at ff04ad81; card #32168): the runner reached for `hq` as a text field to edit, but it is Field.location — a non-coordinate text cleared the stored value with a success toast, extracted as #32139 — and the run asked for a rule-free text field to be named. Re-read at base 8523ef9a: examples/app-showcase/src/data/objects/account.object.ts has no rule-free text field besides `name`, which the filtered reads key on (tax_id, billing_email and churn_reason each meet a validation rule), so the step keeps annual_revenue, which no rule names, and says so. No clause changed",
+          "ref": "#32168"
         }
       ]
     },
