@@ -117,6 +117,14 @@ export interface UnmanagedImportAuditEvent {
     targetPackageId?: string;
     namespace?: string;
     sourceNamespace?: string;
+    /**
+     * [#31482] On a grant refused over its namespace: the namespace the
+     * installer asked the copy to take (`target_namespace`), and the one the
+     * control plane's grant named (`data.target_namespace`), each absent when
+     * there was none.
+     */
+    requestedNamespace?: string;
+    grantedNamespace?: string;
     copiedCount?: number;
     outcome: 'success' | 'failure';
     errorCode?: string;

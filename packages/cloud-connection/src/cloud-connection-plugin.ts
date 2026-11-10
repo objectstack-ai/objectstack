@@ -171,7 +171,7 @@ import { readJsonRequestBody } from './request-json-body.js';
 import { InstallModeSchema, ManifestSchema, SEMVER_2_0_0_VERSION_PATTERN, type InstallMode } from '@objectstack/spec/kernel';
 import {
     INSTALL_LOCAL_DOOR_SERVICE, TARGET_NAMESPACE_ON_MANAGED_INSTALL_MESSAGE, grantRefusalEvent, recordUnmanagedImportEvent,
-    type InstallLocalDoor, type InstallLocalDoorGrant, type UnmanagedImportAuditSurface,
+    type InstallLocalDoor, type InstallLocalDoorGrant, type UnmanagedImportAuditEvent, type UnmanagedImportAuditSurface,
 } from './install-local-door-service.js';
 
 const CLOUD_CONNECTION_PREFIX = '/api/v1/cloud-connection';
@@ -353,31 +353,51 @@ function packageVersionOf(body: any): { ok: true; version: string | undefined } 
 
 /**
  * [#31482] The namespace a `POST /install` body asks an unmanaged copy to take:
- * `target_namespace`, the spelling the control plane's install action reads
- * and its grant echoes (`data.target_namespace`, cloud#3648). One spelling only.
- * `namespace` is `undefined` when the body names none (absent or `null`): the
+ * `target_namespace` (the spelling the control plane's install action reads
+ * and its grant echoes, `data.target_namespace`, cloud#3648) or
+ * `targetNamespace` (the install-local door's), read as {@link installModeOf}
+ * reads the mode. The two spellings naming different values is a 400, never a
+ * pick. `present` is false when the body names none (absent or `null`): the
  * copy keeps the namespace the grant names, else the source's, as before, and
- * the control plane is then sent no `target_namespace`. Anything else is parsed
- * by the manifest key's own declaration (`ManifestSchema.shape.namespace`, by
- * reference, never a copied pattern), and a value it refuses is a 400 here,
- * before the control plane is asked. Whether the name is reserved, owned by
- * another package, or fits every copied name is the install-local door's to
- * answer, on the copy.
+ * the control plane is then sent no `target_namespace`. A string is trimmed,
+ * as `version` is; then it is parsed by the manifest key's own declaration
+ * (`ManifestSchema.shape.namespace`, by reference, never a copied pattern), and
+ * a value it refuses is a 400 here, before the control plane is asked. Whether
+ * the name is reserved, owned by another package, or fits every copied name is
+ * the install-local door's to answer, on the copy. The route refuses any
+ * spelling beside a managed install before the value is judged.
  */
-function targetNamespaceOf(body: any): { ok: true; namespace: string | undefined } | { ok: false; message: string; raw: unknown } {
-    const raw = body?.target_namespace;
-    if (raw === undefined || raw === null) return { ok: true, namespace: undefined };
-    const declared = ManifestSchema.shape.namespace.safeParse(raw);
+function targetNamespaceOf(body: any):
+    | { ok: true; present: false }
+    | { ok: true; present: true; namespace: string | undefined; error?: { message: string; raw: unknown } }
+    | { ok: false; message: string } {
+    const snake = body?.target_namespace ?? undefined;
+    const camel = body?.targetNamespace ?? undefined;
+    if (snake !== undefined && camel !== undefined && snake !== camel) {
+        return {
+            ok: false,
+            message: `\`target_namespace\` (${JSON.stringify(snake)}) and \`targetNamespace\` (${JSON.stringify(camel)}) disagree. `
+                + 'Send one of them. Nothing was installed.',
+        };
+    }
+    const key = snake !== undefined ? 'target_namespace' : 'targetNamespace';
+    const raw = snake !== undefined ? snake : camel;
+    if (raw === undefined) return { ok: true, present: false };
+    const declared = ManifestSchema.shape.namespace.safeParse(typeof raw === 'string' ? raw.trim() : raw);
     if (!declared.success) {
         const rule = declared.error.issues[0]?.message ?? 'See `manifest.namespace`';
         return {
-            ok: false,
-            raw,
-            message: `Invalid package namespace ${JSON.stringify(raw)} on \`target_namespace\`. ${rule}. It becomes the `
-                + 'copy\'s namespace and the prefix of every copied object name. Nothing was installed.',
+            ok: true,
+            present: true,
+            namespace: undefined,
+            error: {
+                raw,
+                message: `Invalid package namespace ${JSON.stringify(raw)} on \`${key}\`. ${rule}. It becomes the `
+                    + 'copy\'s namespace and the prefix of every copied object name. Nothing was installed.',
+            },
         };
     }
-    return { ok: true, namespace: declared.data };
+    return { ok: true, present: true, namespace: declared.data };
 }
 
 export interface CloudConnectionPluginConfig {
@@ -1370,14 +1390,15 @@ export class CloudConnectionPlugin implements Plugin {
                 // sentence, never ignored, since a managed install is never
                 // renamed. Absent, the control plane is sent no
                 // `target_namespace`, so the request is the one it always was.
-                if (body?.target_namespace !== undefined && body?.target_namespace !== null && installMode !== 'unmanaged') {
+                const asked = targetNamespaceOf(body);
+                if (!asked.ok) return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: asked.message } }, 400);
+                if (asked.present && installMode !== 'unmanaged') {
                     return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: TARGET_NAMESPACE_ON_MANAGED_INSTALL_MESSAGE } }, 400);
                 }
-                const asked = targetNamespaceOf(body);
-                if (!asked.ok) {
-                    return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: asked.message, details: { targetNamespace: asked.raw } } }, 400);
+                if (asked.present && asked.error) {
+                    return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: asked.error.message, details: { targetNamespace: asked.error.raw } } }, 400);
                 }
-                const targetNamespace = asked.namespace;
+                const targetNamespace = asked.present ? asked.namespace : undefined;
 
                 // Call the cloud install endpoint in service mode. We do NOT send
                 // an active org → package-install treats this as platform/CI and
@@ -1531,9 +1552,9 @@ export class CloudConnectionPlugin implements Plugin {
                     if (!found) { try { found = kernel?.getService?.<T>(name); } catch { /* not registered */ } }
                     return found;
                 };
-                const auditRefusal = async (errorCode: string, status: number): Promise<void> => {
+                const auditRefusal = async (errorCode: string, status: number, extra: Partial<UnmanagedImportAuditEvent> = {}): Promise<void> => {
                     const audit = await environmentService<UnmanagedImportAuditSurface>('audit');
-                    await recordUnmanagedImportEvent(audit, ctx.logger, 'CloudConnectionPlugin', grantRefusalEvent(granted, errorCode, status));
+                    await recordUnmanagedImportEvent(audit, ctx.logger, 'CloudConnectionPlugin', { ...grantRefusalEvent(granted, errorCode, status), ...extra });
                 };
                 // An answer with no `install_mode` at all may come from a control
                 // plane that does not read the param, and so may already have
@@ -1556,7 +1577,12 @@ export class CloudConnectionPlugin implements Plugin {
                         `[CloudConnectionPlugin] the unmanaged install of ${packageId} in ${environmentId} was not copied: `
                         + `the control plane's grant could not be read (${unread}).${managedNote}`,
                     );
-                    await auditRefusal('PLUGIN_INSTALL_FAILED', 502);
+                    // [#31482] A grant refused over its namespace records both
+                    // namespaces: the one asked for and the one the grant named.
+                    await auditRefusal('PLUGIN_INSTALL_FAILED', 502, versionUnread === undefined ? {
+                        ...(askedNamespace !== undefined ? { requestedNamespace: askedNamespace } : {}),
+                        ...(echoedNamespace !== undefined ? { grantedNamespace: echoedNamespace } : {}),
+                    } : {});
                     return c.json({
                         success: false,
                         error: {
