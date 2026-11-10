@@ -81,6 +81,14 @@ Both end up resolvable by the same name. When the import endpoint resolves
 falls back to the packaged registry — so a runtime-saved mapping and a packaged one are
 addressed identically by the request.
 
+`mappingName` names no package, so the name resolves the way any read that names no
+package does (ADR-0150 D3): the environment's own mapping, else the one package that
+holds the name. When **two packages** hold the same mapping name, the import is refused
+with `409 RESOURCE_CONFLICT` naming every package that holds it, and no row is written;
+it never picks one of them. A request cannot yet name the package, so give one of the
+two mappings another name. `GET /api/v1/meta/mapping/<name>` answers the same `409`;
+`?package=<id>` or `/meta/mapping/<namespace>/<name>` reads one holder's mapping.
+
 The `mapping` kind carries no per-organization overlay: there is no tenant-customized
 variant of a packaged mapping. A tenant that needs different columns saves its own
 mapping under its own name.
@@ -254,6 +262,7 @@ These are whole-request failures — nothing is written, and there is no per-row
 | Status | `code` | Cause |
 |:---|:---|:---|
 | 404 | `MAPPING_NOT_FOUND` | No mapping artifact is registered under that name. |
+| 409 | `RESOURCE_CONFLICT` | Two or more packages hold a mapping under that name, and the environment holds none; the error names every holder. |
 | 400 | `MAPPING_TARGET_MISMATCH` | The artifact's `targetObject` is not the object in the URL. |
 | 400 | `MAPPING_FORMAT_UNSUPPORTED` | The artifact declares `sourceFormat: 'xml'` or `'sql'`; the endpoint accepts csv, json and xlsx payloads only. |
 | 400 | `MAPPING_FORMAT_MISMATCH` | The declared `sourceFormat` contradicts the payload actually sent. A `csv` mapping does apply to an `xlsx` payload — those rows are tabular in the same way — but a `json` mapping does not. |

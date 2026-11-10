@@ -313,6 +313,7 @@
     "api/OpenApiServer",
     "api/OpenApiSpec",
     "api/OperatorMapping",
+    "api/OrganizationEditionChoice",
     "api/PackageApiErrorCode",
     "api/PackageExportBundle",
     "api/PackageExportManifest",

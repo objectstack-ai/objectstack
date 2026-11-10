@@ -19,7 +19,7 @@
 import type { LoadedScenario } from '../loader.js';
 import { isProbedOperation, scenarioNamespace } from '../schema.js';
 import { gradeOperation, type OperationGrade, type OperationObservation } from './scenario-operation-grade.js';
-import { gradePersonaRun, type HiddenScope, type PersonaRunGrade, type RunTranscript } from './scenario-run-grade.js';
+import { gradePersonaRun, type FigureReading, type HiddenScope, type PersonaRunGrade, type RunTranscript } from './scenario-run-grade.js';
 import { scoreScenarioArtifact, type ScenarioArtifactScore } from './scenario-tags.js';
 
 export * from './scenario-graph.js';
@@ -70,10 +70,43 @@ export interface CardAnswer {
   tol?: number;
 }
 
+type CardQuestion = LoadedScenario['card']['run']['questions'][number];
+
+/**
+ * How a card question's figures read besides their numbers, from its truth
+ * spec alone, so every card keeps its format:
+ *
+ *   - an `avg` (or a ranking by an average) is met by its value rounded to
+ *     the precision the reply writes (`TruthFigure.rounded`): the seed's
+ *     4.5556 is the 4.56 a person reads off a report;
+ *   - a `count` grouped by a field answers "who" when its truth is one group
+ *     of count 1 — the one row the question names, and the group is who holds
+ *     it. Each key is named by itself and, when the grouped field is a
+ *     declared lookup, by the `name` of the seed row it points at
+ *     (`checkout.employee` = `e10` is also "Ella Ma"), so a reply naming the
+ *     person meets the figure without stating "1" (`TruthFigure.names`).
+ */
+export function figureReadingOf(card: LoadedScenario['card'], q: CardQuestion): FigureReading {
+  const t = q.truth;
+  if (t.kind === 'avg' || (t.kind === 'topN' && t.measure !== undefined && t.measure.kind === 'avg')) return { average: true };
+  if (t.kind !== 'count' || t.groupBy === undefined) return {};
+  const lookups = new Map((card.expect.lookups ?? []).map((l) => [`${l.object}.${l.field}`, l.to]));
+  const segs = t.groupBy.split('.');
+  let object = q.object;
+  for (const seg of segs.slice(0, -1)) object = lookups.get(`${object}.${seg}`) ?? object;
+  const to = lookups.get(`${object}.${segs[segs.length - 1]}`);
+  const groupNames: Record<string, string[]> = {};
+  for (const row of to === undefined ? [] : card.run.seed[to] ?? []) {
+    if (typeof row.name === 'string') groupNames[String(row.id)] = [String(row.id), row.name];
+  }
+  return { groupNames };
+}
+
 /**
  * Grade one agent answer to a card question — as a persona against that
  * persona's computed truth (a `withheld` truth is must-not-reveal), or, with
- * no persona, against the truth over every row.
+ * no persona, against the truth over every row. An average reads by its
+ * rounding and a "who" count by its names ({@link figureReadingOf}).
  */
 export function gradeCardAnswer(scenario: LoadedScenario, answer: CardAnswer): PersonaRunGrade {
   const { card } = scenario;
@@ -106,6 +139,7 @@ export function gradeCardAnswer(scenario: LoadedScenario, answer: CardAnswer): P
       hidden,
       ...(answer.objectLabels ? { objectLabels: answer.objectLabels } : {}),
       ...(answer.tol !== undefined ? { tol: answer.tol } : {}),
+      reading: figureReadingOf(card, q),
       ...(inScopeFigures ? { inScopeFigures } : {}),
     },
     answer.turn,

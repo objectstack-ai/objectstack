@@ -12,56 +12,48 @@
  * the author had written it. A renderer honouring the order therefore drew the
  * raw id as the record page's H1.
  *
- * The object now points at `display_title`, a text formula over the columns
- * `titleFormat` names. This file asserts:
+ * The object now points at `display_title`, a text formula naming the PERSON
+ * and the status LABEL — not the raw user id and the stored token. It reads the
+ * user's `name` (their `email` where the name is blank) ONE hop through
+ * `user_id`, the mechanism `sys_user_permission_set`'s title uses in
+ * plugin-security, and the status through `label()`. This file asserts:
  *
  *  1. the designate-only pass the registry runs at registration
  *     (`provisionPrimary(…, { synthesize: false })`, ADR-0079 D7) keeps
  *     `display_title` and no longer lands on `id`;
- *  2. the formula reads exactly the columns `titleFormat` names, on this row
- *     only, each required and none withheld from a reader of the row.
+ *  2. the formula reads `user_id` only through the hop — never bare, which is
+ *     the `traversal-bare-and-traversed` refusal — and `status` only through
+ *     `label()`, on a field that declares options;
+ *  3. each column it reads on this row is required and none is withheld from
+ *     a reader of the row.
  *
  * What it does NOT assert, deliberately: the rendered text. That needs the
  * engine to evaluate the formula, and this package's dependency closure has
  * none (`@objectstack/objectql` and `@objectstack/driver-sql` are not among its
- * dependencies). The sibling objects' suites in plugin-security and
- * service-messaging hold the same formula shape to the `titleFormat` text
- * through the real engine.
+ * dependencies). plugin-security's `sys-user-permission-set-person-title.test.ts`
+ * and `sys-security-assignment-display-title.test.ts` hold the same hop to the
+ * person's name through the real engine, as the reader.
  */
 
 import { describe, it, expect } from 'vitest';
 import { provisionPrimary, resolveDisplayField } from '@objectstack/spec/data';
 import { SysPresence } from './sys-presence.object.js';
 
-/**
- * The `titleFormat` template each object declared before the ruling of record
- * on #29007 (6574393684, letter B) retired it: an object definition that
- * declares one is refused at the metadata save gate and by `os validate`, so
- * the object no longer carries it. Kept here as the reference text the title
- * has to reproduce — the text the template drew — not as a title resolver.
- */
-const RETIRED_TITLE_TEMPLATES: Readonly<Record<string, string>> = {
-  sys_presence: '{user_id} ({status})',
-};
-
-/** The `titleFormat` source: the parsed schema carries it as an envelope. */
-function titleFormatSource(schema: unknown): string {
-  const tf = RETIRED_TITLE_TEMPLATES[(schema as { name: string }).name];
-  const source = typeof tf === 'string' ? tf : (tf as { source?: unknown })?.source;
-  if (typeof source !== 'string') throw new Error(`titleFormat carries no template source: ${JSON.stringify(tf)}`);
+/** The `display_title` expression source. */
+function formulaSource(): string {
+  const source = (SysPresence.fields as Record<string, any>).display_title?.expression?.source;
+  if (typeof source !== 'string') throw new Error('display_title carries no expression source');
   return source;
 }
 
-/** The columns `titleFormat` names. */
-function titleFormatColumns(schema: unknown): string[] {
-  return [...titleFormatSource(schema).matchAll(/\{\{?\s*([a-zA-Z0-9_.]+)\s*\}?\}/g)].map((m) => m[1]).sort();
+/** Every `record.<path>` the `display_title` expression reads, as written. */
+function formulaReads(): string[] {
+  return [...new Set([...formulaSource().matchAll(/record\.([A-Za-z_][A-Za-z0-9_.]*)/g)].map((m) => m[1]))].sort();
 }
 
-/** Every `record.<path>` the `display_title` expression reads, as written. */
-function formulaReads(schema: { fields: Record<string, any> }): string[] {
-  const source = schema.fields.display_title?.expression?.source;
-  if (typeof source !== 'string') throw new Error('display_title carries no expression source');
-  return [...source.matchAll(/record\.([A-Za-z_][A-Za-z0-9_.]*)/g)].map((m) => m[1]).sort();
+/** The fields the expression reads through `label(record.<field>)`. */
+function labelReads(): string[] {
+  return [...new Set([...formulaSource().matchAll(/\blabel\s*\(\s*record\.([A-Za-z_][A-Za-z0-9_]*)\s*\)/g)].map((m) => m[1]))].sort();
 }
 
 describe('[#20044] sys_presence declares a real record title under ADR-0079 order', () => {
@@ -76,12 +68,23 @@ describe('[#20044] sys_presence declares a real record title under ADR-0079 orde
     expect(field?.returnType).toBe('text');
   });
 
-  it('the formula reads exactly the titleFormat columns, on this row, each required and none withheld', () => {
+  it('the formula names the person through the user_id hop and the status by its option label', () => {
     const fields = SysPresence.fields as Record<string, any>;
-    const reads = formulaReads(SysPresence as any);
-    // One level deep: a dotted path would read a looked-up record's field.
-    expect(reads).toEqual(titleFormatColumns(SysPresence));
-    for (const column of reads) {
+    // `user_id` is read only through the hop, never bare — the raw id the
+    // title used to print.
+    expect(formulaReads()).toEqual(['status', 'user_id.email', 'user_id.name']);
+    expect(fields.user_id?.type).toBe('lookup');
+    expect(fields.user_id?.reference).toBe('sys_user');
+    // `status` is read only through `label()`, never as the stored token, and
+    // `label()` answers only on a field that declares options.
+    expect(labelReads()).toEqual(['status']);
+    expect(formulaSource()).not.toMatch(/\+\s*record\.status\b/);
+    expect(Array.isArray(fields.status?.options) && fields.status.options.length > 0).toBe(true);
+  });
+
+  it('each column the formula reads on this row is required and none is withheld', () => {
+    const fields = SysPresence.fields as Record<string, any>;
+    for (const column of ['user_id', 'status']) {
       expect(fields[column], column).toBeDefined();
       expect(fields[column].required, column).toBe(true);
       expect(fields[column].hidden ?? false, column).toBe(false);

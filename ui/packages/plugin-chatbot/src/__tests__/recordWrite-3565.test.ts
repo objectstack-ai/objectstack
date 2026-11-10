@@ -14,7 +14,13 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { detectRecordWrite, detectSampleDataCleanup, uiMessagesToChatMessages } from '../mapMessages';
+import {
+  detectPackageRemoval,
+  detectPackageRemovedResult,
+  detectRecordWrite,
+  detectSampleDataCleanup,
+  uiMessagesToChatMessages,
+} from '../mapMessages';
 
 const CREATE = {
   success: true,
@@ -198,5 +204,149 @@ describe('the live mapper lifts the card beside the approval it rides on', () =>
     // Not the sibling cards: a write proposal is neither a hand-off nor a draft.
     expect(tool?.recordHandoff).toBeUndefined();
     expect(tool?.draftReview).toBeUndefined();
+  });
+});
+
+/*
+ * objectstack#31025 — 「删除软件包」: cloud's `delete_package` answers the
+ * pending envelope plus `packageRemoval`, the shape on objectstack#31025
+ * (read at cloud `d6288d27`). A draft object has no table and an uncountable
+ * one has no count: both arrive without `rows`, and must stay without it.
+ */
+describe('detectPackageRemoval — 「删除软件包」 lists what goes', () => {
+  const REMOVAL = {
+    success: true,
+    status: 'pending_approval',
+    pendingActionId: 'pa_31',
+    packageRemoval: {
+      packageId: 'app_helpdesk',
+      label: 'Helpdesk',
+      objects: [
+        { name: 'hd_ticket', label: 'Ticket', rows: 120 },
+        { name: 'hd_agent', label: 'Agent', rows: 0 },
+        { name: 'hd_sla', label: 'SLA' },
+        { name: 'hd_note', label: 'Note', draft: true },
+      ],
+      totalRows: 120,
+      uncountedObjects: 1,
+      items: { view: 3, app: 1 },
+      data: 'dropped',
+      recycleBin: false,
+    },
+    message: 'Queued as pa_31; nothing is removed until the user confirms it on the card.',
+  };
+
+  it('lifts the plan from the bare and the wrapped shape', () => {
+    expect(detectPackageRemoval(REMOVAL)).toEqual({
+      packageId: 'app_helpdesk',
+      label: 'Helpdesk',
+      objects: [
+        { name: 'hd_ticket', label: 'Ticket', rows: 120 },
+        { name: 'hd_agent', label: 'Agent', rows: 0 },
+        { name: 'hd_sla', label: 'SLA' },
+        { name: 'hd_note', label: 'Note', draft: true },
+      ],
+      totalRows: 120,
+      uncountedObjects: 1,
+      items: { view: 3, app: 1 },
+      data: 'dropped',
+    });
+    expect(detectPackageRemoval({ type: 'text', value: JSON.stringify(REMOVAL) })?.packageId).toBe('app_helpdesk');
+  });
+
+  it('keeps an absent row count absent, never 0', () => {
+    const plan = detectPackageRemoval(REMOVAL);
+    const sla = plan?.objects.find((o) => o.name === 'hd_sla');
+    const note = plan?.objects.find((o) => o.name === 'hd_note');
+    expect(sla && 'rows' in sla).toBe(false);
+    expect(note && 'rows' in note).toBe(false);
+    // A real 0 stays a 0.
+    expect(plan?.objects.find((o) => o.name === 'hd_agent')?.rows).toBe(0);
+  });
+
+  it('is not a card without the pending id, without the plan, or on a refusal', () => {
+    const { pendingActionId: _omit, ...noId } = REMOVAL;
+    expect(detectPackageRemoval(noId)).toBeUndefined();
+    const { packageRemoval: _plan, ...noPlan } = REMOVAL;
+    expect(detectPackageRemoval(noPlan)).toBeUndefined();
+    expect(
+      detectPackageRemoval({ success: false, code: 'PACKAGE_INSTALLED_FROM_MARKETPLACE', error: 'Installed from the marketplace.' }),
+    ).toBeUndefined();
+    // The MCP door's confirmation_required queues nothing, so it has no card.
+    expect(
+      detectPackageRemoval({ success: true, status: 'confirmation_required', packageRemoval: REMOVAL.packageRemoval }),
+    ).toBeUndefined();
+  });
+
+  it('normalises counts defensively: negative or non-numeric rows read as uncounted, item counts as whole numbers', () => {
+    const plan = detectPackageRemoval({
+      ...REMOVAL,
+      packageRemoval: {
+        ...REMOVAL.packageRemoval,
+        objects: [
+          { name: 'a', label: 'A', rows: -4 },
+          { name: 'b', label: 'B', rows: '7' },
+          { name: 'c', label: 'C', rows: 2.9 },
+        ],
+        totalRows: -1,
+        uncountedObjects: 'many',
+        items: { view: 2.5, app: -1, page: 'x' },
+      },
+    });
+    expect(plan?.objects).toEqual([
+      { name: 'a', label: 'A' },
+      { name: 'b', label: 'B' },
+      { name: 'c', label: 'C', rows: 2 },
+    ]);
+    expect(plan?.totalRows).toBe(2);
+    expect(plan?.uncountedObjects).toBe(0);
+    expect(plan?.items).toEqual({ view: 2 });
+  });
+
+  it('is lifted by the mapper beside the pending id', () => {
+    const [message] = uiMessagesToChatMessages([
+      {
+        id: 'a1',
+        role: 'assistant',
+        parts: [
+          {
+            type: 'tool-delete_package',
+            toolCallId: 'c3',
+            state: 'output-available',
+            output: { type: 'text', value: JSON.stringify(REMOVAL) },
+          },
+        ],
+      },
+    ]);
+    const tool = message.toolInvocations?.[0];
+    expect(tool?.state).toBe('approval-requested');
+    expect(tool?.pendingActionId).toBe('pa_31');
+    expect(tool?.packageRemoval?.objects).toHaveLength(4);
+    expect(tool?.sampleDataCleanup).toBeUndefined();
+    expect(tool?.recordWrite).toBeUndefined();
+  });
+});
+
+describe('detectPackageRemovedResult — the approved delete_package outcome', () => {
+  it('reads removed, and partial with the failed count', () => {
+    expect(
+      detectPackageRemovedResult({ status: 'removed', packageId: 'app_helpdesk', removed: { object: 2 }, failed: [], data: 'dropped', message: 'Removed.' }),
+    ).toEqual({ status: 'removed', failed: 0 });
+    expect(
+      detectPackageRemovedResult({
+        status: 'partial',
+        packageId: 'app_helpdesk',
+        removed: { object: 1 },
+        failed: [{ type: 'view', name: 'v1' }, { type: 'flow', name: 'f1', code: 'LOCKED' }],
+        data: 'kept',
+        message: 'Partly removed.',
+      }),
+    ).toEqual({ status: 'partial', failed: 2 });
+  });
+
+  it('is nothing for any other answer', () => {
+    expect(detectPackageRemovedResult({ status: 'written', objectName: 'x', recordId: 'y' })).toBeUndefined();
+    expect(detectPackageRemovedResult(undefined)).toBeUndefined();
+    expect(detectPackageRemovedResult('removed')).toBeUndefined();
   });
 });
