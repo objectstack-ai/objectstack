@@ -49,8 +49,8 @@ const P = 'com.acme.caller';
 
 /** The nine types this card wires, as the registry spells them. */
 const E8_TYPES = ['app', 'page', 'dashboard', 'report', 'book', 'analytics_cube', 'tool', 'skill', 'agent'] as const;
-/** The types later children of epic #31527 appended to the list after E8 (#32072: dataset). */
-const LATER_TYPES = ['dataset'] as const;
+/** The types later children of epic #31527 appended to the list after E8 (#32069: api; #32072: dataset). */
+const LATER_TYPES = ['api', 'dataset'] as const;
 /** Of them, the ones phase 1's one-holder refusal does not cover: two package holders can exist today. */
 const UNCOVERED = E8_TYPES.filter((t) => !(BARE_NAME_REGISTRY_TYPES as readonly string[]).includes(t));
 

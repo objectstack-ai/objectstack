@@ -24,6 +24,7 @@ import {
   isGrantExpired,
   derivePosture as deriveAdminPosture,
   catalogEntryAddress,
+  holdsPlatformPermissionSet,
   permissionSetSwitchedOff,
   readDisabledCatalogNames,
   resolveUserAuthzGrants,
@@ -161,13 +162,14 @@ function isAuthzPosture(v: unknown): v is AuthzPosture {
  *         role positions are a provisioning source only and are no longer read
  *         as posture evidence — closing the same #2836 dual-track explain-side.
  */
-function derivePosture(context: any): AuthzPosture {
+function derivePosture(ql: unknown, context: any): AuthzPosture {
   if (!context?.userId || context?.principalKind === 'guest') return 'EXTERNAL';
   if (isAuthzPosture(context?.posture)) return context.posture;
-  const permissions: string[] = Array.isArray(context?.permissions) ? context.permissions : [];
   return deriveAdminPosture({
     isPlatformAdmin: context?.hasPlatformAdminGrant === true,
-    isTenantAdmin: ORGANIZATION_ADMIN_GRANTS.some((n) => permissions.includes(n)),
+    // [ADR-0150 D3] The PLATFORM's organization-administrator set, as the
+    // resolver reads the rung: another package's set of that name confers none.
+    isTenantAdmin: ORGANIZATION_ADMIN_GRANTS.some((n) => holdsPlatformPermissionSet(ql, context, n)),
     // [Ruling of record 6355206139] The same evidence the resolver reads: the
     // projected `org_external` identity.
     isExternal: holdsExternalPosition(context?.positions),
@@ -1816,7 +1818,7 @@ async function applyRecordAttribution(
     declaredColumns, depthScope, delegator, delegatedUnitScope,
   } = ra;
   const isRead = engineOp === 'find';
-  const posture = derivePosture(context);
+  const posture = derivePosture(deps.ql, context);
 
   const record = deps.fetchRecord
     ? await deps.fetchRecord(object, recordId, engineOp).catch(() => null)

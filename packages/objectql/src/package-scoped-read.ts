@@ -13,7 +13,9 @@
  *
  * {@link PACKAGE_SCOPED_READ_TYPES}: the presentation and AI types of child E8
  * (#31680) — app, page, dashboard, report, book, analytics cube, tool, skill
- * and agent — and `dataset` (#32072, a reader #31700 needs before it narrows:
+ * and agent — then `api` (#32069), whose in-memory store `@objectstack/metadata`
+ * keeps per `(package, name)`, so its qualified read serves the holder's own
+ * body, and `dataset` (#32072, a reader #31700 needs before it narrows:
  * `POST /analytics/dataset/query` reads its `datasetName` through the
  * protocol's by-name read, which is this resolver's for the types listed
  * here). A later child adds its own types to the list in its own change;
@@ -62,8 +64,8 @@ import {
 
 /**
  * The types whose by-name readers consult `(package, name)` today — child E8's
- * nine (#31680), as the registry spells them, then `dataset` (#32072). Each
- * later child of epic #31527 appends its own.
+ * nine (#31680), as the registry spells them, then `api` (#32069) and
+ * `dataset` (#32072). Each later child of epic #31527 appends its own.
  */
 export const PACKAGE_SCOPED_READ_TYPES = Object.freeze([
   'app',
@@ -75,6 +77,7 @@ export const PACKAGE_SCOPED_READ_TYPES = Object.freeze([
   'tool',
   'skill',
   'agent',
+  'api',
   // #32072: the analytics dataset query door and the dataset AI tools.
   'dataset',
 ] as const);
