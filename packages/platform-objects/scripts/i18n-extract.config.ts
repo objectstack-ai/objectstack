@@ -187,6 +187,9 @@ import {
   SysMetadataHistoryObject,
   SysMetadataAuditObject,
 } from '../src/metadata/index.js';
+// `sys_metadata_commit` (ADR-0067) lives in metadata-core beside the three
+// above; the back-compat barrel never re-exported it, so it is named here.
+import { SysMetadataCommitObject } from '@objectstack/metadata-core';
 
 // ── System ────────────────────────────────────────────────────────────────
 // `SysPlatformSetting` / `SysPlatformSettingAudit` are the settings global
@@ -347,6 +350,7 @@ const config: ObjectStackDefinition = defineStack({
     SysMetadataObject,
     SysMetadataHistoryObject,
     SysMetadataAuditObject,
+    SysMetadataCommitObject,
 
     // System
     SysSetting,

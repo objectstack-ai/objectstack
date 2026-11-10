@@ -194,3 +194,71 @@ describe('a stored flow the engine refuses at boot is not served as running (#23
         expect((await protocol.getMetaItem({ type: 'flow', name: 'typo' })).registration).toEqual({ state: 'registered' });
     });
 });
+
+/**
+ * A flow stored with no `start` node, now that registration refuses that shape:
+ * what each path does with a row stored before the refusal existed, or kept
+ * mid-edit through the metadata save door.
+ *
+ *  - Boot: the kernel still reaches `running`; the bind refuses the row, warns,
+ *    and records the refusal; every other stored flow is armed as before.
+ *  - Read: the stored row is served unchanged (it does not vanish), beside
+ *    `registration: refused` and the engine's words naming the missing node.
+ *  - Save: the metadata save door still keeps a start-less body (it does not run
+ *    the registration checks), and the mutation sync records the same refusal.
+ */
+describe('a stored flow with no start node: refused at the bind, never at the boot, and readable as refused', () => {
+    let kernel: ObjectKernel;
+
+    afterEach(async () => {
+        if (kernel?.getState() === 'running') await kernel.shutdown();
+    });
+
+    const startless = (name: string, status: string) => ({
+        ...stampFlow(name, { count: 1 }),
+        status,
+        nodes: [
+            { id: 'stamp', type: STAMP, label: 'Stamp', config: { count: 1 } },
+            { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [{ id: 'e1', source: 'stamp', target: 'end' }],
+    });
+
+    async function boot() {
+        kernel = new ObjectKernel({ logger: { level: 'fatal' }, gracefulShutdown: false } as never);
+        await kernel.use(new ObjectQLPlugin());
+        await kernel.use(new AutomationServicePlugin({ suspendedRunStore: 'memory' }));
+        const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
+        await kernel.use(storedFlowsPlugin(driver, [startless('no_start', 'active'), stampFlow('valid', { count: 2 })]));
+        await kernel.bootstrap();
+        return {
+            protocol: kernel.getService<MetadataReadDoors>('protocol'),
+            automation: kernel.getService<AutomationEngine>('automation'),
+        };
+    }
+
+    it('the boot completes, the row is not armed, and the read serves it as stored beside the refusal', async () => {
+        const { protocol, automation } = await boot();
+        expect(kernel.getState()).toBe('running');
+        expect(await automation.getFlow('no_start')).toBeNull();
+        expect(await automation.getFlow('valid'), 'control: the other stored flow is armed').not.toBeNull();
+
+        const read = await protocol.getMetaItem({ type: 'flow', name: 'no_start' });
+        expect((read.item as { status?: string }).status).toBe('active');
+        expect(read.registration?.state).toBe('refused');
+        const reason = read.registration?.state === 'refused' ? read.registration.reason.message : '';
+        expect(reason).toMatch(/^Flow 'no_start' rejected: the flow's top-level `nodes` hold no `start` node/);
+    });
+
+    it('the metadata save door still keeps a start-less draft, and the read says the engine refused it', async () => {
+        const { protocol, automation } = await boot();
+        await protocol.saveMetaItem({ type: 'flow', name: 'draft_no_start', item: startless('draft_no_start', 'draft') });
+
+        await vi.waitFor(async () => {
+            const read = await protocol.getMetaItem({ type: 'flow', name: 'draft_no_start' });
+            expect((read.item as { status?: string }).status).toBe('draft');
+            expect(read.registration?.state).toBe('refused');
+        });
+        expect(await automation.getFlow('draft_no_start')).toBeNull();
+    });
+});

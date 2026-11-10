@@ -2871,7 +2871,64 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "Todos"
+        label: "Todos",
+        emptyState: {
+          title: "Ainda não há mapeamentos de grupo",
+          message: "Conceda um conjunto de permissões aos membros de um grupo do provedor de identidade com \"Mapear grupo de SSO\" (um grupo que um provedor de SSO envia no login) ou \"Mapear grupo de SCIM\" (um grupo que uma conexão SCIM provisiona)."
+        }
+      }
+    },
+    _actions: {
+      map_sso_group: {
+        label: "Mapear grupo de SSO",
+        description: "Concede um conjunto de permissões a cada membro de um grupo que um provedor de SSO envia no login. Vale a partir do próximo login de cada membro pelo provedor.",
+        successMessage: "Mapeamento de grupo salvo. Vale a partir do próximo login de cada membro pelo provedor.",
+        params: {
+          providerId: {
+            label: "ID do provedor de SSO",
+            helpText: "O ID do provedor de SSO cujo login traz o grupo, por exemplo \"okta\". O provedor precisa ter uma declaração de grupos (Editar declaração de grupos no provedor de SSO)."
+          },
+          groupExternalId: {
+            label: "ID externo do grupo",
+            helpText: "O valor do grupo exatamente como a declaração de grupos o envia quando é um ID, por exemplo um ID de objeto de grupo do Entra ID. Preencha este campo ou o nome de exibição do grupo, não ambos."
+          },
+          groupDisplayName: {
+            label: "Nome de exibição do grupo",
+            helpText: "O valor do grupo exatamente como a declaração de grupos o envia quando é um nome, por exemplo \"Sales\". Preencha este campo ou o ID externo do grupo, não ambos."
+          },
+          permissionSet: {
+            label: "Conjunto de permissões",
+            helpText: "O conjunto de permissões que um membro do grupo recebe na organização do provedor. Conjuntos de administrador são recusados."
+          }
+        }
+      },
+      map_scim_group: {
+        label: "Mapear grupo de SCIM",
+        description: "Concede um conjunto de permissões a cada membro de um grupo que uma conexão SCIM provisiona. Os membros atuais do grupo o recebem imediatamente.",
+        successMessage: "Mapeamento de grupo salvo",
+        params: {
+          connectionId: {
+            label: "ID da conexão SCIM",
+            helpText: "A conexão SCIM pela qual o grupo é provisionado, por exemplo \"okta-prod\": o ID da conexão da sua credencial."
+          },
+          groupExternalId: {
+            label: "ID externo do grupo",
+            helpText: "O externalId do grupo como o provedor de identidade o envia. Preencha este campo ou o nome de exibição do grupo, não ambos."
+          },
+          groupDisplayName: {
+            label: "Nome de exibição do grupo",
+            helpText: "O displayName do grupo, comparado exatamente. Preencha este campo ou o ID externo do grupo, não ambos."
+          },
+          permissionSet: {
+            label: "Conjunto de permissões",
+            helpText: "O conjunto de permissões que um membro do grupo recebe na organização da conexão. Conjuntos de administrador são recusados."
+          }
+        }
+      },
+      delete_group_mapping: {
+        label: "Excluir mapeamento",
+        confirmText: "Excluir este mapeamento de grupo? Os membros do grupo deixam de receber o conjunto de permissões dele. Para uma conexão SCIM, os membros do grupo são reprojetados agora e perdem as concessões feitas por este mapeamento. Para um provedor de SSO, as concessões que os logins dele fizeram para este conjunto são removidas agora, a menos que outro mapeamento do provedor cite o mesmo conjunto. Para restaurá-lo, mapeie o grupo de novo.",
+        successMessage: "Mapeamento de grupo excluído"
       }
     }
   },
@@ -3673,6 +3730,55 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       note: {
         label: "Nota"
+      }
+    }
+  },
+  sys_metadata_commit: {
+    label: "Metadata Commit",
+    pluralLabel: "Metadata Commits",
+    description: "Package-scoped commit log grouping a turn’s metadata changes.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      package_id: {
+        label: "Package"
+      },
+      operation: {
+        label: "Operation",
+        options: {
+          apply: "apply",
+          revert: "revert"
+        }
+      },
+      message: {
+        label: "Message",
+        help: "Change summary; for AI turns, the user instruction that produced it."
+      },
+      actor: {
+        label: "Actor"
+      },
+      ai_model: {
+        label: "AI Model"
+      },
+      parent_commit_id: {
+        label: "Parent Commit"
+      },
+      event_seq_start: {
+        label: "Event Seq Start"
+      },
+      event_seq_end: {
+        label: "Event Seq End"
+      },
+      items: {
+        label: "Items",
+        help: "JSON: [{ type, name, existedBefore, prevVersion }] — the revert plan."
+      },
+      item_count: {
+        label: "Item Count"
+      },
+      created_at: {
+        label: "Created At"
       }
     }
   },
