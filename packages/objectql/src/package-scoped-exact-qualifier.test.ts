@@ -358,12 +358,16 @@ describe('a covered type the registry reads through `getItem` (seat rulings (a),
   });
 
   describe('(b) a bare read of a type narrowed to the namespace, read through `getItem`, is refused 501', () => {
-    /** This file's registry, read through a view that answers `false` for every type. */
+    /**
+     * This file's registry, read through a view that answers `false` for every
+     * type and has no bare-action judge of its own (`refuseAmbiguousObjectLessAction`).
+     */
     let readsNothingByPackage: ObjectStackProtocolImplementation;
     beforeEach(() => {
       const view = new Proxy(registry, {
         get(target, prop) {
           if (prop === 'readsByPackage') return () => false;
+          if (prop === 'refuseAmbiguousObjectLessAction') return undefined;
           const value = Reflect.get(target, prop, target);
           return typeof value === 'function' ? value.bind(target) : value;
         },
@@ -388,12 +392,29 @@ describe('a covered type the registry reads through `getItem` (seat rulings (a),
       expect(labelOf(await readsNothingByPackage.getMetaItem({ type: 'tool', name: 'solo' }))).toBe('alpha tool');
     });
 
-    it('CONTROL: the registry WITH the resolver reads the narrowed types by package and serves them', async () => {
-      for (const type of NAMESPACE_SCOPED_BARE_NAME_TYPES) {
+    it('CONTROL: the registry WITH the resolver reads the narrowed AI types by package and serves them', async () => {
+      for (const type of ['agent', 'skill']) {
         expect(registry.readsByPackage(type), type).toBe(true);
         shipValid(type, 'solo', A);
         expect(labelOf(await protocol.getMetaItem({ type, name: 'solo' }))).toBe(`alpha ${type}`);
       }
+    });
+
+    it('CONTROL (#31697): the registry reads `action` through `getItem` but judges its bare read itself, so it is not refused 501: one holder is served, two are refused 409 naming both', async () => {
+      expect(registry.readsByPackage('action')).toBe(false);
+      shipValid('action', 'solo', A);
+      expect(labelOf(await protocol.getMetaItem({ type: 'action', name: 'solo' }))).toBe('alpha action');
+      shipValid('action', 'twin', A);
+      shipValid('action', 'twin', B);
+      let thrown: (Error & { status?: number; code?: string }) | undefined;
+      try {
+        await protocol.getMetaItem({ type: 'action', name: 'twin' });
+      } catch (err) {
+        thrown = err as typeof thrown;
+      }
+      expect([thrown?.status, thrown?.code], String(thrown)).toEqual([409, 'RESOURCE_CONFLICT']);
+      expect(thrown?.message).toContain(A);
+      expect(thrown?.message).toContain(B);
     });
   });
 

@@ -68,6 +68,8 @@ interface ExactQualifierRegistry {
 interface PackagelessReadRegistry {
     readsByPackage(type: string): boolean;
     resolveItem(type: string, name: string, callerPackageId?: string | null, member?: string): unknown;
+    /** [ADR-0150 child B, #31697] The bare `action` read's own holder judge, which `readMetaItem` asks. */
+    refuseAmbiguousObjectLessAction?(name: string, readStoredRows?: () => Promise<readonly unknown[]>): Promise<void>;
 }
 
 /** A read the exact qualifier admitted: the package named, and the registry holder its item is. */
@@ -129,7 +131,11 @@ export type UnjudgeableReadAddress =
  *    narrows in its own reader card. A type whose names are scoped to the
  *    namespace (`NAMESPACE_SCOPED_BARE_NAME_TYPES`) can have two package
  *    holders of a name: `narrowed`, refused like a missing resolver (seat
- *    ruling (b)).
+ *    ruling (b)), unless the registry judges that read itself. `action` is
+ *    such a type: `SchemaRegistry` counts an object-less action's holders
+ *    for the bare read (`refuseAmbiguousObjectLessAction`, asked by
+ *    `readMetaItem`, #31697), and an action bound to an object reads through
+ *    `getItem`, as on `main`.
  */
 function unjudgeableCause(
     host: Pick<ProtocolHost, 'engine'>,
@@ -139,7 +145,8 @@ function unjudgeableCause(
     const registry = registryOf(host);
     if (typeof registry?.readsByPackage !== 'function') return 'no-resolver';
     if (registry.readsByPackage(type)) return typeof registry.resolveItem === 'function' ? undefined : 'no-resolver';
-    return isNamespaceScopedBareNameType(type) ? 'narrowed' : undefined;
+    if (!isNamespaceScopedBareNameType(type)) return undefined;
+    return type === 'action' && typeof registry.refuseAmbiguousObjectLessAction === 'function' ? undefined : 'narrowed';
 }
 
 /** The `501 NOT_IMPLEMENTED` refusal of a read {@link unjudgeableCause} names a cause for. */
