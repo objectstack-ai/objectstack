@@ -16,6 +16,10 @@
  */
 
 import { describe, expect, it } from 'vitest';
+// The object plane reaches `@objectstack/lint` only through a dynamic import; paid
+// here at module scope so the first load lands during collection, not inside a
+// clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/lint';
 import { PackageScopedNameRefusedError, type PackageScopedRefusal } from '@objectstack/core';
 import { runBuildProbes, type ProbeEngine } from './build-probes.js';
 
