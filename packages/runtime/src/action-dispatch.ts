@@ -537,24 +537,32 @@ export function restRefusalResponse(deps: DomainHandlerDeps, refusal: ActionRefu
     );
 }
 
+/** A REST answer as the dispatcher returns it: the `{ handled, response }` pair. */
+type RestActionAnswer = { handled: true; response: { status: number; body: any; headers?: Record<string, string | string[]> } };
+
 /**
  * The REST door's answer to a dispatched arm's outcome (#3962: failures speak
  * HTTP, success is a single wrap). A throw is answered by the door's ONE
  * reader, `actionsDoorAnswerOf` (#31271).
+ *
+ * Returned as the dispatcher's `{ handled, response }` pair so the two
+ * hand-built relays below (the api forward's 2xx and non-2xx answers, which
+ * carry the target's credential headers no `deps.*` helper takes) stay in the
+ * `check:route-envelope` census of this file.
  */
 export function restAnswerOf(
     deps: DomainHandlerDeps,
     admitted: AdmittedActionCall,
     outcome: ActionDispatchOutcome,
-): { status: number; body: any; headers?: Record<string, string | string[]> } {
+): RestActionAnswer {
     const { actionDef, objectName, actionName } = admitted;
     switch (outcome.kind) {
         case 'answered': {
             const relayed = outcome.headers && Object.keys(outcome.headers).length > 0 ? { headers: outcome.headers } : {};
-            return { ...deps.success(outcome.result), ...relayed };
+            return { handled: true, response: { ...deps.success(outcome.result), ...relayed } };
         }
         case 'refused':
-            return restRefusalResponse(deps, outcome.refusal);
+            return { handled: true, response: restRefusalResponse(deps, outcome.refusal) };
         case 'forward-refused': {
             const { forward } = outcome;
             const relayed = Object.keys(forward.headers).length > 0 ? { headers: forward.headers } : {};
@@ -565,7 +573,7 @@ export function restAnswerOf(
             const refused = members
                 ? apiErrorResponse({ message: refusal.message, httpStatus: forward.status, code: (refusal as any).code, extra: members })
                 : deps.error(refusal.message, forward.status, { code: (refusal as any).code });
-            return { ...refused, ...relayed };
+            return { handled: true, response: { ...refused, ...relayed } };
         }
         case 'thrown': {
             const err = outcome.error;
@@ -579,7 +587,7 @@ export function restAnswerOf(
                     ? (line: string) => deps.logger.error(`[HttpDispatcher] ${line}`)
                     : (line: string) => console.error(`[HttpDispatcher] ${line}`);
                 for (const line of staleSummaryAnswerLines(err as SummaryRecomputeRefusal, objectName)) log(line);
-                return deps.success(earned);
+                return { handled: true, response: deps.success(earned) };
             }
             const answer = actionsDoorAnswerOf(err, objectName);
             for (const line of answer.operatorLines) console.error(`[action ${objectName}/${actionName}] ${line}`);
@@ -587,13 +595,16 @@ export function restAnswerOf(
                 ...(answer.declaredCode !== undefined ? { declaredCode: answer.declaredCode } : {}),
                 ...(answer.userMessage !== undefined ? { userMessage: answer.userMessage } : {}),
             };
-            return apiErrorResponse({
-                message: answer.message,
-                httpStatus: answer.status,
-                code: answer.code,
-                details: answer.details,
-                ...(Object.keys(extra).length > 0 ? { extra } : {}),
-            });
+            return {
+                handled: true,
+                response: apiErrorResponse({
+                    message: answer.message,
+                    httpStatus: answer.status,
+                    code: answer.code,
+                    details: answer.details,
+                    ...(Object.keys(extra).length > 0 ? { extra } : {}),
+                }),
+            };
         }
     }
 }
@@ -612,7 +623,7 @@ export async function runResolvedActionAsRest(
 ): Promise<HttpDispatcherResult> {
     const run = await runResolvedAction(deps, requestContext, call);
     if ('refused' in run) return { handled: true, response: restRefusalResponse(deps, run.refused) };
-    const response = restAnswerOf(deps, run.admitted, run.outcome);
+    const { response } = restAnswerOf(deps, run.admitted, run.outcome);
     // [#27908] THE INVOCATION ROW: one row for every call that cleared the
     // gates, whatever the arm answered. A call a gate refused writes none.
     const { actionDef, objectName, actionName, recordId } = run.admitted;

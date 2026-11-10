@@ -49,6 +49,8 @@ interface RigOptions {
     disabledActions?: string[];
     /** The object's package is disabled: the protocol refuses it `404 OBJECT_PACKAGE_DISABLED`. */
     packageDisabled?: boolean;
+    /** The metadata plane reports a degraded read, or its object listing throws. */
+    metaDegraded?: 'diagnosed' | 'listThrows';
 }
 
 function makeRig(actions: any[], opts: RigOptions = {}) {
@@ -78,10 +80,18 @@ function makeRig(actions: any[], opts: RigOptions = {}) {
     };
     const metadata: any = {
         load: vi.fn(async () => null),
-        loadDiagnosed: vi.fn(async () => ({ data: null, degraded: false, errors: [] })),
+        loadDiagnosed: vi.fn(async () => (opts.metaDegraded === 'diagnosed'
+            ? { data: null, degraded: true, errors: ['meta backend down'] }
+            : { data: null, degraded: false, errors: [] })),
         loadMany: vi.fn(async () => []),
-        listObjects: vi.fn(async () => (opts.packageDisabled ? [] : [objectDef])),
-        getObject: vi.fn(async (n: string) => schemaOf(n)),
+        listObjects: vi.fn(async () => {
+            if (opts.metaDegraded === 'listThrows') throw new Error('meta backend down');
+            return opts.packageDisabled ? [] : [objectDef];
+        }),
+        getObject: vi.fn(async (n: string) => {
+            if (opts.metaDegraded === 'listThrows') throw new Error('meta backend down');
+            return schemaOf(n);
+        }),
     };
     // A protocol only where the package is disabled: its by-name object read
     // refuses the object as `@objectstack/metadata-protocol` does, and its
@@ -319,6 +329,49 @@ describe('MCP run_action: served refusal codes that change (the REST door\'s seq
         const addressed = await rig.viaRest(MEMBER_EC, 'ping', { ns: NAMESPACE });
         expect({ status: addressed.status, code: addressed.body.error.code }).toEqual({ status: 404, code: 'OBJECT_PACKAGE_DISABLED' });
         expect(rig.ran()).toBe(0);
+    });
+});
+
+/**
+ * The shared sequence's body checks and its degraded arm, read at MCP
+ * `run_action` (seat review S1 on #32032). Measured on base c9246279 and on
+ * this head with the same probe: only an ARRAY `params` changes (the one
+ * narrowing); everything else answers as it did.
+ */
+describe('MCP run_action: the body checks and the degraded arm (base vs head)', () => {
+    const ping = { name: 'ping', label: 'Ping', type: 'script', target: 'ping', ai: EXPOSED };
+
+    it('NARROWING — an array `params` is refused 400 VALIDATION_FAILED and nothing runs (base spread it into numeric keys and ran)', async () => {
+        const rig = makeRig([ping]);
+        const mcp: any = await rig.viaMcp(MEMBER_EC, 'ping', { params: ['x'] });
+        expect({ status: mcp.status, code: mcp.code }).toEqual({ status: 400, code: 'VALIDATION_FAILED' });
+        expect(mcp.message).toMatch(/`params` expected an object/);
+        expect(rig.ran()).toBe(0);
+    });
+
+    it('unchanged — a string `params` is read as no params and the action runs, as on base', async () => {
+        const rig = makeRig([ping]);
+        const mcp: any = await rig.viaMcp(MEMBER_EC, 'ping', { params: 'oops' });
+        expect(mcp.status).toBe(200);
+        expect(rig.ran()).toBe(1);
+    });
+
+    it('unchanged — a non-string `recordId` (a number, an object) is read as a record-less call and runs, as on base', async () => {
+        for (const recordId of [42, { id: 'r1' }]) {
+            const rig = makeRig([ping]);
+            const mcp: any = await rig.viaMcp(MEMBER_EC, 'ping', { recordId });
+            expect(mcp).toEqual({ status: 200, answer: { ok: true, action: 'ping', objectName: OBJECT, result: { ran: 'script' } } });
+            expect(rig.ran()).toBe(1);
+        }
+    });
+
+    it('unchanged — no degraded 503 at MCP: a degraded metadata read still runs, and a listing that throws is refused 400 as on base', async () => {
+        const diagnosed = makeRig([ping], { metaDegraded: 'diagnosed' });
+        expect((await diagnosed.viaMcp(MEMBER_EC, 'ping')).status).toBe(200);
+        const down = makeRig([ping], { metaDegraded: 'listThrows' });
+        const mcp: any = await down.viaMcp(MEMBER_EC, 'ping');
+        expect({ status: mcp.status, message: mcp.message }).toEqual({ status: 400, message: 'meta backend down' });
+        expect(down.ran()).toBe(0);
     });
 });
 
