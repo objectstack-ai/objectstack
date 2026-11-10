@@ -25,6 +25,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { PackageScopedNameRefusedError } from '@objectstack/core';
 import { MetadataManager } from './metadata-manager.js';
+import { PACKAGE_SLOTTED_STORE_TYPES } from './package-slotted-store.js';
 import { MemoryLoader } from './loaders/memory-loader.js';
 import type { MetadataLoader } from './loaders/loader-interface.js';
 
@@ -426,5 +427,105 @@ describe('the in-memory api store keeps one slot per (package, name) (ADR-0150 D
     manager.registerInMemory('flow', 'f', later);
     expect(await manager.get('flow', 'f')).toBe(later);
     expect(await manager.list('flow')).toEqual([later]);
+  });
+});
+
+/**
+ * [ADR-0150 D3/D4, #32151] The in-memory store keeps one slot per
+ * `(package, name)` for every type whose one-holder rule has narrowed to the
+ * namespace — today `agent` and `skill` (objectql's
+ * `NAMESPACE_SCOPED_BARE_NAME_TYPES`, #31701; objectql pins that set a subset
+ * of `PACKAGE_SLOTTED_STORE_TYPES`). Two packages of two namespaces may each
+ * install such a name, and the artifact door registers every package body's
+ * items here through `register(…, { notify: false })`, stamped by
+ * `applyProtection` (`_packageId`). On main 45f0f81f the store was keyed by
+ * bare name for these types: the second package's register overwrote the
+ * first's, and every read — the one naming the first package included — was
+ * answered the survivor.
+ */
+describe('the in-memory store keeps one slot per (package, name) for every namespace-scoped type (ADR-0150 D4, #32151)', () => {
+  const NAMESPACE_SCOPED = ['agent', 'skill'] as const;
+  const A = 'com.acme.alpha';
+  const B = 'com.acme.beta';
+  const shipped = (type: string, packageId: string, tag: string, envelope = false) => ({
+    name: `shared_${type}`,
+    label: `${tag} ${type}`,
+    instructions: `${tag} instructions`,
+    _packageId: packageId,
+    _provenance: 'package',
+    ...(envelope ? { packageId } : {}),
+  });
+
+  async function twoHolders(type: string, envelope = false): Promise<MetadataManager> {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    await manager.register(type, `shared_${type}`, shipped(type, A, 'alpha', envelope), { notify: false });
+    await manager.register(type, `shared_${type}`, shipped(type, B, 'beta', envelope), { notify: false });
+    return manager;
+  }
+
+  it('the slotted set holds every namespace-scoped type', () => {
+    for (const type of NAMESPACE_SCOPED) expect(PACKAGE_SLOTTED_STORE_TYPES.has(type), type).toBe(true);
+  });
+
+  it.each(NAMESPACE_SCOPED)('%s: a read naming a package answers that package\'s own item, both faces alike; a package holding no slot answers nothing (BASE: both packages were answered the later one)', async (type) => {
+    const manager = await twoHolders(type);
+    const name = `shared_${type}`;
+    expect(((await manager.get(type, name, A)) as any)?.label).toBe(`alpha ${type}`);
+    expect(((await manager.get(type, name, B)) as any)?.label).toBe(`beta ${type}`);
+    expect(((await manager.getDiagnosed(type, name, A)).data as any)?.label).toBe(`alpha ${type}`);
+    expect(((await manager.getDiagnosed(type, name, B)).data as any)?.label).toBe(`beta ${type}`);
+    expect(await manager.get(type, name, 'com.acme.gamma'), 'never another package\'s item').toBeUndefined();
+  });
+
+  it.each(NAMESPACE_SCOPED)('%s: a read naming no package of a two-holder name is refused naming both (D3), never one of them picked (BASE: the later one was served)', async (type) => {
+    const manager = await twoHolders(type);
+    const name = `shared_${type}`;
+    for (const read of [() => manager.get(type, name), () => manager.getDiagnosed(type, name)]) {
+      const err = await read().then(() => undefined, (e: unknown) => e as PackageScopedNameRefusedError);
+      expect(err, 'the read refuses').toBeInstanceOf(PackageScopedNameRefusedError);
+      expect([err!.code, err!.status, err!.refusal.reason]).toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment']);
+      expect(err!.refusal.candidates).toEqual([
+        { kind: 'package', packageId: A },
+        { kind: 'package', packageId: B },
+      ]);
+    }
+  });
+
+  it.each(NAMESPACE_SCOPED)('%s: both items are enumerated under the one name; removing either package leaves the other\'s item (BASE: removing the later one left nothing)', async (type) => {
+    const name = `shared_${type}`;
+    const labels = async (m: MetadataManager) => ((await m.list(type)) as any[]).map((i) => i.label);
+    const first = await twoHolders(type, true);
+    expect(await labels(first)).toEqual([`alpha ${type}`, `beta ${type}`]);
+    expect(await first.listNames(type)).toEqual([name]);
+    await first.unregisterPackage(B);
+    expect(await labels(first)).toEqual([`alpha ${type}`]);
+    expect(((await first.get(type, name)) as any)?.label, 'one holder left: the bare read serves it').toBe(`alpha ${type}`);
+
+    const second = await twoHolders(type, true);
+    await second.unregisterPackage(A);
+    expect(await labels(second)).toEqual([`beta ${type}`]);
+    expect(((await second.get(type, name, B)) as any)?.label).toBe(`beta ${type}`);
+  });
+
+  describe.each(NAMESPACE_SCOPED)('CONTROL — %s, one holder per name: every read is answered the very object registered, as the bare-name map answered it', (type) => {
+    const name = `shared_${type}`;
+
+    it('one package\'s item', async () => {
+      const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+      const item = shipped(type, A, 'alpha');
+      await manager.register(type, name, item, { notify: false });
+      expect(await manager.get(type, name)).toBe(item);
+      expect(await manager.get(type, name, A)).toBe(item);
+      expect((await manager.getDiagnosed(type, name)).data).toBe(item);
+      expect(await manager.list(type)).toEqual([item]);
+    });
+
+    it('an environment-authored item no package holds, to a read naming none or any package', async () => {
+      const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+      const item = { name, label: 'env', instructions: 'env instructions' };
+      await manager.register(type, name, item, { notify: false });
+      expect(await manager.get(type, name)).toBe(item);
+      expect(await manager.get(type, name, A)).toBe(item);
+    });
   });
 });
