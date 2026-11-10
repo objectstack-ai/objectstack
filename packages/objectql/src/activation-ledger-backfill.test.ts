@@ -10,6 +10,12 @@
  * Red line 2 (ambiguity reported, never guessed) is the `two holders` case;
  * it was ablated once (a first-candidate pick put back, the pin read red,
  * restored) and the reading is in the PR body, not kept as a test file.
+ *
+ * An item with more than one row is the upgrade case below, over a real SQLite
+ * ledger and the real package-less index migration, booted twice. It was
+ * ablated the same way (the duplicate check removed: the first boot bound the
+ * first-stored row, the pin read red, restored), and so was the per-row write
+ * isolation (a failed write rethrown: the row after it stayed null).
  */
 
 import { DatabaseSync } from 'node:sqlite';
