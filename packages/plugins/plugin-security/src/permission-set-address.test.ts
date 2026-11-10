@@ -26,6 +26,7 @@ import {
 } from '@objectstack/core';
 import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { SecurityPlugin } from './security-plugin.js';
+import { PermissionEvaluator } from './permission-evaluator.js';
 import { buildContextForUser } from './explain-engine.js';
 
 const ORG = 'org_1';
@@ -71,7 +72,7 @@ function scopedRegistry(holders: Holders, positions: Item[] = []) {
 }
 
 /** An engine double answering `find` from `tables` (equality and `$in`), with the registry above. */
-function engine(tables: Record<string, Array<Record<string, unknown>>>, positions: Item[] = []) {
+function engine(tables: Record<string, Array<Record<string, unknown>>>, positions: Item[] = [], holders: Holders = HOLDERS) {
   const matches = (row: any, where: any): boolean =>
     Object.entries(where ?? {}).every(([k, v]) => {
       if (k.startsWith('$')) throw new Error(`engine double: unsupported operator ${k}`);
@@ -80,7 +81,7 @@ function engine(tables: Record<string, Array<Record<string, unknown>>>, position
       return row[k] === v;
     });
   return {
-    registry: scopedRegistry(HOLDERS, positions),
+    registry: scopedRegistry(holders, positions),
     registerMiddleware: () => {},
     getSchema: () => null,
     findOne: async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; },
@@ -308,5 +309,109 @@ describe('[ADR-0150 D8 R3] an accepted everyone set resolves at the package its 
     bindAudienceAnchorSetScopes(ql, 'everyone', new Map([['sales_rep', [{ packageId: ALPHA }]]]));
     bindAudienceAnchorSetScopes(ql, 'everyone', new Map());
     expect((await resolveUserAuthzGrants(ql, 'u1', { tenantId: ORG })).permissions).toEqual([]);
+  });
+});
+
+describe('[ADR-0150 D8 R3] end to end: an accepted everyone suggestion binds its package, and the member gets that set alone', () => {
+  /** Both packages ship `sales_rep` as an isDefault set; only ALPHA's suggestion is accepted. */
+  const DEFAULT_HOLDERS: Holders = {
+    sales_rep: [
+      { packageId: ALPHA, item: { ...salesRep(ALPHA, 'alpha_deal'), isDefault: true } },
+      { packageId: BETA, item: { ...salesRep(BETA, 'beta_deal'), isDefault: true } },
+    ],
+  };
+  const acceptedRow = {
+    id: 'sugg_alpha_sales_rep',
+    organization_id: ORG,
+    anchor: 'everyone',
+    status: 'confirmed',
+    deployment_decision: true,
+    package_id: ALPHA,
+    permission_set_name: 'sales_rep',
+    permission_set_package: ALPHA,
+  };
+
+  it('the derivation reads the row, and an everyone member reads ALPHA\'s object only — never BETA\'s', async () => {
+    const ql = engine(
+      {
+        ...tablesFor([]),
+        sys_organization: [{ id: ORG, slug: 'default' }],
+        sys_audience_binding_suggestion: [acceptedRow],
+      },
+      [{ name: 'everyone', permissionSets: [] }],
+      DEFAULT_HOLDERS,
+    );
+    const { plugin } = await bootPlugin(ql);
+    // Writable after the boot, for the anchor's composed definition alone, so
+    // the boot's built-in registrations stay out of this double.
+    const positions: Item[] = (ql.registry as any).listItems('position');
+    (ql.registry as any).registerItem = (type: string, item: Item) => {
+      if (type !== 'position') throw new Error(`registry double: registerItem(${type}) is not served`);
+      const at = positions.findIndex((p) => p.name === item.name);
+      if (at >= 0) positions.splice(at, 1, item);
+      else positions.push(item);
+    };
+    // The derivation a boot's `kernel:ready`, an accept or a revoke runs.
+    await plugin.declareEveryone({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() });
+
+    const authz = await resolveUserAuthzGrants(ql, 'u1', { tenantId: ORG });
+    expect(authz.positions).toContain('everyone');
+    expect(authz.permissions).toContain('sales_rep');
+    expect(authz.permissionSetAddresses).toContainEqual({ packageId: ALPHA, name: 'sales_rep' });
+    expect(authz.permissionSetAddresses).not.toContainEqual({ packageId: BETA, name: 'sales_rep' });
+
+    const sets = await plugin.resolvePermissionSetsForContext({
+      userId: 'u1',
+      tenantId: ORG,
+      positions: authz.positions,
+      permissions: authz.permissions,
+      permissionSetAddresses: authz.permissionSetAddresses,
+    });
+    expect(readsOf(sets)).toEqual(['alpha_deal']);
+  });
+});
+
+describe('[ADR-0150 D3] PermissionEvaluator.resolvePermissionSets — the catalog loader beside the by-name signature', () => {
+  it('with a catalog loader the sets come back in the metadata list\'s order, as before ADR-0150 — its bodies are the catalog\'s', async () => {
+    const listed = [{ name: 'app_default' }, { name: 'admin_full_access' }, { name: 'member_default' }];
+    const fromCatalog = (name: string) => ({ name, objects: { [`${name}_obj`]: { allowRead: true } } });
+    const catalogLoader = vi.fn(async (requests: ReadonlyArray<{ name: string }>) => requests.map((r) => fromCatalog(r.name)) as any);
+    const sets = await new PermissionEvaluator().resolvePermissionSets(
+      ['member_default', 'admin_full_access', 'app_default'],
+      { list: async () => listed },
+      [],
+      undefined,
+      { catalogLoader },
+    );
+    expect(sets.map((s) => s.name)).toEqual(['app_default', 'admin_full_access', 'member_default']);
+    expect(sets.map((s) => Object.keys(s.objects ?? {})[0])).toEqual(['app_default_obj', 'admin_full_access_obj', 'member_default_obj']);
+  });
+
+  it('⛔ a catalog loader that throws grants nothing and is said once, naming every set — the metadata list answers no set', async () => {
+    const metadata = { list: vi.fn(async () => [{ name: 'admin_full_access' }]) };
+    const warn = vi.fn();
+    const sets = await new PermissionEvaluator().resolvePermissionSets(
+      ['admin_full_access', 'custom_sales'],
+      metadata,
+      [],
+      undefined,
+      { logger: { warn }, catalogLoader: async () => { throw new Error('db down'); } },
+    );
+    expect(sets).toEqual([]);
+    expect(metadata.list).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][1]).toMatchObject({ unresolved: ['admin_full_access', 'custom_sales'], error: 'db down' });
+  });
+
+  it('the by-name signature answers as it did: the metadata list, then the bootstrap sets, then the by-name loader', async () => {
+    const dbLoader = vi.fn(async (names: string[]) => names.map((name) => ({ name, from: 'loader' })) as any);
+    const sets = await new PermissionEvaluator().resolvePermissionSets(
+      ['from_db', 'from_boot', 'from_list'],
+      { list: () => [{ name: 'from_list' }] },
+      [{ name: 'from_boot' } as any],
+      dbLoader,
+    );
+    expect(sets.map((s) => s.name)).toEqual(['from_list', 'from_boot', 'from_db']);
+    expect(dbLoader).toHaveBeenCalledWith(['from_db']);
   });
 });

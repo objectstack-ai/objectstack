@@ -3891,8 +3891,8 @@ export class SecurityPlugin implements Plugin {
           declared,
           this.metadata,
           this.bootstrapPermissionSets,
-          this.dbLoaderForContext(context),
-          { logger: this.logger, addresses: addresses.get(position) },
+          undefined,
+          { catalogLoader: this.dbLoaderForContext(context), logger: this.logger, addresses: addresses.get(position) },
         );
         for (const set of resolved) {
           const name = (set as any)?.name;
@@ -4016,11 +4016,11 @@ export class SecurityPlugin implements Plugin {
       fallback,
       this.metadata,
       this.bootstrapPermissionSets,
+      undefined,
       // Scoped like every other resolution: a guest of one organization must
       // resolve THAT organization's baseline set, not whichever copy of the
       // name the driver ordered first.
-      this.dbLoaderForContext(context),
-      { logger: this.logger },
+      { catalogLoader: this.dbLoaderForContext(context), logger: this.logger },
     );
   }
 

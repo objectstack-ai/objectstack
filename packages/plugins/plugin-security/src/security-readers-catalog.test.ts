@@ -98,7 +98,7 @@ async function loaderOver(fixture: Fixture = {}) {
   // [ADR-0150 D3] The loader is asked for requests; a bare name is a request
   // with no holder, resolved with no caller.
   const loader = (names: string[]) => raw!(names.map((name) => ({ name })));
-  return { loader, raw: raw!, rowReads: () => rowReads };
+  return { loader, rowReads: () => rowReads };
 }
 
 describe('[ADR-0131 D3/D4] the catalog loader — what it answers', () => {
@@ -143,13 +143,13 @@ describe('[ADR-0131 D3/D4, #2565] a catalog read that did not answer', () => {
   });
 
   it('stays FAIL-CLOSED through the evaluator, and its #2565 warn fires exactly once', async () => {
-    const { raw } = await loaderOver({ registryThrows: new Error('registry unreadable') });
+    const { loader } = await loaderOver({ registryThrows: new Error('registry unreadable') });
     const warns: Array<{ msg: string; meta: any }> = [];
     const resolved = await new PermissionEvaluator().resolvePermissionSets(
       ['ps_catalog'],
       { list: async () => [] },
       [],
-      raw,
+      loader,
       { logger: { warn: (msg: string, meta?: any) => { warns.push({ msg, meta }); } } },
     );
     // The unresolved set grants nothing — fail closed, never a widening.
@@ -161,13 +161,13 @@ describe('[ADR-0131 D3/D4, #2565] a catalog read that did not answer', () => {
   });
 
   it('CONTROL: the same request with a catalog that answers resolves the set and warns nothing', async () => {
-    const { raw } = await loaderOver();
+    const { loader } = await loaderOver();
     const warns: string[] = [];
     const resolved = await new PermissionEvaluator().resolvePermissionSets(
       ['ps_catalog'],
       { list: async () => [] },
       [],
-      raw,
+      loader,
       { logger: { warn: (msg: string) => { warns.push(msg); } } },
     );
     expect(resolved.map((s) => s.name)).toEqual(['ps_catalog']);

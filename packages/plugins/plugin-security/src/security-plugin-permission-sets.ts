@@ -201,8 +201,8 @@ export async function resolvePermissionSetsForContextUnmemoized(
     requested,
     this.metadata,
     this.bootstrapPermissionSets,
-    this.dbLoaderForContext(context),
-    { logger: this.logger, addresses: Array.isArray(context?.permissionSetAddresses) ? context.permissionSetAddresses : undefined },
+    undefined,
+    { catalogLoader: this.dbLoaderForContext(context), logger: this.logger, addresses: Array.isArray(context?.permissionSetAddresses) ? context.permissionSetAddresses : undefined },
   );
   // [#13419 执行要点 5] The retirement is LOUD: a held position whose namesake
   // set exists, and is not granted, is reported — never granted, never silent.
@@ -221,8 +221,8 @@ export async function resolvePermissionSetsForContextUnmemoized(
       baseline,
       this.metadata,
       this.bootstrapPermissionSets,
-      this.dbLoaderForContext(context),
-      { logger: this.logger },
+      undefined,
+      { catalogLoader: this.dbLoaderForContext(context), logger: this.logger },
     );
   }
   // [ADR-0151 D3] Rule 2's ceiling, held at evaluation: an agent principal —
@@ -254,8 +254,8 @@ export async function reportUngrantedNamesakeSets(
     candidates,
     this.metadata,
     this.bootstrapPermissionSets,
-    this.dbLoaderForContext(context),
-    { logger: this.logger },
+    undefined,
+    { catalogLoader: this.dbLoaderForContext(context), logger: this.logger },
   );
   for (const set of namesakes) {
     const position = (set as any)?.name;

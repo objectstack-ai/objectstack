@@ -1439,6 +1439,13 @@ export interface DisabledCatalogItems {
    * with {@link permissionSetSwitchedOff}.
    */
   permissionSets: Set<string>;
+  /**
+   * Permission sets switched off, by name: a name is here when a row
+   * switches off any holder of it. The answer before ADR-0150, kept for
+   * callers that read it; with two holders of a name it cannot say which, so
+   * every reader in this repository asks {@link permissionSetSwitchedOff}.
+   */
+  permissions: Set<string>;
 }
 
 /** Whether the ledger answer `disabled` switches off the set held at `(packageId, name)`. */
@@ -1528,7 +1535,11 @@ export async function readDisabledCatalogNames(
   positions: readonly string[],
   sets: readonly string[],
 ): Promise<DisabledCatalogItems> {
-  const disabled: DisabledCatalogItems = { positions: new Set<string>(), permissionSets: new Set<string>() };
+  const disabled: DisabledCatalogItems = {
+    positions: new Set<string>(),
+    permissionSets: new Set<string>(),
+    permissions: new Set<string>(),
+  };
   const names = [...new Set([...positions, ...sets])];
   if (names.length === 0) return disabled;
   if (ledgerUnregistered(ql)) return disabled;
@@ -1549,6 +1560,7 @@ export async function readDisabledCatalogNames(
     if (typeof row?.name !== 'string' || !(row.active === false || row.active === 0)) continue;
     if (row.metadata_type === 'position') disabled.positions.add(row.name);
     else if (row.metadata_type === 'permission') {
+      disabled.permissions.add(row.name);
       for (const holder of await ledgerRowHolders(catalog, row.name, row.package_id)) {
         disabled.permissionSets.add(permissionSetAddressKey(holder, row.name));
       }
@@ -2480,7 +2492,7 @@ export async function resolveUserAuthzGrants(
       return {
         namedByPosition: new Map(),
         positionEntries: new Map(),
-        disabled: { positions: new Set(), permissionSets: new Set() },
+        disabled: { positions: new Set(), permissionSets: new Set(), permissions: new Set() },
       };
     }
     // The definitions first (in-process), so the ONE ledger read can ask about
