@@ -18,9 +18,8 @@
 //   - `POST /marketplace/install-local` of a third package declaring the held
 //     API name is 422 PLUGIN_REGISTER_FAILED naming both holders and the
 //     rename, installs nothing, and its endpoint path stays unserved;
-//   - the same door refusing a co-owner of `alpha`'s namespace that declares
-//     the held object-less action and the showcase's own API name, naming
-//     both;
+//   - the same door refusing a package that declares the held object-less
+//     action and the showcase's own API name, for the API alone (#31697);
 //   - CONTROL: a package declaring fresh names, and an action BOUND to its own
 //     object under the held object-less action's name, installs.
 //
@@ -36,8 +35,9 @@
 //     `409 RESOURCE_CONFLICT` naming both packages; `?package=` and the
 //     addressed `/actions/:ns/global/NAME` reach each package's own;
 //   - install-local of a package of a THIRD namespace declaring the held name
-//     installs; of a CO-OWNER of `alpha`'s namespace is refused, naming
-//     `alpha` and the rename, as before.
+//     installs; of a CO-OWNER of `alpha`'s namespace is refused naming
+//     `alpha` (the override write gate, ADR-0146 D2, answers first: the
+//     co-owner depends on alpha).
 
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -210,19 +210,32 @@ describe('one package holder per API, object-less action and function name, on a
     expect((await stack.apiAs(admin, 'GET', '/apps/gamma/feed')).status, 'the refused endpoint is not served').toBe(404);
   });
 
-  it('install-local of a co-owner of `alpha`\'s namespace declaring the held object-less action and the showcase\'s API name is refused, naming both holders', async () => {
+  it('install-local of a package declaring the held object-less action and the showcase\'s API name is refused for the API alone, naming the showcase — another namespace\'s action name is no clash (#31697)', async () => {
     const before = await packageIds();
     const { status, body } = await installLocal(inline('delta', {
       apis: [api('delta', SHOWCASE_API)],
       actions: [action('delta')],
-    }, 'alpha'));
+    }));
     expect([status, codeOf(body)], JSON.stringify(body)).toEqual([422, 'PLUGIN_REGISTER_FAILED']);
     const message = String(body?.error?.message ?? '');
     expect(message).toContain(`the API "${SHOWCASE_API}"`);
     expect(message).toContain(SHOWCASE_PKG);
-    expect(message).toContain(`the object-less action "${ACTION}", already held by package "com.qa.bare.alpha"`);
-    expect(message).toContain(`"alpha_${ACTION}"`);
-    expect(message, 'another namespace\'s holder is no clash').not.toContain('com.qa.bare.beta');
+    expect(message).not.toContain(`the object-less action "${ACTION}"`);
+    expect(await packageIds(), 'the package list is unchanged').toEqual(before);
+  });
+
+  it('install-local of a co-owner of `alpha`\'s namespace declaring the held object-less action is refused, naming `alpha` alone; nothing is installed', async () => {
+    // The co-owner depends on alpha, so the override write gate (ADR-0146 D2)
+    // answers before the one-holder door: a dependent never replaces a base
+    // item. The one-holder door's own co-owner refusal is pinned in-process
+    // (registry-bare-name-one-holder-request-family.test.ts, "the narrowing").
+    const before = await packageIds();
+    const { status, body } = await installLocal(inline('alphamod', { actions: [action('alphamod')] }, 'alpha'));
+    expect([status, codeOf(body)], JSON.stringify(body)).toEqual([403, 'NOT_OVERRIDABLE']);
+    const message = String(body?.error?.message ?? '');
+    expect(message).toContain(`'action/${ACTION}'`);
+    expect(message).toContain('com.qa.bare.alpha');
+    expect(message).not.toContain('com.qa.bare.beta');
     expect(await packageIds(), 'the package list is unchanged').toEqual(before);
   });
 
