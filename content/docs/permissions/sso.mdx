@@ -454,9 +454,25 @@ without the API:
   member of the provider's mapping is kept as stored. A provider without a
   groups claim signs users in as one registered without it.
 
-**Saving a mapping.** A platform administrator saves one mapping per group and
-permission set through `POST /api/v1/auth/admin/scim/set-group-mapping`, naming
-the provider with `providerId`:
+**Saving a mapping in Setup.** In **Setup → IdP Group Mappings**, a platform
+administrator manages the mappings without the API:
+
+- **Map SSO Group** saves a mapping for an SSO provider: its Provider ID, the
+  group as the groups claim sends it (a Group External ID or a Group Display
+  Name), and a permission set picked from the security catalog.
+- **Map SCIM Group** does the same for a SCIM connection, named by its
+  connection ID.
+- **Delete Mapping**, on a mapping's row, asks for confirmation and then deletes
+  the mapping, as the delete route below does.
+
+A save or a delete the server refuses shows the server's own message in the
+dialog, and nothing is stored. There is no generic New or Edit form on the
+list: a mapping changes only through these actions or the routes below.
+
+**Saving a mapping through the API.** Operators and scripts save one mapping
+per group and permission set through
+`POST /api/v1/auth/admin/scim/set-group-mapping`, naming the provider with
+`providerId`:
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/auth/admin/scim/set-group-mapping \
