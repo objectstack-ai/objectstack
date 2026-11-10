@@ -76,11 +76,14 @@ export const PLATFORM_CAPABILITY_TOKENS: readonly string[] = Object.freeze([
   'webhooks',
   // Enterprise / cloud-runtime capabilities (no open-edition provider:
   // `hierarchy-security` ships in @objectstack/security-enterprise via
-  // `plugins[]`; `ai-seat` / `governance` are resolved by cloud's
-  // objectos-runtime loader only)
+  // `plugins[]`; `ai-seat` / `governance` / `audit-compliance` /
+  // `access-policy-console` are resolved by cloud's objectos-runtime loader
+  // only — this repository installs nothing for them)
   'hierarchy-security',
   'ai-seat',
   'governance',
+  'audit-compliance',
+  'access-policy-console',
 ]);
 
 /**
@@ -139,7 +142,8 @@ export interface PlatformCapabilityProvider {
   /**
    * npm package whose plugin the runtime loads to satisfy this capability, or
    * `null` when the capability is a cloud-runtime tier with no standalone
-   * package to install (`ai-seat` / `governance`).
+   * package to install (`ai-seat` / `governance` / `audit-compliance` /
+   * `access-policy-console`).
    */
   readonly package: string | null;
   /** Which edition ships an installable version of {@link package}. */
@@ -231,6 +235,8 @@ export const PLATFORM_CAPABILITY_PROVIDERS: Readonly<Record<string, PlatformCapa
     },
     'ai-seat': { package: null, edition: 'cloud', note: 'cloud AI-seat tier' },
     governance: { package: null, edition: 'cloud', note: 'cloud governance tier' },
+    'audit-compliance': { package: null, edition: 'cloud', note: 'cloud audit-compliance tier' },
+    'access-policy-console': { package: null, edition: 'cloud', note: 'cloud access-policy console' },
   });
 
 /**
