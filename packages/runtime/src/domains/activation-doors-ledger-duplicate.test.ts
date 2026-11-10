@@ -14,8 +14,9 @@
  * its `(metadata_type, name)` read found and gave it the write's package. One
  * click therefore bound one row of the pair, the index's next build no longer
  * saw a pair, and the duplicate was never reported again, while which switch
- * applied stayed a matter of storage order. Measured before the fix on this
- * rig: each door answered `200` and the first row gained the package.
+ * applied stayed a matter of storage order. Measured on this rig with the
+ * store's guard ablated back to taking the first row: each door answered
+ * `200`, and the first row of the pair gained the package the door named.
  *
  * ## What is pinned
  *
@@ -239,13 +240,14 @@ describe('the activation doors refuse a switch over two package-less rows for it
             for (const enabled of [false, true]) {
                 const res = await send(door, enabled);
 
+                // Nothing was written: no row gained a package, no switch moved.
+                // Read first, so a regression's failure shows the row it bound.
+                expect(await ledgerRows(rig.engine, door.metadataType, door.name), JSON.stringify(res.body)).toEqual(before);
                 expect(res.statusCode, JSON.stringify(res.body)).toBe(409);
                 expect(res.body?.error?.code).toBe('RESOURCE_CONFLICT');
                 expect(res.body?.error?.httpStatus).toBe(409);
                 expect(res.body?.error?.message).toContain(`${door.metadataType}_a`);
                 expect(res.body?.error?.message).toContain(`${door.metadataType}_b`);
-                // Nothing was written: no row gained a package, no switch moved.
-                expect(await ledgerRows(rig.engine, door.metadataType, door.name)).toEqual(before);
             }
 
             await deleteLedgerRow(rig.engine, `${door.metadataType}_a`);
