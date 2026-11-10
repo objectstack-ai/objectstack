@@ -16,7 +16,10 @@
  *   - the bare `POST /actions/global/qa_send_note` is refused `409
  *     RESOURCE_CONFLICT` naming both packages, and nothing runs;
  *   - CONTROL: an object-less action one package holds still runs on the bare
- *     door and on its own package's address.
+ *     door;
+ *   - that action runs on its own package's address too, though its package is
+ *     not the artifact's own id (alpha; the artifact takes beta's, the last
+ *     input's manifest).
  *
  * ## The boot defect this also holds
  *
@@ -147,12 +150,16 @@ describe('[ADR-0150 D4] the composed artifact of two namespaces\' same-named obj
             expect(answer.text).not.toContain('"from"');
         });
 
-        it('CONTROL — an object-less action one package holds runs on the bare door and on its own address', async () => {
-            for (const path of [`/actions/global/${SOLO}`, `/actions/alpha/global/${SOLO}`]) {
-                const answer = await post(booted!.kernel, path);
-                expect(answer.status, `${path}: ${answer.message}`).toBe(200);
-                expect(answer.text).toContain('"from":"alpha-solo"');
-            }
+        it('CONTROL — an object-less action one package holds runs on the bare door', async () => {
+            const answer = await post(booted!.kernel, `/actions/global/${SOLO}`);
+            expect(answer.status, answer.message).toBe(200);
+            expect(answer.text).toContain('"from":"alpha-solo"');
+        });
+
+        it('a package other than the artifact\'s own reaches its one-holder action at its own address (base: 404, bound under the artifact\'s id)', async () => {
+            const answer = await post(booted!.kernel, `/actions/alpha/global/${SOLO}`);
+            expect(answer.status, answer.message).toBe(200);
+            expect(answer.text).toContain('"from":"alpha-solo"');
         });
     });
 });
