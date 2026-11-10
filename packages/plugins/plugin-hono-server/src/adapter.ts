@@ -39,7 +39,7 @@ import type { Socket } from 'node:net';
 type OwedResponses = Set<ServerResponse>;
 import { matchesRoutePattern } from './route-pattern';
 import { readRequestBody, type RequestBodyReading, type RequestBodyRefusal } from './request-body';
-import { createResponseCompression } from './response-compression';
+import { compressResponse } from './response-compression';
 // The ADR-0112 wire vocabulary, read as DATA rather than restated: `ErrorCode`
 // is the closed union (`StandardErrorCode` ∪ `ERROR_CODE_LEDGER`) a registered
 // code must be a member of, and `HttpStatusErrorCodeMap` IS the set of statuses
@@ -696,9 +696,10 @@ export class HonoHttpServer implements IHttpServer {
      * middleware has set its headers.
      */
     private installResponseCompressionSeam(): void {
-        this.app.use('*', createResponseCompression({
-            isStreamed: (c) => this.streamedRequests.has(c.req.raw),
-        }));
+        this.app.use('*', async (c, next) => {
+            await next();
+            await compressResponse(c, { streamed: this.streamedRequests.has(c.req.raw) });
+        });
     }
 
     /** The scheme this server binds — derived from {@link tls}, settable nowhere else. */

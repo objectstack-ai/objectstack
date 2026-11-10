@@ -14,7 +14,7 @@
  * - **A stream.** A response written through `res.write()` (SSE, the AI data
  *   stream, streamed exports) is left exactly as it was. A deflate or brotli
  *   encoder holds bytes back until it has enough to emit, so an encoded stream
- *   reaches the client late or in bursts; `isStreamed` is the adapter's own
+ *   reaches the client late or in bursts; `streamed` is the adapter's own
  *   record of which responses those are. `text/event-stream` is refused by
  *   type as well, and a response that names a `Transfer-Encoding` (Hono's
  *   streaming helpers set one) is left alone.
@@ -54,7 +54,7 @@
 import { Buffer } from 'node:buffer';
 import type { Transform } from 'node:stream';
 import { constants as zlib, createBrotliCompress, createGzip } from 'node:zlib';
-import type { Context, MiddlewareHandler } from 'hono';
+import type { Context } from 'hono';
 // One vocabulary of compressible media types, Hono's own: it already excludes
 // `text/event-stream`.
 import { COMPRESSIBLE_CONTENT_TYPE_REGEX } from 'hono/compress';
@@ -186,60 +186,59 @@ function encodingTransform(encoder: Transform): TransformStream<Uint8Array, Uint
 }
 
 /**
- * The compression middleware. `isStreamed` names the responses the adapter
- * produced from `res.write()`; see the module docblock for every other rule.
+ * Encode the answer already in `c.res`, in place, when every rule in the
+ * module docblock allows it. Called by the adapter's outermost middleware
+ * AFTER `next()` has produced that answer. `streamed` says whether the
+ * adapter produced it from `res.write()`.
  */
-export function createResponseCompression(options: {
-    isStreamed: (c: Context) => boolean;
-    threshold?: number;
-}): MiddlewareHandler {
+export async function compressResponse(
+    c: Context,
+    options: { streamed: boolean; threshold?: number },
+): Promise<void> {
     const threshold = options.threshold ?? RESPONSE_COMPRESSION_THRESHOLD_BYTES;
-    return async function responseCompression(c, next) {
-        await next();
-        if (options.isStreamed(c) || !isEncodableKind(c)) return;
+    if (options.streamed || !isEncodableKind(c)) return;
 
-        const vary = c.res.headers.get('vary');
-        if (vary !== '*' && !(vary && VARY_ACCEPT_ENCODING.test(vary))) {
-            c.header('Vary', vary ? `${vary}, Accept-Encoding` : 'Accept-Encoding');
-        }
+    const vary = c.res.headers.get('vary');
+    if (vary !== '*' && !(vary && VARY_ACCEPT_ENCODING.test(vary))) {
+        c.header('Vary', vary ? `${vary}, Accept-Encoding` : 'Accept-Encoding');
+    }
 
-        const length = declaredLength(c.res.headers);
-        if (length !== undefined && length < threshold) return;
-        const encoding = selectResponseEncoding(c.req.header('accept-encoding'));
-        if (!encoding) return;
-        const body = c.res.body;
-        if (!body) return;
+    const length = declaredLength(c.res.headers);
+    if (length !== undefined && length < threshold) return;
+    const encoding = selectResponseEncoding(c.req.header('accept-encoding'));
+    if (!encoding) return;
+    const body = c.res.body;
+    if (!body) return;
 
-        const reader = body.getReader();
-        const prefix: Uint8Array[] = [];
-        if (length === undefined) {
-            let read = 0;
-            while (read < threshold) {
-                const { done, value } = await reader.read();
-                if (done) {
-                    // The whole body is below the threshold: the same bytes, unencoded.
-                    c.res = new Response(Buffer.concat(prefix), c.res);
-                    return;
-                }
-                prefix.push(value);
-                read += value.byteLength;
+    const reader = body.getReader();
+    const prefix: Uint8Array[] = [];
+    if (length === undefined) {
+        let read = 0;
+        while (read < threshold) {
+            const { done, value } = await reader.read();
+            if (done) {
+                // The whole body is below the threshold: the same bytes, unencoded.
+                c.res = new Response(Buffer.concat(prefix), c.res);
+                return;
             }
+            prefix.push(value);
+            read += value.byteLength;
         }
+    }
 
-        const encoder = createEncoder(encoding, length);
-        const encoded = replay(prefix, reader, () => encoder.destroy()).pipeThrough(encodingTransform(encoder));
-        const original = c.res;
-        c.res = new Response(encoded, {
-            status: original.status,
-            statusText: original.statusText,
-            headers: original.headers,
-        });
-        // After the assignment: Hono's `res` setter copies the previous
-        // response's headers onto the new one, `Content-Length` included.
-        const encodedHeaders: Headers = c.res.headers;
-        encodedHeaders.delete('content-length');
-        // A byte range names offsets in the identity bytes, not the encoded ones.
-        encodedHeaders.delete('accept-ranges');
-        encodedHeaders.set('content-encoding', encoding);
-    };
+    const encoder = createEncoder(encoding, length);
+    const encoded = replay(prefix, reader, () => encoder.destroy()).pipeThrough(encodingTransform(encoder));
+    const original = c.res;
+    c.res = new Response(encoded, {
+        status: original.status,
+        statusText: original.statusText,
+        headers: original.headers,
+    });
+    // After the assignment: Hono's `res` setter copies the previous
+    // response's headers onto the new one, `Content-Length` included.
+    const encodedHeaders: Headers = c.res.headers;
+    encodedHeaders.delete('content-length');
+    // A byte range names offsets in the identity bytes, not the encoded ones.
+    encodedHeaders.delete('accept-ranges');
+    encodedHeaders.set('content-encoding', encoding);
 }
