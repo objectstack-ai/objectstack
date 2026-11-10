@@ -27,7 +27,11 @@ import { PackageScopedNameRefusedError } from '@objectstack/core';
 import { MetadataManager } from './metadata-manager.js';
 import { PACKAGE_SLOTTED_STORE_TYPES } from './package-slotted-store.js';
 import { MemoryLoader } from './loaders/memory-loader.js';
+import { DatabaseLoader } from './loaders/database-loader.js';
 import type { MetadataLoader } from './loaders/loader-interface.js';
+import { MetadataEventType } from '@objectstack/spec/api';
+import type { IDataDriver, IRealtimeService, RealtimeEventPayload } from '@objectstack/spec/contracts';
+import type { MetadataWatchEvent } from '@objectstack/spec/system';
 
 vi.mock('@objectstack/core', async (orig) => ({
   // [#7378] Spread the REAL module: MetadataManager now also imports the
@@ -541,19 +545,19 @@ describe('the in-memory store keeps one slot per (package, name) for every names
   });
 
   /**
-   * Today's state, pinned so the carry stays visible: `unregisterPackage`
-   * selects stored items by `packageId` or `package`, and the artifact door's
-   * items carry only the `_packageId` stamp, so it removes none of them — on
-   * main 45f0f81f and on this change alike. Teaching it `_packageId` is its own
-   * card (the seat's carry from #32151); that change flips this pin.
+   * [#32198] `unregisterPackage` selects a package's items by `packageId`,
+   * `package` or `_packageId`, the key the artifact door's items carry alone.
+   * On main 0eca80a7 it read the first two only and removed none of them; this
+   * pin recorded that state until #32198 flipped it. The live-set pins are in
+   * the "removal by (package, name)" block below.
    */
-  it.each(NAMESPACE_SCOPED)('%s: `unregisterPackage` removes nothing of an item that carries only the `_packageId` stamp (the artifact door\'s shape), on main and here alike', async (type) => {
+  it.each(NAMESPACE_SCOPED)('%s: `unregisterPackage` removes an item that carries only the `_packageId` stamp (the artifact door\'s shape) (BASE: it removed nothing)', async (type) => {
     const manager = new MetadataManager({ formats: ['json'], loaders: [] });
     const name = `shared_${type}`;
     await manager.register(type, name, shipped(type, A, 'alpha'), { notify: false });
     await manager.unregisterPackage(A);
-    expect(((await manager.list(type)) as any[]).map((i) => i.label)).toEqual([`alpha ${type}`]);
-    expect(((await manager.get(type, name, A)) as any)?.label).toBe(`alpha ${type}`);
+    expect(await manager.list(type)).toEqual([]);
+    expect(await manager.get(type, name, A)).toBeUndefined();
   });
 
   describe.each(NAMESPACE_SCOPED)('CONTROL — %s, one holder per name: every read is answered the very object registered, as the bare-name map answered it', (type) => {
@@ -575,6 +579,236 @@ describe('the in-memory store keeps one slot per (package, name) for every names
       await manager.register(type, name, item, { notify: false });
       expect(await manager.get(type, name)).toBe(item);
       expect(await manager.get(type, name, A)).toBe(item);
+    });
+  });
+});
+
+/**
+ * A minimal `IDataDriver` over in-memory tables, for a `DatabaseLoader` the
+ * removal pins read rows back from. Only what the loader calls.
+ */
+function rowDriver(): { driver: IDataDriver; rows: (type: string) => Array<Record<string, unknown>> } {
+  const tables = new Map<string, Map<string, Record<string, unknown>>>();
+  const table = (name: string) => {
+    if (!tables.has(name)) tables.set(name, new Map());
+    return tables.get(name)!;
+  };
+  const matches = (row: Record<string, unknown>, where: Record<string, unknown> = {}) =>
+    Object.entries(where).every(([key, value]) => row[key] === value);
+  const driver = {
+    name: 'rows',
+    version: '1.0.0',
+    supports: {},
+    connect: async () => undefined,
+    disconnect: async () => undefined,
+    checkHealth: async () => true,
+    execute: async () => undefined,
+    syncSchema: async () => undefined,
+    find: async (name: string, query: any) => [...table(name).values()].filter((r) => matches(r, query?.where)).map((r) => ({ ...r })),
+    findOne: async (name: string, query: any) => {
+      for (const row of table(name).values()) if (matches(row, query?.where)) return { ...row };
+      return null;
+    },
+    create: async (name: string, data: Record<string, unknown>) => {
+      table(name).set(data.id as string, { ...data });
+      return { ...data };
+    },
+    update: async (name: string, id: string, data: Record<string, unknown>) => {
+      const updated = { ...table(name).get(id), ...data };
+      table(name).set(id, updated);
+      return updated;
+    },
+    delete: async (name: string, id: string) => table(name).delete(id),
+    count: async (name: string, query: any) => [...table(name).values()].filter((r) => matches(r, query?.where)).length,
+  } as unknown as IDataDriver;
+  return {
+    driver,
+    rows: (type) => [...table('sys_metadata').values()].filter((row) => row.type === type),
+  };
+}
+
+/**
+ * [ADR-0150 D3/D4, #32198] Removal by `(package, name)`, pinned for EVERY
+ * member of the live `PACKAGE_SLOTTED_STORE_TYPES` at this head — never a
+ * restated list, so a type that joins the set is covered the day it joins.
+ *
+ * The boot is the artifact door's shape: its sink saves each item into the
+ * door's `MemoryLoader` and registers it here with `{ notify: false }`, the
+ * item carrying only the `_packageId` stamp (`applyProtection`), and the
+ * door's loader is registered afterwards. One `DatabaseLoader` is the writable
+ * `datasource:` loader `register` persists into and `unregister` deletes from.
+ * It keys its rows by `(type, name)` and writes no `package_id`, so a name two
+ * packages hold has ONE row, holding the body registered last (beta's here).
+ *
+ * BASE (main 0eca80a7): `unregisterPackage` matched `packageId` / `package`
+ * only, so it removed nothing of these items; a removal of one package's
+ * `packageId` item deleted the name's row whoever's body it held; the
+ * realtime `deleted` event named no package; `unregister(type, name)` took
+ * every package's slot.
+ */
+describe('removal by (package, name) for every type stored per package (ADR-0150 D3/D4, #32198)', () => {
+  const SLOTTED = [...PACKAGE_SLOTTED_STORE_TYPES];
+  const A = 'com.acme.alpha';
+  const B = 'com.acme.beta';
+  const nameOf = (type: string) => `shared_${type}`;
+  const doorItem = (type: string, packageId: string) => ({
+    name: nameOf(type),
+    label: `${packageId === A ? 'alpha' : 'beta'} ${type}`,
+    _packageId: packageId,
+    _provenance: 'package',
+  });
+
+  async function boot(type: string, holders: readonly string[] = [A, B]) {
+    const { driver, rows } = rowDriver();
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerLoader(new DatabaseLoader({ driver, tableName: 'sys_metadata' }));
+    const published: RealtimeEventPayload[] = [];
+    const realtime: IRealtimeService = {
+      publish: async (event: RealtimeEventPayload) => { published.push(event); },
+      subscribe: async () => 'sub-1',
+      unsubscribe: async () => undefined,
+    };
+    manager.setRealtimeService(realtime);
+    const door = new MemoryLoader();
+    for (const packageId of holders) {
+      const item = doorItem(type, packageId);
+      await door.save(type, nameOf(type), item);
+      await manager.register(type, nameOf(type), item, { notify: false });
+    }
+    manager.registerLoader(door);
+    const watched: MetadataWatchEvent[] = [];
+    manager.subscribe(type, (event) => { watched.push(event); });
+    published.length = 0;
+    const labels = async () => ((await manager.list(type)) as any[]).map((item) => item.label);
+    const rowBodies = () => rows(type).map((row) => JSON.parse(row.metadata as string).label);
+    return { manager, published, watched, labels, rowBodies, name: nameOf(type) };
+  }
+
+  const hasRealtimeDeleted = (type: string) =>
+    (MetadataEventType.options as readonly string[]).includes(`metadata.${type}.deleted`);
+
+  it('the live set is the one these pins iterate, and it is not empty', () => {
+    expect(SLOTTED.length).toBeGreaterThan(0);
+    expect(SLOTTED).toEqual(expect.arrayContaining(['api', 'agent', 'skill']));
+  });
+
+  it.each(SLOTTED)('%s: `unregisterPackage` removes each package\'s `_packageId`-only item from its own slot and leaves the other\'s, in either order (BASE: it removed nothing)', async (type) => {
+    const first = await boot(type);
+    await first.manager.unregisterPackage(A);
+    expect(await first.labels()).toEqual([`beta ${type}`]);
+    expect(await first.manager.get(type, first.name, A), 'never another package\'s item').toBeUndefined();
+    expect(((await first.manager.get(type, first.name, B)) as any)?.label).toBe(`beta ${type}`);
+    expect(((await first.manager.get(type, first.name)) as any)?.label, 'one holder left: the bare read serves it').toBe(`beta ${type}`);
+
+    const second = await boot(type);
+    await second.manager.unregisterPackage(B);
+    expect(await second.labels()).toEqual([`alpha ${type}`]);
+    expect(await second.manager.get(type, second.name, B)).toBeUndefined();
+    expect(((await second.manager.get(type, second.name, A)) as any)?.label).toBe(`alpha ${type}`);
+  });
+
+  it.each(SLOTTED)('%s: the storage half deletes only the removed package\'s row — removing alpha keeps the row holding beta\'s body, removing beta deletes it (BASE: removing alpha deleted beta\'s row)', async (type) => {
+    const first = await boot(type);
+    expect(first.rowBodies(), 'one row per name: the body registered last').toEqual([`beta ${type}`]);
+    await first.manager.unregisterPackage(A);
+    expect(first.rowBodies()).toEqual([`beta ${type}`]);
+
+    const second = await boot(type);
+    await second.manager.unregisterPackage(B);
+    expect(second.rowBodies()).toEqual([]);
+  });
+
+  it.each(SLOTTED)('%s: the realtime `deleted` event names the removed package, where the type has a realtime event; the watcher event names the item only (BASE: no package on either)', async (type) => {
+    const ctx = await boot(type);
+    await ctx.manager.unregisterPackage(A);
+    const deleted = ctx.published.map((event) => event.payload as any).filter((event) => event.type === `metadata.${type}.deleted`);
+    if (hasRealtimeDeleted(type)) {
+      expect(deleted.map((event) => [event.name, event.packageId])).toEqual([[ctx.name, A]]);
+    } else {
+      // Outside the closed `MetadataEventType` enum: nothing is published for the type at all.
+      expect(ctx.published).toEqual([]);
+    }
+    // ⛔ The spec's `MetadataWatchEvent` declares no package field; unchanged.
+    expect(ctx.watched.map((event) => [event.type, event.name, event.data])).toEqual([['deleted', ctx.name, undefined]]);
+  });
+
+  it.each(SLOTTED)('%s: `unregister(type, name)` naming no package, of a name two packages hold, is refused naming both, and removes and announces nothing (BASE: both slots and the row went)', async (type) => {
+    const ctx = await boot(type);
+    const err = await ctx.manager.unregister(type, ctx.name).then(() => undefined, (e: unknown) => e as PackageScopedNameRefusedError);
+    expect(err, 'the removal refuses').toBeInstanceOf(PackageScopedNameRefusedError);
+    expect([err!.code, err!.status, err!.refusal.reason]).toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment']);
+    expect(err!.refusal.candidates).toEqual([
+      { kind: 'package', packageId: A },
+      { kind: 'package', packageId: B },
+    ]);
+    expect(await ctx.labels()).toEqual([`alpha ${type}`, `beta ${type}`]);
+    expect(ctx.rowBodies()).toEqual([`beta ${type}`]);
+    expect(ctx.published).toEqual([]);
+    expect(ctx.watched).toEqual([]);
+  });
+
+  it.each(SLOTTED)('%s: `unregister(type, name, { packageId })` removes that package\'s slot and only its row, and names it on the realtime event', async (type) => {
+    const ctx = await boot(type);
+    await ctx.manager.unregister(type, ctx.name, { packageId: A });
+    expect(await ctx.labels()).toEqual([`beta ${type}`]);
+    expect(await ctx.manager.get(type, ctx.name, A)).toBeUndefined();
+    expect(ctx.rowBodies(), 'the row holds beta\'s body: kept').toEqual([`beta ${type}`]);
+    if (hasRealtimeDeleted(type)) {
+      expect(ctx.published.map((event) => (event.payload as any).packageId)).toEqual([A]);
+    }
+    await ctx.manager.unregister(type, ctx.name, { packageId: B });
+    expect(ctx.rowBodies(), 'the row holds beta\'s body: deleted with beta').toEqual([]);
+    // No slot of the name is left; what reads are served now is the residue pin's below (#32246).
+  });
+
+  describe.each(SLOTTED)('CONTROL — %s, one holder: a removal naming no package is unchanged', (type) => {
+    it('`unregister(type, name)` removes the item and its row, and the event names no package (the name is gone, not one package\'s slot)', async () => {
+      const ctx = await boot(type, [A]);
+      await ctx.manager.unregister(type, ctx.name);
+      expect(ctx.rowBodies()).toEqual([]);
+      expect(ctx.watched.map((event) => [event.type, event.name])).toEqual([['deleted', ctx.name]]);
+      if (hasRealtimeDeleted(type)) {
+        expect(ctx.published.map((event) => (event.payload as any).packageId)).toEqual([undefined]);
+      }
+    });
+  });
+
+  /**
+   * Today's state, pinned so the carry stays visible. The artifact door's
+   * `MemoryLoader` is a `memory:` loader, so no removal deletes from it, and it
+   * keeps one item per name: the body registered last. Once every slot of a
+   * name is removed, every read falls through to it and is answered that body
+   * — the read naming the removed package included. #32246 flips this pin.
+   */
+  it.each(SLOTTED)('%s: once every slot of the name is removed, the door\'s in-memory loader still serves the body registered last, to every read (today\'s state; #32246 flips it)', async (type) => {
+    const ctx = await boot(type);
+    await ctx.manager.unregisterPackage(A);
+    await ctx.manager.unregisterPackage(B);
+    expect(ctx.rowBodies()).toEqual([]);
+    expect(await ctx.labels()).toEqual([`beta ${type}`]);
+    expect(((await ctx.manager.get(type, ctx.name)) as any)?.label).toBe(`beta ${type}`);
+    expect(((await ctx.manager.get(type, ctx.name, A)) as any)?.label).toBe(`beta ${type}`);
+    expect(await ctx.manager.exists(type, ctx.name)).toBe(true);
+  });
+
+  describe('CONTROL — a type outside the set keeps one item per name, and removal by name', () => {
+    const CONTROL_TYPE = ['view', 'object'].find((type) => !PACKAGE_SLOTTED_STORE_TYPES.has(type))!;
+
+    it('`unregister(type, name, { packageId })` removes the item and deletes its row by name, whatever package is named; the event names no package', async () => {
+      const ctx = await boot(CONTROL_TYPE, [B]);
+      await ctx.manager.unregister(CONTROL_TYPE, ctx.name, { packageId: A });
+      expect(ctx.rowBodies()).toEqual([]);
+      expect(ctx.watched.map((event) => [event.type, event.name])).toEqual([['deleted', ctx.name]]);
+      if (hasRealtimeDeleted(CONTROL_TYPE)) {
+        expect(ctx.published.map((event) => (event.payload as any).packageId)).toEqual([undefined]);
+      }
+    });
+
+    it('`unregisterPackage` removes a `_packageId`-only item and deletes its row by name (BASE: it removed nothing)', async () => {
+      const ctx = await boot(CONTROL_TYPE, [A]);
+      await ctx.manager.unregisterPackage(A);
+      expect(ctx.rowBodies()).toEqual([]);
+      expect(ctx.watched.map((event) => [event.type, event.name])).toEqual([['deleted', ctx.name]]);
     });
   });
 });
