@@ -37,10 +37,33 @@ export const MULTI_REPLICA_CLUSTER_DRIVER = 'redis';
  * The error code a door answers when it refuses a package change because this
  * deployment declares several replicas over {@link MULTI_REPLICA_CLUSTER_DRIVER}
  * and the change would reach the one replica that served the request (`409`).
- * Spelled once here so every refusing door answers the same code; each door
- * names its own maintenance-window recipe in the message.
+ * Spelled once here so every refusing door answers the same code; each door's
+ * message names its own act and the condition its change needs, around the
+ * one recipe {@link multiReplicaMaintenanceWindowRecipe}.
  */
 export const MULTI_REPLICA_PACKAGE_CHANGE_REFUSED = 'MULTI_REPLICA_PACKAGE_CHANGE_REFUSED';
+
+/**
+ * The maintenance-window recipe every {@link MULTI_REPLICA_PACKAGE_CHANGE_REFUSED}
+ * refusal names, spelled once, beside the reader of the declaration it lifts.
+ *
+ * While the declaration stands, every replica refuses the change the same way,
+ * whichever client sends it, so "run it on one replica" or "run it through a
+ * client" is refused again. The recipe lifts the declaration on a deployment
+ * scaled to the one replica that makes the change: `OS_CLUSTER_REPLICAS` at 1
+ * and `OS_EXPECT_MULTI_NODE` unset, the two settings {@link declaresMultiNode}
+ * reads, so it reads false there. Then the count and the declaration come back
+ * and every replica restarts, which is when the others read the change.
+ *
+ * `act` is what the operator runs against that replica (`run the install`,
+ * `repeat the request`). The condition the change needs to reach the other
+ * replicas is the door's own, so the caller states it after this sentence.
+ */
+export function multiReplicaMaintenanceWindowRecipe(act: string): string {
+    return 'Make the change in a maintenance window instead: scale the deployment to one replica and restart it with '
+        + `OS_CLUSTER_REPLICAS=1 and OS_EXPECT_MULTI_NODE unset, ${act} against that replica, then restore the `
+        + 'replica count and the declaration and restart every replica.';
+}
 
 /**
  * True exactly when the operator declares several replicas

@@ -31,7 +31,11 @@
  * byte-for-byte what they were.
  */
 
-import { declaresMultiReplicaOnRedis, MULTI_REPLICA_PACKAGE_CHANGE_REFUSED } from '@objectstack/service-cluster';
+import {
+    declaresMultiReplicaOnRedis,
+    MULTI_REPLICA_PACKAGE_CHANGE_REFUSED,
+    multiReplicaMaintenanceWindowRecipe,
+} from '@objectstack/service-cluster';
 import { installedManifestsOf, pairOf, type InstalledPackageSource } from '@objectstack/metadata-core';
 import type { HttpDispatcherResult, HttpProtocolContext } from './http-dispatcher.js';
 
@@ -59,14 +63,38 @@ export async function packageChangeReachesOneReplica(
 /**
  * The refusal sentence. `subject` names the change in the gerund the walled
  * refusal uses (`Enabling package "crm"`).
+ *
+ * [#32265] The remedy names only steps that work. While the declaration
+ * stands every replica refuses the change the same way, whichever client sends
+ * it (Studio, the REST API, a script), so "run it on a single replica" is
+ * refused again; and no `os` command reaches these doors at all. So the
+ * remedy is the one maintenance-window recipe the install-local doors name too
+ * (`multiReplicaMaintenanceWindowRecipe`, `@objectstack/service-cluster`): one
+ * replica, the declaration lifted, the same request, then the count and the
+ * declaration restored and every replica restarted.
+ *
+ * Then the condition the change needs to reach the other replicas, read where
+ * they read it at boot: a package created, installed, edited or deleted here
+ * is a `sys_packages` row that `PackageServicePlugin.start()` hydrates into the
+ * registry, so they must read the same database; the enable/disable choice is
+ * the package-state store `AppPlugin` seeds from (`./package-state-host-store.ts`
+ * when the host registers one, else `./package-state-store.ts`, a file under
+ * `OS_HOME` keyed by the environment and the directory the process starts
+ * in), so they must read the same store. The host path itself is never
+ * printed.
  */
 export function multiReplicaPackageChangeMessage(subject: string): string {
     return `${subject} was refused: this deployment declares several replicas (OS_CLUSTER_REPLICAS greater than 1, `
         + 'or OS_EXPECT_MULTI_NODE=true) on the Redis cluster driver, and a package change at runtime reaches only '
         + 'the replica that serves the request: the package registry is read at boot and the enable/disable choice '
-        + 'is kept per replica, so the other replicas would keep serving the packages as they were. Make the change '
-        + 'in a maintenance window instead: run it on a single replica or through the CLI, then restart every '
-        + 'replica. Nothing was changed or written.';
+        + 'is kept per replica, so the other replicas would keep serving the packages as they were. Every replica '
+        + 'refuses the change the same way while the declaration stands, whichever client sends it. '
+        + multiReplicaMaintenanceWindowRecipe('repeat the request')
+        + ' Each replica loads the packages changed at runtime from the database (sys_packages) and the '
+        + 'enable/disable choice from its package-state store when it starts, so the change reaches every replica '
+        + 'only when they all read the same database and the same package-state store: the host\'s, or '
+        + 'package-state under one shared OS_HOME with every replica started from the same directory. '
+        + 'Nothing was changed or written.';
 }
 
 /**
