@@ -2801,7 +2801,7 @@ export class AutomationEngine implements IAutomationService {
      * armed; a bare name two slots hold is refused at every bare entry point,
      * naming both, and never picks one.
      */
-    private readonly flowSlots = new FlowSlotTable();
+    private readonly flowSlots = new FlowSlotTable((name) => this.flowHolder(name)?.status === 'refused');
     /** [#31696] Slot keys whose trigger decline ({@link activateFlowTrigger}) has been said. */
     private readonly sharedSlotTriggerWarned = new Set<string>();
     /**
@@ -4931,7 +4931,9 @@ export class AutomationEngine implements IAutomationService {
      * holder named, nothing picked — the package-scoped rule's own sentence.
      */
     private sharedFlowNameRefusal(name: string, callerPackageId: string | null): PackageScopedRefusal {
-        const candidates = this.flowSlots.slotsOf(name).map((slot) =>
+        // [M1] Every holder the registry names, a holder whose body was refused included.
+        const held = this.flowHolder(name);
+        const candidates = held?.status === 'refused' ? held.candidates : this.flowSlots.slotsOf(name).map((slot) =>
             slot.packageId === null ? { kind: 'environment' as const } : { kind: 'package' as const, packageId: slot.packageId },
         );
         const base = {
@@ -4999,6 +5001,12 @@ export class AutomationEngine implements IAutomationService {
     private flowSlotKeysOf(name: string): string[] {
         const keys = this.flowSlots.keysOf(name);
         return keys.length > 0 ? keys : [name];
+    }
+
+    /** [M1] The key of `name`'s one slot while the registry holds `name` under two packages, else `undefined`. */
+    private loneSharedFlowKey(name: string): string | undefined {
+        const keys = this.flowSlots.keysOf(name);
+        return keys.length === 1 && this.flowSlots.isShared(name) ? keys[0] : undefined;
     }
 
     /** [#31696] Is `key` the key of a slot whose name another slot holds too? */
@@ -5105,7 +5113,7 @@ export class AutomationEngine implements IAutomationService {
         this.flowArms.set(parsed, arm);
         this.flows.set(key, parsed);
         // [#23316] Held now, so no longer refused — see {@link flowRefusals}.
-        this.flowRefusals.delete(name);
+        if (this.loneSharedFlowKey(name) === undefined) this.flowRefusals.delete(name);
         this.flowRefusals.delete(key);
         // Enable/disable from the persisted deployment `status`. `obsolete`/`invalid`
         // flows are DISABLED (unbound + guarded in execute); `draft`/`active` — and
@@ -5275,11 +5283,15 @@ export class AutomationEngine implements IAutomationService {
      */
     recordFlowRefusal(name: string, error: unknown): void {
         // The body lives in ./flow-definitions.ts (#25222).
+        // [M1] Recorded beside a lone slot of a name the registry holds twice
+        // (another package's body), and that slot leaves its trigger.
+        const lone = this.loneSharedFlowKey(name);
         const host: ThisParameterType<typeof recordFlowRefusal> = {
-            flows: this.flows,
+            flows: lone === undefined ? this.flows : new Map(),
             flowRefusals: this.flowRefusals,
         };
         recordFlowRefusal.call(host, name, error);
+        if (lone !== undefined) this.deactivateFlowTrigger(lone);
     }
 
     /**
@@ -5294,8 +5306,9 @@ export class AutomationEngine implements IAutomationService {
         // [#31696] Registered while any slot holds the name. A slot key is
         // no flow's name.
         if (isSlotKeySpelling(name)) return { state: 'unregistered' };
-        if (this.flows.has(name) || this.flowSlots.keysOf(name).length > 0) return { state: 'registered' };
         const refusal = this.flowRefusals.get(name);
+        const lone = refusal !== undefined && this.loneSharedFlowKey(name) !== undefined;
+        if (!lone && (this.flows.has(name) || this.flowSlots.keysOf(name).length > 0)) return { state: 'registered' };
         return refusal ? { state: 'refused', reason: { ...refusal } } : { state: 'unregistered' };
     }
 
@@ -5792,7 +5805,8 @@ export class AutomationEngine implements IAutomationService {
             holds: (key, nodeId, credentialKey) => {
                 const [name, flowPackage] = at(key);
                 if (flowPackage === undefined) return source.holds(name, nodeId, credentialKey);
-                return scoped ? source.holds(name, nodeId, credentialKey, flowPackage) : true;
+                // [S1] By name alone, a "no" means no package holds one, so an unsigned node runs.
+                return scoped ? source.holds(name, nodeId, credentialKey, flowPackage) : source.holds(name, nodeId, credentialKey);
             },
             held: (key) => {
                 const [name, flowPackage] = at(key);

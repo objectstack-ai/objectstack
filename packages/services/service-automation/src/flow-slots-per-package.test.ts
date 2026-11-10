@@ -324,6 +324,28 @@ describe('#31696 two packages\' flows of one name — both armed, each its own',
         expect(warned).toHaveLength(2);
         expect(warned[0][0]).toContain(`another package holds a flow named 't'`);
     });
+
+    it('[M1] two registry holders, one slot (the other body refused): no P1 caller, bare door or trigger reaches P2\'s flow', async () => {
+        const started: string[] = [];
+        engine.registerTrigger({ type: 'record_change', start: (b: { flowName: string }) => { started.push(b.flowName); }, stop: () => undefined } as unknown as FlowTrigger);
+        ship(P2, triggered('f', 'p2'));
+        expect(started).toEqual(['f']);
+        // P1 ships `f` too, and its body is refused at registration: one engine slot, two registry holders.
+        registry.registerItem('flow', { ...leaf('f', 'p1'), _packageId: P1 }, 'name' as never, P1);
+        loaderSets.f = [P2, P1];
+        engine.recordFlowRefusal('f', new Error('refused: p1 body'));
+        ship(P1, caller('c', 'f'));
+        expect(engine.getActiveTriggerBindings()).toEqual([]);
+        expect(engine.getFlowRegistration('f')).toMatchObject({ state: 'refused' });
+        expect((await engine.execute('c')).success).toBe(false);
+        const bare = await engine.execute('f');
+        expect([bare.success, bare.error]).toEqual([false, expect.stringContaining(P1)]);
+        await expect(engine.getFlow('f')).rejects.toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+        expect(() => engine.withdrawFlow('f')).toThrow(/held by 2 packages/);
+        expect(ran).toEqual([]);
+        expect((await engine.executeSlot(P2, 'f')).success).toBe(true);
+        expect(ran).toEqual(['p2']);
+    });
 });
 
 describe('#31696 the activation ledger per slot (epic red line 1)', () => {
@@ -634,7 +656,7 @@ describe('#31696 R9 — the engine asks a credential source by package only for 
         await expect(engine.resolveFlowCredential('f', 'start', 'secret')).rejects.toMatchObject({ code: 'RESOURCE_CONFLICT' });
         expect(asked).toHaveLength(2);
     });
-    it('S3: a source that reads by name alone is never asked for a slot of a shared name: its reads are refused, naming the slot', async () => {
+    it('S3: a source that reads by name alone is never read for a slot of a shared name: its reads are refused, naming the slot', async () => {
         const asked: unknown[][] = [];
         engine.setFlowCredentialSource({
             holds: (...a: unknown[]) => { asked.push(a); return true; },
@@ -649,17 +671,19 @@ describe('#31696 R9 — the engine asks a credential source by package only for 
 
         ship(P2, leaf('f', 'p2'));
         const key = `${P2}/f`;
-        // Never read as "no credential": held, so the read is asked — and refuses.
+        // [S1] `holds` asks by name: a "yes" may be another package's, so the read is asked — and refuses.
         expect(engine.holdsFlowCredential(key, 'start', 'secret')).toBe(true);
         const refused = await engine.resolveFlowCredential(key, 'start', 'secret').catch((e: unknown) => e);
         expect(refused).toMatchObject({ name: 'FlowCredentialUnresolvableError', code: 'SERVICE_UNAVAILABLE', status: 503 });
         expect((refused as Error).message).toContain(`Flow 'f' of package "${P2}"`);
         expect((refused as Error).message).toContain(`Package "${P1}" also holds`);
-        // The source was never asked for the shared slot.
-        expect(asked).toHaveLength(2);
+        // Only that by-name `holds` was asked for the shared slot.
+        expect(asked.slice(2)).toEqual([['f', 'start', 'secret']]);
 
-        // The plugin's channel reads by name alone (R9 by package is PR-1b's): refused the same way.
+        // The plugin's channel reads by name alone (R9 by package is PR-1b's): refused the same way, and
+        // where no package holds a credential, `holds` says so (an unsigned http node runs).
         engine.setFlowCredentialSource(new FlowCredentialChannel(() => ({ find: async () => [] }) as never));
+        expect(engine.holdsFlowCredential(key, 'start', 'secret')).toBe(false);
         await expect(engine.resolveFlowCredential(key, 'start', 'secret')).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
     });
 });
@@ -775,6 +799,7 @@ describe('#31696 the trigger decline is said again for a name shared again', () 
         } as unknown as FlowTrigger);
         ship(P1, triggered('t', 'p1'));
         ship(P2, triggered('t', 'p2'));
+        registry.unregisterItemsByPackage(P2);
         engine.withdrawFlowSlot(P2, 't');
         ship(P2, triggered('t', 'p2'));
         const warned = engineLogger.warn.mock.calls.filter(([message]: [string]) => /NOT armed on trigger/.test(message));

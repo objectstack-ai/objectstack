@@ -98,6 +98,9 @@ export interface FlowKeyMove {
 
 /** The slots one engine holds, and the key each is filed under. */
 export class FlowSlotTable {
+    /** [M1] `heldByMany(name)`: the registry holds `name` under two or more packages (the resolver refuses it with no package). */
+    constructor(private readonly heldByMany?: (name: string) => boolean) {}
+
     private readonly byKey = new Map<string, FlowSlot>();
     /** name → (package id, `''` for none) → key */
     private readonly byName = new Map<string, Map<string, string>>();
@@ -122,9 +125,15 @@ export class FlowSlotTable {
         return this.byName.get(name)?.get(packageId ?? '');
     }
 
-    /** Do two or more slots hold `name`? */
+    /**
+     * Is `name` shared: do two or more slots hold it, or does one while the
+     * registry holds it under two or more packages (the other's body refused)?
+     * The one predicate every reader asks, so a lone slot is never read as the
+     * name's one holder while the resolver refuses the bare name.
+     */
     isShared(name: string): boolean {
-        return (this.byName.get(name)?.size ?? 0) > 1;
+        const size = this.byName.get(name)?.size ?? 0;
+        return size > 1 || (size === 1 && this.heldByMany?.(name) === true);
     }
 
     /** Every key, in arrival order. */
