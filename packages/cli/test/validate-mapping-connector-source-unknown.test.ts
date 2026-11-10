@@ -89,6 +89,8 @@ const STACK = {
     {
       name: 'fx_contact',
       label: 'Contact',
+      // [ADR-0153 D4] a mapping that pulls writes into a synced object only.
+      managedBy: 'synced',
       sharingModel: 'private',
       fields: { name: { type: 'text', label: 'Name' }, external_id: { type: 'text', label: 'External ID' } },
     },

@@ -158,6 +158,14 @@ describe('claimOrgSeedOwnership', () => {
     expect(ql.update).not.toHaveBeenCalled();
   });
 
+  it('[ADR-0153 D4] skips a synced object — a pulled row has no owner column to claim', async () => {
+    const schemas = [{ name: 'erp_order_copy', managedBy: 'synced', fields: BOTH_COLUMNS }];
+    const { ql, writes } = makeQL(schemas, { erp_order_copy: [{ id: 'o1', organization_id: ORG, owner_id: null }] });
+    const seededRecordIds = seededIds({ erp_order_copy: ['o1'] });
+    expect(await claimOrgSeedOwnership(ql, ORG, OWNER, { seededRecordIds })).toEqual([]);
+    expect(writes).toHaveLength(0);
+  });
+
   it('claims this org\'s seeded NULL-owner rows in ONE predicate write, leaving other orgs and human-owned rows untouched', async () => {
     const schemas = [{ name: 'crm_lead', fields: BOTH_COLUMNS }];
     const rows = [
