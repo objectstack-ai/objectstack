@@ -2498,6 +2498,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "權杖摘要",
         help: "Bearer 權杖的 HMAC-SHA-256（base64url），以部署的驗證金鑰為鍵——單向；明文僅在簽發時顯示一次，且絕不儲存。"
       },
+      token_hint: {
+        label: "權杖提示",
+        help: "Bearer 權杖的最後四個字元，於簽發時記錄，用於區分同一連線的多個憑證；絕非權杖本身或其摘要。提示功能上線前簽發的憑證此項為空。"
+      },
       active: {
         label: "啟用",
         help: "撤銷開關——未啟用的憑證在驗證時會被拒絕"
@@ -2505,6 +2509,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       expires_at: {
         label: "到期時間",
         help: "用於分階段憑證輪換的可選硬性過期時間；已過期的憑證會被拒絕"
+      },
+      last_used_at: {
+        label: "最近使用時間",
+        help: "該憑證最近一次通過驗證的 SCIM 請求的時間，每分鐘至多記錄一次；尚無使用記錄時為空"
       },
       user_id: {
         label: "簽發者",
@@ -2554,6 +2562,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "我已儲存權杖",
           fields: {
             token: "權杖",
+            tokenHint: "權杖提示",
             connectionId: "連線 ID",
             expiresAt: "到期時間"
           }

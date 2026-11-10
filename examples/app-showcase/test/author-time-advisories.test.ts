@@ -139,22 +139,6 @@ export const ALLOWED_ADVISORIES: readonly Allowed[] = [
     reason: 'A junction row: every surface that lists it names it by its two masters (team and project), and it '
       + 'has no text field for nameField to point at. Records fall back to the stable Record #ID floor.',
   },
-
-  // ── Lint false positives (reported on #32168 for domain:spec) ────────────
-  {
-    rule: 'field-no-consumers',
-    where: 'object "showcase_invoice" · field "owner"',
-    reason: 'Read on every select by the invoice_own_rows row-level policy (owner == current_user.email, '
-      + 'src/security/permission-sets.ts). The rule counts the whole permissions root as a carrier, so the '
-      + 'predicate goes uncredited.',
-  },
-  {
-    rule: 'field-no-consumers',
-    where: 'object "showcase_invoice_line" · field "position"',
-    reason: "The invoice's line grid stamps it on drag-reorder: the renderer derives the line-position field from "
-      + 'the child object (INLINE_GRID_SORT_FIELDS, packages/spec/src/data/inline-grid-sort-fields.ts), and the '
-      + 'rule does not credit that derivation.',
-  },
 ];
 
 /**
