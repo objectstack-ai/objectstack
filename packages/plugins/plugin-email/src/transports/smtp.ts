@@ -1,5 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import type { Socket } from 'node:net';
 import type {
   IEmailTransport,
   NormalizedEmailMessage,
@@ -87,8 +88,87 @@ export interface SmtpTransportOptions {
    * routinely needed belongs on this interface.
    */
   transportOptions?: Record<string, unknown>;
+  /**
+   * The host's connect policy ({@link SmtpConnectPolicy}). Applied after
+   * `transportOptions`, which may then carry none of
+   * {@link SMTP_CONNECT_POLICY_REFUSED_TRANSPORT_OPTIONS} nor an OAuth2
+   * `auth`. Absent: the transport connects exactly as it does without one.
+   */
+  connect?: SmtpConnectPolicy;
   /** Diagnostic logger. */
   logger?: { info: (msg: string, meta?: any) => void; warn?: (msg: string, meta?: any) => void };
+}
+
+/**
+ * The connection nodemailer is about to open, as handed to
+ * {@link SmtpConnectPolicy.getSocket}: the configured `host` and `port`, plus
+ * the rest of the resolved transport options.
+ */
+export interface SmtpConnectRequest {
+  host?: string;
+  port?: number;
+  [key: string]: unknown;
+}
+
+/**
+ * Where a host lets an SMTP transport connect.
+ *
+ * `getSocket` is nodemailer's own transport hook, called for every connection
+ * the transport opens. It admits a connection by opening the socket itself
+ * and handing it back as `{ connection }` (TLS, STARTTLS and SNI then still
+ * run against the configured host name), and refuses one by calling back with
+ * an error, whose message is what the failed send reports.
+ */
+export interface SmtpConnectPolicy {
+  getSocket(request: SmtpConnectRequest, callback: SmtpConnectCallback): void;
+}
+
+/** How {@link SmtpConnectPolicy.getSocket} answers: an error, or the socket it opened. */
+export type SmtpConnectCallback = (err: Error | null, socket?: { connection: Socket } | false) => void;
+
+/**
+ * `transportOptions` keys an {@link SmtpTransport} refuses while a connect
+ * policy is set: each one chooses the socket or the transport kind itself,
+ * or opens a connection of its own. An OAuth2 `auth` is refused too.
+ */
+export const SMTP_CONNECT_POLICY_REFUSED_TRANSPORT_OPTIONS = [
+  'proxy',
+  'url',
+  'sendmail',
+  'streamTransport',
+  'jsonTransport',
+  'SES',
+  'connection',
+  'socket',
+] as const;
+
+/** An `auth` block nodemailer reads as OAuth2. */
+function isOAuth2Auth(auth: unknown): boolean {
+  if (!auth || typeof auth !== 'object') return false;
+  return String((auth as { type?: unknown }).type ?? '').trim().toUpperCase() === 'OAUTH2';
+}
+
+/** Refuse, naming the key, a connect policy the transport could not keep. */
+function assertConnectPolicyHolds(
+  connect: SmtpConnectPolicy,
+  transportOptions: Record<string, unknown> | undefined,
+): void {
+  if (typeof connect?.getSocket !== 'function') {
+    throw new Error('SmtpTransport: the connect policy has no getSocket function');
+  }
+  const extra = transportOptions ?? {};
+  for (const key of SMTP_CONNECT_POLICY_REFUSED_TRANSPORT_OPTIONS) {
+    if (Object.prototype.hasOwnProperty.call(extra, key) && extra[key] !== undefined) {
+      throw new Error(
+        `SmtpTransport: transportOptions.${key} cannot be used while a connect policy is set`,
+      );
+    }
+  }
+  if (isOAuth2Auth(extra.auth)) {
+    throw new Error(
+      'SmtpTransport: transportOptions.auth of type OAuth2 cannot be used while a connect policy is set',
+    );
+  }
 }
 
 /** Minimal structural view of the nodemailer surface this transport uses. */
@@ -132,6 +212,8 @@ export class SmtpTransport implements IEmailTransport {
       throw new Error(formatInvalidSmtpPortNotice(opts.port));
     }
     this.port = port;
+    // A connect policy the transport cannot keep is refused here, not at send.
+    if (opts.connect !== undefined) this.buildSmtpOptions();
   }
 
   /**
@@ -148,6 +230,8 @@ export class SmtpTransport implements IEmailTransport {
     const implicitTls = secure && this.port === IMPLICIT_TLS_PORT;
     const timeout = this.opts.timeout ?? DEFAULT_TIMEOUT_MS;
     const user = this.opts.user?.trim();
+    const connect = this.opts.connect;
+    if (connect !== undefined) assertConnectPolicyHolds(connect, this.opts.transportOptions);
     return {
       host: String(this.opts.host).trim(),
       port: this.port,
@@ -161,6 +245,10 @@ export class SmtpTransport implements IEmailTransport {
       socketTimeout: timeout,
       ...(user ? { auth: { user, pass: this.opts.password ?? '' } } : {}),
       ...(this.opts.transportOptions ?? {}),
+      // Last, so nothing above can replace the host's connect policy.
+      ...(connect !== undefined
+        ? { getSocket: (request: SmtpConnectRequest, callback: SmtpConnectCallback) => connect.getSocket(request, callback) }
+        : {}),
     };
   }
 
