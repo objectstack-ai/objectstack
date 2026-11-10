@@ -81,7 +81,7 @@ vi.mock('../utils/consoleServerAction', () => ({
  * Capture every <ActionProvider>'s props while keeping the real provider. The
  * record page's own provider is the one whose CONTEXT carries this record, so
  * the selector below picks it even if a nested surface mounts one of its own.
- * `useObjectLabel` stays real except `actionCancelText`, and
+ * `useObjectLabel` stays real except `actionCancelText` and `actionPreflight`, and
  * `useObjectTranslation` stays real except its `language`, so an inline locale
  * map has a non-default language to collapse to.
  */
@@ -90,6 +90,9 @@ const captured: Array<{ onParamCollection: any; context: any }> = [];
 let bundle: Record<string, string> = {};
 const asked: Array<{ objectName: string | undefined; actionName: string | undefined; fallback: unknown }> = [];
 const LANGUAGE = 'zh-CN';
+/** Preflight row labels, keyed `KEY_OBJECT|ACTION|PATH` (`global` for no key object). */
+let preflightLabels: Record<string, string> = {};
+const preflightAsked: Array<{ objectName: string | undefined; actionName: string | undefined }> = [];
 vi.mock('@object-ui/react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@object-ui/react')>();
   return {
@@ -107,6 +110,17 @@ vi.mock('@object-ui/react', async (importOriginal) => {
       actionCancelText: (objectName: string | undefined, actionName: string | undefined, fallback?: string) => {
         asked.push({ objectName, actionName, fallback });
         return bundle[`${objectName ?? 'global'}|${actionName}`] ?? (fallback || undefined);
+      },
+      actionPreflight: (objectName: string | undefined, actionName: string | undefined, spec: any) => {
+        preflightAsked.push({ objectName, actionName });
+        if (!spec || !Array.isArray(spec.fields)) return spec;
+        return {
+          ...spec,
+          fields: spec.fields.map((field: any) => {
+            const label = preflightLabels[`${objectName ?? 'global'}|${actionName}|${field.path}`];
+            return label ? { ...field, label } : field;
+          }),
+        };
       },
     }),
     useObjectTranslation: () => ({ ...actual.useObjectTranslation(), language: LANGUAGE }),
@@ -197,6 +211,8 @@ beforeEach(() => {
   paramDialogState = null;
   bundle = {};
   asked.length = 0;
+  preflightLabels = {};
+  preflightAsked.length = 0;
   // Unrelated chrome on this view (approvals, favourites, …) reaches for the
   // platform API; in jsdom that is a real socket. Answer it locally so the only
   // asynchrony left is the record load the capture waits on.
@@ -252,5 +268,33 @@ describe('RecordDetailView — the declared preflight read (objectstack#31808)',
     });
     await runner.execute({ type: 'api', name: 'send_note', target: '/api/v1/x', params: PARAMS, preflight: PREFLIGHT } as never);
     expect(fill!(PREFLIGHT.read.url, { subject: 'Hello' })).toBe('/api/v1/notes/plan?name=Intro%20call&subject=Hello');
+  });
+});
+
+describe('RecordDetailView — the preflight rows read the bundle (objectstack#31937)', () => {
+  const PREFLIGHT = {
+    read: { url: '/api/v1/notes/plan?subject=${param.subject}' },
+    fields: [
+      { path: 'plan.total', label: 'Total' },
+      { path: 'plan.note', label: { en: 'Note', 'zh-CN': '备注' } },
+    ],
+  };
+
+  it('hands the companion the localized rows, asked on the action\'s own object', async () => {
+    preflightLabels = { [`${OBJECT_NAME}|send_note|plan.total`]: '合计' };
+    await collectParams({ name: 'send_note', label: 'Send', objectName: OBJECT_NAME, preflight: PREFLIGHT });
+    expect(preflightAsked).toEqual([{ objectName: OBJECT_NAME, actionName: 'send_note' }]);
+    expect(paramDialogState.companion.judged).toMatchObject({ ok: true });
+    expect(paramDialogState.companion.judged.preflight.fields).toEqual([
+      { path: 'plan.total', label: '合计' },
+      // No bundle string: the authored inline map goes on as written.
+      { path: 'plan.note', label: { en: 'Note', 'zh-CN': '备注' } },
+    ]);
+  });
+
+  it('CONTROL: an action that declares no preflight asks nothing', async () => {
+    await collectParams({ name: 'send_note', label: 'Send', objectName: OBJECT_NAME });
+    expect(preflightAsked).toEqual([]);
+    expect(paramDialogState.companion).toBeUndefined();
   });
 });

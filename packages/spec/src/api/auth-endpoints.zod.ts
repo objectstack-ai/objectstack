@@ -270,6 +270,12 @@ export const AuthFeaturesConfigSchema = lazySchema(() => z.object({
   cloudManaged: z.boolean().optional().describe(
     'Managed (cloud-hosted, SSO-only) mode: people arrive through the identity provider, so the UI hides inviting, creating users and setting their passwords; absent means not managed',
   ),
+  // A host option (`AuthManagerOptions.developerEditionCreate`) sets it; it
+  // gates no server behaviour here, it only advertises the host's door.
+  developerEditionCreate: z.boolean().optional().describe(
+    'Developer Edition organizations can be created here: true only where the host\'s organization-create door accepts ?edition=developer, so the create-organization form may offer that choice. '
+    + 'An advertisement of the host\'s door, not a switch: it changes no server behaviour. Absent or false means no developer choice is offered',
+  ),
   turnstileSiteKey: z.string().optional().describe(
     'Public Cloudflare Turnstile site key, present only while the opt-in sign-up challenge is on: the sign-up form renders the widget and sends its token in the x-captcha-response header; absent means no challenge',
   ),

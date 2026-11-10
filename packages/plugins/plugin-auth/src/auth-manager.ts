@@ -769,6 +769,20 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
   }) => void | Promise<void>;
 
   /**
+   * Advertise that this host's organization-create door accepts
+   * `?edition=developer`, so a client may offer a Developer Edition choice
+   * when creating an organization. `getPublicConfig()` serves it as
+   * `features.developerEditionCreate`. Default `false`.
+   *
+   * An advertisement only: nothing in this package reads it to change
+   * behaviour, and no door here takes an edition. Set it only on a host that
+   * serves that door itself (the cloud control plane does, beside its
+   * {@link onOrganizationCreated} provisioning); setting it anywhere else
+   * offers a choice the server ignores.
+   */
+  developerEditionCreate?: boolean;
+
+  /**
    * [ADR-0105 D8] Optional callback invoked AFTER an invitation is accepted
    * via better-auth (`organizationHooks.afterAcceptInvitation`) — the seam a
    * host uses to apply an invitation's PLACEMENT INTENT (business-unit
@@ -5191,6 +5205,10 @@ export class AuthManager {
       // judgement site reads (ruling 6341690661 on #25083, Q2 D / Q3 A). A
       // hide-when-on flag: the console hides the doors that add people.
       cloudManaged: isCloudManaged(),
+      // An opt-in host option, served as a boolean like every flag (the drift
+      // guard holds the served key set stable), so `false` when unset. It
+      // only advertises the host's own create door; nothing here acts on it.
+      developerEditionCreate: this.config.developerEditionCreate === true,
       ...(termsUrl ? { termsUrl } : {}),
       ...(privacyUrl ? { privacyUrl } : {}),
       // The PUBLIC Turnstile site key, served only when the sign-up challenge

@@ -4253,6 +4253,16 @@ const pt = {
       expandTable: 'Expandir',
       exitExpandedTable: 'Fechar',
     },
+    answerSource: {
+      title: 'Como isto foi calculado',
+      object: 'Objeto',
+      filter: 'Filtro',
+      allRecords: 'Todos os registros',
+      groupedBy: 'Agrupado por',
+      aggregations: 'Agregações',
+      records: 'Registros',
+      visibleToYou: 'Somente os registros que você pode ver',
+    },
     tool: {
       aggregate_data: "Resumir os dados",
       get_record: "Ler o registro",

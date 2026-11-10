@@ -301,7 +301,7 @@ export const NON_DISPATCH_MOUNT_PREFIXES = [
 /**
  * The ledger.
  *
- * CENSUS (generated): this list holds 131 rows.
+ * CENSUS (generated): this list holds 147 rows.
  *
  * ⛔ THAT NUMBER IS WRITTEN BY A TOOL — never by hand.
  * `pnpm check:route-ledger-census` counts the rows below and fails when the two
@@ -655,6 +655,38 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   // [#22773] The inbound hook's hosted door (segment 2 of ruling A on #22757).
   { route: 'POST /automation/hooks/:flowName/:hookId', domain: '/automation', disposition: 'public',
     note: 'the inbound hook a third-party sender posts a signed event through to start an `api` flow (ADR-0041 Tier 1). Session-less by design: the HMAC signature over the raw body, under the hook\'s own secret, is the only credential, and the trigger-api slot\'s ITriggerApiService.handleInboundHook verifies it before anything is enqueued. The ONE route under /automation the domain\'s anonymous floor admits: the ADR-0069 allow-list\'s one parameterised row (core auth-gate.ts, exactly these four segments, POST only) is read by the floor, the ADR-0069 gate and the membership gate\'s skip through one reading, and the domain hands the route to `domains/automation-hooks.ts` on the statement after the floor, ahead of every other /automation gate. Forwarded with its body UNREAD, the two path parameters decoded, the slot resolved per request, and the member\'s Response returned as it is. An absent slot or member answers 501 NOT_IMPLEMENTED, never ROUTE_NOT_FOUND; a body consumed before it got here is a transport fault, answered 500 and logged. Every other method on the path stays an ordinary /automation request at the floor. This is the door for a kernel with no raw app; a self-hosted kernel serves the same path from the trigger\'s raw-app mount, which never passes through the dispatcher. NOT JS-SDK surface: a sender is a third-party service, not a client of this SDK. Pinned in `domains/automation-hooks.test.ts`' },
+  { route: 'GET /automation/:ns/:name', domain: '/automation', disposition: 'server-only',
+    note: '[ADR-0150 D5] The addressed flow: `:ns` is an installed namespace or `_env`, read in the router\'s order (the grammar\'s literals, then `_env`, then an installed namespace; a sub-resource literal in the name position keeps its bare route, so `/automation/crm/runs` is the runs of the flow `crm`). The qualifier is stripped before every gate, so each gate judges the bare shape, and judged after them: served as the bare path when the bare name resolves to the namespace\'s one holder (its environment overlay included), else 404 when nothing there holds the name, or 409 `RESOURCE_CONFLICT` naming every candidate (two holders in the namespace, a name held only elsewhere, a bare name two packages hold). `_env` addresses the environment\'s own flow, or a name no package holds. Logic in `domains/automation-address.ts`. server-only: the SDK names no namespace yet.' },
+  { route: 'PUT /automation/:ns/:name', domain: '/automation', disposition: 'server-only',
+    note: '[ADR-0150 D5] The addressed definition update, as the `GET /automation/:ns/:name` row; the bare `PUT /automation/:name` row\'s gates judge it.' },
+  { route: 'DELETE /automation/:ns/:name', domain: '/automation', disposition: 'server-only',
+    note: '[ADR-0150 D5] The addressed definition delete, as the `GET /automation/:ns/:name` row; the bare `DELETE /automation/:name` row\'s gates judge it.' },
+  { route: 'POST /automation/:ns/:name/trigger', domain: '/automation', disposition: 'server-only',
+    note: '[ADR-0150 D5] The addressed run, as the `GET /automation/:ns/:name` row.' },
+  { route: 'POST /automation/:ns/:name/toggle', domain: '/automation', disposition: 'server-only',
+    note: '[ADR-0150 D5] The addressed enablement, as the `GET /automation/:ns/:name` row; the bare toggle row\'s gates judge it.' },
+  { route: 'POST /automation/:ns/:name/clone', domain: '/automation', disposition: 'server-only',
+    note: '[ADR-0150 D5] The addressed clone source, as the `GET /automation/:ns/:name` row; the bare clone row\'s gates and body judge it.' },
+  { route: 'GET /automation/:ns/:name/runs', domain: '/automation', disposition: 'server-only',
+    note: '[ADR-0150 D5] The addressed run list, as the `GET /automation/:ns/:name` row.' },
+  { route: 'GET /automation/:ns/:name/runs/:runId', domain: '/automation', disposition: 'server-only',
+    note: '[ADR-0150 D5] The addressed run read, as the `GET /automation/:ns/:name` row.' },
+  { route: 'POST /automation/:ns/:name/runs/:runId/resume', domain: '/automation', disposition: 'server-only',
+    note: '[ADR-0150 D5] The addressed resume, as the `GET /automation/:ns/:name` row; the bare resume row\'s gates judge it.' },
+  { route: 'POST /automation/:ns/:name/runs/:runId/cancel', domain: '/automation', disposition: 'server-only',
+    note: '[ADR-0150 D5] The addressed cancel, as the `GET /automation/:ns/:name` row; the bare cancel row\'s gate judges it.' },
+  { route: 'POST /automation/:ns/:name/runs/:runId/restore-suspension', domain: '/automation', disposition: 'server-only',
+    note: '[ADR-0150 D5] The addressed repair, as the `GET /automation/:ns/:name` row; the bare restore row\'s gate judges it.' },
+  { route: 'GET /automation/:ns/:name/runs/:runId/screen', domain: '/automation', disposition: 'server-only',
+    note: '[ADR-0150 D5] The addressed screen read, as the `GET /automation/:ns/:name` row.' },
+  { route: 'POST /automation/trigger/:ns/:name', domain: '/automation', disposition: 'server-only',
+    note: '[ADR-0150 D5] The legacy trigger door\'s addressed form, as the `GET /automation/:ns/:name` row.' },
+  { route: 'GET /automation/connectors/:ns/:name/connection', domain: '/automation', disposition: 'server-only',
+    note: '[ADR-0150 D5] The addressed connector connection: `:ns` an installed namespace or `_env`, judged as the `GET /automation/:ns/:name` row over the `connector` holders; served as the bare connection row, whose gates judge it.' },
+  { route: 'POST /automation/connectors/:ns/:name/connection', domain: '/automation', disposition: 'server-only',
+    note: '[ADR-0150 D5] The addressed begin, as the row above.' },
+  { route: 'DELETE /automation/connectors/:ns/:name/connection', domain: '/automation', disposition: 'server-only',
+    note: '[ADR-0150 D5] The addressed revoke, as the row above.' },
 
   // ── auth (better-auth passthrough) ────────────────────────────────────────
   { route: '* /auth/**', domain: '/auth', disposition: 'sdk', client: 'auth.me',
