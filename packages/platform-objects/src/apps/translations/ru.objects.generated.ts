@@ -2208,6 +2208,26 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
             helpText: "Необязательно. Запрашиваемый формат SAML NameID. По умолчанию — формат, настроенный в IdP.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          mapEmail: {
+            label: "Сопоставление: атрибут эл. почты",
+            helpText: "Необязательно. Атрибут утверждения SAML, сопоставляемый с эл. почтой пользователя. По умолчанию — «email», затем NameID. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          mapFirstName: {
+            label: "Сопоставление: атрибут имени",
+            helpText: "Необязательно. Атрибут утверждения SAML, сопоставляемый с именем пользователя. По умолчанию — «givenName». Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          mapLastName: {
+            label: "Сопоставление: атрибут фамилии",
+            helpText: "Необязательно. Атрибут утверждения SAML, сопоставляемый с фамилией пользователя. По умолчанию — «surname». Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          mapName: {
+            label: "Сопоставление: атрибут отображаемого имени",
+            helpText: "Необязательно. Атрибут утверждения SAML, сопоставляемый с полным именем пользователя; используется, когда нет атрибутов имени и фамилии. По умолчанию — «displayName», затем NameID. Okta: name. Entra ID: http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          },
           mapGroups: {
             label: "Сопоставление: атрибут групп",
             helpText: "Необязательно. Атрибут утверждения SAML, содержащий группы пользователя. При каждом входе выдаются наборы разрешений, сопоставленные этим группам. Оставьте пустым, чтобы не сопоставлять группы.",
@@ -2267,6 +2287,57 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Готово",
           fields: {
             groupsClaim: "Утверждение групп"
+          }
+        }
+      },
+      show_sso_attribute_mapping: {
+        label: "Показать сопоставление атрибутов",
+        resultDialog: {
+          title: "Сопоставление атрибутов",
+          description: "Атрибуты IdP (SAML) или утверждения (OIDC), из которых этот провайдер читает эл. почту и имя пользователя при каждом входе. Пустое значение означает значение по умолчанию: эл. почта из «email» (SAML: затем NameID); имя из «givenName» + «surname», затем «displayName» (OIDC: «name»). Имя и фамилия применяются только к SAML. Изменить можно через «Изменить сопоставление атрибутов».",
+          acknowledge: "Готово",
+          fields: {
+            protocol: "Протокол",
+            email: "Эл. почта",
+            firstName: "Имя",
+            lastName: "Фамилия",
+            name: "Отображаемое имя"
+          }
+        }
+      },
+      edit_sso_attribute_mapping: {
+        label: "Изменить сопоставление атрибутов",
+        params: {
+          email: {
+            label: "Атрибут эл. почты",
+            helpText: "Атрибут или утверждение IdP, сопоставляемое с эл. почтой пользователя. Не меняйте, чтобы сохранить текущее значение; очистите, чтобы вернуть значение по умолчанию («email»). Entra ID SAML: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          firstName: {
+            label: "Атрибут имени (SAML)",
+            helpText: "Только SAML. Атрибут утверждения, сопоставляемый с именем пользователя. Не меняйте, чтобы сохранить текущее значение. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          lastName: {
+            label: "Атрибут фамилии (SAML)",
+            helpText: "Только SAML. Атрибут утверждения, сопоставляемый с фамилией пользователя. Не меняйте, чтобы сохранить текущее значение. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          name: {
+            label: "Атрибут отображаемого имени",
+            helpText: "Атрибут или утверждение IdP, сопоставляемое с полным именем пользователя (SAML: используется, когда нет имени и фамилии). Не меняйте, чтобы сохранить текущее значение. Okta SAML: name. Entra ID: http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          }
+        },
+        resultDialog: {
+          title: "Сопоставление атрибутов сохранено",
+          description: "Атрибуты или утверждения, из которых этот провайдер теперь читает эл. почту и имя пользователя при каждом входе. Пустое значение означает, что применяется значение по умолчанию.",
+          acknowledge: "Готово",
+          fields: {
+            email: "Эл. почта",
+            firstName: "Имя",
+            lastName: "Фамилия",
+            name: "Отображаемое имя"
           }
         }
       }
