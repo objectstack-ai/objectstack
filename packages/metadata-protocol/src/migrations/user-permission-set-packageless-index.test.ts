@@ -15,15 +15,17 @@ import {
     buildUserPermissionSetPackagelessIndexSql,
     buildUserPermissionSetPackagelessMariaDbKeySql,
     buildUserPermissionSetPackagelessMariaDbSql,
+    createUserPermissionSetGuardAtSchemaSync,
     ensureUserPermissionSetPackagelessIndex,
 } from './user-permission-set-packageless-index.js';
 import type { IndexExec } from './partial-index-probe.js';
 
 /**
  * `sys_user_permission_set` — one grant per `(user_id, permission_set,
- * organization_id)` among the grants that name no package, beside the declared
+ * organization_id)` among the grants that name no package, beside the
  * NULL-distinct `(user_id, permission_set, permission_set_package,
- * organization_id)` key (ADR-0150 D4, #32164).
+ * organization_id)` key ADR-0150 D4 gives the grant (#32164), which these
+ * fixtures declare.
  *
  * Real SQLite (`node:sqlite`), because the claim is about what a UNIQUE index
  * does with NULLs over real rows. PostgreSQL is measured in the
@@ -205,6 +207,76 @@ describe('sys_user_permission_set: one package-less grant per (user_id, permissi
         expect(await ensureUserPermissionSetPackagelessIndex(undefined, log)).toEqual({ status: 'no-driver' });
         expect(log.error).not.toHaveBeenCalled();
         expect(log.warn).not.toHaveBeenCalled();
+    });
+
+    /**
+     * [#32164 MF6 review: must-fix 1 and should-fix 2] The ensurer each kernel's
+     * schema-sync event runs, over an engine whose driver serves this table the
+     * way `SqlDriver` does: `execute` for raw SQL, `config.client` for the
+     * dialect, `schemaDdlDeferred` while a one-shot CLI boot holds DDL back.
+     */
+    describe('createUserPermissionSetGuardAtSchemaSync: once per pass, on every kernel that performs the DDL', () => {
+        const engineOver = (driver: { schemaDdlDeferred?: boolean }) => ({
+            getDriverForObject: (table: string) => (table === USER_PERMISSION_SET_TABLE ? driver : undefined),
+        });
+        const sqliteDriver = () => ({
+            schemaDdlDeferred: false as boolean,
+            config: { client: 'better-sqlite3' },
+            execute: (sql: string) => exec(sql),
+        });
+
+        it('a pass whose driver holds DDL back (a dry run, or apply before its confirmation) builds nothing and latches nothing; the pass after the flush builds it', async () => {
+            const driver = sqliteDriver();
+            driver.schemaDdlDeferred = true;
+            const log = logger();
+            const ensure = createUserPermissionSetGuardAtSchemaSync(engineOver(driver), log);
+
+            expect(await ensure()).toBe('held-back');
+            expect(indexDdl(USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME)).toBeUndefined();
+
+            driver.schemaDdlDeferred = false; // the flush performed what was held back
+            expect(await ensure()).toBe('created');
+            expect(indexDdl(USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME)).toBeDefined();
+            expect(log.error).not.toHaveBeenCalled();
+            expect(log.warn).not.toHaveBeenCalled();
+        });
+
+        it('`created` never latches: a guard the table lost (a SQLite table rebuild drops it) is built again by the next pass, silently', async () => {
+            const log = logger();
+            const ensure = createUserPermissionSetGuardAtSchemaSync(engineOver(sqliteDriver()), log);
+            expect(await ensure()).toBe('created');
+
+            db.exec(`DROP INDEX ${USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME}`);
+            expect(await ensure()).toBe('created');
+            expect(indexDdl(USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME)).toBeDefined();
+            expect(log.error).not.toHaveBeenCalled();
+            expect(log.warn).not.toHaveBeenCalled();
+        });
+
+        it('a refusal latches: reported once, and a later pass in the same boot neither tries again nor says it twice', async () => {
+            insert('a', null);
+            insert('b', null);
+            const log = logger();
+            const ensure = createUserPermissionSetGuardAtSchemaSync(engineOver(sqliteDriver()), log);
+
+            expect(await ensure()).toBe('conflict');
+            expect(await ensure()).toBe('refused-earlier');
+            expect(log.error).toHaveBeenCalledTimes(1);
+            expect(indexDdl(USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME)).toBeUndefined();
+
+            // The next boot is a new ensurer, and tries again.
+            db.prepare(`DELETE FROM ${USER_PERMISSION_SET_TABLE} WHERE id = 'b'`).run();
+            expect(await createUserPermissionSetGuardAtSchemaSync(engineOver(sqliteDriver()), logger())()).toBe('created');
+        });
+
+        it('an engine with no SQL driver for the table: a silent no-op, never latched', async () => {
+            const log = logger();
+            const ensure = createUserPermissionSetGuardAtSchemaSync({ getDriverForObject: () => undefined }, log);
+            expect(await ensure()).toBe('no-driver');
+            expect(await ensure()).toBe('no-driver');
+            expect(log.error).not.toHaveBeenCalled();
+            expect(log.warn).not.toHaveBeenCalled();
+        });
     });
 });
 

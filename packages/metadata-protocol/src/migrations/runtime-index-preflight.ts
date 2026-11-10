@@ -196,9 +196,10 @@ function isMysqlClient(client?: string): boolean {
 }
 
 /**
- * Every index the `kernel:ready` migrations build — FIVE, from four
- * migrations, because `ensureMetadataOverlayIndexes` builds one index per
- * overlay state and either can be blocked independently.
+ * Every index these migrations build — SIX, from five migrations (the grant's
+ * at schema sync, the rest at `kernel:ready`), because
+ * `ensureMetadataOverlayIndexes` builds one index per overlay state and either
+ * can be blocked independently.
  *
  * ## Why one arm takes a dialect and the others do not
  *

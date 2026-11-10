@@ -1,10 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [ADR-0150 D4, #32164] `sys_user_permission_set` is unique on
-// `(user_id, permission_set, permission_set_package, organization_id)`, built
-// NULL-distinct here (#29278), so a grant naming no package is constrained by
-// it no longer. The collection also carries
-// `uniq_sys_user_permission_set_packageless`: one such grant per
+// [ADR-0150 D4, #32164] ADR-0150 gives `sys_user_permission_set` the key
+// `(user_id, permission_set, permission_set_package, organization_id)`, which
+// this driver builds NULL-distinct (#29278), so under it a grant naming no
+// package is constrained no longer. The pins below declare that key on the
+// fixture (`grantSchema`), whichever change lands first. The collection also
+// carries `uniq_sys_user_permission_set_packageless`: one such grant per
 // `(user_id, permission_set, organization_id)`. See `RUNTIME_OWNED_UNIQUES` in
 // `mongodb-schema.ts`; the SQL copy is metadata-protocol's
 // `user-permission-set-packageless-index.ts`.
@@ -173,6 +174,10 @@ describe('[SF8] the guard refused at sync is said at error, never skipped silent
     expect(logger.error.mock.calls[0][0]).toContain(`db.${GRANTS}.getIndexes()`);
     expect(logger.error.mock.calls[0][1]).toMatchObject({ index: GUARD, code: 85 });
     expect(ops).not.toContain(`drop ${OLD_UNIQUE}`);
+    // The index in its way may be an older unique on the same fields, which
+    // enforces the key: the line says so rather than "NOT enforced".
+    expect(logger.error.mock.calls[0][0]).not.toContain('NOT enforced');
+    expect(logger.error.mock.calls[0][0]).toContain('enforced only as far as the index already standing in its way enforces it');
   });
 
   it('CONTROL — a declared index the server refuses with E11000 still fails the sync, as before', async () => {

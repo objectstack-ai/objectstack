@@ -261,7 +261,7 @@ describe('#8928 os migrate duplicates — the report document', () => {
     });
   });
 
-  it('names the six kernel:ready indexes, and the migration behind each — none for the retired sys_view_definition (ADR-0131 D13)', async () => {
+  it('names the six runtime-managed indexes (five built at kernel:ready, the grant guard at schema sync), and the migration behind each — none for the retired sys_view_definition (ADR-0131 D13)', async () => {
     const report = await collect();
     expect(
       report.runtimeIndexPreflight.map((p) => `${p.migration}:${p.table}:${p.index}`),
