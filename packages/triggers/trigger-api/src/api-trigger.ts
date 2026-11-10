@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { timingSafeEqual } from 'node:crypto';
-import { HTTP_SIGNATURE_TOLERANCE_SECONDS, verifyHttpSignature } from '@objectstack/core';
+import { HTTP_SIGNATURE_TOLERANCE_SECONDS, inboundHookRefusal, verifyHttpSignature } from '@objectstack/core';
 import type { HttpSignatureVerdict } from '@objectstack/core';
 import { apiTriggerVerifierOf } from '@objectstack/spec/automation';
 import type { ApiTriggerSignature } from '@objectstack/spec/automation';
@@ -131,10 +131,13 @@ type UnverifiedPostCause =
     | 'wrong-hook-id'
     | UnverifiedSignatureCause
     | DeclaredSignatureCause
-    | 'declared-unusable';
+    | 'declared-unusable'
+    | 'unadmitted-address';
 
 const UNVERIFIED_POST_CAUSE_TEXT: Readonly<Record<UnverifiedPostCause, string>> = {
     'unknown-flow': 'no hook is armed for the flow it names',
+    'unadmitted-address':
+        'its qualifier (a namespace, or `_env`) does not name the package that ships the flow it names (ADR-0150 D5)',
     'wrong-hook-id': 'the hook id it names is not the one its flow is armed with',
     'signature-absent': 'it carries no x-objectstack-signature',
     'signature-malformed': 'its x-objectstack-signature is in neither the timestamped form nor the body-only one',
@@ -174,7 +177,9 @@ const UNVERIFIED_POST_CAUSE_TEXT: Readonly<Record<UnverifiedPostCause, string>> 
  * one. A fresh object per call, so no caller can alter the next answer.
  */
 function unverifiedPostAnswer(): { status: number; body: Record<string, unknown> } {
-    return { status: 401, body: { success: false, error: { code: 'INVALID_SIGNATURE', message: 'Signature verification failed.' } } };
+    // [ADR-0150 D5] Rendered by core, beside the route's one reading, so the
+    // hosted face's refusal of an unadmitted address is these bytes too.
+    return inboundHookRefusal();
 }
 
 /** The trimmed, non-blank string `value` holds, else `undefined`. */
@@ -516,6 +521,15 @@ export class ApiTrigger implements FlowTrigger {
             this.logger.warn(`[trigger-api] enqueue failed for '${hook.queue}': ${err?.message ?? err}`);
             return { status: 503, body: { success: false, error: { code: 'ENQUEUE_FAILED', message: 'Could not enqueue the trigger message.' } } };
         }
+    }
+
+    /**
+     * [ADR-0150 D5] The qualified hook whose qualifier does not name the
+     * package shipping its flow: the one refusal, its cause logged here only.
+     * Decided by the mount before the body or the signature is read.
+     */
+    refuseUnadmittedAddress(flowName: string): { status: number; body: Record<string, unknown> } {
+        return this.refuseUnverified('unadmitted-address', flowName);
     }
 
     /**

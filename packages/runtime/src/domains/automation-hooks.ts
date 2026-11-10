@@ -27,8 +27,10 @@
  * The `/automation` domain claims every path under `/automation`, and its first
  * statement is the ADR-0056 D2 anonymous floor (`domains/automation.ts`). The
  * floor asks the shared decision with its path and method, and the ADR-0069
- * allow-list's one parameterised row (`packages/core`, `auth-gate.ts`) admits
- * exactly this route, `POST` only. The domain's very next statement hands the
+ * allow-list's parameterised row (`packages/core`, `auth-gate.ts`) admits
+ * exactly this route, `POST` only, and its second row the qualified spelling
+ * `POST /automation/hooks/:ns/:flowName/:hookId` (ADR-0150 D5; `:ns` never
+ * `runs`), whose qualifier is judged here before the member is called. The domain's very next statement hands the
  * route here, so nothing runs between the allow-list and the verifier: not the
  * run-read gate, not the authoring gate, not the `automation` service probe.
  * Which paths are this route is answered ONCE, by `matchInboundHookRoute`
@@ -86,7 +88,8 @@
  */
 
 import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
-import type { InboundHookRouteMatch } from '@objectstack/core';
+import { admitInboundHookAddress, inboundHookRefusalResponse, type InboundHookRouteMatch } from '@objectstack/core';
+import { automationAddressRegistryOf } from './automation-address.js';
 import type { ITriggerApiService } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps } from '../domain-handler-registry.js';
@@ -105,6 +108,35 @@ function decodeHookSegment(segment: string): string {
     } catch {
         return segment;
     }
+}
+
+/**
+ * [ADR-0150 D5, child G1] Does the qualified hook's qualifier name the package
+ * that ships its flow? The engine's own read (`packagedFlowOwner`) and the
+ * registry's namespace table, both from the request kernel, judged by core's
+ * one predicate — the one the self-hosted mount asks. A kernel that cannot
+ * answer either read admits no namespace (`_env` then reads "no package").
+ */
+async function isInboundHookAddressAdmitted(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    qualifier: string,
+    flowName: string,
+): Promise<boolean> {
+    const engine = await deps.resolveService(context, 'automation', context.environmentId) as
+        { packagedFlowOwner?(name: string): string | undefined } | undefined;
+    let registry: ReturnType<typeof automationAddressRegistryOf>;
+    try {
+        registry = typeof deps.getObjectQL === 'function' ? automationAddressRegistryOf(await deps.getObjectQL(context)) : undefined;
+    } catch {
+        registry = undefined;
+    }
+    if (!engine || typeof engine.packagedFlowOwner !== 'function') return false;
+    return admitInboundHookAddress({
+        qualifier,
+        flowOwner: engine.packagedFlowOwner(flowName),
+        namespaceOwners: typeof registry?.getNamespaceOwners === 'function' ? registry.getNamespaceOwners(qualifier) ?? [] : [],
+    });
 }
 
 /**
@@ -143,6 +175,28 @@ export async function handleInboundHookRequest(
 
     const request = context.request as Request;
     const logger = deps.logger ?? console;
+
+    // [ADR-0150 D5, child G1] THE QUALIFIED HOOK. Served only when its
+    // qualifier names the package that ships the flow (core's
+    // `admitInboundHookAddress`, over the request kernel's engine and namespace
+    // table), decided before the body or the signature is read. An address that
+    // does not is answered with the door's one refusal, rendered by core as the
+    // trigger renders its own: the same status, header and body as a bad
+    // signature on the same hook, so the answer tells no installed namespace
+    // from another. The cause goes to the server log only.
+    if (hook.qualifier !== undefined) {
+        const flowName = decodeHookSegment(hook.flowName);
+        const qualifier = decodeHookSegment(hook.qualifier);
+        if (!(await isInboundHookAddressAdmitted(deps, context, qualifier, flowName))) {
+            logger?.warn?.(
+                '[automation-hooks] refused an inbound post (unadmitted-address): its qualifier (a namespace, or '
+                + '`_env`) does not name the package that ships the flow it names (ADR-0150 D5). The sender got the '
+                + 'one answer every unverified post gets; this line is the only record of the cause.',
+                { cause: 'unadmitted-address', flowName, qualifier },
+            );
+            return { handled: true, result: inboundHookRefusalResponse() };
+        }
+    }
 
     // The member verifies its signature over the raw body. A body the
     // transport already read cannot be read again, so the member would refuse

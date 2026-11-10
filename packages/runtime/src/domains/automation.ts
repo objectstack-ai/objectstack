@@ -3444,8 +3444,10 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // never speak HTTP at all.
     //
     // [#22773] The floor reads the shared allow-list with this route's path and
-    // method (ruling A on #22757). Its one parameterised row admits the inbound
-    // hook — `POST /automation/hooks/:flowName/:hookId`, exactly four segments
+    // method (ruling A on #22757). Its parameterised rows admit the inbound
+    // hook — `POST /automation/hooks/:flowName/:hookId`, exactly four segments,
+    // and its qualified spelling `POST /automation/hooks/:ns/:flowName/:hookId`
+    // (ADR-0150 D5; `:ns` never `runs`, the run doors of a flow named `hooks`)
     // — and no other `/automation` path or method, so for every other request
     // this decision is the one it always was. The admitted route is handed off
     // on the very next statement, below.

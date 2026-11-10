@@ -489,8 +489,9 @@ describe('auth-gate (ADR-0069 session gate)', () => {
 
     it('PIN 3 — condition 1: every other segment count, and every other /automation path, stays gated', () => {
       for (const p of [
-        // the card's own three, and the bare domain
-        '/automation/hooks', '/automation/hooks/x', '/automation/hooks/x/y/z', '/automation',
+        // the card's own three, and the bare domain. [ADR-0150 D5] Five
+        // segments are the qualified row's now (PIN 7), never this one's.
+        '/automation/hooks', '/automation/hooks/x', '/automation',
         '/automation/hooks/x/y/z/w', '/automation/hooks/f/h/runs/r1/resume',
         // the domain's real routes, at every depth
         '/automation/trigger/f', '/automation/f/trigger', '/automation/f/toggle', '/automation/f/clone',
@@ -505,6 +506,28 @@ describe('auth-gate (ADR-0069 session gate)', () => {
       ]) {
         expect(isAuthGateAllowlisted(p, 'POST'), p).toBe(false);
       }
+    });
+
+    // [ADR-0150 D5, child G1] The qualified hook: one more segment in front of
+    // the flow's name, the same exactness, and never the qualifier `runs`.
+    it('PIN 7 — the qualified hook is exempt as the exact five-segment POST route, its qualifier never `runs`', () => {
+      for (const p of ['/automation/hooks/crm/f/h', '/automation/hooks/_env/f/h', '/environments/env_1/automation/hooks/crm/f/h']) {
+        expect(isAuthGateAllowlisted(p, 'POST'), p).toBe(true);
+        expect(matchInboundHookRoute(p, 'POST'), p).toEqual({ flowName: 'f', hookId: 'h', qualifier: p.includes('_env') ? '_env' : 'crm' });
+        for (const m of ['GET', 'PUT', 'DELETE', undefined]) expect(isAuthGateAllowlisted(p, m), `${m} ${p}`).toBe(false);
+      }
+      for (const p of [
+        // the run-lifecycle doors of a flow named `hooks`: the same verb and arity
+        '/automation/hooks/runs/r1/cancel', '/automation/hooks/runs/r1/resume', '/automation/hooks/runs/r1/restore-suspension',
+        '/environments/env_1/automation/hooks/runs/r1/cancel',
+        // one more segment, an empty one, a mount base
+        '/automation/hooks/crm/f/h/x', '/automation/hooks/crm//h', '/api/v1/automation/hooks/crm/f/h',
+      ]) {
+        expect(isAuthGateAllowlisted(p, 'POST'), p).toBe(false);
+        expect(matchInboundHookRoute(p, 'POST'), p).toBeNull();
+      }
+      // The bare route's reading carries no qualifier.
+      expect(matchInboundHookRoute('/automation/hooks/f/h', 'POST')).toEqual({ flowName: 'f', hookId: 'h' });
     });
 
     it('PIN 4 — the dispatcher spelling only: no mount base, no retired scope, no empty segment', () => {
@@ -573,7 +596,7 @@ describe('auth-gate (ADR-0069 session gate)', () => {
     // 5.4 s on a Test Core runner that carries core beside spec's two test tasks
     // (PR #26005, shard 5, three runs in a row), where the default refused a
     // healthy enumeration. The timeout is a ceiling on load, not a budget.
-    it('BOUNDARY — newly exempt is exactly POST on the four-segment hook route, unscoped or scoped, nothing else', () => {
+    it('BOUNDARY — newly exempt is exactly POST on the four-segment hook route, unscoped or scoped, and the five-segment qualified one with no `runs` qualifier, nothing else', () => {
       const PRE_MOUNT_BASES: readonly (readonly string[])[] = [['api', 'v1'], ['api'], []];
       const PRE_SCOPE_SEGMENTS: readonly string[] = ['environments', 'projects'];
       const PRE_ALLOW_ROUTES: readonly (readonly string[])[] = [
@@ -633,6 +656,12 @@ describe('auth-gate (ADR-0069 session gate)', () => {
           for (const m of ['POST', 'post']) expected.add(`${m} /${[...scope, 'automation', 'hooks', a, b].join('/')}`);
         }
       }
+      // [ADR-0150 D5] The qualified row, five segments: the corpus reaches it
+      // unscoped (its scoped spelling is pinned by PIN 7).
+      for (const q of SEG) for (const a of SEG) for (const b of SEG) {
+        if (q === 'runs') continue;
+        for (const m of ['POST', 'post']) expected.add(`${m} /${['automation', 'hooks', q, a, b].join('/')}`);
+      }
 
       const newlyExempt: string[] = [];
       const newlyGated: string[] = [];
@@ -653,7 +682,9 @@ describe('auth-gate (ADR-0069 session gate)', () => {
       for (const e of expected) expect(inCorpus.has(e.slice(e.indexOf(' ') + 1)), e).toBe(true);
       expect(corpus.length).toBeGreaterThan(100_000);
       expect(corpus.filter((p) => preEntryAllowlisted(p)).length).toBeGreaterThan(0);
-      for (const p of ['/automation/hooks', '/automation/hooks/f', '/automation/hooks/f/runs/health', '/automation/f/hooks/runs']) {
+      // [ADR-0150 D5] `/automation/hooks/f/runs/health` is the qualified row's
+      // now (qualifier `f`); `runs` in that position is the gated sibling.
+      for (const p of ['/automation/hooks', '/automation/hooks/f', '/automation/hooks/runs/f/health', '/automation/f/hooks/runs']) {
         expect(inCorpus.has(p), p).toBe(true);
         expect(isAuthGateAllowlisted(p, 'POST'), p).toBe(false);
       }

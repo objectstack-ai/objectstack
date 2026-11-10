@@ -44,7 +44,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { isAuthGateAllowlisted, matchInboundHookRoute, signHttpBodyAt, verifyHttpSignature } from '@objectstack/core';
+import { inboundHookRefusalResponse, isAuthGateAllowlisted, matchInboundHookRoute, signHttpBodyAt, verifyHttpSignature } from '@objectstack/core';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext, KernelResolver } from '../http-dispatcher.js';
 import { createDispatcherPlugin } from '../dispatcher-plugin.js';
@@ -113,6 +113,25 @@ const authAs = (user?: { id: string; authGate?: { code: string; message: string 
         getSession: async () => (user ? { user, session: { userId: user.id, activeOrganizationId: 'org_tenant' } } : null),
     }),
 });
+
+/**
+ * [ADR-0150 D5, child G1] The services a qualified hook is judged over: the
+ * member, the engine's `packagedFlowOwner` (the package that ships a flow by
+ * its bare name, or none), and the registry's namespace table, read through
+ * the `objectql` service as the dispatcher reads it.
+ */
+function addressedHost(
+    member: { handleInboundHook: unknown },
+    opts: { flowOwner?: (name: string) => string | undefined; namespaces?: Record<string, string[]> },
+): Record<string, unknown> {
+    const namespaces = opts.namespaces ?? {};
+    return {
+        'trigger-api': { handleInboundHook: member.handleInboundHook },
+        ...(opts.flowOwner ? { automation: { packagedFlowOwner: vi.fn(opts.flowOwner) } } : {}),
+        objectql: { registry: { getNamespaceOwners: (ns: string) => namespaces[ns] ?? [] } },
+    };
+}
+
 
 const ctx = (request: Request): HttpProtocolContext => ({ request });
 function post(path = ROUTE, opts: { body?: string; signature?: string | null; method?: string } = {}) {
@@ -206,9 +225,14 @@ describe('[#22773] condition 1 — every other /automation path, and every other
     // Measured on the base commit (12b9daf7) before any change: every one of
     // these answered an anonymous caller `401 UNAUTHENTICATED` from the
     // `/automation` domain's floor — and so did `POST` on the exact route.
+    // [ADR-0150 D5, child G1] The four-segment spellings that were here
+    // (`hooks/x/y/z`, `hooks/f/h/runs`) are now the qualified hook's row; one
+    // segment more stays gated, and so do the run doors of a flow named
+    // `hooks` (`hooks/runs/:runId/…`), which the row never admits.
     const OTHER_PATHS = [
-        '/automation', '/automation/hooks', '/automation/hooks/x', '/automation/hooks/x/y/z',
-        '/automation/hooks/f/h/runs', '/automation/hooks/trigger', '/automation/hooks/runs/r1/resume',
+        '/automation', '/automation/hooks', '/automation/hooks/x', '/automation/hooks/x/y/z/w',
+        '/automation/hooks/f/h/runs/x', '/automation/hooks/trigger', '/automation/hooks/runs/r1/resume',
+        '/automation/hooks/runs/r1/cancel', '/environments/e1/automation/hooks/runs/r1/restore-suspension',
         '/automation/f/trigger', '/automation/trigger/f', '/automation/f/runs/r1', '/automation/hooksx/f/h',
         '/automation/hook/f/h', '/automation//hooks/f/h', '/automation/hooks//h', '/automation/hooks/f//h',
         '/automation/%68ooks/f/h', '/automation/HOOKS/f/h',
@@ -389,7 +413,9 @@ describe('[#22773] the preamble gates are signature-only for the route, POST onl
         for (const [method, path] of [
             ['GET', '/automation/hooks/runs/r1'],    // a run read of a flow named `hooks`
             ['GET', ROUTE], ['DELETE', ROUTE],
-            ['POST', '/automation/hooks/x'], ['POST', '/automation/hooks/x/y/z'], ['POST', '/automation//hooks/f/h'],
+            ['POST', '/automation/hooks/x'], ['POST', '/automation/hooks/x/y/z/w'], ['POST', '/automation//hooks/f/h'],
+            // [ADR-0150 D5] a run door of a flow named `hooks` — never the qualified hook.
+            ['POST', '/automation/hooks/runs/r1/cancel'],
         ] as const) {
             const { dispatcher, hook, membershipReads } = makeTenantHost();
             const request = new Request(`${ORIGIN}/api/v1${path}`, { method, ...(method === 'GET' ? {} : { body: BODY }) });
@@ -437,7 +463,16 @@ describe('[#22773] the allow-list row and the route agree on every spelling they
         '/projects/e1/automation/hooks/f/h', '/api/v1/automation/hooks/f/h', '/environments/automation/hooks/f/h',
         '/environments/a/environments/b/automation/hooks/f/h', '/automation/%68ooks/f/h', '/Automation/hooks/f/h',
         '/automation/hooks/f', '/automation/hooks/f/h/x', '/automation/hooks',
+        // [ADR-0150 D5, child G1] the qualified row, and the spellings it never admits.
+        '/environments/e1/automation/hooks/f/h/x', '/automation/hooks/f/h/x/', '/automation/hooks/f/h/x/y',
+        '/automation/hooks/runs/r1/cancel', '/automation/hooks/f//h/x', '/automation/hooks//f/h',
     ];
+    /**
+     * The services that admit every qualified spelling above: the engine says
+     * the package `com.pin.f` ships every flow, and `f` is its namespace. So
+     * the qualifier never decides here; the row and the route do.
+     */
+    const admitting = (member: ReturnType<typeof verifierMember>) => addressedHost(member, { flowOwner: () => 'com.pin.f', namespaces: { f: ['com.pin.f'] } });
     const gatePath = (spelling: string) => spelling.replace(/\/$/, '');
     const decoded = (raw: { flowName: string; hookId: string }) => ({
         flowName: decodeURIComponent(raw.flowName), hookId: decodeURIComponent(raw.hookId),
@@ -447,7 +482,7 @@ describe('[#22773] the allow-list row and the route agree on every spelling they
         let admittedCount = 0;
         for (const spelling of SPELLINGS) {
             const member = verifierMember({});
-            const { dispatcher } = makeDispatcher({ 'trigger-api': { handleInboundHook: member.handleInboundHook } });
+            const { dispatcher } = makeDispatcher(admitting(member));
             const admitted = isAuthGateAllowlisted(gatePath(spelling), 'POST');
             const result = await dispatcher.dispatch('POST', spelling, {}, {}, ctx(post(ROUTE)));
             const reached = member.handleInboundHook.mock.calls.length === 1;
@@ -462,7 +497,7 @@ describe('[#22773] the allow-list row and the route agree on every spelling they
             }
         }
         // Anti-vacuity: both answers occur.
-        expect(admittedCount).toBe(9);
+        expect(admittedCount).toBe(12);
         expect(SPELLINGS.length - admittedCount).toBeGreaterThan(10);
     });
 
@@ -470,7 +505,7 @@ describe('[#22773] the allow-list row and the route agree on every spelling they
         for (const spelling of SPELLINGS) {
             const member = verifierMember({});
             const { dispatcher } = makeDispatcher({
-                'trigger-api': { handleInboundHook: member.handleInboundHook },
+                ...admitting(member),
                 auth: authAs({ id: 'u1', authGate: { code: 'MFA_REQUIRED', message: 'Enrol a second factor.' } }),
             });
             const exempt = isAuthGateAllowlisted(gatePath(spelling), 'POST');
@@ -519,12 +554,19 @@ describe('[#22773] CONTROL — a kernel with an http.server gets no second mount
 
         // Anti-vacuity: the plugin mounted the /automation bridge at all.
         expect(routes.filter((r) => r.includes('/automation')).length).toBeGreaterThan(5);
-        const hookPath = '/api/v1/automation/hooks/stripe_orders/default';
-        const claimants = routes.filter((r) => {
-            const sp = r.indexOf(' ');
-            return ['POST', 'ALL'].includes(r.slice(0, sp)) && answers(r.slice(sp + 1), hookPath);
-        });
-        expect(claimants, routes.filter((r) => r.includes('/automation')).join('\n')).toEqual([]);
+        // [ADR-0150 D5, child G1] and none answers the qualified hook either:
+        // the trigger's raw-app mount (`HOOKS_ADDRESSED_PATH`) is its door too.
+        for (const hookPath of [
+            '/api/v1/automation/hooks/stripe_orders/default',
+            '/api/v1/automation/hooks/crm/stripe_orders/default',
+            '/api/v1/automation/hooks/_env/stripe_orders/default',
+        ]) {
+            const claimants = routes.filter((r) => {
+                const sp = r.indexOf(' ');
+                return ['POST', 'ALL'].includes(r.slice(0, sp)) && answers(r.slice(sp + 1), hookPath);
+            });
+            expect(claimants, `${hookPath}\n${routes.filter((r) => r.includes('/automation')).join('\n')}`).toEqual([]);
+        }
         // ⭐ The matcher itself is live: it does find the 3-segment POST door it should.
         expect(routes.some((r) => r.startsWith('POST ') && answers(r.slice(5), '/api/v1/automation/f/trigger'))).toBe(true);
     });
@@ -568,5 +610,142 @@ describe('[#30009] the forwarded request keeps a vendor\'s own signature header'
         const twice = await dispatcher.dispatch('POST', ROUTE, undefined, {}, ctx(vendorPost([digest, digest])));
         expect((twice.result as Response).status).toBe(401);
         expect(seen).toEqual([digest, `${digest}, ${digest}`]);
+    });
+});
+
+/**
+ * [ADR-0150 D5, child G1] The qualified inbound hook,
+ * `POST /automation/hooks/:ns/:flowName/:hookId`, on a kernel with no
+ * `http.server` (the hosted face). The qualifier is judged before the body or
+ * the signature is read, by core's `admitInboundHookAddress` over the engine's
+ * `packagedFlowOwner` and the registry's namespace table: a namespace is served
+ * when its package ships the flow, `_env` when no package does. An admitted
+ * address reaches the member exactly as its bare path does. Every other address
+ * is answered with the door's one refusal — the same status, headers and bytes
+ * as a bad signature on the same flow and hook — and its cause goes to the
+ * server log only. The run doors of a flow named `hooks`
+ * (`/automation/hooks/runs/:runId/…`) are never this route.
+ */
+describe('[ADR-0150 D5] the qualified inbound hook on a kernel with no http.server', () => {
+    const PACKAGE = 'com.pin.crm';
+    const QUALIFIED = `/automation/hooks/crm/${FLOW}/${HOOK}`;
+
+    /** Everything a response says, the body as bytes. */
+    async function snapshot(res: Response) {
+        return { status: res.status, headers: [...res.headers.entries()], body: new Uint8Array(await res.arrayBuffer()) };
+    }
+
+    it('a namespace whose package ships the flow: served as the bare path — the member gets the bare flow and hook, and its own request', async () => {
+        const member = verifierMember();
+        const services = addressedHost(member, { flowOwner: (n) => (n === FLOW ? PACKAGE : undefined), namespaces: { crm: [PACKAGE] } });
+        const { dispatcher } = makeDispatcher(services);
+        const request = post(QUALIFIED);
+        const result = await dispatcher.dispatch('POST', QUALIFIED, {}, {}, ctx(request));
+        expect(result.response, JSON.stringify(result.response?.body)).toBeUndefined();
+        expect((result.result as Response).status).toBe(202);
+        expect(member.calls.map((c) => c.hook)).toEqual([{ flowName: FLOW, hookId: HOOK }]);
+        expect(member.calls[0]!.request).toBe(request);
+        expect(member.calls[0]!.body).toBe(BODY);
+        expect((services.automation as any).packagedFlowOwner).toHaveBeenCalledWith(FLOW);
+    });
+
+    it('`_env` names the environment\'s own flow: served when no package ships it — scoped too', async () => {
+        for (const path of [`/automation/hooks/_env/${FLOW}/${HOOK}`, `/environments/e1/automation/hooks/_env/${FLOW}/${HOOK}`]) {
+            const member = verifierMember();
+            const { dispatcher } = makeDispatcher(addressedHost(member, { flowOwner: () => undefined, namespaces: { crm: [PACKAGE] } }));
+            const result = await dispatcher.dispatch('POST', path, {}, {}, ctx(post(path)));
+            expect((result.result as Response | undefined)?.status, `${path} ${JSON.stringify(result.response?.body)}`).toBe(202);
+            expect(member.calls.map((c) => c.hook), path).toEqual([{ flowName: FLOW, hookId: HOOK }]);
+        }
+    });
+
+    const UNADMITTED: Array<[string, string, Parameters<typeof addressedHost>[1]]> = [
+        ['a namespace another package holds', 'crm', { flowOwner: () => 'com.pin.other', namespaces: { crm: [PACKAGE], other: ['com.pin.other'] } }],
+        ['a namespace nothing is installed under', 'nowhere', { flowOwner: () => PACKAGE, namespaces: { crm: [PACKAGE] } }],
+        ['a namespace, for a flow no package ships', 'crm', { flowOwner: () => undefined, namespaces: { crm: [PACKAGE] } }],
+        ['`_env`, for a flow a package ships', '_env', { flowOwner: () => PACKAGE, namespaces: { crm: [PACKAGE] } }],
+        ['a kernel whose engine cannot say who ships a flow', 'crm', { namespaces: { crm: [PACKAGE] } }],
+    ];
+
+    it('⭐ an unadmitted address: the member\'s own bad-signature answer for the same flow and hook — status, headers and bytes — and the member never runs', async () => {
+        // The member's answer to a bad signature on the bare path, same flow and hook.
+        const reference = verifierMember();
+        const bare = await makeDispatcher({ 'trigger-api': { handleInboundHook: reference.handleInboundHook } }).dispatcher
+            .dispatch('POST', ROUTE, {}, {}, ctx(post(ROUTE, { signature: sign(BODY, 'not-the-secret') })));
+        const memberAnswer = await snapshot(bare.result as Response);
+        expect(memberAnswer.status).toBe(401);
+        // Core's one rendering is those bytes too (the real member renders through it).
+        expect(await snapshot(inboundHookRefusalResponse())).toEqual(memberAnswer);
+
+        for (const [label, qualifier, opts] of UNADMITTED) {
+            const member = verifierMember();
+            const { dispatcher } = makeDispatcher(addressedHost(member, opts));
+            const path = `/automation/hooks/${qualifier}/${FLOW}/${HOOK}`;
+            // Correctly signed: the qualifier alone is refused.
+            const result = await dispatcher.dispatch('POST', path, {}, {}, ctx(post(path)));
+            expect(result.response, label).toBeUndefined();
+            expect(await snapshot(result.result as Response), label).toEqual(memberAnswer);
+            expect(member.handleInboundHook, label).not.toHaveBeenCalled();
+        }
+    });
+
+    it('⭐ the cause goes to the server log only: one warn line names it, the flow and the qualifier; the answer names none of them', async () => {
+        for (const [label, qualifier, opts] of UNADMITTED) {
+            const member = verifierMember();
+            const { dispatcher, logger } = makeDispatcher(addressedHost(member, opts));
+            const path = `/automation/hooks/${qualifier}/${FLOW}/${HOOK}`;
+            const result = await dispatcher.dispatch('POST', path, {}, {}, ctx(post(path)));
+            const text = await (result.result as Response).text();
+            for (const word of ['unadmitted', qualifier, FLOW, HOOK, 'namespace', 'package']) {
+                expect(text, `${label}: ${word}`).not.toContain(word);
+            }
+            const lines = logger.warn.mock.calls.filter((c) => String(c[0]).includes('unadmitted-address'));
+            expect(lines, label).toHaveLength(1);
+            expect(lines[0]![1], label).toEqual({ cause: 'unadmitted-address', flowName: FLOW, qualifier });
+            expect(logger.error, label).not.toHaveBeenCalled();
+        }
+        // CONTROL: an admitted address logs no such line.
+        const member = verifierMember();
+        const { dispatcher, logger } = makeDispatcher(addressedHost(member, { flowOwner: () => PACKAGE, namespaces: { crm: [PACKAGE] } }));
+        await dispatcher.dispatch('POST', QUALIFIED, {}, {}, ctx(post(QUALIFIED)));
+        expect(logger.warn.mock.calls.filter((c) => String(c[0]).includes('unadmitted-address'))).toEqual([]);
+        expect(member.handleInboundHook).toHaveBeenCalledTimes(1);
+    });
+
+    it('⭐ a `runs` namespace never reaches the hook gate: the run doors of a flow named `hooks` keep their own gates, and nothing reads the qualifier', async () => {
+        for (const door of ['cancel', 'resume', 'restore-suspension']) {
+            const path = `/automation/hooks/runs/r1/${door}`;
+            expect(matchInboundHookRoute(path, 'POST'), path).toBeNull();
+            for (const auth of [undefined, authAs({ id: 'u_signed_in' })]) {
+                const member = verifierMember();
+                const services = addressedHost(member, { flowOwner: () => PACKAGE, namespaces: { runs: [PACKAGE] } });
+                const { dispatcher, logger } = makeDispatcher({ ...services, ...(auth ? { auth } : {}) });
+                const result = await dispatcher.dispatch('POST', path, {}, {}, ctx(post(path)));
+                const who = `${auth ? 'signed-in' : 'anonymous'} ${path}`;
+                expect(member.handleInboundHook, who).not.toHaveBeenCalled();
+                expect((services.automation as any).packagedFlowOwner, who).not.toHaveBeenCalled();
+                expect(logger.warn.mock.calls.filter((c) => String(c[0]).includes('unadmitted-address')), who).toEqual([]);
+                expect(result.response?.body?.error?.code, who).not.toBe('INVALID_SIGNATURE');
+                if (!auth) expect(envelope(result), who).toEqual({ status: 401, code: 'UNAUTHENTICATED' });
+                // Signed in: the run door's own answer — the operator gate's 403
+                // for cancel and restore, and the resume door itself (this
+                // engine double has no `resumeRun`: its 501).
+                else expect(envelope(result), `${who} ${JSON.stringify(result.response?.body)}`)
+                    .toEqual(door === 'resume' ? { status: 501, code: 'NOT_IMPLEMENTED' } : { status: 403, code: expect.any(String) });
+            }
+        }
+    });
+
+    it('only `POST`: every other method on the qualified path is the floor\'s 401 for an anonymous caller, and nothing reads the qualifier', async () => {
+        for (const method of ['GET', 'PUT', 'PATCH', 'DELETE']) {
+            const member = verifierMember();
+            const services = addressedHost(member, { flowOwner: () => PACKAGE, namespaces: { crm: [PACKAGE] } });
+            const { dispatcher } = makeDispatcher(services);
+            const request = new Request(`${ORIGIN}/api/v1${QUALIFIED}`, { method, ...(method === 'GET' ? {} : { body: BODY }) });
+            const result = await dispatcher.dispatch(method, QUALIFIED, {}, {}, ctx(request));
+            expect(envelope(result), method).toEqual({ status: 401, code: 'UNAUTHENTICATED' });
+            expect(member.handleInboundHook, method).not.toHaveBeenCalled();
+            expect((services.automation as any).packagedFlowOwner, method).not.toHaveBeenCalled();
+        }
     });
 });

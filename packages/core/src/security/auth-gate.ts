@@ -207,6 +207,8 @@ const ALLOW_ROUTES: readonly (readonly string[])[] = [
 interface ParameterisedAllowRoute {
   readonly segments: readonly string[];
   readonly methods: readonly string[];
+  /** Values a parameter never binds, by parameter name: such a path is not this row's. */
+  readonly except?: Readonly<Record<string, readonly string[]>>;
 }
 
 /**
@@ -233,12 +235,39 @@ const INBOUND_HOOK_ROUTE: ParameterisedAllowRoute = {
 };
 
 /**
+ * [ADR-0150 D5, child G1] The values the qualified inbound hook's qualifier
+ * position never takes: `runs`. The same verb and arity is served there by the
+ * run-lifecycle doors of a flow named `hooks`
+ * (`POST /automation/hooks/runs/:runId/resume | cancel | restore-suspension`),
+ * which stay gated and stay those doors. A package whose namespace is `runs`
+ * has no qualified hook; its hook is reached bare. Pinned against the runtime's
+ * route ledger (`route-ledger.conformance.test.ts`).
+ */
+export const INBOUND_HOOK_QUALIFIER_EXCLUSIONS: readonly string[] = Object.freeze(['runs']);
+
+/**
+ * `POST /automation/hooks/:ns/:flowName/:hookId` — the inbound hook
+ * named by its flow's namespace, or `_env` (ADR-0150 D5). The same
+ * signature-only admission as {@link INBOUND_HOOK_ROUTE}, with the same
+ * exactness: five segments, `POST` only, and the qualifier never one of
+ * {@link INBOUND_HOOK_QUALIFIER_EXCLUSIONS}. The row is syntactic: whether the
+ * qualifier names the hook's flow is the serving door's question
+ * ({@link admitInboundHookAddress}), answered with the trigger's one
+ * refusal, so this row admits no more than a sender who can sign.
+ */
+const INBOUND_HOOK_ADDRESSED_ROUTE: ParameterisedAllowRoute = {
+  segments: ['automation', 'hooks', ':ns', ':flowName', ':hookId'],
+  methods: ['POST'],
+  except: { ns: INBOUND_HOOK_QUALIFIER_EXCLUSIONS },
+};
+
+/**
  * The parameterised rows. Unlike {@link ALLOW_ROUTES} they are read in the
  * DISPATCHER's spelling only, by {@link matchParameterisedRoute}: the route
  * exists on the dispatcher alone, and a row must not admit a spelling the
  * dispatcher's router reads differently.
  */
-const ALLOW_PARAMETERISED_ROUTES: readonly ParameterisedAllowRoute[] = [INBOUND_HOOK_ROUTE];
+const ALLOW_PARAMETERISED_ROUTES: readonly ParameterisedAllowRoute[] = [INBOUND_HOOK_ROUTE, INBOUND_HOOK_ADDRESSED_ROUTE];
 
 /**
  * The segments of `rawPath` as a parameterised row reads them, or `null` for a
@@ -291,8 +320,10 @@ function matchParameterisedRoute(
   for (let k = 0; k < rest.length; k++) {
     const want = route.segments[k] as string;
     const got = rest[k] as string;
-    if (want.startsWith(':')) params[want.slice(1)] = got;
-    else if (got !== want) return null;
+    if (want.startsWith(':')) {
+      if (route.except?.[want.slice(1)]?.includes(got)) return null;
+      params[want.slice(1)] = got;
+    } else if (got !== want) return null;
   }
   return params;
 }
@@ -303,14 +334,22 @@ export interface InboundHookRouteMatch {
   readonly flowName: string;
   /** The hook id, raw: still percent-encoded as the path carries it. */
   readonly hookId: string;
+  /**
+   * [ADR-0150 D5] The qualifier in front of the flow's name — an installed
+   * namespace or `_env` — raw; absent on the bare route. Whether it names the
+   * hook's flow is {@link admitInboundHookAddress}'s question.
+   */
+  readonly qualifier?: string;
 }
 
 /**
  * Is `path` + `method` the inbound hook route the allow-list admits, and with
- * which parameters? The ONE reading of that route: the allow-list row matches
+ * which parameters? Either row: the bare route, or the qualified one (ADR-0150
+ * D5), whose `qualifier` comes back with the rest. The ONE reading of that
+ * route: the allow-list rows match
  * through it, and the dispatcher's `/automation` domain and membership gate ask
  * it too, so the readers that admit the route and the reader that serves it
- * cannot disagree on any spelling. Same reading as the row (dispatcher spelling,
+ * cannot disagree on any spelling. Same reading as the rows (dispatcher spelling,
  * one optional `/environments/:id` scope, no empty segment, `POST` only).
  *
  * The parameters come back RAW. Decoding them is the serving domain's job, as
@@ -321,7 +360,11 @@ export function matchInboundHookRoute(
   method: string | undefined | null,
 ): InboundHookRouteMatch | null {
   const params = matchParameterisedRoute(INBOUND_HOOK_ROUTE, path, method);
-  return params ? { flowName: params.flowName as string, hookId: params.hookId as string } : null;
+  if (params) return { flowName: params.flowName as string, hookId: params.hookId as string };
+  const addressed = matchParameterisedRoute(INBOUND_HOOK_ADDRESSED_ROUTE, path, method);
+  return addressed
+    ? { flowName: addressed.flowName as string, hookId: addressed.hookId as string, qualifier: addressed.ns as string }
+    : null;
 }
 
 /** Do `segments` start with every segment of `prefix`? */

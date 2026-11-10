@@ -333,4 +333,29 @@ describe('address grammar ↔ route ledger (ADR-0150 D5, #31691)', () => {
       expect([path.join('/'), automationRouteAllow(path.slice(1))]).toEqual([path.join('/'), served]);
     }
   });
+  // [ADR-0150 D5, child G1] The qualified inbound hook,
+  // `POST /automation/hooks/:ns/:flowName/:hookId`, has the verb and arity of
+  // every `POST /automation/:name/<segment>/:x/<any>` row read for a flow named
+  // `hooks` (`…/:name/runs/:runId/cancel` is `hooks/runs/r1/cancel`). The allow-list row never admits those segments as a qualifier
+  // (core's `INBOUND_HOOK_QUALIFIER_EXCLUSIONS`), so the run doors of a flow
+  // named `hooks` keep their own gates. The set is exactly the ledger's: a new
+  // row of that shape joins it, or this fails.
+  it('the qualified hook\'s excluded qualifiers are exactly the segments of the ledger\'s `POST /automation/:name/<segment>/:x/<any>` rows', async () => {
+    const { INBOUND_HOOK_QUALIFIER_EXCLUSIONS } = await import('@objectstack/core');
+    const colliding = new Set<string>();
+    const hookRows: string[] = [];
+    for (const row of ROUTE_LEDGER) {
+      const verb = row.route.slice(0, row.route.indexOf(' '));
+      const segments = row.route.slice(row.route.indexOf(' ') + 1).split('?')[0].split('/').filter(Boolean);
+      if (verb !== 'POST' || segments.length !== 5 || segments[0] !== 'automation') continue;
+      const [, first, second, third] = segments;
+      if (!third.startsWith(':')) continue;
+      if (first === 'hooks' && second.startsWith(':')) hookRows.push(row.route);
+      else if (first.startsWith(':') && !second.startsWith(':')) colliding.add(second);
+    }
+    // Anti-vacuity: the qualified hook's own row is the one hook row of the shape.
+    expect(hookRows).toEqual(['POST /automation/hooks/:ns/:flowName/:hookId']);
+    expect([...colliding].sort()).toEqual([...INBOUND_HOOK_QUALIFIER_EXCLUSIONS].sort());
+    expect(colliding.size).toBeGreaterThan(0);
+  });
 });
