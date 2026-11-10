@@ -38,7 +38,8 @@ import {
   Checkbox,
 } from '@object-ui/components';
 import { useAuth } from '@object-ui/auth';
-import type { AuthOrganization, AuthPublicConfig } from '@object-ui/auth';
+import type { AuthOrganization } from '@object-ui/auth';
+import type { OrganizationEditionChoice } from '@objectstack/spec/api';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { Loader2 } from 'lucide-react';
 import { provisionProductionEnvironment } from './provisionEnvironment.js';
@@ -156,11 +157,6 @@ async function createWithGeneratedSlug(
     }
   }
 }
-
-/** One organization-create choice the host serves (`features.organizationEditions`). */
-type OrganizationEditionChoice = NonNullable<
-  NonNullable<AuthPublicConfig['features']>['organizationEditions']
->[number];
 
 interface CreateWorkspaceDialogProps {
   open: boolean;
