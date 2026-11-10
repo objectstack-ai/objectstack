@@ -761,7 +761,10 @@ describe('[#27237] contract review: an encoded spelling of the value is withheld
         await engine.setConnectorCredential({ ref: REF, value: ENCODABLE, context: ADMIN });
         expect(await call('erp')).toMatchObject({ status: 401 });
         const reason = engine.getConnectorDegradedReason('erp') ?? '';
-        expect(reason).toContain('[credential withheld]');
+        // The instance's own `paramName` pair is a credential part the
+        // connector metadata read withholds, so the URL reads as that read
+        // serves it, the pair and its value gone together.
+        expect(reason).toContain('the upstream said: GET https://erp.example/orders was refused');
 
         for (const [where, text] of [
             ['reason on a call', reason],

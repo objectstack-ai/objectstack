@@ -641,10 +641,11 @@ export const UPSTREAM_REFUSAL_MESSAGE_MAX_LENGTH = 500;
 /**
  * The upstream's own words from a refused call's body — the body itself when
  * it is text, else its usual `message` / `error_description` / `error` /
- * `error.message` / `detail` / `title` key — on one line, bounded, and with
- * `secret` withheld and `rewrite` applied BEFORE the bound is applied, so a
- * cut can never leave part of either behind. `rewrite` is the instance's
- * `connectorReadWithheldText` (./connector-read-withheld-text.ts).
+ * `error.message` / `detail` / `title` key — on one line, bounded, with
+ * `rewrite` applied to the upstream's own words and then `secret` withheld,
+ * both BEFORE the bound is applied, so a cut can never leave part of either
+ * behind. `rewrite` is the instance's `connectorReadWithheldText`
+ * (./connector-read-withheld-text.ts), which judges a URL as written.
  */
 export function upstreamRefusalMessage(
     body: unknown,
@@ -662,7 +663,7 @@ export function upstreamRefusalMessage(
         );
     }
     if (typeof text !== 'string') return undefined;
-    const flat = rewrite(withoutCredential(text, secret)).replace(/\s+/g, ' ').trim();
+    const flat = withoutCredential(rewrite(text), secret).replace(/\s+/g, ' ').trim();
     if (flat.length === 0) return undefined;
     return flat.length > UPSTREAM_REFUSAL_MESSAGE_MAX_LENGTH ? `${flat.slice(0, UPSTREAM_REFUSAL_MESSAGE_MAX_LENGTH)}…` : flat;
 }

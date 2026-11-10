@@ -3526,11 +3526,12 @@ export class AutomationServicePlugin implements Plugin {
                 // echoes the credential back must not carry it into the husk's
                 // reason, a log record or the thrown boot error. Nor may it
                 // carry what the connector metadata read withholds from the
-                // stored entry (./connector-read-withheld-text.ts): every
-                // reader below takes `thrown`, never `err`.
-                const thrown = rewrittenThrown(
-                    withoutCredentialThrown(err, credentialForms(credential?.value, basicUsernameOf(entry.auth))),
-                    connectorReadWithheldText(entry),
+                // stored entry (./connector-read-withheld-text.ts), judged
+                // first, on the provider's own text: every reader below takes
+                // `thrown`, never `err`.
+                const thrown = withoutCredentialThrown(
+                    rewrittenThrown(err, connectorReadWithheldText(entry)),
+                    credentialForms(credential?.value, basicUsernameOf(entry.auth)),
                 );
                 // ADR-0143 D4 — the upstream refused the token borrowed from the
                 // discovery organization's connection while the instance listed
