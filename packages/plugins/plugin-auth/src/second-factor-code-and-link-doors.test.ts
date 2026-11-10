@@ -171,7 +171,7 @@ const arrange = async (options: { twoFactor?: boolean } = {}) => {
 
   // The ENROLLED account: TOTP enabled and confirmed.
   const enrolled = await signUp(ENROLLED_EMAIL, ENROLLED_PHONE);
-  let secret = Buffer.alloc(0);
+  let secret: Buffer = Buffer.alloc(0);
   let backupCodes: string[] = [];
   let enrolledCookie = enrolled.cookie;
   if (twoFactor) {
