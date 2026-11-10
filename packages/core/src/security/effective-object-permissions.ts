@@ -16,9 +16,10 @@
  * The ruling aligns three carriers with the owner-change door — `security.explain`'s
  * `transfer`, the client permission hint this endpoint serves, and ADR-0142's
  * mapping text — and leaves enforcement unchanged. The expression predicate
- * (`current_user.can(object, 'transfer')` in an option's `visibleWhen`, a CEL
- * `defaultValue`, a `formula`) is server-side and is NOT a carrier: it keeps
- * the evaluator cell's answer, the transfer grant alone. So the map is computed
+ * evaluated on the server (`current_user.can(object, 'transfer')` in an
+ * option's `visibleWhen`, a CEL `defaultValue`, a `formula`) is NOT a carrier:
+ * it keeps the evaluator cell's answer, the transfer grant alone. A predicate
+ * the Console evaluates reads the served slot, so it follows the hint. So the map is computed
  * ONCE ({@link buildEffectiveObjectPermissions}), handed to the predicate as
  * it is, and the served slot is DERIVED from it by one clamp and nothing else
  * ({@link servedObjectPermissions}: `allowTransfer` follows edit). The two
