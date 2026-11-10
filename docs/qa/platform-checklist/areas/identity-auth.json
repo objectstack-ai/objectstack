@@ -2803,6 +2803,360 @@
           "ref": "#27438"
         }
       ]
+    },
+    {
+      "id": "identity-auth.idp-group-permission-set-mapping",
+      "title": "A platform administrator maps an identity-provider group to a permission set: a SCIM group push grants the set to the group's members at once, an SSO sign-in grants it from the groups claim, deleting the mapping removes only the grants it made, and a set outside the organization boundary is refused",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["platform administrator: the mapping doors", "an organization administrator: the 403 leg", "an identity provider: the SCIM pushes"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a boot with OS_SCIM_ENABLED=true, one SCIM connection credential, and a user provisioned through it; a scratch permission set qa_group_reader inside the organization boundary",
+          "for the SSO leg: OS_SSO_ENABLED=true, a registered OIDC provider whose groups claim is set, and an identity provider that signs a user in with a groups claim"
+        ],
+        "knownGaps": ["no stock OIDC identity provider (FOLLOW-UPS §3, still open): the SSO leg is blocked(fixture) without one; the SCIM legs need none"]
+      },
+      "steps": [
+        "as the organization administrator, then as the platform administrator: POST /api/v1/auth/admin/scim/set-group-mapping {\"connectionId\": C, \"groupDisplayName\": \"qa-readers\", \"permissionSet\": \"qa_group_reader\"}; record both answers",
+        "as the platform administrator, the same call with permissionSet admin_full_access; record the answer",
+        "push a SCIM group qa-readers whose members include the provisioned user; read the user's sys_user_permission_set rows",
+        "as admin, grant qa_group_reader to the same user by hand; then POST /api/v1/auth/admin/scim/delete-group-mapping {\"mappingId\": M}; read the user's grants",
+        "SSO leg: map the group for the provider (providerId), sign the user in through the provider, read the grants; delete the mapping, read again"
+      ],
+      "acceptance": [
+        {
+          "clause": "the mapping doors are platform-admin only, and a set outside the organization boundary is refused 400 VALIDATION_FAILED at permissionSet",
+          "oracle": "api",
+          "verify": "the organization administrator's call answers 403; admin_full_access answers 400 VALIDATION_FAILED (packages/plugins/plugin-auth/src/idp-group-mapping-admin.ts#runSetIdpGroupMapping)",
+          "evidence": "both refusal bodies"
+        },
+        {
+          "clause": "a SCIM group push grants the mapped set to its members at once, with the projection's reason marker",
+          "oracle": "api",
+          "verify": "the user holds a qa_group_reader grant whose reason starts with the SCIM marker (packages/plugins/plugin-auth/src/scim-group-projection.ts#SCIM_GROUP_PROJECTION_REASON_PREFIX)",
+          "evidence": "the grant row"
+        },
+        {
+          "clause": "deleting the mapping removes the grants it made and leaves a hand-made grant of the same set",
+          "oracle": "api",
+          "verify": "after the delete the marked grant is gone and the hand-made grant remains (packages/plugins/plugin-auth/src/scim-group-projection.ts#reconcileMappedGrants)",
+          "evidence": "the grants before and after"
+        },
+        {
+          "clause": "an SSO sign-in grants the mapped set from the provider's groups claim, and deleting that mapping revokes it at once",
+          "oracle": "api",
+          "verify": "after sign-in the user holds a grant whose reason starts with the SSO marker (packages/plugins/plugin-auth/src/scim-group-projection.ts#SSO_GROUP_PROJECTION_REASON_PREFIX; packages/plugins/plugin-auth/src/sso-group-projection.ts#readSsoGroupClaim); after the delete it is gone",
+          "evidence": "the grants before and after"
+        }
+      ],
+      "negative": [
+        "a delete that removes a hand-made grant is a FAIL: reconcile deletes only rows carrying the marker",
+        "an administrator set granted through a group is a FAIL"
+      ],
+      "traps": ["wrong-persona", "eventual-consistency"],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-auth/src/scim-group-projection.test.ts; no pin signs in through a live identity provider"
+      },
+      "source": [
+        "packages/plugins/plugin-auth/src/idp-group-mapping-admin.ts#runSetIdpGroupMapping and #runDeleteIdpGroupMapping",
+        "packages/plugins/plugin-auth/src/scim-group-projection.ts#createScimGroupProjection",
+        "packages/plugins/plugin-auth/src/sso-group-projection.ts#createSsoGroupProvisioner",
+        "packages/platform-objects/src/identity/sys-idp-group-mapping.object.ts (source_kind scim or sso)",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (the set-group-mapping and delete-group-mapping rows)",
+        "#31443, #31657"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — SCIM group push and SSO group mapping (#31443, #31657). Scoped sweep #32019 (epic #32022 M1, theme 3: AI service accounts and identity), read from source at 60f8149e; no live run made",
+          "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "identity-auth.sso-provider-groups-claim",
+      "title": "The SSO Providers record shows and edits the groups claim: get-groups-claim answers only the provider id and its claim, set-groups-claim stores it (blank clears it) and changes nothing else in the provider's mapping",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": ["platform administrator", "an organization administrator: the 403 leg"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": ["a boot with OS_SSO_ENABLED=true and one registered OIDC provider (POST /api/v1/auth/admin/sso/register)"],
+        "knownGaps": ["registering a provider may need its issuer reachable; with no stock OIDC identity provider (FOLLOW-UPS §3) the run brings its own"]
+      },
+      "steps": [
+        "POST /api/v1/auth/admin/sso/get-groups-claim {\"providerId\": P}; record the body",
+        "POST /api/v1/auth/admin/sso/set-groups-claim {\"providerId\": P, \"groupsClaim\": \"groups\"}; read it back; then set it to blank and read it back",
+        "repeat the get as the organization administrator",
+        "in the console, open the provider record in SSO Providers and run Map: Groups claim; record what it shows"
+      ],
+      "acceptance": [
+        {
+          "clause": "get-groups-claim answers { providerId, groupsClaim } and nothing else of the stored configuration",
+          "oracle": "api",
+          "verify": "the body has exactly those two keys; an unknown provider answers 404",
+          "evidence": "the body"
+        },
+        {
+          "clause": "set-groups-claim stores the claim, a blank value clears it, and the rest of the provider's mapping is unchanged",
+          "oracle": "api",
+          "verify": "the read-backs show groups, then no claim; the provider's other mapping members are the same before and after (packages/plugins/plugin-auth/src/auth-route-ledger.ts, the set-groups-claim row)",
+          "evidence": "the read-backs and the mapping before and after"
+        },
+        {
+          "clause": "both doors are platform-admin only",
+          "oracle": "api",
+          "verify": "the organization administrator's call answers 403",
+          "evidence": "the refusal body"
+        },
+        {
+          "clause": "the provider record offers the two actions and shows the stored claim",
+          "oracle": "screenshot",
+          "verify": "the record shows the actions show_sso_groups_claim and edit_sso_groups_claim, and the shown claim equals the stored one (packages/platform-objects/src/identity/sys-sso-provider.object.ts)",
+          "evidence": "a screenshot of the record and the action's answer"
+        }
+      ],
+      "negative": ["a get answer that carries the client secret or any other mapping member is a FAIL", "a set that resets other mapping members is a FAIL"],
+      "traps": ["stale-console-bundle", "wrong-persona"],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-auth/src/register-sso-provider.test.ts, packages/plugins/plugin-auth/src/admin-sso-bridge-gate.test.ts"
+      },
+      "source": [
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (the get-groups-claim and set-groups-claim rows)",
+        "packages/plugins/plugin-auth/src/register-sso-provider.ts (set-groups-claim re-dispatched to update-provider with only that member changed)",
+        "packages/platform-objects/src/identity/sys-sso-provider.object.ts (the two record actions)",
+        "#31755"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — the SSO Providers groups claim (#31755). Scoped sweep #32019 (epic #32022 M1, theme 3: AI service accounts and identity), read from source at 60f8149e; no live run made",
+          "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "identity-auth.ai-service-account-lifecycle",
+      "title": "An AI service account is suspended, resumed, re-owned, retired, and has a key revoked and restored, each by the right holder: the owner may suspend but not resume, retire ends the membership and revokes every key, and an owner leaving the organization suspends the account",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "organization administrator (membership grade admin or owner): register, mint and the lifecycle doors",
+        "the accountable owner, a plain member",
+        "a second plain member: the 403 legs",
+        "anonymous (no session): the 401 legs"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "an account registered and given two keys as identity-auth.ai-service-account-register-and-key does, in the seeded admin's organization, with a third member to name as the new owner"
+        ]
+      },
+      "steps": [
+        "as the owner: POST /api/v1/auth/service-account/suspend {\"userId\": ID}; call a read with each key; then as the owner POST …/resume; then as the administrator POST …/resume; call a read with each key",
+        "as the administrator: POST …/revoke-key {\"keyId\": K1}; call a read with each key; as the owner POST …/restore-key {\"keyId\": K1}; then as the administrator",
+        "as the administrator: remove the owner from the organization; read the account's ban fields; POST …/resume; then POST …/set-owner {\"userId\": ID, \"ownerId\": THIRD} and POST …/resume",
+        "as the administrator: POST …/retire; call a read with each key; POST …/restore-key {\"keyId\": K2}; POST …/retire again; POST …/create-key"
+      ],
+      "acceptance": [
+        {
+          "clause": "suspend refuses every key at once without revoking any; the owner cannot resume (403), an organization administrator can, and the keys work again",
+          "oracle": "api",
+          "verify": "after suspend both reads are refused and the ban reason starts with 'AI service account suspended' (packages/plugins/plugin-auth/src/service-account-lifecycle.ts#SERVICE_ACCOUNT_SUSPENDED_REASON); the owner's resume answers 403 PERMISSION_DENIED; after the administrator's resume both reads answer 200",
+          "evidence": "the reads, the ban fields and the resume answers"
+        },
+        {
+          "clause": "revoke-key stops that key alone; the owner cannot restore an administrator's revoke, the administrator can",
+          "oracle": "api",
+          "verify": "K1 is refused and K2 still admitted; the owner's restore answers 403 and the administrator's 200 (packages/plugins/plugin-auth/src/service-account-lifecycle.ts#runRestoreServiceAccountKey)",
+          "evidence": "the reads and both restore answers"
+        },
+        {
+          "clause": "an owner leaving the organization suspends the account; resume is refused 409 until a member is named owner",
+          "oracle": "api",
+          "verify": "the ban reason is the owner-left reason (packages/plugins/plugin-auth/src/service-account-owner-leaves.ts#SERVICE_ACCOUNT_OWNER_LEFT_REASON); the first resume answers 409 RESOURCE_CONFLICT; set-owner then resume answer 200",
+          "evidence": "the ban fields and the three answers"
+        },
+        {
+          "clause": "retire ends the account's membership and revokes every key with organization_membership_ended; it is terminal",
+          "oracle": "api",
+          "verify": "both keys are refused; the account has no sys_member row; restore of K2 answers 403; a second retire answers 409; create-key answers 409 (packages/plugins/plugin-auth/src/service-account-lifecycle.ts#runRetireServiceAccount)",
+          "evidence": "the reads, the membership read and the three refusals"
+        }
+      ],
+      "negative": [
+        "the owner resuming its own account is a FAIL: suspension by the owner is lifted by an administrator",
+        "a retired account whose key is restored, or a new key minted, is a FAIL"
+      ],
+      "traps": ["wrong-persona", "auth-state-leak", "cache-staleness"],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/qa/dogfood/test/service-account-lifecycle.dogfood.test.ts; packages/plugins/plugin-auth/src/service-account-lifecycle.test.ts"
+      },
+      "source": [
+        "packages/plugins/plugin-auth/src/service-account-lifecycle.ts#runSuspendServiceAccount, #runResumeServiceAccount, #runSetServiceAccountOwner, #runRetireServiceAccount, #runRevokeServiceAccountKey, #runRestoreServiceAccountKey",
+        "packages/plugins/plugin-auth/src/service-account-owner-leaves.ts#suspendAccountsOfDepartedOwner",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (the six lifecycle rows: who may call each and every refusal)",
+        "docs/adr/0151-ai-service-account-a-headless-agent-is-a-registered-principal-of-its-own.md D6",
+        "#31981"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0151 D6, the lifecycle doors (#31981). Scoped sweep #32019 (epic #32022 M1, theme 3: AI service accounts and identity), read from source at 60f8149e; no live run made",
+          "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "identity-auth.ai-service-account-register-and-key",
+      "title": "An organization administrator registers an AI service account and mints its key: the account is an agent row owned by a named member, with one plain membership and no sign-in, and its key admits requests as the account in the account's organization",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "organization administrator (membership grade admin or owner): register, mint and the lifecycle doors",
+        "the accountable owner, a plain member",
+        "a second plain member: the 403 legs",
+        "anonymous (no session): the 401 legs"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": ["the seeded admin's organization with two extra plain members (one is the owner) and one user who is not a member of it"]
+      },
+      "steps": [
+        "anonymous and as the second member: POST /api/v1/auth/service-account/register {\"name\": \"qa-bot\", \"ownerId\": OWNER}; then as the administrator with ownerId the non-member; then as the administrator with the owner",
+        "GET /api/v1/data/sys_user/USER_ID and the account's sys_member rows",
+        "as the second member, then as the owner: POST /api/v1/auth/service-account/create-key {\"userId\": USER_ID}; record the answers; as the owner again with expires_at past the ceiling; and with userId the owner's own id",
+        "with the minted key: GET /api/v1/data/sys_user (any read) and record who the request ran as; then POST /api/v1/auth/service-account/create-key and POST /api/v1/keys with the same key"
+      ],
+      "acceptance": [
+        {
+          "clause": "register is an administrator's door: anonymous 401, a plain member 403, an owner who is not a member 400 VALIDATION_FAILED on ownerId, and none of them writes a row",
+          "oracle": "api",
+          "verify": "the three refusals, and no sys_user row named qa-bot after them (packages/plugins/plugin-auth/src/service-account-doors.ts#runRegisterServiceAccount)",
+          "evidence": "the three refusal bodies and the sys_user read"
+        },
+        {
+          "clause": "register answers 201 with the account's userId, name, principalKind agent, organizationId and ownerId, and writes an agent row owned by the owner with a placeholder .invalid address and one plain membership",
+          "oracle": "api",
+          "verify": "the row reads principal_kind agent and accountable_user_id the owner; one sys_member row in the organization with role member (packages/plugins/plugin-auth/src/service-account-identity.ts#AGENT_PRINCIPAL_KIND)",
+          "evidence": "the 201 body, the row and the membership"
+        },
+        {
+          "clause": "create-key is for the owner, an organization administrator or a platform administrator: another member is 403, a person's id is 404, and an expiry past the ceiling is 400 VALIDATION_FAILED at expires_at",
+          "oracle": "api",
+          "verify": "the three refusals; the owner's call returns the raw key once, and the stored sys_api_key row carries the account as user_id and the account's organization as active_organization_id (packages/plugins/plugin-auth/src/service-account-doors.ts#runCreateServiceAccountKey)",
+          "evidence": "the refusal bodies, the key answer and the key row without its secret"
+        },
+        {
+          "clause": "the key admits requests as the account, and a caller holding only that key mints nothing",
+          "oracle": "api",
+          "verify": "the data read runs as the account; both mint calls with the key are refused and no new sys_api_key row exists",
+          "evidence": "the read and the two refusals"
+        },
+        {
+          "clause": "the account never signs in, gets no sys_account, and is not counted as an administrator",
+          "oracle": "test",
+          "verify": "run packages/plugins/plugin-auth/src/service-account-sign-in-refusal.test.ts and packages/plugins/plugin-auth/src/last-admin-guard.agent-account.test.ts and cite their output (packages/plugins/plugin-auth/src/service-account-identity.ts#refuseAgentAccountSession, packages/plugins/plugin-auth/src/last-admin-guard.ts#resolveAdminUserIds)",
+          "evidence": "the test output"
+        }
+      ],
+      "negative": [
+        "a register or mint by a plain member that writes anything is a FAIL",
+        "a key whose active_organization_id is the caller's or the body's rather than the account's is a FAIL",
+        "the raw key appearing again in any later read is a FAIL: only its hash is stored"
+      ],
+      "traps": ["wrong-persona", "auth-state-leak"],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/qa/dogfood/test/service-account-register-key.dogfood.test.ts; packages/plugins/plugin-auth/src/service-account-doors.test.ts"
+      },
+      "source": [
+        "packages/plugins/plugin-auth/src/service-account-doors.ts#runRegisterServiceAccount and #runCreateServiceAccountKey",
+        "packages/plugins/plugin-auth/src/service-account-identity.ts#registerServiceAccountRowGuard (kind immutable; an agent names an existing person as owner)",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (the register and create-key rows)",
+        "docs/adr/0151-ai-service-account-a-headless-agent-is-a-registered-principal-of-its-own.md D1 and D4",
+        "#31779, #31966"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0151 D1 and D4, register and mint (#31779, #31966). Scoped sweep #32019 (epic #32022 M1, theme 3: AI service accounts and identity), read from source at 60f8149e; no live run made",
+          "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "identity-auth.scim-refused-audit-row",
+      "title": "A refused SCIM request writes one bounded scim_refused audit row naming the connection, the presented credential kind, the resource, the method and the status, never the bearer",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": ["an identity provider calling SCIM 2.0", "admin (the seeded admin): the mint and the audit read"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": ["a boot with OS_SCIM_ENABLED=true and one SCIM connection credential minted at POST /api/v1/auth/admin/scim/mint-credential"]
+      },
+      "steps": [
+        "GET /api/v1/auth/scim/v2/Users with a made-up bearer; POST /api/v1/auth/scim/v2/Users with the real bearer and an invalid body",
+        "as admin: GET /api/v1/data/sys_audit_log filtered to action scim_refused; record the rows",
+        "send the made-up-bearer request 25 more times inside ten minutes and count the rows again"
+      ],
+      "acceptance": [
+        {
+          "clause": "each refused request writes one scim_refused row: actor svc:scim:CONNECTION_ID for the real bearer, null for an unknown one, with the resource, method and status in its metadata",
+          "oracle": "api",
+          "verify": "two rows, one per refusal (packages/plugins/plugin-audit/src/scim-refusal-audit.ts#buildScimRefusalAuditRow); neither carries the bearer text",
+          "evidence": "the rows"
+        },
+        {
+          "clause": "the rows are bounded: at most 20 per key per ten minutes",
+          "oracle": "api",
+          "verify": "the made-up-bearer key holds 20 rows after 26 refusals (packages/plugins/plugin-auth/src/scim-refusal-audit.ts#SCIM_REFUSAL_AUDIT_ROWS_PER_KEY, #SCIM_REFUSAL_AUDIT_WINDOW_MS)",
+          "evidence": "the row count"
+        }
+      ],
+      "negative": ["a row carrying the bearer token is a FAIL", "unbounded rows from a hostile caller are a FAIL"],
+      "traps": ["clock-skew"],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-audit/src/scim-refusal-audit.test.ts, packages/plugins/plugin-auth/src/scim-refusal-audit.test.ts, packages/plugins/plugin-auth/src/scim-refusal-audit-bound.test.ts"
+      },
+      "source": [
+        "packages/plugins/plugin-auth/src/scim-refusal-audit.ts#observeScimRefusal and #scimRefusalAuditBoundFor",
+        "packages/plugins/plugin-audit/src/scim-refusal-audit.ts#createScimRefusalAuditWriter",
+        "#31888"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — the bounded scim_refused row (#31888). Scoped sweep #32019 (epic #32022 M1, theme 3: AI service accounts and identity), read from source at 60f8149e; no live run made",
+          "ref": "#32019"
+        }
+      ]
     }
   ]
 }

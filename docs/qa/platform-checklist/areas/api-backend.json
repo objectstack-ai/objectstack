@@ -3412,6 +3412,346 @@
           "ref": "#29906"
         }
       ]
+    },
+    {
+      "id": "api-backend.actions-namespace-address",
+      "title": "An action call names its holder: POST /api/v1/actions/:ns/:object/:action[/:recordId], /actions/:ns/global/:action and the _env forms run that namespace's (or the environment's) declaration, an action another package binds to an object is reachable by its namespace, and the bare call is unchanged",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["admin (the seeded admin): every call"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr_a, namespace qa_a) and qa_b (manifest id com.qa.addr_b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. qa_a declares the object qa_a_ticket with an embedded server action escalate and an object-less action qa_a_ping; qa_b declares a standalone action escalate bound to objectName qa_a_ticket. Each action's handler answers a result naming its package, so the runner can tell which ran",
+          "one qa_a_ticket record (its id is RID), and an environment object-less action qa_env_ping saved with PUT /api/v1/meta/action/qa_env_ping and no ?package="
+        ]
+      },
+      "steps": [
+        "POST /api/v1/actions/qa_a_ticket/escalate/RID (bare); record which handler ran",
+        "POST /api/v1/actions/qa_a/qa_a_ticket/escalate/RID and POST /api/v1/actions/qa_b/qa_a_ticket/escalate/RID; record which handler ran for each",
+        "POST /api/v1/actions/qa_a/global/qa_a_ping, then POST /api/v1/actions/qa_b/global/qa_a_ping",
+        "POST /api/v1/actions/_env/global/qa_env_ping, then POST /api/v1/actions/_env/global/qa_a_ping",
+        "POST /api/v1/actions/qa_a/_activation/qa_a_ticket and POST /api/v1/actions/qa_a/qa_a_ticket/escalate/RID/extra"
+      ],
+      "acceptance": [
+        {
+          "clause": "the bare call is unchanged: /actions/qa_a_ticket/escalate/RID runs the object's own embedded action (qa_a's)",
+          "oracle": "api",
+          "verify": "the answer carries qa_a's result. A first segment that is no installed namespace reads as the bare grammar (packages/spec/src/kernel/address-grammar.ts#readNamespacePositionSegment)",
+          "evidence": "the bare answer"
+        },
+        {
+          "clause": "a namespace segment runs that namespace's declaration: qa_a's embedded escalate for /actions/qa_a/…, and qa_b's standalone escalate bound to qa_a's object for /actions/qa_b/…",
+          "oracle": "api",
+          "verify": "the two answers carry different results, each naming its package. Declarations are collected per (package, objectName:name), so the standalone one is not folded into the embedded one (#31993; packages/runtime/src/action-execution.ts#resolveAddressedRouteActionDeclaration)",
+          "evidence": "both answers"
+        },
+        {
+          "clause": "an object-less action is called as /actions/:ns/global/:action, and a namespace that holds no such action answers 404 naming the namespace",
+          "oracle": "api",
+          "verify": "/actions/qa_a/global/qa_a_ping runs qa_a's; /actions/qa_b/global/qa_a_ping answers 404 with \"Action 'qa_a_ping' not found … in namespace 'qa_b'\" (packages/runtime/src/action-execution.ts#addressedActionHits)",
+          "evidence": "the 200 answer and the 404 body"
+        },
+        {
+          "clause": "_env reaches only the environment's own declarations",
+          "oracle": "api",
+          "verify": "/actions/_env/global/qa_env_ping runs the environment action; /actions/_env/global/qa_a_ping answers 404 naming the environment (packages/runtime/src/action-execution.ts#addressedActionHits)",
+          "evidence": "the 200 answer and the 404 body"
+        },
+        {
+          "clause": "the activation door has no addressed form, and the grammar ends at three segments after the qualifier",
+          "oracle": "api",
+          "verify": "/actions/qa_a/_activation/… answers 404 with the message naming the two addressed shapes; the four-segment path answers 404 and runs nothing (packages/runtime/src/domains/actions.ts)",
+          "evidence": "both 404 bodies, and the record unchanged"
+        }
+      ],
+      "negative": [
+        "the bare call running qa_b's standalone action is a FAIL: #31993 changed the qualified call only",
+        "an addressed call that runs another namespace's declaration when its own has none is a FAIL: a miss is 404, never a fallback",
+        "reading a missing 409 for two packages binding one action name to one object as a defect is wrong: that refusal is not landed and stays with #31697"
+      ],
+      "traps": ["dispatcher-vs-hono-route"],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/runtime/src/domains/actions-addressed-route.test.ts and packages/runtime/src/action-execution-addressed-exposure-refusal.test.ts; no live spec drives the scratch-package pair"
+      },
+      "source": [
+        "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D5 (the actions row, the router order, _env)",
+        "packages/runtime/src/action-execution.ts#resolveAddressedRouteActionDeclaration and #addressedActionHits (holder resolution and the 404 sentences)",
+        "packages/runtime/src/domains/actions.ts (the addressed-path arm, the _activation 404 and the three-segment limit)",
+        "packages/runtime/src/route-ledger.ts#ROUTE_LEDGER (the three addressed rows: POST /actions/:ns/:object/:action, /actions/:ns/global/:action, /actions/:ns/:object/:action/:recordId)",
+        "#31979 (G1 /actions), #31993 (a standalone action bound to another package's object)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0150 child G1, the /actions door (#31979, #31993). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
+          "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.meta-qualified-item-read",
+      "title": "A metadata item reads by its qualified address: GET /api/v1/meta/:type/:ns/:name and /meta/:type/_env/:name name the holder exactly, a bare read of a name two packages hold answers 409 naming both, and ?package= stays the exact qualifier",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["admin (the seeded admin): every read", "a caller the bare item read refuses (no session): the parity leg"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr_a, namespace qa_a) and qa_b (manifest id com.qa.addr_b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Each holds a page named qa_home with a label that says which package it is; qa_a also holds a page qa_only_a. page is one of the nine types whose readers consult (package, name) (packages/objectql/src/package-scoped-read.ts#PACKAGE_SCOPED_READ_TYPES), and no one-holder rule covers it, so both packages may hold qa_home",
+          "an environment page qa_env_home, saved with PUT /api/v1/meta/page/qa_env_home and no ?package= (a minimal valid page body)"
+        ]
+      },
+      "steps": [
+        "GET /api/v1/meta/page/qa_a/qa_home and GET /api/v1/meta/page/qa_b/qa_home; record each body's package and label",
+        "GET /api/v1/meta/page/qa_home (bare) and GET /api/v1/meta/page/qa_only_a (bare); record status and body",
+        "GET /api/v1/meta/page/qa_home?package=com.qa.addr_a, then GET /api/v1/meta/page/qa_only_a?package=com.qa.addr_b",
+        "GET /api/v1/meta/page/_env/qa_env_home, then GET /api/v1/meta/page/_env/qa_home",
+        "GET /api/v1/meta/page/qa_a/qa_home?package=com.qa.addr_b (two qualifiers) and GET /api/v1/meta/page/qa_nowhere/qa_home (a middle segment that is no installed namespace)",
+        "GET /api/v1/meta/page/qa_a/history and GET /api/v1/meta/page/qa_nopage/history; compare the two answers",
+        "without a session: GET /api/v1/meta/page/qa_only_a, then GET /api/v1/meta/page/qa_a/qa_only_a; compare"
+      ],
+      "acceptance": [
+        {
+          "clause": "a namespace segment reads that namespace's holder: /meta/page/qa_a/qa_home serves qa_a's page and /meta/page/qa_b/qa_home serves qa_b's",
+          "oracle": "api",
+          "verify": "both answer 200; each body names its own package and label. The segment is read once (packages/metadata-protocol/src/protocol-exact-qualifier.ts#resolveMetaItemAddress) and the read is ?package= that holder, answered by the item read itself (packages/rest/src/meta-qualified-item-route.ts#registerMetaQualifiedItemRoute)",
+          "evidence": "both bodies with package and label"
+        },
+        {
+          "clause": "a bare read of a name two packages hold answers 409 RESOURCE_CONFLICT naming both packages, never one picked; a bare read of a name one package holds still answers 200",
+          "oracle": "api",
+          "verify": "GET /meta/page/qa_home answers 409 with code RESOURCE_CONFLICT and a message naming com.qa.addr_a and com.qa.addr_b (packages/core/src/package-scoped-resolution.ts#PackageScopedNameRefusedError); GET /meta/page/qa_only_a answers 200 with qa_a's page",
+          "evidence": "the 409 body and the 200 body"
+        },
+        {
+          "clause": "?package= is the exact qualifier: it serves that package's item, and a package that holds no item of the name is refused 409 naming every holder, never served another package's item",
+          "oracle": "api",
+          "verify": "?package=com.qa.addr_a on qa_home serves qa_a's page; ?package=com.qa.addr_b on qa_only_a answers 409 RESOURCE_CONFLICT naming com.qa.addr_a (packages/metadata-protocol/src/protocol-exact-qualifier.ts#admitExactQualifier, reason not-held-by-qualifier)",
+          "evidence": "the 200 body and the 409 body"
+        },
+        {
+          "clause": "_env reads the environment's own item, and a name only packages hold is refused 409 naming them",
+          "oracle": "api",
+          "verify": "/meta/page/_env/qa_env_home answers 200 with the environment page; /meta/page/_env/qa_home answers 409 RESOURCE_CONFLICT naming both packages (packages/metadata-protocol/src/protocol-exact-qualifier.ts#admitEnvironmentQualifier)",
+          "evidence": "the 200 body and the 409 body"
+        },
+        {
+          "clause": "a qualified path that also sends ?package= is refused 400 VALIDATION_ERROR, and a middle segment that is neither _env nor an installed namespace answers 404 and serves no item",
+          "oracle": "api",
+          "verify": "the two-qualifier read answers 400 with code VALIDATION_ERROR; the qa_nowhere read answers 404 (ENDPOINT_NOT_FOUND \"Not found\" on the REST route manager, ROUTE_NOT_FOUND on a dispatcher host; packages/runtime/src/route-ledger.ts#ROUTE_LEDGER row GET /meta/:type/:ns/:name)",
+          "evidence": "both refusal bodies"
+        },
+        {
+          "clause": "a sub-resource literal in the last position keeps its route: /meta/page/qa_a/history is the history read of a page named qa_a, never an item named history in namespace qa_a",
+          "oracle": "api",
+          "verify": "the qa_a/history answer has the same status and shape as the qa_nopage/history answer (packages/metadata-protocol/src/protocol-exact-qualifier.ts#META_ITEM_SUBRESOURCE_SEGMENTS holds audit, diff, history, layers, publish, published, references, rollback and tree)",
+          "evidence": "both answers side by side"
+        },
+        {
+          "clause": "the qualified path gives a caller nothing the bare read refuses it",
+          "oracle": "api",
+          "verify": "without a session, the qualified read answers the same status as the bare read of qa_only_a (packages/runtime/src/domains/meta.ts#isPackageScopedRefusal: an anonymous caller is never rewritten, and a type-level read refusal answers first)",
+          "evidence": "the two answers"
+        }
+      ],
+      "negative": [
+        "a bare 200 that serves one of the two qa_home pages is a FAIL: a silent pick between holders is what ADR-0150 D5 refuses",
+        "?package=com.qa.addr_b serving qa_a's qa_only_a (or the environment's item) is a FAIL: the qualifier is exact, never a closure",
+        "a qualified read that answers 200 where the bare read refuses the same caller is a FAIL"
+      ],
+      "traps": ["dispatcher-vs-hono-route", "wrong-persona"],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/rest/src/meta-qualified-item-route.test.ts and packages/runtime/src/domains/meta-qualified-item-read.test.ts (both transports), packages/objectql/src/package-scoped-exact-qualifier.test.ts; no live spec drives the scratch-package pair"
+      },
+      "source": [
+        "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D5 (the metadata row of the grammar table, the router order, the 409 on ambiguity)",
+        "packages/metadata-protocol/src/protocol-exact-qualifier.ts#resolveMetaItemAddress (the segment order: sub-resource literal, then _env, then an installed namespace)",
+        "packages/metadata-protocol/src/protocol-exact-qualifier.ts#admitExactQualifier and #admitEnvironmentQualifier (the two qualifier judgements)",
+        "packages/rest/src/meta-qualified-item-route.ts#registerMetaQualifiedItemRoute (the REST route, its 400 and its 404)",
+        "packages/runtime/src/domains/meta.ts#isPackageScopedRefusal (the dispatcher arm and its 409)",
+        "packages/objectql/src/package-scoped-read.ts#PACKAGE_SCOPED_READ_TYPES (the nine types a bare read refuses for two holders)",
+        "#31959 (G1, child of epic #31527)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0150 child G1, the /meta door (#31959). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
+          "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.automation-namespace-address",
+      "title": "The automation, legacy trigger, connector connection and inbound hook doors take the namespace and _env segments: /automation/:ns/:name[/trigger|/toggle|/clone|/runs…], /automation/trigger/:ns/:name, /automation/connectors/:ns/:name/connection and /automation/hooks/:ns/:flowName/:hookId serve the name's one holder exactly as the bare path does, and refuse any other qualifier with 404, 409 RESOURCE_CONFLICT or, for the hook, the door's own 401",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "admin (the seeded admin): every read, run and connection call",
+        "an external sender with no session: the inbound hook posts",
+        "a member without manage_metadata (check GET /api/v1/auth/me/permissions first): the gate leg"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase with the hook secret set: export SHOWCASE_WEBHOOK_SECRET=<any test value>, then `pnpm dev -- --fresh -p PORT --seed-admin` (until the variable is set, every hook post is refused 503). The showcase package (manifest id com.example.showcase, namespace showcase: examples/app-showcase/objectstack.config.ts) is the one holder of the flow showcase_batch_reminders (autolaunched, runs through the trigger door), of the flow showcase_inbound_task_webhook (type api, hook intake, secretRef SHOWCASE_WEBHOOK_SECRET) and of the connector instance showcase_status_api (auth none)",
+          "one scratch package qa_b (manifest id com.qa.addr_b, namespace qa_b), its own scratch app directory (never the shared examples), a defineStack({ manifest: { id, namespace, version, type: 'app' }, objects: [one object qa_b_note] }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials). It declares no flow and no connector: it is an installed namespace that holds none of the names below. Its one object is what registers the namespace (packages/objectql/src/registry.ts#registerNamespace)",
+          "an environment flow qa_env_flow, created as admin with POST /api/v1/automation and a minimal autolaunched body (a start node and an end node joined by one edge), so no package holds it"
+        ],
+        "knownGaps": [
+          "a name two packages hold is not reachable here: phase 1's one-holder rule covers flow and connector (packages/core/src/package-scoped-resolution.ts#BARE_NAME_ONE_HOLDER_TYPES), so install refuses the second holder (422 PLUGIN_REGISTER_FAILED at install-local). The bare 409 and its address's 409 for such a name are held by domains/automation-addressed-route.test.ts, not driven live"
+        ]
+      },
+      "steps": [
+        "as admin: GET /api/v1/automation/showcase_batch_reminders (bare), GET /api/v1/automation/showcase/showcase_batch_reminders, GET /api/v1/automation/qa_b/showcase_batch_reminders, GET /api/v1/automation/_env/showcase_batch_reminders and GET /api/v1/automation/qa_b/qa_nothing; record status and body of each",
+        "GET /api/v1/automation/_env/qa_env_flow, GET /api/v1/automation/qa_env_flow (bare) and GET /api/v1/automation/showcase/qa_env_flow; then GET /api/v1/automation/qa_nowhere/showcase_batch_reminders (a first segment that is no installed namespace)",
+        "run by address: POST /api/v1/automation/showcase/showcase_batch_reminders/trigger, then POST /api/v1/automation/trigger/showcase/showcase_batch_reminders (body {} for both); then GET /api/v1/automation/showcase/showcase_batch_reminders/runs and the bare GET /api/v1/automation/showcase_batch_reminders/runs; read one run as GET /api/v1/automation/showcase/showcase_batch_reminders/runs/RUN_ID",
+        "POST /api/v1/automation/trigger/qa_nowhere/showcase_batch_reminders (body {}); re-read the bare runs list",
+        "connector connection: GET /api/v1/automation/connectors/showcase_status_api/connection (bare), then the same under showcase, qa_b and _env (GET /api/v1/automation/connectors/NS/showcase_status_api/connection)",
+        "inbound hook. As admin read the run count of showcase_inbound_task_webhook (GET /api/v1/automation/showcase_inbound_task_webhook/runs). Without a session, POST /api/v1/automation/hooks/showcase/showcase_inbound_task_webhook/intake with the body {\"title\":\"qa addressed hook\"}, signed t=,v1= with SHOWCASE_WEBHOOK_SECRET as automation.inbound-hook-timestamped-signature signs. Then make the same correctly signed post to /hooks/qa_b/showcase_inbound_task_webhook/intake and to /hooks/_env/showcase_inbound_task_webhook/intake. Then post to the bare /hooks/showcase_inbound_task_webhook/intake with a wrong signature. Record status, headers and raw body of each, then re-read the run count once the queue drains",
+        "gate before admission: as the member, PUT /api/v1/automation/showcase_batch_reminders (bare), PUT /api/v1/automation/showcase/showcase_batch_reminders and PUT /api/v1/automation/qa_b/showcase_batch_reminders, each with the body step 1 read; record each status and code",
+        "as admin: DELETE /api/v1/automation/showcase/showcase_batch_reminders/runs; record the status and the Allow header"
+      ],
+      "acceptance": [
+        {
+          "clause": "a namespace address naming the name's one holder is served exactly as the bare path",
+          "oracle": "api",
+          "verify": "GET /automation/showcase/showcase_batch_reminders answers the bare read's status and body. The qualifier is read once, before every gate, and stripped, so each gate judges the bare shape (packages/runtime/src/domains/automation-address.ts#readAutomationAddress); admission serves it because the bare name resolves to com.example.showcase, the namespace's holder (#admitAutomationAddress)",
+          "evidence": "both bodies"
+        },
+        {
+          "clause": "an installed namespace that holds no such name, and _env for a packaged name, answer 409 RESOURCE_CONFLICT naming every candidate; a name nothing holds answers 404 naming the namespace",
+          "oracle": "api",
+          "verify": "qa_b/showcase_batch_reminders and _env/showcase_batch_reminders each answer 409 with code RESOURCE_CONFLICT and candidates naming the package com.example.showcase; qa_b/qa_nothing answers 404 with \"Flow 'qa_nothing' not found in namespace 'qa_b'\" (packages/runtime/src/domains/automation-address.ts#admitAutomationAddress)",
+          "evidence": "the three bodies"
+        },
+        {
+          "clause": "_env addresses the environment's own flow, and a namespace never reaches it",
+          "oracle": "api",
+          "verify": "_env/qa_env_flow answers what the bare GET /automation/qa_env_flow answers; showcase/qa_env_flow answers 404 with \"Flow 'qa_env_flow' not found in namespace 'showcase'\"",
+          "evidence": "the three bodies"
+        },
+        {
+          "clause": "a first segment that is no installed namespace is no address",
+          "oracle": "api",
+          "verify": "qa_nowhere/showcase_batch_reminders reads as the bare two-segment shape, which no GET route serves: 404 ROUTE_NOT_FOUND (the dispatcher's no-route answer), never the flow (packages/spec/src/kernel/address-grammar.ts#readNamespacePositionSegment)",
+          "evidence": "the 404 body"
+        },
+        {
+          "clause": "the run doors and the legacy trigger take the address, and a three-segment legacy trigger with no address runs nothing",
+          "oracle": "api",
+          "verify": "both addressed runs answer as the bare POST /automation/showcase_batch_reminders/trigger does and each adds one run; the addressed and bare run lists name the same runs, and the addressed run read returns RUN_ID. trigger/qa_nowhere/showcase_batch_reminders answers 404 ROUTE_NOT_FOUND and the run count is unchanged (#32001 BREAKING 2: before, that path ran the flow qa_nowhere)",
+          "evidence": "the run answers and the run lists before and after"
+        },
+        {
+          "clause": "the connector connection door takes the address over the connector holders",
+          "oracle": "api",
+          "verify": "the showcase address answers what the bare connection read answers; qa_b and _env each answer 409 RESOURCE_CONFLICT naming com.example.showcase (#admitAutomationAddress with type connector)",
+          "evidence": "the four bodies"
+        },
+        {
+          "clause": "the hook's address is served only when it names the package that ships the flow, and any other address gets the door's bad-signature answer, byte for byte",
+          "oracle": "api",
+          "verify": "the showcase address answers 202 and the run count rises by exactly one. The qa_b and _env posts, though correctly signed, and the bare post with a wrong signature, each answer 401 with the same Content-Type and the same raw body {\"success\":false,\"error\":{\"code\":\"INVALID_SIGNATURE\",\"message\":\"Signature verification failed.\"}}. None of them adds a run (packages/core/src/security/inbound-hook-answer.ts#admitInboundHookAddress and #inboundHookRefusal; both faces, the raw mount packages/triggers/trigger-api/src/plugin.ts#HOOKS_ADDRESSED_PATH and the hosted domains/automation-hooks.ts, ask the one predicate)",
+          "evidence": "the four raw answers byte-compared, and the run count before and after"
+        },
+        {
+          "clause": "the gates judge the bare shape first: a caller they refuse learns nothing about the name's holders",
+          "oracle": "api",
+          "verify": "the member's bare PUT and both addressed PUTs answer 403 PERMISSION_DENIED (manage_metadata, the authoring gate). The qa_b address gives the member 403, never the 409 that names com.example.showcase (packages/runtime/src/route-ledger.ts#ROUTE_LEDGER, the GET /automation/:ns/:name row: stripped before every gate, judged after them)",
+          "evidence": "the three answers"
+        },
+        {
+          "clause": "a served shape under a verb it is not served by answers 405 with the verbs it is served under",
+          "oracle": "api",
+          "verify": "DELETE on the addressed runs list answers 405 with Allow: GET (packages/runtime/src/domains/automation-address.ts#automationRouteAllow)",
+          "evidence": "the status and the Allow header"
+        }
+      ],
+      "negative": [
+        "a qualified path serving a flow or connector its namespace does not hold is a FAIL: a miss is 404 or 409, never a fallback to the bare item",
+        "an unadmitted hook address answering anything other than the bad-signature bytes (a 404, a 409, a body or header naming the namespace) is a FAIL: the refusal must not tell one installed namespace from another",
+        "reading the member's 403 for an installed namespace against a 404 for qa_nowhere as a leak is wrong: whether a namespace is installed is read before the gates by design, and the seat accepted it (#32001, open question N1); who holds the name is judged only after the gates",
+        "reading the 409 on the address of a name two packages hold as a defect is wrong: the engine arms one flow per bare name, so neither address is served until one holder is renamed or removed (#32001 BREAKING 1)"
+      ],
+      "variants": [
+        "a sub-resource literal in the name position keeps its bare route after a namespace: GET /automation/showcase/runs is the run list of a flow named showcase (packages/runtime/src/domains/automation-address.ts#AUTOMATION_FLOW_SUBRESOURCE_SEGMENTS: clone, runs, toggle, trigger)",
+        "one of the door's own literals after a qualifier is no route: GET /automation/_env/actions and GET /automation/showcase/_status are declined, while the bare catalog GET /automation/actions is unchanged (#AUTOMATION_DOOR_LITERALS)",
+        "the hook qualifier is never runs: POST /automation/hooks/runs/RUN_ID/cancel stays the run door of a flow named hooks (packages/core/src/security/auth-gate.ts#INBOUND_HOOK_QUALIFIER_EXCLUSIONS)",
+        "the 16 addressed /automation rows are server-only: the SDK names no namespace (api-backend.client-sdk-namespace-address)"
+      ],
+      "traps": ["dispatcher-vs-hono-route", "eventual-consistency", "wrong-persona"],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/runtime/src/domains/automation-addressed-route.test.ts, packages/runtime/src/automation-every-verb.hono.integration.test.ts, packages/runtime/src/domains/automation-hooks.test.ts, packages/core/src/security/inbound-hook-answer.test.ts and packages/triggers/trigger-api/src/inbound-hook-member.test.ts; no live spec drives the showcase addresses"
+      },
+      "source": [
+        "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D5 (the automation, inbound hook and connectors rows)",
+        "packages/runtime/src/domains/automation-address.ts#readAutomationAddress and #admitAutomationAddress (the reading order, the 404 and the 409)",
+        "packages/runtime/src/domains/automation-address.ts#automationRouteAllow (the 405's Allow)",
+        "packages/runtime/src/domains/automation.ts (the address read before every gate, admission after them, the bare by-name 409, the three-segment trigger decline)",
+        "packages/core/src/security/inbound-hook-answer.ts#admitInboundHookAddress and #inboundHookRefusal",
+        "packages/core/src/security/auth-gate.ts#matchInboundHookRoute and #INBOUND_HOOK_QUALIFIER_EXCLUSIONS (the anonymous allow-list row, five segments, POST only)",
+        "packages/triggers/trigger-api/src/plugin.ts#HOOKS_ADDRESSED_PATH (the raw mount)",
+        "packages/runtime/src/route-ledger.ts#ROUTE_LEDGER (16 server-only addressed /automation rows and the public POST /automation/hooks/:ns/:flowName/:hookId)",
+        "#32001 (G1 part c), #32049 (G1 part d, closed #31691)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0150 child G1 parts (c) and (d): the addressed /automation flow, legacy trigger and connector connection doors (#32001) and the qualified inbound hook (#32049). This sweep first drafted the item as planned at 60f8149e, before either landed; both landed before it reached main, so it is authored active, as a new item, not promoted. Scoped sweep #32019 (epic #32022 M1, theme 1), read from source at 0f7389cc; no live run made",
+          "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.client-sdk-namespace-address",
+      "title": "The client SDK builds the qualified path: automation.*, actions.invoke and meta.getItem take an optional namespace",
+      "since": null,
+      "status": "planned",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": ["an integrator calling the platform through @objectstack/client"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": ["the scratch-package pair api-backend.meta-qualified-item-read and api-backend.actions-namespace-address use"]
+      },
+      "acceptance": [
+        {
+          "clause": "a namespace passed to each method produces the qualified path the server reads, and no namespace keeps the bare path",
+          "oracle": "network",
+          "verify": "record each request URL and compare with the server's qualified grammar",
+          "evidence": "the request URLs and answers"
+        }
+      ],
+      "source": [
+        "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D5 (the client SDK) and child G3",
+        "packages/client/src/index.ts (at the base sha actions.invoke takes objectName and actionName only, and meta.getItem takes { packageId })",
+        "#31695 (G3, open)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — planned. ADR-0150 child G3 declares a namespace option on the SDK; packages/client takes none at the base sha. Scoped sweep #32019 (epic #32022 M1, theme 1), read from source at 60f8149e. Steps arrive with the implementing card, in the edit that promotes this item after a run in which it passes",
+          "ref": "#32019"
+        }
+      ]
     }
   ]
 }

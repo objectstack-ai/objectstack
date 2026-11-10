@@ -2525,6 +2525,55 @@
           "ref": "#27438"
         }
       ]
+    },
+    {
+      "id": "integration-system.job-package-key",
+      "title": "Two packages may each declare a job of one name: the first holder keeps the bare job key, the second is armed under PACKAGE_ID:NAME, and both keys survive a restart unchanged",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": ["admin (the seeded admin)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr_a, namespace qa_a) and qa_b (manifest id com.qa.addr_b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Each declares a scheduled job qa_nightly (job has no one-holder rule, and the two namespaces differ). The boot runs on a file DB so the arming survives a restart"
+        ]
+      },
+      "steps": [
+        "install qa_a, then qa_b; GET /api/v1/data/sys_job and record each row's name, the key the adapter arms it by",
+        "restart the server against the same DB and read the keys again"
+      ],
+      "acceptance": [
+        {
+          "clause": "the first holder's job is keyed by its bare name and the second by PACKAGE_ID:NAME",
+          "oracle": "api",
+          "verify": "one job is keyed qa_nightly and the other com.qa.addr_b:qa_nightly (packages/runtime/src/app-artifact-handlers.ts#jobKeyFor)",
+          "evidence": "the two keys"
+        },
+        {
+          "clause": "the keys are stable across a restart: the bare key does not move to the other package",
+          "oracle": "api",
+          "verify": "after the restart the same package holds the bare key",
+          "evidence": "the keys before and after"
+        }
+      ],
+      "negative": ["the second job replacing the first under the bare key is a FAIL: one package's job would silently stop"],
+      "traps": ["first-boot-cold-start"],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/runtime/src/app-artifact-handlers.jobs.test.ts"
+      },
+      "source": ["packages/runtime/src/app-artifact-handlers.ts#jobKeyFor", "#31730 (E7)"],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0150 child E7 (#31730). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
+          "ref": "#32019"
+        }
+      ]
     }
   ]
 }

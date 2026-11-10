@@ -2996,6 +2996,82 @@
           "ref": "#31499"
         }
       ]
+    },
+    {
+      "id": "automation.flow-reference-package-resolution",
+      "title": "A package flow's by-name references resolve from its package: a subflow held by the flow's own package or one holder in its declared dependencies runs, one held only by the environment or an unrelated package is refused naming the holder and nothing runs",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": ["admin (the seeded admin): the trigger calls and the run reads"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr_a, namespace qa_a) and qa_b (manifest id com.qa.addr_b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. qa_a holds an autolaunched flow qa_a_child; qa_b holds two autolaunched flows: qa_b_parent with a subflow node naming qa_a_child, and qa_b_env with a subflow node naming qa_env_child",
+          "an environment flow qa_env_child saved with PUT /api/v1/meta/flow/qa_env_child and no ?package="
+        ]
+      },
+      "steps": [
+        "POST /api/v1/automation/qa_b_parent/trigger; record the answer and GET /api/v1/automation/qa_b_parent/runs",
+        "POST /api/v1/automation/qa_b_env/trigger; record the answer and the run",
+        "POST /api/v1/automation/qa_env_child/trigger (a door run, a caller with no package); record the answer",
+        "rebuild qa_b declaring a dependency on qa_a, reinstall, and repeat the first step"
+      ],
+      "acceptance": [
+        {
+          "clause": "a subflow held by a package outside the caller's closure is refused naming that package, and the child never runs",
+          "oracle": "api",
+          "verify": "the qa_b_parent run fails with an error naming qa_a_child and com.qa.addr_a; qa_a_child has no run (packages/services/service-automation/src/engine.ts, flowNameRefusal before dispatch)",
+          "evidence": "the run record and the child's empty run list"
+        },
+        {
+          "clause": "a subflow only the environment holds is refused for a package caller, naming the environment",
+          "oracle": "api",
+          "verify": "the qa_b_env run fails naming qa_env_child and the environment (ADR-0150 D3 (a))",
+          "evidence": "the run record"
+        },
+        {
+          "clause": "a door run, a caller with no package, still reaches the environment flow",
+          "oracle": "api",
+          "verify": "the qa_env_child trigger runs",
+          "evidence": "the trigger answer"
+        },
+        {
+          "clause": "once qa_b declares qa_a, the subflow resolves to the one holder in the closure and runs",
+          "oracle": "api",
+          "verify": "the second qa_b_parent run succeeds and qa_a_child has a run",
+          "evidence": "both run records"
+        },
+        {
+          "clause": "an email template, connector or webhook a package names resolves from that package the same way",
+          "oracle": "test",
+          "verify": "run packages/plugins/plugin-email/src/template-loader.test.ts and packages/plugins/plugin-webhooks/src/declared-webhooks.test.ts and cite their output",
+          "evidence": "the test output"
+        }
+      ],
+      "negative": [
+        "qa_b_parent running qa_a_child without the dependency is a FAIL: resolution never loosens outside the closure",
+        "a package flow served the environment's qa_env_child is a FAIL"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/services/service-automation/src/flow-package-scoped-resolution.test.ts (the subflow cases, red lines 1 and 2)"
+      },
+      "source": [
+        "packages/services/service-automation/src/engine.ts (execute refuses a name the resolver refuses for the caller's package, before dispatch)",
+        "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D3 and D3 (a)",
+        "#31738 (E1), #31725 / #31744 / #31825 (E5)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0150 children E1 and E5 (#31738, #31725, #31744, #31825). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
+          "ref": "#32019"
+        }
+      ]
     }
   ]
 }
