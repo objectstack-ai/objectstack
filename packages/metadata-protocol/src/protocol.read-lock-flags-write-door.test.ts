@@ -48,6 +48,7 @@ import './lint-root-preload.testkit.js';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { assertEngineFindOnePredicate, isCodeArtifactBody } from '@objectstack/metadata-core';
+import { isNamespaceScopedBareNameType } from '@objectstack/core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 import { SysMetadataRepository, resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
@@ -120,6 +121,13 @@ function harness(environmentId: string | undefined, rows: StoredRow[] = [], extr
     const artifacts = artifactsFor(extra);
     const registry = {
         ...NO_PACKAGE_SCOPED_READS,
+        // A type whose names are scoped to the namespace is read by package
+        // (ADR-0150), as `SchemaRegistry` reads it: this double holds one item
+        // per name, so its package-scoped resolver answers what `getItem` does.
+        readsByPackage: (type: string) => isNamespaceScopedBareNameType(type),
+        resolveItem(type: string, name: string) {
+            return artifacts.get(type)?.get(name);
+        },
         getArtifactItem(type: string, name: string) {
             const hit = artifacts.get(type)?.get(name);
             return hit && isCodeArtifactBody(hit) ? hit : undefined;
