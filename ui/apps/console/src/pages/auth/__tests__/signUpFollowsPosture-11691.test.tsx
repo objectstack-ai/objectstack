@@ -54,6 +54,8 @@ const INVITE_SIGN_UP = { name: builtInLocales.en.auth.login.invitationSignUpButt
 const INVITATION = '/accept-invitation/inv_1';
 const INVITE_QUERY = `?redirect=${encodeURIComponent(INVITATION)}`;
 const SELF_REGISTRATION_CLOSED_TEXT = builtInLocales.en.auth.register.errors.selfRegistrationClosed;
+/** objectstack#32021 — a deployment nobody has an account on leads with this. */
+const FIRST_OWNER_LINK = { name: builtInLocales.en.auth.login.firstOwner.createButton } as const;
 
 /** The dev-seeded admin hint is set by the SAME config read as the sign-up offer. */
 const DEV_SEED = { devSeedAdmin: { email: 'admin@objectos.ai', password: 'admin123' } };
@@ -80,19 +82,32 @@ function configFor(
 interface Wire {
   bootstrapProbes: number;
   signUps: Array<Record<string, unknown>>;
+  signIns: number;
 }
 let wire: Wire;
 
-/** A signed-out visitor on a server with the given config and owner state. */
-function stubServer(config: AuthPublicConfig, hasOwner: boolean): typeof fetch {
-  wire = { bootstrapProbes: 0, signUps: [] };
+/**
+ * A signed-out visitor on a server with the given config and owner state.
+ * `hasOwner: 'error'` is a probe the server fails (500). Every sign-in is
+ * refused as a wrong password (objectstack#32021, the no-mail copy).
+ */
+function stubServer(config: AuthPublicConfig, hasOwner: boolean | 'error'): typeof fetch {
+  wire = { bootstrapProbes: 0, signUps: [], signIns: 0 };
   const json = (body: unknown) =>
     new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
   return (async (input: string | URL | Request, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     if (url.endsWith('/bootstrap-status')) {
       wire.bootstrapProbes += 1;
+      if (hasOwner === 'error') return new Response('{}', { status: 500 });
       return json({ hasOwner });
+    }
+    if (url.includes('/sign-in/email')) {
+      wire.signIns += 1;
+      return new Response(
+        JSON.stringify({ code: 'INVALID_EMAIL_OR_PASSWORD', message: 'Invalid email or password' }),
+        { status: 401, headers: { 'Content-Type': 'application/json' } },
+      );
     }
     if (url.includes('/sign-up/email')) {
       wire.signUps.push(JSON.parse(String(init?.body)));
@@ -115,7 +130,11 @@ function Recorder() {
  * probe uses the global `fetch` (`useBootstrapStatus`, `@object-ui/app-shell`),
  * so the same stub answers it.
  */
-function renderAt(path: string, config: AuthPublicConfig, { hasOwner = true } = {}) {
+function renderAt(
+  path: string,
+  config: AuthPublicConfig,
+  { hasOwner = true }: { hasOwner?: boolean | 'error' } = {},
+) {
   const fetchFn = stubServer(config, hasOwner);
   vi.stubGlobal('fetch', fetchFn);
   window.history.replaceState({}, '', path);
@@ -181,21 +200,25 @@ describe('LoginPage — the "Sign up" link follows the audience posture (objectu
     expect(wire.bootstrapProbes).toBe(0);
   });
 
-  it('under invite_only on a deployment with no owner yet, keeps "Sign up" for the first owner', async () => {
+  it('under invite_only on a deployment with no owner yet, still offers the first owner a sign-up', async () => {
     renderAt('/login', configFor('invite_only'), { hasOwner: false });
     await loginConfigApplied();
     await waitFor(() => expect(wire.bootstrapProbes).toBe(1));
 
-    expect((await screen.findByRole('link', SIGN_UP_LINK)).getAttribute('href')).toBe('/register');
+    // objectstack#32021 — as the lead (the owner-account prompt), not the small link.
+    expect((await screen.findByRole('link', FIRST_OWNER_LINK)).getAttribute('href')).toBe('/register');
+    expect(screen.queryByRole('link', SIGN_UP_LINK)).toBeNull();
   });
 
-  it('under open and email_domain, is unchanged and makes no bootstrap probe', async () => {
+  it('under open and email_domain on a deployment with an owner, is unchanged', async () => {
     for (const posture of ['open', 'email_domain']) {
       renderAt('/login', configFor(posture));
       await loginConfigApplied();
+      // objectstack#32021 — one probe, asking only whether an owner exists.
+      await waitFor(() => expect(wire.bootstrapProbes).toBe(1));
 
       expect(screen.getByRole('link', SIGN_UP_LINK).getAttribute('href')).toBe('/register');
-      expect(wire.bootstrapProbes).toBe(0);
+      expect(screen.queryByRole('link', FIRST_OWNER_LINK)).toBeNull();
       cleanup();
     }
   });
@@ -205,7 +228,6 @@ describe('LoginPage — the "Sign up" link follows the audience posture (objectu
     await loginConfigApplied();
 
     expect(screen.getByRole('link', SIGN_UP_LINK).getAttribute('href')).toBe('/register');
-    expect(wire.bootstrapProbes).toBe(0);
   });
 
   it('with disableSignUp: true, hides "Sign up" even from an invitation redirect', async () => {
@@ -290,11 +312,11 @@ describe('RegisterPage — explains invitation-only registration before the form
     expect(wire.bootstrapProbes).toBe(1);
   });
 
-  it('under open, renders the form as before and makes no bootstrap probe', async () => {
+  it('under open, renders the form as before', async () => {
     renderAt('/register', configFor('open'));
 
     expect(await screen.findByRole('button', { name: 'Create Account' })).toBeInTheDocument();
-    expect(wire.bootstrapProbes).toBe(0);
+    expect(screen.queryByTestId('register-by-invitation')).toBeNull();
   });
 
   it('with disableSignUp: true, bounces an invitation redirect to /login as before', async () => {
@@ -304,4 +326,113 @@ describe('RegisterPage — explains invitation-only registration before the form
     expect(screen.queryByRole('button', { name: 'Create Account' })).toBeNull();
     expect(screen.queryByTestId('register-by-invitation')).toBeNull();
   });
+});
+
+describe('a deployment nobody has an account on leads with creating the owner account (objectstack#32021)', () => {
+  const en = builtInLocales.en.auth;
+
+  it.each(['open', 'invite_only'])(
+    'under %s, the first visit is set-up, not "Welcome back", with one way to the sign-up',
+    async (posture) => {
+      renderAt('/login', configFor(posture), { hasOwner: false });
+      await loginConfigApplied();
+
+      expect(await screen.findByRole('heading', { name: en.login.firstOwner.title })).toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: en.login.welcomeTitle })).toBeNull();
+      expect(screen.getByTestId('first-owner-sign-up')).toHaveTextContent(en.login.firstOwner.signInDivider);
+      expect(screen.getByRole('link', FIRST_OWNER_LINK).getAttribute('href')).toBe('/register');
+      expect(screen.queryByRole('link', SIGN_UP_LINK)).toBeNull();
+      // Signing in to an existing account stays on the same card.
+      expect(screen.getByLabelText('Email')).toBeInTheDocument();
+      expect(screen.queryByTestId('invitation-link-hint')).toBeNull();
+    },
+  );
+
+  it('the owner-account button reaches the register page, titled for the first owner', async () => {
+    renderAt('/login', configFor('open'), { hasOwner: false });
+    await loginConfigApplied();
+    await userEvent.click(await screen.findByRole('link', FIRST_OWNER_LINK));
+
+    expect(await screen.findByRole('heading', { name: en.register.firstOwner.title })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create Account' })).toBeInTheDocument();
+    expect(seen[seen.length - 1]).toBe('/register');
+  });
+
+  it('CONTROL: a deployment with an owner still says "Welcome back" and keeps "Have an invitation?"', async () => {
+    renderAt('/login', configFor('invite_only'));
+    await loginConfigApplied();
+    await waitFor(() => expect(wire.bootstrapProbes).toBe(1));
+
+    expect(screen.getByRole('heading', { name: en.login.welcomeTitle })).toBeInTheDocument();
+    expect(await screen.findByTestId('invitation-link-hint')).toHaveTextContent(en.login.invitationLinkHint);
+    expect(screen.queryByRole('heading', { name: en.login.firstOwner.title })).toBeNull();
+    expect(screen.queryByTestId('first-owner-sign-up')).toBeNull();
+  });
+
+  it('CONTROL: an open deployment with an owner says "Welcome back" with the small "Sign up"', async () => {
+    renderAt('/login', configFor('open'));
+    await loginConfigApplied();
+    await waitFor(() => expect(wire.bootstrapProbes).toBe(1));
+
+    expect(screen.getByRole('heading', { name: en.login.welcomeTitle })).toBeInTheDocument();
+    expect(screen.getByRole('link', SIGN_UP_LINK).getAttribute('href')).toBe('/register');
+    expect(screen.queryByTestId('first-owner-sign-up')).toBeNull();
+  });
+
+  it('a probe the server fails is not read as "nobody here": the page stays "Welcome back"', async () => {
+    renderAt('/login', configFor('open'), { hasOwner: 'error' });
+    await loginConfigApplied();
+    await waitFor(() => expect(wire.bootstrapProbes).toBe(1));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(screen.getByRole('heading', { name: en.login.welcomeTitle })).toBeInTheDocument();
+    expect(screen.queryByTestId('first-owner-sign-up')).toBeNull();
+  });
+
+  it('an invitee on a deployment with no owner is greeted for the invitation, not as the owner', async () => {
+    renderAt(`/login${INVITE_QUERY}`, configFor('open'), { hasOwner: false });
+    await loginConfigApplied();
+
+    expect(screen.getByRole('heading', { name: en.login.invitationTitle })).toBeInTheDocument();
+    expect(screen.queryByTestId('first-owner-sign-up')).toBeNull();
+    expect(wire.bootstrapProbes).toBe(0);
+  });
+});
+
+describe('with no mail service, a wrong password points to the administrator (objectstack#32021)', () => {
+  const errors = builtInLocales.en.auth.login.errors;
+
+  async function signInRefused(config: AuthPublicConfig): Promise<string> {
+    renderAt('/login', config);
+    await loginConfigApplied();
+    await userEvent.type(screen.getByLabelText('Email'), 'someone@example.com');
+    await userEvent.type(screen.getByLabelText('Password'), 'hunter2hunter2');
+    await userEvent.click(screen.getByRole('button', { name: builtInLocales.en.auth.login.submitButton }));
+    await waitFor(() => expect(wire.signIns).toBe(1));
+    return (await screen.findByText(/Invalid email or password\./)).textContent ?? '';
+  }
+
+  const withMail = (emailDelivery: boolean | undefined): AuthPublicConfig => {
+    const base = configFor('open');
+    return {
+      ...base,
+      features: { ...base.features, ...(emailDelivery === undefined ? {} : { emailDelivery }) },
+    };
+  };
+
+  it('the server says no mail is sent (features.emailDelivery: false): ask the administrator', async () => {
+    const text = await signInRefused(withMail(false));
+    expect(text).toBe(errors.invalidCredentialsNoMail);
+    expect(text).not.toBe(errors.invalidCredentials);
+  });
+
+  it.each([true, undefined])(
+    'CONTROL: emailDelivery %s keeps the reset hint',
+    async (emailDelivery) => {
+      const text = await signInRefused(withMail(emailDelivery));
+      expect(text).toBe(errors.invalidCredentials);
+    },
+  );
 });
