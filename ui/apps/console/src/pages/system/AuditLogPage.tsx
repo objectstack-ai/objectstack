@@ -40,7 +40,7 @@
 
 import { Suspense, useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
-import { mergeFilterNodes, toFilterNodeSafely } from '@object-ui/core';
+import { formatDateTimeStamp, mergeFilterNodes, toFilterNodeSafely } from '@object-ui/core';
 import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
 import {
   Button,
@@ -256,11 +256,13 @@ function servedObjectOf(raw: unknown): { name: string; label?: string } | undefi
 /**
  * `locale` is REQUIRED: the log's timestamp column used to format with no
  * tag, i.e. in the MACHINE's locale (objectui#9909). The page passes
- * `useDisplayLocale()`; the `catch` is for an unparseable value.
+ * `useDisplayLocale()`. The face is the shared timestamp face, so one locale
+ * reads one clock: the grid's 12-hour convention, to the second, in the
+ * declared display zone (objectstack#32158).
  */
 function formatDate(s: string | null | undefined, locale: string): string {
   if (!s) return '—';
-  try { return new Date(s).toLocaleString(locale); } catch { return s; }
+  return formatDateTimeStamp(s, { locale });
 }
 
 /**

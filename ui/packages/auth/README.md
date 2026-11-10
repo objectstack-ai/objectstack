@@ -198,6 +198,13 @@ const authedFetch = createAuthenticatedFetch();
 const sameOriginFetch = createAuthenticatedFetch({ sameOriginOnly: true });
 ```
 
+A `401` answered to an API request through this wrapper tells a mounted
+`AuthProvider` that the session may have ended on the server. While it holds a
+session, the provider asks the server once; only an answered "no session"
+clears it, so `AuthGuard` renders its fallback (the Console's sends the visitor
+to `/login?redirect=<current page>`). A `403`, a `404`, an unanswered re-check
+or a `401` with no session held changes nothing.
+
 ### Browser storage at sign-out
 
 Every sign-out clears the `localStorage` and `sessionStorage` keys the session

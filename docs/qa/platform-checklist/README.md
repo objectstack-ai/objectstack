@@ -121,6 +121,7 @@ copy its shape rather than inventing a second one.
     "why": "what is missing from stock seeds, and which clauses block(fixture) without it",
     "provenance": "run #7635 (framework 92f26f75) → #7670",   // where the recipe was proven
     "app": "showcase",
+    "command": "node scripts/qa/qa-fixture.mjs … — optional: ONE command that replays the sequence",
     "requires": ["capabilities/sessions the recipe itself needs before step 1"],
     "sequence": [                        // the calls, in order — replayable literally
       { "step": 1,
@@ -213,6 +214,17 @@ Why this shape:
   CI-wired (see "Operating cadence"), so it reaches whoever runs the gate — **not every
   PR** — plus the daily `platform-checklist-watchdog` job of `fleet-patrols.yml`, which files or refreshes
   one issue when the gate is red.
+- **`command` is optional, and the sequence stays the authority.** A recipe a run keeps
+  re-deriving can name one command that replays it (`scripts/qa/qa-fixture.mjs`, #32168):
+  the script follows the sequence step by step, proves the recipe's own premise before it
+  reports success, and prints what the items need (credentials, ids) as one JSON object. A
+  call the sequence changes is changed in the script in the same PR; when the two disagree,
+  the sequence is right and the script is the bug. The same script provisions the fixtures
+  that are not area recipes — the walled boot (RUNNER.md, "A walled boot is a fixture of its
+  own"), the credentialed external database and the broken-upstream scratch app (named in
+  the `fixtures` of the items that need them) — and refuses with exit 2, naming the input,
+  where one needs something the container may lack. ⛔ No credential is ever committed: a
+  recipe that needs one takes it from the environment or generates it per run.
 - **`why` is the debt marker.** A recipe exists because stock fixtures cannot demonstrate
   something — the same discipline as a coverage waiver. Landing the fixture in the
   showcase seeds proper retires the recipe; until then `why` says what is missing and

@@ -48,6 +48,7 @@ export interface SubflowGuardsHost {
     readonly packagedSubflowCallers: AutomationEngine['packagedSubflowCallers'];
     readonly deactivateFlowTrigger: AutomationEngine['deactivateFlowTrigger'];
     readonly activateFlowTrigger: AutomationEngine['activateFlowTrigger'];
+    readonly flowCallKey: AutomationEngine['flowCallKey'];
 }
 
 /** The body of {@link AutomationEngine.describeDisabledFlow}; that method's docblock is its contract. */
@@ -246,7 +247,7 @@ export function describeDisabledSubflows(
 }
 
 /** The body of {@link AutomationEngine.rejudgeSubflowCallers}; that method's docblock is its contract. */
-export function rejudgeSubflowCallers(this: Pick<SubflowGuardsHost, 'boundFlowTriggers' | 'subflowDeclinedFlows' | 'subflowNoticeDeclinedFlows' | 'subflowRegionDeclinedFlows' | 'flows' | 'subflowTargets' | 'packagedSubflowCallers' | 'disabledPackagedSubflows' | 'deactivateFlowTrigger' | 'activateFlowTrigger'>, subflow: string): void {
+export function rejudgeSubflowCallers(this: Pick<SubflowGuardsHost, 'boundFlowTriggers' | 'subflowDeclinedFlows' | 'subflowNoticeDeclinedFlows' | 'subflowRegionDeclinedFlows' | 'flows' | 'subflowTargets' | 'packagedSubflowCallers' | 'disabledPackagedSubflows' | 'deactivateFlowTrigger' | 'activateFlowTrigger' | 'flowCallKey'>, subflow: string): void {
     if (
         this.boundFlowTriggers.size === 0 &&
         this.subflowDeclinedFlows.size === 0 &&
@@ -269,7 +270,8 @@ export function rejudgeSubflowCallers(this: Pick<SubflowGuardsHost, 'boundFlowTr
     for (const caller of transitiveSubflowCallers(this.flows, this.subflowTargets, subflow)) {
         if (reoffered.has(caller)) continue;
         const settled = this.boundFlowTriggers.has(caller)
-            ? subflowNoticeTrap(this.flows, caller) === undefined && regionSuspendingCall(this.flows, caller) === undefined
+            ? subflowNoticeTrap(this.flows, caller, this.flowCallKey) === undefined
+                && regionSuspendingCall(this.flows, caller, this.flowCallKey) === undefined
             : !this.subflowNoticeDeclinedFlows.has(caller) && !this.subflowRegionDeclinedFlows.has(caller);
         if (settled) continue;
         this.deactivateFlowTrigger(caller);

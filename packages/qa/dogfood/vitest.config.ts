@@ -328,6 +328,11 @@ export default defineConfig({
               find: /^@objectstack\/service-datasource$/,
               replacement: path.resolve(__dirname, '../../services/service-datasource/src/index.ts'),
             },
+            // [#31696] `flow-credential-channel.dogfood.test.ts` builds its channel from this export.
+            {
+              find: /^@objectstack\/service-automation$/,
+              replacement: path.resolve(__dirname, '../../services/service-automation/src/index.ts'),
+            },
             // [#21880] `search-companion-field-scope.dogfood.test.ts` mounts
             // `PinyinSearchPlugin` on a real boot, and the companion values it
             // writes are what every search in that file matches through. The

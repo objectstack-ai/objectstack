@@ -104,7 +104,10 @@ export function registerMetaQualifiedItemRoute(
                 }
                 await readItem(asItemRead(req, params, query), res);
             } catch (error: any) {
-                handleRouteError(res, error);
+                // [#32201] A shareable namespace both owners hold, or `_env`
+                // for a name the environment does not hold: the refusal with
+                // its holders as `details.candidates`.
+                handleRouteError(res, error, undefined, { packageScopedCandidates: true });
             }
         },
         metadata: {

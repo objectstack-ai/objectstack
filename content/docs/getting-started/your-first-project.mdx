@@ -114,11 +114,15 @@ my-app/
     ├── objects/
     │   ├── index.ts             # barrel — re-exports every object
     │   └── note.object.ts       # a sample object
-    ├── views/index.ts           # an empty barrel for each directory
-    ├── actions/index.ts         # `os generate` writes into, already
-    ├── flows/index.ts           # wired into objectstack.config.ts
-    ├── dashboards/index.ts
-    ├── apps/index.ts
+    ├── views/
+    │   ├── index.ts
+    │   └── note.view.ts         # the sample object's list view
+    ├── apps/
+    │   ├── index.ts
+    │   └── main.app.ts          # the starter app, listing the notes
+    ├── actions/index.ts         # an empty barrel for each other directory
+    ├── flows/index.ts           # `os generate` writes into, already
+    ├── dashboards/index.ts      # wired into objectstack.config.ts
     └── skills/index.ts
 ```
 
@@ -275,15 +279,15 @@ Console — data browser, metadata explorer, API docs — is served at
 (`admin@objectos.ai` / `admin123`).
 
 <Callout type="info">
-**The starter has no app, so `my_app_note` is in no Console navigation.** You
-will see the platform's own apps and not the note object: this template ships
-objects only, with no app and no views. That is the intended starting point,
-not a broken install — the object is live, and the REST calls in step 4 read
-and write it. **An object appears in Console navigation only when an app lists
-it.** `npx os generate app notes` writes one under `src/apps/`, with a
-navigation entry for the starter's only object and its export line in
-`src/apps/index.ts`; the Console shows it after the dev server rebuilds. Or
-describe the app you want to your coding agent —
+**The starter ships one app, so your project is in the Console from the first
+boot.** Next to the platform's own apps you will see **Main**, from
+`src/apps/main.app.ts`; its `Notes` entry opens the list that
+`src/views/note.view.ts` declares for `my_app_note`. **An object appears in
+Console navigation only when an app lists it**, so for each object you add, add
+a navigation entry to that app (or generate an app of its own) and a view:
+`npx os generate app NAME --object OBJECT` and `npx os generate view OBJECT`
+write the file and its export line, and the Console shows it after the dev
+server rebuilds. Or describe the app you want to your coding agent —
 [Build with Claude Code](/docs/getting-started/build-with-claude-code).
 </Callout>
 

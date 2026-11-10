@@ -76,6 +76,7 @@ import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import type { ErrorCode } from '@objectstack/spec/api';
 import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 import { logError } from './log.js';
+import { PackageScopedNameRefusedError, type PackageScopedHolder } from '@objectstack/core';
 
 export {
     sandboxBusinessMessage,
@@ -254,7 +255,36 @@ function logWithheldServerFault(
  * instead of forming a second opinion that can drift from the responder — the
  * drift this whole seam exists to prevent (#4886).
  */
-function resolveErrorResponse(error: any, object?: string): { status: number; body: Record<string, unknown> } {
+/**
+ * [#32201, ADR-0150 D5] What a route asks of this door beyond the answer every
+ * route gets. `packageScopedCandidates`: a package-scoped refusal (the
+ * `409 RESOURCE_CONFLICT` a by-name read throws when its address names no one
+ * item) carries its holders as `details.candidates`, beside the flat body's
+ * `error` and `code`, which stay as they are. The `/meta` by-name reads ask it
+ * (`meta-item-read-routes.ts`, `meta-qualified-item-route.ts`), so their
+ * answer lists the holders as the runtime dispatcher's `/meta`, `/automation`
+ * and `/actions` doors do. Every other route's answer is unchanged.
+ */
+export interface RouteErrorOptions {
+    readonly packageScopedCandidates?: boolean;
+}
+
+/**
+ * The holders of a package-scoped refusal, or `undefined` for any other thrown
+ * value. Recognised by class and, as `import-mapping.ts` and the runtime's
+ * `/meta` door recognise it, by shape (`code === 'RESOURCE_CONFLICT'` with a
+ * `refusal` whose `status` is `'refused'`), for an error that crossed a second
+ * copy of `@objectstack/core`.
+ */
+function packageScopedRefusalCandidates(error: unknown): readonly PackageScopedHolder[] | undefined {
+    const thrown = error as { code?: unknown; refusal?: { status?: unknown; candidates?: unknown } } | null | undefined;
+    const recognised = error instanceof PackageScopedNameRefusedError
+        || (thrown?.code === 'RESOURCE_CONFLICT' && thrown.refusal?.status === 'refused');
+    const candidates = recognised ? thrown?.refusal?.candidates : undefined;
+    return Array.isArray(candidates) ? (candidates as readonly PackageScopedHolder[]) : undefined;
+}
+
+function resolveErrorResponse(error: any, object?: string, options?: RouteErrorOptions): { status: number; body: Record<string, unknown> } {
     // [#17273] A sandboxed body that CRASHED is a fault before it is anything
     // else — the SAME terminal ordering commit cf6e0a193 gave {@link classifyDataError},
     // asked here so the ruling reaches the other door too.
@@ -602,10 +632,17 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
                     : thrownCodeFields(error, error.status)),
                 ...(Array.isArray(error.issues) ? { issues: error.issues } : {}),
                 ...(object ? { object } : {}),
+                ...packageScopedCandidatesMember(error, options),
             },
         });
     }
     return mapDataError(error, object);
+}
+
+/** [#32201] The `details.candidates` member {@link RouteErrorOptions} asks for, or nothing. */
+function packageScopedCandidatesMember(error: unknown, options: RouteErrorOptions | undefined): { details?: { candidates: readonly PackageScopedHolder[] } } {
+    const candidates = options?.packageScopedCandidates ? packageScopedRefusalCandidates(error) : undefined;
+    return candidates ? { details: { candidates } } : {};
 }
 
 /**
@@ -1136,8 +1173,8 @@ export function thrownAnswerIsBareNotFound(error: any, object?: string): boolean
  * to a bare `sendThrownError(res, error, object)` — this only decides whether the log
  * line is printed.
  */
-export function handleRouteError(res: any, error: any, object?: string): void {
-    const resolved = resolveErrorResponse(error, object);
+export function handleRouteError(res: any, error: any, object?: string, options?: RouteErrorOptions): void {
+    const resolved = resolveErrorResponse(error, object, options);
     logUnexpectedRouteError(error, resolved);
     res.status(resolved.status).json(resolved.body);
 }

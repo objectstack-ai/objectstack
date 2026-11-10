@@ -495,6 +495,43 @@ describe('SCIM group push → mapped permission set', () => {
   });
 });
 
+// Setup's declared "Map … Group" actions reach the save through the action
+// door, which stamps the caller's active organization into the body of every
+// `/api/v1/auth/` target (`buildApiActionRequest`, packages/runtime). The save
+// admits that one key and reads nothing from it; every other unknown key is
+// still refused.
+describe('the mapping save admits the action door\'s organizationId stamp, and only that key', () => {
+  it('a body stamped with another organization saves the mapping in the source\'s organization', async () => {
+    const h = await boot();
+    const saved = await saveMapping(h, {
+      connectionId: CONNECTION,
+      groupExternalId: 'okta-grp-sales',
+      permissionSet: SALES,
+      organizationId: 'org_where_the_admin_is_working',
+    });
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+    expect((saved.body as { data: Record<string, unknown> }).data.organizationId).toBe(ORG);
+    const rows = (await h.engine.find('sys_idp_group_mapping', {}, SYSTEM)) as Array<Record<string, unknown>>;
+    expect(rows.map((r) => [r.permission_set, r.organization_id])).toEqual([[SALES, ORG]]);
+  });
+
+  it('any other unknown key is still refused unknown_field, beside the admitted stamp, and nothing is stored', async () => {
+    const h = await boot();
+    const refused = await saveMapping(h, {
+      connectionId: CONNECTION,
+      groupExternalId: 'okta-grp-sales',
+      permissionSet: SALES,
+      organizationId: ORG,
+      tenantId: ORG,
+    });
+    expect(refused.status).toBe(400);
+    const error = (refused.body as { error: { code: string; fields: Array<{ field: string; code: string }> } }).error;
+    expect(error.code).toBe('VALIDATION_FAILED');
+    expect(error.fields.map((f) => [f.field, f.code])).toEqual([['tenantId', 'unknown_field']]);
+    expect(await h.engine.find('sys_idp_group_mapping', {}, SYSTEM)).toEqual([]);
+  });
+});
+
 // [ADR-0090 D10, D12] The projection writes its grants as the system, so the
 // agent ceiling refusal on the grant table stands down for it; what keeps an
 // agent ceiling set off a person here is the organization boundary's by-name

@@ -719,6 +719,23 @@ contradicts it, and correct it here when it does.
   this entry and the missing prerequisite — never `fail`, and never on a faked posture.
   Each item that carries such a leg names it in its own `fixtures.knownGaps`.
 
+  **One command provisions it:** `node scripts/qa/qa-fixture.mjs walled-boot` (`--posture
+  group` for the other wall; default `isolated`). It boots the showcase from this tree
+  through `os dev` on a free port and its own file DB under `/tmp`, with the three variables
+  above exported (the operator is the `--seed-admin` address, the policy `invite-only`),
+  waits for the ready banner, and proves the wall took rather than assuming it: it fails on a
+  DEGRADED banner, and unless `GET /api/v1/auth/config` answers
+  `features.multiOrgEnabled: true`, the posture asked for, and `degradedTenancy: false`. Then
+  the operator creates an organization and makes it current (`--no-organization` skips
+  that, for a clause about the no-organization state), so the operator token it prints mints
+  walled personas through `admin/create-user` at once, each landing in that organization with
+  `membershipCreated: true`. It prints one JSON object (port, operator token, organization,
+  log path, the `Seeds:` row, which reads `not run this boot (multi-tenant-replay)` on a
+  walled boot); `node scripts/qa/qa-fixture.mjs teardown --dir DIR` stops the boot it
+  recorded and removes the directory. Proved on both postures at `8523ef9a` (#32168, after
+  QA run #32135 listed the walled boot among the recurring fixture debt). The items that
+  carry a walled leg reach the command through this entry, which they already cite.
+
 - **A stock `single` boot holds exactly one organization, and no door mints a second; a
   walled boot mints them through the auth API.**
   `POST /api/v1/auth/organization/create` answers **`403 ORGANIZATION_CREATION_DISABLED`**

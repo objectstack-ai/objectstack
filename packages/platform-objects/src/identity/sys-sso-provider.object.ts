@@ -163,6 +163,16 @@ export const SysSsoProvider = ObjectSchema.create({
         { name: 'entryPoint', label: 'IdP SSO URL', type: 'text', required: true, helpText: 'The IdP’s SAML single sign-on (redirect) endpoint that receives the SAMLRequest.' },
         { name: 'cert', label: 'IdP Signing Certificate', type: 'textarea', required: true, helpText: 'The IdP’s X.509 signing certificate (PEM body). Used to verify assertion signatures.' },
         { name: 'identifierFormat', label: 'NameID Format', type: 'text', required: false, placeholder: 'urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress', helpText: 'Optional. Requested SAML NameID format. Defaults to the IdP’s configured format.' },
+        // Who a sign-in resolves to: the assertion attributes the user's email
+        // and name are read from, stored as the provider's `mapping.email` /
+        // `firstName` / `lastName` / `name` (plugin-auth `register-sso-provider.ts`,
+        // "The attribute mapping"). Blank keeps the vendor's default for that
+        // member. The help text names the Okta and Entra ID attribute names,
+        // which differ from the defaults.
+        { name: 'mapEmail', label: 'Map: Email attribute', type: 'text', required: false, placeholder: 'email', helpText: 'Optional. Assertion attribute mapped to the user’s email. Defaults to "email", then the NameID. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress' },
+        { name: 'mapFirstName', label: 'Map: First name attribute', type: 'text', required: false, placeholder: 'givenName', helpText: 'Optional. Assertion attribute mapped to the user’s first name. Defaults to "givenName". Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname' },
+        { name: 'mapLastName', label: 'Map: Last name attribute', type: 'text', required: false, placeholder: 'surname', helpText: 'Optional. Assertion attribute mapped to the user’s last name. Defaults to "surname". Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname' },
+        { name: 'mapName', label: 'Map: Display name attribute', type: 'text', required: false, placeholder: 'displayName', helpText: 'Optional. Assertion attribute mapped to the user’s full name, used when the first and last name attributes are absent. Defaults to "displayName", then the NameID. Okta: name. Entra ID: http://schemas.microsoft.com/identity/claims/displayname' },
         { name: 'mapGroups', label: 'Map: Groups attribute', type: 'text', required: false, placeholder: 'groups', helpText: 'Optional. Assertion attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.' },
       ],
     },
@@ -271,7 +281,8 @@ export const SysSsoProvider = ObjectSchema.create({
       type: 'api',
       method: 'POST',
       // The provider's two sign-in toggles (ruling record 6718355623 on the
-      // Enterprise SSO operator knobs), written through @better-auth/sso's own
+      // Enterprise SSO operator knobs) and its OIDC userinfo opt-out
+      // (`skip_user_info`), written through @better-auth/sso's own
       // /sso/update-provider, which takes them as provider additional fields
       // (plugin-auth `sso-sign-in-options.ts`). Its writers are the provider's
       // writers: the vendor's provider-access check plus plugin-auth's
@@ -286,6 +297,7 @@ export const SysSsoProvider = ObjectSchema.create({
         { name: 'providerId', field: 'provider_id', defaultFromRow: true, required: true },
         { name: 'allowIdpInitiated', field: 'allow_idp_initiated', defaultFromRow: true, required: false },
         { name: 'allowJit', field: 'allow_jit', defaultFromRow: true, required: false },
+        { name: 'skipUserInfo', field: 'skip_user_info', defaultFromRow: true, required: false },
       ],
     },
     // The provider's groups claim, shown and changed where the register forms
@@ -343,6 +355,72 @@ export const SysSsoProvider = ObjectSchema.create({
         acknowledge: 'Done',
         fields: [
           { path: 'groupsClaim', label: 'Groups claim', format: 'text' },
+        ],
+      },
+    },
+    // The provider's attribute mapping: the IdP attributes (SAML) or claims
+    // (OIDC) a sign-in reads the user's email and name from, stored as
+    // `mapping.email` / `firstName` / `lastName` / `name` in the same internal
+    // configuration as the groups claim, so shown and changed through
+    // plugin-auth bridges on the same terms. Platform-admin standing (ADR-0068
+    // D4). No `ai` block on the edit: the email member decides which account a
+    // sign-in is linked to, so it stays human-only (ADR-0011 bucket H's test).
+    {
+      name: 'show_sso_attribute_mapping',
+      label: 'Show Attribute Mapping',
+      icon: 'id-card',
+      variant: 'secondary',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      method: 'POST',
+      target: '/api/v1/auth/admin/sso/get-attribute-mapping',
+      requiredPermissions: [...PLATFORM_ADMIN_SETTINGS_GATE],
+      visible: 'current_user.isPlatformAdmin == true',
+      params: [
+        { name: 'providerId', field: 'provider_id', defaultFromRow: true, required: true },
+      ],
+      resultDialog: {
+        title: 'Attribute mapping',
+        description:
+          'The IdP attributes (SAML) or claims (OIDC) this provider reads the user’s email and name from at each sign-in. Empty means the default: email from "email" (SAML: then the NameID); name from "givenName" + "surname", then "displayName" (OIDC: "name"). First and last name apply to SAML only. Change it with “Edit Attribute Mapping”.',
+        acknowledge: 'Done',
+        fields: [
+          { path: 'protocol', label: 'Protocol', format: 'text' },
+          { path: 'email', label: 'Email', format: 'text' },
+          { path: 'firstName', label: 'First name', format: 'text' },
+          { path: 'lastName', label: 'Last name', format: 'text' },
+          { path: 'name', label: 'Display name', format: 'text' },
+        ],
+      },
+    },
+    {
+      name: 'edit_sso_attribute_mapping',
+      label: 'Edit Attribute Mapping',
+      icon: 'id-card',
+      variant: 'secondary',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      method: 'POST',
+      target: '/api/v1/auth/admin/sso/set-attribute-mapping',
+      requiredPermissions: [...PLATFORM_ADMIN_SETTINGS_GATE],
+      visible: 'current_user.isPlatformAdmin == true',
+      refreshAfter: true,
+      params: [
+        { name: 'providerId', field: 'provider_id', defaultFromRow: true, required: true },
+        { name: 'email', label: 'Email attribute', type: 'text', required: false, placeholder: 'email', helpText: 'The IdP attribute or claim mapped to the user’s email. Leave untouched to keep the current one; clear it to go back to the default ("email"). Entra ID SAML: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress' },
+        { name: 'firstName', label: 'First name attribute (SAML)', type: 'text', required: false, placeholder: 'givenName', helpText: 'SAML only. The assertion attribute mapped to the user’s first name. Leave untouched to keep the current one. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname' },
+        { name: 'lastName', label: 'Last name attribute (SAML)', type: 'text', required: false, placeholder: 'surname', helpText: 'SAML only. The assertion attribute mapped to the user’s last name. Leave untouched to keep the current one. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname' },
+        { name: 'name', label: 'Display name attribute', type: 'text', required: false, placeholder: 'displayName', helpText: 'The IdP attribute or claim mapped to the user’s full name (SAML: used when first and last name are absent). Leave untouched to keep the current one. Okta SAML: name. Entra ID: http://schemas.microsoft.com/identity/claims/displayname' },
+      ],
+      resultDialog: {
+        title: 'Attribute mapping saved',
+        description: 'The attributes or claims this provider now reads the user’s email and name from at each sign-in. Empty means the default applies.',
+        acknowledge: 'Done',
+        fields: [
+          { path: 'email', label: 'Email', format: 'text' },
+          { path: 'firstName', label: 'First name', format: 'text' },
+          { path: 'lastName', label: 'Last name', format: 'text' },
+          { path: 'name', label: 'Display name', format: 'text' },
         ],
       },
     },
@@ -453,6 +531,23 @@ export const SysSsoProvider = ObjectSchema.create({
       trackHistory: true,
       description:
         'Under the invite-only audience posture, create an account for a person who signs in through this provider without an account or an invitation. Off by default: such a person is refused. Other postures provision as before. Change it with “Edit Sign-In Options”.',
+      group: 'Identity',
+    }),
+
+    // The OIDC userinfo opt-out, written as the @better-auth/sso provider
+    // additional field `skipUserInfo` (plugin-auth `sso-sign-in-options.ts`).
+    // On, the provider's claims (email, name, groups) come from the verified
+    // ID token only and its userinfo endpoint is not called: the vendor reads
+    // claims from userinfo ALONE whenever one is configured, and Microsoft
+    // Entra ID's userinfo carries no `groups`, `preferred_username` or `upn`.
+    // `trackHistory`, like the two toggles above: it changes what a sign-in
+    // reads about the person.
+    skip_user_info: Field.boolean({
+      label: 'Read Claims From the ID Token Only',
+      defaultValue: false,
+      trackHistory: true,
+      description:
+        'OIDC only. Read the email, name and groups from the identity provider’s verified ID token and do not call its userinfo endpoint. Turn it on for Microsoft Entra ID, whose userinfo answer carries no groups and no preferred_username. Off by default: a provider with a userinfo endpoint reads its claims from that answer. Change it with “Edit Sign-In Options”.',
       group: 'Identity',
     }),
 
