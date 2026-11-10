@@ -254,9 +254,12 @@ widths, the page size and how often a probe is tried are that child's tuning.
   returns the same rows, and the pull never ends. Cutting at `field >= T + 1 ms` instead skips that millisecond's
   rows with a lower key and a higher finer part. A key cursor has neither problem, because the key compares exactly.
   Invariant 6 is where the key comes from: a federated object declares no primary key except a `columnMap` entry
-  onto `id`, and the SQL driver's own paging guesses none either (`SqlDriver#paginationTieBreaker`: "an object with
-  no mapped key is left alone: no column is guessed"). A source over a view, a keyless table or a composite key
-  therefore needs that entry, or it is refused. For invariant 7, nothing in `driver-sql` sets `supportBigNumbers` or
+  onto `id`, and the SQL driver's own paging guesses none either
+  (`packages/drivers/driver-sql/src/sql-driver.ts#paginationTieBreaker`: guessing on a federated table "would be
+  worse than doing nothing"; a `columnMap` entry onto `id` "has DECLARED its key column"). The driver's one other
+  key, a SQL Server table's catalog primary key (#31327), is read at run time and is not visible at build, so the pull
+  does not use it. A source over a view, a keyless table or a composite key therefore needs that entry, or it is
+  refused. For invariant 7, nothing in `driver-sql` sets `supportBigNumbers` or
   `bigNumberStrings`. A MySQL `BIGINT` above 2^53 may come back rounded, and `key > lastKey` on a rounded value skips
   rows. That client default was not verified here. The engine child verifies it per dialect and reads such a key as
   a string, or refuses it as `source_key_not_exact`.
