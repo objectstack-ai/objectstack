@@ -39,13 +39,15 @@
  *     a validation predicate, a view FILTER / sort / grouping, a flow node, a
  *     hook or action body, a dataset or cube dimension or measure (every
  *     field its column path reads — {@link creditAnalyticsColumns}), a widget
- *     filter, a sharing-rule condition.
+ *     filter, a sharing-rule condition, a row-level security predicate
+ *     ({@link isRlsPredicateSite} — `rowLevelSecurity[].using` / `.check`).
  *   - **display** — the field is drawn: a view column, a form section, a page
  *     binding, an inline grid column ({@link creditInlineGridColumns}),
  *     `highlightFields`, `searchableFields`, an index.
  *   - **carrier** — the field is merely carried along: a translation label, a
- *     seed value, an import-mapping column, a field-level permission grant, a
- *     flow's WRITE of the field, prose that names it. These are what a REMOVAL
+ *     seed value, an import-mapping column, a field-level permission grant
+ *     (every path under `permissions` but an RLS predicate), a flow's WRITE of
+ *     the field, prose that names it. These are what a REMOVAL
  *     must clean up; none of them is evidence that anything reads the field.
  *     A seeded value nothing reads is precisely the shape being hunted.
  *
@@ -76,6 +78,15 @@
  *     precisely so no real row can acquire one, and a consumer anywhere else
  *     would defeat it. Nothing here exempts `hidden` as such — a `hidden` field
  *     that no upsert matches on and nothing reads is still reported.
+ *   - **A row-level security predicate** ({@link isRlsPredicateSite}). A
+ *     permission set is a carrier root — a field-level grant names a field it
+ *     never reads — but its `rowLevelSecurity[].using` is compiled into the
+ *     row filter of every query the policy governs (ADR-0056 D4), and its
+ *     `check` is matched against every row a write produces (ADR-0058 D4).
+ *     Both READ the fields they name on every request, as a sharing-rule
+ *     `condition` does, so both are behaviour sites; and since the policy's
+ *     fields are bare CEL identifiers (`owner == current_user.email`), both
+ *     are read as expressions, every identifier a candidate.
  *   - **A derived inline grid** ({@link creditDerivedInlineGrid},
  *     `deriveInlineGridColumns`). A relationship field that sets `inlineEdit`
  *     with no `inlineColumns`, and a `subforms` entry with no `columns`, both
@@ -107,6 +118,16 @@
  * field that sets `inlineEdit` is the inline grid's join key — the renderer
  * loads the child rows filtered on it and stamps it on every row it saves —
  * so it is read whatever columns the grid draws.
+ *
+ * Another is the grid's line-position field ({@link creditInlineGridSortField},
+ * `deriveInlineGridSortField`): the child field the grid stamps each line's
+ * position into on drag-reorder and loads the child rows ordered by. No
+ * column draws it — both derivations above skip it — so no column credits
+ * it, but every inline grid resolves one, with authored columns or derived
+ * ones: a relationship field that sets `inlineEdit` and every `subforms` /
+ * `details` entry. The field is the spec's derivation, never a copy of its
+ * name list; the child's other sort-named fields, and a `record:line_items`
+ * panel (which draws no grid of its own), stay uncredited.
  *
  * A field with at least one behaviour OR display site is consumed and gets no
  * finding — a field that is only drawn is the ordinary state of most fields
@@ -178,12 +199,14 @@
 import {
   deriveFieldGroupLayout,
   deriveInlineGridColumns,
+  deriveInlineGridSortField,
   deriveInlineRowFormFields,
   isInlineRowFormOffered,
   resolveDisplayField,
 } from '@objectstack/spec/data';
 import type { DisplayNameObjectMeta } from '@objectstack/spec/data';
 import { referenceTargetOf } from '@objectstack/spec/data';
+import type { PermissionSet, RowLevelSecurityPolicy } from '@objectstack/spec/security';
 import { collectionEntries } from './collection-entries.js';
 import {
   indexServedObjectGraph,
@@ -290,6 +313,54 @@ export const CARRIER_ROOTS: readonly string[] = ['translations', 'data', 'mappin
  * and the reader is the loader.
  */
 const CARRIER_IDENTITY_SEGMENTS: ReadonlySet<string> = new Set(['externalId', 'upsertKey']);
+
+/**
+ * The permission-set key that holds its row-level security policies
+ * (`PermissionSetSchema.rowLevelSecurity`). Typed against the spec, so a
+ * rename there fails this package's typecheck instead of silently turning the
+ * credit below off.
+ */
+const RLS_POLICIES_KEY = 'rowLevelSecurity' satisfies keyof PermissionSet;
+
+/**
+ * The two predicate clauses of a row-level security policy
+ * (`RowLevelSecurityPolicySchema`): `using`, the row filter compiled onto
+ * every read, update and delete the policy governs (ADR-0056 D4), and
+ * `check`, matched against the row every insert and update writes
+ * (ADR-0058 D4). Every other member of a policy — `name`, `object`,
+ * `operation`, `positions`, `enabled` — names no field.
+ *
+ * A literal, typed against the spec's policy type: the spec exports no list
+ * of a policy's predicate clauses (its own cross-field refinement names the
+ * same two members by hand), and `satisfies` makes a renamed clause a type
+ * error here rather than a credit that quietly stops matching.
+ */
+const RLS_PREDICATE_KEYS: ReadonlySet<string> = new Set(
+  ['using', 'check'] as const satisfies readonly (keyof RowLevelSecurityPolicy)[],
+);
+
+/**
+ * [#32256] Whether a site is a row-level security predicate of a permission
+ * set: `permissions[].rowLevelSecurity[].using` / `.check`. The walk does not
+ * put array indices in `segments`, so the policy key and the clause are the
+ * last two segments whatever shape (array or name-keyed map) `permissions`
+ * was authored in.
+ *
+ * It is the only READ under the `permissions` carrier root: a field-level
+ * grant (`fields`), an object grant and every other key of a permission set
+ * stay carriers. A policy's `object` is the enclosing
+ * declaration {@link contextOf} already resolves, so the predicate's
+ * identifiers are credited to the object the policy filters.
+ */
+function isRlsPredicateSite(root: string, segments: readonly string[]): boolean {
+  const n = segments.length;
+  return (
+    root === 'permissions' &&
+    n >= 2 &&
+    segments[n - 2] === RLS_POLICIES_KEY &&
+    RLS_PREDICATE_KEYS.has(segments[n - 1])
+  );
+}
 
 /** Roots whose sites are display by default; `BEHAVIOUR_SEGMENTS` earn behaviour back. */
 const DISPLAY_ROOTS: ReadonlySet<string> = new Set(['views', 'pages', 'apps']);
@@ -559,10 +630,13 @@ class ConsumerLedger {
 }
 
 function bucketFor(root: string, segments: readonly string[], leafKey: string): SiteKind {
-  // An upsert identity inside a carrier root is the one read there: the loader
-  // matches rows on that column. Everything else a carrier root holds is a
-  // value it writes or a label it carries.
+  // An upsert identity inside a carrier root is a read there: the loader
+  // matches rows on that column. So is a row-level security predicate: the
+  // policy filters, or checks, rows by the fields it names on every request.
+  // Everything else a carrier root holds is a value it writes or a label it
+  // carries.
   if (CARRIER_ROOTS.includes(root)) {
+    if (isRlsPredicateSite(root, segments)) return 'behaviour';
     return segments.some((s) => CARRIER_IDENTITY_SEGMENTS.has(s)) ? 'behaviour' : 'carrier';
   }
   if (PROSE_KEYS.has(leafKey)) return 'carrier';
@@ -591,7 +665,10 @@ function scanText(
   const hits: { token: string; at: number }[] = [];
   const trimmed = text.trim();
   if (ledger.objectsByField.has(trimmed)) hits.push({ token: trimmed, at: 0 });
-  const shapes = EXPRESSION_KEYS.has(leafKey) ? [...REFERENCE_SHAPES, IDENTIFIER_SHAPE] : REFERENCE_SHAPES;
+  // [#32256] An RLS predicate is CEL whose row fields are bare identifiers, but
+  // `using` and `check` are too generic to be expression keys everywhere.
+  const expression = EXPRESSION_KEYS.has(leafKey) || isRlsPredicateSite(root, segments);
+  const shapes = expression ? [...REFERENCE_SHAPES, IDENTIFIER_SHAPE] : REFERENCE_SHAPES;
   for (const shape of shapes) {
     for (const m of text.matchAll(shape)) {
       if (ledger.objectsByField.has(m[1])) {
@@ -715,6 +792,31 @@ function creditDerivedInlineGrid(
   }
   if (rowForm === undefined) return;
   creditDerivedRowForm(ledger, childObject, fields, relationshipField, rowForm.inlineMode, columns, root, path);
+}
+
+/**
+ * [#32256] Credit an inline grid's line-position field, on the child object.
+ *
+ * `deriveInlineGridSortField` (`@objectstack/spec/data`) is the renderer's
+ * rule: the first child field, in field-map order, whose name is a
+ * sort-position name. The grid writes each line's position into it on
+ * drag-reorder and orders the child rows by it when it loads them, so the
+ * field is read wherever the grid is drawn — a behaviour site, as a view's
+ * sort is. The renderer resolves it on every grid, authored columns or
+ * derived, so the callers credit it on each carrier that draws a grid.
+ */
+function creditInlineGridSortField(
+  ledger: ConsumerLedger,
+  childObject: string | undefined,
+  root: string,
+  path: string,
+): void {
+  const fields = childObject === undefined ? undefined : ledger.fieldMapByObject.get(childObject);
+  if (childObject === undefined || fields === undefined) return;
+  const sortField = deriveInlineGridSortField({ fields });
+  if (sortField !== undefined && ledger.declares(childObject, sortField)) {
+    ledger.record(childObject, sortField, { root, path, kind: 'behaviour' });
+  }
 }
 
 /**
@@ -923,8 +1025,10 @@ function walk(
       creditDerivedInlineGrid(ledger, childObject, relationshipField, rowForm, root, `${path}.childObject`);
     }
     // [#21091] An authored row form, read against the child.
+    // [#32256] And the grid's line-position field, whatever columns it draws.
     if (childEntry === 'collection') {
       creditAuthoredRowForm(ledger, rec, childObject, root, `${path}.${CHILD_ENTRY_FORM_FIELDS_KEY}`);
+      creditInlineGridSortField(ledger, childObject, root, `${path}.childObject`);
     }
     // [#20951] The child-field keys, each read against the child — and only
     // there, which is why the loop below skips them.
@@ -1033,6 +1137,9 @@ function walkObject(ledger: ConsumerLedger, obj: AnyRec, objectName: string, obj
       // saves. That holds whether the columns are authored or derived, and
       // for a `lookup` as for a `master_detail` — which is exempt anyway.
       ledger.record(objectName, fieldName, { root: 'objects', path: `${fieldPath}.inlineEdit`, kind: 'behaviour' });
+      // [#32256] So is the grid's line-position field on THIS object, authored
+      // columns or derived.
+      creditInlineGridSortField(ledger, objectName, 'objects', `${fieldPath}.inlineEdit`);
       if (!hasAuthoredColumns(field.inlineColumns)) {
         // [#21091] The derived grid's per-row expand form draws more of THIS
         // object. An explicit `grid` / `form` is the form factor; `true` is

@@ -1542,6 +1542,124 @@ describe('[#21439] validateFieldConsumers — an analytics member credits every 
   });
 });
 
+describe('[#32256] validateFieldConsumers — a row-level security predicate reads the fields it names', () => {
+  /** `owner` is what the policies below filter on; `region` is named by nothing but what each case adds. */
+  const stack = (permissionSet: AnyRec): AnyRec => ({
+    objects: [
+      { name: 'inv', fields: { name: { type: 'text' }, owner: { type: 'text' }, region: { type: 'text' } } },
+      { name: 'other', fields: { name: { type: 'text' }, owner: { type: 'text' } } },
+    ],
+    views: [{ list: { data: { object: 'inv' }, columns: [] } }, { list: { data: { object: 'other' }, columns: [] } }],
+    permissions: [{ name: 'contributor', objects: { inv: { allowRead: true } }, ...permissionSet }],
+  });
+  const OWN_ROWS = { name: 'own_rows', object: 'inv', operation: 'select', using: 'owner == current_user.email' };
+  const OWNER_KEPT = { name: 'owner_kept', object: 'inv', operation: 'update', check: 'owner == current_user.email' };
+
+  /** `object.field` → verdict, for every field the rule reports. */
+  const verdicts = (s: AnyRec): Record<string, string> =>
+    Object.fromEntries(validateFieldConsumers(s).map((f) => [`${f.object}.${f.field}`, f.verdict]));
+  const UNREAD = { 'inv.region': 'inert', 'other.owner': 'inert' };
+
+  it('baseline: with no policy, `owner` is reported on both objects', () => {
+    expect(verdicts(stack({}))).toEqual({ ...UNREAD, 'inv.owner': 'inert' });
+  });
+
+  it('a `using` predicate reads its bare field, on the object the policy names', () => {
+    expect(verdicts(stack({ rowLevelSecurity: [OWN_ROWS] }))).toEqual(UNREAD);
+  });
+
+  it('a `check` predicate is the same read, on the row a write produces (ADR-0058 D4)', () => {
+    expect(verdicts(stack({ rowLevelSecurity: [OWNER_KEPT] }))).toEqual(UNREAD);
+  });
+
+  it('every field a compound predicate names is read', () => {
+    const both = { ...OWN_ROWS, using: "owner == current_user.email && region == 'emea'" };
+    expect(verdicts(stack({ rowLevelSecurity: [both] }))).toEqual({ 'other.owner': 'inert' });
+  });
+
+  it('a name-keyed permission set map reads the same way', () => {
+    const s = { ...stack({}), permissions: { contributor: { name: 'contributor', rowLevelSecurity: [OWN_ROWS] } } };
+    expect(verdicts(s)).toEqual(UNREAD);
+  });
+
+  it('⛔ a field-level grant beside the policy stays a carrier', () => {
+    const s = stack({ objects: { inv: { allowRead: true, fields: { region: 'read' } } }, rowLevelSecurity: [OWN_ROWS] });
+    const region = validateFieldConsumers(s).find((f) => f.object === 'inv' && f.field === 'region');
+    expect(region?.verdict).toBe('carrier-only');
+    expect(region?.carriers).toEqual(['permissions[0].objects.inv.fields.region']);
+  });
+
+  it('⛔ a predicate credits only the object it filters, never another declaring the same name', () => {
+    const findings = verdicts(stack({ rowLevelSecurity: [OWN_ROWS] }));
+    expect(findings['other.owner']).toBe('inert');
+  });
+});
+
+describe('[#32256] validateFieldConsumers — an inline grid reads its line-position field', () => {
+  const data = { provider: 'object', object: 'ord' };
+  const LOOKUP = { type: 'lookup', reference: 'ord' };
+
+  /** The child of every grid below: `position` comes first, so it is the line-position field. */
+  const LINE_FIELDS = {
+    name: { type: 'text' },
+    qty: { type: 'number' },
+    position: { type: 'number' },
+    sort_order: { type: 'number' },
+  };
+
+  const stack = (relationship: AnyRec, extra: AnyRec = {}, lineFields: AnyRec = LINE_FIELDS): AnyRec => ({
+    objects: [
+      { name: 'ord', fields: { name: { type: 'text' } } },
+      { name: 'lin', fields: { ...lineFields, ord: relationship } },
+    ],
+    views: [{ list: { type: 'grid', data, columns: [{ field: 'name' }] } }],
+    ...extra,
+  });
+  const reported = (s: AnyRec, object = 'lin'): string[] =>
+    validateFieldConsumers(s).filter((f) => f.object === object).map((f) => f.field).sort();
+
+  it('baseline: a relationship that draws no grid leaves both sort-named fields reported', () => {
+    expect(reported(stack(LOOKUP))).toEqual(['ord', 'position', 'qty', 'sort_order']);
+  });
+
+  it('a grid with authored `inlineColumns` reads `position`, which no column draws', () => {
+    expect(reported(stack({ ...LOOKUP, inlineEdit: 'grid', inlineColumns: [{ name: 'qty' }] }))).toEqual(['sort_order']);
+  });
+
+  it('a grid with derived columns reads it too (the derivation skips it as a column)', () => {
+    expect(reported(stack({ ...LOOKUP, inlineEdit: 'grid' }))).toEqual(['sort_order']);
+  });
+
+  it('a form view `subforms` entry reads it on its `childObject`', () => {
+    const entry = { childObject: 'lin', relationshipField: 'ord', columns: [{ name: 'qty' }] };
+    const s = stack(LOOKUP, { views: [{ list: { type: 'grid', data, columns: [{ field: 'name' }] }, form: { type: 'simple', data, subforms: [entry] } }] });
+    expect(reported(s)).toEqual(['sort_order']);
+  });
+
+  it('an `object-master-detail-form` detail entry reads it on its `childObject`', () => {
+    const entry = { childObject: 'lin', relationshipField: 'ord', columns: [{ name: 'qty' }] };
+    const s = stack(LOOKUP, {
+      pages: [{
+        name: 'ord_entry',
+        regions: [{ name: 'main', components: [{ type: 'object-master-detail-form', properties: { objectName: 'ord', details: [entry] } }] }],
+      }],
+    });
+    expect(reported(s)).toEqual(['sort_order']);
+  });
+
+  it('the line-position field is the first sort name in the child\'s FIELD order, not the list\'s', () => {
+    const swapped = { name: { type: 'text' }, qty: { type: 'number' }, sort_order: { type: 'number' }, position: { type: 'number' } };
+    expect(reported(stack({ ...LOOKUP, inlineEdit: 'grid', inlineColumns: [{ name: 'qty' }] }, {}, swapped))).toEqual(['position']);
+  });
+
+  it('⛔ a child field the grid does not derive stays reported, and so does the parent\'s own sort-named field', () => {
+    const s = stack({ ...LOOKUP, inlineEdit: 'grid', inlineColumns: [{ name: 'qty' }] });
+    (s.objects as AnyRec[])[0].fields = { name: { type: 'text' }, position: { type: 'number' } };
+    expect(reported(s)).toEqual(['sort_order']);
+    expect(reported(s, 'ord')).toEqual(['position']);
+  });
+});
+
 describe('[#22161] one-line verdicts — field-no-consumers, the same-name clause bounded', () => {
   /** `n` objects each declaring `description`, with a view naming only `owner`'s name field. */
   const sharedName = (n: number, carried = false): AnyRec => ({
