@@ -1370,6 +1370,79 @@
           "ref": "#31499"
         }
       ]
+    },
+    {
+      "id": "attachments-storage.multi-replica-local-root-refusal",
+      "title": "A declared multi-replica boot on Redis refuses the local file-storage adapter unless the root is declared shared, and a settings change to the local adapter is not applied",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123): the settings leg",
+        "an operator booting the replicas"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two replicas declared on Redis: a Redis server both reach (OS_REDIS_URL), ONE shared Postgres (OS_DATABASE_URL=postgres://…, never a file database: os serve refuses one under this declaration, cli.serve-multi-replica-local-database-refusal), OS_CLUSTER_DRIVER=redis with OS_CLUSTER_REPLICAS=2 on both, the same OS_AUTH_SECRET on both (os start refuses without one, cli.start-multi-replica-auth-secret-refusal), an app that declares @objectstack/service-cluster and @objectstack/service-cluster-redis, and a multi-node gate registered on the module instance os serve consults (packages/services/service-cluster/src/multi-node-gate.ts#registerMultiNodeGate). For the boot legs one replica is enough; two os start processes, each on its own port and its own home (--home), are replica A and replica B. Premise check before any clause: neither boot log carries `[cluster] multi-node not authorized (`, and GET /api/v1/ready on each answers a body whose cluster.driver is redis",
+          "for the settings leg, replica A booted with S3 storage (OS_STORAGE_ADAPTER=s3 and its bucket variables) or with OS_STORAGE_LOCAL_ROOT_SHARED=true"
+        ],
+        "knownGaps": [
+          "BLOCKED(fixture) until a run provisions REPLICA_FIXTURE. The open tree registers no multi-node gate: checkMultiNodeAllowed fails closed when none is registered (packages/services/service-cluster/src/multi-node-gate.ts#checkMultiNodeAllowed), os serve then drops the redis driver for the in-process one, and the split-brain guard refuses the declared topology at ClusterServicePlugin.init, so no declared multi-replica boot on Redis reaches kernel:ready on a stock tree. The gate carriers ship with a distribution, not this repository. The unproven open-tree route is the one the CLI pin uses: an app whose own copy of @objectstack/service-cluster calls registerMultiNodeGate on the instance os serve imports from the host (packages/cli/test/serve-multi-node-gate-declaration.integration.test.ts#writeApp), here with the real redis driver instead of the pin's memory stand-in. The first run that boots two replicas that way names the recipe and lifts `blocked` in the same revision. FOLLOW-UPS §17c"
+        ]
+      },
+      "steps": [
+        "boot replica A with the default local storage adapter and OS_STORAGE_LOCAL_ROOT_SHARED unset; record the exit and the log",
+        "boot it again with OS_STORAGE_LOCAL_ROOT_SHARED=true",
+        "on a replica booted with S3, as admin PUT /api/settings/storage switching the adapter to local; read that replica's log, then upload a file through it"
+      ],
+      "acceptance": [
+        {
+          "clause": "the local adapter under declared replicas refuses the boot, naming S3 and the shared-root declaration",
+          "oracle": "log",
+          "verify": "the boot fails with \"StorageServicePlugin: several replicas are declared (OS_EXPECT_MULTI_NODE / OS_CLUSTER_REPLICAS>1) over the redis cluster driver, but file storage is the local adapter\" and \"OS_STORAGE_LOCAL_ROOT_SHARED=true\" (packages/services/service-storage/src/multi-replica-local-root.ts#MULTI_REPLICA_LOCAL_STORAGE_REFUSAL)",
+          "evidence": "the boot log"
+        },
+        {
+          "clause": "declaring the root shared admits the boot",
+          "oracle": "log",
+          "verify": "with OS_STORAGE_LOCAL_ROOT_SHARED=true the replica boots past storage (packages/services/service-storage/src/multi-replica-local-root.ts#LOCAL_ROOT_SHARED_ENV and #refusesUnsharedLocalRoot)",
+          "evidence": "the boot log"
+        },
+        {
+          "clause": "a settings change to the local adapter is not applied: the replica logs the same refusal and keeps the adapter it had",
+          "oracle": "log",
+          "verify": "the log carries the refusal sentence followed by \"The storage settings change was NOT applied: the current adapter keeps serving.\" (packages/services/service-storage/src/storage-service-plugin.ts, the settings subscriber), and the upload afterwards still lands in S3. The PUT itself may answer 200: the refusal is the subscriber's, not the settings door's",
+          "evidence": "the log lines and the upload's storage key"
+        }
+      ],
+      "negative": [
+        "a declared replica that boots on an unshared local root, or a settings change that switches it there, is a FAIL"
+      ],
+      "blocked": {
+        "by": "fixture",
+        "ref": "fixture gap: no multi-node gate the open tree can register, so no declared multi-replica boot on Redis reaches kernel:ready (FOLLOW-UPS §17c, #32020)"
+      },
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/services/service-storage/src/storage-service-plugin.test.ts (the declared multi-replica cases); no live spec boots declared replicas"
+      },
+      "source": [
+        "packages/services/service-storage/src/multi-replica-local-root.ts#MULTI_REPLICA_LOCAL_STORAGE_REFUSAL, #LOCAL_ROOT_SHARED_ENV and #refusesUnsharedLocalRoot",
+        "packages/services/service-storage/src/storage-service-plugin.ts (the kernel:ready refusal and the settings-change refusal)",
+        "packages/services/service-cluster/src/multi-replica.ts#composedClusterDriver",
+        "#31950"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — multi-replica on Redis: the local storage root is refused unless declared shared (#31950). Blocked(fixture): no multi-node gate in the open tree. Scoped sweep #32020 (epic #32022 M2), read from source at 43a51b55; no live run made",
+          "ref": "#32020"
+        }
+      ]
     }
   ]
 }

@@ -80,7 +80,9 @@
       "items": [
         "api-backend.rest-crud-config-contract",
         "api-backend.query-contract-matrix",
-        "records-forms.crud-roundtrip"
+        "records-forms.crud-roundtrip",
+        "api-backend.recycle-bin-delete-entry-restore",
+        "api-backend.recycle-bin-refusals-purge-empty"
       ]
     },
     "dashboard": {
@@ -146,7 +148,11 @@
         "studio-authoring.summary-field-authoring",
         "studio-authoring.no-entry-property-matrix",
         "studio-authoring.api-written-keys-survive-studio-save",
-        "studio-authoring.removed-key-save-door-refusal"
+        "studio-authoring.removed-key-save-door-refusal",
+        "records-forms.multi-currency-invoice",
+        "records-forms.home-amount-preview-states",
+        "studio-authoring.currency-home-amount-editor",
+        "records-forms.master-detail-child-follows-parent-currency"
       ]
     },
     "flow": {
@@ -219,7 +225,8 @@
     "metadata_endpoints": {
       "items": [
         "api-backend.rest-metadata-config-contract",
-        "platform-core.metadata-registry-serving"
+        "platform-core.metadata-registry-serving",
+        "studio-authoring.currency-field-repointed-refusal"
       ]
     },
     "object": {
@@ -247,7 +254,8 @@
         "studio-authoring.removed-key-save-door-refusal",
         "studio-authoring.uninstalled-package-refused",
         "studio-authoring.package-extension-field-c",
-        "platform-core.namespace-object-name-refusal"
+        "platform-core.namespace-object-name-refusal",
+        "studio-authoring.currency-field-repointed-refusal"
       ]
     },
     "page": {
@@ -285,7 +293,8 @@
         "access-security.ai-service-account-agent-ceiling",
         "identity-auth.idp-group-permission-set-mapping",
         "access-security.permission-set-address-in-execution-context",
-        "access-security.agent-ceiling-set-assignment-refusal"
+        "access-security.agent-ceiling-set-assignment-refusal",
+        "api-backend.recycle-bin-refusals-purge-empty"
       ]
     },
     "picklist": {
