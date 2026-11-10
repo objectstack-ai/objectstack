@@ -65,7 +65,10 @@ const GENERIC: RefusalCopy = {
  *    SAML response (an unverifiable signature, a wrong audience or recipient);
  *  - `state_not_found`: the OIDC callback carried no `state`, which is an
  *    identity-provider-initiated sign-in the provider does not allow, or a
- *    callback URL opened again later.
+ *    callback URL opened again later;
+ *  - `unsolicited_response`: the SAML ACS refused an identity-provider-
+ *    initiated response (a sign-in started from the provider's app tile)
+ *    because the provider does not allow IdP-initiated sign-in.
  *
  * A code missing here keeps the generic sentence.
  */
@@ -74,6 +77,7 @@ const SSO_CALLBACK_REFUSALS: Readonly<Record<string, RefusalCopy>> = {
   account_not_linked: ACCOUNT_NOT_LINKED,
   saml_error: RESPONSE_REJECTED,
   invalid_saml_response: RESPONSE_REJECTED,
+  unsolicited_response: START_FROM_LOGIN_PAGE,
   state_not_found: START_FROM_LOGIN_PAGE,
 };
 

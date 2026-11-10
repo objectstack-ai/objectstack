@@ -2106,6 +2106,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         label: "Just-in-Time-Bereitstellung zulassen",
         help: "Bei der Zielgruppenrichtlinie „Nur auf Einladung“ ein Konto für eine Person anlegen, die sich ohne Konto oder Einladung über diesen Anbieter anmeldet. Standardmäßig deaktiviert: Eine solche Person wird abgewiesen. Andere Richtlinien stellen wie bisher bereit. Ändern Sie dies mit „Anmeldeoptionen bearbeiten“."
       },
+      skip_user_info: {
+        label: "Claims nur aus dem ID-Token lesen",
+        help: "Nur OIDC. Liest E-Mail-Adresse, Name und Gruppen aus dem verifizierten ID-Token des Identitätsanbieters und ruft dessen Userinfo-Endpunkt nicht auf. Für Microsoft Entra ID einschalten: Dessen Userinfo-Antwort enthält keine Gruppen und kein preferred_username. Standardmäßig aus: Ein Anbieter mit Userinfo-Endpunkt liest seine Claims aus dieser Antwort. Änderung über „Anmeldeoptionen bearbeiten“."
+      },
       user_id: {
         label: "Registriert von",
         help: "Benutzer, der diesen Anbieter registriert hat"
@@ -2432,6 +2436,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         label: "Token-Digest",
         help: "HMAC-SHA-256 (base64url) des Bearer-Tokens, verschlüsselt mit dem Authentifizierungsgeheimnis der Bereitstellung – nur in eine Richtung; der Klartext wird beim Ausstellen einmal angezeigt und nie gespeichert."
       },
+      token_hint: {
+        label: "Token-Hinweis",
+        help: "Die letzten vier Zeichen des Bearer-Tokens, bei der Ausstellung erfasst, damit sich die Anmeldedaten einer Verbindung unterscheiden lassen; nie das Token oder sein Digest. Leer bei Anmeldedaten, die ausgestellt wurden, bevor Hinweise erfasst wurden."
+      },
       active: {
         label: "Aktiv",
         help: "Widerrufsschalter – inaktive Anmeldedaten werden bei der Prüfung abgelehnt"
@@ -2439,6 +2447,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       expires_at: {
         label: "Läuft ab am",
         help: "Optionaler fester Ablauf für eine gestaffelte Rotation der Anmeldedaten; abgelaufene Anmeldedaten werden abgelehnt"
+      },
+      last_used_at: {
+        label: "Zuletzt verwendet am",
+        help: "Wann die Anmeldedaten zuletzt eine SCIM-Anfrage authentifiziert haben, höchstens einmal pro Minute erfasst; leer, wenn keine Verwendung erfasst wurde"
       },
       user_id: {
         label: "Ausgestellt von",
@@ -2488,6 +2500,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Ich habe das Token gespeichert",
           fields: {
             token: "Token",
+            tokenHint: "Token-Hinweis",
             connectionId: "Verbindungs-ID",
             expiresAt: "Läuft ab am"
           }
@@ -2871,7 +2884,64 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "Alle"
+        label: "Alle",
+        emptyState: {
+          title: "Noch keine Gruppenzuordnungen",
+          message: "Mit „SSO-Gruppe zuordnen“ (eine Gruppe, die ein SSO-Anbieter bei der Anmeldung sendet) oder „SCIM-Gruppe zuordnen“ (eine Gruppe, die eine SCIM-Verbindung bereitstellt) den Mitgliedern einer Gruppe des Identitätsanbieters einen Berechtigungssatz gewähren."
+        }
+      }
+    },
+    _actions: {
+      map_sso_group: {
+        label: "SSO-Gruppe zuordnen",
+        description: "Jedem Mitglied einer Gruppe, die ein SSO-Anbieter bei der Anmeldung sendet, einen Berechtigungssatz gewähren. Gilt ab der nächsten Anmeldung des Mitglieds über den Anbieter.",
+        successMessage: "Gruppenzuordnung gespeichert. Sie gilt ab der nächsten Anmeldung jedes Mitglieds über den Anbieter.",
+        params: {
+          providerId: {
+            label: "SSO-Anbieter-ID",
+            helpText: "Die Anbieter-ID des SSO-Anbieters, dessen Anmeldung die Gruppe mitsendet, z. B. „okta“. Der Anbieter braucht einen Gruppen-Claim (Gruppen-Claim bearbeiten am SSO-Anbieter)."
+          },
+          groupExternalId: {
+            label: "Externe Gruppen-ID",
+            helpText: "Der Gruppenwert genau so, wie der Gruppen-Claim ihn sendet, wenn er eine ID ist, z. B. eine Gruppenobjekt-ID aus Entra ID. Dieses Feld oder den Gruppen-Anzeigenamen setzen, nicht beide."
+          },
+          groupDisplayName: {
+            label: "Gruppen-Anzeigename",
+            helpText: "Der Gruppenwert genau so, wie der Gruppen-Claim ihn sendet, wenn er ein Name ist, z. B. „Sales“. Dieses Feld oder die externe Gruppen-ID setzen, nicht beide."
+          },
+          permissionSet: {
+            label: "Berechtigungssatz",
+            helpText: "Der Berechtigungssatz, den ein Mitglied der Gruppe in der Organisation des Anbieters erhält. Administratorsätze werden abgelehnt."
+          }
+        }
+      },
+      map_scim_group: {
+        label: "SCIM-Gruppe zuordnen",
+        description: "Jedem Mitglied einer Gruppe, die eine SCIM-Verbindung bereitstellt, einen Berechtigungssatz gewähren. Die aktuellen Mitglieder der Gruppe erhalten ihn sofort.",
+        successMessage: "Gruppenzuordnung gespeichert",
+        params: {
+          connectionId: {
+            label: "SCIM-Verbindungs-ID",
+            helpText: "Die SCIM-Verbindung, über die die Gruppe bereitgestellt wird, z. B. „okta-prod“: die Verbindungs-ID ihrer Anmeldedaten."
+          },
+          groupExternalId: {
+            label: "Externe Gruppen-ID",
+            helpText: "Die externalId der Gruppe, wie der Identitätsanbieter sie sendet. Dieses Feld oder den Gruppen-Anzeigenamen setzen, nicht beide."
+          },
+          groupDisplayName: {
+            label: "Gruppen-Anzeigename",
+            helpText: "Der displayName der Gruppe, exakt abgeglichen. Dieses Feld oder die externe Gruppen-ID setzen, nicht beide."
+          },
+          permissionSet: {
+            label: "Berechtigungssatz",
+            helpText: "Der Berechtigungssatz, den ein Mitglied der Gruppe in der Organisation der Verbindung erhält. Administratorsätze werden abgelehnt."
+          }
+        }
+      },
+      delete_group_mapping: {
+        label: "Zuordnung löschen",
+        confirmText: "Diese Gruppenzuordnung löschen? Die Mitglieder der Gruppe erhalten ihren Berechtigungssatz nicht mehr. Bei einer SCIM-Verbindung werden die Mitglieder der Gruppe sofort neu projiziert und verlieren die Zuweisungen dieser Zuordnung. Bei einem SSO-Anbieter werden die Zuweisungen, die seine Anmeldungen für diesen Satz vorgenommen haben, sofort entfernt, sofern keine andere Zuordnung des Anbieters denselben Satz nennt. Zum Wiederherstellen die Gruppe erneut zuordnen.",
+        successMessage: "Gruppenzuordnung gelöscht"
       }
     }
   },
@@ -3673,6 +3743,55 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       note: {
         label: "Notiz"
+      }
+    }
+  },
+  sys_metadata_commit: {
+    label: "Metadata Commit",
+    pluralLabel: "Metadata Commits",
+    description: "Package-scoped commit log grouping a turn’s metadata changes.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      package_id: {
+        label: "Package"
+      },
+      operation: {
+        label: "Operation",
+        options: {
+          apply: "apply",
+          revert: "revert"
+        }
+      },
+      message: {
+        label: "Message",
+        help: "Change summary; for AI turns, the user instruction that produced it."
+      },
+      actor: {
+        label: "Actor"
+      },
+      ai_model: {
+        label: "AI Model"
+      },
+      parent_commit_id: {
+        label: "Parent Commit"
+      },
+      event_seq_start: {
+        label: "Event Seq Start"
+      },
+      event_seq_end: {
+        label: "Event Seq End"
+      },
+      items: {
+        label: "Items",
+        help: "JSON: [{ type, name, existedBefore, prevVersion }] — the revert plan."
+      },
+      item_count: {
+        label: "Item Count"
+      },
+      created_at: {
+        label: "Created At"
       }
     }
   },

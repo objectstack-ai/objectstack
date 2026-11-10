@@ -843,6 +843,11 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
 
     async signInWithPhoneOtp(phoneNumber: string, code: string) {
       const payload = await postPhoneNumberEndpoint('/phone-number/verify', { phoneNumber, code });
+      // An account with an enrolled second factor is not signed in by the
+      // code alone: the server answers the same two-factor challenge the
+      // password doors answer, and the code step follows.
+      const twoFactor = readTwoFactorChallenge(payload);
+      if (twoFactor) return { twoFactor };
       // Response: `{ status, token: string|null, user: object|null }` —
       // token/user are null when the number belongs to no account (the
       // endpoint also serves the change-phone verification flow).
@@ -1104,13 +1109,13 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       slug: string;
       logo?: string;
       timezone?: string;
-      edition?: 'developer';
+      edition?: string;
     }): Promise<AuthOrganization> {
       // objectui#11908: the creator's zone rides the QUERY (`?timezone=`), the
       // shape the server's create route reads it from; the body stays
       // `{ name, slug, logo }`. better-auth's client proxy lifts
       // `fetchOptions.query` onto the URL and keeps it out of the body. The
-      // edition (`?edition=developer`) rides the same query. An absent or
+      // edition (`?edition=VALUE`) rides the same query. An absent or
       // empty value sends no parameter at all, and with neither there is no
       // query object.
       const { timezone, edition } = orgData;

@@ -1,6 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
+// Pay the driver's first load at collection, not inside a clocked `it()`
+// (`check:test-source-alias`).
+import '@objectstack/driver-sql';
 import { DatasourceSchema } from '@objectstack/spec/data';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 import { registerDatasourceAdminRoutes } from '../admin-routes.js';
@@ -130,10 +133,16 @@ const USER_URL = 'mongodb://app@127.0.0.1:27017/qa';
 
 async function expectRefusal(res: Response, expected: string): Promise<void> {
   expect(res.status).toBe(400);
-  const body = (await res.json()) as { success: boolean; error: { code: string; message: string } };
+  const body = (await res.json()) as {
+    success: boolean;
+    error: { code: string; message: string; details?: { reason?: string; hint?: string } };
+  };
   expect(body.success).toBe(false);
   expect(body.error.code).toBe('DATASOURCE_ADMIN_ERROR');
-  expect(body.error.message).toContain(expected);
+  expect(typeof body.error.details?.reason).toBe('string');
+  // The whole account of a refusal: its one-line message, then its hint.
+  const hint = body.error.details?.hint;
+  expect(hint ? `${body.error.message}\n${hint}` : body.error.message).toContain(expected);
 }
 
 describe('POST /api/v1/datasources judges the record it will persist (#21058)', () => {

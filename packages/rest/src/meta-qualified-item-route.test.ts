@@ -226,3 +226,60 @@ describe('a shareable namespace two packages share (ADR-0150 D2)', () => {
         expect([answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
     });
 });
+
+/**
+ * [#32201, ADR-0150 D5] Every `/meta` read form's `409 RESOURCE_CONFLICT` on
+ * this transport carries its holders as `details.candidates` (the
+ * `PackageScopedHolder` list the runtime dispatcher answers), beside the flat
+ * body's `error` and `code`, which stay as they were.
+ *
+ * BASE (main 6440802a): `{ error: '<the sentence>', code: 'RESOURCE_CONFLICT' }`
+ * and no `details` on each.
+ */
+describe('#32201 — the 409 carries `details.candidates` on every read form', () => {
+    const conflictOf = (answer: { status: number; body?: any }) =>
+        [answer.status, codeOf(answer), answer.body?.details?.candidates];
+    const pkg = (packageId: string) => ({ kind: 'package', packageId });
+
+    it('bare `GET /meta/:type/:name`, a name two packages hold: both holders', async () => {
+        ship('dashboard', 'sales', A);
+        ship('dashboard', 'sales', B);
+        const answer = await drive(ITEM, { type: 'dashboard', name: 'sales' });
+        expect(conflictOf(answer), JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT', [pkg(A), pkg(B)]]);
+        // The flat body's members stay: the sentence is still `error`.
+        expect(typeof answer.body?.error).toBe('string');
+        expect(messageOf(answer)).toContain(`package "${A}"`);
+    });
+
+    it('exact qualifier `?package=` of a package that holds nothing: the holder', async () => {
+        ship('page', 'home', A);
+        const answer = await drive(ITEM, { type: 'page', name: 'home' }, { package: C });
+        expect(conflictOf(answer), JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT', [pkg(A)]]);
+    });
+
+    it('qualified `/meta/:type/:ns/:name`, a namespace that holds nothing of the name: both holders', async () => {
+        ship('page', 'home', A);
+        ship('page', 'home', B);
+        const answer = await drive(QUALIFIED, { type: 'page', ns: 'gamma', name: 'home' });
+        expect(conflictOf(answer), JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT', [pkg(A), pkg(B)]]);
+    });
+
+    it('`/meta/:type/_env/:name`, a name only a package holds: the package', async () => {
+        ship('page', 'solo', A);
+        const answer = await drive(QUALIFIED, { type: 'page', ns: '_env', name: 'solo' });
+        expect(conflictOf(answer), JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT', [pkg(A)]]);
+        expect(messageOf(answer)).toContain('is not held by the environment');
+    });
+
+    it('a shareable namespace both owners hold (ADR-0150 D2, the address read\'s own refusal): both owners', async () => {
+        const SYS_ONE = 'com.acme.sys_one';
+        const SYS_TWO = 'com.acme.sys_two';
+        for (const id of [SYS_ONE, SYS_TWO]) {
+            registry.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace: 'sys' } as never, 'code');
+        }
+        ship('page', 'home', SYS_ONE);
+        ship('page', 'home', SYS_TWO);
+        const answer = await drive(QUALIFIED, { type: 'page', ns: 'sys', name: 'home' });
+        expect(conflictOf(answer), JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT', [pkg(SYS_ONE), pkg(SYS_TWO)]]);
+    });
+});

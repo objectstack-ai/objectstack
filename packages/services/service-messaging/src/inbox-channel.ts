@@ -16,6 +16,12 @@ import { assertActorReferenceResolves } from './actor-reference.js';
 /** The object the inbox channel writes rows to. */
 export const INBOX_OBJECT = 'sys_inbox_message';
 
+/**
+ * [#32240] The `sys_inbox_message` column holding the catalog keys a row's
+ * `title` / `body_md` were rendered from (`NotificationTextKeys`).
+ */
+export const INBOX_TEXT_KEYS_FIELD = 'keyed_text';
+
 /** The receipt object the inbox channel writes a `delivered` row to (ADR-0030). */
 export const RECEIPT_OBJECT = 'sys_notification_receipt';
 
@@ -260,6 +266,13 @@ export function createInboxChannel(opts: InboxChannelOptions): MessagingChannel 
                 organization_id: n.organizationId ?? null,
                 created_at: at,
             };
+            // [#32240] The keys `title` / `body_md` were rendered from, so a
+            // reader in another language reads this row in theirs
+            // (`inbox-reader-locale.ts`). Read off the unit the service or the
+            // dispatcher set, never off `payload`. Not on the template path:
+            // that text is the template's, not the keys'. Absent ⇒ the column
+            // is left unwritten, the insert byte-identical to before.
+            if (n.keyedText && !templateName) row[INBOX_TEXT_KEYS_FIELD] = n.keyedText;
 
             let inboxId: string | undefined;
             try {

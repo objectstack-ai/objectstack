@@ -149,6 +149,13 @@ const fr = {
         unmanagedHint: "Copié une seule fois dans ce runtime comme ses propres métadonnées : chaque élément est modifiable ici, et la copie ne reçoit aucune mise à niveau.",
         required: "Choisissez un mode d'installation pour installer ce paquet.",
       },
+      targetNamespace: {
+        label: "Espace de noms cible",
+        placeholder: "ex. crm_copy",
+        hint: "L'espace de noms sous lequel les métadonnées de cette copie sont écrites. Modifiez-le pour installer sous un autre nom.",
+        noDefault: "Aucun espace de noms par défaut n'a pu être lu. Saisissez l'espace de noms que cette copie doit prendre.",
+        taken: "L'espace de noms \"{{namespace}}\" appartient à un autre paquet. Choisissez un autre nom et relancez l'installation.",
+      },
       unmanagedSuccess: "v{{version}} de \"{{name}}\" copié dans ce runtime comme ses propres métadonnées, dans la base {{base}}. La copie est modifiable et ne reçoit aucune mise à niveau.",
       unmanagedStrippedLocks: "Le paquet verrouillait ces éléments. La copie est modifiable, leurs verrous n'ont donc pas été copiés :",
       unmanagedIgnored: "Ce runtime ne prend pas en charge les installations non gérées : \"{{name}}\" a donc été installé en mode géré (enregistré comme code) au lieu d'être copié. Mettez à niveau le runtime, puis désinstallez le paquet et réinstallez-le comme copie non gérée.",

@@ -344,9 +344,45 @@ function listToArray(
   return arr.map((addr) => formatCallerAddress(addr, field));
 }
 
+/** The message's text fields — each a string in `SendEmailInput`. */
+type MessageTextField = 'subject' | 'text' | 'html';
+
+/** How a refusal names a value's JSON kind ("a number", "an array", …). */
+function kindOf(value: unknown): string {
+  if (Array.isArray(value)) return 'an array';
+  const kind = typeof value;
+  return /^[aeiou]/.test(kind) ? `an ${kind}` : `a ${kind}`;
+}
+
+/**
+ * Refuse a text field that is present but not a string — the type
+ * `SendEmailInput` already declares for it, judged where a JSON body can
+ * carry any value.
+ *
+ * Without this, nothing typed these fields: `subject` was coerced with
+ * `String()`, so an object sent a mail reading `Subject: [object Object]`, and
+ * a non-string `text` / `html` passed the truthiness presence check and threw
+ * inside the transport's stream, which `send` records as a delivery failure —
+ * a `200 status: failed` for input the caller wrote. Refused here instead, as
+ * `VALIDATION_FAILED` naming the field, before any `sys_email` delivery row or
+ * transport call: the same refusal path, and so the same REST `400` and the
+ * same `failed` rejection row ({@link EmailService.recordRejectedMessage}), as
+ * a malformed recipient.
+ *
+ * `undefined` and `null` are absence, not a wrong type: whether an absent
+ * field is acceptable stays the presence checks' question, exactly as before
+ * (no subject is still "subject is required"; a `null` `text` beside a string
+ * `html` still sends).
+ */
+function assertTextField(value: unknown, field: MessageTextField): void {
+  if (value === undefined || value === null || typeof value === 'string') return;
+  throw new Error(`VALIDATION_FAILED: \`${field}\` must be a string, not ${kindOf(value)}`);
+}
+
 /**
  * Validate input + apply default-from + canonicalize recipients.
  * Throws Error('VALIDATION_FAILED: REASON') for malformed payloads — a
+ * non-string `subject` / `text` / `html` ({@link assertTextField}) and a
  * malformed caller-supplied address (`to` / `cc` / `bcc` / `replyTo`)
  * included. An unsendable `from` is the one malformed address that is NOT a
  * `VALIDATION_FAILED`: see {@link formatCallerAddress}.
@@ -358,6 +394,9 @@ export function normalizeMessage(
   if (!input || typeof input !== 'object') {
     throw new Error('VALIDATION_FAILED: input must be an object');
   }
+  assertTextField(input.subject, 'subject');
+  assertTextField(input.text, 'text');
+  assertTextField(input.html, 'html');
   const subject = String(input.subject ?? '').trim();
   if (!subject) throw new Error('VALIDATION_FAILED: subject is required');
   if (!input.text && !input.html) {
@@ -1016,7 +1055,7 @@ export class EmailService implements IEmailService {
   /**
    * Write the `sys_email` record for a message REJECTED before delivery —
    * a `normalizeMessage` throw (bad/absent `from`, no recipient, no subject,
-   * no body).
+   * no body, a non-string `subject` / `text` / `html`).
    *
    * ## Why a row for something that was never sent
    * `sys_email` is documented as the log of "every email the platform has
@@ -1054,7 +1093,12 @@ export class EmailService implements IEmailService {
       ...(rawAddressText(raw.cc) ? { cc_addresses: rawAddressText(raw.cc) } : {}),
       ...(rawAddressText(raw.bcc) ? { bcc_addresses: rawAddressText(raw.bcc) } : {}),
       ...(rawAddressText(raw.replyTo) ? { reply_to: rawAddressText(raw.replyTo) } : {}),
-      subject: String(raw.subject ?? '').trim() || UNSTATED_COLUMN,
+      // Only a string is recorded, as for the body columns below: a
+      // non-string subject is one of the refusals recorded here, and
+      // `String()` on it either invents `[object Object]` or THROWS (an object
+      // whose own `toString` is not callable), which would replace the
+      // caller's `VALIDATION_FAILED` with a TypeError — a 500, and no row.
+      subject: (typeof raw.subject === 'string' ? raw.subject.trim() : '') || UNSTATED_COLUMN,
       ...(typeof raw.text === 'string' ? { body_text: raw.text } : {}),
       ...(typeof raw.html === 'string' ? { body_html: raw.html } : {}),
       ...(raw.relatedObject ? { related_object: raw.relatedObject } : {}),

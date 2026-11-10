@@ -1192,7 +1192,7 @@ signed out).
 curl -X POST http://localhost:3000/api/v1/auth/admin/scim/mint-credential \
   -H 'Content-Type: application/json' -H "Authorization: Bearer $ADMIN_SESSION" \
   -d '{ "connectionId": "okta-prod", "label": "rotation 2026-Q4" }'
-# → { success, data: { credentialId, connectionId, token, expiresAt } }
+# → { success, data: { credentialId, connectionId, token, tokenHint, expiresAt } }
 ```
 
 - `connectionId` (required) names the connection every provisioned resource
@@ -1204,6 +1204,10 @@ curl -X POST http://localhost:3000/api/v1/auth/admin/scim/mint-credential \
   no-store`). Only a keyed one-way digest of it is stored; it is not readable
   through the data API, the audit log or the logs afterwards. Paste it into the
   identity provider's SCIM settings as the bearer token.
+- `tokenHint` is the token's last four characters. It is stored on the
+  credential row as `token_hint`, so the credentials list shows which bearer a
+  row is; it is not a secret on its own. Credentials minted before the hint
+  existed show none, and none can be added: the token is not stored.
 - While SCIM is off the mint is refused `503 SERVICE_UNAVAILABLE`: a credential
   nothing can verify is not issued.
 
@@ -1213,7 +1217,10 @@ is refused `401`. An unknown credential answers `404 RESOURCE_NOT_FOUND`, one
 already revoked `409 RESOURCE_CONFLICT`. Revocation works whether or not SCIM is
 on. To **rotate**, mint a second credential for the same `connectionId`, move
 the identity provider to it, then revoke the old one; both authenticate until
-you do. Each mint and each revoke writes one `sys_audit_log` row naming the
+you do. Each credential's `last_used_at` records when it last authenticated a
+SCIM request (at most once a minute; a refused request records nothing), and
+its `token_hint` tells the two rows apart: the old one is safe to revoke once
+its `last_used_at` stops advancing while the new one's does. Each mint and each revoke writes one `sys_audit_log` row naming the
 administrator and the connection, never the credential.
 
 A connection's groups grant permission sets through the same group mappings an

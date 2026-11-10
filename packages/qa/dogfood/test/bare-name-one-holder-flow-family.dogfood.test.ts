@@ -18,14 +18,14 @@
 //     connector, both packages and the rename for every name (the email
 //     template's rule narrowed to the namespace, ADR-0150 D9 #31699: two
 //     namespaces' templates are no clash, and a send of the name is refused
-//     naming both); the automation engine arms NEITHER of the two
-//     flows and logs the refusal naming both, and the declared webhook's
+//     naming both); the automation engine arms EACH flow in its own
+//     slot and refuses the bare name naming both, and the declared webhook's
 //     by-name read refuses the held name naming both packages (ADR-0150 D3,
 //     #31677 Q1 ruled A: a clash held from before phase 1 is refused like any
 //     other two-holder name, not first-picked);
 //   - `POST /marketplace/install-local` of a third package declaring the held
 //     flow name is 422 PLUGIN_REGISTER_FAILED naming both holders and the
-//     rename, installs nothing, and the engine still arms neither flow;
+//     rename, installs nothing, and the engine still serves the two slots;
 //   - the same door refusing a package that declares the held webhook name and
 //     the showcase's own flow name, naming the showcase — and no longer the
 //     showcase's email template name, which another namespace may now ship;
@@ -154,10 +154,12 @@ describe('one package holder per flow, webhook, connector and email template nam
     return { status: res.status, body: (await res.json()) as any };
   };
 
-  /** The flow the automation engine serves for `name` — its bare-name flow map. */
-  const armedFlowLabel = async (name: string): Promise<string | undefined> => {
-    const automation = (stack.kernel as any).getService('automation');
-    return (await automation.getFlow(name))?.label;
+  /** [ADR-0150 D4, #31696] Each holder's flow is armed in its own slot; the bare name is refused (409), naming both. */
+  const slotFlowLabel = (pkg: string): string | undefined => (stack.kernel as any).getService('automation').getFlowSlot(pkg, FLOW)?.label;
+  const expectEachSlotArmedAndBareRefused = async (): Promise<void> => {
+    expect([slotFlowLabel('com.qa.bare.alpha'), slotFlowLabel('com.qa.bare.beta')]).toEqual(['alpha flow', 'beta flow']);
+    const err = await (stack.kernel as any).getService('automation').getFlow(FLOW).then(() => undefined, (e: unknown) => e);
+    expect([err?.code, err?.status, /com\.qa\.bare\.alpha.*com\.qa\.bare\.beta/.test(String(err?.message))]).toEqual(['RESOURCE_CONFLICT', 409, true]);
   };
 
   /**
@@ -238,18 +240,16 @@ describe('one package holder per flow, webhook, connector and email template nam
     expect(line).not.toContain(BUILT_IN_TPL);
     expect(line).not.toContain(baseline!);
     expect(await packageIds(), 'both packages booted').toEqual(expect.arrayContaining(['com.qa.bare.alpha', 'com.qa.bare.beta']));
-    // [ADR-0150 D3, #31677 Q1] The automation engine arms neither flow: the arming is refused, naming both.
-    expect(bootLines.some((l) =>
-      l.includes('failed to register flow') && l.includes(`"${FLOW}"`) && l.includes('held by 2 packages')
-      && l.includes('com.qa.bare.alpha') && l.includes('com.qa.bare.beta'))).toBe(true);
-    expect(await armedFlowLabel(FLOW)).toBeUndefined();
+    // [ADR-0150 D4, #31696] The engine arms each flow (it had refused the arming).
+    expect(bootLines.some((l) => l.includes('failed to register flow') && l.includes(`"${FLOW}"`))).toBe(false);
+    await expectEachSlotArmedAndBareRefused();
     // ADR-0150 D3 (#31677, Q1 ruled A): the webhook the clash held before phase 1
     // is no longer served by first registration — the by-name read refuses it,
     // naming both packages.
     await expectHeldWebhookRefused();
   });
 
-  it('install-local of a third package declaring a held flow name is 422 PLUGIN_REGISTER_FAILED naming both holders and the rename; nothing is installed, and neither flow is armed', async () => {
+  it('install-local of a third package declaring a held flow name is 422 PLUGIN_REGISTER_FAILED naming both holders and the rename; nothing is installed, and each holder\'s slot is still served', async () => {
     const before = await packageIds();
     const { status, body } = await installLocal(inline('gamma', { flows: [flow('gamma')] }));
     expect([status, codeOf(body)], JSON.stringify(body)).toEqual([422, 'PLUGIN_REGISTER_FAILED']);
@@ -259,7 +259,8 @@ describe('one package holder per flow, webhook, connector and email template nam
     expect(message).toContain('com.qa.bare.beta');
     expect(message).toContain(`"gamma_${FLOW}"`);
     expect(await packageIds(), 'the package list is unchanged').toEqual(before);
-    expect(await armedFlowLabel(FLOW)).toBeUndefined();
+    expect(slotFlowLabel('com.qa.bare.gamma')).toBeUndefined();
+    await expectEachSlotArmedAndBareRefused();
   });
 
   it('install-local of a package declaring the held webhook name and the showcase\'s own flow and email template names is refused for the flow and the webhook, naming the showcase', async () => {

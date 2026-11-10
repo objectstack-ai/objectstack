@@ -72,6 +72,7 @@ import { summarizeRun } from './run-summary.js';
 // interpolating it into the log message. See ./thrown-cause-diagnostics.ts.
 import { describeThrownForLog } from './thrown-cause-diagnostics.js';
 import { defaultEnvCredentialResolver, type CredentialResolver } from './credential-resolver.js';
+import { FlowCredentialUnresolvableError } from './flow-credential-channel.js';
 // [#22450] The one bundle-locale negotiation rule (`resolveLocaleAmong`'s five
 // steps: exact → case-insensitive → platform locale table language, so `zh-TW`
 // reaches `zh-Hant` → base language → variant expansion), asked about the
@@ -229,6 +230,10 @@ import { describeSubflowNoticeTrap, subflowNoticeTrap } from './subflow-notice-g
 // projection keyed by `(package, name)`.
 import type { PackageScopedRefusal, PackageScopedResolution } from '@objectstack/objectql';
 import { FlowActivationProjection } from './flow-activation-projection.js';
+// [ADR-0150 D4, #31696] The engine holds flows by `(package, name)` slot.
+import { packageScopedRefusalMessage, PackageScopedNameRefusedError } from '@objectstack/core';
+import { FlowSlotTable, flowRunKey, flowRunPackage, isSlotKeySpelling, qualifiedFlowKey, unfiledFlowKey, stampFlowRunSlot, type FlowKeyMove, type FlowSlot } from './flow-slots.js';
+import { flowSlotRunStore } from './flow-slot-run-store.js';
 import { describeRegionSuspendingCall, regionSuspendingCall } from './subflow-region-guard.js';
 // [#25222] The consumed-suspension restore's bodies: journaling a consumed
 // suspension, resolving its witnesses, and restoring, peeking at or inspecting
@@ -1678,6 +1683,14 @@ export function applyResumeSignal(
 export interface SuspendedRun {
     runId: string;
     flowName: string;
+    /**
+     * [ADR-0150 D8 row R8, #31696] The package whose flow `flowName` names —
+     * `sys_automation_run.flow_package` — absent for a flow no package holds.
+     * The engine stamps it on every write and resumes a stored run by
+     * `(flowName, flowPackage)`, so a paused run of one package's flow never
+     * continues on another package's flow of that name.
+     */
+    flowPackage?: string;
     /** The author's `FlowSchema.version` integer, for display only: two bodies can carry one number. */
     flowVersion?: number;
     /**
@@ -1776,6 +1789,8 @@ export function isTerminalRunStatus(status: unknown): status is TerminalRunStatu
 export interface RunRecord {
     runId: string;
     flowName: string;
+    /** [ADR-0150 D8 row R8, #31696] As {@link SuspendedRun.flowPackage}. */
+    flowPackage?: string;
     flowVersion?: number;
     /**
      * The terminal state this run reached, as the engine observed it.
@@ -2584,14 +2599,30 @@ export interface FlowContender {
     source: 'override' | 'package' | 'runtime';
     /** The owning package id, when a code package ships this body; the `.custom` pair for an override. */
     packageId?: string;
+    /**
+     * [ADR-0150 D4, #31696] The package whose ITEM the body is — the slot the
+     * engine holds it in ({@link FlowSlot}): the shipping package for a
+     * `package` body and for its declared `override` (the override is that
+     * package's item, customized), and absent for a body no package holds.
+     * Precedence stamps it; absent on a `package` arm it reads as
+     * `packageId`, and on an `override` arm as the loader's owner of the name.
+     */
+    holder?: string;
 }
 
 /**
  * [#20761] A reader over the loader's set: the package that ships the flow
  * `name` as a code artifact, or `undefined` when no managed package loaded a
  * flow of that name. See {@link AutomationEngine.setPackagedFlowSource}.
+ *
+ * [ADR-0150 D4, #31696] Asked with `packageId`, the question is that
+ * package's own: does the loader's set hold a flow `name` of package
+ * `packageId`? It answers `packageId` when it does. A reader that reads only
+ * `name` answers the name's one owner, and the engine takes that answer only
+ * when it IS `packageId`, so such a reader never puts one package's flow in
+ * another's slot.
  */
-export type PackagedFlowSource = (name: string) => string | undefined;
+export type PackagedFlowSource = (name: string, packageId?: string) => string | undefined;
 
 /**
  * [ADR-0150 D3] A reader over the ONE package-scoped resolver: which item the
@@ -2643,9 +2674,24 @@ export type FlowHistorySource = (name: string, checksum: string) => Promise<unkn
  * position `holds` reports.
  */
 export interface FlowCredentialSource {
-    holds(flowName: string, nodeId: string, key: string): boolean;
-    held(flowName: string): Array<{ nodeId: string; key: string }>;
-    resolve(flowName: string, nodeId: string, key: string): Promise<string | undefined>;
+    /**
+     * [ADR-0150 D8 row R9, #31696] `flowPackage`, when given, is the package
+     * whose flow `flowName` names — `sys_flow_credential.flow_package` — and
+     * only that package's rows answer. The engine gives it for a flow of a
+     * name two packages hold, and only then; absent, every row of the name
+     * answers, as before.
+     */
+    holds(flowName: string, nodeId: string, key: string, flowPackage?: string): boolean;
+    held(flowName: string, flowPackage?: string): Array<{ nodeId: string; key: string }>;
+    resolve(flowName: string, nodeId: string, key: string, flowPackage?: string): Promise<string | undefined>;
+    /**
+     * [ADR-0150 D8 row R9, #31696] `true` when, given `flowPackage`, only that
+     * package's rows answer. A source that does not say so (the plugin's
+     * `FlowCredentialChannel` today) is never asked for a flow of a name two
+     * packages hold: `holds` answers `true`, and `held` / `resolve` throw
+     * `FlowCredentialUnresolvableError` naming the flow and its package.
+     */
+    readonly readsByPackage?: boolean;
 }
 
 /**
@@ -2742,13 +2788,28 @@ export class AutomationEngine implements IAutomationService {
      */
     static readonly MAX_NODE_REENTRIES = 100;
 
+    /**
+     * The flows this engine holds, by slot KEY — the bare name while one slot
+     * holds the name, `PACKAGE/NAME` while two or more do ({@link flowSlots}).
+     * Every other per-flow map below is keyed the same way.
+     */
     private flows = new Map<string, FlowParsed>();
     /**
-     * [#11997] Shadowing receipts, keyed by the bare flow name.
+     * [ADR-0150 D4, #31696] Which `(package, name)` slot each key of
+     * {@link flows} files, and the key each slot is filed under — see
+     * ./flow-slots.ts. Two packages' same-named flows are two slots, both
+     * armed; a bare name two slots hold is refused at every bare entry point,
+     * naming both, and never picks one.
+     */
+    private readonly flowSlots = new FlowSlotTable((name) => this.flowHolder(name)?.status === 'refused');
+    /** [#31696] Slot keys whose trigger decline ({@link activateFlowTrigger}) has been said. */
+    private readonly sharedSlotTriggerWarned = new Set<string>();
+    /**
+     * [#11997] Shadowing receipts, keyed by the flow's slot key.
      *
-     * `flows` is keyed by BARE name and stays that way — making it
-     * package-aware is a much larger change than this defect warrants, and
-     * ADR-0048 does not ask for it. The consequence is that when a packaged
+     * `flows` held one flow per BARE name when this receipt was written; it
+     * holds one per `(package, name)` slot now (#31696), and what a receipt
+     * records is still what precedence decided WITHIN one slot. When a packaged
      * flow and a runtime-authored flow claim one name, the loser leaves no
      * trace in `flows`: `listFlows`/`getFlowRuntimeStates` enumerate
      * `flows.keys()`, so the shadowed contender is invisible BY CONSTRUCTION,
@@ -2833,6 +2894,22 @@ export class AutomationEngine implements IAutomationService {
                     + `package "${holderPackageId}"'s own row.`,
                 { flow: name, rowPackageId, holderPackageId },
             ),
+        slotOf: (key) => {
+            const slot = this.flowSlots.slot(key);
+            return slot ? { ...slot, shared: this.flowSlots.isShared(slot.name) } : undefined;
+        },
+        // [#31696, ADR-0150 D4] One warning, never a pick: the row fails closed.
+        reportPackagelessOverShared: ({ name }) => {
+            const holders = this.flowSlots.slotsOf(name).map((slot) => slot.packageId ?? '');
+            this.logger.warn(
+                `[Automation] The flow "${name}" is switched off by an activation row that names no package, and `
+                    + `${holders.length} packages hold a flow of that name (${holders.map((h) => `"${h}"`).join(', ')}). `
+                    + 'Such a row switches off the one holder of its name, and nothing says which of them that is, so '
+                    + 'it keeps every package\'s flow of that name off that has no row of its own. To turn one on, '
+                    + 'switch that package\'s flow: that writes its own row.',
+                { flow: name, holders },
+            );
+        },
     });
     /**
      * The durable ledger behind {@link flowLedgerDisabled}. `null` until a host
@@ -3164,7 +3241,7 @@ export class AutomationEngine implements IAutomationService {
 
     constructor(logger: Logger, store?: SuspendedRunStore, options?: AutomationEngineOptions) {
         this.logger = logger;
-        this.store = store;
+        this.store = store && this.slotKeyedRunStore(store);
         this.maxLogSize = options?.maxLogSize ?? DEFAULT_MAX_EXECUTION_LOG_SIZE;
         this.runSummaryLog = options?.runSummaryLog ?? 'info';
         this.scheduledWorkPolicy = options?.scheduledWorkPolicy;
@@ -3189,7 +3266,38 @@ export class AutomationEngine implements IAutomationService {
      * `init`, before services are wired).
      */
     setSuspendedRunStore(store: SuspendedRunStore): void {
-        this.store = store;
+        this.store = this.slotKeyedRunStore(store);
+    }
+
+    /**
+     * [ADR-0150 D8 row R8, #31696] The attached store as the engine reads and
+     * writes it: records keyed by slot key here, by `(flow name, flow
+     * package)` in the store — see ./flow-slot-run-store.ts.
+     */
+    private slotKeyedRunStore(store: SuspendedRunStore): SuspendedRunStore {
+        return flowSlotRunStore(store, {
+            // The flow's own name and package, never a key. The run's own
+            // package (stamped at start) comes first, so a run whose key moved
+            // in flight is still its own package's run. A key no slot files is
+            // a qualified key moved back to the bare name: split at its last `/`.
+            stored: (filed, flowPackage) => {
+                const key = filed.startsWith('\u0000') ? filed.slice(1) : filed; // [S3] an unfiled key stores its name
+                const slot = this.flowSlots.slot(key);
+                const cut = key.lastIndexOf('/');
+                const flowName = slot?.name ?? (cut >= 0 ? key.slice(cut + 1) : key);
+                const packageId = flowPackage || (slot ? slot.packageId ?? undefined : cut >= 0 ? key.slice(0, cut) : undefined);
+                return { flowName, ...(packageId ? { flowPackage: packageId } : {}) };
+            },
+            key: (flowName, flowPackage) => {
+                if (!flowPackage) return this.flowSlots.isShared(flowName) ? unfiledFlowKey(flowName) : flowName;
+                const key = this.flowSlots.keyOf(flowName, flowPackage);
+                if (key !== undefined) return key;
+                // The package holds no flow of the name now: a key no slot
+                // files, so the run reads as its flow's absence — never as
+                // another package's flow of that name.
+                return this.flowSlots.keysOf(flowName).length > 0 ? qualifiedFlowKey(flowPackage, flowName) : flowName;
+            },
+        });
     }
 
     /**
@@ -3416,6 +3524,13 @@ export class AutomationEngine implements IAutomationService {
      * nobody read, and every in-flight approval zombified by the next restart.
      */
     private persistSuspendedRun(run: SuspendedRun): Promise<void> {
+        // [ADR-0150 D8 row R8, #31696] The run names the package whose flow
+        // it runs, as stamped when it started, whatever key its slot is filed
+        // under by the time it pauses.
+        if (run.flowPackage === undefined) {
+            const flowPackage = flowRunPackage(run.context);
+            if (flowPackage !== undefined) run = { ...run, flowPackage };
+        }
         // The body lives in ./run-resume.ts (#25222).
         const readStore = () => this.store;
         const host: ThisParameterType<typeof persistSuspendedRun> = {
@@ -3911,6 +4026,24 @@ export class AutomationEngine implements IAutomationService {
         if (!this.isFlowEnabled(flowName)) return;
         const resolved = this.resolveTriggerBinding(flowName);
         if (!resolved) return;
+        // [ADR-0150 D4, #31696] The triggers still bind a flow by its bare
+        // name, and two packages' flows of this name would be one binding: a
+        // slot of a shared name is not handed to a trigger until they bind by
+        // slot. It runs through the qualified entry ({@link executeSlot}); the
+        // status row reads it unbound, behind this warning.
+        if (this.isSharedFlowKey(flowName)) {
+            if (!this.sharedSlotTriggerWarned.has(flowName)) {
+                this.sharedSlotTriggerWarned.add(flowName);
+                this.logger.warn(
+                    `Flow '${flowName}' is registered but NOT armed on trigger '${resolved.triggerType}' — another `
+                        + `package holds a flow named '${this.flowSlotName(flowName)}', and triggers bind a flow by its `
+                        + 'name alone, so neither package\'s flow of that name is armed on its trigger yet. It runs when '
+                        + 'called by its package.',
+                    { flow: this.flowSlotName(flowName), slot: flowName, triggerType: resolved.triggerType },
+                );
+            }
+            return;
+        }
         // [#17396] The deployment gate, read HERE rather than only inside the
         // trigger. The trigger has its own copy of this gate and throws, which
         // is what protects a host that binds without this engine — but a
@@ -4606,6 +4739,321 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * [ADR-0150 D4, #31696] The package whose item a registration is — the
+     * slot it is held in — or `undefined` for a body no package holds (an
+     * environment-authored row, a write door's body), which lands in the
+     * name's one slot ({@link placeFlowSlot}).
+     */
+    private flowArmHolder(name: string, arm: FlowContender): string | undefined {
+        if (arm.holder) return arm.holder;
+        if (arm.source === 'package') return arm.packageId || undefined;
+        if (arm.source === 'override') {
+            const keys = this.flowSlots.keysOf(name);
+            if (keys.length === 1) return this.flowSlots.slot(keys[0])?.packageId ?? this.loaderOwnerOf(name);
+            // Two slots and no `holder`: no package's, so placeFlowSlot refuses it.
+            return keys.length === 0 ? this.loaderOwnerOf(name) : undefined;
+        }
+        return undefined;
+    }
+
+    /** The loader's set's one owner of the bare name, asked by name alone. */
+    private loaderOwnerOf(name: string): string | undefined {
+        const owner = this.packagedFlowSource?.(name);
+        return typeof owner === 'string' && owner !== '' ? owner : undefined;
+    }
+
+    /**
+     * [ADR-0150 D4, #31696] The key `name`'s registration is filed under,
+     * creating the slot when it is new. A package's body goes in its own slot
+     * (taking over a package-less one: D4, that flow is its customization); a
+     * second package's slot moves the incumbent's records to its qualified
+     * key ({@link moveFlowRecords}). A body no package holds goes in the
+     * name's one slot, and throws, with nothing changed, over two (nothing
+     * picks whose customization it is), or where the resolver refuses the
+     * bare name for a caller with no package (E1).
+     */
+    private placeFlowSlot(name: string, arm: FlowContender): string {
+        // E1 (#31677 Q1), unchanged for every arm that names no slot: a name
+        // the resolver refuses for a caller with no package is refused, never
+        // armed by package id or by arrival. Only precedence's per-package
+        // winner names its slot (`holder`), and arms beside the others.
+        if (arm.holder === undefined) {
+            const refusal = this.flowNameRefusal(name, null);
+            if (refusal) throw new Error(refusal.message);
+        }
+        const packageId = this.flowArmHolder(name, arm);
+        if (packageId === undefined) {
+            const keys = this.flowSlots.keysOf(name);
+            if (keys.length > 1) throw new PackageScopedNameRefusedError(this.sharedFlowNameRefusal(name, null));
+            return keys[0] ?? this.flowSlots.add({ packageId: null, name }).key;
+        }
+        const own = this.flowSlots.keyOf(name, packageId);
+        if (own !== undefined) return own;
+        const packageless = this.flowSlots.keyOf(name, null);
+        if (packageless !== undefined) {
+            this.flowSlots.adopt(packageless, packageId);
+            return packageless;
+        }
+        const incumbents = this.flowSlots.slotsOf(name);
+        const incumbent = incumbents.length === 1 ? incumbents[0].packageId : null;
+        if (incumbent !== null && this.flowHoldersSealed) this.bindPackagelessActivation(name, incumbent);
+        const { key, moved } = this.flowSlots.add({ packageId, name });
+        this.moveFlowRecords(moved);
+        if (incumbent !== null && !this.flowHoldersSealed) this.flowLedgerDisabled.refusePackagelessBind(name, incumbent);
+        return key;
+    }
+
+    /**
+     * [#31696, ADR-0150 D4, epic red line 1] After the boot's holders have
+     * converged ({@link sealFlowHolders}), a name's one holder is getting a
+     * second: an activation row naming no package was that holder's switch
+     * (D8), so it is bound to it, in the ledger first and in the projection
+     * once that write lands. Until then the row keeps every holder off
+     * ({@link FlowActivationProjection}); a failed write leaves it so (past a
+     * restart too), said once. A row read over two holders is never bound.
+     * {@link flowActivationBinds} settles once the write has.
+     */
+    private bindPackagelessActivation(name: string, holder: string): void {
+        if (!this.flowLedgerDisabled.canBindPackageless(name, holder)) return;
+        const store = this.flowActivationStore;
+        const bound = () => {
+            this.flowLedgerDisabled.bindPackageless(name, holder);
+            this.logger.info(
+                `[Automation] The flow "${name}" is switched off by an activation row that names no package, and a second `
+                    + `package now holds a flow of that name: the row is now the switch of package "${holder}", which held `
+                    + 'the name alone.',
+                { flow: name, packageId: holder },
+            );
+            // The other holders were held off while the row named no package.
+            for (const key of this.flowSlots.keysOf(name)) {
+                if (!this.flows.has(key) || this.flowLedgerDisabled.has(key)) continue;
+                this.activateFlowTrigger(key);
+                this.rejudgeSubflowCallers(key);
+            }
+        };
+        if (!store) {
+            bound();
+            return;
+        }
+        this.flowLedgerDisabled.beginBindPackageless(name);
+        const write = Promise.resolve()
+            .then(() => store.setActive({ name, packageId: holder, active: false }, { adoptPackageless: true }))
+            .then(bound, (err: unknown) => {
+                this.flowLedgerDisabled.failBindPackageless(name);
+                this.logger.warn(
+                    `[Automation] The flow "${name}" is switched off by an activation row that names no package, and a `
+                        + `second package now holds a flow of that name. Writing that row as package "${holder}"'s own `
+                        + 'row failed, so the row still names no package and keeps every package\'s flow of that name '
+                        + 'off. To turn one on, switch that package\'s flow: that writes its own row.',
+                    { flow: name, packageId: holder, ...describeThrownForLog(err) },
+                );
+            })
+            .finally(() => this.pendingFlowActivationBinds.delete(write));
+        this.pendingFlowActivationBinds.add(write);
+    }
+
+    /**
+     * [#31696, ADR-0150 D4, epic red line 1] Have this boot's flow holders
+     * converged ({@link sealFlowHolders})? Before, packages arrive in boot
+     * order (code packages at the pull, installed ones at `kernel:ready`), so
+     * a second holder never binds a package-less disable row to the first:
+     * the row reads as one first read under two holders.
+     */
+    private flowHoldersSealed = false;
+
+    /**
+     * [#31696, ADR-0150 D4] Every package of the boot has registered:
+     * `AutomationServicePlugin` calls it at `kernel:bootstrapped`, as the
+     * registry seals its bare-name holders. Only a later second holder binds
+     * a package-less disable row ({@link bindPackagelessActivation}); an engine
+     * never sealed binds none. Idempotent.
+     */
+    sealFlowHolders(): void {
+        this.flowHoldersSealed = true;
+    }
+
+    /** [#31696] The ledger binds {@link bindPackagelessActivation} has begun and not yet settled. */
+    private readonly pendingFlowActivationBinds = new Set<Promise<void>>();
+
+    /**
+     * [#31696, ADR-0150 D4] Settles once every activation-row bind begun so
+     * far ({@link bindPackagelessActivation}) has landed or failed; until
+     * then, the flows it is for stay off.
+     */
+    async flowActivationBinds(): Promise<void> {
+        while (this.pendingFlowActivationBinds.size > 0) {
+            await Promise.allSettled([...this.pendingFlowActivationBinds]);
+        }
+    }
+
+    /**
+     * [#31696] Move every per-flow record from the keys a slot change moved
+     * off to the keys it moved onto. Each moved flow's trigger is released
+     * under the old key first and armed under the new one after, through the
+     * one arming gate.
+     */
+    private moveFlowRecords(moved: readonly FlowKeyMove[]): void {
+        if (moved.length === 0) return;
+        for (const { from } of moved) {
+            this.deactivateFlowTrigger(from);
+            // A key that moves leaves the sharing it was declined under, so
+            // a later share of the name says the decline again.
+            this.sharedSlotTriggerWarned.delete(from);
+        }
+        const maps: Array<Map<string, unknown>> = [
+            this.flows,
+            this.flowShadowing,
+            this.flowStatusDisabled,
+            this.flowVersionHistory,
+            this.policyDisabledFlows,
+            this.subflowDeclinedFlows,
+            this.subflowNoticeDeclinedFlows,
+            this.subflowRegionDeclinedFlows,
+        ];
+        for (const { from, to } of moved) {
+            for (const map of maps) {
+                const records: Map<string, unknown> = map;
+                if (!records.has(from)) continue;
+                records.set(to, records.get(from));
+                records.delete(from);
+            }
+            for (const [runId, run] of this.suspendedRuns) {
+                if (run.flowName === from) this.suspendedRuns.set(runId, { ...run, flowName: to });
+            }
+        }
+        for (const { to } of moved) {
+            if (this.flows.has(to)) this.activateFlowTrigger(to);
+        }
+    }
+
+    /**
+     * [#31696, ADR-0150 D3] The refusal a bare `name` two slots hold gets
+     * from a caller of package `callerPackageId` that reaches neither: every
+     * holder named, nothing picked — the package-scoped rule's own sentence.
+     */
+    private sharedFlowNameRefusal(name: string, callerPackageId: string | null): PackageScopedRefusal {
+        // [M1] Every holder the registry names, a holder whose body was refused included.
+        const held = this.flowHolder(name);
+        const candidates = held?.status === 'refused' ? held.candidates : this.flowSlots.slotsOf(name).map((slot) =>
+            slot.packageId === null ? { kind: 'environment' as const } : { kind: 'package' as const, packageId: slot.packageId },
+        );
+        const base = {
+            status: 'refused' as const,
+            reason: 'ambiguous-in-environment' as const,
+            type: 'flow' as const,
+            name,
+            callerPackageId,
+            candidates,
+        };
+        return { ...base, message: packageScopedRefusalMessage(base) };
+    }
+
+    /**
+     * [ADR-0150 D3, #31696] The key the bare flow name `name` means for a
+     * caller of package `callerPackageId` (`null`: a caller with no package),
+     * or the refusal. A name one slot holds is its own key, refused only by
+     * the resolver, as before slots. A name two slots hold resolves through
+     * the resolver to the holder it reaches; the caller's own slot, when no
+     * resolver is attached; else it is refused, naming every holder.
+     */
+    private resolveFlowKey(name: string, callerPackageId: string | null): { key: string } | { refusal: PackageScopedRefusal } {
+        // [#31696] A slot key is no flow's name: it names no flow here.
+        if (isSlotKeySpelling(name)) return { key: unfiledFlowKey(name) };
+        if (!this.flowSlots.isShared(name)) {
+            const refusal = this.flowNameRefusal(name, callerPackageId);
+            return refusal ? { refusal } : { key: name };
+        }
+        const resolution = this.flowNameResolver?.(name, callerPackageId);
+        if (resolution?.status === 'refused') return { refusal: resolution };
+        if (resolution?.status === 'resolved' && resolution.holder.kind === 'package') {
+            const key = this.flowSlots.keyOf(name, resolution.holder.packageId);
+            if (key !== undefined) return { key };
+        }
+        if (resolution === undefined && callerPackageId !== null) {
+            const own = this.flowSlots.keyOf(name, callerPackageId);
+            if (own !== undefined) return { key: own };
+        }
+        return { refusal: this.sharedFlowNameRefusal(name, callerPackageId) };
+    }
+
+    /**
+     * [ADR-0150 D3, #31696] {@link resolveFlowKey} for a caller with no
+     * package, the refusal thrown (409, every holder named). `undefined` for a
+     * slot-key spelling (`PACKAGE/NAME`): no flow is named so, so the door
+     * answers as for a flow it does not hold ({@link getFlowSlot} takes one).
+     */
+    private bareFlowKey(name: string): string | undefined {
+        if (isSlotKeySpelling(name)) return undefined;
+        if (!this.flowSlots.isShared(name)) return name;
+        throw new PackageScopedNameRefusedError(this.sharedFlowNameRefusal(name, null));
+    }
+
+    /** [#31696] The package of the slot `key` files, or `undefined` (a package-less slot, or none). */
+    private flowSlotPackage(key: string): string | undefined {
+        return this.flowSlots.slot(key)?.packageId ?? undefined;
+    }
+
+    /** [#31696] The flow name a slot key files: the key itself for a key no slot files. */
+    private flowSlotName(key: string): string {
+        return this.flowSlots.slot(key)?.name ?? key;
+    }
+
+    /** [#31696] Every key a slot of the bare `name` is filed under; the name itself when none is. */
+    private flowSlotKeysOf(name: string): string[] {
+        const keys = this.flowSlots.keysOf(name);
+        return keys.length > 0 ? keys : [name];
+    }
+
+    /** [M1] The key of `name`'s one slot while the registry holds `name` under two packages, else `undefined`. */
+    private loneSharedFlowKey(name: string): string | undefined {
+        const keys = this.flowSlots.keysOf(name);
+        return keys.length === 1 && this.flowSlots.isShared(name) ? keys[0] : undefined;
+    }
+
+    /** [#31696] Is `key` the key of a slot whose name another slot holds too? */
+    private isSharedFlowKey(key: string): boolean {
+        const slot = this.flowSlots.slot(key);
+        return slot !== undefined && this.flowSlots.isShared(slot.name);
+    }
+
+    /**
+     * [ADR-0150 D4, #31696] The slots this engine holds for the bare flow
+     * name `name`: one per package whose flow of that name it holds, or one
+     * package-less slot. Engine-local (not on the service contract).
+     */
+    getFlowSlots(name: string): FlowSlot[] {
+        return this.flowSlots.slotsOf(name);
+    }
+
+    /**
+     * [ADR-0150 D4, #31696] The key the slot `(packageId, name)` is filed
+     * under — the bare name while it is the name's one slot — or `undefined`
+     * when the engine holds no such slot. Engine-local.
+     */
+    flowSlotKey(packageId: string | null, name: string): string | undefined {
+        return this.flowSlots.keyOf(name, packageId);
+    }
+
+    /**
+     * [ADR-0150 D4, #31696] Run package `packageId`'s flow `name` (`null`:
+     * the package-less flow of that name) — the qualified entry a door that
+     * names the package dispatches through, where the bare {@link execute}
+     * refuses a name two packages hold. Engine-local.
+     */
+    async executeSlot(packageId: string | null, name: string, context?: AutomationContext): Promise<AutomationResult> {
+        const key = this.flowSlots.keyOf(name, packageId);
+        if (key === undefined) {
+            return {
+                success: false,
+                error: packageId === null
+                    ? `Flow '${name}' not found`
+                    : `Flow '${name}' of package '${packageId}' not found`,
+            };
+        }
+        return this.executeKey(key, context, Date.now());
+    }
+
+    /**
      * @param armedFrom [ADR-0150 D3, epic #31527 child E5] Where `definition`
      *   comes from: the automation plugin's arming steps hand the precedence
      *   winner's classification (`resolveFlowPrecedence`) — `package` for the
@@ -4643,21 +5091,20 @@ export class AutomationEngine implements IAutomationService {
             if (refusal) throw new Error(refusal.message);
         }
 
-        // [ADR-0150 D3/D4, #31677 Q1] The engine arms one flow per bare name, so
-        // a name the resolver cannot answer for a caller with no package — two
-        // packages hold it — is refused here, naming every holder, before
-        // anything is armed. ⛔ Never an arming by package id or by arrival.
-        const nameRefusal = this.flowNameRefusal(name, null);
-        if (nameRefusal) throw new Error(nameRefusal.message);
+        // [ADR-0150 D4, #31696] The slot the body is held in: its package's,
+        // so two packages' flows of one name are both armed (the line #31677
+        // Q1 drew, "arming neither", moves here). Every record below is filed
+        // under the slot's key.
+        const key = this.placeFlowSlot(name, arm);
 
         // Version history management
-        const history = this.flowVersionHistory.get(name) ?? [];
+        const history = this.flowVersionHistory.get(key) ?? [];
         history.push({
             version: parsed.version,
             definition: parsed,
             createdAt: new Date().toISOString(),
         });
-        this.flowVersionHistory.set(name, history);
+        this.flowVersionHistory.set(key, history);
 
         // [#28405] The identity of the body as handed over — the stored body,
         // for a flow the protocol serves — so it is the checksum the metadata
@@ -4665,9 +5112,10 @@ export class AutomationEngine implements IAutomationService {
         const checksum = flowContentChecksum(definition);
         if (checksum !== undefined) this.flowChecksums.set(parsed, checksum);
         this.flowArms.set(parsed, arm);
-        this.flows.set(name, parsed);
+        this.flows.set(key, parsed);
         // [#23316] Held now, so no longer refused — see {@link flowRefusals}.
-        this.flowRefusals.delete(name);
+        if (this.loneSharedFlowKey(name) === undefined) this.flowRefusals.delete(name);
+        this.flowRefusals.delete(key);
         // Enable/disable from the persisted deployment `status`. `obsolete`/`invalid`
         // flows are DISABLED (unbound + guarded in execute); `draft`/`active` — and
         // any legacy flow with no explicit status — stay enabled, so existing flows
@@ -4688,8 +5136,8 @@ export class AutomationEngine implements IAutomationService {
         // DISAPPEARS rather than moving is the sign the two were always
         // distinct facts crammed into one map.
         const flowStatus = (parsed as { status?: string }).status;
-        this.flowStatusDisabled.set(name, flowStatus === 'obsolete' || flowStatus === 'invalid');
-        this.logger.info(`Flow registered: ${name} (version ${parsed.version})`);
+        this.flowStatusDisabled.set(key, flowStatus === 'obsolete' || flowStatus === 'invalid');
+        this.logger.info(`Flow registered: ${key} (version ${parsed.version})`);
 
         // ADR-0018 §M1 node-type check, inline — but ONLY once the vocabulary
         // is closed (#4771). During boot the registry is still filling up
@@ -4702,11 +5150,11 @@ export class AutomationEngine implements IAutomationService {
         // registerFlow) IS against a complete vocabulary, so it warns at once.
         // Placed after the enable/disable resolution above so it can honor the
         // same "a flow that cannot run cannot fail" rule as the audit.
-        if (this.nodeTypeVocabularySealed && this.isFlowEnabled(name)) {
+        if (this.nodeTypeVocabularySealed && this.isFlowEnabled(key)) {
             const known = this.knownNodeTypes();
             const unknownTypes = this.unknownNodeTypes(parsed, known);
             if (unknownTypes.length > 0) {
-                this.warnUnknownNodeTypes({ flowName: name, unknownTypes, knownTypes: [...known] });
+                this.warnUnknownNodeTypes({ flowName: key, unknownTypes, knownTypes: [...known] });
             }
         }
 
@@ -4718,12 +5166,12 @@ export class AutomationEngine implements IAutomationService {
         // path. The refusal is `activateFlowTrigger`'s own enablement gate,
         // the one every arming path shares — ⛔ not re-asked here, where a
         // caller-side check once stood alone and `registerTrigger` had none.
-        this.deactivateFlowTrigger(name);
-        this.activateFlowTrigger(name);
+        this.deactivateFlowTrigger(key);
+        this.activateFlowTrigger(key);
         // [#20725, ADR-0126 §7.3] And the flows that call THIS one: a subflow
         // republished `obsolete` disarms its packaged callers, republished
         // `active` re-arms the ones the gate declined — both through the gate.
-        this.rejudgeSubflowCallers(name);
+        this.rejudgeSubflowCallers(key);
 
         // #12206 (Option A) — hand the caller the canonicalized flow this
         // registration stored: the same object `this.flows` now holds and
@@ -4759,9 +5207,10 @@ export class AutomationEngine implements IAutomationService {
             isPackagedFlow: (...a) => this.isPackagedFlow(...a),
             packagedSubflowCallers: (...a) => this.packagedSubflowCallers(...a),
             refuseUnderReachingCallers: (...a) => this.refuseUnderReachingCallers(...a),
-            withdrawFlow: (...a) => this.withdrawFlow(...a),
+            withdrawFlow: (...a) => this.withdrawFlowKey(...a),
         };
-        unregisterFlow.call(host, name);
+        const key = this.bareFlowKey(name);
+        if (key !== undefined) unregisterFlow.call(host, key);
     }
 
     /**
@@ -4782,6 +5231,24 @@ export class AutomationEngine implements IAutomationService {
      * that package, reported at the caller's subflow node.
      */
     withdrawFlow(name: string): void {
+        // [#31696] A bare name two slots hold is refused; one slot is
+        // withdrawn by {@link withdrawFlowSlot}.
+        const key = this.bareFlowKey(name);
+        if (key !== undefined) this.withdrawFlowKey(key);
+    }
+
+    /**
+     * [ADR-0150 D4, #31696] {@link withdrawFlow} for one slot: package
+     * `packageId`'s flow `name` (`null`: the package-less flow of that name).
+     * A no-op for a slot the engine does not hold. Engine-local.
+     */
+    withdrawFlowSlot(packageId: string | null, name: string): void {
+        const key = this.flowSlots.keyOf(name, packageId);
+        if (key !== undefined) this.withdrawFlowKey(key);
+    }
+
+    private withdrawFlowKey(name: string): void {
+        this.sharedSlotTriggerWarned.delete(name);
         // The body lives in ./flow-definitions.ts (#25222).
         const host: ThisParameterType<typeof withdrawFlow> = {
             deactivateFlowTrigger: (...a) => this.deactivateFlowTrigger(...a),
@@ -4796,6 +5263,9 @@ export class AutomationEngine implements IAutomationService {
             logger: this.logger,
         };
         withdrawFlow.call(host, name);
+        // [#31696] The slot goes with its flow; a name left with one slot
+        // files it under the bare name again.
+        this.moveFlowRecords(this.flowSlots.remove(name));
     }
 
     /**
@@ -4814,11 +5284,15 @@ export class AutomationEngine implements IAutomationService {
      */
     recordFlowRefusal(name: string, error: unknown): void {
         // The body lives in ./flow-definitions.ts (#25222).
+        // [M1] Recorded beside a lone slot of a name the registry holds twice
+        // (another package's body), and that slot leaves its trigger.
+        const lone = this.loneSharedFlowKey(name);
         const host: ThisParameterType<typeof recordFlowRefusal> = {
-            flows: this.flows,
+            flows: lone === undefined ? this.flows : new Map(),
             flowRefusals: this.flowRefusals,
         };
         recordFlowRefusal.call(host, name, error);
+        if (lone !== undefined) this.deactivateFlowTrigger(lone);
     }
 
     /**
@@ -4830,8 +5304,12 @@ export class AutomationEngine implements IAutomationService {
      * otherwise. A read: it records nothing.
      */
     getFlowRegistration(name: string): FlowRegistration {
-        if (this.flows.has(name)) return { state: 'registered' };
+        // [#31696] Registered while any slot holds the name. A slot key is
+        // no flow's name.
+        if (isSlotKeySpelling(name)) return { state: 'unregistered' };
         const refusal = this.flowRefusals.get(name);
+        const lone = refusal !== undefined && this.loneSharedFlowKey(name) !== undefined;
+        if (!lone && (this.flows.has(name) || this.flowSlots.keysOf(name).length > 0)) return { state: 'registered' };
         return refusal ? { state: 'refused', reason: { ...refusal } } : { state: 'unregistered' };
     }
 
@@ -4872,6 +5350,7 @@ export class AutomationEngine implements IAutomationService {
             describeUnboundReason: (...a) => this.describeUnboundReason(...a),
             isFlowEnabled: (...a) => this.isFlowEnabled(...a),
             boundFlowTriggers: this.boundFlowTriggers,
+            flowSlotName: (...a) => this.flowSlotName(...a),
         };
         return getFlowRuntimeStates.call(host);
     }
@@ -4958,7 +5437,12 @@ export class AutomationEngine implements IAutomationService {
      */
     recordFlowShadowing(record: FlowShadowingRecord): void {
         if (!record.shadowed.length) return;
-        this.flowShadowing.set(record.name, record);
+        // [#31696] Filed under the armed contender's slot.
+        const holder = record.armed.holder ?? (record.armed.source === 'package' ? record.armed.packageId : undefined);
+        const keys = this.flowSlots.keysOf(record.name);
+        const key = (holder !== undefined ? this.flowSlots.keyOf(record.name, holder) : undefined)
+            ?? (keys.length === 1 ? keys[0] : record.name);
+        this.flowShadowing.set(key, record);
     }
 
     /**
@@ -4975,12 +5459,50 @@ export class AutomationEngine implements IAutomationService {
         return [...this.flowShadowing.values()];
     }
 
+    /**
+     * Every flow this engine holds, by name. [#31696] One entry per slot, so
+     * two packages' flows of one name list that name twice.
+     */
     async listFlows(): Promise<string[]> {
-        return [...this.flows.keys()];
+        return [...this.flows.keys()].map((key) => this.flowSlotName(key));
     }
 
+    /** [#31696] Refused (409, naming both) for a name two packages hold: see {@link getFlowSlot}. */
     async getFlow(name: string): Promise<FlowParsed | null> {
-        return this.flows.get(name) ?? null;
+        const key = this.bareFlowKey(name);
+        return key === undefined ? null : this.flows.get(key) ?? null;
+    }
+
+    /**
+     * [ADR-0150 D4, #31696] The flow the run `context` executes (its own
+     * slot's body, where {@link getFlow} refuses a shared name), or `null`.
+     * Engine-local.
+     */
+    getRunFlow(context: AutomationContext | undefined): FlowParsed | null {
+        const key = this.flowKeyOfRun(context);
+        return key === undefined ? null : this.flows.get(key) ?? null;
+    }
+
+    /**
+     * [ADR-0150 D4, #31696] The key the run `context`'s flow is filed under
+     * NOW: its start key, or where that moved in flight, the key its
+     * package's slot moved to. `undefined` for no run. Engine-local.
+     */
+    flowKeyOfRun(context: AutomationContext | undefined): string | undefined {
+        const key = flowRunKey(context);
+        if (key === undefined || this.flows.has(key)) return key;
+        const name = (context as { flowName?: unknown } | undefined)?.flowName;
+        if (typeof name !== 'string') return key;
+        return this.flowSlots.keyOf(name, flowRunPackage(context) ?? null) ?? key;
+    }
+
+    /**
+     * [ADR-0150 D4, #31696] The flow package `packageId` holds under `name`
+     * (`null`: the package-less flow of that name), or `null`. Engine-local.
+     */
+    getFlowSlot(packageId: string | null, name: string): FlowParsed | null {
+        const key = this.flowSlots.keyOf(name, packageId);
+        return key === undefined ? null : this.flows.get(key) ?? null;
     }
 
     /**
@@ -5037,8 +5559,26 @@ export class AutomationEngine implements IAutomationService {
      * deployment — and for every flow while no reader is attached.
      */
     packagedFlowOwner(name: string): string | undefined {
+        // [ADR-0150 D4, #31696] `name` may be a slot key. A slot of a name two
+        // slots hold asks the loader's set for its own package's flow; a bare
+        // name two slots hold has no one owner, and answers none.
+        const slot = this.flowSlots.slot(name);
+        if (slot !== undefined && this.flowSlots.isShared(slot.name)) {
+            if (slot.packageId === null) return undefined;
+            return this.packagedFlowSource?.(slot.name, slot.packageId) === slot.packageId ? slot.packageId : undefined;
+        }
+        if (slot === undefined && this.flowSlots.isShared(name)) return undefined;
         const owner = this.packagedFlowSource?.(name);
         return typeof owner === 'string' && owner !== '' ? owner : undefined;
+    }
+
+    /**
+     * [ADR-0150 D4, #31696] Does package `packageId`'s loader set hold a flow
+     * `name` of its own? `packageId` when it does — the per-package question
+     * precedence asks of a name two packages may hold.
+     */
+    packagedFlowSlotOwner(name: string, packageId: string): string | undefined {
+        return this.packagedFlowSource?.(name, packageId) === packageId ? packageId : undefined;
     }
 
     /** [#20761] Is `name` a packaged flow — {@link packagedFlowOwner}, as a verdict. */
@@ -5058,8 +5598,9 @@ export class AutomationEngine implements IAutomationService {
      *    arms a name, so a name two packages hold is refused, naming both,
      *    instead of arming one of them — a deployment sealed at its cold boot
      *    with a clash that predates phase 1 included (#31677 Q1, ruled A).
-     *    The engine keeps one armed slot per bare name, and nothing picks
-     *    between two holders.
+     *    [#31696] An arm that names its package's slot (precedence's
+     *    per-package winner) is not asked: each package's flow is held in its
+     *    own slot, and nothing picks between two holders.
      *  - {@link execute} asks it for the caller's package: the package that
      *    ships the flow whose run names the child (a `subflow` or `map` node's
      *    `flowName`, carried on the run's context as `flowName`), or no
@@ -5140,8 +5681,10 @@ export class AutomationEngine implements IAutomationService {
      * (#31699). Read-only.
      */
     flowCallerPackage(context: AutomationContext | undefined): string | null {
-        const caller = context?.flowName;
-        if (typeof caller !== 'string' || caller === '') return null;
+        // [#31696] The slot key the run stamped, where its flow's name is one
+        // two slots hold; else the name, which is then its key.
+        const caller = this.flowKeyOfRun(context);
+        if (caller === undefined) return null;
         return this.armedFlowPackage(caller) ?? null;
     }
 
@@ -5211,9 +5754,11 @@ export class AutomationEngine implements IAutomationService {
      *    package> | null, claimBare: false }` — the collision guard. The bare
      *    key would be one row for every holder, the cross-package collision
      *    the package segment removes, so it is neither claimed nor read.
-     *    Unreachable while {@link registerFlow} refuses a second package's
-     *    same-named flow (#31754); the guard keeps the bare claim safe once
-     *    ADR-0150 D9 lets two packages hold one name;
+     *    [#31696] Asked by a bare name two slots hold, it answers
+     *    `{ packageId: null, claimBare: false }` (no body is armed under the
+     *    bare name). No trigger asks it for a slot of such a name yet: the
+     *    triggers decline a shared slot ({@link activateFlowTrigger}) until
+     *    they bind by slot;
      *  - anything else (the environment's own flow, a flow registered straight
      *    into the engine, no holder, no resolver): `{ packageId: null,
      *    claimBare: true }` — the bare key, as before.
@@ -5231,7 +5776,57 @@ export class AutomationEngine implements IAutomationService {
      * carries, as before.
      */
     setFlowCredentialSource(source: FlowCredentialSource | undefined): void {
-        this.flowCredentialSource = source;
+        // [ADR-0150 D8 row R9, #31696] Asked by slot key, answered by the
+        // flow's name and — for a name two packages hold — its package. A
+        // bare name two packages hold names neither flow, so it is refused
+        // (409, naming both), as at every bare door.
+        const at = (key: string): [string, string | undefined] => {
+            const slot = this.flowSlots.slot(key);
+            if (!slot) {
+                if (this.flowSlots.isShared(key)) {
+                    throw new PackageScopedNameRefusedError(this.sharedFlowNameRefusal(key, null));
+                }
+                return [key, undefined];
+            }
+            if (!this.flowSlots.isShared(slot.name)) return [slot.name, undefined];
+            return [slot.name, slot.packageId ?? ''];
+        };
+        // [S3] A source that does not answer by package is never asked for a
+        // slot of a shared name: it fails closed, naming the slot.
+        const scoped = source?.readsByPackage === true;
+        const unscopedRefusal = (name: string, flowPackage: string) => {
+            const others = this.flowSlots.slotsOf(name)
+                .map((slot) => slot.packageId ?? '')
+                .filter((packageId) => packageId !== flowPackage);
+            return new FlowCredentialUnresolvableError(
+                `Flow '${name}' of package "${flowPackage}": its credentials cannot be read. `
+                    + `${others.map((p) => `Package "${p}"`).join(', ')} also ${others.length === 1 ? 'holds' : 'hold'} a flow `
+                    + `named '${name}', and the flow credential source attached to this engine reads by flow name alone, `
+                    + 'so it could answer another package\'s secret. Nothing was read. Attach a source that reads by '
+                    + 'package (FlowCredentialSource.readsByPackage).',
+            );
+        };
+        this.flowCredentialSource = source && {
+            readsByPackage: true,
+            holds: (key, nodeId, credentialKey) => {
+                const [name, flowPackage] = at(key);
+                if (flowPackage === undefined) return source.holds(name, nodeId, credentialKey);
+                // [S1] By name alone, a "no" means no package holds one, so an unsigned node runs.
+                return scoped ? source.holds(name, nodeId, credentialKey, flowPackage) : source.holds(name, nodeId, credentialKey);
+            },
+            held: (key) => {
+                const [name, flowPackage] = at(key);
+                if (flowPackage === undefined) return source.held(name);
+                if (!scoped) throw unscopedRefusal(name, flowPackage);
+                return source.held(name, flowPackage);
+            },
+            resolve: async (key, nodeId, credentialKey) => {
+                const [name, flowPackage] = at(key);
+                if (flowPackage === undefined) return source.resolve(name, nodeId, credentialKey);
+                if (!scoped) throw unscopedRefusal(name, flowPackage);
+                return source.resolve(name, nodeId, credentialKey, flowPackage);
+            },
+        };
     }
 
     /**
@@ -5411,6 +6006,9 @@ export class AutomationEngine implements IAutomationService {
      * copy would share it.
      */
     flowCredentialHoldings(name: string): FlowCredentialHolding[] {
+        // [#31696] By name: a slot key is no flow's name, and a name two
+        // packages hold names neither flow (no slot is filed under it).
+        if (isSlotKeySpelling(name)) return [];
         // The body lives in ./flow-definitions.ts (#25222).
         const readFlowCredentialSource = () => this.flowCredentialSource;
         const host: ThisParameterType<typeof flowCredentialHoldings> = {
@@ -5483,6 +6081,7 @@ export class AutomationEngine implements IAutomationService {
             flows: this.flows,
             deactivateFlowTrigger: (...a) => this.deactivateFlowTrigger(...a),
             rejudgeSubflowCallers: (...a) => this.rejudgeSubflowCallers(...a),
+            flowSlotKeysOf: (...a) => this.flowSlotKeysOf(...a),
         };
         return hydrateFlowActivations.call(host);
     }
@@ -5570,8 +6169,37 @@ export class AutomationEngine implements IAutomationService {
      */
     private subflowTargets(flow: FlowParsed): string[] {
         // The body lives in ./subflow-guards.ts (#25222).
-        return subflowTargets(flow);
+        const targets = subflowTargets(flow);
+        // [ADR-0150 D3/D4, #31696] A name two slots hold is the slot the
+        // calling flow's package resolves it to — what its run dispatches.
+        if (!targets.some((target) => this.flowSlots.isShared(target) || isSlotKeySpelling(target))) return targets;
+        const arm = this.flowArms.get(flow);
+        const caller = arm?.source === 'package' ? (arm.holder ?? arm.packageId ?? null) : null;
+        return targets.map((target) => (this.flowSlots.isShared(target) || isSlotKeySpelling(target) ? this.resolvedFlowCallKey(target, caller) : target));
     }
+
+    /**
+     * [ADR-0150 D3/D4, #31696] The key the bare `name` a `subflow` / `map`
+     * node calls resolves to from `callerPackageId`; the name itself, which
+     * no slot files, when it is refused — read as an absent child, the way a
+     * run's node reads the refusal.
+     */
+    private resolvedFlowCallKey(name: string, callerPackageId: string | null): string {
+        const resolved = this.resolveFlowKey(name, callerPackageId);
+        return 'key' in resolved ? resolved.key : unfiledFlowKey(name);
+    }
+
+    /**
+     * [ADR-0150 D3/D4, #31696] The key a call by the bare `name` in the flow
+     * filed under `caller` dispatches to — the subflow guards' reading of a
+     * call, the one a run makes ({@link flowCallerPackage}). An arrow, so the
+     * guards can hold it.
+     */
+    private readonly flowCallKey = (caller: string, name: string): string => {
+        if (isSlotKeySpelling(name)) return unfiledFlowKey(name);
+        if (!this.flowSlots.isShared(name)) return name;
+        return this.resolvedFlowCallKey(name, this.armedFlowPackage(caller) ?? null);
+    };
 
     /**
      * [ADR-0126 §7.3] Packaged flows that invoke `name` as a subflow — the
@@ -5880,7 +6508,7 @@ export class AutomationEngine implements IAutomationService {
      * @returns `true` when the flow is declined and must not be armed.
      */
     private declineOntoSuspendingSubflowNotice(flowName: string, triggerType: string): boolean {
-        const trap = subflowNoticeTrap(this.flows, flowName);
+        const trap = subflowNoticeTrap(this.flows, flowName, this.flowCallKey);
         if (!trap) {
             this.subflowNoticeDeclinedFlows.delete(flowName);
             return false;
@@ -5922,7 +6550,7 @@ export class AutomationEngine implements IAutomationService {
      * @returns `true` when the flow is declined and must not be armed.
      */
     private declineOntoRegionSuspendingCall(flowName: string, triggerType: string): boolean {
-        const trap = regionSuspendingCall(this.flows, flowName);
+        const trap = regionSuspendingCall(this.flows, flowName, this.flowCallKey);
         if (!trap) {
             this.subflowRegionDeclinedFlows.delete(flowName);
             return false;
@@ -5981,6 +6609,7 @@ export class AutomationEngine implements IAutomationService {
             disabledPackagedSubflows: (...a) => this.disabledPackagedSubflows(...a),
             deactivateFlowTrigger: (...a) => this.deactivateFlowTrigger(...a),
             activateFlowTrigger: (...a) => this.activateFlowTrigger(...a),
+            flowCallKey: this.flowCallKey,
         };
         rejudgeSubflowCallers.call(host, subflow);
     }
@@ -6094,6 +6723,30 @@ export class AutomationEngine implements IAutomationService {
      *   exists to remove.
      */
     toggleFlow(name: string, enabled: boolean, caller?: Pick<AutomationContext, 'userId'>): Promise<void> {
+        // [#31696] A name two packages hold is refused (409, naming both):
+        // {@link toggleFlowSlot} switches one package's flow.
+        let key: string | undefined;
+        try {
+            key = this.bareFlowKey(name);
+        } catch (err) {
+            return Promise.reject(err);
+        }
+        if (key === undefined) return Promise.reject(new Error(`Flow '${name}' not found`));
+        return this.toggleFlowKey(key, enabled, caller);
+    }
+
+    /**
+     * [ADR-0150 D4, #31696] Switch package `packageId`'s flow `name` on or off
+     * — {@link toggleFlow} for one slot of a name two packages hold. The
+     * ledger row names that package. Engine-local.
+     */
+    toggleFlowSlot(packageId: string, name: string, enabled: boolean, caller?: Pick<AutomationContext, 'userId'>): Promise<void> {
+        const key = this.flowSlots.keyOf(name, packageId);
+        if (key === undefined) return Promise.reject(new Error(`Flow '${name}' of package '${packageId}' not found`));
+        return this.toggleFlowKey(key, enabled, caller);
+    }
+
+    private toggleFlowKey(name: string, enabled: boolean, caller?: Pick<AutomationContext, 'userId'>): Promise<void> {
         // The body lives in ./flow-definitions.ts (#25222).
         const readFlowActivationStore = () => this.flowActivationStore;
         const host: ThisParameterType<typeof toggleFlow> = {
@@ -6111,13 +6764,16 @@ export class AutomationEngine implements IAutomationService {
             activateFlowTrigger: (...a) => this.activateFlowTrigger(...a),
             deactivateFlowTrigger: (...a) => this.deactivateFlowTrigger(...a),
             rejudgeSubflowCallers: (...a) => this.rejudgeSubflowCallers(...a),
+            flowSlotName: (...a) => this.flowSlotName(...a),
+            isSharedFlowKey: (...a) => this.isSharedFlowKey(...a),
         };
         return toggleFlow.call(host, name, enabled, caller);
     }
 
     /** Get flow version history */
     getFlowVersionHistory(name: string): Array<{ version: number; definition: FlowParsed; createdAt: string }> {
-        return this.flowVersionHistory.get(name) ?? [];
+        const key = this.bareFlowKey(name);
+        return key === undefined ? [] : this.flowVersionHistory.get(key) ?? [];
     }
 
     /** Rollback flow to a specific version */
@@ -6128,7 +6784,9 @@ export class AutomationEngine implements IAutomationService {
             flows: this.flows,
             logger: this.logger,
         };
-        rollbackFlow.call(host, name, version);
+        const key = this.bareFlowKey(name);
+        if (key === undefined) throw new Error(`Flow '${name}' has no version history`);
+        rollbackFlow.call(host, key, version);
     }
 
     listRuns(
@@ -6446,9 +7104,25 @@ export class AutomationEngine implements IAutomationService {
         // in P's declared dependency closure; anything else is refused with
         // every candidate named, and nothing runs. Never dispatched, so no
         // `status`, for the reason the disabled exit below states.
-        const nameRefusal = this.flowNameRefusal(flowName, this.flowCallerPackage(context));
-        if (nameRefusal) return { success: false, error: nameRefusal.message };
+        // [#31696] A name two packages hold resolves to the slot the caller
+        // reaches, the same way; a caller that reaches neither is refused.
+        // [#31696] A slot key is no flow's name: not found, as for any name
+        // this engine holds no flow of.
+        if (isSlotKeySpelling(flowName)) return { success: false, error: `Flow '${flowName}' not found` };
+        const resolved = this.resolveFlowKey(flowName, this.flowCallerPackage(context));
+        if ('refusal' in resolved) return { success: false, error: resolved.refusal.message };
+        return this.executeKey(resolved.key, context, startTime);
+    }
+
+    /**
+     * [#31696] {@link execute} for the flow filed under the slot key
+     * `flowName`, already resolved. Every record of the run is keyed by it.
+     */
+    private async executeKey(flowName: string, context: AutomationContext | undefined, startTime: number): Promise<AutomationResult> {
         const flow = this.flows.get(flowName);
+        // [#31696] Read with the flow, before any await: the slot's key can
+        // move while the run is in flight, its package cannot.
+        const runPackage = this.flowSlotPackage(flowName);
 
         if (!flow) {
             return { success: false, error: `Flow '${flowName}' not found` };
@@ -6529,6 +7203,7 @@ export class AutomationEngine implements IAutomationService {
         // Also stamps `flowRunId` so this run's data writes are attributable to it
         // (#3456).
         const runContext = await this.resolveRunContext(flow, context, runId);
+        stampFlowRunSlot(runContext, flowName, runPackage);
 
         try {
             // Find the start node
@@ -10262,7 +10937,8 @@ export class AutomationEngine implements IAutomationService {
         const host: ThisParameterType<typeof seedRunVariables> = {
             seedDeclaredVariables: (...a) => this.seedDeclaredVariables(...a),
         };
-        return seedRunVariables.call(host, flow, flowName, context, runId);
+        // [#31696] `$flowName` is the flow's own name, never a slot key.
+        return seedRunVariables.call(host, flow, this.flowSlotName(flowName), context, runId);
     }
 
     /**
@@ -10301,6 +10977,7 @@ export class AutomationEngine implements IAutomationService {
             persistSuspendedRun: (...a) => this.persistSuspendedRun(...a),
             flowChecksumOf: (...a) => this.flowChecksumOf(...a),
             renderFlowTerminalMessage: (...a) => this.renderFlowTerminalMessage(...a),
+            flowSlotPackage: (...a) => this.flowSlotPackage(...a),
         };
         return executeWithoutRetry.call(host, flowName, context, dispatched);
     }

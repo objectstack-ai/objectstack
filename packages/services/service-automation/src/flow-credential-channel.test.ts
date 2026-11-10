@@ -286,6 +286,42 @@ describe('[#20790] a draft-to-active promotion', () => {
     });
 });
 
+describe('[ADR-0150 D8 row R9, #31696] under a flow name two packages hold, no save or publish touches a stored credential', () => {
+    const [P1, P2] = ['com.acme.alpha', 'com.acme.beta'];
+    const shared = (name: string) => ({
+        status: 'refused' as const, reason: 'ambiguous-in-environment' as const, type: 'flow' as const, name, callerPackageId: null,
+        candidates: [{ kind: 'package', packageId: P1 }, { kind: 'package', packageId: P2 }] as never,
+        message: `The flow "${name}" is held by 2 packages in this environment (package "${P1}", package "${P2}").`,
+    });
+    const withoutCallout = (body: any) => ({ ...body, nodes: body.nodes.filter((n: any) => n.id !== 'callout') });
+
+    it('a save or a publish that would update or delete another package\'s row is refused, naming both; nothing changes', async () => {
+        const ql = await boot();
+        // P1's row at the start node, P2's at the callout, as the boot backfill stamps them.
+        await new FlowCredentialChannel(() => ql as never).store({ name: 'pin_inbound', state: 'active', body: inbound({ hook: HOOK, sign: SIGN }) });
+        for (const [node, pkg] of [['begin', P1], ['callout', P2]]) {
+            const [row] = (await channelRows(ql)).filter((r) => r.node_id === node);
+            await ql.update(FLOW_CREDENTIAL_OBJECT, { id: row.id, flow_package: pkg }, { context: SYSTEM } as never);
+        }
+        const before = await channelRows(ql);
+        const channel = new FlowCredentialChannel(() => ql as never, shared);
+        const saves = [inbound({ hook: ROTATED }), inbound({ sign: '' }), withoutCallout(inbound())];
+        for (const attempt of [...saves.map((body) => () => channel.store({ name: 'pin_inbound', state: 'active', body })),
+            () => channel.promote({ name: 'pin_inbound', body: withoutCallout(inbound()) })]) {
+            const refused = await attempt().catch((e: unknown) => e);
+            expect(refused).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+            expect((refused as Error).message).toContain(`package "${P1}"`);
+            expect((refused as Error).message).toContain(`package "${P2}"`);
+        }
+        expect(await channelRows(ql)).toEqual(before);
+        expect(await channel.resolve('pin_inbound', 'begin', 'secret')).toBe(HOOK);
+        expect(await channel.resolve('pin_inbound', 'callout', 'signingSecret')).toBe(SIGN);
+        // A save that writes and removes nothing (the served form) still saves.
+        await expect(channel.store({ name: 'pin_inbound', state: 'active', body: inbound() })).resolves.toBeDefined();
+        expect(await channelRows(ql)).toEqual(before);
+    });
+});
+
 describe('[#20790] a restore strips and writes nothing (R2)', () => {
     it('the body a rollback stores carries no credential, and the channel keeps its current one', async () => {
         const ql = await boot();

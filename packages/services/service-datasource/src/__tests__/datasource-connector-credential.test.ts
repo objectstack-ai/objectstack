@@ -1,6 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+// Pay the driver's first load at collection, not inside a clocked `it()`
+// (`check:test-source-alias`).
+import '@objectstack/driver-sql';
 import { ObjectQL } from '@objectstack/objectql';
 import {
   CONNECTOR_CREDENTIAL_SOURCE_SERVICE,
@@ -25,6 +28,7 @@ import {
 import { borrowConnectorCredential } from '../datasource-connector-credential.js';
 import { DatasourceAdminServicePlugin } from '../datasource-admin-plugin.js';
 import type { IDataDriver } from '@objectstack/spec/contracts';
+import { refusalAccount } from './refusal-account.js';
 
 /**
  * [ADR-0015 amendment D7] A datasource that names a declared connector
@@ -290,10 +294,10 @@ describe('[ADR-0015 D7] a datasource borrows its connector instance\'s credentia
     const { factory } = apiDriverFactory(upstream());
     const { source } = lender({ declared: [] });
     const { svc } = service(factory, source);
-    await expect(svc.connectDeclared({
+    expect(await refusalAccount(svc.connectDeclared({
       datasources: [sapOrders],
       objects: [{ name: 'sap_order', datasource: 'sap_orders' }],
-    })).rejects.toThrow(/connector instance 'sap_s4'/);
+    }))).toMatch(/connector instance 'sap_s4'/);
   });
 
   it('borrows nothing for a datasource that names no connector', async () => {
@@ -344,10 +348,10 @@ describe('[ADR-0015 D7] a plugin driver adopted from its driver.<name> service i
   it('fails the boot for a datasource objects bind to, when its instance is not declared', async () => {
     const { source } = lender({ declared: [] });
     const { connection } = await adoptedPluginDriver(source);
-    await expect(connection.connectDeclared({
+    expect(await refusalAccount(connection.connectDeclared({
       datasources: [sapOrders],
       objects: [{ name: 'sap_order', datasource: 'sap_orders' }],
-    })).rejects.toThrow(/connector instance 'sap_s4'.*is not declared/s);
+    }))).toMatch(/connector instance 'sap_s4'.*is not declared/s);
   });
 
   it('records a disabled instance as failed, naming it, and marks the datasource unavailable', async () => {
@@ -572,21 +576,21 @@ describe('[ADR-0015 D7] the admin door judges external.connector at save and pro
 
   it('refuses to create a draft naming an undeclared instance, leaving nothing behind', async () => {
     const { service, ops, records } = adminDoor(lender({ declared: [] }).source);
-    await expect(service.createDatasource(draft)).rejects.toThrow(/external\.connector: connector instance 'sap_s4'.*is not declared/s);
+    expect(await refusalAccount(service.createDatasource(draft))).toMatch(/external\.connector: connector instance 'sap_s4'.*is not declared/s);
     expect(ops).toEqual([]);
     expect(records.size).toBe(0);
   });
 
   it('refuses to create one when no lender is registered', async () => {
     const { service, ops } = adminDoor(undefined);
-    await expect(service.createDatasource(draft)).rejects.toThrow(/no connector credential source is registered/);
+    expect(await refusalAccount(service.createDatasource(draft))).toMatch(/no connector credential source is registered/);
     expect(ops).toEqual([]);
   });
 
   it('refuses an update that points external at an undeclared instance, and lets a label-only one through', async () => {
     const seed: StoredDatasource = { ...draft, origin: 'runtime' } as StoredDatasource;
     const { service, ops } = adminDoor(lender({ declared: [] }).source, { seed: [seed] });
-    await expect(service.updateDatasource('sap_orders', { external: { connector: 'sap_s4' } })).rejects.toThrow(/is not declared/);
+    expect(await refusalAccount(service.updateDatasource('sap_orders', { external: { connector: 'sap_s4' } }))).toMatch(/is not declared/);
     expect(ops).toEqual([]);
     await service.updateDatasource('sap_orders', { label: 'SAP orders (renamed)' });
     expect(ops).toContain('put:sap_orders');

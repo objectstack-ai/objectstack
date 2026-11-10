@@ -49,6 +49,11 @@
  *     install and uninstall doors refuse `409 MULTI_REPLICA_PACKAGE_CHANGE_REFUSED`
  *     with nothing written, registered or withdrawn; on a single node, on the
  *     in-process driver or with no cluster service they act as before;
+ *   - (#32176) the remedy that refusal names works on the path every client of
+ *     the door takes (`os package install` posts here): the settings it names,
+ *     applied to one replica, let the same install or uninstall through, and
+ *     every replica restarted with the declaration restored over the same
+ *     ledger serves the result;
  *   - (#31566) a ledger entry an earlier build wrote for a register the engine
  *     refuses: at boot nothing of it loads, and the listing marks it
  *     `notLoaded: { code, message }` from the refusal; a healthy entry and a
@@ -68,7 +73,7 @@ import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import '@objectstack/runtime';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin, type ObjectQL } from '@objectstack/objectql';
-import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
+import { MarketplaceInstallLocalPlugin, multiReplicaInstallLocalRefusalMessage } from './marketplace-install-local-plugin.js';
 import { LocalManifestSource } from './local-manifest-source.js';
 import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 
@@ -581,9 +586,30 @@ describe('install-local refuses a package change under declared replicas on the 
         expect(ApiErrorSchema.safeParse(res.payload.error).success).toBe(true);
         expect(res.payload.success).toBe(false);
         expect(res.payload.error.code).toBe('MULTI_REPLICA_PACKAGE_CHANGE_REFUSED');
-        // The first sentence names the door; the recipe is the remedy an operator acts on.
+        // The first sentence names the door; the recipe is the remedy an operator acts on,
+        // the one text `os package install` prints too.
         expect(res.payload.error.message).toMatch(new RegExp(`^${verb} a package through install-local was refused: `));
-        expect(res.payload.error.message).toContain('run the install script, then restart every replica');
+        expect(res.payload.error.message).toBe(multiReplicaInstallLocalRefusalMessage(verb));
+    }
+
+    /**
+     * The settings the refusal's remedy tells the operator to give the one
+     * replica that makes the change: each `NAME=value` it assigns and each
+     * `NAME unset`, read from the recipe (the text after `instead:`), never
+     * from the sentence that describes the declaration. A remedy that names
+     * none is an empty map, which the callers refuse.
+     */
+    function remedySettings(message: string): Record<string, string | undefined> {
+        const recipe = message.split(' instead: ')[1] ?? '';
+        const settings: Record<string, string | undefined> = {};
+        for (const m of recipe.matchAll(/\b(OS_[A-Z0-9_]+)=([^\s,;]+)/g)) settings[m[1]] = m[2];
+        for (const m of recipe.matchAll(/\b(OS_[A-Z0-9_]+) unset\b/g)) settings[m[1]] = undefined;
+        return settings;
+    }
+
+    /** Boot one replica with `settings` applied over the current environment (`undefined` unsets). */
+    function withSettings(settings: Record<string, string | undefined>) {
+        for (const [k, v] of Object.entries(settings)) vi.stubEnv(k, v);
     }
 
     for (const d of DECLARATIONS) {
@@ -615,6 +641,55 @@ describe('install-local refuses a package change under declared replicas on the 
 
             expect(ledger()).toEqual([HOLDER]);
             expect(ql.registry.getPackage(HOLDER_ID)?.manifest?.version).toBe('1.0.0');
+        });
+
+        it(`${d.name}: the remedy the refusal names installs the package, and every replica restarted over the ledger serves it`, async () => {
+            vi.stubEnv(d.key, d.value);
+            // The inline branch: the body `os package install FILE` posts.
+            const refused = await (await bootPlugin(undefined, { clusterDriver: 'redis' })).install({ manifest: holderVersion() });
+            expectMultiReplicaRefusal(refused, 'Installing');
+            const remedy = remedySettings(refused.payload.error.message);
+            expect(Object.keys(remedy), refused.payload.error.message).not.toEqual([]);
+
+            // Scaled to one replica, restarted with the settings the remedy names: the same install goes through.
+            withSettings(remedy);
+            const res = await (await bootPlugin(undefined, { clusterDriver: 'redis' })).install({ manifest: holderVersion() });
+            expect(res.status, JSON.stringify(res.payload)).toBe(200);
+            expect(ledger()).toEqual([HOLDER]);
+
+            // The replica count and the declaration restored: each replica restarted over the same ledger serves
+            // the package, and refuses the next change, so the declaration really stands again.
+            vi.unstubAllEnvs();
+            vi.stubEnv(d.key, d.value);
+            for (let replica = 0; replica < 2; replica++) {
+                const { ql, uninstall } = await bootPlugin(undefined, { clusterDriver: 'redis' });
+                expect(ql.registry.getPackage(HOLDER_ID)?.manifest?.version).toBe('1.0.0');
+                expectMultiReplicaRefusal(await uninstall(HOLDER_ID), 'Uninstalling');
+            }
+            expect(ledger()).toEqual([HOLDER]);
+        });
+
+        it(`${d.name}: the remedy the refusal names uninstalls the package, and no replica restarted over the ledger serves it`, async () => {
+            await (await bootPlugin(undefined, { clusterDriver: 'redis' })).installHolder();
+            vi.stubEnv(d.key, d.value);
+            const refused = await (await bootPlugin(undefined, { clusterDriver: 'redis' })).uninstall(HOLDER_ID);
+            expectMultiReplicaRefusal(refused, 'Uninstalling');
+            const remedy = remedySettings(refused.payload.error.message);
+            expect(Object.keys(remedy), refused.payload.error.message).not.toEqual([]);
+
+            withSettings(remedy);
+            const res = await (await bootPlugin(undefined, { clusterDriver: 'redis' })).uninstall(HOLDER_ID);
+            expect(res.status, JSON.stringify(res.payload)).toBe(200);
+            expect(ledger()).toEqual([]);
+
+            vi.unstubAllEnvs();
+            vi.stubEnv(d.key, d.value);
+            for (let replica = 0; replica < 2; replica++) {
+                const { ql, install } = await bootPlugin(undefined, { clusterDriver: 'redis' });
+                expect(ql.registry.getPackage(HOLDER_ID)).toBeUndefined();
+                expectMultiReplicaRefusal(await install({ manifest: holderVersion() }), 'Installing');
+            }
+            expect(ledger()).toEqual([]);
         });
     }
 

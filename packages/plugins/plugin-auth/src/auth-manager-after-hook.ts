@@ -50,6 +50,7 @@ import { rotateCallerBearerOnImpersonation } from './impersonation-bearer-rotati
 import { stampInvitationDeliveryOutcome } from './invitation-delivery-outcome.js';
 import { retireExpiredInvitationsOnReissue } from './invitation-expired-supersede.js';
 import { codeInviteRoleNotFound } from './invite-role-not-found-code.js';
+import { explainUntrustedDiscoveryRefusal } from './sso-discovery-companion-origins.js';
 import { readRequestClientAddress } from './request-client-address.js';
 import { stampRoleChangeGrantedSet } from './role-change-granted-set.js';
 import { attachSessionToCredentialResponse } from './session-envelope-completion.js';
@@ -417,6 +418,11 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // `ROLE_NOT_FOUND` (see `invite-role-not-found-code.ts`). It throws
   // on a match, so it stays after every section above.
   await codeInviteRoleNotFound(ctx);
+
+  // ── An untrusted discovery endpoint: say how to name it explicitly ──
+  // `/sso/register` only; the same status and code, the remedy appended to
+  // the vendor's message (`sso-discovery-companion-origins.ts`).
+  await explainUntrustedDiscoveryRefusal(ctx);
 
   // ── #29163: update-user's uncoded refusal carries its code ──
   // Same seam as the change-email section above; throws on a match.

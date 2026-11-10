@@ -261,6 +261,9 @@ describe('platform-admin-gated doors: every first-party action offers itself to 
         'sys_sso_provider.edit_sso_attribute_mapping',
         'sys_scim_connection_credential.mint_scim_credential',
         'sys_scim_connection_credential.revoke_scim_credential',
+        'sys_idp_group_mapping.map_sso_group',
+        'sys_idp_group_mapping.map_scim_group',
+        'sys_idp_group_mapping.delete_group_mapping',
       ]),
     );
   });

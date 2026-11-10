@@ -6292,9 +6292,9 @@
     {
       "id": "records-forms.multi-currency-invoice",
       "title": "A multi-currency invoice stores its home-currency amount at the rate in force on its document date, refuses a date no rate covers, and keeps a currency-less amount blank",
-      "since": "v18",
+      "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -6309,7 +6309,7 @@
           "the console bundle for the browser legs (pnpm console:build)"
         ],
         "knownGaps": [
-          "invoice lines and the Subtotal (`total`) roll-up stay dynamic-mode currency: a child amount cannot take its parent's record currency, and a summary over a record-mode child amount is refused (packages/objectql/src/record-currency-aggregate-door.ts#RecordCurrencySummaryRefusedError). On a EUR or JPY invoice those two show the home currency's symbol while `amount` shows the record's own. That is the platform's current shape, not a failure of this item",
+          "invoice lines and the Subtotal (`total`) roll-up stay dynamic-mode currency: the showcase's invoice lines declare no record-mode amount, and a summary over a record-mode child amount is refused (packages/objectql/src/record-currency-aggregate-door.ts#RecordCurrencySummaryRefusedError). On a EUR or JPY invoice those two show the home currency's symbol while `amount` shows the record's own. That is the platform's current shape, not a failure of this item. A master_detail child following its parent's currency (currencyField PARENT_FIELD.CODE_FIELD) is admitted by the spec since #31956, but the engine does not project through the path at 43a51b55 (#31911 open): records-forms.master-detail-child-follows-parent-currency (planned) is where that lands",
           "a host with no .env reader and no other currency source has no home currency, so every coded seed invoice is refused ERR_HOME_CURRENCY_UNSET and dropped by the seeder with a warning: the invoice list is empty. That is a fixture failure (requires[0]), scored blocked(fixture), never a FAIL of these clauses"
         ]
       },
@@ -6378,6 +6378,460 @@
           "date": "2026-11-09",
           "change": "initial: the showcase invoice became the multi-currency example (#27197); verified live in the same PR, clause table in its body",
           "ref": "#31757"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-10",
+          "change": "since corrected from v18 to v18.4: the invoice became the multi-currency example in #31757, and the converted-at hint (#31638) and the form preview (#31724) that acceptance[5] reads landed after 18.3.0 (83d7e4ae). fixtures.knownGaps[0] no longer says a child amount cannot take its parent's currency: the spec admits it since #31956 and the engine half is #31911 (open), now the planned item records-forms.master-detail-child-follows-parent-currency; the preview's other states are records-forms.home-amount-preview-states. No clause changed. Scoped sweep #32020 (epic #32022 M2, theme 5), read at 43a51b55; no live run made",
+          "ref": "#32020"
+        }
+      ]
+    },
+    {
+      "id": "records-forms.delete-toast-undo-restore",
+      "title": "Undo a business-record delete from its toast: the confirm asks without promising permanence, the toast offers Undo, and Undo restores the record through the recycle bin, while a platform-object delete keeps \"cannot be undone\"",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123): every step"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a showcase boot on its own port and file DB (dogfood §0), OS_PORT exported, signed in as the seeded admin; OS_RECYCLE_BIN_RETENTION_DAYS unset, so retention is the 30-day default (packages/spec/src/data/recycle-bin.zod.ts#RECYCLE_BIN_DEFAULT_RETENTION_DAYS); the console bundle built from this tree (pnpm console:build)",
+          "a project of this run, never a seeded one: POST /api/v1/data/showcase_project with a unique name (QA-RB-<run>), then two showcase_task rows whose project (the master_detail field to showcase_project) is its id, with the task's other required fields as GET /api/v1/meta/object/showcase_task declares them. Its id is PID",
+          "a second project of this run (QA-RB2-<run>, no tasks) for the list-row leg"
+        ]
+      },
+      "steps": [
+        "open the project PID's record page in the console and choose Delete; read the confirm dialog, then confirm",
+        "read the toast; click its Undo before it closes",
+        "reload the project's record page and its Tasks related list",
+        "from the showcase_project list view, delete QA-RB2-<run> from its row menu, read the toast and click Undo",
+        "select two rows of this run in the list and bulk-delete them; read the toast",
+        "open Setup → Exchange Rates (or any sys_ object the admin may delete), choose Delete on a scratch row and read the confirm text, then cancel"
+      ],
+      "acceptance": [
+        {
+          "clause": "a business-object delete asks the question alone, with no permanence promise",
+          "oracle": "dom",
+          "verify": "the dialog body reads \"Are you sure you want to delete this record?\" (objectActions.deleteConfirmQuestion) and not \"…This cannot be undone.\" (ui/packages/core/src/actions/recordDelete.ts#recordDelete, confirmText)",
+          "evidence": "a screenshot of the dialog"
+        },
+        {
+          "clause": "the delete toast names the record and carries Undo, and Undo restores it with its tasks under the same ids",
+          "oracle": "network",
+          "verify": "the toast reads Project \"QA-RB-<run>\" deleted with an Undo action; clicking it sends POST /api/v1/data/showcase_project/recycle-bin/EID/restore with EID = the recycleBinEntryId the DELETE answered, the success toast reads Project \"QA-RB-<run>\" restored, and after reload the record and both tasks are back under their ids",
+          "evidence": "the DELETE answer and restore request in the network log, both toasts, the reloaded page"
+        },
+        {
+          "clause": "a list-row delete offers the same Undo, and a bulk delete keeps its summary toast with no Undo",
+          "oracle": "dom",
+          "verify": "the row delete's toast carries Undo and restores the row; the bulk toast reads \"Deleted 2 Project records\" with no action (recordDelete: a batch keeps its summary toast)",
+          "evidence": "the two toasts and the list after Undo"
+        },
+        {
+          "clause": "a platform-object delete still says it cannot be undone and offers no Undo",
+          "oracle": "dom",
+          "verify": "the sys_ object's confirm reads \"Are you sure you want to delete this record? This cannot be undone.\" (objectActions.deleteConfirm): a platform object enters no bin (packages/objectql/src/recycle-bin/capture.ts#recycleBinTakesObject)",
+          "evidence": "a screenshot of the dialog"
+        }
+      ],
+      "negative": [
+        "an Undo that re-creates the record (a POST /api/v1/data/showcase_project with a new id) is a FAIL: undo is a restore, never a create",
+        "an Undo offered to a caller without allowRestoreOwnDeleted on the object is a FAIL (ui/packages/app-shell/src/utils/recycleBinRestore.ts#canRestoreOwnDeletes); the admin holds it through modifyAllRecords, so this item cannot show the absence — do not score it from the admin's view"
+      ],
+      "traps": [
+        "stale-console-bundle",
+        "hydration-race"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/app-shell/src/utils/__tests__/recycleBinRestore-30239.test.ts, ui/packages/core/src/actions/__tests__/recycleBinRestore.test.ts, ui/packages/data-objectstack/src/recycleBinEntry-30239.test.ts and ui/packages/i18n/src/__tests__/recycle-bin-delete-copy-30239.test.ts; no live spec drives the toast"
+      },
+      "source": [
+        "ui/packages/core/src/actions/recordDelete.ts#recordDelete (confirmText, the toast with Undo, undo)",
+        "ui/packages/app-shell/src/utils/recycleBinRestore.ts#recycleBinRestoreOf and #canRestoreOwnDeletes",
+        "ui/packages/app-shell/src/hooks/useObjectActions.ts (the list door) and ui/packages/app-shell/src/views/RecordDetailView.tsx (the record page door)",
+        "ui/packages/i18n/src/locales/en.ts (objectActions.deleteConfirmQuestion, deletedNamed, restoredNamed, bulkDeleteSuccess)",
+        "#31795 (undo from the toast), #31877 (the delete texts say the bin exists)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0148 recycle bin: undo a delete from its toast (#31795, #31877). Scoped sweep #32020 (epic #32022 M2), read from source at 43a51b55; no live run made",
+          "ref": "#32020"
+        }
+      ]
+    },
+    {
+      "id": "records-forms.setup-recycle-bin-page",
+      "title": "Setup → Recycle bin lists the objects whose bin the caller manages, shows each deleted record with who deleted it and until when it is kept, restores one, and empties an object's bin after a confirm",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123): every step"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a showcase boot on its own port and file DB (dogfood §0), OS_PORT exported, signed in as the seeded admin; OS_RECYCLE_BIN_RETENTION_DAYS unset, so retention is the 30-day default (packages/spec/src/data/recycle-bin.zod.ts#RECYCLE_BIN_DEFAULT_RETENTION_DAYS); the console bundle built from this tree (pnpm console:build)",
+          "three projects of this run deleted through DELETE /api/v1/data/showcase_project/:id (one with two tasks, so its entry carries related records), and one task of a live seeded project deleted the same way"
+        ]
+      },
+      "steps": [
+        "open Setup and choose Recycle bin in its navigation (the nav entry opens /_console/apps/setup/component/data/recycle-bin, ui/packages/app-shell/src/views/setup/recycleBin.ts#recycleBinPagePath)",
+        "read the object list, filter it by \"proj\", and pick Project",
+        "read the entries table; choose Restore on the entry with related records",
+        "pick Task, choose Empty recycle bin, read the dialog and confirm"
+      ],
+      "acceptance": [
+        {
+          "clause": "the object list holds the business objects whose bin the caller manages, and no sys_ object",
+          "oracle": "dom",
+          "verify": "the list is the objects for which the admin's effective permission grants manageRecycleBin (ui/packages/app-shell/src/views/setup/recycleBin.ts#managesRecycleBin, over the /auth/me/permissions map): Project and Task are listed, no object with the sys_ prefix is",
+          "evidence": "a screenshot of the list, and GET /api/v1/auth/me/permissions"
+        },
+        {
+          "clause": "each entry shows the record, how many related records went with it, who deleted it, when, and the date it is kept until",
+          "oracle": "dom",
+          "verify": "the table (data-testid recycle-bin-entries) has the columns Record, Deleted by, Deleted and Kept until; the entry with tasks reads \"and 2 related records\"; Kept until is the entry's purgeAfter from GET /api/v1/data/showcase_project/recycle-bin",
+          "evidence": "a screenshot and the listing body"
+        },
+        {
+          "clause": "Restore writes the entry back and removes its row from the page",
+          "oracle": "network",
+          "verify": "Restore sends POST /api/v1/data/showcase_project/recycle-bin/EID/restore, the success toast names the project, its row leaves the table, and the project with both tasks reads back under its ids",
+          "evidence": "the request, the toast, the table after, the reads"
+        },
+        {
+          "clause": "Empty recycle bin asks first and then removes every entry of that object for good",
+          "oracle": "dom",
+          "verify": "the dialog (data-testid recycle-bin-empty-dialog) reads \"Empty the recycle bin of Task?\" and \"Every deleted Task record in it is removed for good. This cannot be undone.\"; confirming sends DELETE /api/v1/data/showcase_task/recycle-bin, the toast reads \"1 deleted record removed for good\" and the page shows \"No deleted Task records are in the recycle bin.\"",
+          "evidence": "screenshots of the dialog and the page after, and the DELETE answer"
+        }
+      ],
+      "negative": [
+        "a sys_ object in the list, or an object listed whose bin then answers 403, is a FAIL",
+        "an Empty that runs without its confirm, or leaves entries behind, is a FAIL"
+      ],
+      "traps": [
+        "stale-console-bundle",
+        "destructive-in-place"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/app-shell/src/views/setup/RecycleBinPage.test.tsx and ui/packages/app-shell/src/views/setup/RecycleBinPage.navContribution.test.tsx; no live spec drives the page"
+      },
+      "source": [
+        "ui/packages/app-shell/src/views/setup/RecycleBinPage.tsx",
+        "ui/packages/app-shell/src/views/setup/recycleBin.ts#managesRecycleBin and #recycleBinPagePath",
+        "packages/platform-objects/src/apps/setup-nav.contributions.ts (the nav_recycle_bin entry, componentRef data:recycle-bin)",
+        "ui/packages/i18n/src/locales/en.ts (recycleBin.page.*)",
+        "#31835 (the Setup page)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0148 recycle bin: the Setup page to restore or empty (#31835). Scoped sweep #32020 (epic #32022 M2), read from source at 43a51b55; no live run made",
+          "ref": "#32020"
+        }
+      ]
+    },
+    {
+      "id": "records-forms.home-amount-preview-states",
+      "title": "The edit form's home-amount preview says what will be stored before save: the converted amount, the home-currency line, a missing document date, a date no rate covers, and a rate the user may not read",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123): the converted, home-currency, awaiting-date and awaiting-rate states",
+        "a contributor-bound member (the search:qa-contributor-bound-member recipe): the unreadable-rate state, on an invoice of their own"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the boot, home currency and stock rates records-forms.multi-currency-invoice requires (home currency USD; EUR and JPY rates from 2025-01-01, none before)",
+          "the console bundle built from this tree (pnpm console:build)"
+        ],
+        "provisioning": {
+          "use": "search:qa-contributor-bound-member",
+          "why": "acceptance[3] needs a member who edits invoices but may not read sys_exchange_rate: member_default names no business object and showcase_contributor grants invoices only (packages/platform-objects/src/system/sys-exchange-rate.object.ts#SysExchangeRate). The recipe's step 5 gives the member an invoice of their own. Without it acceptance[3] scores blocked(fixture)"
+        }
+      },
+      "steps": [
+        "as admin, open a USD draft invoice's edit form and read the line under Amount (data-testid home-amount-preview)",
+        "change Currency to EUR and read the line; clear Invoice date and read it; set Invoice date to 2024-06-01 and read it; do not save",
+        "cancel, then as the contributor-bound member open their own invoice's edit form, set Currency to EUR and a 2025 date, and read the line"
+      ],
+      "acceptance": [
+        {
+          "clause": "a home-currency amount previews as itself, and a foreign one previews the amount the save will store",
+          "oracle": "dom",
+          "verify": "on USD the line reads \"≈ AMOUNT (home currency)\" with data-state same; on EUR it reads \"≈ AMOUNT at RATE on DATE\" with data-state converted, AMOUNT = amount ÷ the EUR rate in force on the invoice date (the engine's own arithmetic, ui/packages/fields/src/widgets/homeAmountPreview.tsx#useHomeAmountPreview)",
+          "evidence": "screenshots with the data-state attribute, and the rate row read by GET /api/v1/data/sys_exchange_rate"
+        },
+        {
+          "clause": "with no document date the preview asks for one",
+          "oracle": "dom",
+          "verify": "the line reads \"Set the document date to see the home amount\" with data-state awaitingDate",
+          "evidence": "a screenshot"
+        },
+        {
+          "clause": "a date no rate covers warns before save that saving will be refused",
+          "oracle": "dom",
+          "verify": "the line reads \"No EUR rate on or before 2024-06-01: saving is refused until one is added\" with data-state awaitingRate, the same refusal the save answers (ERR_EXCHANGE_RATE_MISSING, records-forms.multi-currency-invoice acceptance[4])",
+          "evidence": "a screenshot"
+        },
+        {
+          "clause": "a user who may not read exchange rates is told the amount is converted on save, never shown a number",
+          "oracle": "dom",
+          "verify": "the member's line reads \"Converted to the home currency when you save\" with data-state refused: their rate read answers 403 and the preview stops there (ui/packages/fields/src/widgets/homeAmountPreview.tsx#HomeAmountPreview)",
+          "evidence": "a screenshot and the 403 rate read in the network log"
+        }
+      ],
+      "negative": [
+        "a previewed amount that differs from the amount_home the save stores is a FAIL; so is a computed number shown to the member who cannot read the rate"
+      ],
+      "traps": [
+        "stale-console-bundle",
+        "wrong-persona",
+        "clock-skew"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/fields/src/__tests__/homeAmountPreview-27196.test.tsx and ui/packages/plugin-form/src/__tests__/sectionFormHomeAmount-27196.test.tsx; no live spec drives the form"
+      },
+      "source": [
+        "ui/packages/fields/src/widgets/homeAmountPreview.tsx#HomeAmountPreview and #useHomeAmountPreview",
+        "ui/packages/i18n/src/locales/en.ts (fields.currencyHome.*)",
+        "packages/platform-objects/src/system/sys-exchange-rate.object.ts#SysExchangeRate (who reads the rates)",
+        "examples/app-showcase/src/data/objects/invoice.object.ts (amount, homeAmount)",
+        "#31724 (the preview and the unreadable-rate message)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0144 multi-currency: the home-amount preview and its states (#31724). Scoped sweep #32020 (epic #32022 M2), read from source at 43a51b55; no live run made",
+          "ref": "#32020"
+        }
+      ]
+    },
+    {
+      "id": "records-forms.master-detail-child-follows-parent-currency",
+      "title": "A master_detail child's record-mode amount follows its parent's currency: it stores no code of its own, its home amount converts at the parent's code, and the parent's code locks while children hold amounts",
+      "since": null,
+      "status": "planned",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "an app author modelling invoice lines in their invoice's currency",
+        "a user entering lines on a EUR invoice"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a parent object with a record-mode amount and its code field, and a master_detail child whose amount declares currencyField PARENT_FIELD.CODE_FIELD (the spec admits the path since #31956)"
+        ]
+      },
+      "acceptance": [
+        {
+          "clause": "a child amount declared with a PARENT_FIELD.CODE_FIELD path is read, displayed and converted in the parent record's currency",
+          "oracle": "api",
+          "verify": "record the child row and its home amount after a write under a EUR parent, and compare with the parent's rate",
+          "evidence": "the reads"
+        }
+      ],
+      "source": [
+        "docs/adr/0144-multi-currency-record-currency-dated-rates-write-time-home-projection.md (D2 as amended 2026-11-09: a master_detail child follows its parent's currency, and the parent's code locks)",
+        "packages/spec/src/data/field.zod.ts#CurrencyConfigSchema (currencyField may be a two-segment path) and packages/spec/src/data/object.zod.ts#refuseDishonestRecordCurrencyPath (the authoring door, landed)",
+        "packages/objectql/src/validation/record-currency-code.ts (at the base sha the engine reads currencyField as a field of the same row, so a path reads no code)",
+        "#31917 (the ADR amendment), #31956 (the spec admits the path), #31911 (the engine half, open)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — planned. ADR-0144 D2 (amended) declares a child that follows its parent's currency and #31956 admits the path at the authoring door, but the engine does not project through it at the base sha (#31911 open). Scoped sweep #32020 (epic #32022 M2, theme 5), read from source at 43a51b55. Steps arrive with the implementing card, in the edit that promotes this item after a run in which it passes",
+          "ref": "#32020"
+        }
+      ]
+    },
+    {
+      "id": "records-forms.action-preflight-panel",
+      "title": "An action's param dialog runs its declared preflight read: the panel moves from loading to ready with the declared fields, a seeded param is drawn read-only from the answer and submitted as it, and a failed read draws the error panel, leaves the seed empty and holds Confirm",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), signed in through the form"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin`",
+          "two scratch actions on showcase_task, saved before the browser leg. qa_pf_probe: PUT /api/v1/meta/action/qa_pf_probe with { name: 'qa_pf_probe', label: 'QA preflight probe', objectName: 'showcase_task', operation: 'update', execution: 'perRecord', locations: ['record_header'], params: [{ name: 'estimate_hours', label: 'Estimate (h)', type: 'number', required: true }, { name: 'notes', label: 'Notes', type: 'textarea', required: true }], preflight: { read: { url: '/api/v1/data/showcase_task/${ctx.recordId}' }, path: 'record', fields: [{ path: 'title', label: 'Title' }, { path: 'status', label: 'Status' }], seed: [{ param: 'notes', path: 'title' }] } }. qa_pf_fail: the same body named qa_pf_fail, labelled 'QA preflight fail', with read.url '/api/v1/data/showcase_task/qa-missing-${ctx.recordId}' (a record that does not exist, so the read answers 404)",
+          "`path` selects the record in the read's answer: run `GET /api/v1/data/showcase_task/ID` once with curl. GetDataResponseSchema answers `{ object, id, record }`; if the door wraps it in `{ success, data }`, save both actions with path 'data.record' instead of 'record' (packages/spec/src/api/protocol.zod.ts#GetDataResponseSchema)",
+          "one seeded showcase_task with a title; record its id, title and estimate_hours"
+        ],
+        "knownGaps": [
+          "the panel's `waiting` state (a URL hole on a param not yet filled), a stale answer dropped after the URL moved on, and the seed cleared on a URL change have no live leg here: a `${param.X}` hole needs a query parameter the record read accepts, and GET /api/v1/data/OBJECT/ID refuses every parameter but select and expand (packages/rest/src/rest-server.ts#DATA_RECORD_READ_PARAMS). acceptance[4] scores them from the pins"
+        ]
+      },
+      "steps": [
+        "open the task's record page; press QA preflight probe in the record header with the network panel recording",
+        "screenshot the dialog as soon as it opens, then again once the read answers; read the panel's data-status at each",
+        "read the Notes param: its control, its value and its hint",
+        "type 3 into Estimate (h) and Confirm; capture the dispatch request and its answer; GET the task",
+        "open QA preflight fail on the same record; screenshot once the read answers; press Confirm with Estimate (h) filled"
+      ],
+      "acceptance": [
+        {
+          "clause": "the dialog sends one GET to the filled URL and draws the panel: data-status loading, then ready with the declared Title and Status values",
+          "oracle": "dom",
+          "verify": "[data-testid=action-preflight-panel] under the heading 'Before you confirm'; data-status moves loading → ready; the panel shows the task's title and status; the network panel holds one GET /api/v1/data/showcase_task/ID (ui/packages/app-shell/src/views/ActionParamDialog.tsx#PreflightPanel)",
+          "evidence": "the two screenshots, the data-status values and the GET"
+        },
+        {
+          "clause": "the seeded param is drawn read-only with the answer's value under its own hint",
+          "oracle": "dom",
+          "verify": "Notes shows the task's title, is not editable, and carries 'Filled in by the check (read-only)' (ui/packages/i18n/src/locales/en.ts actionDialog.preflight.seededHint)",
+          "evidence": "the screenshot and the control's DOM"
+        },
+        {
+          "clause": "Confirm submits the typed and the seeded value, and the record holds both",
+          "oracle": "network",
+          "verify": "the dispatch carries estimate_hours 3 and notes equal to the title; the GET afterwards shows both written",
+          "evidence": "the dispatch request body and the GET"
+        },
+        {
+          "clause": "a failed read draws the error panel, leaves the seed empty, and Confirm does not run",
+          "oracle": "dom",
+          "verify": "data-status failed with 'This check could not be completed. The values it fills stay empty. Close this dialog and try again.'; Notes is empty; Confirm marks Notes required and sends no dispatch request",
+          "evidence": "the screenshot and the network panel after Confirm"
+        },
+        {
+          "clause": "the pins pass at the run subject sha: waiting for the params a URL reads, the stale answer dropped, the seed cleared on a URL change, refused and unbound blocks never read, and the panel's field labels resolved from the bundle",
+          "oracle": "test",
+          "verify": "run each file in automated.ref with its package's vitest; each reports ≥1 test and 0 failed",
+          "evidence": "the vitest summary line per file, with the subject sha"
+        }
+      ],
+      "negative": [
+        "a seeded param the user can type into is a FAIL: the answer fills it",
+        "a dispatch sent after a failed read is a FAIL",
+        "a panel that shows ready before the GET answers is a FAIL"
+      ],
+      "traps": [
+        "hydration-race",
+        "automation-input"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/app-shell/src/views/ActionParamDialog.preflight-31808.test.tsx, ui/packages/core/src/actions/__tests__/ActionRunner.preflightRead-31808.test.ts, ui/packages/i18n/src/__tests__/useObjectLabel-actionPreflight-31937.test.tsx; no live spec opens the dialog"
+      },
+      "source": [
+        "ui/packages/app-shell/src/views/ActionParamDialog.tsx#PreflightPanel",
+        "ui/packages/app-shell/src/views/ActionParamDialog.tsx#preflightHoleParams",
+        "packages/spec/src/system/i18n-resolver.ts#resolveActionPreflight (the bundle key objects.OBJECT._actions.ACTION.preflight.fields.PATH)",
+        "packages/rest/src/rest-server.ts#DATA_RECORD_READ_PARAMS",
+        "#31808",
+        "#31937"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — the console half of an action's `preflight` read (#31808) and its bundle labels (#31937). Scoped sweep #32269 (epic #32022 M3, theme 6: action preflight and page bindings), read from source at 9091955b; no live run made",
+          "ref": "#32269"
+        }
+      ]
+    },
+    {
+      "id": "records-forms.list-link-filter-refused-whole",
+      "title": "A list link whose filter names a field the reader cannot filter on is refused whole: the list opens on the view's own filter, the address bar loses uf__filter, and one notice says why",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), signed in through the form"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin`",
+          "two links to the showcase_task list, each with uf__filter set to the URL-encoded JSON envelope: GOOD = { logic: 'and', conditions: [{ field: 'priority', operator: 'equals', value: 'high' }] }; BAD = GOOD with a second condition { field: 'qa_ghost', operator: 'equals', value: 'x' } (a field the object does not declare)"
+        ]
+      },
+      "steps": [
+        "open /_console/apps/showcase_app/showcase_task?uf__filter=GOOD with the network panel recording; read the list query and the address bar",
+        "open /_console/apps/showcase_app/showcase_task?uf__filter=BAD; read the toast, the list query and the address bar"
+      ],
+      "acceptance": [
+        {
+          "clause": "a link whose every condition passes is applied as written, with no notice",
+          "oracle": "network",
+          "verify": "the list query carries a filter on priority = high; the address bar keeps uf__filter; no warning toast",
+          "evidence": "the list request and the URL"
+        },
+        {
+          "clause": "one condition the gate drops refuses the whole filter: the list query carries no filter at all",
+          "oracle": "network",
+          "verify": "the list request for BAD carries no filter (not even priority = high) (ui/packages/app-shell/src/views/objectViewListUrlState.ts#useObjectViewListUrlState)",
+          "evidence": "the list request"
+        },
+        {
+          "clause": "the address bar loses uf__filter and one warning says the link's filter was not applied",
+          "oracle": "dom",
+          "verify": "the URL has no uf__filter; one toast reads 'This link’s filter was not applied. It names a field you can’t filter on here, so the list shows the view without it.' (ui/packages/i18n/src/locales/en.ts console.objectView.linkFilterRefused)",
+          "evidence": "the URL and a screenshot with the toast"
+        },
+        {
+          "clause": "the pins pass at the run subject sha: an OR filter is refused whole too, and the reader's own stored filter keeps its per-entry drop with no notice",
+          "oracle": "test",
+          "verify": "run ui/packages/app-shell/src/views/ObjectView.listUrlState-11860.test.tsx with the app-shell vitest; it reports ≥1 test and 0 failed",
+          "evidence": "the vitest summary line, with the subject sha"
+        }
+      ],
+      "negative": [
+        "BAD opening on priority = high alone is a FAIL: a dropped AND condition widens the list without saying so",
+        "a second toast on a re-render is a FAIL: the notice is owed once"
+      ],
+      "traps": [
+        "hydration-race",
+        "shared-browser-tab"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/app-shell/src/views/ObjectView.listUrlState-11860.test.tsx (the link-filter-judged-whole cases); no live spec opens a list link"
+      },
+      "source": [
+        "ui/packages/app-shell/src/views/objectViewListUrlState.ts#useObjectViewListUrlState",
+        "ui/packages/app-shell/src/views/userFilterUrlState.ts#LIST_FILTER_PARAM",
+        "#31869"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — a list link's filter judged whole (#31869). Scoped sweep #32269 (epic #32022 M3, theme 7: AI data tools and MCP), read from source at 9091955b; no live run made",
+          "ref": "#32269"
         }
       ]
     }

@@ -80,6 +80,16 @@ function fromStart(graph: { nodes: TopNode[]; next: Map<string, string[]> }): Se
 }
 
 /**
+ * [ADR-0150 D3/D4, #31696] The key of the flow a `subflow` / `map` node of the
+ * flow filed under `caller` calls by the bare name `name`: the slot the
+ * engine resolves that name to from the calling flow's package. Absent, a
+ * call's name is its key — every name one slot holds.
+ */
+export type FlowCallKey = (caller: string, name: string) => string;
+
+const sameName: FlowCallKey = (_caller, name) => name;
+
+/**
  * Where a flow can suspend: the pausing node, the flow that holds it, and the
  * calls that lead there, from the flow asked about to that one.
  */
@@ -100,6 +110,7 @@ export function suspendingNode(
     flows: ReadonlyMap<string, FlowParsed>,
     name: string,
     seen: Set<string> = new Set(),
+    callKey: FlowCallKey = sameName,
 ): SuspendingNode | undefined {
     if (seen.has(name)) return undefined;
     seen.add(name);
@@ -111,7 +122,7 @@ export function suspendingNode(
     if (pause) return { id: pause.id, type: pause.type, flow: name, through: [name] };
     for (const node of graph.nodes) {
         if (node.calls === undefined || !reached.has(node.id)) continue;
-        const deeper = suspendingNode(flows, node.calls, seen);
+        const deeper = suspendingNode(flows, callKey(name, node.calls), seen, callKey);
         if (deeper) return { ...deeper, through: [name, ...deeper.through] };
     }
     return undefined;
@@ -133,7 +144,11 @@ export interface SubflowNoticeTrap {
  * The first `save_notice` of `name` that a path start → … → `subflow` / `map`
  * node whose child can suspend → … → that notice reaches, or `undefined`.
  */
-export function subflowNoticeTrap(flows: ReadonlyMap<string, FlowParsed>, name: string): SubflowNoticeTrap | undefined {
+export function subflowNoticeTrap(
+    flows: ReadonlyMap<string, FlowParsed>,
+    name: string,
+    callKey: FlowCallKey = sameName,
+): SubflowNoticeTrap | undefined {
     const flow = flows.get(name);
     if (!flow) return undefined;
     const notices: Array<{ judgedAs: string; id: string }> = [];
@@ -156,7 +171,7 @@ export function subflowNoticeTrap(flows: ReadonlyMap<string, FlowParsed>, name: 
     const reached = fromStart(graph);
     for (const node of graph.nodes) {
         if (node.calls === undefined || !reached.has(node.id)) continue;
-        const suspends = suspendingNode(flows, node.calls);
+        const suspends = suspendingNode(flows, callKey(name, node.calls), undefined, callKey);
         if (!suspends) continue;
         // From its successors, not itself: a node is "after" the call only on
         // a path that leaves it, which is also how a loop back counts.

@@ -33,10 +33,11 @@
  *    package's dataset;
  *  - `api` — the endpoint matcher keeps ONE api per name, the last-registered,
  *    so the other package's declared path answers `404`;
- *  - `action`, object-less only — `/actions/global/NAME` runs the
- *    last-registered package's handler while `/meta/action/NAME` serves the
- *    first-registered package's declaration, so the button a client draws and
- *    the code that runs come from two packages;
+ *  - `action`, object-less only — `/actions/global/NAME` ran the
+ *    last-registered package's handler while `/meta/action/NAME` served the
+ *    first-registered package's declaration, so the button a client drew and
+ *    the code that ran came from two packages (since narrowed to the
+ *    namespace: "The narrowing");
  *  - `function` — the engine's function registry keeps one function per name,
  *    the last-registered, and a flow `script` node's `function` and an
  *    action's `target` resolve it with no package;
@@ -88,9 +89,9 @@
  *    package whose handlers the hook binder bound it for
  *    ({@link handlerOwnerPackageId}): the function registry is the engine's,
  *    not the registry's, so its one door is that bind;
- *  - **a built-in** — {@link BUILT_IN_BARE_NAMES}; none today for the covered
- *    types, kept in the vocabulary so a platform-held name is refused the way
- *    the security catalog refuses one.
+ *  - **a built-in** — {@link BUILT_IN_BARE_NAMES}: a name the platform itself
+ *    requests by a fixed spelling (the object-less action `install_package`,
+ *    #31697), refused the way the security catalog refuses one.
  *
  * ⛔ **Never the environment catalog.** An item authored in this environment
  * under a package's name is the ADR-0005 overlay — the sanctioned
@@ -141,6 +142,14 @@
  * built-in name (D9: the refusal narrows, it does not go). `agent` and `skill`
  * narrowed first (#31701): `/meta/agent|skill/NAME` read through
  * `readPackageScopedItem`, and the MCP prompt and agent faces are `NS-NAME`.
+ * The object-less `action` followed (#31697): a call that names no package —
+ * the engine's `executeAction`, the bare `/actions` door and MCP's bare
+ * `run_action` — is refused `409 RESOURCE_CONFLICT` naming every holder of the
+ * name, and the namespace-qualified address (`/actions/NS/global/NAME`,
+ * `run_action` with `namespace`) reaches each. The same 409 answers two
+ * packages' same-named action bound to ONE object (epic ruling record
+ * 6729825528, letter A), which this rule never covered.
+ *
  * `email_template` followed (#31699): `/meta/email_template/NAME` reads
  * through `readPackageScopedItem` member by member, and a send resolves the
  * name from the package it is made from (a flow's `notify` node passes the
@@ -258,16 +267,25 @@ const COLLECTION_KEY: Readonly<Record<BareNameRegistryType, string>> = Object.fr
 
 /**
  * The names the platform itself holds, whichever package registers first.
- * None today: the platform ships no item of a covered type under a name a
- * package could take. Applied at the package door only, as the security
- * catalog applies its own.
+ * Applied at the package door only, as the security catalog applies its own.
+ *
+ * - `action`: `install_package` (#31697; epic ruling record 6762267053,
+ *   item 2 (b)). The Console's marketplace and the cloud connection call
+ *   `POST /actions/sys_package/install_package` by that fixed name, naming no
+ *   package, and an object-less action reaches every object's route when the
+ *   object binds none of that name. So no package may hold the object-less
+ *   name, and a package's never makes the platform's install button answer
+ *   `409`. The census found no other fixed-name action request in the
+ *   platform's own code (`packages/**` and `ui/**` sources).
+ * - every other covered type: none — the platform ships no item of it under
+ *   a name a package could take.
  */
 export const BUILT_IN_BARE_NAMES: Readonly<Record<BareNameOneHolderType, ReadonlySet<string>>> = Object.freeze({
   picklist: new Set<string>(),
   mapping: new Set<string>(),
   dataset: new Set<string>(),
   api: new Set<string>(),
-  action: new Set<string>(),
+  action: new Set<string>(['install_package']),
   function: new Set<string>(),
   flow: new Set<string>(),
   webhook: new Set<string>(),
@@ -279,16 +297,62 @@ export const BUILT_IN_BARE_NAMES: Readonly<Record<BareNameOneHolderType, Readonl
 });
 
 /**
+ * [#31697; contract review G6, epic answer on #32213] The OBJECT-BOUND action
+ * keys (`OBJECT:NAME`) the platform itself holds. The Console's marketplace
+ * and the cloud connection post `POST /actions/sys_package/install_package`
+ * by that fixed name, and that route reaches an action bound to `sys_package`
+ * first, so {@link BUILT_IN_BARE_NAMES}' object-less entry alone does not
+ * guard it. A package declaring an action bound to one of these keys is
+ * refused at install, naming the platform — a declared narrowing (first-party
+ * count 0). The census: no other fixed-name action request in the platform's
+ * own code (`packages/**` and `ui/**` sources), and no source in this
+ * repository declares the action (the call reaches the cloud control plane).
+ */
+export const BUILT_IN_BOUND_ACTION_KEYS: ReadonlySet<string> = new Set(['sys_package:install_package']);
+
+/** One object-bound action a manifest declares under a key the platform holds ({@link BUILT_IN_BOUND_ACTION_KEYS}). */
+export interface DeclaredBuiltInBoundAction {
+  readonly name: string;
+  readonly objectName: string;
+}
+
+/**
+ * The object-bound actions `manifest` (and each plugin it carries) declares
+ * under a key the platform holds ({@link BUILT_IN_BOUND_ACTION_KEYS}). An
+ * overridable baseline package is not judged, as {@link declaredBareNames}.
+ */
+export function declaredBuiltInBoundActions(manifest: ObjectStackManifest | unknown): DeclaredBuiltInBoundAction[] {
+  const out: DeclaredBuiltInBoundAction[] = [];
+  if (isOverridableBaseline('action', artifactPackageId(manifest))) return out;
+  const read = (source: unknown) => {
+    const items = source && typeof source === 'object' ? (source as Record<string, unknown>)[COLLECTION_KEY.action] : undefined;
+    if (!Array.isArray(items)) return;
+    for (const item of items) {
+      const name = itemName(item);
+      if (name === undefined || holdsBareName('action', item)) continue;
+      const objectName = standaloneActionOwnerKey(item);
+      if (BUILT_IN_BOUND_ACTION_KEYS.has(`${objectName}:${name}`)) out.push({ name, objectName });
+    }
+  };
+  read(manifest);
+  const plugins = (manifest as { plugins?: unknown } | null | undefined)?.plugins;
+  if (Array.isArray(plugins)) for (const plugin of plugins) read(plugin);
+  return out;
+}
+
+/**
  * [ADR-0150 D2/D9, child B] The covered types whose one-holder rule has
  * narrowed from the deployment to the namespace (module doc, "The narrowing").
  * Each type joins in its own trailing change, once its by-name readers, its
  * AI faces and its stored references all carry the package: the AI family's
- * `agent` and `skill` first (#31701), then `email_template` (#31699). A type
- * not listed here keeps one package holder per deployment.
+ * `agent` and `skill` first (#31701), then the object-less `action` (#31697),
+ * then `email_template` (#31699). A type not listed here keeps one package
+ * holder per deployment.
  */
 export const NAMESPACE_SCOPED_BARE_NAME_TYPES: readonly BareNameOneHolderType[] = Object.freeze([
   'agent',
   'skill',
+  'action',
   'email_template',
 ]);
 

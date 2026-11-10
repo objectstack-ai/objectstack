@@ -268,6 +268,24 @@ export class NotificationTextRenderer {
         return i18n ? this.renderWith(i18n, keys, literal, locale) : literal;
     }
 
+    /**
+     * [#32240] Render a STORED notification's `keys` for a READER whose
+     * request locale is `locale` — the inbox read (`inbox-reader-locale.ts`).
+     * The same render as delivery, member by member over `literal` (the text
+     * stored at delivery), with one difference: a key the catalog cannot
+     * answer is not announced, because nothing was delivered — the stored
+     * text is simply served. `undefined` when no `i18n` service is
+     * registered, so the caller leaves the row as stored.
+     */
+    renderForReader(
+        keys: NotificationTextKeys,
+        literal: RenderedNotificationText,
+        locale: string,
+    ): RenderedNotificationText | undefined {
+        const i18n = this.i18n();
+        return i18n ? this.renderWith(i18n, keys, literal, locale, false) : undefined;
+    }
+
     private i18n(): NotificationTextI18n | undefined {
         try {
             const service = this.opts.getI18n();
@@ -282,15 +300,19 @@ export class NotificationTextRenderer {
         keys: NotificationTextKeys,
         literal: RenderedNotificationText,
         requested: string | undefined,
+        announceMisses = true,
     ): RenderedNotificationText {
         const locale = negotiatedLocale(i18n, requested ?? DEFAULT_LOCALE);
         const params: Record<string, string> = {};
         for (const [name, param] of Object.entries(keys.params ?? {})) {
             params[name] = typeof param === 'string' ? param : (lookup(i18n, param.key, locale) ?? param.fallback);
         }
+        const entry = (key: string): string | undefined => announceMisses
+            ? this.entry(i18n, key, locale, params)
+            : lookup(i18n, key, locale, params);
         return {
-            title: keys.titleKey ? (this.entry(i18n, keys.titleKey, locale, params) ?? literal.title) : literal.title,
-            body: keys.bodyKey ? (this.entry(i18n, keys.bodyKey, locale, params) ?? literal.body) : literal.body,
+            title: keys.titleKey ? (entry(keys.titleKey) ?? literal.title) : literal.title,
+            body: keys.bodyKey ? (entry(keys.bodyKey) ?? literal.body) : literal.body,
         };
     }
 

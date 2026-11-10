@@ -327,11 +327,11 @@ describe('the narrowing — agent and skill hold one name per namespace (ADR-015
 
   it('the switch holds agent and skill, the later families\' narrowed types, and no other covered type', () => {
     // Later child B cards append their own type, each pinned in its family's file.
-    const SWITCHED = [...NARROWED, 'email_template'] as const;
+    const SWITCHED: readonly string[] = [...NARROWED, 'action', 'email_template'];
     expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).toEqual(SWITCHED);
     for (const type of BARE_NAME_ONE_HOLDER_TYPES) {
       // A type that has not narrowed meets every holder, namespaces or not.
-      expect(bareNameHoldersMeet(type, 'alpha', 'beta'), type).toBe(SWITCHED.includes(type as never) ? false : true);
+      expect(bareNameHoldersMeet(type, 'alpha', 'beta'), type).toBe(SWITCHED.includes(type) ? false : true);
       expect(bareNameHoldersMeet(type, 'alpha', 'alpha'), type).toBe(true);
       expect(bareNameHoldersMeet(type, undefined, 'beta'), type).toBe(true);
       expect(bareNameHoldersMeet(type, 'alpha', undefined), type).toBe(true);

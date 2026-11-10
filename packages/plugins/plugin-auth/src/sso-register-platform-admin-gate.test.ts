@@ -600,7 +600,13 @@ describe('the per-provider sign-in toggles are written by the provider writer, d
         const fieldDefault = (SysSsoProvider as any).fields[param.field]?.defaultValue;
         body[param.name] = row[param.field] ?? fieldDefault;
       }
-      expect(body).toEqual({ providerId: 'acme-okta', allowIdpInitiated: presented ?? false, allowJit: presented ?? false });
+      // `skip_user_info` (the OIDC userinfo opt-out) is left as registered: off.
+      expect(body).toEqual({
+        providerId: 'acme-okta',
+        allowIdpInitiated: presented ?? false,
+        allowJit: presented ?? false,
+        skipUserInfo: false,
+      });
 
       const res = await send(
         new Request(`${AUTH}/sso/update-provider`, {
