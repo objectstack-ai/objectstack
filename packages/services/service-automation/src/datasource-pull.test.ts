@@ -32,7 +32,8 @@ const TARGET = {
     fields: {
         external_no: { name: 'external_no', label: 'External no', type: 'text' },
         amount: { name: 'amount', label: 'Amount', type: 'number' },
-        updated_at: { name: 'updated_at', label: 'Updated at', type: 'datetime' },
+        // Not `updated_at`: that is the platform's audit column, stamped on every write.
+        source_updated_at: { name: 'source_updated_at', label: 'Updated at (source)', type: 'datetime' },
     },
 };
 
@@ -58,7 +59,7 @@ const MAPPING = {
     fieldMapping: [
         { source: 'id', target: 'external_no' },
         { source: 'amount', target: 'amount' },
-        { source: 'updated_at', target: 'updated_at' },
+        { source: 'updated_at', target: 'source_updated_at' },
     ],
     datasourceSource: { object: 'erp_order', watermark: { field: 'updated_at', start: '2026-01-01' } },
 };
@@ -156,7 +157,7 @@ async function refusalOf(p: Promise<unknown>): Promise<ConnectorPullError> {
 
 async function copies(ql: ObjectQL): Promise<Rec[]> {
     const rows = await ql.find('order_copy', { orderBy: [{ field: 'external_no', order: 'asc' }], context: SYSTEM as never });
-    return rows.map((r: Rec) => ({ external_no: r.external_no, amount: r.amount, updated_at: r.updated_at }));
+    return rows.map((r: Rec) => ({ external_no: r.external_no, amount: r.amount, updated_at: r.source_updated_at }));
 }
 
 describe('[ADR-0153 D1] a datasourceSource pull, end to end (built-in read path)', () => {

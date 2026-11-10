@@ -285,6 +285,7 @@ export async function pullDatasourceSource(
         const res = await protocol.findData({
             object: sourceObject,
             query: {
+                object: sourceObject,
                 where: query.where,
                 ...(query.orderBy ? { orderBy: query.orderBy } : {}),
                 limit: query.limit ?? windowLimit,
