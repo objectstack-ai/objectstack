@@ -939,7 +939,8 @@ const SECURITY_UPDATE_POLICY_NO_CHECK_EXPLANATION: RuleExplanation = {
       'ownership floor take no part in the check, so a creator who is not the owner loses update unless a ' +
       '`check` admits them. Decide which callers an update should admit, and write exactly that as the `check`.',
     'The finding is `info` tier: the composition is the published one and no door refuses a policy without ' +
-      '`check`, so `--strict` does not fail on it. A policy keyed on `created_by` alone is not reported, ' +
+      '`check`. `os lint` reports it as a suggestion, so `os lint --strict` does not fail on it. A policy ' +
+      'keyed on `created_by` alone is not reported, ' +
       'because on the new row its `using` admits exactly whom the floor admits. Each policy is judged as ' +
       'declared: whether a sibling policy declares `check` for a given caller depends on the sets and ' +
       'positions that caller holds, which the authored metadata does not settle.',
