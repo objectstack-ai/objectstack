@@ -12,8 +12,13 @@
  * restored) and the reading is in the PR body, not kept as a test file.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { DatabaseSync } from 'node:sqlite';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import {
+  ACTIVATION_LEDGER_PACKAGELESS_INDEX_NAME,
+  ensureActivationLedgerPackagelessIndex,
+} from '@objectstack/metadata-protocol';
 import { SchemaRegistry } from './registry.js';
 import { activationLedgerHolderOf, backfillActivationLedgerAtBoot } from './activation-ledger-backfill.js';
 
@@ -56,7 +61,7 @@ function makeLedger(rows: Array<Record<string, unknown>>) {
   return { engine, table };
 }
 
-const logger = () => ({ info: vi.fn(), warn: vi.fn(), debug: vi.fn() });
+const logger = () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() });
 
 beforeEach(() => {
   registry = new SchemaRegistry();
@@ -163,5 +168,152 @@ describe('backfillActivationLedgerAtBoot — once per boot, after the seal', () 
     expect(engine.update).not.toHaveBeenCalled();
     expect(log.warn).toHaveBeenCalledTimes(1);
     expect(log.warn.mock.calls[0]?.[1]).toEqual({ error: 'no such table' });
+  });
+});
+
+/**
+ * The ledger as a real SQLite table carrying the declared key, as
+ * `SqlDriver.syncDeclaredIndexes` builds `(metadata_type, package_id, name)`
+ * there: a write that key refuses is refused here too, and the package-less
+ * index migration (`@objectstack/metadata-protocol`) runs its real statements
+ * against the same rows. `find` answers in storage order, as a driver does.
+ */
+function sqliteLedger(rows: Array<{ id: string; name: string; package_id: string | null; active: number }>) {
+  const db = new DatabaseSync(':memory:');
+  db.exec(`CREATE TABLE ${TABLE} (id TEXT PRIMARY KEY, metadata_type TEXT, name TEXT, package_id TEXT, active INTEGER)`);
+  db.exec(
+    `CREATE UNIQUE INDEX uniq_sys_metadata_activation_metadata_type_package_id_name ON ${TABLE} ` +
+      '(metadata_type, package_id, name)',
+  );
+  for (const r of rows) {
+    db.prepare(`INSERT INTO ${TABLE} (id, metadata_type, name, package_id, active) VALUES (?, 'flow', ?, ?, ?)`).run(
+      r.id,
+      r.name,
+      r.package_id,
+      r.active,
+    );
+  }
+  const exec = async (sql: string) => (/^\s*select/i.test(sql) ? db.prepare(sql).all() : db.exec(sql));
+  const engine = {
+    find: vi.fn(async (_object: string, options?: any) => {
+      if (Object.keys(options?.where ?? {}).length > 0) {
+        throw new Error('sqliteLedger: the backfill reads the whole ledger; a scoped read is not modelled');
+      }
+      return db.prepare(`SELECT * FROM ${TABLE} ORDER BY rowid`).all();
+    }),
+    update: vi.fn(async (_object: string, data: any, options?: any) => {
+      assertEngineUpdateDispatch(data, options);
+      const { id, ...patch } = data;
+      const columns = Object.keys(patch);
+      db.prepare(`UPDATE ${TABLE} SET ${columns.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`).run(
+        ...columns.map((c) => patch[c]),
+        id,
+      );
+      return data;
+    }),
+  };
+  const packageOf = (id: string) =>
+    (db.prepare(`SELECT package_id FROM ${TABLE} WHERE id = ?`).get(id) as { package_id: string | null } | undefined)
+      ?.package_id;
+  const indexExists = () =>
+    db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?").get(ACTIVATION_LEDGER_PACKAGELESS_INDEX_NAME) !==
+    undefined;
+  return { db, exec, engine, packageOf, indexExists };
+}
+
+describe('an upgrade over two package-less rows for one packaged flow, and a third flow stored after them', () => {
+  const APP = 'com.example.app183';
+  let ledger: ReturnType<typeof sqliteLedger>;
+
+  /** One boot's two steps, in boot order: the index at `kernel:ready`, the backfill at `kernel:bootstrapped`. */
+  const boot = async () => {
+    const log = logger();
+    const index = await ensureActivationLedgerPackagelessIndex(ledger.exec, log, { client: 'better-sqlite3' });
+    const report = await backfillActivationLedgerAtBoot(ledger.engine, bootRegistry(), log);
+    return { index, report, log };
+  };
+
+  beforeEach(() => {
+    install(APP);
+    ship('flow', 'app183_switch', APP);
+    ship('flow', 'app183_digest', APP);
+    registry.sealBareNameHolders();
+    ledger = sqliteLedger([
+      { id: 'd1', name: 'app183_switch', package_id: null, active: 0 },
+      { id: 'd2', name: 'app183_switch', package_id: null, active: 1 },
+      { id: 'd3', name: 'app183_digest', package_id: null, active: 0 },
+    ]);
+  });
+
+  afterEach(() => ledger.db.close());
+
+  it('binds neither duplicate on the first boot or the second, the index keeps refusing, and the third flow is bound', async () => {
+    for (let bootNumber = 1; bootNumber <= 2; bootNumber++) {
+      const { index, report, log } = await boot();
+
+      expect(index.status).toBe('conflict');
+      expect(ledger.indexExists()).toBe(false);
+      expect(ledger.packageOf('d1')).toBeNull();
+      expect(ledger.packageOf('d2')).toBeNull();
+      expect(ledger.packageOf('d3')).toBe(APP);
+      expect(report?.duplicated).toEqual([{
+        metadataType: 'flow',
+        name: 'app183_switch',
+        packageId: APP,
+        rows: [{ id: 'd1', active: false }, { id: 'd2', active: true }],
+      }]);
+      expect(report?.failed).toEqual([]);
+      // The backfill's own line names the item and both rows (the index's refusal is the other error line).
+      const duplicateLine = log.error.mock.calls.map((c) => String(c[0])).find((m) => m.includes('[ObjectQLPlugin]'));
+      expect(duplicateLine).toContain("flow 'app183_switch'");
+      expect(duplicateLine).toContain('row d1');
+      expect(duplicateLine).toContain('row d2');
+      expect(log.warn).not.toHaveBeenCalled();
+    }
+  });
+
+  it('once an operator deletes the row that should not apply, the next boot builds the index and binds the row left', async () => {
+    await boot();
+    ledger.db.prepare(`DELETE FROM ${TABLE} WHERE id = ?`).run('d1');
+
+    const { index, report, log } = await boot();
+
+    expect(index.status).toBe('created');
+    expect(ledger.indexExists()).toBe(true);
+    expect(ledger.packageOf('d2')).toBe(APP);
+    expect(report?.bound).toEqual([{ metadataType: 'flow', name: 'app183_switch', packageId: APP }]);
+    expect(report?.duplicated).toEqual([]);
+    expect(log.error).not.toHaveBeenCalled();
+  });
+});
+
+describe('backfillActivationLedgerAtBoot — a row whose write fails', () => {
+  it('is named with its error, and the rows stored after it are still bound', async () => {
+    install(A);
+    ship('flow', 'nightly_sync', A);
+    ship('flow', 'weekly_sync', A);
+    registry.sealBareNameHolders();
+    const { engine, table } = makeLedger([
+      { id: 'r1', metadata_type: 'flow', name: 'nightly_sync', package_id: null, active: false },
+      { id: 'r2', metadata_type: 'flow', name: 'weekly_sync', package_id: null, active: false },
+    ]);
+    const update = engine.update.getMockImplementation()!;
+    engine.update.mockImplementation(async (object: string, data: any, options?: any) => {
+      if (data.id === 'r1') throw new Error('connection reset');
+      return update(object, data, options);
+    });
+    const log = logger();
+
+    const report = await backfillActivationLedgerAtBoot(engine, bootRegistry(), log);
+
+    expect(table[0].package_id).toBeNull();
+    expect(table[1].package_id).toBe(A);
+    expect(report?.failed).toEqual([
+      { metadataType: 'flow', name: 'nightly_sync', id: 'r1', packageId: A, error: 'connection reset' },
+    ]);
+    const warning = String(log.warn.mock.calls[0]?.[0] ?? '');
+    expect(warning).toContain("flow 'nightly_sync'");
+    expect(warning).toContain('row r1');
+    expect(warning).toContain('connection reset');
   });
 });
