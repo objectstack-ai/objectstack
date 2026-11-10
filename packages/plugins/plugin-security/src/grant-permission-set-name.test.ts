@@ -264,7 +264,14 @@ describe('the data door (a non-system writer)', () => {
   it('a catalog read that throws refuses nothing: the write proceeds and the operator is told', async () => {
     const h = await boot();
     const metadata = h.ctx.getService('metadata');
-    vi.spyOn(metadata, 'get').mockRejectedValue(new Error('metadata store down'));
+    // Down for the name under check only: since ADR-0150 D3 the writer's own
+    // sets resolve through the same catalog read, and a store down for them
+    // too would refuse the writer (fail closed) before this check is reached.
+    const read = metadata.get.bind(metadata);
+    vi.spyOn(metadata, 'get').mockImplementation(async (type: string, name: string) => {
+      if (name === 'qa_nowhere') throw new Error('metadata store down');
+      return read(type, name);
+    });
     await h.engine.insert('sys_user_permission_set', { user_id: 'u_7', permission_set: 'qa_nowhere' }, { context: ADMIN } as any);
     expect(await grantsOf(h, 'u_7')).toHaveLength(1);
     expect(h.ctx.logger.warn).toHaveBeenCalledWith(

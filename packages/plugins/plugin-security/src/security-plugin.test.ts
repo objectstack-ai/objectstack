@@ -2919,7 +2919,7 @@ describe('PermissionEvaluator', () => {
     expect(result).toEqual([psAdmin]);
   });
 
-  it('warns (and keeps resolving) when the dbLoader throws — #2565 observability', async () => {
+  it('warns (and fails closed) when the catalog loader throws — #2565 observability', async () => {
     const evaluator = new PermissionEvaluator();
     const psAdmin = { name: 'admin_full_access' };
     const metadata = { list: vi.fn().mockReturnValue([psAdmin]) };
@@ -2931,12 +2931,14 @@ describe('PermissionEvaluator', () => {
       async () => { throw new Error('db down'); },
       { logger: { warn: (msg, meta) => warns.push({ msg, meta }) } },
     );
-    // behavior unchanged: metadata-resolved set still returned, unresolved grants nothing
-    expect(result).toEqual([psAdmin]);
-    // ...but the swallow is surfaced, naming the unresolved sets
+    // [ADR-0150 D3] With a catalog loader it is the one source: the metadata
+    // list is never read, so a loader that throws grants nothing at all.
+    expect(result).toEqual([]);
+    expect(metadata.list).not.toHaveBeenCalled();
+    // ...and the swallow is surfaced, naming every set it could not answer
     expect(warns.length).toBe(1);
     expect(warns[0].msg).toContain('catalog lookup failed');
-    expect(warns[0].meta?.unresolved).toEqual(['custom_sales']);
+    expect(warns[0].meta?.unresolved).toEqual(['admin_full_access', 'custom_sales']);
     expect(warns[0].meta?.error).toBe('db down');
   });
 

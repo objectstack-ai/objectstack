@@ -241,6 +241,7 @@ export async function bindOrganizationAccessPolicy(deps: OrganizationAccessPolic
         ...(organizationId ? { tenantId: organizationId } : {}),
         positions: [...grants.positions],
         permissions: [...grants.permissions],
+        ...(grants.permissionSetAddresses ? { permissionSetAddresses: [...grants.permissionSetAddresses] } : {}),
       });
       return (Array.isArray(sets) ? sets : []).some(carriesAdminScope);
     },

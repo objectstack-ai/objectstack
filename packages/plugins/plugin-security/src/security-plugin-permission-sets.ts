@@ -113,11 +113,17 @@ export function permissionSetMemoKey(
 ): string {
   const positions = Array.isArray(context?.positions) ? context.positions : [];
   const permissions = Array.isArray(context?.permissions) ? context.permissions : [];
+  // [ADR-0150 D3] The addresses decide which holder of a name resolves: two
+  // contexts naming the same sets at different packages resolve differently.
+  const addresses = Array.isArray(context?.permissionSetAddresses)
+    ? context.permissionSetAddresses.map((a: any) => [a?.packageId ?? null, a?.name ?? null])
+    : null;
   return JSON.stringify([
     positions,
     permissions,
     context?.principalKind ?? null,
     context?.userId ? 1 : 0,
+    addresses,
   ]);
 }
 
@@ -187,12 +193,16 @@ export async function resolvePermissionSetsForContextUnmemoized(
       if (!requested.includes(name)) requested.push(name);
     }
   }
+  // [ADR-0150 D3] Each granted set is requested at the holder the resolver
+  // resolved it to (`ExecutionContext.permissionSetAddresses`); a name with no
+  // address — the baseline, an API key's seed, an agent's scope — by D3 with
+  // no caller.
   let permissionSets = await this.permissionEvaluator.resolvePermissionSets(
     requested,
     this.metadata,
     this.bootstrapPermissionSets,
     this.dbLoaderForContext(context),
-    { logger: this.logger },
+    { logger: this.logger, addresses: Array.isArray(context?.permissionSetAddresses) ? context.permissionSetAddresses : undefined },
   );
   // [#13419 执行要点 5] The retirement is LOUD: a held position whose namesake
   // set exists, and is not granted, is reported — never granted, never silent.

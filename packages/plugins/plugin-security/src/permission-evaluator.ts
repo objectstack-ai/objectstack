@@ -620,114 +620,151 @@ export class PermissionEvaluator {
   }
 
   /**
-   * Resolve permission sets for a list of identifier names from metadata.
+   * Resolve the permission sets a list of names requests.
    *
-   * Identifiers are matched to `PermissionSet.name`. The names may be
-   * either role names (when `sys_position.name` is reused as a permission set
-   * name — common for default admin/member/viewer roles) or explicit
-   * permission set names supplied through `ExecutionContext.permissions[]`
-   * (resolved by `resolveExecutionContext` from `sys_user_permission_set`
-   * and `sys_position_permission_set`).
+   * [ADR-0150 D3, ADR-0131 D3/D4] With a catalog loader — the security
+   * plugin's, which every composition with an engine carries — that loader is
+   * the ONE source: each name is resolved through the security catalog's
+   * package-scoped rule (`resolvePermissionScoped`, `@objectstack/core`). A
+   * name `options.addresses` carries an address for is resolved at that
+   * holder exactly (the catalog's stored-column arm: a holder that no longer
+   * serves the name is read by D3 and said once); every other name — a
+   * caller's seed, an agent's scope ceiling, the baseline — by D3 with no
+   * caller: one holder answers, two or more are refused naming every
+   * candidate, and nothing is picked. ⛔ There is no by-name pick from the
+   * metadata service's list: with two holders of a name it would take
+   * whichever came first.
    *
-   * Async because the underlying metadata service exposes `list()` as a
-   * Promise — synchronous iteration would silently yield zero results
-   * (the historical SecurityPlugin behaviour, masking all enforcement).
+   * Without a loader no catalog is bound — an engine-less stand-in, or an
+   * engine with no registry, which the plugin's `start()` already warns about
+   * (every position-bound set then resolves to nothing). Only there do the
+   * metadata service's list and the plugin's own `bootstrapPermissionSets`
+   * answer by name, as they did before ADR-0150; there is no package to tell
+   * two holders apart by. A booted composition always binds the catalog, so
+   * it never reaches this arm.
    *
-   * `bootstrapPermissionSets` is a fallback list of plugin-owned permission
-   * sets (typically the platform defaults: admin_full_access /
-   * member_default / viewer_readonly) that are registered via
-   * `manifest.register({ permissions })` but do not currently propagate
-   * into the metadata service's `list()` index. Without this fallback,
-   * SecurityPlugin would never resolve the defaults and all enforcement
-   * would be silently disabled for authenticated requests.
+   * A loader that throws is swallowed (fail closed: the requested sets grant
+   * nothing) but SURFACED via `options.logger` — see #2565: without the warn,
+   * a transient read error makes sets silently vanish and the resulting 403s
+   * are undiagnosable.
+   *
    */
   async resolvePermissionSets(
     identifiers: string[],
     metadataService: any,
     bootstrapPermissionSets: PermissionSet[] = [],
     /**
-     * Optional async loader for permission set names that aren't found in
-     * metadata or bootstrap — the security plugin passes its catalog loader
-     * (the security catalog's definitions, ADR-0131 D3/D4). Failures are swallowed
-     * (fail-closed: unresolvable sets grant nothing) but SURFACED via
-     * `options.logger` — see #2565: without the warn, a transient DB error
-     * makes custom permission sets silently vanish and the resulting 403s
-     * are undiagnosable.
+     * The security plugin's catalog loader: the catalog's definition of each
+     * request, resolved by ADR-0150 D3. `undefined` only where no catalog
+     * exists.
      */
-    dbLoader?: (unresolved: string[]) => Promise<PermissionSet[]>,
-    /** Optional logger; only `warn` is used. Resolution behavior is unchanged. */
-    options: { logger?: { warn?: (msg: string, meta?: Record<string, any>) => void } } = {},
+    catalogLoader?: CatalogSetLoader,
+    options: {
+      /** Optional logger; only `warn` is used. */
+      logger?: { warn?: (msg: string, meta?: Record<string, any>) => void };
+      /**
+       * [ADR-0150 D3] The `(packageId, name)` each granted set was resolved
+       * to (`ExecutionContext.permissionSetAddresses`). A name with an
+       * address of a package is requested at that holder.
+       */
+      addresses?: readonly PermissionSetAddressLike[];
+    } = {},
   ): Promise<PermissionSet[]> {
     if (identifiers.length === 0) return [];
+    const names = [...new Set(identifiers.filter((n): n is string => typeof n === 'string' && n !== ''))];
 
-    const result: PermissionSet[] = [];
-    const seen = new Set<string>();
+    if (!catalogLoader) return resolveWithoutCatalog(names, metadataService, bootstrapPermissionSets, options.logger);
 
-    // Get all permission sets from metadata. Support both async (Manager) and
-    // sync (test stub) implementations of `list`.
-    let allPermSets: any = [];
+    const requests = permissionSetRequestsFor(names, options.addresses);
     try {
-      const listed = metadataService?.list?.('permission')
-        ?? metadataService?.list?.('permissions')
-        ?? [];
-      allPermSets = typeof (listed as any)?.then === 'function' ? await listed : listed;
+      return (await catalogLoader(requests)) ?? [];
     } catch (e) {
-      allPermSets = [];
       options.logger?.warn?.(
-        '[security] permission-set metadata list() failed — falling back to bootstrap/db sources',
-        { requested: identifiers, error: (e as Error)?.message },
+        '[security] permission-set catalog lookup failed — unresolved sets grant nothing this request',
+        { unresolved: names, error: (e as Error)?.message },
       );
+      return [];
     }
-    if (!Array.isArray(allPermSets)) allPermSets = [];
-
-    const wanted = new Set(identifiers);
-    for (const ps of allPermSets) {
-      if (wanted.has(ps.name) && !seen.has(ps.name)) {
-        seen.add(ps.name);
-        result.push(ps);
-      }
-    }
-
-    // Fallback: any wanted name not yet matched is sourced from the
-    // bootstrap list (plugin-owned defaults). Avoids silent failure when
-    // permission sets are registered via `manifest.register` but the
-    // metadata service hasn't indexed them.
-    for (const ps of bootstrapPermissionSets) {
-      if (wanted.has(ps.name) && !seen.has(ps.name)) {
-        seen.add(ps.name);
-        result.push(ps);
-      }
-    }
-
-    // Last source: the loader the caller supplies — the security plugin's
-    // catalog loader, which answers environment-authored and package sets the
-    // metadata list does not (ADR-0131 D3/D4). Without it those sets would be
-    // silently ignored both for CRUD enforcement and for field-level masking.
-    if (dbLoader) {
-      const unresolved = identifiers.filter((n) => !seen.has(n));
-      if (unresolved.length > 0) {
-        try {
-          const dbRows = await dbLoader(unresolved);
-          for (const ps of dbRows ?? []) {
-            if (ps?.name && !seen.has(ps.name)) {
-              seen.add(ps.name);
-              result.push(ps);
-            }
-          }
-        } catch (e) {
-          // Swallow — the request shouldn't fail just because the DB
-          // lookup is unavailable (fail-closed: the unresolved sets simply
-          // grant nothing). But surface it: without this warn a transient
-          // DB error silently drops custom permission sets and the
-          // resulting 403s point nowhere near the cause (#2565).
-          options.logger?.warn?.(
-            '[security] permission-set catalog lookup failed — unresolved sets grant nothing this request',
-            { unresolved, error: (e as Error)?.message },
-          );
-        }
-      }
-    }
-
-    return result;
   }
+}
+
+/**
+ * The by-name arm of {@link PermissionEvaluator.resolvePermissionSets}, for a
+ * composition with no catalog bound: the metadata service's list (async or a
+ * synchronous stand-in), then the bootstrap sets, one set per name.
+ */
+async function resolveWithoutCatalog(
+  names: readonly string[],
+  metadataService: any,
+  bootstrapPermissionSets: readonly PermissionSet[],
+  logger: { warn?: (msg: string, meta?: Record<string, any>) => void } | undefined,
+): Promise<PermissionSet[]> {
+  let listed: unknown = [];
+  try {
+    const answer = metadataService?.list?.('permission') ?? metadataService?.list?.('permissions') ?? [];
+    listed = typeof (answer as any)?.then === 'function' ? await answer : answer;
+  } catch (e) {
+    logger?.warn?.(
+      '[security] permission-set metadata list() failed — falling back to the bootstrap sets',
+      { requested: [...names], error: (e as Error)?.message },
+    );
+  }
+  const wanted = new Set(names);
+  const result: PermissionSet[] = [];
+  const seen = new Set<string>();
+  for (const ps of [...(Array.isArray(listed) ? listed : []), ...bootstrapPermissionSets]) {
+    if (ps && wanted.has(ps.name) && !seen.has(ps.name)) {
+      seen.add(ps.name);
+      result.push(ps);
+    }
+  }
+  return result;
+}
+
+/** [ADR-0150 D3] The address a context carries for one granted set — `ExecutionContext.permissionSetAddresses`' entry. */
+export interface PermissionSetAddressLike {
+  readonly packageId: string | null;
+  readonly name: string;
+}
+
+/**
+ * [ADR-0150 D3] One permission set the evaluator asks the catalog for: a name,
+ * and — when the context carried an address of a package for it — that holder.
+ * No `packageId`: resolved by D3 with no caller.
+ */
+export interface PermissionSetRequest {
+  readonly name: string;
+  readonly packageId?: string;
+}
+
+/** The catalog loader {@link PermissionEvaluator.resolvePermissionSets} asks: one definition per holder resolved. */
+export type CatalogSetLoader = (requests: readonly PermissionSetRequest[]) => Promise<PermissionSet[]>;
+
+/**
+ * [ADR-0150 D3] The requests for `names`: one per address of a package the
+ * context carries for a name (two packages' sets of one name are two
+ * requests), else one with no holder. An address with a `null` package names
+ * a set no package holds — the environment's own — which D3 with no caller
+ * answers first, so it is requested with no holder too.
+ */
+export function permissionSetRequestsFor(
+  names: readonly string[],
+  addresses: readonly PermissionSetAddressLike[] | undefined,
+): PermissionSetRequest[] {
+  const requests: PermissionSetRequest[] = [];
+  for (const name of names) {
+    const holders = [...new Set(
+      (addresses ?? [])
+        .filter((a) => a?.name === name && typeof a.packageId === 'string' && a.packageId !== '')
+        .map((a) => a.packageId as string),
+    )];
+    const environmentToo = (addresses ?? []).some((a) => a?.name === name && a.packageId === null);
+    if (holders.length === 0) {
+      requests.push({ name });
+      continue;
+    }
+    for (const packageId of holders) requests.push({ name, packageId });
+    if (environmentToo) requests.push({ name });
+  }
+  return requests;
 }

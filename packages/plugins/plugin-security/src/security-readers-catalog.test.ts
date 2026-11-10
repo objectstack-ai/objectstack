@@ -31,7 +31,7 @@ import type { PermissionSet } from '@objectstack/spec/security';
 import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 import { SecurityPlugin } from './security-plugin.js';
-import { PermissionEvaluator } from './permission-evaluator.js';
+import { PermissionEvaluator, type CatalogSetLoader } from './permission-evaluator.js';
 
 /** An environment-authored set, as the engine registry holds it. */
 const CATALOG_SET: PermissionSet = {
@@ -92,10 +92,13 @@ async function loaderOver(fixture: Fixture = {}) {
   const plugin = new SecurityPlugin();
   await plugin.init(ctx);
   await plugin.start(ctx);
-  const loader = (plugin as any).catalogSetLoader as ((names: string[]) => Promise<PermissionSet[]>) | undefined;
-  expect(typeof loader, 'the catalog loader was never built — the boot bailed out').toBe('function');
+  const raw = (plugin as any).catalogSetLoader as CatalogSetLoader | undefined;
+  expect(typeof raw, 'the catalog loader was never built — the boot bailed out').toBe('function');
   rowReads = 0; // boot-time reads are not the loader's
-  return { loader: loader!, rowReads: () => rowReads };
+  // [ADR-0150 D3] The loader is asked for requests; a bare name is a request
+  // with no holder, resolved with no caller.
+  const loader = (names: string[]) => raw!(names.map((name) => ({ name })));
+  return { loader, raw: raw!, rowReads: () => rowReads };
 }
 
 describe('[ADR-0131 D3/D4] the catalog loader — what it answers', () => {
@@ -140,13 +143,13 @@ describe('[ADR-0131 D3/D4, #2565] a catalog read that did not answer', () => {
   });
 
   it('stays FAIL-CLOSED through the evaluator, and its #2565 warn fires exactly once', async () => {
-    const { loader } = await loaderOver({ registryThrows: new Error('registry unreadable') });
+    const { raw } = await loaderOver({ registryThrows: new Error('registry unreadable') });
     const warns: Array<{ msg: string; meta: any }> = [];
     const resolved = await new PermissionEvaluator().resolvePermissionSets(
       ['ps_catalog'],
       { list: async () => [] },
       [],
-      loader,
+      raw,
       { logger: { warn: (msg: string, meta?: any) => { warns.push({ msg, meta }); } } },
     );
     // The unresolved set grants nothing — fail closed, never a widening.
@@ -158,13 +161,13 @@ describe('[ADR-0131 D3/D4, #2565] a catalog read that did not answer', () => {
   });
 
   it('CONTROL: the same request with a catalog that answers resolves the set and warns nothing', async () => {
-    const { loader } = await loaderOver();
+    const { raw } = await loaderOver();
     const warns: string[] = [];
     const resolved = await new PermissionEvaluator().resolvePermissionSets(
       ['ps_catalog'],
       { list: async () => [] },
       [],
-      loader,
+      raw,
       { logger: { warn: (msg: string) => { warns.push(msg); } } },
     );
     expect(resolved.map((s) => s.name)).toEqual(['ps_catalog']);

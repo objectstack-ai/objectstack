@@ -2215,6 +2215,8 @@ export class AutomationServicePlugin implements Plugin {
                     return {
                         positions: grants.positions,
                         permissions: grants.permissions,
+                        // [ADR-0150 D3] Which package's set each name is.
+                        ...(grants.permissionSetAddresses ? { permissionSetAddresses: grants.permissionSetAddresses } : {}),
                         // The peer list the request path seeds through this
                         // same resolver: the run's organization's members and
                         // the user, so `sys_user_org_members` resolves for the
