@@ -2,8 +2,10 @@
 // #2747 — uninstall-time revocation of a package's data-plane permission rows
 // (ADR-0086 D3 provenance consumed at last; ADR-0090 D5 "no ghost grants").
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { cleanupPackagePermissions } from './cleanup-package-permissions';
+import { assertEngineFindOnePredicate, assertEngineUpdateDispatch, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
+import { SecurityPlugin } from './security-plugin.js';
 
 /**
  * The permission-set names the uninstalling door read off the package before
@@ -198,5 +200,229 @@ describe('[ADR-0131 D4, ADR-0090 D5] the grants naming a set the package declare
     expect(ql.tables.sys_user_permission_set.map((r: any) => r.id)).toEqual(
       ['ups_1', 'ups_2', 'ups_env', 'ups_other', 'ups_named_1', 'ups_named_2', 'ups_named_other'],
     );
+  });
+});
+
+/**
+ * [ADR-0150 D8] A permission-set name may have two holders (two packages of two
+ * namespaces, D3/D4), and a grant names its holder in `permission_set_package`.
+ * Uninstalling one holder revokes only the grants bound to it, or bound to none;
+ * an empty-column grant of a name another holder still serves is revoked and
+ * reported, never bound to that holder (red line 1).
+ *
+ * Install refuses a second holder until the narrowing lands, so the rows and the
+ * holder reader are seeded here directly. The reader stands for the security
+ * catalog AFTER the door withdrew `gamma`: only `delta` still holds the name.
+ */
+describe('[ADR-0150 D8] uninstall revokes by (package, name)', () => {
+  const GAMMA = 'com.qa.gamma';
+  const DELTA = 'com.qa.delta';
+  const SET = 'qa_removal_set';
+  const declared = { permission: [SET] };
+
+  /** The security catalog's `list` after the withdrawal: the holders left. */
+  const catalogOf = (...holders: Array<string | undefined>) => ({
+    list: vi.fn(async () => holders.map((packageId) => ({ name: SET, ...(packageId ? { packageId } : {}) }))),
+  });
+
+  function twoHolderQl(extra: any[] = []) {
+    const ql = makeQl();
+    ql.tables.sys_user_permission_set.push(
+      { id: 'ups_y_gamma', user_id: 'usr_y', organization_id: 'org_1', permission_set: SET, permission_set_package: GAMMA },
+      { id: 'ups_z_delta', user_id: 'usr_z', organization_id: 'org_1', permission_set: SET, permission_set_package: DELTA },
+      ...extra,
+    );
+    // A revocation is a delete: a write that binds a grant to another holder
+    // is the thing this card forbids, so any update here fails the test.
+    ql.update = vi.fn(async () => { throw new Error('the uninstall cleanup must never rebind a grant'); });
+    return ql;
+  }
+
+  const ids = (ql: any) => ql.tables.sys_user_permission_set.map((r: any) => r.id);
+
+  it('two holders, each with a bound grant: uninstalling one leaves the other\'s grant', async () => {
+    const ql = twoHolderQl();
+    const out = await cleanupPackagePermissions(ql, GAMMA, undefined, declared, { catalog: catalogOf(DELTA) });
+
+    expect(out.userGrants).toBe(1);
+    expect(out.reportedGrants).toBeUndefined();
+    // Delta's user keeps delta's set; gamma's grant is gone.
+    expect(ids(ql)).toContain('ups_z_delta');
+    expect(ids(ql)).not.toContain('ups_y_gamma');
+    expect(ql.tables.sys_user_permission_set.find((r: any) => r.id === 'ups_z_delta')).toMatchObject({
+      user_id: 'usr_z', permission_set: SET, permission_set_package: DELTA,
+    });
+  });
+
+  it('control — uninstalling the other holder takes its own grant and leaves the first', async () => {
+    const ql = twoHolderQl();
+    const out = await cleanupPackagePermissions(ql, DELTA, undefined, declared, { catalog: catalogOf(GAMMA) });
+
+    expect(out.userGrants).toBe(1);
+    expect(ids(ql)).toContain('ups_y_gamma');
+    expect(ids(ql)).not.toContain('ups_z_delta');
+  });
+
+  it('a null-column grant with one holder is revoked, as today — nothing reported', async () => {
+    const ql = makeQl();
+    ql.tables.sys_user_permission_set.push(
+      { id: 'ups_null', user_id: 'usr_n', organization_id: 'org_1', permission_set: SET, permission_set_package: null },
+      { id: 'ups_blank', user_id: 'usr_b', organization_id: 'org_1', permission_set: SET, permission_set_package: '  ' },
+    );
+    const warns: string[] = [];
+    const out = await cleanupPackagePermissions(ql, GAMMA, { warn: (m) => { warns.push(m); } }, declared, {
+      // After gamma's withdrawal nobody holds the name.
+      catalog: catalogOf(),
+    });
+
+    expect(out.userGrants).toBe(2);
+    expect(out.reportedGrants).toBeUndefined();
+    expect(ids(ql)).not.toContain('ups_null');
+    expect(ids(ql)).not.toContain('ups_blank');
+    expect(warns).toEqual([]);
+  });
+
+  it('a null-column grant with two holders is revoked and reported — never bound to the remaining holder', async () => {
+    const ql = twoHolderQl([
+      { id: 'ups_w_null', user_id: 'usr_w', organization_id: 'org_2', permission_set: SET, permission_set_package: null },
+    ]);
+    const warns: Array<{ msg: string; meta?: any }> = [];
+    const out = await cleanupPackagePermissions(ql, GAMMA, {
+      warn: (msg, meta) => { warns.push({ msg, meta }); },
+    }, declared, { catalog: catalogOf(DELTA) });
+
+    // Revoked: gamma's bound grant and the unbound one.
+    expect(out.userGrants).toBe(2);
+    expect(ids(ql)).not.toContain('ups_w_null');
+    // Never bound: no write but the deletes, and delta's own grant is the only
+    // grant of the name left, still bound to delta.
+    expect(ql.update).not.toHaveBeenCalled();
+    expect(ql.tables.sys_user_permission_set.filter((r: any) => r.permission_set === SET).map((r: any) => r.id))
+      .toEqual(['ups_z_delta']);
+    // Reported on the outcome (the receipt) …
+    expect(out.reportedGrants).toEqual([{ user: 'usr_w', organization: 'org_2', permission_set: SET }]);
+    // … and in ONE warning naming the user, the organization, the set and the remedy.
+    expect(warns).toHaveLength(1);
+    expect(warns[0]!.msg).toContain('"usr_w"');
+    expect(warns[0]!.msg).toContain('"org_2"');
+    expect(warns[0]!.msg).toContain(`"${SET}"`);
+    expect(warns[0]!.msg).toContain(DELTA);
+    expect(warns[0]!.msg).toContain('grant it again with the package named');
+    expect(warns[0]!.meta).toMatchObject({ packageId: GAMMA, reportedGrants: out.reportedGrants });
+  });
+
+  it('a holder reader that cannot answer reports every revoked null-column grant — nobody could say it had one holder', async () => {
+    const ql = twoHolderQl([
+      { id: 'ups_w_null', user_id: 'usr_w', organization_id: null, permission_set: SET },
+    ]);
+    const out = await cleanupPackagePermissions(ql, GAMMA, undefined, declared, {
+      catalog: { list: async () => { throw new Error('registry unreadable'); } },
+    });
+
+    expect(ids(ql)).toEqual(expect.arrayContaining(['ups_z_delta']));
+    expect(ids(ql)).not.toContain('ups_w_null');
+    expect(out.reportedGrants).toEqual([{ user: 'usr_w', organization: null, permission_set: SET }]);
+  });
+
+  it('a body still naming the withdrawn package is not another holder', async () => {
+    const ql = makeQl();
+    ql.tables.sys_user_permission_set.push({ id: 'ups_null', user_id: 'usr_n', permission_set: SET });
+    const out = await cleanupPackagePermissions(ql, GAMMA, undefined, declared, { catalog: catalogOf(GAMMA) });
+
+    expect(out.userGrants).toBe(1);
+    expect(out.reportedGrants).toBeUndefined();
+  });
+
+  it('the catalog is read once per uninstall, and not at all when no null-column grant was revoked', async () => {
+    const bound = catalogOf(DELTA);
+    await cleanupPackagePermissions(twoHolderQl(), GAMMA, undefined, declared, { catalog: bound });
+    expect(bound.list).not.toHaveBeenCalled();
+
+    const unbound = catalogOf(DELTA);
+    const ql = twoHolderQl([
+      { id: 'ups_a', user_id: 'usr_a', permission_set: SET },
+      { id: 'ups_b', user_id: 'usr_b', permission_set: 'qa_second_set' },
+    ]);
+    await cleanupPackagePermissions(ql, GAMMA, undefined, { permission: [SET, 'qa_second_set'] }, { catalog: unbound });
+    expect(unbound.list).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * [ADR-0150 D8] The call site: the cleanup the plugin registers with the
+ * protocol reads the holders from the security catalog over the engine
+ * registry (here, after `gamma`'s withdrawal, only `delta` holds the name) and
+ * answers the reported grants on its outcome, which the runner relays onto the
+ * uninstall's receipt.
+ */
+describe('[ADR-0150 D8] the registered uninstall cleanup answers the reported grants', () => {
+  const SET = 'qa_removal_set';
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  async function bootWithCleanup(registryItems: any[]) {
+    const base = makeQl();
+    base.tables.sys_user_permission_set.push(
+      { id: 'ups_z_delta', user_id: 'usr_z', organization_id: 'org_1', permission_set: SET, permission_set_package: 'com.qa.delta' },
+      { id: 'ups_w_null', user_id: 'usr_w', organization_id: 'org_2', permission_set: SET, permission_set_package: null },
+    );
+    const ql: any = {
+      ...base,
+      registerMiddleware: () => {},
+      getSchema: (name: string) => (name === 'sys_user' || name === 'sys_member' ? { name, fields: {} } : undefined),
+      registry: {
+        listItems: (type: string) => (type === 'permission' ? registryItems : []),
+        getItem: (type: string, name: string) => (type === 'permission' ? registryItems.find((i) => i.name === name) : undefined),
+        isPackageDisabled: () => false,
+      },
+      findOne: async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; },
+      count: async () => 0,
+      insert: async (_object: string, data: any) => ({ id: 'row_1', ...data }),
+      update: async (_object: string, data: any, options?: any) => { assertEngineUpdateDispatch(data, options); return 0; },
+    };
+    const cleanups = new Map<string, (args: any) => Promise<any>>();
+    const protocol = {
+      registerMutationProjector: vi.fn(),
+      onMetadataMutation: () => () => {},
+      registerUninstallCleanup: (name: string, fn: (args: any) => Promise<any>) => { cleanups.set(name, fn); },
+    };
+    const services: Record<string, any> = {
+      manifest: { register: vi.fn() },
+      objectql: ql,
+      metadata: { get: async () => null, list: async () => [] },
+      protocol,
+    };
+    const hook = vi.fn();
+    const ctx: any = {
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+      registerService: vi.fn(),
+      getService: (name: string) => { if (!(name in services)) throw new Error(`no service: ${name}`); return services[name]; },
+      hook,
+    };
+    vi.spyOn(SecurityPlugin.prototype as any, 'declareEveryone').mockResolvedValue(undefined);
+    const plugin = new SecurityPlugin();
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    for (const [, cb] of hook.mock.calls.filter((c: any[]) => c[0] === 'kernel:ready')) await cb();
+    return { cleanup: cleanups.get('security.package-permissions')!, tables: base.tables, ctx };
+  }
+
+  it('another holder left: the null-column grant is revoked and named on the outcome; the bound one stays', async () => {
+    const { cleanup, tables } = await bootWithCleanup([{ name: SET, _packageId: 'com.qa.delta' }]);
+    expect(cleanup).toBeTypeOf('function');
+
+    const outcome = await cleanup({ packageId: 'com.qa.gamma', declared: { permission: [SET] } });
+
+    expect(outcome).toEqual({
+      success: true,
+      removed: 1,
+      reportedGrants: [{ user: 'usr_w', organization: 'org_2', permission_set: SET }],
+    });
+    expect(tables.sys_user_permission_set.filter((r: any) => r.permission_set === SET).map((r: any) => r.id)).toEqual(['ups_z_delta']);
+  });
+
+  it('control — no holder left: the outcome answers as before, with no reported grants', async () => {
+    const { cleanup } = await bootWithCleanup([]);
+    const outcome = await cleanup({ packageId: 'com.qa.gamma', declared: { permission: [SET] } });
+    expect(outcome).toEqual({ success: true, removed: 1 });
   });
 });

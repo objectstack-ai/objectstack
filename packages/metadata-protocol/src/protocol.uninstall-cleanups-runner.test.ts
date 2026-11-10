@@ -105,4 +105,24 @@ describe('#21490: runUninstallCleanups — the uninstall-cleanup registry\'s one
         expect(res.cleanups).toEqual(await runner.mock.results[0]!.value);
         expect(res.cleanups).toEqual([{ name: 'security.package-permissions', success: true, removed: 4 }]);
     });
+
+    // [ADR-0150 D8] plugin-security names the grants it revoked that named no
+    // package while another holder still serves the set's name; the runner
+    // relays them onto the outcome, and so onto the uninstall's answer.
+    it('relays the grants a cleanup reported onto its outcome, and onto deletePackage\'s answer', async () => {
+        const protocol = makeProtocol();
+        const reportedGrants = [{ user: 'usr_w', organization: 'org_2', permission_set: 'qa_removal_set' }];
+        protocol.registerUninstallCleanup('security.package-permissions', async () => ({ success: true, removed: 2, reportedGrants }));
+        protocol.registerUninstallCleanup('another.cleanup', async () => ({ success: true, removed: 0, reportedGrants: [] }));
+
+        const outcomes = await protocol.runUninstallCleanups({ packageId: PACKAGE_ID });
+        expect(outcomes).toEqual([
+            { name: 'security.package-permissions', success: true, removed: 2, reportedGrants },
+            // An empty report adds nothing: the outcome answers as before.
+            { name: 'another.cleanup', success: true, removed: 0 },
+        ]);
+
+        const res = await protocol.deletePackage({ packageId: PACKAGE_ID, actor: 'usr_1' });
+        expect(res.cleanups[0]).toEqual({ name: 'security.package-permissions', success: true, removed: 2, reportedGrants });
+    });
 });

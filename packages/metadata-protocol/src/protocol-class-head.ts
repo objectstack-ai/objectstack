@@ -129,6 +129,11 @@ export class ProtocolClassHeadFacet {
                     success: r?.success !== false,
                     removed: typeof r?.removed === 'number' ? r.removed : 0,
                     ...(r?.error ? { error: r.error } : {}),
+                    // [ADR-0150 D8] The grants the cleanup revoked and reported,
+                    // relayed onto the uninstall's receipt; absent when none.
+                    ...(Array.isArray(r?.reportedGrants) && r.reportedGrants.length > 0
+                        ? { reportedGrants: r.reportedGrants }
+                        : {}),
                 });
             } catch (e: any) {
                 // [#8136] A cleanup is arbitrary plugin code that goes straight
