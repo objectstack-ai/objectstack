@@ -41,6 +41,7 @@ import type { DatasourceConnectPolicy } from '@objectstack/service-datasource';
 import '@objectstack/driver-sql';
 import '@objectstack/objectql';
 import '@objectstack/service-datasource';
+import '@objectstack/metadata';
 
 const BOOT_TIMEOUT = 60_000;
 
