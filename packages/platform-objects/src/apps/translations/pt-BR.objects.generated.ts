@@ -2160,7 +2160,15 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           },
           discoveryEndpoint: {
             label: "URL de descoberta",
-            helpText: "Opcional. URL do documento de descoberta OIDC. Deixe em branco para derivar `<issuer>/.well-known/openid-configuration`."
+            helpText: "Opcional. URL do documento de descoberta OIDC (https). Deixe em branco para derivar `<issuer>/.well-known/openid-configuration`. Um endpoint informado aqui é considerado confiável para este provedor."
+          },
+          userInfoEndpoint: {
+            label: "URL de userinfo",
+            helpText: "Opcional. URL do endpoint userinfo do OIDC (https), usada no lugar da indicada pelo documento de descoberta. Um endpoint informado aqui é considerado confiável para este provedor: informe-o quando o registro for recusado porque o documento de descoberta indica um host de userinfo em que o servidor não confia."
+          },
+          skipUserInfo: {
+            label: "Ler declarações apenas do token de ID",
+            helpText: "Opcional. Ler as declarações do usuário apenas do token de ID verificado e nunca chamar o endpoint userinfo. Microsoft Entra ID: ative para mapear \"preferred_username\", que o endpoint userinfo dele não retorna."
           },
           scopes: {
             label: "Escopos",
@@ -2169,7 +2177,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           },
           mapEmail: {
             label: "Mapear: declaração de e-mail",
-            helpText: "Opcional. Declaração mapeada para o e-mail. O padrão é \"email\".",
+            helpText: "Opcional. Declaração mapeada para o e-mail. O padrão é \"email\". Microsoft Entra ID (emissor em login.microsoftonline.com): usuários sem caixa de correio não trazem a declaração \"email\"; mapeie \"preferred_username\" (ou \"upn\") e ative \"Ler declarações apenas do token de ID\".",
             placeholder: "email"
           },
           mapName: {

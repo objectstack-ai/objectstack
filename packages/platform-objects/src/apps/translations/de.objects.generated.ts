@@ -2160,7 +2160,15 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           },
           discoveryEndpoint: {
             label: "Discovery-URL",
-            helpText: "Optional. URL des OIDC-Discovery-Dokuments. Leer lassen, um `<issuer>/.well-known/openid-configuration` abzuleiten."
+            helpText: "Optional. URL des OIDC-Discovery-Dokuments (https). Leer lassen, um `<issuer>/.well-known/openid-configuration` abzuleiten. Ein hier angegebener Endpunkt gilt für diesen Anbieter als vertrauenswürdig."
+          },
+          userInfoEndpoint: {
+            label: "Userinfo-URL",
+            helpText: "Optional. URL des OIDC-Userinfo-Endpunkts (https); ersetzt den im Discovery-Dokument genannten. Ein hier angegebener Endpunkt gilt für diesen Anbieter als vertrauenswürdig: Geben Sie ihn an, wenn die Registrierung abgelehnt wird, weil das Discovery-Dokument einen Userinfo-Host nennt, dem der Server nicht vertraut."
+          },
+          skipUserInfo: {
+            label: "Claims nur aus dem ID-Token lesen",
+            helpText: "Optional. Die Claims des Benutzers nur aus dem verifizierten ID-Token lesen und den Userinfo-Endpunkt nie aufrufen. Microsoft Entra ID: Aktivieren Sie dies, um „preferred_username“ zuzuordnen, das der Userinfo-Endpunkt nicht liefert."
           },
           scopes: {
             label: "Bereiche",
@@ -2169,7 +2177,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           },
           mapEmail: {
             label: "Zuordnung: E-Mail-Claim",
-            helpText: "Optional. Claim, der der E-Mail-Adresse zugeordnet wird. Standard ist „email“.",
+            helpText: "Optional. Claim, der der E-Mail-Adresse zugeordnet wird. Standard ist „email“. Microsoft Entra ID (Aussteller auf login.microsoftonline.com): Benutzer ohne Postfach haben keinen „email“-Claim; ordnen Sie daher „preferred_username“ (oder „upn“) zu und aktivieren Sie „Claims nur aus dem ID-Token lesen“.",
             placeholder: "email"
           },
           mapName: {

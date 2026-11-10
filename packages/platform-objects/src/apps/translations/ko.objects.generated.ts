@@ -2160,7 +2160,15 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
           },
           discoveryEndpoint: {
             label: "검색 URL",
-            helpText: "선택 사항입니다. OIDC 검색 문서 URL입니다. 비워 두면 `<issuer>/.well-known/openid-configuration`에서 도출합니다."
+            helpText: "선택 사항입니다. OIDC 검색 문서 URL(https)입니다. 비워 두면 `<issuer>/.well-known/openid-configuration`에서 도출합니다. 여기에 지정한 엔드포인트는 이 공급자에 대해 신뢰됩니다."
+          },
+          userInfoEndpoint: {
+            label: "Userinfo 엔드포인트 URL",
+            helpText: "선택 사항입니다. 검색 문서가 지정한 엔드포인트 대신 사용할 OIDC userinfo 엔드포인트 URL(https)입니다. 여기에 지정한 엔드포인트는 이 공급자에 대해 신뢰됩니다. 검색 문서가 서버가 신뢰하지 않는 userinfo 호스트를 지정해 등록이 거부되면 이 값을 입력하세요."
+          },
+          skipUserInfo: {
+            label: "ID 토큰에서만 클레임 읽기",
+            helpText: "선택 사항입니다. 사용자의 클레임을 검증된 ID 토큰에서만 읽고 userinfo 엔드포인트를 호출하지 않습니다. Microsoft Entra ID: userinfo 엔드포인트가 반환하지 않는 \"preferred_username\"을 매핑하려면 켜세요."
           },
           scopes: {
             label: "범위",
@@ -2169,7 +2177,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
           },
           mapEmail: {
             label: "매핑: 이메일 클레임",
-            helpText: "선택 사항입니다. 이메일에 매핑되는 클레임입니다. 기본값은 \"email\"입니다.",
+            helpText: "선택 사항입니다. 이메일에 매핑되는 클레임입니다. 기본값은 \"email\"입니다. Microsoft Entra ID(발급자가 login.microsoftonline.com): 사서함이 없는 사용자에게는 \"email\" 클레임이 없으므로 \"preferred_username\"(또는 \"upn\")을 매핑하고 \"ID 토큰에서만 클레임 읽기\"를 켜세요.",
             placeholder: "email"
           },
           mapName: {

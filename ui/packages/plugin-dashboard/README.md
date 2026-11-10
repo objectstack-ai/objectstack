@@ -397,6 +397,18 @@ export const App = () => (
 > on the dashboard node, and a live adapter written into that slot wires nothing
 > up — it is a different kind of thing wearing the same name.
 
+### Dataset widgets share one request per render
+
+A dataset-bound widget queries through the adapter's `queryDataset`. When the
+adapter also has `queryDatasetBatch` (`@object-ui/data-objectstack` does),
+`DashboardRenderer` and `DashboardGridLayout` send the queries one render's
+widgets and filter bar ask as one batch request per package
+(`POST /api/v1/analytics/dataset/query/batch`) instead of one request each.
+Each widget still gets its own answer, its own refusal state and its own
+refetch when a write invalidates the object it reads. A query asked alone (a
+widget mounted alone, a one-widget refetch) and every query of an adapter
+without `queryDatasetBatch` go through `queryDataset` unchanged.
+
 ## Dashboard-level filters
 
 A dashboard can declare top-level filters — a date range and any number of

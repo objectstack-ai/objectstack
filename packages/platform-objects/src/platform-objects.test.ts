@@ -285,6 +285,46 @@ describe('@objectstack/platform-objects', () => {
       ]);
     });
 
+    it('SysSsoProvider register_sso_provider collects the fields the register bridge reads, under the bridge\'s names (#32297)', () => {
+      // The bridge (plugin-auth `register-sso-provider.ts`,
+      // `runRegisterSsoProviderFromForm`) reads these flat body members and
+      // nothing else; a param under another name is dropped on the wire. The
+      // two endpoints and the userinfo opt-out are what an Entra ID admin
+      // needs once the server half (#32296) accepts them.
+      const action = (SysSsoProvider.actions ?? []).find((a) => a.name === 'register_sso_provider');
+      const params = (action?.params ?? []) as Array<{ name?: string; type?: string; required?: boolean; defaultValue?: unknown; helpText?: unknown }>;
+      expect(params.map((p) => [p.name, p.type, p.required ?? false])).toEqual([
+        ['providerId', 'text', true],
+        ['issuer', 'text', true],
+        ['domain', 'text', true],
+        ['clientId', 'text', true],
+        ['clientSecret', 'password', true],
+        ['discoveryEndpoint', 'url', false],
+        ['userInfoEndpoint', 'url', false],
+        ['skipUserInfo', 'boolean', false],
+        ['scopes', 'text', false],
+        ['mapEmail', 'text', false],
+        ['mapName', 'text', false],
+        ['mapGroups', 'text', false],
+      ]);
+      const byName = new Map(params.map((p) => [p.name, p]));
+      // A help text is a `template` slot: the parsed object carries a bare string as `{ dialect, source }`.
+      const help = (name: string): string => {
+        const h = byName.get(name)?.helpText as string | { source?: string } | undefined;
+        return typeof h === 'string' ? h : String(h?.source ?? '');
+      };
+      // Never set for the admin: no default on the opt-out or the email claim.
+      expect(byName.get('skipUserInfo')?.defaultValue).toBeUndefined();
+      expect(byName.get('mapEmail')?.defaultValue).toBeUndefined();
+      // The Entra ID mapping is suggested in words, beside the issuer host it applies to.
+      expect(help('mapEmail')).toContain('login.microsoftonline.com');
+      expect(help('mapEmail')).toContain('"preferred_username"');
+      // Both nameable endpoints say a named endpoint is trusted for this provider.
+      for (const name of ['discoveryEndpoint', 'userInfoEndpoint']) {
+        expect(help(name), name).toContain('An endpoint named here is trusted for this provider');
+      }
+    });
+
     it('SysUser admin actions surface on the record-detail header, not just the row menu', () => {
       // An admin viewing an open user record must be able to run the same
       // account-management actions available from the Users list row menu —
