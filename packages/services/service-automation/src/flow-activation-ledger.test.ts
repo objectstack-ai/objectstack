@@ -1071,6 +1071,57 @@ describe('ADR-0126 §4/§5 — the row this line writes', () => {
         expect((await engine.execute('f')).success).toBe(true);
     });
 
+    // [ADR-0150 D8 row R4] A ledger that holds two rows naming no package for
+    // the flow: the store refuses the write (`409 RESOURCE_CONFLICT`, both rows
+    // named), and the engine relays that declared refusal unchanged, so the
+    // door answers it, with nothing moved in process. The door's answer over a
+    // real table is pinned in runtime's `activation-doors-ledger-duplicate.test.ts`.
+    it('a write the store refuses over two package-less rows is relayed with its envelope, and nothing moves', async () => {
+        const fake = fakeEngine([
+            { id: 'd1', metadata_type: 'flow', name: 'f', package_id: null, active: 1 },
+            { id: 'd2', metadata_type: 'flow', name: 'f', package_id: null, active: 1 },
+        ]);
+        const engine = withLoaderSetFromPull(new AutomationEngine(createTestLogger()));
+        const trigger = recordingTrigger('record_change');
+        engine.registerTrigger(trigger.trigger);
+        engine.setFlowActivationStore(new ObjectStoreFlowActivationStore(fake as any));
+        engine.registerFlow('f', packagedFlow('f', { objectName: 'lead', triggerType: 'record-after-create' }));
+
+        const refusal = await engine.toggleFlow('f', false).then(() => undefined, (e: any) => e);
+
+        expect({ code: refusal?.code, status: refusal?.status }).toEqual({ code: 'RESOURCE_CONFLICT', status: 409 });
+        expect(String(refusal?.message)).toContain('d1');
+        expect(String(refusal?.message)).toContain('d2');
+        expect(fake.inserted).toEqual([]);
+        expect(fake.updated).toEqual([]);
+        // Nothing moved in process: still armed, still bound, still runnable.
+        expect(trigger.isBound('f')).toBe(true);
+        expect((await engine.execute('f')).success).toBe(true);
+    });
+
+    // [ADR-0150 D4] Two packages' flows of one name each keep their own row
+    // (the flow store is addressed by `(package, name)`). A switch of the flow
+    // `crm` ships, over a ledger holding only another package's row of the
+    // name, adds crm's own row and lands every later switch there; the other
+    // package's row is never rewritten.
+    it('a switch for one package that finds only another package\'s row writes its own row, never that one', async () => {
+        const fake = fakeEngine([
+            { id: 'a1', metadata_type: 'flow', name: 'f', package_id: 'com.example.other', active: false },
+        ]);
+        const engine = withLoaderSetFromPull(new AutomationEngine(createTestLogger()));
+        engine.setFlowActivationStore(new ObjectStoreFlowActivationStore(fake as any));
+        engine.registerFlow('f', packagedFlow('f'));
+
+        await engine.toggleFlow('f', false);
+        await engine.toggleFlow('f', true);
+
+        expect(fake.inserted).toEqual([{ metadata_type: 'flow', name: 'f', package_id: 'crm', active: false }]);
+        expect(fake.updated).toEqual([{ id: 'row_1', active: true, package_id: 'crm' }]);
+        expect(fake.rows.find((r: any) => r.id === 'a1')).toEqual(
+            { id: 'a1', metadata_type: 'flow', name: 'f', package_id: 'com.example.other', active: false },
+        );
+    });
+
     it('with no store attached the flip still applies, and WARNS that it is not durable', async () => {
         const logger = createTestLogger();
         const engine = withLoaderSetFromPull(new AutomationEngine(logger));
