@@ -22,7 +22,7 @@
 - 企业版卡一律挂作 cloud 仓企业版父单的 sub-issue(该父单上的维护者裁决)。
 - 优先级:新派发先取 p1/p2,再取 p3(维护者令)。
 - 安全卡照常按级入队派修落地,⛔ 无常设停派(维护者令);余照 `security-findings.md` §6、§9。
-- cloud 卡阻于 objectstack 卡:认领席(未认领则分诊日对账兜底)敲阻塞卡车道席 `Request: assist`。
+- 卡阻于 objectstack 卡 ⇒ 挂 `pm:blocked` 或认领它的本车道席敲阻塞卡车道席 `Request: assist`。
 - 阻塞卡未认领或停车改敲 `triage#1`;每张阻塞卡一次,轮记列明敲了谁;不限级(维护者令)。
 - 兜底:分诊日对账见 cloud 卡无状态逾 4 h ⇒ 写信本车道各席;分诊 ⛔ 不代打标签。
 - `target:<major>` 发版板在 cloud 仓的生产者是本车道(`seat-post-protocol.md` 发版板节)。
