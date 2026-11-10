@@ -39,6 +39,7 @@ import type { Socket } from 'node:net';
 type OwedResponses = Set<ServerResponse>;
 import { matchesRoutePattern } from './route-pattern';
 import { readRequestBody, type RequestBodyReading, type RequestBodyRefusal } from './request-body';
+import { createResponseCompression } from './response-compression';
 // The ADR-0112 wire vocabulary, read as DATA rather than restated: `ErrorCode`
 // is the closed union (`StandardErrorCode` ∪ `ERROR_CODE_LEDGER`) a registered
 // code must be a member of, and `HttpStatusErrorCodeMap` IS the set of statuses
@@ -642,6 +643,14 @@ export class HonoHttpServer implements IHttpServer {
      */
     private unmatchedMarks = new WeakSet<object>();
     /**
+     * Requests whose answer {@link runHandler} produced from `res.write()` — a
+     * stream (SSE, the AI data stream, a streamed export). Read by the
+     * compression seam, which never encodes one: an encoder holds bytes back
+     * until it has enough to emit, so an encoded stream would arrive late.
+     * Keyed on the fetch `Request` object, like {@link unmatchedMarks}.
+     */
+    private streamedRequests = new WeakSet<object>();
+    /**
      * The LAST-RESORT handler installed by {@link setFallbackHandler}, or
      * `undefined` when no consumer installed one. Exactly one — installing
      * again REPLACES, per the contract.
@@ -676,6 +685,20 @@ export class HonoHttpServer implements IHttpServer {
     ) {
         this.app = new Hono();
         this.installErrorEnvelopeSeam();
+        this.installResponseCompressionSeam();
+    }
+
+    /**
+     * Response compression, on by default (`./response-compression.ts` holds
+     * every rule). Installed from the constructor, before any other `use()`,
+     * so it is the OUTERMOST middleware: it sees the final answer of every
+     * route, raw-app mounts and static files included, after every inner
+     * middleware has set its headers.
+     */
+    private installResponseCompressionSeam(): void {
+        this.app.use('*', createResponseCompression({
+            isStreamed: (c) => this.streamedRequests.has(c.req.raw),
+        }));
     }
 
     /** The scheme this server binds — derived from {@link tls}, settable nowhere else. */
@@ -909,6 +932,7 @@ export class HonoHttpServer implements IHttpServer {
             done.then(() => {
                 _endHandler?.();
                 if (isStreaming) {
+                    this.streamedRequests.add(c.req.raw);
                     resolve({
                         response: new Response(stream, {
                             status: 200,
