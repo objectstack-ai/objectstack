@@ -60,6 +60,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       },
       created_at: {
         label: "建立時間"
+      },
+      keyed_text: {
+        label: "文字鍵",
+        help: "投遞時渲染標題與內文所用的目錄鍵與參數。讀取時依讀者的語言以它們重新渲染標題與內文;通知未帶鍵時為空,此時依儲存原樣傳回標題與內文。"
       }
     },
     _views: {
