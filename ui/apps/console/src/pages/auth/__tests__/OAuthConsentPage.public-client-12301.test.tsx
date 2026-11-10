@@ -95,7 +95,8 @@ function authClient(signedIn: boolean): AuthClient {
 }
 
 function stubLookup(answer: Answer, request: Answer = ADMIN_REGISTERED) {
-  const fetchMock = vi.fn((input: unknown) => {
+  // Typed as `fetch` is called (input, init), so a recorded call reads as both.
+  const fetchMock = vi.fn((input: unknown, _init?: RequestInit) => {
     const url = String(input);
     if (url.includes(CONSENT_REQUEST_PATH)) return respond(request);
     if (!url.includes('/oauth2/public-client')) {
