@@ -19,6 +19,14 @@
 //   - the same door refusing a package that redeclares the showcase's own
 //     mapping and dataset names, naming the showcase;
 //   - CONTROL: a package declaring fresh names installs.
+//
+// [#32071, ADR-0150 D3] The same boot drives `mapping`'s by-name readers,
+// which consult `(package, name)` and name no package: a name two packages
+// hold is refused naming both (bare `/meta`, the import door's `mappingName`),
+// the qualified address and `?package=` reach each holder, and one holder —
+// including a package's mapping into an object a package it depends on owns
+// (`zeta` into `alpha_item`) — answers as before. The connector pull's read is
+// the same protocol read, pinned in service-automation's `connector-pull.test.ts`.
 
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -69,6 +77,21 @@ function bootPackage(p: 'alpha' | 'beta') {
     picklists: [picklist(p)],
     mappings: [mapping(p)],
     datasets: [dataset(p)],
+  } as never);
+}
+
+/**
+ * [#32071] A package that depends on `alpha` and ships the one holder of a
+ * mapping into `alpha`'s object: the cross-package one-holder import.
+ */
+const ZETA_MAPPING = 'qa_zeta_into_alpha';
+function zetaPackage() {
+  return defineStack({
+    manifest: {
+      id: 'com.qa.bare.zeta', namespace: 'zeta', name: 'qa_bare_zeta', version: '1.0.0', type: 'app',
+      dependencies: { 'com.qa.bare.alpha': '^1.0.0' },
+    },
+    mappings: [mapping('zeta', ZETA_MAPPING, 'alpha_item')],
   } as never);
 }
 
@@ -133,6 +156,7 @@ describe('one package holder per picklist, mapping and dataset name, on a booted
       extraPlugins: [
         new AppPlugin(bootPackage('alpha') as never),
         new AppPlugin(bootPackage('beta') as never),
+        new AppPlugin(zetaPackage() as never),
         new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir }),
       ],
     }));
@@ -185,6 +209,55 @@ describe('one package holder per picklist, mapping and dataset name, on a booted
     expect(message).toContain(SHOWCASE_PKG);
     expect(message).toContain(`"delta_${SHOWCASE_MAPPING}"`);
     expect(await packageIds(), 'the package list is unchanged').toEqual(before);
+  });
+
+  // ── [#32071] mapping's by-name readers, on the clash this boot holds ──
+
+  const metaRead = async (path: string) => {
+    const r = await stack.apiAs(admin, 'GET', path);
+    return { status: r.status, body: (await r.json()) as any };
+  };
+  const importDry = async (object: string, mappingName: string) => {
+    const r = await stack.apiAs(admin, 'POST', `/data/${object}/import`, { format: 'csv', csv: 'Name\nx', mappingName, dryRun: true });
+    return { status: r.status, body: (await r.json()) as any };
+  };
+  const labelIn = (body: any) => body?.item?.label ?? body?.data?.item?.label;
+
+  it('mapping: the bare /meta read of a name two packages hold is 409 RESOURCE_CONFLICT naming both', async () => {
+    const { status, body } = await metaRead(`/meta/mapping/${MAPPING}`);
+    expect([status, codeOf(body)], JSON.stringify(body)).toEqual([409, 'RESOURCE_CONFLICT']);
+    const message = JSON.stringify(body);
+    expect(message).toContain('com.qa.bare.alpha');
+    expect(message).toContain('com.qa.bare.beta');
+  });
+
+  it('mapping: the qualified address and ?package= each reach their own holder', async () => {
+    for (const p of ['alpha', 'beta'] as const) {
+      const qualified = await metaRead(`/meta/mapping/${p}/${MAPPING}`);
+      expect([qualified.status, labelIn(qualified.body)], JSON.stringify(qualified.body)).toEqual([200, `${p} mapping`]);
+      const byPackage = await metaRead(`/meta/mapping/${MAPPING}?package=com.qa.bare.${p}`);
+      expect([byPackage.status, labelIn(byPackage.body)], JSON.stringify(byPackage.body)).toEqual([200, `${p} mapping`]);
+    }
+  });
+
+  it('mapping: importing by a name two packages hold is 409 RESOURCE_CONFLICT naming both, never the first holder\'s MAPPING_TARGET_MISMATCH', async () => {
+    for (const object of ['alpha_item', 'beta_item']) {
+      const { status, body } = await importDry(object, MAPPING);
+      expect([status, codeOf(body)], JSON.stringify(body)).toEqual([409, 'RESOURCE_CONFLICT']);
+      expect(String(body?.error)).toContain('com.qa.bare.alpha');
+      expect(String(body?.error)).toContain('com.qa.bare.beta');
+    }
+  });
+
+  it('CONTROL — mapping: one holder answers as before, a package\'s mapping into the object of a package it depends on included', async () => {
+    const own = await metaRead(`/meta/mapping/${SHOWCASE_MAPPING}`);
+    expect([own.status, own.body?.item?._packageId ?? own.body?.data?.item?._packageId]).toEqual([200, SHOWCASE_PKG]);
+    const cross = await metaRead(`/meta/mapping/${ZETA_MAPPING}`);
+    expect([cross.status, labelIn(cross.body)], JSON.stringify(cross.body)).toEqual([200, 'zeta mapping']);
+    const imported = await importDry('alpha_item', ZETA_MAPPING);
+    expect([imported.status, imported.body?.ok, imported.body?.errors], JSON.stringify(imported.body)).toEqual([200, 1, 0]);
+    const mismatch = await importDry('beta_item', ZETA_MAPPING);
+    expect([mismatch.status, codeOf(mismatch.body)], JSON.stringify(mismatch.body)).toEqual([400, 'MAPPING_TARGET_MISMATCH']);
   });
 
   it('CONTROL — install-local of a package declaring fresh names installs', async () => {

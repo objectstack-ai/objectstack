@@ -13,6 +13,9 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { buildFieldMetaMap, runImport } from '@objectstack/core';
+import { PackageScopedNameRefusedError } from '@objectstack/core';
+import { SchemaRegistry } from '@objectstack/objectql';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import {
     pullConnectorSource,
     ConnectorPullError,
@@ -488,5 +491,66 @@ describe('a failed pull logs one warn line naming the mapping and the reason', (
         const res = await pullConnectorSource(h.deps, { mapping: 'crm_contacts' });
         expect(res.pulled).toBe(1);
         expect(warns).toEqual([]);
+    });
+});
+
+/**
+ * [#32071, ADR-0150 D3] `mapping` is addressed by `(package, name)`, and the
+ * pull names no package (its request carries none): the mapping is read by the
+ * protocol's by-name read as a caller with no package. Driven here over the
+ * REAL read — `ObjectStackProtocolImplementation` over a real `SchemaRegistry`
+ * — for the mapping, the harness for everything else.
+ */
+describe('[#32071] connector pull — a mapping name two packages hold is refused, never pulled through the first', () => {
+    const ALPHA = 'com.acme.alpha';
+    const BETA = 'com.acme.beta';
+
+    function overRealMappingRead(holders: readonly string[]): Harness & { real: ObjectStackProtocolImplementation } {
+        const h = harness();
+        const registry = new SchemaRegistry({ multiTenant: false });
+        for (const packageId of holders) {
+            registry.installPackage(
+                { id: packageId, name: packageId, version: '1.0.0', type: 'app', namespace: packageId.split('.').pop() } as never,
+                'code',
+            );
+            registry.registerItem('mapping', baseMapping({ label: packageId }) as never, 'name' as never, packageId);
+        }
+        // The engine as the protocol reads it: the registry, and an empty
+        // stored-metadata store (no environment row of the name).
+        const engine = {
+            registry,
+            find: vi.fn().mockResolvedValue([]),
+            findOne: vi.fn().mockResolvedValue(null),
+            count: vi.fn().mockResolvedValue(0),
+            aggregate: vi.fn().mockResolvedValue([]),
+        };
+        const real = new ObjectStackProtocolImplementation(engine as never);
+        const fake = h.deps.protocol;
+        h.deps.protocol = {
+            ...fake,
+            getMetaItem: (request) => (request.type === 'mapping' ? real.getMetaItem(request) : fake.getMetaItem(request)),
+        };
+        return { ...h, real };
+    }
+
+    it('two holders: refused with the read\'s own 409, naming both; no action call, nothing written', async () => {
+        const h = overRealMappingRead([ALPHA, BETA]);
+        const err = await refusal(h);
+        const read = await h.real.getMetaItem({ type: 'mapping', name: 'crm_contacts' }).catch((e: unknown) => e);
+        expect(read).toBeInstanceOf(PackageScopedNameRefusedError);
+        const refused = read as PackageScopedNameRefusedError;
+        expect(err.reason).toBe('mapping_name_refused');
+        expect({ code: err.code, status: err.status }).toEqual({ code: refused.code, status: 409 });
+        expect(err.message).toContain(ALPHA);
+        expect(err.message).toContain(BETA);
+        expect(h.handler).not.toHaveBeenCalled();
+        expect(h.writes).toHaveLength(0);
+    });
+
+    it('CONTROL: one package holder is pulled exactly as before', async () => {
+        const h = overRealMappingRead([ALPHA]);
+        const result = await pullConnectorSource(h.deps, { mapping: 'crm_contacts' });
+        expect(result.targetObject).toBe('contact');
+        expect(h.handler).toHaveBeenCalledTimes(1);
     });
 });
