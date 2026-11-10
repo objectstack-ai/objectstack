@@ -157,19 +157,28 @@ async function boot(opts: {
     await plugin.start(ctx as any);
     await hooks.get('kernel:ready')?.();
     const door = services['marketplace-install-local'] as InstallLocalDoor;
-    /** The request the cloud-connection door builds for a grant: the cloud branch, unmanaged. */
-    const request = () => new Request(`http://localhost${ROUTE}`, {
+    /**
+     * The request the cloud-connection door builds for a grant: the cloud
+     * branch, unmanaged; [#31963] with `extra` (the grant's own `manifest`,
+     * `seedSampleData`) merged into its body.
+     */
+    const request = (extra: Record<string, unknown> = {}) => new Request(`http://localhost${ROUTE}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ packageId: 'pkg_crm', versionId: 'ver_9', installMode: 'unmanaged' }),
+        body: JSON.stringify({ packageId: 'pkg_crm', versionId: 'ver_9', installMode: 'unmanaged', ...extra }),
     });
+    const answered = async (r: Response) => ({ status: r.status, payload: await r.json() as any });
     return {
         auditEvents,
         importUnmanagedPackage,
         fetchSpy,
         logger,
-        viaGrant: async () => { const r = await door.install(request(), { grant: GRANT }); return { status: r.status, payload: await r.json() as any }; },
-        plain: async () => { const r = await door.install(request()); return { status: r.status, payload: await r.json() as any }; },
+        viaGrant: async () => answered(await door.install(request(), { grant: GRANT })),
+        plain: async () => answered(await door.install(request())),
+        /** [#31963] The grant path with `extra` in the body and `grant` beside it. */
+        viaGrantWith: async (extra: Record<string, unknown>, grant: InstallLocalDoorGrant) => answered(await door.install(request(extra), { grant })),
+        /** [#31963] The same body, sent by no grant: a caller's file import. */
+        plainWith: async (extra: Record<string, unknown>) => answered(await door.install(request(extra))),
         route: () => routes.get(`POST ${ROUTE}`)!,
     };
 }
@@ -274,5 +283,113 @@ describe('[#31481] an unmanaged grant the install-local door refuses before the 
         expect(res.status).toBe(403);
         const errors = h.logger.error.mock.calls.map((call: unknown[]) => String(call[0]));
         expect(errors.join('\n')).toContain('package_unmanaged_import');
+    });
+});
+
+// ── [#31963, cloud#3624 ruling A] the grant's own manifest, handed inline ──
+//
+// The cloud fetch cannot read an organization's PRIVATE manifest with the
+// shared service key: here it answers 404, as the catalog does. The
+// cloud-connection door hands the grant's `data.manifest` inline with the
+// grant (`manifestId`, `version`) beside it; the door copies it only when it is
+// the granted package and version, and every check of the cloud branch runs.
+
+describe('[#31963] an unmanaged grant copies from the grant\'s own manifest, inline', () => {
+    /** The grant of a private package, as the cloud-connection door hands it with an inline manifest. */
+    const INLINE_GRANT: InstallLocalDoorGrant = { ...GRANT, manifestId: 'com.example.crm' };
+    /** The catalog's answer to the shared service key for a private manifest. */
+    const PRIVATE = { cloud: { status: 404, body: { error: 'not found' } } };
+
+    it('the fix: a private package\'s grant with its manifest inline copies it, and the catalog is never asked', async () => {
+        const h = await boot(PRIVATE);
+        const res = await h.viaGrantWith({ manifest: crm() }, INLINE_GRANT);
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(h.fetchSpy).not.toHaveBeenCalled();
+        expect(h.importUnmanagedPackage).toHaveBeenCalledTimes(1);
+        expect(h.importUnmanagedPackage.mock.calls[0][0].manifest).toMatchObject({ id: 'com.example.crm', version: '4.0.0' });
+        // [#31481] The copy's own success row, and no refusal row.
+        expect(h.auditEvents).toHaveLength(1);
+        expect(h.auditEvents[0]).toMatchObject({ action: 'package_unmanaged_import', packageId: 'com.example.crm', outcome: 'success' });
+    });
+
+    it('CONTROL: the same private grant with no manifest in the body (an older control plane) takes the cloud fetch, which answers 404', async () => {
+        const h = await boot(PRIVATE);
+        const res = await h.viaGrant();
+        expect(res.status, JSON.stringify(res.payload)).toBe(404);
+        expect(res.payload.error.code).toBe('CLOUD_FETCH_FAILED');
+        expect(h.fetchSpy).toHaveBeenCalledTimes(1);
+        expect(h.importUnmanagedPackage).not.toHaveBeenCalled();
+        expect(h.auditEvents).toEqual([refusalEvent('CLOUD_FETCH_FAILED', 404)]);
+    });
+
+    for (const c of [
+        { name: 'a manifest declaring another package', manifest: () => crm({ id: 'com.example.other' }), grant: INLINE_GRANT },
+        { name: 'a manifest at another version', manifest: () => crm({ version: '4.0.1' }), grant: INLINE_GRANT },
+        { name: 'a grant naming no manifest id', manifest: () => crm(), grant: GRANT },
+        { name: 'a grant naming no version', manifest: () => crm(), grant: { packageId: 'pkg_crm', manifestId: 'com.example.crm', environmentId: 'env_1', actor: INSTALLER } },
+    ]) {
+        it(`fails closed on ${c.name}: 502 PLUGIN_MANIFEST_INVALID, nothing copied, audited once`, async () => {
+            const h = await boot(PRIVATE);
+            const res = await h.viaGrantWith({ manifest: c.manifest() }, c.grant);
+            expect(res.status, JSON.stringify(res.payload)).toBe(502);
+            expect(res.payload.error.code).toBe('PLUGIN_MANIFEST_INVALID');
+            expect(res.payload.error.message).toContain('Nothing was copied');
+            expect(h.importUnmanagedPackage).not.toHaveBeenCalled();
+            expect(h.fetchSpy).not.toHaveBeenCalled();
+            expect(h.auditEvents).toHaveLength(1);
+            expect(h.auditEvents[0]).toMatchObject({ action: 'package_unmanaged_import', packageId: 'pkg_crm', outcome: 'failure', errorCode: 'PLUGIN_MANIFEST_INVALID', status: 502 });
+        });
+    }
+
+    // Every check of the cloud branch is judged on the inline manifest too.
+    for (const c of [
+        { name: 'the installModes gate', manifest: () => crm({ installModes: ['managed'] }), code: 'INSTALL_MODE_NOT_PERMITTED', status: 422 },
+        { name: 'the ADR-0087 engines handshake', manifest: () => crm({ engines: { protocol: '^1.0.0' } }), code: 'OS_PROTOCOL_INCOMPATIBLE', status: 422 },
+        { name: 'the ADR-0141 dependency check', manifest: () => crm({ dependencies: { 'com.example.sales': '6.x' } }), code: 'DEPENDENCY_MISSING', status: 422 },
+    ]) {
+        it(`${c.name} judges the grant's inline manifest: ${c.status} ${c.code}, nothing copied, audited once`, async () => {
+            const h = await boot(PRIVATE);
+            const res = await h.viaGrantWith({ manifest: c.manifest() }, INLINE_GRANT);
+            expect(res.status, JSON.stringify(res.payload)).toBe(c.status);
+            expect(res.payload.error.code).toBe(c.code);
+            expect(h.importUnmanagedPackage).not.toHaveBeenCalled();
+            expect(h.auditEvents).toEqual([refusalEvent(c.code, c.status)]);
+        });
+    }
+
+    it('the walled catalog judges the grant\'s inline manifest: 403, nothing copied', async () => {
+        const h = await boot({ ...PRIVATE, walled: true });
+        const res = await h.viaGrantWith({ manifest: crm() }, INLINE_GRANT);
+        expect(res.status, JSON.stringify(res.payload)).toBe(403);
+        expect(h.importUnmanagedPackage).not.toHaveBeenCalled();
+        expect(h.auditEvents).toEqual([refusalEvent('FORBIDDEN', 403)]);
+    });
+
+    it('seedSampleData reaches the import as on the cloud branch (#30808)', async () => {
+        const h = await boot(PRIVATE);
+        const res = await h.viaGrantWith({ manifest: crm(), seedSampleData: true }, INLINE_GRANT);
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(h.importUnmanagedPackage.mock.calls[0][0]).toMatchObject({ seedData: true });
+    });
+
+    it('an invalid id in the grant\'s manifest answers 502, as a fetched one does; a caller\'s file still answers 400', async () => {
+        const bad = () => crm({ id: 'late-app' });
+        const granted = await boot(PRIVATE);
+        const viaGrant = await granted.viaGrantWith({ manifest: bad() }, INLINE_GRANT);
+        expect(viaGrant.status, JSON.stringify(viaGrant.payload)).toBe(502);
+        expect(viaGrant.payload.error.code).toBe('PLUGIN_MANIFEST_INVALID');
+        const fetched = await boot({ cloud: { status: 200, body: { success: true, data: { manifest: bad(), version_id: 'ver_9', version: '4.0.0' } } } });
+        expect((await fetched.viaGrant()).status).toBe(502);
+        const plain = await boot(PRIVATE);
+        const file = await plain.plainWith({ manifest: bad() });
+        expect(file.status, JSON.stringify(file.payload)).toBe(400);
+        expect(file.payload.error.code).toBe('PLUGIN_MANIFEST_INVALID');
+    });
+
+    it('CONTROL: a caller\'s file import, which no grant started, is not held to a grant: it copies its own manifest, as before', async () => {
+        const h = await boot(PRIVATE);
+        const res = await h.plainWith({ manifest: crm({ id: 'com.example.other' }) });
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(h.importUnmanagedPackage.mock.calls[0][0].manifest).toMatchObject({ id: 'com.example.other' });
     });
 });
