@@ -78,9 +78,10 @@ describe('#32183 — the stored-reference report judges every holder, as the bac
   const A = 'com.acme.alpha';
   const B = 'com.acme.beta';
 
-  it('a row naming a template two packages hold stays refused while one of them is disabled, naming both', async () => {
+  // [contract review S2] Both registration orders.
+  it.each([['enabled first', [A, B]], ['disabled first', [B, A]]] as const)('a row naming a template two packages hold stays refused while one of them is disabled, naming both (%s)', async (_order, order) => {
     for (const [id, namespace] of [[A, 'alpha'], [B, 'beta']]) registry.installPackage(manifest(id, namespace), 'marketplace');
-    for (const id of [A, B]) {
+    for (const id of order) {
       registry.registerItem('email_template', { name: 'shared_notice', label: 'n', subject: 'n', body: 'n', locale: 'en-US' }, 'name' as never, id);
     }
     registry.sealBareNameHolders();
@@ -97,7 +98,7 @@ describe('#32183 — the stored-reference report judges every holder, as the bac
     expect(answer.stored).toEqual([
       expect.objectContaining({
         d8: 'R20', table: 'sys_email_template', id: 't1', name: 'shared_notice', reason: 'ambiguous',
-        candidates: [expect.objectContaining({ packageId: A }), expect.objectContaining({ packageId: B })],
+        candidates: order.map((packageId) => expect.objectContaining({ packageId })),
       }),
     ]);
   });

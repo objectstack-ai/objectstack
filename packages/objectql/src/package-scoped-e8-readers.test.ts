@@ -421,10 +421,12 @@ describe('[#32072] dataset: the by-name read is the package-scoped resolver\'s',
  * false) at every reader alike. No in-tree production caller reads it.
  */
 describe('#32183 — a disabled package holds no name at the library readers', () => {
+  // [contract review S2] Both registration orders of every two-holder pin.
+  const ORDERS = [['enabled first', [A, B]], ['disabled first', [B, A]]] as const;
+
   for (const type of PACKAGE_SCOPED_READ_TYPES) {
-    it(`${type}: two holders, one disabled — every reader serves the enabled holder's item`, async () => {
-      ship(type, 'shared', A);
-      ship(type, 'shared', B);
+    it.each(ORDERS)(`${type}: two holders, one disabled (%s) — every reader serves the enabled holder's item`, async (_order, order) => {
+      for (const id of order) ship(type, 'shared', id);
       registry.disablePackage(B);
       expect(labelOf(registry.resolveItem(type, 'shared'))).toBe(`alpha ${type}`);
       expect(labelOf((await protocol.getMetaItem({ type, name: 'shared' }))?.item)).toBe(`alpha ${type}`);
@@ -449,9 +451,8 @@ describe('#32183 — a disabled package holds no name at the library readers', (
     });
   }
 
-  it('`getApp`: two holders, one disabled, serves the enabled one; only a disabled holder, none', () => {
-    ship('app', 'crm', A);
-    ship('app', 'crm', B);
+  it.each(ORDERS)('`getApp`: two holders, one disabled (%s), serves the enabled one; only a disabled holder, none', (_order, order) => {
+    for (const id of order) ship('app', 'crm', id);
     ship('app', 'solo', B);
     registry.disablePackage(B);
     expect(labelOf(registry.getApp('crm'))).toBe('alpha app');
@@ -459,20 +460,18 @@ describe('#32183 — a disabled package holds no name at the library readers', (
     expect(labelOf(registry.getApp('solo', B))).toBe('beta app');
   });
 
-  it('the read MCP `agent_prompt` makes (the by-name read naming no package) serves the enabled holder\'s agent', async () => {
-    ship('agent', 'helper', A);
-    ship('agent', 'helper', B);
-    await expectRefusal(() => protocol.getMetaItem({ type: 'agent', name: 'helper' }), 'ambiguous-in-environment', [A, B]);
+  it.each(ORDERS)('the read MCP `agent_prompt` makes (the by-name read naming no package) serves the enabled holder\'s agent (%s)', async (_order, order) => {
+    for (const id of order) ship('agent', 'helper', id);
+    await expectRefusal(() => protocol.getMetaItem({ type: 'agent', name: 'helper' }), 'ambiguous-in-environment', [...order]);
     registry.disablePackage(B);
     const read = await protocol.getMetaItem({ type: 'agent', name: 'helper' });
     expect(labelOf(read?.item)).toBe('alpha agent');
     expect((read?.item as { instructions?: string } | undefined)?.instructions).toBe('alpha');
   });
 
-  it('a package caller outside both closures is refused naming the enabled holder only', async () => {
+  it.each(ORDERS)('a package caller outside both closures is refused naming the enabled holder only (%s)', async (_order, order) => {
     install(P);
-    ship('page', 'home', A);
-    ship('page', 'home', B);
+    for (const id of order) ship('page', 'home', id);
     registry.disablePackage(B);
     let thrown: unknown;
     try {

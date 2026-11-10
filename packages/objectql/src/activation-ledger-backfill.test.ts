@@ -392,10 +392,14 @@ describe('#32183 — a binding never moves with a reversible disable: the holder
     ship('flow', 'shared_flow', A);
     ship('flow', 'shared_flow', B);
     ship('flow', 'beta_flow', B);
+    // [contract review S2] The reverse registration order: the disabled holder first.
+    ship('flow', 'reversed_flow', B);
+    ship('flow', 'reversed_flow', A);
     registry.sealBareNameHolders();
     registry.disablePackage(B);
     const holderOf = activationLedgerHolderOf(registry);
     expect(holderOf('flow', 'shared_flow')).toEqual({ kind: 'ambiguous', candidates: [A, B] });
+    expect(holderOf('flow', 'reversed_flow')).toEqual({ kind: 'ambiguous', candidates: [B, A] });
     expect(holderOf('flow', 'beta_flow')).toEqual({ kind: 'package', packageId: B });
   });
 });

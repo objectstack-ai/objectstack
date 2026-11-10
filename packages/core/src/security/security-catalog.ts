@@ -648,15 +648,17 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
       const definition = servable(outcome.item, name);
       return definition ? { status: 'resolved', entry: entry('permission', definition, 'registry') } : { status: 'not-found' };
     }
-    // [#32183] The registry still holds the name, in disabled packages only:
-    // not-found, never the metadata service's by-name body in their place.
-    let heldOnlyDisabled: boolean;
+    // [#32183] The registry still holds the name in some package, read over
+    // every holder; no served holder answered above, so each one it finds is
+    // disabled: not-found, never the metadata service's by-name body in their
+    // place.
+    let heldInAnyPackage: boolean;
     try {
-      heldOnlyDisabled = scope.packageScopedHoldersOf('permission', name, null, { includeDisabledPackages: true }).length > 0;
+      heldInAnyPackage = scope.packageScopedHoldersOf('permission', name, null, { includeDisabledPackages: true }).length > 0;
     } catch (error) {
       throw unreadable('registry', 'permission', error);
     }
-    if (heldOnlyDisabled) return { status: 'not-found' };
+    if (heldInAnyPackage) return { status: 'not-found' };
     // The registry holds the name nowhere. The metadata service reads by name
     // only, so its body is the environment's: it answers a caller with no
     // package, and for a package's reference it is the D3 (a) refusal, naming
@@ -887,7 +889,7 @@ export function holdsPlatformPermissionSet(engine: unknown, held: HeldPermission
   if (!registry || !PACKAGE_SCOPED_HOLDER_READS.every((member) => typeof registry[member] === 'function')) return true;
   const scope = registry as unknown as SecurityCatalogPackageScopedRegistry;
   let outcome: PackageScopedResolution;
-  let heldOnlyDisabled = false;
+  let heldInAnyPackage = false;
   try {
     outcome = resolvePackageScopedHolders(
       { type: 'permission', name, callerPackageId: null },
@@ -899,14 +901,16 @@ export function holdsPlatformPermissionSet(engine: unknown, held: HeldPermission
       (callerPackageId) => packageResolutionClosure(scope, callerPackageId),
     );
     // [#32183] A name only disabled packages hold is held, and served by no
-    // one: never the environment's by-name answer.
+    // one: never the environment's by-name answer. Read over every holder,
+    // and only when no served holder answered, so each one it finds is
+    // disabled.
     if (outcome.status === 'not-found') {
-      heldOnlyDisabled = scope.packageScopedHoldersOf('permission', name, null, { includeDisabledPackages: true }).length > 0;
+      heldInAnyPackage = scope.packageScopedHoldersOf('permission', name, null, { includeDisabledPackages: true }).length > 0;
     }
   } catch {
     return false;
   }
-  if (outcome.status === 'refused' || heldOnlyDisabled) return false;
+  if (outcome.status === 'refused' || heldInAnyPackage) return false;
   if (outcome.status !== 'resolved' || outcome.holder.kind !== 'package') return true;
   const packageId = outcome.holder.packageId;
   const disabled = typeof registry.isPackageDisabled === 'function'

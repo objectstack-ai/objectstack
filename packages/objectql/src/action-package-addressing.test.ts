@@ -180,14 +180,17 @@ describe('ADR-0150 D4 — the coordinate a handler is registered under', () => {
   });
 });
 
-describe('#32183 — a disabled package holds no action name (the served holders)', () => {
+// [contract review S2] Both registration orders.
+describe.each([
+  { order: 'enabled first', packages: [A, B] },
+  { order: 'disabled first', packages: [B, A] },
+])('#32183 — a disabled package holds no action name (the served holders), $order', ({ packages }) => {
   // BASE (main de141e32): every caller but the two holders was refused naming both.
   beforeEach(() => {
     install(A);
     install(B);
     install(P);
-    ship('approve', A, 'account');
-    ship('approve', B, 'account');
+    for (const id of packages) ship('approve', id, 'account');
     registry.disablePackage(B);
   });
 

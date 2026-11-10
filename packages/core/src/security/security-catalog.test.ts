@@ -538,16 +538,21 @@ describe('security catalog read — permission sets by (package, name) through t
    * resolved that holder and answered not-found, and `holdsPlatformPermissionSet`
    * false.
    */
-  describe('#32183 — a disabled holder', () => {
+  // [contract review S2] Both registration orders: the holders as listed, and reversed.
+  describe.each([
+    { order: 'enabled first', reversed: false },
+    { order: 'disabled first', reversed: true },
+  ])('#32183 — a disabled holder, $order', ({ reversed }) => {
     const SYS = 'com.objectstack.kernel';
     const OFF = 'com.acme.off';
+    const ordered = <T>(holders: T[]): T[] => (reversed ? [...holders].reverse() : holders);
     const two = () => scopedRegistry({}, {
       packages: { [P]: {}, [Q]: {}, [OFF]: {}, [SYS]: { namespace: 'sys' } },
       disabled: [OFF],
       holders: {
-        shared: [{ packageId: Q, item: { name: 'shared', _packageId: Q, label: 'Q' } }, { packageId: OFF, item: { name: 'shared', _packageId: OFF, label: 'OFF' } }],
+        shared: ordered([{ packageId: Q, item: { name: 'shared', _packageId: Q, label: 'Q' } }, { packageId: OFF, item: { name: 'shared', _packageId: OFF, label: 'OFF' } }]),
         off_set: [{ packageId: OFF, item: { name: 'off_set', _packageId: OFF } }],
-        admin_set: [{ packageId: SYS, item: { name: 'admin_set', _packageId: SYS } }, { packageId: OFF, item: { name: 'admin_set', _packageId: OFF } }],
+        admin_set: ordered([{ packageId: SYS, item: { name: 'admin_set', _packageId: SYS } }, { packageId: OFF, item: { name: 'admin_set', _packageId: OFF } }]),
       },
     });
 

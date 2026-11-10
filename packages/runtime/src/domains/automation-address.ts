@@ -207,8 +207,12 @@ function refused(
     return { status: 409, refusal: { ...base, message: packageScopedRefusalMessage(base) } };
 }
 
-function holdersOf(registry: AutomationAddressRegistry, type: string, name: string): string[] {
-    return typeof registry.packageScopedHoldersOf === 'function' ? registry.packageScopedHoldersOf(type, name) ?? [] : [];
+/** [#32183] The served holders; `options` reaches the registry's read as given. */
+function holdersOf(
+    registry: AutomationAddressRegistry, type: string, name: string,
+    options?: { includeDisabledPackages?: boolean },
+): string[] {
+    return typeof registry.packageScopedHoldersOf === 'function' ? registry.packageScopedHoldersOf(type, name, null, options) ?? [] : [];
 }
 
 function canResolve(registry: AutomationAddressRegistry): registry is AutomationAddressRegistry & PackageScopedRegistry {

@@ -845,13 +845,14 @@ describe('R2 — a residual owner (ADR-0130 D4) reaches what it declares through
 
 describe('#32183 — a disabled package holds no name for a by-name read (the served holders)', () => {
   const D = 'com.acme.addon';
+  // [contract review S2] Both registration orders of every two-holder pin.
+  const ORDERS = [['enabled first', [A, B]], ['disabled first', [B, A]]] as const;
 
   for (const type of ['flow', 'app', 'page'] as const) {
-    it(`${type}: two holders, one disabled — the enabled holder answers a caller with no package`, () => {
+    it.each(ORDERS)(`${type}: two holders, one disabled (%s) — the enabled holder answers a caller with no package`, (_order, order) => {
       install(A);
       install(B);
-      ship(type, 'shared', A);
-      ship(type, 'shared', B);
+      for (const id of order) ship(type, 'shared', id);
       expect(resolve(type, 'shared')).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment' });
       registry.disablePackage(B);
       expect(registry.packageScopedHoldersOf(type, 'shared')).toEqual([A]);
@@ -862,12 +863,25 @@ describe('#32183 — a disabled package holds no name for a by-name read (the se
     });
   }
 
-  it('a caller outside both closures is refused naming the enabled holder only', () => {
+  it.each(ORDERS)('a caller outside both closures is refused naming the enabled holder only (%s)', (_order, order) => {
     install(A);
     install(B);
     install(C);
-    ship('flow', 'shared', A);
-    ship('flow', 'shared', B);
+    for (const id of order) ship('flow', 'shared', id);
+    registry.disablePackage(B);
+    expect(resolve('flow', 'shared', C)).toMatchObject({
+      status: 'refused', reason: 'outside-closure', candidates: [{ kind: 'package', packageId: A }],
+    });
+  });
+
+  // [contract review M3] The declared served → refused move. BASE (main
+  // de141e32): the caller resolved the disabled holder inside its closure.
+  it.each(ORDERS)('served → refused: a caller whose closure holds the name only through the disabled holder, the enabled one outside, is refused naming the enabled one (%s)', (_order, order) => {
+    install(A);
+    install(B);
+    install(C, [B]);
+    for (const id of order) ship('flow', 'shared', id);
+    expect(resolve('flow', 'shared', C)).toMatchObject({ status: 'resolved', via: 'closure', holder: { kind: 'package', packageId: B } });
     registry.disablePackage(B);
     expect(resolve('flow', 'shared', C)).toMatchObject({
       status: 'refused', reason: 'outside-closure', candidates: [{ kind: 'package', packageId: A }],

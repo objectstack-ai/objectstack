@@ -298,9 +298,13 @@ describe('#32183 — a binding never moves with a reversible disable: the holder
     registry.registerItem('queue', { name: TWO_HOLDERS, label: 'CRM inbox' }, 'name' as never, CRM);
     registry.registerItem('queue', { name: TWO_HOLDERS, label: 'HR inbox' }, 'name' as never, HR);
     registry.registerItem('queue', { name: 'hr_only', label: 'HR only' }, 'name' as never, HR);
+    // [contract review S2] The reverse registration order: the disabled holder first.
+    registry.registerItem('queue', { name: 'reversed_inbox', label: 'HR first' }, 'name' as never, HR);
+    registry.registerItem('queue', { name: 'reversed_inbox', label: 'CRM second' }, 'name' as never, CRM);
     registry.disablePackage(HR);
     const holderOf = declaredHolderOf(registry);
     expect(holderOf('queue', TWO_HOLDERS)).toEqual({ kind: 'ambiguous', candidates: [`package "${CRM}"`, `package "${HR}"`] });
+    expect(holderOf('queue', 'reversed_inbox')).toEqual({ kind: 'ambiguous', candidates: [`package "${HR}"`, `package "${CRM}"`] });
     expect(holderOf('queue', 'hr_only')).toEqual({ kind: 'package', packageId: HR });
   });
 });
