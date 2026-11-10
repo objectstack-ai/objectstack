@@ -1148,7 +1148,10 @@ describe('[ADR-0106 D1] an action the caller is not shown is answered on every r
                 const control = await run(persona, SET_BUDGET.name, { recordId: twin, params: { budget: 7 } });
                 delete process.env[OBJECT_SCHEMA_MASK_DISABLE_ENV];
                 const where = `${door} ${String(persona.userId)}`;
-                expect(JSON.stringify(answered).split(id).join('ID'), where).toBe(JSON.stringify(control).split(twin).join('ID'));
+                // The row's own timestamps are the wall clock of each write, not anything a gate decided.
+                const text = (answer: unknown, rowId: string) => JSON.stringify(answer).split(rowId).join('ID')
+                    .replace(/"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z"/g, '"CLOCK"');
+                expect(text(answered, id), where).toBe(text(control, twin));
                 expect(JSON.stringify(answered).includes(UNKNOWN), where).toBe(false);
                 expect((await rowOf(id))?.budget, where).toBe((await rowOf(twin))?.budget);
             }

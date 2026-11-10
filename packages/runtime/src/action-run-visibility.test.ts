@@ -94,11 +94,11 @@ async function objectDoorVerdict(masker: ActionObjectMasker, object: Record<stri
 }
 
 /** The `/meta` action door's verdict on a standalone action entry. */
-async function actionDoorVerdict(masker: ActionObjectMasker, action: { objectName?: string }): Promise<Verdict> {
+async function actionDoorVerdict(masker: ActionObjectMasker, action: Record<string, unknown>): Promise<Verdict> {
     const projected = await projectMetaActionForCaller(
         { masker, readObject: async (name) => OBJECTS[name] },
         action,
-        action.objectName,
+        typeof action.objectName === 'string' ? action.objectName : undefined,
     );
     return projected.kind;
 }
