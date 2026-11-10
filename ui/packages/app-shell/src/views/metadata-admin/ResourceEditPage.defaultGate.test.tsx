@@ -29,6 +29,9 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source loads these lazily; pay that load at collection, not inside a
+// case's clocked window.
+import '@objectstack/lint';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';

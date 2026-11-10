@@ -13,6 +13,10 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source loads these lazily; pay that load at collection, not inside a
+// case's clocked window.
+import '@objectstack/formula';
+import '@objectstack/lint';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';

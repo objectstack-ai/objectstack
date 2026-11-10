@@ -36,6 +36,9 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source loads these lazily; pay that load at collection, not inside a
+// case's clocked window.
+import '@objectstack/lint';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 // Module scope as well as where a test awaits it below: the cold transform is paid

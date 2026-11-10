@@ -24,6 +24,9 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source loads these lazily; pay that load at collection, not inside a
+// case's clocked window.
+import '@objectstack/lint';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
