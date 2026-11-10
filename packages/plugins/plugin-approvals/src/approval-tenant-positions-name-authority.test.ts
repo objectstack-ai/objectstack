@@ -577,11 +577,10 @@ describe('[ADR-0131 D1] under a walled posture, a request with no organization i
       expect(await svc.getRequest(missing, context)).toBeNull();
     });
 
-    it('the list door shows the request to a platform administrator, with the override flag, and not to the tenant administrator', async () => {
+    it('the list door does not show the request to the tenant administrator, and a system read lists it', async () => {
       const { context } = await resolve('genuine');
       const { svc, id } = await setup(posture, null);
-      const rows = await svc.listRequests({}, PLATFORM);
-      expect(rows.find((r) => r.id === id)).toMatchObject({ viewer: { can_override: true } });
+      expect((await svc.listRequests({}, SYS)).map((r) => r.id)).toContain(id);
       expect(await svc.listRequests({}, context)).toEqual([]);
     });
 
