@@ -237,6 +237,14 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // the per-package walk a registry rule gets cannot see. Both doors make the
   // call, right after the parse.
   'findNamespaceObjectNameRefusals',
+  // [ADR-0150 D5, child G1] A namespace of the artifact spelling a literal
+  // segment of the address grammar — the spec's judge
+  // (`validateNamespaceNotAddressLiteral`), which the install door and
+  // `defineStack` ask too. Not a registry rule: it judges every namespace the
+  // artifact declares, each `packages[]` body's included, which the
+  // per-package walk a registry rule gets sees one at a time without the
+  // body's own id. Both doors make the call, right after the parse.
+  'findNamespaceAddressLiteralRefusals',
 ];
 
 /**
