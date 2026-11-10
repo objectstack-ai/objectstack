@@ -287,8 +287,8 @@ describe('multi-tenant mode (env-registry + per-env kernel auth)', () => {
     // ── [#31482, cloud#3648] the namespace an unmanaged copy takes, forwarded ──
 
     it('[#31482] install forwards `target_namespace` beside an unmanaged install, as the control plane spells it', async () => {
-        const { res, sent } = await installWith({ package_id: 'pkg_1', install_mode: 'unmanaged', target_namespace: 'acme' });
-        expect(res.payload.success).toBe(true);
+        // What is SENT is pinned here; what the grant's answer does with it is pinned below.
+        const { sent } = await installWith({ package_id: 'pkg_1', install_mode: 'unmanaged', target_namespace: 'acme' });
         expect(sent).toEqual({
             recordId: 'pkg_1',
             params: { environment_id: ENV, seed_sample_data: false, install_mode: 'unmanaged', target_namespace: 'acme', installer_user_id: 'user-1' },
@@ -297,9 +297,10 @@ describe('multi-tenant mode (env-registry + per-env kernel auth)', () => {
 
     it('[#31482] CONTROL — install with no `target_namespace` (absent or null) sends no `target_namespace` key', async () => {
         for (const body of [{ package_id: 'pkg_1', install_mode: 'unmanaged' }, { package_id: 'pkg_1', install_mode: 'unmanaged', target_namespace: null }]) {
-            const { res, sent } = await installWith(body);
-            expect(res.payload.success, JSON.stringify(body)).toBe(true);
-            expect(sent.params, JSON.stringify(body)).not.toHaveProperty('target_namespace');
+            const { sent } = await installWith(body);
+            expect(sent.params, JSON.stringify(body)).toEqual({
+                environment_id: ENV, seed_sample_data: false, install_mode: 'unmanaged', installer_user_id: 'user-1',
+            });
         }
     });
 
