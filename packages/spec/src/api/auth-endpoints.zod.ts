@@ -25,6 +25,7 @@ import { z } from 'zod';
  */
 import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
+import { NON_BLANK_STRING } from '../shared/refinement-projection';
 import { TenancyPostureSchema } from '../security/tenancy-posture';
 import { AUDIENCE_POSTURES } from '../system/auth-config.zod';
 import { SessionSchema, SessionUserSchema } from './auth.zod';
@@ -197,6 +198,34 @@ export const AuthProviderInfoSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * Organization Edition Choice (Public)
+ *
+ * One edition a host's organization-create door accepts besides its default,
+ * served in `features.organizationEditions` so the create-organization form
+ * can draw the choice from the host's own words (objectui ADR-0060: the renderer is
+ * product-neutral, so no product copy lives in this repository or in objectui).
+ *
+ * Follows {@link AuthProviderInfoSchema}'s conventions: a machine value the
+ * client hands back (`edition`, like a provider `id`) beside display text the
+ * server has already resolved (`label`, `hint`, like a provider `name`), and
+ * nothing secret.
+ */
+export const OrganizationEditionChoiceSchema = lazySchema(() => z.object({
+  edition: z.string().regex(/^[a-z][a-z0-9_]*$/).describe(
+    'The value the organization-create door takes in its edition query parameter for this choice (snake_case, e.g. developer); the client sends it back unchanged when the choice is picked',
+  ),
+  label: z.string().refine(NON_BLANK_STRING, { message: 'label must not be blank' }).describe(
+    'Display name of the choice, already resolved by the host in the language the request asked for; the form shows it as given',
+  ),
+  hint: z.string().refine(NON_BLANK_STRING, { message: 'hint must not be blank' }).describe(
+    'One line under the label saying what the choice means, already resolved by the host in the request language; the form shows it as given',
+  ),
+  memberLimit: z.number().int().positive().optional().describe(
+    'Most members an organization of this edition may hold, when the edition caps them; the host\'s own figure, so a form that mentions the cap never spells a constant of its own. Absent means no cap is stated',
+  ),
+}));
+
+/**
  * Email/Password Configuration (Public)
  */
 export const EmailPasswordConfigPublicSchema = lazySchema(() => z.object({
@@ -270,11 +299,20 @@ export const AuthFeaturesConfigSchema = lazySchema(() => z.object({
   cloudManaged: z.boolean().optional().describe(
     'Managed (cloud-hosted, SSO-only) mode: people arrive through the identity provider, so the UI hides inviting, creating users and setting their passwords; absent means not managed',
   ),
-  // A host option (`AuthManagerOptions.developerEditionCreate`) sets it; it
-  // gates no server behaviour here, it only advertises the host's door.
+  // Derived from `organizationEditions` below (plugin-auth serves it true
+  // exactly when that list holds a `developer` choice); it gates no server
+  // behaviour here, it only advertises the host's door.
   developerEditionCreate: z.boolean().optional().describe(
-    'Developer Edition organizations can be created here: true only where the host\'s organization-create door accepts ?edition=developer, so the create-organization form may offer that choice. '
+    'Developer Edition organizations can be created here: true exactly when organizationEditions holds a choice whose edition is developer, i.e. the host\'s organization-create door accepts ?edition=developer. '
+    + 'The same fact as a boolean, so an action, param or field group can gate on it with requiresFeature; the choice\'s words and cap live in organizationEditions. '
     + 'An advertisement of the host\'s door, not a switch: it changes no server behaviour. Absent or false means no developer choice is offered',
+  ),
+  // Served by plugin-auth from the host option
+  // `AuthManagerOptions.organizationEditions`, only when the host sets it.
+  organizationEditions: z.array(OrganizationEditionChoiceSchema).optional().describe(
+    'Editions the host\'s organization-create door accepts besides its default, each with the edition query value, a label and a hint the host resolved in the request language, and its member cap when one applies. '
+    + 'The create-organization form draws each as a choice that starts unchecked (the renderer\'s rule: no choice is ever picked for the user) and, when one is picked, sends its edition value to the create door. '
+    + 'Served only when the host declares choices; absent means the door takes no edition and the form offers none',
   ),
   turnstileSiteKey: z.string().optional().describe(
     'Public Cloudflare Turnstile site key, present only while the opt-in sign-up challenge is on: the sign-up form renders the widget and sends its token in the x-captcha-response header; absent means no challenge',
@@ -350,6 +388,9 @@ export type EndpointMappingKey = keyof typeof EndpointMapping;
 export type AuthProviderInfo = z.input<typeof AuthProviderInfoSchema>;
 /** Post-parse shape of {@link AuthProviderInfo} — defaults applied, transforms run (ADR-0122). */
 export type AuthProviderInfoParsed = z.infer<typeof AuthProviderInfoSchema>;
+export type OrganizationEditionChoice = z.input<typeof OrganizationEditionChoiceSchema>;
+/** Post-parse shape of {@link OrganizationEditionChoice} — defaults applied, transforms run (ADR-0122). */
+export type OrganizationEditionChoiceParsed = z.infer<typeof OrganizationEditionChoiceSchema>;
 export type EmailPasswordConfigPublic = z.input<typeof EmailPasswordConfigPublicSchema>;
 export type AuthFeaturesConfig = z.input<typeof AuthFeaturesConfigSchema>;
 /** Post-parse shape of {@link AuthFeaturesConfig} — defaults applied, transforms run (ADR-0122). */

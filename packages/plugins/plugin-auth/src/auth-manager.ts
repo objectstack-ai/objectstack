@@ -100,6 +100,7 @@ import {
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/api';
+import { OrganizationEditionChoiceSchema, type OrganizationEditionChoice } from '@objectstack/spec/api';
 import { createObjectQLAdapterFactory, withSystemReadContext } from './objectql-adapter.js';
 import { isPresentedInvitationPending } from './presented-invitation.js';
 import { type ExternalDirectoryDoorDeps } from './external-directory-door.js';
@@ -774,18 +775,28 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
   }) => void | Promise<void>;
 
   /**
-   * Advertise that this host's organization-create door accepts
-   * `?edition=developer`, so a client may offer a Developer Edition choice
-   * when creating an organization. `getPublicConfig()` serves it as
-   * `features.developerEditionCreate`. Default `false`.
+   * The editions this host's organization-create door accepts besides its
+   * default, as choices a client may offer when creating an organization.
+   * `getPublicConfig()` calls it per request with that request's
+   * `accept-language` header and serves the answer as
+   * `features.organizationEditions`, labels and hints exactly as returned, so
+   * the host resolves its own copy in the request language (objectui is a
+   * product-neutral renderer and carries no product words). Unset, or
+   * answering an empty list, serves no choices.
+   *
+   * `features.developerEditionCreate` is derived from the answer: `true`
+   * exactly when it holds a choice whose `edition` is `developer`.
    *
    * An advertisement only: nothing in this package reads it to change
    * behaviour, and no door here takes an edition. Set it only on a host that
    * serves that door itself (the cloud control plane does, beside its
    * {@link onOrganizationCreated} provisioning); setting it anywhere else
-   * offers a choice the server ignores.
+   * offers a choice the server ignores. The answer is checked against
+   * `OrganizationEditionChoiceSchema` before it is served, and a malformed one
+   * fails the `/auth/config` read loudly rather than publishing a contract
+   * violation.
    */
-  developerEditionCreate?: boolean;
+  organizationEditions?: (request: { acceptLanguage?: string }) => readonly OrganizationEditionChoice[];
 
   /**
    * [ADR-0105 D8] Optional callback invoked AFTER an invitation is accepted
@@ -5019,7 +5030,34 @@ export class AuthManager {
     return this.config.getTenancy?.()?.posture ?? resolveTenancyPosture();
   }
 
-  getPublicConfig() {
+  /**
+   * The organization-create choices the host declares for this request, checked
+   * against the public contract. `undefined` when the host declares none, so
+   * the key is left out of `features`.
+   */
+  private resolveOrganizationEditions(request: unknown): OrganizationEditionChoice[] | undefined {
+    const host = this.config.organizationEditions;
+    if (!host) return undefined;
+    const answer = host({ acceptLanguage: acceptLanguageHeader(request) });
+    const checked = OrganizationEditionChoiceSchema.array().safeParse(answer);
+    if (!checked.success) {
+      const first = checked.error.issues[0];
+      throw new Error(
+        'AuthManagerOptions.organizationEditions answered a list that is not a valid '
+        + `features.organizationEditions value (${first ? `${first.path.join('.') || '(root)'}: ${first.message}` : 'invalid'}); `
+        + 'fix the host option so each entry carries an edition (snake_case), a non-blank label and hint, and an optional positive whole memberLimit.',
+      );
+    }
+    return checked.data.length > 0 ? checked.data : undefined;
+  }
+
+  /**
+   * The public `/auth/config` payload. `request` (a Web `Request`, or anything
+   * {@link acceptLanguageHeader} reads) carries the language the host resolves
+   * its organization-create copy in; without it the host answers in its
+   * default language.
+   */
+  getPublicConfig(request?: unknown) {
     // Extract social providers info (without sensitive data)
     const socialProviders = [];
     if (this.config.socialProviders) {
@@ -5139,6 +5177,7 @@ export class AuthManager {
     const privacyUrl = resolveLegalUrl(rawPrivacyUrl, DEFAULT_PRIVACY_URL);
 
     const turnstileKeys = resolveTurnstileKeys();
+    const organizationEditions = this.resolveOrganizationEditions(request);
 
     // [#7481, maintainer ruling 2026-08-11] `passkeys` / `magicLink` are
     // deliberately NOT advertised here — see PUBLIC_AUTH_FEATURES_NOT_ADVERTISED
@@ -5210,16 +5249,21 @@ export class AuthManager {
       // judgement site reads (ruling 6341690661 on #25083, Q2 D / Q3 A). A
       // hide-when-on flag: the console hides the doors that add people.
       cloudManaged: isCloudManaged(),
-      // An opt-in host option, served as a boolean like every flag (the drift
-      // guard holds the served key set stable), so `false` when unset. It
+      // Derived from the host's organization-create choices below, served as a
+      // boolean like every flag (the drift guard holds the served key set
+      // stable), so `false` when the host declares no developer choice. It
       // only advertises the host's own create door; nothing here acts on it.
-      developerEditionCreate: this.config.developerEditionCreate === true,
+      developerEditionCreate: organizationEditions?.some((choice) => choice.edition === 'developer') ?? false,
       ...(termsUrl ? { termsUrl } : {}),
       ...(privacyUrl ? { privacyUrl } : {}),
       // The PUBLIC Turnstile site key, served only when the sign-up challenge
       // is wired (both keys set; the resolver `buildPluginList()` mounts the
       // plugin from). The secret is never part of this payload.
       ...(turnstileKeys ? { turnstileSiteKey: turnstileKeys.siteKey } : {}),
+      // The host's organization-create choices, its labels and hints as given,
+      // served only when it declares some (registered in
+      // PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS); absent, the door takes no edition.
+      ...(organizationEditions ? { organizationEditions } : {}),
     };
 
     // Dev-only login hint (15.1 third-party eval): the empty-DB auto-seeded

@@ -3222,8 +3222,9 @@ describe('AuthManager', () => {
         degradedTenancy: false,
         // [#25292] `OS_CLOUD_MANAGED` is unset here, so not managed.
         cloudManaged: false,
-        // No `developerEditionCreate` host option here, so no Developer
-        // Edition choice is advertised.
+        // No `organizationEditions` host option here, so no organization-create
+        // choice is served (no `organizationEditions` key at all) and the
+        // derived Developer Edition flag is false.
         developerEditionCreate: false,
         privacyUrl: 'https://objectstack.ai/privacy',
         termsUrl: 'https://objectstack.ai/terms',
@@ -3251,16 +3252,62 @@ describe('AuthManager', () => {
       expect((manager.getPublicConfig() as any).features.cloudManaged).toBe(false);
     });
 
-    // `features.developerEditionCreate` is the host option advertised as is:
-    // true only where the host set it, false otherwise (never absent, so the
-    // served key set stays the registry's).
-    it('serves features.developerEditionCreate from the host option', () => {
+    // `features.organizationEditions` is the host's organization-create choices,
+    // served only when the host declares some, its words exactly as given (the
+    // host resolves them in the request language; this package carries none).
+    // `features.developerEditionCreate` is derived from them.
+    describe('features.organizationEditions from the host option', () => {
       const base = { secret: 'test-secret-at-least-32-chars-long', baseUrl: 'http://localhost:3000' };
-      const served = (options: Partial<ConstructorParameters<typeof AuthManager>[0]>) =>
-        (new AuthManager({ ...base, ...options }).getPublicConfig() as any).features.developerEditionCreate;
-      expect(served({ developerEditionCreate: true })).toBe(true);
-      expect(served({ developerEditionCreate: false })).toBe(false);
-      expect(served({})).toBe(false);
+      const features = (
+        options: Partial<ConstructorParameters<typeof AuthManager>[0]>,
+        request?: unknown,
+      ) => (new AuthManager({ ...base, ...options }).getPublicConfig(request) as any).features;
+      const developer = {
+        edition: 'developer',
+        label: 'Edition label as the host wrote it',
+        hint: 'Hint line as the host wrote it — «quoted», 5 members',
+        memberLimit: 5,
+      };
+
+      it('serves the declared choices with their labels and hints unchanged', () => {
+        const served = features({ organizationEditions: () => [developer] });
+        expect(served.organizationEditions).toEqual([developer]);
+        expect(served.developerEditionCreate).toBe(true);
+      });
+
+      it('CONTROL: no host option serves no choices and a false flag', () => {
+        const served = features({});
+        expect(served).not.toHaveProperty('organizationEditions');
+        expect(served.developerEditionCreate).toBe(false);
+      });
+
+      it('an empty answer serves no choices either', () => {
+        const served = features({ organizationEditions: () => [] });
+        expect(served).not.toHaveProperty('organizationEditions');
+        expect(served.developerEditionCreate).toBe(false);
+      });
+
+      it('the flag is true only when a developer choice is served', () => {
+        const other = { edition: 'trial', label: 'L', hint: 'H' };
+        const served = features({ organizationEditions: () => [other] });
+        expect(served.organizationEditions).toEqual([other]);
+        expect(served.developerEditionCreate).toBe(false);
+      });
+
+      it('hands the host the request\'s accept-language, and nothing without a request', () => {
+        const host = vi.fn(() => [developer]);
+        features({ organizationEditions: host }, new Request('http://localhost/x', { headers: { 'accept-language': 'ja-JP' } }));
+        features({ organizationEditions: host });
+        expect(host.mock.calls).toEqual([[{ acceptLanguage: 'ja-JP' }], [{ acceptLanguage: undefined }]]);
+      });
+
+      it('refuses to serve an answer the public contract would reject, naming the option', () => {
+        const manager = new AuthManager({
+          ...base,
+          organizationEditions: () => [{ ...developer, label: '   ' }],
+        });
+        expect(() => manager.getPublicConfig()).toThrow(/AuthManagerOptions\.organizationEditions.*0\.label/);
+      });
     });
 
     // Enterprise SSO (@better-auth/sso) is opt-in: the plugin is only wired
