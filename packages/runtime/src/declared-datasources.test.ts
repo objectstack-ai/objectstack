@@ -515,6 +515,27 @@ describe('connectPackageDatasources — a datasource name two packages of one bo
         await expect(holderSeenByAnInstall(k)).resolves.toEqual({ status: 'held', holder: "the package 'com.example.beta'" });
     });
 
+    it('in one artifact, when the first body\'s connect fails and the second body\'s opens the name, the second body\'s declaration is the holder listed', async () => {
+        const k = booting();
+        const alpha = { ...ALPHA, autoConnect: true };
+        const beta = { ...BETA, autoConnect: true };
+        // Each declaration answers its own verdict, in the order the connect attempts them.
+        (k.ctx as unknown as { getService(n: string): any }).getService('datasource-connection').connectDeclared = async (input: { datasources: any[] }) =>
+            input.datasources.map((ds) => ({ name: ds.name, status: ds === alpha ? 'failed-degraded' : 'connected' }));
+        await connectPackageDatasources(k.ctx, {
+            appId: 'com.example.host',
+            datasources: [alpha, beta],
+            owned: [
+                { datasource: alpha, owner: { packageId: 'com.example.alpha' } },
+                { datasource: beta, owner: { packageId: 'com.example.beta' } },
+            ],
+            objects: [],
+        });
+        expect(k.listed()).toMatchObject({ _packageId: 'com.example.beta', config: BETA.config });
+        expect(k.logger.error.mock.calls.map((c) => String(c[0]))[0]).toContain("opened from the declaration of 'com.example.beta'");
+        await expect(holderSeenByAnInstall(k)).resolves.toEqual({ status: 'held', holder: "the package 'com.example.beta'" });
+    });
+
     it('one artifact whose two package bodies declare one name lists the declaration that opened the connection', async () => {
         const k = booting();
         await connectPackageDatasources(k.ctx, {

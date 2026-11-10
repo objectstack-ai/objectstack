@@ -33,6 +33,7 @@ import { DriverPlugin } from './driver-plugin.js';
 import { AppPlugin } from './app-plugin.js';
 import { datasourceNameHolder } from './declared-datasources.js';
 import type { DatasourceConnectPolicy } from '@objectstack/service-datasource';
+import { composeStacks, defineStack } from '@objectstack/spec';
 
 // [#10126] Pay the first transform of these dist-resolved workspace deps at MODULE
 // LOAD. Each is reached below through a dynamic `import()` inside an `it()` body or a
@@ -494,7 +495,7 @@ describe('a boot composing two packages that declare one datasource name', () =>
   function pkg(id: string, file: string, mapped = false) {
     const short = id.split('.').pop()!;
     return {
-      manifest: { id, name: short, version: '1.0.0' },
+      manifest: { id, name: short, version: '1.0.0', type: 'app' as const },
       objects: [
         mapped
           ? { name: `${short}_note`, label: 'Note', fields: { title: { type: 'text' } } }
@@ -532,6 +533,22 @@ describe('a boot composing two packages that declare one datasource name', () =>
     const holder = () => datasourceNameHolder({ getService: (n: string) => kernel.getService(n) } as never, 'com.qa.gamma', 'pkg_shared');
     return { kernel, errors: errors.filter((e) => e.includes("'pkg_shared'")), engine, fileOf, listed, holder };
   }
+
+  /**
+   * A package whose objects bind nothing to the name and whose declaration
+   * connects on its own (`autoConnect`) — with `failing`, through a driver no
+   * factory supports, so its connect fails and the boot degrades rather than
+   * refuses.
+   */
+  function unbound(id: string, file: string, failing = false) {
+    const app = pkg(id, file);
+    return {
+      ...app,
+      objects: app.objects.map(({ datasource: _bound, ...object }: any) => object),
+      datasources: app.datasources.map((ds) => ({ ...ds, autoConnect: true, ...(failing ? { driver: 'no-such-driver' } : {}) })),
+    };
+  }
+  const composed = (...apps: any[]) => composeStacks(apps.map((app) => defineStack(app)), { manifest: 'preserve' });
 
   let dir: string;
   beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'ds-name-clash-')); });
@@ -604,6 +621,49 @@ describe('a boot composing two packages that declare one datasource name', () =>
       expect(fileOf(engine.getDriverByName('pkg_shared'))).toBe(betaFile);
       await expect(listed()).resolves.toEqual({ packageId: 'com.qa.beta', file: betaFile });
       await expect(holder()).resolves.toEqual({ status: 'held', holder: "the package 'com.qa.beta'" });
+    } finally {
+      try { await (kernel as any)?.shutdown?.(); } catch { /* noop */ }
+    }
+  }, BOOT_TIMEOUT);
+
+  it('when the first package\'s connect fails and a later package\'s opens the name, the registration follows the connect verdict', async () => {
+    const betaFile = join(dir, 'beta.db');
+    const { kernel, errors, engine, fileOf, listed, holder } = await bootApps([unbound('com.qa.alpha', join(dir, 'alpha.db'), true), pkg('com.qa.beta', betaFile)]);
+    try {
+      expect(fileOf(engine.getDriverByName('pkg_shared'))).toBe(betaFile);
+      await expect(listed()).resolves.toEqual({ packageId: 'com.qa.beta', file: betaFile });
+      await expect(holder()).resolves.toEqual({ status: 'held', holder: "the package 'com.qa.beta'" });
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain("opened from the declaration of 'com.qa.beta'");
+    } finally {
+      try { await (kernel as any)?.shutdown?.(); } catch { /* noop */ }
+    }
+  }, BOOT_TIMEOUT);
+
+  it('one artifact whose two package bodies declare one name lists the body whose declaration serves it', async () => {
+    const alphaFile = join(dir, 'alpha.db');
+    const { kernel, errors, engine, fileOf, listed, holder } = await bootApps([composed(pkg('com.qa.alpha', alphaFile), pkg('com.qa.beta', join(dir, 'beta.db')))]);
+    try {
+      expect(fileOf(engine.getDriverByName('pkg_shared'))).toBe(alphaFile);
+      await expect(listed()).resolves.toEqual({ packageId: 'com.qa.alpha', file: alphaFile });
+      await expect(holder()).resolves.toEqual({ status: 'held', holder: "the package 'com.qa.alpha'" });
+      expect(errors).toHaveLength(1);
+    } finally {
+      try { await (kernel as any)?.shutdown?.(); } catch { /* noop */ }
+    }
+  }, BOOT_TIMEOUT);
+
+  it('in one artifact, when the first body\'s connect fails and the second body\'s opens the name, the second body is the holder listed and named', async () => {
+    const betaFile = join(dir, 'beta.db');
+    const { kernel, errors, engine, fileOf, listed, holder } = await bootApps([
+      composed(unbound('com.qa.alpha', join(dir, 'alpha.db'), true), unbound('com.qa.beta', betaFile)),
+    ]);
+    try {
+      expect(fileOf(engine.getDriverByName('pkg_shared'))).toBe(betaFile);
+      await expect(listed()).resolves.toEqual({ packageId: 'com.qa.beta', file: betaFile });
+      await expect(holder()).resolves.toEqual({ status: 'held', holder: "the package 'com.qa.beta'" });
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain("opened from the declaration of 'com.qa.beta'");
     } finally {
       try { await (kernel as any)?.shutdown?.(); } catch { /* noop */ }
     }
