@@ -1789,13 +1789,7 @@ export function isTerminalRunStatus(status: unknown): status is TerminalRunStatu
 export interface RunRecord {
     runId: string;
     flowName: string;
-    /**
-     * [ADR-0150 D8 row R8, #31696] The package whose flow `flowName` names —
-     * `sys_automation_run.flow_package` — absent for a flow no package holds.
-     * The engine stamps it on every write and resumes a stored run by
-     * `(flowName, flowPackage)`, so a paused run of one package's flow never
-     * continues on another package's flow of that name.
-     */
+    /** [ADR-0150 D8 row R8, #31696] As {@link SuspendedRun.flowPackage}. */
     flowPackage?: string;
     flowVersion?: number;
     /**
@@ -2691,12 +2685,10 @@ export interface FlowCredentialSource {
     held(flowName: string, flowPackage?: string): Array<{ nodeId: string; key: string }>;
     resolve(flowName: string, nodeId: string, key: string, flowPackage?: string): Promise<string | undefined>;
     /**
-     * [ADR-0150 D8 row R9, #31696] `true` when, given `flowPackage`, only
-     * that package's rows answer. A source that does not say so (the plugin's
-     * `FlowCredentialChannel` today, or one older than `flowPackage`) is never
-     * asked for a flow of a name two packages hold, since it could answer
-     * another package's secret: `holds` answers `true` (never "no
-     * credential"), and `held` / `resolve` throw
+     * [ADR-0150 D8 row R9, #31696] `true` when, given `flowPackage`, only that
+     * package's rows answer. A source that does not say so (the plugin's
+     * `FlowCredentialChannel` today) is never asked for a flow of a name two
+     * packages hold: `holds` answers `true`, and `held` / `resolve` throw
      * `FlowCredentialUnresolvableError` naming the flow and its package.
      */
     readonly readsByPackage?: boolean;
@@ -3284,14 +3276,10 @@ export class AutomationEngine implements IAutomationService {
      */
     private slotKeyedRunStore(store: SuspendedRunStore): SuspendedRunStore {
         return flowSlotRunStore(store, {
-            // Always the flow's own name and, where one holds it, its
-            // package — never a key. The run's own package comes first: it
-            // was stamped when the run started ({@link stampFlowRunSlot}), so
-            // a run whose slot's key moved while it was in flight (a second
-            // package arrived, or one left) is still stored as its own
-            // package's run. A key no slot files any more is a qualified key
-            // that moved back to the bare name: it splits at its last `/`,
-            // since no flow name contains one.
+            // The flow's own name and package, never a key. The run's own
+            // package (stamped at start) comes first, so a run whose key moved
+            // in flight is still its own package's run. A key no slot files is
+            // a qualified key moved back to the bare name: split at its last `/`.
             stored: (key, flowPackage) => {
                 const slot = this.flowSlots.slot(key);
                 const cut = key.lastIndexOf('/');
@@ -4775,20 +4763,13 @@ export class AutomationEngine implements IAutomationService {
 
     /**
      * [ADR-0150 D4, #31696] The key `name`'s registration is filed under,
-     * creating the slot when it is new. Throws, with nothing changed, when a
-     * body no package holds names a name two packages hold: it would be a
-     * customization of one of them, and nothing picks which.
-     *
-     *  - A package's body goes in that package's slot. A package arriving for
-     *    a name only a package-less flow holds takes that slot over (D4: the
-     *    package-less flow is its customization, never a second item); one
-     *    arriving for a name another package holds is a second slot, and the
-     *    incumbent's records move to its qualified key ({@link moveFlowRecords}).
-     *  - A body no package holds goes in the name's one slot, or a new
-     *    package-less slot.
-     *
-     * Asked first, as before slots, of every arm that names no slot: the
-     * resolver's refusal of the bare name for a caller with no package (E1).
+     * creating the slot when it is new. A package's body goes in its own slot
+     * (taking over a package-less one: D4, that flow is its customization); a
+     * second package's slot moves the incumbent's records to its qualified
+     * key ({@link moveFlowRecords}). A body no package holds goes in the
+     * name's one slot, and throws, with nothing changed, over two (nothing
+     * picks whose customization it is), or where the resolver refuses the
+     * bare name for a caller with no package (E1).
      */
     private placeFlowSlot(name: string, arm: FlowContender): string {
         // E1 (#31677 Q1), unchanged for every arm that names no slot: a name
@@ -4823,20 +4804,12 @@ export class AutomationEngine implements IAutomationService {
 
     /**
      * [#31696, ADR-0150 D4, epic red line 1] After the boot's holders have
-     * converged ({@link sealFlowHolders}), a name's one holder is about to
-     * get a second: an activation row naming no package was that holder's
-     * switch (D8), so it is bound to it — in the ledger first, as the
-     * holder's own row, so it stays bound past a restart, and in the
-     * projection once that write lands. A switched-off flow stays off when a
-     * second package ships its name.
-     *
-     * Until the write lands, the row keeps every holder of the name off (a
-     * package-less row over two holders fails closed:
-     * {@link FlowActivationProjection}), so the second package's flow runs only
-     * once the row is the first holder's. A write that fails leaves it so: the
-     * ledger still has the package-less row, which keeps both off after a
-     * restart too, and it is said once. Only a row this engine has read over
-     * one holder is bound; one it has read over two never is.
+     * converged ({@link sealFlowHolders}), a name's one holder is getting a
+     * second: an activation row naming no package was that holder's switch
+     * (D8), so it is bound to it, in the ledger first and in the projection
+     * once that write lands. Until then the row keeps every holder off
+     * ({@link FlowActivationProjection}); a failed write leaves it so (past a
+     * restart too), said once. A row read over two holders is never bound.
      * {@link flowActivationBinds} settles once the write has.
      */
     private bindPackagelessActivation(name: string, holder: string): void {
@@ -4903,10 +4876,8 @@ export class AutomationEngine implements IAutomationService {
 
     /**
      * [#31696, ADR-0150 D4] Settles once every activation-row bind begun so
-     * far ({@link bindPackagelessActivation}) has landed or failed. Nothing
-     * has to wait for it: while a bind is in flight, the flows it is for stay
-     * off. A caller that wants the settled state (a test, an operator tool)
-     * awaits it.
+     * far ({@link bindPackagelessActivation}) has landed or failed; until
+     * then, the flows it is for stay off.
      */
     async flowActivationBinds(): Promise<void> {
         while (this.pendingFlowActivationBinds.size > 0) {
@@ -5003,13 +4974,10 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
-     * [ADR-0150 D3, #31696] The key a bare name means at a door with no
-     * package — {@link resolveFlowKey} for a caller with no package — or the
-     * refusal thrown: a 409 naming every holder when two slots hold it.
-     * `undefined` for a "name" that spells a slot key (`PACKAGE/NAME`): no
-     * flow is named so, and a bare door never takes a slot's key, so the door
-     * answers as for a flow it does not hold. The slot doors take a package
-     * and a name ({@link getFlowSlot}, {@link toggleFlowSlot}, …).
+     * [ADR-0150 D3, #31696] {@link resolveFlowKey} for a caller with no
+     * package, the refusal thrown (409, every holder named). `undefined` for a
+     * slot-key spelling (`PACKAGE/NAME`): no flow is named so, so the door
+     * answers as for a flow it does not hold ({@link getFlowSlot} takes one).
      */
     private bareFlowKey(name: string): string | undefined {
         if (isSlotKeySpelling(name)) return undefined;
@@ -5115,13 +5083,9 @@ export class AutomationEngine implements IAutomationService {
         }
 
         // [ADR-0150 D4, #31696] The slot the body is held in: its package's,
-        // so two packages' flows of one name are two slots, both armed — the
-        // line #31677 Q1 drew ("arming neither") moves here. A body no
-        // package holds is still refused, naming every holder, where the
-        // resolver cannot answer its name for a caller with no package
-        // (E1), and where two packages' slots hold the name: nothing picks
-        // which package's flow it would customize. Every record below is
-        // filed under the slot's key.
+        // so two packages' flows of one name are both armed (the line #31677
+        // Q1 drew, "arming neither", moves here). Every record below is filed
+        // under the slot's key.
         const key = this.placeFlowSlot(name, arm);
 
         // Version history management
@@ -5496,11 +5460,9 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
-     * [ADR-0150 D4, #31696] The flow the run `context` executes: the body
-     * filed under the run's own slot key, so a run of a flow whose name two
-     * packages hold reads its own package's body, where {@link getFlow} refuses
-     * the bare name. `null` for a context that is no run's, and for a run
-     * whose slot no longer files a flow. Engine-local.
+     * [ADR-0150 D4, #31696] The flow the run `context` executes (its own
+     * slot's body, where {@link getFlow} refuses a shared name), or `null`.
+     * Engine-local.
      */
     getRunFlow(context: AutomationContext | undefined): FlowParsed | null {
         const key = this.flowKeyOfRun(context);
@@ -5508,11 +5470,9 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
-     * [ADR-0150 D4, #31696] The key the flow the run `context` executes is
-     * filed under NOW: the key the run started under, or — where that key
-     * moved while the run was in flight (a second package arrived for its
-     * name, or one left) — the key its package's slot of the name moved to.
-     * `undefined` for a context that is no run's. Engine-local.
+     * [ADR-0150 D4, #31696] The key the run `context`'s flow is filed under
+     * NOW: its start key, or where that moved in flight, the key its
+     * package's slot moved to. `undefined` for no run. Engine-local.
      */
     flowKeyOfRun(context: AutomationContext | undefined): string | undefined {
         const key = flowRunKey(context);
