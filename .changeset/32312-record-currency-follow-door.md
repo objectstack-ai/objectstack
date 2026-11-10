@@ -16,6 +16,8 @@ Metadata-protocol: none
 
 Now, once the server has finished booting, each is refused `INVALID_METADATA` / 422 (`RecordCurrencyFollowRefusedError`), whichever object is saved second, with the message `defineStack` prints: the two messages and the code-field predicate are one module of `@objectstack/spec/data` (`isRecordCurrencyCodeField`, `recordCurrencyFollowedCodeError`, `recordCurrencyRecordRollupError`, `recordCurrencyUnfollowedRollupError`), read by both doors. A parent saved without the code field a registered child follows is refused the same way. A code field the parent gets from a registered `objectExtensions` entry counts.
 
+Where the refusal is heard: by every caller of the registry (`registerObject`, `ObjectQL.registerApp` after boot, the metadata facade's `register`). The metadata HTTP save door (`PUT /meta/object`) does not relay a registration refusal today, as it does not relay D6's: its pre-flight judges the body alone, so the row is stored, the save answers `200`, and the registration refusal is logged, leaving the object unregistered (a new object) or as it was (a re-save).
+
 What an author does: name a code field of the parent in the path's second segment (a `text` field declaring `valueDomain: 'iso_4217_currency'`; the message lists the candidates), and declare `currencyMode: 'record'` on a roll-up only when its child amounts follow the parent through the `master_detail` it rolls up (else delete `currencyConfig`, or declare `fixed`).
 
 What does not change: the boot registers every stored or packaged object it registered before, a `record` roll-up over a child amount in its own record currency stays D6's refusal (`RecordCurrencySummaryRefusedError`), and the stack check's findings and words are unchanged.
