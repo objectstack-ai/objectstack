@@ -25,7 +25,7 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 import { resolveThrownHttpError } from '@objectstack/types';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { SchemaRegistry } from './registry.js';
-import { PackageScopedNameRefusedError } from './package-scoped-read.js';
+import { PACKAGE_SCOPED_READ_TYPES, PackageScopedNameRefusedError } from './package-scoped-read.js';
 
 const A = 'com.acme.alpha';
 const B = 'com.acme.beta';
@@ -261,5 +261,39 @@ describe('[#31699] a bundled type (email_template): the exact qualifier reads a 
       metadata: JSON.stringify({ name: 'welcome', label: 'beta fr-FR', locale: 'fr-FR', subject: 'beta fr-FR', bodyHtml: '<p>b</p>' }),
     });
     expect((await read(A, 'fr-FR'))?.item).toBeUndefined();
+  });
+});
+
+/**
+ * [#32069] The exact read never serves a body under a package it was not read
+ * from. On main ff04ad81, `GET /meta/api/alpha/NAME` of an api two packages
+ * hold answered beta's body stamped `_packageId: alpha`: the metadata service
+ * (step 2 of the read) answered by bare name, and the envelope grafted on the
+ * requested package's stamp. A pin that only asserts the stamp echoes the
+ * request passes on that defect, so each case asserts the BODY too.
+ *
+ * Driven for every type whose readers consult `(package, name)`, with a
+ * metadata service that answers the other package's body whatever it is asked
+ * — the shape the bare-name store had.
+ */
+describe('the exact read serves the holder\'s own body under the holder\'s own stamp, for every package-scoped type (#32069)', () => {
+  it.each([...PACKAGE_SCOPED_READ_TYPES])('%s: `?package=` of each holder serves that holder\'s body and stamp, whatever the service answers', async (type) => {
+    ship(type, 'shared', A);
+    ship(type, 'shared', B);
+    const wrongBody = { name: 'shared', label: `beta ${type}`, _packageId: B };
+    const metadata = {
+      get: vi.fn(async () => wrongBody),
+      getDiagnosed: vi.fn(async () => ({ data: wrongBody, degraded: false, errors: [] })),
+    };
+    const served = new ObjectStackProtocolImplementation(
+      (protocol as unknown as { engine: never }).engine,
+      () => new Map<string, unknown>([['metadata', metadata]]),
+    );
+    for (const [packageId, label] of [[A, `alpha ${type}`], [B, `beta ${type}`]] as const) {
+      const answer = await served.getMetaItem({ type, name: 'shared', packageId });
+      const item = (answer as { item?: { label?: string; _packageId?: string } }).item;
+      expect([item?.label, item?._packageId], `${type} at ${packageId}`).toEqual([label, packageId]);
+    }
+    expect(metadata.get.mock.calls.length + metadata.getDiagnosed.mock.calls.length, 'the service layer was read').toBeGreaterThan(0);
   });
 });

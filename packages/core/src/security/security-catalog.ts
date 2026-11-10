@@ -157,7 +157,7 @@
  */
 
 import { AUDIENCE_ANCHOR_POSITIONS } from '@objectstack/spec/identity';
-import { packageResolutionClosure, type PackageClosureRegistry } from '@objectstack/metadata-core';
+import { KERNEL_NAMESPACE, packageResolutionClosure, type PackageClosureRegistry } from '@objectstack/metadata-core';
 import { AuthzStoreUnavailableError } from './authz-store-unavailable.js';
 import {
   describePackageScopedHolder,
@@ -775,6 +775,110 @@ export function bindSecurityCatalogReader(engine: unknown, reader: SecurityCatal
   const registry = (engine as { registry?: unknown }).registry;
   if (registry && typeof registry === 'object') boundReaders.set(registry, reader);
   return true;
+}
+
+/**
+ * [ADR-0150 D2/D3] Is the holder `packageId` of a permission set the
+ * PLATFORM's own, on `engine` — the holder an identity the platform derives
+ * from a set's name (`admin_full_access`, the organization-administrator sets)
+ * may be read from?
+ *
+ * The platform's metadata belongs to the reserved kernel namespace `sys`
+ * (ADR-0150 D2; ADR-0028 TL;DR 5), so a holder is the platform's when:
+ *
+ *  - it is a package whose manifest, as the engine's registry holds it,
+ *    declares the namespace `sys` — the security plugin's own shipped sets;
+ *  - it names no package: the environment's own item, or an ADR-0005 overlay
+ *    rehydrated from `sys_metadata` (D4: a package-less row that bears a
+ *    package-held name is that holder's customization, never a second item);
+ *  - the registry reads permission sets by name alone (a test stand-in, or a
+ *    host with no package-scoped reads): it holds one item per name, so the
+ *    name IS the holder, and the answer is the one a by-name read gave.
+ *
+ * Any other package — one of another namespace, or one the registry cannot
+ * produce — is not: a set it ships under a platform name is that package's
+ * set, granted as any other, and never the platform's identity.
+ */
+export function permissionSetHolderIsPlatform(engine: unknown, packageId: string | null | undefined): boolean {
+  if (typeof packageId !== 'string' || packageId === '' || packageId === OVERLAY_PROVENANCE_SENTINEL) return true;
+  const registry = registryOf(engine);
+  if (!registry || !PACKAGE_SCOPED_HOLDER_READS.every((member) => typeof registry[member] === 'function')) return true;
+  const getPackage = registry.getPackage;
+  if (typeof getPackage !== 'function') return false;
+  let row: { manifest?: unknown } | undefined;
+  try {
+    row = (getPackage as (id: string) => { manifest?: unknown } | undefined).call(registry, packageId);
+  } catch {
+    return false;
+  }
+  const manifest = row?.manifest as { namespace?: unknown } | undefined;
+  return manifest?.namespace === KERNEL_NAMESPACE;
+}
+
+/** The registry `engine` carries (or `engine` itself when it is one), as a record of its members. */
+function registryOf(engine: unknown): Record<string, unknown> | undefined {
+  if (!engine || typeof engine !== 'object') return undefined;
+  const registry = (engine as { registry?: unknown }).registry;
+  if (registry && typeof registry === 'object') return registry as Record<string, unknown>;
+  return engine as Record<string, unknown>;
+}
+
+/** What {@link holdsPlatformPermissionSet} reads: a context's or a grant envelope's held sets. */
+export interface HeldPermissionSets {
+  readonly permissions?: readonly string[];
+  readonly permissionSetAddresses?: readonly { readonly packageId: string | null; readonly name: string }[];
+}
+
+/**
+ * [ADR-0150 D3] Does `held` — an execution context or a resolved grant
+ * envelope — hold the PLATFORM's permission set `name`
+ * ({@link permissionSetHolderIsPlatform})? The one reading for every identity
+ * derived from a set's name, so none of them reads a bare name that another
+ * package could also hold:
+ *
+ *  - the name must be held at all (`permissions`);
+ *  - a name carried with its addresses (`permissionSetAddresses`) is the
+ *    platform's when one of those holders is;
+ *  - a name carried with none (an API key's seed, a context built before the
+ *    pipeline carried addresses) is read as a caller with no package reads it
+ *    (D3), by the one rule over the registry's holders — the read the catalog
+ *    and the evaluator make: the environment's own item, or the one holder,
+ *    answers; two holders are refused and hold nothing. A name the registry
+ *    holds nowhere is the environment's (or no one's) and answers as a by-name
+ *    read did, as does any name on a registry read by name alone.
+ *
+ * Synchronous: it reads only the registry, so a predicate that answers inline
+ * (an override check, a posture derivation) asks it without a second path.
+ */
+export function holdsPlatformPermissionSet(engine: unknown, held: HeldPermissionSets | undefined, name: string): boolean {
+  const names = Array.isArray(held?.permissions) ? held.permissions : [];
+  if (!names.includes(name)) return false;
+  const addressed = (Array.isArray(held?.permissionSetAddresses) ? held.permissionSetAddresses : [])
+    .filter((address) => address?.name === name);
+  if (addressed.length > 0) return addressed.some((address) => permissionSetHolderIsPlatform(engine, address.packageId));
+  const registry = registryOf(engine);
+  if (!registry || !PACKAGE_SCOPED_HOLDER_READS.every((member) => typeof registry[member] === 'function')) return true;
+  const scope = registry as unknown as SecurityCatalogPackageScopedRegistry;
+  let outcome: PackageScopedResolution;
+  try {
+    outcome = resolvePackageScopedHolders(
+      { type: 'permission', name, callerPackageId: null },
+      {
+        packageHolders: scope.packageScopedHoldersOf('permission', name, null),
+        packageItem: (packageId) => scope.getPackageScopedItem('permission', name, packageId),
+        environmentItem: () => scope.getEnvironmentScopedItem('permission', name),
+      },
+      (callerPackageId) => packageResolutionClosure(scope, callerPackageId),
+    );
+  } catch {
+    return false;
+  }
+  if (outcome.status === 'refused') return false;
+  if (outcome.status !== 'resolved' || outcome.holder.kind !== 'package') return true;
+  const packageId = outcome.holder.packageId;
+  const disabled = typeof registry.isPackageDisabled === 'function'
+    && (registry.isPackageDisabled as (id: string) => boolean).call(registry, packageId);
+  return !disabled && permissionSetHolderIsPlatform(engine, packageId);
 }
 
 /**
