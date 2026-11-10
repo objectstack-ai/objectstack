@@ -243,3 +243,72 @@ describe('LoginForm — two-factor sign-in by phone number and password (objects
     expect(screen.getByLabelText('Password')).toBeTruthy();
   });
 });
+
+describe('LoginForm — the phone-code sign-in continues to the two-factor prompt when the account has an enrolled second factor', () => {
+  const OTP_ON = { features: { phoneNumber: true, phoneNumberOtp: true } };
+
+  async function submitPhoneCode(code: string) {
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in with verification code' }));
+    fireEvent.change(await screen.findByLabelText('Phone number'), { target: { value: '+8613800138000' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Get code' }));
+    await screen.findByRole('button', { name: /Resend in \d+s/ });
+    fireEvent.change(screen.getByLabelText('Verification code'), { target: { value: code } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
+  }
+
+  it('shows the two-factor prompt after an accepted phone code, with no error, then signs the user in', async () => {
+    const client = stubClient({
+      getConfig: vi.fn().mockResolvedValue(OTP_ON),
+      sendPhoneOtp: vi.fn().mockResolvedValue(undefined),
+      signInWithPhoneOtp: vi.fn().mockResolvedValue({ twoFactor: { methods: ['totp'] } }),
+    });
+    const onSuccess = vi.fn();
+    renderLogin(client, { onSuccess });
+
+    await submitPhoneCode('123456');
+
+    await screen.findByTestId('two-factor-challenge');
+    expect(client.signInWithPhoneOtp).toHaveBeenCalledWith('+8613800138000', '123456');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByLabelText('Verification code')).toBeNull();
+    expect(screen.getByTestId('signed-in-as').textContent).toBe('');
+    expect(onSuccess).not.toHaveBeenCalled();
+
+    enterCode('Authentication code', '654321');
+
+    await waitFor(() => expect(screen.getByTestId('signed-in-as').textContent).toBe(USER.email));
+    expect(client.verifySignInTwoFactor).toHaveBeenCalledWith('654321', 'totp');
+    expect(onSuccess).toHaveBeenCalledTimes(1);
+  });
+
+  it('CONTROL: signs a phone account with no enrolled second factor straight in, as before', async () => {
+    const client = stubClient({
+      getConfig: vi.fn().mockResolvedValue(OTP_ON),
+      sendPhoneOtp: vi.fn().mockResolvedValue(undefined),
+      signInWithPhoneOtp: vi.fn().mockResolvedValue({ user: USER, session: { token: 'otp-token' } }),
+    });
+    const onSuccess = vi.fn();
+    renderLogin(client, { onSuccess });
+
+    await submitPhoneCode('123456');
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId('signed-in-as').textContent).toBe(USER.email);
+    expect(screen.queryByTestId('two-factor-challenge')).toBeNull();
+  });
+
+  it('CONTROL: a wrong phone code still shows the existing error, and asks for no second factor', async () => {
+    const client = stubClient({
+      getConfig: vi.fn().mockResolvedValue(OTP_ON),
+      sendPhoneOtp: vi.fn().mockResolvedValue(undefined),
+      signInWithPhoneOtp: vi.fn().mockRejectedValue(refusal('INVALID_OTP', 'Invalid OTP')),
+    });
+    renderLogin(client);
+
+    await submitPhoneCode('000000');
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Invalid OTP');
+    expect(screen.queryByTestId('two-factor-challenge')).toBeNull();
+    expect(screen.getByLabelText('Verification code')).toBeTruthy();
+  });
+});
