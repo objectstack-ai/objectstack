@@ -24,7 +24,13 @@ import {
   type MarketplaceIndustry,
   type MarketplaceSolutionType,
 } from '@objectstack/spec/marketplace';
-import type { MarketplaceListParams, MarketplacePackageSummary } from './marketplaceApi.js';
+import type {
+  MarketplaceFacetCount,
+  MarketplaceListParams,
+  MarketplaceListResponse,
+  MarketplacePackageSummary,
+} from './marketplaceApi.js';
+import { languageLabel } from './shippedLanguages.js';
 
 /** The spec's business functions, in the spec's order. */
 export const BUSINESS_FUNCTIONS: readonly MarketplaceBusinessFunction[] = MarketplaceBusinessFunctionSchema.options;
@@ -79,12 +85,19 @@ export interface FacetSelection {
   industries: ReadonlySet<MarketplaceIndustry>;
   /** `null` is "All". */
   solutionType: MarketplaceSolutionType | null;
+  /**
+   * The languages facet's selection, in the catalog's own spelling of each
+   * locale (`MarketplaceLanguages.tsx`). Not a spec vocabulary: its values are
+   * the ones the catalog's counts serve.
+   */
+  languages: ReadonlySet<string>;
 }
 
 export const EMPTY_FACET_SELECTION: FacetSelection = {
   businessFunctions: new Set(),
   industries: new Set(),
   solutionType: null,
+  languages: new Set(),
 };
 
 /**
@@ -100,18 +113,21 @@ export function effectiveSolutionType(taxonomy: ListingTaxonomy): MarketplaceSol
 /**
  * The list read's filters for a selection. The server filters and pages (OR
  * inside a facet, AND across facets), so the selection travels as the query:
- * each facet's values in the spec's order, and a facet with nothing selected
- * left out — the door refuses an empty facet.
+ * each taxonomy facet's values in the spec's order, the languages sorted, and a
+ * facet with nothing selected left out — the door refuses an empty facet.
  */
 export function facetListParams(
   selection: FacetSelection,
-): Pick<MarketplaceListParams, 'businessFunctions' | 'industries' | 'solutionTypes'> {
+): Pick<MarketplaceListParams, 'businessFunctions' | 'industries' | 'solutionTypes' | 'languages'> {
   const businessFunctions = BUSINESS_FUNCTIONS.filter((v) => selection.businessFunctions.has(v));
   const industries = INDUSTRIES.filter((v) => selection.industries.has(v));
+  // No spec order to follow: sorted, so one selection is one request spelling.
+  const languages = [...selection.languages].sort();
   return {
     ...(businessFunctions.length > 0 ? { businessFunctions } : {}),
     ...(industries.length > 0 ? { industries } : {}),
     ...(selection.solutionType !== null ? { solutionTypes: [selection.solutionType] } : {}),
+    ...(languages.length > 0 ? { languages } : {}),
   };
 }
 
@@ -142,4 +158,37 @@ export function widenServedFacets(served: ServedFacets, rows: readonly ListingTa
     && next.solutionType === served.solutionType
     ? served
     : next;
+}
+
+/**
+ * The languages counts of one list answer (`facets.languages`), or `null` when
+ * the answer carries none. The catalog serves only values with a count above
+ * zero, most listings first, then by value; an entry that is not such a value
+ * is not a language anyone can select, and is dropped.
+ */
+export function readLanguageCounts(
+  answer: Pick<MarketplaceListResponse, 'facets'> | null | undefined,
+): readonly MarketplaceFacetCount[] | null {
+  const counts = answer?.facets?.languages;
+  if (!Array.isArray(counts)) return null;
+  return counts.filter(
+    (c): c is MarketplaceFacetCount =>
+      typeof c?.value === 'string' && c.value !== '' && typeof c.count === 'number' && Number.isFinite(c.count) && c.count > 0,
+  );
+}
+
+/**
+ * The languages row's buttons: the served counts in the catalog's order, each
+ * labelled as the language menu names it; then any selected language the
+ * counts do not name (another facet narrowed it to none), without a count, so
+ * the selection can always be undone.
+ */
+export function languageFacetEntries(
+  counts: readonly MarketplaceFacetCount[],
+  selected: ReadonlySet<string>,
+): { value: string; label: string; count?: number }[] {
+  const served = counts.map((c) => ({ value: c.value, label: languageLabel(c.value), count: c.count }));
+  const named = new Set(served.map((e) => e.value));
+  const kept = [...selected].filter((v) => !named.has(v)).sort().map((value) => ({ value, label: languageLabel(value) }));
+  return [...served, ...kept];
 }
