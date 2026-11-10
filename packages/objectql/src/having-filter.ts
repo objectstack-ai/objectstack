@@ -1344,6 +1344,85 @@ export function assertHavingIsFilterCondition(having: unknown): void {
 }
 
 /**
+ * Refuse a combinator operand that is not a filter node, in a `having` or an
+ * `aggregations[i].filter`, before any row is read. This is the shape gate every
+ * driver runs on `where` (`driver-sql`'s, `driver-memory`'s and `driver-mongodb`'s
+ * `assertFilterNodeList` / `assertFilterNode`), walked over the same nodes in the
+ * same order and refused in the same words, with the position rooted at `root`:
+ * - a `$and` / `$or` operand that is not a list — {@link filterNodeListExpectedError};
+ * - a `$and` / `$or` element, or the `$not` operand, that is not a plain object —
+ *   a condition array, `null`, a string, a `Date` — {@link filterNodeExpectedError}.
+ *
+ * Before this gate, the walker below ({@link matchesHaving} and its row-independent
+ * twin {@link assertNodeIsEvaluable}) took such an operand as it came. A condition
+ * array was read as a node whose keys are its index positions, so
+ * `{ $and: [[{ stage: 'won' }]] }` counted no row. A `null` or a string element was
+ * read as no constraint, so `{ $or: [null] }` counted every row. A non-list `$and`
+ * was read as a one-element list. `where` refuses every one of these on every
+ * driver, so one filter got two answers within one verb. Measured through
+ * `engine.aggregate` on a native-capable and a raw driver, empty and populated.
+ *
+ * It decides SHAPE only, as the drivers' gate does: field constraints are not
+ * descended, and a `$` key outside `LOGICAL_OPERATORS` (`$nor`) is left to the
+ * walker, which refuses it as an unknown operator. Called first at each position,
+ * because every later door walks a filter node's keys and steps around anything
+ * that is not one.
+ *
+ * The words are a declared verbatim copy of `driver-memory`'s `filter-refusal.ts`
+ * (= `driver-sql`'s author-facing text). This package cannot depend on a driver,
+ * and neither `@objectstack/core` nor the spec exports the text. The message is
+ * not withheld: no read scope is merged into either position (see
+ * {@link nonBooleanFlagComparandError}).
+ *
+ * Read-only; `filter` is assumed to be a plain object or absent.
+ */
+export function assertFilterNodeShapes(filter: unknown, root: string): void {
+  if (!isPlainFilterNode(filter)) return;
+  for (const [key, value] of Object.entries(filter)) {
+    const here = `${root}.${key}`;
+    if (key === '$and' || key === '$or') {
+      if (!Array.isArray(value)) throw filterNodeListExpectedError(key, value, here);
+      value.forEach((branch, i) => {
+        if (!isPlainFilterNode(branch)) throw filterNodeExpectedError(branch, `${here}[${i}]`);
+        assertFilterNodeShapes(branch, `${here}[${i}]`);
+      });
+      continue;
+    }
+    if (key === '$not') {
+      if (!isPlainFilterNode(value)) throw filterNodeExpectedError(value, here);
+      assertFilterNodeShapes(value, here);
+    }
+  }
+}
+
+/** A filter node: a plain object (a literal or a null-prototype one), as the drivers' gate requires. */
+function isPlainFilterNode(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/** `$and` / `$or` take a list of nodes. `driver-memory`'s words, verbatim. */
+function filterNodeListExpectedError(key: string, value: unknown, path: string): Error {
+  return invalidFilterError(
+    `Filter combinator "${key}" at ${path} requires an array of filter conditions, but received a `
+    + `${describeFlagOperand(value)}. @objectstack/spec `
+    + `FilterConditionSchema declares "${key}" as FilterCondition[].`,
+  );
+}
+
+/** Every `$and` / `$or` element and the `$not` operand is a node. `driver-memory`'s words, verbatim. */
+function filterNodeExpectedError(value: unknown, path: string): Error {
+  return invalidFilterError(
+    `Filter node at ${path} is a ${describeFlagOperand(value)}, not a `
+    + `filter condition object. Every element of "$and"/"$or" and the operand of "$not" must be a `
+    + `plain object of field constraints (e.g. { "status": "active" }) or nested combinators — `
+    + `@objectstack/spec FilterConditionSchema declares this position as a FilterCondition. It is `
+    + `refused rather than skipped because skipping it would silently change which rows match.`,
+  );
+}
+
+/**
  * [#20099] Judge a whole `having` clause ONCE, independent of the rows — every
  * refusal the per-row walk can raise, plus the `{ $field }` reference's
  * position and name.

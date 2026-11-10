@@ -1030,3 +1030,101 @@ describe('[#20148] a Date bound is compared as an instant — as the same bound 
     expect(matchesAggregationFilter({ note: '2026-02-01' }, { note: { $gte: '2026-02-01T00:00:00.000Z' } } as never, 0)).toBe(false);
   });
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+// A combinator operand that is not a filter node is refused, as `where` refuses it
+// ───────────────────────────────────────────────────────────────────────────
+
+describe('per-aggregation filter — a combinator operand that is not a filter node is refused in where\'s words', () => {
+  // Before, measured through `engine.aggregate` on both driver kinds: every
+  // row below ANSWERED after a driver read. A condition array counted no row
+  // (the walker read its index positions as columns), `null` / a string / a
+  // `Date` element counted every row, a string or `null` `$not` operand counted
+  // no row, and a non-list `$and` read as a one-element list. The same operand
+  // in a `where` is refused INVALID_FILTER / 400 on driver-sql, driver-memory
+  // and driver-mongodb, in the words pinned here (their shape gate's first
+  // sentence, with the position rooted at the aggregation's filter).
+  //
+  // name · filter · the first sentence of the refusal
+  const NODE_REFUSED: ReadonlyArray<readonly [string, () => unknown, string]> = [
+    ['a condition array as a $and element (the card\'s row)', () => ({ $and: [[{ stage: 'closed_won' }]] }),
+      `Filter node at ${AT}.$and[0] is a array ([{"stage":"closed_won"}]), not a filter condition object.`],
+    ['a condition array as a $or element', () => ({ $or: [[{ stage: 'closed_won' }]] }),
+      `Filter node at ${AT}.$or[0] is a array ([{"stage":"closed_won"}]), not a filter condition object.`],
+    ['null as a $or element', () => ({ $or: [{ stage: 'open' }, null] }),
+      `Filter node at ${AT}.$or[1] is a null (null), not a filter condition object.`],
+    ['a string as a $or element', () => ({ $or: ['closed_won'] }),
+      `Filter node at ${AT}.$or[0] is a string ("closed_won"), not a filter condition object.`],
+    ['a Date as a $and element', () => ({ $and: [new Date(0)] }),
+      `Filter node at ${AT}.$and[0] is a Date ("1970-01-01T00:00:00.000Z"), not a filter condition object.`],
+    ['a condition array as the $not operand', () => ({ $not: [{ stage: 'closed_won' }] }),
+      `Filter node at ${AT}.$not is a array ([{"stage":"closed_won"}]), not a filter condition object.`],
+    ['a string as the $not operand', () => ({ $not: 'closed_won' }),
+      `Filter node at ${AT}.$not is a string ("closed_won"), not a filter condition object.`],
+    ['null as the $not operand', () => ({ $not: null }),
+      `Filter node at ${AT}.$not is a null (null), not a filter condition object.`],
+    ['a condition array two combinators deep', () => ({ $or: [{ amount: { $gt: 0 } }, { $and: [[{ stage: 'open' }]] }] }),
+      `Filter node at ${AT}.$or[1].$and[0] is a array ([{"stage":"open"}]), not a filter condition object.`],
+    ['a $and operand that is not a list', () => ({ $and: { stage: 'closed_won' } }),
+      `Filter combinator "$and" at ${AT}.$and requires an array of filter conditions, but received a object ({"stage":"closed_won"}).`],
+    ['a $or operand that is a string', () => ({ $or: 'closed_won' }),
+      `Filter combinator "$or" at ${AT}.$or requires an array of filter conditions, but received a string ("closed_won").`],
+  ];
+
+  for (const [name, filter, head] of NODE_REFUSED) {
+    it(`${name}: INVALID_FILTER / 400 before any read, empty or populated, at its position`, async () => {
+      const message = await expectFilterRefusal(filter);
+      expect(message.startsWith(`${head} `), message).toBe(true);
+      expect(message).toContain('@objectstack/spec FilterConditionSchema declares');
+    });
+  }
+
+  it('the index is the aggregation that carries the filter', async () => {
+    const { driver, calls } = makeCountingDriver(OPPORTUNITIES, false);
+    const engine = await makeEngine(driver);
+    const err = await refusalOf(() => engine.aggregate('crm_opportunity', {
+      aggregations: [
+        { function: 'count', alias: 'won', filter: { stage: 'closed_won' } },
+        { function: 'count', alias: 'opp_count' },
+        { function: 'count', alias: 'picked', filter: { $and: [[{ stage: 'open' }]] } },
+      ],
+    } as unknown as EngineAggregateOptions));
+    expect(err.code).toBe('INVALID_FILTER');
+    expect(err.status).toBe(400);
+    expect(err.message).toContain('Filter node at aggregations[2].filter.$and[0] is a array');
+    expect(calls).toEqual({ aggregate: 0, find: 0 });
+  });
+
+  it('$nor is no declared combinator: its key is refused before any read, so its operand is never counted', async () => {
+    // `FilterConditionSchema` declares `$and` / `$or` / `$not` only. `where`
+    // refuses a `$nor` key on every driver before its operand is read, and so
+    // does the walker here (as an unknown operator, since #10576).
+    const message = await expectFilterRefusal(() => ({ $nor: [[{ stage: 'closed_won' }]] }));
+    expect(message).toContain(`Unsupported operator '$nor' in \`${AT}\``);
+  });
+
+  // The object forms, unchanged: the same counts at base and head, on both
+  // driver kinds, 0 on an empty table.
+  const OBJECT_FORM: ReadonlyArray<readonly [string, () => Record<string, unknown>, number]> = [
+    ['$and of nodes', () => ({ $and: [{ stage: 'closed_won' }, { amount: { $gt: 300 } }] }), 1],
+    ['$or of nodes', () => ({ $or: [{ stage: 'closed_won' }, { amount: { $gt: 800 } }] }), 3],
+    ['$not of a node', () => ({ $not: { stage: 'open' } }), 4],
+    ['a null-prototype $and element', () => ({ $and: [Object.assign(Object.create(null), { stage: 'open' })] }), 2],
+    ['nested combinators', () => ({ $or: [{ $and: [{ region: 'east' }, { stage: 'open' }] }, { $not: { amount: { $gt: 30 } } }] }), 2],
+    ['the empty $and (TRUE)', () => ({ $and: [] }), 6],
+    ['the empty $or (FALSE)', () => ({ $or: [] }), 0],
+  ];
+
+  for (const [name, filter, populatedCount] of OBJECT_FORM) {
+    it(`${name} counts ${populatedCount} of 6, and 0 on an empty table`, async () => {
+      for (const native of [true, false]) {
+        const { driver } = makeCountingDriver(OPPORTUNITIES, native);
+        const populated = await makeEngine(driver);
+        expect(await populated.aggregate('crm_opportunity', withFilter(filter()))).toEqual([{ opp_count: 6, picked: populatedCount }]);
+        const { driver: emptyDriver } = makeCountingDriver([], native);
+        const empty = await makeEngine(emptyDriver);
+        expect(await empty.aggregate('crm_opportunity', withFilter(filter()))).toEqual([{ opp_count: 0, picked: 0 }]);
+      }
+    });
+  }
+});

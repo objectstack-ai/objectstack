@@ -985,3 +985,55 @@ describe('[#20127] having — a { $field, addDays } pair is judged by each aggre
     });
   });
 });
+
+describe('having — a combinator operand that is not a filter node is refused in where\'s words, whatever the rows', () => {
+  // Before, measured through `engine.aggregate` on both doors: a `null`, a
+  // string or a `Date` element, a string or `null` `$not` operand and a
+  // non-list `$and` / `$or` ANSWERED (the walker read the non-node as no
+  // constraint, the non-list as a one-element list); a condition array was
+  // refused, but as a key naming no column ('0'). The per-aggregation `filter`
+  // takes the same gate (engine-aggregate-filter.test.ts), and `where` refuses
+  // each on driver-sql, driver-memory and driver-mongodb in these words.
+  //
+  // name · having · the first sentence of the refusal
+  const NODE_REFUSED: ReadonlyArray<readonly [string, () => unknown, string]> = [
+    ['a condition array as a $and element', () => ({ $and: [[{ total: { $gt: 100 } }]] }),
+      'Filter node at having.$and[0] is a array ([{"total":{"$gt":100}}]), not a filter condition object.'],
+    ['null as a $or element', () => ({ $or: [{ total: { $gt: 100 } }, null] }),
+      'Filter node at having.$or[1] is a null (null), not a filter condition object.'],
+    ['a string as a $or element', () => ({ $or: ['c1'] }),
+      'Filter node at having.$or[0] is a string ("c1"), not a filter condition object.'],
+    ['a Date as a $and element', () => ({ $and: [new Date(0)] }),
+      'Filter node at having.$and[0] is a Date ("1970-01-01T00:00:00.000Z"), not a filter condition object.'],
+    ['a condition array as the $not operand', () => ({ $not: [{ total: 1 }] }),
+      'Filter node at having.$not is a array ([{"total":1}]), not a filter condition object.'],
+    ['a string as the $not operand', () => ({ $not: 'c1' }),
+      'Filter node at having.$not is a string ("c1"), not a filter condition object.'],
+    ['a $or operand that is not a list', () => ({ $or: { total: { $gt: 100 } } }),
+      'Filter combinator "$or" at having.$or requires an array of filter conditions, but received a object ({"total":{"$gt":100}}).'],
+  ];
+
+  for (const [name, having, head] of NODE_REFUSED) {
+    it(`${name}: refused on both doors, empty or populated, before any read`, async () => {
+      const message = await expectRowIndependentRefusal(offContract({ ...AGG_QUERY, having: having() }), ROWS);
+      expect(message.startsWith(`${head} `), message).toBe(true);
+    });
+  }
+
+  // c1: total 500, 2 orders · c2: total 1250, 3 orders · c3: total 20, 1 order
+  const OBJECT_FORM: ReadonlyArray<readonly [string, () => Record<string, unknown>, string[]]> = [
+    ['$and of nodes', () => ({ $and: [{ total: { $gt: 100 } }, { order_count: { $lt: 3 } }] }), ['c1']],
+    ['$or of nodes', () => ({ $or: [{ total: { $gt: 1000 } }, { order_count: 1 }] }), ['c2', 'c3']],
+    ['$not of a node', () => ({ $not: { customer_id: 'c2' } }), ['c1', 'c3']],
+    ['the empty $and (TRUE)', () => ({ $and: [] }), ['c1', 'c2', 'c3']],
+  ];
+
+  for (const [name, having, kept] of OBJECT_FORM) {
+    it(`${name} keeps ${kept.join(', ')} on both doors, as before`, async () => {
+      for (const [door, native] of DOORS) {
+        const { engine } = await makeEngine(ROWS, native);
+        expect(groups(await engine.aggregate(OBJECT, offContract({ ...AGG_QUERY, having: having() }))), door).toEqual(kept);
+      }
+    });
+  }
+});
