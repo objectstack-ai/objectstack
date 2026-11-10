@@ -344,6 +344,7 @@ describe('[ADR-0151 D7] register: a licence refusal declared on either write kee
   /** What cloud's AI-seat cap throws: a numeric `statusCode` and its own string `code`. */
   const seatCap = (extra: Record<string, unknown> = {}) =>
     Object.assign(new Error('AI-seat cap reached: 5 of 5 seats are in use.'), {
+      // adr0112-ok: a downstream licence plugin's own spelling, thrown as that producer throws it; the door demotes it to declaredCode
       statusCode: 402, code: 'ai_seat_limit_reached', ...extra,
     });
   const refuseUserInsert = (error: () => unknown) =>
@@ -405,6 +406,7 @@ describe('[ADR-0151 D7] register: a licence refusal declared on either write kee
 
   it('a declared 503 keeps its status and code; its message is withheld unless the producer declared it a refusal', async () => {
     const unknown = (extra: Record<string, unknown> = {}) =>
+      // adr0112-ok: a downstream licence plugin's own spelling, thrown as that producer throws it; the door demotes it to declaredCode
       Object.assign(new Error('seat ledger at db-7.internal timed out'), { statusCode: 503, code: 'ai_seat_cap_unknown', ...extra });
     refuseUserInsert(() => unknown());
     const withheld = await register();
@@ -418,6 +420,7 @@ describe('[ADR-0151 D7] register: a licence refusal declared on either write kee
 
     engine.unregisterHooksByPackage(PACKAGE);
     refuseUserInsert(() => Object.assign(new Error('The AI-seat count cannot be read right now. Try again shortly.'), {
+      // adr0112-ok: a downstream licence plugin's own spelling, thrown as that producer throws it; the door demotes it to declaredCode
       statusCode: 503, code: 'ai_seat_cap_unknown', refusal: true,
     }));
     const addressed = await register();
@@ -431,7 +434,9 @@ describe('[ADR-0151 D7] register: a licence refusal declared on either write kee
   it('a throw that declares only one half, or a status outside 400-599, is not a refusal: it still fails as before', async () => {
     const undeclared: Array<[string, () => unknown]> = [
       ['no code', () => Object.assign(new Error('seat check failed'), { statusCode: 402 })],
+      // adr0112-ok: a downstream licence plugin's own spelling, half-declared here to pin that it is not a refusal
       ['no status', () => Object.assign(new Error('seat check failed'), { code: 'ai_seat_limit_reached' })],
+      // adr0112-ok: a downstream licence plugin's own spelling, half-declared here to pin that it is not a refusal
       ['a status outside 400-599', () => Object.assign(new Error('seat check failed'), { statusCode: 700, code: 'ai_seat_limit_reached' })],
       ['an empty code', () => Object.assign(new Error('seat check failed'), { statusCode: 402, code: '' })],
       ['a plain error', () => new Error('seat check failed')],

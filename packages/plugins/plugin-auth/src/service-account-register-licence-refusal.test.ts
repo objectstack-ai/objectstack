@@ -65,6 +65,7 @@ const mergeCookies = (held: string, fresh: string): string => {
 
 /** What cloud's AI-seat cap throws on the write it refuses. */
 const seatCap = () =>
+  // adr0112-ok: a downstream licence plugin's own spelling, thrown as that producer throws it; the door demotes it to declaredCode
   Object.assign(new Error('AI-seat cap reached: 5 of 5 seats are in use.'), { statusCode: 402, code: 'ai_seat_limit_reached' });
 
 describe('[ADR-0151 D7] POST /service-account/register answers a declared licence refusal with its status and code', () => {
