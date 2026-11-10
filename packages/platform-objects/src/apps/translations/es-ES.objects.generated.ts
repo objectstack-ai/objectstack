@@ -2785,6 +2785,59 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       all: {
         label: "Todos"
       }
+    },
+    _actions: {
+      map_sso_group: {
+        label: "Asignar grupo de SSO",
+        description: "Concede un conjunto de permisos a cada miembro de un grupo que un proveedor de SSO envía al iniciar sesión. Se aplica en el siguiente inicio de sesión de cada miembro a través del proveedor.",
+        successMessage: "Asignación de grupo guardada. Se aplica en el siguiente inicio de sesión de cada miembro a través del proveedor.",
+        params: {
+          providerId: {
+            label: "ID del proveedor de SSO",
+            helpText: "El ID del proveedor de SSO cuyo inicio de sesión envía el grupo, p. ej., «okta». El proveedor debe tener una notificación de grupos (Editar notificación de grupos en el proveedor de SSO)."
+          },
+          groupExternalId: {
+            label: "ID externo del grupo",
+            helpText: "El valor del grupo tal como lo envía la notificación de grupos cuando es un ID, p. ej., un ID de objeto de grupo de Entra ID. Indica este campo o el nombre visible del grupo, no ambos."
+          },
+          groupDisplayName: {
+            label: "Nombre visible del grupo",
+            helpText: "El valor del grupo tal como lo envía la notificación de grupos cuando es un nombre, p. ej., «Sales». Indica este campo o el ID externo del grupo, no ambos."
+          },
+          permissionSet: {
+            label: "Conjunto de permisos",
+            helpText: "El conjunto de permisos que recibe un miembro del grupo en la organización del proveedor. Los conjuntos de administrador se rechazan."
+          }
+        }
+      },
+      map_scim_group: {
+        label: "Asignar grupo de SCIM",
+        description: "Concede un conjunto de permisos a cada miembro de un grupo que aprovisiona una conexión SCIM. Los miembros actuales del grupo lo reciben de inmediato.",
+        successMessage: "Asignación de grupo guardada",
+        params: {
+          connectionId: {
+            label: "ID de conexión SCIM",
+            helpText: "La conexión SCIM a través de la que se aprovisiona el grupo, p. ej., «okta-prod»: el ID de conexión de su credencial."
+          },
+          groupExternalId: {
+            label: "ID externo del grupo",
+            helpText: "El externalId del grupo tal como lo envía el proveedor de identidad. Indica este campo o el nombre visible del grupo, no ambos."
+          },
+          groupDisplayName: {
+            label: "Nombre visible del grupo",
+            helpText: "El displayName del grupo, comparado de forma exacta. Indica este campo o el ID externo del grupo, no ambos."
+          },
+          permissionSet: {
+            label: "Conjunto de permisos",
+            helpText: "El conjunto de permisos que recibe un miembro del grupo en la organización de la conexión. Los conjuntos de administrador se rechazan."
+          }
+        }
+      },
+      delete_group_mapping: {
+        label: "Eliminar asignación",
+        confirmText: "¿Eliminar esta asignación de grupo? Los miembros del grupo dejan de recibir su conjunto de permisos. En una conexión SCIM, los miembros del grupo se vuelven a proyectar ahora y pierden las concesiones de esta asignación. En un proveedor de SSO, las concesiones que sus inicios de sesión hicieron para este conjunto se retiran ahora, salvo que otra asignación del proveedor nombre el mismo conjunto. Para restaurarla, vuelve a asignar el grupo.",
+        successMessage: "Asignación de grupo eliminada"
+      }
     }
   },
   sys_notification: {
