@@ -91,8 +91,15 @@ async function single(arm: Arm): Promise<string> {
 }
 
 describe('[#32200] the single dataset door answers byte for byte as before the shared judgment', () => {
-    beforeEach(() => { vi.spyOn(console, 'error').mockImplementation(() => {}); });
-    afterEach(() => { vi.restoreAllMocks(); });
+    // The fault log at its SHIPPED level ('info'); the spy only swallows the output.
+    beforeEach(() => {
+        vi.stubEnv('OS_REST_LOG', 'info');
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+    });
+    afterEach(() => {
+        vi.restoreAllMocks();
+        vi.unstubAllEnvs();
+    });
 
     it('answered: the bare AnalyticsResult, written without a status call', async () => {
         expect(await single({ provider: answering, body: { dataset: inlineDataset, selection } })).toMatchInlineSnapshot(`"200 status-calls=0 {"rows":[{"region":"NA","revenue":100}],"fields":[{"name":"revenue","type":"number"}]}"`);

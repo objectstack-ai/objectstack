@@ -144,8 +144,16 @@ function expectWholeRefusal(res: any, status: number, code: string) {
     expect(ApiErrorSchema.safeParse(res.body.error).success).toBe(true);
 }
 
-beforeEach(() => { vi.spyOn(console, 'error').mockImplementation(() => {}); });
-afterEach(() => { vi.restoreAllMocks(); });
+// The fault log at its SHIPPED level ('info'), as `check-rest-log-spy-declared`
+// requires of a file that spies on it; the spy only swallows the output.
+beforeEach(() => {
+    vi.stubEnv('OS_REST_LOG', 'info');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+});
+afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 
