@@ -209,6 +209,12 @@ npx @objectstack/scenarios help                                      # the comma
   `claude-sonnet-4-5-20250929`, `opus` is not) is a mismatch (`modelMismatch`). The scorecard's author rows name the
   served model (`⚠ asked for sonnet` on a mismatch), and its `Run · model` rows count the persona turns per served
   model (`claude-opus-5-5 ×9 ⚠ 9 not sonnet`).
+- **Cost** (`scorecard.ts`): every turn records the cost its driver reported (`reportedCostUsd`: the `claude` CLI's
+  `total_cost_usd`, notional under a subscription login, or an external command's report) and, from an external
+  command, its `inputTokens` and `outputTokens`; a turn that reported none records none, never a zero. The scorecard's
+  `author cost` line (the card) and `Author cost` row (each mode) sum the authoring turns' costs, build and iterate,
+  only when every authoring turn that ran reported one (`$0.84 over 3 author turns`); otherwise they read `not reported`,
+  never a partial sum. `--driver codex` reports no cost, so its runs read `not reported`.
 - **Turn caps** (`driver.ts`): an authoring turn, build and iterate alike, may take `DEFAULT_AUTHOR_MAX_TURNS` by the
   card's `tier` — `control` 80, `starter` 300, `delivery` 600 — unless `--author-max-turns N` sets one cap for every
   card; a question or operation turn takes 12 unless `--ask-max-turns N` says otherwise. The cap guards a looping turn
@@ -368,7 +374,9 @@ or a text file naming a local absolute path.
 
 The same card can measure another agent tool. Every record (`env.driver`) and every gallery app page (`- Driver:`)
 names the driver and its version; a replay (`--driver recorded:F`) names the driver of the recording it replays
-(`replayOf`), never the recording's path.
+(`replayOf`), never the recording's path. Each page's `- Author cost` line states what the authoring turns cost, as
+the driver reported it, when every one of them reported a cost, and `not reported` otherwise, so two channels are
+compared on cost only where both reported it.
 
 ### `--driver codex`
 
@@ -405,9 +413,18 @@ the directory you run from. For anything more, write a wrapper script.
   the directory of `mcp.configFile`.
   `{"contract":…,"kind":"ask","step":{"card","mode","phase","step","persona"},"prompt":"…","mcp":{"url":"…","configFile":"/tmp/…/mcp.json"},"limits":{…}}`
 - **The answer** to `author` and `ask`, strict (an unknown key is refused):
-  `{"replyText":"every text the agent said, joined","toolCalls":[{"name":"query_records","input":{…},"output":"…","isError":false}],"model":"…","numTurns":3}`.
-  `model` and `numTurns` are optional; an MCP tool may be named bare or `mcp__<server>__<tool>`; a call that never
+  `{"replyText":"every text the agent said, joined","toolCalls":[{"name":"query_records","input":{…},"output":"…","isError":false}],"model":"…","numTurns":3,"reportedCostUsd":0.42,"inputTokens":18000,"outputTokens":2300}`.
+  Every key after `toolCalls` is optional; an MCP tool may be named bare or `mcp__<server>__<tool>`; a call that never
   answered leaves `output` out.
+- **Usage**: `reportedCostUsd` is the call's cost in US dollars as the tool reports it (a number, zero or more),
+  `inputTokens` and `outputTokens` its token counts (whole numbers, zero or more). Report what the tool reports and
+  leave out what it does not: a command that reports no usage answers the same contract, and its turns record none,
+  never a zero. A figure of another shape (a string, `null`, a negative cost, a fractional count) is
+  `invalid-output(…)`. Each turn in the record (`cardRun`) carries the figures its command reported. The scorecard's
+  `author cost` line and `Author cost` row, and the gallery page's `- Author cost` line, sum the authoring turns'
+  (build and iterate) costs only when every authoring turn reported one; otherwise they read `not reported`. Adding
+  these optional keys kept the contract name `objectstack-scenario-driver/1`; a runner built before them refuses an
+  answer that carries one, so a command that must also serve such a runner leaves them out.
 - **Exit codes**: 0 with an answer of that shape is the turn. Any other end is a failed turn with a named reason,
   never an empty pass: a non-zero exit or a signal is `no-result(exit N)`, stdout that is not one JSON object of that
   shape is `invalid-output(…)`. A failed authoring turn leaves its Build half not measured; a failed persona turn is
@@ -420,7 +437,7 @@ the directory you run from. For anything more, write a wrapper script.
   `--mcp-config` (`{"mcpServers":{"app":{"type":"http","url":…,"headers":{"Authorization":"Bearer …"}}}}`), deleted
   when the call returns. It is never on argv, in the environment or on stdin, and so never in a run record, a
   scorecard or a gallery export. A command must not print it.
-- **Cost**: the runner cannot see an external command's login, so the record's login reads `not verified`; the cost
+- **Login**: the runner cannot see an external command's login, so the record's login reads `not verified`; the cost
   ruling still applies, and the runner removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY` and
   `CODEX_API_KEY` from the command's environment.
 

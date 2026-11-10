@@ -110,8 +110,14 @@ interface Variant {
  * ADR-0103 needed is gone — objectstack#3355 made the writable half a real
  * bucket (`system-data`), so the variant map is once again 1:1 with the union
  * and a new bucket is a compile error to miss.
+ *
+ * `synced` (objectstack ADR-0153 D4) is left out on purpose and draws no badge
+ * yet: its read-only rendering, copy and translations are the Studio child of
+ * that ADR, and borrowing another bucket's note would tell the reader something
+ * false (`engine-owned`'s says rows appear when actions run). Its buttons are
+ * already closed: the affordance matrix comes from the spec.
  */
-type VariantKey = Exclude<Bucket, 'platform'>;
+type VariantKey = Exclude<Bucket, 'platform' | 'synced'>;
 
 const VARIANTS: Record<VariantKey, Variant> = {
   config: {
