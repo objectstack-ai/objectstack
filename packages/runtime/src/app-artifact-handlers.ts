@@ -444,18 +444,21 @@ interface ActionBindingGroup {
  *     (`app:<package id>`), so a package-qualified call reaches it;
  *   - no body carries it (a top-level residual: an input with no manifest):
  *     under the artifact's `owner`;
- *   - two or more bodies carry it: ONE handler from the reconciled
- *     declaration, under the artifact's `owner`, as the binder bound every
- *     key before it read bodies, so a call that names no package keeps the
- *     answer it had. The one exception is the pair `composeStacks` admits
+ *   - two or more bodies carry it: the reconciled declarations, under the
+ *     artifact's `owner`, as the binder bound every key before it read
+ *     bodies: one coordinate, where a later registration replaces an earlier
+ *     one, so a call that names no package keeps the answer it had. The one exception is the pair `composeStacks` admits
  *     under `manifest: 'preserve'` (#32245): an object-less key whose bodies
  *     are distinct packages no two of which meet under the install gate's
  *     namespace rule (`namespacedHoldersMeet`). Each of those bodies binds
  *     its OWN declaration under its own package, as two installs bind them,
  *     and a call that names no package is refused naming both.
  *
- * `resolveArtifactCollections` keys an item by its name, so the reconciled
- * set carries one of that pair; the bodies are read for the rest.
+ * The bodies are read to choose each declaration's owner and, for that
+ * pair, to bind each body's own declaration. The reconciled set may carry
+ * one or both of the pair's declarations (package bodies do not claim
+ * against each other in `resolveArtifactCollections`, only the top level
+ * does), so the pair's key is split once (`split`), whichever it carries.
  */
 function actionBindingGroups(bundle: unknown, owner: string): ActionBindingGroup[] {
     const reconciled = collectBundleActions(bundle);
