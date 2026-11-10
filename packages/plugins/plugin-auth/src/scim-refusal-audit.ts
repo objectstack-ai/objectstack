@@ -19,9 +19,24 @@
  * place every `/scim/v2/*` request passes, after the vendor answered. A
  * response with status 400 or above is a refusal. The connection is read off
  * the request's SCIM scope, which the bearer verifier filled
- * (`recordScimRequestConnection`); the bearer is never verified again and its
- * digest never computed here. A bearer that verified as nothing leaves the
+ * (`recordScimRequestConnection`). A bearer that verified as nothing leaves the
  * scope empty, and the row names no connection.
+ *
+ * [#32116] One refusal reads the connection a second way. The vendor refuses
+ * a body that fails its schema (a malformed PATCH, a create with no
+ * `userName`) BEFORE its bearer verifier runs, so the scope is empty although
+ * the bearer may be valid. Only when the scope names no connection AND the
+ * presented credential carries the minted SCIM prefix, the bearer is resolved
+ * ONCE — after the response, and only for a refusal the bound admitted —
+ * through the verifier's own lookup ({@link ScimRefusalConnectionResolver},
+ * `findLiveScimCredential` in `scim-connection-service.ts`): the keyed digest
+ * is computed there, matched on `sys_scim_connection_credential` with the
+ * verifier's liveness predicate, and never returned, stored, logged or put in
+ * the event. The lookup is a READ: it writes nothing, the credential's
+ * last-use stamp included, so a refused request is not counted as a use.
+ * Only a live credential names a connection; a forged, revoked or expired
+ * bearer, a lookup that fails and a credential of any other shape leave the
+ * row naming none, exactly as before.
  *
  * ## Who writes the row
  *
@@ -51,7 +66,9 @@
  *
  *  - per KEY — the connection, or for a bearer that verified as none the
  *    client address — at most {@link SCIM_REFUSAL_AUDIT_ROWS_PER_KEY} rows in a
- *    10-minute window from the key's first row of the window;
+ *    10-minute window from the key's first row of the window; a schema-refused
+ *    request whose bearer resolves to a connection afterwards (#32116) stays
+ *    counted on its address, because the bound admits BEFORE the lookup;
  *  - across all keys, at most {@link SCIM_REFUSAL_AUDIT_ROW_CAP} rows per
  *    10-minute window, and once that cap drops a row, one operator `warn` line
  *    for the window;
@@ -237,8 +254,51 @@ export function scimResourceOf(endpointPath: string | undefined): string {
  */
 export function presentedCredentialOf(authorization: string | null | undefined): 'scim_bearer' | 'other' | 'none' {
   if (typeof authorization !== 'string' || authorization.trim() === '') return 'none';
+  return scimBearerOf(authorization) !== undefined ? 'scim_bearer' : 'other';
+}
+
+/** The presented bearer when it carries the minted SCIM prefix; `undefined` otherwise. Never leaves this module. */
+function scimBearerOf(authorization: string | null | undefined): string | undefined {
+  if (typeof authorization !== 'string') return undefined;
   const match = /^Bearer\s+(\S+)/i.exec(authorization.trim());
-  return match && match[1]!.startsWith(SCIM_BEARER_PREFIX) ? 'scim_bearer' : 'other';
+  return match && match[1]!.startsWith(SCIM_BEARER_PREFIX) ? match[1] : undefined;
+}
+
+/**
+ * [#32116] Resolves a presented SCIM bearer to the connection a LIVE credential
+ * names, by the verifier's own read-only lookup — `null` when none does. It
+ * reads and never writes (no last-use stamp), and answers nothing of the
+ * bearer or its digest.
+ */
+export type ScimRefusalConnectionResolver = (
+  token: string,
+) => Promise<{ connectionId: string; organizationId?: string } | null>;
+
+/**
+ * The observation with the connection a schema-refused request's bearer
+ * resolves to, when the scope named none and the bearer is a live SCIM
+ * credential (the module note); otherwise the observation unchanged. Never
+ * throws: a lookup that fails names no connection.
+ */
+async function withResolvedConnection(
+  observation: ScimRefusalObservation,
+  resolve: ScimRefusalConnectionResolver | undefined,
+): Promise<ScimRefusalObservation> {
+  if (observation.connectionId || !resolve) return observation;
+  const bearer = scimBearerOf(observation.authorization);
+  if (bearer === undefined) return observation;
+  try {
+    const resolved = await resolve(bearer);
+    if (!resolved || typeof resolved.connectionId !== 'string' || resolved.connectionId === '') return observation;
+    const { authorization: _presented, ...rest } = observation;
+    return {
+      ...rest,
+      connectionId: resolved.connectionId,
+      ...(resolved.organizationId ? { organizationId: resolved.organizationId } : {}),
+    };
+  } catch {
+    return observation;
+  }
 }
 
 /** What `handleRequest` observed of one refused SCIM request. */
@@ -325,12 +385,19 @@ function boundKeyOf(observation: ScimRefusalObservation): string {
  * 400, a missing sink, a sink without the member and a dropped refusal are
  * all no-ops. Never throws, and never delays or changes `response`: the body
  * is read from a clone taken here, before the caller hands `response` on.
+ *
+ * `resolveConnection` names the connection of a request refused before its
+ * bearer verified (the module note): called at most once, inside the
+ * after-response task, and only for a refusal the bound admitted — so the
+ * bound is keyed as before (the client address) and a flood the bound drops
+ * costs no lookup.
  */
 export function observeScimRefusal(
   sink: AuthEventAuditSurface | undefined,
   response: Response,
   observation: ScimRefusalObservation,
   warn?: (line: string) => void,
+  resolveConnection?: ScimRefusalConnectionResolver,
 ): void {
   try {
     if (response.status < 400) return;
@@ -340,8 +407,9 @@ export function observeScimRefusal(
     const copy = response.clone();
     runAfterResponse(
       async () => {
+        const resolved = await withResolvedConnection(observation, resolveConnection);
         const body = await refusalBodyOf(copy);
-        await sink.recordScimRefusal!(scimRefusalEventFor(observation, body, admission.suppressed));
+        await sink.recordScimRefusal!(scimRefusalEventFor(resolved, body, admission.suppressed));
       },
       () => {
         /* the writer reports its own lost rows; the SCIM answer is already given */
