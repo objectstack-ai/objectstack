@@ -39,7 +39,9 @@ const PLAIN_URL = 'http://127.0.0.1:9/openapi.json?v=3';
 /** Every string a value holds, an `Error`'s message, stack and cause included. */
 function textOf(value: unknown): string {
     return JSON.stringify(value ?? null, (_key, v) =>
-        v instanceof Error ? { name: v.name, message: v.message, stack: v.stack, cause: v.cause } : v,
+        v instanceof Error
+            ? { name: v.name, message: v.message, stack: v.stack, cause: (v as { cause?: unknown }).cause }
+            : v,
     );
 }
 const holdsAPlaceholder = (value: unknown): boolean => {
