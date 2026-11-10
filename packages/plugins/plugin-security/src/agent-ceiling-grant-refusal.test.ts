@@ -117,7 +117,9 @@ async function boot() {
     manifest: { register: vi.fn() },
     objectql: engine,
     metadata: {
-      get: async (type: string, name: string) => (type === 'position' ? null : engine.getSchema(name)) ?? null,
+      // The catalog reads a set by name (ADR-0150 D3): served from the same list.
+      get: async (type: string, name: string) =>
+        (type === 'position' ? null : type === 'permission' ? [MEMBER_DEFAULT, QA_ADMIN].find((s: any) => s.name === name) : engine.getSchema(name)) ?? null,
       list: async (type: string) => (type === 'position' ? [] : [MEMBER_DEFAULT, QA_ADMIN]),
     },
   };

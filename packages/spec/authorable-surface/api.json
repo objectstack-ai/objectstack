@@ -213,6 +213,7 @@
     "api/AuthFeaturesConfig:audiencePosture",
     "api/AuthFeaturesConfig:cloudManaged",
     "api/AuthFeaturesConfig:degradedTenancy",
+    "api/AuthFeaturesConfig:developerEditionCreate",
     "api/AuthFeaturesConfig:deviceAuthorization",
     "api/AuthFeaturesConfig:emailDelivery",
     "api/AuthFeaturesConfig:magicLink [RETIRED]",

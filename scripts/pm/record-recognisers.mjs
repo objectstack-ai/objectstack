@@ -1282,6 +1282,25 @@ export function contractReviewHold(rows, headSha, { now } = {}) {
  * seat of every open PR carrying that line, one knock per PR, in the same
  * round (`triage-duties.md`); the seat merges `origin/main`, drops the line
  * and resumes its landing. No gate, label, state or patrol row rides on it.
+ * The `cloud-confirm` and `assist` pairs were admitted on the maintainer's word,
+ * verbatim and untranslated: 「之前分诊的规则是开发和cloud相关就要挂 cloud 车道，但是实际
+ * 上现在座位可以像 cloud 车道用邮箱确认事项，还有就是 各车道的高优先级卡片被阻塞时，也应
+ * 该用邮箱请其他车道协助，这个应该立卡修改skills」. `cloud-confirm`: a card whose fix and
+ * acceptance both land here, and whose only cloud tie is a fact, a reading or a
+ * confirmation, stays in its lane and asks a `repo:cloud` seat; the answer is a
+ * comment on the card, named by `Notify: cloud-confirm` (a card that reads or
+ * changes cloud code, or carries a cloud half, still routes whole to the cloud
+ * PM). `assist`: a p0/p1 card blocked on another lane's open card that is
+ * unclaimed or idle 3 h rings that lane — its claiming seat, or triage while it is
+ * unclaimed; the receiving seat answers with a record on the blocker (its own
+ * claim, a serial note with an ETA, or why it will not take it now), named by
+ * `Notify: assist` — one key for all three, carrying the record id as
+ * `Notify: progress` does, where `Notify: serial` carries no record and cannot
+ * spell a refusal. A ring moves no claim. The `assist` ring reads p0 to p3 and
+ * cards in another repository (`owner/name#n`), because a lane charter may ring
+ * for a blocked card of any priority across repositories (`lanes/cloud.md`, on
+ * the maintainer's word 「objectstack 阻塞卡，都应该邮箱通知对应的车道经理，优先处
+ * 理。」); the table row's own trigger stays p0/p1.
  *
  * `from` / `to` / `when` are the row in English, for the printout; the rules
  * text is the authority on who rings whom.
@@ -1308,6 +1327,10 @@ export const MAILBOX_KEYS = Object.freeze([
   { id: 'notify:split', kind: 'Notify', key: 'split', from: 'a seat of a multi-seat lane', to: 'its sibling seats', when: 'at round open, only when the list changed', template: 'Notify: split · LANE#N · takes: … · leaves: …' },
   { id: 'notify:security', kind: 'Notify', key: 'security', from: 'the seat holding the finding (a dev\'s or a QA runner\'s reaches its PM session privately first); triage, for a public card it labelled `security`', to: 'security#1', when: 'the seat\'s relay `advisory_create` draft landed: the opaque advisory id ALONE; or triage labelled a public card `security`: its number ALONE — never a mechanism, a path or an object name, and never a PRIVATE repository\'s card (that repository\'s own lane holds it)', template: 'Notify: security · GHSA-ID or #n' },
   { id: 'request:progress', kind: 'Request', key: 'progress', from: 'triage', to: 'the claiming seat (or the online sibling an off-shift seat\'s items went to)', when: 'a claimed card or an open PR whose last PROGRESS (its head commit, any non-triage comment, a label change by its seat — never `updated_at`) is 3 h old: at most one per item per 60 min; none while an answered ETA stands, or while the item is parked (`Blocked-by:` / `Resume-from:`) or waits on a decision card; two unanswered ⇒ the round record lists it and the seat reads as possibly down', template: 'Request: progress · #n · idle since TIME' },
+  { id: 'request:cloud-confirm', kind: 'Request', key: 'cloud-confirm', from: 'the lane seat holding a card whose fix and acceptance both land in this repository', to: 'a `repo:cloud` seat', when: 'the card\'s only cloud tie is a fact, a reading or a confirmation, so it stays in its lane — in flight too, instead of a `Release:` (a card that reads or changes cloud code, or carries a cloud half, still routes whole to the cloud PM)', template: 'Request: cloud-confirm · #n · ONE-LINE-QUESTION' },
+  { id: 'notify:cloud-confirm', kind: 'Notify', key: 'cloud-confirm', from: 'the `repo:cloud` seat that answered', to: 'the asking lane seat', when: 'answering a cloud-confirm ring — the record is a comment on #n giving the fact, the reading or the confirmation', template: 'Notify: cloud-confirm · #n · record ID' },
+  { id: 'request:assist', kind: 'Request', key: 'assist', from: 'the waiting card\'s claiming seat, or triage while the waiting card is unclaimed', to: 'a seat of the blocker\'s lane', when: 'a p0/p1 card is `pm:blocked` on an open card of another lane or repository that is unclaimed, or claimed but idle 3 h (the `Request: progress` threshold) — a lane charter may ring at any priority (`lanes/cloud.md`: a blocked cloud card), so the field reads p0 to p3; either card may sit in another repository (`owner/name#n`); no record by the answer\'s ETA, or for 2 h, and the ring goes to triage, which raises a decision card when the blocker\'s lane has no seat online; a ring moves no claim', template: 'Request: assist · #a behind #b · pN · ONE-LINE-REASON' },
+  { id: 'notify:assist', kind: 'Notify', key: 'assist', from: 'the blocker lane\'s seat that answered', to: 'the seat (or triage) that rang', when: 'answering an assist ring — the record is a comment on the blocker #b (bare, or `owner/name#n` in another repository, as the ring named it): the seat\'s own claim, a serial note with an ETA, or why it will not take it now', template: 'Notify: assist · #b · record ID' },
   { id: 'notify:progress', kind: 'Notify', key: 'progress', from: 'the claiming seat', to: 'triage', when: 'answering a progress knock — the record is a comment on #n giving the next act and an ETA, the park (`Blocked-by:` / `Resume-from:`), or the release', template: 'Notify: progress · #n · record ID' },
 ]);
 /** One event, one line: the longest a mailbox line may be, in bytes (the text's 「≤200 字节」). */
@@ -1337,6 +1360,17 @@ const BREAKING_REF = /^breaking PR (?:#([1-9][0-9]*)|none)$/;
 const UNBLOCKED_PRIORITY_REF = /^(p0|p1)$/;
 /** `#a behind #b` — the card that waits, then the card it waits for, on `Notify: serial`. */
 const SERIAL_REF = /^#([1-9][0-9]*) behind #([1-9][0-9]*)$/;
+/**
+ * One card on `assist`, bare (`#n`, this repository) or in GitHub's short cross-repository form (`owner/name#n`):
+ * the owner by GitHub's login rule (`LOGIN_REF`'s spelling), the name its repository characters, never `.` or `..`.
+ * The ring crosses repositories (a cloud card blocked on an objectstack card), so both of its cards may be qualified.
+ */
+const ASSIST_CARD = '(?:([A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38})/((?!\\.\\.?(?:#|$))[A-Za-z0-9_.-]{1,100}))?#([1-9][0-9]*)';
+const ASSIST_CARD_REF = new RegExp(`^${ASSIST_CARD}$`);
+/** `<card> behind <card>` on `Request: assist` — `serial`'s pair, each side bare or `owner/name#n`. */
+const ASSIST_PAIR_REF = new RegExp(`^${ASSIST_CARD} behind ${ASSIST_CARD}$`);
+/** `p0` … `p3` on `Request: assist`: p0/p1 by the table's row, any priority under a lane charter that rings for all; the template's `pN` is a placeholder. */
+const ASSIST_PRIORITY_REF = /^(p[0-3])$/;
 /** A ruling's option LETTER as the record spells it (`A`, `B′`, `乙`): one short token, never a number reference. */
 const RULING_LETTER_REF = /^[^\s#`]{1,12}$/u;
 /**
@@ -1515,6 +1549,42 @@ const MAILBOX_FIELD_READERS = Object.freeze({
     const item = NUMBER_REF.exec(p[1]);
     const record = RECORD_REF.exec(p[2]);
     return item && record ? { item: Number(item[1]), record: Number(record[1]), numbers: [Number(item[1])] } : null;
+  },
+  'request:cloud-confirm': (p) => {
+    if (p.length < 3) return null;
+    const card = NUMBER_REF.exec(p[1]);
+    const question = p.slice(2).join(' · ').trim();
+    return card && question !== '' ? { card: Number(card[1]), question, numbers: [Number(card[1])] } : null;
+  },
+  'notify:cloud-confirm': (p) => {
+    if (p.length !== 3) return null;
+    const card = NUMBER_REF.exec(p[1]);
+    const record = RECORD_REF.exec(p[2]);
+    return card && record ? { card: Number(card[1]), record: Number(record[1]), numbers: [Number(card[1])] } : null;
+  },
+  // The waiting card, the blocker it waits behind (`serial`'s pair, each bare or `owner/name#n`), the waiting
+  // card's priority (p0 to p3 — the template's own `pN` is a placeholder) and why the wait matters, in one line.
+  // `cardRepo` / `behindRepo` are `owner/name` for a qualified card and null for a bare one; `numbers` keeps
+  // only the bare cards, so a number from another repository never reads as one of this board's.
+  'request:assist': (p) => {
+    if (p.length < 4) return null;
+    const pair = ASSIST_PAIR_REF.exec(p[1]);
+    const priority = ASSIST_PRIORITY_REF.exec(p[2]);
+    const reason = p.slice(3).join(' · ').trim();
+    if (!pair || !priority || reason === '') return null;
+    const cardRepo = pair[1] === undefined ? null : `${pair[1]}/${pair[2]}`;
+    const behindRepo = pair[4] === undefined ? null : `${pair[4]}/${pair[5]}`;
+    const card = Number(pair[3]);
+    const behind = Number(pair[6]);
+    return { card, cardRepo, behind, behindRepo, priority: priority[1], reason, numbers: [...(cardRepo === null ? [card] : []), ...(behindRepo === null ? [behind] : [])] };
+  },
+  'notify:assist': (p) => {
+    if (p.length !== 3) return null;
+    const ref = ASSIST_CARD_REF.exec(p[1]);
+    const record = RECORD_REF.exec(p[2]);
+    if (!ref || !record) return null;
+    const repo = ref[1] === undefined ? null : `${ref[1]}/${ref[2]}`;
+    return { card: Number(ref[3]), repo, record: Number(record[1]), numbers: repo === null ? [Number(ref[3])] : [] };
   },
 });
 
@@ -2893,6 +2963,10 @@ export async function selfTest() {
     sec: MSG('Notify: security · GHSA-7q4h-9x2m-5c8v', 'security#1'),
     rp: MSG('Request: progress · #29420 · idle since 2026-11-03T00:06Z', 'domain:skills#1'),
     np: MSG('Notify: progress · #29420 · record 6599000001', 'triage'),
+    cc: MSG('Request: cloud-confirm · #31989 · is the hosted default still 20?', 'repo:cloud#1'),
+    nk: MSG('Notify: cloud-confirm · #31989 · record 6754000001', 'domain:skills#3'),
+    ax: MSG('Request: assist · #31990 behind #31800 · p1 · release candidate waits on it', 'domain:server#2'),
+    na: MSG('Notify: assist · #31800 · record 6754000002', 'domain:skills#3'),
   };
   t('⭐ `Request: contract-review` reads the PR, the head (7–40 hex) and the reason — the reason may carry a comma', (() => { const r = readMailboxLine(DB.cr); return r.state === 'read' && r.id === 'request:contract-review' && r.kind === 'Request' && r.key === 'contract-review' && r.pr === 26766 && r.head === HO_HEAD && r.reason === `${CONTRACT_REVIEW_TIER_NAME} refused, HTTP 429` && r.numbers.join() === '26766'; })());
   t('⭐ `Request: urgent-triage` reads the card and the one-line criterion', (() => { const r = readMailboxLine(DB.ut); return r.state === 'read' && r.id === 'request:urgent-triage' && r.card === 27047 && r.criterion === 'main red on the merge group, deterministic' && r.numbers.join() === '27047'; })());
@@ -2917,8 +2991,15 @@ export async function selfTest() {
   t('⛔ a malformed qualifier, or the qualified card beside an id, a public card, a path or free text, stays unreadable — as the qualified card alone now is', ['Notify: security · objectstack-ai#412', 'Notify: security · objectstack-ai/cloud/x#412', 'Notify: security · /cloud#412', 'Notify: security · objectstack-ai/#412', 'Notify: security · .x/cloud#412', 'Notify: security · objectstack-ai/cloud#0', 'Notify: security · objectstack-ai/cloud #412', 'Notify: security · objectstack-ai/cloud#412a', 'Notify: security · OWNER/REPO#N', 'Notify: security · objectstack-ai/cloud#412 · GHSA-7q4h-9x2m-5c8v', 'Notify: security · GHSA-7q4h-9x2m-5c8v · objectstack-ai/cloud#412', 'Notify: security · objectstack-ai/cloud#412 · #29761', 'Notify: security · objectstack-ai/cloud#412 · packages/x/src/door.ts', 'Notify: security · objectstack-ai/cloud#412 · see the card'].every((l) => readMailboxLine(MSG(l)).state === 'unreadable'));
   t('⭐ `Request: progress` reads the item (a card or a PR, bare `#n`) and the time its last progress was read — with seconds too; the placeholder `TIME`, a duration, a date without a time, a local time and `PR #n` stay unreadable', (() => { const r = readMailboxLine(DB.rp); const sec = readMailboxLine(DB.rp.replace('T00:06Z', 'T00:06:30Z')); return r.state === 'read' && r.id === 'request:progress' && r.kind === 'Request' && r.key === 'progress' && r.to === 'domain:skills#1' && r.item === 29420 && r.since === '2026-11-03T00:06Z' && r.numbers.join() === '29420' && sec.state === 'read' && sec.since === '2026-11-03T00:06:30Z' && ['Request: progress · #29420 · idle since TIME', 'Request: progress · #29420 · idle since 3h', 'Request: progress · #29420 · idle since 2026-11-03', 'Request: progress · #29420 · idle since 2026-11-03T00:06', 'Request: progress · #29420 · idle since 2026-11-03T00:06+08:00', 'Request: progress · PR #29420 · idle since 2026-11-03T00:06Z', 'Request: progress · #29420', 'Request: progress · #29420 · idle since 2026-11-03T00:06Z · please answer'].every((l) => { const u = readMailboxLine(MSG(l)); return u.state === 'unreadable' && /does not spell/.test(u.reason); }); })());
   t('⭐ `Notify: progress` reads the item and the record id (the comment on it with the next act and an ETA, the park, or the release) — `record none`, a sentence and a second field stay unreadable', (() => { const r = readMailboxLine(DB.np); return r.state === 'read' && r.id === 'notify:progress' && r.kind === 'Notify' && r.key === 'progress' && r.to === 'triage#1' && r.item === 29420 && r.record === 6599000001 && r.numbers.join() === '29420' && readMailboxLine(MSG('Notify: progress · #29420 · record #6599000001', 'triage')).record === 6599000001 && ['Notify: progress · #29420 · record none', 'Notify: progress · #29420 · record ID', 'Notify: progress · #29420 · ETA 11:00Z', 'Notify: progress · #29420', 'Notify: progress · #29420 · record 6599000001 · ETA 11:00Z'].every((l) => { const u = readMailboxLine(MSG(l, 'triage')); return u.state === 'unreadable' && /does not spell/.test(u.reason); }); })());
+  t('⭐ `Request: cloud-confirm` reads the card and the one-line question to the cloud seat — the question may carry a comma; no question, a PR, the placeholder `#n` and a bare number stay unreadable', (() => { const r = readMailboxLine(DB.cc); return r.state === 'read' && r.id === 'request:cloud-confirm' && r.kind === 'Request' && r.key === 'cloud-confirm' && r.to === 'repo:cloud#1' && r.card === 31989 && r.question === 'is the hosted default still 20?' && r.numbers.join() === '31989' && readMailboxLine(MSG('Request: cloud-confirm · #31989 · which plan, and since when?', 'repo:cloud')).question === 'which plan, and since when?' && ['Request: cloud-confirm · #31989', 'Request: cloud-confirm · PR #31989 · is it 20?', 'Request: cloud-confirm · #n · is it 20?', 'Request: cloud-confirm · 31989 · is it 20?'].every((l) => { const u = readMailboxLine(MSG(l, 'repo:cloud#1')); return u.state === 'unreadable' && /does not spell/.test(u.reason); }); })());
+  t('⭐ `Notify: cloud-confirm` reads the card and the record id (the answer comment on it) — `record none`, the placeholder, a reading in the line and a second field stay unreadable; the misspelt `cloud-confirmed` and `confirm` are keys outside the table and REFUSED', (() => { const r = readMailboxLine(DB.nk); return r.state === 'read' && r.id === 'notify:cloud-confirm' && r.kind === 'Notify' && r.key === 'cloud-confirm' && r.to === 'domain:skills#3' && r.card === 31989 && r.record === 6754000001 && r.numbers.join() === '31989' && ['Notify: cloud-confirm · #31989 · record none', 'Notify: cloud-confirm · #31989 · record ID', 'Notify: cloud-confirm · #31989 · it is 20', 'Notify: cloud-confirm · #31989', 'Notify: cloud-confirm · #31989 · record 6754000001 · it is 20'].every((l) => { const u = readMailboxLine(MSG(l)); return u.state === 'unreadable' && /does not spell/.test(u.reason); }) && ['Notify: cloud-confirmed · #31989 · record 6754000001', 'Notify: confirm · #31989 · record 6754000001'].every((l) => readMailboxLine(MSG(l)).state === 'refused'); })());
+  t('⭐ `Request: assist` reads the waiting card, the blocker it waits behind, its priority and the one-line reason — both bare cards in `numbers`, no repository on either; p0 reads as p1 does; p4, `P1`, the placeholder `pN`, the old placeholder `p0 or p1`, no reason, a lone card and the `#a · #b` spelling stay unreadable', (() => { const r = readMailboxLine(DB.ax); const p0 = readMailboxLine(DB.ax.replace(' p1 ', ' p0 ')); return r.state === 'read' && r.id === 'request:assist' && r.kind === 'Request' && r.key === 'assist' && r.to === 'domain:server#2' && r.card === 31990 && r.cardRepo === null && r.behind === 31800 && r.behindRepo === null && r.priority === 'p1' && r.reason === 'release candidate waits on it' && r.numbers.join() === '31990,31800' && p0.priority === 'p0' && ['Request: assist · #31990 behind #31800 · p4 · it matters', 'Request: assist · #31990 behind #31800 · P1 · it matters', 'Request: assist · #31990 behind #31800 · pN · it matters', 'Request: assist · #31990 behind #31800 · p0 or p1 · it matters', 'Request: assist · #31990 behind #31800 · p1', 'Request: assist · #31800 · p1 · it matters', 'Request: assist · #31990 · #31800 · p1 · it matters'].every((l) => { const u = readMailboxLine(MSG(l, 'domain:server#2')); return u.state === 'unreadable' && /does not spell/.test(u.reason); }); })());
+  t('⭐ `Request: assist` reads p2 and p3 too — a lane charter rings a blocked card at any priority (the cloud lane, for a blocked cloud card) — and the table row\'s p0/p1 still read', ['p0', 'p1', 'p2', 'p3'].every((v) => { const r = readMailboxLine(DB.ax.replace(' p1 ', ` ${v} `)); return r.state === 'read' && r.priority === v; }));
+  t('⭐ `Request: assist` reads a card in another repository in GitHub\'s short form `owner/name#n`, on either side — the repository rides beside the card, and `numbers` keeps only the bare card, so another repository\'s number never reads as this board\'s', (() => { const x = readMailboxLine(MSG('Request: assist · objectstack-ai/cloud#412 behind #31800 · p2 · hosted install waits on it', 'domain:server#2')); const y = readMailboxLine(MSG('Request: assist · #31990 behind objectstack-ai/hotcrm#77 · p3 · demo data waits on it', 'repo:hotcrm#1')); const z = readMailboxLine(MSG('Request: assist · my-org1/a_b.c-d#7 behind objectstack-ai/.github#9 · p1 · both elsewhere')); return x.state === 'read' && x.card === 412 && x.cardRepo === 'objectstack-ai/cloud' && x.behind === 31800 && x.behindRepo === null && x.priority === 'p2' && x.numbers.join() === '31800' && y.state === 'read' && y.card === 31990 && y.cardRepo === null && y.behind === 77 && y.behindRepo === 'objectstack-ai/hotcrm' && y.numbers.join() === '31990' && z.state === 'read' && z.cardRepo === 'my-org1/a_b.c-d' && z.behindRepo === 'objectstack-ai/.github' && z.numbers.length === 0; })());
+  t('⛔ `Request: assist` with a malformed cross-repository card stays unreadable — an owner with no name, a path, a leading slash, an empty name, an owner starting with a dot or a hyphen, `.` or `..` as the name, `#0`, a space before `#`, a trailing letter, and the placeholder `OWNER/REPO#N`', ['objectstack-ai#412', 'objectstack-ai/cloud/x#412', '/cloud#412', 'objectstack-ai/#412', '.x/cloud#412', '-x/cloud#412', 'objectstack-ai/.#412', 'objectstack-ai/..#412', 'objectstack-ai/cloud#0', 'objectstack-ai/cloud #412', 'objectstack-ai/cloud#412a', 'OWNER/REPO#N'].every((ref) => [`Request: assist · ${ref} behind #31800 · p2 · it matters`, `Request: assist · #31990 behind ${ref} · p2 · it matters`].every((l) => { const u = readMailboxLine(MSG(l, 'domain:server#2')); return u.state === 'unreadable' && /does not spell/.test(u.reason); })));
+  t('⭐ `Notify: assist` reads the blocker and the record id on it (the claim, the serial note with its ETA, or the reason it is not taken now) — a blocker in another repository reads with its repository and leaves `numbers` empty; `record none`, an ETA in the line, a claim sentence, a second field and a malformed qualifier stay unreadable', (() => { const r = readMailboxLine(DB.na); const q = readMailboxLine(MSG('Notify: assist · objectstack-ai/cloud#412 · record 6754000003')); return r.state === 'read' && r.id === 'notify:assist' && r.kind === 'Notify' && r.key === 'assist' && r.to === 'domain:skills#3' && r.card === 31800 && r.repo === null && r.record === 6754000002 && r.numbers.join() === '31800' && q.state === 'read' && q.card === 412 && q.repo === 'objectstack-ai/cloud' && q.record === 6754000003 && q.numbers.length === 0 && ['Notify: assist · #31800 · record none', 'Notify: assist · #31800 · ETA 11:00Z', 'Notify: assist · #31800 · claimed', 'Notify: assist · #31800', 'Notify: assist · #31800 · record 6754000002 · ETA 11:00Z', 'Notify: assist · objectstack-ai#412 · record 6754000003', 'Notify: assist · objectstack-ai/cloud#0 · record 6754000003'].every((l) => { const u = readMailboxLine(MSG(l)); return u.state === 'unreadable' && /does not spell/.test(u.reason); }); })());
   t('⭐ every key of the table is named, as `Kind: key` in a code span, in the protocol text (`references/project-forms.md` 〈信箱 PR〉), and that section names NO other key — the table in both directions — and points at `--mailbox-keys` for the full spellings', (() => { const forms = readFileSync(new URL('../../.claude/skills/pm-dispatch/references/project-forms.md', import.meta.url), 'utf8'); const at = forms.indexOf('\n## 信箱 PR\n'); const section = at < 0 ? '' : forms.slice(at + 1).split(/\n## /)[0]; const named = new Set([...section.matchAll(/`(Request|Notify): ([a-z-]+)`/g)].map((m) => `${m[1]}: ${m[2]}`)); const table = new Set(MAILBOX_KEYS.map((k) => `${k.kind}: ${k.key}`)); return section !== '' && named.size === table.size && [...table].every((k) => named.has(k)) && section.includes('--mailbox-keys'); })());
-  t('⭐ every template, sent VERBATIM, is not an event — a placeholder (`#n`, `SHA`, `LANE#N`, `p0 or p1`, `TRIGGER_ID`, `ID`) never reads as one', MAILBOX_KEYS.every((k) => readMailboxLine(MSG(k.template)).state === 'unreadable'));
+  t('⭐ every template, sent VERBATIM, is not an event — a placeholder (`#n`, `SHA`, `LANE#N`, `p0 or p1`, `pN`, `TRIGGER_ID`, `ID`) never reads as one', MAILBOX_KEYS.every((k) => readMailboxLine(MSG(k.template)).state === 'unreadable'));
   t('⭐ `--mailbox-keys` prints exactly `mailboxKeyLines()` — every template, with its row under it — and exits 0', (() => { const r = faceCli(['--mailbox-keys']); return r.status === 0 && r.stdout === `${mailboxKeyLines().join('\n')}\n` && MAILBOX_KEYS.every((k) => r.stdout.includes(`${k.template}\n    ${k.from} → ${k.to}; ${k.when}\n`)) && usageLines().join('\n').includes('--mailbox-keys'); })());
   t('decoration reads: a bulleted bolded key and a blockquoted message are the same event', (() => { const a = readMailboxLine(MSG(`- **Request:** contract-review · PR #26766 · head ${HO_HEAD} · quota exhausted`)); const b = readMailboxLine(DB.sp.split('\n').map((l) => `> ${l}`).join('\n')); return a.state === 'read' && a.pr === 26766 && b.state === 'read' && b.id === 'notify:split' && b.to === 'domain:skills#1'; })());
   t('the attribution block the platform APPENDS (bare or session-URL footer under a rule line) is not a second line', ['\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_', `\n\n---\n_Generated by [Claude Code](https://claude.ai/code/${RECORD_SESSION})_`].every((tail) => readMailboxLine(`${DB.on}${tail}`).state === 'read'));
@@ -2960,7 +3041,7 @@ export async function selfTest() {
     t('⭐ ONE reader: check-half-states H72 judges the REAL reader\'s readings — a free-form question, an off-table key and a five-field `seat-online` are listed, a table key is not, and a bell older than the window has aged out', row.includes('3 comment(s)') && ['comment 7002', 'comment 7003', 'comment 7004'].every((c) => row.includes(c)) && !row.includes('comment 7001') && !row.includes('comment 7005') && hs.h72OffTableMailboxLines(mailboxEvents([rows72[0]]), NOW72) === null);
     t('⭐ …and its population is the OPENER\'s label — an open mailbox touched inside the window owes a page, the same PR without the label does not', hs.h72NeedsThread({ number: 28646, state: 'open', labels: [{ name: MAILBOX_LABEL }], updated_at: '2026-11-01T13:00:00Z' }, MAILBOX_LABEL, NOW72) === true && hs.h72NeedsThread({ number: 28646, state: 'open', labels: [], updated_at: '2026-11-01T13:00:00Z' }, MAILBOX_LABEL, NOW72) === false);
   }
-  t('the roster: eighteen keys, unique ids, each of the two kinds with a reader, every row spelled (from, to, when), the byte cap the text states', MAILBOX_KEYS.length === 18 && new Set(MAILBOX_KEYS.map((k) => k.id)).size === 18 && MAILBOX_KEYS.every((k) => ['Request', 'Notify'].includes(k.kind) && k.id === `${k.kind.toLowerCase()}:${k.key}` && k.template.startsWith(`${k.kind}: ${k.key}`) && typeof MAILBOX_FIELD_READERS[k.id] === 'function' && [k.from, k.to, k.when].every((v) => typeof v === 'string' && v !== '')) && Object.keys(MAILBOX_FIELD_READERS).length === 18 && MAILBOX_LINE_MAX_BYTES === 200);
+  t('the roster: twenty-two keys, unique ids, each of the two kinds with a reader, every row spelled (from, to, when), the byte cap the text states', MAILBOX_KEYS.length === 22 && new Set(MAILBOX_KEYS.map((k) => k.id)).size === 22 && MAILBOX_KEYS.every((k) => ['Request', 'Notify'].includes(k.kind) && k.id === `${k.kind.toLowerCase()}:${k.key}` && k.template.startsWith(`${k.kind}: ${k.key}`) && typeof MAILBOX_FIELD_READERS[k.id] === 'function' && [k.from, k.to, k.when].every((v) => typeof v === 'string' && v !== '')) && Object.keys(MAILBOX_FIELD_READERS).length === 22 && MAILBOX_LINE_MAX_BYTES === 200);
 
   // -- the signature line (#27113) ----------------------------------------------
   //

@@ -272,6 +272,15 @@ export {
   // security catalog — the `sys_metadata_activation` ledger, never a catalog
   // row's `active` column — shared with the explainer and the security plugin.
   readDisabledCatalogNames,
+  // [ADR-0150 D4, D8 R4] The ledger switches off one holder: its answer is
+  // keyed by `(packageId, name)` and asked through this one predicate.
+  permissionSetAddressKey,
+  permissionSetSwitchedOff,
+  catalogEntryAddress,
+  type DisabledCatalogItems,
+  // [ADR-0150 D8 R3] The `everyone` anchor's accepted sets resolve through
+  // their suggestion rows' stored scope, bound here by the security plugin.
+  bindAudienceAnchorSetScopes,
   // [ADR-0131 D3/D4, ADR-0095 D3] A position, described as the resolver
   // enforces it for a holder: the sets its definition grants in force, and how
   // many people hold it in an organization — the position catalog's list reads
@@ -425,7 +434,17 @@ export {
   type AuthGate,
   type InboundHookRouteMatch,
   type UserAuthGateSource,
+  INBOUND_HOOK_QUALIFIER_EXCLUSIONS,
 } from './auth-gate.js';
+// [ADR-0150 D5] The inbound hook's one refusal and its qualified address's admission.
+export {
+  INBOUND_HOOK_REFUSAL_STATUS,
+  inboundHookRefusal,
+  inboundHookJsonResponse,
+  inboundHookRefusalResponse,
+  admitInboundHookAddress,
+  type InboundHookAddress,
+} from './inbound-hook-answer.js';
 
 // Managing API keys is a signed-in-session act on every data door: the one
 // rule the runtime dispatcher's and RestServer's per-object gates ask.

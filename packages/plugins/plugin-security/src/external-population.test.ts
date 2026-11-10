@@ -119,10 +119,12 @@ async function locateSecurityService() {
       return null;
     },
     find: async () => [],
+    // The shipped sets are in the catalog as a booted stack's manifest puts
+    // them there: the catalog is the one source a set resolves from (ADR-0150 D3).
     registry: {
       getItem: (type: string, name: string) =>
-        type === 'permission' ? [APP_DEFAULT, PORTAL_GRANT].find((d) => d.name === name) : undefined,
-      listItems: (type: string) => (type === 'permission' ? [APP_DEFAULT, PORTAL_GRANT] : []),
+        type === 'permission' ? [APP_DEFAULT, PORTAL_GRANT, ...defaultPermissionSets].find((d) => d.name === name) : undefined,
+      listItems: (type: string) => (type === 'permission' ? [APP_DEFAULT, PORTAL_GRANT, ...defaultPermissionSets] : []),
       isPackageDisabled: () => false,
     },
   };

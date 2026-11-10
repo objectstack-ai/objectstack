@@ -851,6 +851,11 @@ export const USER_STANDING_KEYS = ['email', 'email_verified'] as const;
  * it). A ledger DELETE is not judged: absence of a row means ACTIVE, so
  * removing one can only restore standing.
  *
+ * [ADR-0150 D4, D8 R4] `package_id` names WHICH holder's set a row switches
+ * off, and the resolver now reads it: a payload re-pointing it can move the
+ * switch onto `admin_full_access`'s holder, so it pays for the enumeration like
+ * one re-pointing the name.
+ *
  * Two catalog tables get no list, because the resolver no longer reads them:
  * `sys_permission_set` (the set's existence and body are its catalog
  * definition, ADR-0131 D4) and `sys_position` (a position-bound
@@ -858,7 +863,7 @@ export const USER_STANDING_KEYS = ['email', 'email_verified'] as const;
  * standing is read from `sys_member.role`). Writing either row cannot move the
  * administrator population, so neither is guarded.
  */
-export const ACTIVATION_LEDGER_STANDING_KEYS = ['metadata_type', 'name', 'active'] as const;
+export const ACTIVATION_LEDGER_STANDING_KEYS = ['metadata_type', 'name', 'active', 'package_id'] as const;
 
 /**
  * [ADR-0131 D5] Same, for `sys_organization`: the `slug` that names the Default

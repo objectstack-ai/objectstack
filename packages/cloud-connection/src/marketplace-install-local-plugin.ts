@@ -337,7 +337,8 @@ import { readJsonRequestBody } from './request-json-body.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
 import { countSeedRows, matchSeedRows, purgeSeedRows, seedDatasetOfReceiptItem, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
 import {
-    INSTALL_LOCAL_DOOR_SERVICE, grantRefusalEvent, recordUnmanagedImportEvent, refusalCodeOf, routeContextOf,
+    INSTALL_LOCAL_DOOR_SERVICE, TARGET_NAMESPACE_ON_MANAGED_INSTALL_MESSAGE, grantRefusalEvent, recordUnmanagedImportEvent,
+    refusalCodeOf, routeContextOf,
     type InstallLocalDoor, type InstallLocalDoorGrant, type UnmanagedImportAuditEvent, type UnmanagedImportAuditSurface,
 } from './install-local-door-service.js';
 import {
@@ -2222,9 +2223,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 success: false,
                 error: {
                     code: 'INVALID_REQUEST',
-                    message: '`targetNamespace` renames an unmanaged copy, and this install is managed: a managed install '
-                        + 'is never renamed — it keeps the package\'s namespace and its upgrade channel. Install with '
-                        + '`installMode: \'unmanaged\'` to take a copy under a namespace of its own, or omit `targetNamespace`.',
+                    message: TARGET_NAMESPACE_ON_MANAGED_INSTALL_MESSAGE,
                 },
             }, 400);
         }

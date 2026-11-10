@@ -115,11 +115,14 @@ export const ADMIN_STANDING_SURFACE: Readonly<Record<string, AdminStandingTable>
       + 'column). No catalog row is read — the row objects are retired (ADR-0131 D3, C3 stage 8): the '
       + 'set itself — its existence and its body — is the catalog definition (see the '
       + '`security-catalog` non-table input). ⚠️ It does NOT un-make a CONFIG-derived administrator '
-      + '(§6b-config), which never reads a set.',
+      + '(§6b-config), which never reads a set. [ADR-0150 D4, D8 R4] `package_id` names WHICH '
+      + "package's set a `permission` row switches off, so one package's `admin_full_access` row "
+      + 'leaves another holder of the name granting.',
     columns: [
       'metadata_type',
       'name',
       'active',
+      'package_id',
     ],
   },
 

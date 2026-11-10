@@ -34,6 +34,14 @@
  * "sealed clash"). Neither is bindable: a body or a declaration is the
  * author's to fix.
  *
+ * It also names each installed package whose namespace spells a literal
+ * segment of the address grammar (`trigger`, `hooks`, `global`, … — ADR-0150
+ * D5, child G1), judged by the install door's own
+ * `validateNamespaceNotAddressLiteral`. The boot keeps such a package with one
+ * warning, so this is where an operator sees it: its items are read with
+ * `?package=ID`, and only a rename of its namespace gives them qualified
+ * addresses. Not bindable either: a namespace is the author's to change.
+ *
  * ## What it never does
  *
  * - **Resolution never loosens.** No first-registered fallback, no guess: every
@@ -51,6 +59,7 @@
 import type { PackageScopedHolder, PackageScopedResolution } from '@objectstack/core';
 import { resolvePackageScopedName, type PackageScopedRegistry } from '@objectstack/objectql';
 import { keysetWalk } from '@objectstack/types';
+import { validateNamespaceNotAddressLiteral } from '@objectstack/spec/kernel';
 
 /** The D3 types a stored reference names. */
 type ReferencedType = 'permission' | 'sharing_rule' | 'queue' | 'assignment_rule' | 'flow' | 'connector' | 'email_template';
@@ -145,11 +154,20 @@ export interface SealedClashFinding {
   readonly candidates: readonly string[];
 }
 
+/** One installed package whose namespace spells an address literal (ADR-0150 D5, child G1). */
+export interface LiteralNamespaceFinding {
+  readonly packageId: string;
+  readonly namespace: string;
+  /** The install door's sentence (`validateNamespaceNotAddressLiteral`), verbatim. */
+  readonly message: string;
+}
+
 /** The report (module doc). */
 export interface StoredPackageReferenceReport {
   readonly stored: readonly StoredReferenceFinding[];
   readonly picklists: readonly PicklistReferenceFinding[];
   readonly sealedClashes: readonly SealedClashFinding[];
+  readonly literalNamespaces: readonly LiteralNamespaceFinding[];
   /** D8 tables this composition does not carry, so not read. */
   readonly tablesNotCarried: readonly string[];
   /** D8 tables the boot measured absent from the database: nothing stored, read as no rows. */
@@ -162,9 +180,10 @@ export interface StoredReferenceEngine {
   update(object: string, data: unknown, options?: unknown): Promise<unknown>;
 }
 
-/** The registry slice: the resolver's reads, the table check, and the two readers the report lists. */
+/** The registry slice: the resolver's reads, the table check, and the readers the report lists. */
 export type StoredReferenceRegistry = PackageScopedRegistry & {
   getObject?(name: string): unknown;
+  getAllPackages?(): ReadonlyArray<{ manifest?: { id?: unknown; namespace?: unknown } }>;
   findOutsideClosurePicklistReferences?(): ReadonlyArray<{ object: string; field: string; picklist: string; packageId?: string }>;
   picklistReferenceVerdict?(name: string, callerPackageId?: string | null): PackageScopedResolution;
   sealBareNameHolders?(): ReadonlyArray<{
@@ -363,7 +382,19 @@ export async function collectStoredPackageReferences(
     .map((c) => ({ type: c.type, name: c.name, candidates: [...c.holders].sort(byText) }))
     .sort((a, b) => byText(a.type, b.type) || byText(a.name, b.name));
 
-  return { stored, picklists, sealedClashes, tablesNotCarried, tablesAbsent };
+  // The packages the boot kept under an address-literal namespace (warned
+  // once there): the install door's judge, over every installed package.
+  const literalNamespaces: LiteralNamespaceFinding[] = [];
+  for (const pkg of registry.getAllPackages?.() ?? []) {
+    const packageId = pkg.manifest?.id;
+    const namespace = pkg.manifest?.namespace;
+    if (typeof packageId !== 'string' || typeof namespace !== 'string') continue;
+    const message = validateNamespaceNotAddressLiteral(namespace);
+    if (message !== null) literalNamespaces.push({ packageId, namespace, message });
+  }
+  literalNamespaces.sort((a, b) => byText(a.packageId, b.packageId));
+
+  return { stored, picklists, sealedClashes, literalNamespaces, tablesNotCarried, tablesAbsent };
 }
 
 /** What the operator asks the bind to write. */

@@ -289,4 +289,79 @@ describe('address grammar ↔ route ledger (ADR-0150 D5, #31691)', () => {
       expect([...served].sort(), `door ${door} (${position.prefix})`).toEqual([...position.literals].sort());
     }
   });
+
+  // Seat ruling Q1 = A: a sub-resource literal in a flow door's name position
+  // keeps its bare route (`/automation/crm/runs` is the runs of the flow
+  // `crm`). The set the domain reads (`AUTOMATION_FLOW_SUBRESOURCE_SEGMENTS`)
+  // is exactly the segments the ledger's `/automation/:name/<segment>` rows
+  // serve, so a sub-resource a new row adds joins it.
+  it('the flow doors\' sub-resource literals are exactly the segments the ledger serves after `/automation/:name`', async () => {
+    const { AUTOMATION_FLOW_SUBRESOURCE_SEGMENTS } = await import('./domains/automation-address.js');
+    const served = new Set<string>();
+    for (const row of ROUTE_LEDGER) {
+      const path = row.route.slice(row.route.indexOf(' ') + 1).split('?')[0];
+      const match = /^\/automation\/:name\/([^/:]+)/.exec(path);
+      if (match) served.add(match[1]);
+    }
+    expect([...served].sort()).toEqual([...AUTOMATION_FLOW_SUBRESOURCE_SEGMENTS].sort());
+  });
+
+  // [ADR-0150 D5, child G1] The domain's `405` names the verbs a bare shape is
+  // served under (`automationRouteAllow`), since every two-segment path reaches
+  // it under every verb. Those verbs are the ledger's: for each bare
+  // `/automation` row's path (parameters filled), every bare row whose pattern
+  // matches that path, and nothing else.
+  it('the `/automation` domain\'s `Allow` for each bare shape is exactly the verbs the ledger serves there', async () => {
+    const { automationRouteAllow } = await import('./domains/automation-address.js');
+    const rows = ROUTE_LEDGER
+      .map((row) => {
+        const [verb, rest] = [row.route.slice(0, row.route.indexOf(' ')), row.route.slice(row.route.indexOf(' ') + 1).split('?')[0]];
+        return { verb, segments: rest.split('/').filter(Boolean) };
+      })
+      // The domain root is left out: its `GET` (the retired flow list, #19543)
+      // is declined by the domain, so the host answers it, never this table.
+      .filter(({ segments }) => segments[0] === 'automation' && segments.length > 1 && !segments.includes(':ns'));
+    expect(rows.length).toBeGreaterThan(20);
+    expect(automationRouteAllow([])).toEqual([]);
+    const fill = (seg: string) => (seg.startsWith(':') ? `${seg.slice(1)}_1` : seg);
+    const matches = (pattern: string[], path: string[]) =>
+      pattern.length === path.length && pattern.every((seg, i) => seg.startsWith(':') || seg === path[i]);
+    const VERBS = ['GET', 'POST', 'PUT', 'DELETE'];
+    for (const { segments } of rows) {
+      const path = segments.map(fill);
+      const served = VERBS.filter((verb) => rows.some((row) => row.verb === verb && matches(row.segments, path)));
+      expect([path.join('/'), automationRouteAllow(path.slice(1))]).toEqual([path.join('/'), served]);
+    }
+  });
+  // [ADR-0150 D5, child G1] The qualified inbound hook,
+  // `POST /automation/hooks/:ns/:flowName/:hookId`, has the verb and arity of
+  // every five-segment `POST /automation/…` row whose second segment can read
+  // `hooks` (a parameter, or `hooks` itself): `…/:name/runs/:runId/cancel` is
+  // `hooks/runs/r1/cancel` for a flow named `hooks`. Its third and fourth
+  // segments match some path whatever they are, so each such row collides on
+  // the qualifier its second segment names. The allow-list row never admits
+  // those qualifiers (core's `INBOUND_HOOK_QUALIFIER_EXCLUSIONS`), so the set
+  // is exactly the ledger's; a row whose qualifier position is a parameter
+  // would collide on every qualifier, and none may exist.
+  it('the qualified hook\'s excluded qualifiers are exactly the qualifier-position literals of every five-segment `POST /automation` row that can read `hooks` there', async () => {
+    const { INBOUND_HOOK_QUALIFIER_EXCLUSIONS } = await import('@objectstack/core');
+    const colliding = new Set<string>();
+    const everyQualifier: string[] = [];
+    const hookRows: string[] = [];
+    for (const row of ROUTE_LEDGER) {
+      const verb = row.route.slice(0, row.route.indexOf(' '));
+      const segments = row.route.slice(row.route.indexOf(' ') + 1).split('?')[0].split('/').filter(Boolean);
+      if (verb !== 'POST' || segments.length !== 5 || segments[0] !== 'automation') continue;
+      const [, first, qualifierPosition] = segments;
+      if (!(first.startsWith(':') || first === 'hooks')) continue;
+      if (row.route === 'POST /automation/hooks/:ns/:flowName/:hookId') { hookRows.push(row.route); continue; }
+      if (qualifierPosition.startsWith(':')) everyQualifier.push(row.route);
+      else colliding.add(qualifierPosition);
+    }
+    // Anti-vacuity: the qualified hook's own row was seen.
+    expect(hookRows).toEqual(['POST /automation/hooks/:ns/:flowName/:hookId']);
+    expect(everyQualifier).toEqual([]);
+    expect([...colliding].sort()).toEqual([...INBOUND_HOOK_QUALIFIER_EXCLUSIONS].sort());
+    expect(colliding.size).toBeGreaterThan(0);
+  });
 });

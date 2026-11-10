@@ -25,6 +25,8 @@
 // forward.dogfood.test.ts`; this file drives the doors over fakes so each
 // forwarded byte can be asserted.
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/metadata';
 import { describe, it, expect, vi } from 'vitest';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
@@ -513,12 +515,15 @@ describe('door 2 — the MCP `run_action` bridge forwards a same-origin api acti
         expect(String(thrown.message)).toBe('nope');
     });
 
-    it('an OFF-ORIGIN api action cannot be invoked via MCP', async () => {
+    it('an OFF-ORIGIN api action is refused at MCP with the REST door\'s prescription', async () => {
         const h = boot();
 
         const thrown = await runViaMcp(h, REMOTE_PING.name).catch((e) => e);
 
-        expect(String(thrown.message)).toContain('cannot be invoked via MCP');
+        // [#31923] One admitted sequence: the REST door's off-origin
+        // prescription (C6), still a 400 and still never forwarded.
+        expect((thrown as any).status).toBe(400);
+        expect(String(thrown.message)).toContain('with an off-origin `target`');
         expect(h.request).not.toHaveBeenCalled();
     });
 });

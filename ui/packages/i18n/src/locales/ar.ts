@@ -3367,6 +3367,10 @@ const ar = {
       unknownApp: "تطبيق ما",
       unidentified: "تعذّر التعرّف على هذا التطبيق.",
       clientId: "معرّف العميل",
+      unverified: "تطبيق غير موثّق",
+      unverifiedHint: "لم يسجّل هذا التطبيق أيُّ مسؤول هنا، لذا لم يُتحقَّق من اسمه. لا تمنحه الإذن إلا إذا كنت تثق في {{destination}}.",
+      destinationUnconfirmed: "تعذّر تأكيد الجهة التي سيُرسل إليها هذا الوصول، لذا لا يمكن منح الإذن هنا.",
+      sentTo: "سيُرسل الوصول إلى:",
       willAllow: "سيتمكن هذا التطبيق من:",
       scope: {
         openid: "تأكيد هويتك",
@@ -4497,6 +4501,16 @@ const ar = {
       collapse: 'طي',
       expandTable: 'توسيع',
       exitExpandedTable: 'إغلاق',
+    },
+    answerSource: {
+      title: 'كيف تم حساب ذلك',
+      object: 'الكائن',
+      filter: 'عامل التصفية',
+      allRecords: 'كل السجلات',
+      groupedBy: 'مجمّعة حسب',
+      aggregations: 'التجميعات',
+      records: 'السجلات',
+      visibleToYou: 'فقط السجلات التي يمكنك رؤيتها',
     },
     tool: {
       aggregate_data: "تجميع البيانات ذات الصلة",
