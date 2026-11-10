@@ -2361,6 +2361,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "令牌摘要",
         help: "Bearer 令牌的 HMAC-SHA-256（base64url），以部署的认证密钥为键——单向；明文仅在签发时显示一次，且绝不存储。"
       },
+      token_hint: {
+        label: "令牌提示",
+        help: "Bearer 令牌的最后四个字符，在签发时记录，用于区分同一连接的多个凭据；绝非令牌本身或其摘要。提示功能上线前签发的凭据此项为空。"
+      },
       active: {
         label: "启用",
         help: "撤销开关——未启用的凭据在验证时会被拒绝"
@@ -2368,6 +2372,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       expires_at: {
         label: "过期时间",
         help: "用于分阶段凭据轮换的可选硬性过期时间；已过期的凭据会被拒绝"
+      },
+      last_used_at: {
+        label: "最近使用时间",
+        help: "该凭据最近一次通过验证的 SCIM 请求的时间，每分钟至多记录一次；尚无使用记录时为空"
       },
       user_id: {
         label: "签发人",
@@ -2417,6 +2425,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "我已保存令牌",
           fields: {
             token: "令牌",
+            tokenHint: "令牌提示",
             connectionId: "连接 ID",
             expiresAt: "过期时间"
           }

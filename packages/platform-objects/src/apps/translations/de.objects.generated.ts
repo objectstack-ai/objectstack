@@ -2361,6 +2361,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         label: "Token-Digest",
         help: "HMAC-SHA-256 (base64url) des Bearer-Tokens, verschlüsselt mit dem Authentifizierungsgeheimnis der Bereitstellung – nur in eine Richtung; der Klartext wird beim Ausstellen einmal angezeigt und nie gespeichert."
       },
+      token_hint: {
+        label: "Token-Hinweis",
+        help: "Die letzten vier Zeichen des Bearer-Tokens, bei der Ausstellung erfasst, damit sich die Anmeldedaten einer Verbindung unterscheiden lassen; nie das Token oder sein Digest. Leer bei Anmeldedaten, die ausgestellt wurden, bevor Hinweise erfasst wurden."
+      },
       active: {
         label: "Aktiv",
         help: "Widerrufsschalter – inaktive Anmeldedaten werden bei der Prüfung abgelehnt"
@@ -2368,6 +2372,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       expires_at: {
         label: "Läuft ab am",
         help: "Optionaler fester Ablauf für eine gestaffelte Rotation der Anmeldedaten; abgelaufene Anmeldedaten werden abgelehnt"
+      },
+      last_used_at: {
+        label: "Zuletzt verwendet am",
+        help: "Wann die Anmeldedaten zuletzt eine SCIM-Anfrage authentifiziert haben, höchstens einmal pro Minute erfasst; leer, wenn keine Verwendung erfasst wurde"
       },
       user_id: {
         label: "Ausgestellt von",
@@ -2417,6 +2425,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Ich habe das Token gespeichert",
           fields: {
             token: "Token",
+            tokenHint: "Token-Hinweis",
             connectionId: "Verbindungs-ID",
             expiresAt: "Läuft ab am"
           }

@@ -2361,6 +2361,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Resumen del token",
         help: "HMAC-SHA-256 (base64url) del token de portador, con clave derivada del secreto de autenticación del despliegue; unidireccional: el texto sin cifrar se muestra una vez al emitirlo y nunca se almacena."
       },
+      token_hint: {
+        label: "Pista del token",
+        help: "Los últimos cuatro caracteres del token bearer, registrados al emitirlo para distinguir las credenciales de una misma conexión; nunca el token ni su resumen. Vacío en una credencial emitida antes de que se registraran las pistas."
+      },
       active: {
         label: "Activa",
         help: "Interruptor de revocación: una credencial inactiva se rechaza al verificarla."
@@ -2368,6 +2372,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       expires_at: {
         label: "Caduca el",
         help: "Caducidad estricta opcional para la rotación escalonada de credenciales; una credencial caducada se rechaza."
+      },
+      last_used_at: {
+        label: "Último uso",
+        help: "Cuándo autenticó la credencial una solicitud SCIM por última vez, registrado como máximo una vez por minuto; vacío si no se ha registrado ningún uso"
       },
       user_id: {
         label: "Emitida por",
@@ -2417,6 +2425,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "He guardado el token",
           fields: {
             token: "Token de portador",
+            tokenHint: "Pista del token",
             connectionId: "ID de conexión",
             expiresAt: "Caduca el"
           }
