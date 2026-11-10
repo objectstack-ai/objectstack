@@ -4947,7 +4947,7 @@ function collectSourcedMappingErrors(config: ObjectStackDefinition): string[] {
     }
 
     // D3: the watermark is copied unchanged onto a target field of its type.
-    const copies = (Array.isArray(m.fieldMapping) ? m.fieldMapping : []).filter(
+    const copies = (Array.isArray(m.fieldMapping) ? (m.fieldMapping as unknown[]) : []).filter(
       (entry): entry is Record<string, unknown> =>
         isRecord(entry) &&
         (entry.transform === undefined || entry.transform === 'none') &&
