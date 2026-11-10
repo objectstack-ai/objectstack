@@ -3588,6 +3588,55 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_metadata_commit: {
+    label: "Confirmación de metadatos",
+    pluralLabel: "Confirmaciones de metadatos",
+    description: "Registro de confirmaciones por paquete que agrupa los cambios de metadatos de un turno.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      package_id: {
+        label: "Paquete"
+      },
+      operation: {
+        label: "Operación",
+        options: {
+          apply: "Aplicar",
+          revert: "Revertir"
+        }
+      },
+      message: {
+        label: "Mensaje",
+        help: "Resumen del cambio; en los turnos de IA, la instrucción del usuario que lo produjo."
+      },
+      actor: {
+        label: "Actor"
+      },
+      ai_model: {
+        label: "Modelo de IA"
+      },
+      parent_commit_id: {
+        label: "Confirmación principal"
+      },
+      event_seq_start: {
+        label: "Inicio de la secuencia de eventos"
+      },
+      event_seq_end: {
+        label: "Fin de la secuencia de eventos"
+      },
+      items: {
+        label: "Elementos",
+        help: "JSON: [{ type, name, existedBefore, prevVersion }]: el plan de reversión."
+      },
+      item_count: {
+        label: "Número de elementos"
+      },
+      created_at: {
+        label: "Creado el"
+      }
+    }
+  },
   sys_setting: {
     label: "Ajuste",
     pluralLabel: "Ajustes",

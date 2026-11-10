@@ -293,10 +293,11 @@ function stringsUnder(node: unknown, path: string, out: Array<[string, string]>)
 describe('zh-CN settings.auth uses full-width punctuation inside Chinese sentences', () => {
   it('the rule flags a half-width mark in Chinese prose and leaves codes, paths and placeholders', () => {
     expect(halfWidthMarksInChinese('认证限流:最大请求数')).toEqual(['4::']);
-    expect(halfWidthMarksInChinese('要求成员使用身份验证器应用(TOTP)保护账户。')).toEqual(['12:(', '17:)']);
+    expect(halfWidthMarksInChinese('要求成员使用身份验证器应用(TOTP)保护账户。')).toEqual(['13:(', '18:)']);
     expect(halfWidthMarksInChinese('裸域名,每行一个')).toEqual(['3:,']);
     expect(halfWidthMarksInChinese('例如 203.0.113.0/24。Auth Token')).toEqual([]);
-    expect(halfWidthMarksInChinese('设置 `auth:mfa` 与 {{count}}, 共计')).toEqual([]);
+    expect(halfWidthMarksInChinese('设置 `键:值` 与 {{名,称}} 共计')).toEqual([]);
+    expect(halfWidthMarksInChinese('{{count}}, 共计')).toEqual(['9:,']);
   });
 
   it('no zh-CN settings.auth string carries a half-width , ; : ( ) inside Chinese prose', () => {

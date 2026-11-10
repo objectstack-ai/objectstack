@@ -35,6 +35,8 @@ export const esESGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_metadata.fields.id.label": "00b0385c9c152888",
   "objects.sys_metadata_audit.fields.actor.label": "b155813f8a7f06e3",
   "objects.sys_metadata_audit.fields.id.label": "00b0385c9c152888",
+  "objects.sys_metadata_commit.fields.actor.label": "b155813f8a7f06e3",
+  "objects.sys_metadata_commit.fields.id.label": "00b0385c9c152888",
   "objects.sys_metadata_history.fields.checksum.label": "4fe7cc0967282ec9",
   "objects.sys_metadata_history.fields.id.label": "00b0385c9c152888",
   "objects.sys_notification.fields.actor_id.label": "b155813f8a7f06e3",

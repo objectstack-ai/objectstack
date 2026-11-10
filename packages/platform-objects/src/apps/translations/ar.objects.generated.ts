@@ -3588,6 +3588,55 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_metadata_commit: {
+    label: "Metadata Commit",
+    pluralLabel: "Metadata Commits",
+    description: "Package-scoped commit log grouping a turn’s metadata changes.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      package_id: {
+        label: "Package"
+      },
+      operation: {
+        label: "Operation",
+        options: {
+          apply: "apply",
+          revert: "revert"
+        }
+      },
+      message: {
+        label: "Message",
+        help: "Change summary; for AI turns, the user instruction that produced it."
+      },
+      actor: {
+        label: "Actor"
+      },
+      ai_model: {
+        label: "AI Model"
+      },
+      parent_commit_id: {
+        label: "Parent Commit"
+      },
+      event_seq_start: {
+        label: "Event Seq Start"
+      },
+      event_seq_end: {
+        label: "Event Seq End"
+      },
+      items: {
+        label: "Items",
+        help: "JSON: [{ type, name, existedBefore, prevVersion }] — the revert plan."
+      },
+      item_count: {
+        label: "Item Count"
+      },
+      created_at: {
+        label: "Created At"
+      }
+    }
+  },
   sys_setting: {
     label: "الإعداد",
     pluralLabel: "الإعدادات",

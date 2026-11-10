@@ -30,6 +30,7 @@ export const jaJPGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_metadata.fields.bundle_member.label": "49b49e6b77397e92",
   "objects.sys_metadata.fields.id.label": "00b0385c9c152888",
   "objects.sys_metadata_audit.fields.id.label": "00b0385c9c152888",
+  "objects.sys_metadata_commit.fields.id.label": "00b0385c9c152888",
   "objects.sys_metadata_history.fields.id.label": "00b0385c9c152888",
   "objects.sys_oauth_access_token.fields.id.label": "00b0385c9c152888",
   "objects.sys_oauth_application._actions.create_oauth_application.params.type.options.web": "2a7ead3da8c035c5",

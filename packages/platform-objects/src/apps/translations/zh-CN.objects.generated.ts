@@ -3588,6 +3588,55 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_metadata_commit: {
+    label: "元数据提交",
+    pluralLabel: "元数据提交",
+    description: "按软件包记录的提交日志，把一轮操作中的元数据变更归为一组。",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      package_id: {
+        label: "软件包"
+      },
+      operation: {
+        label: "操作",
+        options: {
+          apply: "应用",
+          revert: "回滚"
+        }
+      },
+      message: {
+        label: "说明",
+        help: "变更摘要；AI 轮次下为产生该变更的用户指令。"
+      },
+      actor: {
+        label: "操作者"
+      },
+      ai_model: {
+        label: "AI 模型"
+      },
+      parent_commit_id: {
+        label: "父提交"
+      },
+      event_seq_start: {
+        label: "起始事件序号"
+      },
+      event_seq_end: {
+        label: "结束事件序号"
+      },
+      items: {
+        label: "条目",
+        help: "JSON：[{ type, name, existedBefore, prevVersion }]——回滚计划。"
+      },
+      item_count: {
+        label: "条目数"
+      },
+      created_at: {
+        label: "创建时间"
+      }
+    }
+  },
   sys_setting: {
     label: "设置",
     pluralLabel: "设置",
