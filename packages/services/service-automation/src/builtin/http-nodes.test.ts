@@ -245,3 +245,72 @@ describe('http (canonical node)', () => {
 
     });
 });
+
+describe('http (canonical node) — a failed call names its host and cause', () => {
+    // Real fetches against real failures: the cause shape is undici's, not a mock's.
+    async function run(config: Record<string, unknown>) {
+        const engine = new AutomationEngine(createTestLogger());
+        registerHttpNodes(engine, createCtx());
+        engine.registerFlow('http_flow', httpFlow('http', config));
+        return engine.execute('http_flow');
+    }
+
+    it('an unknown host reports the host and the DNS cause, not a bare "fetch failed"', async () => {
+        const result = await run({ url: 'http://no-such-host.invalid/path' });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('http: fetch failed');
+        expect(result.error).toContain('no-such-host.invalid');
+        expect(result.error).toContain('ENOTFOUND');
+    });
+
+    it('a refused port reports the host:port and ECONNREFUSED', async () => {
+        const { createServer } = await import('node:http');
+        const server = createServer();
+        await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+        const port = (server.address() as { port: number }).port;
+        await new Promise<void>((r) => server.close(() => r()));
+        const result = await run({ url: `http://127.0.0.1:${port}/x` });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain(`127.0.0.1:${port}`);
+        expect(result.error).toContain('ECONNREFUSED');
+    });
+
+    it('never names the path, query secret or userinfo of the url', async () => {
+        // A query secret on a url that fails to connect.
+        const q = await run({ url: 'http://no-such-host.invalid/hook/PATHSECRET?token=QUERYSECRET' });
+        expect(q.error).toContain('no-such-host.invalid');
+        expect(q.error).not.toContain('QUERYSECRET');
+        expect(q.error).not.toContain('PATHSECRET');
+        // Userinfo makes undici throw a TypeError that quotes the whole url.
+        const u = await run({ url: 'https://user:USERPW@no-such-host.invalid/x?token=QUERYSECRET' });
+        expect(u.success).toBe(false);
+        expect(u.error).toContain('no-such-host.invalid');
+        expect(u.error).not.toContain('USERPW');
+        expect(u.error).not.toContain('QUERYSECRET');
+    });
+
+    it('a timeout still reads "timeout after Nms"', async () => {
+        const { createServer } = await import('node:http');
+        const server = createServer(() => { /* never answers */ });
+        await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+        const port = (server.address() as { port: number }).port;
+        try {
+            const result = await run({ url: `http://127.0.0.1:${port}/slow`, timeoutMs: 50 });
+            expect(result.success).toBe(false);
+            expect(result.error).toBe('http: timeout after 50ms');
+        } finally {
+            server.closeAllConnections?.();
+            await new Promise<void>((r) => server.close(() => r()));
+        }
+    });
+
+    it('a failure with no cause keeps its own message and the host', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('boom')));
+        try {
+            const result = await run({ url: 'https://api.test/items' });
+            expect(result.error).toBe('http: boom — api.test');
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+});
