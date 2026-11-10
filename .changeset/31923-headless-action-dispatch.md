@@ -2,7 +2,9 @@
 '@objectstack/runtime': patch
 ---
 
-Export `dispatchAction(kernel, request)` (with `ActionDispatchRequest`, `ActionDispatchAnswer` and `ActionDispatchPosture`): the REST `/actions` door's admission and dispatch as a function, so a host's own action door (an in-product AI tool, a job runner) answers what that door answers instead of keeping a second copy of its rules. `posture: 'ai'` adds the MCP `run_action` tool's rules (`sys_*` exposure, `ai.exposed`, `ai.requiresConfirmation`); `namespace` addresses an installed package's action as the addressed REST path does. A host call writes its invocation row without a `surface`.
+**BREAKING (narrowing):** a caller of the MCP action bridge that passes `params` as an array is now refused `400 VALIDATION_FAILED` before anything runs (it ran before, the array spread into numeric keys). First-party count: 0 — the published `run_action` tool's input schema already refuses an array.
+
+Export `dispatchAction(kernel, request)` (with `ActionDispatchRequest`, `ActionDispatchAnswer` and `ActionDispatchPosture`): the REST `/actions` door's admission and dispatch as a function, so a host's own action door (an in-product AI tool, a job runner) answers what that door answers instead of keeping a second copy of its rules. `posture: 'ai'` adds the MCP `run_action` tool's rules (`sys_*` exposure, `ai.exposed`, `ai.requiresConfirmation`); `namespace` addresses an installed package's action as the addressed REST path does. A host call writes its invocation row without a `surface`. A `posture` that is neither `'rest'` nor `'ai'` is refused `400 VALIDATION_FAILED` before anything resolves. The export runs through a new public method, `HttpDispatcher.dispatchHostAction(request)`, which answers the same `ActionDispatchAnswer` with the REST door's dependencies.
 
 The REST door, the host export and MCP `run_action` now run one admitted sequence (`action-dispatch.ts`). The REST door's answers are unchanged. MCP `run_action` refusals that change (each was refused before and stays refused; nothing new runs):
 
