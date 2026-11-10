@@ -222,6 +222,16 @@ describe('[#31699] a bundled type (email_template): the exact qualifier reads a 
     expect(labelOf(await read(D))).toBe('alphaaddon fr-FR');
   });
 
+  it.each(['app', 'page', 'dashboard', 'report', 'book', 'analytics_cube', 'tool', 'skill', 'agent'])(
+    'CONTROL — %s (no bundle member): the holders the qualifier asks with itself as caller are the holders it asked before',
+    (type) => {
+      ship(type, 'home', A);
+      ship(type, 'home', B);
+      expect(registry.packageScopedHoldersOf(type, 'home', C)).toEqual(registry.packageScopedHoldersOf(type, 'home'));
+      expect(registry.packageScopedHoldersOf(type, 'home', C)).toEqual([A, B]);
+    },
+  );
+
   it('CONTROL — the addition is still the dependent\'s only: naming the base does not serve it, naming a third package is refused naming the base', async () => {
     tpl('en-US', A);
     tpl('fr-FR', D);
