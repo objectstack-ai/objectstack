@@ -31,6 +31,7 @@ import { MetadataManager } from '@objectstack/metadata';
 import { RestServer } from './rest-server';
 import { loadExcelJs } from './xlsx-module.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
+import { resolveNamedMapping } from './import-mapping.js';
 
 // ---------------------------------------------------------------------------
 // The real backend: better-sqlite3 `:memory:`, constructed the canonical way
@@ -655,6 +656,15 @@ describe('import route — named mapping artifact (#2611)', () => {
       expect(res._json.error).toContain(ALPHA);
       expect(res._json.error).toContain(BETA);
       expect(await engine.findOne('task', { where: { id: 'k1' } })).toBeFalsy();
+    });
+
+    it('a refusal recognised by shape (a plain object, no class): answered with its own 409 and sentence, never 404', async () => {
+      const message = `The mapping 'task_pkg_feed' is held by ${ALPHA} and ${BETA}. Nothing picks one of them: address it by its package.`;
+      const res = await resolveNamedMapping(
+        { getMetaItem: () => Promise.reject({ code: 'RESOURCE_CONFLICT', status: 409, message, refusal: { status: 'refused', message } }) },
+        { mappingName: 'task_pkg_feed', objectName: 'task', detectedFormat: 'csv' },
+      );
+      expect(res).toEqual({ ok: false, status: 409, code: 'RESOURCE_CONFLICT', error: message });
     });
 
     it('CONTROL: one package holder of a mapping into an object no package owns imports as before', async () => {

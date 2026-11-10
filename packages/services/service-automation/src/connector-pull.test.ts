@@ -496,8 +496,9 @@ describe('a failed pull logs one warn line naming the mapping and the reason', (
 
 /**
  * [#32071, ADR-0150 D3] `mapping` is addressed by `(package, name)`, and the
- * pull names no package (its request carries none): the mapping is read by the
- * protocol's by-name read as a caller with no package. Driven here over the
+ * pull names no package (its request carries `callerPackageId`, which the pull
+ * does not read yet): the mapping is read by the protocol's by-name read as a
+ * caller with no package. Driven here over the
  * REAL read — `ObjectStackProtocolImplementation` over a real `SchemaRegistry`
  * — for the mapping, the harness for everything else.
  */
@@ -541,6 +542,25 @@ describe('[#32071] connector pull — a mapping name two packages hold is refuse
         const refused = read as PackageScopedNameRefusedError;
         expect(err.reason).toBe('mapping_name_refused');
         expect({ code: err.code, status: err.status }).toEqual({ code: refused.code, status: 409 });
+        expect(err.message).toContain(ALPHA);
+        expect(err.message).toContain(BETA);
+        expect(h.handler).not.toHaveBeenCalled();
+        expect(h.writes).toHaveLength(0);
+    });
+
+    it('a refusal recognised by shape (a plain object, no class): refused with its own code and status, naming both', async () => {
+        const h = harness();
+        const message = `The mapping 'crm_contacts' is held by ${ALPHA} and ${BETA}. Nothing picks one of them: address it by its package.`;
+        const fake = h.deps.protocol;
+        h.deps.protocol = {
+            ...fake,
+            getMetaItem: (request) => (request.type === 'mapping'
+                ? Promise.reject({ code: 'RESOURCE_CONFLICT', status: 409, message, refusal: { status: 'refused', message } })
+                : fake.getMetaItem(request)),
+        };
+        const err = await refusal(h);
+        expect(err.reason).toBe('mapping_name_refused');
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'RESOURCE_CONFLICT', status: 409 });
         expect(err.message).toContain(ALPHA);
         expect(err.message).toContain(BETA);
         expect(h.handler).not.toHaveBeenCalled();

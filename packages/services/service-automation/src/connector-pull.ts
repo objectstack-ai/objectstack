@@ -223,6 +223,28 @@ function shapeOf(value: unknown): string {
 }
 
 /**
+ * [ADR-0150 D3, #32071] The refusal a by-name read threw, or `undefined` for
+ * any other failure. Recognised by class and, as the runtime's `/meta` door
+ * recognises it (`isPackageScopedRefusal`), by shape: `code ===
+ * 'RESOURCE_CONFLICT'` with a `refusal` whose `status` is `'refused'`, which
+ * is what reaches the pull when the error crossed a realm or a second copy of
+ * `@objectstack/core` and `instanceof` cannot see it. The answer is the
+ * error's own code, status and sentence.
+ */
+function packageScopedRefusalOf(err: unknown): { code: string; status: number; message: string } | undefined {
+    if (err instanceof PackageScopedNameRefusedError) return { code: err.code, status: err.status, message: err.message };
+    const thrown = err as {
+        code?: unknown; status?: unknown; httpStatus?: unknown; message?: unknown;
+        refusal?: { status?: unknown; message?: unknown };
+    } | null | undefined;
+    if (thrown?.code !== 'RESOURCE_CONFLICT' || thrown.refusal?.status !== 'refused') return undefined;
+    const status = typeof thrown.status === 'number' ? thrown.status
+        : typeof thrown.httpStatus === 'number' ? thrown.httpStatus : 409;
+    const message = typeof thrown.message === 'string' && thrown.message ? thrown.message : String(thrown.refusal.message ?? '');
+    return { code: thrown.code, status, message };
+}
+
+/**
  * Pull one `mapping`'s `connectorSource` and write what it returns. Throws
  * {@link ConnectorPullError} on every refusal, before anything is written.
  *
@@ -273,9 +295,9 @@ async function pullOnce(
     //
     // [ADR-0150 D3, #32071] `mapping` is addressed by `(package, name)`, and
     // this read names no package: the pull is a caller with no package until
-    // the job's package reaches it (the pull request carries none). One
-    // holder is read as before; a name two packages hold is refused by the
-    // read naming both, and the pull is refused with that refusal's own code,
+    // it reads the job's package (the request carries `callerPackageId`, but
+    // the pull does not read it yet). One holder is read as before; a name
+    // two packages hold is refused by the read naming both, and the pull is refused with that refusal's own code,
     // status and sentence — ⛔ never as "no mapping is registered", and never
     // by pulling through whichever package's mapping came first.
     let artifact: PulledMapping | undefined;
@@ -283,8 +305,9 @@ async function pullOnce(
         const res = await protocol.getMetaItem({ type: 'mapping', name: mappingName }) as Record<string, unknown> | undefined;
         artifact = res?.item as PulledMapping | undefined;
     } catch (err) {
-        if (err instanceof PackageScopedNameRefusedError) {
-            return refuse(err.code, err.status, 'mapping_name_refused', `Mapping "${mappingName}": ${err.message}`);
+        const refused = packageScopedRefusalOf(err);
+        if (refused) {
+            return refuse(refused.code, refused.status, 'mapping_name_refused', `Mapping "${mappingName}": ${refused.message}`);
         }
         /* anything else is treated as not found below */
     }

@@ -42,6 +42,28 @@ export {
 export type ResolveMappingResult = { ok: true; artifact: MappingArtifactLike } | MappingFailure;
 
 /**
+ * [ADR-0150 D3, #32071] The refusal a by-name read threw, or `undefined` for
+ * any other failure. Recognised by class and, as the runtime's `/meta` door
+ * recognises it (`isPackageScopedRefusal`), by shape: `code ===
+ * 'RESOURCE_CONFLICT'` with a `refusal` whose `status` is `'refused'`, which
+ * is what reaches this door when the error crossed a realm or a second copy
+ * of `@objectstack/core` and `instanceof` cannot see it. The answer is the
+ * error's own code, status and sentence.
+ */
+function packageScopedRefusalOf(err: unknown): { code: string; status: number; message: string } | undefined {
+    if (err instanceof PackageScopedNameRefusedError) return { code: err.code, status: err.status, message: err.message };
+    const thrown = err as {
+        code?: unknown; status?: unknown; httpStatus?: unknown; message?: unknown;
+        refusal?: { status?: unknown; message?: unknown };
+    } | null | undefined;
+    if (thrown?.code !== 'RESOURCE_CONFLICT' || thrown.refusal?.status !== 'refused') return undefined;
+    const status = typeof thrown.status === 'number' ? thrown.status
+        : typeof thrown.httpStatus === 'number' ? thrown.httpStatus : 409;
+    const message = typeof thrown.message === 'string' && thrown.message ? thrown.message : String(thrown.refusal.message ?? '');
+    return { code: thrown.code, status, message };
+}
+
+/**
  * Resolve a named mapping artifact and check it against the request:
  * target object must match the URL object, and the artifact's declared
  * sourceFormat (when set) must match the payload format actually sent.
@@ -77,9 +99,8 @@ export async function resolveNamedMapping(
         // [#32071] The by-name read refused: the name is held by more than
         // one package. Answered with the refusal's own code, status and
         // sentence, which names every candidate.
-        if (err instanceof PackageScopedNameRefusedError) {
-            return { ok: false, status: err.status, code: err.code, error: err.message };
-        }
+        const refused = packageScopedRefusalOf(err);
+        if (refused) return { ok: false, status: refused.status, code: refused.code, error: refused.message };
         /* anything else is treated as not found below */
     }
     if (!artifact || typeof artifact !== 'object' || !Array.isArray(artifact.fieldMapping)) {
