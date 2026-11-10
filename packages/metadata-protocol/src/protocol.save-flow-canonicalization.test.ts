@@ -48,7 +48,7 @@ import { ObjectStackProtocolImplementation } from './protocol.js';
  * node no edge from it reaches (`flow-node-unreachable`). The start node goes
  * LAST so every `nodes[i]` index and path below still names the node it did.
  */
-const wiredFromStart = (nodes: Array<{ id: string }>) => ({
+const wiredFromStart = <N extends { id: string }>(nodes: N[]) => ({
     nodes: [...nodes, { id: 'start', type: 'start', label: 'Start' }],
     edges: nodes.map((n) => ({ id: `e_${n.id}`, source: 'start', target: n.id })),
 });
@@ -702,8 +702,8 @@ describe('[#23903] a re-save that newly introduces a retired spelling is judged 
         waitEventConfig: { eventType: 'timer', timerDuration: 'PT5M' },
         config: { duration: 'PT9M' },
     });
-    const flowOf = (nodes: unknown[], label = 'Purge Stale Leads') =>
-        ({ name: 'purge_flow', label, type: 'autolaunched', status: 'active', ...wiredFromStart(nodes as Array<{ id: string }>) });
+    const flowOf = (nodes: Array<{ id: string }>, label = 'Purge Stale Leads') =>
+        ({ name: 'purge_flow', label, type: 'autolaunched', status: 'active', ...wiredFromStart(nodes) });
     const legacyNode = (id: string) => purge(id, { objectName: 'lead', filters: { status: 'stale' } });
     const canonicalNode = (id: string) => purge(id, { objectName: 'lead', filter: { status: 'stale' } });
 
