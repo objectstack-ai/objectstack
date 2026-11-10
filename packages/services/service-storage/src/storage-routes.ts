@@ -53,6 +53,10 @@ import {
 // guard's own `findFileHolder`.
 import type { FileHolder } from './attachment-lifecycle.js';
 import { contentDispositionValue } from './content-disposition.js';
+import { buildKey } from './storage-key.js';
+// [#23306] Re-exported so the server-side attach verbs, which import it from
+// here, lay their keys out exactly as the upload doors do.
+export { buildKey };
 // [#30892] The upload-link doors: the service verbs they call, the one
 // refusal an unusable link gets, and the page a link opens.
 import type { UploadLinkDoor, UploadLinkView } from './record-file-access.js';
@@ -2354,12 +2358,3 @@ export async function mintDownloadUrl(storage: IStorageService, file: FileRecord
   return null;
 }
 
-/**
- * The storage key of a new file: `<scope>/<fileId><.ext>`. Package-internal
- * (not re-exported from `index.ts`); [#23306] exported so the server-side
- * attach verb lays its keys out exactly as the upload doors do.
- */
-export function buildKey(scope: string, fileId: string, filename: string): string {
-  const ext = filename.includes('.') ? '.' + filename.split('.').pop() : '';
-  return `${scope}/${fileId}${ext}`;
-}
