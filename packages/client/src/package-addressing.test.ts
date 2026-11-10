@@ -312,7 +312,8 @@ function producerBackedClient(dispatcher: any, executionContext: Record<string, 
 
 /** The ObjectQL registry double the `/automation` door's address reads (the runtime's own suite's shape). */
 function automationDoor(holders: Record<string, string[]>, namespaces: Record<string, string>) {
-    const holdersOf = (type: string, name: string) => holders[`${type}:${name}`] ?? [];
+    const holderTable = new Map(Object.entries(holders));
+    const holdersOf = (type: string, name: string) => holderTable.get(`${type}:${name}`) ?? [];
     const registry = {
         getNamespaceOwners: (ns: string) => Object.keys(namespaces).filter((id) => namespaces[id] === ns),
         packageScopedHoldersOf: holdersOf,
