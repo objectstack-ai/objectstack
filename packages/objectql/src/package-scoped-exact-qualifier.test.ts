@@ -311,7 +311,9 @@ describe('fail closed — a registry with no package-scoped resolver refuses wha
    */
   it.each(UNWIRED_COVERED_TYPES)('CONTROL: %s, covered but read through `getItem` by this registry, is served as before, both ways', async (type) => {
     expect(registry.readsByPackage(type), 'this registry reads the type through getItem').toBe(false);
-    ship(type, 'solo', A);
+    // A shipped action is stored as its schema parse, which wants a target.
+    const extra = type === 'action' ? { type: 'url', target: 'https://example.com' } : {};
+    registry.registerItem(type, { name: 'solo', label: `alpha ${type}`, ...extra }, 'name' as never, A);
     expect(labelOf(await protocol.getMetaItem({ type, name: 'solo' }))).toBe(`alpha ${type}`);
     expect(labelOf(await protocol.getMetaItem({ type, name: 'solo', packageId: A }))).toBe(`alpha ${type}`);
   });
