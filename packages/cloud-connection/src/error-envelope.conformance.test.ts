@@ -61,6 +61,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+// The install-local plugin reaches `@objectstack/runtime` through a lazy `import()`;
+// its first load is paid here, at module top, never inside a clocked `it`.
+import '@objectstack/runtime';
 import { BaseResponseSchema, ApiErrorSchema, envelopeViolations } from '@objectstack/spec/api';
 import { CloudConnectionPlugin } from './cloud-connection-plugin.js';
 import { MarketplaceProxyPlugin } from './marketplace-proxy-plugin.js';
@@ -242,12 +245,12 @@ async function mountCloudConnection(opts: {
 async function driveCloudConnection(
     routes: Map<string, Handler>,
     key: string,
-    opts: { body?: unknown; raw?: { contentType: string; text: string } } = {},
+    opts: { body?: unknown; raw?: { contentType: string; text: string }; query?: string } = {},
 ): Promise<Captured> {
     const handler = routes.get(key);
     if (!handler) throw new Error(`no handler for ${key} (have: ${[...routes.keys()].join(', ')})`);
     const [method, path] = key.split(' ');
-    const { c, captured } = makeC({ url: `${HOST}${path}`, method, body: opts.body, raw: opts.raw });
+    const { c, captured } = makeC({ url: `${HOST}${path}${opts.query ?? ''}`, method, body: opts.body, raw: opts.raw });
     await handler(c);
     return captured;
 }
@@ -351,6 +354,32 @@ describe('plugin-route door — CloudConnectionPlugin error exits (#9267)', () =
         expectDeclaredErrorEnvelope(
             await driveCloudConnection(routes, `POST ${CC}/install`, { body: {} }),
             { status: 400, code: 'INVALID_REQUEST' },
+        );
+    });
+
+    // [#32083] The install-namespace door's own refusals.
+    it('GET /install-namespace with a parameter outside its closed set → 400 in the declared envelope', async () => {
+        const routes = await mountCloudConnection({ resolvesEnvironment: true, userId: 'usr_1', controlPlaneApiKey: 'svc-key' });
+        expectDeclaredErrorEnvelope(
+            await driveCloudConnection(routes, `GET ${CC}/install-namespace`, { query: '?package_id=pkg_1&packageId=pkg_1' }),
+            { status: 400, code: 'VALIDATION_ERROR' },
+        );
+    });
+
+    it('GET /install-namespace with a session but no cloud credential → 503 in the declared envelope', async () => {
+        const routes = await mountCloudConnection({ resolvesEnvironment: true, userId: 'usr_1' });
+        expectDeclaredErrorEnvelope(
+            await driveCloudConnection(routes, `GET ${CC}/install-namespace`, { query: '?package_id=pkg_1' }),
+            { status: 503, code: 'CLOUD_UNCONFIGURED' },
+        );
+    });
+
+    it('GET /install-namespace with the control plane unreachable → 502 in the declared envelope', async () => {
+        const routes = await mountCloudConnection({ resolvesEnvironment: true, userId: 'usr_1', controlPlaneApiKey: 'svc-key' });
+        vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNREFUSED'); }));
+        expectDeclaredErrorEnvelope(
+            await driveCloudConnection(routes, `GET ${CC}/install-namespace`, { query: '?package_id=pkg_1' }),
+            { status: 502, code: 'EXTERNAL_SERVICE_ERROR' },
         );
     });
 

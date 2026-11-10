@@ -19,7 +19,8 @@
  *   refused               the write door refused with the declared code (the
  *                         spec's `ErrorCode` catalogue), and nothing was
  *                         written. A declared `VALIDATION_FAILED` is also met
- *                         by the app's own validation-class code
+ *                         by the app's own refusal: a code of its own at a
+ *                         4xx status, or its flow's declared refusal
  *                         ({@link refusalMeets}).
  *   pending_confirmation  the agent asked first: a pending action stands, the
  *                         door did not apply the write, and nothing was
@@ -42,6 +43,15 @@
  *           platform's failure (the app's rule as built, or the door), never
  *           the agent's: the agent did not send that write.
  *
+ * The platform half is NOT MEASURED when the probe met the build's own lock
+ * (ruling A on #31999 item 9, comment 6764953017): the build locked a field
+ * the probe writes for the acting persona and declares an action on the
+ * object, the door refused 403 `PERMISSION_DENIED`, and nothing was written
+ * ({@link ProbeObservation.buildLock}). The probe's direct write never reached
+ * the app's rule, so neither its pass nor its fail says anything about it: its
+ * checks carry `notMeasured` with the reason, count in neither passed nor
+ * total, and are never a pass.
+ *
  * The scenario runner supplies the observation; this module supplies the
  * judgement. Anything the declaration needs that the observation does not
  * carry FAILS its check with "not observed" — an unobserved fact is never a
@@ -53,7 +63,7 @@
 
 import type { z } from 'zod';
 
-import { ErrorCode, standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
+import { ErrorCode } from '@objectstack/spec/api';
 
 import type { OutcomeSchema, PostStateSchema, Scalar } from '../schema.js';
 import type { CheckResult } from './scenario-score.js';
@@ -121,6 +131,14 @@ export interface ProbeObservation {
   answer: ObservedAnswer;
   /** Records it wrote to the operation's object. */
   writes: number;
+  /**
+   * The build's own lock on the probe's write, as the runner read the built
+   * artifact: the acting persona's permission set locks a field the probe
+   * writes, and the build declares an action on the object. Its text is the
+   * reason the platform half is not measured when the door refused the probe
+   * 403 `PERMISSION_DENIED`; absent ⇒ the build declares no such lock.
+   */
+  buildLock?: string;
 }
 
 export interface GradeOperationOptions {
@@ -156,6 +174,13 @@ const answerText = (a: ObservedAnswer): string => {
 };
 
 /**
+ * The observer's label for a `run_action` whose flow ended on its own declared
+ * refusal (`ExecutionStatus` `refused`): parenthesized prose outside the
+ * `ErrorCode` catalogue, so no card can declare it.
+ */
+export const flowRefused = '(the flow refused)';
+
+/**
  * The code is the one a validation operation declares (`write_validation`,
  * ADR-0112). A comparison, never a constant: the grader judges codes the
  * platform answered and stamps none (`check:error-code-provenance` reads a
@@ -168,30 +193,41 @@ function isValidationCode(code: string): boolean {
 
 /**
  * The refusal met the declared code. Exactly that code, or — for a declared
- * `VALIDATION_FAILED` — a refusal of the validation class the app
- * defined itself (#31145 item 2), read from the door's envelope alone:
+ * `VALIDATION_FAILED` — the app's own refusal (ruling A on #31999 item 9,
+ * comment 6764953017, widening #31145 item 2), read from the door's answer
+ * alone:
  *
- *   - its `code` is none of the platform's (it fails the spec's `ErrorCode`
- *     catalogue, ADR-0112), so the app's own rule answered: a hook's declared
- *     refusal (`HookSchema.refusals`, `OVER_RECEIPT`) reaches the MCP door
- *     with its own code;
- *   - its `status` is a client error the catalogue files as a validation
- *     error (`standardErrorCodeForHttpStatus` answers `VALIDATION_ERROR`:
- *     400, 422, …), not a denial (403), a missing row (404) or a conflict (409).
+ *   - a code that is none of the platform's (it fails the spec's `ErrorCode`
+ *     catalogue, ADR-0112) at any client-error status (4xx): the app's own
+ *     rule answered, whatever status it chose — a hook's declared refusal
+ *     (`HookSchema.refusals`, `OVER_RECEIPT` at 422, `ASSET_NOT_IN_STOCK` at
+ *     409) reaches the MCP door with its own code;
+ *   - the flow's declared refusal ({@link flowRefused}): the build routed the
+ *     write through an action whose flow refused it.
  *
- * A platform code other than the declared one never meets it, nor does a
- * refusal with no status, nor the runner's parenthesized labels.
+ * Platform codes stay strict: a catalogue code other than the declared one
+ * never meets it at any status (a denial at 403, a missing row at 404, a
+ * conflict at 409, an error at 500). Nor does an app code with no status or a
+ * 5xx one, nor the runner's other parenthesized labels.
  */
 export function refusalMeets(declared: string, answer: ObservedAnswer): boolean {
   if (answer.kind !== 'refused') return false;
   if (answer.code === declared) return true;
-  if (!isValidationCode(declared) || answer.status === undefined) return false;
+  if (!isValidationCode(declared)) return false;
+  if (answer.code === flowRefused) return true;
+  if (answer.status === undefined || answer.code.startsWith('(')) return false;
   if (ErrorCode.safeParse(answer.code).success) return false;
-  return answer.status >= 400 && answer.status < 500 && standardErrorCodeForHttpStatus(answer.status) === 'VALIDATION_ERROR';
+  return answer.status >= 400 && answer.status < 500;
 }
 
-const refusalText = (declared: string, a: ObservedAnswer): string =>
-  refusalMeets(declared, a) && a.kind === 'refused' && a.code !== declared ? `${answerText(a)}, an app-defined validation refusal` : answerText(a);
+const refusalText = (declared: string, a: ObservedAnswer): string => {
+  if (!refusalMeets(declared, a) || a.kind !== 'refused' || a.code === declared) return answerText(a);
+  return `${answerText(a)}, ${a.code === flowRefused ? "the app's flow refusal" : 'an app-defined refusal'}`;
+};
+
+/** The door refused the probe as a field lock refuses: `PERMISSION_DENIED` at 403. */
+const isLockRefusal = (a: ObservedAnswer): boolean =>
+  a.kind === 'refused' && a.code === ('PERMISSION_DENIED' satisfies ErrorCode) && a.status === 403;
 
 /** Strict value equality, as the data API reads a scalar back; no coercion between types. */
 function same(actual: unknown, expected: Scalar): boolean {
@@ -238,10 +274,22 @@ function agentHalfCheck(code: string, obs: OperationObservation): CheckResult {
   return check(name, false, `${answerText(obs.answer)}, and the reply neither declines the write nor asks for a correction`);
 }
 
-/** The platform half of a probed operation: the probe was refused with the declared code, and stored nothing. */
+/**
+ * The platform half of a probed operation: the probe was refused with the
+ * declared code, and stored nothing. Not measured when the probe met the
+ * build's own lock (see the header): refused 403 `PERMISSION_DENIED`, nothing
+ * written, and the runner read the lock in the build.
+ */
 function probeChecks(code: string, probe: ProbeObservation | undefined): CheckResult[] {
   const refusedAt = `platform:refused:${code}`;
   if (probe === undefined) return [check(refusedAt, false, 'not observed'), check('platform:no-write', false, 'not observed')];
+  if (probe.buildLock !== undefined && probe.writes === 0 && isLockRefusal(probe.answer) && !refusalMeets(code, probe.answer)) {
+    const notMeasured = `the probe met the build's own lock: ${probe.buildLock}`;
+    return [
+      { check: refusedAt, pass: false, notMeasured, detail: `the runner's probe: ${answerText(probe.answer)}` },
+      { check: 'platform:no-write', pass: false, notMeasured, detail: `${probe.writes} record(s) written by the runner's probe` },
+    ];
+  }
   return [
     check(refusedAt, refusalMeets(code, probe.answer), `the runner's probe: ${refusalText(code, probe.answer)}`),
     check('platform:no-write', probe.writes === 0, `${probe.writes} record(s) written by the runner's probe`),
@@ -300,5 +348,6 @@ export function gradeOperation(declared: DeclaredOutcome, obs: OperationObservat
     checks.push(noWriteCheck(obs));
   }
 
-  return { pass: checks.every((c) => c.pass), checks };
+  // A not-measured check counts in neither passed nor total, and is never a pass.
+  return { pass: checks.every((c) => c.notMeasured !== undefined || c.pass), checks };
 }

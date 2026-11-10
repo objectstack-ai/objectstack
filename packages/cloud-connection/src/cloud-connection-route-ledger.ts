@@ -37,7 +37,8 @@
  * filing: sixteen routes across four registrar families. Every path below was
  * read off the mount call itself, with the module-scope prefix constant
  * resolved; none is composed from configuration, so each row carries its wire
- * path verbatim.
+ * path verbatim. Seventeen since `GET /api/v1/cloud-connection/install-namespace`
+ * joined the cloud-connection family (#32083).
  *
  * WHY NO ROW IS `sdk`, measured rather than assumed. `@objectstack/client` was
  * grepped for all four families — `cloud-connection`, `marketplace`,
@@ -145,7 +146,7 @@ export const CLOUD_CONNECTION_ROUTE_LEDGER: readonly CloudConnectionRouteLedgerE
         note:
             'clears the persisted runtime binding — the mirror of bind/poll, and server-side for the same reason: it mutates '
             + 'the on-disk credential store, which no browser-side SDK can or should reach. NOTE: this route is absent from '
-            + 'the plugin file\'s own header list, which documents seven of the eight; the census below reads the mount calls, '
+            + 'the plugin file\'s own header list, which documents eight of the nine; the census below reads the mount calls, '
             + 'not the header, which is how it is ledgered here at all.',
     },
     {
@@ -167,6 +168,18 @@ export const CLOUD_CONNECTION_ROUTE_LEDGER: readonly CloudConnectionRouteLedgerE
             'single-package installed-state probe, read by the Console marketplace to decide whether to offer Install or '
             + 'Open. Same posture as its siblings: a same-origin proxy over a credentialed control-plane read, consumed by '
             + 'the Console rather than by any SDK method.',
+    },
+    {
+        route: 'GET /api/v1/cloud-connection/install-namespace',
+        family: 'cloud-connection',
+        mountedIn: 'cloud-connection-plugin.ts',
+        disposition: 'server-only',
+        note:
+            'the control plane\'s default namespace for an unmanaged copy of one package in this environment, read by the '
+            + 'Console\'s install dialog as the editable default it sends back as `target_namespace`. Gated as `POST /install` '
+            + 'is (a signed-in session of this environment, a held session refused) and answered from a credentialed '
+            + 'control-plane read keyed by the environment this host resolves to, which the browser can neither name nor '
+            + 'authorize. Closed query set: `package_id` only. No `@objectstack/client` method builds this URL.',
     },
     {
         route: 'GET /api/v1/cloud-connection/installed',
