@@ -93,7 +93,13 @@ async function boot(posture: 'single' | 'isolated' | 'group', renamed: boolean, 
   const protocol = new ObjectStackProtocolImplementation(engine as never, () => new Map(), undefined);
   const emit = vi.fn(async () => ({ notificationId: 'n1' }));
   const services: Record<string, unknown> = {
-    manifest: { register: vi.fn() },
+    // [ADR-0150 D2] The plugin's own package and permission sets, as a booted
+    // kernel's `registerApp` holds them: `admin_full_access` is the platform's
+    // (the `sys` namespace), so a grant of it names a platform administrator.
+    manifest: { register: vi.fn((m: { id: string; namespace?: string; version?: string; type?: string; name?: string; permissions?: Array<Record<string, unknown>> }) => {
+      (engine as any).registry.installPackage({ id: m.id, namespace: m.namespace, version: m.version, type: m.type, name: m.name }, 'code');
+      for (const ps of m.permissions ?? []) (engine as any).registry.registerItem('permission', structuredClone(ps), 'name', m.id);
+    }) },
     objectql: engine,
     metadata,
     protocol,

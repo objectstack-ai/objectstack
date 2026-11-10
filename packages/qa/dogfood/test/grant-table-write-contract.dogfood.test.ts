@@ -217,3 +217,85 @@ describe('a grant naming an agent ceiling set is refused at every write door of 
     expect(await ceilingGrantsOf(personId)).toEqual([]);
   });
 });
+
+// [ADR-0090 D10] The same rule on every other door that gives a person a set:
+// a position (its definition at the metadata door, its assignment at the data
+// door) and a seed. The engine pins are `agent-ceiling-grant-refusal.test.ts`.
+describe('an agent ceiling set reaches no person through a position or a seed', () => {
+  const PKG = 'app.agentceilingdoors';
+  const CEILING = MCP_AGENT_PERMISSION_SET_READ;
+  let personId: string;
+  let personToken: string;
+
+  const fieldsOf = (body: any): any[] =>
+    body?.error?.details?.fields ?? body?.details?.fields ?? body?.fields ?? [];
+  const expectRefused = async (res: Response, field: string, value: string, label: string) => {
+    const body = await res.json();
+    expect([res.status, codeOf(body)], `${label}: ${JSON.stringify(body)}`).toEqual([400, 'VALIDATION_FAILED']);
+    expect(fieldsOf(body)[0], `${label}: ${JSON.stringify(body)}`).toMatchObject({ field, code: 'invalid_value', value });
+  };
+
+  beforeAll(async () => {
+    const email = 'grant-contract-agent-ceiling-doors@verify.test';
+    personToken = await stack.signUp(email);
+    personId = String((await ql.findOne('sys_user', { where: { email }, context: SYS }))?.id ?? '');
+    expect(personId, 'the person signed up').toBeTruthy();
+    const created = await stack.apiAs(admin, 'POST', '/packages', {
+      manifest: { id: PKG, name: 'Agent ceiling doors', version: '0.1.0', type: 'app', namespace: 'agentceil' },
+    });
+    expect(created.status, await created.clone().text()).toBe(201);
+  }, 120_000);
+
+  it('the metadata door refuses a position whose definition names an agent ceiling set, active and draft, and stores neither', async () => {
+    const body = { name: 'agent_ceiling_position', label: 'Agent ceiling', permissionSets: [SET, CEILING] };
+    await expectRefused(await stack.apiAs(admin, 'PUT', '/meta/position/agent_ceiling_position', body), 'permissionSets', CEILING, 'active');
+    await expectRefused(
+      await stack.apiAs(admin, 'PUT', `/meta/position/agent_ceiling_position?mode=draft&package=${PKG}`, body),
+      'permissionSets', CEILING, 'draft',
+    );
+    const read = await stack.apiAs(admin, 'GET', '/meta/position/agent_ceiling_position');
+    expect(read.status, 'no such position was stored').toBe(404);
+  });
+
+  it('control: a position naming a person set is saved, assigned, and its holder holds that set', async () => {
+    const saved = await stack.apiAs(admin, 'PUT', '/meta/position/person_set_position', {
+      name: 'person_set_position', label: 'Person set', permissionSets: [SET],
+    });
+    expect(saved.status, await saved.clone().text()).toBe(200);
+    const assigned = await stack.apiAs(admin, 'POST', '/data/sys_user_position', { user_id: personId, position: 'person_set_position' });
+    expect(assigned.status, await assigned.clone().text()).toBe(201);
+  });
+
+  it('the data door refuses assigning a position a package declares with an agent ceiling set, and stores nothing', async () => {
+    // A definition declared in code never meets the metadata door: registered
+    // the way a package's declaration reaches the catalog.
+    ql.registry.registerItem(
+      'position', { name: 'declared_ceiling_position', label: 'Declared', permissionSets: [CEILING] }, 'name', 'app.declared-ceiling',
+    );
+    const res = await stack.apiAs(admin, 'POST', '/data/sys_user_position', { user_id: personId, position: 'declared_ceiling_position' });
+    await expectRefused(res, 'position', 'declared_ceiling_position', 'assignment');
+    expect(await ql.find('sys_user_position', { where: { user_id: personId, position: 'declared_ceiling_position' }, context: SYS })).toEqual([]);
+  });
+
+  it('a published seed granting an agent ceiling set stores no grant, and a person-set seed does', async () => {
+    const seed = (name: string, set: string) => stack.apiAs(admin, 'PUT', `/meta/seed/${name}?mode=draft&package=${PKG}`, {
+      object: 'sys_user_permission_set', mode: 'insert', records: [{ user_id: personId, permission_set: set }],
+    });
+    expect((await seed('agent_ceiling_grant_seed', CEILING)).status).toBe(200);
+    expect((await seed('person_set_grant_seed', SET)).status).toBe(200);
+    const published = await stack.apiAs(admin, 'POST', `/packages/${PKG}/publish-drafts`, {});
+    expect(published.status, await published.clone().text()).toBe(200);
+    const grants = (await ql.find('sys_user_permission_set', { where: { user_id: personId }, context: SYS })) as any[];
+    expect(grants.map((g) => g.permission_set)).toContain(SET);
+    expect(grants.filter((g) => (MCP_AGENT_PERMISSION_SETS as readonly string[]).includes(String(g.permission_set)))).toEqual([]);
+  });
+
+  it('control: the person resolves the person set and no agent ceiling set', async () => {
+    const res = await stack.apiAs(personToken, 'GET', '/auth/me/permissions');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    const sets: string[] = (body?.data ?? body)?.permissionSets ?? [];
+    expect(sets).toContain(SET);
+    expect(sets.filter((s) => (MCP_AGENT_PERMISSION_SETS as readonly string[]).includes(s))).toEqual([]);
+  });
+});
