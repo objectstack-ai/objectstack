@@ -82,6 +82,7 @@ const result = ApiMethod.parse(data);
 | **ttl** | `{ field: string; expireAfter: string; onlyWhen?: Record<string, string \| number \| boolean \| object \| object> }` | optional | Per-row TTL auto-expiry (transient/event classes). |
 | **storage** | `{ strategy: 'rotation'; shards: integer; unit: Enum<'day' \| 'week' \| 'month'> }` | optional | Physical storage strategy for high-frequency telemetry (LifecycleService Rotator). |
 | **archive** | `{ after: string; to: string; keep?: string }` | optional | Cold-store archival (LifecycleService Archiver) — audit-class hot→cold hand-off. |
+| **seal** | `{ valueFields: string[] }` | optional | Seals the rows into signed, chained checkpoints (ADR-0154), so a change, insert or delete made outside the platform shows. Only `class: 'audit'` may declare it, and not beside `retention.onlyWhen`, a `ttl` on another field than `created_at`, or rotation `storage`. A deployment with no crypto provider seals nothing and reports that once at error. |
 | **reclaim** | `boolean` | optional | Run driver space reclamation (SQLite incremental_vacuum) after sweeping this object. Default true for non-record classes. |
 
 ### Nested Shape: `Lifecycle.retention`
@@ -114,6 +115,12 @@ const result = ApiMethod.parse(data);
 | **after** | `string` | ✅ | Rows older than this are copied to the archive datasource before hot deletion. |
 | **to** | `string` | ✅ | Target datasource name for cold storage. When it is not registered, the Archiver skips (audit rows are then retained, never dropped unarchived). |
 | **keep** | `string` | optional | How long archived rows are kept in cold storage (undefined = forever). |
+
+### Nested Shape: `Lifecycle.seal`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **valueFields** | `string[]` | ✅ | Columns that enter each sealed row as salted commitments instead of in clear, so a checkpoint never carries their values; every other declared column enters in clear. Each must name a declared field. |
 
 
 ---
@@ -358,6 +365,7 @@ const result = ApiMethod.parse(data);
 | **ttl** | `{ field: string; expireAfter: string; onlyWhen?: Record<string, string \| number \| boolean \| object \| object> }` | optional | Per-row TTL auto-expiry (transient/event classes). |
 | **storage** | `{ strategy: 'rotation'; shards: integer; unit: Enum<'day' \| 'week' \| 'month'> }` | optional | Physical storage strategy for high-frequency telemetry (LifecycleService Rotator). |
 | **archive** | `{ after: string; to: string; keep?: string }` | optional | Cold-store archival (LifecycleService Archiver) — audit-class hot→cold hand-off. |
+| **seal** | `{ valueFields: string[] }` | optional | Seals the rows into signed, chained checkpoints (ADR-0154), so a change, insert or delete made outside the platform shows. Only `class: 'audit'` may declare it, and not beside `retention.onlyWhen`, a `ttl` on another field than `created_at`, or rotation `storage`. A deployment with no crypto provider seals nothing and reports that once at error. |
 | **reclaim** | `boolean` | optional | Run driver space reclamation (SQLite incremental_vacuum) after sweeping this object. Default true for non-record classes. |
 
 ### Nested Shape: `Object.activityMilestones[number]`

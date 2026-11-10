@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 293 |
-| Object name statically decidable | 203 |
-| Object name chosen at run time | 90 |
-| Against a tenancy-enabled object | 196 |
+| Write call sites | 297 |
+| Object name statically decidable | 205 |
+| Object name chosen at run time | 92 |
+| Against a tenancy-enabled object | 198 |
 | Against an object declaring tenancy off | 7 |
-| Threading a tenant context | 225 |
+| Threading a tenant context | 228 |
 | Provably carrying none | 11 |
 | …and decidably tenancy-enabled | 3 |
-| Options argument unreadable | 57 |
-| …and decidably tenancy-enabled | 30 |
-| Threading a decidably elevated context | 161 |
+| Options argument unreadable | 58 |
+| …and decidably tenancy-enabled | 31 |
+| Threading a decidably elevated context | 164 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 121 |
+| Threading a context of undecidable elevation | 122 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-10 at `c5ed14410`.
+Measured on 2026-11-10 at `352a6461e`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1103 |
-| engine-shaped types recognised | 128 |
-| declared objects in the registry | 133 |
-| same-named calls subtracted as non-engine | 255 |
+| tracked non-test sources scanned | 1121 |
+| engine-shaped types recognised | 131 |
+| declared objects in the registry | 136 |
+| same-named calls subtracted as non-engine | 280 |
 
 ## Every site
 
@@ -119,6 +119,10 @@ Measured on 2026-11-10 at `c5ed14410`.
 | `packages/plugins/plugin-approvals/src/stored-process-package-backfill.ts` | `update` | `sys_approval_request` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/action-invocation-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/activity-changed-fields-backfill.ts` | `update` | `sys_activity` | enabled | elevated | 1 |
+| `packages/plugins/plugin-audit/src/audit-seal/sealer.ts` | `insert` | `AUDIT_CHECKPOINT_OBJECT` | undecidable | elevated | 1 |
+| `packages/plugins/plugin-audit/src/audit-seal/signer.ts` | `insert` | `AUDIT_SIGNING_KEY_OBJECT` | undecidable | elevated | 1 |
+| `packages/plugins/plugin-audit/src/audit-seal/signer.ts` | `delete` | `sys_secret` | enabled | options unreadable | 1 |
+| `packages/plugins/plugin-audit/src/audit-signing-key-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/auth-event-audit.ts` | `insert` | `sys_audit_log` | enabled | options unreadable | 1 |
 | `packages/plugins/plugin-audit/src/comment-parent-pair-backfill.ts` | `update` | `sys_comment` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/credential-use-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |

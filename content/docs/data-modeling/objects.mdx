@@ -182,6 +182,7 @@ lifecycle: {
 | `ttl` | Per-row expiry: `field` + `expireAfter`, plus optional `onlyWhen` — the same row filter (same value union) scoping the TTL reap; rows outside it are retained regardless of expiry, and the same rotation/`archive` incompatibilities apply |
 | `storage` | `{ strategy: 'rotation', shards, unit }` — time-shard + O(1) shard `DROP` (SQLite) |
 | `archive` | Cold-store hand-off: `after` (must equal `retention.maxAge`) + `to` (datasource name) + optional `keep` |
+| `seal` | Tamper evidence (ADR-0154), `audit` class only: `{ valueFields }` — see [Sealed audit objects](#sealed-audit-objects-lifecycleseal) |
 | `reclaim` | Space reclamation after sweeps (default on for non-`record`) |
 
 | Class | Contract | Typical use |
@@ -205,6 +206,42 @@ Enforcement rules:
 - Registering a datasource named `telemetry` routes every
   `telemetry`/`event`/`audit` object to it — separate storage, opt-in purely
   by the datasource's existence.
+
+#### Sealed audit objects (`lifecycle.seal`)
+
+An `audit`-class object that declares `seal` has its rows sealed by
+`@objectstack/plugin-audit` into signed, chained checkpoints, so a row changed,
+inserted or deleted outside the platform shows when the ledger is verified:
+
+```typescript
+lifecycle: {
+  class: 'audit',
+  retention: { maxAge: '90d' },
+  archive: { after: '90d', to: 'archive', keep: '7y' },
+  seal: { valueFields: ['old_value', 'new_value', 'metadata'] },
+}
+```
+
+- Each hour of `created_at` is sealed ten minutes after it ends: one
+  checkpoint per organization (and one for rows about no organization),
+  holding a Merkle root over the rows, signed with the deployment's Ed25519
+  key. A row that arrives later in a sealed hour is sealed as a `late`
+  checkpoint; rows that already exist when sealing starts are sealed oldest
+  first, archived rows included.
+- `valueFields` names the columns that enter a checkpoint as salted
+  commitments instead of in clear, so a checkpoint never carries their values.
+  Each must be a declared field (refused at parse time otherwise). The object
+  must declare `id` and `created_at`, and both stay in clear: a sealed object
+  that does not, or names either in `valueFields`, is not sealed.
+- Every column must have a type with one canonical spelling. A column of type
+  `password`, `secret`, `formula`, `summary`, `image`, `file`, `avatar`,
+  `video` or `audio` has none, and an object that declares one is not sealed.
+- Refused at parse time beside `seal`: a `class` other than `audit`,
+  `retention.onlyWhen`, a `ttl` on a field other than `created_at`, and
+  rotation `storage`. Each deletes part of a sealed hour.
+- Sealing needs a crypto provider, which the host passes to `AuditPlugin` as
+  `cryptoProvider`. Without one, nothing is sealed and the plugin says so once
+  at `error`.
 
 Operations knobs live in the `lifecycle` settings namespace: a runtime
 `enabled` switch, tenant-scoped `retention_overrides` (a regulated tenant
