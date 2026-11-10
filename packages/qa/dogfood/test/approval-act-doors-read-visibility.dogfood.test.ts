@@ -51,7 +51,8 @@
 //   6. ⭐ the walled posture (`isolated`), a request with no organization
 //      (ADR-0131 D1): every organization's administrator gets, on every act
 //      door, the answer an id that names no request gets, and the request is
-//      not touched; the platform administrator decides it.
+//      not touched; the platform administrator is not answered as for an
+//      unseen request, and the decision's write is refused by ADR-0131 D9.
 //
 // Each has a control: on the action door, the submitter is relayed the
 // route's `403 FORBIDDEN` and the approver decides (`200`); on a returned
@@ -496,7 +497,7 @@ describe('behind the organization wall (isolated posture), a request with no org
   const OWNER_B = 'actvis-nullorg-owner-b@verify.test';
 
   it(
-    'answers every organization administrator 404 REQUEST_NOT_FOUND on every act door for a request with no organization, the same as for no request, while the platform administrator decides it',
+    'answers every organization administrator 404 REQUEST_NOT_FOUND on every act door for a request with no organization, the same as for no request; the platform administrator is not answered as unseen, and ADR-0131 D9 refuses the decision write',
     async () => {
       const scene = await bootScene({ multiTenant: 'posture-only' });
       const { stack, ql, idOf, act, open, stored, snapshot, expectAnsweredAsMissing } = scene;
@@ -550,15 +551,24 @@ describe('behind the organization wall (isolated posture), a request with no org
         await expectAnsweredAsMissing(ownerAToken, orgLess.id, ACT_DOORS(ownerAId), 'no organization · owner of A');
         await expectAnsweredAsMissing(ownerBToken, orgLess.id, ACT_DOORS(ownerAId), 'no organization · owner of B');
 
-        // CONTROL — the platform administrator decides a request with no organization.
+        // CONTROL — the platform administrator is the actor the rule admits: the
+        // door does not answer them as for an unseen request. Under a walled
+        // posture the decision's action write carries no organization, which
+        // ADR-0131 D9 refuses at the engine, so the request is not decided at
+        // the door and nothing is written; the organization-ownership ceremony
+        // gives such a row its owner. (Admission is pinned at the service in
+        // `approval-tenant-positions-name-authority.test.ts`.)
         const before = await snapshot(orgLessForAdmin.id);
         expect(before.row?.status).toBe('pending');
-        // Admitted, never refused: the decision lands. (Its echo is read in the
-        // administrator's active organization, which the row is outside, so the
-        // answer may be the loud READ_BACK_FAILED, the write recorded.)
         const decided = await act(adminToken, orgLessForAdmin.id, 'approve', {});
-        expect(['REQUEST_NOT_FOUND', 'FORBIDDEN'], JSON.stringify(decided.body)).not.toContain(codeOf(decided));
-        expect((await stored(orgLessForAdmin.id))?.status).toBe('approved');
+        const label = JSON.stringify(decided);
+        expect(['REQUEST_NOT_FOUND', 'FORBIDDEN'], label).not.toContain(codeOf(decided));
+        // The door relays the engine's refusal under its own fault code; the
+        // subject it names is the action table whose write was refused.
+        expect(decided.status, label).toBe(500);
+        expect(codeOf(decided), label).toBe('APPROVAL_APPROVE_FAILED');
+        expect(String((decided.body as any)?.error ?? ''), label).toContain('sys_approval_action');
+        expect(await snapshot(orgLessForAdmin.id), 'nothing was written').toEqual(before);
 
         // CONTROL — A's own administrator still decides A's request through the
         // override: the refusal above is about the missing organization.
