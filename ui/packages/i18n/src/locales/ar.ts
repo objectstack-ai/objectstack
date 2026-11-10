@@ -4498,6 +4498,16 @@ const ar = {
       expandTable: 'توسيع',
       exitExpandedTable: 'إغلاق',
     },
+    answerSource: {
+      title: 'كيف تم حساب ذلك',
+      object: 'الكائن',
+      filter: 'عامل التصفية',
+      allRecords: 'كل السجلات',
+      groupedBy: 'مجمّعة حسب',
+      aggregations: 'التجميعات',
+      records: 'السجلات',
+      visibleToYou: 'فقط السجلات التي يمكنك رؤيتها',
+    },
     tool: {
       aggregate_data: "تجميع البيانات ذات الصلة",
       get_record: "قراءة هذا السجل",

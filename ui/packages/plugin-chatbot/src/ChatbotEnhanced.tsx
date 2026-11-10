@@ -101,7 +101,9 @@ import {
   type RecordWrite,
   type SampleDataCleanup,
   type ReplayOutcome,
+  type AnswerSource,
 } from './mapMessages';
+import { AnswerSourceBlock } from './AnswerSource';
 
 /**
  * One chat message as `<ChatbotEnhanced>` RENDERS it — the runtime contract of
@@ -391,6 +393,13 @@ export interface ChatbotEnhancedToolInvocation {
    * update, and three buttons: 确认 / 打开完整表单 / 取消.
    */
   recordWrite?: RecordWrite;
+  /**
+   * The `source` block a data tool answered beside its result: what the
+   * answer was computed from, drawn for every reader as the turn's collapsed
+   * "How this was computed" block. Only this lifted copy is drawn there, never
+   * `result` itself.
+   */
+  answerSource?: AnswerSource;
   /**
    * cloud#3565 — 「清理示例数据」: the tables and counts the seed ledger
    * recorded, listed on the card before the user confirms (the generic
@@ -4843,6 +4852,15 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                           )}
                         </ListLinkContext.Provider>
                         </RecordLinkContext.Provider>
+                      ) : null}
+                      {!isUser ? (
+                        <AnswerSourceBlock
+                          sources={tools.flatMap((tool) =>
+                            tool.answerSource
+                              ? [{ key: tool.toolCallId, source: tool.answerSource }]
+                              : [],
+                          )}
+                        />
                       ) : null}
                       {!isUser && sources.length > 0 ? (
                         <Sources>

@@ -4387,6 +4387,16 @@ const zh = {
       expandTable: '展开',
       exitExpandedTable: '关闭',
     },
+    answerSource: {
+      title: '计算方式',
+      object: '对象',
+      filter: '筛选条件',
+      allRecords: '全部记录',
+      groupedBy: '分组依据',
+      aggregations: '汇总',
+      records: '记录',
+      visibleToYou: '仅包含你可见的记录',
+    },
     tool: {
       aggregate_data: '汇总相关数据',
       get_record: '读取这条记录',
