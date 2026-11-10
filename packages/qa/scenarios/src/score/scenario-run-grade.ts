@@ -460,7 +460,7 @@ export function truthFigures(truth: Truth, object: string, label: string, tol?: 
  * and a failed attempt ("I couldn't get the number of accounts") reads as one.
  * So does a write the reply says it withheld ({@link WITHHELD_ACT}).
  */
-const DECLINE =/无法|不能|无权|没有权限|权限不足|看不到|不可见|不提供|未记录|没有记录|没有相关数据|\b(?:cannot|can't|can ?not|could ?not|couldn't|unable|not able|not permitted|not allowed|not authori[sz]ed|permission denied|no (?:read )?(?:access|permission)|(?:do not|don't|does not|doesn't) have (?:the )?(?:read )?(?:access|permission)|lacks? (?:the )?(?:read )?(?:access|permission)|not available|isn't available|is not recorded|not recorded|no data)\b/i;
+const DECLINE = /无法|不能|无权|没有权限|权限不足|看不到|不可见|不提供|未记录|没有记录|没有相关数据|\b(?:cannot|can't|can ?not|could ?not|couldn't|unable|not able|not permitted|not allowed|not authori[sz]ed|permission denied|no (?:read )?(?:access|permission)|(?:do not|don't|does not|doesn't) have (?:the )?(?:read )?(?:access|permission)|lacks? (?:the )?(?:read )?(?:access|permission)|not available|isn't available|is not recorded|not recorded|no data)\b/i;
 
 /**
  * The code a door answers a caller it does not let read (ADR-0112). A literal

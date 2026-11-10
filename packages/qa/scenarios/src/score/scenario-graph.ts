@@ -130,7 +130,7 @@ export function artifactToEvalGraph(artifact: unknown): EvalGraph {
     })
     .sort((a, b) => a.priority - b.priority || a.i - b.i);
 
-  const objects =collection('objects').map((raw, i) => {
+  const objects = collection('objects').map((raw, i) => {
     const o = named(raw, `objects[${i}]`);
     const fieldsRaw = o.fields ?? {};
     if (!isBag(fieldsRaw)) {
