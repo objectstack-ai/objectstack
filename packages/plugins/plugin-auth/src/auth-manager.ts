@@ -73,7 +73,12 @@ export interface OrganizationAccessPolicySource {
   isDelegatedAdministrator?(
     userId: string,
     organizationId: string | undefined,
-    grants: { positions: readonly string[]; permissions: readonly string[] },
+    grants: {
+      positions: readonly string[];
+      permissions: readonly string[];
+      /** [ADR-0150 D3] Which package's set each of {@link permissions} is. */
+      permissionSetAddresses?: readonly { packageId: string | null; name: string }[];
+    },
   ): Promise<boolean>;
 }
 
@@ -6755,7 +6760,11 @@ export class AuthManager {
     const delegated = this.orgAccessPolicySource?.isDelegatedAdministrator;
     if (!delegated) return false;
     try {
-      return await delegated(userId, organizationId, { positions: grants.positions, permissions: grants.permissions });
+      return await delegated(userId, organizationId, {
+        positions: grants.positions,
+        permissions: grants.permissions,
+        ...(grants.permissionSetAddresses ? { permissionSetAddresses: grants.permissionSetAddresses } : {}),
+      });
     } catch {
       return true;
     }

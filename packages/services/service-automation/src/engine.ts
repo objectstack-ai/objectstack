@@ -801,6 +801,13 @@ export type FlowObjectSchemaResolver = (
 export interface FlowUserGrants {
   positions: string[];
   permissions: string[];
+  /**
+   * [ADR-0150 D3] The `(package, name)` address of each set in
+   * {@link permissions} (`resolveUserAuthzGrants`' own field). Run setup seeds
+   * it beside them ({@link SeededRunContext.permissionSetAddresses}). A
+   * resolver that omits it leaves the names to resolve caller-less.
+   */
+  permissionSetAddresses?: SeededRunContext['permissionSetAddresses'];
   tenantId?: string;
   /**
    * The user's peers in the organization the resolver was asked about, the

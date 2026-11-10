@@ -4317,6 +4317,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/permission-set-address.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/permission-set-resolution-memo.test.ts",
       "verb": "findOne",
       "pinned": 1

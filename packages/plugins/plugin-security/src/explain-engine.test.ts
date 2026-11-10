@@ -1224,6 +1224,8 @@ describe('buildContextForUser', () => {
   it('reconstructs positions + direct grants + the everyone anchor', async () => {
     const ctx = await buildContextForUser(ql, 'u2', NOW, ORG);
     expect(ctx).toEqual({
+      // [ADR-0150 D3] The address of the set the grant conferred; the catalog here serves it from no package.
+      permissionSetAddresses: [{ packageId: null, name: 'payroll_reader' }],
       userId: 'u2',
       positions: ['hr_specialist', 'everyone'],
       permissions: ['payroll_reader'],
