@@ -198,9 +198,14 @@ export type {
   CommentSharingLike,
   CommentThreadTarget,
 } from './comment-access-hooks.js';
-// [ADR-0154] The audit ledger's tamper evidence — its pure core: the RFC 8785
-// canonical form, salted column commitments, per-checkpoint seed salts, the
-// RFC 6962 Merkle tree and the checkpoint / amendment signed bodies. The
-// `sys_secret` reference union reads `AUDIT_SEAL_SECRET_HOLDERS` and
-// `isAuditSealSecretCoordinate` from here.
-export * from './audit-seal/index.js';
+// [ADR-0154] The audit ledger's tamper evidence. Only what a package outside
+// this one reads: the `sys_secret` reference union (`@objectstack/cli`) finds
+// the sealer's secrets through the holder list, the coordinate predicate and
+// the two sealing contexts. The rest of the pure core (`./audit-seal/`) is
+// reached by path inside this package.
+export {
+  AUDIT_SEAL_SECRET_HOLDERS,
+  checkpointSeedContext,
+  isAuditSealSecretCoordinate,
+  signingKeyContext,
+} from './audit-seal/index.js';

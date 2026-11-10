@@ -22,15 +22,13 @@
  * columns the family reads.
  */
 
+import { randomBytes } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { LocalCryptoProvider } from '@objectstack/service-settings';
 import {
-  AUDIT_CHECKPOINT_OBJECT,
-  AUDIT_SIGNING_KEY_OBJECT,
+  AUDIT_SEAL_SECRET_HOLDERS,
   checkpointSeedContext,
-  encodeCheckpointSeed,
-  generateCheckpointSeed,
   signingKeyContext,
 } from '@objectstack/plugin-audit';
 import type { CryptoContext } from '@objectstack/spec/contracts';
@@ -89,8 +87,11 @@ const sysSecretObject = {
   },
 };
 
+/** The holder objects, named by the producer's own list rather than restated here. */
+const [CHECKPOINT_HOLDER, SIGNING_KEY_HOLDER] = AUDIT_SEAL_SECRET_HOLDERS;
+
 const checkpointObject = {
-  name: AUDIT_CHECKPOINT_OBJECT,
+  name: CHECKPOINT_HOLDER.object,
   label: 'Audit Checkpoint',
   fields: {
     ...Object.fromEntries(['id', 'sealed_object', 'tenant_id', 'seed_handle'].map((f) => [f, textField(f)])),
@@ -98,7 +99,7 @@ const checkpointObject = {
   },
 };
 const signingKeyObject = {
-  name: AUDIT_SIGNING_KEY_OBJECT,
+  name: SIGNING_KEY_HOLDER.object,
   label: 'Audit Signing Key',
   fields: Object.fromEntries(['id', 'fingerprint', 'private_handle'].map((f) => [f, textField(f)])),
 };
@@ -131,7 +132,7 @@ async function buildRuntime(opts: { registerHolders: boolean }) {
 /** One checkpoint's seed and one signing key, each held by its row. */
 async function sealSomething(rt: Awaited<ReturnType<typeof buildRuntime>>, holders: boolean) {
   const seedCtx = checkpointSeedContext('sys_audit_log', 'org_1', 0);
-  const seedHandle = await rt.mint(encodeCheckpointSeed(generateCheckpointSeed()), seedCtx);
+  const seedHandle = await rt.mint(randomBytes(32).toString('base64'), seedCtx);
   const fingerprint = 'ab'.repeat(32);
   const keyCtx = signingKeyContext(fingerprint);
   const privateHandle = await rt.mint('private-half-placeholder', keyCtx);

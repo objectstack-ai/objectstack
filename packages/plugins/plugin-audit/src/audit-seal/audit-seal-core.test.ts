@@ -29,6 +29,7 @@ import {
   leafInput,
   merkleRoot,
   nodeHash,
+  rowIdOf,
   sealedColumnSet,
   signedBodyBytes,
   signingKeyContext,
@@ -341,5 +342,63 @@ describe('signed bodies (D4, D7, D8)', () => {
     expect(e).toMatchObject({ chain_key: 'org:org_1', row_id: null, sealed_commitment: null });
     expect(amendmentBodyFromRow({ ...e, first_sequence: '0', covered_to: new Date(expiry.covered_to) })).toEqual(expiry);
     expect(() => amendmentBodyFromRow({ ...e, first_sequence: 5 })).toThrow(SignedBodyError);
+  });
+});
+
+describe('a refusal never echoes the value it refused (D2: value columns stay on the host)', () => {
+  // A value column holds audit payloads (old_value, new_value, metadata). An
+  // error message is logged, so it names the column and the type, never the value.
+  const SECRET = 'hunter2-old-password';
+  const messageOf = (fn: () => unknown): string => {
+    try { fn(); } catch (err) { return (err as Error).message; }
+    throw new Error('expected a refusal');
+  };
+  const types = { created_at: { type: 'datetime' }, flag: { type: 'boolean' }, when: { type: 'datetime' } };
+  const cols = (committed: string[]) => ({ clear: ['created_at', 'id'], committed });
+  const row = (extra: Record<string, unknown>) => ({ id: 'r', created_at: '2026-01-01T00:00:00.000Z', ...extra });
+  const salt = () => Buffer.alloc(32);
+
+  it.each([
+    ['an unparseable datetime', () => leafInput(row({ when: SECRET }), cols(['when']), types, salt), 'when'],
+    ['a non-boolean', () => leafInput(row({ flag: SECRET }), cols(['flag']), types, salt), 'flag'],
+    ['a datetime read directly', () => canonicalDatetime(SECRET, 'created_at'), 'created_at'],
+    ['a value JCS cannot write', () => commitValue(Buffer.alloc(32), { note: SECRET, n: Number.NaN }), 'n'],
+    ['a row with an unusable id', () => rowIdOf({ id: { token: SECRET } }), 'id'],
+  ] as const)('%s names the column and the type, not the value', (_label, fn, column) => {
+    const message = messageOf(fn);
+    expect(message).not.toContain(SECRET);
+    expect(message).not.toContain('NaN');
+    if (column !== 'id') expect(message).toContain(column);
+  });
+});
+
+describe('the deployment chain signs a NULL organization (D5)', () => {
+  it('writes "tenant_id":null into the signed bytes, and no organization key at all', () => {
+    const body: CheckpointSignedBody = {
+      sealed_object: 'sys_audit_log',
+      tenant_id: null,
+      sequence: 0,
+      kind: 'window',
+      window_start: '2026-11-10T04:00:00.000Z',
+      window_end: '2026-11-10T05:00:00.000Z',
+      sealed_through: '2026-11-10T05:00:00.000Z',
+      leaf_count: 1,
+      row_ids: ['r1'],
+      root: 'a'.repeat(64),
+      previous_digest: null,
+      columns: { clear: ['created_at', 'id'], committed: [] },
+      canon_version: AUDIT_SEAL_CANON_VERSION,
+      seed_handle: 'sec_0',
+      fencing_token: '1',
+      sealed_at: '2026-11-10T05:10:00.000Z',
+      signing_key_id: 'c'.repeat(64),
+    };
+    // Read back from the stored row, as a verifier does.
+    const stored = checkpointRow(body, { id: 'cp0', signature: 's' });
+    const text = signedBodyBytes(checkpointBodyFromRow(stored)).toString('utf8');
+    expect(text).toContain('"tenant_id":null');
+    // The stored-only key never enters the signed bytes.
+    expect(text).not.toContain('chain_key');
+    expect(text).not.toContain('deployment');
   });
 });

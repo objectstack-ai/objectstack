@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { createHash } from 'node:crypto';
-import { canonicalJson, canonicalJsonBytes } from './jcs.js';
+import { canonicalJsonBytes } from './jcs.js';
 
 /**
  * ADR-0154 D1 — the canonical form of a sealed row: each row is one leaf, its
@@ -13,7 +13,7 @@ import { canonicalJson, canonicalJsonBytes } from './jcs.js';
  * epoch milliseconds; `0`/`1` for a boolean), and the row moves from one to
  * the other at `archive.after`. So every value is brought to one spelling by
  * its column's DECLARED type before it is serialized ({@link canonicalValue}),
- * and the serialization is RFC 8785 ({@link canonicalJson}).
+ * and the serialization is RFC 8785 (`canonicalJson` in `./jcs.ts`).
  *
  * `canon` version 1 is the form below. A future form is a new version that
  * travels in every checkpoint (`canon_version`), never a silent change here.
@@ -79,7 +79,7 @@ export function canonicalDatetime(value: unknown, at = 'value'): string {
   } else {
     throw new CanonicalFormError(`${at}: a ${value === null ? 'null' : typeof value} is not a datetime`);
   }
-  if (Number.isNaN(date.getTime())) throw new CanonicalFormError(`${at}: '${String(value)}' does not parse as a datetime`);
+  if (Number.isNaN(date.getTime())) throw new CanonicalFormError(`${at}: a ${typeof value} that does not parse as a datetime`);
   return date.toISOString();
 }
 
@@ -105,7 +105,7 @@ export function canonicalValue(value: unknown, type: string | undefined, at = 'v
   if (type === 'boolean') {
     if (value === true || value === 1 || value === '1') return true;
     if (value === false || value === 0 || value === '0') return false;
-    throw new CanonicalFormError(`${at}: '${String(value)}' is not a boolean`);
+    throw new CanonicalFormError(`${at}: a ${typeof value} that is not a boolean`);
   }
   return value;
 }
@@ -166,15 +166,7 @@ export function rowIdOf(row: Readonly<Record<string, unknown>>): string {
   const id = row.id;
   if (typeof id === 'string' && id !== '') return id;
   if (typeof id === 'number' && Number.isFinite(id)) return String(id);
-  throw new CanonicalFormError(`a sealed row carries no usable id (${canonicalJsonSafe(id)})`);
-}
-
-function canonicalJsonSafe(value: unknown): string {
-  try {
-    return canonicalJson(value ?? null);
-  } catch {
-    return typeof value;
-  }
+  throw new CanonicalFormError(`a sealed row carries no usable id (a ${id === null ? 'null' : typeof id})`);
 }
 
 /** UTF-16 code-unit order — the order JCS sorts names in, and the leaf order below uses. */

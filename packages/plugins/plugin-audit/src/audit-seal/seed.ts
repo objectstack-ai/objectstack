@@ -97,7 +97,7 @@ export function columnSaltsOf(seed: Uint8Array, sealedObject: string): (rowId: s
  * chain must stay verifiable after the organization is deleted (D5).
  */
 export function checkpointSeedContext(sealedObject: string, tenantId: string | null, sequence: number): CryptoContext {
-  if (!Number.isSafeInteger(sequence) || sequence < 0) throw new Error(`a checkpoint sequence is a non-negative integer, not ${sequence}`);
+  if (!Number.isSafeInteger(sequence) || sequence < 0) throw new Error('a checkpoint sequence is a non-negative integer');
   return { scope: AUDIT_SEAL_SCOPE, namespace: sealedObject, key: canonicalJson([tenantId, sequence]) };
 }
 

@@ -48,7 +48,7 @@ function write(value: unknown, at: string): string {
     case 'boolean':
       return value ? 'true' : 'false';
     case 'number':
-      if (!Number.isFinite(value)) throw new CanonicalJsonError(`${at}: ${String(value)} has no JSON form`);
+      if (!Number.isFinite(value)) throw new CanonicalJsonError(`${at}: a non-finite number has no JSON form`);
       return JSON.stringify(value);
     case 'string':
       if (UNPAIRED_SURROGATE.test(value)) throw new CanonicalJsonError(`${at}: a string holds an unpaired surrogate`);
