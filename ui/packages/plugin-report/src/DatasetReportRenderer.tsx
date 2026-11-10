@@ -117,6 +117,8 @@ import {
   // report's TABLE rows, its matrix headers and its chart's categories are put
   // in it (see `arrangeByDeclaredOptions`).
   buildCategoryRank,
+  // ADR-0150 D5 — the report's served package, sent on its dataset queries.
+  servedPackageId,
   type DatasetResultField,
   type DatasetDrillRange,
 } from '@object-ui/core';
@@ -161,6 +163,7 @@ interface DatasetCapableSource {
   queryDataset?: (
     dataset: string,
     selection: unknown,
+    options?: { packageId?: string },
   ) => Promise<{
     rows: Row[];
     fields?: DatasetResultField[];
@@ -600,6 +603,16 @@ function spanDrillRanges(
 }
 
 /**
+ * The package the rendered report is served from (ADR-0150 D5), which every
+ * dataset selection under it names as `?package=`: its datasets, the joined
+ * blocks' included, were authored against it. `undefined` for a report
+ * authored in the environment, whose selections send the bare name. Provided
+ * once by {@link DatasetReportRenderer} from the report's own `_packageId`, so
+ * the table, matrix, chart and joined-block readers below need no parameter.
+ */
+const ReportPackageContext = React.createContext<string | undefined>(undefined);
+
+/**
  * Shared fetch for one dataset selection.
  *
  * `order` (framework#3916) is scoped to what THIS selection projects before it
@@ -647,7 +660,8 @@ function useDatasetRows(
   // The report's period (`dateRange`) is part of the signature too: picking
   // another window on the chip is another selection, so it re-queries.
   const windowKey = JSON.stringify(timeWindow ?? null);
-  const signature = `${dataset}|${dimensions.join(',')}|${measures.join(',')}|${rfKey}|${totalsKey}|${orderKey}|${windowKey}`;
+  const packageId = React.useContext(ReportPackageContext);
+  const signature = `${packageId ?? ''}|${dataset}|${dimensions.join(',')}|${measures.join(',')}|${rfKey}|${totalsKey}|${orderKey}|${windowKey}`;
 
   // objectui#10814 — the data-invalidation bus (`notifyDataChanged` from
   // `@object-ui/react`), read the objectui#10623 way: the nonce moves when a
@@ -712,7 +726,7 @@ function useDatasetRows(
         // `runtimeFilter`, never a bucket. Absent, the selection is exactly
         // what a report without a period has always posted.
         ...(timeWindow ? { timeDimensions: [timeWindow] } : {}),
-      })
+      }, ...(packageId ? [{ packageId }] : []))
       .then((res) => {
         if (!cancelled) {
           setDatasetObject(typeof res?.object === 'string' && res.object ? res.object : undefined);
@@ -2229,7 +2243,17 @@ function DatasetMatrixTable({
   );
 }
 
-export const DatasetReportRenderer: React.FC<DatasetReportRendererProps> = ({
+/**
+ * Renders a dataset-bound report. The report's own served package
+ * (`servedPackageId`, ADR-0150 D5) is provided to every selection under it.
+ */
+export const DatasetReportRenderer: React.FC<DatasetReportRendererProps> = (props) => (
+  <ReportPackageContext.Provider value={servedPackageId(props.report)}>
+    <DatasetReportRendererBody {...props} />
+  </ReportPackageContext.Provider>
+);
+
+const DatasetReportRendererBody: React.FC<DatasetReportRendererProps> = ({
   report,
   dataSource,
   runtimeFilter,
