@@ -199,7 +199,8 @@ is a decision of its own record.
   on `c9246279` or in `objectstack-ai/hotcrm` at `235106f` carries a `connectorSource`, so no known producer is
   narrowed; per the startup-stage axis the rule lands at once, with no warning window.
 - *Why a bucket and not `engine-owned` plus columns.* The bucket is the one key the guard, the affordance matrix, the
-  injected-columns plan and the Console already branch on, and `engine-owned` means rows of no business value. The
+  injected-columns plan and the Console already branch on, and `engine-owned` names runtime rows the engine owns end
+  to end, not business data an organization reads. The
   objection ADR-0103 D1 raised against a new value (an old Console falls through to editable) was retired by its
   2026-07-20 addendum: the server-side guard refuses the write whatever the client renders, and the Console's bucket
   union is closed (`ui/packages/types/src/managed-by.ts#ManagedByBucket`), so the P2 spec card carries its row.
