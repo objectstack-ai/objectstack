@@ -22,8 +22,8 @@ the canonical API contract.
 ## TypeScript Usage
 
 ```typescript
-import { AuthEndpointSchema, AuthFeaturesConfigSchema, AuthProviderInfoSchema, DeviceRequestResponseSchema, DeviceTokenResponseSchema, EmailPasswordConfigPublicSchema, GetAuthConfigResponseSchema, OneTimeTokenHandoffQuerySchema, OneTimeTokenVerifyRequestSchema, OneTimeTokenVerifyResponseSchema } from '@objectstack/spec/api';
-import type { AuthEndpoint, AuthFeaturesConfig, AuthProviderInfo, DeviceRequestResponse, DeviceTokenResponse, EmailPasswordConfigPublic, GetAuthConfigResponse, OneTimeTokenHandoffQuery, OneTimeTokenVerifyRequest, OneTimeTokenVerifyResponse } from '@objectstack/spec/api';
+import { AuthEndpointSchema, AuthFeaturesConfigSchema, AuthProviderInfoSchema, DeviceRequestResponseSchema, DeviceTokenResponseSchema, EmailPasswordConfigPublicSchema, GetAuthConfigResponseSchema, OneTimeTokenHandoffQuerySchema, OneTimeTokenVerifyRequestSchema, OneTimeTokenVerifyResponseSchema, OrganizationEditionChoiceSchema } from '@objectstack/spec/api';
+import type { AuthEndpoint, AuthFeaturesConfig, AuthProviderInfo, DeviceRequestResponse, DeviceTokenResponse, EmailPasswordConfigPublic, GetAuthConfigResponse, OneTimeTokenHandoffQuery, OneTimeTokenVerifyRequest, OneTimeTokenVerifyResponse, OrganizationEditionChoice } from '@objectstack/spec/api';
 
 // Validate data
 const result = AuthEndpointSchema.parse(data);
@@ -65,7 +65,8 @@ const result = AuthEndpointSchema.parse(data);
 | **phoneNumberOtp** | `boolean` | optional | Phone-number OTP sign-in and self-service password reset available — requires the phoneNumber plugin plus a deliverable SMS service |
 | **emailDelivery** | `boolean` | optional | Email leaves this deployment: the wired email service reports itself configured with a real transport, so password-reset, verification and invitation mail is delivered. False with no email service and with the stock log transport, which writes mail to the server console instead of sending it; the forgot-password page can then say a reset link cannot be emailed here and to ask an administrator. A statement about the deployment, never about an address: the password-reset request answers known and unknown addresses alike either way. Absent means not live |
 | **cloudManaged** | `boolean` | optional | Managed (cloud-hosted, SSO-only) mode: people arrive through the identity provider, so the UI hides inviting, creating users and setting their passwords; absent means not managed |
-| **developerEditionCreate** | `boolean` | optional | Developer Edition organizations can be created here: true only where the host's organization-create door accepts ?edition=developer, so the create-organization form may offer that choice. An advertisement of the host's door, not a switch: it changes no server behaviour. Absent or false means no developer choice is offered |
+| **developerEditionCreate** | `boolean` | optional | Developer Edition organizations can be created here: true exactly when organizationEditions holds a choice whose edition is developer, i.e. the host's organization-create door accepts ?edition=developer. The same fact as a boolean, so an action, param or field group can gate on it with requiresFeature; the choice's words and cap live in organizationEditions. An advertisement of the host's door, not a switch: it changes no server behaviour. Absent or false means no developer choice is offered |
+| **organizationEditions** | `{ edition: string; label: string; hint: string; memberLimit?: integer }[]` | optional | Editions the host's organization-create door accepts besides its default, each with the edition query value, a label and a hint the host resolved in the request language, and its member cap when one applies. The create-organization form draws each as a choice that starts unchecked (the renderer's rule: no choice is ever picked for the user) and, when one is picked, sends its edition value to the create door. Served only when the host declares choices; absent means the door takes no edition and the form offers none |
 | **turnstileSiteKey** | `string` | optional | Public Cloudflare Turnstile site key, present only while the opt-in sign-up challenge is on: the sign-up form renders the widget and sends its token in the x-captcha-response header; absent means no challenge |
 | **multiOrgEnabled** | `boolean` | optional | Multi-organization capability: true when the effective tenancy posture enforces an organization wall (group or isolated), the same answer the create-organization door gives; false on a single posture, and on a degraded deployment that asked for isolation but has none. The console offers creating, switching and leaving organizations only when it is on; the flag is default-on, so absent reads as on |
 | **tenancyPosture** | `Enum<'single' \| 'group' \| 'isolated'>` | optional | Which tenancy posture is in force (single, group or isolated): the effective posture, from the same derivation as multiOrgEnabled. A value, not a gate: multiOrgEnabled stays the capability flag, while this tells the console how to render organization context (under group the organization switcher picks the write target and reads span every organization the member belongs to) |
@@ -76,6 +77,15 @@ const result = AuthEndpointSchema.parse(data);
 | **admin** | `boolean` | optional | Admin plugin wired (forced on whenever SCIM is enabled), so user administration (creating, banning, unlocking and impersonating users, setting their passwords) is available; the console shows those actions only when it is true. Absent means not wired |
 | **termsUrl** | `string` | optional | Terms-of-service link shown beneath the login and register cards: the trimmed OS_TERMS_URL value when set, otherwise the public ObjectStack terms page; absent when the operator set OS_TERMS_URL to an empty or blank (whitespace-only) value to suppress the link |
 | **privacyUrl** | `string` | optional | Privacy-policy link shown beneath the login and register cards: the trimmed OS_PRIVACY_URL value when set, otherwise the public ObjectStack privacy page; absent when the operator set OS_PRIVACY_URL to an empty or blank (whitespace-only) value to suppress the link |
+
+### Nested Shape: `AuthFeaturesConfig.organizationEditions[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **edition** | `string` | ✅ | The value the organization-create door takes in its edition query parameter for this choice (snake_case, e.g. developer); the client sends it back unchanged when the choice is picked |
+| **label** | `string` | ✅ | Display name of the choice, already resolved by the host in the language the request asked for; the form shows it as given |
+| **hint** | `string` | ✅ | One line under the label saying what the choice means, already resolved by the host in the request language; the form shows it as given |
+| **memberLimit** | `integer` | optional | Most members an organization of this edition may hold, when the edition caps them; the host's own figure, so a form that mentions the cap never spells a constant of its own. Absent means no cap is stated |
 
 
 ---
@@ -204,7 +214,8 @@ This schema accepts one of the following structures:
 | **phoneNumberOtp** | `boolean` | optional | Phone-number OTP sign-in and self-service password reset available — requires the phoneNumber plugin plus a deliverable SMS service |
 | **emailDelivery** | `boolean` | optional | Email leaves this deployment: the wired email service reports itself configured with a real transport, so password-reset, verification and invitation mail is delivered. False with no email service and with the stock log transport, which writes mail to the server console instead of sending it; the forgot-password page can then say a reset link cannot be emailed here and to ask an administrator. A statement about the deployment, never about an address: the password-reset request answers known and unknown addresses alike either way. Absent means not live |
 | **cloudManaged** | `boolean` | optional | Managed (cloud-hosted, SSO-only) mode: people arrive through the identity provider, so the UI hides inviting, creating users and setting their passwords; absent means not managed |
-| **developerEditionCreate** | `boolean` | optional | Developer Edition organizations can be created here: true only where the host's organization-create door accepts ?edition=developer, so the create-organization form may offer that choice. An advertisement of the host's door, not a switch: it changes no server behaviour. Absent or false means no developer choice is offered |
+| **developerEditionCreate** | `boolean` | optional | Developer Edition organizations can be created here: true exactly when organizationEditions holds a choice whose edition is developer, i.e. the host's organization-create door accepts ?edition=developer. The same fact as a boolean, so an action, param or field group can gate on it with requiresFeature; the choice's words and cap live in organizationEditions. An advertisement of the host's door, not a switch: it changes no server behaviour. Absent or false means no developer choice is offered |
+| **organizationEditions** | `{ edition: string; label: string; hint: string; memberLimit?: integer }[]` | optional | Editions the host's organization-create door accepts besides its default, each with the edition query value, a label and a hint the host resolved in the request language, and its member cap when one applies. The create-organization form draws each as a choice that starts unchecked (the renderer's rule: no choice is ever picked for the user) and, when one is picked, sends its edition value to the create door. Served only when the host declares choices; absent means the door takes no edition and the form offers none |
 | **turnstileSiteKey** | `string` | optional | Public Cloudflare Turnstile site key, present only while the opt-in sign-up challenge is on: the sign-up form renders the widget and sends its token in the x-captcha-response header; absent means no challenge |
 | **multiOrgEnabled** | `boolean` | optional | Multi-organization capability: true when the effective tenancy posture enforces an organization wall (group or isolated), the same answer the create-organization door gives; false on a single posture, and on a degraded deployment that asked for isolation but has none. The console offers creating, switching and leaving organizations only when it is on; the flag is default-on, so absent reads as on |
 | **tenancyPosture** | `Enum<'single' \| 'group' \| 'isolated'>` | optional | Which tenancy posture is in force (single, group or isolated): the effective posture, from the same derivation as multiOrgEnabled. A value, not a gate: multiOrgEnabled stays the capability flag, while this tells the console how to render organization context (under group the organization switcher picks the write target and reads span every organization the member belongs to) |
@@ -268,6 +279,20 @@ This schema accepts one of the following structures:
 | **timezone** | `string` | optional | Preferred timezone |
 | **createdAt** | `string` | optional |  |
 | **updatedAt** | `string` | optional |  |
+
+
+---
+
+## OrganizationEditionChoice
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **edition** | `string` | ✅ | The value the organization-create door takes in its edition query parameter for this choice (snake_case, e.g. developer); the client sends it back unchanged when the choice is picked |
+| **label** | `string` | ✅ | Display name of the choice, already resolved by the host in the language the request asked for; the form shows it as given |
+| **hint** | `string` | ✅ | One line under the label saying what the choice means, already resolved by the host in the request language; the form shows it as given |
+| **memberLimit** | `integer` | optional | Most members an organization of this edition may hold, when the edition caps them; the host's own figure, so a form that mentions the cap never spells a constant of its own. Absent means no cap is stated |
 
 
 ---
