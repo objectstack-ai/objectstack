@@ -31,14 +31,14 @@ export const SysPresence = ObjectSchema.create({
   systemFields: { tenant: false },
   requiredPermissions: ['manage_platform_settings'],
   description: 'Real-time user presence and activity tracking',
-  // [ADR-0079] The record title is `display_title`, a text formula over the
-  // same two columns `titleFormat` named. With no pointer declared, the
+  // [ADR-0079] The record title is `display_title`, a text formula naming the
+  // user and their status. With no pointer declared, the
   // registry's designate-only pass stamped `nameField: 'id'` (the first
   // title-eligible field), so a renderer honouring ADR-0079's order (an
   // explicit `nameField` wins over `titleFormat`) drew the raw id as the record
   // page's H1. The retired `titleFormat` template beside it is gone (refused at
   // save and by `os validate`); `sys-presence-display-title.test.ts` pins the
-  // pointer and the formula's inputs.
+  // pointer and the formula's reads.
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   highlightFields: ['user_id', 'status', 'last_seen'],
@@ -51,13 +51,17 @@ export const SysPresence = ObjectSchema.create({
     }),
 
     // [ADR-0079] The record title (`nameField` above). A formula is computed on
-    // read and has no stored column. It reads only this row's own columns —
-    // the user foreign key and the status token, never a field of the user
-    // record. Both are required, so the expression needs no null guard.
+    // read and has no stored column. It names the PERSON — the user's `name`,
+    // their `email` where the name is blank — ONE hop through `user_id`, the
+    // traversal the formula read path serves (ADR-0079 addendum), as
+    // plugin-security's `sys_user_permission_set` title does; the hop is read
+    // as the READER, so a user the reader may not read leaves the title null.
+    // The status is the option LABEL the reader reads (`label()`), not the
+    // stored token. `sys-presence-display-title.test.ts` pins the formula.
     display_title: Field.formula({
       label: 'Title',
       returnType: 'text',
-      expression: F`record.user_id + ' (' + record.status + ')'`,
+      expression: F`(isBlank(trim(record.user_id.name)) ? record.user_id.email : record.user_id.name) + ' (' + label(record.status) + ')'`,
       description: 'Record title: the user and their presence status (computed on read)',
     }),
 
