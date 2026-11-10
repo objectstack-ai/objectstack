@@ -3,7 +3,7 @@
  */
 
 import React from 'react';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AuthProvider } from '../AuthProvider';
@@ -11,6 +11,8 @@ import { useAuth } from '../useAuth';
 import { AuthGuard } from '../AuthGuard';
 import type { AuthClient } from '../types';
 import { registerBeforeSignOut, resetBeforeSignOutForTests } from '../beforeSignOut';
+import { createAuthClient } from '../createAuthClient';
+import { createAuthenticatedFetch } from '../createAuthenticatedFetch';
 
 function createMockClient(overrides: Partial<AuthClient> = {}): AuthClient {
   return {
@@ -423,5 +425,120 @@ describe('AuthGuard', () => {
     await waitFor(() => {
       expect(screen.getByText('Access denied')).toBeTruthy();
     });
+  });
+});
+
+/**
+ * objectstack#32138 — a 401 on an API call re-checks the session, and only
+ * the server's "no session" ends it in the tab. Driven through the real
+ * `createAuthenticatedFetch` and a real `createAuthClient`, whose `get-session`
+ * answers are scripted at the fetch seam: the "was this read answered?" signal
+ * the re-check relies on exists only on a client that module built.
+ */
+describe('a 401 on an API call re-checks the session (objectstack#32138)', () => {
+  const AUTH_URL = 'http://localhost/api/v1/auth';
+  const ALICE = { id: '1', name: 'Alice', email: 'alice@test.com' };
+
+  /** What `get-session` answers next. */
+  let getSessionAnswer: () => Promise<Response>;
+
+  function liveSession() {
+    return new Response(JSON.stringify({ user: ALICE, session: { id: 's1', userId: '1' } }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  function realClient() {
+    const fetchFn = vi.fn(async () => getSessionAnswer()) as unknown as typeof fetch;
+    return { client: createAuthClient({ baseURL: AUTH_URL, fetchFn }), fetchFn };
+  }
+
+  async function signedIn() {
+    getSessionAnswer = async () => liveSession();
+    const { client, fetchFn } = realClient();
+    render(
+      <AuthProvider authUrl={AUTH_URL} client={client}>
+        <TestConsumer />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId('user-name').textContent).toBe('Alice'));
+    return fetchFn;
+  }
+
+  /** An API call on the data lane answers 401. */
+  async function apiAnswers401() {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 401 })));
+    await act(async () => {
+      await createAuthenticatedFetch()('http://localhost/api/v1/meta/page/home');
+    });
+  }
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('the server answers "no session": identity clears, so the guard can send the visitor to sign in', async () => {
+    const fetchFn = await signedIn();
+    const reads = vi.mocked(fetchFn).mock.calls.length;
+
+    getSessionAnswer = async () => new Response('null', { status: 401 });
+    await apiAnswers401();
+
+    await waitFor(() => expect(screen.getByTestId('authenticated').textContent).toBe('false'));
+    expect(screen.getByTestId('user-name').textContent).toBe('none');
+    expect(vi.mocked(fetchFn).mock.calls.length).toBeGreaterThan(reads);
+  });
+
+  it('the server says the session is live: nothing changes', async () => {
+    const fetchFn = await signedIn();
+    const reads = vi.mocked(fetchFn).mock.calls.length;
+
+    await apiAnswers401();
+
+    await waitFor(() => expect(vi.mocked(fetchFn).mock.calls.length).toBeGreaterThan(reads));
+    expect(screen.getByTestId('authenticated').textContent).toBe('true');
+    expect(screen.getByTestId('user-name').textContent).toBe('Alice');
+  });
+
+  it('the re-check is not answered (transport error): the session is kept, an unanswered read is not a sign-out', async () => {
+    const fetchFn = await signedIn();
+    const reads = vi.mocked(fetchFn).mock.calls.length;
+
+    getSessionAnswer = async () => {
+      throw new TypeError('Failed to fetch');
+    };
+    await apiAnswers401();
+
+    await waitFor(() => expect(vi.mocked(fetchFn).mock.calls.length).toBeGreaterThan(reads));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(screen.getByTestId('authenticated').textContent).toBe('true');
+    expect(screen.getByTestId('user-name').textContent).toBe('Alice');
+  });
+
+  it('no session held: a 401 is the expected answer and asks the server nothing', async () => {
+    getSessionAnswer = async () => new Response('null', { status: 401 });
+    const { client, fetchFn } = realClient();
+    render(
+      <AuthProvider authUrl={AUTH_URL} client={client}>
+        <TestConsumer />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId('loading').textContent).toBe('false'));
+    const reads = vi.mocked(fetchFn).mock.calls.length;
+
+    await apiAnswers401();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+
+    expect(vi.mocked(fetchFn).mock.calls.length).toBe(reads);
+    expect(screen.getByTestId('authenticated').textContent).toBe('false');
   });
 });

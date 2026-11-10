@@ -29,9 +29,16 @@ export const ExternalCustomer = ObjectSchema.create({
   datasource: 'showcase_external',
   external: { remoteName: 'customers' },
   fields: {
-    name: Field.text({ label: 'Name', searchable: true }),
-    email: Field.text({ label: 'Email' }),
-    region: Field.text({ label: 'Region' }),
-    lifetime_value: Field.currency({ label: 'Lifetime Value' }),
+    name: Field.text({ label: 'Name', searchable: true, group: 'customer' }),
+    email: Field.text({ label: 'Email', group: 'customer' }),
+    region: Field.text({ label: 'Region', group: 'customer' }),
+    lifetime_value: Field.currency({ label: 'Lifetime Value', group: 'customer' }),
   },
+
+  // ADR-0085 §5: the form, detail and drawer layout is derived from these
+  // groups, so each field is placed in a named section rather than left to the
+  // untitled fallback, which the field-no-consumers rule credits to no one (#32168).
+  fieldGroups: [
+    { key: 'customer', label: 'Customer' },
+  ],
 });

@@ -251,17 +251,26 @@ export function registerStartHooks(
         // declared (`args.declared`, captured by the door before it withdrew
         // the package) so grants die with the package — the "no ghost
         // grants" clause of ADR-0090 D5.
+        // [ADR-0150 D8] Only the grants bound to this package or to none: the
+        // security catalog, read here AFTER the door's withdrawal, says who
+        // still holds a name, and an empty-column grant of a name another
+        // holder keeps is revoked and named on the receipt (`reportedGrants`).
         if (protocol && typeof protocol.registerUninstallCleanup === 'function') {
           protocol.registerUninstallCleanup(
             'security.package-permissions',
             async (args: { packageId: string; declared?: { permission?: string[] } }) => {
-              const r = await cleanupPackagePermissions(ql, args.packageId, ctx.logger, args.declared);
+              const r = await cleanupPackagePermissions(ql, args.packageId, ctx.logger, args.declared, {
+                catalog: {
+                  list: (type) => createSecurityCatalogReader({ registry: (ql as any).registry, metadata: this.metadata }).list(type),
+                },
+              });
               // [#22801 → A] The package's acceptance rows are gone with it;
               // `everyone` is derived again without its sets.
               await this.declareEveryone(ctx.logger);
               return {
                 success: true,
                 removed: r.userGrants + r.suggestions,
+                ...(r.reportedGrants ? { reportedGrants: r.reportedGrants } : {}),
               };
             },
           );

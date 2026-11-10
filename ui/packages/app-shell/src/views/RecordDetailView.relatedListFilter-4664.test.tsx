@@ -418,3 +418,35 @@ describe('derived related list — declared relatedListFilter on the wire (objec
     expect(badgeProbe.$filter).toEqual({ [PARENT]: RECORD_ID });
   });
 });
+
+// A child the data API does not expose (`enable.apiEnabled: false`, the shape
+// `sys_user_device` ships on the stock boot) answers every read of its records
+// `404 OBJECT_API_DISABLED`: the record page draws no panel for it and never
+// asks for its rows or its count. The exposed sibling keeps both reads.
+describe('derived related list — a child the data API does not expose is never read', () => {
+  const HIDDEN_CHILD = 'check_device';
+  const hiddenChild = {
+    name: HIDDEN_CHILD,
+    label: 'Check Device',
+    managedBy: 'platform',
+    enable: { apiEnabled: false },
+    fields: {
+      id: { type: 'text', label: 'Id' },
+      [PARENT]: { type: 'lookup', reference: PARENT, label: 'Task Version' },
+    },
+  };
+
+  it('asks no rows and no count of the apiEnabled: false child, and keeps the exposed one', async () => {
+    const ds = makeDataSource();
+    renderPage([parentObject, childObject(), hiddenChild], ds);
+    const callsFor = (name: string) => ds.find.mock.calls.filter((c: any[]) => c[0] === name);
+    // Live control: the exposed child is read (rows and count) and drawn.
+    await waitFor(() => {
+      expect(callsFor(CHILD).some((c: any[]) => isRowQuery(c[1]))).toBe(true);
+      expect(callsFor(CHILD).some((c: any[]) => isBadgeProbe(c[1]))).toBe(true);
+    });
+    expect(await screen.findByText('Live Item')).toBeTruthy();
+    expect(callsFor(HIDDEN_CHILD)).toEqual([]);
+    expect(screen.queryByText('Check Device')).toBeNull();
+  });
+});

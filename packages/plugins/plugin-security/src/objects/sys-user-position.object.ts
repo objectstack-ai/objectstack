@@ -45,14 +45,14 @@ export const SysUserPosition = ObjectSchema.create({
   // [ADR-0057 D4, ADR-0090 D3] The platform-owned assignment record, in the
   // words Setup shows.
   description: 'Which positions each user holds, one row per assignment.',
-  // [ADR-0079] The record title is `display_title`, a text formula over the
-  // same two columns `titleFormat` named. With no pointer declared, the
+  // [ADR-0079] The record title is `display_title`, a text formula naming the
+  // user and the position. With no pointer declared, the
   // registry's designate-only pass stamped `nameField: 'id'` (the first
   // title-eligible field), so a renderer honouring ADR-0079's order (an
   // explicit `nameField` wins over `titleFormat`) drew the raw id as the record
   // page's H1. The retired `titleFormat` template beside it is gone (refused at
   // save and by `os validate`); `sys-security-assignment-display-title.test.ts`
-  // holds the formula to the text that template drew.
+  // pins the title.
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   highlightFields: ['user_id', 'position', 'business_unit_id', 'organization_id'],
@@ -66,15 +66,19 @@ export const SysUserPosition = ObjectSchema.create({
     }),
 
     // [ADR-0079] The record title (`nameField` above). A formula is computed on
-    // read and has no stored column. It reads only this row's own columns —
-    // the user foreign key and the position name, never a field of the user
-    // record — and neither is hidden, permission-guarded or masked on this
-    // object, so the title carries nothing the declared read path withholds.
-    // Both are required, so the expression needs no null guard.
+    // read and has no stored column. It names the PERSON — the user's `name`,
+    // their `email` where the name is blank — ONE hop through `user_id`, the
+    // traversal the formula read path serves (ADR-0079 addendum), exactly as
+    // `sys_user_permission_set`'s title does. The hop is read as the READER: a
+    // user the reader may not read, or one that no longer exists, leaves the
+    // title null rather than leaking the name. `position` is this row's own
+    // column, read as stored: it is a catalog NAME, not a lookup and not a
+    // select, so no formula can reach the catalog's label for it.
+    // `sys-security-assignment-display-title.test.ts` pins the title.
     display_title: Field.formula({
       label: 'Title',
       returnType: 'text',
-      expression: F`record.user_id + ' → ' + record.position`,
+      expression: F`(isBlank(trim(record.user_id.name)) ? record.user_id.email : record.user_id.name) + ' → ' + record.position`,
       description: 'Record title: the user and the position they hold (computed on read)',
     }),
 
