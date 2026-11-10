@@ -19,7 +19,7 @@
  * entry per input that would satisfy it, and an English sentence.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, cleanup, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 import { ActionRunner, type ActionResult } from '@object-ui/core';
@@ -284,7 +284,8 @@ async function mapSsoGroup(permissionSet: string) {
   });
   fireEvent.change(await screen.findByLabelText(/^SSO Provider ID/), { target: { value: 'okta' } });
   fireEvent.change(screen.getByLabelText(/^Group Display Name/), { target: { value: 'Sales' } });
-  fireEvent.change(screen.getByLabelText(/^Permission Set/), { target: { value: permissionSet } });
+  // The permission-ref widget is lazy; with no data source to list the catalog it draws its text box.
+  fireEvent.change(await screen.findByLabelText(/^Permission Set/), { target: { value: permissionSet } });
   fireEvent.click(screen.getByRole('button', { name: '确认' }));
   await waitFor(() => expect(authFetchSpy).toHaveBeenCalledTimes(1));
   return { settled, onRefresh };
@@ -329,7 +330,12 @@ describe('objectstack#32185 — Setup maps and unmaps an IdP group through the p
     answer(409, { success: false, error: { code: 'RESOURCE_CONFLICT', message: CONFLICT_SENTENCE, httpStatus: 409 } });
     const { settled, onRefresh } = await mapSsoGroup('sales_reader');
 
-    expect(await screen.findByTestId('action-param-refusal')).toHaveTextContent(CONFLICT_SENTENCE);
+    // The box leads with the refusal's first sentence and keeps the rest — the
+    // mapping to delete first — one click behind 更多 (objectui#13332).
+    const box = await screen.findByTestId('action-param-refusal');
+    expect(box).toHaveTextContent("IdP group mapping 'm_old' already maps this group to 'sales_reader'");
+    fireEvent.click(within(box).getByRole('button', { name: '更多' }));
+    expect(box).toHaveTextContent("Delete mapping 'm_old' first (POST /admin/scim/delete-group-mapping), then save again.");
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(settled.result).toBeUndefined();
     expect(onRefresh).not.toHaveBeenCalled();

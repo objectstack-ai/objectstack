@@ -129,7 +129,7 @@ describe('sys_idp_group_mapping: each action is offered to, and gated on, the ru
       const source = visibleSource(action(name));
       expect(offered(source, { id: 'u_pa', isPlatformAdmin: true, positions: [] }), name).toBe('true');
       expect(offered(source, { id: 'u_org_admin', isPlatformAdmin: false, positions: [] }), name).toBe('false');
-      expect(offered(source, { id: 'u_member', positions: [] }), name).toBe('false');
+      expect(offered(source, { id: 'u_member', isPlatformAdmin: false, positions: ['member'] }), name).toBe('false');
     }
   });
 
