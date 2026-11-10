@@ -349,6 +349,123 @@ describe('ObjectStoreMetadataActivationStore — an item no package ships', () =
     });
 });
 
+// [ADR-0150 D8 row R4] An item whose ledger already holds more than one row a
+// write could mean: two naming no package (stored before the package-less
+// index stood), or one naming none beside the write's package's own row. The
+// write used to update the FIRST match and give it the write's package, which
+// took one row of a package-less pair out of that index's reach, so the next
+// boot built the index over the pair and the duplicate was never reported
+// again. The store now refuses, naming every such row, and writes nothing —
+// the stance the boot backfill takes for the same rows (the describe below
+// `backfillActivationLedgerPackages`). The envelope (`code` + `status`) and
+// the row ids are asserted, never the sentence.
+describe('ObjectStoreMetadataActivationStore — a write never picks one of several rows it could mean', () => {
+    const writes = (calls: Array<{ op: string }>) => calls.filter((c) => c.op === 'insert' || c.op === 'update');
+
+    async function expectRefusedNaming(write: Promise<void>, ids: readonly string[]) {
+        const refusal = await write.then(() => undefined, (e: unknown) => e as { code?: unknown; status?: unknown; message?: unknown });
+        expect(refusal, 'the write was accepted').toBeDefined();
+        expect({ code: refusal?.code, status: refusal?.status }).toEqual({ code: 'RESOURCE_CONFLICT', status: 409 });
+        for (const id of ids) expect(String(refusal?.message)).toContain(id);
+    }
+
+    it('refuses a write naming a package on an item with two package-less rows, naming both, and writes nothing', async () => {
+        const { engine, calls } = makeStoreEngine([
+            { id: 'd1', metadata_type: 'flow', name: 'app_switch', package_id: null, active: 0 },
+            { id: 'd2', metadata_type: 'flow', name: 'app_switch', package_id: null, active: 1 },
+        ]);
+
+        await expectRefusedNaming(
+            new ObjectStoreMetadataActivationStore(engine, 'flow').setActive({ name: 'app_switch', packageId: 'com.example.app', active: false }),
+            ['d1', 'd2'],
+        );
+        expect(writes(calls)).toEqual([]);
+    });
+
+    it('refuses a write naming no package on the same pair: flipping one of two switches is picked by storage order', async () => {
+        const { engine, calls } = makeStoreEngine([
+            { id: 'd1', metadata_type: 'permission', name: 'env_set', package_id: null, active: false },
+            { id: 'd2', metadata_type: 'permission', name: 'env_set', package_id: null, active: true },
+        ]);
+
+        await expectRefusedNaming(
+            new ObjectStoreMetadataActivationStore(engine, 'permission').setActive({ name: 'env_set', active: true }),
+            ['d1', 'd2'],
+        );
+        expect(writes(calls)).toEqual([]);
+    });
+
+    it('refuses a write beside a package-less row AND the write\'s package\'s own row, naming both, in either storage order', async () => {
+        const packaged = { id: 'b1', metadata_type: 'action', name: 'approve', package_id: 'com.example.app', active: false };
+        const packageless = { id: 'n1', metadata_type: 'action', name: 'approve', package_id: null, active: false };
+        for (const rows of [[packaged, packageless], [packageless, packaged]]) {
+            const { engine, calls } = makeStoreEngine(rows.map((r) => ({ ...r })));
+
+            await expectRefusedNaming(
+                new ObjectStoreMetadataActivationStore(engine, 'action').setActive({ name: 'approve', packageId: 'com.example.app', active: true }),
+                ['b1', 'n1'],
+            );
+            expect(writes(calls)).toEqual([]);
+        }
+    });
+
+    it('refuses a write that finds rows of two other packages and none of its own: re-addressing one is a guess', async () => {
+        const { engine, calls } = makeStoreEngine([
+            { id: 'q1', metadata_type: 'flow', name: 'app_switch', package_id: 'com.example.one', active: false },
+            { id: 'q2', metadata_type: 'flow', name: 'app_switch', package_id: 'com.example.two', active: false },
+        ]);
+
+        await expectRefusedNaming(
+            new ObjectStoreMetadataActivationStore(engine, 'flow').setActive({ name: 'app_switch', packageId: 'com.example.app', active: true }),
+            ['q1', 'q2'],
+        );
+        expect(writes(calls)).toEqual([]);
+    });
+
+    it('CONTROL: binds an item\'s ONE package-less row to the write\'s package, as before', async () => {
+        const { engine, calls } = makeStoreEngine([
+            { id: 'n1', metadata_type: 'flow', name: 'app_switch', package_id: null, active: true },
+        ]);
+
+        await new ObjectStoreMetadataActivationStore(engine, 'flow').setActive({ name: 'app_switch', packageId: 'com.example.app', active: false });
+
+        expect(writes(calls).map((c: any) => [c.op, c.data])).toEqual([
+            ['update', { id: 'n1', active: false, package_id: 'com.example.app' }],
+        ]);
+    });
+
+    it('CONTROL: beside another package\'s row, writes the row that names no package or the write\'s own, in either storage order', async () => {
+        const other = { id: 'q1', metadata_type: 'flow', name: 'app_switch', package_id: 'com.example.other', active: false };
+        for (const mine of [
+            { id: 'n1', metadata_type: 'flow', name: 'app_switch', package_id: null, active: true },
+            { id: 'm1', metadata_type: 'flow', name: 'app_switch', package_id: 'com.example.app', active: true },
+        ]) {
+            for (const rows of [[other, mine], [mine, other]]) {
+                const { engine, calls } = makeStoreEngine(rows.map((r) => ({ ...r })));
+
+                await new ObjectStoreMetadataActivationStore(engine, 'flow').setActive({ name: 'app_switch', packageId: 'com.example.app', active: false });
+
+                // Never the other package's row: that is its own switch (ADR-0150 D4).
+                expect(writes(calls).map((c: any) => [c.op, c.data])).toEqual([
+                    ['update', { id: mine.id, active: false, package_id: 'com.example.app' }],
+                ]);
+            }
+        }
+    });
+
+    it('CONTROL: re-addresses an item\'s ONE row of another package to the write\'s package, as before', async () => {
+        const { engine, calls } = makeStoreEngine([
+            { id: 'q1', metadata_type: 'flow', name: 'app_switch', package_id: 'com.example.old', active: false },
+        ]);
+
+        await new ObjectStoreMetadataActivationStore(engine, 'flow').setActive({ name: 'app_switch', packageId: 'com.example.app', active: true });
+
+        expect(writes(calls).map((c: any) => [c.op, c.data])).toEqual([
+            ['update', { id: 'q1', active: true, package_id: 'com.example.app' }],
+        ]);
+    });
+});
+
 // [#26474] A door writes the row ON BEHALF of the administrator who asked, so
 // the write runs under that caller's own envelope, elevated — the engine stamps
 // `created_by` / `updated_by` from its `userId`, and the audit plugin reads

@@ -88,6 +88,13 @@
  * including the memory driver, which has no such index. Rows written before the key carried the package may have a null
  * `package_id` for an item a package holds: {@link backfillActivationLedgerPackages}
  * binds each one to its one holder and reports the rest, never guessing.
+ *
+ * An item that already holds more than one row a write could mean (two naming
+ * no package, or one naming none beside one naming the write's package) is the
+ * same question at both ends: the backfill reports it at boot and binds none
+ * of its rows, and `setActive` refuses the switch and writes none of them
+ * ({@link addressedLedgerRow}). Either way the operator deletes the row that
+ * should not apply; nothing here deletes or picks one.
  */
 
 /**
@@ -237,6 +244,95 @@ export class InMemoryMetadataActivationStore implements MetadataActivationStore 
     }
 }
 
+/** One stored ledger row as a driver returns it: the columns this module reads. */
+type StoredLedgerRow = { id?: unknown; metadata_type?: unknown; name?: unknown; package_id?: unknown; active?: unknown };
+
+/**
+ * Does a stored row name no package? `null`, and an absent column, are the
+ * spelling the writer produces for it. An empty string is not a spelling the
+ * writer produces ({@link refuseEmptyPackageId}), so it is left as it stands
+ * rather than read as "no package".
+ */
+function namesNoPackage(row: StoredLedgerRow): boolean {
+    return row.package_id === null || row.package_id === undefined;
+}
+
+/**
+ * How a refusal names one stored row: its id (what an operator deletes it by),
+ * its package and its switch. The words are the boot backfill's report's
+ * (`describeDuplicateRow` in `@objectstack/objectql`'s
+ * `activation-ledger-backfill.ts`), repeated here because this package cannot
+ * import that one, so the boot and the door name a row the same way.
+ */
+function describeLedgerRow(row: StoredLedgerRow & { id: NonNullable<unknown> }): string {
+    const named: ActivationLedgerDuplicateRow = {
+        id: String(row.id),
+        ...(typeof row.package_id === 'string' && row.package_id !== '' ? { packageId: row.package_id } : {}),
+        active: readActiveColumn(row.active),
+    };
+    return `row ${named.id} (${named.packageId === undefined ? 'no package' : `package ${named.packageId}`}, ` +
+        `${named.active ? 'active' : 'switched off'})`;
+}
+
+/**
+ * [ADR-0150 D4, D8 row R4] The one stored row a `setActive` write updates, or
+ * `undefined` when there is none and the write inserts.
+ *
+ * The rows a write could mean are the item's rows that name no package and,
+ * when the write names a package, that package's own row: exactly the rows
+ * {@link backfillActivationLedgerPackages} reports for an item with more than
+ * one, so the boot and the door agree on what a duplicate is. With none of
+ * those, the item's one row of another package is re-addressed to the write's
+ * package, as the bare path always has.
+ *
+ * More than one such row is refused, naming every one of them, and nothing is
+ * written:
+ *
+ *  - two or more naming no package: updating the first would bind it to the
+ *    write's package, out of the package-less index's reach, so the next boot
+ *    would build the index over the pair and the duplicate would never be
+ *    reported again; a write naming no package would flip one of two switches,
+ *    picked by storage order, while the other kept applying;
+ *  - one naming no package beside the write's package's own row: name-keyed
+ *    readers apply whichever they read (the catalog every switched-off row of
+ *    the name, the action projection the last row it reads), so the switch the
+ *    administrator throws need not be the one that applies, and binding the
+ *    package-less row would collide with the other under the declared key;
+ *  - two or more of other packages and none of the write's: re-addressing one
+ *    of them would be picked by storage order.
+ *
+ * The answer is `409 RESOURCE_CONFLICT`, the ADR-0112 member the ADR-0150
+ * refusals to pick one of several holders answer
+ * (`PackageScopedNameRefusedError`, `../package-scoped-resolution.ts`): the request names one item and the
+ * ledger holds more than one switch for it. A door relays it as it relays any
+ * declared refusal of this store, and writes nothing in process either, since
+ * every door writes the durable row first.
+ */
+function addressedLedgerRow(
+    rows: readonly StoredLedgerRow[],
+    write: { readonly metadataType: string; readonly name: string; readonly packageId: string | null; readonly active: boolean },
+): (StoredLedgerRow & { id: NonNullable<unknown> }) | undefined {
+    const addressable = rows.filter(
+        (r): r is StoredLedgerRow & { id: NonNullable<unknown> } => r !== null && typeof r === 'object' && r.id != null,
+    );
+    const meant = addressable.filter(
+        (r) => namesNoPackage(r) || (write.packageId !== null && r.package_id === write.packageId),
+    );
+    const candidates = meant.length > 0 ? meant : addressable;
+    if (candidates.length <= 1) return candidates[0];
+    throw Object.assign(
+        new Error(
+            `Cannot switch ${write.metadataType} '${write.name}' ${write.active ? 'on' : 'off'}: the activation ledger ` +
+            `(${METADATA_ACTIVATION_TABLE}) holds ${candidates.length} switch rows for it that this switch could write — ` +
+            `${candidates.map(describeLedgerRow).join(', ')}. Picking one would go by storage order, so nothing was ` +
+            `written. Delete the row that should not apply from ${METADATA_ACTIVATION_TABLE} (by the id named here), ` +
+            `then switch the item again.`,
+        ),
+        // ADR-0112 envelope: code AND status, the pair a door relays.
+        { code: 'RESOURCE_CONFLICT', status: 409 },
+    );
+}
+
 /**
  * Durable {@link MetadataActivationStore} backed by the
  * `sys_metadata_activation` object (ADR-0126 §4), scoped to one
@@ -287,11 +383,18 @@ export class ObjectStoreMetadataActivationStore implements MetadataActivationSto
      * The write still addresses the row by `(metadata_type, name)`: the bare
      * path, kept (ADR-0150 red line 3). This is the ledger's only writer, and it
      * inserts only where that read finds nothing, so it keeps one row per
-     * `(metadata_type, name)` and taking the FIRST match is taking the only one.
-     * The wider index permits a second package's row of the same name; nothing
-     * writes one until a type's own readers consult the ledger by
-     * `(package, name)` (that type's ADR-0150 child), so no name-keyed reader
-     * ever sees two rows for one name.
+     * `(metadata_type, name)`. The wider index permits a second package's row
+     * of the same name; nothing writes one until a type's own readers consult
+     * the ledger by `(package, name)` (that type's ADR-0150 child).
+     *
+     * ⛔ It updates the ONE row the read finds, never the first of several
+     * ({@link addressedLedgerRow}). Rows stored before the package-less index
+     * stood can hold two package-less rows for one item, and updating the first
+     * with the write's package would take it out of that index's reach: the
+     * next boot would build the index over the pair, and the duplicate would
+     * never be reported again. So a write that finds more than one row it could
+     * mean is refused `409 RESOURCE_CONFLICT`, naming every one of them, and
+     * nothing is written; the operator deletes the row that should not apply.
      *
      * `packageId` absent writes NO package (`null`), the ledger's spelling for
      * an item no package ships. An empty string is refused before anything is
@@ -310,12 +413,15 @@ export class ObjectStoreMetadataActivationStore implements MetadataActivationSto
             where: { metadata_type: this.metadataType, name: row.name },
             context,
         });
-        const current = Array.isArray(existing) ? existing[0] : undefined;
+        const current = addressedLedgerRow(
+            Array.isArray(existing) ? (existing as StoredLedgerRow[]) : [],
+            { metadataType: this.metadataType, name: row.name, packageId, active: row.active },
+        );
 
-        if (current && (current as { id?: unknown }).id != null) {
+        if (current) {
             await this.engine.update(
                 METADATA_ACTIVATION_TABLE,
-                { id: (current as { id: unknown }).id, active: row.active, package_id: packageId },
+                { id: current.id, active: row.active, package_id: packageId },
                 { context },
             );
             return;
@@ -561,10 +667,8 @@ export async function backfillActivationLedgerPackages(
         list.push(row as LedgerRow);
         items.set(key, list);
     }
-    // Only a row with NO package is a backfill candidate. An empty string is
-    // not a spelling the writer produces ({@link refuseEmptyPackageId}), so it
-    // is left as it stands rather than read as "no package".
-    const namesNoPackage = (r: LedgerRow): boolean => r.package_id === null || r.package_id === undefined;
+    // Only a row with NO package is a backfill candidate ({@link namesNoPackage},
+    // the same reading `setActive` asks of a write's rows).
 
     // Ask every question first (module doc): nothing below writes.
     const writes: Array<ActivationLedgerUnboundRow & { id: unknown; packageId: string }> = [];
