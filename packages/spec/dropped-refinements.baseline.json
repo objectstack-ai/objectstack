@@ -180,6 +180,11 @@
         "manifest.views.element.list.timeline.groupByField"
       ]
     },
+    "api/AuthFeaturesConfig": {
+      "sites": [
+        "organizationEditions"
+      ]
+    },
     "api/CloneFlowResponse": {
       "sites": [
         "data.flow",
@@ -249,6 +254,11 @@
         "query.in.where.options[0].lazy.options[0].items[0]",
         "query.in.where.options[0].lazy.options[0].items[1]",
         "query.in.where.options[0].lazy.options[2].items[0]"
+      ]
+    },
+    "api/GetAuthConfigResponse": {
+      "sites": [
+        "features.organizationEditions"
       ]
     },
     "api/GetFlowResponse": {
