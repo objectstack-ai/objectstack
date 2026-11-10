@@ -264,7 +264,10 @@ packages hold, granted with no package, is refused `409` `RESOURCE_CONFLICT`,
 and the message names every holder. A package that does not hold the set is
 refused `409` whatever the number of holders, and nothing is stored. One user
 holds at most one grant per set, package and organization, and at most one
-grant that names no package per set and organization.
+grant that names no package per set and organization. On the in-memory driver
+(`driver-memory`) that second limit is not enforced: it builds no index for
+grants that name no package, so it admits two of them for one set and
+organization.
 
 The assignment writes are **governed** (ADR-0090 D12): tenant-level admins pass
 through to the ordinary checks; a delegated admin needs a covering

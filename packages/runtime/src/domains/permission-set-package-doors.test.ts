@@ -27,6 +27,7 @@ import { bindSecurityCatalogReader, createSecurityCatalogReader } from '@objects
 import { assertEngineUpdateDispatch } from '@objectstack/objectql';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
+import { resolvePermissionSetAddress } from './catalog-activation.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
 
 const LEDGER = 'sys_metadata_activation';
@@ -37,6 +38,8 @@ const OTHER = 'com.acme.other';
 const TWO = 'shared_reader';
 /** Held by CRM alone. */
 const ONE = 'crm_sales_rep';
+/** A position CRM holds: the type whose ledger store stays name-addressed. */
+const POSITION = 'crm_rep';
 
 type Row = Record<string, unknown>;
 const setOf = (name: string, packageId: string) => ({
@@ -91,10 +94,12 @@ function boot() {
     const manifests = Object.values(packages);
     bindSecurityCatalogReader(engine, createSecurityCatalogReader({
         registry: {
-            getItem: (type: string, name: string) => (type === 'permission' && holders[name] ? setOf(name, holders[name][0]) : undefined),
+            getItem: (type: string, name: string) => (type === 'permission' && holders[name]
+                ? setOf(name, holders[name][0])
+                : type === 'position' && name === POSITION ? { name, label: name, _packageId: CRM } : undefined),
             listItems: (type: string) => (type === 'permission'
                 ? Object.entries(holders).flatMap(([name, held]) => held.map((p) => setOf(name, p)))
-                : []),
+                : type === 'position' ? [{ name: POSITION, label: POSITION, _packageId: CRM }] : []),
             isPackageDisabled: () => false,
             packageScopedHoldersOf: (type: string, name: string) => (type === 'permission' ? holders[name] ?? [] : []),
             getPackageScopedItem: (type: string, name: string, packageId: string) =>
@@ -165,19 +170,46 @@ describe('the activation door — a permission set two packages hold', () => {
     });
 
     /**
-     * NOT a promise — the ledger store's own boundary, pinned so a change to it
-     * is seen: `ObjectStoreMetadataActivationStore.setActive` addresses its row
-     * by `(metadata_type, name)` (ADR-0150 red line 3; its docblock), because
-     * every reader of a permission set's ledger row is still name-keyed. So a
-     * later flip of CRM's set re-addresses the one row rather than writing a
-     * second. Per-package rows need package-keyed ledger readers, which this
-     * card does not change.
+     * [MF1, epic ruling on #32164] The permission ledger store is addressed by
+     * `(package, name)` (`PERMISSION_LEDGER_ADDRESSING`): each holder keeps its
+     * own row. BASE (this branch before the ruling, the name-addressed store):
+     * the CRM flip re-addressed HR's row, `[[CRM, false]]`, and HR's set
+     * granted again with both calls answering 200.
      */
-    it('BOUNDARY — one ledger row per (type, name): a flip of the other holder re-addresses that row', async () => {
+    it('each holder keeps its own row: flipping CRM leaves HR\'s switched-off row untouched, and both stay independently switchable', async () => {
         const h = boot();
-        await flip(h, TWO, { package: HR });
+        expect(answer(await flip(h, TWO, { package: HR })).status).toBe(200);
         expect(answer(await flip(h, TWO, { package: CRM })).status).toBe(200);
-        expect(h.tables[LEDGER].map((r) => [r.package_id, r.active])).toEqual([[CRM, false]]);
+        expect(h.tables[LEDGER].map((r) => [r.package_id, r.active])).toEqual([[HR, false], [CRM, false]]);
+        // CRM back on: HR's row is not touched.
+        expect(answer(await flip(h, TWO, { package: CRM }, { enabled: true })).status).toBe(200);
+        expect(h.tables[LEDGER].map((r) => [r.package_id, r.active])).toEqual([[HR, false], [CRM, true]]);
+        // HR back on, then off again: CRM's row is not touched.
+        expect(answer(await flip(h, TWO, { package: HR }, { enabled: true })).status).toBe(200);
+        expect(answer(await flip(h, TWO, { package: CRM })).status).toBe(200);
+        expect(h.tables[LEDGER].map((r) => [r.package_id, r.active])).toEqual([[HR, true], [CRM, false]]);
+    });
+
+    it('a row naming no package keeps both holders off, so switching one on is 409 naming that row; nothing written (red line 1)', async () => {
+        const h = boot();
+        h.tables[LEDGER].push({ id: 'legacy', metadata_type: 'permission', name: TWO, package_id: null, active: false });
+        const res = answer(await flip(h, TWO, { package: CRM }, { enabled: true }));
+        expect(res).toMatchObject({ status: 409, code: 'RESOURCE_CONFLICT' });
+        expect(res.message).toContain(`package "${CRM}"`);
+        expect(res.message).toContain('naming no package');
+        expect(h.writes).toEqual([]);
+        // Switching it off writes CRM's own row; the package-less row is neither's and stays.
+        expect(answer(await flip(h, TWO, { package: CRM })).status).toBe(200);
+        expect(h.tables[LEDGER].map((r) => [r.package_id, r.active])).toEqual([[null, false], [CRM, false]]);
+    });
+
+    it('a row naming a package that no longer serves the name keeps both holders off too: switching one on is 409; nothing written', async () => {
+        const h = boot();
+        h.tables[LEDGER].push({ id: 'stale', metadata_type: 'permission', name: TWO, package_id: OTHER, active: false });
+        const res = answer(await flip(h, TWO, { package: HR }, { enabled: true }));
+        expect(res).toMatchObject({ status: 409, code: 'RESOURCE_CONFLICT' });
+        expect(res.message).toContain(`naming package "${OTHER}"`);
+        expect(h.writes).toEqual([]);
     });
 
     it('?package= a package that does not hold it: 409 not-held-by-qualifier naming the holders; nothing written', async () => {
@@ -206,6 +238,42 @@ describe('the activation door — CONTROL, one holder', () => {
         const h = boot();
         expect(answer(await flip(h, ONE)).status).toBe(200);
         expect(h.tables[LEDGER]).toEqual([expect.objectContaining({ name: ONE, package_id: CRM, active: false })]);
+    });
+
+    it('[MF1, D8] a row naming no package is the one holder\'s switch: the flip takes it over, never a second row', async () => {
+        const h = boot();
+        h.tables[LEDGER].push({ id: 'legacy', metadata_type: 'permission', name: ONE, package_id: null, active: false });
+        expect(answer(await flip(h, ONE, {}, { enabled: true })).status).toBe(200);
+        expect(h.tables[LEDGER].map((r) => [r.id, r.package_id, r.active])).toEqual([['legacy', CRM, true]]);
+    });
+
+    it('[MF1, D8] a row naming a package that no longer serves the name is the one holder\'s switch too: re-addressed, as before', async () => {
+        const h = boot();
+        h.tables[LEDGER].push({ id: 'stale', metadata_type: 'permission', name: ONE, package_id: OTHER, active: false });
+        expect(answer(await flip(h, ONE, {}, { enabled: true })).status).toBe(200);
+        expect(h.tables[LEDGER].map((r) => [r.id, r.package_id, r.active])).toEqual([['stale', CRM, true]]);
+    });
+
+    // BASE (the name-addressed store): the first row found was re-addressed and
+    // the other row stayed, so the answer hung on the order the rows came back.
+    it('[MF1] beside the holder\'s own row, a row naming no package keeps it off: switching it on is 409 naming that row; nothing written', async () => {
+        const h = boot();
+        h.tables[LEDGER].push(
+            { id: 'own', metadata_type: 'permission', name: ONE, package_id: CRM, active: false },
+            { id: 'legacy', metadata_type: 'permission', name: ONE, package_id: null, active: false },
+        );
+        const res = answer(await flip(h, ONE, {}, { enabled: true }));
+        expect(res).toMatchObject({ status: 409, code: 'RESOURCE_CONFLICT' });
+        expect(res.message).toContain('naming no package, which is read by the name alone');
+        expect(h.writes).toEqual([]);
+    });
+
+    it('[MF1] every other type keeps the name-addressed store: a position row is re-attributed by name, as before', async () => {
+        const h = boot();
+        h.tables[LEDGER].push({ id: 'pos', metadata_type: 'position', name: POSITION, package_id: OTHER, active: true });
+        expect(answer(await h.dispatcher.handleSecurity(`/_activation/position/${POSITION}`, 'POST', { enabled: false }, {}, OPERATOR())).status)
+            .toBe(200);
+        expect(h.tables[LEDGER].map((r) => [r.id, r.metadata_type, r.package_id, r.active])).toEqual([['pos', 'position', CRM, false]]);
     });
 
     it('?package= the holder answers the same; another package is 409; a name nothing holds stays 404', async () => {
@@ -266,5 +334,30 @@ describe('the clone door — CONTROL, one holder', () => {
         const h = boot();
         expect(answer(await clone(h, ONE, {}, { name: ONE, label: 'Copy' })).status).toBe(409);
         expect(h.saves).toEqual([]);
+    });
+});
+
+describe('[SF7] the overlay provenance sentinel is no package, at both doors\' address read', () => {
+    const OVERLAID = 'overlaid_auditor';
+    const SENTINEL = 'sys_metadata';
+    const reader = () => createSecurityCatalogReader({
+        registry: {
+            getItem: (type: string, name: string) => (type === 'permission' && name === OVERLAID ? setOf(OVERLAID, SENTINEL) : undefined),
+            listItems: (type: string) => (type === 'permission' ? [setOf(OVERLAID, SENTINEL)] : []),
+            isPackageDisabled: () => false,
+            getPackage: () => undefined,
+            getAllPackages: () => [],
+        } as never,
+        metadata: { get: () => undefined, list: () => [] },
+    });
+
+    it('?package= the sentinel holds nothing: refused not-held-by-qualifier, the holder named as the environment; CONTROL: the bare name resolves', async () => {
+        expect(await resolvePermissionSetAddress(reader(), OVERLAID, SENTINEL)).toMatchObject({
+            status: 'refused',
+            refusal: { reason: 'not-held-by-qualifier', candidates: [{ kind: 'environment' }] },
+        });
+        expect(await resolvePermissionSetAddress(reader(), OVERLAID, OTHER))
+            .toMatchObject({ status: 'refused', refusal: { candidates: [{ kind: 'environment' }] } });
+        expect(await resolvePermissionSetAddress(reader(), OVERLAID)).toMatchObject({ status: 'resolved', entry: { name: OVERLAID } });
     });
 });

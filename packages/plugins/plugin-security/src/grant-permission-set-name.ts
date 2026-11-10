@@ -128,6 +128,7 @@
 
 import {
   PackageScopedNameRefusedError,
+  catalogEntryAddress,
   packageScopedRefusalMessage,
   resolveCatalogReference,
   securityCatalogReaderOf,
@@ -295,12 +296,18 @@ export async function judgeGrantSet(
       },
     };
   }
+  // [SF7] A holder's package is read as core's `catalogEntryAddress` reads it:
+  // the `sys_metadata` provenance sentinel is no package, so a grant naming it
+  // holds nothing (the stamp seam's reading too) and a refusal names the
+  // environment, never the sentinel.
   const holders = (await catalog.list(PERMISSION_SET_CATALOG_TYPE)).filter((e) => e.name === name);
-  const exact = holders.find((e) => e.packageId === packageId);
+  const exact = holders.find((e) => catalogEntryAddress(e).packageId === packageId);
   if (exact) return { status: 'resolved', entry: exact };
   if (holders.length === 0) return { status: 'not-found' };
-  const candidates: PackageScopedHolder[] = holders.map((e) =>
-    e.packageId !== undefined ? { kind: 'package', packageId: e.packageId } : { kind: 'environment' });
+  const candidates: PackageScopedHolder[] = holders.map((e) => {
+    const holder = catalogEntryAddress(e).packageId;
+    return holder !== null ? { kind: 'package', packageId: holder } : { kind: 'environment' };
+  });
   const base = {
     status: 'refused' as const,
     reason: 'not-held-by-qualifier' as const,

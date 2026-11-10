@@ -442,9 +442,13 @@ leaves `package_id` empty when there is none, and the resolver honours both
 alike, because it keys the row by type and name. For a permission set two
 packages hold, `?package=<id>` names one (ADR-0150 D3): without it the route
 answers `409` `RESOURCE_CONFLICT` with `details.candidates`, a package that does
-not hold the set answers `409` too, and the row records the named package. The
-ledger still keeps one row per type and name, so a later write naming the other
-holder re-addresses that row. `package` is the only query parameter, and only
+not hold the set answers `409` too, and the row records the named package.
+Each holder keeps its own row (the permission ledger is keyed by package and
+name), so switching one package's set never touches the other's. A row that
+names no package switches off every holder of the name while more than one
+holds it, and so does a row naming a package that no longer serves the name;
+switching a holder on while such a row stands answers `409`, and nothing is
+written. `package` is the only query parameter, and only
 for `permission`; any other, or a repeated or blank one, answers `400`
 before any lookup. A write the ledger refuses
 answers with the status its code means: a record validation failure is `400`

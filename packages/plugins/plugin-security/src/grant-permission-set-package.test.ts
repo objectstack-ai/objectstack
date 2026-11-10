@@ -34,7 +34,7 @@ import { bindSecurityCatalogReader, createSecurityCatalogReader } from '@objects
 import { mapDataError, resolveThrownHttpError } from '@objectstack/types';
 
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
-import { registerGrantPermissionSetNameHooks } from './grant-permission-set-name.js';
+import { judgeGrantSet, registerGrantPermissionSetNameHooks } from './grant-permission-set-name.js';
 import { registerPermissionSetPackageStamp } from './stored-permission-set-package-stamp.js';
 
 const ORG = 'org_a';
@@ -284,5 +284,39 @@ describe('what an update keeps', () => {
     await engine.insert(GRANTS, grant('u3', ONE), { context: SYS } as any);
     await engine.update(GRANTS, { id: 'u3', permission_set: TWO }, { context: SYS } as any);
     expect(await stored(engine)).toEqual({ u3: null });
+  });
+});
+
+describe('[SF7] the overlay provenance sentinel is no package', () => {
+  /** A set whose catalog entry carries `sys_metadata` as its package: an overlay row's provenance, not a holder. */
+  const OVERLAID = 'overlaid_auditor';
+  const SENTINEL = 'sys_metadata';
+  const overlayCatalog = () => createSecurityCatalogReader({
+    registry: {
+      getItem: (type: string, name: string) => (type === 'permission' && name === OVERLAID ? itemOf(OVERLAID, SENTINEL) : undefined),
+      listItems: (type: string) => (type === 'permission' ? [itemOf(OVERLAID, SENTINEL)] : []),
+      isPackageDisabled: () => false,
+      getPackage: () => undefined,
+      getAllPackages: () => [],
+    } as never,
+    metadata: { get: async () => undefined, list: async () => [] },
+  });
+
+  it('a grant naming the sentinel holds nothing: refused not-held-by-qualifier, the holder named as the environment', async () => {
+    const answer = await judgeGrantSet(overlayCatalog(), OVERLAID, SENTINEL);
+    expect(answer).toMatchObject({
+      status: 'refused',
+      refusal: { reason: 'not-held-by-qualifier', candidates: [{ kind: 'environment' }] },
+    });
+    // The caller's own qualifier is echoed; the holder it lists is the environment.
+    const message = answer.status === 'refused' ? answer.refusal.message : '';
+    expect(message).toContain('the environment');
+    expect(message.split(`package "${SENTINEL}"`)).toHaveLength(2);
+  });
+
+  it('a refusal for another package names the environment, never the sentinel; CONTROL: the bare name resolves', async () => {
+    const other = await judgeGrantSet(overlayCatalog(), OVERLAID, OTHER);
+    expect(other).toMatchObject({ status: 'refused', refusal: { candidates: [{ kind: 'environment' }] } });
+    expect(await judgeGrantSet(overlayCatalog(), OVERLAID)).toMatchObject({ status: 'resolved', entry: { name: OVERLAID } });
   });
 });

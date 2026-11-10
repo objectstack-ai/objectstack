@@ -180,7 +180,7 @@ describe('[18.x step 7b] the organization key part across the 18.0 → HEAD upgr
     it('[#32164] the grant key that gained its package column: its 18.0 narrower is offered for retirement as ONE safe replace, the guard standing', async () => {
       // `sys_user_permission_set`'s `(user_id, permission_set, organization_id)`
       // became `(user_id, permission_set, permission_set_package,
-      // organization_id)`; the boot's `kernel:ready` migration built the
+      // organization_id)`; the boot's schema-sync migration built the
       // package-less guard, so on this certified store the differ's widening arm
       // offers the 18.0 COALESCE index's retirement — never an orphan drop.
       const grant = (await managedDrift(stack!)).filter((d) => d.table === 'sys_user_permission_set');

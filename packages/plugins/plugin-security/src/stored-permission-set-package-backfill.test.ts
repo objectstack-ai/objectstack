@@ -383,7 +383,7 @@ describe('the boot run', () => {
  * `organization_id`), `unique: 'organization'`, and refused a second grant of
  * one name whatever either row's package said. Two package-less grants of one
  * name stay refused by the runtime partial index metadata-protocol builds at
- * `kernel:ready` (`user-permission-set-packageless-index.ts`, pinned per dialect
+ * schema sync (`user-permission-set-packageless-index.ts`, pinned per dialect
  * there); this engine is not booted through it, so the declared key alone is
  * measured here.
  */
@@ -484,6 +484,16 @@ describe('the write seam stamps the package column on every write that names a s
     expect(await packagesById(engine, GRANTS.object)).toEqual({ f1: HR, f2: HR });
   });
 
+  // [#32164 SF4] BASE (main e40f2df2): the named package was replaced by none.
+  // Nothing holds the name, so there is no holder to refuse it against: it is
+  // kept as written, and every reader reads a package that does not serve the
+  // name as no package (the stored column's stale arm).
+  it('R1 (SF4): a system insert naming a package for a name nothing holds keeps it as written', async () => {
+    const engine = await stamped();
+    await engine.insert(GRANTS.object, grant('s4', NOBODY, { permission_set_package: HR }), { context: SYS_ORG });
+    expect((await packagesById(engine, GRANTS.object)).s4).toBe(HR);
+  });
+
   it('R1: a rename re-stamps the column and never keeps the old package; a write that names no set leaves it', async () => {
     const engine = await stamped();
     await engine.insert(GRANTS.object, grant('r1', ONE_HOLDER), { context: SYS_ORG });
@@ -501,6 +511,30 @@ describe('the write seam stamps the package column on every write that names a s
       await engine.insert(SUGGESTIONS.object, row, { context: SYS_ORG });
     }
     expect(await packagesById(engine, SUGGESTIONS.object)).toEqual({ t1: D, t2: null, t3: P, t4: null });
+  });
+
+  // [#32164 MF2] F3 reaches R3 through the same seam. BASE (main e40f2df2): a
+  // system insert naming a non-holder was re-stamped by the rule's answer, and a
+  // column-only update naming one landed as written. Both are now 409
+  // not-held-by-qualifier, nothing stored. The table is system-write only, and
+  // `os migrate stored-references bind --table sys_audience_binding_suggestion`
+  // writes through this hook.
+  it('R3 (F3): a system insert or column-only update naming a package that does not hold the set is 409, nothing stored; CONTROL: a holder is kept', async () => {
+    const engine = await stamped();
+    await expect(
+      engine.insert(SUGGESTIONS.object, { ...suggestion('n1', P, D_ONLY), [SUGGESTIONS.packageColumn]: U }, { context: SYS_ORG }),
+    ).rejects.toMatchObject({ code: 'RESOURCE_CONFLICT', refusal: { reason: 'not-held-by-qualifier', callerPackageId: U } });
+    expect(await packagesById(engine, SUGGESTIONS.object)).toEqual({});
+
+    await engine.insert(SUGGESTIONS.object, suggestion('n2', P, D_ONLY), { context: SYS_ORG });
+    await expect(
+      engine.update(SUGGESTIONS.object, { id: 'n2', [SUGGESTIONS.packageColumn]: U }, { context: SYS_ORG }),
+    ).rejects.toMatchObject({ code: 'RESOURCE_CONFLICT', refusal: { reason: 'not-held-by-qualifier', callerPackageId: U } });
+    expect(await packagesById(engine, SUGGESTIONS.object)).toEqual({ n2: D });
+
+    // CONTROL: a holder, named on the insert, is kept (one of two in the closure, which the rule alone leaves null).
+    await engine.insert(SUGGESTIONS.object, { ...suggestion('n3', P, D_AND_D2), [SUGGESTIONS.packageColumn]: D }, { context: SYS_ORG });
+    expect((await packagesById(engine, SUGGESTIONS.object)).n3).toBe(D);
   });
 
   it('before the holders are sealed nothing is stamped: the boot backfill binds the row', async () => {

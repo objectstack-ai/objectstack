@@ -134,8 +134,9 @@ export const SysUserPermissionSet = ObjectSchema.create({
       readonly: true,
       maxLength: 255,
       description:
-        'The app the permission set comes from. Filled in by the platform; empty when the set was created here, ' +
-        'or when more than one app provides a set of that name.',
+        'The app the permission set comes from. A grant names it to choose between apps that provide a set of ' +
+        'the same name; otherwise the platform fills it in. Empty when the set was created here, or when more than ' +
+        'one app provides a set of that name and the grant names none.',
     }),
 
     // Provenance, not a business link: the platform writes it, a caller does

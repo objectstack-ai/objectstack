@@ -66,12 +66,26 @@
  * addresses exactly PKG's set and writes its ledger row naming PKG; a PKG that
  * does not hold the name is refused `409` naming the holders
  * (`not-held-by-qualifier`). With one holder, a request that names no package
- * answers as before. The ledger store still keeps one row per
- * `(metadata_type, name)` (`ObjectStoreMetadataActivationStore.setActive`,
- * ADR-0150 red line 3), because every reader of a permission set's row is
- * name-keyed: a later flip naming the other holder re-addresses that row.
- * Per-package rows arrive only with package-keyed ledger readers, which this
- * door does not change.
+ * answers as before.
+ *
+ * ## One ledger row per holder (ADR-0150 D4/D8 R4, epic ruling MF1 on #32164)
+ *
+ * The permission type's ledger store is addressed by `(package, name)`
+ * ({@link PERMISSION_LEDGER_ADDRESSING}), as the flow store is: every reader of
+ * a permission set's row is package-aware (core's `readDisabledCatalogNames`
+ * and `ledgerRowSwitchesOff` read a row's `package_id` as its holder), so two
+ * packages each keep their own row of one name, and switching one never
+ * re-addresses the other's. Every other type keeps the name-addressed store.
+ * A row naming no package, or naming a package that no longer serves the name,
+ * is a holder's switch only while the name has that one holder (D8), so only
+ * then does a write take it over (`adoptPackageless`, or the stale row's
+ * re-address the name-addressed store always wrote);
+ * under two holders it is neither's, and the core readers keep every holder
+ * off by it. {@link planPermissionSetLedgerWrite} refuses `409` a write the
+ * readers would not follow: one that would re-address a switched-off row
+ * another holder reads as its own (a legacy row), and an enable that another
+ * row (one naming no package under two holders, or a package that no longer
+ * serves the name) would still keep off. Nothing is written then.
  *
  * The door's query set is closed (AGENTS route rule 5): `package` for
  * `permission`, nothing for every other type — a name outside it is refused
@@ -85,6 +99,8 @@ import {
     METADATA_ACTIVATION_TABLE,
     ObjectStoreMetadataActivationStore,
     PackageScopedNameRefusedError,
+    catalogEntryAddress,
+    ledgerRowSwitchesOff,
     packageScopedRefusalMessage,
     resolveCatalogReference,
     securityCatalogReaderOf,
@@ -384,12 +400,17 @@ export async function resolvePermissionSetAddress(
             },
         };
     }
+    // [SF7] A holder's package is read as core's `catalogEntryAddress` reads it:
+    // the overlay provenance sentinel is no package, so `?package=` naming it
+    // holds nothing and a refusal names the environment, never the sentinel.
     const holders = (await reader.list('permission')).filter((e) => e.name === name);
-    const exact = holders.find((e) => e.packageId === packageId);
+    const exact = holders.find((e) => catalogEntryAddress(e).packageId === packageId);
     if (exact) return { status: 'resolved', entry: exact };
     if (holders.length === 0) return { status: 'not-found' };
-    const candidates: PackageScopedHolder[] = holders.map((e) =>
-        (e.packageId !== undefined ? { kind: 'package' as const, packageId: e.packageId } : { kind: 'environment' as const }));
+    const candidates: PackageScopedHolder[] = holders.map((e) => {
+        const holder = catalogEntryAddress(e).packageId;
+        return holder !== null ? { kind: 'package' as const, packageId: holder } : { kind: 'environment' as const };
+    });
     const base = {
         status: 'refused' as const,
         reason: 'not-held-by-qualifier' as const,
@@ -399,6 +420,121 @@ export async function resolvePermissionSetAddress(
         candidates,
     };
     return { status: 'refused', refusal: { ...base, message: packageScopedRefusalMessage(base) } };
+}
+
+/**
+ * [ADR-0150 D4, epic ruling MF1 on #32164] The permission type's ledger rows are
+ * addressed by `(package, name)` (core's `MetadataActivationRowAddressing`), as
+ * flows' are (`flow-activation-store.ts`): its readers are package-aware. Only
+ * this type: every other type's store stays name-addressed.
+ */
+export const PERMISSION_LEDGER_ADDRESSING = { addressing: 'package-and-name' } as const;
+
+/** The ledger row a permission write reads, as stored. */
+type PermissionLedgerRow = { id?: unknown; metadata_type?: unknown; name?: unknown; package_id?: unknown; active?: unknown };
+
+/** A stored `package_id`, as the store compares it: empty and absent are no package. */
+const storedPackageOf = (row: PermissionLedgerRow): string | null =>
+    (typeof row.package_id === 'string' && row.package_id !== '' ? row.package_id : null);
+
+const holderPhrase = (packageId: string | null): string =>
+    (packageId === null ? 'the environment\'s set' : `package "${packageId}"'s set`);
+
+/**
+ * [ADR-0150 D4/D8 R4, epic ruling MF1 on #32164] Plan a permission set's ledger
+ * write under {@link PERMISSION_LEDGER_ADDRESSING}: whether it takes a row naming
+ * no package over (`adoptPackageless`, only while the name has this one holder,
+ * D8), or a `409` with nothing written when the readers would not follow it.
+ *
+ * - The row the store would write is switched off and read by core's readers
+ *   as another holder's switch (a legacy row): writing it would re-arm that
+ *   holder without a word (epic red line 1). Refused, naming that holder.
+ * - An enable while another row keeps this holder off: a row naming no
+ *   package under two holders, which keeps every holder off, or a row naming a
+ *   package that no longer serves the name, read by the D3 rule. This holder's
+ *   own row cannot outvote it, so a `200` would report a switch that did not
+ *   happen. Refused, naming that row.
+ *
+ * Both are read with core's `ledgerRowSwitchesOff`, the reader's own rule, so
+ * the door refuses exactly what the resolver would not follow.
+ */
+async function planPermissionSetLedgerWrite(
+    deps: DomainHandlerDeps,
+    ql: any,
+    reader: SecurityCatalogReader,
+    entry: { name: string; packageId?: string },
+    enabled: boolean,
+    context: HttpProtocolContext,
+): Promise<{ refusal?: HttpDispatcherResult; adoptPackageless: boolean; bindStale?: boolean }> {
+    const name = entry.name;
+    const target = catalogEntryAddress(entry).packageId;
+    const holders = (await reader.list('permission'))
+        .filter((e) => e.name === name)
+        .map((e) => catalogEntryAddress(e).packageId);
+    const adoptPackageless = target !== null && holders.length === 1 && holders[0] === target;
+    const found = await ql.find(METADATA_ACTIVATION_TABLE, {
+        where: { metadata_type: 'permission', name },
+        context: activationWriteContext(context),
+    });
+    const rows: PermissionLedgerRow[] = Array.isArray(found) ? found : [];
+    // [D8] The name's one holder also takes over its one row when that row names
+    // a package that no longer serves the name: the readers read it by the name
+    // alone, so it is this holder's switch, and the name-addressed store wrote
+    // exactly this re-address before (every one-holder answer unchanged).
+    const bindStale = adoptPackageless && rows.length === 1 && storedPackageOf(rows[0]) !== null
+        && storedPackageOf(rows[0]) !== target;
+    const own = rows.find((r) => storedPackageOf(r) === target)
+        ?? (adoptPackageless ? rows.find((r) => storedPackageOf(r) === null) : undefined)
+        ?? (bindStale ? rows[0] : undefined);
+
+    if (own) {
+        for (const other of holders) {
+            if (other === target || !(await ledgerRowSwitchesOff(ql, own, other, name))) continue;
+            return {
+                adoptPackageless,
+                bindStale,
+                refusal: {
+                    handled: true,
+                    response: deps.error(
+                        `Permission set '${name}': the activation ledger row this switch would write ` +
+                            `(${storedPackageOf(own) === null ? 'naming no package' : `naming package "${storedPackageOf(own)}"`}) ` +
+                            `switches off ${holderPhrase(other)} too, so writing it for ${holderPhrase(target)} would switch ` +
+                            `that one back on without a word (ADR-0150). Nothing was written. Delete that row from ` +
+                            `${METADATA_ACTIVATION_TABLE} and switch each holder through its own row.`,
+                        409,
+                        { code: 'RESOURCE_CONFLICT' },
+                    ),
+                },
+            };
+        }
+    }
+    if (enabled) {
+        for (const row of rows) {
+            if (row === own || !(await ledgerRowSwitchesOff(ql, row, target, name))) continue;
+            const named = storedPackageOf(row);
+            return {
+                adoptPackageless,
+                bindStale,
+                refusal: {
+                    handled: true,
+                    response: deps.error(
+                        `Permission set '${name}' of ${target === null ? 'the environment' : `package "${target}"`} ` +
+                            `stays switched off by another activation ledger row, ` +
+                            (named === null
+                                ? (holders.length > 1
+                                    ? 'one naming no package, which switches off every holder of the name while more than one holds it'
+                                    : 'one naming no package, which is read by the name alone (ADR-0150 D3)')
+                                : `one naming package "${named}", which no longer serves the name, so it is read by the name alone (ADR-0150 D3)`) +
+                            `, so switching it on here would not take effect. Nothing was written. Delete that row from ` +
+                            `${METADATA_ACTIVATION_TABLE}, then switch each holder through its own row (ADR-0150).`,
+                        409,
+                        { code: 'RESOURCE_CONFLICT' },
+                    ),
+                },
+            };
+        }
+    }
+    return { adoptPackageless, bindStale };
 }
 
 /**
@@ -691,17 +827,34 @@ export async function handleCatalogActivationWrite(
         // [#22621 → A] The row carries the definition's package when it names
         // one, and NO package when it does not — a position or permission set
         // the environment authored through the metadata door. That item is
-        // switched exactly like a packaged one: the resolver keys the row by
-        // type and name, never by package. The write runs for the caller,
+        // switched exactly like a packaged one. The write runs for the caller,
         // elevated, so the row and its audit row name the administrator who
         // switched the item (`activationWriteContext`).
-        await new ObjectStoreMetadataActivationStore(ql, type).setActive(
+        //
+        // [ADR-0150 D4, MF1 on #32164] A permission set's row is its holder's
+        // own, addressed by `(package, name)` ({@link planPermissionSetLedgerWrite});
+        // every other type's row is addressed by `(type, name)`, as before.
+        let adoptPackageless = false;
+        let bindStale = false;
+        if (type === 'permission' && reader) {
+            const plan = await planPermissionSetLedgerWrite(deps, ql, reader, entry, enabled, context);
+            if (plan.refusal) return plan.refusal;
+            adoptPackageless = plan.adoptPackageless;
+            bindStale = plan.bindStale === true;
+        }
+        const packageId = type === 'permission' ? catalogEntryAddress(entry).packageId ?? undefined : entry.packageId;
+        // A stale row the one holder takes over is the name's only row, which the
+        // name-addressed store writes (`bindStale`, {@link planPermissionSetLedgerWrite}).
+        const store = type === 'permission' && !bindStale
+            ? new ObjectStoreMetadataActivationStore(ql, type, PERMISSION_LEDGER_ADDRESSING)
+            : new ObjectStoreMetadataActivationStore(ql, type);
+        await store.setActive(
             {
                 name: entry.name,
-                ...(entry.packageId !== undefined ? { packageId: entry.packageId } : {}),
+                ...(packageId !== undefined ? { packageId } : {}),
                 active: enabled,
             },
-            { context: activationWriteContext(context) },
+            { context: activationWriteContext(context), ...(adoptPackageless ? { adoptPackageless: true } : {}) },
         );
     } catch (err: unknown) {
         // A failed write must never read as a successful flip, and its code and

@@ -10,7 +10,7 @@
  * declared key `(user_id, permission_set, permission_set_package,
  * organization_id)` (`unique: 'global'`, ADR-0150 D4) and, for the grants that
  * name no package, the package-less guard `metadata-protocol` builds at
- * `kernel:ready` (#32164) refuse a second on every write path, so a revoke
+ * schema sync (#32164) refuse a second on every write path, so a revoke
  * leaves no grant of that set in force. The organization key part is the plain
  * column since ADR-0131 D1 (the tenant column is NOT NULL), so on the pre-18
  * nullable column this harness models a grant with no organization is exempt,
@@ -405,7 +405,7 @@ describe('a system writer', () => {
 describe('one grant per user, set and organization — the declared key and the package-less guard', () => {
   const ORG = 'org_dup';
   /**
-   * The harness with the package-less guard built as the `kernel:ready`
+   * The harness with the package-less guard built as the schema-sync
    * migration builds it (#32164). The catalog here is the environment's, so
    * every grant names no package and the guard is what keeps them to one.
    */
@@ -440,7 +440,7 @@ describe('one grant per user, set and organization — the declared key and the 
     expect(await grantsOfSet(h, 'u_d1', 'qa_alpha')).toEqual([]);
   });
 
-  it('CONTROL — without the guard (driver-memory\'s declared limit; a SQL kernel before its kernel:ready migration ran) the declared key alone admits a second package-less grant', async () => {
+  it('CONTROL — without the guard (driver-memory\'s declared limit; a SQL table before its guard is built) the declared key alone admits a second package-less grant', async () => {
     const h = await boot();
     await h.engine.insert('sys_member', { id: 'mem_g1', user_id: 'u_d1', organization_id: ORG, role: 'member' }, { context: SYS } as any);
     await h.engine.insert('sys_user_permission_set', { id: 'ups_g1', user_id: 'u_d1', permission_set: 'qa_alpha', organization_id: ORG }, { context: ADMIN } as any);
