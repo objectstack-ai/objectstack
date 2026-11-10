@@ -50,6 +50,7 @@ import './lint-root-preload.testkit.js';
 import { describe, expect, it } from 'vitest';
 import { assertEngineFindOnePredicate, isCodeArtifactBody } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 
 const ORG = 'org_a';
 /** Per-organization overridable (ADR-0005), so the organization axis is live. */
@@ -117,6 +118,7 @@ function harness(
     const { items = [], runtime, type = TYPE } = options;
     const ofPackage = (packageId?: string) => items.filter((i) => !packageId || i._packageId === packageId);
     const registry = {
+        ...NO_PACKAGE_SCOPED_READS,
         getArtifactItem(asked: string, name: string, packageId?: string) {
             const hit = asked === type ? ofPackage(packageId).find((i) => i.name === name) : undefined;
             return hit && isCodeArtifactBody(hit) ? hit : undefined;

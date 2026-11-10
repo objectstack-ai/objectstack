@@ -209,8 +209,13 @@ export interface MetaItemReadGateSources extends MetaReadGateAudienceSources, Me
      * Absent, or a registry that cannot answer, is "not withheld": the answer
      * before #24210. A REJECTION is a fault and propagates, ⛔ never "not
      * withheld".
+     *
+     * [#32076] Asked at the member the layers were read at: the plain read
+     * it stands on reads that member, and a read naming a package is judged
+     * at member grain (ADR-0150 D5), so a dependent's added locale read with
+     * no member would be judged as the base's canonical one and refused.
      */
-    isItemOfDisabledPackage?(item: { type: string; name: string; packageId?: string }): Promise<boolean>;
+    isItemOfDisabledPackage?(item: { type: string; name: string; packageId?: string; member?: string }): Promise<boolean>;
     /**
      * [#28337, ADR-0048] The refusal of a layered read that names NO package,
      * of a name whose active rows two or more packages hold: the protocol's
@@ -4950,7 +4955,9 @@ export function createMetaLayeredAnswer(
         // 1b. [#7557, #24210] A disabled package's item is that same absence,
         //     for every caller: before the gate, so no author is served it.
         if (metaType !== 'object'
-            && await sources.isItemOfDisabledPackage?.({ type: metaType, name, ...(packageId ? { packageId } : {}) }) === true) {
+            && await sources.isItemOfDisabledPackage?.({
+                type: metaType, name, ...(packageId ? { packageId } : {}), ...(member !== undefined ? { member } : {}),
+            }) === true) {
             return { kind: 'refuse', refusal: { reason: 'absent' } };
         }
 

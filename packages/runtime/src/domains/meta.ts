@@ -554,11 +554,14 @@ function metaItemReadGateSources(
             }
         },
         navPruneLogged: NAV_PRUNE_LOGGED,
-        isItemOfDisabledPackage: async ({ type, name, packageId }) => {
+        isItemOfDisabledPackage: async ({ type, name, packageId, member }) => {
             if (typeof protocol?.getMetaItem !== 'function') return false;
             const registry = (await deps.getObjectQL(context))?.registry;
             if (typeof (registry as { isPackageDisabled?: unknown } | undefined)?.isPackageDisabled !== 'function') return false;
-            const envelope = await protocol.getMetaItem({ type, name, ...(packageId ? { packageId } : {}) });
+            // [#32076] At the member the layers were read at (`MetaItemReadGateSources.isItemOfDisabledPackage`).
+            const envelope = await protocol.getMetaItem({
+                type, name, ...(packageId ? { packageId } : {}), ...(member !== undefined ? { member } : {}),
+            });
             return envelope?.item == null && isServiceItemOfDisabledPackage(registry, { _packageId: envelope?.packageId });
         },
         ...(typeof protocol?.packagelessLayeredReadRefusal === 'function'
@@ -1013,6 +1016,15 @@ function isPackageScopedRefusal(e: unknown): boolean {
     if (e instanceof PackageScopedNameRefusedError) return true;
     const thrown = e as { code?: unknown; refusal?: { status?: unknown } } | null | undefined;
     return thrown?.code === 'RESOURCE_CONFLICT' && thrown.refusal?.status === 'refused';
+}
+
+/**
+ * [ADR-0150 D3/D5] Whether a thrown value is a refusal the protocol DECLARED
+ * (`refusal: true`, the 5xx boundary's mark of an authored refusal rather than
+ * a fault) — the read's answer, never a miss.
+ */
+function isDeclaredRefusal(e: unknown): boolean {
+    return (e as { refusal?: unknown } | null | undefined)?.refusal === true;
 }
 
 /**
@@ -2193,6 +2205,12 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // for the by-name service read below to answer with
                     // whichever item it finds first.
                     if (isPackageScopedRefusal(e)) throw e;
+                    // [ADR-0150 D3/D5, epic #31527] …and so is any refusal the
+                    // protocol DECLARED (`refusal: true`): the read's answer,
+                    // such as a by-name read an engine with no package-scoped
+                    // resolver cannot judge (`501`), never a miss for the
+                    // by-name service read below to answer with a first match.
+                    if (isDeclaredRefusal(e)) throw e;
                  }
             }
             if (found) return serveItem(protocol, found);

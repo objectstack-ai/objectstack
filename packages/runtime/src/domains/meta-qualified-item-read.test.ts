@@ -151,6 +151,34 @@ describe('the bare read and `?package=` on this transport', () => {
     });
 });
 
+/**
+ * Seat ruling (c) of #32076 (claim amendment 6764879174): a covered type the
+ * registry still reads through `getItem` (`readsByPackage` answers `false`; a
+ * queue here) is judged by the exact qualifier too.
+ */
+describe('a covered type the registry reads through `getItem`: the exact qualifier on this transport', () => {
+    it('`?package=`, the qualified path and `_env` of a name only alpha holds: 409 naming it (BASE: 200, alpha\'s queue)', async () => {
+        // The premise: this registry reads a queue through `getItem`, so the 409 is ruling (c)'s, not G1's.
+        expect(registry.readsByPackage('queue')).toBe(false);
+        ship('queue', 'status', A);
+        for (const answer of [
+            await read('/queue/status', { package: C }),
+            await read('/queue/gamma/status'),
+            await read('/queue/_env/status'),
+        ]) {
+            expect([answer.status, answer.body?.error?.code], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+            expect(answer.body?.error?.message).toContain(`package "${A}"`);
+        }
+    });
+
+    it('CONTROL: the bare read and the holder\'s own reads answer as before', async () => {
+        ship('queue', 'status', A);
+        expect(labelOf(await read('/queue/status'))).toBe('alpha queue');
+        expect(labelOf(await read('/queue/status', { package: A }))).toBe('alpha queue');
+        expect(labelOf(await read('/queue/alpha/status'))).toBe('alpha queue');
+    });
+});
+
 describe('ruling Q1 — a sub-resource literal in the last position keeps its route', () => {
     it('`/meta/app/alpha/published` is the app `alpha`\'s published read, not the item `published` of namespace alpha', async () => {
         ship('app', 'alpha', A);
@@ -282,6 +310,85 @@ describe('a shareable namespace two packages share (ADR-0150 D2)', () => {
         ship('datasource', 'warehouse', SYS_TWO);
         const answer = await read('/datasource/sys/warehouse', undefined, asCaller(['manage_platform_settings', 'manage_metadata']));
         expect([answer.status, answer.body?.error?.code], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+    });
+});
+
+/**
+ * ADR-0150 D3/D5, epic #31527 (#32076): on an engine whose registry has no
+ * package-scoped resolver slice, the protocol refuses a by-name read of a type
+ * ADR-0150 addresses by `(package, name)` with a DECLARED `501
+ * NOT_IMPLEMENTED`. This transport answers that refusal with its sentence —
+ * never a miss for the by-name `MetadataService` read to answer with a first
+ * match. The registry is this file's `SchemaRegistry`, read through a view
+ * that hides the five slice reads.
+ *
+ * BASE (main ff04ad81, this fixture): each read below answered `200` with the
+ * first match.
+ */
+describe('a composition with no package-scoped resolver: the protocol\'s 501 is the answer', () => {
+    const SLICE = new Set([
+        'readsByPackage', 'packageScopedHoldersOf', 'getEnvironmentScopedItem', 'getPackageScopedItem', 'resolveItem',
+    ]);
+    /** The by-name service read the dispatcher falls through to on a miss: it answers a first match. */
+    let serviceGetItem: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+        const view = new Proxy(registry, {
+            get(target, prop) {
+                if (typeof prop === 'string' && SLICE.has(prop)) return undefined;
+                const value = Reflect.get(target, prop, target);
+                return typeof value === 'function' ? value.bind(target) : value;
+            },
+        });
+        const engine = {
+            registry: view,
+            find: vi.fn().mockResolvedValue([]),
+            findOne: vi.fn().mockResolvedValue(null),
+            insert: vi.fn(),
+            update: vi.fn(),
+            delete: vi.fn(),
+            count: vi.fn().mockResolvedValue(0),
+            aggregate: vi.fn().mockResolvedValue([]),
+        };
+        const protocol = new ObjectStackProtocolImplementation(engine as never);
+        serviceGetItem = vi.fn(async (_type: string, name: string) => ({ name, label: 'first match' }));
+        const services: Record<string, unknown> = { protocol, objectql: engine, metadata: { getItem: serviceGetItem } };
+        const resolve = (name: string) => services[name] ?? null;
+        dispatcher = new HttpDispatcher({
+            getService: resolve,
+            getServiceAsync: async (name: string) => resolve(name),
+            context: { getService: resolve },
+        } as never);
+    });
+
+    const expect501 = (answer: { status?: number; body?: any }) => {
+        expect([answer.status, answer.body?.error?.code], JSON.stringify(answer.body)).toEqual([501, 'NOT_IMPLEMENTED']);
+        expect(answer.body?.error?.message).toContain('has no package-scoped resolver');
+        expect(serviceGetItem, 'the by-name service read is never asked').not.toHaveBeenCalled();
+    };
+
+    it('a bare name: 501 with its sentence, never the service read\'s first match (BASE: 200 first match)', async () => {
+        ship('page', 'home', A);
+        expect501(await read('/page/home'));
+    });
+
+    it('`?package=` and the qualified path: 501 (BASE: 200 first match)', async () => {
+        ship('page', 'home', A);
+        ship('page', 'home', B);
+        expect501(await read('/page/home', { package: C }));
+        expect501(await read('/page/beta/home'));
+    });
+
+    it('the environment address: 501', async () => {
+        ship('page', 'home', A);
+        expect501(await read('/page/_env/home'));
+    });
+
+    it('CONTROL — a type ADR-0150 does not address by package (view) is served as before', async () => {
+        registry.registerItem('view', { name: 'all', label: 'alpha view' }, 'name' as never, A);
+        const answer = await read('/view/all');
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(labelOf(answer)).toBe('alpha view');
     });
 });
 

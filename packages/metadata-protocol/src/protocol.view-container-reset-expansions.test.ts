@@ -84,6 +84,7 @@ import {
 } from '@objectstack/metadata-core';
 import { expandViewContainer } from '@objectstack/spec/ui';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 
 const PKG = 'com.example.showcase';
 const OTHER_PKG = 'com.example.other';
@@ -145,6 +146,7 @@ function makeRegistry() {
     };
     const isArtifact = (it: any) => !!it && !!it._packageId && it._packageId !== 'sys_metadata' && !isTenantAuthored(it);
     return {
+        ...NO_PACKAGE_SCOPED_READS,
         registerItem(type: string, item: any, keyField = 'name', packageId?: string) {
             // `applyProtection` stamps a package's entry; a bare registration is left as handed in.
             if (packageId) {

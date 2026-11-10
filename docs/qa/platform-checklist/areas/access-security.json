@@ -4713,7 +4713,7 @@
       "title": "A package's position resolves its permission sets from that package and its declared dependencies: a set only the environment or an unrelated package holds is refused and grants nothing, the boot report names the candidates, and a grant row records the package that holds its set",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4723,7 +4723,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr_a, namespace qa_a) and qa_b (manifest id com.qa.addr_b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. qa_a holds the permission set qa_a_reader (read on one showcase object); qa_b holds the position qa_b_desk binding qa_a_reader and qa_env_reader, and declares no dependency on qa_a",
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. qa_a holds the permission set qa_a_reader (read on one showcase object); qa_b holds the position qa_b_desk binding qa_a_reader and qa_env_reader, and declares no dependency on qa_a",
           "an environment permission set qa_env_reader saved with PUT /api/v1/meta/permission/qa_env_reader and no ?package=; a member assigned qa_b_desk; the server restarted after the installs so the boot report runs"
         ]
       },
@@ -4743,7 +4743,7 @@
         {
           "clause": "the boot report names each refused reference with its candidates",
           "oracle": "log",
-          "verify": "the boot log names qa_b_desk, qa_a_reader with com.qa.addr_a, and qa_env_reader with the environment",
+          "verify": "the boot log names qa_b_desk, qa_a_reader with com.qa.addr-a, and qa_env_reader with the environment",
           "evidence": "the report lines"
         },
         {
@@ -4755,7 +4755,7 @@
         {
           "clause": "a grant row written without a package records the package that holds its set",
           "oracle": "api",
-          "verify": "the read-back row carries permission_set_package com.qa.addr_a (packages/plugins/plugin-security/src/stored-permission-set-package-stamp.ts#registerPermissionSetPackageStamp)",
+          "verify": "the read-back row carries permission_set_package com.qa.addr-a (packages/plugins/plugin-security/src/stored-permission-set-package-stamp.ts#registerPermissionSetPackageStamp)",
           "evidence": "the row"
         },
         {
@@ -4786,6 +4786,12 @@
           "date": "2026-11-10",
           "change": "initial — ADR-0150 child E3 and the R1/R3 stamp (#31815, #31974). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
           "ref": "#32019"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-10",
+          "change": "fixture-text correction, no clause change: the scratch package ids are re-spelled with a hyphen (com.qa.addr-a, com.qa.addr-b) everywhere this item names them (fixtures and acceptance), because `objectstack build` refuses an underscore in a package id (packages/spec/src/kernel/manifest.zod.ts#MANIFEST_ID_PATTERN, refused with manifestIdRefusal). The namespaces qa_a and qa_b and every namespace-qualified address are unchanged. No step, clause or variant changes meaning. Found by the M4 verification run (#32316, FOLLOW-UPS §19b); card #32330",
+          "ref": "#32330"
         }
       ]
     },
@@ -4794,14 +4800,14 @@
       "title": "Sharing rules, queues and assignment rules resolve by (package, name): the activation door refuses a name two packages hold with the candidates, a declared rule's queue recipient and an assignment rule's queue come from the rule's own package, and a refused declared name serves nothing",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["admin (the seeded admin): the activation calls"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr_a, namespace qa_a) and qa_b (manifest id com.qa.addr_b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Each holds a queue qa_desk, a sharing rule qa_share and an assignment rule qa_route (none of these types has a one-holder rule, and the namespaces differ, so both install)"
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Each holds a queue qa_desk, a sharing rule qa_share and an assignment rule qa_route (none of these types has a one-holder rule, and the namespaces differ, so both install)"
         ]
       },
       "steps": [
@@ -4813,7 +4819,7 @@
         {
           "clause": "the activation door answers 409 RESOURCE_CONFLICT with the candidates for a queue, sharing rule or assignment rule name two packages hold, and writes no row",
           "oracle": "api",
-          "verify": "each call answers 409 with code RESOURCE_CONFLICT and candidates naming com.qa.addr_a and com.qa.addr_b (packages/runtime/src/domains/catalog-activation.ts); the ledger holds no row for the three names",
+          "verify": "each call answers 409 with code RESOURCE_CONFLICT and candidates naming com.qa.addr-a and com.qa.addr-b (packages/runtime/src/domains/catalog-activation.ts); the ledger holds no row for the three names",
           "evidence": "the three 409 bodies and the ledger read"
         },
         {
@@ -4843,6 +4849,12 @@
           "date": "2026-11-10",
           "change": "initial — ADR-0150 child E4 (#31728, #31789, #31850). The queue and assignment_rule waivers in coverage.json stand: this item drives the activation door, not claim, release or move. Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
           "ref": "#32019"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-10",
+          "change": "fixture-text correction, no clause change: the scratch package ids are re-spelled with a hyphen (com.qa.addr-a, com.qa.addr-b) everywhere this item names them (fixtures and acceptance), because `objectstack build` refuses an underscore in a package id (packages/spec/src/kernel/manifest.zod.ts#MANIFEST_ID_PATTERN, refused with manifestIdRefusal). The namespaces qa_a and qa_b and every namespace-qualified address are unchanged. No step, clause or variant changes meaning. Found by the M4 verification run (#32316, FOLLOW-UPS §19b); card #32330",
+          "ref": "#32330"
         }
       ]
     },
@@ -4851,7 +4863,7 @@
       "title": "A permission set travels as (package, name) from the grant to every request's evaluation: the execution context carries permissionSetAddresses, the evaluator reads each set at its holder, the activation ledger switches a set off per holder, and an OAuth client acting for a user carries none",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -4861,7 +4873,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr_a, namespace qa_a) and qa_b (manifest id com.qa.addr_b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. qa_a declares the object qa_a_ticket and the permission set qa_a_reader (read on qa_a_ticket, nothing else); qa_b declares one object and no permission set",
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. qa_a declares the object qa_a_ticket and the permission set qa_a_reader (read on qa_a_ticket, nothing else); qa_b declares one object and no permission set",
           "a boot on a file database, as platform-core.activation-ledger-row-contract boots, because two steps stop the server and write the ledger directly",
           "a member M (any signed-up person) granted qa_a_reader as admin with POST /api/v1/data/sys_user_permission_set {\"user_id\": M, \"permission_set\": \"qa_a_reader\"}; the grant door stamps permission_set_package (access-security.permission-set-package-resolution); one qa_a_ticket record"
         ],
@@ -4871,7 +4883,7 @@
       },
       "steps": [
         "as M: GET /api/v1/auth/me/permissions and GET /api/v1/data/qa_a_ticket. As admin: POST /api/v1/security/explain {\"userId\": M, \"object\": \"qa_a_ticket\", \"operation\": \"read\"}, and read M's grant row (GET /api/v1/data/sys_user_permission_set) for its permission_set_package",
-        "stop the server. In the database file, INSERT one sys_metadata_activation row: metadata_type 'permission', package_id 'com.qa.addr_b', name 'qa_a_reader', active false, with a fresh id and the audit columns as an existing row carries them. That row is a holder of the name M does not hold. Restart and repeat step 1. Then stop, DELETE that row and restart",
+        "stop the server. In the database file, INSERT one sys_metadata_activation row: metadata_type 'permission', package_id 'com.qa.addr-b', name 'qa_a_reader', active false, with a fresh id and the audit columns as an existing row carries them. That row is a holder of the name M does not hold. Restart and repeat step 1. Then stop, DELETE that row and restart",
         "as admin: POST /api/v1/security/_activation/permission/qa_a_reader {\"enabled\": false}; read the row it wrote (GET /api/v1/data/sys_metadata_activation); repeat step 1",
         "stop the server; UPDATE that row's package_id to NULL (a package-less row, the shape an earlier release wrote); restart and repeat step 1. Then POST /api/v1/security/_activation/permission/qa_a_reader {\"enabled\": true} and repeat step 1 once more"
       ],
@@ -4879,7 +4891,7 @@
         {
           "clause": "a grant resolves its set at its holder, and the member holds what the set grants",
           "oracle": "api",
-          "verify": "M's effective permissions list qa_a_reader and the data read returns the record; the grant row's permission_set_package is com.qa.addr_a, which the resolver reads first, else ADR-0150 D3, and records as M's address (packages/core/src/security/resolve-authz-context.ts#resolveUserAuthzGrants; the evaluator resolves each address through the security catalog: packages/plugins/plugin-security/src/permission-evaluator.ts#permissionSetRequestsFor)",
+          "verify": "M's effective permissions list qa_a_reader and the data read returns the record; the grant row's permission_set_package is com.qa.addr-a, which the resolver reads first, else ADR-0150 D3, and records as M's address (packages/core/src/security/resolve-authz-context.ts#resolveUserAuthzGrants; the evaluator resolves each address through the security catalog: packages/plugins/plugin-security/src/permission-evaluator.ts#permissionSetRequestsFor)",
           "evidence": "the effective-permissions body, the data read and the grant row"
         },
         {
@@ -4891,7 +4903,7 @@
         {
           "clause": "the holder's own row switches the set off, and explain names it deactivated",
           "oracle": "api",
-          "verify": "the door's row carries package_id com.qa.addr_a and active false; M's effective permissions no longer list qa_a_reader and the data read no longer returns the record (record its status); explain's principal layer carries the contributor {kind: 'permission_set', name: 'qa_a_reader', via: 'held — deactivated', state: 'deactivated'} (packages/plugins/plugin-security/src/explain-engine.ts, which judges dropped grants per holder)",
+          "verify": "the door's row carries package_id com.qa.addr-a and active false; M's effective permissions no longer list qa_a_reader and the data read no longer returns the record (record its status); explain's principal layer carries the contributor {kind: 'permission_set', name: 'qa_a_reader', via: 'held — deactivated', state: 'deactivated'} (packages/plugins/plugin-security/src/explain-engine.ts, which judges dropped grants per holder)",
           "evidence": "the ledger row and the three answers"
         },
         {
@@ -4909,7 +4921,7 @@
       ],
       "negative": [
         "the foreign row of step 2 switching off M's set is a FAIL: the ledger is judged per holder",
-        "⛔ leaving step 2's foreign row in place before step 3 makes the door switch that row instead of writing com.qa.addr_a's: setActive finds its row by (metadata_type, name) (packages/core/src/utils/metadata-activation-store.ts, FOLLOW-UPS §16b). That is a fixture error, never a verdict on this item"
+        "⛔ leaving step 2's foreign row in place before step 3 makes the door switch that row instead of writing com.qa.addr-a's: setActive finds its row by (metadata_type, name) (packages/core/src/utils/metadata-activation-store.ts, FOLLOW-UPS §16b). That is a fixture error, never a verdict on this item"
       ],
       "traps": ["cache-staleness", "wrong-persona"],
       "automated": {
@@ -4931,6 +4943,12 @@
           "date": "2026-11-10",
           "change": "initial — ADR-0150 D3 and D4 (D8 row R4), the permission set address pipeline (#32027). This sweep first drafted the item as planned at 60f8149e, when the assembler always left permissionSetAddresses undefined; #32027 landed before the item reached main, so it is authored active, as a new item, not promoted. Scoped sweep #32019 (epic #32022 M1, theme 1), read from source at 0f7389cc; no live run made",
           "ref": "#32019"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-10",
+          "change": "fixture-text correction, no clause change: the scratch package ids are re-spelled with a hyphen (com.qa.addr-a, com.qa.addr-b) everywhere this item names them (fixtures, steps, acceptance and negative), because `objectstack build` refuses an underscore in a package id (packages/spec/src/kernel/manifest.zod.ts#MANIFEST_ID_PATTERN, refused with manifestIdRefusal). The namespaces qa_a and qa_b and every namespace-qualified address are unchanged. No step, clause or variant changes meaning. Found by the M4 verification run (#32316, FOLLOW-UPS §19b); card #32330",
+          "ref": "#32330"
         }
       ]
     },
