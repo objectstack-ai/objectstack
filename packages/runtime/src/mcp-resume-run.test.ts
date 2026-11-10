@@ -34,6 +34,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Paid at collection, not inside a case's clock: the dispatcher's reach loads it lazily.
+import '@objectstack/metadata';
 
 import { HttpDispatcher } from './http-dispatcher.js';
 
