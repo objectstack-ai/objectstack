@@ -120,7 +120,7 @@ export function ChatDockConversation({
       editPackageId !== undefined && isThreadBoundToPackage(messages, editPackageId),
     [editPackageId],
   );
-  const { conversationId, conversationScope, initialMessages } = useChatConversation({
+  const { conversationId, conversationScope, initialMessages, ensureConversation } = useChatConversation({
     userId: activeAgent ? userId : undefined,
     scope,
     apiBase,
@@ -162,6 +162,7 @@ export function ChatDockConversation({
       surfaceArtifactLabel={surfaceArtifactLabel}
       initialMessages={paneInitialMessages}
       pendingFirstMessageRef={pendingFirstMessageRef}
+      ensureConversation={ensureConversation}
       onSent={() => {}}
       onShare={() => {}}
       showDebug={false}

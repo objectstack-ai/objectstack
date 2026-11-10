@@ -881,3 +881,45 @@ describe('ActionParamDialog — a param `widget` draws the named widget (#30260)
     await waitFor(() => expect(resolve).toHaveBeenCalledWith({ reason: 'because' }));
   });
 });
+
+/**
+ * objectstack#32087 — two boolean params (the shape of "Edit Sign-In Options":
+ * Allow IdP-Initiated, Allow JIT) are two independent yes/no controls: each a
+ * checkbox, none a radio, and changing one leaves the other as it was. What
+ * keeps the console from drawing that checkbox as a circle is the theme's
+ * corner, pinned on the compiled stylesheet in the console's
+ * `index-css-scan-excludes-tests.test.ts`.
+ */
+describe('ActionParamDialog — two boolean params are independent controls (objectstack#32087)', () => {
+  const twoToggles = () => [
+    def({ name: 'allowIdpInitiated', label: 'Allow IdP-Initiated Sign-In', type: 'boolean' }),
+    def({ name: 'allowJit', label: 'Allow Just-in-Time Provisioning', type: 'boolean' }),
+  ];
+
+  it('draws each as its own checkbox, and no radio', async () => {
+    openDialog(twoToggles());
+    const boxes = await screen.findAllByRole('checkbox');
+    expect(boxes).toHaveLength(2);
+    expect(screen.queryAllByRole('radio')).toHaveLength(0);
+    expect(screen.queryByRole('radiogroup')).toBeNull();
+    expect(screen.getByRole('checkbox', { name: 'Allow IdP-Initiated Sign-In' })).toBeTruthy();
+    expect(screen.getByRole('checkbox', { name: 'Allow Just-in-Time Provisioning' })).toBeTruthy();
+  });
+
+  it('turning one on leaves the other as it was, and both can be on at once', async () => {
+    const resolve = openDialog(twoToggles());
+    const idp = await screen.findByRole('checkbox', { name: 'Allow IdP-Initiated Sign-In' });
+    const jit = screen.getByRole('checkbox', { name: 'Allow Just-in-Time Provisioning' });
+
+    fireEvent.click(idp);
+    await waitFor(() => expect(idp).toHaveAttribute('aria-checked', 'true'));
+    expect(jit).toHaveAttribute('aria-checked', 'false');
+
+    fireEvent.click(jit);
+    await waitFor(() => expect(jit).toHaveAttribute('aria-checked', 'true'));
+    expect(idp).toHaveAttribute('aria-checked', 'true');
+
+    confirm();
+    await waitFor(() => expect(resolve).toHaveBeenCalledWith({ allowIdpInitiated: true, allowJit: true }));
+  });
+});

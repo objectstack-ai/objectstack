@@ -2764,6 +2764,24 @@ const en = {
       sampleDataCleanupEdited: '{{count}} rows edited since they were seeded stay.',
       sampleDataCleanupEdited_one: '{{count}} row edited since it was seeded stays.',
       sampleDataCleanupEdited_other: '{{count}} rows edited since they were seeded stay.',
+      packageRemovalTitle: 'Delete the package {{package}}',
+      packageRemovalRows: '{{count}} records',
+      packageRemovalRows_one: '{{count}} record',
+      packageRemovalRows_other: '{{count}} records',
+      packageRemovalDraft: 'Draft, no table',
+      packageRemovalRowsUnknown: 'Record count unavailable',
+      packageRemovalTotal: '{{count}} records in total',
+      packageRemovalTotal_one: '{{count}} record in total',
+      packageRemovalTotal_other: '{{count}} records in total',
+      packageRemovalUncounted: 'The total leaves out {{count}} objects whose records could not be counted.',
+      packageRemovalUncounted_one: 'The total leaves out {{count}} object whose records could not be counted.',
+      packageRemovalUncounted_other: 'The total leaves out {{count}} objects whose records could not be counted.',
+      packageRemovalPermanent: 'The tables are dropped permanently, with every record in them. Dropped tables do not go to the recycle bin and cannot be restored.',
+      packageRemovalKept: 'The database tables and every record in them are kept; only the package is removed.',
+      packageRemovalRemoved: 'The package was deleted.',
+      packageRemovalPartial: 'The package was partly deleted: {{count}} items were not removed.',
+      packageRemovalPartial_one: 'The package was partly deleted: {{count}} item was not removed.',
+      packageRemovalPartial_other: 'The package was partly deleted: {{count}} items were not removed.',
       copy: 'Copy',
       copied: 'Copied',
       regenerate: 'Regenerate',
@@ -3420,6 +3438,9 @@ const en = {
       // `LoginForm`'s own default for that label, so an English session reads
       // the same with or without the pack.
       ssoButton: 'Sign in with SSO',
+      // Shown before any request when "Sign in with SSO" is pressed with no
+      // email: single sign-on routes by the email's domain (objectstack#32087).
+      ssoEmailRequiredText: "Enter your work email to sign in with SSO.",
       ssoOnlyDescription: "Sign in with your organization's single sign-on",
       noSignInMethodText: 'No sign-in method is available. Contact your administrator.',
       usePasswordText: 'Use a password instead',
@@ -3474,6 +3495,14 @@ const en = {
         invalidCredentials: 'Invalid email or password. After several failed attempts, sign-in is paused for a while. Forgot your password? Reset it to sign in right away.',
         emailNotVerified: 'Please verify your email address before signing in.',
         oauthCallbackFailed: 'Single sign-on could not be completed — the sign-in link expired or was already used. Please try again.',
+        // objectstack#32087 — a refused single sign-on, by the code it lands
+        // with (`ssoCallbackRefusal.ts` in the console). `oauthCallbackFailed`
+        // above stays for a code with no sentence of its own.
+        ssoAccountNotInvited: "Your account isn't set up for this system yet. Ask your administrator to invite you.",
+        ssoAccountNotLinked: "An account with your email already exists here, but it isn't connected to single sign-on. Sign in another way, or ask your administrator to connect it.",
+        ssoResponseRejected: "Your organization's sign-in service sent a response this system could not accept. Ask your administrator to check the single sign-on setup.",
+        ssoStartFromLoginPage: "Sign-in has to start from this system's login page. Enter your work email here and choose Sign in with SSO.",
+        ssoTechnicalDetails: "Technical details",
         // objectstack#29105 — refusals of the two-factor sign-in step, by the
         // server's code (`signInRefusalMessages`).
         twoFactorInvalidCode: 'That code is not valid. Check your authenticator app and try again.',

@@ -3061,7 +3061,12 @@ describe('ObjectSchema.fields — __proto__ / constructor / prototype key refusa
     const node = publishedFieldsNode();
     // The record's own key-TYPE rule survives — the ban is CONJOINED, never
     // substituted, so the reference tables keep the shape they always printed.
-    expect(node.propertyNames).toEqual({ type: 'string', pattern: '^[a-z_][a-z0-9_]*$' });
+    // [ADR-0153 D4] The `_sync_` prefix is reserved for the engine's sync
+    // columns, so the key rule conjoins a second pattern beside the first.
+    expect(node.propertyNames).toEqual({
+      type: 'string',
+      allOf: [{ pattern: '^[a-z_][a-z0-9_]*$' }, { pattern: '^(?!_sync_)' }],
+    });
     // One clause per reserved name (#20997): each name is its own single-name
     // refine so its refusal can carry the name as its path, and the generator
     // conjoins the two bans — the same rule as one two-name `enum`.

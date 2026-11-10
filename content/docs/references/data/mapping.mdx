@@ -50,6 +50,7 @@ const result = ImportFieldMappingSchema.parse(data);
 | **mode** | `Enum<'insert' \| 'update' \| 'upsert'>` | optional (default: `"insert"`) |  |
 | **upsertKey** | `string[]` | optional | Fields to match for upsert (e.g. email) |
 | **connectorSource** | `{ connector: string; action: string; input?: Record<string, any>; recordsPath?: string; … }` | optional | Pull binding: the rest/openapi connector this mapping pulls rows from (one-way, full or timestamp-incremental; a `job` sets the cadence). Pulled when a job drives it — a `job` whose `pull: { mapping }` names this mapping, on the job's schedule; the binding alone moves no rows |
+| **datasourceSource** | `{ object: string; watermark: object; full?: boolean; deletePolicy?: Enum<'mark' \| 'ignore'>; … }` | optional | Pull binding: the federated object this mapping pulls rows from (one-way; a `job` sets the cadence), read in windows cut on `watermark.field`. Exclusive with `connectorSource`. Pulled when a job drives it — a `job` whose `pull: { mapping }` names this mapping; the binding alone moves no rows |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
@@ -77,6 +78,19 @@ const result = ImportFieldMappingSchema.parse(data);
 | **input** | `Record<string, any>` | optional | Fixed input passed to the action on every pull (e.g. `{ method: 'GET', path: '/contacts' }` for `rest`) |
 | **recordsPath** | `string` | optional | Dot path, within the action's result, to the array of records (e.g. `body.results`); omitted ⇒ the result's `body` is the array |
 | **watermark** | `{ field: string; param: string }` | optional | Timestamp-incremental pull; omitted ⇒ every pull reads the full set. Either way a pull makes ONE action call and reads ONE response: the connector's paging is not followed, so a paged endpoint yields its first page only — and an incremental pull over a newest-first paged endpoint moves its starting point past the pages it never read |
+| **paging** | `{ style: Enum<'page' \| 'cursor' \| 'offset' \| 'none'>; param?: string; nextPath?: string }` | optional | The connector's paging convention: page, cursor or offset, or `none` for a source whose one response is the whole set. Omitted ⇒ a pull reads one response and does not treat it as complete |
+| **deletePolicy** | `Enum<'mark' \| 'ignore'>` | optional | What a pull does with a row the source no longer has: 'mark' stamps the row's source-deleted mark and clears it if the row comes back, 'ignore' leaves the row as it is. Absent reads as 'mark'. A pull never deletes a row physically. A full pull marks only when its read was complete; an incremental pull sees a delete only through `deletedField` |
+| **deletedField** | `string` | optional | Source field whose truthy value means the row was deleted at the source — how an incremental pull, which cannot see an absent row, learns of a delete |
+
+### Nested Shape: `Mapping.datasourceSource`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Name of the federated object (ADR-0015) whose rows the pull reads — an object whose own `external` binding addresses the remote table, and whose `external.columnMap` maps the source key onto `id` |
+| **watermark** | `{ field: string; start: string \| integer }` | ✅ | The field the read windows are cut on, and where the first read starts |
+| **full** | `boolean` | optional | Re-read from `watermark.start` on every run (a full pull, the one that can mark deletes by absence); omitted ⇒ each run reads on from the position the last run committed |
+| **deletePolicy** | `Enum<'mark' \| 'ignore'>` | optional | What a pull does with a row the source no longer has: 'mark' stamps the row's source-deleted mark and clears it if the row comes back, 'ignore' leaves the row as it is. Absent reads as 'mark'. A pull never deletes a row physically. A full pull marks only when its read was complete; an incremental pull sees a delete only through `deletedField` |
+| **deletedField** | `string` | optional | Source field whose truthy value means the row was deleted at the source — how an incremental pull, which cannot see an absent row, learns of a delete |
 
 ### Nested Shape: `Mapping.overrides`
 
