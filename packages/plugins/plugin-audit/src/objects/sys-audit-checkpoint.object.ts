@@ -50,7 +50,7 @@ export const SysAuditCheckpoint = ObjectSchema.create({
 
   fields: {
     id: Field.text({ label: 'Checkpoint ID', required: true, readonly: true }),
-    // Keyed by both indexes below, so bounded (#11374): an object name, which
+    // Keyed by both indexes below, so bounded (`check:keyed-text-bounds`): an object name, which
     // the sealer reads off the registry, bounded as `sys_audit_log.object_name`.
     sealed_object: Field.text({
       label: 'Sealed Object',

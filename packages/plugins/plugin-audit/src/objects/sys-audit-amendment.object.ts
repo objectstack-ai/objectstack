@@ -62,7 +62,7 @@ export const SysAuditAmendment = ObjectSchema.create({
         readonly: true,
       },
     ),
-    // Keyed columns are bounded (#11374). An object name, which the sealer
+    // Keyed columns are bounded (`check:keyed-text-bounds`). An object name, which the sealer
     // reads off the registry, bounded as `sys_audit_log.object_name`.
     sealed_object: Field.text({ label: 'Sealed Object', required: true, readonly: true, maxLength: 255 }),
     // `org:` (4 characters) and an organization id, a stored row's id: the
