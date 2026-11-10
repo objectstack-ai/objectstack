@@ -11,7 +11,9 @@
  * keys, by the same rules (`package-slotted-store.ts`): each package's item in
  * its own slot, so the artifact door — which saves every package body's items
  * here — keeps both packages' items of one name instead of the last one
- * saved. Every other type is held by name, as before.
+ * saved. `loadSlots` / `loadManySlots` answer every slot; `load`, `loadMany`
+ * and `loadManyKeyed` still answer one item per name, the one saved last, as
+ * they did. Every other type is held by name, as before.
  */
 
 import type {
@@ -25,7 +27,8 @@ import type {
 import type { MetadataLoader, MetadataKeyedItem, MetadataLoaderDeleteOptions } from './loader-interface.js';
 import {
   PACKAGE_SLOTTED_STORE_TYPES,
-  readStoreEntry,
+  lastWrittenOf,
+  recordStoreWrite,
   slotPackageOf,
   storedNameOf,
   storeKeysNamed,
@@ -49,20 +52,14 @@ export class MemoryLoader implements MetadataLoader {
   // per `(package, name)` the registry's store key (a package's slot).
   private storage = new Map<string, Map<string, any>>();
 
-  /**
-   * [#32246] For a type stored per `(package, name)`, the read naming no
-   * package (`readStoreEntry`): the name's package-less item, else its one
-   * holder's; refused (`PackageScopedNameRefusedError`, `409`) when two
-   * packages hold it.
-   */
+  /** [#32246] For a type stored per `(package, name)`: the slot of the name saved last. */
   async load(
     type: string,
     name: string,
     _options?: MetadataLoadOptions
   ): Promise<MetadataLoadResult> {
     const typeStore = this.storage.get(type);
-    const entry = PACKAGE_SLOTTED_STORE_TYPES.has(type) ? readStoreEntry(typeStore, type, name) : undefined;
-    const data = entry ? (entry.found ? entry.data : undefined) : typeStore?.get(name);
+    const data = PACKAGE_SLOTTED_STORE_TYPES.has(type) ? lastWrittenOf(typeStore, type, name) : typeStore?.get(name);
 
     if (data) {
       return {
@@ -82,6 +79,7 @@ export class MemoryLoader implements MetadataLoader {
   ): Promise<T[]> {
     const typeStore = this.storage.get(type);
     if (!typeStore) return [];
+    if (PACKAGE_SLOTTED_STORE_TYPES.has(type)) return this.latestByName<T>(type, typeStore).map((entry) => entry.data);
     return Array.from(typeStore.values()) as T[];
   }
 
@@ -100,14 +98,27 @@ export class MemoryLoader implements MetadataLoader {
   ): Promise<MetadataKeyedItem<T>[]> {
     const typeStore = this.storage.get(type);
     if (!typeStore) return [];
-    // [#32246] A package's slot answers with its name and the package.
-    return Array.from(typeStore, ([key, data]) => keyedSlot<T>(type, key, data));
+    if (PACKAGE_SLOTTED_STORE_TYPES.has(type)) return this.latestByName<T>(type, typeStore);
+    return Array.from(typeStore, ([name, data]) => ({ name, data: data as T }));
   }
 
   /** [#32246] Every slot of `name`, each with the package it is held for. */
   async loadSlots<T = any>(type: string, name: string): Promise<MetadataKeyedItem<T>[]> {
     const typeStore = this.storage.get(type);
-    return storeKeysNamed(typeStore, type, name).map((key) => keyedSlot<T>(type, key, typeStore!.get(key)));
+    return storeKeysNamed(typeStore, type, name).map((key) => keyedSlot<T>(key, typeStore!.get(key)));
+  }
+
+  /** [#32246] Every slot of every name, each with its name and the package it is held for. */
+  async loadManySlots<T = any>(type: string): Promise<MetadataKeyedItem<T>[]> {
+    const typeStore = this.storage.get(type);
+    if (!typeStore) return [];
+    return Array.from(typeStore, ([key, data]) => keyedSlot<T>(key, data));
+  }
+
+  /** One entry per name, in the order names were first saved: its slot saved last. */
+  private latestByName<T>(type: string, typeStore: Map<string, any>): MetadataKeyedItem<T>[] {
+    const names = [...new Set(Array.from(typeStore.keys(), storedNameOf))];
+    return names.map((name) => ({ name, data: lastWrittenOf(typeStore, type, name) as T }));
   }
 
   async exists(type: string, name: string): Promise<boolean> {
@@ -148,6 +159,7 @@ export class MemoryLoader implements MetadataLoader {
     const { key, replaces } = storeWriteKey(typeStore, type, name, data);
     for (const replaced of replaces) typeStore.delete(replaced);
     typeStore.set(key, data);
+    recordStoreWrite(typeStore, key);
 
     return {
       success: true,
@@ -159,17 +171,23 @@ export class MemoryLoader implements MetadataLoader {
   /**
    * Delete a metadata item from memory storage
    *
-   * [ADR-0150 D3/D4, #32246] For a type stored per `(package, name)`, by the
-   * registry's removal rule (`storeRemovalKeys`): with `options.packageId`,
-   * that package's slot only — ⛔ never another package's item; with none,
-   * every slot of the name while at most one package holds it, and refused
+   * [ADR-0150 D3/D4, #32246] For a type stored per `(package, name)`: with
+   * `options.packageId`, every slot of the name held for that package (an
+   * object-bound action's included, as `DatabaseLoader`'s one row of the
+   * package holds it) — ⛔ never another package's item; with none, by the
+   * registry's removal rule (`storeRemovalKeys`): every slot of the name
+   * while at most one package holds it, refused
    * (`PackageScopedNameRefusedError`) when two or more do.
    */
   async delete(type: string, name: string, options?: MetadataLoaderDeleteOptions): Promise<void> {
     const typeStore = this.storage.get(type);
     if (typeStore) {
       if (PACKAGE_SLOTTED_STORE_TYPES.has(type)) {
-        for (const key of storeRemovalKeys(typeStore, type, name, options?.packageId).keys) typeStore.delete(key);
+        const packageId = options?.packageId;
+        const keys = packageId === undefined
+          ? storeRemovalKeys(typeStore, type, name).keys
+          : storeKeysNamed(typeStore, type, name).filter((key) => slotPackageOf(key) === packageId);
+        for (const key of keys) typeStore.delete(key);
       } else {
         typeStore.delete(name);
       }
@@ -180,9 +198,9 @@ export class MemoryLoader implements MetadataLoader {
   }
 }
 
-/** One stored entry, keyed by its name, with its package when its key is a package's slot. */
-function keyedSlot<T>(type: string, key: string, data: unknown): MetadataKeyedItem<T> {
-  const packageId = PACKAGE_SLOTTED_STORE_TYPES.has(type) ? slotPackageOf(key) : undefined;
+/** One stored slot, keyed by its name, with its package when its key is a package's slot. */
+function keyedSlot<T>(key: string, data: unknown): MetadataKeyedItem<T> {
+  const packageId = slotPackageOf(key);
   return packageId === undefined
     ? { name: storedNameOf(key), data: data as T }
     : { name: storedNameOf(key), data: data as T, packageId };

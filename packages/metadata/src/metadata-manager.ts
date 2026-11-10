@@ -87,6 +87,7 @@ import type {
 import { EndpointMatcher } from './endpoint-matcher.js';
 import {
   PACKAGE_SLOTTED_STORE_TYPES,
+  keyIdentityOf,
   readStoreEntry,
   recordStoreWrite,
   slotPackageOf,
@@ -98,7 +99,6 @@ import {
   storeSlotKey,
   storeWriteKey,
 } from './package-slotted-store.js';
-import { PackageScopedNameRefusedError } from '@objectstack/core';
 // [#5309] The stored ENVELOPE / authored BODY split — peeled before any spec
 // schema parses a stored row. See `stored-envelope.ts`.
 import { peelStoredEnvelope, STORED_ENVELOPE_KEYS } from './stored-envelope.js';
@@ -1161,13 +1161,12 @@ export class MetadataManager implements IMetadataService {
         const result = await loader.load(type, name);
         if (result.data) slots.push({ packageId: indexedItemPackageId(result.data), data: result.data });
       } catch (e) {
-        if (e instanceof PackageScopedNameRefusedError) throw e;
         const message = e instanceof Error ? e.message : String(e);
         errors.push(`${loader.contract.name}: ${message}`);
         this.logger.warn(`Loader ${loader.contract.name} failed to load ${type}:${name}`, { error: e });
       }
     }
-    const entry = readStoreEntry(slotStoreOf(name, slots), type, name, packageId);
+    const entry = readStoreEntry(slotStoreOf(type, name, slots), type, name, packageId);
     return entry.found
       ? { data: entry.data, degraded: false, errors }
       : { data: null, degraded: errors.length > 0, errors };
@@ -1353,36 +1352,59 @@ export class MetadataManager implements IMetadataService {
 
   /**
    * [ADR-0150 D4, #32246] {@link admitLoaderItems} for a type stored per
-   * `(package, name)`: a loader's item fills the slot of the package it is
-   * held for (the loader's own answer, else the package its body carries), so
-   * two packages' stored items of one name are both listed, as the registry
-   * lists them. What an earlier source (the registry, an earlier loader)
-   * already holds shadows it, as before:
+   * `(package, name)`: every item a loader stores ({@link loaderSlotEntries})
+   * fills the slot of the package it is held for, keyed as the store keys it,
+   * so two packages' stored items of one name are both listed, as the
+   * registry lists them. What an earlier source (the registry, an earlier
+   * loader) already holds shadows it, as before:
    *
-   *  - a package's item, by that package's slot — or by the name's
-   *    package-less slot when no package slot of the name is held (a
-   *    package's first item takes that slot over in the store);
-   *  - an item held for no package, by any slot of its name (D4: under a
+   *  - a package's item, by that package's slot — or by the package-less slot
+   *    when no package slot of its identity is held (a package's first item
+   *    takes that slot over in the store);
+   *  - an item held for no package, by any slot of its identity (D4: under a
    *    package-held name it is that holder's customization, never a second
    *    item).
    *
-   * One loader's own slots of a name do not shadow each other.
+   * One loader's own slots do not shadow each other.
    */
   private async admitLoaderSlots(loader: MetadataLoader, type: string, items: Map<string, unknown>): Promise<void> {
     const prior = new Set(items.keys());
-    const heldNames = new Set<string>();
-    const packageHeldNames = new Set<string>();
+    const heldIdentities = new Set<string>();
+    const packageHeldIdentities = new Set<string>();
     for (const key of prior) {
-      heldNames.add(storedNameOf(key));
-      if (slotPackageOf(key) !== undefined) packageHeldNames.add(storedNameOf(key));
+      heldIdentities.add(keyIdentityOf(key));
+      if (slotPackageOf(key) !== undefined) packageHeldIdentities.add(keyIdentityOf(key));
     }
-    for (const entry of await this.loaderEntries(loader, type)) {
-      const key = storeSlotKey(entry.name, entry.packageId ?? indexedItemPackageId(entry.data));
-      const shadowed = items.has(key) || (key === entry.name
-        ? heldNames.has(entry.name)
-        : prior.has(entry.name) && !packageHeldNames.has(entry.name));
+    for (const entry of await this.loaderSlotEntries(loader, type)) {
+      const key = storeSlotKey(type, entry.name, entry.packageId ?? indexedItemPackageId(entry.data), entry.data);
+      const identity = keyIdentityOf(key);
+      const shadowed = items.has(key) || (slotPackageOf(key) === undefined
+        ? heldIdentities.has(identity)
+        : prior.has(identity) && !packageHeldIdentities.has(identity));
       if (!shadowed) items.set(key, entry.data);
     }
+  }
+
+  /**
+   * [ADR-0150 D4, #32246] Every item one loader stores for a type stored per
+   * `(package, name)`, each with the package it is held for:
+   * {@link MetadataLoader.loadManySlots} where the loader offers it, else
+   * {@link loaderEntries} (one item per name, read for the package its body
+   * carries).
+   */
+  private async loaderSlotEntries(
+    loader: MetadataLoader,
+    type: string,
+  ): Promise<Array<{ name: string; data: unknown; packageId?: string }>> {
+    if (typeof loader.loadManySlots !== 'function') return this.loaderEntries(loader, type);
+    const entries: Array<{ name: string; data: unknown; packageId?: string }> = [];
+    for (const entry of await loader.loadManySlots(type)) {
+      if (!entry || typeof entry.name !== 'string' || entry.name === '') continue;
+      entries.push(entry.packageId === undefined
+        ? { name: entry.name, data: entry.data }
+        : { name: entry.name, data: entry.data, packageId: entry.packageId });
+    }
+    return entries;
   }
 
   /**
@@ -1392,18 +1414,12 @@ export class MetadataManager implements IMetadataService {
    * reading, for loaders that cannot produce keys). An item with no key is
    * left out, as {@link admitLoaderItems} always left it.
    */
-  private async loaderEntries(
-    loader: MetadataLoader,
-    type: string,
-  ): Promise<Array<{ name: string; data: unknown; packageId?: string }>> {
-    const entries: Array<{ name: string; data: unknown; packageId?: string }> = [];
+  private async loaderEntries(loader: MetadataLoader, type: string): Promise<Array<{ name: string; data: unknown }>> {
+    const entries: Array<{ name: string; data: unknown }> = [];
     if (typeof loader.loadManyKeyed === 'function') {
       for (const entry of await loader.loadManyKeyed(type)) {
         if (!entry || typeof entry.name !== 'string' || entry.name === '') continue;
-        // [#32246] The package a loader holds a by-package type's item for.
-        entries.push(entry.packageId === undefined
-          ? { name: entry.name, data: entry.data }
-          : { name: entry.name, data: entry.data, packageId: entry.packageId });
+        entries.push({ name: entry.name, data: entry.data });
       }
       return entries;
     }
@@ -1656,8 +1672,8 @@ export class MetadataManager implements IMetadataService {
    * matcher keys its routes by METHOD + path (bucket 1).
    */
   private async listForPackageScopedIndex(type: string): Promise<unknown[]> {
-    // [#32246] A loader entry's package is the one the loader holds it for,
-    // else the one its body carries.
+    // [#32246] Every item a loader stores, each with the package the loader
+    // holds it for, else the one its body carries.
     const entries: Array<{ name: string; data: unknown; packageId?: string }> = [];
     const typeStore = this.registry.get(type);
     if (typeStore) {
@@ -1665,7 +1681,7 @@ export class MetadataManager implements IMetadataService {
     }
     for (const loader of this.loaders.values()) {
       // No try/catch, on purpose — see {@link listForIndex}.
-      entries.push(...(await this.loaderEntries(loader, type)));
+      entries.push(...(await this.loaderSlotEntries(loader, type)));
     }
 
     const holders = new Map<string, Set<string>>();
@@ -3221,9 +3237,6 @@ export class MetadataManager implements IMetadataService {
                 return { data: result.data as T, degraded: false, errors };
             }
         } catch (e) {
-            // [ADR-0150 D3, #32246] A loader's refusal of a bare read of a name
-            // two packages store is an answer, not an outage.
-            if (e instanceof PackageScopedNameRefusedError) throw e;
             const message = e instanceof Error ? e.message : String(e);
             errors.push(`${loader.contract.name}: ${message}`);
             this.logger.warn(`Loader ${loader.contract.name} failed to load ${type}:${name}`, { error: e });

@@ -38,12 +38,12 @@ export interface MetadataKeyedItem<T = any> {
   /** The stored body, exactly as {@link MetadataLoader.loadMany} would return it. */
   readonly data: T;
   /**
-   * [ADR-0150 D4, #32246] The package this loader holds the item for, for a
-   * type stored per `(package, name)` (`PACKAGE_SLOTTED_STORE_TYPES`); absent
-   * for an item it holds for no package, and for every other type. A
-   * customization of a package's item (D4) is held for that package even
-   * though its body names none, which is why the package travels beside the
-   * body rather than being read off it.
+   * [ADR-0150 D4, #32246] On an entry of {@link MetadataLoader.loadSlots} or
+   * {@link MetadataLoader.loadManySlots}: the package this loader holds the
+   * item for; absent for an item it holds for no package. A customization of
+   * a package's item (D4) is held for that package though its body names
+   * none, which is why the package travels beside the body rather than being
+   * read off it.
    */
   readonly packageId?: string;
 }
@@ -116,21 +116,36 @@ export interface MetadataLoader {
 
   /**
    * [ADR-0150 D3/D4, #32246] Every item this loader holds under `name`, each
-   * with the package it holds it for ({@link MetadataKeyedItem.packageId}).
+   * with the package it holds it for ({@link MetadataKeyedItem.packageId}),
+   * for a type stored per `(package, name)` (`PACKAGE_SLOTTED_STORE_TYPES`),
+   * of which a loader may hold one item per package.
    *
-   * Optional. `MetadataManager` asks it for a type stored per
-   * `(package, name)` when its in-memory registry holds no slot of the name,
-   * and reads the answer through the store's own rule (`readStoreEntry`): a
-   * read naming a package gets that package's item, never another package's,
-   * and a read naming none is refused when two packages hold the name. A
-   * loader without it answers with its one `load(type, name)` body, read for
-   * the package that body carries.
+   * Optional. `MetadataManager` asks it when its in-memory registry holds no
+   * slot of the name, and reads the answer through the store's own rule
+   * (`readStoreEntry`): a read naming a package gets that package's item,
+   * never another package's, and a read naming none is refused when two
+   * packages hold the name. A loader without it answers with its one
+   * `load(type, name)` body, read for the package that body carries.
+   *
+   * ⛔ The loader's own `load`, `loadMany` and `loadManyKeyed` keep one item
+   * per name — the one stored last — so their callers read what they read.
    *
    * @param type The metadata type
    * @param name The item name
    * @returns One entry per stored item of the name; `[]` when none
    */
   loadSlots?<T = any>(type: string, name: string): Promise<MetadataKeyedItem<T>[]>;
+
+  /**
+   * [ADR-0150 D4, #32246] {@link loadSlots} for every name of `type`: every
+   * stored item, each with its key and the package it is held for. Optional;
+   * `MetadataManager.list` and the endpoint index use it for a type stored
+   * per `(package, name)`, and fall back to {@link loadManyKeyed} without it.
+   *
+   * @param type The metadata type
+   * @returns One entry per stored item
+   */
+  loadManySlots?<T = any>(type: string): Promise<MetadataKeyedItem<T>[]>;
 
   /**
    * Check if item exists

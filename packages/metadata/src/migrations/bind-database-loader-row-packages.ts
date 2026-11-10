@@ -9,8 +9,9 @@
  * `(package, name)` (`PACKAGE_SLOTTED_STORE_TYPES`) named its package only in
  * its stored body. The loader now keeps one row per `(package, name)` with
  * `package_id` filled. It still reads an old row's package off its body, so
- * reads are right without this migration; what this adds is the column, for
- * the overlay unique index and for any other reader of `package_id`.
+ * reads are right without this migration, and its next save binds the row;
+ * what this adds is the column for every row now, for the overlay unique
+ * index and for any other reader of `package_id`.
  *
  * A row is bound when all four hold — and ⛔ nothing is ever guessed:
  *
@@ -26,9 +27,9 @@
  * a row whose package already has a row of the same name (binding it would
  * make two rows of one slot), and a row whose update fails.
  *
- * Safe to run any number of times: a bound row is no longer a candidate.
- * `DatabaseLoader` runs it once per loader, best-effort, before its first
- * operation on one of these types, and binds every row it saves.
+ * Safe to run any number of times: a bound row is no longer a candidate. An
+ * operator runs it; ⛔ `DatabaseLoader` does not run it on its own, so a
+ * loader's reads cost what they cost.
  *
  * Usage:
  *   import { migrateDatabaseLoaderRowPackages } from '@objectstack/metadata/migrations';

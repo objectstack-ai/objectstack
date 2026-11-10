@@ -100,12 +100,13 @@ describe('migrateDatabaseLoaderRowPackages (ADR-0150 D4, #32246)', () => {
     expect(result).toEqual({ bound: [], left: [] });
   });
 
-  it.each(SLOTTED)('%s: `DatabaseLoader` runs it before its first operation on such a type, so a row written before #32246 is bound', async (type) => {
-    const { store, packageOf } = rowStore([row('legacy', type, { name: `shared_${type}`, _packageId: A })]);
+  it.each(SLOTTED)('%s: without it, `DatabaseLoader` reads a row written before #32246 by its body, and its next save of that package\'s item binds it', async (type) => {
+    const { store, packageOf } = rowStore([row('legacy', type, { name: `shared_${type}`, label: 'old', _packageId: A })]);
     const loader = new DatabaseLoader({ driver: store as unknown as IDataDriver, trackHistory: false });
-    expect(await loader.exists(CONTROL_TYPE, 'anything')).toBe(false);
-    expect(packageOf('legacy'), 'an operation on another type binds nothing').toBeNull();
     expect((await loader.loadSlots(type, `shared_${type}`)).map((slot) => slot.packageId)).toEqual([A]);
+    expect(packageOf('legacy'), 'a read binds nothing').toBeNull();
+    await loader.save(type, `shared_${type}`, { name: `shared_${type}`, label: 'new', _packageId: A });
     expect(packageOf('legacy')).toBe(A);
+    expect(await loader.loadSlots(type, `shared_${type}`)).toHaveLength(1);
   });
 });

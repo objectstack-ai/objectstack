@@ -609,6 +609,18 @@ function rowDriver(): {
       }
       return row[key] === value;
     });
+  // `orderBy` by plain field comparison, applied before `limit`.
+  const ordered = (rows: Array<Record<string, unknown>>, orderBy: unknown) => {
+    if (orderBy === undefined) return rows;
+    const keys = orderBy as Array<{ field: string; order?: 'asc' | 'desc' }>;
+    return [...rows].sort((a, b) => {
+      for (const { field, order } of keys) {
+        const [x, y] = [a[field] as any, b[field] as any];
+        if (x !== y) return (x < y ? -1 : 1) * (order === 'desc' ? -1 : 1);
+      }
+      return 0;
+    });
+  };
   const driver = {
     name: 'rows',
     version: '1.0.0',
@@ -619,13 +631,13 @@ function rowDriver(): {
     execute: async () => undefined,
     syncSchema: async () => undefined,
     find: async (name: string, query: any) => {
-      const rows = [...table(name).values()].filter((r) => matches(r, query?.where));
+      const rows = ordered([...table(name).values()].filter((r) => matches(r, query?.where)), query?.orderBy);
       const page = typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
       return page.map((r) => ({ ...r }));
     },
     findOne: async (name: string, query: any) => {
-      for (const row of table(name).values()) if (matches(row, query?.where)) return { ...row };
-      return null;
+      const row = ordered([...table(name).values()].filter((r) => matches(r, query?.where)), query?.orderBy)[0];
+      return row ? { ...row } : null;
     },
     create: async (name: string, data: Record<string, unknown>) => {
       // `sys_metadata_history` is unique on `(type, name, version)`, as the
@@ -967,11 +979,49 @@ describe('per-package loader storage for every type stored per package (ADR-0150
     });
   });
 
+  /**
+   * The loaders' own unscoped reads — what `MetadataManager.load`,
+   * `loadDiagnosed`, `loadMany` and `loadManyKeyed` read, and what the action
+   * router's third rung and objectql's action audit call — still answer one
+   * item per name, the one saved last, as when each loader kept one entry.
+   */
+  it.each(SLOTTED)('%s: the loaders\' unscoped reads still answer one item per name, the one saved last (unchanged)', async (type) => {
+    const ctx = await boot(type);
+    for (const peer of [ctx.peer(['database']), ctx.peer(['door'])]) {
+      expect(((await peer.load(type, nameOf(type))) as any)?.label).toBe(label(type, B));
+      expect((((await peer.loadDiagnosed(type, nameOf(type))).data) as any)?.label).toBe(label(type, B));
+      expect(labelsOf(await peer.loadMany(type))).toEqual([label(type, B)]);
+      expect((await peer.loadManyKeyed(type)).map((entry) => [entry.name, (entry.data as any).label])).toEqual([[nameOf(type), label(type, B)]]);
+    }
+  });
+
   it.each(SLOTTED)('%s: with one package\'s slot in the registry, `list` adds the other package\'s stored item, and no second copy of the first (BASE: the registry\'s item only)', async (type) => {
     const ctx = await boot(type);
     const peer = ctx.peer(['database', 'door']);
     await peer.register(type, nameOf(type), doorItem(type, A), { notify: false });
     expect(labelsOf(await peer.list(type))).toEqual([label(type, A), label(type, B)]);
+  });
+
+  /**
+   * An action bound to an object is slotted by its object and name (#31697),
+   * so the loaders' items are keyed the same way: the door's store keeps one
+   * package's two same-named actions of two objects, and the registry's copy
+   * of each shadows the door's.
+   */
+  it.runIf(PACKAGE_SLOTTED_STORE_TYPES.has('action'))('action: one package\'s two same-named actions bound to two objects are both listed from the door\'s store, and each once beside the registry', async () => {
+    const ctx = await boot('action', []);
+    const bound = (objectName: string) => ({ name: 'approve', objectName, label: `approve ${objectName}`, _packageId: A });
+    for (const objectName of ['account', 'contact']) {
+      await ctx.door.save('action', 'approve', bound(objectName));
+      await ctx.manager.register('action', 'approve', bound(objectName), { notify: false });
+    }
+    expect(labelsOf(await ctx.manager.list('action'))).toEqual(['approve account', 'approve contact']);
+    expect(labelsOf(await ctx.peer(['door']).list('action'))).toEqual(['approve account', 'approve contact']);
+
+    await ctx.manager.unregisterPackage(A);
+    expect(await ctx.door.loadSlots('action', 'approve'), 'the door\'s copies go with the package').toEqual([]);
+    expect(await ctx.manager.list('action')).toEqual([]);
+    expect(await ctx.manager.get('action', 'approve', A)).toBeUndefined();
   });
 
   it.each(SLOTTED)('%s: a package-less write of a name one package holds is that package\'s customization in storage too: it goes in the holder\'s row and binds it (D4)', async (type) => {

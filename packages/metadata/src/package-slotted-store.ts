@@ -40,7 +40,8 @@
  * the artifact door's `MemoryLoader` under these keys, `DatabaseLoader` one
  * row per `(package, name)`; and a read the registry cannot answer reads the
  * loaders' stored items of the name through {@link readStoreEntry}
- * ({@link slotStoreOf}).
+ * ({@link slotStoreOf}). A loader's own unscoped read still answers the item
+ * of a name written last ({@link lastWrittenOf}), as it did.
  *
  * ⛔ `api`'s endpoint matcher keys its routes by METHOD + path (bucket 1);
  * nothing here resolves a path. What changes is that the matcher now sees
@@ -127,7 +128,7 @@ function slotIdentityOf(type: string, name: string, data: unknown): string {
 }
 
 /** The identity a store key addresses: the key without its package. */
-function keyIdentityOf(key: string): string {
+export function keyIdentityOf(key: string): string {
   const at = key.indexOf(SLOT_SEPARATOR);
   return at === -1 ? key : key.slice(at + 1);
 }
@@ -178,29 +179,54 @@ export function slotPackageOf(key: string): string | undefined {
 }
 
 /**
- * [#32246] The store key of an item of `name` held for `packageId`: that
- * package's slot, or the name's bare slot when it is held for no package.
+ * [#32246] The store key of `data`, an item of `name` held for `packageId`:
+ * that package's slot of the item's identity ({@link slotIdentityOf} — the
+ * name, or an object-bound action's object and name), or the identity's bare
+ * slot when it is held for no package.
  */
-export function storeSlotKey(name: string, packageId?: string | null): string {
+export function storeSlotKey(type: string, name: string, packageId: string | null | undefined, data: unknown): string {
+  const identity = PACKAGE_SLOTTED_STORE_TYPES.has(type) ? slotIdentityOf(type, name, data) : name;
+  return isPackageCaller(packageId) ? slotKey(packageId, identity) : identity;
+}
+
+/**
+ * [#32246] The key of a `DatabaseLoader` row of `name` held for `packageId`:
+ * one slot per `(package, name)`, whatever object an action is bound to
+ * (see {@link storeRowWriteKey}).
+ */
+export function storeRowKey(name: string, packageId: string | null | undefined): string {
   return isPackageCaller(packageId) ? slotKey(packageId, name) : name;
 }
 
 /**
- * [ADR-0150 D3/D4, #32246] One loader's stored items of `name` (or every
- * loader's, in precedence order), keyed the way the in-memory store keys
- * them: an item held for a package fills that package's slot, one held for
- * none fills the name's bare slot, and the first item of a slot is kept. The
- * store's rules — {@link readStoreEntry}, {@link storeWriteKey},
- * {@link storeRemovalKeys} — then answer for the loaders exactly as they
- * answer for the registry, so the rule stays here, once.
+ * [ADR-0150 D3/D4, #32246] Loaders' stored items of `name` (one loader's, or
+ * every loader's in precedence order), keyed the way the in-memory store keys
+ * them ({@link storeSlotKey}), the first item of a slot kept. The store's own
+ * rule ({@link readStoreEntry}) then answers for the loaders exactly as it
+ * answers for the registry, so the rule stays here, once.
  */
-export function slotStoreOf<T>(name: string, items: Iterable<{ readonly packageId?: string; readonly data: T }>): Map<string, T> {
+export function slotStoreOf<T>(
+  type: string,
+  name: string,
+  items: Iterable<{ readonly packageId?: string; readonly data: T }>,
+): Map<string, T> {
   const store = new Map<string, T>();
   for (const { packageId, data } of items) {
-    const key = storeSlotKey(name, packageId);
+    const key = storeSlotKey(type, name, packageId, data);
     if (!store.has(key)) store.set(key, data);
   }
   return store;
+}
+
+/**
+ * [#32246] The item of `name` written last among every slot of it — what a
+ * store keyed by bare name held. The loaders' own unscoped reads (`load`,
+ * `loadMany`, `loadManyKeyed`) answer it, as they answered before they kept a
+ * slot per package; `undefined` when no slot of the name is held.
+ */
+export function lastWrittenOf(store: ReadonlyMap<string, unknown> | undefined, type: string, name: string): unknown {
+  const keys = storeKeysNamed(store, type, name);
+  return keys.length === 0 ? undefined : store!.get(writtenLast(store!, keys));
 }
 
 /**
@@ -247,9 +273,9 @@ export function storeWriteKey(
   type: string,
   name: string,
   data: unknown,
+  identity: string = slotIdentityOf(type, name, data),
 ): { key: string; replaces: string[] } {
   if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) return { key: name, replaces: [] };
-  const identity = slotIdentityOf(type, name, data);
   if (!store) {
     const packageId = storedItemPackageId(data);
     return { key: packageId === undefined ? identity : slotKey(packageId, identity), replaces: [] };
@@ -261,6 +287,21 @@ export function storeWriteKey(
   }
   const others = holders.filter((holder) => holder !== packageId);
   return { key: slotKey(packageId, identity), replaces: others.length === 0 && store.has(identity) ? [identity] : [] };
+}
+
+/**
+ * [#32246] {@link storeWriteKey} for a store with one slot per `(package,
+ * name)` whatever object an action is bound to: `DatabaseLoader`'s rows,
+ * which `sys_metadata`'s unique key `(type, name, package_id, bundle_member)`
+ * holds once per package of a name.
+ */
+export function storeRowWriteKey(
+  store: ReadonlyMap<string, unknown> | undefined,
+  type: string,
+  name: string,
+  data: unknown,
+): { key: string; replaces: string[] } {
+  return storeWriteKey(store, type, name, data, name);
 }
 
 /** Whether a package id names a caller with a package (not empty, not the provenance sentinel). */

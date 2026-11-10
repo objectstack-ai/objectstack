@@ -28,13 +28,11 @@ import type { IDataDriver, IDataEngine, DriverQuery } from '@objectstack/spec/co
 import type { MetadataLoader, MetadataKeyedItem, MetadataLoaderDeleteOptions } from './loader-interface.js';
 import {
   PACKAGE_SLOTTED_STORE_TYPES,
-  readStoreEntry,
   slotPackageOf,
-  slotStoreOf,
   storedItemPackageId,
   storeRemovalKeys,
-  storeSlotKey,
-  storeWriteKey,
+  storeRowKey,
+  storeRowWriteKey,
 } from '../package-slotted-store.js';
 import { LRUCache } from '../utils/lru-cache.js';
 // [commit 6a180e42d] Both predicates moved to `@objectstack/types` — see its
@@ -42,7 +40,6 @@ import { LRUCache } from '../utils/lru-cache.js';
 // byte-identical; only the import path changed.
 import { isMissingTableError, isSchemaAlreadyExistsError } from '@objectstack/types';
 import { migrateProjectIdToEnvironmentId } from '../migrations/migrate-project-id-to-environment-id.js';
-import { migrateDatabaseLoaderRowPackages } from '../migrations/bind-database-loader-row-packages.js';
 
 /** [ADR-0131 D7] The tables whose physical `organization_id` can outlive their declaration. */
 const LEGACY_FAMILY_TABLES: ReadonlySet<string> = new Set([
@@ -286,14 +283,17 @@ export interface DatabaseLoaderOptions {
  * [ADR-0150 D3/D4, #32246] A type stored per `(package, name)`
  * (`PACKAGE_SLOTTED_STORE_TYPES`) keeps one row per `(package, name)`, with
  * `package_id` filled, by the in-memory store's own rules
- * (`package-slotted-store.ts`): a save fills the slot `storeWriteKey` picks, a
- * delete takes the slots `storeRemovalKeys` picks, and a by-name read is
- * `readStoreEntry` over the name's rows. A row's package is its `package_id`
- * column, else the package its stored body names (a row written before this
- * loader filled the column). Versions of such a type are numbered per name
- * across its packages' rows, so their `sys_metadata_history` rows — unique on
- * `(type, name, version)` — never collide. Every other type keeps one row per
- * `(type, name)`, as before.
+ * (`package-slotted-store.ts`): a save fills the slot `storeRowWriteKey`
+ * picks, a delete takes the slots `storeRemovalKeys` picks, and `loadSlots` /
+ * `loadManySlots` answer every row with its package. A row's package is its
+ * `package_id` column, else the package its stored body names (a row written
+ * before this loader filled the column: its next save binds it, and so does
+ * `migrateDatabaseLoaderRowPackages`). Versions of such a type are numbered
+ * per name across its packages' rows, so their `sys_metadata_history` rows —
+ * unique on `(type, name, version)` — never collide, and the row of a name
+ * saved last is its highest version: `load`, `loadMany` and `loadManyKeyed`
+ * answer that one, one item per name, as they did. Every other type keeps one
+ * row per `(type, name)`, as before.
  */
 export class DatabaseLoader implements MetadataLoader {
   readonly contract: MetadataLoaderContract = {
@@ -327,8 +327,6 @@ export class DatabaseLoader implements MetadataLoader {
    * degradation into noise people learn to skim.
    */
   private historySeqFailureReported = false;
-  /** [#32246] The one run of {@link bindRowPackagesOnce}. */
-  private rowPackagesBound?: Promise<void>;
 
   /** (type, name) → metadata payload — primes `load()` */
   private readonly loadCache?: LRUCache<string, Record<string, unknown> | null>;
@@ -696,42 +694,6 @@ export class DatabaseLoader implements MetadataLoader {
   }
 
   /**
-   * [ADR-0150 D4, #32246] Once per loader, before its first operation on a
-   * by-package type: bind this loader's own rows of those types to the
-   * package their body names ({@link migrateDatabaseLoaderRowPackages}). Not
-   * at schema time, so a loader that never touches these types pays no query
-   * for it. Best-effort, and said at `warn` when it fails: every read already
-   * attributes an unbound row by its body, and a save binds the row it
-   * writes, so what a failure leaves behind is an empty column, not a wrong
-   * answer.
-   */
-  private bindRowPackagesOnce(type: string): Promise<void> {
-    if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) return Promise.resolve();
-    return (this.rowPackagesBound ??= this.bindRowPackages());
-  }
-
-  private async bindRowPackages(): Promise<void> {
-    try {
-      await migrateDatabaseLoaderRowPackages(
-        {
-          find: (table, query) => this._find(table, query),
-          update: (table, id, data) => this._update(table, id, data),
-        },
-        { tableName: this.tableName },
-      );
-    } catch (error) {
-      if (isMissingTableError(error, this.tableName)) return;
-      console.warn(
-        `[Metadata] Binding \`${this.tableName}\` rows of ${[...PACKAGE_SLOTTED_STORE_TYPES].join(', ')} to the package ` +
-          `their body names was SKIPPED. Reads still attribute each such row by its body; its \`package_id\` stays empty. ` +
-          `Re-run it with \`migrateDatabaseLoaderRowPackages(driver)\` from \`@objectstack/metadata/migrations\` ` +
-          `once the datasource is reachable.`,
-        error,
-      );
-    }
-  }
-
-  /**
    * Ensure the history table exists.
    * Uses IDataDriver.syncSchema with the SysMetadataHistoryObject definition.
    */
@@ -1076,16 +1038,6 @@ export class DatabaseLoader implements MetadataLoader {
 
     await this.ensureSchema();
 
-    // [ADR-0150 D3, #32246] A by-package type: the name's rows, read by the
-    // store's rule for a caller naming no package — refused when two
-    // packages hold the name.
-    if (PACKAGE_SLOTTED_STORE_TYPES.has(type)) {
-      const entry = readStoreEntry(slotStoreOf(name, await this.loadSlots(type, name)), type, name);
-      return entry.found
-        ? { data: entry.data as Record<string, unknown>, source: 'database', format: 'json', loadTime: Date.now() - startTime }
-        : { data: null, loadTime: Date.now() - startTime };
-    }
-
     // Read-through cache. We cache `null` (not-found) results too so a barrage
     // of misses does not hammer the database; invalidation on `save` upgrades
     // the entry once the row exists.
@@ -1103,8 +1055,11 @@ export class DatabaseLoader implements MetadataLoader {
     }
 
     try {
+      // [#32246] A by-package type has a row per package: the one saved last,
+      // its highest version.
       const row = await this._findOne(this.tableName, {
         where: this.baseFilter(type, name),
+        ...(PACKAGE_SLOTTED_STORE_TYPES.has(type) ? { orderBy: [{ field: 'version', order: 'desc' as const }] } : {}),
       });
 
       if (!row) {
@@ -1154,7 +1109,6 @@ export class DatabaseLoader implements MetadataLoader {
    */
   private async readTypeRows(type: string): Promise<StoredTypeRow[]> {
     await this.ensureSchema();
-    await this.bindRowPackagesOnce(type);
 
     if (this.loadManyCache) {
       const cached = this.loadManyCache.get(type);
@@ -1176,7 +1130,9 @@ export class DatabaseLoader implements MetadataLoader {
         result.push({
           name: typeof name === 'string' && name !== '' ? name : null,
           data,
-          packageId: PACKAGE_SLOTTED_STORE_TYPES.has(type) ? storedRowPackageId(row) : undefined,
+          ...(PACKAGE_SLOTTED_STORE_TYPES.has(type)
+            ? { packageId: storedRowPackageId(row), version: Number(row.version) || 0 }
+            : {}),
         });
       }
 
@@ -1193,7 +1149,26 @@ export class DatabaseLoader implements MetadataLoader {
     type: string,
     _options?: MetadataLoadOptions
   ): Promise<T[]> {
-    return (await this.readTypeRows(type)).map(entry => entry.data) as T[];
+    return (await this.unscopedTypeRows(type)).map(entry => entry.data) as T[];
+  }
+
+  /**
+   * [#32246] {@link readTypeRows} as the unscoped reads answer it: for a
+   * by-package type, one row per name — the one saved last (its highest
+   * version), in the order names first appear — as when the loader kept one
+   * row per name. Every other type: every row.
+   */
+  private async unscopedTypeRows(type: string): Promise<StoredTypeRow[]> {
+    const rows = await this.readTypeRows(type);
+    if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) return rows;
+    const latest = new Map<string | null, StoredTypeRow>();
+    const unnamed: StoredTypeRow[] = [];
+    for (const row of rows) {
+      if (row.name === null) { unnamed.push(row); continue; }
+      const held = latest.get(row.name);
+      if (!held || (row.version ?? 0) >= (held.version ?? 0)) latest.set(row.name, row);
+    }
+    return [...latest.values(), ...unnamed];
   }
 
   /**
@@ -1211,11 +1186,11 @@ export class DatabaseLoader implements MetadataLoader {
     type: string,
     _options?: MetadataLoadOptions
   ): Promise<MetadataKeyedItem<T>[]> {
-    const entries = await this.readTypeRows(type);
+    const entries = await this.unscopedTypeRows(type);
     const keyed: MetadataKeyedItem<T>[] = [];
     for (const entry of entries) {
       if (entry.name === null) continue;
-      keyed.push(keyedRow<T>(entry.name, entry));
+      keyed.push({ name: entry.name, data: entry.data as T });
     }
     return keyed;
   }
@@ -1226,9 +1201,14 @@ export class DatabaseLoader implements MetadataLoader {
    * {@link loadManyKeyed} shares, so it costs no query of its own.
    */
   async loadSlots<T = any>(type: string, name: string): Promise<MetadataKeyedItem<T>[]> {
+    return (await this.loadManySlots<T>(type)).filter((slot) => slot.name === name);
+  }
+
+  /** [ADR-0150 D4, #32246] Every named row of `type`, each with the package it holds the item for. */
+  async loadManySlots<T = any>(type: string): Promise<MetadataKeyedItem<T>[]> {
     const slots: MetadataKeyedItem<T>[] = [];
     for (const entry of await this.readTypeRows(type)) {
-      if (entry.name === name) slots.push(keyedRow<T>(name, entry));
+      if (entry.name !== null) slots.push(keyedRow<T>(entry.name, entry));
     }
     return slots;
   }
@@ -1537,7 +1517,7 @@ export class DatabaseLoader implements MetadataLoader {
   /**
    * [ADR-0150 D4, #32246] Where a save of a by-package type lands: the name's
    * rows read as store slots, and the slot the store's write rule picks
-   * (`storeWriteKey`) — this package's row, or for a package-less body the
+   * (`storeRowWriteKey`) — this package's row, or for a package-less body the
    * one holder's row (D4: its customization) or the name's package-less row.
    * A package's first item takes over the name's package-less row when no
    * other package holds the name, as the in-memory store does, so that row is
@@ -1550,8 +1530,12 @@ export class DatabaseLoader implements MetadataLoader {
     data: unknown,
   ): Promise<{ existing: Record<string, unknown> | null; packageId?: string; version: number }> {
     const rows = await this._find(this.tableName, { where: this.baseFilter(type, name) });
-    const bySlot = slotStoreOf(name, rows.map((row) => ({ packageId: storedRowPackageId(row), data: row })));
-    const { key, replaces } = storeWriteKey(bySlot, type, name, data);
+    const bySlot = new Map<string, Record<string, unknown>>();
+    for (const row of rows) {
+      const key = storeRowKey(name, storedRowPackageId(row));
+      if (!bySlot.has(key)) bySlot.set(key, row);
+    }
+    const { key, replaces } = storeRowWriteKey(bySlot, type, name, data);
     const existing = bySlot.get(key) ?? replaces.map((replaced) => bySlot.get(replaced)).find(Boolean) ?? null;
     return { existing, packageId: slotPackageOf(key), version: highestVersion(rows) + 1 };
   }
@@ -1570,7 +1554,6 @@ export class DatabaseLoader implements MetadataLoader {
     const startTime = Date.now();
 
     await this.ensureSchema();
-    await this.bindRowPackagesOnce(type);
 
     const now = new Date().toISOString();
     const metadataJson = JSON.stringify(data);
@@ -1715,11 +1698,10 @@ export class DatabaseLoader implements MetadataLoader {
     await this.ensureSchema();
 
     if (PACKAGE_SLOTTED_STORE_TYPES.has(type)) {
-      await this.bindRowPackagesOnce(type);
       const rows = await this._find(this.tableName, { where: this.baseFilter(type, name) });
       const bySlot = new Map<string, Record<string, unknown>[]>();
       for (const row of rows) {
-        const key = storeSlotKey(name, storedRowPackageId(row));
+        const key = storeRowKey(name, storedRowPackageId(row));
         bySlot.set(key, [...(bySlot.get(key) ?? []), row]);
       }
       const { keys } = storeRemovalKeys(bySlot, type, name, options?.packageId);
@@ -1781,6 +1763,8 @@ interface StoredTypeRow {
   data: Record<string, unknown>;
   /** For a by-package type, the package the row holds its item for. */
   packageId?: string;
+  /** For a by-package type, the row's version (the highest is the row saved last). */
+  version?: number;
 }
 
 /** A type-wide row keyed by its name, with its package when it holds one's item. */
