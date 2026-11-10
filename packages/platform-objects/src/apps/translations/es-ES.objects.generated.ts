@@ -2840,6 +2840,23 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Organización",
         help: "La organización en la que se concede: la organización propietaria de la conexión SCIM o del proveedor SSO."
       },
+      match_status: {
+        label: "Estado de coincidencia",
+        help: "Si el grupo que nombra la asignación es uno que su conexión SCIM envía actualmente. Sin coincidencia no se concede nada. No aplica a un proveedor SSO, que no guarda una lista de grupos.",
+        options: {
+          matched: "Coincide",
+          unmatched: "No coincide con ningún grupo actual",
+          not_applicable: "No aplica"
+        }
+      },
+      matched_group_id: {
+        label: "ID del grupo coincidente",
+        help: "El ID del grupo SCIM con el que coincide actualmente la asignación. Vacío si no coincide con ninguno."
+      },
+      match_changed_at: {
+        label: "Coincidencia cambiada el",
+        help: "Cuándo cambió por última vez el estado de coincidencia o el grupo coincidente."
+      },
       created_at: {
         label: "Creado el"
       },

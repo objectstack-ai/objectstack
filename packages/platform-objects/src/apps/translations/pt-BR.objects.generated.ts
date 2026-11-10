@@ -2840,6 +2840,23 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         label: "Organização",
         help: "A organização em que a concessão é feita: a organização proprietária da conexão SCIM ou do provedor SSO."
       },
+      match_status: {
+        label: "Status de correspondência",
+        help: "Se o grupo indicado pelo mapeamento é um que sua conexão SCIM envia atualmente. Sem correspondência, nada é concedido. Não se aplica a um provedor SSO, que não armazena uma lista de grupos.",
+        options: {
+          matched: "Corresponde",
+          unmatched: "Não corresponde a nenhum grupo atual",
+          not_applicable: "Não se aplica"
+        }
+      },
+      matched_group_id: {
+        label: "ID do grupo correspondente",
+        help: "O ID do grupo SCIM ao qual o mapeamento corresponde atualmente. Vazio quando não corresponde a nenhum."
+      },
+      match_changed_at: {
+        label: "Correspondência alterada em",
+        help: "Quando o status de correspondência ou o grupo correspondente mudou pela última vez."
+      },
       created_at: {
         label: "Criado em"
       },

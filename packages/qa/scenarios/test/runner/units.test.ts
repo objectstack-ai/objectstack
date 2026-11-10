@@ -14,6 +14,8 @@ import { fileURLToPath } from 'node:url';
 
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ErrorCode } from '@objectstack/spec/api';
+
 import { formatRefusal, loadScenarioFile, loadScenarios, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
 import type { ScenarioTier } from '../../src/schema.js';
 import { gradeCardOperation, type OperationObservation } from '../../src/score/index.js';
@@ -35,6 +37,7 @@ import {
   asksToConfirm,
   asksToCorrect,
   countWrites,
+  flowRefused,
   lastReadRefusal,
   noWriteAttempted,
   observedAnswer,
@@ -364,6 +367,39 @@ describe('the validation operation (#30883 item 2, ruled B): the agent half and 
     const contractor: PersonaAccount = { persona: 'contractor', userId: 'u-contractor', email: 'c@x', apiKey: 'k', permissionSet: { name: 'demopm_contractor', assigned: true } };
     expect(probeValues(project.card, task, [contractor], 'u-admin')).toEqual({ project: 'p2', status: 'todo', assignee: 'u-contractor' });
     expect(probeValues(project.card, task, [], 'u-admin').assignee).toBe('u-admin');
+  });
+});
+
+describe('QA scenario round 1 (2026-11-09): what the observer read wrong', () => {
+  it('asksToCorrect reads a request for the missing value', () => {
+    for (const r of [
+      'What should it say? The ticket needs a resolution code before it can be resolved.',
+      'What should the resolution code be?',
+      'Please tell me the right number of chairs and I will record it.',
+      'Tell me the correct amount for the hotel line.',
+      'What I need from you: Resolution code (fixed / workaround / answered).',
+      'I need you to confirm the receipt quantity.',
+      '解决代码应该填什么?',
+    ]) {
+      expect(asksToCorrect(r), r).toBe(true);
+    }
+    // ⛔ A follow-up offer or a next-step question is no correction request.
+    for (const r of ['The ticket now says "fixed". What should we tackle next?', 'Done. Tell me if you need anything else.', 'What I did: resolved TK-0114.']) {
+      expect(asksToCorrect(r), r).toBe(false);
+    }
+  });
+
+  it("a run_action whose flow refused is a refusal, not an applied write (the refused-flow contract)", () => {
+    const obj = 'leave_request';
+    const action = (result: unknown) => ({ name: 'run_action', input: { actionName: 'submit_request', objectName: obj, recordId: 'lr_091' }, output: JSON.stringify({ ok: true, action: 'submit_request', objectName: obj, recordId: 'lr_091', result }) });
+    const refused = action({ success: true, status: 'refused', refusalMessage: 'Not enough annual leave: 2 days remaining.' });
+    expect(observedAnswer(turnOf('The request was refused.', [refused]), obj, 0)).toEqual({ kind: 'refused', code: flowRefused, note: 'the flow answered "Not enough annual leave: 2 days remaining."' });
+    expect(observedAnswer(turnOf('', [action({ success: true, status: 'refused' })]), obj, 0)).toEqual({ kind: 'refused', code: flowRefused });
+    // Rows changed still read as applied; a flow that completed is an applied write.
+    expect(observedAnswer(turnOf('', [refused]), obj, 1)).toEqual({ kind: 'applied' });
+    expect(observedAnswer(turnOf('', [action({ success: true, status: 'completed' })]), obj, 0)).toEqual({ kind: 'applied' });
+    // The label is no code a card can declare.
+    expect(ErrorCode.safeParse(flowRefused).success).toBe(false);
   });
 });
 

@@ -759,7 +759,7 @@ describe('completeness is the contract', () => {
 
   it('reports one result for every member of the closed family set', async () => {
     const union = await collect(rt);
-    expect([...SECRET_REFERENCE_FAMILIES]).toEqual(['settings', 'object-field', 'datasource']);
+    expect([...SECRET_REFERENCE_FAMILIES]).toEqual(['settings', 'object-field', 'datasource', 'audit-seal']);
     expect(Object.keys(union.families).sort()).toEqual([...SECRET_REFERENCE_FAMILIES].sort());
     for (const family of SECRET_REFERENCE_FAMILIES) {
       expect(union.families[family].family).toBe(family);
@@ -774,6 +774,7 @@ describe('completeness is the contract', () => {
         reason: 'no driver resolves for `tenant_thing`',
       },
       datasource: { family: 'datasource', status: 'enumerated', references: [] },
+      'audit-seal': { family: 'audit-seal', status: 'enumerated', references: [] },
     });
     expect(union.complete).toBe(false);
 
@@ -791,6 +792,7 @@ describe('completeness is the contract', () => {
       settings: { family: 'settings', status: 'enumerated', references: [] },
       'object-field': { family: 'object-field', status: 'enumerated', references: [] },
       datasource: { family: 'datasource', status: 'enumerated', references: [] },
+      'audit-seal': { family: 'audit-seal', status: 'enumerated', references: [] },
     });
     expect(union.complete).toBe(true);
     expect(() => assertSecretReferenceUnionComplete(union)).not.toThrow();

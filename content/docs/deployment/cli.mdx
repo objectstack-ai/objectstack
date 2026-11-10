@@ -790,7 +790,7 @@ os compile --json                    # JSON output for CI pipelines
   → Normalizing stack definition...
   → Lowering inline handlers...
   → Validating protocol compliance...
-  → Running author-time rules (64)...
+  → Running author-time rules (65)...
   → Checking that every required capability has a provider installable in this edition...
   → Collecting package docs (ADR-0046)... 0 collected
   → Writing artifact...
@@ -2675,7 +2675,18 @@ os verify --dashboard-windows                  # Also prove each dashboard date 
    view-container-name checks and `--strict` stay `os validate`'s, so run it
    too.
 2. **Runtime.** Boot the app in-process and exercise it through the real HTTP
-   stack: for each object, a record derived from its fields is created, read
+   stack. The boot reads the project's `.env*` files first, the ones `os dev`
+   reads, from the directory holding the config (a variable already exported
+   in the shell wins), so a value the app pins there, such as its home
+   currency, is in force as it is under `os dev`. The boot's seed is judged
+   before anything runs against it: every record the seed drops, every
+   reference field it drops from a written record and every marketplace install
+   that comes up empty fails the run, and the seed line names the count (the
+   run's `[Seeder]` warnings name each record and why it was refused). A seed
+   still writing when the wait ends, or one that reports no outcome, fails the
+   run too; a multi-tenant boot, which replays the seed per organization
+   instead, is reported as not judged. Then, for each object, a record derived
+   from its fields is created, read
    back and compared (CRUD round-trip fidelity), and a create, read or
    fidelity failure fails the run. With `--rls`, a second fresh boot proves the
    cross-owner invariant — a member must not write what it cannot read — for a
@@ -2816,7 +2827,8 @@ document carries depends on where the run ended:
   `path`, `message`, `hint`, plus `package` for a finding raised inside one
   package of the artifact), or the schema issues when the stack does not parse.
 - **Reached the runtime stage:** the report — `app`, `config`, `multiTenant`,
-  `crud`, `rls` (with `--rls`), `referenceShapes` (with `--reference-shapes`),
+  `seed` (the boot's seed: its `status`, per-source counts, `totals` and the
+  `hardFailures` it adds), `crud`, `rls` (with `--rls`), `referenceShapes` (with `--reference-shapes`),
   `deleteBehaviors` (with `--delete-behaviors`), `uniqueScopes` (with
   `--unique-scopes`; its `boot` names the legs the run could prove),
   `parentWriteReach` (with `--parent-write-reach`; its `personas` name who

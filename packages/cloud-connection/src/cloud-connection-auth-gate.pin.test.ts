@@ -9,8 +9,8 @@
  * ## The two plugins that resolve a session, and where each consults
  *
  *  - `CloudConnectionPlugin` reads the session in ONE place
- *    (`sessionFromAuthService`, under both resolution modes). Seven of its
- *    eight doors refuse on it; `/status` reads it only to decide what it
+ *    (`sessionFromAuthService`, under both resolution modes). Eight of its
+ *    nine doors refuse on it; `/status` reads it only to decide what it
  *    serves (#24148) and refuses no one.
  *  - `MarketplaceInstallLocalPlugin` reads it in ONE place
  *    (`resolveInstallPrincipal`), and all six doors answer a held session
@@ -32,12 +32,12 @@
  *    except the three connection-changing doors (`bind/start`, `bind/poll`,
  *    `unbind`) on a platform-managed runtime (the service key), which answer
  *    their own `409` past the gate (ruling 甲, #25097; #25113); the self-hosted
- *    shape, served by all seven, is read beside it.
+ *    shape, served by all eight, is read beside it.
  *  - Anonymous is refused `401` as before, and `/status` answers a held
  *    session `200` with its narrowed shape (#24148).
  *
  * Every test user holds `manage_platform_settings`, so a refusal below is the
- * gate's alone (#24148 and ruling 乙, #25119, make three of the seven doors
+ * gate's alone (#24148 and ruling 乙, #25119, make three of the eight doors
  * demand it; its own pins are `cloud-connection-setup-access.pin.test.ts`).
  */
 
@@ -153,13 +153,15 @@ afterEach(() => {
 const CC = '/api/v1/cloud-connection';
 const ORIGIN = 'https://env.example.test';
 
-/** The seven doors that resolve a session, each with what it needs to reach the control plane. */
+/** The eight doors that resolve a session, each with what it needs to reach the control plane. */
 const CC_SESSION_DOORS = [
     { route: `POST ${CC}/bind/start`, url: `${ORIGIN}${CC}/bind/start`, body: {} },
     { route: `POST ${CC}/bind/poll`, url: `${ORIGIN}${CC}/bind/poll`, body: { device_code: 'dc_1' } },
     { route: `POST ${CC}/unbind`, url: `${ORIGIN}${CC}/unbind`, body: {} },
     { route: `POST ${CC}/install`, url: `${ORIGIN}${CC}/install`, body: { package_id: 'pkg_1' } },
     { route: `GET ${CC}/installation`, url: `${ORIGIN}${CC}/installation?package_id=pkg_1`, body: {} },
+    // [#32083] Gated as `POST /install` is.
+    { route: `GET ${CC}/install-namespace`, url: `${ORIGIN}${CC}/install-namespace?package_id=pkg_1`, body: {} },
     { route: `GET ${CC}/installed`, url: `${ORIGIN}${CC}/installed`, body: {} },
     { route: `GET ${CC}/org-packages`, url: `${ORIGIN}${CC}/org-packages`, body: {} },
 ] as const;
@@ -220,10 +222,10 @@ async function mountCloudConnection(mode: 'single' | 'multi', serviceKey = 'svc-
 }
 
 describe('ADR-0069 at CloudConnectionPlugin', () => {
-    it('census: eight routes, none allow-listed; seven refuse a held session and /status refuses none', async () => {
+    it('census: nine routes, none allow-listed; eight refuse a held session and /status refuses none', async () => {
         const { rawApp } = await mountCloudConnection('single');
         const keys = [...rawApp.routes.keys()];
-        expect(keys).toHaveLength(8);
+        expect(keys).toHaveLength(9);
         for (const key of keys) expect(isAuthGateAllowlisted(key.split(' ')[1]), key).toBe(false);
         expect(keys.filter((k) => k !== `GET ${CC}/status`).sort()).toEqual(CC_SESSION_DOORS.map((d) => d.route).sort());
         // [#24148] `/status` reads the session only to decide what it serves: a
@@ -236,7 +238,7 @@ describe('ADR-0069 at CloudConnectionPlugin', () => {
 
     for (const mode of ['single', 'multi'] as const) {
         for (const { user, gate } of HELD) {
-            it(`HELD (${gate.code}, ${mode}-environment): all seven session doors answer 403 with the gate's code, and nothing reaches the control plane`, async () => {
+            it(`HELD (${gate.code}, ${mode}-environment): all eight session doors answer 403 with the gate's code, and nothing reaches the control plane`, async () => {
                 const { rawApp, fetchCalls, credentialPath } = await mountCloudConnection(mode);
                 for (const door of CC_SESSION_DOORS) {
                     const res = await rawApp.routes.get(door.route)!(makeC(door.url, user, door.body));
@@ -249,7 +251,7 @@ describe('ADR-0069 at CloudConnectionPlugin', () => {
         }
     }
 
-    it('UN-HELD: the same caller without a posture is served by all seven doors (self-hosted: the stored device credential)', async () => {
+    it('UN-HELD: the same caller without a posture is served by all eight doors (self-hosted: the stored device credential)', async () => {
         const { rawApp, fetchCalls } = await mountCloudConnection('single', '');
         // `unbind` really disconnects here, clearing the stored credential the
         // install-side doors present — so it is driven last.
@@ -264,7 +266,7 @@ describe('ADR-0069 at CloudConnectionPlugin', () => {
         }
     });
 
-    it('UN-HELD (platform-managed: the service key): four doors are served, and the three connection-changing doors are the platform-managed 409 — not the gate', async () => {
+    it('UN-HELD (platform-managed: the service key): five doors are served, and the three connection-changing doors are the platform-managed 409 — not the gate', async () => {
         // The shape the HELD cases above run in. Ruling 甲 (#25097) refuses
         // `unbind` here for every caller, and #25113 refuses `bind/start` and
         // `bind/poll` alike, so those doors' control is that refusal rather
