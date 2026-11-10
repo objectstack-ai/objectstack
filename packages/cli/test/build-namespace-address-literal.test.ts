@@ -7,6 +7,10 @@
  * install door refuses such a namespace already; before these calls the two
  * commands passed it and `os build` wrote the artifact.
  *
+ * The config is the one a server loads: a strict `defineStack` call, which
+ * only WARNS about the namespace (a deployment holding such a package keeps
+ * booting), so the refusal is the commands' own.
+ *
  * The rows are asserted EQUAL to the spec's judge
  * (`validateNamespaceNotAddressLiteral`) for the same namespace. Which
  * namespaces the walk judges is pinned by its own file
@@ -92,8 +96,8 @@ beforeAll(() => {
   for (const namespace of ['hooks', 'triggers']) {
     const dir = join(root, namespace);
     mkdirSync(dir, { recursive: true });
-    // `strict: false`: the namespace is the commands' to judge, not the producer's.
-    writeFileSync(join(dir, 'objectstack.config.ts'), defineStackSource(stack(namespace), { strict: false }));
+    // A strict `defineStack`, the way a server loads it: it warns, and the commands refuse.
+    writeFileSync(join(dir, 'objectstack.config.ts'), defineStackSource(stack(namespace)));
     linkSpec(dir);
     fixtures[namespace] = {
       config: join(dir, 'objectstack.config.ts'),

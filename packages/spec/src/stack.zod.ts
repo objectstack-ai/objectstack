@@ -2584,16 +2584,6 @@ function validateNamespacePrefix(config: ObjectStackDefinition): string[] {
     hold(body, body?.objects);
   }
   hold(config.manifest as Record<string, unknown> | undefined, config.objects);
-  // [ADR-0150 D5, child G1] …and no namespace this artifact declares spells a
-  // literal segment of the address grammar (`trigger`, `global`, `hooks`, …):
-  // the router reads the literal before any namespace, so the package's
-  // qualified addresses would never reach it. The install door's own judge,
-  // asked here so a new package is refused when it is written, not first at
-  // install (a package the boot registers is only warned there).
-  for (const { namespace } of namespaces) {
-    const refusal = validateNamespaceNotAddressLiteral(namespace);
-    if (refusal) errors.push(refusal);
-  }
   for (const clash of findNamespaceObjectNameClashes({ namespaces, objects })) errors.push(clash.message);
   return errors;
 }
@@ -6319,6 +6309,49 @@ function warnUnknownAuthoringKeys(raw: unknown): void {
   }
 }
 
+const warnedAddressLiteralNamespaces = new Set<string>();
+
+/**
+ * [ADR-0150 D5, child G1] Warn, once per package and namespace, about a
+ * namespace this stack declares (its own `manifest.namespace` or a
+ * `packages[]` body's) that spells a literal segment of the address grammar
+ * (`actions`, `connectors`, `global`, `hooks`, `oauth`, `trigger`). The
+ * sentence is the install door's own judge
+ * (`validateNamespaceNotAddressLiteral`).
+ *
+ * ## Why a warning here and a refusal at the build
+ *
+ * `defineStack` runs at every load of a config, the server's included
+ * (`os serve`, `os dev`, every host importing a stack), so a throw here would
+ * stop a deployment that already holds such a package from booting after an
+ * upgrade — the very thing the boot exemption keeps (the registry warns once
+ * and keeps a package the boot registers, read by `?package=`). The author's
+ * doors refuse it instead: `os validate` and `os build` exit 1 with the same
+ * sentence, and the running install door refuses a new one.
+ */
+function warnAddressLiteralNamespaces(data: ObjectStackDefinition): void {
+  const bodies: Array<Record<string, unknown> | undefined> = [];
+  for (const entry of Array.isArray((data as { packages?: unknown }).packages)
+    ? (data as { packages: unknown[] }).packages : []) {
+    bodies.push(isRecord(entry) && isRecord(entry.manifest) ? entry.manifest : undefined);
+  }
+  bodies.push(data.manifest as Record<string, unknown> | undefined);
+  for (const body of bodies) {
+    const namespace = typeof body?.namespace === 'string' ? body.namespace : undefined;
+    const message = validateNamespaceNotAddressLiteral(namespace);
+    if (message === null) continue;
+    const packageId = typeof body?.id === 'string' && body.id !== '' ? body.id : undefined;
+    const key = `${packageId ?? ''} ${namespace}`;
+    if (warnedAddressLiteralNamespaces.has(key)) continue;
+    warnedAddressLiteralNamespaces.add(key);
+    console.warn(
+      `defineStack: ${packageId ? `package '${packageId}': ` : ''}${message} `
+      + `It still loads, and a server that already holds it keeps booting, its items read with \`?package=${packageId ?? 'ID'}\`; `
+      + '`os validate` and `os build` refuse it, and the install door refuses a new package under it.',
+    );
+  }
+}
+
 const warnedEmailTemplateFloors = new Set<string>();
 
 /**
@@ -6706,6 +6739,7 @@ function buildDefinedStack(
   // and/or `objects` (bound-action merge, `order` sort) before the result
   // reaches the caller.
   warnEmailTemplateLocaleFloor(data);
+  warnAddressLiteralNamespaces(data);
 
   // [#20367 ruling B] The mark the author-time doors and `composeStacks` check:
   // this value went through the judgement above. Non-enumerable, so it reaches
