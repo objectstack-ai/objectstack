@@ -552,11 +552,14 @@ function metaItemReadGateSources(
             }
         },
         navPruneLogged: NAV_PRUNE_LOGGED,
-        isItemOfDisabledPackage: async ({ type, name, packageId }) => {
+        isItemOfDisabledPackage: async ({ type, name, packageId, member }) => {
             if (typeof protocol?.getMetaItem !== 'function') return false;
             const registry = (await deps.getObjectQL(context))?.registry;
             if (typeof (registry as { isPackageDisabled?: unknown } | undefined)?.isPackageDisabled !== 'function') return false;
-            const envelope = await protocol.getMetaItem({ type, name, ...(packageId ? { packageId } : {}) });
+            // [#32076] At the member the layers were read at (`MetaItemReadGateSources.isItemOfDisabledPackage`).
+            const envelope = await protocol.getMetaItem({
+                type, name, ...(packageId ? { packageId } : {}), ...(member !== undefined ? { member } : {}),
+            });
             return envelope?.item == null && isServiceItemOfDisabledPackage(registry, { _packageId: envelope?.packageId });
         },
         ...(typeof protocol?.packagelessLayeredReadRefusal === 'function'
