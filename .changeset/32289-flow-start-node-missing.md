@@ -14,6 +14,7 @@ Skills-docs: none — no page in `skills/**` or `content/docs/**` says a flow wi
 
 - **Before.** A flow whose top-level `nodes` held no `start` node (an empty list included) parsed, built and was stored live by the metadata save door, which answered `200`. The author learned of the defect only from a later read (`registration: refused`, since the engine refuses to register it) or from a trigger that never ran.
 - **Now.** `flow-start-node-missing` (severity `error`) names the flow at `flow 'NAME' · nodes`, the node types it found, why the flow can never run, and the fix. A live save and a publish answer `422 INVALID_METADATA` with the rule in `issues[]`. A draft save still stores, with the finding in its `_diagnostics`, so a designer can keep saving a flow mid-edit.
+- **Rows stored before this release.** A live re-save of a start-less flow is refused until a start node is added; a draft stored earlier is judged at publish and blocks its package's publish until fixed; deleting the flow, or saving it as a draft, still works.
 - **Scope, matching the engine's registration check.** Zero start nodes only: a flow with two registers and runs from the first, and `flow-node-unreachable` names the extra one. Only the flow's own graph: a start node inside a region body does not count. A flow whose `nodes` is not a list is left to the flow parse, which refuses it first.
 - **`os explain flow-node-unreachable`.** Its sentence saying the flow parse refuses a flow with no start node was false and is corrected: the parse accepts it, and the new rule names it.
 

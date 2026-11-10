@@ -204,8 +204,10 @@ describe('a stored flow the engine refuses at boot is not served as running (#23
  *    and records the refusal; every other stored flow is armed as before.
  *  - Read: the stored row is served unchanged (it does not vanish), beside
  *    `registration: refused` and the engine's words naming the missing node.
- *  - Save: the metadata save door still keeps a start-less body (it does not run
- *    the registration checks), and the mutation sync records the same refusal.
+ *  - Save: since #32289 the metadata save door's own lint rule
+ *    (`flow-start-node-missing`) refuses a live start-less save, whatever the
+ *    flow's `status`, so nothing reaches the engine; a metadata draft
+ *    (`mode: 'draft'`) still stores mid-edit, with the finding on its draft read.
  */
 describe('a stored flow with no start node: refused at the bind, never at the boot, and readable as refused', () => {
     let kernel: ObjectKernel;
