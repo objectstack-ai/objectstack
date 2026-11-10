@@ -44,4 +44,4 @@
 - 该评论点名席位与步骤;无既有卡承载且请求自身即立卡门 ①②④ 时才立新卡。
 - 本仓卡挂 `domain:cloud`+`repo:cloud`+活态,摘车道 `domain:*`,⛔ 不挂 `status:parked`。
 - 他仓卡能转即转 cloud 仓,否则本仓立 `repo:cloud` 承接卡写全所求;⛔ 不拆半边等读数。
-- 在飞卡见涉 cloud 即 `Release:`+`pm:retriage` 交分诊转 cloud 车道,已测读点留卡。
+- 在飞卡涉 cloud 即 `Release:`+`pm:retriage` 交分诊转 cloud 车道,读点留卡;只缺事实读数敲信箱。

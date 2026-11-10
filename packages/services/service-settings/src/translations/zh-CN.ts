@@ -471,7 +471,7 @@ export const zhCN: PlatformTranslationData = {
       title: 'AI 与向量化',
       description: '平台 AI 与知识库服务使用的 LLM 提供商、模型、凭据与向量化配置。',
       groups: {
-        provider: { title: '提供商', description: '选择 LLM 后端。Memory 模式仅原样回显输入,仅用于测试,严禁用于生产。' },
+        provider: { title: '提供商', description: '选择 LLM 后端。' },
         gateway: { title: 'Vercel AI Gateway', description: '多提供商路由器。模型写作 provider/model,例如 openai/gpt-4o。' },
         openai: { title: 'OpenAI' },
         anthropic: { title: 'Anthropic' },
@@ -490,7 +490,6 @@ export const zhCN: PlatformTranslationData = {
         provider: {
           label: '提供商',
           options: {
-            memory: 'Memory(回显 — 仅测试)',
             gateway: 'Vercel AI Gateway',
             openai: 'OpenAI',
             anthropic: 'Anthropic',

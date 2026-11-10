@@ -17,6 +17,7 @@
     "usage",
     "---More---",
     "build-progress",
-    "dataset-tools"
+    "dataset-tools",
+    "object-query-source"
   ]
 }

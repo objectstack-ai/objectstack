@@ -4362,6 +4362,16 @@ const ru = {
       expandTable: 'Развернуть',
       exitExpandedTable: 'Закрыть',
     },
+    answerSource: {
+      title: 'Как это рассчитано',
+      object: 'Объект',
+      filter: 'Фильтр',
+      allRecords: 'Все записи',
+      groupedBy: 'Группировка по',
+      aggregations: 'Агрегаты',
+      records: 'Записи',
+      visibleToYou: 'Только записи, которые вам доступны',
+    },
     tool: {
       aggregate_data: "Агрегировать данные",
       get_record: "Прочитать запись",

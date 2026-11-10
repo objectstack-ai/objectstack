@@ -4272,6 +4272,16 @@ const es = {
       expandTable: 'Ampliar',
       exitExpandedTable: 'Cerrar',
     },
+    answerSource: {
+      title: 'Cómo se calculó',
+      object: 'Objeto',
+      filter: 'Filtro',
+      allRecords: 'Todos los registros',
+      groupedBy: 'Agrupado por',
+      aggregations: 'Agregaciones',
+      records: 'Registros',
+      visibleToYou: 'Solo los registros que puede ver',
+    },
     tool: {
       aggregate_data: "Resumir los datos",
       get_record: "Leer el registro",
