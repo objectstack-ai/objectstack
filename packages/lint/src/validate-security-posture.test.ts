@@ -32,6 +32,7 @@ import {
   SECURITY_MODIFY_ALL_DELETE_WITHHELD,
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
   SECURITY_SUPERUSER_FIELD_MASK_INERT,
+  SECURITY_CBP_MASTER_REFERENCE_HIDDEN,
 } from './validate-security-posture.js';
 import { lintDataModel } from './data-model-rules.js';
 import { explainRule } from './rule-explanations.js';
@@ -1706,6 +1707,108 @@ describe('validateSecurityPosture · a field mask its own set\'s View All / Modi
 });
 
 /**
+ * ── Rule: security-controlled-by-parent-master-reference-hidden (ADR-0055 §3) ──
+ *
+ * A write of a controlled_by_parent detail needs edit access to the master its
+ * stored reference names, whatever the writer may read. A set that hides that
+ * reference (`readable: false`) hides a field that still decides its holders'
+ * writes, and a holder refused there is told only the rule, with no master
+ * named. Legal, so a warning. Sets below are PARSED by `PermissionSetSchema`
+ * unless a case says otherwise.
+ */
+describe('validateSecurityPosture · a hidden master reference still decides a controlled_by_parent write', () => {
+  const hidden = (stack: Record<string, unknown>) =>
+    validateSecurityPosture(stack)
+      .filter((f) => f.rule === SECURITY_CBP_MASTER_REFERENCE_HIDDEN)
+      .map((f) => [f.severity, f.where, f.path]);
+  const DETAIL = objectFixture({
+    name: 'line_item', sharingModel: 'controlled_by_parent',
+    fields: {
+      invoice: { type: 'master_detail', label: 'Invoice', reference: 'invoice', required: true },
+      note: { type: 'text', label: 'Note' },
+    },
+  });
+  const MASTER = objectFixture({ name: 'invoice', sharingModel: 'private' });
+  const withSets = (objects: unknown[], ...sets: Array<Record<string, unknown>>) => ({
+    objects,
+    permissions: sets.map((set) => PermissionSetSchema.parse(set)),
+  });
+
+  it('warns a set that hides the master reference of a controlled_by_parent detail', () => {
+    expect(hidden(withSets([MASTER, DETAIL], {
+      name: 'clerk', objects: { line_item: { allowRead: true, allowEdit: true }, invoice: { allowRead: true, allowEdit: true } },
+      fields: { 'line_item.invoice': { readable: false, editable: true } },
+    }))).toEqual([['warning', 'permission set "clerk"', 'permissions[0].fields["line_item.invoice"]']]);
+  });
+
+  it('warns each set that hides it, and an unparsed entry reads as the parse writes it', () => {
+    const raw = { name: 'raw', objects: {}, fields: { 'line_item.invoice': { readable: false } } };
+    expect(hidden({ objects: [MASTER, DETAIL], permissions: [raw, { ...raw, name: 'raw_two' }] })).toEqual([
+      ['warning', 'permission set "raw"', 'permissions[0].fields["line_item.invoice"]'],
+      ['warning', 'permission set "raw_two"', 'permissions[1].fields["line_item.invoice"]'],
+    ]);
+    expect(hidden(withSets([MASTER, DETAIL], raw))).toEqual(hidden({ objects: [MASTER, DETAIL], permissions: [raw] }));
+  });
+
+  it('warns on an optional master reference too: the stored master still decides the write', () => {
+    const optional = objectFixture({
+      name: 'line_item', sharingModel: 'controlled_by_parent',
+      fields: { invoice: { type: 'master_detail', label: 'Invoice', reference: 'invoice', required: false } },
+    });
+    expect(hidden(withSets([MASTER, optional], {
+      name: 'clerk', objects: {}, fields: { 'line_item.invoice': { readable: false, editable: true } },
+    }))).toEqual([['warning', 'permission set "clerk"', 'permissions[0].fields["line_item.invoice"]']]);
+  });
+
+  it('control: a readable master reference, and a hidden field that is not the master reference, get nothing', () => {
+    expect(hidden(withSets([MASTER, DETAIL], {
+      name: 'clerk', objects: {}, fields: { 'line_item.invoice': { readable: true, editable: true } },
+    }))).toEqual([]);
+    expect(hidden(withSets([MASTER, DETAIL], {
+      name: 'clerk', objects: {}, fields: { 'line_item.note': { readable: false, editable: false } },
+    }))).toEqual([]);
+    expect(hidden(withSets([MASTER, DETAIL], { name: 'clerk', objects: {} }))).toEqual([]);
+  });
+
+  it('control: the same field on an object that is not a controlled_by_parent detail gets nothing', () => {
+    const ownSharing = objectFixture({
+      name: 'line_item', sharingModel: 'private',
+      fields: { invoice: { type: 'master_detail', label: 'Invoice', reference: 'invoice', required: true } },
+    });
+    expect(hidden(withSets([MASTER, ownSharing], {
+      name: 'clerk', objects: {}, fields: { 'line_item.invoice': { readable: false, editable: true } },
+    }))).toEqual([]);
+    // A detail this stack does not declare is not judged.
+    expect(hidden(withSets([MASTER], {
+      name: 'clerk', objects: {}, fields: { 'line_item.invoice': { readable: false, editable: true } },
+    }))).toEqual([]);
+  });
+
+  it('control: the set\'s own View All on the detail makes the mask inert, so the inert rule speaks instead', () => {
+    const stack = withSets([MASTER, DETAIL], {
+      name: 'auditor', objects: { line_item: { allowRead: true, viewAllRecords: true } },
+      fields: { 'line_item.invoice': { readable: false, editable: false } },
+    });
+    expect(hidden(stack)).toEqual([]);
+    expect(validateSecurityPosture(stack).map((f) => f.rule)).toContain(SECURITY_SUPERUSER_FIELD_MASK_INERT);
+  });
+
+  it('states the rule and its consequence in one line, and the id is explained', () => {
+    const [f] = validateSecurityPosture(withSets([MASTER, DETAIL], {
+      name: 'clerk', objects: {}, fields: { 'line_item.invoice': { readable: false, editable: true } },
+    })).filter((x) => x.rule === SECURITY_CBP_MASTER_REFERENCE_HIDDEN);
+    expect(f.message).toContain("'line_item.invoice' hides the master reference");
+    expect(f.message).toContain('still decides each write of the detail');
+    expect(f.message).toContain('a refusal naming no master');
+    expect(f.message, f.message).not.toContain('\n');
+    expect(f.message.length, f.message).toBeLessThanOrEqual(200);
+    expect(f.hint).toContain('readable: true');
+    expect(f.hint, f.hint).not.toContain('\n');
+    expect(explainRule(SECURITY_CBP_MASTER_REFERENCE_HIDDEN)).toBeDefined();
+  });
+});
+
+/**
  * ── The structural meta-guard (#4992 pattern, #5009/#5018 shape) — #5017 ─────
  *
  * #4984 removed the `??` alias reads from a sharing rule's fields; #5009
@@ -2209,6 +2312,7 @@ const RULE_IDS: Record<string, string> = {
   SECURITY_MODIFY_ALL_DELETE_WITHHELD,
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
   SECURITY_SUPERUSER_FIELD_MASK_INERT,
+  SECURITY_CBP_MASTER_REFERENCE_HIDDEN,
 };
 
 const TEXT_FIELD = { a: { type: 'text', label: 'A' } } as const;
@@ -2354,6 +2458,21 @@ const REACHABILITY_CORPUS: Array<{ label: string; stack: Record<string, unknown>
     },
   },
   {
+    // A resolving controlled_by_parent detail whose master reference a set
+    // hides; every key the arm reads (`fields[KEY].readable`) is authorable.
+    label: 'cbp-master-reference-hidden',
+    stack: {
+      objects: [
+        objectFixture({ name: 'invoice', sharingModel: 'private' }),
+        objectFixture({
+          name: 'line_item', sharingModel: 'controlled_by_parent',
+          fields: { invoice: { type: 'master_detail', label: 'Invoice', reference: 'invoice', required: true } },
+        }),
+      ],
+      permissions: [{ name: 'ps', label: 'PS', objects: {}, fields: { 'line_item.invoice': { readable: false, editable: true } } }],
+    },
+  },
+  {
     label: 'grant-expired-at-authoring',
     stack: { data: [{ object: 'sys_user_position', records: [{ user_id: 'u1', position: 'p', valid_until: '2020-01-01T00:00:00Z' }] }] },
   },
@@ -2378,7 +2497,8 @@ describe('validateSecurityPosture — every branch is reachable without an undec
     // 18 since #25760: an owner-keyed update policy on a controlled_by_parent detail that has not opted in.
     // 19 since #26591: the same rule id, for a policy keyed only on a column the opt-in does not admit.
     // 20 since #29544: a field mask its own set's View All / Modify All makes inert.
-    expect(pushedRuleIds()).toHaveLength(20);
+    // 21: a set's readable: false on a controlled_by_parent detail's master reference.
+    expect(pushedRuleIds()).toHaveLength(21);
   });
 
   it('reaches every `findings.push` site from that corpus', () => {

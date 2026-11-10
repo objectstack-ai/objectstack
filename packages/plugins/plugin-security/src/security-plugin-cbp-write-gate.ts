@@ -244,6 +244,41 @@ function bodyEmptiesMasterReference(data: unknown, fk: string): boolean {
 }
 
 /**
+ * [ADR-0055 §3] The reason a refusal of this gate gives a caller who cannot
+ * read the detail's master reference. A rule, not a verdict trace: it names no
+ * master object, no master record and no leg of the check, so the refusal
+ * tells that caller nothing the field-level security of the reference keeps
+ * from them. The same words answer every verdict of the gate, the owner rule
+ * of a row whose optional master is empty included, so the sentence does not
+ * tell whether the hidden reference is set either.
+ */
+const MASTER_REFERENCE_UNREADABLE_REASON = 'no edit permission on the parent record of this detail';
+
+/**
+ * [ADR-0055 §3] May the caller read the master reference `fk` of `object`?
+ * Asked of the plugin's own readable projection
+ * ({@link SecurityPlugin.getReadableFields}), the field-level security the
+ * data plane's reads mask by, for the caller of the write: the request's
+ * context (`opCtx.context`, which carries the delegation link on an
+ * on-behalf-of write, so the delegator's mask is intersected), else the pass's
+ * own. Fails closed: an unresolvable schema or posture, and a throw, read as
+ * "cannot read".
+ */
+async function callerReadsMasterReference(
+  host: Pick<CbpWriteGateHost, 'getReadableFields'>,
+  object: string,
+  fk: string,
+  readerContext: any,
+): Promise<boolean> {
+  try {
+    const readable = await host.getReadableFields(object, readerContext);
+    return Array.isArray(readable) && readable.includes(fk);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The `SecurityPlugin` members the functions below read — every one of them,
  * and no other; each function's `this` is the `Pick` of the members IT reads.
  * Each is typed AS the class member (an indexed access on the class), so a
@@ -265,6 +300,7 @@ export interface CbpWriteGateHost {
   delegatorOwnWriteFloorOptions: SecurityPlugin['delegatorOwnWriteFloorOptions'];
   extractSingleId: SecurityPlugin['extractSingleId'];
   getObjectSecurityMeta: SecurityPlugin['getObjectSecurityMeta'];
+  getReadableFields: SecurityPlugin['getReadableFields'];
   readRowById: SecurityPlugin['readRowById'];
   resolveCbpRelation: SecurityPlugin['resolveCbpRelation'];
   resolveOperationPrincipals: SecurityPlugin['resolveOperationPrincipals'];
@@ -303,8 +339,48 @@ export async function checkControlledByParentWrite(
   return { outcome: 'allow' };
 }
 
-/** The body of `SecurityPlugin#assertControlledByParentWrite`; the method's docblock there is its contract. */
+/**
+ * The body of `SecurityPlugin#assertControlledByParentWrite`; the method's docblock there is its contract.
+ *
+ * [ADR-0055 §3] The verdict is {@link judgeControlledByParentWrite}'s, asked of
+ * the stored master whatever the caller may read, and this function never
+ * changes it. What it decides is the refusal's WORDS: a refusal of the gate's
+ * own (one {@link MASTER_EDIT_DENIAL_LEG} names) reaches a caller who cannot
+ * read the detail's master reference ({@link callerReadsMasterReference}) as
+ * the same `403 PERMISSION_DENIED`, for the same leg, with a sentence that
+ * names no master, no leg and no master id
+ * ({@link MASTER_REFERENCE_UNREADABLE_REASON}). A caller who can read the
+ * reference gets the specific refusal unchanged, and every other error passes
+ * through as raised.
+ */
 export async function assertControlledByParentWrite(
+  this: Pick<CbpWriteGateHost, 'assertControlledByParentChainEditable' | 'controlledByParentPredicateWriteMasters' | 'declaresControlledByParent' | 'extractSingleId' | 'getReadableFields' | 'permissionEvaluator' | 'readRowById' | 'resolveCbpRelation'>,
+  permissionSets: PermissionSet[],
+  object: string,
+  operation: string,
+  opCtx: any,
+  context: any,
+): Promise<void> {
+  try {
+    await judgeControlledByParentWrite.call(this, permissionSets, object, operation, opCtx, context);
+  } catch (e) {
+    const leg = e instanceof PermissionDeniedError ? MASTER_EDIT_DENIAL_LEG.get(e) : undefined;
+    if (!leg) throw e;
+    const rel = this.resolveCbpRelation(object);
+    const readerContext = opCtx?.context ?? context;
+    if (rel && (await callerReadsMasterReference(this, object, rel.fk, readerContext))) throw e;
+    const withheld = new PermissionDeniedError(
+      `[Security] Access denied: ${operation} on '${object}' requires edit access to its master record ` +
+        `(${MASTER_REFERENCE_UNREADABLE_REASON})`,
+      { operation, object },
+    );
+    MASTER_EDIT_DENIAL_LEG.set(withheld, leg);
+    throw withheld;
+  }
+}
+
+/** The verdict of {@link assertControlledByParentWrite}: every leg of the ADR-0055 §3 master-write check. */
+async function judgeControlledByParentWrite(
   this: Pick<CbpWriteGateHost, 'assertControlledByParentChainEditable' | 'controlledByParentPredicateWriteMasters' | 'declaresControlledByParent' | 'extractSingleId' | 'permissionEvaluator' | 'readRowById' | 'resolveCbpRelation'>,
   permissionSets: PermissionSet[],
   object: string,
