@@ -1159,6 +1159,34 @@ ETag: "abc123def456"
 - POST/PATCH/DELETE: Not cacheable
 - Cache duration: Configurable per object (default 60 seconds)
 
+## Response Compression
+
+The built-in HTTP server (`@objectstack/plugin-hono-server`, which `os dev` and
+`os start` run) compresses responses by default. A response of 1 KB or more with
+a compressible content type goes out brotli- or gzip-encoded when the request
+accepts one:
+
+```http
+GET /api/v1/meta/object
+Accept-Encoding: gzip, deflate, br
+```
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Encoding: br
+Vary: Accept-Encoding
+```
+
+- Brotli wins a tie with gzip, and `q=0` refuses a coding. A request with no
+  `Accept-Encoding` gets the unencoded body.
+- Streams are never encoded: SSE, the AI data stream, streamed exports, and any
+  other response written chunk by chunk.
+- Responses that already carry a `Content-Encoding`, `206 Partial Content`,
+  `HEAD`, and responses marked `Cache-Control: no-transform` are sent unchanged.
+- The `ETag` is the same on encoded and unencoded answers. A save sends it back
+  as `If-Match`, and the server compares it strongly.
+
 ## Rate Limiting
 
 Inbound rate limiting is **off unless a stack declares it**, and it is declared in
