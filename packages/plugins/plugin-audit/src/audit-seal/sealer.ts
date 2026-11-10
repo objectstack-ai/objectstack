@@ -505,10 +505,8 @@ class ObjectPass {
   }
 
   private async writeChains(chains: Map<string, ChainLeaves>, start: number, kind: AuditCheckpointKind, watermark: number): Promise<void> {
-    for (const key of [...chains.keys()].sort()) {
-      const chain = chains.get(key)!;
-      if (chain.leaves.length > 0) await this.writeCheckpoint(key, chain, start, kind, watermark);
-    }
+    // `readWindow` makes a chain only with its first leaf, so no checkpoint is empty (D3).
+    for (const key of [...chains.keys()].sort()) await this.writeCheckpoint(key, chains.get(key)!, start, kind, watermark);
     if (kind === 'window') this.watermark = Math.max(this.watermark ?? watermark, watermark);
   }
 
