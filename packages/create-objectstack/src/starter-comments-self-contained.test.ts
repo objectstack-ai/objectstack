@@ -116,7 +116,14 @@ function shippedFiles(): string[] {
  * Each is spelled to match the identifier, not any particular sentence, so the
  * prose around it stays free to change.
  */
-const MONOREPO_ONLY = [
+interface MonorepoOnlyPattern {
+  label: string;
+  re: RegExp;
+  /** Judges each match; without it, the first match is a hit. */
+  isHit?: (rel: string, found: string) => boolean;
+}
+
+const MONOREPO_ONLY: MonorepoOnlyPattern[] = [
   { label: 'an ADR identifier', re: /\bADR-\d{3,4}\b/ },
   { label: 'a bare issue number', re: /(^|[^\w/])#\d{3,6}\b/ },
   { label: 'a repo build-script path', re: /\bscripts\/[\w.-]+\.(?:mjs|mts|cjs|ts|js)\b/ },
@@ -218,10 +225,11 @@ function escapesProject(rel: string, found: string): boolean {
  * finds; the rest report their first match. Built fresh per call, so a global
  * pattern's `lastIndex` never carries from one file to the next.
  */
-function firstHit(entry: (typeof MONOREPO_ONLY)[number], rel: string, text: string): string | null {
-  if (!('isHit' in entry)) return entry.re.exec(text)?.[0] ?? null;
+function firstHit(entry: MonorepoOnlyPattern, rel: string, text: string): string | null {
+  const { isHit } = entry;
+  if (!isHit) return entry.re.exec(text)?.[0] ?? null;
   for (const m of text.matchAll(new RegExp(entry.re.source, 'g'))) {
-    if (entry.isHit(rel, m[0])) return m[0];
+    if (isHit(rel, m[0])) return m[0];
   }
   return null;
 }
