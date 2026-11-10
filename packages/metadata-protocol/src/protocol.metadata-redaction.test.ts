@@ -1823,3 +1823,110 @@ describe('[#28640 ②B] a save of the served connector form drains an undeclared
         expect(res).not.toHaveProperty('advisories');
     });
 });
+
+// ---------------------------------------------------------------------------
+// The connector doors judge a provider URL the way a URL parser reads it
+// ---------------------------------------------------------------------------
+//
+// A provider builds its request with `new URL()`, so whatever that parser reads
+// a credential from is refused by the save door and withheld by the read
+// exits, at every provider URL position — whatever surrounds the URL and
+// however many slashes or backslashes follow its scheme. The write half goes
+// through the real `saveMetaItem`; the read half seeds rows directly, the
+// population a refused write can no longer create.
+
+const PROVIDER_URL_SECRET = 'TEST_PLACEHOLDER_PROVIDER_URL_SECRET';
+const UNIT_SEPARATOR = String.fromCharCode(0x1f);
+const VERTICAL_TAB = String.fromCharCode(0x0b);
+const BACKSLASH = String.fromCharCode(0x5c);
+
+/** [position, a connector holding `url` there, the path it sits at]. */
+const PROVIDER_URL_POSITIONS: Array<[string, (name: string, url: string) => Record<string, unknown>, string[]]> = [
+    ['the rest baseUrl', (name, url) => ({
+        name, label: name, type: 'api', provider: 'rest',
+        providerConfig: { baseUrl: url }, auth: { type: 'bearer', credentialRef: 'VENDOR_API_TOKEN' },
+    }), ['providerConfig', 'baseUrl']],
+    ['the mcp transport url', (name, url) => ({
+        name, label: name, type: 'api', provider: 'mcp',
+        providerConfig: { transport: { kind: 'http', url } },
+    }), ['providerConfig', 'transport', 'url']],
+    ['the openapi spec URL', (name, url) => ({
+        name, label: name, type: 'api', provider: 'openapi',
+        providerConfig: { spec: url }, auth: { type: 'bearer', credentialRef: 'VENDOR_API_TOKEN' },
+    }), ['providerConfig', 'spec']],
+    ['the openapi baseUrl', (name, url) => ({
+        name, label: name, type: 'api', provider: 'openapi',
+        providerConfig: { spec: 'openapi/vendor.json', baseUrl: url }, auth: { type: 'bearer', credentialRef: 'VENDOR_API_TOKEN' },
+    }), ['providerConfig', 'baseUrl']],
+];
+
+/** Spellings a URL parser reads a userinfo or a credential query parameter from. */
+const PROVIDER_URL_SPELLINGS: string[] = [
+    `${UNIT_SEPARATOR}https:/u:${PROVIDER_URL_SECRET}@api.vendor.example/v1`,
+    `https:${PROVIDER_URL_SECRET}@api.vendor.example/v1${VERTICAL_TAB}`,
+    `https:${BACKSLASH}${BACKSLASH}api.vendor.example${BACKSLASH}v1?token=${PROVIDER_URL_SECRET}`,
+    ` https:api.vendor.example/v1?api_key=${PROVIDER_URL_SECRET}${UNIT_SEPARATOR}`,
+];
+
+/** Whether a URL parser reads a userinfo, or a `token` / `api_key` query value, from `value`. */
+function parserReadsProviderCredential(value: string): boolean {
+    let url: URL;
+    try {
+        url = new URL(value);
+    } catch {
+        return false;
+    }
+    return url.username !== '' || url.password !== ''
+        || [...url.searchParams].some(([name, v]) => v !== '' && ['token', 'api_key'].includes(name));
+}
+
+const readPath = (body: any, path: string[]) => path.reduce((node, key) => node?.[key], body);
+
+describe('the connector doors judge a provider URL the way a URL parser reads it', () => {
+    it('every spelling here is one a URL parser reads a credential from', () => {
+        for (const url of PROVIDER_URL_SPELLINGS) expect(parserReadsProviderCredential(url), JSON.stringify(url)).toBe(true);
+    });
+
+    it.each(PROVIDER_URL_POSITIONS)('the save door refuses a credential in %s, in every spelling, and stores nothing', async (_position, connectorWith) => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        for (const [i, url] of PROVIDER_URL_SPELLINGS.entries()) {
+            const name = `vendor_${i}`;
+            const refusal = await protocol.saveMetaItem({ type: 'connector', name, item: connectorWith(name, url) }).then(
+                () => undefined,
+                (err: any) => err,
+            );
+            expect({ code: refusal?.code, status: refusal?.status }, JSON.stringify(url)).toEqual({ code: 'INVALID_METADATA', status: 422 });
+            expect(allStrings(refusal?.issues ?? []).some((s) => s.includes(PROVIDER_URL_SECRET))).toBe(false);
+        }
+        expect(Array.from(rows.values()).filter((r) => r.type === 'connector')).toEqual([]);
+    });
+
+    it.each(PROVIDER_URL_POSITIONS)('CONTROL: the save door stores %s when no spelling of it carries a credential', async (_position, connectorWith, path) => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const url = `${UNIT_SEPARATOR}https:/api.vendor.example/v1?page=2`;
+        await protocol.saveMetaItem({ type: 'connector', name: 'vendor_clean', item: connectorWith('vendor_clean', url) });
+        expect(readPath(storedConnector(rows), path)).toBe(url);
+    });
+
+    it.each(PROVIDER_URL_POSITIONS)('the read exits withhold a stored credential in %s, in every spelling', async (_position, connectorWith, path) => {
+        for (const url of PROVIDER_URL_SPELLINGS) {
+            const { engine, rows } = makeStubEngine();
+            const where = { type: 'connector', name: 'vendor_api', organization_id: null, package_id: null, state: 'active' };
+            const body = connectorWith('vendor_api', url);
+            rows.set(keyOf(where), { id: 'r_provider_url', ...where, metadata: JSON.stringify(body), checksum: hashSpec(body), version: 1 } as Row);
+            // The seeded row holds the credential at rest: what follows is the read's doing.
+            expect(readPath(storedConnector(rows), path)).toBe(url);
+
+            const protocol = new ObjectStackProtocolImplementation(engine);
+            const one: any = (await protocol.getMetaItem({ type: 'connector', name: 'vendor_api' })).item;
+            const list: any = await protocol.getMetaItems({ type: 'connector' });
+            const layered: any = await protocol.getMetaItemLayered({ type: 'connector', name: 'vendor_api' });
+            expect(allStrings([one, list, layered]).some((s) => s.includes(PROVIDER_URL_SECRET)), JSON.stringify(url)).toBe(false);
+            const servedUrl = readPath(one, path);
+            expect(typeof servedUrl).toBe('string');
+            expect(parserReadsProviderCredential(servedUrl), JSON.stringify(servedUrl)).toBe(false);
+        }
+    });
+});
