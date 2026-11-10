@@ -1456,13 +1456,6 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
         {heading && caption && (
           <span className={METRIC_TILE_MEASURE_LABEL_CLASS} data-testid="dataset-metric-label">{caption}</span>
         )}
-        {/* objectstack#32165 — a tile whose caption repeats the title draws
-            none, but keeps the caption's line, empty: the tile is centred in
-            its card, and tiles side by side keep their titles and values on
-            one line. */}
-        {heading && !caption && (
-          <span className={METRIC_TILE_MEASURE_LABEL_CLASS} aria-hidden="true" data-testid="dataset-metric-label-spacer">{'\u00a0'}</span>
-        )}
         {delta && (
           <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground" data-testid="dataset-compare-trend">
             <span className={cn(

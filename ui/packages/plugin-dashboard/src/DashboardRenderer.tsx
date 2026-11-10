@@ -1150,13 +1150,6 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
                     "bg-card/50 backdrop-blur-sm",
                     forceMobileFullWidth && "w-full",
                     designMode && "relative",
-                    // objectstack#32165 — a dataset-bound metric tile is
-                    // shorter than the grid rows it spans: the card is a
-                    // column whose body takes the rest of the box, so the
-                    // tile (`justify-center`) sits in the middle of it instead
-                    // of at the top of an empty card. The grid rows are
-                    // untouched.
-                    datasetMetric && "flex flex-col",
                     selectionClasses
                 )}
                 style={innerGridSpanStyle}
@@ -1172,8 +1165,8 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
                         )}
                     </CardHeader>
                 )}
-                <CardContent className={cn("p-0", datasetMetric && "flex min-h-0 flex-1 flex-col")}>
-                    <div className={cn("h-full w-full", datasetMetric ? "flex-1 p-3 sm:p-4" : "p-3 sm:p-4 md:p-6", designMode && "pointer-events-none")}>
+                <CardContent className="p-0">
+                    <div className={cn("h-full w-full", datasetMetric ? "p-3 sm:p-4" : "p-3 sm:p-4 md:p-6", designMode && "pointer-events-none")}>
                         {datasetWidget
                           ? <DatasetWidget
                               widget={datasetWidget}

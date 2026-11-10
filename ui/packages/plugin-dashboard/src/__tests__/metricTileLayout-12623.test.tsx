@@ -226,11 +226,6 @@ describe('a subtitle equal to the title is not drawn (objectstack#32165)', () =>
     datasetTile({ ...TILE, title: 'Avg Progress' });
     await screen.findByText('47');
     expect(screen.queryByTestId('dataset-metric-label')).toBeNull();
-    // The caption's line is kept, empty and hidden from assistive tech, so
-    // tiles side by side keep their lines aligned.
-    const spacer = screen.getByTestId('dataset-metric-label-spacer');
-    expect(spacer).toHaveAttribute('aria-hidden', 'true');
-    expect(spacer.textContent?.trim()).toBe('');
     expect(screen.getAllByText('Avg Progress')).toHaveLength(1);
     expect(screen.getByTestId('dataset-metric-title')).toHaveAttribute('title', 'Avg Progress');
   });
@@ -304,50 +299,3 @@ describe('a subtitle equal to the title is not drawn (objectstack#32165)', () =>
   });
 });
 
-/**
- * objectstack#32165 — a dataset-bound metric tile sits in the middle of its
- * card. The card spans its grid rows (two 5 rem rows, 176 px measured), the
- * tile's content is about 90 px, and it drew at the top of an empty card. The
- * card is now a column whose body takes the rest of the box; the tile's
- * `justify-center` centres it. jsdom has no layout: this pins the classes; the
- * measured heights are in the pull request.
- */
-describe('a dataset-bound metric tile is centred in its card (objectstack#32165)', () => {
-  it('makes the card a column and the body fill it; a chart card is untouched (CONTROL)', async () => {
-    render(
-      <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
-        <DashboardRenderer
-          schema={{
-            type: 'dashboard',
-            name: 'gallery',
-            columns: 12,
-            widgets: [
-              { id: 'kpi', type: 'metric', title: 'Total Tasks', dataset: 'task_metrics', values: ['task_count'], layout: { x: 0, y: 0, w: 4, h: 2 } },
-              { id: 'tbl', type: 'table', title: 'By Status', dataset: 'task_metrics', dimensions: ['status'], values: ['task_count'], layout: { x: 4, y: 0, w: 8, h: 4 } },
-            ],
-          } as unknown as DashboardComponentSchema}
-          dataSource={{
-            queryDataset: vi.fn(async () => ({
-              rows: [{ task_count: 10, status: 'done' }],
-              fields: [
-                { name: 'task_count', label: 'Tasks', type: 'number' },
-                { name: 'status', label: 'Status', type: 'text' },
-              ],
-            })),
-          }}
-        />
-      </I18nProvider>,
-    );
-    const caption = await screen.findByTestId('dataset-metric-label');
-    const tile = caption.closest('.justify-center') as HTMLElement;
-    expect(tile).not.toBeNull();
-    const body = tile.parentElement!.parentElement!;
-    const card = body.parentElement!;
-    expect(card).toHaveClass('flex', 'flex-col');
-    expect(body).toHaveClass('flex', 'flex-1', 'flex-col');
-    expect(tile.parentElement).toHaveClass('flex-1');
-
-    const tableCard = screen.getByText('By Status').closest('.overflow-hidden') as HTMLElement;
-    expect(tableCard).not.toHaveClass('flex-col');
-  });
-});
