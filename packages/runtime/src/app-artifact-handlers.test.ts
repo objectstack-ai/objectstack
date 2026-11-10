@@ -22,6 +22,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
+import { composeStacks, defineStack } from '@objectstack/spec';
 import { bindAppArtifactHandlers, appArtifactHandlerOwner, collectHooksWithoutBody } from './app-artifact-handlers.js';
 
 const APP_ID = 'com.example.tasksapp';
@@ -194,5 +195,90 @@ describe('#21585: hooks with no body — the judgement, and the door that withho
 
         expect(bound).toMatchObject({ hooks: 1, functions: 1, withheldHooks: [] });
         expect(await insertStatus(ql)).toBe('own');
+    });
+});
+
+/**
+ * [ADR-0150 D4, #32333 review F1/N2] A multi-package artifact (`packages[]`)
+ * binds what the RECONCILED artifact carries: a key one body carries goes under
+ * that body's package; a key two bodies carry stays ONE handler under the
+ * artifact's owner (the answer the binder gave before it read bodies), except
+ * the object-less pair `composeStacks` admits for two namespaces; and a
+ * declaration the composition replaced is bound at no address. A re-bind that
+ * drops a package body stops its actions.
+ *
+ * Read at the binder: a composition that reconciled one object two packages
+ * declare does not boot (`ArtifactObjectNameConflictError`, ADR-0130 D3), so no
+ * boot reaches this; the binder's install-local door reads the same bundles.
+ */
+describe('[ADR-0150 D4] bindAppArtifactHandlers on a multi-package artifact', () => {
+    const NS = 'qashare';
+    const OBJECT = 'qashare_doc';
+    const STAMP = 'qa_stamp';
+    const scriptFrom = (from: string) => ({ language: 'js', source: `return { from: '${from}' };` });
+    const sharedObjectStack = (suffix: 'one' | 'two', from: string) => defineStack({
+        manifest: { id: `com.qa.share.${suffix}`, namespace: NS, name: `qa_share_${suffix}`, version: '1.0.0', type: suffix === 'one' ? 'app' : 'module' },
+        objects: [{
+            name: OBJECT, label: 'Shared doc', sharingModel: 'public_read_write',
+            fields: { name: { type: 'text', label: 'Name' } },
+            actions: [{ name: STAMP, label: 'Stamp', type: 'script', body: scriptFrom(from) }],
+        }],
+    } as never);
+    const rowsOf = (ql: ObjectQL, objectName: string, actionName: string) =>
+        ql.listRegisteredActions().filter((r) => r.objectName === objectName && r.actionName === actionName).map((r) => r.package);
+    const bind = (ql: ObjectQL, bundle: any) =>
+        bindAppArtifactHandlers(ql as any, bundle, { appId: bundle.manifest?.id ?? bundle.id, logger: quiet });
+
+    it.each([
+        { conflict: 'override', from: ['one', 'two'], runs: 'two', replaced: 'one' },
+        { conflict: 'merge', from: ['same', 'same'], runs: 'same', replaced: undefined },
+    ] as const)('objectConflict $conflict: the reconciled object\'s action is bound once, under the artifact\'s owner, and the replaced one at no address', async ({ conflict, from, runs, replaced }) => {
+        const artifact = composeStacks([sharedObjectStack('one', from[0]), sharedObjectStack('two', from[1])], { manifest: 'preserve', objectConflict: conflict }) as any;
+        expect(artifact.packages, 'precondition: a preserve artifact').toHaveLength(2);
+        const ql = new ObjectQL({ logger: quiet } as any);
+        const bound = bind(ql, artifact);
+
+        expect(rowsOf(ql, OBJECT, STAMP)).toEqual([bound.owner]);
+        await expect(ql.executeAction(OBJECT, STAMP, { params: {} })).resolves.toEqual({ from: runs });
+        for (const packageId of ['app:com.qa.share.one', 'app:com.qa.share.two']) {
+            const answer = await ql.executeAction(OBJECT, STAMP, { params: {} }, { packageId }).catch((e: Error) => e);
+            if (replaced) expect(answer, packageId).not.toEqual({ from: replaced });
+        }
+    });
+
+    it('a hand-built artifact whose two bodies of ONE namespace carry one object-less key binds it once, under the artifact\'s owner', async () => {
+        const body = (id: string, from: string) => ({
+            id, namespace: NS, name: id.replace(/\./g, '_'), version: '1.0.0', type: 'module',
+            actions: [{ name: 'qa_note', label: 'Note', type: 'script', body: scriptFrom(from) }],
+        });
+        const artifact = {
+            manifest: { id: 'com.qa.share.two', namespace: NS, name: 'qa_share_two', version: '1.0.0', type: 'app' },
+            packages: [{ manifest: body('com.qa.share.one', 'one') }, { manifest: body('com.qa.share.two', 'two') }],
+        };
+        const ql = new ObjectQL({ logger: quiet } as any);
+        const bound = bind(ql, artifact);
+
+        expect(rowsOf(ql, 'global', 'qa_note')).toEqual([bound.owner]);
+        // The declaration `resolveArtifactCollections` keeps for the name, as the binder bound it before it read bodies.
+        await expect(ql.executeAction('global', 'qa_note', { params: {} })).resolves.toEqual({ from: 'two' });
+    });
+
+    it('a re-bind that drops a package body stops that body\'s actions', async () => {
+        const body = (ns: string, action: string) => ({
+            id: `com.qa.rebind.${ns}`, namespace: ns, name: `qa_rebind_${ns}`, version: '1.0.0', type: 'module',
+            actions: [{ name: action, label: action, type: 'script', body: scriptFrom(ns) }],
+        });
+        const artifact = (...bodies: Array<ReturnType<typeof body>>) => ({
+            manifest: { id: 'com.qa.rebind', name: 'qa_rebind', version: '1.0.0', type: 'app' },
+            packages: bodies.map((manifest) => ({ manifest })),
+        });
+        const ql = new ObjectQL({ logger: quiet } as any);
+        bind(ql, artifact(body('alpha', 'qa_alpha_note'), body('beta', 'qa_beta_note')));
+        expect(rowsOf(ql, 'global', 'qa_beta_note')).toEqual(['app:com.qa.rebind.beta']);
+
+        bind(ql, artifact(body('alpha', 'qa_alpha_note')));
+
+        expect(rowsOf(ql, 'global', 'qa_beta_note'), 'a package body the new bundle dropped must stop running').toEqual([]);
+        expect(rowsOf(ql, 'global', 'qa_alpha_note')).toEqual(['app:com.qa.rebind.alpha']);
     });
 });
