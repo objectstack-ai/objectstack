@@ -31,6 +31,34 @@
  * - an UPDATE whose payload carries `permission_set` with a value other than
  *   the one the matched row already stores (an echo is not a new name).
  *
+ * ## A name two packages hold, and a grant that names its package (ADR-0150 D3/D5, #32164)
+ *
+ * A permission set is identified by `(package, name)` (ADR-0150 D4), so after
+ * the narrowing two packages may each ship a set of one name. Asked with no
+ * package, that name is the D3 refusal: the catalog picks neither. That is an
+ * answer about the name — two sets, nothing picked — never "no such set", so it
+ * is refused as what it is: `409 RESOURCE_CONFLICT`, core's
+ * `PackageScopedNameRefusedError`, whose sentence names every candidate.
+ * (The data door carries that sentence and not yet the structured candidates:
+ * #32250.)
+ *
+ * An INSERT may name the package beside the name, in the grant's own
+ * `permission_set_package` column (ADR-0150 D8 row R1). The grant then holds
+ * exactly that package's set:
+ *
+ * - the package holds the name ⇒ accepted, whatever any other package holds;
+ * - it does not ⇒ refused `409 RESOURCE_CONFLICT`, reason
+ *   `not-held-by-qualifier`, naming the holders (the D5 sentence the exact
+ *   `/meta` qualifier answers) — at any holder count, so a writer is never
+ *   moved to another package's set behind its back (epic red line 1; the
+ *   stamp seam refuses the same write, `stored-permission-set-package-stamp.ts`);
+ * - nothing holds the name at all ⇒ the `400` below, as for a grant naming no
+ *   package.
+ *
+ * An UPDATE is judged by its name alone: the engine strips a non-system
+ * caller's value of the `readonly` column after the before-phase, so the
+ * package a non-system update sends is never stored and never judged.
+ *
  * The predicate is the one `position-catalog-refusal.ts` applies to
  * `sys_user_position.position`: a DEACTIVATED set is still a set, so a grant
  * naming it is accepted and stops granting through the activation ledger.
@@ -73,12 +101,19 @@
  *
  * ## One grant per user, set and organization
  *
- * Not judged here. The declared unique index (`user_id`, `permission_set`,
- * `organization_id`) is `unique: 'organization'`, whose organization key part
- * is NULL-safe (ADR-0120 D3), so it refuses a second grant of one set to one
- * user in one organization AND a second platform-wide grant (organization
- * NULL), for every writer and every write path: a duplicate confers nothing
- * more, but a revoke that deletes one row would leave the other granting.
+ * Not judged here. Since ADR-0150 D4 a set is `(package, name)`, so the
+ * declared unique index is (`user_id`, `permission_set`,
+ * `permission_set_package`, `organization_id`), `unique: 'global'`: one user
+ * may hold both packages' sets of one name in one organization, and a second
+ * grant of one package's set is refused, for every writer and every write path.
+ * A grant whose package column is empty is held to one per (`user_id`,
+ * `permission_set`, `organization_id`) by the runtime-built partial index
+ * `uniq_sys_user_permission_set_packageless` (metadata-protocol's
+ * `user-permission-set-packageless-index.ts`), because a unique index treats
+ * empty values as distinct. A duplicate confers nothing more, but a revoke that
+ * deletes one row would leave the other granting. Every key part is a plain
+ * column (ADR-0131 D1), so a grant whose organization is empty (a platform-wide
+ * grant) is exempt from both indexes, as it was from the key before them.
  *
  * ## Hooks, not a middleware
  *
@@ -91,12 +126,22 @@
  * D10 (names first, then the id column goes).
  */
 
-import { securityCatalogReaderOf, type SecurityCatalogReader } from '@objectstack/core';
+import {
+  PackageScopedNameRefusedError,
+  packageScopedRefusalMessage,
+  resolveCatalogReference,
+  securityCatalogReaderOf,
+  type PackageScopedHolder,
+  type PackageScopedRefusal,
+  type SecurityCatalogEntry,
+  type SecurityCatalogReader,
+} from '@objectstack/core';
 import { MCP_AGENT_PERMISSION_SETS } from '@objectstack/spec/ai';
 import type { FieldErrorCode } from '@objectstack/spec/api';
 import { isPlainRecord } from '@objectstack/spec/data';
 import { validationFailure } from '@objectstack/types';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
+import { PERMISSION_SET_PACKAGE_COLUMN } from './stored-permission-set-package-backfill.js';
 
 /** The grant object this module judges. */
 export const GRANT_OBJECT = 'sys_user_permission_set';
@@ -209,13 +254,80 @@ interface GrantNameEngine {
 
 type GrantNameLogger = { warn?: (msg: string, meta?: any) => void } | undefined;
 
-/** Refuse `name` when the bound catalog holds no permission set by it (module note). */
-async function assertNameInCatalog(engine: GrantNameEngine, name: string, logger: GrantNameLogger): Promise<void> {
+/**
+ * [ADR-0150 D3/D5, #32164] The catalog's answer for the set a grant names: by
+ * its name alone, or — `packageId` given — exactly that package's set (module
+ * note, "A name two packages hold").
+ *
+ * - `resolved`: the set the grant holds.
+ * - `not-found`: no holder of the name anywhere.
+ * - `refused`: the D3 refusal of the bare name (two holders), or a named
+ *   package that does not hold it (`not-held-by-qualifier`, naming the
+ *   holders). Every candidate is structured.
+ *
+ * The named package is matched against the catalog's own per-holder entries
+ * (`list`, one per `(package, name)`) — never through the stored-column scope,
+ * whose stale-column arm reads a package that does not hold the name as no
+ * package and would pick the other holder.
+ */
+export async function judgeGrantSet(
+  catalog: SecurityCatalogReader,
+  name: string,
+  packageId?: string,
+): Promise<
+  | { readonly status: 'resolved'; readonly entry: SecurityCatalogEntry }
+  | { readonly status: 'not-found' }
+  | { readonly status: 'refused'; readonly refusal: PackageScopedRefusal }
+> {
+  if (packageId === undefined) {
+    const answer = await resolveCatalogReference(catalog, PERMISSION_SET_CATALOG_TYPE, name);
+    if (answer.status !== 'refused') return answer;
+    return {
+      status: 'refused',
+      refusal: {
+        status: 'refused',
+        reason: answer.reason as PackageScopedRefusal['reason'],
+        type: PERMISSION_SET_CATALOG_TYPE,
+        name,
+        callerPackageId: null,
+        candidates: answer.holders ?? [],
+        message: answer.message,
+      },
+    };
+  }
+  const holders = (await catalog.list(PERMISSION_SET_CATALOG_TYPE)).filter((e) => e.name === name);
+  const exact = holders.find((e) => e.packageId === packageId);
+  if (exact) return { status: 'resolved', entry: exact };
+  if (holders.length === 0) return { status: 'not-found' };
+  const candidates: PackageScopedHolder[] = holders.map((e) =>
+    e.packageId !== undefined ? { kind: 'package', packageId: e.packageId } : { kind: 'environment' });
+  const base = {
+    status: 'refused' as const,
+    reason: 'not-held-by-qualifier' as const,
+    type: 'permission' as const,
+    name,
+    callerPackageId: packageId,
+    candidates,
+  };
+  return { status: 'refused', refusal: { ...base, message: packageScopedRefusalMessage(base) } };
+}
+
+/**
+ * Refuse a grant whose set the bound catalog does not resolve (module note):
+ * `400` when nothing holds the name, `409` when the name is refused or the
+ * named package does not hold it.
+ */
+async function assertNameInCatalog(
+  engine: GrantNameEngine,
+  name: string,
+  logger: GrantNameLogger,
+  packageId?: string,
+): Promise<void> {
   const catalog = securityCatalogReaderOf(engine);
   if (!catalog) return;
-  let held: boolean;
+  let answer: Awaited<ReturnType<typeof judgeGrantSet>>;
   try {
-    held = (await catalog.resolve(PERMISSION_SET_CATALOG_TYPE, name)) !== undefined;
+    answer = await judgeGrantSet(catalog, name, packageId);
   } catch (e) {
     logger?.warn?.(
       `[security] the security catalog could not be read, so a ${GRANT_OBJECT} write was NOT checked for a ` +
@@ -224,7 +336,17 @@ async function assertNameInCatalog(engine: GrantNameEngine, name: string, logger
     );
     return;
   }
-  if (!held) throw grantSetNotInCatalogError(name, await setsLabelled(catalog, name, logger));
+  if (answer.status === 'resolved') return;
+  if (answer.status === 'refused') throw new PackageScopedNameRefusedError(answer.refusal);
+  throw grantSetNotInCatalogError(name, await setsLabelled(catalog, name, logger));
+}
+
+/** The package an insert names beside the set (`permission_set_package`), trimmed; blank or absent names none. */
+function namedPackage(data: Record<string, unknown>): string | undefined {
+  const value = data[PERMISSION_SET_PACKAGE_COLUMN];
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed === '' ? undefined : trimmed;
 }
 
 const AGENT_CEILING_SETS: ReadonlySet<string> = new Set(MCP_AGENT_PERMISSION_SETS);
@@ -269,7 +391,7 @@ async function onInsert(engine: GrantNameEngine, ctx: any, logger: GrantNameLogg
   const data = ctx?.input?.data;
   if (!isPlainRecord(data)) return;
   const name = judgedName(data[GRANT_SET_NAME_FIELD]);
-  if (name !== undefined) await assertNameInCatalog(engine, name, logger);
+  if (name !== undefined) await assertNameInCatalog(engine, name, logger, namedPackage(data));
 }
 
 /**

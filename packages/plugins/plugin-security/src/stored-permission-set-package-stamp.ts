@@ -47,18 +47,48 @@
  * then on. A null answer writes the key only to replace a value the writer
  * sent; otherwise the column is left to its default.
  *
- * ## What a write keeps
+ * ## What a write keeps (ADR-0150 D3/D8, #32164)
  *
- * - **An insert** is stamped from its name, whoever writes it: a value the
- *   writer sent is replaced — the column is `readonly`, and what it names is
- *   what the authorization resolver reads. No writer today knows more than the
- *   name; binding a refused name is the operator's reviewed bind, an update.
+ * A writer that NAMES a package (a non-blank `permission_set_package` in its
+ * payload) has said which set it means, so the seam never picks for it:
+ *
+ * - **the package holds the name** (a registry holder of `(permission, name)`
+ *   for the reference's writer) ⇒ kept as written — even where the bare name
+ *   is refused (two holders), which is how a grant of either package's set is
+ *   written at all;
+ * - **it does not** ⇒ refused, `409 RESOURCE_CONFLICT`, core's
+ *   `PackageScopedNameRefusedError`, reason `not-held-by-qualifier`, naming
+ *   every holder — at ANY holder count, never re-stamped to the holder it
+ *   did not name (epic red line 1). One holder included: before #32164 such a
+ *   write was re-stamped to the one holder without a word;
+ * - **nothing holds the name** ⇒ kept unjudged: there is no holder to name and
+ *   nothing to contradict it, and the reader reads a column naming a package
+ *   that does not serve the set as no package (`storedPermissionSetScope`), so
+ *   it confers nothing. A system writer may write a grant before the set it
+ *   names is registered — the stand-down the grant-name hook takes.
+ *
+ * A writer that names none is stamped by the rule:
+ *
+ * - **An insert** is stamped from its name, whoever writes it. No first-party
+ *   writer names a package (measured on #32164: the stamp, the boot backfill
+ *   and the reviewed bind are the column's only writers).
  * - **An update** is stamped only when it changes what the reference names:
  *   the set's name, or (R3) the package that wrote it. A rename never keeps the
- *   old package. An update that touches neither — the backfill's and the
- *   reviewed bind's, which write the column alone — is left as it is.
+ *   old package. An update that touches neither is left as it is.
+ *
+ * An update that writes the column itself — the backfill's and the reviewed
+ * bind's, which write it alone, or a rename that names its package — is judged
+ * as above when a SYSTEM writer sends it. A value equal to the one the row
+ * already stores is an echo (a whole-row write), not a choice, and is not
+ * judged. A non-system caller's value of the
+ * `readonly` column is stripped by the engine after the before-phase, so the
+ * seam neither judges nor keeps it: a non-system update is stamped by the rule.
+ *
+ * Before the holders are sealed nothing is judged: a named package is kept as
+ * written (a stale one reads as no package), and a name with none is left null.
  */
 
+import { PackageScopedNameRefusedError, packageScopedRefusalMessage, type PackageScopedHolder } from '@objectstack/core';
 import { isPlainRecord } from '@objectstack/spec/data';
 import {
   isPermissionSetHolderRegistry,
@@ -93,17 +123,48 @@ const named = (value: unknown): string | null => {
   return v === '' ? null : v;
 };
 
+/** The registry's holder reads, once its bare-name holders are sealed; `undefined` before that, or without them. */
+function sealedHolderRegistry(engine: StampEngine) {
+  const registry = engine.registry;
+  if (!isPermissionSetHolderRegistry(registry)) return undefined;
+  if ((registry as { bareNameHoldersAreSealed?: unknown }).bareNameHoldersAreSealed !== true) return undefined;
+  return registry;
+}
+
 /**
  * The package to stamp for `name` written by `caller` (`null`: no package), or
  * `null`: no package holds it for that caller, or the holders are not sealed
  * yet (module doc).
  */
 function stampFor(engine: StampEngine, name: string, caller: string | null): string | null {
-  const registry = engine.registry;
-  if (!isPermissionSetHolderRegistry(registry)) return null;
-  if ((registry as { bareNameHoldersAreSealed?: unknown }).bareNameHoldersAreSealed !== true) return null;
+  const registry = sealedHolderRegistry(engine);
+  if (!registry) return null;
   const holder = permissionSetHolderOf(registry)(name, caller);
   return holder.kind === 'package' ? holder.packageId : null;
+}
+
+/**
+ * [#32164] Judge a package a writer named beside `name` (module doc, "What a
+ * write keeps"): returns when it is kept, throws the `not-held-by-qualifier`
+ * refusal naming every holder when it is not.
+ */
+function assertNamedPackageHolds(engine: StampEngine, name: string, named: string, caller: string | null): void {
+  const registry = sealedHolderRegistry(engine);
+  if (!registry) return;
+  const packageHolders = registry.packageScopedHoldersOf('permission', name, caller) ?? [];
+  if (packageHolders.includes(named)) return;
+  const candidates: PackageScopedHolder[] = packageHolders.map((packageId) => ({ kind: 'package' as const, packageId }));
+  if (registry.getEnvironmentScopedItem('permission', name) !== undefined) candidates.push({ kind: 'environment' });
+  if (candidates.length === 0) return;
+  const refusal = {
+    status: 'refused' as const,
+    reason: 'not-held-by-qualifier' as const,
+    type: 'permission' as const,
+    name,
+    callerPackageId: named,
+    candidates,
+  };
+  throw new PackageScopedNameRefusedError({ ...refusal, message: packageScopedRefusalMessage(refusal) });
 }
 
 /** Whether the object as registered declares the package column (module doc, "Where the column is not declared"). */
@@ -137,7 +198,16 @@ function onInsert(engine: StampEngine, reference: StoredPermissionSetReference, 
   if (!isPlainRecord(data)) return;
   const name = named(data[reference.nameColumn]);
   if (name === null || !declaresColumn(engine, reference)) return;
-  stamp(data, reference.packageColumn, stampFor(engine, name, writerOf(reference, data)));
+  const writer = writerOf(reference, data);
+  const chosen = named(data[reference.packageColumn]);
+  if (chosen !== null) {
+    // [#32164] The writer named its package: kept when it holds the name,
+    // refused when it does not — never re-stamped (module doc).
+    assertNamedPackageHolds(engine, name, chosen, writer);
+    data[reference.packageColumn] = chosen;
+    return;
+  }
+  stamp(data, reference.packageColumn, stampFor(engine, name, writer));
 }
 
 /** `beforeUpdate`: one dispatch per matched row, `previous` bound (module doc). */
@@ -146,13 +216,27 @@ function onUpdate(engine: StampEngine, reference: StoredPermissionSetReference, 
   const data = ctx?.input?.data;
   if (!isPlainRecord(data)) return;
   const previous = isPlainRecord(ctx?.previous) ? ctx.previous : {};
+  // [#32164] Only a system writer's value of the readonly column is stored;
+  // a non-system caller's is stripped after this phase (module doc). An echo
+  // of the stored value (a whole-row write) chooses nothing new.
+  const sent = ctx?.session?.isSystem === true && hasOwn(data, reference.packageColumn)
+    ? named(data[reference.packageColumn])
+    : null;
+  const chosen = sent !== null && sent !== named(previous[reference.packageColumn]) ? sent : null;
   const touchesName = hasOwn(data, reference.nameColumn)
     && named(data[reference.nameColumn]) !== named(previous[reference.nameColumn]);
   const touchesWriter = reference.callerColumn !== undefined && hasOwn(data, reference.callerColumn)
     && named(data[reference.callerColumn]) !== named(previous[reference.callerColumn]);
-  if ((!touchesName && !touchesWriter) || !declaresColumn(engine, reference)) return;
+  if ((chosen === null && !touchesName && !touchesWriter) || !declaresColumn(engine, reference)) return;
   const after = { ...previous, ...data };
   const name = named(after[reference.nameColumn]);
+  if (chosen !== null) {
+    // A system writer naming the package — the reviewed bind, the backfill,
+    // a rename that says which set it means — is judged, never re-stamped.
+    if (name !== null) assertNamedPackageHolds(engine, name, chosen, writerOf(reference, after));
+    return;
+  }
+  if (!touchesName && !touchesWriter) return;
   // A rename always writes the key: the old package must not survive it.
   data[reference.packageColumn] = name === null ? null : stampFor(engine, name, writerOf(reference, after));
 }

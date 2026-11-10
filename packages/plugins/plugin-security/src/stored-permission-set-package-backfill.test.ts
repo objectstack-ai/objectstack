@@ -376,10 +376,21 @@ describe('the boot run', () => {
   });
 });
 
-describe('no unique key widens: the package column sits beside the keys, never in them', () => {
-  it('every index of both tables is byte-identical to the one before the column', () => {
+/**
+ * [#32164, ADR-0150 D4] The grant's key gains its package column — one user may
+ * hold both packages' sets of one name — and the suggestion's key is untouched.
+ * BASE (main e40f2df2): the grant key was (`user_id`, `permission_set`,
+ * `organization_id`), `unique: 'organization'`, and refused a second grant of
+ * one name whatever either row's package said. Two package-less grants of one
+ * name stay refused by the runtime partial index metadata-protocol builds at
+ * `kernel:ready` (`user-permission-set-packageless-index.ts`, pinned per dialect
+ * there); this engine is not booted through it, so the declared key alone is
+ * measured here.
+ */
+describe('the grant key gains its package column; the suggestion key is untouched', () => {
+  it('the declared indexes: the grant\'s unique is global over four columns, the suggestion\'s as before', () => {
     expect(JSON.stringify(SysUserPermissionSet.indexes)).toBe(JSON.stringify([
-      { fields: ['user_id', 'permission_set', 'organization_id'], unique: 'organization' },
+      { fields: ['user_id', 'permission_set', 'permission_set_package', 'organization_id'], unique: 'global' },
       { fields: ['user_id'], unique: false },
       { fields: ['organization_id'], unique: false },
     ]));
@@ -390,17 +401,16 @@ describe('no unique key widens: the package column sits beside the keys, never i
     ]));
   });
 
-  it('the store still refuses a second grant of one set to one user, whatever either row\'s package column says', async () => {
+  it('the store refuses a second grant of one package\'s set to one user, and admits the other package\'s set beside it', async () => {
     const engine = await boot();
-    await engine.insert(GRANTS.object, grant('k1', ONE_HOLDER, { user_id: 'u_k' }), { context: SYS_ORG });
-    // Both null: the case a widened key would quietly let through.
-    await expect(engine.insert(GRANTS.object, grant('k2', ONE_HOLDER, { user_id: 'u_k' }), { context: SYS_ORG })).rejects.toThrow();
-    // One differs only in the new column: still the same grant.
+    await engine.insert(GRANTS.object, grant('k1', TWO_HOLDERS, { user_id: 'u_k', permission_set_package: CRM }), { context: SYS_ORG });
     await expect(
-      engine.insert(GRANTS.object, grant('k3', ONE_HOLDER, { user_id: 'u_k', permission_set_package: CRM }), { context: SYS_ORG }),
+      engine.insert(GRANTS.object, grant('k2', TWO_HOLDERS, { user_id: 'u_k', permission_set_package: CRM }), { context: SYS_ORG }),
     ).rejects.toThrow();
-    const rows = (await engine.find(GRANTS.object, { where: { user_id: 'u_k' }, context: SYSTEM_CTX })) as unknown[];
-    expect(rows).toHaveLength(1);
+    // BASE: refused by the three-column key. The other package's set is another set.
+    await engine.insert(GRANTS.object, grant('k3', TWO_HOLDERS, { user_id: 'u_k', permission_set_package: HR }), { context: SYS_ORG });
+    const rows = (await engine.find(GRANTS.object, { where: { user_id: 'u_k' }, context: SYSTEM_CTX })) as Array<Record<string, unknown>>;
+    expect(rows.map((r) => r.permission_set_package).sort()).toEqual([CRM, HR]);
   });
 });
 
@@ -447,7 +457,8 @@ describe('the write seam stamps the package column on every write that names a s
     declared.add(GRANTS.object);
     expect(write(insert, { permission_set: ONE_HOLDER })).toEqual({ permission_set: ONE_HOLDER, [GRANTS.packageColumn]: CRM });
     expect(write(insert, { permission_set: TWO_HOLDERS })).toEqual({ permission_set: TWO_HOLDERS });
-    expect(write(insert, { permission_set: TWO_HOLDERS, [GRANTS.packageColumn]: HR })).toEqual({ permission_set: TWO_HOLDERS, [GRANTS.packageColumn]: null });
+    // [#32164] A writer naming a package that holds the name keeps it (BASE: replaced by null).
+    expect(write(insert, { permission_set: TWO_HOLDERS, [GRANTS.packageColumn]: HR })).toEqual({ permission_set: TWO_HOLDERS, [GRANTS.packageColumn]: HR });
   });
 
   it('R1: an insert takes the one package holder; a refused, environment or unheld name stays null', async () => {
@@ -458,12 +469,19 @@ describe('the write seam stamps the package column on every write that names a s
     expect(await packagesById(engine, GRANTS.object)).toEqual({ w1: CRM, w2: null, w3: null, w4: null });
   });
 
-  it('R1: a writer\'s own package value is replaced by the rule\'s answer — a system writer\'s too', async () => {
+  // [#32164] BASE (main e40f2df2): every writer's own package value was
+  // replaced by the rule's answer — f1 and f2 stored null, f3 was re-stamped
+  // to CRM without a word. A writer naming a package now keeps it when that
+  // package holds the name, and is refused when it does not, at any holder
+  // count (the 409 envelope is pinned in `grant-permission-set-package.test.ts`).
+  it('R1: a writer\'s own package value is kept when it holds the name — a system writer\'s too — and a non-holder is refused, never re-stamped', async () => {
     const engine = await stamped();
     await engine.insert(GRANTS.object, grant('f1', TWO_HOLDERS, { permission_set_package: HR }), { context: { userId: 'u_admin', tenantId: ORG } });
-    await engine.insert(GRANTS.object, grant('f2', TWO_HOLDERS, { permission_set_package: HR }), { context: SYS_ORG });
-    await engine.insert(GRANTS.object, grant('f3', ONE_HOLDER, { permission_set_package: HR }), { context: SYS_ORG });
-    expect(await packagesById(engine, GRANTS.object)).toEqual({ f1: null, f2: null, f3: CRM });
+    await engine.insert(GRANTS.object, grant('f2', TWO_HOLDERS, { permission_set_package: HR, user_id: 'u_f2' }), { context: SYS_ORG });
+    await expect(
+      engine.insert(GRANTS.object, grant('f3', ONE_HOLDER, { permission_set_package: HR }), { context: SYS_ORG }),
+    ).rejects.toMatchObject({ code: 'RESOURCE_CONFLICT', refusal: { reason: 'not-held-by-qualifier', callerPackageId: HR } });
+    expect(await packagesById(engine, GRANTS.object)).toEqual({ f1: HR, f2: HR });
   });
 
   it('R1: a rename re-stamps the column and never keeps the old package; a write that names no set leaves it', async () => {
@@ -489,5 +507,12 @@ describe('the write seam stamps the package column on every write that names a s
     const engine = await stamped(false);
     await engine.insert(GRANTS.object, grant('b1', ONE_HOLDER), { context: SYS_ORG });
     expect((await packagesById(engine, GRANTS.object)).b1).toBeNull();
+  });
+
+  // [#32164] BASE: a named package was replaced by null before the seal.
+  it('before the holders are sealed a named package is kept unjudged: a stale one reads as no package', async () => {
+    const engine = await stamped(false);
+    await engine.insert(GRANTS.object, grant('b2', ONE_HOLDER, { permission_set_package: HR }), { context: SYS_ORG });
+    expect((await packagesById(engine, GRANTS.object)).b2).toBe(HR);
   });
 });

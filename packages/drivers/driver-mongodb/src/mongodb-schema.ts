@@ -407,6 +407,14 @@ interface IndexDef {
  * {@link NON_NULL_BSON_TYPES}, so a document missing one is exempt, as SQL's
  * NULL rule says.
  *
+ * `sys_user_permission_set` is the same case on the grant (#32164): its key
+ * `(user_id, permission_set, permission_set_package, organization_id)` gained
+ * the nullable package column, so a grant naming no package is kept to one per
+ * `(user_id, permission_set, organization_id)` here
+ * (`user-permission-set-packageless-index.ts` on SQL). A grant missing its
+ * organization is exempt through that part's non-null type list, as it was
+ * under the old three-part unique this driver built NULL-distinct.
+ *
  * Keyed by collection name, never a generic rule: it widens nothing any other
  * collection declares.
  */
@@ -421,6 +429,21 @@ const RUNTIME_OWNED_UNIQUES: Readonly<Record<string, ReadonlyArray<{ spec: Index
           metadata_type: { $type: [...NON_NULL_BSON_TYPES] },
           name: { $type: [...NON_NULL_BSON_TYPES] },
           package_id: null,
+        },
+      },
+    },
+  ],
+  sys_user_permission_set: [
+    {
+      spec: { user_id: 1, permission_set: 1, organization_id: 1 },
+      options: {
+        name: 'uniq_sys_user_permission_set_packageless',
+        unique: true,
+        partialFilterExpression: {
+          user_id: { $type: [...NON_NULL_BSON_TYPES] },
+          permission_set: { $type: [...NON_NULL_BSON_TYPES] },
+          organization_id: { $type: [...NON_NULL_BSON_TYPES] },
+          permission_set_package: null,
         },
       },
     },

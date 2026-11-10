@@ -46,6 +46,10 @@ import {
     ensureActivationLedgerPackagelessIndex,
     resolveActivationLedgerIndexSeam,
 } from './migrations/activation-ledger-packageless-index.js';
+import {
+    ensureUserPermissionSetPackagelessIndex,
+    resolveUserPermissionSetIndexSeam,
+} from './migrations/user-permission-set-packageless-index.js';
 import { createRecordedBySentinelPlan } from './migrations/recorded-by-sentinel.js';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import type { MetadataAuthoringChannel } from './protocol.js';
@@ -378,6 +382,25 @@ export function assembleMetadataProtocol(
                     } catch (e: unknown) {
                         ctx.logger.warn(
                             '[metadata-protocol] activation ledger index migration skipped — the index that keeps one row per (metadata_type, name) among rows naming no package was not ensured this boot',
+                            { error: e instanceof Error ? e.message : String(e) },
+                        );
+                    }
+                    // `sys_user_permission_set`'s one grant per (user_id,
+                    // permission_set, organization_id) among the grants that
+                    // name no package (ADR-0150 D4, #32164): the declared key
+                    // gained the NULL-distinct `permission_set_package`, the
+                    // ledger's case on the grant table. It ADDS an index and
+                    // replaces none. The table belongs to `plugin-security`, so
+                    // it may be absent here (a silent no-op). Same seam, same
+                    // gate, own try/catch.
+                    try {
+                        const seam = resolveUserPermissionSetIndexSeam(ql);
+                        await ensureUserPermissionSetPackagelessIndex(seam?.exec, ctx.logger, {
+                            client: seam?.client,
+                        });
+                    } catch (e: unknown) {
+                        ctx.logger.warn(
+                            '[metadata-protocol] permission-set grant index migration skipped — the index that keeps one grant per (user_id, permission_set, organization_id) among grants naming no package was not ensured this boot',
                             { error: e instanceof Error ? e.message : String(e) },
                         );
                     }

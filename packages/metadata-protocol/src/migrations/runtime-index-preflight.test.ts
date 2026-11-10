@@ -118,6 +118,25 @@ describe('kernel:ready index pre-flight (#8725)', () => {
         pref.run('p3', 'org_b', null, 'deal.won', 'email');
         pref.run('p4', 'org_a', 'usr_1', 'deal.won', 'email');
 
+        // ── sys_user_permission_set: two package-less grants of one set ────
+        // [ADR-0150 D4, #32164] The declared key gained `permission_set_package`,
+        // which is NULL on a grant naming no package, so the package-less guard
+        // holds those to one per (user, set, organization). Controls: the same
+        // grant bound to two packages, and two platform-wide grants (a NULL
+        // organization, distinct under a UNIQUE, as under the old key).
+        db.exec(`CREATE TABLE sys_user_permission_set (
+            id TEXT PRIMARY KEY, user_id TEXT, permission_set TEXT, permission_set_package TEXT, organization_id TEXT
+        );`);
+        const grant = db.prepare(
+            'INSERT INTO sys_user_permission_set (id, user_id, permission_set, permission_set_package, organization_id) VALUES (?,?,?,?,?)',
+        );
+        grant.run('g1', 'usr_1', 'sales_rep', null, 'org_a');
+        grant.run('g2', 'usr_1', 'sales_rep', null, 'org_a');
+        grant.run('g3', 'usr_1', 'sales_rep', 'com.acme.crm', 'org_a');
+        grant.run('g4', 'usr_1', 'sales_rep', 'com.acme.hr', 'org_a');
+        grant.run('g5', 'usr_1', 'sales_rep', null, null);
+        grant.run('g6', 'usr_1', 'sales_rep', null, null);
+
         // ⛔ `sys_setting` is deliberately NOT created: it is registered by the
         // OPTIONAL `service-settings`, so an ordinary kernel reaches
         // `kernel:ready` without it and the migration treats that as a silent
@@ -144,6 +163,7 @@ describe('kernel:ready index pre-flight (#8725)', () => {
             'uniq_sys_notification_preference_a22d7d27:blocked',
             // The fixture holds no activation ledger.
             'uniq_sys_metadata_activation_packageless:table-absent',
+            'uniq_sys_user_permission_set_packageless:blocked',
         ]);
 
         // The overlay conflict. [ADR-0131 C7b] The organization is no part of
@@ -185,6 +205,12 @@ describe('kernel:ready index pre-flight (#8725)', () => {
             { key: { organization_id: 'org_a', user_id_key: '', topic: 'deal.won', channel: 'email' }, rowCount: 2 },
         ]);
         expect(by('uniq_sys_notification_preference_a22d7d27', results).rowScope).toBeNull();
+
+        // Only the package-less pair in one organization blocks the grant guard.
+        expect(by('uniq_sys_user_permission_set_packageless', results).groups).toEqual([
+            { key: { user_id: 'usr_1', permission_set: 'sales_rep', organization_id: 'org_a' }, rowCount: 2 },
+        ]);
+        expect(by('uniq_sys_user_permission_set_packageless', results).rowScope).toBe('permission_set_package IS NULL');
     });
 
     it('[ADR-0131 C7b] names the legacy organization rows the re-keyed index now refuses: two organizations, or an organization and the environment, on one key', async () => {
@@ -238,6 +264,7 @@ describe('kernel:ready index pre-flight (#8725)', () => {
                 'ensureSysSettingIdentityIndex:sys_setting:uniq_sys_setting_organization_id_namespace_key_scope_user_id',
                 'ensureNotificationPreferenceIdentityIndex:sys_notification_preference:uniq_sys_notification_preference_a22d7d27',
                 'ensureActivationLedgerPackagelessIndex:sys_metadata_activation:uniq_sys_metadata_activation_packageless',
+                'ensureUserPermissionSetPackagelessIndex:sys_user_permission_set:uniq_sys_user_permission_set_packageless',
             ]);
         }
     });
