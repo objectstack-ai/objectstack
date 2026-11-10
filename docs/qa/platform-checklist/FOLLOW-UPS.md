@@ -1052,9 +1052,14 @@ else is missing. No live run was made: every clause is read from source, and eac
 
 ### 16c. Fixtures worth adding
 
-- **An 18.3.0 database recipe.** Once a run proves route (a), it should become an area-level
-  recipe in `platform-core`, with its provenance. The three upgrade items would then reference
-  it instead of carrying the prose.
+- **An 18.3.0 database recipe.** QA record #32093 proved route (a) on a real 18.3.0 database
+  made with npm `create-objectstack@18.3.0`. Its environment fingerprint should become an
+  area-level recipe in `platform-core`, with that provenance. The three upgrade items would
+  then reference it instead of carrying the prose. The same run's item-text findings (PR
+  comment 6765257068) are applied to those three items: the plan order, the index-listing
+  oracle, the rows 18.3.0 cannot write, the fresh-install comparison, the scaffold's
+  `approvals`, the telemetry sibling and `--dev`, and the TTY-only prompt. Its product defects
+  are carded separately: #32094, #32095, #32096.
 - **An OIDC identity provider** (§3, still open). It blocks the SSO leg of
   `identity-auth.idp-group-permission-set-mapping`. It also gates provider registration for
   `identity-auth.sso-provider-groups-claim` if registration needs a reachable issuer.

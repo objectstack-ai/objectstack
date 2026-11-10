@@ -2713,12 +2713,13 @@
       "fixtures": {
         "app": "any",
         "requires": [
-          "an 18.3.0-shaped SQLite file, copied, never the original, by one of two routes. (a) A file a boot of npm `@objectstack/cli@18.3.0` (published; the tree is 18.3.0 plus the unreleased v18.4 work) wrote for a blank scaffold, with the rows the steps name planted through that release's own doors; a blank scaffold, because the showcase is a private workspace package with no published build. (b) The planted shape: a copy of a file DB this tree's own boot wrote, in which the step's columns are set back to NULL (and, for the activation ledger, the index uniq_sys_metadata_activation_packageless is dropped), which is what a database an earlier release built holds once this release's schema sync has added the columns, after its first boot on this tree, with one sys_queue_member row left null because two installed packages in two namespaces both hold its queue qa_desk"
+          "an 18.3.0-shaped SQLite file, copied, never the original, by one of two routes. (a) A file a boot of npm `@objectstack/cli@18.3.0` (published; the tree is 18.3.0 plus the unreleased v18.4 work) wrote for a blank scaffold, with the rows the steps name planted through that release's own doors; a blank scaffold, because the showcase is a private workspace package with no published build (QA record #32093 made one with npm `create-objectstack@18.3.0`; copy the file and its telemetry sibling X.telemetry.db together). (b) The planted shape: a copy of a file DB this tree's own boot wrote, in which the step's columns are set back to NULL (and, for the activation ledger, the index uniq_sys_metadata_activation_packageless is dropped), which is what a database an earlier release built holds once this release's schema sync has added the columns, after its first boot on this tree, with one sys_queue_member row left null because two installed packages in two namespaces both hold its queue qa_desk",
+          "on a dev database, pass --dev to every command, so the telemetry sibling, which holds the paused runs and the audit row, is composed. Run the commands with the server stopped: bind refuses an SQLite file another process holds unless --force"
         ]
       },
       "steps": [
         "os migrate stored-references --json; record the findings; run it again and diff the two outputs; record any row change",
-        "os migrate stored-references bind --table sys_queue_member --id ID --package P with P one of the finding's candidates; answer the prompt n, then run with --yes",
+        "os migrate stored-references bind --table sys_queue_member --id ID --package P, with P one of the finding's candidates. Run it on a TTY and answer the prompt n; then run it with stdin piped and no --yes; then run it with --yes",
         "run the same bind again; then bind with a package that is not a candidate, and with --table sys_flow_dispatch",
         "read the queue member row and sys_audit_log"
       ],
@@ -2732,8 +2733,8 @@
         {
           "clause": "bind writes one row only after confirmation, and leaves one sys_audit_log row",
           "oracle": "api",
-          "verify": "answering n changes nothing; --yes sets queue_package to P and one sys_audit_log row records the change (packages/cli/src/utils/stored-package-references.ts#bindStoredPackageReference; the bind composes the audit plugin)",
-          "evidence": "the row before and after, and the audit row"
+          "verify": "answering n on a TTY changes nothing. With stdin piped, or with --json, and no --yes, there is no prompt: bind refuses with confirmation_required (\"pass --yes\"), exits 1 and writes nothing (packages/cli/src/commands/migrate/stored-references/bind.ts; QA record #32093 (a live run of this item on a real 18.3.0 database)). --yes sets queue_package to P and one sys_audit_log row records the change (packages/cli/src/utils/stored-package-references.ts#bindStoredPackageReference; the bind composes the audit plugin)",
+          "evidence": "the row before and after each run, the piped run's output and exit code, and the audit row"
         },
         {
           "clause": "bind refuses what it may not decide: an already bound row, a package that is not a candidate, and a report-only table",
@@ -2758,7 +2759,7 @@
         {
           "revision": 1,
           "date": "2026-11-10",
-          "change": "initial — ADR-0150 child S4 (#31961), with the literalNamespaces section #31968 added. Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e and, for that section, at 0f7389cc; no live run made",
+          "change": "initial — ADR-0150 child S4 (#31961), with the literalNamespaces section #31968 added. Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e and, for that section, at 0f7389cc; no live run made. Corrected from QA record #32093 (a live run of this item on a real 18.3.0 database), before this item reached main: no clause failed on the text, but the text would have misled the next runner",
           "ref": "#32019"
         }
       ],

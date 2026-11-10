@@ -4356,27 +4356,28 @@
       "fixtures": {
         "app": "any",
         "requires": [
-          "an 18.3.0-shaped SQLite file, copied, never the original, by one of two routes. (a) A file a boot of npm `@objectstack/cli@18.3.0` (published; the tree is 18.3.0 plus the unreleased v18.4 work) wrote for a blank scaffold, with the rows the steps name planted through that release's own doors; a blank scaffold, because the showcase is a private workspace package with no published build. (b) The planted shape: a copy of a file DB this tree's own boot wrote, in which the step's columns are set back to NULL (and, for the activation ledger, the index uniq_sys_metadata_activation_packageless is dropped), which is what a database an earlier release built holds once this release's schema sync has added the columns. Its sys_metadata_activation holds a package-less row (package_id NULL) for a flow one installed package ships (on route (a), set it NULL by hand if the 18.3.0 door wrote the package), a row for a position, and, on route (b), a package-less row for a name two packages hold",
-          "a copy of the same file with two package-less rows planted for one (metadata_type, name), for the conflict leg"
+          "an 18.3.0-shaped SQLite file, copied, never the original, by one of two routes. (a) A file a boot of npm `@objectstack/cli@18.3.0` (published; the tree is 18.3.0 plus the unreleased v18.4 work) wrote for a blank scaffold, with the rows the steps name planted through that release's own doors; a blank scaffold, because the showcase is a private workspace package with no published build (QA record #32093 made one with npm `create-objectstack@18.3.0`; copy the file and its telemetry sibling X.telemetry.db together). (b) The planted shape: a copy of a file DB this tree's own boot wrote, in which the step's columns are set back to NULL (and, for the activation ledger, the index uniq_sys_metadata_activation_packageless is dropped), which is what a database an earlier release built holds once this release's schema sync has added the columns. Its sys_metadata_activation holds a package-less row (package_id NULL) for a flow one installed package ships, and a row for a position. On route (a), 18.3.0's door already writes package_id (for a name two packages hold, the first holder), so set the flow row's package_id to NULL by SQL. On route (b) it also holds a package-less row for a name two packages hold. An environment item's row is planted by SQL on either route: 18.3.0's door answers 409 for one",
+          "a copy of the same file with two package-less rows planted by SQL for one (metadata_type, name), for the conflict leg. On a route (a) file, drop 18.3.0's unique (metadata_type, name) index first, because it forbids the pair"
         ]
       },
       "steps": [
-        "boot this tree on the 18.3.0-shaped copy; read the boot log; then, with the server stopped, read the indexes on sys_metadata_activation and every row",
-        "boot it again; read the log and the rows",
-        "os migrate plan against the same DB; record the operation offered for the earlier (metadata_type, name) index; os migrate apply, then os migrate plan again",
+        "os migrate plan against the untouched 18.3.0-shaped copy, before any boot of this tree; record the operations offered for sys_metadata_activation",
+        "boot this tree on the copy (boot 1); read the boot log; then, with the server stopped, read the indexes on sys_metadata_activation (PRAGMA index_list('sys_metadata_activation')) and every row",
+        "os migrate plan; record the operation offered for the earlier (metadata_type, name) index; os migrate apply, then os migrate plan again. ⛔ Before boot 2, not after it: a boot's schema sync applies that replacement itself once the package-less index stands",
+        "boot it again (boot 2); read the log and the rows",
         "boot the conflict copy; read the log; delete one of the two rows, restart, and read the indexes"
       ],
       "acceptance": [
         {
           "clause": "the first boot builds uniq_sys_metadata_activation_packageless over (metadata_type, name) for rows with no package",
-          "oracle": "log",
-          "verify": "the index exists after the boot (packages/metadata-protocol/src/migrations/activation-ledger-packageless-index.ts#ACTIVATION_LEDGER_PACKAGELESS_INDEX_NAME, #ACTIVATION_LEDGER_PACKAGELESS_ROW_SCOPE)",
+          "oracle": "api",
+          "verify": "the index exists after boot 1, read from the database's index listing with the server stopped (packages/metadata-protocol/src/migrations/activation-ledger-packageless-index.ts#ACTIVATION_LEDGER_PACKAGELESS_INDEX_NAME, #ACTIVATION_LEDGER_PACKAGELESS_ROW_SCOPE). ⛔ Not from the log: a successful build logs nothing (QA record #32093 (a live run of this item on a real 18.3.0 database))",
           "evidence": "the index listing"
         },
         {
           "clause": "a package-less row binds to the one package that holds its item; a position row, an environment item's row and a row whose name two packages hold stay null, the ambiguous one with a warning naming the candidates",
           "oracle": "api",
-          "verify": "the flow row carries its package id; the position row is unchanged; the planted ambiguous row is null and the log names its candidates (packages/objectql/src/activation-ledger-backfill.ts#activationLedgerHolderOf)",
+          "verify": "the flow row carries its package id; the position row is unchanged; the planted ambiguous row is null and the log names its candidates (packages/objectql/src/activation-ledger-backfill.ts#activationLedgerHolderOf). On route (a), a row 18.3.0's door bound keeps its package: the backfill reads only rows with no package",
           "evidence": "the rows before and after, and the warning"
         },
         {
@@ -4386,10 +4387,10 @@
           "evidence": "both row dumps"
         },
         {
-          "clause": "os migrate plan offers the earlier (metadata_type, name) index as a safe replace_unique_index only while the package-less index stands, and apply leaves nothing to offer",
+          "clause": "os migrate plan offers only create_index for the table on the untouched 18.3.0 file, then, once boot 1 has built the package-less index, the earlier (metadata_type, name) index as a safe replace_unique_index; apply leaves nothing to offer",
           "oracle": "build",
-          "verify": "the plan lists the replacement as safe (packages/drivers/driver-sql/src/schema-drift.ts); after apply, the plan lists no operation for the table",
-          "evidence": "both plan outputs"
+          "verify": "the first plan lists create_index only; the second lists the replacement as safe (packages/drivers/driver-sql/src/schema-drift.ts); after apply the plan lists no operation for the table. ⚠️ Once the package-less index stands, a boot's schema sync applies the safe replacement itself and logs `[schema-drift] auto-reconciled replace_unique_index …`, so a plan taken after boot 2 can never show it (QA record #32093 (a live run of this item on a real 18.3.0 database))",
+          "evidence": "the three plan outputs"
         },
         {
           "clause": "a database that already holds two package-less rows for one name is not repaired silently: the index build is refused with the probe query and os migrate duplicates named, the boot continues, and the index is built once one row is deleted",
@@ -4399,9 +4400,10 @@
         }
       ],
       "negative": [
-        "a row bound to a package that does not hold its item, or an ambiguous row bound to either candidate, is a FAIL",
+        "a row bound to a package that does not hold its item, or an ambiguous row bound by this tree's backfill to either candidate, is a FAIL. A row 18.3.0's door already bound to the first holder arrives bound, and the backfill leaves it",
         "a duplicate row deleted by the boot is a FAIL: they are administrators' switches",
-        "the old index dropped before the package-less index exists is a FAIL: package-less rows would lose their only uniqueness rule"
+        "the old index dropped before the package-less index exists is a FAIL: package-less rows would lose their only uniqueness rule",
+        "a plan taken after boot 2 that shows no replace_unique_index is not a FAIL: that boot applied it. Read the boot log for the auto-reconciled line"
       ],
       "traps": ["destructive-in-place", "first-boot-cold-start"],
       "automated": {
@@ -4419,7 +4421,7 @@
         {
           "revision": 1,
           "date": "2026-11-10",
-          "change": "initial — ADR-0150 child S1 on the upgrade path (#31727, #31831). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
+          "change": "initial — ADR-0150 child S1 on the upgrade path (#31727, #31831). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made. Corrected from QA record #32093 (a live run of this item on a real 18.3.0 database), before this item reached main: no clause failed on the text, but the text would have misled the next runner",
           "ref": "#32019"
         }
       ]
@@ -4510,17 +4512,19 @@
       "fixtures": {
         "app": "any",
         "requires": [
-          "an 18.3.0-shaped SQLite file, copied, never the original, by one of two routes. (a) A file a boot of npm `@objectstack/cli@18.3.0` (published; the tree is 18.3.0 plus the unreleased v18.4 work) wrote for a blank scaffold, with the rows the steps name planted through that release's own doors; a blank scaffold, because the showcase is a private workspace package with no published build. (b) The planted shape: a copy of a file DB this tree's own boot wrote, in which the step's columns are set back to NULL (and, for the activation ledger, the index uniq_sys_metadata_activation_packageless is dropped), which is what a database an earlier release built holds once this release's schema sync has added the columns. The rows planted: a sys_user_permission_set grant of a set one package holds; a managed sys_sharing_rule row; a paused sys_automation_run of a package flow; a pending sys_approval_request; a sys_email_template row for a platform template; a sys_flow_dispatch row keyed schedule:FLOW:WINDOW_START for a package flow inside 30 days, and one older than 30 days; and a sys_queue_member row naming a queue qa_desk that two installed packages in two namespaces both hold"
+          "an 18.3.0-shaped SQLite file, copied, never the original, by one of two routes. (a) A file a boot of npm `@objectstack/cli@18.3.0` (published; the tree is 18.3.0 plus the unreleased v18.4 work) wrote for a blank scaffold, with the rows the steps name planted through that release's own doors; a blank scaffold, because the showcase is a private workspace package with no published build (QA record #32093 made one with npm `create-objectstack@18.3.0`; copy the file and its telemetry sibling X.telemetry.db together). (b) The planted shape: a copy of a file DB this tree's own boot wrote, in which the step's columns are set back to NULL (and, for the activation ledger, the index uniq_sys_metadata_activation_packageless is dropped), which is what a database an earlier release built holds once this release's schema sync has added the columns. The rows planted: a sys_user_permission_set grant of a set one package holds; a managed sys_sharing_rule row; a paused sys_automation_run of a package flow; a pending sys_approval_request; a sys_email_template row for a platform template; a sys_flow_dispatch row keyed schedule:FLOW:WINDOW_START for a package flow inside 30 days, and one older than 30 days; and a sys_queue_member row naming a queue qa_desk that two installed packages in two namespaces both hold. Planted by SQL on either route: a sys_audience_binding_suggestion row naming a set one package holds (R3), a sys_flow_credential row for a package flow (R9), a sys_connector_connection row for a package connector (R11) and a sys_assignment_cursor row for a package assignment rule (R13). On route (a), the managed sys_sharing_rule and sys_email_template rows are planted by SQL too, because 18.3.0 has no door that writes them (ADR-0131 D2, D6, D10). The scaffold's requires lists 'approvals', or no sys_approval_request exists. 18.3.0 writes sys_flow_dispatch rows only when it boots with OS_AUTOMATION_SCHEDULED_WORK_ENABLED=true",
+          "every boot of this tree on the copy leaves scheduled work off (OS_AUTOMATION_SCHEDULED_WORK_ENABLED unset), so no new dispatch row joins the ones being re-keyed",
+          "a fresh install of this tree with the same app, the same grant for the same member and the same ledger switches: clause 4's reference body"
         ]
       },
       "steps": [
-        "as admin on the copy BEFORE the upgrade boot (18.3.0 or the planted copy), read GET /api/v1/auth/me/permissions for the granted member; keep the body",
+        "on the copy BEFORE the upgrade boot (18.3.0, or the planted copy), with every planted ledger switch in place, sign in as the granted member and read GET /api/v1/auth/me/permissions; keep the body. Read the same body on the fresh install",
         "boot this tree on the copy; read the boot log; with the server stopped, read each planted row's new package column and every sys_flow_dispatch key",
-        "restart; read the same permissions body for the member; then boot once more and diff every row"
+        "restart; read the same permissions body as the member; then boot once more and diff every row"
       ],
       "acceptance": [
         {
-          "clause": "each planted row whose item has one holder gains that package: permission_set_package, sys_sharing_rule.package_id, flow_package, process_package and sys_email_template.package_id (com.objectstack.service.email for a platform template)",
+          "clause": "each planted row whose item has one holder gains that package: permission_set_package (on the grant and on the binding suggestion), sys_sharing_rule.package_id, flow_package (on the paused run and on the flow credential), connector_package, rule_package, process_package and sys_email_template.package_id (com.objectstack.service.email for a platform template)",
           "oracle": "api",
           "verify": "each column holds the holder's id (packages/plugins/plugin-security/src/stored-permission-set-package-backfill.ts#STORED_PERMISSION_SET_REFERENCES, packages/plugins/plugin-sharing/src/stored-declaration-package-backfill.ts#STORED_DECLARATION_REFERENCES, packages/services/service-automation/src/stored-reference-package-backfill.ts#STORED_AUTOMATION_REFERENCES, packages/plugins/plugin-approvals/src/stored-process-package-backfill.ts#backfillProcessPackages, packages/plugins/plugin-email/src/stored-template-package-backfill.ts#backfillTemplatePackages)",
           "evidence": "each row before and after"
@@ -4538,10 +4542,10 @@
           "evidence": "the key list"
         },
         {
-          "clause": "the backfill changes no access answer",
+          "clause": "the backfill changes no access answer: the member's permissions after the upgrade are a fresh install's for the same grant",
           "oracle": "api",
-          "verify": "the member's permissions body after the upgrade equals the body before it",
-          "evidence": "both bodies"
+          "verify": "the post-upgrade body equals the fresh install's. On route (b) it also equals the copy's own pre-upgrade body. ⛔ On route (a), do not compare with the 18.3.0 body: the release itself adds restore and purge and the sys_activity and sys_comment entries, so that body differs by design (QA record #32093 (a live run of this item on a real 18.3.0 database))",
+          "evidence": "the fresh install's body, the post-upgrade body and the pre-upgrade body"
         },
         {
           "clause": "a second boot writes nothing",
@@ -4571,7 +4575,7 @@
         {
           "revision": 1,
           "date": "2026-11-10",
-          "change": "initial — ADR-0150 children S2 and S3 on the upgrade path (#31872, #31903). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
+          "change": "initial — ADR-0150 children S2 and S3 on the upgrade path (#31872, #31903). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made. Corrected from QA record #32093 (a live run of this item on a real 18.3.0 database), before this item reached main: no clause failed on the text, but the text would have misled the next runner",
           "ref": "#32019"
         }
       ]
