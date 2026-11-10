@@ -210,7 +210,7 @@ describe('os secret rewrap — the concrete driver and the command, end to end (
     expect(payload.report.families.settings.status).toBe('enumerated');
     expect(payload.report.families.datasource.status).toBe('enumerated');
     expect(payload.report.byClass).toMatchObject({ rewrap: 2, left_orphan: 2, done: 0 });
-    expect(payload.report.rewrapByScope).toEqual({ settings: 1, object_secret_field: 0, datasource_credential: 1 });
+    expect(payload.report.rewrapByScope).toEqual({ settings: 1, object_secret_field: 0, datasource_credential: 1, audit_seal: 0 });
     expect(exitCode).toBe(0);
     expect(await secretDriver.find('sys_secret', {})).toEqual(before);
   }, 180_000);

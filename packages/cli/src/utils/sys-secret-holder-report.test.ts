@@ -381,6 +381,7 @@ describe('counts, and what never leaves the report', () => {
         ],
       },
       datasource: { family: 'datasource', status: 'enumerated', references: [] },
+      'audit-seal': { family: 'audit-seal', status: 'enumerated', references: [] },
     });
     const report = reportSysSecretHolders({ secrets: [{ id: 'sec_x', namespace: 'vault', key: 'token' }], union });
     expect(idsIn(report.shared)).toEqual(['sec_x']);
