@@ -985,8 +985,22 @@ export function useDeferredFirstSend(opts: {
       void ensureConversationRef.current?.();
       return;
     }
-    pendingRef.current = null;
-    doSend(pending.content, pending.files);
+    // objectstack#32031 — replay on the next task, never inside this effect.
+    // The chat runtime stops its in-flight request when the pane's effects are
+    // torn down (`useChat`'s cleanup calls `chat.stop()`), and React tears them
+    // down right after this first run whenever it re-runs effects on mount
+    // (StrictMode, i.e. every dev build) — so a send issued here was aborted
+    // before it reached the wire and the first message vanished. That only
+    // happened in the old race window; with the row created by the first send
+    // it would be every first message. The timer is cleared with the effect,
+    // so the replay fires once, from the pane whose effects stayed up; a pane
+    // unmounted for real leaves the stash for the next one.
+    const timer = setTimeout(() => {
+      if (pendingRef.current !== pending) return;
+      pendingRef.current = null;
+      doSend(pending.content, pending.files);
+    }, 0);
+    return () => clearTimeout(timer);
   }, [apiMode, conversationId, pendingRef, doSend, pendingSignal, agentRoute]);
 
   return useCallback(

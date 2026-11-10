@@ -41,13 +41,22 @@ vi.mock('@object-ui/plugin-chatbot', async (importOriginal) => {
     useAiModels: () => ({ models: [], defaultModelId: undefined }),
     useHitlInChat: () => ({ decide: vi.fn(), decisions: {} }),
     useObjectChat: (opts: Record<string, unknown>) => {
+      // The real hook ARMS the parent id when the prop arrives and sends it
+      // with the next turn, even if the prop has dropped by then (the
+      // URL-mirror drops it as the build conversation id lands); see
+      // `parentConvRef` in useObjectChat. Model that, not a read of the prop at
+      // send time: the first message is replayed on the task after the id
+      // lands (objectstack#32031).
+      const parentRef = React.useRef<unknown>(opts.parentConversationId);
+      if (opts.parentConversationId) parentRef.current = opts.parentConversationId;
       return {
         messages: [],
         isLoading: false,
         error: undefined,
         sendMessage: (text: string) => {
           sent.push(text);
-          sentParent.push(opts.parentConversationId);
+          sentParent.push(parentRef.current);
+          parentRef.current = undefined;
         },
         stop: vi.fn(),
         reload: vi.fn(),

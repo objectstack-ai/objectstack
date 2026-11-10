@@ -27,6 +27,17 @@ import { useChatConversation } from '../../../hooks/useChatConversation';
 
 const API = 'https://example.test/api/v1/ai/agents/build/chat';
 
+/**
+ * objectstack#32031 — the replay fires on the next task, not inside the effect
+ * (a send issued inside it is stopped by the chat runtime's own effect
+ * teardown under StrictMode). Let that task run.
+ */
+async function flushReplay(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
 function setup(initial: { chatApi?: string; conversationId?: string }) {
   const pendingRef: React.MutableRefObject<PendingFirstMessage | null> = { current: null };
   const doSend = vi.fn();
@@ -39,7 +50,7 @@ function setup(initial: { chatApi?: string; conversationId?: string }) {
 }
 
 describe('useDeferredFirstSend', () => {
-  it('defers a send made before the conversation id exists, then replays it once it lands', () => {
+  it('defers a send made before the conversation id exists, then replays it once it lands', async () => {
     const { result, rerender, pendingRef, doSend } = setup({ chatApi: API, conversationId: undefined });
 
     // Empty-state first send: id not minted yet → stash, do NOT send (a send now
@@ -50,12 +61,14 @@ describe('useDeferredFirstSend', () => {
 
     // POST /conversations resolved → the stashed message is replayed exactly once.
     act(() => rerender({ chatApi: API, conversationId: 'c1' }));
+    await flushReplay();
     expect(doSend).toHaveBeenCalledTimes(1);
     expect(doSend).toHaveBeenCalledWith('please build me a CRM', undefined);
     expect(pendingRef.current).toBeNull();
 
     // A later id change (URL mirror / switch) must not re-fire the consumed send.
     act(() => rerender({ chatApi: API, conversationId: 'c2' }));
+    await flushReplay();
     expect(doSend).toHaveBeenCalledTimes(1);
   });
 
@@ -63,7 +76,7 @@ describe('useDeferredFirstSend', () => {
   // OUT OF BAND, and can land AFTER the conversation id already resolved (the
   // async agent-catalog race). Refs don't trigger effects, so the replay would
   // never fire — unless a `pendingSignal` bump re-runs it. This locks that in.
-  it('replays a pending message seeded AFTER the id resolved, driven by pendingSignal', () => {
+  it('replays a pending message seeded AFTER the id resolved, driven by pendingSignal', async () => {
     const pendingRef: React.MutableRefObject<PendingFirstMessage | null> = { current: null };
     const doSend = vi.fn();
     const { rerender } = renderHook(
@@ -80,6 +93,7 @@ describe('useDeferredFirstSend', () => {
       pendingRef.current = { content: 'handoff prompt', files: undefined };
       rerender({ pendingSignal: 1 });
     });
+    await flushReplay();
     expect(doSend).toHaveBeenCalledTimes(1);
     expect(doSend).toHaveBeenCalledWith('handoff prompt', undefined);
     expect(pendingRef.current).toBeNull();
@@ -89,6 +103,7 @@ describe('useDeferredFirstSend', () => {
       pendingRef.current = { content: 'second handoff', files: undefined };
       rerender({ pendingSignal: 2 });
     });
+    await flushReplay();
     expect(doSend).toHaveBeenCalledTimes(2);
     expect(doSend).toHaveBeenLastCalledWith('second handoff', undefined);
   });
@@ -97,7 +112,7 @@ describe('useDeferredFirstSend', () => {
   // NOT consume the handoff stash: a send issued there dies with the unmount
   // before reaching the wire. A stash stamped `targetAgentRoute: 'build'` is
   // HELD by any non-build pane and replayed only by the build-bound one.
-  it('holds a targeted stash in a mismatched-agent pane, replays it in the matching one', () => {
+  it('holds a targeted stash in a mismatched-agent pane, replays it in the matching one', async () => {
     const pendingRef: React.MutableRefObject<PendingFirstMessage | null> = { current: null };
     const doSend = vi.fn();
     const { rerender } = renderHook(
@@ -119,17 +134,19 @@ describe('useDeferredFirstSend', () => {
       pendingRef.current = { content: 'handoff prompt', targetAgentRoute: 'build' };
       rerender({ agentRoute: 'ask', pendingSignal: 1 });
     });
+    await flushReplay();
     expect(doSend).not.toHaveBeenCalled();
     expect(pendingRef.current).not.toBeNull();
 
     // The pane re-binds to build (transition settled) → replayed exactly once.
     act(() => rerender({ agentRoute: 'build', pendingSignal: 1 }));
+    await flushReplay();
     expect(doSend).toHaveBeenCalledTimes(1);
     expect(doSend).toHaveBeenCalledWith('handoff prompt', undefined);
     expect(pendingRef.current).toBeNull();
   });
 
-  it('an untargeted stash keeps the legacy consume-anywhere behavior', () => {
+  it('an untargeted stash keeps the legacy consume-anywhere behavior', async () => {
     const pendingRef: React.MutableRefObject<PendingFirstMessage | null> = { current: null };
     const doSend = vi.fn();
     const { rerender } = renderHook(
@@ -148,6 +165,7 @@ describe('useDeferredFirstSend', () => {
       pendingRef.current = { content: 'typed by user' };
       rerender({ pendingSignal: 1 });
     });
+    await flushReplay();
     expect(doSend).toHaveBeenCalledWith('typed by user', undefined);
   });
 
@@ -160,7 +178,7 @@ describe('useDeferredFirstSend', () => {
     expect(pendingRef.current).toBeNull();
   });
 
-  it('carries file attachments through the deferral', () => {
+  it('carries file attachments through the deferral', async () => {
     const { result, rerender, pendingRef, doSend } = setup({ chatApi: API, conversationId: undefined });
     const file = new File(['hi'], 'spec.txt', { type: 'text/plain' });
 
@@ -169,6 +187,7 @@ describe('useDeferredFirstSend', () => {
     expect(pendingRef.current).toEqual({ content: 'with a file', files: [file] });
 
     act(() => rerender({ chatApi: API, conversationId: 'c1' }));
+    await flushReplay();
     expect(doSend).toHaveBeenCalledWith('with a file', [file]);
   });
 
@@ -184,7 +203,7 @@ describe('useDeferredFirstSend', () => {
   // <ChatPane> remount and the replay fires in the FRESHLY-mounted pane. This
   // harness mirrors that structure — a parent owns the ref + id, the child is
   // keyed on the id (so resolving it unmounts/remounts the child).
-  it('replays the first message across the id-keyed pane REMOUNT (reproduces the reported bug)', () => {
+  it('replays the first message across the id-keyed pane REMOUNT (reproduces the reported bug)', async () => {
     const pendingRef: React.MutableRefObject<PendingFirstMessage | null> = { current: null };
     const doSend = vi.fn();
     let mounts = 0;
@@ -225,6 +244,7 @@ describe('useDeferredFirstSend', () => {
     // Conversation id resolves → the pane REMOUNTS, and the new instance replays
     // the stashed message (this is what used to be silently dropped).
     fireEvent.click(screen.getByTestId('resolve'));
+    await flushReplay();
     expect(mounts).toBe(2); // proves the remount actually happened
     expect(doSend).toHaveBeenCalledTimes(1);
     expect(doSend).toHaveBeenCalledWith('first message', undefined);
@@ -304,6 +324,7 @@ describe('useDeferredFirstSend — the first send creates the conversation (obje
     fireEvent.click(screen.getByTestId('send-a'));
     await waitFor(() => expect(screen.getByTestId('conv').textContent).toBe('conv-1'));
     expect(createCount()).toBe(1);
+    await flushReplay();
     expect(doSend).toHaveBeenCalledTimes(1);
     expect(doSend).toHaveBeenCalledWith('first message', undefined);
   });
@@ -316,8 +337,47 @@ describe('useDeferredFirstSend — the first send creates the conversation (obje
     fireEvent.click(screen.getByTestId('send-b'));
     await waitFor(() => expect(screen.getByTestId('conv').textContent).toBe('conv-1'));
     expect(createCount()).toBe(1);
+    await flushReplay();
     expect(doSend).toHaveBeenCalledTimes(1);
     expect(doSend).toHaveBeenCalledWith('first message', undefined);
+  });
+
+  it('the replayed first send survives the effect teardown StrictMode runs on mount', async () => {
+    // The chat runtime (`useChat`) stops its in-flight request in an effect
+    // cleanup, and StrictMode runs that cleanup right after the first effect
+    // pass on mount. This pane models exactly that: a send in flight when the
+    // teardown runs is aborted. Replaying inside the effect lost the message.
+    const pendingRef: React.MutableRefObject<PendingFirstMessage | null> = {
+      current: { content: 'first message' },
+    };
+    const chat = { inflight: null as string | null, aborted: [] as string[] };
+    function Pane() {
+      React.useEffect(
+        () => () => {
+          if (chat.inflight) chat.aborted.push(chat.inflight);
+          chat.inflight = null;
+        },
+        [],
+      );
+      useDeferredFirstSend({
+        chatApi: API,
+        conversationId: 'conv-1',
+        pendingRef,
+        doSend: (content) => {
+          chat.inflight = content;
+        },
+      });
+      return null;
+    }
+    render(
+      <React.StrictMode>
+        <Pane />
+      </React.StrictMode>,
+    );
+    await flushReplay();
+    expect(chat.aborted).toEqual([]);
+    expect(chat.inflight).toBe('first message');
+    expect(pendingRef.current).toBeNull();
   });
 
   it('a stash seeded out of band (the handoff) asks for the conversation itself', async () => {
