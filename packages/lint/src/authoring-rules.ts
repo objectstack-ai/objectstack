@@ -140,6 +140,7 @@ import { validateSecurityPosture, validateSecurityRoleWord } from './validate-se
 import { validateOrgAxisRedLines } from './validate-org-axis-red-lines.js';
 import { validateSharingRuleEnforceability } from './validate-sharing-rule-enforceability.js';
 import { validateExternalOwnerSharing } from './validate-external-owner-sharing.js';
+import { validateSyncedPrivateReadability } from './validate-synced-private-readability.js';
 import { validateRollupSourceVisibility } from './validate-rollup-source-visibility.js';
 import { validateRlsPredicateEnforceability } from './validate-rls-predicate-enforceability.js';
 import {
@@ -2553,6 +2554,23 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_ONLY,
     surfaceReason: RUNTIME_OBJECT_ADVISORY_VOLUME,
     run: (stack) => validateExternalOwnerSharing(stack),
+  },
+  // [ADR-0153 D4] A `private` `synced` object no sharing rule grants read on:
+  // a pull writes its rows with no person owner, so the owner-scoped model
+  // shows a member none of them. Advisory: the stack is valid and the rule may
+  // come from another installed package; a refusal would narrow the published
+  // accept set.
+  {
+    name: 'validateSyncedPrivateReadability',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-synced-private-readability.ts',
+    surfaces: CLI_ONLY,
+    // It reads `sharingRules` beside `objects`, and the per-write snapshot
+    // does not carry `sharingRules`.
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
+    run: (stack) => validateSyncedPrivateReadability(stack),
   },
   // A roll-up `summary` a permission set reads, over child data the same set
   // cannot read — a hidden source field, an unreadable child object, or child
