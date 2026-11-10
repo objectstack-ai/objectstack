@@ -95,7 +95,7 @@ const SHARED = 'shared_flow';
 
 const AUTHOR = { userId: 'u_admin', isSystem: false, systemPermissions: ['manage_metadata'] };
 
-const flowOf = (name: string, label: string) => ({ name, label, type: 'autolaunched', nodes: [], edges: [] });
+const flowOf = (name: string, label: string) => ({ name, label, type: 'autolaunched', nodes: [{ id: 'start', type: 'start', label: 'Start' }], edges: [] });
 
 const liveEngines: ObjectQL[] = [];
 afterEach(async () => {

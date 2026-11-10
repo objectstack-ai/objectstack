@@ -295,7 +295,7 @@ describe('[ADR-0131 D6] the dispatcher /meta door: the hatch opens no write onto
 
             const created = responseOf(await dispatcher.handleMetadata(
                 '/flow/crm_new_alert', ctx(), 'PUT',
-                { name: 'crm_new_alert', label: 'New Alert', type: 'autolaunched', nodes: [], edges: [] },
+                { name: 'crm_new_alert', label: 'New Alert', type: 'autolaunched', nodes: [{ id: 'start', type: 'start', label: 'Start' }], edges: [] },
             ));
             expect(created.status, JSON.stringify(created.body)).toBe(200);
             expect(activeRow(engine, 'flow', 'crm_new_alert')).toBeDefined();

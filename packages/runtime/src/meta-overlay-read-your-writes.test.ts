@@ -427,7 +427,7 @@ describe('#5079 — list / get / dispatch agree immediately after deleteMeta', (
         await protocol.saveMetaItem({
             type: 'flow',
             name: 'twin',
-            item: { name: 'twin', label: 'Flow Twin', type: 'autolaunched', nodes: [], edges: [] },
+            item: { name: 'twin', label: 'Flow Twin', type: 'autolaunched', nodes: [{ id: 'start', type: 'start', label: 'Start' }], edges: [] },
         });
 
         await protocol.deleteMetaItem({ type: 'action', name: 'twin' });
