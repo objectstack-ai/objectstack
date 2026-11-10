@@ -1,0 +1,19 @@
+---
+'@objectstack/plugin-security': minor
+---
+
+fix(plugin-security)!: an agent ceiling permission set reaches no person through a position, a seed or the deployment's baseline
+
+Clause-②: no (narrowing) — a position whose definition names one of the three MCP agent ceiling sets (`mcp_agent_data_read`, `mcp_agent_data_write`, `mcp_agent_restricted`) is refused at the metadata door (`400 VALIDATION_FAILED`, `invalid_value` at `permissionSets`), on a draft, an active save and a restore; a `sys_user_position` write naming a position whose definition names one is refused (`invalid_value` at `position`) for every writer; a seed write of a `sys_user_permission_set` row naming one is refused like any other write of it (`invalid_value` at `permission_set`); and a `SecurityPlugin` whose `fallbackPermissionSet` or `acceptedDefaultPermissionSets` names one is refused at construction; nothing is widened.
+Metadata-protocol: narrowed
+
+<!-- adr-0087: not-required (no-migration-prescription) no key of any schema is added, removed or re-shaped: a position definition naming an agent ceiling set is refused at runtime authoring and a stored one is left for an administrator to edit, and the replacement set is a person's set chosen by hand, not a mechanical conversion -->
+
+**BREAKING** for a deployment that gives people an MCP agent ceiling set through a position, a seed, or the security plugin's baseline options.
+
+- **The rule (ADR-0090 D10).** The agent ceiling sets are an AI agent's own grants: the door that admits an agent connected over MCP derives its ceiling from the scopes its user consented to. A permission set given to a person never names one, whatever path gives it — the direct assignment refused it already, and so does the self-registration set.
+- **A position.** A position gives every holder each set its definition names. The metadata door refuses a position definition whose `permissionSets` names an agent ceiling set (`PUT /api/v1/meta/position/NAME`, as a draft in a package too, and a restore of such a version). A position a package or the stack declares in code is not saved through that door, so assigning one whose definition names an agent ceiling set is refused on `sys_user_position` instead, for every writer: the data API, import and batch doors, an accepted invitation's placement (the membership lands without that position, and the placement miss is reported), and the development demo accounts.
+- **A seed.** A seed writes the grants it declares — a stack's `data` and a published `seed` item alike — and a seed grant naming an agent ceiling set is refused like any other grant write; the seed's other rows still land and the refused one is reported.
+- **The baseline.** Every signed-in person holds the deployment's baseline, so `new SecurityPlugin({ fallbackPermissionSet })` naming an agent ceiling set — directly, or as the `isDefault` set among the plugin's `defaultPermissionSets` — and `acceptedDefaultPermissionSets` naming one are refused when the plugin is constructed.
+- **Unchanged.** Every other permission set flows through every path as before. An agent connected over MCP holds its ceiling exactly as before. An organization administrator and an identity-provider group mapping are still refused the same sets on the organization boundary first.
+- **Who moves, and the fix.** A position definition stored before this release that names an agent ceiling set is left as it is: edit it to remove the set (`PUT /api/v1/meta/position/NAME` without it), and its holders stop holding it. A position declared in code that names one: remove the set from the declaration. A seed that grants one: remove that row. A baseline option that names one: name a permission set meant for people (`member_default`, or the deployment's own).
