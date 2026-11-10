@@ -96,7 +96,8 @@ type BackfillRegistry = PackageScopedRegistry & {
 interface BackfillLogger {
   info(message: string, meta?: Record<string, unknown>): void;
   warn(message: string, meta?: Record<string, unknown>): void;
-  error(message: string, meta?: Record<string, unknown>): void;
+  /** The platform logger's shape: the second argument is the thrown error, when there is one. */
+  error(message: string, error?: Error, meta?: Record<string, unknown>): void;
   debug?(message: string, meta?: Record<string, unknown>): void;
 }
 
@@ -182,6 +183,7 @@ export async function backfillActivationLedgerAtBoot(
         `automatically — ${report.duplicated
           .map((d) => `${describeRow(d)}, held by ${d.packageId}: ${d.rows.map(describeDuplicateRow).join(', ')}`)
           .join('; ')}.`,
+      undefined,
       { duplicated: report.duplicated },
     );
   }

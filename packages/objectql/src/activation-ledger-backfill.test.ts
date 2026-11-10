@@ -270,7 +270,11 @@ describe('an upgrade over two package-less rows for one packaged flow, and a thi
       }]);
       expect(report?.failed).toEqual([]);
       // The backfill's own line names the item and both rows (the index's refusal is the other error line).
-      const duplicateLine = log.error.mock.calls.map((c) => String(c[0])).find((m) => m.includes('[ObjectQLPlugin]'));
+      const duplicateCall = log.error.mock.calls.find((c) => String(c[0]).includes('[ObjectQLPlugin]'));
+      // The platform logger's shape: message, thrown error (none), meta.
+      expect(duplicateCall?.[1]).toBeUndefined();
+      expect(duplicateCall?.[2]).toEqual({ duplicated: report?.duplicated });
+      const duplicateLine = String(duplicateCall?.[0]);
       expect(duplicateLine).toContain("flow 'app183_switch'");
       expect(duplicateLine).toContain('row d1');
       expect(duplicateLine).toContain('row d2');
