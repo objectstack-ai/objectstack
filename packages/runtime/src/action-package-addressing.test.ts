@@ -27,6 +27,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 // dispatcher chain this file reaches loads it dynamically.
 import '@objectstack/metadata';
 import { ObjectQL, assertEngineFindOnePredicate } from '@objectstack/objectql';
+import { PackageScopedNameRefusedError, resolvePackageScopedHolders } from '@objectstack/core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { actionHandlerOwnerRefusal, executeRegisteredAction, resolveRouteActionDeclaration, type ActionExecutionDeps } from './action-execution.js';
 
@@ -43,6 +44,8 @@ const manifest = (id: string, deps: string[] = []) => ({
 let engine: ObjectQL;
 let deps: ActionExecutionDeps;
 let protocol: ObjectStackProtocolImplementation;
+/** The environment store's active `sys_metadata` rows the row store answers (empty unless a case seeds it). */
+let storedRows: any[];
 
 const install = (id: string, deps: string[] = []) => engine.registry.installPackage(manifest(id, deps), 'code');
 const ship = (packageId: string, objectName = OBJECT) =>
@@ -60,9 +63,16 @@ const resolve = (callerPackageId?: string) => resolveRouteActionDeclaration(deps
 beforeEach(() => {
     engine = new ObjectQL();
     engine.registry.logLevel = 'silent';
+    storedRows = [];
     const rowStore: any = {
         registry: engine.registry,
-        find: async () => [],
+        find: async (object: string, query: any) => {
+            if (object !== 'sys_metadata' || storedRows.length === 0) return [];
+            const type = query?.where?.type;
+            const types: string[] = typeof type === 'string' ? [type] : Array.isArray(type?.$in) ? type.$in : [];
+            const name = query?.where?.name;
+            return storedRows.filter((row) => types.includes(row.type) && (name === undefined || row.name === name));
+        },
         findOne: async (object: string, query: any) => { assertEngineFindOnePredicate(object, query); return null; },
         count: async () => 0, aggregate: async () => [],
     };
@@ -265,11 +275,41 @@ describe('[#31697] the by-name read of an object-less action two packages hold',
         expect((await read()).item).toMatchObject({ name: 'digest', label: 'alpha' });
     });
 
-    it('CONTROL — the environment\'s own item answers first beside a package\'s (ADR-0150 D3)', async () => {
+    it('CONTROL — the environment\'s own item, a row its store holds bound to no package, answers first beside a package\'s (ADR-0150 D3)', async () => {
         install(A);
         shipObjectLess(A);
         shipObjectLess(undefined);
+        storedRows = [{
+            id: 'env-digest', type: 'action', name: 'digest', state: 'active', package_id: null,
+            metadata: JSON.stringify({ name: 'digest', label: 'env', type: 'script', body: { language: 'js', source: 'return 1;', capabilities: [] } }),
+        }];
         expect((await read()).item).toMatchObject({ name: 'digest', label: 'env' });
+    });
+
+    it('[#31697 review F3] a package-less item the store does not hold is the platform\'s (host code or a plugin): beside a package it is refused naming both, as on the action doors', async () => {
+        install(A);
+        shipObjectLess(A);
+        shipObjectLess(undefined);
+        const refused = await read().then(() => undefined, (e: any) => e);
+        expect(refused, 'the read was refused').toBeDefined();
+        expect(refused).toMatchObject({ code: 'RESOURCE_CONFLICT' });
+        expect(refused.refusal?.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'platform' }]);
+        // A store row bound to an OBJECT is not the environment's object-less item (F5's key).
+        storedRows = [{ id: 'env-bound', type: 'action', name: 'digest', state: 'active', package_id: null, metadata: { name: 'digest', objectName: OBJECT } }];
+        expect(await read().then(() => undefined, (e: any) => e?.code)).toBe('RESOURCE_CONFLICT');
+    });
+
+    it('[#31697 review F4] a disabled package holds nothing: the enabled holder answers the bare read, and the bare REST door serves it, never "degraded"', async () => {
+        install(A);
+        install(B);
+        shipObjectLess(A);
+        shipObjectLess(B);
+        engine.registry.disablePackage(B);
+        expect((await read()).item).toMatchObject({ name: 'digest', label: 'alpha' });
+        const declaration = await resolveRouteActionDeclaration(deps, { request: {} } as any, { ql: engine, objectName: 'global', actionName: 'digest' });
+        expect(declaration.degraded).toBeFalsy();
+        expect(declaration.refusal).toBeUndefined();
+        expect(declaration.action).toMatchObject({ name: 'digest', label: 'alpha' });
     });
 
     it('CONTROL — two packages\' actions of one name bound to two objects are not refused (object-bound reads are not this card\'s)', async () => {
@@ -279,5 +319,24 @@ describe('[#31697] the by-name read of an object-less action two packages hold',
         ship(B, 'contact');
         const answer: any = await protocol.getMetaItem({ type: 'action', name: 'approve' } as any);
         expect(answer.item).toMatchObject({ name: 'approve' });
+    });
+});
+
+describe('[#31697 review F4] the bare REST door reads the by-name read\'s refusal as a refusal', () => {
+    it('a refusal the protocol\'s by-name read throws answers the refusal naming its holders — never `degraded`', async () => {
+        const refused = resolvePackageScopedHolders(
+            { type: 'action', name: 'digest', callerPackageId: null },
+            { packageHolders: [A, B], packageItem: (id) => ({ name: 'digest', _packageId: id }), environmentItem: () => undefined },
+            () => new Set<string>(),
+        );
+        if (refused.status !== 'refused') throw new Error('expected a refusal');
+        const stub: any = {
+            getMetaItems: async () => ({ items: [] }),
+            getMetaItemForExecution: async () => { throw new PackageScopedNameRefusedError(refused); },
+        };
+        const stubDeps = { ...deps, resolveService: (async (_ctx: unknown, name: string) => (name === 'protocol' ? stub : undefined)) as any };
+        const declaration = await resolveRouteActionDeclaration(stubDeps, { request: {} } as any, { ql: engine, objectName: 'global', actionName: 'digest' });
+        expect(declaration.degraded).toBeFalsy();
+        expect(declaration.refusal?.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
     });
 });

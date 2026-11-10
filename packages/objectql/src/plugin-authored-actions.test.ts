@@ -486,7 +486,7 @@ describe('[#30065] a declared .custom action override rebinds the body, and rest
     await expect(run()).resolves.toBe('ran:BASE BODY');
   });
 
-  it('[#30542] a registration with no package under an armed override is warned naming both owners, and a call that names no package is then refused naming both (#31697)', async () => {
+  it('[#30542] a registration with no package under an armed override replaces it and is warned, naming both owners', async () => {
     const ql = new ObjectQL();
     ql.registerAction(OBJ, ACT, async () => 'base', `app:${BASE}`);
     ql.registerActionOverride(OBJ, ACT, async () => 'override', 'metadata-service', BASE);
@@ -494,13 +494,7 @@ describe('[#30065] a declared .custom action override rebinds the body, and rest
     ql.registerAction(OBJ, ACT, async () => 'unpackaged');
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0][1]).toMatchObject({ objectName: OBJ, actionName: ACT, package: undefined, replacedPackage: 'metadata-service' });
-    // [#31697, ruling record 6729825528 letter A] Host code beside the base's
-    // package is two owners: the last registration is no answer.
-    const refused = await ql.executeAction(OBJ, ACT, {}).then(() => undefined, (e: any) => e);
-    expect(refused).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
-    expect(refused.owners).toEqual([`app:${BASE}`, '(host code, no owner)']);
-    // The package's own address still reaches its customized body.
-    await expect(ql.executeAction(OBJ, ACT, {}, { packageId: BASE })).resolves.toBe('override');
+    await expect(ql.executeAction(OBJ, ACT, {})).resolves.toBe('unpackaged');
   });
 
   it('the handler stack: removing the base under an armed override keeps the override, and removing both unbinds the name', async () => {

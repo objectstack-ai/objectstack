@@ -290,24 +290,41 @@ describe('ObjectQL action handlers keyed (package, objectName, name)', () => {
         expect(await engine.executeAction('bc_org', 'rename', {})).toBe('owner again');
     });
 
-    it('[#31697] host code (no owner) or a plugin beside a package is two owners; the environment\'s resync is never one', async () => {
+    it('[#31697] on the object-less key, host code (no owner) or a plugin beside a package is refused naming both (the G2 obligation)', async () => {
         const engine = new ObjectQL();
-        engine.registerAction('bc_org', 'rename', () => 'owner', `app:${OWNER}`);
-        engine.registerAction('bc_org', 'rename', () => 'host');
-        await expect(engine.executeAction('bc_org', 'rename', {})).rejects.toMatchObject({
-            code: 'RESOURCE_CONFLICT', owners: [`app:${OWNER}`, '(host code, no owner)'],
+        engine.registerAction('global', 'digest', () => 'owner', `app:${OWNER}`);
+        engine.registerAction('global', 'digest', () => 'host');
+        await expect(engine.executeAction('global', 'digest', {})).rejects.toMatchObject({
+            code: 'RESOURCE_CONFLICT', status: 409, owners: [`app:${OWNER}`, '(host code, no owner)'],
         });
+        await expect(engine.executeAction('global', 'digest', {}, { packageId: OWNER })).resolves.toBe('owner');
         const plugin = new ObjectQL();
-        plugin.registerAction('bc_org', 'rename', () => 'owner', `app:${OWNER}`);
-        plugin.registerAction('bc_org', 'rename', () => 'plugin', 'com.test.plugin');
-        await expect(plugin.executeAction('bc_org', 'rename', {})).rejects.toMatchObject({
+        plugin.registerAction('global', 'digest', () => 'owner', `app:${OWNER}`);
+        plugin.registerAction('global', 'digest', () => 'plugin', 'com.test.plugin');
+        await expect(plugin.executeAction('global', 'digest', {})).rejects.toMatchObject({
             code: 'RESOURCE_CONFLICT', owners: [`app:${OWNER}`, 'com.test.plugin'],
         });
         // CONTROL — an environment-authored handler beside one package is one code owner.
         const env = new ObjectQL();
-        env.registerAction('bc_org', 'rename', () => 'owner', `app:${OWNER}`);
-        env.registerAction('bc_org', 'rename', () => 'authored', 'metadata-service');
-        expect(await env.executeAction('bc_org', 'rename', {})).toBe('authored');
+        env.registerAction('global', 'digest', () => 'owner', `app:${OWNER}`);
+        env.registerAction('global', 'digest', () => 'authored', 'metadata-service');
+        expect(await env.executeAction('global', 'digest', {})).toBe('authored');
+    });
+
+    it('[#31697, epic ruling 6762267053 item 1] on an object-bound key, host code or a plugin beside ONE package is not refused: the last registration runs, as before', async () => {
+        const host = new ObjectQL();
+        host.registerAction('bc_org', 'rename', () => 'owner', `app:${OWNER}`);
+        host.registerAction('bc_org', 'rename', () => 'host');
+        expect(await host.executeAction('bc_org', 'rename', {})).toBe('host');
+        const plugin = new ObjectQL();
+        plugin.registerAction('bc_org', 'rename', () => 'owner', `app:${OWNER}`);
+        plugin.registerAction('bc_org', 'rename', () => 'plugin', 'com.test.plugin');
+        expect(await plugin.executeAction('bc_org', 'rename', {})).toBe('plugin');
+        // …and a second PACKAGE on that key is refused, naming the packages and the plugin.
+        plugin.registerAction('bc_org', 'rename', () => 'twin', `app:${TWIN}`);
+        await expect(plugin.executeAction('bc_org', 'rename', {})).rejects.toMatchObject({
+            code: 'RESOURCE_CONFLICT', owners: [`app:${OWNER}`, `app:${TWIN}`, 'com.test.plugin'],
+        });
     });
 
     it('withdrawing one package keeps the other\'s handler for a call naming it', async () => {

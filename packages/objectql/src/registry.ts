@@ -67,7 +67,7 @@ import { applyProtection } from '@objectstack/spec/shared';
 // (`id || name`). The install gate's co-ownership set must name packages by the
 // same string the artifact loader ordered them by, or a co-owner would be
 // admitted — or refused — under a key nothing else in the path uses.
-import { artifactPackageId, declaredDependencyIds, PackageScopedNameRefusedError, type SecurityCatalogType } from '@objectstack/core';
+import { artifactPackageId, declaredDependencyIds, PackageScopedNameRefusedError, resolvePackageScopedHolders, type SecurityCatalogType } from '@objectstack/core';
 // One name, one holder for positions, permission sets and capabilities — the
 // rule, the holders and the one place a declaration is read from (module doc).
 import {
@@ -167,7 +167,7 @@ import {
   type PackageScopedResolution,
 } from './package-scoped-resolver.js';
 import { standaloneActionOwnerKey, isObjectLessActionKey, GLOBAL_ACTION_OBJECT_KEY } from './action-governance.js';
-import { resolveActionByPackage } from './action-package-addressing.js';
+import { actionOwnerScopedRegistry, resolveActionByPackage } from './action-package-addressing.js';
 import { recordCurrencySummaryRefusal } from './record-currency-aggregate-door.js';
 
 /**
@@ -3800,6 +3800,27 @@ class RegistrationRestorePoint {
   restore(): void {
     for (let i = this.undo.length - 1; i >= 0; i--) this.undo[i]();
   }
+}
+
+/**
+ * [#31697] Does one of an action's stored environment rows (the protocol's
+ * by-name row read: active, the environment's own) belong to no package and
+ * bind no object — the row the environment's own object-less item comes
+ * from? Its `package_id` column decides the binding; its body's owner key
+ * ({@link standaloneActionOwnerKey}) the object. A body that does not parse
+ * is no such row.
+ */
+function storesObjectLessPackagelessRow(rows: readonly { package_id?: string | null; metadata?: unknown }[]): boolean {
+  return rows.some((row) => {
+    if (row?.package_id !== null && row?.package_id !== undefined && row?.package_id !== '') return false;
+    let body: unknown;
+    try {
+      body = typeof row?.metadata === 'string' ? JSON.parse(row.metadata) : row?.metadata;
+    } catch {
+      return false;
+    }
+    return body !== null && typeof body === 'object' && isObjectLessActionKey(standaloneActionOwnerKey(body));
+  });
 }
 
 export class SchemaRegistry {
@@ -8719,20 +8740,72 @@ export class SchemaRegistry {
 
   /**
    * [ADR-0150 D5, #31697] The by-name read of an action that names no package
-   * and no object (`GET /meta/action/NAME`): when two or more packages hold an
-   * OBJECT-LESS action of `name` — two namespaces may, once the action's
-   * one-holder rule narrowed to the namespace — the read is refused naming
-   * each (`409 RESOURCE_CONFLICT`), never the first registered. Resolved by
-   * the ONE rule over the object-less holders ({@link resolveActionByPackage}
-   * for a caller with no package): the environment's own item, else the one
-   * package holder, answers as before. ⛔ An action bound to an object is not
-   * judged here: its by-name read stays {@link getItem}'s (seat ruling on
-   * #31697, Q1 A).
+   * and no object (`GET /meta/action/NAME`): when the object-less holders of
+   * `name` resolve to no one, the read is refused naming each
+   * (`409 RESOURCE_CONFLICT`), never the first registered — two namespaces'
+   * packages may each hold the name once the action's one-holder rule
+   * narrowed to the namespace. Resolved by the ONE rule over the object-less
+   * holders ({@link resolveActionByPackage} for a caller with no package),
+   * with the classification the action doors apply (review 6762242732 F3,
+   * F4):
+   *
+   *  - a package-less item is the ENVIRONMENT's own — it answers first, as
+   *    before — only when the environment's store holds an active
+   *    package-less row of the name that is itself object-less
+   *    (`readStoredRows`, the protocol's by-name row read). Otherwise it is
+   *    code the host or a plugin registered with no package: the PLATFORM's,
+   *    one more holder, refused beside a package holder, naming both. With no
+   *    `readStoredRows`, every package-less item is the platform's. The store
+   *    is read only when a package-less item stands beside a package holder,
+   *    and a read that throws travels to the caller (ADR-0110 D3).
+   *  - a DISABLED package is no holder: the merged listings and the by-name
+   *    read withhold its item (#25308), so it neither answers nor makes the
+   *    enabled holder's read refuse.
+   *
+   * ⛔ An action bound to an object is not judged here: its by-name read stays
+   * {@link getItem}'s (seat ruling on #31697, Q1 A).
    *
    * @throws {PackageScopedNameRefusedError} when the object-less holders refuse.
    */
-  refuseAmbiguousObjectLessAction(name: string): void {
-    const resolution = resolveActionByPackage(this, { objectName: GLOBAL_ACTION_OBJECT_KEY, actionName: name, callerPackageId: null });
+  async refuseAmbiguousObjectLessAction(
+    name: string,
+    readStoredRows?: () => Promise<readonly { package_id?: string | null; metadata?: unknown }[]>,
+  ): Promise<void> {
+    const live: PackageScopedRegistry = {
+      getPackage: (id) => this.getPackage(id),
+      getAllPackages: () => this.getAllPackages(),
+      packageScopedHoldersOf: (type, holderName) =>
+        this.packageScopedHoldersOf(type, holderName).filter((id) => !this.isPackageDisabled(id)),
+      getPackageScopedItem: (type, itemName, packageId, member) =>
+        this.isPackageDisabled(packageId) ? undefined : this.getPackageScopedItem(type, itemName, packageId, member),
+      getEnvironmentScopedItem: (type, itemName, member) => this.getEnvironmentScopedItem(type, itemName, member),
+    };
+    const objectLess = actionOwnerScopedRegistry(live, GLOBAL_ACTION_OBJECT_KEY);
+    const packages = objectLess.packageScopedHoldersOf('action', name);
+    // Every package-less object-less item of the name, bound or not: the
+    // registry reads one over a held name as that holder's overlay (ADR-0150
+    // D4), which only the environment's own row is — host code's is not.
+    const collection = this.metadata.get('action');
+    const packageless = collection === undefined ? undefined : this.bareSlotEntriesOf('action', collection, name)
+      .map(({ item }) => item)
+      .find((item) => item !== null && typeof item === 'object' && !(item as any)._packageId
+        && isObjectLessActionKey(standaloneActionOwnerKey(item)));
+    if (packageless !== undefined && packages.length > 0
+      && !(readStoredRows !== undefined && storesObjectLessPackagelessRow(await readStoredRows()))) {
+      const resolution = resolvePackageScopedHolders(
+        { type: 'action', name, callerPackageId: null },
+        {
+          packageHolders: packages,
+          packageItem: (packageId) => objectLess.getPackageScopedItem('action', name, packageId),
+          environmentItem: () => undefined,
+          platformItem: () => packageless,
+        },
+        () => new Set<string>(),
+      );
+      if (resolution.status === 'refused') throw new PackageScopedNameRefusedError(resolution);
+      return;
+    }
+    const resolution = resolveActionByPackage(live, { objectName: GLOBAL_ACTION_OBJECT_KEY, actionName: name, callerPackageId: null });
     if (resolution.status === 'refused') throw new PackageScopedNameRefusedError(resolution);
   }
 

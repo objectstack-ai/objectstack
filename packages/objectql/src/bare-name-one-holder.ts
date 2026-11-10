@@ -88,9 +88,9 @@
  *    package whose handlers the hook binder bound it for
  *    ({@link handlerOwnerPackageId}): the function registry is the engine's,
  *    not the registry's, so its one door is that bind;
- *  - **a built-in** — {@link BUILT_IN_BARE_NAMES}; none today for the covered
- *    types, kept in the vocabulary so a platform-held name is refused the way
- *    the security catalog refuses one.
+ *  - **a built-in** — {@link BUILT_IN_BARE_NAMES}: a name the platform itself
+ *    requests by a fixed spelling (the object-less action `install_package`,
+ *    #31697), refused the way the security catalog refuses one.
  *
  * ⛔ **Never the environment catalog.** An item authored in this environment
  * under a package's name is the ADR-0005 overlay — the sanctioned
@@ -245,16 +245,25 @@ const COLLECTION_KEY: Readonly<Record<BareNameRegistryType, string>> = Object.fr
 
 /**
  * The names the platform itself holds, whichever package registers first.
- * None today: the platform ships no item of a covered type under a name a
- * package could take. Applied at the package door only, as the security
- * catalog applies its own.
+ * Applied at the package door only, as the security catalog applies its own.
+ *
+ * - `action`: `install_package` (#31697; epic ruling record 6762267053,
+ *   item 2 (b)). The Console's marketplace and the cloud connection call
+ *   `POST /actions/sys_package/install_package` by that fixed name, naming no
+ *   package, and an object-less action reaches every object's route when the
+ *   object binds none of that name. So no package may hold the object-less
+ *   name, and a package's never makes the platform's install button answer
+ *   `409`. The census found no other fixed-name action request in the
+ *   platform's own code (`packages/**` and `ui/**` sources).
+ * - every other covered type: none — the platform ships no item of it under
+ *   a name a package could take.
  */
 export const BUILT_IN_BARE_NAMES: Readonly<Record<BareNameOneHolderType, ReadonlySet<string>>> = Object.freeze({
   picklist: new Set<string>(),
   mapping: new Set<string>(),
   dataset: new Set<string>(),
   api: new Set<string>(),
-  action: new Set<string>(),
+  action: new Set<string>(['install_package']),
   function: new Set<string>(),
   flow: new Set<string>(),
   webhook: new Set<string>(),

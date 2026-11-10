@@ -23,7 +23,7 @@ import { HttpDispatcher } from '../http-dispatcher.js';
 const CRM = 'com.crm.pkg';
 const HR = 'com.hr.pkg';
 
-function dispatcherWith(objects: any[], standalone: any[], namespaceOf: Record<string, string> = { [CRM]: 'crm', [HR]: 'hr' }) {
+function dispatcherWith(objects: any[], standalone: any[], namespaceOf: Record<string, string> = { [CRM]: 'crm', [HR]: 'hr' }, extraServices: Record<string, unknown> = {}) {
     const ran: Array<{ obj: string; key: string; packageId?: string }> = [];
     const subjects: Array<{ obj: string; record?: any; recordId?: string }> = [];
     const ql: any = {
@@ -66,6 +66,7 @@ function dispatcherWith(objects: any[], standalone: any[], namespaceOf: Record<s
         audit: { recordActionInvocation: vi.fn(async () => {}) },
         auth: { api: { getSession: async () => ({ user: { id: 'u1' } }) } },
         automation: { execute: vi.fn(async () => ({ success: true })) },
+        ...extraServices,
     };
     const kernel: any = { context: { getService: (n: string) => services[n] ?? null } };
     const dispatcher = new HttpDispatcher(kernel) as any;
@@ -459,5 +460,92 @@ describe('[#31697] an owner-less declaration beside a package holder: the platfo
         expect((await post('/global/send_digest')).status).toBe(200);
         expect((await bridge.runAction('send_digest', {})).ok).toBe(true);
         expect(ran).toEqual([{ obj: 'global', key: 'send_digest' }, { obj: 'global', key: 'send_digest' }]);
+    });
+});
+
+/**
+ * [#31697, review 6762242732 F1; epic record 6762108144] The bare door fails
+ * CLOSED. A capability that is absent judges nothing; a listing that THROWS
+ * once it is there answers `degraded` (503) — never the rungs, which would
+ * serve the object's own declaration while the two-holder refusal is skipped.
+ */
+describe('[#31697] the bare door\'s holder rule when the listing read throws', () => {
+    const lead = () => ({ name: 'lead', _packageId: CRM, fields: { name: { type: 'text' } }, actions: [act('convert', undefined)] });
+    const throwing = () => ({ getMetaItems: vi.fn(async () => { throw new Error('sys_metadata unreachable'); }) });
+
+    it('the protocol\'s merged listing throws, two packages on one object: 503, nothing run — not the object\'s own', async () => {
+        const { post, ran } = dispatcherWith([lead()], [act('convert', HR, { objectName: 'lead' })], undefined, { protocol: throwing() });
+        const rest = await post('/lead/convert/r1');
+        expect(rest.status, JSON.stringify(rest.body)).toBe(503);
+        expect(messageOf(rest)).toContain('sys_metadata unreachable');
+        expect(ran).toEqual([]);
+    });
+
+    it('the metadata service\'s listing throws (no protocol): 503, nothing run', async () => {
+        const { post, ran } = dispatcherWith([lead()], [act('convert', HR, { objectName: 'lead' })], undefined, {
+            metadata: { listObjects: vi.fn(async () => { throw new Error('metadata plane down'); }), loadMany: vi.fn(async () => []) },
+        });
+        const rest = await post('/lead/convert/r1');
+        expect(rest.status, JSON.stringify(rest.body)).toBe(503);
+        expect(ran).toEqual([]);
+    });
+
+    it('CONTROL — no listing capability at all (no protocol, a metadata service with no list verb): the rungs answer as before', async () => {
+        const { post, ran } = dispatcherWith([lead()], [], undefined, {
+            metadata: { loadDiagnosed: vi.fn(async () => ({ data: null, degraded: false, errors: [] })) },
+        });
+        const rest = await post('/lead/convert/r1');
+        expect(rest.status, JSON.stringify(rest.body)).toBe(200);
+        expect(ran).toEqual([{ obj: 'lead', key: 'convert' }]);
+    });
+});
+
+/**
+ * [#31697, review 6762242732 F2] The bare REST door serves the declaration
+ * the holder rule chose — the one MCP's bare `run_action` runs — never the
+ * object's own by rung precedence. A package's embedded `convert` on `lead`
+ * and the environment's own stored `convert` bound to `lead`: the
+ * environment's answers first (ADR-0150 D3) on both doors; on base, both
+ * doors answered the embedded one (declared in the changeset).
+ */
+describe('[#31697] an object-bound pair of a package\'s and the environment\'s: both bare doors serve the environment\'s', () => {
+    const lead = () => ({ name: 'lead', _packageId: CRM, fields: { name: { type: 'text' } }, actions: [act('convert', undefined)] });
+    const storeHolding = (keys: Array<[string, string]>) => vi.fn(async (object: string, query?: any) =>
+        object === 'sys_metadata' && query?.where?.type === 'action'
+            ? keys.map(([objectName, name]) => ({ name, type: 'action', state: 'active', package_id: null, metadata: { name, objectName } }))
+            : object === 'sys_metadata' ? [] : [{ id: 'r1' }]);
+
+    it('the environment\'s declaration (gated) judges the bare call on REST and on MCP alike', async () => {
+        const { post, bridge, ran, ql } = dispatcherWith([lead()], [act('convert', undefined, { objectName: 'lead', requiredPermissions: ['env_admin'] })]);
+        ql.find = storeHolding([['lead', 'convert']]);
+        expect((await post('/lead/convert/r1')).status).toBe(403);
+        expect((await refusalOf(bridge.runAction('convert', { objectName: 'lead', recordId: 'r1' }))).status).toBe(403);
+        expect(ran).toEqual([]);
+    });
+
+    it('[review F5] a package-less row the store holds on ANOTHER object does not make this one the environment\'s: it is the platform\'s, and on an object-bound key that keeps today\'s answer, the object\'s own', async () => {
+        const { post, bridge, ran, ql } = dispatcherWith([lead()], [act('convert', undefined, { objectName: 'lead', requiredPermissions: ['env_admin'] })]);
+        ql.find = storeHolding([['account', 'convert']]);
+        expect((await post('/lead/convert/r1')).status).toBe(200);
+        expect((await bridge.runAction('convert', { objectName: 'lead', recordId: 'r1' })).ok).toBe(true);
+        expect(ran).toEqual([{ obj: 'lead', key: 'convert' }, { obj: 'lead', key: 'convert' }]);
+    });
+});
+
+/**
+ * [#31697, epic ruling record 6762267053 item 1] The doors refuse exactly the
+ * two declared cases: two packages on one key, and — on the OBJECT-LESS key
+ * only — a package beside the platform (host code or a plugin). The platform
+ * beside ONE package on an object-bound key is not refused: today's answer,
+ * the first declaration, stands.
+ */
+describe('[#31697] the platform beside one package on an object-bound key is not refused', () => {
+    it('host code\'s standalone `convert` on crm\'s `lead`: the bare call answers crm\'s own on REST and MCP, as before', async () => {
+        const lead = { name: 'lead', _packageId: CRM, fields: { name: { type: 'text' } }, actions: [act('convert', undefined)] };
+        const { post, bridge, ran, ql } = dispatcherWith([lead], [act('convert', undefined, { objectName: 'lead', requiredPermissions: ['host_admin'] })]);
+        ql.find = vi.fn(async (object: string) => (object === 'sys_metadata' ? [] : [{ id: 'r1' }]));
+        expect((await post('/lead/convert/r1')).status).toBe(200);
+        expect((await bridge.runAction('convert', { objectName: 'lead', recordId: 'r1' })).ok).toBe(true);
+        expect(ran).toEqual([{ obj: 'lead', key: 'convert' }, { obj: 'lead', key: 'convert' }]);
     });
 });

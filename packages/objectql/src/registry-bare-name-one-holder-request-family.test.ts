@@ -419,9 +419,16 @@ describe('the narrowing — the object-less action holds one name per namespace 
     ]);
   });
 
+  it('[#31697, epic ruling 6762267053 item 2 (b)] the action the platform\'s own UI calls by a fixed name is a built-in: a package of any namespace is refused it', async () => {
+    // The census: the Console's marketplace and the cloud connection POST
+    // `/actions/sys_package/install_package`; no other fixed-name action call.
+    expect([...BUILT_IN_BARE_NAMES.action]).toEqual(['install_package']);
+    const { register } = await boot();
+    expectRefusal(await register(pkg('com.acme.alpha', { action: ['install_package'] })), 'com.acme.alpha', { kind: 'built-in' }, 'alpha_install_package');
+  });
+
   it('a built-in name is still refused to a package of any namespace', async () => {
     const builtIns = BUILT_IN_BARE_NAMES.action as Set<string>;
-    expect(builtIns.size, 'the census: no platform code requests an object-less action by a fixed name').toBe(0);
     builtIns.add('platform_action');
     try {
       const { register } = await boot();
