@@ -215,7 +215,7 @@ describe('#20281 stage ③ (Q1-B): a job pulls a mapping by declaration, through
         expect(out.pulls).toEqual(['orders_pull_hourly']);
         expect(out.notScheduled).toEqual([]);
         const outcome = (await h.run('orders_pull_hourly')) as { outcome: string; reason?: string };
-        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true } }]);
+        expect(h.defaultAutomation.pullConnectorSource).toHaveBeenCalledWith({ mapping: 'orders_pull', context: { isSystem: true } });
         expect(outcome.outcome).toBe('degraded');
         expect(outcome.reason).toContain("from 'erp_order'");
         expect(outcome.reason).toContain('1 of 4');
