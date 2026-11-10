@@ -731,6 +731,18 @@ function resolveStringSlot(
  * no flow edit. This is the seam that fixes the "notify drops on the floor"
  * gap (#1292) once messaging is present.
  */
+/**
+ * [ADR-0150 D3, #31699] A node's literal `payload` without the key the
+ * delivery reads as the template's caller package: only the engine names it
+ * (`AutomationEngine.flowCallerPackage`), so an authored key can never resolve
+ * the template from another package.
+ */
+function withoutTemplateCallerPackage(payload: unknown): Record<string, unknown> {
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return {};
+    const { templateCallerPackageId: _dropped, ...rest } = payload as Record<string, unknown>;
+    return rest;
+}
+
 export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext): void {
     const getMessaging = (): MessagingServiceSurface | undefined => {
         try {
@@ -990,6 +1002,12 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             // is evaluated in the run's scope, a literal handed on as written —
             // the resolver every value-slot map shares.
             const template = toStr(cfg.template);
+            // [ADR-0150 D3, #31699] The package the template name resolves
+            // from at delivery: the package whose own body of this flow is
+            // armed, never a stamp on the definition. An environment-authored
+            // flow (or an environment override of a packaged one) names none,
+            // and the delivery resolves the name as a caller with no package.
+            const templateCallerPackageId = template ? engine.flowCallerPackage(context) : null;
             const templateData = cfg.templateData
                 ? resolveValueSlotMap(engine, cfg.templateData, variables, 'templateData', context)
                 : undefined;
@@ -1154,10 +1172,17 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     // On the template path no inline title/body keys are set:
                     // channels without template support fall back to the topic,
                     // which is the honest degraded rendering, not ''.
+                    // [#31699] The template's caller package is the engine's
+                    // answer alone: a key of that name in the literal
+                    // `payload` is dropped, never forwarded as one.
                     payload: {
-                        ...(payload ?? {}),
+                        ...withoutTemplateCallerPackage(payload),
                         ...(template
-                            ? { template, ...(templateData !== undefined ? { templateData } : {}) }
+                            ? {
+                                template,
+                                ...(templateData !== undefined ? { templateData } : {}),
+                                ...(templateCallerPackageId ? { templateCallerPackageId } : {}),
+                            }
                             : { title, body }),
                         url: actionUrl,
                     },

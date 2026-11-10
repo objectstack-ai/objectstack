@@ -5133,8 +5133,13 @@ export class AutomationEngine implements IAutomationService {
      * body is not the package's own ({@link armedFlowPackage}): an
      * environment-authored flow, or an environment override of a packaged
      * flow, resolves as a caller with no package (ADR-0150 D3).
+     *
+     * Public for the nodes that hand a name on to be resolved later, outside
+     * the run: the `notify` node records it beside its email template
+     * reference, so the delivery resolves the template from the flow's package
+     * (#31699). Read-only.
      */
-    private flowCallerPackage(context: AutomationContext | undefined): string | null {
+    flowCallerPackage(context: AutomationContext | undefined): string | null {
         const caller = context?.flowName;
         if (typeof caller !== 'string' || caller === '') return null;
         return this.armedFlowPackage(caller) ?? null;

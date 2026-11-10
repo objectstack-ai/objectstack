@@ -8,7 +8,7 @@ import type {
     MessagingChannelContext,
     SendResult,
 } from './channel.js';
-import { templateRefusalAfterCurrencyReadFault, type EmailSenderSurface } from './email-channel.js';
+import { templateCallerPackageOf, templateRefusalAfterCurrencyReadFault, type EmailSenderSurface } from './email-channel.js';
 import { RECIPIENT_LOCALE_FIELD, USER_OBJECT, resolveRecipientLocale } from './recipient-locale.js';
 import { FAN_OUT_SYSTEM_CONTEXT } from './fan-out-system-context.js';
 import { assertActorReferenceResolves } from './actor-reference.js';
@@ -218,6 +218,9 @@ export function createInboxChannel(opts: InboxChannelOptions): MessagingChannel 
                 // against the declared input, so a rename on either side fails
                 // to compile. No default currency sends no key (#27754).
                 if (currency) renderInput.currency = currency;
+                // [ADR-0150 D3, #31699] The package the template name resolves from.
+                const callerPackageId = templateCallerPackageOf(payload);
+                if (callerPackageId) renderInput.callerPackageId = callerPackageId;
                 try {
                     const rendered = await email.renderTemplate(renderInput);
                     title = rendered.subject;
@@ -237,6 +240,7 @@ export function createInboxChannel(opts: InboxChannelOptions): MessagingChannel 
                                 template: templateName,
                                 ...(templateData !== undefined ? { data: templateData } : {}),
                                 ...(templateLocale ? { locale: templateLocale } : {}),
+                                ...(callerPackageId ? { callerPackageId } : {}),
                                 currency: probe,
                             }),
                         ),
