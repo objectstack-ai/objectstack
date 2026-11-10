@@ -15,6 +15,7 @@ import {
   selectDesignHintIndex,
   type ChatbotEnhancedMessage,
 } from '../ChatbotEnhanced';
+import { uiMessagesToChatMessages } from '../mapMessages';
 
 describe('ChatbotEnhanced (AI Elements composition)', () => {
   beforeEach(() => {
@@ -1986,5 +1987,78 @@ describe('ChatbotEnhanced — propose_blueprint live design progress (data-bluep
     expect(badge).not.toBeNull();
     expect(badge?.textContent).toContain('Extending');
     expect(badge?.textContent).toContain('recruiting');
+  });
+});
+
+/**
+ * One build turn renders ONE plan card: the newest `propose_blueprint` result,
+ * the plan the runtime builds. Each message goes through the real live mapper
+ * (`uiMessagesToChatMessages`) from raw tool parts.
+ */
+describe('one plan card per build turn — the newest propose_blueprint result', () => {
+  const plan = (n: number) => ({
+    status: 'blueprint_proposed',
+    summary: `Plan ${n}`,
+    blueprint: {
+      app: { label: `App ${n}` },
+      objects: [{ name: 'book', label: 'Book', fields: [{ name: 'title' }] }],
+    },
+    counts: { objects: 1, views: 0, dashboards: 0, seedData: 0 },
+    questions: [],
+  });
+  const proposePart = (n: number, state: 'output-available' | 'input-available' = 'output-available') => ({
+    type: 'tool-propose_blueprint',
+    toolCallId: `plan-${n}`,
+    state,
+    input: {},
+    ...(state === 'output-available' ? { output: plan(n) } : {}),
+  });
+  const user = (id: string) => ({ id, role: 'user', parts: [{ type: 'text', text: 'build me a library app' }] });
+  const titles = () => screen.getAllByTestId('proposed-plan-title').map((el) => el.textContent);
+
+  it('a turn with four propose_blueprint results draws one card, the newest', () => {
+    render(
+      <ChatbotEnhanced
+        onSendMessage={vi.fn()}
+        messages={uiMessagesToChatMessages([
+          user('u1'),
+          { id: 'a1', role: 'assistant', parts: [1, 2, 3, 4].map((n) => proposePart(n)) },
+        ])}
+      />,
+    );
+    expect(screen.getAllByTestId('proposed-plan')).toHaveLength(1);
+    expect(titles()).toEqual(['Proposed plan · App 4']);
+    // The earlier results do not fall back to the unstructured confirm card.
+    expect(screen.queryByTestId('proposed-plan-fallback')).toBeNull();
+    expect(screen.getAllByTestId('proposed-plan-approve')).toHaveLength(1);
+  });
+
+  it('while the turn streams, the newest landed result is the card', () => {
+    render(
+      <ChatbotEnhanced
+        isLoading
+        onSendMessage={vi.fn()}
+        messages={uiMessagesToChatMessages(
+          [user('u1'), { id: 'a1', role: 'assistant', parts: [proposePart(1), proposePart(2), proposePart(3, 'input-available')] }],
+          { isStreaming: true },
+        )}
+      />,
+    );
+    expect(titles()).toEqual(['Proposed plan · App 2']);
+  });
+
+  it('PRESERVATION: a plan from a previous turn keeps its card', () => {
+    render(
+      <ChatbotEnhanced
+        onSendMessage={vi.fn()}
+        messages={uiMessagesToChatMessages([
+          user('u1'),
+          { id: 'a1', role: 'assistant', parts: [proposePart(0)] },
+          user('u2'),
+          { id: 'a2', role: 'assistant', parts: [1, 2, 3, 4].map((n) => proposePart(n)) },
+        ])}
+      />,
+    );
+    expect(titles()).toEqual(['Proposed plan · App 0', 'Proposed plan · App 4']);
   });
 });

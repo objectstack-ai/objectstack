@@ -94,6 +94,7 @@ import {
   detectPublishedBuildReview,
   buildProgressFromDraftReview,
   detectPackageRemovedResult,
+  supersededPlanIds,
   type BuildResultChecklist,
   type DraftReview,
   type ProposedChanges,
@@ -1774,6 +1775,22 @@ function isBuildProposalTool(tool: ChatbotEnhancedToolInvocation): boolean {
 }
 
 /**
+ * An invocation as the message list draws it. `planSuperseded` marks a plan a
+ * later plan in the same build turn replaced (`supersededPlanIds`): its
+ * `proposedPlan` is withheld, so it draws as a completed step, not as a plan
+ * card and not as the unstructured confirm card below.
+ */
+type RenderedToolInvocation = ChatbotEnhancedToolInvocation & { planSuperseded?: true };
+
+function withoutSupersededPlan(
+  tool: ChatbotEnhancedToolInvocation,
+  superseded: ReadonlySet<string>,
+): RenderedToolInvocation {
+  if (!tool.proposedPlan || !superseded.has(tool.toolCallId)) return tool;
+  return { ...tool, proposedPlan: undefined, planSuperseded: true };
+}
+
+/**
  * A COMPLETED propose_blueprint whose result the detector could not turn into a
  * rich `proposedPlan` card (e.g. the model returned a thin/oddly-shaped envelope,
  * or proposed in prose). We still owe the user an explicit confirm gate, so the
@@ -1782,11 +1799,12 @@ function isBuildProposalTool(tool: ChatbotEnhancedToolInvocation): boolean {
  * "确认" phrase. Only the finished, non-error state qualifies: a running proposal
  * keeps its live timer, an errored one keeps its error card.
  */
-function isUnstructuredBuildProposal(tool: ChatbotEnhancedToolInvocation): boolean {
+function isUnstructuredBuildProposal(tool: RenderedToolInvocation): boolean {
   return (
     isBuildProposalTool(tool) &&
     getToolState(tool) === 'completed' &&
     !tool.proposedPlan &&
+    !tool.planSuperseded &&
     !tool.proposedChanges &&
     !tool.draftReview?.items.length
   );
@@ -1861,7 +1879,7 @@ export function classifyAssumptions(assumptions: readonly string[]): {
   return { designNotes, deferred };
 }
 
-function shouldRenderDetailedTool(tool: ChatbotEnhancedToolInvocation): boolean {
+function shouldRenderDetailedTool(tool: RenderedToolInvocation): boolean {
   const state = getToolState(tool);
   return (
     state === 'awaiting' ||
@@ -3235,7 +3253,11 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       onPlanApprovalPendingChangeRef.current?.(planApprovalPending, planApprovalPendingCount);
     }, [planApprovalPending, planApprovalPendingCount]);
 
-    const renderToolDetail = (tool: ChatbotEnhancedToolInvocation) => {
+    // Read fresh each render from the messages themselves; consulted by value
+    // (`has`) only, never as a dependency.
+    const supersededPlans = supersededPlanIds(messages);
+
+    const renderToolDetail = (tool: RenderedToolInvocation) => {
       const state =
         tool.state ??
         (tool.errorText
@@ -4724,7 +4746,11 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                 // draws no bubble: live, after a reload, or on a shared
                 // transcript. The model still received it.
                 if (isUser && isHitlContinuation(message.content)) return null;
-                const tools = message.toolInvocations ?? [];
+                // One plan card per build turn: the newest plan, the one the
+                // runtime builds; earlier plans of the turn draw as steps.
+                const tools = (message.toolInvocations ?? []).map((tool) =>
+                  withoutSupersededPlan(tool, supersededPlans),
+                );
                 const reasoning = message.reasoning?.trim();
                 const sources = message.sources ?? [];
                 const buildProgress = !isUser ? message.buildProgress : undefined;
