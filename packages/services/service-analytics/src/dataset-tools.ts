@@ -13,6 +13,7 @@ import {
   type ListDatasetsOutput,
   type QueryDatasetOutput,
 } from '@objectstack/spec/ai';
+import { PackageScopedNameRefusedError, packageScopedHolderSource, resolvePackageScopedHolders } from '@objectstack/core';
 import type { AIToolDefinition, AnalyticsResult, DatasetSelection } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
@@ -226,8 +227,54 @@ function inputRefusal(tool: string, issues: unknown, input: unknown): ToolRefusa
 
 interface LoadedDatasets {
   readonly datasets: Dataset[];
+  /**
+   * [#32072] Every saved item read, as `(holder, name, dataset)`: the package
+   * its `_packageId` names, `null` for the environment's own item, and the
+   * parsed dataset, `undefined` for an item the parse left out. `query_dataset`
+   * resolves a name over these ({@link resolveSavedDataset}).
+   */
+  readonly holdings: ReadonlyArray<{ readonly packageId: string | null; readonly name: unknown; readonly dataset?: Dataset }>;
   readonly partial: boolean;
   readonly warning?: string;
+}
+
+/**
+ * [#32072] The package a listed item is bound to: its `_packageId`, unless that
+ * is absent, empty or the `'sys_metadata'` sentinel a package-less row carries,
+ * which is the environment's own item (`null`).
+ */
+function listedHolder(item: unknown): string | null {
+  const packageId = (item as { _packageId?: unknown } | null | undefined)?._packageId;
+  return typeof packageId === 'string' && packageId !== '' && packageId !== 'sys_metadata' ? packageId : null;
+}
+
+/**
+ * [#32072, ADR-0150 D3] The saved dataset `query_dataset` names, by the ONE
+ * package-scoped rule (`resolvePackageScopedHolders`, `@objectstack/core`) over
+ * the holders the listed items' `_packageId`s name — the same rule the REST
+ * door's by-name read applies. The caller is one with no package: the tools'
+ * only callers are the MCP bridges, whose clients belong to no package, and
+ * the input carries none. So: the environment's own item, else the one
+ * package holder; a name two packages hold is refused naming both
+ * (`PackageScopedNameRefusedError`, `409 RESOURCE_CONFLICT`). It never takes
+ * the first listed, which is what the `find` that stood here did.
+ *
+ * `undefined` when nothing holds the name, or when the holder's item failed
+ * the parse (as before, a dataset the parse leaves out is not found).
+ *
+ * @throws {PackageScopedNameRefusedError} when the rule refuses.
+ */
+function resolveSavedDataset(loaded: LoadedDatasets, datasetName: string): Dataset | undefined {
+  const resolution = resolvePackageScopedHolders<Dataset | undefined>(
+    { type: 'dataset', name: datasetName, callerPackageId: null },
+    packageScopedHolderSource<Dataset | undefined>(
+      loaded.holdings.filter((h) => h.name === datasetName).map((h) => [h.packageId, h.dataset] as const),
+    ),
+    // A caller with no package reads no dependency closure.
+    () => new Set<string>(),
+  );
+  if (resolution.status === 'refused') throw new PackageScopedNameRefusedError(resolution);
+  return resolution.status === 'resolved' ? resolution.item : undefined;
 }
 
 /** A label at the caller's locale; `fallback` when it resolves to nothing. */
@@ -258,13 +305,21 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
     const items = Array.isArray(source) ? source : (source as { items?: readonly unknown[] }).items ?? [];
     const degraded = !Array.isArray(source) && (source as { partial?: unknown }).partial === true;
     const datasets: Dataset[] = [];
+    const holdings: Array<LoadedDatasets['holdings'][number]> = [];
     for (const item of items) {
       const parsed = DatasetSchema.safeParse(stripReadDecorations(item));
-      if (parsed.success) datasets.push(parsed.data as Dataset);
-      else service.reportDatasetCatalogDefect(datasetItemName(item), parsed.error.message);
+      const name = (item as { name?: unknown } | null | undefined)?.name;
+      if (parsed.success) {
+        datasets.push(parsed.data as Dataset);
+        holdings.push({ packageId: listedHolder(item), name, dataset: parsed.data as Dataset });
+      } else {
+        service.reportDatasetCatalogDefect(datasetItemName(item), parsed.error.message);
+        holdings.push({ packageId: listedHolder(item), name });
+      }
     }
     return {
       datasets,
+      holdings,
       partial: degraded,
       ...(degraded ? { warning: String((source as { warning?: unknown }).warning ?? 'The dataset read was degraded.') } : {}),
     };
@@ -356,7 +411,7 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
       );
     }
     const notFound = () => refusal('NOT_FOUND', 404, `Dataset "${datasetName}" not found.`);
-    const dataset = loaded.datasets.find((d) => d.name === datasetName);
+    const dataset = resolveSavedDataset(loaded, datasetName);
     if (!dataset) throw notFound();
     // Resolved exactly as `list_datasets` lists it: a dataset the caller may
     // not query is absent, one answer for missing and hidden (ADR-0149 D2).
