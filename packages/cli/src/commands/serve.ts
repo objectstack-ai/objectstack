@@ -85,7 +85,8 @@ import { missingProviderMessage } from '../utils/capability-preflight.js';
 // module. Contrast `importConfigPlugin` below, which IS host-anchored: an
 // app-declared package wins there (per commit 5a90c56d1).
 import { resolveDeploymentAppName } from '@objectstack/plugin-email';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { hostname as osHostname } from 'node:os';
 import { resolveObjectStackHome, type InstalledPluginRefusal, type StandaloneStackConfig } from '@objectstack/runtime';
 import { LOG_LEVELS, resolveLogLevel, readLogLevelEnv } from '../utils/log-level.js';
 // The ONE port contract — range, reader and refusal prose — shared with the two
@@ -245,6 +246,9 @@ import { SEMCONV, OBSERVABILITY_METRICS_SERVICE, type MetricsRegistry } from '@o
 //   OS_OBS_SERVICE_NAME   resource attr, default `objectstack`
 //   OS_OBS_DEPLOYMENT_ENV resource attr, default `production`
 //   OS_OTLP_FLUSH_MS      buffer flush interval (default 10000)
+//
+// Not a knob: with several replicas declared over the redis cluster driver the
+// resource also carries `service.instance.id` (`serveOtlpResource` below).
 // ---------------------------------------------------------------------------
 
 function parseObsHeaders(spec: string | undefined): Record<string, string> {
@@ -261,6 +265,62 @@ function parseObsHeaders(spec: string | undefined): Record<string, string> {
     out[k] = v;
   }
   return out;
+}
+
+/** Where {@link serveOtlpResource} reads this process's identity from; injectable so a test can stand in for a second process. */
+export interface ServeInstanceHost {
+  hostname: () => string;
+  pid: number;
+  randomId: () => string;
+}
+
+const SERVE_INSTANCE_HOST: ServeInstanceHost = {
+  hostname: osHostname,
+  pid: process.pid,
+  randomId: randomUUID,
+};
+
+/**
+ * This process's `service.instance.id`: `<hostname>-<pid>`. The host name is
+ * the pod name on Kubernetes and the container id under Compose; the pid tells
+ * apart two replicas that share a host name within one PID namespace (two
+ * processes on one machine), and in a container it is the same on every
+ * restart (pid 1), so a restart does not open a new series. It does NOT tell
+ * apart two replicas that share a host name across PID namespaces (a fixed
+ * Compose `hostname:`, host-network containers): both are pid 1 and export one
+ * id, so such replicas need distinct host names. A host that reports no name
+ * (or throws asking) falls back to a random id for this process.
+ */
+export function serveInstanceId(host: ServeInstanceHost = SERVE_INSTANCE_HOST): string {
+  let name = '';
+  try { name = host.hostname().trim(); } catch { /* fall back below */ }
+  return name ? `${name}-${host.pid}` : host.randomId();
+}
+
+/**
+ * The OTLP resource `os serve` exports with. Replicas declared over the redis
+ * cluster driver (`declaresReplicasSharingState`, the pre-boot form of the
+ * cluster package's `declaresMultiReplicaOnRedis`, cloud#3814 R3) each export
+ * their own `service.instance.id`, so the backend keeps one series per replica
+ * instead of folding them into one. Any other boot exports the two attributes it
+ * always did, in the same order.
+ *
+ * Nothing else feeds this resource: `OTEL_RESOURCE_ATTRIBUTES` and the OTel
+ * resource detectors are not read, so there is no operator-written
+ * `service.instance.id` for this one to override.
+ */
+export async function serveOtlpResource(
+  env: NodeJS.ProcessEnv,
+  host: ServeInstanceHost = SERVE_INSTANCE_HOST,
+): Promise<Record<string, string>> {
+  const resource: Record<string, string> = {
+    'service.name': env.OS_OBS_SERVICE_NAME ?? 'objectstack',
+    'deployment.environment': env.OS_OBS_DEPLOYMENT_ENV ?? 'production',
+  };
+  if (await declaresReplicasSharingState(env)) {
+    resource['service.instance.id'] = serveInstanceId(host);
+  }
+  return resource;
 }
 
 async function buildServeObservability(): Promise<{ metrics: any; errorReporter: any } | undefined> {
@@ -282,10 +342,7 @@ async function buildServeObservability(): Promise<{ metrics: any; errorReporter:
         console.warn('[observability] OS_OBS_EXPORTER=otlp but OS_OTLP_ENDPOINT is empty — falling back to noop');
         return undefined;
       }
-      const resource = {
-        'service.name': process.env.OS_OBS_SERVICE_NAME ?? 'objectstack',
-        'deployment.environment': process.env.OS_OBS_DEPLOYMENT_ENV ?? 'production',
-      };
+      const resource = await serveOtlpResource(process.env);
       metrics = new mod.OtlpHttpMetricsRegistry({
         endpoint,
         headers: parseObsHeaders(process.env.OS_OTLP_HEADERS),

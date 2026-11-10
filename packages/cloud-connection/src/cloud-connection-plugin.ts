@@ -168,13 +168,17 @@ import { CLOUD_BINDING_SERVICE, type ICloudBindingService } from '@objectstack/s
 import { CLOUD_CONNECTION_CAPABILITY, CLOUD_CONNECTION_UI_BUNDLE } from './cloud-connection-ui.js';
 import { readJsonRequestBody } from './request-json-body.js';
 // [#30964] The install mode's one declaration, read by reference: never a copy of its two spellings.
-import { InstallModeSchema, SEMVER_2_0_0_VERSION_PATTERN, type InstallMode } from '@objectstack/spec/kernel';
+import { InstallModeSchema, ManifestSchema, SEMVER_2_0_0_VERSION_PATTERN, type InstallMode } from '@objectstack/spec/kernel';
 import {
     INSTALL_LOCAL_DOOR_SERVICE, grantRefusalEvent, recordUnmanagedImportEvent,
     type InstallLocalDoor, type InstallLocalDoorGrant, type UnmanagedImportAuditSurface,
 } from './install-local-door-service.js';
 
 const CLOUD_CONNECTION_PREFIX = '/api/v1/cloud-connection';
+
+/** [#31963] A JSON object (not an array, not null): the only shape a grant's `data.manifest` is read in. */
+const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /**
  * [#24148, ruling 乙 #25119] The refusal the three connection-changing doors
@@ -1388,11 +1392,25 @@ export class CloudConnectionPlugin implements Plugin {
              *
              * Cross-repo, NOT MEASURED: the grant's shape. The control plane is
              * assumed to skip its own install on an unmanaged grant and answer
-             * `data.install_mode: 'unmanaged'` with the granted `data.version_id`;
-             * the door then fetches that version's manifest itself, as its
-             * cloud branch always has. Fail closed: an answer that does not echo
-             * the mode, or names no version, copies nothing (502). A
-             * `data.manifest` in the answer is never read.
+             * `data.install_mode: 'unmanaged'` with the granted `data.version_id`.
+             * Fail closed: an answer that does not echo the mode, or names no
+             * version, copies nothing (502).
+             *
+             * [#31963, cloud#3624 ruling A] The manifest the copy is made from.
+             * The door's cloud branch cannot read an organization's PRIVATE
+             * manifest with the shared service key (404 `CLOUD_FETCH_FAILED`),
+             * so the grant's own `data.manifest` is handed to the door inline,
+             * when the answer says which manifest it granted: the requested
+             * package id when that is itself a manifest id, else the answer's
+             * `data.manifest_id` (the Console names a catalog record id, which
+             * is not one). The door copies that manifest only when it declares
+             * exactly that id and the granted `data.version`
+             * ({@link InstallLocalDoorGrant.manifestId}); an inline manifest with
+             * no granted `data.version` copies nothing (502). An answer with no
+             * `data.manifest`, or one that does not say which manifest it
+             * granted, keeps the door's cloud fetch of the granted version, as
+             * before. The manifest comes only from this answer: the caller's
+             * body never reaches the door.
              *
              * [#31481, ruling A「两边审计」] Every refusal after the grant leaves
              * the environment's `package_unmanaged_import` failure row beside
@@ -1408,9 +1426,17 @@ export class CloudConnectionPlugin implements Plugin {
                 const { environmentId, packageId, seedSampleData, installerUserId, grant } = args;
                 const data = grant?.data;
                 const versionId = typeof data?.version_id === 'string' ? data.version_id.trim() : '';
+                const grantedVersion = typeof data?.version === 'string' && data.version.trim() !== '' ? data.version.trim() : undefined;
+                // [#31963] The grant's own manifest, handed inline only when the
+                // answer says which manifest it granted.
+                const grantedManifestId = ManifestSchema.shape.id.safeParse(packageId).success
+                    ? packageId
+                    : typeof data?.manifest_id === 'string' && data.manifest_id.trim() !== '' ? data.manifest_id.trim() : undefined;
+                const inlineManifest = isPlainRecord(data?.manifest) && grantedManifestId !== undefined ? data.manifest : undefined;
                 const granted: InstallLocalDoorGrant = {
                     packageId,
-                    ...(typeof data?.version === 'string' && data.version.trim() !== '' ? { version: data.version.trim() } : {}),
+                    ...(grantedVersion !== undefined ? { version: grantedVersion } : {}),
+                    ...(inlineManifest !== undefined ? { manifestId: grantedManifestId } : {}),
                     environmentId,
                     actor: installerUserId,
                 };
@@ -1441,7 +1467,9 @@ export class CloudConnectionPlugin implements Plugin {
                 const unechoed = data?.install_mode === undefined || data?.install_mode === null;
                 const unread = data?.install_mode !== 'unmanaged'
                     ? 'its answer does not echo `install_mode: \'unmanaged\'`'
-                    : versionId === '' ? 'its answer names no `version_id`' : undefined;
+                    : versionId === '' ? 'its answer names no `version_id`'
+                        : inlineManifest !== undefined && grantedVersion === undefined
+                            ? 'its answer carries the granted manifest but names no `version` to check it against' : undefined;
                 if (unread !== undefined) {
                     const managedNote = unechoed
                         ? ' The control plane did not echo install_mode; a control plane that does not read it may have '
@@ -1484,6 +1512,8 @@ export class CloudConnectionPlugin implements Plugin {
                         versionId,
                         installMode: 'unmanaged',
                         ...(seedSampleData ? { seedSampleData: true } : {}),
+                        // [#31963] The grant's own manifest; the door checks it against `granted`.
+                        ...(inlineManifest !== undefined ? { manifest: inlineManifest } : {}),
                     }),
                 });
                 // The grant rides beside the request, so the door audits its own refusals of it.
