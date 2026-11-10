@@ -434,3 +434,180 @@ describe('[#16166] CONTROL — a genuine org-admin capability grant still overri
     expect(await h.attemptRecall(context, req.id)).toEqual({ threw: null, status: 'recalled' });
   });
 });
+
+/**
+ * [ADR-0131 D1] A request that carries NO organization belongs to no
+ * organization's administrator. Under a walled posture (`isolated`, `group`)
+ * only a platform administrator or a system context acts on it; under `single`
+ * a tenant administrator still does. A request that carries an organization is
+ * acted on by that organization's administrator or a platform administrator.
+ *
+ * ## POPULATION OF THIS PIN
+ *
+ * Every door that acts on a request by id — approve, reject, recall, reassign,
+ * send back, resubmit, remind, request info, comment — for a tenant
+ * administrator resolved through the REAL `resolveUserAuthzGrants` (the
+ * `genuine` shape above: an org-scoped `organization_admin` grant in `ORG`).
+ * The request is opened in `ORG` and then given the organization the case
+ * needs; the no-organization case models a stored row that predates ADR-0131
+ * D9 (a new write is stamped or refused, so legacy rows are the population).
+ * The refused answer is pinned side by side with the answer for an id that
+ * names no request. CONTROLS: the platform administrator and a system context
+ * under a walled posture, the tenant administrator under `single`, the
+ * tenant administrator on their own organization's request, and the tenant
+ * administrator refused on another organization's request.
+ */
+describe('[ADR-0131 D1] under a walled posture, a request with no organization is acted on only by a platform administrator or the system', () => {
+  const OTHER_ORG = 't_other';
+  const PLATFORM = {
+    userId: 'usr_platform', tenantId: ORG, posture: 'PLATFORM_ADMIN',
+    positions: [], permissions: [ADMIN_FULL_ACCESS],
+  } as unknown as ExecutionContext;
+
+  type Door =
+    | 'approve' | 'reject' | 'recall' | 'reassign' | 'sendBack'
+    | 'resubmit' | 'remind' | 'requestInfo' | 'comment';
+  const DOORS: readonly Door[] = [
+    'approve', 'reject', 'recall', 'reassign', 'sendBack', 'resubmit', 'remind', 'requestInfo', 'comment',
+  ];
+  /** The three doors the override admits a non-participant through (#3424). */
+  const OVERRIDE_DOORS: readonly Door[] = ['approve', 'reject', 'recall', 'reassign'];
+
+  /**
+   * A service under `posture`, and one pending request opened in `ORG` whose
+   * stored organization is then set to `requestOrg` (`null` = none). The
+   * reassign target is an account of the request's organization, so a
+   * reassign that is admitted lands.
+   */
+  async function setup(posture: string, requestOrg: string | null) {
+    const engine = makeFakeEngine();
+    engine._tables.sys_user = [{ id: 'usr_designated' }, { id: 'usr_target' }];
+    engine._tables.sys_member = [{ organization_id: requestOrg ?? ORG, user_id: 'usr_target' }];
+    const svc = new ApprovalService({ engine: engine as any, tenancyPosture: () => posture });
+    const req = opened(await svc.openNodeRequest(
+      {
+        object: 'opportunity', recordId: 'opp1', runId: 'run_1', nodeId: 'sign_off',
+        flowName: 'deal_flow',
+        config: {
+          approvers: [{ type: 'user' as const, value: 'usr_designated' }],
+          behavior: 'first_response' as const,
+        },
+        record: { id: 'opp1', amount: 100 },
+      } as any,
+      SUBMITTER,
+    ));
+    const row = engine._tables.sys_approval_request.find((r) => r.id === req.id)!;
+    row.organization_id = requestOrg;
+    return { engine, svc, id: req.id };
+  }
+
+  /** Drive one door; report the refusal it threw (whole message) or `null`. */
+  async function act(svc: ApprovalService, door: Door, id: string, ctx: ExecutionContext): Promise<string | null> {
+    const actorId = String((ctx as any).userId ?? 'system');
+    try {
+      switch (door) {
+        case 'approve': await svc.decide(id, { decision: 'approve', actorId } as any, ctx); break;
+        case 'reject': await svc.decide(id, { decision: 'reject', actorId } as any, ctx); break;
+        case 'recall': await svc.recall(id, { actorId } as any, ctx); break;
+        case 'reassign': await svc.reassign(id, { actorId, to: 'usr_target' }, ctx); break;
+        case 'sendBack': await svc.sendBack(id, { actorId, comment: 'please revise' } as any, ctx); break;
+        case 'resubmit': await svc.resubmit(id, { actorId } as any, ctx); break;
+        case 'remind': await svc.remind(id, { actorId }, ctx); break;
+        case 'requestInfo': await svc.requestInfo(id, { actorId, comment: 'more detail' }, ctx); break;
+        case 'comment': await svc.comment(id, { actorId, comment: 'a note' }, ctx); break;
+      }
+      return null;
+    } catch (e) {
+      return String((e as any)?.message ?? e);
+    }
+  }
+
+  /** What the door left behind: the request's status and the actions the actor recorded. */
+  async function trace(engine: ReturnType<typeof makeFakeEngine>, id: string, actor: string) {
+    const [row] = await engine.find('sys_approval_request', { where: { id } });
+    const actions = (await engine.find('sys_approval_action', { where: { request_id: id } }))
+      .filter((a: any) => a.actor_id === actor);
+    return { status: row?.status, pending: row?.pending_approvers, actions: actions.length };
+  }
+
+  /** The effect an admitted override door leaves. */
+  const ADMITTED: Record<string, (t: Awaited<ReturnType<typeof trace>>) => void> = {
+    approve: (t) => expect(t.status).toBe('approved'),
+    reject: (t) => expect(t.status).toBe('rejected'),
+    recall: (t) => expect(t.status).toBe('recalled'),
+    reassign: (t) => expect(String(t.pending)).toContain('usr_target'),
+  };
+
+  describe.each(['isolated', 'group'])('under the walled `%s` posture', (posture) => {
+    it.each(DOORS)('a tenant administrator is refused on `%s`, answered as an id that names no request, and the request is unchanged', async (door) => {
+      const { context } = await resolve('genuine');
+      expect(context.posture).toBe('TENANT_ADMIN');
+      const { engine, svc, id } = await setup(posture, null);
+      const before = await trace(engine, id, ACTOR);
+
+      const threw = await act(svc, door, id, context);
+
+      expect(threw).toBe(`REQUEST_NOT_FOUND: ${id}`);
+      expect(await trace(engine, id, ACTOR)).toEqual(before);
+      expect(before).toMatchObject({ status: 'pending', actions: 0 });
+    });
+
+    it.each(DOORS)('side by side on `%s`: the refusal is the answer an id that names no request gets', async (door) => {
+      const { context } = await resolve('genuine');
+      const { svc, id } = await setup(posture, null);
+      const missing = 'areq_does_not_exist';
+
+      const onRow = await act(svc, door, id, context);
+      const onMissing = await act(svc, door, missing, context);
+
+      expect(onMissing).toBe(`REQUEST_NOT_FOUND: ${missing}`);
+      expect(onRow?.replace(id, '<id>')).toBe(onMissing?.replace(missing, '<id>'));
+      // The read door gives both the same answer too.
+      expect(await svc.getRequest(id, context)).toBeNull();
+      expect(await svc.getRequest(missing, context)).toBeNull();
+    });
+
+    it('the list door shows the request to a platform administrator, with the override flag, and not to the tenant administrator', async () => {
+      const { context } = await resolve('genuine');
+      const { svc, id } = await setup(posture, null);
+      const rows = await svc.listRequests({}, PLATFORM);
+      expect(rows.find((r) => r.id === id)).toMatchObject({ viewer: { can_override: true } });
+      expect(await svc.listRequests({}, context)).toEqual([]);
+    });
+
+    it.each(OVERRIDE_DOORS)('CONTROL — a platform administrator still acts on `%s`', async (door) => {
+      const { engine, svc, id } = await setup(posture, null);
+      expect(await act(svc, door, id, PLATFORM)).toBeNull();
+      ADMITTED[door](await trace(engine, id, 'usr_platform'));
+    });
+
+    it.each(OVERRIDE_DOORS)('CONTROL — a system context still acts on `%s`', async (door) => {
+      const { engine, svc, id } = await setup(posture, null);
+      expect(await act(svc, door, id, SYS)).toBeNull();
+      ADMITTED[door](await trace(engine, id, 'system'));
+    });
+
+    it.each(OVERRIDE_DOORS)('CONTROL — an organization’s own administrator still acts on `%s` for that organization’s request', async (door) => {
+      const { context } = await resolve('genuine');
+      const { engine, svc, id } = await setup(posture, ORG);
+      expect(await act(svc, door, id, context)).toBeNull();
+      ADMITTED[door](await trace(engine, id, ACTOR));
+    });
+
+    it.each(OVERRIDE_DOORS)('CONTROL — an administrator of another organization is refused on `%s` for an organization’s request', async (door) => {
+      const { context } = await resolve('genuine');
+      const { engine, svc, id } = await setup(posture, OTHER_ORG);
+      expect(await act(svc, door, id, context)).toBe(`REQUEST_NOT_FOUND: ${id}`);
+      expect(await trace(engine, id, ACTOR)).toMatchObject({ status: 'pending', actions: 0 });
+    });
+  });
+
+  describe('under the `single` posture', () => {
+    it.each(OVERRIDE_DOORS)('CONTROL — a tenant administrator still acts on `%s` for a request with no organization', async (door) => {
+      const { context } = await resolve('genuine');
+      const { engine, svc, id } = await setup('single', null);
+      expect(await act(svc, door, id, context)).toBeNull();
+      ADMITTED[door](await trace(engine, id, ACTOR));
+    });
+  });
+});
