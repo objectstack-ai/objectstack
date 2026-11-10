@@ -19,11 +19,21 @@
  *    epic seat's condition 1 asks: a second package-less grant in one
  *    organization refused, two packages admitted, one package twice refused.
  *    The organization column is NOT NULL on a table this driver builds
- *    (ADR-0131 D1), so no grant here has a NULL organization at all.
+ *    (ADR-0131 D1), so no grant here has a NULL organization at all;
+ *  - the narrower key as 18.0 built it — `(user_id, permission_set,
+ *    COALESCE(organization_id, '__global__'))` under the same generated name,
+ *    over a nullable organization column — is the widening arm's to account
+ *    for, never an orphan `drop_index` (destructive): KEPT on a table that is
+ *    not certified (the COALESCE bucket keeps NULL-organization grants to one,
+ *    which neither the wider key nor the guard does), and on a certified one
+ *    (ADR-0131 D1: the tenant column holds no NULL, so the two forms are one
+ *    constraint) kept until the guard stands, then one SAFE replace. Measured
+ *    on the upgrade dogfoods' 18.0 and 18.0.0 fixtures first (#32164).
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { SqlDriver } from './index.js';
+import { asPre18TenantColumn } from './pre-18-tenant-column.testkit.js';
 
 const GRANTS = 'sys_user_permission_set';
 const GUARD_NAME = 'uniq_sys_user_permission_set_packageless';
@@ -129,5 +139,116 @@ describe('the grant key widened by its package column — a real SQLite database
     // A second boot of this release leaves everything as it is.
     await driver!.initObjects(grants(NEW_INDEXES) as any);
     expect(await drift()).toEqual([]);
+  });
+});
+
+describe('the narrower key as 18.0 built it (the NULL-safe organization form) — a real SQLite database', () => {
+  let driver: SqlDriver | undefined;
+  afterEach(async () => {
+    await driver?.disconnect();
+    driver = undefined;
+  });
+
+  /** `buildIndexName('sys_user_permission_set', ['user_id', 'permission_set', 'organization_id'], true)`, the 18.0 fixtures' name. */
+  const LEGACY = 'uniq_sys_user_permission_set_ac248331';
+  const knex = () => (driver as any).knex;
+  const indexSql = async (name: string): Promise<string | null> =>
+    ((await knex().raw(`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?`, [name])) as any[])[0]?.sql ?? null;
+  const indexOps = async () =>
+    ((await driver!.detectManagedDrift()) as any[]).filter((e) => e.table === GRANTS && String(e.op.type).endsWith('_index'));
+  const lands = async (id: string, pkg: string | null, org: string | null): Promise<boolean> => {
+    try {
+      await knex()(GRANTS).insert({ id, user_id: 'u1', permission_set: 'sales_rep', permission_set_package: pkg, organization_id: org });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  /** An 18.0 database (nullable organization, the COALESCE narrower), booted by this release's declaration. */
+  async function from18Point0(): Promise<void> {
+    driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
+    (driver as any).logger = { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    await driver.initObjects(grants(OLD_INDEXES) as any);
+    await asPre18TenantColumn(driver, GRANTS);
+    await knex().raw(`DROP INDEX "${LEGACY}"`);
+    await knex().raw(
+      `CREATE UNIQUE INDEX "${LEGACY}" ON "${GRANTS}" ("user_id", "permission_set", COALESCE("organization_id", '__global__'))`,
+    );
+    await driver.initObjects(grants(NEW_INDEXES) as any);
+    expect(await indexSql(LEGACY)).toMatch(/COALESCE/);
+  }
+
+  it('certified or not, never an orphan drop and nothing destructive (before this arm: a destructive drop_index, the 18.0 upgrade dogfoods red)', async () => {
+    await from18Point0();
+    for (const certified of [false, true]) {
+      driver!.setTenantKeyCertifiedResolver(() => certified);
+      const ops = await indexOps();
+      expect(ops.some((e) => e.op.type === 'drop_index'), `certified=${certified}`).toBe(false);
+      expect(ops.some((e) => e.category === 'destructive'), `certified=${certified}`).toBe(false);
+    }
+  });
+
+  it('read BEFORE the sync that adds the package column (`os migrate plan` over an 18.0 database): KEPT, never an orphan drop', async () => {
+    driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
+    (driver as any).logger = { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    // The 18.0 table: no package column yet, a nullable organization, the COALESCE narrower.
+    const [old] = grants(OLD_INDEXES) as Array<{ fields: Record<string, unknown> }>;
+    const { permission_set_package: _absent, ...oldFields } = old.fields;
+    await driver.initObjects([{ ...old, fields: oldFields }] as any);
+    await asPre18TenantColumn(driver, GRANTS);
+    await knex().raw(`DROP INDEX "${LEGACY}"`);
+    await knex().raw(
+      `CREATE UNIQUE INDEX "${LEGACY}" ON "${GRANTS}" ("user_id", "permission_set", COALESCE("organization_id", '__global__'))`,
+    );
+    for (const certified of [false, true]) {
+      driver!.setTenantKeyCertifiedResolver(() => certified);
+      const plan = ((await driver!.detectManagedDrift(grants(NEW_INDEXES) as any)) as any[]).filter((e) => e.table === GRANTS);
+      expect(plan.filter((e) => e.op.type === 'drop_index' || e.category === 'destructive'), `certified=${certified}`).toEqual([]);
+      // Nothing else is offered for this table either: the additive sync adds
+      // the column (the plan reports no missing column), and the wider index
+      // cannot be offered before its column exists.
+      expect(plan, `certified=${certified}`).toEqual([]);
+    }
+    expect(await indexSql(LEGACY)).toMatch(/COALESCE/);
+  });
+
+  it('not certified: KEPT even beside the guard — no replace, no drop — and it still folds NULL-organization grants', async () => {
+    await from18Point0();
+    driver!.setTenantKeyCertifiedResolver(() => false);
+    await knex().raw(GUARD_SQL);
+    expect(await indexOps()).toEqual([]);
+    expect(await indexSql(LEGACY)).toMatch(/COALESCE/);
+    // Everything it refused, it still refuses: a NULL organization included.
+    expect(await lands('a', null, null)).toBe(true);
+    expect(await lands('b', null, null)).toBe(false);
+    expect(await lands('c', null, 'org_1')).toBe(true);
+    expect(await lands('d', null, 'org_1')).toBe(false);
+  });
+
+  it('certified, no guard yet: KEPT — no replace, no drop', async () => {
+    await from18Point0();
+    driver!.setTenantKeyCertifiedResolver(() => true);
+    expect(await indexOps()).toEqual([]);
+    expect(await indexSql(LEGACY)).toMatch(/COALESCE/);
+  });
+
+  it('certified, with the guard: one SAFE replace naming it, applied without allowDestructive; re-plan empty; condition 1 on the non-NULL organization', async () => {
+    await from18Point0();
+    driver!.setTenantKeyCertifiedResolver(() => true);
+    await knex().raw(GUARD_SQL);
+    const plan = await indexOps();
+    expect(plan.map((e) => [e.op.type, e.category])).toEqual([['replace_unique_index', 'safe']]);
+    expect(plan[0].op.dropIndexNames).toEqual([LEGACY]);
+    expect(plan[0].actual).toBe("UNIQUE (user_id, permission_set, COALESCE(organization_id, '__global__'))");
+    const { applied, skipped } = await driver!.applyMigrationEntries(plan);
+    expect([applied.length, skipped]).toEqual([1, []]);
+    expect(await indexSql(LEGACY)).toBeNull();
+    expect(await indexOps()).toEqual([]);
+    expect(await lands('n1', null, 'org_1')).toBe(true);
+    expect(await lands('n2', null, 'org_1')).toBe(false);
+    expect(await lands('p1', 'com.acme.crm', 'org_1')).toBe(true);
+    expect(await lands('p2', 'com.acme.hr', 'org_1')).toBe(true);
+    expect(await lands('p3', 'com.acme.crm', 'org_1')).toBe(false);
   });
 });
