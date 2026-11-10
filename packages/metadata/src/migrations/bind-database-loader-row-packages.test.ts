@@ -31,7 +31,11 @@ function rowStore(seed: Array<Record<string, unknown>>) {
       return row[key] === value;
     });
   const store = {
-    find: async (_table: string, query: any) => [...rows.values()].filter((row) => matches(row, query?.where)).map((row) => ({ ...row })),
+    find: async (_table: string, query: any) => {
+      const found = [...rows.values()].filter((row) => matches(row, query?.where));
+      const page = typeof query?.limit === 'number' ? found.slice(0, query.limit) : found;
+      return page.map((row) => ({ ...row }));
+    },
     findOne: async (_table: string, query: any) => [...rows.values()].find((row) => matches(row, query?.where)) ?? null,
     count: async (_table: string, query: any) => [...rows.values()].filter((row) => matches(row, query?.where)).length,
     update: async (_table: string, id: string, data: Record<string, unknown>) => {

@@ -19,7 +19,7 @@ ADR-0150 D3/D4 already stored these types per package in `MetadataManager`'s reg
 - **Removal.** `unregister` and `unregisterPackage` delete a by-package type from the in-memory loaders too (the artifact door's store), by the same key. `unregisterPackage(P)` also removes every item in P's slot, a package-less customization of P's item included. The realtime `created`/`updated` event names the package of an item that carries only the `_packageId` stamp, the way `deleted` already did.
 - **Unchanged.** Every other type is stored, read and removed by name, as before (pinned as CONTROL), and its in-memory loader copy is still not deleted from (a separate card). A read the registry answers is unchanged.
 
-**The remedy.** What a caller sees, FROM → TO, for a type in the set, with first-party reach:
+**The remedy.** What a caller sees before and after, for a type in the set, with first-party reach:
 
 - `get`/`getDiagnosed` naming no package that reaches the loaders, of a name two packages stored: FROM the body saved last TO `409 RESOURCE_CONFLICT` (`ambiguous-in-environment`), as the registry already answers it. Name the package in the read.
 - `get`/`getDiagnosed` naming a package that stored nothing, where another package did: FROM that package's body TO not found.
