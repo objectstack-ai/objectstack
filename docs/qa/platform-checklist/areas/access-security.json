@@ -4707,6 +4707,464 @@
           "ref": "#25835"
         }
       ]
+    },
+    {
+      "id": "access-security.permission-set-package-resolution",
+      "title": "A package's position resolves its permission sets from that package and its declared dependencies: a set only the environment or an unrelated package holds is refused and grants nothing, the boot report names the candidates, and a grant row records the package that holds its set",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "admin (the seeded admin): the installs, the grant and the reads",
+        "a member who holds the position qa_b_desk: the effective-permissions read"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr_a, namespace qa_a) and qa_b (manifest id com.qa.addr_b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. qa_a holds the permission set qa_a_reader (read on one showcase object); qa_b holds the position qa_b_desk binding qa_a_reader and qa_env_reader, and declares no dependency on qa_a",
+          "an environment permission set qa_env_reader saved with PUT /api/v1/meta/permission/qa_env_reader and no ?package=; a member assigned qa_b_desk; the server restarted after the installs so the boot report runs"
+        ]
+      },
+      "steps": [
+        "read the boot log for the catalog reference report",
+        "as the member, read the effective permissions (GET /api/v1/auth/me/permissions); record whether either set's grants are present",
+        "rebuild qa_b declaring a dependency on qa_a, reinstall, restart, and repeat the two reads",
+        "as admin, insert a sys_user_permission_set row granting qa_a_reader to the member with no package column; read the row back"
+      ],
+      "acceptance": [
+        {
+          "clause": "a position's set that only the environment holds, or that a package outside the position's closure holds, resolves to nothing and grants nothing",
+          "oracle": "api",
+          "verify": "before the dependency, the member holds neither set's grants (packages/core/src/security/security-catalog.ts: a refusal confers nothing and is never a guess, reason outside-closure)",
+          "evidence": "the effective-permissions body"
+        },
+        {
+          "clause": "the boot report names each refused reference with its candidates",
+          "oracle": "log",
+          "verify": "the boot log names qa_b_desk, qa_a_reader with com.qa.addr_a, and qa_env_reader with the environment",
+          "evidence": "the report lines"
+        },
+        {
+          "clause": "once qa_b declares qa_a, the position reaches qa_a_reader; qa_env_reader stays refused, since no package can depend on the environment",
+          "oracle": "api",
+          "verify": "after the dependency, the member holds qa_a_reader's grants and not qa_env_reader's (ADR-0150 D3 (a))",
+          "evidence": "the second effective-permissions body"
+        },
+        {
+          "clause": "a grant row written without a package records the package that holds its set",
+          "oracle": "api",
+          "verify": "the read-back row carries permission_set_package com.qa.addr_a (packages/plugins/plugin-security/src/stored-permission-set-package-stamp.ts#registerPermissionSetPackageStamp)",
+          "evidence": "the row"
+        },
+        {
+          "clause": "confirming a binding suggestion whose set name is refused answers 409 naming the reviewed bind command",
+          "oracle": "test",
+          "verify": "run packages/plugins/plugin-security/src/suggested-audience-bindings.test.ts and cite the case naming os migrate stored-references bind (a live run needs a suggestion row whose set two holders reach, which no stock fixture writes)",
+          "evidence": "the test output"
+        }
+      ],
+      "negative": [
+        "the member holding qa_env_reader's grants through the package position is a FAIL: that is the D3 (a) narrowing",
+        "a grant row stamped with a package that does not hold the set is a FAIL"
+      ],
+      "traps": ["wrong-persona", "cache-staleness"],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/objectql/src/engine-security-catalog-package-door.test.ts, packages/plugins/plugin-security/src/suggested-audience-bindings.test.ts, packages/qa/dogfood/test/stored-reference-package-column.dogfood.test.ts (R1)"
+      },
+      "source": [
+        "packages/core/src/security/security-catalog.ts (reads permission sets by (package, name) through resolvePackageScopedHolders; positions stay one slot per name)",
+        "packages/plugins/plugin-security/src/stored-permission-set-package-stamp.ts#registerPermissionSetPackageStamp (the column stamp on insert and update)",
+        "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D3 (own, then the one holder in the closure, else the refusal) and D3 (a)",
+        "#31815 (E3), #31974 (R1/R3 stamp and the suggestion refusal)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0150 child E3 and the R1/R3 stamp (#31815, #31974). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
+          "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "access-security.sharing-queue-assignment-package-resolution",
+      "title": "Sharing rules, queues and assignment rules resolve by (package, name): the activation door refuses a name two packages hold with the candidates, a declared rule's queue recipient and an assignment rule's queue come from the rule's own package, and a refused declared name serves nothing",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": ["admin (the seeded admin): the activation calls"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr_a, namespace qa_a) and qa_b (manifest id com.qa.addr_b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Each holds a queue qa_desk, a sharing rule qa_share and an assignment rule qa_route (none of these types has a one-holder rule, and the namespaces differ, so both install)"
+        ]
+      },
+      "steps": [
+        "POST /api/v1/security/_activation/queue/qa_desk {\"enabled\": false}; record status and body",
+        "repeat for /security/_activation/sharing_rule/qa_share and /security/_activation/assignment_rule/qa_route",
+        "GET /api/v1/data/sys_metadata_activation; record any row for the three names"
+      ],
+      "acceptance": [
+        {
+          "clause": "the activation door answers 409 RESOURCE_CONFLICT with the candidates for a queue, sharing rule or assignment rule name two packages hold, and writes no row",
+          "oracle": "api",
+          "verify": "each call answers 409 with code RESOURCE_CONFLICT and candidates naming com.qa.addr_a and com.qa.addr_b (packages/runtime/src/domains/catalog-activation.ts); the ledger holds no row for the three names",
+          "evidence": "the three 409 bodies and the ledger read"
+        },
+        {
+          "clause": "a declared sharing rule's queue recipient and an assignment rule's queue resolve from the rule's own package, and a refused declared name serves nothing and warns once",
+          "oracle": "test",
+          "verify": "run packages/plugins/plugin-sharing/src/package-scoped-declarations.test.ts and packages/plugins/plugin-sharing/src/queue-recipient.test.ts and cite their output (packages/plugins/plugin-sharing/src/package-scoped-declarations.ts#resolveDeclaredName). No checklist app stages queue members, so the live leg is the door above",
+          "evidence": "the test output"
+        }
+      ],
+      "negative": [
+        "a 200 that switches off one of the two holders' items is a FAIL: the door never picks",
+        "a 503 for the same call is a regression of #31959, which maps the package-scoped refusal to 409"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-sharing/src/package-scoped-declarations.test.ts, packages/plugins/plugin-sharing/src/queue-recipient.test.ts, packages/plugins/plugin-sharing/src/stored-declaration-package-backfill.test.ts"
+      },
+      "source": [
+        "packages/plugins/plugin-sharing/src/package-scoped-declarations.ts#resolveDeclaredName and #listedHoldersView",
+        "packages/plugins/plugin-sharing/src/ownership-queue-service.ts (resolve, expandMembers and isMember take the caller's package)",
+        "packages/runtime/src/domains/catalog-activation.ts (the 409 with candidates)",
+        "#31728, #31789, #31850 (E4), #31959 (the activation door's 409)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0150 child E4 (#31728, #31789, #31850). The queue and assignment_rule waivers in coverage.json stand: this item drives the activation door, not claim, release or move. Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
+          "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "access-security.permission-set-address-in-execution-context",
+      "title": "A permission set travels as (package, name) from the grant to every request's evaluation: the execution context carries permissionSetAddresses, the evaluator reads each set at its holder, the activation ledger switches a set off per holder, and an OAuth client acting for a user carries none",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "a member M holding a packaged permission set: every read the set decides",
+        "admin (the seeded admin): the grant, the explain reads and the activation switch"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr_a, namespace qa_a) and qa_b (manifest id com.qa.addr_b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. qa_a declares the object qa_a_ticket and the permission set qa_a_reader (read on qa_a_ticket, nothing else); qa_b declares one object and no permission set",
+          "a boot on a file database, as platform-core.activation-ledger-row-contract boots, because two steps stop the server and write the ledger directly",
+          "a member M (any signed-up person) granted qa_a_reader as admin with POST /api/v1/data/sys_user_permission_set {\"user_id\": M, \"permission_set\": \"qa_a_reader\"}; the grant door stamps permission_set_package (access-security.permission-set-package-resolution); one qa_a_ticket record"
+        ],
+        "knownGaps": [
+          "two packages each shipping qa_a_reader is not reachable through install today (#32027's own note), so the cases this change exists for (one name, two holders, each grant reaching only its own) are held by packages/plugins/plugin-security/src/permission-set-address.test.ts, not driven live"
+        ]
+      },
+      "steps": [
+        "as M: GET /api/v1/auth/me/permissions and GET /api/v1/data/qa_a_ticket. As admin: POST /api/v1/security/explain {\"userId\": M, \"object\": \"qa_a_ticket\", \"operation\": \"read\"}, and read M's grant row (GET /api/v1/data/sys_user_permission_set) for its permission_set_package",
+        "stop the server. In the database file, INSERT one sys_metadata_activation row: metadata_type 'permission', package_id 'com.qa.addr_b', name 'qa_a_reader', active false, with a fresh id and the audit columns as an existing row carries them. That row is a holder of the name M does not hold. Restart and repeat step 1. Then stop, DELETE that row and restart",
+        "as admin: POST /api/v1/security/_activation/permission/qa_a_reader {\"enabled\": false}; read the row it wrote (GET /api/v1/data/sys_metadata_activation); repeat step 1",
+        "stop the server; UPDATE that row's package_id to NULL (a package-less row, the shape an earlier release wrote); restart and repeat step 1. Then POST /api/v1/security/_activation/permission/qa_a_reader {\"enabled\": true} and repeat step 1 once more"
+      ],
+      "acceptance": [
+        {
+          "clause": "a grant resolves its set at its holder, and the member holds what the set grants",
+          "oracle": "api",
+          "verify": "M's effective permissions list qa_a_reader and the data read returns the record; the grant row's permission_set_package is com.qa.addr_a, which the resolver reads first, else ADR-0150 D3, and records as M's address (packages/core/src/security/resolve-authz-context.ts#resolveUserAuthzGrants; the evaluator resolves each address through the security catalog: packages/plugins/plugin-security/src/permission-evaluator.ts#permissionSetRequestsFor)",
+          "evidence": "the effective-permissions body, the data read and the grant row"
+        },
+        {
+          "clause": "a ledger row for another holder of the name switches nothing off for the holder M's grant names",
+          "oracle": "api",
+          "verify": "after step 2's restart M still lists qa_a_reader and still reads the record, and explain lists qa_a_reader as a contributor with no 'held — deactivated' entry (packages/core/src/security/resolve-authz-context.ts#permissionSetSwitchedOff, per holder since #32027)",
+          "evidence": "the three answers after the restart"
+        },
+        {
+          "clause": "the holder's own row switches the set off, and explain names it deactivated",
+          "oracle": "api",
+          "verify": "the door's row carries package_id com.qa.addr_a and active false; M's effective permissions no longer list qa_a_reader and the data read no longer returns the record (record its status); explain's principal layer carries the contributor {kind: 'permission_set', name: 'qa_a_reader', via: 'held — deactivated', state: 'deactivated'} (packages/plugins/plugin-security/src/explain-engine.ts, which judges dropped grants per holder)",
+          "evidence": "the ledger row and the three answers"
+        },
+        {
+          "clause": "a package-less row switches every holder of the name off, and re-enabling restores the grant",
+          "oracle": "api",
+          "verify": "with package_id NULL, step 1's answers are those of the previous clause (packages/core/src/security/resolve-authz-context.ts#readDisabledCatalogNames); after {\"enabled\": true} M lists qa_a_reader again and reads the record",
+          "evidence": "both sets of answers"
+        },
+        {
+          "clause": "an OAuth client acting for a user carries no address; an AI service account carries its own",
+          "oracle": "test",
+          "verify": "packages/core/src/security/assemble-execution-context.ts#assembleExecutionContext sets permissionSetAddresses to undefined on the OAuth agent arm: its permissions are the scope-derived ceiling names, which resolve by D3 with no caller, as #32027's comment on the line states. The AI service account (ADR-0151) is the account arm, not that one, and carries authz.permissionSetAddresses. ⚠️ No pin tells the arms apart: assemble-execution-context.test.ts's 'decided but not yet filled' case asserts the agent context has no key, but its authz fixture carries no addresses either. Score this clause from the source reading and say so in the run record (FOLLOW-UPS §16b)",
+          "evidence": "the source lines read, and the run record's note"
+        }
+      ],
+      "negative": [
+        "the foreign row of step 2 switching off M's set is a FAIL: the ledger is judged per holder",
+        "⛔ leaving step 2's foreign row in place before step 3 makes the door switch that row instead of writing com.qa.addr_a's: setActive finds its row by (metadata_type, name) (packages/core/src/utils/metadata-activation-store.ts, FOLLOW-UPS §16b). That is a fixture error, never a verdict on this item"
+      ],
+      "traps": ["cache-staleness", "wrong-persona"],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-security/src/permission-set-address.test.ts and packages/core/src/security/request-execution-context.test.ts; no live spec drives the ledger per holder"
+      },
+      "source": [
+        "packages/core/src/security/assemble-execution-context.ts#assembleExecutionContext (permissionSetAddresses: agent ? undefined : authz.permissionSetAddresses)",
+        "packages/core/src/security/resolve-authz-context.ts#resolveUserAuthzGrants (each set resolved once through the security catalog: the R1 column first, else D3)",
+        "packages/core/src/security/resolve-authz-context.ts#permissionSetSwitchedOff and #readDisabledCatalogNames (the ledger per holder; a package-less row switches every holder off)",
+        "packages/plugins/plugin-security/src/permission-evaluator.ts#permissionSetRequestsFor (the evaluator reads each set at its address)",
+        "packages/plugins/plugin-security/src/explain-engine.ts (dropped grants per holder)",
+        "packages/spec/src/kernel/execution-context.zod.ts#PermissionSetAddressSchema (declared by #31978)",
+        "#32027 (part of #31971), #31698 (permission-set family narrowing, open)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0150 D3 and D4 (D8 row R4), the permission set address pipeline (#32027). This sweep first drafted the item as planned at 60f8149e, when the assembler always left permissionSetAddresses undefined; #32027 landed before the item reached main, so it is authored active, as a new item, not promoted. Scoped sweep #32019 (epic #32022 M1, theme 1), read from source at 0f7389cc; no live run made",
+          "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "access-security.ai-service-account-agent-ceiling",
+      "title": "An AI service account acts under the agent ceiling: its key never carries View All, Modify All, the destructive class, a system permission or admin standing; assigning it a set or a position above the ceiling, by insert or update, is refused 400 naming what breaches; and a set edited above it after assignment still grants nothing more",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["organization administrator: the assignments", "the AI service account, through its key: every effective read"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "an account with a key, registered as identity-auth.ai-service-account-register-and-key does; a scratch permission set qa_agent_reader (read on one showcase object, no system permissions) and a second set qa_view_all with viewAllRecords on the same object",
+          "a position qa_view_all_pos whose permissionSets is [\"qa_view_all\"], saved as admin with PUT /api/v1/meta/position/qa_view_all_pos"
+        ]
+      },
+      "steps": [
+        "with the key: GET /api/v1/auth/me/permissions; record system permissions, admin standing and any View All / Modify All",
+        "as the administrator: POST /api/v1/data/sys_user_permission_set granting qa_view_all to the account, then qa_agent_reader; POST /api/v1/data/sys_user_position assigning qa_view_all_pos to the account; PATCH the accepted qa_agent_reader row's permission_set to qa_view_all; then grant mcp_agent_data_read to the account; record each answer and read the account's grant and position rows",
+        "with the key: read the object; then as the administrator edit qa_agent_reader to add viewAllRecords (PUT /api/v1/meta/permission/qa_agent_reader) and repeat the effective-permissions read and the object read with the key"
+      ],
+      "acceptance": [
+        {
+          "clause": "the account resolves as an agent: no system permissions, no admin standing, and no everyone-anchor sets",
+          "oracle": "api",
+          "verify": "the effective-permissions body lists no system permission and no admin scope (packages/core/src/security/resolve-authz-context.ts#isAgentAccountRow, #resolveUserAuthzGrants)",
+          "evidence": "the body"
+        },
+        {
+          "clause": "assigning a set or a position above the ceiling, by insert or by update, is refused 400 VALIDATION_FAILED naming what breaches; a set inside it is accepted",
+          "oracle": "api",
+          "verify": "the qa_view_all grant answers 400 with code VALIDATION_FAILED and invalid_value at permission_set naming viewAllRecords (packages/plugins/plugin-security/src/agent-account-grant-refusal.ts#agentAccountSetGrantMessage); the qa_view_all_pos assignment answers 400 at position naming qa_view_all and its breaching bits (#agentAccountPositionGrantMessage); the PATCH answers 400 at permission_set and the row keeps qa_agent_reader; the qa_agent_reader grant is accepted. No refused row is stored",
+          "evidence": "the four answers and the rows read after them"
+        },
+        {
+          "clause": "an MCP agent ceiling set is refused to the account by its sibling rule, which runs first",
+          "oracle": "api",
+          "verify": "the mcp_agent_data_read grant answers 400 VALIDATION_FAILED at permission_set with the sentence of the MCP ceiling rule (\"…the permission ceiling of an AI assistant connected over MCP, not a permission set for a person…\": packages/plugins/plugin-security/src/agent-ceiling-grant-refusal.ts#agentCeilingGrantMessage). That rule judges every holder at hook priority 35, before this item's rule at 45; access-security.agent-ceiling-set-assignment-refusal covers its other doors",
+          "evidence": "the answer"
+        },
+        {
+          "clause": "a set edited above the ceiling after assignment is still read under it",
+          "oracle": "api",
+          "verify": "after the edit the key's effective permissions still carry no View All, and the object read returns only what qa_agent_reader allowed before the edit (packages/plugins/plugin-security/src/agent-ceiling-clamp.ts#clampPermissionSetToAgentCeiling)",
+          "evidence": "the effective-permissions body and both object reads"
+        }
+      ],
+      "negative": [
+        "View All reaching the key through any path is a FAIL",
+        "this item's refusal applied to a person's grant is a FAIL: only an agent holder is judged by the bits its sets carry. ⛔ Do not confuse it with the MCP agent ceiling sets' rule, which refuses those three sets to every holder (access-security.agent-ceiling-set-assignment-refusal)"
+      ],
+      "traps": ["wrong-persona", "cache-staleness"],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-security/src/agent-account-grant-refusal.test.ts, packages/plugins/plugin-security/src/agent-ceiling-clamp.test.ts, packages/plugins/plugin-security/src/agent-ceiling-grant-refusal.test.ts, packages/core/src/security/resolve-authz-context.agent-account.test.ts"
+      },
+      "source": [
+        "packages/plugins/plugin-security/src/agent-account-grant-refusal.ts#registerAgentAccountGrantRefusal (the write-path refusal on sys_user_permission_set and sys_user_position, insert and update, priority 45)",
+        "packages/plugins/plugin-security/src/agent-ceiling-clamp.ts#AGENT_CEILING_OBJECT_KEYS (the clamp at evaluation)",
+        "packages/plugins/plugin-security/src/agent-ceiling-grant-refusal.ts#registerAgentCeilingGrantRefusal (the sibling rule for the MCP ceiling sets, priority 35)",
+        "packages/core/src/security/resolve-authz-context.ts#resolveUserAuthzGrants",
+        "docs/adr/0151-ai-service-account-a-headless-agent-is-a-registered-principal-of-its-own.md D3",
+        "#31867, #32056"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0151 D3, the agent ceiling (#31867): the set and position refusals, insert and update, and the clamp; with the sibling MCP ceiling-set rule's answer to the account (#32056 widened that rule's doors). Scoped sweep #32019 (epic #32022 M1, theme 3: AI service accounts and identity), read from source at 0f7389cc; no live run made",
+          "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "access-security.credential-use-audit-row",
+      "title": "Each API key or OAuth access token use writes one credential_use audit row per use window, naming the credential, its owner and the client's address, and never the key, its hash or its prefix",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": ["a member holding an osk_ API key: the requests", "admin (the seeded admin): the audit read"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": ["one API key a member minted at POST /api/v1/keys, unused since it was minted"]
+      },
+      "steps": [
+        "make two reads with the key in quick succession",
+        "as admin: GET /api/v1/data/sys_audit_log filtered to action credential_use; record every row for the key",
+        "search each row's whole text for the raw key and for its prefix"
+      ],
+      "acceptance": [
+        {
+          "clause": "the first admitted use writes one credential_use row; a second use inside the window writes none",
+          "oracle": "api",
+          "verify": "exactly one row for the key (packages/plugins/plugin-audit/src/credential-use-audit.ts#CREDENTIAL_USE_AUDIT_ACTION; the stamp is the window)",
+          "evidence": "the audit rows"
+        },
+        {
+          "clause": "the row names the key owner as actor, the key row as its record, and carries credential_kind api_key, credential_id, used_at and the client address and user agent, or ip_address_absent",
+          "oracle": "api",
+          "verify": "the row's metadata holds those keys (packages/plugins/plugin-audit/src/credential-use-audit.ts#buildCredentialUseAuditRow; packages/core/src/security/credential-use-client.ts#credentialUseClientOf)",
+          "evidence": "the row"
+        },
+        {
+          "clause": "the row never carries the key, its hash or its prefix",
+          "oracle": "api",
+          "verify": "neither search finds a match",
+          "evidence": "the two search results"
+        }
+      ],
+      "negative": [
+        "one row per request is a FAIL: the ledger would grow with traffic, not with use windows",
+        "a client address read from X-Forwarded-For is a FAIL: only the transport peer is read"
+      ],
+      "traps": ["eventual-consistency"],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-audit/src/credential-use-audit.integration.test.ts, packages/core/src/security/credential-use-client-doors.pin.test.ts"
+      },
+      "source": [
+        "packages/plugins/plugin-audit/src/credential-use-audit.ts#installCredentialUseAudit (the stamp is the window; the row's keys)",
+        "packages/core/src/security/credential-use-client.ts#transportPeerAddressOf",
+        "#31862, #31897, #31967"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — the credential_use ledger row (#31862, #31897, #31967). Scoped sweep #32019 (epic #32022 M1, theme 3: AI service accounts and identity), read from source at 60f8149e; no live run made",
+          "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "access-security.agent-ceiling-set-assignment-refusal",
+      "title": "The MCP agent ceiling sets (mcp_agent_data_read, mcp_agent_data_write, mcp_agent_restricted) reach no person through any door: a direct grant, a position definition saved at the metadata door (active or draft), a position assignment, a seed and the deployment baseline are each refused 400 VALIDATION_FAILED at the field that named the set, and an ordinary set passes every one of them",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "admin (the seeded admin): every write",
+        "a person P (any signed-up account): the holder every write targets, and the effective-permissions read"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh showcase boot and a person P signed up through the auth door",
+          "an authored package created as admin with POST /api/v1/packages {\"manifest\": {\"id\": \"com.qa.ceil\", \"name\": \"QA ceiling doors\", \"version\": \"0.1.0\", \"type\": \"app\", \"namespace\": \"qa_ceil\"}} (201), for the draft and seed legs",
+          "one scratch package qa_decl (manifest id com.qa.decl, namespace qa_decl), its own scratch app directory, compiled with `objectstack build` and installed with `os package install DIR/dist/objectstack.json`, declaring one object and the position qa_declared_ceiling whose permissionSets is [\"mcp_agent_data_read\"]: a definition that reaches the catalog without the metadata door, for the assignment leg",
+          "the showcase person sets showcase_contributor, showcase_auditor and showcase_ops, used as the ordinary-set controls"
+        ],
+        "knownGaps": [
+          "if installing qa_decl is itself refused, record that answer: the assignment leg then has no position to assign, so score it blocked(fixture), never a pass. The dogfood pin registers such a definition straight into the registry, which a live run cannot do",
+          "the baseline leg needs a host whose SecurityPlugin options name a ceiling set, which the showcase boot does not take; it is scored from the unit pin"
+        ]
+      },
+      "steps": [
+        "as admin: POST /api/v1/data/sys_user_permission_set {\"user_id\": P, \"permission_set\": \"mcp_agent_data_read\"}; then the same with showcase_contributor; then PATCH that accepted row's permission_set to mcp_agent_data_write; record each answer",
+        "PUT /api/v1/meta/position/qa_ceiling_pos {\"name\": \"qa_ceiling_pos\", \"label\": \"QA ceiling\", \"permissionSets\": [\"showcase_auditor\", \"mcp_agent_data_read\"]}; then PUT /api/v1/meta/position/qa_ceiling_pos?mode=draft&package=com.qa.ceil with the same body; then GET /api/v1/meta/position/qa_ceiling_pos",
+        "control: PUT /api/v1/meta/position/qa_person_pos {\"name\": \"qa_person_pos\", \"label\": \"QA person\", \"permissionSets\": [\"showcase_auditor\"]}, then POST /api/v1/data/sys_user_position {\"user_id\": P, \"position\": \"qa_person_pos\"}",
+        "POST /api/v1/data/sys_user_position {\"user_id\": P, \"position\": \"qa_declared_ceiling\"}; read P's sys_user_position rows",
+        "seed: PUT /api/v1/meta/seed/qa_ceiling_seed?mode=draft&package=com.qa.ceil {\"object\": \"sys_user_permission_set\", \"mode\": \"insert\", \"records\": [{\"user_id\": P, \"permission_set\": \"mcp_agent_restricted\"}]} and PUT /api/v1/meta/seed/qa_person_seed?mode=draft&package=com.qa.ceil with permission_set showcase_ops; POST /api/v1/packages/com.qa.ceil/publish-drafts {}; read P's sys_user_permission_set rows",
+        "as P: GET /api/v1/auth/me/permissions"
+      ],
+      "acceptance": [
+        {
+          "clause": "a direct grant of a ceiling set, by insert or by update, is refused; an ordinary set is granted",
+          "oracle": "api",
+          "verify": "the mcp_agent_data_read insert and the PATCH each answer 400 with code VALIDATION_FAILED and one fields[] entry {field: 'permission_set', code: 'invalid_value', value: <the set>}, whose constraint carries principalKind agent and permissionSet (packages/plugins/plugin-security/src/agent-ceiling-grant-refusal.ts#agentCeilingGrantError); the showcase_contributor grant is accepted and keeps its set",
+          "evidence": "the three answers and the row after the PATCH"
+        },
+        {
+          "clause": "the metadata door refuses a position definition naming a ceiling set, active and draft, and stores neither",
+          "oracle": "api",
+          "verify": "both saves answer 400 VALIDATION_FAILED at permissionSets with value mcp_agent_data_read (#registerPositionAgentCeilingGate, the protocol's authoring gate for position; a restore runs the same gate); the read answers 404. The control position saves 200 and its assignment answers 201",
+          "evidence": "the two refusals, the 404 and the two control answers"
+        },
+        {
+          "clause": "assigning a position whose definition names a ceiling set is refused at position, for a definition that never met the metadata door",
+          "oracle": "api",
+          "verify": "the qa_declared_ceiling assignment answers 400 VALIDATION_FAILED with fields[0] {field: 'position', code: 'invalid_value', value: 'qa_declared_ceiling'}, whose message names the set (#agentCeilingPositionAssignment); P has no row for it",
+          "evidence": "the answer and the rows"
+        },
+        {
+          "clause": "a seed granting a ceiling set stores no grant, and the seed's ordinary grant lands",
+          "oracle": "api",
+          "verify": "the publish answers 200; P's grant rows include showcase_ops and no row names any of the three ceiling sets. The seed's refused row is reported, and its other rows land",
+          "evidence": "the publish answer and the rows"
+        },
+        {
+          "clause": "the person resolves the ordinary sets and no ceiling set",
+          "oracle": "api",
+          "verify": "P's permissionSets include showcase_contributor, showcase_auditor (through qa_person_pos) and showcase_ops, and none of mcp_agent_data_read, mcp_agent_data_write, mcp_agent_restricted",
+          "evidence": "the body"
+        },
+        {
+          "clause": "a baseline naming a ceiling set does not boot, and an identity-provider group mapping never grants one",
+          "oracle": "test",
+          "verify": "run agent-ceiling-grant-refusal.test.ts: a SecurityPlugin whose fallbackPermissionSet (directly or as the isDefault set of defaultPermissionSets) or acceptedDefaultPermissionSets names a ceiling set throws at construction (#refuseAgentCeilingInBaselineOptions). Run scim-group-projection.test.ts: the mapping save refuses each of the three names and stores nothing, and the per-grant admission grants nothing for a stored mapping naming one. Each file reports at least one test and 0 failed",
+          "evidence": "both runs"
+        }
+      ],
+      "negative": [
+        "a ceiling set reaching a person through any of these doors is a FAIL",
+        "an ordinary set refused at any of these doors is a FAIL: the rule matches the three names exactly",
+        "reading a position a person holds without an assignment row, or a definition that reached the catalog without the metadata door and is never assigned, as a miss of this item is wrong: these doors do not judge them, and the read side is a separate decision (#32004)"
+      ],
+      "traps": ["wrong-persona"],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-security/src/agent-ceiling-grant-refusal.test.ts, packages/plugins/plugin-auth/src/scim-group-projection.test.ts and packages/qa/dogfood/test/grant-table-write-contract.dogfood.test.ts (the door pins on a booted showcase)"
+      },
+      "source": [
+        "packages/plugins/plugin-security/src/agent-ceiling-grant-refusal.ts#registerAgentCeilingGrantRefusal (sys_user_permission_set and sys_user_position, insert and update, priority 35)",
+        "packages/plugins/plugin-security/src/agent-ceiling-grant-refusal.ts#registerPositionAgentCeilingGate and #refuseAgentCeilingInBaselineOptions",
+        "packages/plugins/plugin-security/src/security-plugin-start-hooks.ts (both registrations)",
+        "packages/spec/src/ai/mcp.zod.ts#MCP_AGENT_PERMISSION_SETS",
+        "docs/adr/0090-permission-model-v2-concept-convergence.md D10",
+        "#32056"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0090 D10, the MCP agent ceiling sets reach no person: the direct grant rule, and the four doors #32056 added (the metadata door's position definition, every sys_user_position write, a seed, the baseline options), with the identity-provider mapping pins. Scoped sweep #32019 (epic #32022 M1, theme 3), read from source at 0f7389cc; no live run made",
+          "ref": "#32019"
+        }
+      ]
     }
   ]
 }

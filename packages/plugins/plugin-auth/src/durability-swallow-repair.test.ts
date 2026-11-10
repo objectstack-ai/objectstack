@@ -424,8 +424,9 @@ describe('#12981 batch 5 — plugin-auth durability swallows report instead of v
     it('a refused SCIM provenance stamp is reported, and names why nothing retries it', async () => {
       let stamp: ((hookCtx: unknown) => Promise<void>) | undefined;
       const engine = {
-        registerHook: vi.fn((event: string, handler: (c: unknown) => Promise<void>) => {
-          if (event === 'afterInsert') stamp = handler;
+        // The stamp is the plugin package's own afterInsert; other triggers bind theirs under their own package id.
+        registerHook: vi.fn((event: string, handler: (c: unknown) => Promise<void>, options?: { packageId?: string }) => {
+          if (event === 'afterInsert' && options?.packageId === 'com.objectstack.plugin-auth') stamp = handler;
         }),
         count: vi.fn(async () => 0),
         findOne: vi.fn(async () => ({ id: 'u1', source: 'env_native' })),
