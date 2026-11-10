@@ -69,13 +69,15 @@ export function decodeCheckpointSeed(text: string): Buffer {
 
 /** The salt of column `column` of row `rowId` of `sealedObject`, under `seed` (D2). */
 export function columnSalt(seed: Uint8Array, sealedObject: string, rowId: string, column: string): Buffer {
-  return createHmac('sha256', seed)
-    .update(Buffer.from(sealedObject, 'utf8'))
-    .update(Uint8Array.of(0x00))
-    .update(Buffer.from(rowId, 'utf8'))
-    .update(Uint8Array.of(0x00))
-    .update(Buffer.from(column, 'utf8'))
-    .digest();
+  const separator = Uint8Array.of(0x00);
+  const message = Buffer.concat([
+    Buffer.from(sealedObject, 'utf8'),
+    separator,
+    Buffer.from(rowId, 'utf8'),
+    separator,
+    Buffer.from(column, 'utf8'),
+  ]);
+  return createHmac('sha256', seed).update(message).digest();
 }
 
 /** A salt function over one checkpoint's seed, for `leafInput`. */

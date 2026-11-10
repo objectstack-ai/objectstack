@@ -50,16 +50,22 @@ export const SysAuditCheckpoint = ObjectSchema.create({
 
   fields: {
     id: Field.text({ label: 'Checkpoint ID', required: true, readonly: true }),
+    // Keyed by both indexes below, so bounded (#11374): an object name, which
+    // the sealer reads off the registry, bounded as `sys_audit_log.object_name`.
     sealed_object: Field.text({
       label: 'Sealed Object',
       required: true,
       readonly: true,
+      maxLength: 255,
       description: 'The object whose rows this checkpoint seals',
     }),
+    // `org:` (4 characters) and an organization id, a stored row's id: the
+    // `varchar(255)` primary key `driver-sql` creates. 4 + 255.
     chain_key: Field.text({
       label: 'Chain Key',
       required: true,
       readonly: true,
+      maxLength: 259,
       description: '`org:` and the organization id, or `deployment` for rows about no organization',
     }),
     tenant_id: Field.lookup('sys_organization', {

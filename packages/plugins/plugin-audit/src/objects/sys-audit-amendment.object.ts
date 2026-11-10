@@ -62,11 +62,16 @@ export const SysAuditAmendment = ObjectSchema.create({
         readonly: true,
       },
     ),
-    sealed_object: Field.text({ label: 'Sealed Object', required: true, readonly: true }),
+    // Keyed columns are bounded (#11374). An object name, which the sealer
+    // reads off the registry, bounded as `sys_audit_log.object_name`.
+    sealed_object: Field.text({ label: 'Sealed Object', required: true, readonly: true, maxLength: 255 }),
+    // `org:` (4 characters) and an organization id, a stored row's id: the
+    // `varchar(255)` primary key `driver-sql` creates. 4 + 255.
     chain_key: Field.text({
       label: 'Chain Key',
       required: true,
       readonly: true,
+      maxLength: 259,
       description: '`org:` and the organization id, or `deployment` for rows about no organization',
     }),
     tenant_id: Field.lookup('sys_organization', {
@@ -79,7 +84,8 @@ export const SysAuditAmendment = ObjectSchema.create({
 
     // ── redaction ────────────────────────────────────────────────
     checkpoint_id: Field.text({ label: 'Checkpoint', required: false, readonly: true }),
-    row_id: Field.text({ label: 'Row ID', required: false, readonly: true }),
+    // A sealed row's id: the `varchar(255)` primary key `driver-sql` creates.
+    row_id: Field.text({ label: 'Row ID', required: false, readonly: true, maxLength: 255 }),
     column_name: Field.text({ label: 'Column', required: false, readonly: true }),
     sealed_commitment: Field.text({ label: 'Sealed Commitment', required: false, readonly: true }),
     rewritten_commitment: Field.text({ label: 'Rewritten Commitment', required: false, readonly: true }),

@@ -19,7 +19,7 @@ const HASH_BYTES = 32;
 
 /** An interior node's hash. */
 export function nodeHash(left: Uint8Array, right: Uint8Array): Buffer {
-  return createHash('sha256').update(Uint8Array.of(NODE_PREFIX)).update(left).update(right).digest();
+  return createHash('sha256').update(Buffer.concat([Uint8Array.of(NODE_PREFIX), left, right])).digest();
 }
 
 /** The root of `leaves`, lowercase hex. Refuses an empty list and anything that is not a 32-byte hash. */
