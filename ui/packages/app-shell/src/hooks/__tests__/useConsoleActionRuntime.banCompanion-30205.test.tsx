@@ -29,6 +29,9 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 /** The bundle, keyed `KEY_OBJECT|ACTION` (`global` for no key object). */
 let bundle: Record<string, string> = {};
 const asked: Array<{ objectName: string | undefined; actionName: string | undefined; fallback: unknown }> = [];
+/** Preflight row labels, keyed `KEY_OBJECT|ACTION|PATH` (`global` for no key object). */
+let preflightLabels: Record<string, string> = {};
+const preflightAsked: Array<{ objectName: string | undefined; actionName: string | undefined }> = [];
 const LANGUAGE = 'zh-CN';
 
 // Partial mock: `@object-ui/components` reaches for `createSafeTranslation` at
@@ -45,6 +48,19 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
     actionCancelText: (objectName: string | undefined, actionName: string | undefined, fallback?: string) => {
       asked.push({ objectName, actionName, fallback });
       return bundle[`${objectName ?? 'global'}|${actionName}`] ?? (fallback || undefined);
+    },
+    // Stands in for the bundle overlay so this file pins what the handler asks
+    // and passes on; the bundle node lookup is `@object-ui/i18n`'s own pin.
+    actionPreflight: (objectName: string | undefined, actionName: string | undefined, spec: any) => {
+      preflightAsked.push({ objectName, actionName });
+      if (!spec || !Array.isArray(spec.fields)) return spec;
+      return {
+        ...spec,
+        fields: spec.fields.map((field: any) => {
+          const label = preflightLabels[`${objectName ?? 'global'}|${actionName}|${field.path}`];
+          return label ? { ...field, label } : field;
+        }),
+      };
     },
   }),
   useObjectTranslation: () => ({
@@ -107,6 +123,8 @@ async function collectParams(dispatch: Record<string, unknown>, interpolateRead?
 beforeEach(() => {
   bundle = {};
   asked.length = 0;
+  preflightLabels = {};
+  preflightAsked.length = 0;
   paramDialogState = null;
 });
 
@@ -142,5 +160,34 @@ describe('useConsoleActionRuntime — the declared preflight read joins the slot
       kind: 'preflight',
       hostChrome: { kind: 'user-assigned-work', userId: 'u_lee' },
     });
+  });
+});
+
+describe('useConsoleActionRuntime — the preflight rows read the bundle (objectstack#31937)', () => {
+  const PREFLIGHT = {
+    read: { url: '/api/v1/plan?subject=${param.subject}' },
+    path: 'data',
+    fields: [
+      { path: 'plan.total', label: 'Total' },
+      { path: 'plan.note', label: { en: 'Note', 'zh-CN': '备注' } },
+    ],
+  };
+
+  it('hands the companion the localized rows, asked on the action\'s own object', async () => {
+    preflightLabels = { 'crm_note|send_note|plan.total': '合计' };
+    await collectParams({ name: 'send_note', label: 'Send', objectName: 'crm_note', preflight: PREFLIGHT });
+    expect(preflightAsked).toEqual([{ objectName: 'crm_note', actionName: 'send_note' }]);
+    expect(paramDialogState.companion.judged).toMatchObject({ ok: true });
+    expect(paramDialogState.companion.judged.preflight.fields).toEqual([
+      { path: 'plan.total', label: '合计' },
+      // No bundle string: the authored inline map goes on as written.
+      { path: 'plan.note', label: { en: 'Note', 'zh-CN': '备注' } },
+    ]);
+  });
+
+  it('CONTROL: an action that declares no preflight asks nothing', async () => {
+    await collectParams({ name: 'send_note', label: 'Send', objectName: 'crm_note' });
+    expect(preflightAsked).toEqual([]);
+    expect(paramDialogState.companion).toBeUndefined();
   });
 });
