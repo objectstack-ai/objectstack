@@ -3683,7 +3683,15 @@ const ObjectSchemaBase = strictObject(
           message: 'Field names must not be "constructor" or "prototype" (reserved JavaScript prototype property names).',
           path: [reserved],
         }),
-      z.record(AuthorFieldNameKeySchema, FieldSchema),
+      z.record(AuthorFieldNameKeySchema, FieldSchema, {
+        // [ADR-0153 D4] A grammatical key under the reserved prefix gets the
+        // reservation's own sentence, not zod's generic "Invalid key in
+        // record"; every other key keeps the message it had.
+        error: (issue) =>
+          issue.code === 'invalid_key' && /^_sync_[a-z0-9_]*$/.test(String(issue.input))
+            ? SYNC_RESERVED_FIELD_PREFIX_REFUSED
+            : undefined,
+      }),
     ),
     'fields',
   ).describe('Field definitions map. Keys must be snake_case identifiers; "__proto__", "constructor" and "prototype" are refused, and so is the "_sync_" prefix, reserved for the platform\'s sync-in columns.'),

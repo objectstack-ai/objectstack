@@ -131,6 +131,8 @@
         "manifest.hooks.element.object",
         "manifest.jobs.element",
         "manifest.jobs.element.schedule.options[0].timezone",
+        "manifest.mappings.element",
+        "manifest.mappings.element.connectorSource.paging",
         "manifest.navigationContributions.element.items.element.lazy",
         "manifest.navigationContributions.element.items.element.lazy.options[0]",
         "manifest.objectExtensions.element",
@@ -285,6 +287,8 @@
         "data.options[1].manifest.hooks.element.object",
         "data.options[1].manifest.jobs.element",
         "data.options[1].manifest.jobs.element.schedule.options[0].timezone",
+        "data.options[1].manifest.mappings.element",
+        "data.options[1].manifest.mappings.element.connectorSource.paging",
         "data.options[1].manifest.objectExtensions.element",
         "data.options[1].manifest.objects.element",
         "data.options[1].manifest.objects.element.defaultRowScope",
@@ -428,6 +432,8 @@
         "options[1].manifest.hooks.element.object",
         "options[1].manifest.jobs.element",
         "options[1].manifest.jobs.element.schedule.options[0].timezone",
+        "options[1].manifest.mappings.element",
+        "options[1].manifest.mappings.element.connectorSource.paging",
         "options[1].manifest.objectExtensions.element",
         "options[1].manifest.objects.element",
         "options[1].manifest.objects.element.defaultRowScope",
@@ -511,6 +517,8 @@
         "data.packages.element.options[1].manifest.hooks.element.object",
         "data.packages.element.options[1].manifest.jobs.element",
         "data.packages.element.options[1].manifest.jobs.element.schedule.options[0].timezone",
+        "data.packages.element.options[1].manifest.mappings.element",
+        "data.packages.element.options[1].manifest.mappings.element.connectorSource.paging",
         "data.packages.element.options[1].manifest.objectExtensions.element",
         "data.packages.element.options[1].manifest.objects.element",
         "data.packages.element.options[1].manifest.objects.element.defaultRowScope",
@@ -1004,6 +1012,12 @@
     "data/LocalStoragePersistenceConfig": {
       "sites": [
         "key"
+      ]
+    },
+    "data/Mapping": {
+      "sites": [
+        "",
+        "connectorSource.paging"
       ]
     },
     "data/Metric": {

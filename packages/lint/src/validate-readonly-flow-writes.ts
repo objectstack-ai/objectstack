@@ -197,8 +197,12 @@ export function buildServedReadonlyIndex(stack: AnyRec): Map<string, Map<string,
  * while `platform` / `config` / `system-data` are writable by default and carry
  * no such guard.
  */
- * | `synced`       | ADR-0103 guard, `userActions` locked (ADR-0153 D4) | steps around |
- * | `better-auth`  | ADR-0092 identity write guard                 | steps around |
+const PLATFORM_INTERNAL_MANAGED_BUCKETS: ReadonlySet<string> = new Set([
+  'engine-owned',
+  'append-only',
+  'synced',
+  'better-auth',
+]);
 
 /**
  * Objects the engine's CREATE-side static strip does not judge at all — the
