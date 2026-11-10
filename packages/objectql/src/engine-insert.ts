@@ -685,13 +685,19 @@ export class InsertFacet {
       // payload it saw before the hide existed, wherever no hook wrote the key.
       // The per-key rule is `handBackWithheldInsertReadonly`'s. A culled row is
       // handed back too: it ran no hook, so it gets its caller's row back whole.
+      //
+      // A withheld value a hook wrote over is recorded per row
+      // (`insertSuperseded`) and reported beside the strips' drops, never
+      // refused: under `strictReadonlyWrites` the hook's stamp still stands, as
+      // before. See `handBackWithheldInsertReadonly`.
+      const insertSuperseded: string[][] = rowHookContexts.map(() => []);
       for (let i = 0; i < rowHookContexts.length; i++) {
         const withheld = insertWithheld[i];
         if (!withheld) continue;
         const target = rowHookContexts[i]!.input.data as Record<string, unknown> | null | undefined;
         if (!target || typeof target !== 'object' || Array.isArray(target)) continue;
         rowHookWrittenKeys[i] = handBackWithheldInsertReadonly(
-          target, withheld, insertShown[i] ?? new Map(), rowHookWrittenKeys[i],
+          target, withheld, insertShown[i] ?? new Map(), rowHookWrittenKeys[i], insertSuperseded[i],
         );
       }
 
@@ -1222,11 +1228,22 @@ export class InsertFacet {
             object, [...new Set(insertDrops.flatMap((d) => d.fields))], insertDrops, 'insert',
           );
         }
-        if (insertDrops.length > 0 && typeof options?.onFieldsDropped === 'function') {
+        // The listener also hears every caller value a hook stamp wrote over
+        // (`insertSuperseded`), on the rows that are written, under the same
+        // `readonly` reason.
+        const reportedReadonly = [...insertDropped];
+        insertSuperseded.forEach((keys, i) => {
+          if (rowErrors[i] !== undefined) return;
+          for (const k of keys) if (!reportedReadonly.includes(k)) reportedReadonly.push(k);
+        });
+        const reportedDrops = reportedReadonly.length === insertDropped.length
+          ? insertDrops
+          : droppedFieldEvents(object, computedDropped, reportedReadonly, storedExpressionReplaced);
+        if (reportedDrops.length > 0 && typeof options?.onFieldsDropped === 'function') {
           // A strict write never reaches here with a drop (refused above), so
           // the listener hears only a write that completes. A REFUSED write
           // never fires the listener: it did not complete.
-          for (const drop of insertDrops) {
+          for (const drop of reportedDrops) {
             try {
               options.onFieldsDropped(drop);
             } catch (err) {
@@ -1620,8 +1637,10 @@ export class InsertFacet {
           ? (partialMode
               ? rows.map((_r, i): InsertManyRowOutcome => {
                   if (rowErrors[i] !== undefined) return { ok: false as const, error: rowErrors[i] };
+                  const rowReadonly = [...(insertDroppedPerRow[i] ?? [])];
+                  for (const k of insertSuperseded[i] ?? []) if (!rowReadonly.includes(k)) rowReadonly.push(k);
                   const droppedFields = droppedFieldEvents(
-                    object, computedStrip.droppedPerRow[i] ?? [], insertDroppedPerRow[i] ?? [],
+                    object, computedStrip.droppedPerRow[i] ?? [], rowReadonly,
                     storedExpressionReplacedPerRow[i] ?? [],
                   );
                   return {

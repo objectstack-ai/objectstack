@@ -2455,6 +2455,16 @@ function withholdInsertReadonlyFromHooks(
  * exists to prevent. Every key handed back is dropped from the returned record
  * for the same reason.
  *
+ * A key NOT handed back is one whose caller value the row will not store: a
+ * hook wrote over it (the audit binder stamping `created_by` from the session
+ * is the platform's own case) or removed it. The static strip never sees that
+ * value, so it cannot report it, and the caller was told nothing. Each such key
+ * whose stored value differs from the caller's is pushed onto `superseded`, and
+ * the insert reports it under `droppedFields` reason `readonly` — the report
+ * the strip gives the same value when no hook stamps it. A caller value equal
+ * to what is stored was not lost, so it is not pushed: the console toasts
+ * every reported field.
+ *
  * @returns the row's `hookWrittenKeys`, narrowed by every key handed back
  *   (`undefined` stays `undefined`).
  */
@@ -2463,6 +2473,7 @@ function handBackWithheldInsertReadonly(
   withheld: Readonly<Record<string, unknown>>,
   shown: ReadonlyMap<string, unknown>,
   hookWrittenKeys: ReadonlySet<string> | undefined,
+  superseded?: string[],
 ): ReadonlySet<string> | undefined {
   let narrowed: Set<string> | undefined;
   for (const [key, callerValue] of Object.entries(withheld)) {
@@ -2478,7 +2489,10 @@ function handBackWithheldInsertReadonly(
     } else {
       handBack = shown.has(key) && Object.is(target[key], shown.get(key));
     }
-    if (!handBack) continue;
+    if (!handBack) {
+      if (!present || !Object.is(target[key], callerValue)) superseded?.push(key);
+      continue;
+    }
     target[key] = callerValue;
     if (hookWrittenKeys?.has(key)) {
       narrowed ??= new Set(hookWrittenKeys);
