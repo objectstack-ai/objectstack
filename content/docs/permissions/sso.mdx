@@ -138,6 +138,50 @@ This is an ObjectStack mount, distinct from `@better-auth/sso`'s own
 post flat fields; both doors apply the platform-admin rule.
 </Callout>
 
+### Register Microsoft Entra ID
+
+Register an Entra ID application from **Setup → SSO Providers → Register
+Provider**, or through `POST /api/v1/auth/sso/register`, with the issuer
+`https://login.microsoftonline.com/<tenant-id>/v2.0`. No trusted-origins
+configuration is needed.
+
+**Discovery.** Entra ID's discovery document names its `userinfo_endpoint` on
+`https://graph.microsoft.com`, a host other than the issuer's. The server keeps a
+built-in table of such companion origins for well-known identity providers, and
+trusts `https://graph.microsoft.com` only while it validates the discovery
+document of a registration whose issuer is an `https://login.microsoftonline.com`
+URL. It is not added to the trusted origins that the CSRF check reads, and no
+other request sees it. Sovereign-cloud Entra hosts are not in the table: name
+their userinfo endpoint explicitly, as below.
+
+**Any other identity provider** whose discovery document names an endpoint on a
+foreign host is refused **400 `discovery_untrusted_origin`**. The message names
+the endpoint and the registration member that names it explicitly, for example
+`"userInfoEndpoint": "https://profile.example.com/userinfo"`. A host is never
+trusted only because a discovery document names it. Pass the endpoint as
+`oidcConfig.userInfoEndpoint` (or as `userInfoEndpoint` on the Register SSO Provider
+bridge, `POST /api/v1/auth/admin/sso/register`), and the
+registration trusts it.
+
+**Claims.** Microsoft Graph's userinfo answer carries `sub`, `name`, `email` and
+`picture`, but no `groups`, `preferred_username` or `upn`. Two things follow:
+
+- **Groups come from the verified ID token.** When the userinfo answer does not
+  carry the provider's groups claim (`mapping.extraFields.groups`), the groups
+  are read from the ID token the server has already verified. Where both carry
+  the claim, the userinfo answer wins. See
+  [Grant permission sets from IdP groups](#grant-permission-sets-from-idp-groups).
+- **A user without a mailbox needs an email mapping.** Entra ID sends no `email`
+  claim for a user with no mailbox, and such a sign-in is refused
+  `email_claim_missing` (see [Why an OIDC sign-in was refused](#why-an-oidc-sign-in-was-refused)).
+  Set **Map: Email claim** on the register form, or the email member with
+  **Edit Attribute Mapping** on an existing provider, to `preferred_username`
+  (or `upn`), and turn on
+  **Read Claims From the ID Token Only** (`skipUserInfo`, see
+  [Per-provider sign-in options](#per-provider-sign-in-options)), because while
+  userinfo is called the mapping reads the userinfo answer, which has neither.
+  The server never makes up an email address from another claim on its own.
+
 ### Quick start — Okta
 
 {/* os:check */}
@@ -305,9 +349,12 @@ any token content, and the answer does not depend on whether the account exists.
 | `id_token_signing_key_unknown` | No key in the IdP's JWKS matches the token's key ID, usually after the IdP rotated or retired its signing key. Check the `jwksEndpoint`. |
 | `id_token_signature_invalid` | The JWKS key does not verify the token's signature. Check that the `jwksEndpoint` belongs to the same IdP as the `issuer`. |
 | `token_not_verified` | Any other refusal of the ID token. The server log carries the detail. |
+| `email_claim_missing` | The ID token was accepted, but the claim the provider maps to the email (`mapping.email`, `email` by default) is missing. The warn line names the claim and the mapping key. For a Microsoft Entra ID user without a mailbox, map `preferred_username` or `upn` and turn on `skipUserInfo`. |
 
-The list is exported as `SSO_OIDC_REFUSAL_CAUSES` from `@objectstack/plugin-auth`.
-SAML refusals do not name their cause yet.
+The ID-token causes are exported as `SSO_OIDC_REFUSAL_CAUSES` from
+`@objectstack/plugin-auth`, and `email_claim_missing` as
+`SSO_OIDC_EMAIL_CLAIM_MISSING`.
+SAML refusals name theirs too: see [Why a SAML sign-in was refused](#why-a-saml-sign-in-was-refused).
 
 ---
 
@@ -330,6 +377,11 @@ Fill in the IdP details collected by the **Register SAML Provider** action:
 | `entryPoint` | ✅ | The IdP's SAML single sign-on (redirect) URL that receives the `SAMLRequest`. |
 | `cert` | ✅ | The IdP's X.509 signing certificate (PEM body) — used to verify assertion signatures. |
 | `identifierFormat` | — | Requested SAML NameID format (defaults to the IdP's configured format), e.g. `urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress`. |
+| `mapEmail` | — | Assertion attribute the user's email is read from. Defaults to `email`, then the NameID. |
+| `mapFirstName` | — | Assertion attribute the user's first name is read from. Defaults to `givenName`. |
+| `mapLastName` | — | Assertion attribute the user's last name is read from. Defaults to `surname`. |
+| `mapName` | — | Assertion attribute the user's full name is read from when the first and last name are absent. Defaults to `displayName`, then the NameID. |
+| `mapGroups` | — | Assertion attribute that carries the user's groups (see [Grant permission sets from IdP groups](#grant-permission-sets-from-idp-groups)). |
 
 On success the response returns the two **Service Provider (SP)** URLs you
 configure on the IdP side:
@@ -366,24 +418,78 @@ configure on the IdP side:
 > Signature, timestamp, and replay validation are handled by `@better-auth/sso`
 > (samlify). You only supply the IdP's signing certificate at registration time.
 
+### Map the user's email and name
+
+A SAML sign-in reads the user's email and name from assertion attributes. With
+nothing mapped, the email is the `email` attribute (else the NameID) and the name
+is `givenName` + `surname`, else `displayName`, else the NameID. Okta and Entra ID
+use other attribute names, so their users are named after their NameID until the
+provider maps them:
+
+| Member | Default | Okta (common) | Entra ID |
+| :--- | :--- | :--- | :--- |
+| Email | `email` | `email` | `http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress` |
+| First name | `givenName` | — | `http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname` |
+| Last name | `surname` | — | `http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname` |
+| Display name | `displayName` | `name` | `http://schemas.microsoft.com/identity/claims/displayname` |
+
+Okta sends the attributes its application's attribute statements name, so check
+those statements for the exact names. Map them on the **Register SAML Provider**
+form, or on an existing provider:
+
+- **Show Attribute Mapping** shows the attributes (SAML) or claims (OIDC) the
+  provider reads now; an empty member uses the default.
+- **Edit Attribute Mapping** changes the members you fill in. A member you leave
+  untouched keeps its value, and a member you clear goes back to the default.
+  The groups claim and every other member of the mapping are kept as stored.
+  An OIDC provider maps `email` and `name` only (its default claims are `email`
+  and `name`).
+
+Both run on platform-admin standing, through `POST
+/api/v1/auth/admin/sso/get-attribute-mapping` and `POST
+/api/v1/auth/admin/sso/set-attribute-mapping` (`{ providerId, email?, firstName?,
+lastName?, name? }`). The email member decides which account a sign-in is linked
+to, so change it with care on a provider that already has users.
+
+### Why a SAML sign-in was refused
+
+When the identity provider's SAML response is not accepted, the sign-in lands on
+your `errorCallbackURL` (or the platform's sign-in page) with `error=saml_error`.
+For the four common configuration mistakes, `error_description` names the cause
+instead of `Invalid SAML response`, and the server writes one `warn` log line
+with the `providerId`, `protocol: 'saml'` and the same `cause`. The cause is read
+from the response the IdP posted, compared with the provider's configured signing
+certificate and IdP entity ID; neither the redirect nor the log line carries any
+assertion content, and the answer does not depend on whether the account exists.
+
+| `error_description` | What to check |
+| :--- | :--- |
+| `saml_idp_status_not_success` | The IdP answered with a failure status instead of an assertion: for example Entra ID's "user is not assigned to the application". Check the user's assignment and the IdP's sign-in log. |
+| `saml_response_unsigned` | Neither the response nor its assertion is signed. Turn on response or assertion signing in the IdP application. |
+| `saml_signing_certificate_mismatch` | The response is signed with a certificate the provider does not have, usually after the IdP rotated its signing certificate. Update the provider's certificate (several can be configured while both are in use). |
+| `saml_issuer_mismatch` | The response is signed with the configured certificate but comes from another IdP entity ID. Check the provider's IdP Entity ID against the IdP's issuer. |
+| `Invalid SAML response` | Any other refusal of the response (for example an expired assertion or a broken signature). The server log carries the vendor's line. |
+
 ---
 
 ## Per-provider sign-in options
 
-Each registered SSO provider, OIDC or SAML, carries two switches. Both are
-**off** by default.
+Each registered SSO provider carries these switches. All of them are **off** by
+default. The first two apply to OIDC and SAML, the third to OIDC only.
 
 | Option | Column on `sys_sso_provider` | When on |
 |---|---|---|
 | `allowIdpInitiated` | `allow_idp_initiated` | The provider may start a sign-in from the IdP's own portal, with no request from this platform. |
 | `allowJit` | `allow_jit` | Under the `invite_only` audience posture, the provider may create an account for a person who has none and holds no invitation. |
+| `skipUserInfo` | `skip_user_info` | The provider's email, name and groups are read from its verified ID token, and its userinfo endpoint is not called. The stored endpoint is kept, and turning the option off uses it again. |
 
 **Changing them.** Use **Setup → SSO Providers → Edit Sign-In Options** on a
 provider row. It posts to `POST /api/v1/auth/sso/update-provider` with
-`{ providerId, allowIdpInitiated, allowJit }`, and `POST /api/v1/auth/sso/register`
-takes the same two members. The people who can change a provider today are the
+`{ providerId, allowIdpInitiated, allowJit, skipUserInfo }`, and
+`POST /api/v1/auth/sso/register` takes the same members, as does the Register SSO
+Provider bridge (`POST /api/v1/auth/admin/sso/register`) for `skipUserInfo`. The people who can change a provider today are the
 only ones who can change these options. A value that is not a boolean is refused
-**400 `VALIDATION_ERROR`**, and nothing is written. Both fields keep a history,
+**400 `VALIDATION_ERROR`**, and nothing is written. Every option keeps a history,
 so every change writes a row to the audit ledger (`sys_audit_log`) and a
 field-level line to the record's activity feed, naming the old and the new value.
 
@@ -442,6 +548,18 @@ through `POST /api/v1/auth/sso/register`. The claim's value may be one string or
 a list of strings. A provider whose mapping fills no `groups` signs users in as
 before.
 
+For OIDC, the claim is read from the userinfo answer when it carries it, and
+otherwise from the ID token the server has already verified. Microsoft Entra ID
+puts `groups` only in the ID token, so it needs nothing more.
+
+**Groups overage (Entra ID).** When a user belongs to more groups than fit in a
+token, Entra ID sends a reference to Microsoft Graph (`_claim_names`) instead of
+the groups. The server does not call Graph. That sign-in grants nothing from
+groups, removes the grants the provider made earlier, and logs one `warn` line
+per provider naming the fix: in the Entra ID application, emit only the
+**groups assigned to the application**, or point the groups claim at the claim that carries
+the application's own assignments instead of `groups`.
+
 In **Setup → SSO Providers**, a platform administrator sets the same member
 without the API:
 
@@ -454,9 +572,25 @@ without the API:
   member of the provider's mapping is kept as stored. A provider without a
   groups claim signs users in as one registered without it.
 
-**Saving a mapping.** A platform administrator saves one mapping per group and
-permission set through `POST /api/v1/auth/admin/scim/set-group-mapping`, naming
-the provider with `providerId`:
+**Saving a mapping in Setup.** In **Setup → IdP Group Mappings**, a platform
+administrator manages the mappings without the API:
+
+- **Map SSO Group** saves a mapping for an SSO provider: its Provider ID, the
+  group as the groups claim sends it (a Group External ID or a Group Display
+  Name), and a permission set picked from the security catalog.
+- **Map SCIM Group** does the same for a SCIM connection, named by its
+  connection ID.
+- **Delete Mapping**, on a mapping's row, asks for confirmation and then deletes
+  the mapping, as the delete route below does.
+
+A save or a delete the server refuses shows the server's own message in the
+dialog, and nothing is stored. There is no generic New or Edit form on the
+list: a mapping changes only through these actions or the routes below.
+
+**Saving a mapping through the API.** Operators and scripts save one mapping
+per group and permission set through
+`POST /api/v1/auth/admin/scim/set-group-mapping`, naming the provider with
+`providerId`:
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/auth/admin/scim/set-group-mapping \

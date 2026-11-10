@@ -413,9 +413,12 @@ export function pickRenderableLocale(
  * Apply the signed-in user's `sys_user.locale` to the UI language, and keep
  * applying it for as long as the session lasts.
  *
- * Mount ONCE, in the shell (the console does it in `AppContent`, beside the
- * mutation-invalidation bridge it depends on). Mounting it twice would only
- * duplicate a read, never contradict one — but there is no reason to.
+ * Mount ONCE, in the shell: `ConnectedShell` does it, above every signed-in
+ * console route, Home included (objectstack#32140). It reads the column back
+ * off the data-invalidation bus, which is module-wide, so the profile card's
+ * save reaches it through the mutation-invalidation bridge `AppContent` mounts.
+ * Mounting it twice would only duplicate a read, never contradict one — but
+ * there is no reason to.
  *
  * A column that is unset says nothing about this user, so nothing is applied
  * and the device value keeps deciding; the first switch through

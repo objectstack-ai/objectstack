@@ -287,3 +287,125 @@ describe('SettingsView refusal toasts interpolate through the bundle (objectui#4
     expect(panel.textContent).toContain('Wire a cryptoProvider.');
   });
 });
+
+/**
+ * A half-width `, : ; ! ?` touching a Han character: the typography zh-CN copy
+ * on this page must not carry (objectstack#32158). The `u` flag and a script
+ * property class, never ASCII `\w`, per the i18n evidence rule in `ui/AGENTS.md`.
+ */
+const HALF_WIDTH_BESIDE_HAN = /\p{Script=Han}[,:;!?]|[,:;!?]\s*\p{Script=Han}/u;
+
+/** Save once with one dirty field and answer the save with `error`. */
+async function saveRefusedWith(status: number, error: Record<string, unknown>, saveLabel: string) {
+  await dirty(1);
+  fetchMock.mockResolvedValueOnce({
+    ok: false,
+    status,
+    statusText: 'Refused',
+    json: async () => ({ success: false, error }),
+  } as unknown as Response);
+  fireEvent.click(await screen.findByText(saveLabel));
+  await waitFor(() => expect(toastError).toHaveBeenCalled());
+  const calls = toastError.mock.calls;
+  return String(calls[calls.length - 1]?.[0] ?? '');
+}
+
+/** Serve `payload` as the namespace read, in place of the suite's default. */
+function serveNamespace(payload: unknown) {
+  fetchMock.mockResolvedValue({
+    ok: true,
+    status: 200,
+    statusText: 'OK',
+    json: async () => ({ success: true, data: payload }),
+  } as unknown as Response);
+}
+
+const CRYPTO_REFUSAL = {
+  code: 'SETTINGS_CRYPTO_UNAVAILABLE',
+  message: 'Wire a cryptoProvider.',
+  details: { namespace: 'localization', key: 'api_key' },
+};
+
+describe('SettingsView zh-CN page copy uses full-width punctuation, en unchanged (objectstack#32158)', () => {
+  it('the detector reads a half-width mark beside Han, and not a full-width one or an English sentence', () => {
+    expect(HALF_WIDTH_BESIDE_HAN.test('已被环境变量锁定:timezone')).toBe(true);
+    expect(HALF_WIDTH_BESIDE_HAN.test('加密字段,因此')).toBe(true);
+    expect(HALF_WIDTH_BESIDE_HAN.test('已被环境变量锁定：timezone')).toBe(false);
+    expect(HALF_WIDTH_BESIDE_HAN.test('Locked by environment: timezone')).toBe(false);
+  });
+
+  it('SETTINGS_LOCKED toast: zh-CN joins the key with a full-width colon; en is unchanged', async () => {
+    const LOCKED = { code: 'SETTINGS_LOCKED', message: 'locked', details: { key: 'timezone' } };
+
+    renderInLocale('zh');
+    const zh = await saveRefusedWith(409, LOCKED, '保存更改');
+    expect(zh).toBe('已被环境变量锁定：timezone');
+    expect(zh).not.toMatch(HALF_WIDTH_BESIDE_HAN);
+    cleanup();
+
+    renderInLocale('en');
+    expect(await saveRefusedWith(409, LOCKED, 'Save changes')).toBe('Locked by environment: timezone');
+  });
+
+  it('crypto refusal, located: zh-CN toast and panel sentence are full-width; en is unchanged', async () => {
+    renderInLocale('zh');
+    const zhToast = await saveRefusedWith(503, CRYPTO_REFUSAL, '保存更改');
+    expect(zhToast).toBe('无法加密机密信息：localization.api_key');
+    const zhPanel = (await screen.findByRole('alert')).textContent ?? '';
+    expect(zhPanel).toContain('被声明为加密字段，因此未写入任何内容。');
+    expect(zhPanel).not.toMatch(HALF_WIDTH_BESIDE_HAN);
+    cleanup();
+
+    renderInLocale('en');
+    expect(await saveRefusedWith(503, CRYPTO_REFUSAL, 'Save changes')).toBe('Cannot encrypt secrets: localization.api_key');
+    expect((await screen.findByRole('alert')).textContent).toContain('is declared encrypted, so nothing was written.');
+  });
+
+  it('crypto refusal, unlocated: the zh-CN panel sentence is full-width; en is unchanged', async () => {
+    const UNLOCATED = { code: 'SETTINGS_CRYPTO_UNAVAILABLE', message: 'Wire a cryptoProvider.' };
+
+    renderInLocale('zh');
+    await saveRefusedWith(503, UNLOCATED, '保存更改');
+    const zhPanel = (await screen.findByRole('alert')).textContent ?? '';
+    expect(zhPanel).toContain('声明为加密的值被拒绝，因此未写入任何内容。');
+    expect(zhPanel).not.toMatch(HALF_WIDTH_BESIDE_HAN);
+    cleanup();
+
+    renderInLocale('en');
+    await saveRefusedWith(503, UNLOCATED, 'Save changes');
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'The declared-encrypted value was refused, so nothing was written.',
+    );
+  });
+
+  it('env-lock chip title: zh-CN is full-width; en is unchanged', async () => {
+    serveNamespace({
+      ...PAYLOAD,
+      values: { ...PAYLOAD.values, timezone: { value: 'Asia/Shanghai', source: 'env', locked: true } },
+    });
+
+    renderInLocale('zh');
+    const zhChip = (await screen.findByText('环境变量锁定')).closest('[title]');
+    expect(zhChip?.getAttribute('title')).toBe('由环境变量固定，无法在界面中编辑。');
+    cleanup();
+
+    renderInLocale('en');
+    const enChip = (await screen.findByText('Locked by env')).closest('[title]');
+    expect(enChip?.getAttribute('title')).toBe('Pinned by environment variable — cannot be edited from the UI.');
+  });
+
+  it('unsupported specifier row: zh-CN joins the type with a full-width colon; en is unchanged', async () => {
+    serveNamespace({
+      ...PAYLOAD,
+      manifest: { ...PAYLOAD.manifest, specifiers: [{ type: 'mystery_widget', key: 'mystery', label: 'Mystery' }] },
+      values: { mystery: { value: 'x', source: 'default', locked: false } },
+    });
+
+    renderInLocale('zh');
+    expect(await screen.findByText('不支持的设置项类型：mystery_widget')).toBeTruthy();
+    cleanup();
+
+    renderInLocale('en');
+    expect(await screen.findByText('Unsupported specifier type: mystery_widget')).toBeTruthy();
+  });
+});

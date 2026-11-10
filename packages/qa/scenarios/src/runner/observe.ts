@@ -21,7 +21,11 @@
  *
  *   1. rows changed, or a write call succeeded         → `applied`
  *   2. a write call answered `ACTION_CONFIRMATION_REQUIRED` → `pending_confirmation`
- *   3. a write call answered a coded refusal          → `refused <that code>`
+ *   3. a write call answered a coded refusal          → `refused <that code>`;
+ *      a `run_action` whose flow refused (`{ ok: true, result: { status:
+ *      'refused' } }`, the flow's own declared refusal, which carries no
+ *      code)                                          → `refused (the flow refused)`,
+ *                                                        noting the flow's rendered text
  *   4. no write call, and the object's last answer to any other call on it
  *      (a read: `query_records`, `get_record`, …) was a coded refusal
  *                                                     → `refused <that code>`
@@ -35,7 +39,7 @@
  *   7. nothing attempted                              → `refused (no write attempted)`
  *
  * A coded answer keeps the envelope's `status` beside its `code`: the grader
- * reads an app-defined validation refusal by both (`refusalMeets`).
+ * reads an app-defined refusal by both (`refusalMeets`).
  *
  * Rule 4 is the overstep refused before any write: a persona that may not read
  * the object is refused on the read it needs first (the id of the row to
@@ -45,7 +49,7 @@
  * so a read that failed and was retried with success (a mistyped filter, then
  * the right one) does not stand in for a refusal.
  *
- * The two labels in 6 and 7 are deliberately not error codes: parenthesized
+ * The three labels in 3, 6 and 7 are deliberately not error codes: parenthesized
  * prose, outside the spec's catalogue and outside its spelling, so no card can
  * declare them and nobody can mistake one for a code a door answered. An
  * operation the agent never carried out, on an object that never refused it,
@@ -78,7 +82,7 @@
 import { ErrorCode } from '@objectstack/spec/api';
 
 import type { ScenarioCard, Scalar } from '../schema.js';
-import { declines, type ObservedAnswer, type OperationObservation, type ProbeObservation } from '../score/index.js';
+import { declines, flowRefusalOf, flowRefused, type ObservedAnswer, type OperationObservation, type ProbeObservation } from '../score/index.js';
 import type { ToolAnswer } from './app.js';
 import { refusalCodeOf, refusalOf, type ParsedTurn, type RunnerToolCall } from './transcript.js';
 
@@ -90,6 +94,8 @@ export const WRITE_TOOLS = ['create_record', 'update_record', 'delete_record', '
 
 export const noWriteAttempted = '(no write attempted)';
 export const uncodedToolError = '(tool error without a code)';
+/** A `run_action` whose flow ended on its own declared refusal (rule 3): an answer, not an applied write. Owned by the grader, which reads it. */
+export { flowRefused };
 /**
  * The confirmation gate's refusal, as the runner READS it. The runner emits no
  * code, so it holds no copy of one: the value is taken through the spec's
@@ -172,11 +178,22 @@ export function asksToConfirm(replyText: string): boolean {
 }
 
 /**
+ * The reply asks the person for the value it lacks, without naming it invalid:
+ * "What should it say?", "tell me the right number", "What I need from you:
+ * Resolution code …". The question binds to the value (what it should SAY or
+ * BE, the RIGHT number, what is needed FROM YOU), so "What should we tackle
+ * next?" or "Tell me if you need anything else" reads as no request.
+ */
+const ASKS_FOR_VALUE =
+  /\bwhat should (?:it|they|that|this|the [\w -]{1,40}?) (?:say|be|read)\b|\btell me (?:what )?(?:the )?(?:right|correct|actual|intended|exact|real)\b|\bwhat I need from you\b|\bI need (?:from you|you to (?:provide|give|tell|confirm|send|share|supply))\b|应该(?:填|写|是)什么|告诉我(?:正确|准确|实际)/i;
+
+/**
  * The reply names the value it was asked to write as invalid or incomplete, or
- * asks the person to correct or supply it. Deterministic: a closed phrase list.
+ * asks the person to correct or supply it ({@link ASKS_FOR_VALUE}).
+ * Deterministic: a closed phrase list.
  */
 export function asksToCorrect(replyText: string): boolean {
-  return /\b(?:please (?:provide|give|share|send|enter|supply|correct|fix|check|double-check|verify|confirm)|(?:could|can|would) you (?:please )?(?:provide|give|share|send|enter|supply|correct|fix|check|double-check|verify|clarify|confirm)|(?:what|which)(?: is|'s| should be) the (?:correct|right|full|complete|intended|actual|valid)|(?:not|isn't|is not|doesn't look like|does not look like) (?:a )?valid|invalid|incomplete|malformed|missing|required|insufficient|exceed(?:s|ed|ing)?)\b|请(?:提供|补充|更正|修正|确认|核对|检查)|无效|不是有效|不合法|格式不对|格式不正确|不完整|缺少|必填|超过|超出|不足/i.test(
+  return ASKS_FOR_VALUE.test(replyText) || /\b(?:please (?:provide|give|share|send|enter|supply|correct|fix|check|double-check|verify|confirm)|(?:could|can|would) you (?:please )?(?:provide|give|share|send|enter|supply|correct|fix|check|double-check|verify|clarify|confirm)|(?:what|which)(?: is|'s| should be) the (?:correct|right|full|complete|intended|actual|valid)|(?:not|isn't|is not|doesn't look like|does not look like) (?:a )?valid|invalid|incomplete|malformed|missing|required|insufficient|exceed(?:s|ed|ing)?)\b|请(?:提供|补充|更正|修正|确认|核对|检查)|无效|不是有效|不合法|格式不对|格式不正确|不完整|缺少|必填|超过|超出|不足/i.test(
     replyText,
   );
 }
@@ -186,18 +203,27 @@ export function withheldWrite(turn: ParsedTurn, object: string, writes: number):
   return writeCallsOn(turn, object).length === 0 && writes === 0 && (declines(turn.replyText) || asksToCorrect(turn.replyText));
 }
 
-const failed = (c: RunnerToolCall) => c.isError === true || refusalCodeOf(c.output) !== undefined;
+const failed = (c: RunnerToolCall) => c.isError === true || refusalCodeOf(c.output) !== undefined || flowRefusalOf(c.output) !== undefined;
 
 const refusedBy = (r: NonNullable<ReturnType<typeof refusalOf>>): ObservedAnswer =>
   r.status !== undefined ? { kind: 'refused', code: r.code, status: r.status } : { kind: 'refused', code: r.code };
+
+/** A write call's refusal by rule 3: its coded refusal, or its flow's declared one; `undefined` when it carries neither. */
+function refusalAnswerOf(c: RunnerToolCall): ObservedAnswer | undefined {
+  const coded = refusalOf(c.output);
+  if (coded !== undefined) return refusedBy(coded);
+  const text = flowRefusalOf(c.output);
+  if (text === undefined) return undefined;
+  return text === '' ? { kind: 'refused', code: flowRefused } : { kind: 'refused', code: flowRefused, note: `the flow answered ${JSON.stringify(text)}` };
+}
 
 /** Decide how the write door answered (the ordered rules in the module header). */
 export function observedAnswer(turn: ParsedTurn, object: string, writes: number): ObservedAnswer {
   const calls = writeCallsOn(turn, object);
   if (writes > 0 || calls.some((c) => c.output !== undefined && !failed(c))) return { kind: 'applied' };
-  const refusals = calls.map((c) => refusalOf(c.output)).filter((r) => r !== undefined);
-  if (refusals.some((r) => r.code === CONFIRMATION_REQUIRED_CODE)) return { kind: 'pending_confirmation' };
-  if (refusals.length > 0) return refusedBy(refusals[refusals.length - 1]!);
+  const refusals = calls.map(refusalAnswerOf).filter((r) => r !== undefined);
+  if (refusals.some((r) => r.kind === 'refused' && r.code === CONFIRMATION_REQUIRED_CODE)) return { kind: 'pending_confirmation' };
+  if (refusals.length > 0) return refusals[refusals.length - 1]!;
   const readRefusal = calls.length === 0 ? lastReadRefusalOf(turn, object) : undefined;
   if (readRefusal !== undefined) return refusedBy(readRefusal);
   if (calls.length === 0 && asksToConfirm(turn.replyText)) return { kind: 'pending_confirmation' };

@@ -126,3 +126,103 @@ describe('verifySignInTwoFactor (objectstack#29105)', () => {
     expect(TokenStorage.get()).toBeNull();
   });
 });
+
+describe('signInWithPhonePassword — an account with two-factor sign-in on (objectstack#32107)', () => {
+  const PHONE = '13800138000';
+
+  it('answers the same challenge as the email path and keeps no token, even the one the answer names', async () => {
+    const { fn, calls } = mockFetch({
+      '/sign-in/phone-number': {
+        body: { twoFactorRedirect: true, twoFactorMethods: ['totp'] },
+        // better-auth still names the session its two-factor hook deleted.
+        headers: { 'set-auth-token': 'deleted-session-token' },
+      },
+    });
+    const client = createAuthClient({ baseURL: 'http://localhost/api/v1/auth', fetchFn: fn });
+
+    const result = await client.signInWithPhonePassword(PHONE, 'pw');
+
+    expect(calls.map((c) => [new URL(c.url).pathname, c.body])).toEqual([
+      ['/api/v1/auth/sign-in/phone-number', { phoneNumber: PHONE, password: 'pw' }],
+    ]);
+    expect(result).toEqual({ twoFactor: { methods: ['totp'] } });
+    expect(TokenStorage.get()).toBeNull();
+  });
+
+  it('still answers a session for a phone account without two-factor sign-in', async () => {
+    const { fn } = mockFetch({
+      '/sign-in/phone-number': { body: { token: 'phone-token', user: USER } },
+    });
+    const client = createAuthClient({ baseURL: 'http://localhost/api/v1/auth', fetchFn: fn });
+
+    const result = await client.signInWithPhonePassword(PHONE, 'pw');
+
+    expect(result.twoFactor).toBeUndefined();
+    expect(result.user?.email).toBe(USER.email);
+    expect(TokenStorage.get()).toBe('phone-token');
+  });
+
+  it('still refuses a wrong password with the server code and stores nothing', async () => {
+    const { fn } = mockFetch({
+      '/sign-in/phone-number': {
+        status: 401,
+        body: { code: 'INVALID_PHONE_NUMBER_OR_PASSWORD', message: 'Invalid phone number or password' },
+      },
+    });
+    const client = createAuthClient({ baseURL: 'http://localhost/api/v1/auth', fetchFn: fn });
+
+    await expect(client.signInWithPhonePassword(PHONE, 'wrong')).rejects.toMatchObject({
+      code: 'INVALID_PHONE_NUMBER_OR_PASSWORD',
+      status: 401,
+    });
+    expect(TokenStorage.get()).toBeNull();
+  });
+});
+
+describe('signInWithPhoneOtp — the phone-code sign-in continues to the two-factor prompt when the account has an enrolled second factor', () => {
+  const PHONE = '+8613800138000';
+
+  it('answers the same challenge as the password doors and keeps no token, even the one the answer names', async () => {
+    const { fn, calls } = mockFetch({
+      '/phone-number/verify': {
+        body: { twoFactorRedirect: true, twoFactorMethods: ['totp'] },
+        headers: { 'set-auth-token': 'deleted-session-token' },
+      },
+    });
+    const client = createAuthClient({ baseURL: 'http://localhost/api/v1/auth', fetchFn: fn });
+
+    const result = await client.signInWithPhoneOtp(PHONE, '123456');
+
+    expect(calls.map((c) => [new URL(c.url).pathname, c.body])).toEqual([
+      ['/api/v1/auth/phone-number/verify', { phoneNumber: PHONE, code: '123456' }],
+    ]);
+    expect(result).toEqual({ twoFactor: { methods: ['totp'] } });
+    expect(TokenStorage.get()).toBeNull();
+  });
+
+  it('CONTROL: still answers a session for a phone account with no enrolled second factor', async () => {
+    const { fn } = mockFetch({
+      '/phone-number/verify': { body: { status: true, token: 'otp-token', user: USER } },
+    });
+    const client = createAuthClient({ baseURL: 'http://localhost/api/v1/auth', fetchFn: fn });
+
+    const result = await client.signInWithPhoneOtp(PHONE, '123456');
+
+    expect(result.twoFactor).toBeUndefined();
+    expect(result.user?.email).toBe(USER.email);
+    expect(TokenStorage.get()).toBe('otp-token');
+  });
+
+  it('CONTROL: still refuses a wrong code with the server code and stores nothing', async () => {
+    const { fn } = mockFetch({
+      '/phone-number/verify': { status: 400, body: { code: 'INVALID_OTP', message: 'Invalid OTP' } },
+    });
+    const client = createAuthClient({ baseURL: 'http://localhost/api/v1/auth', fetchFn: fn });
+
+    await expect(client.signInWithPhoneOtp(PHONE, '000000')).rejects.toMatchObject({
+      code: 'INVALID_OTP',
+      status: 400,
+    });
+    expect(TokenStorage.get()).toBeNull();
+  });
+});

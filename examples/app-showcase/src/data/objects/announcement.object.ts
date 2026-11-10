@@ -25,8 +25,15 @@ export const Announcement = ObjectSchema.create({
   sharingModel: 'public_read',
 
   fields: {
-    title: Field.text({ label: 'Title', required: true, searchable: true, maxLength: 160 }),
-    body: Field.text({ label: 'Body', maxLength: 2000 }),
-    owner_id: Field.lookup('sys_user', { label: 'Owner' }),
+    title: Field.text({ label: 'Title', required: true, searchable: true, maxLength: 160, group: 'announcement' }),
+    body: Field.text({ label: 'Body', maxLength: 2000, group: 'announcement' }),
+    owner_id: Field.lookup('sys_user', { label: 'Owner', group: 'announcement' }),
   },
+
+  // ADR-0085 §5: the form, detail and drawer layout is derived from these
+  // groups, so each field is placed in a named section rather than left to the
+  // untitled fallback, which the field-no-consumers rule credits to no one (#32168).
+  fieldGroups: [
+    { key: 'announcement', label: 'Announcement' },
+  ],
 });

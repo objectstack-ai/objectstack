@@ -25,7 +25,8 @@ import { lowerFilterCondition, type FilterLoweringOptions } from '@objectstack/s
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { historySnapshotBody } from '../utils/history-snapshot-body.js';
 import type { IDataDriver, IDataEngine, DriverQuery } from '@objectstack/spec/contracts';
-import type { MetadataLoader, MetadataKeyedItem } from './loader-interface.js';
+import type { MetadataLoader, MetadataKeyedItem, MetadataLoaderDeleteOptions } from './loader-interface.js';
+import { storedItemPackageId } from '../package-slotted-store.js';
 import { LRUCache } from '../utils/lru-cache.js';
 // [commit 6a180e42d] Both predicates moved to `@objectstack/types` — see its
 // `driver-error-classification.ts` `## Home` section. The verdicts are
@@ -1556,8 +1557,18 @@ export class DatabaseLoader implements MetadataLoader {
 
   /**
    * Delete a metadata item from the database
+   *
+   * [ADR-0150 D4, #32198] With `options.packageId`, one package's item of a
+   * type stored per `(package, name)` is being removed while another package
+   * may hold the same name, and only a row that holds THAT package's item is
+   * deleted ({@link storedRowPackageId}). A row holding another package's
+   * item, or one it cannot attribute to any package, is kept: ⛔ never
+   * another package's stored item. This loader keys its rows by
+   * `(type, name)` and writes no `package_id`, so a name has one row holding
+   * the body registered last; deleting it by name took that body whoever had
+   * registered it.
    */
-  async delete(type: string, name: string): Promise<void> {
+  async delete(type: string, name: string, options?: MetadataLoaderDeleteOptions): Promise<void> {
     await this.ensureSchema();
 
     // Find the existing record to get its ID
@@ -1570,11 +1581,38 @@ export class DatabaseLoader implements MetadataLoader {
       return;
     }
 
+    if (options?.packageId !== undefined && storedRowPackageId(existing) !== options.packageId) {
+      // Another package's item (or none this row can name): not this removal's.
+      return;
+    }
+
     // Delete from the main metadata table using the record's ID
     await this._delete(this.tableName, existing.id as string);
 
     this.invalidate(type, name);
   }
+}
+
+/**
+ * [ADR-0150 D4, #32198] The package whose item a `sys_metadata` row holds:
+ * its `package_id` column when a writer filled it, else the package its stored
+ * body carries (`storedItemPackageId`: the envelope's `packageId`, else the
+ * registry's `_packageId` stamp). `undefined` when neither names one — a row
+ * bound to no package, or a body that does not parse, which a package-scoped
+ * delete therefore never takes.
+ */
+function storedRowPackageId(row: Record<string, unknown>): string | undefined {
+  const column = row.package_id;
+  if (typeof column === 'string' && column !== '' && column !== 'sys_metadata') return column;
+  const stored = row.metadata;
+  if (stored === null || stored === undefined) return undefined;
+  let body: unknown;
+  try {
+    body = typeof stored === 'string' ? JSON.parse(stored) : stored;
+  } catch {
+    return undefined;
+  }
+  return storedItemPackageId(body);
 }
 
 /**

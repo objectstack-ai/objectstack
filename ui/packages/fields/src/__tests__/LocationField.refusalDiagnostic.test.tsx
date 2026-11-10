@@ -315,3 +315,78 @@ describe('LocationField leaves the published `error` slot single-authored (objec
     expect(box()).toHaveAttribute('aria-invalid', 'true');
   });
 });
+
+/* -------------------------------------------------------------------------- */
+/* objectstack#32139 — the refusal is reported to the host.                    */
+/* -------------------------------------------------------------------------- */
+
+describe('LocationField reports a refused draft through `onInvalidInputChange` (objectstack#32139)', () => {
+  const FORMAT = 'Not saved: enter a latitude, longitude pair (example: 30.2741, 120.1551).';
+
+  it('reports the refusal, and withdraws it once the box is cleared', async () => {
+    const user = userEvent.setup();
+    const onInvalidInputChange = vi.fn();
+    const { onChange } = mount(STORED, { onInvalidInputChange });
+    await user.clear(box());
+    await user.keyboard('Shenzhen');
+    expect(onInvalidInputChange).toHaveBeenLastCalledWith(FORMAT);
+
+    await user.clear(box());
+    expect(onInvalidInputChange).toHaveBeenLastCalledWith(null);
+    // Clearing on purpose is still a write of `null`.
+    expect(onChange).toHaveBeenLastCalledWith(null);
+  });
+
+  it('withdraws the refusal when a valid pair replaces it, and emits the pair', () => {
+    const onInvalidInputChange = vi.fn();
+    const { onChange } = mount(STORED, { onInvalidInputChange });
+    fireEvent.change(box(), { target: { value: '12abc, 34' } });
+    expect(onInvalidInputChange).toHaveBeenLastCalledWith(expect.stringContaining('Not saved:'));
+    fireEvent.change(box(), { target: { value: '30.2741, 120.1551' } });
+    expect(onInvalidInputChange).toHaveBeenLastCalledWith(null);
+    expect(onChange).toHaveBeenLastCalledWith({ lat: 30.2741, lng: 120.1551 });
+  });
+
+  it('reports each arm once per change of message, never per render', () => {
+    const onInvalidInputChange = vi.fn();
+    mount(STORED, { onInvalidInputChange });
+    // Nothing refused yet: nothing reported.
+    expect(onInvalidInputChange).not.toHaveBeenCalled();
+    fireEvent.change(box(), { target: { value: 'abc' } });
+    fireEvent.change(box(), { target: { value: 'abcd' } });
+    expect(onInvalidInputChange).toHaveBeenCalledTimes(1);
+    fireEvent.change(box(), { target: { value: '999, 999' } });
+    expect(onInvalidInputChange).toHaveBeenCalledTimes(2);
+    expect(onInvalidInputChange).toHaveBeenLastCalledWith(expectedRangeMessage({ lat: 999, lng: 999 }));
+  });
+
+  it('withdraws a standing refusal on unmount', () => {
+    const onInvalidInputChange = vi.fn();
+    const { unmount } = render(
+      <LocationField field={field} value={STORED} onChange={vi.fn()} onInvalidInputChange={onInvalidInputChange} />,
+    );
+    fireEvent.change(box(), { target: { value: 'abc' } });
+    expect(onInvalidInputChange).toHaveBeenLastCalledWith(FORMAT);
+    unmount();
+    expect(onInvalidInputChange).toHaveBeenLastCalledWith(null);
+  });
+
+  it('draws its own line until the host shows the same sentence, then leaves it to the host', () => {
+    const onInvalidInputChange = vi.fn();
+    const props = { field, value: STORED, onChange: vi.fn(), onInvalidInputChange };
+    const { container, rerender } = render(<LocationField {...props} />);
+    fireEvent.change(box(), { target: { value: 'abc' } });
+    // The host has not validated yet: the reason must not blink out.
+    expect(diagnostic(container)).toBe(FORMAT);
+    // The host's `<FormMessage/>` now draws it: the widget does not repeat it.
+    rerender(<LocationField {...props} error={FORMAT} />);
+    expect(diagnostic(container)).toBeNull();
+    expect(box()).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('a host without the channel keeps the widget\'s own line (inline edit)', () => {
+    const { container } = mount(STORED, { error: FORMAT });
+    fireEvent.change(box(), { target: { value: 'abc' } });
+    expect(diagnostic(container)).toBe(FORMAT);
+  });
+});

@@ -211,7 +211,18 @@ import type { ExplainDecision } from '@objectstack/spec/security';
 // missing a required field.
 import type { Invitation, InvitationStatus, Member, Organization } from '@objectstack/spec/identity';
 import { Logger, createLogger } from '@objectstack/core/logger';
+import type { PackageScopedHolder } from '@objectstack/core';
 import { RealtimeAPI } from './realtime-api';
+import {
+  actionsQualifier,
+  addressCandidatesOf,
+  automationFlowQualifier,
+  automationTriggerQualifier,
+  metaItemQualifier,
+  type QualifiedAddressOptions,
+} from './package-address';
+
+export type { QualifiedAddressOptions } from './package-address';
 
 /**
  * Route types that the client can resolve.
@@ -752,6 +763,25 @@ async function* parseEventStream(res: Response): AsyncIterable<AiStreamChunk> {
   }
 
   yield* emit(decoder.decode());
+}
+
+/**
+ * What `client.actions.invoke` and `invokeGlobal` resolve to. Neither throws:
+ * a failure is `success: false` with the door's message in `error`.
+ */
+export interface ActionInvokeResult<T> {
+  success: boolean;
+  data?: T;
+  error?: string;
+  /**
+   * [ADR-0150 D5] Every holder the door named when it refused the call with
+   * `409 RESOURCE_CONFLICT` because the address names no one action: a bare
+   * name two packages declare, or a namespace that holds no such action while
+   * another package does. Each is `{ kind: 'package', packageId }` or
+   * `{ kind: 'environment' }`; retry with the intended holder's `namespace`
+   * (or `'_env'`). Absent on every other failure, and on success.
+   */
+  candidates?: readonly PackageScopedHolder[];
 }
 
 /** Best human-readable text for an action failure, whatever shape carried it. */
@@ -1415,7 +1445,12 @@ export interface AuthPasswordChangeResult {
  * `callbackURL`.
  */
 export interface AuthEmailVerificationResult {
-    /** Always `true`; a bad or expired token is a 401 raised by `this.fetch`. */
+    /**
+     * Always `true`; a bad or expired token is a 401 raised by `this.fetch`.
+     * A request that would sign in an account with an enrolled second factor
+     * answers the two-factor challenge (`twoFactorRedirect`) instead of this
+     * receipt: no one-time code or sign-in link alone signs such an account in.
+     */
     status: true;
     /**
      * The updated user when the token was minted by `changeEmail` (the address
@@ -2042,20 +2077,36 @@ export class ObjectStackClient {
      * Get a specific metadata item by type and name
      * @param type - Metadata type (e.g., 'object', 'plugin')
      * @param name - Item name (snake_case identifier)
-     * @param options - Optional filters (e.g., packageId to scope by package)
+     * @param options - Optional qualifiers: `packageId` (`?package=`) names
+     *   the holding package by id, exactly; `namespace` names it by its
+     *   manifest namespace, or `'_env'` for the environment's own item, and
+     *   reads the qualified path `GET /meta/:type/:ns/:name` (ADR-0150 D5).
+     *   Send one of the two: the door refuses both on one read with `400`.
      *
      * Answers the spec's `GetMetaItemResponseSchema` envelope: the metadata
      * document lives under `item`, NOT spread at the top level. Naming that
      * type here is honest only because #5563 converged every serving path on
      * it — the cached path (the default one) used to answer the bare document,
      * so before that convergence no annotation could describe both (#5545).
+     *
+     * When the door refuses the read for its holders (a qualifier whose
+     * package holds no item of the name while another holder does, or a name
+     * the address cannot tell apart), the promise REJECTS with
+     * `409 RESOURCE_CONFLICT` (`err.code`, `err.httpStatus`): `err.message`
+     * names every holder, and `err.details.candidates` lists them
+     * (`{ kind: 'package', packageId }` or `{ kind: 'environment' }`), so a
+     * caller can retry with the one it means; the door never picks one. An item
+     * named like one of the door's sub-resources (`history`, `audit`, `diff`,
+     * …) has no qualified path, so a `namespace` for it is refused before any
+     * request with `400 VALIDATION_ERROR`: read it with `packageId`.
      */
-    getItem: async (type: string, name: string, options?: { packageId?: string }): Promise<GetMetaItemResponse> => {
+    getItem: async (type: string, name: string, options?: { packageId?: string } & QualifiedAddressOptions): Promise<GetMetaItemResponse> => {
         const route = this.getRoute('metadata');
+        const qualifier = metaItemQualifier(type, name, options);
         const params = new URLSearchParams();
         if (options?.packageId) params.set('package', options.packageId);
         const qs = params.toString();
-        const url = `${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}${qs ? `?${qs}` : ''}`;
+        const url = `${this.baseUrl}${route}/${encodeURIComponent(type)}${qualifier}/${encodeURIComponent(name)}${qs ? `?${qs}` : ''}`;
         const res = await this.fetch(url);
         return this.unwrapResponse<GetMetaItemResponse>(res);
     },
@@ -5979,6 +6030,25 @@ export class ObjectStackClient {
 
   /**
    * Automation Services
+   *
+   * [ADR-0150 D5] Every method here that names a flow takes an optional
+   * trailing `address` (`{ namespace }`; on `runs.list` and `listRuns`, the
+   * `namespace` member of their options): the manifest namespace of the
+   * package that ships the flow, or `'_env'` for a flow authored in the
+   * environment. It calls the qualified door (`/automation/:ns/:name/…`;
+   * `/automation/trigger/:ns/:name` for `trigger`). Without it every call is
+   * the bare one, byte for byte.
+   *
+   * A flow name two packages hold is refused at the bare door with
+   * `409 RESOURCE_CONFLICT`, and so is an address whose namespace holds no
+   * such flow while another package does: the promise rejects, and
+   * `err.details.candidates` lists every holder (`{ kind: 'package',
+   * packageId }` or `{ kind: 'environment' }`). The door never picks one.
+   * A (namespace, name) pair the router cannot read as an address (a
+   * malformed namespace, a namespace spelling one of the door's literals, or
+   * a flow named like a sub-resource: `runs`, `trigger`, `toggle`, `clone`
+   * under a namespace) is refused before any request with
+   * `400 VALIDATION_ERROR`.
    */
   automation = {
       /**
@@ -6006,16 +6076,15 @@ export class ObjectStackClient {
        * A flow name the deployment does not hold rejects with **404** instead.
        * A run that PAUSED at a screen node is not a failure and still resolves.
        *
-       * **Since #9415 the two never-dispatched refusals are distinguishable**,
-       * completing the #9378 status table. Neither ran a single node, so
-       * neither carries a run summary and neither is `FLOW_FAILED`:
+       * **Since #9415 the never-dispatched refusals are distinguishable**,
+       * completing the #9378 status table. None ran a single node, so
+       * none carries a run summary and none is `FLOW_FAILED`:
        *
        * | `err.httpStatus` | `err.code` | what happened | the caller's remedy |
        * |:---|:---|:---|:---|
        * | `409` | `FLOW_DISABLED` | the flow is switched off | enable it — the identical request then succeeds |
-       * | `422` | `FLOW_NO_START_NODE` | the stored definition has no `start` node | fix the flow; retrying cannot help |
        * | `400` | `FLOW_FAILED` | the flow RAN and was rejected | read `err.details.summary` for the failing node |
-       * | `404` | — | no such flow in this deployment | check the name |
+       * | `404` | — | no flow by that name is held in this deployment; a flow stored with no `start` node is never armed, so it answers here | check the name |
        *
        * [#13079] **Resolves to the `AutomationResult` alone — the SAME value
        * its sibling `automation.execute` resolves to**, because both reach one
@@ -6046,9 +6115,10 @@ export class ObjectStackClient {
        * annotating the source rather than the copy is what keeps this method
        * immune to the transcription drifting again.
        */
-      trigger: async (triggerName: string, payload: any): Promise<AutomationResult> => {
+      trigger: async (triggerName: string, payload: any, address?: QualifiedAddressOptions): Promise<AutomationResult> => {
           const route = this.getRoute('automation');
-          const res = await this.fetch(`${this.baseUrl}${route}/trigger/${triggerName}`, {
+          const qualifier = automationTriggerQualifier(address);
+          const res = await this.fetch(`${this.baseUrl}${route}/trigger${qualifier}/${triggerName}`, {
               method: 'POST',
               body: JSON.stringify(payload)
           });
@@ -6065,9 +6135,10 @@ export class ObjectStackClient {
       /**
        * Get a flow definition by name
        */
-      get: async (name: string): Promise<FlowParsed> => {
+      get: async (name: string, address?: QualifiedAddressOptions): Promise<FlowParsed> => {
           const route = this.getRoute('automation');
-          const res = await this.fetch(`${this.baseUrl}${route}/${name}`);
+          const qualifier = automationFlowQualifier(name, address);
+          const res = await this.fetch(`${this.baseUrl}${route}${qualifier}/${name}`);
           return this.unwrapResponse(res);
       },
 
@@ -6098,9 +6169,10 @@ export class ObjectStackClient {
        * definition (`UpdateFlowRequestSchema`); partial update is not
        * implemented.
        */
-      update: async (name: string, definition: any): Promise<FlowParsed> => {
+      update: async (name: string, definition: any, address?: QualifiedAddressOptions): Promise<FlowParsed> => {
           const route = this.getRoute('automation');
-          const res = await this.fetch(`${this.baseUrl}${route}/${name}`, {
+          const qualifier = automationFlowQualifier(name, address);
+          const res = await this.fetch(`${this.baseUrl}${route}${qualifier}/${name}`, {
               method: 'PUT',
               body: JSON.stringify({ definition }),
           });
@@ -6110,9 +6182,10 @@ export class ObjectStackClient {
       /**
        * Delete (unregister) a flow
        */
-      delete: async (name: string): Promise<{ name: string; deleted: boolean }> => {
+      delete: async (name: string, address?: QualifiedAddressOptions): Promise<{ name: string; deleted: boolean }> => {
           const route = this.getRoute('automation');
-          const res = await this.fetch(`${this.baseUrl}${route}/${name}`, {
+          const qualifier = automationFlowQualifier(name, address);
+          const res = await this.fetch(`${this.baseUrl}${route}${qualifier}/${name}`, {
               method: 'DELETE',
           });
           return this.unwrapResponse(res);
@@ -6173,9 +6246,10 @@ export class ObjectStackClient {
        * `automation.update(name, definition)` (`PUT /automation/:name`) with
        * `status: 'obsolete'` to disarm it, or `status: 'active'` to arm it.
        */
-      toggle: async (name: string, enabled: boolean): Promise<{ name: string; enabled: boolean }> => {
+      toggle: async (name: string, enabled: boolean, address?: QualifiedAddressOptions): Promise<{ name: string; enabled: boolean }> => {
           const route = this.getRoute('automation');
-          const res = await this.fetch(`${this.baseUrl}${route}/${name}/toggle`, {
+          const qualifier = automationFlowQualifier(name, address);
+          const res = await this.fetch(`${this.baseUrl}${route}${qualifier}/${name}/toggle`, {
               method: 'POST',
               body: JSON.stringify({ enabled }),
           });
@@ -6207,9 +6281,10 @@ export class ObjectStackClient {
        * `RESOURCE_CONFLICT`); `package` omitted for a source no package ships,
        * which has no pair (400). Requires `manage_metadata`.
        */
-      clone: async (name: string, body: CloneFlowRequest): Promise<CloneFlowResponse['data']> => {
+      clone: async (name: string, body: CloneFlowRequest, address?: QualifiedAddressOptions): Promise<CloneFlowResponse['data']> => {
           const route = this.getRoute('automation');
-          const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(name)}/clone`, {
+          const qualifier = automationFlowQualifier(name, address);
+          const res = await this.fetch(`${this.baseUrl}${route}${qualifier}/${encodeURIComponent(name)}/clone`, {
               method: 'POST',
               body: JSON.stringify(body),
           });
@@ -6245,21 +6320,23 @@ export class ObjectStackClient {
            * There is no continuation token — read `hasMore` to learn whether
            * the window was short.
            */
-          list: async (flowName: string, options?: { limit?: number }): Promise<{ runs: ExecutionLog[]; hasMore: boolean }> => {
+          list: async (flowName: string, options?: { limit?: number } & QualifiedAddressOptions): Promise<{ runs: ExecutionLog[]; hasMore: boolean }> => {
               const route = this.getRoute('automation');
+              const qualifier = automationFlowQualifier(flowName, options);
               const params = new URLSearchParams();
               if (options?.limit !== undefined) params.set('limit', String(options.limit));
               const qs = params.toString();
-              const res = await this.fetch(`${this.baseUrl}${route}/${flowName}/runs${qs ? `?${qs}` : ''}`);
+              const res = await this.fetch(`${this.baseUrl}${route}${qualifier}/${flowName}/runs${qs ? `?${qs}` : ''}`);
               return this.unwrapResponse(res);
           },
 
           /**
            * Get a single execution run
            */
-          get: async (flowName: string, runId: string): Promise<ExecutionLog> => {
+          get: async (flowName: string, runId: string, address?: QualifiedAddressOptions): Promise<ExecutionLog> => {
               const route = this.getRoute('automation');
-              const res = await this.fetch(`${this.baseUrl}${route}/${flowName}/runs/${runId}`);
+              const qualifier = automationFlowQualifier(flowName, address);
+              const res = await this.fetch(`${this.baseUrl}${route}${qualifier}/${flowName}/runs/${runId}`);
               return this.unwrapResponse(res);
           },
       },
@@ -6289,9 +6366,10 @@ export class ObjectStackClient {
        * NOT constrained — there the payload really is the caller's.
        */
       /** Alias for `automation.get` — fetch a flow definition by name. */
-      getFlow: async <T extends FlowParsed = FlowParsed>(name: string): Promise<T> => {
+      getFlow: async <T extends FlowParsed = FlowParsed>(name: string, address?: QualifiedAddressOptions): Promise<T> => {
           const route = this.getRoute('automation');
-          const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(name)}`);
+          const qualifier = automationFlowQualifier(name, address);
+          const res = await this.fetch(`${this.baseUrl}${route}${qualifier}/${encodeURIComponent(name)}`);
           return this.unwrapResponse(res) as Promise<T>;
       },
       /**
@@ -6301,14 +6379,15 @@ export class ObjectStackClient {
        * `400` `FLOW_FAILED` (author text on `err.details.errorMessage`, per-node
        * accounting on `err.details.summary`) instead of resolving with an inner
        * `{ success: false }` under HTTP 200; an unknown flow rejects with `404`.
-       * Since #9415, a DISABLED flow rejects with `409` `FLOW_DISABLED` and one
-       * whose definition has no `start` node with `422` `FLOW_NO_START_NODE` —
-       * both never dispatched, so neither is `FLOW_FAILED`.
+       * Since #9415, a DISABLED flow rejects with `409` `FLOW_DISABLED`, never
+       * dispatched, so not `FLOW_FAILED`. A flow with no `start` node is refused at
+       * registration, and a stored one is not armed: its trigger rejects with `404`.
        * See `automation.trigger` for the full table — both call the same door.
        */
-      execute: async <T extends AutomationResult = AutomationResult>(name: string, ctx?: Record<string, any>): Promise<T> => {
+      execute: async <T extends AutomationResult = AutomationResult>(name: string, ctx?: Record<string, any>, address?: QualifiedAddressOptions): Promise<T> => {
           const route = this.getRoute('automation');
-          const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(name)}/trigger`, {
+          const qualifier = automationFlowQualifier(name, address);
+          const res = await this.fetch(`${this.baseUrl}${route}${qualifier}/${encodeURIComponent(name)}/trigger`, {
               method: 'POST',
               body: JSON.stringify(ctx ?? {}),
           });
@@ -6323,9 +6402,10 @@ export class ObjectStackClient {
        */
       listRuns: async <T extends { runs: ExecutionLog[]; hasMore: boolean } = { runs: ExecutionLog[]; hasMore: boolean }>(
           flowName: string,
-          opts?: { limit?: number; status?: ExecutionStatus },
+          opts?: { limit?: number; status?: ExecutionStatus } & QualifiedAddressOptions,
       ): Promise<T> => {
           const route = this.getRoute('automation');
+          const qualifier = automationFlowQualifier(flowName, opts);
           const params = new URLSearchParams();
           if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
           // [#7359] The route's declared `status` filter, now that the boundary
@@ -6335,15 +6415,16 @@ export class ObjectStackClient {
           if (opts?.status) params.set('status', opts.status);
           const qs = params.toString();
           const res = await this.fetch(
-              `${this.baseUrl}${route}/${encodeURIComponent(flowName)}/runs${qs ? `?${qs}` : ''}`,
+              `${this.baseUrl}${route}${qualifier}/${encodeURIComponent(flowName)}/runs${qs ? `?${qs}` : ''}`,
           );
           return this.unwrapResponse(res) as Promise<T>;
       },
       /** Alias for `automation.runs.get`. */
-      getRun: async <T extends ExecutionLog = ExecutionLog>(flowName: string, runId: string): Promise<T> => {
+      getRun: async <T extends ExecutionLog = ExecutionLog>(flowName: string, runId: string, address?: QualifiedAddressOptions): Promise<T> => {
           const route = this.getRoute('automation');
+          const qualifier = automationFlowQualifier(flowName, address);
           const res = await this.fetch(
-              `${this.baseUrl}${route}/${encodeURIComponent(flowName)}/runs/${encodeURIComponent(runId)}`,
+              `${this.baseUrl}${route}${qualifier}/${encodeURIComponent(flowName)}/runs/${encodeURIComponent(runId)}`,
           );
           return this.unwrapResponse(res) as Promise<T>;
       },
@@ -6424,10 +6505,12 @@ export class ObjectStackClient {
               /** Out-edge to follow (e.g. an approval's `approve` / `reject`). */
               branchLabel?: string;
           },
+          address?: QualifiedAddressOptions,
       ): Promise<T> => {
           const route = this.getRoute('automation');
+          const qualifier = automationFlowQualifier(flowName, address);
           const res = await this.fetch(
-              `${this.baseUrl}${route}/${encodeURIComponent(flowName)}/runs/${encodeURIComponent(runId)}/resume`,
+              `${this.baseUrl}${route}${qualifier}/${encodeURIComponent(flowName)}/runs/${encodeURIComponent(runId)}/resume`,
               { method: 'POST', body: JSON.stringify(signal ?? {}) },
           );
           return this.unwrapResponse(res) as Promise<T>;
@@ -6437,10 +6520,11 @@ export class ObjectStackClient {
        * not launch the run (a reload, a different tab, an inbox) render the
        * pending step before calling {@link resume}.
        */
-      getScreen: async <T extends { runId: string; screen: ScreenSpec } = { runId: string; screen: ScreenSpec }>(flowName: string, runId: string): Promise<T> => {
+      getScreen: async <T extends { runId: string; screen: ScreenSpec } = { runId: string; screen: ScreenSpec }>(flowName: string, runId: string, address?: QualifiedAddressOptions): Promise<T> => {
           const route = this.getRoute('automation');
+          const qualifier = automationFlowQualifier(flowName, address);
           const res = await this.fetch(
-              `${this.baseUrl}${route}/${encodeURIComponent(flowName)}/runs/${encodeURIComponent(runId)}/screen`,
+              `${this.baseUrl}${route}${qualifier}/${encodeURIComponent(flowName)}/runs/${encodeURIComponent(runId)}/screen`,
           );
           return this.unwrapResponse(res) as Promise<T>;
       },
@@ -6485,15 +6569,25 @@ export class ObjectStackClient {
        * `engine.registerAction(objectName, actionName, handler)`, so it is
        * caller-supplied in exactly the sense `data.get<T>` is — not the
        * fixed-shape platform erasure this card was about.
+       *
+       * [ADR-0150 D5] `opts.namespace` names the package that declares the
+       * action by its manifest namespace (`'_env'`: the environment's own
+       * action), and calls `POST /actions/:ns/:object/:action`; the door then
+       * resolves the action among that namespace's packages only. Without it
+       * the call is the bare one, byte for byte. A door that refuses the call
+       * with `409 RESOURCE_CONFLICT` names its holders in `candidates`. A
+       * namespace the router would not read as one (malformed, or `global`)
+       * is refused before any request, as `success: false`.
        */
       invoke: async <T = any>(
           objectName: string,
           actionName: string,
-          opts?: { recordId?: string; params?: Record<string, unknown> },
-      ): Promise<{ success: boolean; data?: T; error?: string }> => {
+          opts?: { recordId?: string; params?: Record<string, unknown> } & QualifiedAddressOptions,
+      ): Promise<ActionInvokeResult<T>> => {
           try {
+              const qualifier = actionsQualifier(opts);
               const res = await this.fetch(
-                  `${this.baseUrl}/api/v1/actions/${encodeURIComponent(objectName)}/${encodeURIComponent(actionName)}`,
+                  `${this.baseUrl}/api/v1/actions${qualifier}/${encodeURIComponent(objectName)}/${encodeURIComponent(actionName)}`,
                   {
                       method: 'POST',
                       body: JSON.stringify({ recordId: opts?.recordId, params: opts?.params ?? {} }),
@@ -6509,19 +6603,25 @@ export class ObjectStackClient {
               // the server's human-readable message onto `err.message` (with
               // `err.code` / `err.httpStatus` kept for programmatic use), so
               // the toast text is unchanged.
-              return { success: false, error: actionErrorMessage(err) };
+              //
+              // [ADR-0150 D5] A `409 RESOURCE_CONFLICT` whose door named the
+              // candidates (`error.details.candidates`) keeps them on the
+              // result, so a caller can retry with the holder's namespace.
+              const candidates = addressCandidatesOf(err);
+              return { success: false, error: actionErrorMessage(err), ...(candidates ? { candidates } : {}) };
           }
       },
 
       /**
        * Invoke a global (object-less) action — the server's
        * `POST /actions/global/:action` shape, dispatched to the `'global'`
-       * handler-registry key.
+       * handler-registry key. `opts.namespace` calls
+       * `POST /actions/:ns/global/:action`, as on {@link invoke}.
        */
       invokeGlobal: async <T = any>(
           actionName: string,
-          opts?: { recordId?: string; params?: Record<string, unknown> },
-      ): Promise<{ success: boolean; data?: T; error?: string }> => {
+          opts?: { recordId?: string; params?: Record<string, unknown> } & QualifiedAddressOptions,
+      ): Promise<ActionInvokeResult<T>> => {
           return this.actions.invoke<T>('global', actionName, opts);
       },
   };
@@ -8498,12 +8598,16 @@ export class ScopedEnvironmentClient {
       const res = await this.parent._fetch(this.metaUrl(`/${type}${qs ? `?${qs}` : ''}`));
       return this.parent._unwrap<GetMetaItemsResponse>(res);
     },
-    /** Same `{ type, name, item }` envelope as the unscoped surface (#5563). */
-    getItem: async (type: string, name: string, options?: { packageId?: string }): Promise<GetMetaItemResponse> => {
+    /**
+     * Same `{ type, name, item }` envelope as the unscoped surface (#5563),
+     * and the same qualifiers: `packageId` or `namespace` (ADR-0150 D5).
+     */
+    getItem: async (type: string, name: string, options?: { packageId?: string } & QualifiedAddressOptions): Promise<GetMetaItemResponse> => {
+      const qualifier = metaItemQualifier(type, name, options);
       const params = new URLSearchParams();
       if (options?.packageId) params.set('package', options.packageId);
       const qs = params.toString();
-      const res = await this.parent._fetch(this.metaUrl(`/${encodeURIComponent(type)}/${encodeURIComponent(name)}${qs ? `?${qs}` : ''}`));
+      const res = await this.parent._fetch(this.metaUrl(`/${encodeURIComponent(type)}${qualifier}/${encodeURIComponent(name)}${qs ? `?${qs}` : ''}`));
       return this.parent._unwrap<GetMetaItemResponse>(res);
     },
     /**
@@ -8895,11 +8999,16 @@ export class ScopedEnvironmentClient {
    * `/api/v1/environments/:environmentId/automation/...`. Surface mirrors the methods
    * needed by Studio's Flow viewer: read flow definition, execute (trigger),
    * list runs, fetch a single run.
+   *
+   * Each method takes the same optional `namespace` as its unscoped twin
+   * (ADR-0150 D5): the scoped mount replays the same handler, so the same
+   * qualified paths, refusals and `409` candidates apply.
    */
   automation = {
     /** Fetch a flow definition by name. */
-    getFlow: async <T extends FlowParsed = FlowParsed>(name: string): Promise<T> => {
-      const res = await this.parent._fetch(this.url(`/automation/${encodeURIComponent(name)}`));
+    getFlow: async <T extends FlowParsed = FlowParsed>(name: string, address?: QualifiedAddressOptions): Promise<T> => {
+      const qualifier = automationFlowQualifier(name, address);
+      const res = await this.parent._fetch(this.url(`/automation${qualifier}/${encodeURIComponent(name)}`));
       return this.parent._unwrap<T>(res);
     },
     /**
@@ -8910,12 +9019,13 @@ export class ScopedEnvironmentClient {
      * **breaking #9378 behaviour**: a run that ran and then failed REJECTS with
      * `400` `FLOW_FAILED` (author text on `err.details.errorMessage`) instead of
      * resolving with an inner `{ success: false }` under HTTP 200, and an
-     * unknown flow rejects with `404`. Since #9415 a disabled flow rejects with
-     * `409` `FLOW_DISABLED` and a definition with no `start` node with `422`
-     * `FLOW_NO_START_NODE`. See that method for the full table.
+     * unknown flow rejects with `404`, a flow stored with no `start` node (never
+     * armed) included. Since #9415 a disabled flow rejects with `409`
+     * `FLOW_DISABLED`. See that method for the full table.
      */
-    execute: async <T extends AutomationResult = AutomationResult>(name: string, ctx?: Record<string, any>): Promise<T> => {
-      const res = await this.parent._fetch(this.url(`/automation/${encodeURIComponent(name)}/trigger`), {
+    execute: async <T extends AutomationResult = AutomationResult>(name: string, ctx?: Record<string, any>, address?: QualifiedAddressOptions): Promise<T> => {
+      const qualifier = automationFlowQualifier(name, address);
+      const res = await this.parent._fetch(this.url(`/automation${qualifier}/${encodeURIComponent(name)}/trigger`), {
         method: 'POST',
         body: JSON.stringify(ctx ?? {}),
       });
@@ -8930,22 +9040,24 @@ export class ScopedEnvironmentClient {
      */
     listRuns: async <T extends { runs: ExecutionLog[]; hasMore: boolean } = { runs: ExecutionLog[]; hasMore: boolean }>(
       flowName: string,
-      opts?: { limit?: number; status?: ExecutionStatus },
+      opts?: { limit?: number; status?: ExecutionStatus } & QualifiedAddressOptions,
     ): Promise<T> => {
+      const qualifier = automationFlowQualifier(flowName, opts);
       const params = new URLSearchParams();
       if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
       // [#7359] — see the sibling `listRuns` alias above.
       if (opts?.status) params.set('status', opts.status);
       const qs = params.toString();
       const res = await this.parent._fetch(
-        this.url(`/automation/${encodeURIComponent(flowName)}/runs${qs ? `?${qs}` : ''}`),
+        this.url(`/automation${qualifier}/${encodeURIComponent(flowName)}/runs${qs ? `?${qs}` : ''}`),
       );
       return this.parent._unwrap<T>(res);
     },
     /** Fetch a single run (with step log) for a flow. */
-    getRun: async <T extends ExecutionLog = ExecutionLog>(flowName: string, runId: string): Promise<T> => {
+    getRun: async <T extends ExecutionLog = ExecutionLog>(flowName: string, runId: string, address?: QualifiedAddressOptions): Promise<T> => {
+      const qualifier = automationFlowQualifier(flowName, address);
       const res = await this.parent._fetch(
-        this.url(`/automation/${encodeURIComponent(flowName)}/runs/${encodeURIComponent(runId)}`),
+        this.url(`/automation${qualifier}/${encodeURIComponent(flowName)}/runs/${encodeURIComponent(runId)}`),
       );
       return this.parent._unwrap<T>(res);
     },
@@ -8967,17 +9079,20 @@ export class ScopedEnvironmentClient {
         output?: Record<string, unknown>;
         branchLabel?: string;
       },
+      address?: QualifiedAddressOptions,
     ): Promise<T> => {
+      const qualifier = automationFlowQualifier(flowName, address);
       const res = await this.parent._fetch(
-        this.url(`/automation/${encodeURIComponent(flowName)}/runs/${encodeURIComponent(runId)}/resume`),
+        this.url(`/automation${qualifier}/${encodeURIComponent(flowName)}/runs/${encodeURIComponent(runId)}/resume`),
         { method: 'POST', body: JSON.stringify(signal ?? {}) },
       );
       return this.parent._unwrap<T>(res);
     },
     /** Fetch the screen a paused run is waiting on. */
-    getScreen: async <T extends { runId: string; screen: ScreenSpec } = { runId: string; screen: ScreenSpec }>(flowName: string, runId: string): Promise<T> => {
+    getScreen: async <T extends { runId: string; screen: ScreenSpec } = { runId: string; screen: ScreenSpec }>(flowName: string, runId: string, address?: QualifiedAddressOptions): Promise<T> => {
+      const qualifier = automationFlowQualifier(flowName, address);
       const res = await this.parent._fetch(
-        this.url(`/automation/${encodeURIComponent(flowName)}/runs/${encodeURIComponent(runId)}/screen`),
+        this.url(`/automation${qualifier}/${encodeURIComponent(flowName)}/runs/${encodeURIComponent(runId)}/screen`),
       );
       return this.parent._unwrap<T>(res);
     },

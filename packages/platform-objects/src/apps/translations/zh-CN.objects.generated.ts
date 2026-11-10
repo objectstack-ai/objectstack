@@ -2106,6 +2106,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "允许即时开通账号",
         help: "在仅限邀请的受众策略下，为通过此提供方登录、但既无账号也无邀请的人创建账号。默认关闭：此类人员会被拒绝。其他策略照旧开通账号。请通过“编辑登录选项”修改。"
       },
+      skip_user_info: {
+        label: "仅从 ID 令牌读取声明",
+        help: "仅适用于 OIDC。从身份提供方已验证的 ID 令牌读取邮箱、姓名和组，不调用其 userinfo 端点。Microsoft Entra ID 需开启此项：它的 userinfo 响应不含组，也不含 preferred_username。默认关闭：配置了 userinfo 端点的提供方从该响应读取声明。请通过“编辑登录选项”修改。"
+      },
       user_id: {
         label: "注册人",
         help: "注册该提供方的用户"
@@ -2208,6 +2212,26 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
             helpText: "可选。请求的 SAML NameID 格式。默认为 IdP 配置的格式。",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          mapEmail: {
+            label: "映射：邮箱属性",
+            helpText: "可选。映射为用户邮箱的断言属性。默认为“email”，其次为 NameID。Entra ID：http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          mapFirstName: {
+            label: "映射：名字属性",
+            helpText: "可选。映射为用户名字的断言属性。默认为“givenName”。Entra ID：http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          mapLastName: {
+            label: "映射：姓氏属性",
+            helpText: "可选。映射为用户姓氏的断言属性。默认为“surname”。Entra ID：http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          mapName: {
+            label: "映射：显示名称属性",
+            helpText: "可选。映射为用户全名的断言属性，在缺少名字和姓氏属性时使用。默认为“displayName”，其次为 NameID。Okta：name。Entra ID：http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          },
           mapGroups: {
             label: "映射：组属性",
             helpText: "可选。携带用户所属组的断言属性。每次登录都会授予映射到这些组的权限集。留空则不映射任何组。",
@@ -2267,6 +2291,57 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "完成",
           fields: {
             groupsClaim: "组 claim"
+          }
+        }
+      },
+      show_sso_attribute_mapping: {
+        label: "查看属性映射",
+        resultDialog: {
+          title: "属性映射",
+          description: "此提供方在每次登录时读取用户邮箱和姓名所用的 IdP 属性（SAML）或 claim（OIDC）。为空表示使用默认值：邮箱取自“email”（SAML 其次为 NameID）；姓名取自“givenName” + “surname”，其次为“displayName”（OIDC 为“name”）。名字和姓氏仅适用于 SAML。可通过“编辑属性映射”修改。",
+          acknowledge: "完成",
+          fields: {
+            protocol: "协议",
+            email: "邮箱",
+            firstName: "名字",
+            lastName: "姓氏",
+            name: "显示名称"
+          }
+        }
+      },
+      edit_sso_attribute_mapping: {
+        label: "编辑属性映射",
+        params: {
+          email: {
+            label: "邮箱属性",
+            helpText: "映射为用户邮箱的 IdP 属性或 claim。不修改则保留当前值；清空则恢复默认值（“email”）。Entra ID SAML：http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          firstName: {
+            label: "名字属性（SAML）",
+            helpText: "仅 SAML。映射为用户名字的断言属性。不修改则保留当前值。Entra ID：http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          lastName: {
+            label: "姓氏属性（SAML）",
+            helpText: "仅 SAML。映射为用户姓氏的断言属性。不修改则保留当前值。Entra ID：http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          name: {
+            label: "显示名称属性",
+            helpText: "映射为用户全名的 IdP 属性或 claim（SAML：在缺少名字和姓氏时使用）。不修改则保留当前值。Okta SAML：name。Entra ID：http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          }
+        },
+        resultDialog: {
+          title: "属性映射已保存",
+          description: "此提供方此后每次登录时读取用户邮箱和姓名所用的属性或 claim。为空表示使用默认值。",
+          acknowledge: "完成",
+          fields: {
+            email: "邮箱",
+            firstName: "名字",
+            lastName: "姓氏",
+            name: "显示名称"
           }
         }
       }
@@ -2361,6 +2436,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "令牌摘要",
         help: "Bearer 令牌的 HMAC-SHA-256（base64url），以部署的认证密钥为键——单向；明文仅在签发时显示一次，且绝不存储。"
       },
+      token_hint: {
+        label: "令牌提示",
+        help: "Bearer 令牌的最后四个字符，在签发时记录，用于区分同一连接的多个凭据；绝非令牌本身或其摘要。提示功能上线前签发的凭据此项为空。"
+      },
       active: {
         label: "启用",
         help: "撤销开关——未启用的凭据在验证时会被拒绝"
@@ -2368,6 +2447,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       expires_at: {
         label: "过期时间",
         help: "用于分阶段凭据轮换的可选硬性过期时间；已过期的凭据会被拒绝"
+      },
+      last_used_at: {
+        label: "最近使用时间",
+        help: "该凭据最近一次通过验证的 SCIM 请求的时间，每分钟至多记录一次；尚无使用记录时为空"
       },
       user_id: {
         label: "签发人",
@@ -2417,6 +2500,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "我已保存令牌",
           fields: {
             token: "令牌",
+            tokenHint: "令牌提示",
             connectionId: "连接 ID",
             expiresAt: "过期时间"
           }
@@ -2774,6 +2858,23 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "组织",
         help: "授权所在的组织：拥有该 SCIM 连接或 SSO 提供方的组织。"
       },
+      match_status: {
+        label: "匹配状态",
+        help: "该映射指定的组是否为其 SCIM 连接当前推送的组。未匹配时不授予任何权限。SSO 提供方不保存组列表，因此不适用。",
+        options: {
+          matched: "已匹配",
+          unmatched: "未匹配任何当前组",
+          not_applicable: "不适用"
+        }
+      },
+      matched_group_id: {
+        label: "匹配的组 ID",
+        help: "该映射当前匹配的 SCIM 组的 ID。未匹配任何组时为空。"
+      },
+      match_changed_at: {
+        label: "匹配变更时间",
+        help: "匹配状态或匹配的组最近一次变化的时间。"
+      },
       created_at: {
         label: "创建时间"
       },
@@ -2783,7 +2884,64 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "全部"
+        label: "全部",
+        emptyState: {
+          title: "还没有组映射",
+          message: "使用“映射 SSO 组”（SSO 提供方在登录时发送的组）或“映射 SCIM 组”（SCIM 连接开通的组），为身份提供方某个组的成员授予权限集。"
+        }
+      }
+    },
+    _actions: {
+      map_sso_group: {
+        label: "映射 SSO 组",
+        description: "为 SSO 提供方在登录时发送的某个组的每位成员授予一个权限集。成员下次通过该提供方登录时生效。",
+        successMessage: "组映射已保存。成员下次通过该提供方登录时生效。",
+        params: {
+          providerId: {
+            label: "SSO 提供方 ID",
+            helpText: "其登录会携带该组的 SSO 提供方的提供方 ID，例如 “okta”。该提供方必须已设置组声明（在 SSO 提供方上使用“编辑组声明”）。"
+          },
+          groupExternalId: {
+            label: "组外部 ID",
+            helpText: "组声明发送的值为 ID 时，按原样填写，例如 Entra ID 的组对象 ID。与“组显示名称”二选一，不要同时填写。"
+          },
+          groupDisplayName: {
+            label: "组显示名称",
+            helpText: "组声明发送的值为名称时，按原样填写，例如 “Sales”。与“组外部 ID”二选一，不要同时填写。"
+          },
+          permissionSet: {
+            label: "权限集",
+            helpText: "该组成员在提供方所属组织中获得的权限集。管理员权限集会被拒绝。"
+          }
+        }
+      },
+      map_scim_group: {
+        label: "映射 SCIM 组",
+        description: "为某个 SCIM 连接开通的组的每位成员授予一个权限集。该组的现有成员会立即获得。",
+        successMessage: "组映射已保存",
+        params: {
+          connectionId: {
+            label: "SCIM 连接 ID",
+            helpText: "开通该组所经由的 SCIM 连接，例如 “okta-prod”：即其凭据的连接 ID。"
+          },
+          groupExternalId: {
+            label: "组外部 ID",
+            helpText: "身份提供方发送的组 externalId。与“组显示名称”二选一，不要同时填写。"
+          },
+          groupDisplayName: {
+            label: "组显示名称",
+            helpText: "组的 displayName，需完全一致。与“组外部 ID”二选一，不要同时填写。"
+          },
+          permissionSet: {
+            label: "权限集",
+            helpText: "该组成员在连接所属组织中获得的权限集。管理员权限集会被拒绝。"
+          }
+        }
+      },
+      delete_group_mapping: {
+        label: "删除映射",
+        confirmText: "删除此组映射？该组成员将不再获得它的权限集。对于 SCIM 连接，会立即重新投影该组成员，并移除此映射授予的权限。对于 SSO 提供方，会立即移除其登录为该权限集授予的权限，除非该提供方的另一条映射仍指向同一权限集。如需恢复，请重新映射该组。",
+        successMessage: "组映射已删除"
       }
     }
   },
@@ -3585,6 +3743,55 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       note: {
         label: "备注"
+      }
+    }
+  },
+  sys_metadata_commit: {
+    label: "元数据提交",
+    pluralLabel: "元数据提交",
+    description: "按软件包记录的提交日志，把一轮操作中的元数据变更归为一组。",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      package_id: {
+        label: "软件包"
+      },
+      operation: {
+        label: "操作",
+        options: {
+          apply: "应用",
+          revert: "回滚"
+        }
+      },
+      message: {
+        label: "说明",
+        help: "变更摘要；AI 轮次下为产生该变更的用户指令。"
+      },
+      actor: {
+        label: "操作者"
+      },
+      ai_model: {
+        label: "AI 模型"
+      },
+      parent_commit_id: {
+        label: "父提交"
+      },
+      event_seq_start: {
+        label: "起始事件序号"
+      },
+      event_seq_end: {
+        label: "结束事件序号"
+      },
+      items: {
+        label: "条目",
+        help: "JSON：[{ type, name, existedBefore, prevVersion }]——回滚计划。"
+      },
+      item_count: {
+        label: "条目数"
+      },
+      created_at: {
+        label: "创建时间"
       }
     }
   },
