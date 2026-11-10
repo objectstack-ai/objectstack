@@ -17,9 +17,10 @@
  * stand-in that lists the widgets it was handed.
  *
  * Pins: (a) a bundled dashboard opens with no `dashboard` list, no whole
- * `object` list and no `view` list; (b) the objects its widgets require are
- * asked by name, and a widget whose object the server answered absent is left
- * out; (c) CONTROL: a dashboard the bundle does not hold is read from the
+ * `object` list and no `view` list; (b) which objects its widgets require is
+ * asked in one `?names=` read, a widget whose object the server answered
+ * absent is left out, and that absent object is never asked by name (a 404 on
+ * every open); (c) CONTROL: a dashboard the bundle does not hold is read from the
  * `dashboard` list, prefer-local, still without the whole object list.
  */
 
@@ -167,10 +168,21 @@ function makeAdapter() {
     },
     getClient: () => ({
       meta: {
-        getItems: (type: string, options?: { packageId?: string }) => {
-          server.calls.push(options?.packageId ? `${type}?package=${options.packageId}` : type);
+        getItems: (type: string, options?: { packageId?: string; names?: readonly string[] }) => {
+          server.calls.push(
+            options?.packageId
+              ? `${type}?package=${options.packageId}`
+              : options?.names
+                ? `${type}?names=${options.names.join(',')}`
+                : type,
+          );
           const all = type === 'object' ? OBJECTS : type === 'app' ? server.apps : type === 'dashboard' ? [SALES, SERVICE, ...SHARED] : [];
-          const items = options?.packageId ? all.filter((o: any) => o._packageId === options.packageId) : all;
+          // The `?names=` door answers an absent name by leaving it out, never a 404.
+          const items = options?.packageId
+            ? all.filter((o: any) => o._packageId === options.packageId)
+            : options?.names
+              ? all.filter((o: any) => options.names!.includes(o.name))
+              : all;
           return Promise.resolve({ type, items: structuredClone(items) });
         },
         getItem: (type: string, name: string) => {
@@ -257,13 +269,17 @@ describe('a dashboard route reads from the app bundle and asks its widgets\' obj
     expect(objectCalls().filter((c) => c.startsWith('object/'))).toEqual([]);
   });
 
-  it('(b) asks the widgets\' objects by name and leaves out a widget whose object is absent', async () => {
+  it('(b) asks which widget objects exist in one ?names= read and leaves out a widget whose object is absent, with no by-name read of it', async () => {
     boot(`/apps/${CRM}/dashboard/service`);
     await waitFor(() => expect(screen.getByTestId('dashboard-widgets')).toHaveTextContent('cases,plain'));
 
     expect(screen.getByTestId('dashboard-widgets')).not.toHaveTextContent('cloud');
+    expect(objectCalls()).toContain('object?names=crm_case,cloud_only');
+    // An object this runtime does not register is never asked by name: that
+    // read answers 404 on every open (a cloud-only `requiresObject`).
+    expect(objectCalls()).not.toContain('object/cloud_only');
+    // A served widget object is still read by name for the route's scope.
     expect(objectCalls()).toContain('object/crm_case');
-    expect(objectCalls()).toContain('object/cloud_only');
     expect(objectCalls()).not.toContain('object');
     expect(server.calls).not.toContain('dashboard');
   });

@@ -255,3 +255,39 @@ describe('deriveRelatedLists', () => {
     expect(out[0]).toMatchObject({ childObject: 'task', referenceField: 'project', isOwned: true });
   });
 });
+
+// A child the data API does not expose (`enable.apiEnabled: false`, the shape
+// `sys_user_device` ships on the stock boot) answers every read of its records
+// `404 OBJECT_API_DISABLED`, so the record page derives no list for it.
+describe('deriveRelatedLists — a child the data API does not expose', () => {
+  const user = { name: 'sys_user', label: 'User', fields: { name: { type: 'text' } } };
+  const device = {
+    name: 'sys_user_device',
+    label: 'Device',
+    enable: { apiEnabled: false },
+    fields: { user_id: { type: 'lookup', reference: 'sys_user' } },
+  };
+  const session = {
+    name: 'sys_session',
+    label: 'Session',
+    fields: { user_id: { type: 'lookup', reference: 'sys_user' } },
+  };
+
+  it('derives no record-page list for an apiEnabled: false child', () => {
+    const out = deriveRelatedLists(user, [user, device, session]);
+    expect(out.map((r) => r.childObject)).toEqual(['sys_session']);
+  });
+
+  it('keeps the list of a child that declares apiEnabled: true, or no enable block', () => {
+    const exposed = { ...device, enable: { apiEnabled: true } };
+    expect(deriveRelatedLists(user, [user, exposed]).map((r) => r.childObject)).toEqual(['sys_user_device']);
+    const { enable: _enable, ...undeclared } = device;
+    expect(deriveRelatedLists(user, [user, undeclared]).map((r) => r.childObject)).toEqual(['sys_user_device']);
+  });
+
+  it('lists the relationship on the authoring surface, flagged hidden', () => {
+    const out = deriveRelatedLists(user, [user, device, session], { includeHidden: true });
+    expect(out.find((r) => r.childObject === 'sys_user_device')).toMatchObject({ referenceField: 'user_id', isHidden: true });
+    expect(out.find((r) => r.childObject === 'sys_session')?.isHidden).toBeUndefined();
+  });
+});
