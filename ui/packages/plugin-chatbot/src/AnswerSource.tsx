@@ -30,14 +30,14 @@ import type { AnswerSource } from './mapMessages';
 /** The scope value the block states in words; any other value draws nothing. */
 const SCOPE_VISIBLE_TO_YOU = 'visible_to_you';
 
-type Scalar = string | number | boolean;
+type FilterScalar = string | number | boolean;
 
 /** One filter condition as the block draws it: field, operator label key, comparands. */
 interface FilterRow {
   field: string;
   /** A `filterBuilder.operators.*` key, the words the filter builder already draws. */
   operator: string;
-  values: Scalar[];
+  values: FilterScalar[];
   /** `between` draws its two comparands as a range. */
   range?: boolean;
 }
@@ -97,7 +97,7 @@ const OPERATOR_WORDS_EN: Readonly<Record<string, string>> = {
   notExists: 'Is not set',
 };
 
-const isScalar = (v: unknown): v is Scalar =>
+const isScalar = (v: unknown): v is FilterScalar =>
   typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean';
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
@@ -214,7 +214,7 @@ function AnswerSourceSection({ source }: { source: AnswerSource }) {
   const { t } = useObjectTranslation();
   const tt = useSafeTranslate();
   const aggregateWords = builtinAggregateLabels(tt) as Record<string, string>;
-  const word = (v: Scalar): string =>
+  const word = (v: FilterScalar): string =>
     typeof v === 'boolean'
       ? v
         ? t('filterBuilder.trueLabel', { defaultValue: 'True' })
