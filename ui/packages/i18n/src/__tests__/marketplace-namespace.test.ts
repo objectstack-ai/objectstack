@@ -116,7 +116,7 @@ describe('marketplace namespace — lazy by construction', () => {
     // script or region subtag (`./zh-Hant.js`, `./pt-BR.js`).
     expect(staticSpecifiers.filter((s) => /^\.\/[a-z]{2}(?:-[A-Za-z]+)?\.js$/.test(s))).toEqual([]);
     // Lit control: the static imports were read.
-    expect(staticSpecifiers).toContain('../../locales/registry.js');
+    expect(staticSpecifiers).toContain('../packNamespace.js');
   });
 
   it('ships one catalogue per built-in language (the platform locale table)', () => {

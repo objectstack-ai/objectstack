@@ -80,7 +80,12 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
  * sides hold is a key defined twice, which no reader could resolve the same
  * way twice, and throws.
  */
-function complete<P extends object, N extends object>(pack: P, partials: readonly object[], label: string): P & N {
+function complete<P extends object, M extends object, D extends object>(
+  pack: P,
+  marketplace: M,
+  developer: D,
+  label: string,
+): P & M & D {
   const merge = (into: Record<string, unknown>, from: Record<string, unknown>, at: string) => {
     const out: Record<string, unknown> = { ...into };
     for (const key of Object.keys(from)) {
@@ -97,8 +102,8 @@ function complete<P extends object, N extends object>(pack: P, partials: readonl
     return out;
   };
   let out = pack as Record<string, unknown>;
-  for (const partial of partials) out = merge(out, partial as Record<string, unknown>, '');
-  return out as P & N;
+  for (const partial of [marketplace, developer]) out = merge(out, partial as Record<string, unknown>, '');
+  return out as P & M & D;
 }
 
 // Export names are JavaScript identifiers, not pack keys: `zh` is the zh-Hans
@@ -110,57 +115,68 @@ function complete<P extends object, N extends object>(pack: P, partials: readonl
 // serialize (TS7056). Each `typeof` is emitted as a reference.
 export const en: typeof enPack & typeof enMarketplace & typeof enDeveloper = complete(
   enPack,
-  [enMarketplace, enDeveloper],
+  enMarketplace,
+  enDeveloper,
   'en',
 );
 export const zh: typeof zhHansPack & typeof zhHansMarketplace & typeof zhHansDeveloper = complete(
   zhHansPack,
-  [zhHansMarketplace, zhHansDeveloper],
+  zhHansMarketplace,
+  zhHansDeveloper,
   'zh-Hans',
 );
 export const zhHant: typeof zhHantPack & typeof zhHantMarketplace & typeof zhHantDeveloper = complete(
   zhHantPack,
-  [zhHantMarketplace, zhHantDeveloper],
+  zhHantMarketplace,
+  zhHantDeveloper,
   'zh-Hant',
 );
 export const ja: typeof jaPack & typeof jaMarketplace & typeof jaDeveloper = complete(
   jaPack,
-  [jaMarketplace, jaDeveloper],
+  jaMarketplace,
+  jaDeveloper,
   'ja',
 );
 export const ko: typeof koPack & typeof koMarketplace & typeof koDeveloper = complete(
   koPack,
-  [koMarketplace, koDeveloper],
+  koMarketplace,
+  koDeveloper,
   'ko',
 );
 export const de: typeof dePack & typeof deMarketplace & typeof deDeveloper = complete(
   dePack,
-  [deMarketplace, deDeveloper],
+  deMarketplace,
+  deDeveloper,
   'de',
 );
 export const fr: typeof frPack & typeof frMarketplace & typeof frDeveloper = complete(
   frPack,
-  [frMarketplace, frDeveloper],
+  frMarketplace,
+  frDeveloper,
   'fr',
 );
 export const es: typeof esPack & typeof esMarketplace & typeof esDeveloper = complete(
   esPack,
-  [esMarketplace, esDeveloper],
+  esMarketplace,
+  esDeveloper,
   'es',
 );
 export const pt: typeof ptBrPack & typeof ptBrMarketplace & typeof ptBrDeveloper = complete(
   ptBrPack,
-  [ptBrMarketplace, ptBrDeveloper],
+  ptBrMarketplace,
+  ptBrDeveloper,
   'pt-BR',
 );
 export const ru: typeof ruPack & typeof ruMarketplace & typeof ruDeveloper = complete(
   ruPack,
-  [ruMarketplace, ruDeveloper],
+  ruMarketplace,
+  ruDeveloper,
   'ru',
 );
 export const ar: typeof arPack & typeof arMarketplace & typeof arDeveloper = complete(
   arPack,
-  [arMarketplace, arDeveloper],
+  arMarketplace,
+  arDeveloper,
   'ar',
 );
 
