@@ -1012,7 +1012,7 @@ export function AuthProvider({
       slug: string;
       logo?: string;
       timezone?: string;
-      edition?: 'developer';
+      edition?: string;
     }): Promise<AuthOrganization> => {
       setError(null);
       try {

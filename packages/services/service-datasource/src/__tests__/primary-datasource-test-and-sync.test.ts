@@ -39,6 +39,9 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+// Pay the driver's first load at collection, not inside a clocked `it()`
+// (`check:test-source-alias`).
+import '@objectstack/driver-sql';
 import { ObjectQL } from '@objectstack/objectql';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 import type { IDataDriver } from '@objectstack/spec/contracts';
@@ -211,6 +214,10 @@ describe('the primary datasource: Sync refuses as before, with the true reason',
     expect(tables.body.error.code).toBe('EXTERNAL_DATASOURCE_ERROR');
     expect(tables.body.error.message).toContain(NOT_A_FEDERATION_SOURCE);
     expect(tables.body.error.message).not.toContain('no registered driver');
+    // The reason a client branches on, and the rationale beside the one-line message.
+    expect(tables.body.error.details).toMatchObject({ reason: 'primary_not_federated' });
+    expect(tables.body.error.details.hint).toContain("Its tables are the platform's own objects");
+    expect(tables.body.error.message.length).toBeLessThanOrEqual(160);
 
     const draft = await call('POST', '/default/object-draft', { table: 'acct' });
     expect(draft.status).toBe(400);

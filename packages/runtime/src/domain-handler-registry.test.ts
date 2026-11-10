@@ -18,6 +18,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { envelopeViolations } from '@objectstack/spec/api';
 import { HttpDispatcher } from './http-dispatcher.js';
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/metadata';
 import { DomainHandlerRegistry } from './domain-handler-registry.js';
 import type { DomainHandler } from './domain-handler-registry.js';
 
@@ -386,11 +388,13 @@ describe('HttpDispatcher extracted domains (PR-3: keys/storage/ui)', () => {
         };
         // Direct delegate call — dispatch() would re-resolve identity off the
         // auth-less mock kernel and overwrite the seeded executionContext.
-        const result = await makeDispatcher({ objectql }).handleKeys('POST', { name: 'CI Key', user_id: 'attacker' }, context);
+        // [#32281] A body `user_id` is refused now (http-dispatcher.keys.test.ts
+        // pins that); this case is about the registry reaching the handler.
+        const result = await makeDispatcher({ objectql }).handleKeys('POST', { name: 'CI Key' }, context);
         expect(result.response?.status).toBe(201);
         const row = insert.mock.calls[0][1];
         expect(insert.mock.calls[0][0]).toBe('sys_api_key');
-        // user_id pinned to caller; body's user_id ignored; only the hash stored.
+        // user_id pinned to caller; only the hash stored.
         expect(row.user_id).toBe('caller-1');
         expect(row.key).not.toBe(result.response?.body?.data?.key);
         expect(result.response?.body?.data?.key).toBeTruthy();

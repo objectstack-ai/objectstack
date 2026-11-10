@@ -2106,6 +2106,10 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         label: "Autoriser le provisionnement juste-à-temps",
         help: "Avec la politique d’audience sur invitation uniquement, créer un compte pour une personne qui se connecte via ce fournisseur sans compte ni invitation. Désactivé par défaut : cette personne est refusée. Les autres politiques provisionnent comme avant. Modifiez-le avec « Modifier les options de connexion »."
       },
+      skip_user_info: {
+        label: "Lire les revendications uniquement depuis le jeton d’ID",
+        help: "OIDC uniquement. Lit l’e-mail, le nom et les groupes depuis le jeton d’ID vérifié du fournisseur d’identité, sans appeler son point de terminaison userinfo. À activer pour Microsoft Entra ID, dont la réponse userinfo ne contient ni groupes ni preferred_username. Désactivé par défaut : un fournisseur doté d’un point de terminaison userinfo lit ses revendications dans cette réponse. Modifiez-le avec « Modifier les options de connexion »."
+      },
       user_id: {
         label: "Enregistré par",
         help: "Utilisateur qui a enregistré ce fournisseur"
@@ -2432,6 +2436,10 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         label: "Empreinte du jeton",
         help: "HMAC-SHA-256 (base64url) du jeton bearer, avec pour clé le secret d’authentification du déploiement — à sens unique ; le texte en clair n’est affiché qu’une fois lors de la génération et n’est jamais stocké."
       },
+      token_hint: {
+        label: "Indice du jeton",
+        help: "Les quatre derniers caractères du jeton bearer, enregistrés à l'émission pour distinguer les identifiants d'une même connexion ; jamais le jeton ni son condensat. Vide pour un identifiant émis avant l'enregistrement des indices."
+      },
       active: {
         label: "Actif",
         help: "Interrupteur de révocation — un identifiant inactif est refusé lors de la vérification"
@@ -2439,6 +2447,10 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       expires_at: {
         label: "Expire le",
         help: "Expiration ferme facultative pour une rotation progressive des identifiants ; un identifiant expiré est refusé"
+      },
+      last_used_at: {
+        label: "Dernière utilisation",
+        help: "Moment où l'identifiant a authentifié une requête SCIM pour la dernière fois, enregistré au plus une fois par minute ; vide si aucune utilisation n'a été enregistrée"
       },
       user_id: {
         label: "Généré par",
@@ -2488,6 +2500,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "J’ai enregistré le jeton",
           fields: {
             token: "Jeton",
+            tokenHint: "Indice du jeton",
             connectionId: "ID de connexion",
             expiresAt: "Expire le"
           }
