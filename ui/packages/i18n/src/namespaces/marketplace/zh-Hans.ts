@@ -128,6 +128,13 @@ const zh = {
           unmanagedHint: '一次性复制到本运行时，成为它自己的元数据：每个条目都可在此编辑，副本不再接收升级。',
           required: '请先选择安装方式，再安装此软件包。',
         },
+        targetNamespace: {
+          label: '目标命名空间',
+          placeholder: '例如 crm_copy',
+          hint: '这份副本的元数据写入的命名空间。可修改为其他名称后安装。',
+          noDefault: '未能读取默认命名空间。请输入这份副本要使用的命名空间。',
+          taken: '命名空间 "{{namespace}}" 已属于另一个包。请换一个名称后重新安装。',
+        },
         unmanagedSuccess: '已将 "{{name}}" 的 v{{version}} 复制到本运行时，成为它自己的元数据，位于基础包 {{base}} 中。副本可编辑，且不再接收升级。',
         unmanagedStrippedLocks: '软件包锁定了以下条目。副本可编辑，因此这些锁未被复制：',
         unmanagedIgnored: '本运行时不支持非托管安装，因此 "{{name}}" 以托管方式安装（以代码形式注册），而不是被复制。请先升级运行时，然后卸载该软件包，再以非托管副本重新安装。',

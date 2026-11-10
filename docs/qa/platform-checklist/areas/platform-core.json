@@ -9,7 +9,7 @@
       "title": "Showcase boots clean: health + ready 200, no degraded startup banners, console + app metadata served",
       "since": "v15",
       "status": "active",
-      "revision": 13,
+      "revision": 14,
       "priority": "P0",
       "surface": "mixed",
       "preconditions": [
@@ -19,7 +19,7 @@
         "boot examples/app-showcase via `objectstack dev --ui --seed-admin -p <port> -d file:/tmp/<run>/data.db`",
         "poll GET http://localhost:<port>/api/v1/health until 200; record time-to-healthy",
         "GET /api/v1/ready and record the status (the readiness probe is a separate route — packages/runtime/src/route-ledger.ts)",
-        "read the FULL boot log: capture the Flows: banner, any ⚠ lines, any ERROR-level lines, and the seed outcome. ⚠️ at the default log level (warn) SeedLoader prints NO success line, so a grep for one finds nothing on a healthy boot. Read the ready banner's `Seeds:` row instead — it is immune to the level (packages/runtime/src/seed-summary.ts), e.g. `Seeds:   com.example.showcase 132 rows`, and turns yellow with ⚠ and an `N ok / M errors` or `lost links` count when rows were dropped. `--log-level info` additionally prints `[Seeder] Seed loading complete {inserted, updated, skipped, errored}`; a load that dropped records logs `[Seeder] Seed loading completed with N dropped record(s)…` at warn and is visible at either level. `os dev` compiles before it serves (the default since #26130), and the compile prints its author-time lint findings as ⚠ lines first (65 on the stock showcase at 756220c4): they are build advisories, not boot lines, so start the ⚠ read at the server's startup, after the compile output. ⚠️ /api/v1/health answers 200 as soon as the port is bound, BEFORE the ready banner (`Flows:`, `Seeds:`) is printed (packages/cli/src/commands/serve.ts prints the banner after the bind), so a log cut at the health-green line can stop short of the very lines this step reads: capture the boot log to its own file, wait for the banner's last line (`Press Ctrl+C to stop`), and end the boot window at the first NON-health request the run issues",
+        "read the FULL boot log: capture the Flows: banner, any ⚠ lines, any ERROR-level lines, and the seed outcome. ⚠️ at the default log level (warn) SeedLoader prints NO success line, so a grep for one finds nothing on a healthy boot. Read the ready banner's `Seeds:` row instead — it is immune to the level (packages/runtime/src/seed-summary.ts), e.g. `Seeds:   com.example.showcase 138 rows`, and turns yellow with ⚠ and an `N ok / M errors` or `lost links` count when rows were dropped. `--log-level info` additionally prints `[Seeder] Seed loading complete {inserted, updated, skipped, errored}`; a load that dropped records logs `[Seeder] Seed loading completed with N dropped record(s)…` at warn and is visible at either level. `os dev` compiles before it serves (the default since #26130), and the compile prints its author-time lint findings as ⚠ lines first (30 on the stock showcase since #32168, which brought QA run #32135's 76 down; each of the 30 is named, with the reason it stays, in examples/app-showcase/test/author-time-advisories.test.ts, which fails on a new one; a checkout whose Console is not built prints one more, the `sdui/jsx-parse-level-only` info notice that the JSX component check had no manifest to run against, which reports the build state rather than the app): they are build advisories, not boot lines, so start the ⚠ read at the server's startup, after the compile output. ⚠️ /api/v1/health answers 200 as soon as the port is bound, BEFORE the ready banner (`Flows:`, `Seeds:`) is printed (packages/cli/src/commands/serve.ts prints the banner after the bind), so a log cut at the health-green line can stop short of the very lines this step reads: capture the boot log to its own file, wait for the banner's last line (`Press Ctrl+C to stop`), and end the boot window at the first NON-health request the run issues",
         "GET /_console/ and confirm the console shell HTML is served (200, text/html)",
         "GET /api/v1/meta/app?id=showcase_app and capture the merged app/nav metadata (?id= matches the App document's NAME, never the package id — ?id=com.example.showcase answers an empty items array, which reads exactly like missing metadata)",
         "cross-check the nav payload: the grp_data group lists the seeded objects (showcase_project, showcase_task, showcase_account, showcase_contact, showcase_invoice, showcase_field_zoo, …)"
@@ -138,6 +138,12 @@
           "date": "2026-10-31",
           "change": "steps[3] and acceptance[2].verify move the end of the boot window from health-green to the first non-health request. Checklist-accuracy finding of QA run #27481 (18.3.0 wave 3, parked on anchor #27377; slice S4, #28338): /api/v1/health answered 200 before the Flows:/Seeds: banner was flushed, because serve.ts prints the banner after the bind, so cutting the log at health-green dropped the banner acceptance[2] reads. The ERROR-scope reason for a window is unchanged; only its end moved. acceptance[0] still records time-to-healthy. Re-read at 3fd80337",
           "ref": "#27481"
+        },
+        {
+          "revision": 14,
+          "date": "2026-11-10",
+          "change": "steps[3]'s example seed banner reads `com.example.showcase 138 rows` (was 132), the count seed-integrity steps[1] re-measured at 8523ef9a (20 datasets: sys_exchange_rate and showcase_invoice_line among them), and its compile-advisory count reads 30 (was 65 at 756220c4; QA run #32135 met 76), the count #32168 ask D leaves, with the test that names each (plus the sdui/jsx-parse-level-only notice on a checkout whose Console is not built). Checklist-accuracy notes of QA run #32135. No clause changed",
+          "ref": "#32168"
         }
       ]
     },
@@ -146,7 +152,7 @@
       "title": "Seed integrity: row counts match the authored seed, values land verbatim, replay is idempotent",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P0",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -158,11 +164,11 @@
       },
       "steps": [
         "after a clean fresh boot, derive the expected per-object row counts from the app's own seed module (examples/app-showcase/src/data/seed/index.ts — count the records arrays; re-derive rather than trusting a stale list if seeds changed)",
-        "baseline for cross-checking the derivation — all 19 datasets of ShowcaseSeedData, 132 rows, read at 9753d163 (QA run #25812 counted the same 19/19 and 132 at 6679644a): showcase_account=14, showcase_contact=32 (8 named + 24 bulk prospects), showcase_inquiry=3, showcase_product=4, showcase_project=5, showcase_task=10, showcase_category=4, showcase_business_unit=9, sys_business_unit=5, showcase_team=2, showcase_project_membership=3 (mode ignore), showcase_field_zoo=2, showcase_invoice=12, showcase_invoice_line=5, showcase_expense_report=4, showcase_expense_line=13, showcase_preference=1, showcase_announcement=2, showcase_client_brief=2",
+        "baseline for cross-checking the derivation — all 20 datasets of ShowcaseSeedData, 138 rows, counted at 8523ef9a by importing the module (QA run #32135's boot banner read the same 138 at ff04ad81): showcase_account=14, showcase_contact=32 (8 named + 24 bulk prospects), showcase_inquiry=3, showcase_product=4, showcase_project=5, showcase_task=10, showcase_category=4, showcase_business_unit=9, sys_business_unit=5, showcase_team=2, showcase_project_membership=3, showcase_field_zoo=2, sys_exchange_rate=4 (two rates each for EUR and JPY), showcase_invoice=12, showcase_invoice_line=7, showcase_expense_report=4, showcase_expense_line=13, showcase_preference=1, showcase_announcement=2, showcase_client_brief=2",
         "for each seeded object, GET /api/v1/data/<object>?$top=1 and read the server total; build the expected-vs-actual table",
         "GET the Field Zoo 'Specimen — Full' row and spot-diff authored values (f_multiselect ['red','green'] as a set, f_lookup resolving to the Northwind account id, f_json nested object intact, f_time in its canonical stored form — authored '14:30', served '14:30:00', which is equal and not a drift; packages/core/src/utils/temporal-storage-form.ts#canonicalTimeOfDay)",
-        "read the seed outcome: every seed source reports success and none reports a rejection or a partial load. ⚠️ at the default log level (warn) SeedLoader prints NO success line, so a grep for one finds nothing on a healthy boot. Read the ready banner's `Seeds:` row instead — it is immune to the level (packages/runtime/src/seed-summary.ts), e.g. `Seeds:   com.example.showcase 132 rows`, and turns yellow with ⚠ and an `N ok / M errors` or `lost links` count when rows were dropped. `--log-level info` additionally prints `[Seeder] Seed loading complete {inserted, updated, skipped, errored}`; a load that dropped records logs `[Seeder] Seed loading completed with N dropped record(s)…` at warn and is visible at either level",
-        "restart the server against the SAME file DB; re-run the count sweep and diff against the first sweep (upsert mode must no-op, not duplicate)"
+        "read the seed outcome: every seed source reports success and none reports a rejection or a partial load. ⚠️ at the default log level (warn) SeedLoader prints NO success line, so a grep for one finds nothing on a healthy boot. Read the ready banner's `Seeds:` row instead — it is immune to the level (packages/runtime/src/seed-summary.ts), e.g. `Seeds:   com.example.showcase 138 rows`, and turns yellow with ⚠ and an `N ok / M errors` or `lost links` count when rows were dropped. `--log-level info` additionally prints `[Seeder] Seed loading complete {inserted, updated, skipped, errored}`; a load that dropped records logs `[Seeder] Seed loading completed with N dropped record(s)…` at warn and is visible at either level",
+        "restart the server against the SAME file DB; re-run the count sweep and diff against the first sweep. Every dataset replays create-only: no dataset declares mode 'upsert', so each takes the seed default `ignore` (the seed module's own comment says why), and a replay matches each row by its externalId and leaves it as it is — no row is added, none is rewritten"
       ],
       "acceptance": [
         {
@@ -184,7 +190,7 @@
           "evidence": "the log excerpt"
         },
         {
-          "clause": "seed replay is idempotent: a restart against the same DB changes no count (upsert with externalId no-ops on unchanged rows)",
+          "clause": "seed replay is idempotent: a restart against the same DB changes no count (every dataset is create-only, the seed default `ignore`: each authored row is matched by its externalId and left as it is)",
           "oracle": "api",
           "verify": "second count sweep diffs empty against the first",
           "evidence": "both sweeps"
@@ -198,7 +204,7 @@
       ],
       "negative": [
         "a count of 0 on any nav-visible object is a FAIL against the seed, never 'feature has nothing to show' (seed-data-thin trap: check row counts vs the built artifact, read the boot log)",
-        "counts that GROW on restart are a FAIL of upsert idempotence even though every row individually looks valid"
+        "counts that GROW on restart are a FAIL of replay idempotence (the externalId match) even though every row individually looks valid"
       ],
       "traps": ["seed-data-thin", "single-datapoint"],
       "source": [
@@ -234,6 +240,12 @@
           "date": "2026-10-28",
           "change": "acceptance[1].verify names the masked field. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26481, priority:P0, at 756220c4; wave anchor #25807, slice B): f_password read back as the mask '••••••••', so a literal Specimen diff showed one difference that is the field's declared behaviour. Re-read at base fd246c22: examples/app-showcase/src/data/objects/field-zoo.object.ts (f_password, 'Password (masked on read)'), examples/app-showcase/src/data/seed/index.ts. The clause is unchanged",
           "ref": "#25807"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-10",
+          "change": "steps[1], steps[4] and steps[5], acceptance[3].clause and negative[1] corrected. Checklist-accuracy findings of QA run #32135 (the maintainer-named full-platform run at ff04ad81; card #32168). (1) steps[1]'s baseline said 19 datasets and 132 rows, and the run's boot read 138: ShowcaseSeedData now carries 20 datasets and 138 rows, because sys_exchange_rate (4 rows) was added and showcase_invoice_line authors 7 lines, not 5. Counted at base 8523ef9a by importing ShowcaseSeedData (examples/app-showcase/src/data/seed/index.ts) and summing each records array; steps[4]'s banner example follows. (2) steps[5], acceptance[3] and negative[1] called the replay an upsert, but no dataset declares mode 'upsert': each takes the seed default `ignore` (create-only), as the seed module's comment says. The assertion is unchanged: a restart changes no count",
+          "ref": "#32168"
         }
       ]
     },
@@ -242,7 +254,7 @@
       "title": "Seeded admin signs in through the console; the session survives reload and re-authenticates cleanly after expiry",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P0",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -251,8 +263,8 @@
         "sign in with the seeded admin credentials — drive the React controlled inputs with the native setter + input/change events, or POST the auth endpoint from the page (dogfood skill §4; naive fills submit empty)",
         "screenshot the post-login shell; capture the first authed API responses",
         "reload the page; capture the first authed API request after reload",
-        "expire the session SERVER-side: POST /api/v1/auth/sign-out; then trigger an authed navigation/API call. ⛔ Do NOT use a clearCookies() gesture: the console authenticates with a bearer token in localStorage under `auth-session-token`, sent as an Authorization header, so clearing cookies expires NOTHING and the shell legitimately keeps rendering authed data — which reads exactly like the dead-shell failure clause 3 exists to catch (this nearly produced a false P0). Clearing localStorage as well is the client-side equivalent",
-        "observe the console's reaction (redirect to login vs dead shell); screenshot",
+        "expire the session SERVER-side: POST /api/v1/auth/sign-out. Then drive BOTH legs, each scored on its own, in this order: (a) an IN-APP navigation with no reload — click a tile on Home (the Showcase app) or a sidebar link, which the console routes client-side; then (b) a full page RELOAD. They are different code paths and can disagree: the reload reads the session afresh at page load, while the in-app navigation only meets the 401s its data calls answer (QA run #32135: the reload went to /_console/login?redirect=…, the in-app navigation kept the full shell over 'Page Not Found', #32138). ⛔ Do NOT use a clearCookies() gesture: the console authenticates with a bearer token in localStorage under `auth-session-token`, sent as an Authorization header, so clearing cookies expires NOTHING and the shell legitimately keeps rendering authed data — which reads exactly like the dead-shell failure clause 3 exists to catch (this nearly produced a false P0). Clearing localStorage as well is the client-side equivalent",
+        "observe the console's reaction after EACH leg of steps[4] (redirect to login vs dead shell); screenshot each",
         "sign in again and verify the console restores a working session on the same route",
         "negative pass: sign out, then attempt login with a wrong password; capture the auth response and the UI"
       ],
@@ -276,10 +288,10 @@
           "evidence": "the 401 trace"
         },
         {
-          "clause": "the console reacts to expiry by returning the user to login (or an explicit re-auth prompt) — never a dead shell rendering stale data as if authed",
+          "clause": "the console reacts to expiry by returning the user to login (or an explicit re-auth prompt) on BOTH legs of steps[4], the in-app navigation and the reload — never a dead shell rendering stale data, or a 'not found' or connection error, as if the user were still signed in",
           "oracle": "screenshot",
-          "verify": "post-expiry screenshot shows the login/re-auth surface",
-          "evidence": "screenshot"
+          "verify": "one post-expiry screenshot per leg, each showing the login/re-auth surface. The reload leg passing never scores the in-app leg: QA run #32135 met exactly that split (the reload redirected; the in-app navigation kept the sidebar and avatar over 'Page Not Found' and 'Couldn't load records', #32138)",
+          "evidence": "a screenshot per leg"
         },
         {
           "clause": "re-authentication after expiry restores a working session: the same authed calls return 200 again and the shell renders current data",
@@ -302,7 +314,8 @@
         { "revision": 1, "date": "2026-08-07", "change": "initial", "ref": "#3358" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 3, "date": "2026-08-18", "change": "corrected step 5's expiry gesture and the clause-2 ?id= example. The console authenticates by bearer token in localStorage (auth-session-token), so the documented clearCookies() gesture expires nothing and leaves a fully authed shell rendering — the exact shape of the c3 failure mode, which nearly produced a false P0 (#9453 CF-8). True expiry is POST /api/v1/auth/sign-out. Also corrected ?id=com.example.showcase to the app name showcase_app (#9334)", "ref": "#9386" },
-        { "revision": 4, "date": "2026-10-01", "change": "checklist-accuracy findings of QA run #21056: acceptance[2].verify still said 'after clearing cookies', contradicting the rev-3 sign-out in steps[4]; acceptance[0] asked for 'nav + header', but the post-login landing /_console/home renders the header and the launcher with no sidebar by design", "ref": "#21060" }
+        { "revision": 4, "date": "2026-10-01", "change": "checklist-accuracy findings of QA run #21056: acceptance[2].verify still said 'after clearing cookies', contradicting the rev-3 sign-out in steps[4]; acceptance[0] asked for 'nav + header', but the post-login landing /_console/home renders the header and the launcher with no sidebar by design", "ref": "#21060" },
+        { "revision": 5, "date": "2026-11-10", "change": "steps[4], steps[5] and acceptance[3] name both expiry legs. Checklist-accuracy finding of QA run #32135 (at ff04ad81; card #32168): after the server-side sign-out, an in-app navigation and a full reload behave differently — the reload returned to /_console/login?redirect=…, the in-app navigation kept the signed-in shell over 'Page Not Found' (the product defect #32138) — and steps[4] said only 'an authed navigation/API call', so a run could score the clause on whichever leg it happened to drive. Each leg is now driven and screenshotted, and the clause holds only when both return to login. Not loosened: the reload leg passing no longer stands for the in-app one", "ref": "#32168" }
       ]
     },
     {
@@ -4577,6 +4590,380 @@
           "date": "2026-11-10",
           "change": "initial — ADR-0150 children S2 and S3 on the upgrade path (#31872, #31903). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made. Corrected from QA record #32093 (a live run of this item on a real 18.3.0 database), before this item reached main: no clause failed on the text, but the text would have misled the next runner",
           "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.multi-replica-package-change-refusal",
+      "title": "Under declared replicas on Redis a runtime package change is refused 409 MULTI_REPLICA_PACKAGE_CHANGE_REFUSED on every package door, on marketplace install-local, and on a clone that would create a customization package; nothing is written",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123): every call"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two replicas declared on Redis: a Redis server both reach (OS_REDIS_URL), ONE shared Postgres (OS_DATABASE_URL=postgres://…, never a file database: os serve refuses one under this declaration, cli.serve-multi-replica-local-database-refusal), OS_CLUSTER_DRIVER=redis with OS_CLUSTER_REPLICAS=2 on both, the same OS_AUTH_SECRET on both (os start refuses without one, cli.start-multi-replica-auth-secret-refusal), an app that declares @objectstack/service-cluster and @objectstack/service-cluster-redis, and a multi-node gate registered on the module instance os serve consults (packages/services/service-cluster/src/multi-node-gate.ts#registerMultiNodeGate). Two os start processes, each on its own port and its own home (--home), are replica A and replica B. Premise check before any clause: neither boot log carries `[cluster] multi-node not authorized (`, and GET /api/v1/ready on each answers a body whose cluster.driver is redis",
+          "a scratch app package built with objectstack build (its dist/objectstack.json) for the install probes"
+        ],
+        "knownGaps": [
+          "BLOCKED(fixture) until a run provisions REPLICA_FIXTURE. The open tree registers no multi-node gate: checkMultiNodeAllowed fails closed when none is registered (packages/services/service-cluster/src/multi-node-gate.ts#checkMultiNodeAllowed), os serve then drops the redis driver for the in-process one, and the split-brain guard refuses the declared topology at ClusterServicePlugin.init, so no declared multi-replica boot on Redis reaches kernel:ready on a stock tree. The gate carriers ship with a distribution, not this repository. The unproven open-tree route is the one the CLI pin uses: an app whose own copy of @objectstack/service-cluster calls registerMultiNodeGate on the instance os serve imports from the host (packages/cli/test/serve-multi-node-gate-declaration.integration.test.ts#writeApp), here with the real redis driver instead of the pin's memory stand-in. The first run that boots two replicas that way names the recipe and lifts `blocked` in the same revision. FOLLOW-UPS §17c"
+        ]
+      },
+      "steps": [
+        "on replica A: POST /api/v1/packages with the scratch package; PATCH /api/v1/packages/com.example.showcase/disable and /enable; PATCH /api/v1/packages/com.example.showcase; POST /api/v1/packages/com.example.showcase/duplicate and /ensure-customization; DELETE /api/v1/packages/com.example.showcase",
+        "POST /api/v1/marketplace/install-local with the scratch manifest, and DELETE /api/v1/marketplace/install-local/ID",
+        "clone a packaged flow of a package that has no customization package yet, through the automation clone door",
+        "GET /api/v1/packages on replica A and on replica B"
+      ],
+      "acceptance": [
+        {
+          "clause": "every package door answers 409 MULTI_REPLICA_PACKAGE_CHANGE_REFUSED naming its act, and nothing changes",
+          "oracle": "api",
+          "verify": "each answers 409 with code MULTI_REPLICA_PACKAGE_CHANGE_REFUSED and the message \"<act> was refused: this deployment declares several replicas … Make the change in a maintenance window instead … Nothing was changed or written.\" (packages/runtime/src/multi-replica-package-refusal.ts#multiReplicaPackageChangeMessage), the act being Installing a package, Enabling package \"ID\", Disabling package \"ID\", Updating package \"ID\", Duplicating package \"ID\", Ensuring the customization package of \"ID\" or Deleting package \"ID\"; the package list reads the same before and after on both replicas",
+          "evidence": "the seven 409 bodies and the two package lists"
+        },
+        {
+          "clause": "install-local refuses both directions the same way",
+          "oracle": "api",
+          "verify": "both answer 409 MULTI_REPLICA_PACKAGE_CHANGE_REFUSED, \"Installing a package through install-local was refused\" and \"Uninstalling a package through install-local was refused\", \"Nothing was installed, uninstalled or written.\" (packages/cloud-connection/src/marketplace-install-local-plugin.ts)",
+          "evidence": "both 409 bodies"
+        },
+        {
+          "clause": "a clone that would create the customization package is refused, naming the pair",
+          "oracle": "api",
+          "verify": "the clone answers 409 MULTI_REPLICA_PACKAGE_CHANGE_REFUSED, its message naming the paired customization package that does not exist yet (packages/runtime/src/multi-replica-package-refusal.ts#multiReplicaPairCreationRefusal)",
+          "evidence": "the 409 body"
+        }
+      ],
+      "negative": [
+        "a package door that changes replica A alone (the list differs between A and B) is a FAIL",
+        "reading these 409s on a single-node boot is wrong: each door proceeds as before when the declaration is absent (packages/runtime/src/multi-replica-package-refusal.ts#refuseMultiReplicaPackageChange)"
+      ],
+      "blocked": {
+        "by": "fixture",
+        "ref": "fixture gap: no multi-node gate the open tree can register, so no declared multi-replica boot on Redis reaches kernel:ready (FOLLOW-UPS §17c, #32020)"
+      },
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/runtime/src/domains/packages-capability-gate.test.ts, packages/runtime/src/domains/automation-flow-clone-custom-package.test.ts, packages/runtime/src/domains/permission-set-clone.test.ts and packages/cloud-connection/src/marketplace-install-local-register-refusal.test.ts; no live spec boots declared replicas"
+      },
+      "source": [
+        "packages/runtime/src/multi-replica-package-refusal.ts#refuseMultiReplicaPackageChange, #multiReplicaPackageChangeMessage and #multiReplicaPairCreationRefusal",
+        "packages/runtime/src/domains/packages.ts (the seven doors) and packages/runtime/src/domains/automation.ts (the clone)",
+        "packages/cloud-connection/src/marketplace-install-local-plugin.ts (the install-local refusal)",
+        "packages/services/service-cluster/src/multi-replica.ts#MULTI_REPLICA_PACKAGE_CHANGE_REFUSED",
+        "packages/runtime/src/route-ledger.ts (the /packages rows)",
+        "#31751 (runtime package changes), #31712 (install-local)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — multi-replica on Redis: runtime package changes and install-local are refused (#31751, #31712). Blocked(fixture): no multi-node gate in the open tree. Scoped sweep #32020 (epic #32022 M2), read from source at 43a51b55; no live run made",
+          "ref": "#32020"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.ready-cluster-driver-health",
+      "title": "GET /api/v1/ready reports the redis cluster driver's health under declared replicas: a cluster entry when it answers, and status degraded (still 200) when it does not; a single node's body is unchanged",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "an orchestrator probing readiness (no session)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two replicas declared on Redis: a Redis server both reach (OS_REDIS_URL), ONE shared Postgres (OS_DATABASE_URL=postgres://…, never a file database: os serve refuses one under this declaration, cli.serve-multi-replica-local-database-refusal), OS_CLUSTER_DRIVER=redis with OS_CLUSTER_REPLICAS=2 on both, the same OS_AUTH_SECRET on both (os start refuses without one, cli.start-multi-replica-auth-secret-refusal), an app that declares @objectstack/service-cluster and @objectstack/service-cluster-redis, and a multi-node gate registered on the module instance os serve consults (packages/services/service-cluster/src/multi-node-gate.ts#registerMultiNodeGate). Two os start processes, each on its own port and its own home (--home), are replica A and replica B. Premise check before any clause: neither boot log carries `[cluster] multi-node not authorized (`, and GET /api/v1/ready on each answers a body whose cluster.driver is redis",
+          "a way to stop the Redis server and start it again during the run (its own process or container)",
+          "for the control, a single-node showcase boot with no cluster variables"
+        ],
+        "knownGaps": [
+          "BLOCKED(fixture) until a run provisions REPLICA_FIXTURE. The open tree registers no multi-node gate: checkMultiNodeAllowed fails closed when none is registered (packages/services/service-cluster/src/multi-node-gate.ts#checkMultiNodeAllowed), os serve then drops the redis driver for the in-process one, and the split-brain guard refuses the declared topology at ClusterServicePlugin.init, so no declared multi-replica boot on Redis reaches kernel:ready on a stock tree. The gate carriers ship with a distribution, not this repository. The unproven open-tree route is the one the CLI pin uses: an app whose own copy of @objectstack/service-cluster calls registerMultiNodeGate on the instance os serve imports from the host (packages/cli/test/serve-multi-node-gate-declaration.integration.test.ts#writeApp), here with the real redis driver instead of the pin's memory stand-in. The first run that boots two replicas that way names the recipe and lifts `blocked` in the same revision. FOLLOW-UPS §17c"
+        ]
+      },
+      "steps": [
+        "GET /api/v1/ready on replica A",
+        "stop the Redis server; wait at least two seconds; GET /api/v1/ready on replica A",
+        "start Redis again; wait for the replica to reconnect; GET /api/v1/ready",
+        "control: GET /api/v1/ready on the single-node boot"
+      ],
+      "acceptance": [
+        {
+          "clause": "a healthy replica answers 200 with its status and a cluster entry naming the driver as reachable",
+          "oracle": "api",
+          "verify": "the body keeps its status ready and gains cluster { driver: 'redis', reachable: true } (packages/runtime/src/http-dispatcher.ts#withClusterReading; packages/services/service-cluster/src/driver-health.ts#ClusterDriverHealth)",
+          "evidence": "the body"
+        },
+        {
+          "clause": "with Redis down the probe still answers 200, with status degraded and why",
+          "oracle": "api",
+          "verify": "the body answers 200 with status degraded and cluster { driver: 'redis', reachable: false, reason } where reason is one of timeout, ping-failed, unexpected-reply or no-probe (the probe times out at packages/services/service-cluster/src/driver-health.ts#DEFAULT_CLUSTER_PROBE_TIMEOUT_MS, and the reading is held one second)",
+          "evidence": "the body"
+        },
+        {
+          "clause": "recovery reads healthy again, and a single node answers exactly as before",
+          "oracle": "api",
+          "verify": "after reconnect the body is the healthy one again; the single-node body has no cluster key",
+          "evidence": "both bodies"
+        }
+      ],
+      "negative": [
+        "a 503 while Redis is down, or a cluster key on the single-node body, is a FAIL"
+      ],
+      "traps": [
+        "cache-staleness"
+      ],
+      "blocked": {
+        "by": "fixture",
+        "ref": "fixture gap: no multi-node gate the open tree can register, so no declared multi-replica boot on Redis reaches kernel:ready (FOLLOW-UPS §17c, #32020)"
+      },
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/runtime/src/http-dispatcher.ready.test.ts and packages/services/service-cluster/src/driver-health.test.ts; no live spec boots declared replicas"
+      },
+      "source": [
+        "packages/runtime/src/http-dispatcher.ts#withClusterReading",
+        "packages/services/service-cluster/src/driver-health.ts#ClusterDriverHealth and #DEFAULT_CLUSTER_PROBE_TIMEOUT_MS",
+        "packages/runtime/src/route-ledger.ts (GET /ready)",
+        "#31711"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — multi-replica on Redis: /ready reports the cluster driver's health (#31711). Blocked(fixture): no multi-node gate in the open tree. Scoped sweep #32020 (epic #32022 M2), read from source at 43a51b55; no live run made",
+          "ref": "#32020"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.cluster-membership-heartbeat",
+      "title": "Under declared replicas on Redis each replica keeps a membership key alive by heartbeat and lists itself in the roster; a killed replica drops out within the TTL and a stopped one at once",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "an operator reading which replicas are alive"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two replicas declared on Redis: a Redis server both reach (OS_REDIS_URL), ONE shared Postgres (OS_DATABASE_URL=postgres://…, never a file database: os serve refuses one under this declaration, cli.serve-multi-replica-local-database-refusal), OS_CLUSTER_DRIVER=redis with OS_CLUSTER_REPLICAS=2 on both, the same OS_AUTH_SECRET on both (os start refuses without one, cli.start-multi-replica-auth-secret-refusal), an app that declares @objectstack/service-cluster and @objectstack/service-cluster-redis, and a multi-node gate registered on the module instance os serve consults (packages/services/service-cluster/src/multi-node-gate.ts#registerMultiNodeGate). Two os start processes, each on its own port and its own home (--home), are replica A and replica B. Premise check before any clause: neither boot log carries `[cluster] multi-node not authorized (`, and GET /api/v1/ready on each answers a body whose cluster.driver is redis",
+          "redis-cli against the same Redis, and the default cluster key prefix os:"
+        ],
+        "knownGaps": [
+          "BLOCKED(fixture) until a run provisions REPLICA_FIXTURE. The open tree registers no multi-node gate: checkMultiNodeAllowed fails closed when none is registered (packages/services/service-cluster/src/multi-node-gate.ts#checkMultiNodeAllowed), os serve then drops the redis driver for the in-process one, and the split-brain guard refuses the declared topology at ClusterServicePlugin.init, so no declared multi-replica boot on Redis reaches kernel:ready on a stock tree. The gate carriers ship with a distribution, not this repository. The unproven open-tree route is the one the CLI pin uses: an app whose own copy of @objectstack/service-cluster calls registerMultiNodeGate on the instance os serve imports from the host (packages/cli/test/serve-multi-node-gate-declaration.integration.test.ts#writeApp), here with the real redis driver instead of the pin's memory stand-in. The first run that boots two replicas that way names the recipe and lifts `blocked` in the same revision. FOLLOW-UPS §17c",
+          "readClusterMembers() has no HTTP door or CLI command at the base sha; the item reads the keys it reads, in Redis"
+        ]
+      },
+      "steps": [
+        "with both replicas up, redis-cli --scan --pattern 'os:kv:cluster:member:*', then GET each key and its TTL, and GET os:kv:cluster:members",
+        "kill -9 replica B; scan again every five seconds for twenty seconds",
+        "start B again, wait for its key, then stop it with SIGTERM and scan at once"
+      ],
+      "acceptance": [
+        {
+          "clause": "each live replica holds one member key with a TTL, and the roster lists both",
+          "oracle": "log",
+          "verify": "two keys os:kv:cluster:member:NODE_ID, each TTL at most 15 seconds and renewed between reads (packages/services/service-cluster/src/cluster-membership.ts#CLUSTER_MEMBER_KEY_PREFIX and #DEFAULT_TTL_MS); the roster value lists both node ids (#CLUSTER_MEMBERS_ROSTER_KEY)",
+          "evidence": "the redis-cli output"
+        },
+        {
+          "clause": "a killed replica drops out within the TTL, and the survivor prunes it from the roster",
+          "oracle": "log",
+          "verify": "B's key is gone within 15 seconds of the kill, and after A's next beat the roster no longer lists B",
+          "evidence": "the timed scans"
+        },
+        {
+          "clause": "a clean stop deletes the key at once",
+          "oracle": "log",
+          "verify": "the scan right after SIGTERM no longer shows B's new key",
+          "evidence": "the scan"
+        }
+      ],
+      "negative": [
+        "a member key with no TTL, or a roster that grows by one id per restart, is a FAIL"
+      ],
+      "traps": [
+        "eventual-consistency",
+        "clock-skew"
+      ],
+      "blocked": {
+        "by": "fixture",
+        "ref": "fixture gap: no multi-node gate the open tree can register, so no declared multi-replica boot on Redis reaches kernel:ready (FOLLOW-UPS §17c, #32020)"
+      },
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/services/service-cluster/src/cluster-membership.test.ts; no live spec boots declared replicas"
+      },
+      "source": [
+        "packages/services/service-cluster/src/cluster-membership.ts#CLUSTER_MEMBER_KEY_PREFIX, #CLUSTER_MEMBERS_ROSTER_KEY, #DEFAULT_TTL_MS and #readClusterMembers",
+        "packages/services/service-cluster-redis/src/kv.ts (keys stored as PREFIXkv:KEY)",
+        "content/docs/kernel/cluster.mdx",
+        "#31942"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — multi-replica on Redis: membership heartbeat keys and readClusterMembers() (#31942). Blocked(fixture): no multi-node gate in the open tree. Scoped sweep #32020 (epic #32022 M2), read from source at 43a51b55; no live run made",
+          "ref": "#32020"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.settings-change-reaches-every-replica",
+      "title": "Under declared replicas on Redis a settings change made through one replica takes effect on the others without a restart (the settings lane)",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123): the settings change",
+        "an anonymous visitor signing up or in on replica B"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two replicas declared on Redis: a Redis server both reach (OS_REDIS_URL), ONE shared Postgres (OS_DATABASE_URL=postgres://…, never a file database: os serve refuses one under this declaration, cli.serve-multi-replica-local-database-refusal), OS_CLUSTER_DRIVER=redis with OS_CLUSTER_REPLICAS=2 on both, the same OS_AUTH_SECRET on both (os start refuses without one, cli.start-multi-replica-auth-secret-refusal), an app that declares @objectstack/service-cluster and @objectstack/service-cluster-redis, and a multi-node gate registered on the module instance os serve consults (packages/services/service-cluster/src/multi-node-gate.ts#registerMultiNodeGate). Two os start processes, each on its own port and its own home (--home), are replica A and replica B. Premise check before any clause: neither boot log carries `[cluster] multi-node not authorized (`, and GET /api/v1/ready on each answers a body whose cluster.driver is redis",
+          "redis-cli against the same Redis for the channel probe"
+        ],
+        "knownGaps": [
+          "BLOCKED(fixture) until a run provisions REPLICA_FIXTURE. The open tree registers no multi-node gate: checkMultiNodeAllowed fails closed when none is registered (packages/services/service-cluster/src/multi-node-gate.ts#checkMultiNodeAllowed), os serve then drops the redis driver for the in-process one, and the split-brain guard refuses the declared topology at ClusterServicePlugin.init, so no declared multi-replica boot on Redis reaches kernel:ready on a stock tree. The gate carriers ship with a distribution, not this repository. The unproven open-tree route is the one the CLI pin uses: an app whose own copy of @objectstack/service-cluster calls registerMultiNodeGate on the instance os serve imports from the host (packages/cli/test/serve-multi-node-gate-declaration.integration.test.ts#writeApp), here with the real redis driver instead of the pin's memory stand-in. The first run that boots two replicas that way names the recipe and lifts `blocked` in the same revision. FOLLOW-UPS §17c"
+        ]
+      },
+      "steps": [
+        "redis-cli SUBSCRIBE os:ps:settings.changed in a side shell",
+        "on replica A as admin, GET /api/settings/auth, then PUT /api/settings/auth raising password_min_length above the current value",
+        "on replica B, without restarting it, attempt a sign-up (on an invitation, as search:qa-contributor-bound-member step 1 does) with a password one character shorter than the new minimum",
+        "put password_min_length back"
+      ],
+      "acceptance": [
+        {
+          "clause": "the change is published on the settings channel",
+          "oracle": "log",
+          "verify": "the subscriber receives one message on os:ps:settings.changed naming the auth namespace (packages/services/service-settings/src/settings-cluster-channel.ts#SETTINGS_CHANGE_CLUSTER_CHANNEL; channels are stored as PREFIXps:CHANNEL, packages/services/service-cluster-redis/src/pubsub.ts)",
+          "evidence": "the subscriber output"
+        },
+        {
+          "clause": "replica B enforces the new value without a restart",
+          "oracle": "api",
+          "verify": "B refuses the short password with the password-length refusal; the same password was admitted before the change",
+          "evidence": "the refusal body and the earlier admission"
+        }
+      ],
+      "negative": [
+        "⛔ a GET /api/settings/auth on B that reads the new value proves nothing: both replicas read one shared database. The verdict rests on B's behaviour, never on a read"
+      ],
+      "traps": [
+        "eventual-consistency",
+        "cache-staleness"
+      ],
+      "blocked": {
+        "by": "fixture",
+        "ref": "fixture gap: no multi-node gate the open tree can register, so no declared multi-replica boot on Redis reaches kernel:ready (FOLLOW-UPS §17c, #32020)"
+      },
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/services/service-settings/src/settings-cluster-lane.test.ts; no live spec boots declared replicas"
+      },
+      "source": [
+        "packages/services/service-settings/src/settings-cluster-channel.ts#SETTINGS_CHANGE_CLUSTER_CHANNEL",
+        "packages/services/service-settings/src/settings-service.ts (publishes on a change, re-reads on a message)",
+        "packages/plugins/plugin-auth/src/auth-plugin.ts (subscribes to the auth namespace)",
+        "content/docs/kernel/cluster.mdx",
+        "#31785"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — multi-replica on Redis: settings changes reach every replica (#31785). Blocked(fixture): no multi-node gate in the open tree. Scoped sweep #32020 (epic #32022 M2), read from source at 43a51b55; no live run made",
+          "ref": "#32020"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.shared-redis-cache-across-replicas",
+      "title": "Under declared replicas on Redis the cache service is the one shared Redis cache, so a cache-backed limit such as the sign-in rate limit holds across replicas",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "an anonymous caller attempting sign-in on both replicas"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two replicas declared on Redis: a Redis server both reach (OS_REDIS_URL), ONE shared Postgres (OS_DATABASE_URL=postgres://…, never a file database: os serve refuses one under this declaration, cli.serve-multi-replica-local-database-refusal), OS_CLUSTER_DRIVER=redis with OS_CLUSTER_REPLICAS=2 on both, the same OS_AUTH_SECRET on both (os start refuses without one, cli.start-multi-replica-auth-secret-refusal), an app that declares @objectstack/service-cluster and @objectstack/service-cluster-redis, and a multi-node gate registered on the module instance os serve consults (packages/services/service-cluster/src/multi-node-gate.ts#registerMultiNodeGate). Two os start processes, each on its own port and its own home (--home), are replica A and replica B. Premise check before any clause: neither boot log carries `[cluster] multi-node not authorized (`, and GET /api/v1/ready on each answers a body whose cluster.driver is redis",
+          "redis-cli against the same Redis",
+          "the auth rate limit read first with GET /api/settings/auth (rate_limit_max and rate_limit_window_seconds), lowered by an admin for the run if it is large"
+        ],
+        "knownGaps": [
+          "BLOCKED(fixture) until a run provisions REPLICA_FIXTURE. The open tree registers no multi-node gate: checkMultiNodeAllowed fails closed when none is registered (packages/services/service-cluster/src/multi-node-gate.ts#checkMultiNodeAllowed), os serve then drops the redis driver for the in-process one, and the split-brain guard refuses the declared topology at ClusterServicePlugin.init, so no declared multi-replica boot on Redis reaches kernel:ready on a stock tree. The gate carriers ship with a distribution, not this repository. The unproven open-tree route is the one the CLI pin uses: an app whose own copy of @objectstack/service-cluster calls registerMultiNodeGate on the instance os serve imports from the host (packages/cli/test/serve-multi-node-gate-declaration.integration.test.ts#writeApp), here with the real redis driver instead of the pin's memory stand-in. The first run that boots two replicas that way names the recipe and lifts `blocked` in the same revision. FOLLOW-UPS §17c"
+        ]
+      },
+      "steps": [
+        "redis-cli --scan --pattern 'os:cache:*' and note the count",
+        "send POST /api/v1/auth/sign-in/email with a wrong password for one address, alternating replica A and replica B, rate_limit_max times within the window, then once more on either replica",
+        "scan os:cache:* again"
+      ],
+      "acceptance": [
+        {
+          "clause": "the limit counts attempts across both replicas: the attempt past the maximum is refused whichever replica takes it",
+          "oracle": "api",
+          "verify": "the extra attempt answers 429 although neither replica alone saw more than half of the attempts (packages/plugins/plugin-auth/src/rate-limit-storage.shared-redis.test.ts pins the shared storage)",
+          "evidence": "the status of every attempt, with the replica that took it"
+        },
+        {
+          "clause": "cache entries live in the shared Redis under the cache prefix",
+          "oracle": "log",
+          "verify": "the scan finds keys under os:cache: that were not there before (entries stored at PREFIXcache:KEY, packages/services/service-cache/src/redis-cache-adapter.ts)",
+          "evidence": "the two scans"
+        }
+      ],
+      "negative": [
+        "an extra attempt admitted because each replica counted only its own share is a FAIL"
+      ],
+      "traps": [
+        "eventual-consistency"
+      ],
+      "blocked": {
+        "by": "fixture",
+        "ref": "fixture gap: no multi-node gate the open tree can register, so no declared multi-replica boot on Redis reaches kernel:ready (FOLLOW-UPS §17c, #32020)"
+      },
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-auth/src/rate-limit-storage.shared-redis.test.ts and packages/services/service-cache/src/cache-service-plugin.topology.test.ts; no live spec boots declared replicas"
+      },
+      "source": [
+        "packages/services/service-cache/src/cache-service-plugin.ts (redis is the adapter under a declared multi-node deployment on the redis cluster driver; memory is refused there)",
+        "packages/services/service-cache/src/redis-cache-adapter.ts",
+        "packages/services/service-cache/README.md",
+        "packages/plugins/plugin-auth/src/rate-limit-storage.shared-redis.test.ts",
+        "#31624"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — multi-replica on Redis: one shared Redis cache, so cache-backed limits hold across replicas (#31624). Blocked(fixture): no multi-node gate in the open tree. Scoped sweep #32020 (epic #32022 M2), read from source at 43a51b55; no live run made",
+          "ref": "#32020"
         }
       ]
     }

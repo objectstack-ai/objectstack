@@ -57,7 +57,7 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useObjectTranslation: () => ({
     t: (key: string, opts?: Record<string, unknown>) => {
-      const parts = ['name', 'base', 'version']
+      const parts = ['name', 'base', 'version', 'namespace']
         .filter((k) => opts?.[k] !== undefined)
         .map((k) => `${k}=${String(opts?.[k])}`);
       return parts.length > 0 ? `«${key}|${parts.join('|')}»` : `«${key}»`;
@@ -76,7 +76,7 @@ vi.mock('../../../components/SuggestedBindingsPanel', () => ({
 
 import { initRuntimeConfig, resetRuntimeConfigForTesting } from '../../../runtime-config';
 import { MarketplacePackagePage } from '../MarketplacePackagePage';
-import { installPackage } from '../marketplaceApi';
+import { getInstallNamespace, installPackage } from '../marketplaceApi';
 
 const PKG = 'com.example.crm';
 const MANIFEST_PATH = '/api/v1/marketplace/packages/pkg_crm/versions/latest/manifest';
@@ -121,7 +121,14 @@ const unmanagedAnswer = (strippedLocks: unknown[]) => ({
   note: 'The package\'s metadata is now this environment\'s own.',
 });
 
-interface Wire { manifest: { status: number; body: unknown }; install: { status: number; body: unknown } }
+interface Wire {
+  manifest: { status: number; body: unknown };
+  install: { status: number; body: unknown };
+  /** The hosted `GET /cloud-connection/install-namespace` answer; absent falls through to the 404. */
+  namespace?: { status: number; body: unknown };
+  /** Holds the namespace answer until it settles, so the loading state is a reading, not a race. */
+  namespaceGate?: Promise<void>;
+}
 let wire: Wire;
 let answered: string[] = [];
 let posts: Array<Record<string, unknown>> = [];
@@ -139,6 +146,8 @@ const answer = (status: number, body: unknown) => ({
 const HOSTED_CLOUD = 'https://cloud.example.test';
 const CLOUD_INSTALL_PATH = '/api/v1/cloud-connection/install';
 let cloudPosts: Array<Record<string, unknown>> = [];
+const NAMESPACE_PATH = '/api/v1/cloud-connection/install-namespace';
+let namespaceReads: string[] = [];
 
 async function boot(installLocal = true, cloudUrl = '') {
   resetRuntimeConfigForTesting();
@@ -147,7 +156,7 @@ async function boot(installLocal = true, cloudUrl = '') {
     vi.fn(async (input: unknown, init?: { method?: string; body?: string }) => {
       const path = new URL(String(input), 'http://console.test').pathname;
       const method = (init?.method ?? 'GET').toUpperCase();
-      const reply = (() => {
+      const reply = await (async () => {
         if (path === '/api/v1/runtime/config') {
           return answer(200, {
             cloudUrl,
@@ -166,6 +175,11 @@ async function boot(installLocal = true, cloudUrl = '') {
         if (path === CLOUD_INSTALL_PATH && method === 'POST') {
           cloudPosts.push(JSON.parse(init?.body ?? '{}'));
           return answer(wire.install.status, wire.install.body);
+        }
+        if (path === NAMESPACE_PATH && method === 'GET' && wire.namespace) {
+          namespaceReads.push(new URL(String(input), 'http://console.test').search);
+          if (wire.namespaceGate) await wire.namespaceGate;
+          return answer(wire.namespace.status, wire.namespace.body);
         }
         if (path === '/api/v1/cloud-connection/installation' && method === 'GET') {
           return answer(200, { success: true, data: { installed: false } });
@@ -215,6 +229,7 @@ beforeEach(() => {
   answered = [];
   posts = [];
   cloudPosts = [];
+  namespaceReads = [];
 });
 
 afterEach(() => {
@@ -448,7 +463,11 @@ describe('the hosted install path sends the mode the package permits (objectstac
   async function installHosted() {
     fireEvent.click(installToCloud());
     const dialog = await screen.findByRole('dialog');
-    fireEvent.click(within(dialog).getByRole('button', { name: '«marketplace.action.install»' }));
+    // An unmanaged install holds Install while its namespace default is read
+    // (objectstack#32040): a click before the read settles is not a click.
+    const dialogInstall = within(dialog).getByRole('button', { name: '«marketplace.action.install»' });
+    await waitFor(() => expect(dialogInstall).toBeEnabled());
+    fireEvent.click(dialogInstall);
     await waitFor(() => expect(cloudPosts).toHaveLength(1));
     return dialog;
   }
@@ -580,5 +599,201 @@ describe('`installPackage()` sends `install_mode` only when it is set (objectsta
     const modeOf = (b: Record<string, unknown>) => (cloudUrl ? b : (b.params as Record<string, unknown>));
     expect(modeOf(bodies[0])).not.toHaveProperty('install_mode');
     expect(modeOf(bodies[1]).install_mode).toBe('unmanaged');
+  });
+});
+
+describe('the hosted unmanaged install names its target namespace (objectstack#32040)', () => {
+  const installToCloud = () => screen.getByRole('button', { name: '«marketplace.action.installToCloud»' });
+  const field = (dialog: HTMLElement) => within(dialog).getByTestId('install-target-namespace');
+  const input = (dialog: HTMLElement) => within(dialog).getByRole('textbox', { name: '«marketplace.install.targetNamespace.label»' });
+  const dialogInstall = (dialog: HTMLElement) => within(dialog).getByRole('button', { name: '«marketplace.action.install»' });
+  const DEFAULT_ANSWER = { status: 200, body: { success: true, data: { namespace: 'crm_copy' } } };
+
+  async function renderHosted(installModes: string[]) {
+    serveManifest(flatBody({ installModes }));
+    await boot(false, HOSTED_CLOUD);
+    render(<MarketplacePackagePage />);
+    await screen.findByRole('button', { name: '«marketplace.action.installToCloud»' });
+    await waitFor(() => expect(answered).toContain(`GET ${MANIFEST_PATH}`));
+    await act(async () => {});
+  }
+
+  /** Open the dialog and settle once the namespace field has left its loading state. */
+  async function openDialog() {
+    fireEvent.click(installToCloud());
+    const dialog = await screen.findByRole('dialog');
+    await waitFor(() => expect(field(dialog)).not.toHaveAttribute('data-state', 'loading'));
+    return dialog;
+  }
+
+  async function pressInstall(dialog: HTMLElement, posts: number) {
+    fireEvent.click(dialogInstall(dialog));
+    await waitFor(() => expect(cloudPosts).toHaveLength(posts));
+    await act(async () => {});
+  }
+
+  it('shows the control plane\'s default in an editable field, read for this package, and sends it as `target_namespace`', async () => {
+    wire.namespace = DEFAULT_ANSWER;
+    let release = () => {};
+    wire.namespaceGate = new Promise<void>((r) => { release = r; });
+    await renderHosted(['unmanaged']);
+    fireEvent.click(installToCloud());
+    const dialog = await screen.findByRole('dialog');
+    // While the read is in flight the field is loading and Install waits.
+    await waitFor(() => expect(namespaceReads).toHaveLength(1));
+    expect(field(dialog)).toHaveAttribute('data-state', 'loading');
+    expect(dialogInstall(dialog)).toBeDisabled();
+    release();
+
+    await waitFor(() => expect(input(dialog)).toHaveValue('crm_copy'));
+    expect(namespaceReads).toEqual(['?package_id=pkg_crm']);
+    expect(input(dialog)).toBeEnabled();
+    await pressInstall(dialog, 1);
+
+    expect(cloudPosts[0]).toEqual({ package_id: 'pkg_crm', seed_sample_data: false, install_mode: 'unmanaged', target_namespace: 'crm_copy' });
+  });
+
+  it('sends the edited value, not the default', async () => {
+    wire.namespace = DEFAULT_ANSWER;
+    await renderHosted(['unmanaged']);
+    const dialog = await openDialog();
+
+    fireEvent.change(input(dialog), { target: { value: 'crm_sales' } });
+    await pressInstall(dialog, 1);
+
+    expect(cloudPosts[0]).toMatchObject({ install_mode: 'unmanaged', target_namespace: 'crm_sales' });
+  });
+
+  it.each([
+    [503, 'CLOUD_UNCONFIGURED'],
+    [502, 'EXTERNAL_SERVICE_ERROR'],
+  ])('a %i %s read is "no default": the field is empty, says so, and a typed name still installs', async (status, code) => {
+    wire.namespace = { status, body: { success: false, error: { code, message: 'no default' } } };
+    await renderHosted(['unmanaged']);
+    const dialog = await openDialog();
+
+    expect(input(dialog)).toHaveValue('');
+    expect(within(dialog).getByText('«marketplace.install.targetNamespace.noDefault»')).toBeInTheDocument();
+    expect(dialogInstall(dialog)).toBeEnabled();
+    fireEvent.change(input(dialog), { target: { value: 'crm_typed' } });
+    await pressInstall(dialog, 1);
+
+    expect(cloudPosts[0]).toMatchObject({ install_mode: 'unmanaged', target_namespace: 'crm_typed' });
+  });
+
+  it('CONTROL: an empty field sends no `target_namespace`, and the control plane\'s default stands', async () => {
+    wire.namespace = { status: 503, body: { success: false, error: { code: 'CLOUD_UNCONFIGURED', message: 'no default' } } };
+    await renderHosted(['unmanaged']);
+    const dialog = await openDialog();
+    await pressInstall(dialog, 1);
+
+    expect(cloudPosts[0]).toEqual({ package_id: 'pkg_crm', seed_sample_data: false, install_mode: 'unmanaged' });
+  });
+
+  it('a `409 RESOURCE_CONFLICT` naming the namespace keeps the dialog open, says the name is taken, and installs a new name', async () => {
+    wire.namespace = DEFAULT_ANSWER;
+    wire.install = {
+      status: 409,
+      body: { success: false, error: { code: 'RESOURCE_CONFLICT', message: 'OWNER-SENTINEL', details: { namespace: 'crm_copy' } } },
+    };
+    await renderHosted(['unmanaged']);
+    const dialog = await openDialog();
+    await pressInstall(dialog, 1);
+
+    expect(screen.getByRole('dialog')).toBe(dialog);
+    expect(field(dialog)).toHaveAttribute('data-state', 'refused');
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('«marketplace.install.targetNamespace.taken|namespace=crm_copy»');
+    expect(input(dialog)).toHaveAttribute('aria-invalid', 'true');
+    expect(input(dialog)).toHaveFocus();
+    expect(dialogInstall(dialog)).toBeEnabled();
+
+    // Another name clears the refusal and is what the next install sends.
+    wire.install = { status: 200, body: { success: true, data: unmanagedAnswer([]) } };
+    fireEvent.change(input(dialog), { target: { value: 'crm_two' } });
+    expect(field(dialog)).toHaveAttribute('data-state', 'ready');
+    await pressInstall(dialog, 2);
+
+    expect(cloudPosts[1]).toMatchObject({ target_namespace: 'crm_two' });
+  });
+
+  it('a `400 INVALID_REQUEST` naming `targetNamespace` shows the server\'s sentence beside the field', async () => {
+    wire.namespace = DEFAULT_ANSWER;
+    wire.install = {
+      status: 400,
+      body: { success: false, error: { code: 'INVALID_REQUEST', message: 'NAMESPACE-SENTINEL: reserved namespace.', details: { targetNamespace: 'sys' } } },
+    };
+    await renderHosted(['unmanaged']);
+    const dialog = await openDialog();
+    fireEvent.change(input(dialog), { target: { value: 'sys' } });
+    await pressInstall(dialog, 1);
+
+    expect(field(dialog)).toHaveAttribute('data-state', 'refused');
+    expect(within(field(dialog)).getByRole('alert')).toHaveTextContent('NAMESPACE-SENTINEL: reserved namespace.');
+  });
+
+  it('a `409` naming `targetPackageId` (a second copy) is shown as refused, with no re-ask for a namespace', async () => {
+    wire.namespace = DEFAULT_ANSWER;
+    wire.install = {
+      status: 409,
+      body: { success: false, error: { code: 'RESOURCE_CONFLICT', message: 'COPY-SENTINEL: a copy already exists.', details: { targetPackageId: `${PKG}-copy`, namespace: 'crm_copy' } } },
+    };
+    await renderHosted(['unmanaged']);
+    const dialog = await openDialog();
+    await pressInstall(dialog, 1);
+
+    expect(await within(dialog).findByText('COPY-SENTINEL: a copy already exists.')).toBeInTheDocument();
+    expect(field(dialog)).toHaveAttribute('data-state', 'ready');
+    expect(within(field(dialog)).queryByRole('alert')).not.toBeInTheDocument();
+    expect(within(dialog).queryByText(/targetNamespace\.taken/)).not.toBeInTheDocument();
+  });
+
+  it('a managed install draws no field, reads no default, and sends no `target_namespace`', async () => {
+    wire.namespace = DEFAULT_ANSWER;
+    await renderHosted(['managed', 'unmanaged']);
+    fireEvent.click(radio('managed'));
+    await waitFor(() => expect(installToCloud()).toBeEnabled());
+    fireEvent.click(installToCloud());
+    const dialog = await screen.findByRole('dialog');
+    await pressInstall(dialog, 1);
+
+    expect(within(dialog).queryByTestId('install-target-namespace')).not.toBeInTheDocument();
+    expect(namespaceReads).toEqual([]);
+    expect(cloudPosts[0]).toEqual({ package_id: 'pkg_crm', seed_sample_data: false, install_mode: 'managed' });
+  });
+});
+
+describe('`installPackage()` and `getInstallNamespace()` on the hosted route (objectstack#32040)', () => {
+  it('`target_namespace` rides only beside `installMode: unmanaged`, trimmed, and never blank', async () => {
+    await boot(false, HOSTED_CLOUD);
+    const bodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input: unknown, init?: { body?: string }) => {
+      bodies.push(JSON.parse(init?.body ?? '{}'));
+      return answer(200, { success: true, data: {} });
+    }));
+
+    await installPackage({ packageId: 'pkg_crm', environmentId: 'env_1', installMode: 'unmanaged', targetNamespace: '  crm_x ' });
+    await installPackage({ packageId: 'pkg_crm', environmentId: 'env_1', installMode: 'managed', targetNamespace: 'crm_x' });
+    await installPackage({ packageId: 'pkg_crm', environmentId: 'env_1', installMode: 'unmanaged', targetNamespace: '   ' });
+
+    expect(bodies[0].target_namespace).toBe('crm_x');
+    expect(bodies[1]).not.toHaveProperty('target_namespace');
+    expect(bodies[2]).not.toHaveProperty('target_namespace');
+  });
+
+  it.each([
+    ['200 with `data.namespace`', 200, { success: true, data: { namespace: 'crm_copy' } }, 'crm_copy'],
+    ['503 CLOUD_UNCONFIGURED', 503, { success: false, error: { code: 'CLOUD_UNCONFIGURED', message: 'x' } }, null],
+    ['502 EXTERNAL_SERVICE_ERROR', 502, { success: false, error: { code: 'EXTERNAL_SERVICE_ERROR', message: 'x' } }, null],
+    ['200 with no string namespace', 200, { success: true, data: { namespace: 7 } }, null],
+  ])('reads %s', async (_label, status, body, expected) => {
+    await boot(false, HOSTED_CLOUD);
+    const urls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
+      urls.push(String(input));
+      return answer(status, body);
+    }));
+
+    expect(await getInstallNamespace('pkg/1')).toBe(expected);
+    expect(urls).toEqual(['/api/v1/cloud-connection/install-namespace?package_id=pkg%2F1']);
   });
 });

@@ -111,8 +111,23 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
     'sys_approval_request',
     'sys_approval_token',
   ],
-  /** `@objectstack/plugin-audit` — audit trail & activity feed (ADR-0052). */
-  'plugin-audit': ['sys_activity', 'sys_audit_log', 'sys_comment', 'sys_comment_reaction'],
+  /**
+   * `@objectstack/plugin-audit` — audit trail & activity feed (ADR-0052), and
+   * the audit ledger's checkpoints, amendments and signing keys (ADR-0154).
+   * The package registers the checkpoints and the signing keys, ahead of the
+   * sealer and signer that write them. `sys_audit_amendment` is declared and
+   * registered with its first writer, the redaction amendments; until then it
+   * is the one name in this group the package does not register.
+   */
+  'plugin-audit': [
+    'sys_activity',
+    'sys_audit_amendment',
+    'sys_audit_checkpoint',
+    'sys_audit_log',
+    'sys_audit_signing_key',
+    'sys_comment',
+    'sys_comment_reaction',
+  ],
   /** `@objectstack/plugin-security` — ADR-0090 permission model v2. */
   'plugin-security': [
     'sys_audience_binding_suggestion',

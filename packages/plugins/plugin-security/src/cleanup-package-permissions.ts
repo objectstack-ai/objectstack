@@ -14,13 +14,30 @@
  *  - [ADR-0131 D3/D4, C3 stage 8] The package's permission sets are the names
  *    it declared in the security catalog. The uninstalling door captures them
  *    before it withdraws the package (`declared` on the cleanup's arguments,
- *    `captureUninstallDeclared` in `@objectstack/metadata-protocol`), and every
- *    grant naming one of them is revoked. No catalog row is read: the row
- *    objects are retired, and the package withdrawal already took the
- *    definitions themselves out of the catalog. A grant written before the
- *    name column existed names nothing, so it cannot be reached here; the
- *    organization-ownership migration's id-to-name rewrite (ADR-0131 D10)
- *    owns it.
+ *    `captureUninstallDeclared` in `@objectstack/metadata-protocol`). No
+ *    catalog row is read: the row objects are retired, and the package
+ *    withdrawal already took the definitions themselves out of the catalog. A
+ *    grant written before the name column existed names nothing, so it cannot
+ *    be reached here; the organization-ownership migration's id-to-name
+ *    rewrite (ADR-0131 D10) owns it.
+ *  - [ADR-0150 D8] A name no longer belongs to one holder: two packages of
+ *    two namespaces may each hold it (D3/D4), and a grant says which one in
+ *    its `permission_set_package` column. So a grant naming a declared set is
+ *    revoked only when that column is THIS package, or when it is empty:
+ *      - bound to this package: revoked. It was this package's set.
+ *      - bound to ANOTHER package: never touched. That package still holds
+ *        its set, and the grant is its user's access to it.
+ *      - empty (written before the column, or bound to no holder because the
+ *        name was ambiguous, D4): revoked in every case. When this package
+ *        was the name's one holder that is today's revocation (it was this
+ *        package's switch). When another holder still serves the name AFTER
+ *        this package's withdrawal (`options.catalog`), the grant was already
+ *        ambiguous: it is revoked and REPORTED (one `warn` per uninstall and
+ *        `reportedGrants` on the outcome, naming user, organization and set),
+ *        so the operator re-grants it with the package named. ⛔ It is never
+ *        bound to the remaining holder: that would hand the user another
+ *        package's set, which nobody granted (red line 1). Revoking is
+ *        fail-closed: it takes away no access that was ever bound.
  *  - `sys_audience_binding_suggestion` rows for the package are removed in
  *    every status: with the sets gone, confirmed/dismissed history points at
  *    nothing, and a fresh reinstall should re-prompt (D5 — admin confirms).
@@ -68,19 +85,85 @@ async function deleteRows(
   rows: any[],
   refusals?: SeedWriteRefusals,
 ): Promise<number> {
-  let removed = 0;
+  return (await deleteRowsLanded(ql, object, rows, refusals)).length;
+}
+
+/** {@link deleteRows}, answering the rows whose delete LANDED rather than their count. */
+async function deleteRowsLanded(
+  ql: any,
+  object: string,
+  rows: any[],
+  refusals?: SeedWriteRefusals,
+): Promise<any[]> {
+  const landed: any[] = [];
   for (const row of rows) {
     if (!row?.id) continue;
     try {
       await ql.delete(object, { where: { id: row.id }, context: SYSTEM_CTX });
-      removed += 1;
+      landed.push(row);
     } catch (e) {
       // Per-row best-effort, and now counted: `removed` reflects what landed,
       // `refusals` reflects what did not.
       refusals?.record(object, e);
     }
   }
-  return removed;
+  return landed;
+}
+
+/** A stored package column, trimmed; blank reads as none (`storedPermissionSetScope`). */
+function packageColumnOf(row: any): string | undefined {
+  const column = row?.permission_set_package;
+  return typeof column === 'string' && column.trim() !== '' ? column.trim() : undefined;
+}
+
+/**
+ * [ADR-0150 D8] A grant revoked although another holder still serves its set's
+ * name: its package column was empty, so it never said which holder it meant.
+ * Named on the uninstall's receipt so the operator can grant it again, this
+ * time with the package named.
+ */
+export interface ReportedPermissionGrant {
+  /** The grant's `user_id`. */
+  user: string;
+  /** The grant's `organization_id`; `null` for a grant of no organization. */
+  organization: string | null;
+  /** The permission set's name. */
+  permission_set: string;
+}
+
+/**
+ * [ADR-0150 D8] The reader that says who still holds a permission-set name
+ * once the uninstalled package is withdrawn: the security catalog's `list`,
+ * one entry per `(package, name)` holder plus the environment's own item
+ * (`createSecurityCatalogReader` in `@objectstack/core`).
+ */
+export interface PackagePermissionHolderReader {
+  list(type: 'permission'): Promise<ReadonlyArray<{ readonly name: string; readonly packageId?: string }>>;
+}
+
+/** Who still holds each name, the uninstalled package left out; `undefined` when the reader could not say. */
+async function remainingHolders(
+  catalog: PackagePermissionHolderReader,
+  packageId: string,
+): Promise<Map<string, string[]> | undefined> {
+  let entries: ReadonlyArray<{ readonly name: string; readonly packageId?: string }>;
+  try {
+    entries = await catalog.list('permission');
+  } catch {
+    return undefined;
+  }
+  const holders = new Map<string, string[]>();
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    if (!entry || typeof entry.name !== 'string') continue;
+    // A body still naming the withdrawn package as its owner is a leftover of
+    // the withdrawal, not another holder.
+    if (entry.packageId === packageId) continue;
+    const holder = typeof entry.packageId === 'string' && entry.packageId !== '' ? entry.packageId : '(environment)';
+    const list = holders.get(entry.name) ?? [];
+    if (!list.includes(holder)) list.push(holder);
+    holders.set(entry.name, list);
+  }
+  return holders;
 }
 
 export interface PackagePermissionCleanupOutcome {
@@ -88,7 +171,10 @@ export interface PackagePermissionCleanupOutcome {
   sets: number;
   /** Always 0 since C3 stage 8: a position's sets are part of its definition, and no binding row exists. */
   positionBindings: number;
-  /** sys_user_permission_set rows naming those sets. */
+  /**
+   * sys_user_permission_set rows naming those sets and bound to this package,
+   * or bound to none (ADR-0150 D8), that were revoked.
+   */
   userGrants: number;
   /** sys_audience_binding_suggestion rows for the package (any status). */
   suggestions: number;
@@ -106,6 +192,13 @@ export interface PackagePermissionCleanupOutcome {
    * `success: true`.
    */
   refused: number;
+  /**
+   * [ADR-0150 D8] Grants revoked with an empty package column although another
+   * holder still serves the name — counted in {@link userGrants} too, and
+   * reported so the operator re-grants them with the package named. Absent
+   * when there are none, so a one-holder uninstall answers as before.
+   */
+  reportedGrants?: ReportedPermissionGrant[];
 }
 
 export async function cleanupPackagePermissions(
@@ -113,6 +206,16 @@ export async function cleanupPackagePermissions(
   packageId: string,
   logger?: { info?: (m: string, meta?: any) => void; warn?: (m: string, meta?: any) => void },
   declared?: { permission?: readonly string[] },
+  options?: {
+    /**
+     * [ADR-0150 D8] Who still holds a name AFTER this package's withdrawal,
+     * read once per uninstall. Decides only whether an empty-column grant is
+     * reported: it is revoked either way. Absent: nothing is reported (the
+     * one-holder reading). A reader that throws: every empty-column grant is
+     * reported, since nobody could say it had one holder.
+     */
+    catalog?: PackagePermissionHolderReader;
+  },
 ): Promise<PackagePermissionCleanupOutcome> {
   const out: PackagePermissionCleanupOutcome = {
     sets: 0, positionBindings: 0, userGrants: 0, suggestions: 0, refused: 0,
@@ -127,15 +230,55 @@ export async function cleanupPackagePermissions(
 
   // [ADR-0131 D3/D4, ADR-0090 D5] The package's sets are served from the
   // registry, so no row stands for them: the grants naming them are reached by
-  // the names the uninstall door captured before it withdrew the package. A
-  // name belongs to one holder (the registry refuses a second at install), so
-  // every grant naming it was a grant of this package's set.
-  for (const name of new Set(declared?.permission ?? [])) {
-    if (typeof name !== 'string' || name === '') continue;
-    out.userGrants += await deleteRows(
-      ql, 'sys_user_permission_set',
-      await tryFind(ql, 'sys_user_permission_set', { permission_set: name }),
-      refusals,
+  // the names the uninstall door captured before it withdrew the package.
+  // [ADR-0150 D8] A name may have more than one holder, so a grant naming it is
+  // this package's only when its package column says so, or says nothing: a
+  // grant bound to another package is that package's user's access and stays.
+  const names = [...new Set(declared?.permission ?? [])].filter(
+    (name): name is string => typeof name === 'string' && name !== '',
+  );
+  const reported: ReportedPermissionGrant[] = [];
+  const ambiguous: Array<{ grant: ReportedPermissionGrant; holders: string[] }> = [];
+  let holders: Map<string, string[]> | undefined | 'unread' = 'unread';
+  for (const name of names) {
+    const grants = await tryFind(ql, 'sys_user_permission_set', { permission_set: name });
+    const ours = grants.filter((row) => {
+      const column = packageColumnOf(row);
+      return column === undefined || column === packageId;
+    });
+    const landed = await deleteRowsLanded(ql, 'sys_user_permission_set', ours, refusals);
+    out.userGrants += landed.length;
+    const unbound = landed.filter((row) => packageColumnOf(row) === undefined);
+    if (unbound.length === 0 || !options?.catalog) continue;
+    // Read once, and only when an empty-column grant was revoked.
+    if (holders === 'unread') holders = await remainingHolders(options.catalog, packageId);
+    const others = holders === undefined ? ['(unknown: the security catalog could not be read)'] : holders.get(name) ?? [];
+    if (others.length === 0) continue;
+    for (const row of unbound) {
+      const grant: ReportedPermissionGrant = {
+        user: String(row.user_id ?? ''),
+        organization: typeof row.organization_id === 'string' && row.organization_id !== '' ? row.organization_id : null,
+        permission_set: name,
+      };
+      reported.push(grant);
+      ambiguous.push({ grant, holders: others });
+    }
+  }
+  if (reported.length > 0) {
+    out.reportedGrants = reported;
+    // [ADR-0150 D8] ONE line per uninstall, naming every such grant: these
+    // users lost a grant that may have meant the set another package still
+    // serves, and only the operator can say which.
+    logger?.warn?.(
+      `[security] uninstalling package "${packageId}" revoked ${reported.length} permission-set grant(s) ` +
+        `that named no package while another holder still serves the set's name: ` +
+        ambiguous.map(({ grant, holders: h }) =>
+          `user "${grant.user}" in ${grant.organization === null ? 'no organization' : `organization "${grant.organization}"`}` +
+            ` — set "${grant.permission_set}" (still held by ${h.join(', ')})`).join('; ') +
+        `. Such a grant never said which holder it meant (ADR-0150 D4), so it is revoked rather than handed to ` +
+        `the remaining holder, which nobody granted. Remedy: if the user should keep the set, grant it again ` +
+        `with the package named (the grant's permission_set_package).`,
+      { packageId, reportedGrants: reported },
     );
   }
 
@@ -185,7 +328,7 @@ export async function cleanupPackagePermissions(
     );
   }
   if (out.userGrants + out.suggestions > 0) {
-    logger?.info?.('[security] package permission rows revoked on uninstall — every grant naming a set the package declared, so no grant outlives the package (ADR-0090 D5)', {
+    logger?.info?.('[security] package permission rows revoked on uninstall — every grant naming a set the package declared and bound to it or to no package, so no grant outlives the package (ADR-0090 D5, ADR-0150 D8)', {
       packageId, ...out,
     });
   }

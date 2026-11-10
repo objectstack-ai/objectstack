@@ -99,15 +99,17 @@ OS_ARTIFACT_PATH=./dist/objectstack.json objectstack dev
 
 Every stack needs a `manifest`:
 
+<!-- os:check -->
 ```typescript
-manifest: {
-  id: 'com.example.crm',        // Reverse domain unique ID
-  version: '1.0.0',             // Semver
-  type: 'app',                  // app | plugin | driver | module | ...
-  name: 'Acme CRM',             // Human-readable display name
-  description: 'CRM system',    // Optional description
-  engines: { protocol: '^18' }, // Metadata-protocol major this app targets
-}
+import { defineStack } from '@objectstack/spec';
+export default defineStack({ manifest: {
+  id: 'com.example.crm', // Reverse domain unique ID
+  version: '1.0.0', // Semver
+  type: 'app', // app | plugin | driver | module | ...
+  name: 'Acme CRM', // Human-readable display name
+  description: 'CRM system', // Optional
+  engines: { protocol: '^18' },
+} });
 ```
 
 **`manifest.engines.protocol`:** the metadata-protocol major the app is authored

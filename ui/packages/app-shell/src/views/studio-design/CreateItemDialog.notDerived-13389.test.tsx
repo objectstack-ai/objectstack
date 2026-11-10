@@ -17,6 +17,7 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { CreateItemDialog } from './CreateItemDialog';
 import { t, type SupportedLocale } from '../metadata-admin/i18n';
 import { loadHanRomanizer } from '../metadata-admin/romanizeHan';
@@ -119,5 +120,53 @@ describe('CreateItemDialog — a Chinese name derives its identifier by pinyin (
     const d = renderDialog('zh-CN', (id) => prefixObjectName(id, 'repairs'));
     fireEvent.change(d.label(), { target: { value: '维修中心' } });
     expect(screen.getByTestId('create-item-stored-name')).toHaveTextContent('repairs_weixiu_zhongxin');
+  });
+});
+
+/**
+ * objectstack#32104 — the dialog's submit ("Save as draft", "Create", per
+ * opener) stays disabled until a usable name is entered, and was a bare
+ * disabled button: no reason on hover, Tab skipped it, nothing in the
+ * accessibility tree. It now sits in a focusable wrapper described by the
+ * reason (`DisabledControlReason`), keeping its own name; the dialog is shared
+ * by every Studio create flow, so each opener inherits it.
+ */
+describe('CreateItemDialog — a disabled submit says what is missing (objectstack#32104)', () => {
+  const describedBy = (el: HTMLElement) =>
+    document.getElementById(el.getAttribute('aria-describedby') ?? '') as HTMLElement | null;
+  const NEED_LABEL = t('engine.studio.createItem.needLabel', 'en-US');
+  const NEED_NAME = t('engine.studio.createItem.needName', 'en-US');
+
+  it('an empty dialog: Tab from Cancel reaches the disabled submit, which asks for a display name', async () => {
+    const user = userEvent.setup();
+    const d = renderDialog();
+    const submit = d.submit();
+    expect(submit).toBeDisabled();
+    expect(describedBy(submit)).toHaveTextContent(NEED_LABEL);
+
+    screen.getByRole('button', { name: t('engine.studio.cancel', 'en-US') }).focus();
+    await user.tab();
+    expect(submit.parentElement).toHaveFocus();
+    expect(describedBy(submit.parentElement as HTMLElement)).toHaveTextContent(NEED_LABEL);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(NEED_LABEL);
+  });
+
+  it('a name that derives no identifier: the reason asks for the identifier instead', () => {
+    const d = renderDialog();
+    fireEvent.change(d.label(), { target: { value: 'フィードバック' } });
+    expect(d.submit()).toBeDisabled();
+    expect(describedBy(d.submit())).toHaveTextContent(NEED_NAME);
+  });
+
+  it('CONTROL — a usable name: the submit is a plain enabled button with no reason, and submits', async () => {
+    const user = userEvent.setup();
+    const d = renderDialog();
+    fireEvent.change(d.label(), { target: { value: 'Feedback' } });
+    const submit = d.submit();
+    expect(submit).toBeEnabled();
+    expect(submit).not.toHaveAttribute('aria-describedby');
+    expect(submit.parentElement).not.toHaveAttribute('data-disabled-reason');
+    await user.click(submit);
+    expect(d.onSubmit).toHaveBeenCalledWith({ label: 'Feedback', name: 'feedback' });
   });
 });

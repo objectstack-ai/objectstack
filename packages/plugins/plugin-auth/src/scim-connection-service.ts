@@ -201,6 +201,8 @@ interface CredentialEngine {
     query: { where: Record<string, unknown> },
     options?: { context?: { isSystem?: boolean } },
   ): Promise<Record<string, unknown> | null>;
+  /** The last-use stamp's one write ({@link ScimCredentialLastUseStamper}). */
+  update?(object: string, data: Record<string, unknown>, options?: { context?: { isSystem?: boolean; actor?: string } }): Promise<unknown>;
 }
 
 /**
@@ -244,11 +246,33 @@ export interface MintedScimConnectionCredential {
   token: string;
   /** The `sys_scim_connection_credential` row id. */
   credentialId: string;
+  /** [#32120] The bearer's {@link scimBearerTokenHint}, as stored on the row. */
+  tokenHint: string;
+}
+
+/** [#32120] How many trailing characters of the bearer {@link scimBearerTokenHint} keeps. */
+export const SCIM_TOKEN_HINT_LENGTH = 4;
+
+/**
+ * [#32120] The non-secret hint stored beside a credential so an administrator
+ * can tell two credentials of one connection apart and match a row to the
+ * bearer they pasted into the identity provider: the bearer's LAST
+ * {@link SCIM_TOKEN_HINT_LENGTH} characters.
+ *
+ * Never a prefix: every bearer starts with the constant
+ * {@link SCIM_BEARER_PREFIX}, so a prefix tells nothing apart. The suffix is
+ * 4 of the 43 base64url characters that carry the token's 256 random bits, so
+ * it leaves 232 bits unknown (4 × 6 bits disclosed): the bearer stays
+ * unguessable, and the hint is not the digest either, which stays internal.
+ */
+export function scimBearerTokenHint(token: string): string {
+  return token.slice(-SCIM_TOKEN_HINT_LENGTH);
 }
 
 /**
  * Mint a bearer credential for a SCIM connection: generate a 256-bit random
- * token, persist ONLY its keyed digest, return the plaintext once.
+ * token, persist ONLY its keyed digest and its {@link scimBearerTokenHint},
+ * return the plaintext once.
  */
 export async function mintScimConnectionCredential(
   engine: CredentialEngine,
@@ -257,17 +281,19 @@ export async function mintScimConnectionCredential(
 ): Promise<MintedScimConnectionCredential> {
   if (!input.connectionId) throw new Error('[scim] mint requires a connectionId');
   const token = SCIM_BEARER_PREFIX + randomBytes(32).toString('base64url');
+  const tokenHint = scimBearerTokenHint(token);
   const row = await engine.insert(SCIM_CREDENTIAL_OBJECT, {
     connection_id: input.connectionId,
     provisioning_domain_id: input.provisioningDomainId,
     organization_id: input.organizationId,
     label: input.label,
     token_digest: digestScimBearerToken(secret, token),
+    token_hint: tokenHint,
     active: true,
     expires_at: input.expiresAt ? input.expiresAt.toISOString() : undefined,
     user_id: input.mintedByUserId,
   });
-  return { token, credentialId: String(row.id) };
+  return { token, credentialId: String(row.id), tokenHint };
 }
 
 /**
@@ -308,18 +334,129 @@ export function scimCredentialIsLive(row: Record<string, unknown>, now: number =
 }
 
 /**
- * Application-owned bearer verification for the stable scim plugin: digest the
- * presented token, probe the credential store by digest (unique index), refuse
- * inactive or expired rows, and resolve the connection from the row.
- *
- * Returns `null` — upstream's "unauthenticated" — on any miss. Never throws on
- * a bad token: an unknown bearer is a 401, not a 500.
+ * [#32120] The last-use stamp's granularity: `sys_scim_connection_credential.last_used_at`
+ * is written at most once per credential per minute, however many requests an
+ * identity provider sends in it. A minute is what a rotation needs ("is the
+ * IdP still on the old credential?") without a write per SCIM request.
  */
-export async function verifyScimBearerToken(
+export const SCIM_CREDENTIAL_LAST_USED_STAMP_INTERVAL_MS = 60 * 1000;
+
+/** [#32120] How many credentials one process remembers a stamp claim for. */
+export const SCIM_CREDENTIAL_LAST_USE_MEMO_CAP = 10_000;
+
+/** [#32120] How many distinct stamp failure messages one process reports. */
+export const SCIM_CREDENTIAL_LAST_USE_FAILURE_REPORT_CAP = 16;
+
+/** A stored instant as epoch milliseconds, `undefined` when absent or unreadable. */
+function storedInstantMs(value: unknown): number | undefined {
+  if (value == null || value === '') return undefined;
+  const ms = (value instanceof Date ? value : new Date(value as string | number)).getTime();
+  return Number.isNaN(ms) ? undefined : ms;
+}
+
+/**
+ * [#32120] Records when a SCIM credential last authenticated a request:
+ * `sys_scim_connection_credential.last_used_at`, written by
+ * {@link verifyScimBearerToken} on a SUCCESSFUL verification and by nothing
+ * else (the field is `readonly`, and the data API serves the object list-only).
+ *
+ * The shape is the platform's two existing use stamps, reused rather than
+ * reinvented:
+ *
+ *  - like the API-key stamp (`@objectstack/core` `stampAdmittedKey`), it
+ *    compares against the value on the row the verifier already read, and
+ *    writes only when that value is empty or at least
+ *    {@link SCIM_CREDENTIAL_LAST_USED_STAMP_INTERVAL_MS} old — so several
+ *    processes write a busy credential about once a minute between them;
+ *  - like the MCP client stamp (`mcp-client-last-use.ts`), each process claims
+ *    a credential's minute in memory BEFORE the write, so a burst of
+ *    concurrent requests that all read the same stale row writes once, and an
+ *    outage is retried next minute, not next request. The memory is bounded
+ *    ({@link SCIM_CREDENTIAL_LAST_USE_MEMO_CAP}, oldest dropped first).
+ *
+ * The stored value is the server's clock at the request that claimed the
+ * minute. No request field reaches it. The write is the system's, attributed
+ * to the connection the bearer verified as (`svc:scim:CONNECTION_ID`, the
+ * actor every other write of a SCIM request carries — `authSystemWriteContext`),
+ * because the identity provider's use is what it records.
+ *
+ * ⛔ A failed stamp never fails the SCIM request: the bearer was judged on the
+ * row as found. It is a durability loss all the same — the column claims the
+ * last use, and an unstamped one makes a credential the IdP still uses read as
+ * idle, which is exactly what a rotation reads before revoking — so each
+ * DISTINCT failure (by message) is handed to `onNewFailure` once per process,
+ * for the caller to report at `error`, naming the credential row id and never
+ * the bearer or its digest.
+ */
+export class ScimCredentialLastUseStamper {
+  /** credential id → the epoch ms this process last claimed a stamp at. */
+  private readonly claimed = new Map<string, number>();
+  /** The failure messages this process has already reported. */
+  private readonly reportedFailures = new Set<string>();
+
+  constructor(
+    private readonly opts: {
+      now?: () => number;
+      /** Told about each DISTINCT stamp failure (by message) once in this process. */
+      onNewFailure?: (error: unknown, credentialId: string) => void;
+    } = {},
+  ) {}
+
+  /**
+   * Stamp the verified credential `row` unless its stored stamp, or this
+   * process's last claim, is younger than the interval. Resolves once the
+   * stamp is settled; never rejects.
+   */
+  async record(engine: CredentialEngine, row: Record<string, unknown>, connectionId: string): Promise<void> {
+    const id = row.id == null ? '' : String(row.id);
+    if (!id || typeof engine.update !== 'function') return;
+    const nowMs = (this.opts.now ?? Date.now)();
+    const storedMs = storedInstantMs(row.last_used_at);
+    if (storedMs !== undefined && nowMs - storedMs < SCIM_CREDENTIAL_LAST_USED_STAMP_INTERVAL_MS) return;
+    const claimMs = this.claimed.get(id);
+    if (claimMs !== undefined && nowMs - claimMs < SCIM_CREDENTIAL_LAST_USED_STAMP_INTERVAL_MS) return;
+    // Claimed BEFORE the write, so concurrent requests of the same minute skip
+    // it, and kept on failure, so an outage is retried next minute.
+    this.claimed.delete(id);
+    this.claimed.set(id, nowMs);
+    if (this.claimed.size > SCIM_CREDENTIAL_LAST_USE_MEMO_CAP) {
+      const oldest = this.claimed.keys().next().value;
+      if (oldest !== undefined) this.claimed.delete(oldest);
+    }
+    try {
+      await engine.update(
+        SCIM_CREDENTIAL_OBJECT,
+        { id, last_used_at: new Date(nowMs).toISOString() },
+        { context: { isSystem: true, actor: scimServicePrincipal(connectionId) } },
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (this.reportedFailures.has(message)) return;
+      if (this.reportedFailures.size >= SCIM_CREDENTIAL_LAST_USE_FAILURE_REPORT_CAP) return;
+      this.reportedFailures.add(message);
+      try {
+        this.opts.onNewFailure?.(error, id);
+      } catch {
+        // A report is best-effort; the stamp never becomes the request's failure.
+      }
+    }
+  }
+}
+
+/**
+ * The live credential row a presented bearer digests to, naming a connection —
+ * or `null` on any miss: no row, a row {@link scimCredentialIsLive} refuses, a
+ * row naming no connection, a storage fault. The verifier's lookup, and ONLY a
+ * read: it writes nothing (no last-use stamp) and answers the row, never the
+ * digest. [#32116] The refused-request audit (`scim-refusal-audit.ts`) resolves
+ * a bearer the vendor refused before verifying through this and nothing else,
+ * so a refusal never counts as a use. Never throws.
+ */
+export async function findLiveScimCredential(
   engine: CredentialEngine,
   secret: string,
   token: string,
-): Promise<ScimBearerVerification | null> {
+): Promise<Record<string, unknown> | null> {
   if (!token || typeof token !== 'string') return null;
   const digest = digestScimBearerToken(secret, token);
   let row: Record<string, unknown> | null;
@@ -330,12 +467,39 @@ export async function verifyScimBearerToken(
     return null;
   }
   if (!row || !scimCredentialIsLive(row)) return null;
+  if (!String((row as { connection_id?: unknown }).connection_id ?? '')) return null;
+  return row;
+}
+
+/**
+ * Application-owned bearer verification for the stable scim plugin: digest the
+ * presented token, probe the credential store by digest (unique index), refuse
+ * inactive or expired rows, and resolve the connection from the row — the
+ * lookup is {@link findLiveScimCredential}.
+ *
+ * Returns `null` — upstream's "unauthenticated" — on any miss. Never throws on
+ * a bad token: an unknown bearer is a 401, not a 500.
+ *
+ * [#32120] On a successful verification only, `lastUse` stamps the row's
+ * `last_used_at` (throttled; see {@link ScimCredentialLastUseStamper}). A miss,
+ * a revoked or expired row and a storage fault stamp nothing. The stamp is
+ * this function's own step AFTER the read-only lookup, so nothing else that
+ * calls the lookup writes it.
+ */
+export async function verifyScimBearerToken(
+  engine: CredentialEngine,
+  secret: string,
+  token: string,
+  lastUse?: ScimCredentialLastUseStamper,
+): Promise<ScimBearerVerification | null> {
+  const row = await findLiveScimCredential(engine, secret, token);
+  if (!row) return null;
   const rawExpiry = (row as { expires_at?: unknown }).expires_at;
   const expiresAt = rawExpiry != null ? new Date(rawExpiry as string) : undefined;
   const connectionId = String((row as { connection_id?: unknown }).connection_id ?? '');
-  if (!connectionId) return null;
   const domain = (row as { provisioning_domain_id?: unknown }).provisioning_domain_id;
   const organization = (row as { organization_id?: unknown }).organization_id;
+  if (lastUse) await lastUse.record(engine, row, connectionId);
   return {
     connection: {
       id: connectionId,

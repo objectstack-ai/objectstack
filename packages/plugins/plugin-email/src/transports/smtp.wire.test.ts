@@ -10,8 +10,9 @@
 //     wrong quietly, which is why ADR-0012 says nodemailer;
 //   * an AUTH rejection (535) reaches the caller instead of being swallowed.
 
+import net from 'node:net';
 import { describe, it, expect, afterEach } from 'vitest';
-import { SmtpTransport } from './smtp.js';
+import { SmtpTransport, SMTP_CONNECT_POLICY_NO_SOCKET, type SmtpConnectPolicy } from './smtp.js';
 // The fake server + wire decoders live in a testkit since #5177, so the
 // sys_email round-trip suite proves itself against the SAME wire, not a second
 // hand-written copy of it.
@@ -110,5 +111,115 @@ describe('SmtpTransport over a real SMTP conversation', () => {
     })).rejects.toThrow(/535|[Ii]nvalid login|authentication/);
     await transport.close();
     expect(server.messages).toHaveLength(0);
+  }, 20_000);
+});
+
+// A host's connect policy, against the real library: nodemailer asks the
+// policy for every connection, a refusal fails the send in the policy's own
+// words, and an admitted connection is the socket the policy opened.
+describe('SmtpTransport — a host connect policy over a real SMTP conversation', () => {
+  /** Admit by opening the socket to the configured host and port, and record each request. */
+  function admitting() {
+    const seen: Array<{ host?: string; port?: number }> = [];
+    const connect: SmtpConnectPolicy = {
+      getSocket(request, callback) {
+        seen.push({ host: request.host, port: request.port });
+        const socket = net.connect(Number(request.port), String(request.host));
+        const onError = (err: Error) => callback(err);
+        socket.once('error', onError);
+        socket.once('connect', () => {
+          socket.removeListener('error', onError);
+          callback(null, { connection: socket });
+        });
+      },
+    };
+    return { connect, seen };
+  }
+
+  const SEND = { to: ['rcpt@example.test'], from: 'no-reply@example.test', subject: 'Hello', text: 'plain' };
+
+  it('fails the send with the policy\'s own words, and the server is never reached', async () => {
+    server = await startFakeSmtp();
+    const connect: SmtpConnectPolicy = {
+      getSocket(_request, callback) { callback(new Error('the host does not allow this destination')); },
+    };
+    const transport = new SmtpTransport({ host: '127.0.0.1', port: server.port, secure: false, timeout: 5_000, connect });
+    await expect(transport.send(SEND)).rejects.toThrow('the host does not allow this destination');
+    await transport.close();
+    expect(server.connections).toBe(0);
+    expect(server.commands).toEqual([]);
+    expect(server.messages).toHaveLength(0);
+  }, 20_000);
+
+  it.each([
+    ['false', false],
+    ['undefined', undefined],
+    ['an object without a connection', {}],
+  ] as const)('an answer without a socket (%s) fails the send, and the server is never reached', async (_label, answer) => {
+    server = await startFakeSmtp();
+    const connect: SmtpConnectPolicy = {
+      getSocket(_request, callback) { (callback as (e: Error | null, s?: unknown) => void)(null, answer); },
+    };
+    const transport = new SmtpTransport({ host: '127.0.0.1', port: server.port, secure: false, timeout: 5_000, connect });
+    await expect(transport.send(SEND)).rejects.toThrow(SMTP_CONNECT_POLICY_NO_SOCKET);
+    await transport.close();
+    expect(server.connections).toBe(0);
+    expect(server.messages).toHaveLength(0);
+  }, 20_000);
+
+  it('delivers over the socket the policy admitted, asked with the configured host and port', async () => {
+    server = await startFakeSmtp();
+    const { connect, seen } = admitting();
+    const transport = new SmtpTransport({ host: '127.0.0.1', port: server.port, secure: false, timeout: 5_000, connect });
+    const res = await transport.send(SEND);
+    await transport.close();
+    expect(res.response).toContain('250');
+    expect(server.messages).toHaveLength(1);
+    expect(seen).toEqual([{ host: '127.0.0.1', port: server.port }]);
+  }, 20_000);
+
+  it('asks the policy once per connection: twice for two sends on a non-pooled transport', async () => {
+    server = await startFakeSmtp();
+    const { connect, seen } = admitting();
+    const transport = new SmtpTransport({ host: '127.0.0.1', port: server.port, secure: false, timeout: 5_000, connect });
+    await transport.send(SEND);
+    await transport.send(SEND);
+    await transport.close();
+    expect(server.messages).toHaveLength(2);
+    expect(seen).toEqual([
+      { host: '127.0.0.1', port: server.port },
+      { host: '127.0.0.1', port: server.port },
+    ]);
+  }, 20_000);
+
+  it('still asks the policy on a pooled transport', async () => {
+    server = await startFakeSmtp();
+    const { connect, seen } = admitting();
+    const transport = new SmtpTransport({
+      host: '127.0.0.1', port: server.port, secure: false, timeout: 5_000, connect,
+      transportOptions: { pool: true },
+    });
+    await transport.send(SEND);
+    await transport.close();
+    expect(server.messages).toHaveLength(1);
+    expect(seen.length).toBeGreaterThanOrEqual(1);
+    expect(seen[0]).toEqual({ host: '127.0.0.1', port: server.port });
+  }, 20_000);
+
+  it('a getSocket in transportOptions is never asked in the policy\'s place', async () => {
+    server = await startFakeSmtp();
+    const { connect, seen } = admitting();
+    let otherAsked = 0;
+    const transport = new SmtpTransport({
+      host: '127.0.0.1', port: server.port, secure: false, timeout: 5_000, connect,
+      transportOptions: {
+        getSocket: (_o: unknown, cb: (err: Error | null) => void) => { otherAsked += 1; cb(new Error('not this one')); },
+      },
+    });
+    await transport.send(SEND);
+    await transport.close();
+    expect(otherAsked).toBe(0);
+    expect(seen).toHaveLength(1);
+    expect(server.messages).toHaveLength(1);
   }, 20_000);
 });

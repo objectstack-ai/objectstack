@@ -659,6 +659,20 @@ export function registerExternalDatasourceRoutes(
     if (envelope?.status === 404 && envelope?.code === 'RESOURCE_NOT_FOUND') {
       return sendError(res, 404, 'RESOURCE_NOT_FOUND', (err as Error).message);
     }
+    // A refusal that declared this route's own 400 envelope may carry
+    // `details` (the federation guard's refusals: `details.reason`, and the
+    // rationale as `details.hint` beside a one-line message), relayed as
+    // thrown, as `service-datasource`'s admin routes relay the same throw
+    // (`badRequest`). All three must hold, so a driver error with a stray
+    // `details` field keeps answering the bare sentence.
+    const details = (err as { details?: unknown } | null | undefined)?.details;
+    if (
+      envelope?.status === 400
+      && envelope?.code === code
+      && details !== null && typeof details === 'object' && !Array.isArray(details)
+    ) {
+      return sendError(res, 400, code, refusalSentence(err), { details });
+    }
     return sendError(res, 400, code, refusalSentence(err));
   };
 

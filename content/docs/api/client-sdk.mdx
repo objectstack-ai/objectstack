@@ -509,6 +509,92 @@ await client.storage.getDownloadUrl('file-123');
 **Service availability**: Optional services (automation, ai, etc.) are only available when the corresponding plugin is installed on the server. Always check the `services` map on the discovery result returned by `client.connect()` (cache it yourself — the client has no `discovery` getter) to verify service availability before calling these methods.
 </Callout>
 
+### Addressing an item by its package
+
+Two installed packages can ship an item under the same name. The by-name calls
+`automation.*`, `actions.invoke` / `actions.invokeGlobal` and `meta.getItem`
+(and their twins on `client.environment(id)`) take an optional `namespace`: the
+holding package's manifest `namespace`, or `'_env'` for an item authored in the
+environment, which no package holds. The SDK puts it in the path segment the
+server reads it from (ADR-0150 D5):
+
+| Call | Bare | With `namespace` |
+|:--|:--|:--|
+| `automation.get`, `execute`, `runs`, `toggle`, … | `/automation/:name[/…]` | `/automation/:ns/:name[/…]` |
+| `automation.trigger` | `/automation/trigger/:name` | `/automation/trigger/:ns/:name` |
+| `actions.invoke` / `invokeGlobal` | `/actions/:object/:action` | `/actions/:ns/:object/:action` |
+| `meta.getItem` | `/meta/:type/:name` | `/meta/:type/:ns/:name` |
+
+Leave `namespace` out (or pass `undefined`) and every call sends exactly the
+request it sent before.
+
+```typescript
+// The flow `send_digest` that the package with namespace `crm` ships
+await client.automation.execute('send_digest', { params }, { namespace: 'crm' });
+// → POST /api/v1/automation/crm/send_digest/trigger
+
+await client.automation.listRuns('send_digest', { limit: 20, namespace: 'crm' });
+await client.actions.invoke('crm_lead', 'convert', { recordId, namespace: 'crm' });
+await client.meta.getItem('page', 'home', { namespace: 'crm' });
+// The environment's own copy of a name, beside any package's:
+await client.meta.getItem('page', 'home', { namespace: '_env' });
+```
+
+**The server picks no holder for you.** A bare name that two packages hold, or a
+name that two packages sharing one namespace both hold, is answered
+`409 RESOURCE_CONFLICT`. Nothing runs and nothing is read. On `/automation` and
+`/meta`, a namespace whose package does not hold the name while another package
+does is a `409` naming that holder too; `/actions` answers it `404`.
+
+```typescript
+try {
+  await client.automation.execute('send_digest', { params });
+} catch (err: any) {
+  if (err.httpStatus === 409 && err.code === 'RESOURCE_CONFLICT') {
+    // [{ kind: 'package', packageId: 'com.acme.crm' }, { kind: 'package', packageId: 'com.acme.hr' }]
+    console.log(err.details?.candidates);
+  }
+}
+
+// actions.invoke does not throw: the candidates ride on the result.
+const res = await client.actions.invoke('crm_lead', 'convert', { recordId });
+if (!res.success && res.candidates) {
+  // ask which package's action to run, then call again with its namespace
+}
+```
+
+On `/automation`, `/actions` and `/meta` the `409` lists the holders in
+`details.candidates`, and the error message names them too.
+
+**Some addresses have no qualified path, and the SDK refuses them before
+sending.** The server reads the segment after the door in a fixed order (the
+door's own literal segments, then `_env`, then an installed namespace, else the
+bare address), so for these pairs the qualified URL would be a different
+request. Each is thrown (or, on `actions.*`, returned as `success: false`) with
+`code: 'VALIDATION_ERROR'`, `httpStatus: 400`, and no request is made:
+
+- A `namespace` that is not a package namespace: 2 to 20 characters, a lowercase
+  letter first, then lowercase letters, digits or `_`. `'_env'` is the one
+  exception.
+- A `namespace` that spells one of the door's literal segments, such as
+  `trigger` or `hooks` on `/automation` and `global` on `/actions`.
+- A flow named like a flow sub-resource (`runs`, `toggle`, `clone`, `trigger`)
+  under a package namespace: `/automation/crm/runs` is the run list of the flow
+  `crm`. Call it bare, or under `'_env'` when the environment holds it.
+- A flow named like one of the door's literals (`hooks`, `actions`, …) under any
+  namespace, `'_env'` included. Call it bare.
+- A metadata item named like a `/meta` sub-resource (`history`, `references`,
+  `tree`, …): `/meta/app/crm/history` is the history of the app `crm`. Read it
+  with `packageId` instead (`?package=`).
+
+`meta.getItem` also takes `packageId`. Send one of the two: the server refuses a
+read that names both with `400 VALIDATION_ERROR`. Whether a namespace is
+installed is the server's call, not the SDK's: a well-formed namespace that no
+installed package declares is read as part of the bare address.
+
+`meta.getHistory`, `getReferences`, `getAudit` and `diffItem` take no
+`namespace`: their server routes do not read one.
+
 ---
 
 ## Query Builder
@@ -731,7 +817,7 @@ narrowed one step further here:
 /**
  * What the automation door attaches to `details` on a `FLOW_FAILED`: the run's
  * own artefacts. A flow that never dispatched (`FLOW_DISABLED`,
- * `FLOW_NO_START_NODE`, `FLOW_INPUT_SCHEMA_INVALID`, or an unknown flow's 404)
+ * `FLOW_INPUT_SCHEMA_INVALID`, or an unknown flow's 404)
  * has no author text and no node log to point at, which is why both members
  * are optional.
  */
@@ -751,7 +837,7 @@ try {
 } catch (err) {
   if (!isApiError(err)) throw err;     // not a server response — rethrow
   console.error(err.httpStatus);       // 409 | 422 | 400 | 404
-  console.error(err.code);             // 'FLOW_DISABLED' | 'FLOW_NO_START_NODE' | 'FLOW_INPUT_SCHEMA_INVALID' | 'FLOW_FAILED'
+  console.error(err.code);             // 'FLOW_DISABLED' | 'FLOW_INPUT_SCHEMA_INVALID' | 'FLOW_FAILED'
   if (err.code === 'FLOW_FAILED' && hasFlowFailureDetails(err)) {
     console.error(err.details.errorMessage);   // the flow author's own text
     console.error(err.details.summary);        // which node failed

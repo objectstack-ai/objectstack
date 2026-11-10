@@ -354,6 +354,10 @@ export async function runMintScimCredential(
         credentialId: minted.credentialId,
         connectionId,
         token: minted.token,
+        // [#32120] The non-secret hint the row stores (the bearer's last four
+        // characters), answered beside the token so the result dialog shows
+        // the administrator what the credentials list will show for it.
+        tokenHint: minted.tokenHint,
         expiresAt: expiresAt ? expiresAt.toISOString() : null,
       },
     },

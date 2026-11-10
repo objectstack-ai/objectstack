@@ -231,7 +231,10 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
             // channel is not asked. A held secret that does not come back
             // refuses the node — it is never sent unsigned.
             let raw = authored;
-            const flowName = context.flowName;
+            // [ADR-0150 D8 row R9] The channel is asked for the running flow's
+            // own slot, so a flow of a name two packages hold reads only its
+            // own package's rows.
+            const flowName = engine.flowKeyOfRun(context);
             if (
                 typeof flowName === 'string'
                 && authored.signingSecret !== FLOW_CREDENTIAL_CLEARED
@@ -405,7 +408,7 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                 };
             } catch (err) {
                 const e = err as { name?: string; message?: string };
-                const msg = e?.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : e?.message ?? String(err);
+                const msg = e?.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : describeFetchFailure(err, url);
                 // A timed-out or aborted mutating request may well have landed —
                 // the response is what we lost, not necessarily the write.
                 return {
@@ -420,6 +423,49 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
     });
 
     ctx.logger.info('[HTTP] http executor registered');
+}
+
+/** Longest cause text a run-record line carries. */
+const MAX_CAUSE_CHARS = 200;
+
+/**
+ * The failure text for a `fetch` that threw before any response: what undici
+ * reports as a bare `fetch failed` hides the real reason on `err.cause` (a
+ * `code` such as `ENOTFOUND` / `ECONNREFUSED` / a TLS code, and its message).
+ * The line names the target HOST and that cause, so an admin reading the run
+ * record can tell DNS from refused from TLS without the server log.
+ *
+ * Only the host is ever named. The url is a text slot that may carry userinfo
+ * or a query-string key, and some `fetch` errors quote it whole (undici's
+ * "cannot be constructed from a URL that includes credentials" does), so every
+ * occurrence of the url, and of its userinfo and query, is scrubbed to the host.
+ */
+function describeFetchFailure(err: unknown, url: string): string {
+    const e = err as { message?: string; cause?: { code?: unknown; message?: unknown } };
+    let host: string | undefined;
+    const secrets: string[] = [url];
+    try {
+        const u = new URL(url);
+        host = u.host;
+        secrets.push(u.href, u.search, u.username, u.password);
+    } catch {
+        // an unparseable url has no host to name; the scrub below still applies
+    }
+    const scrub = (text: string): string => {
+        let out = text;
+        for (const secret of secrets) {
+            if (secret.length >= 3) out = out.split(secret).join(host ?? '[url]');
+        }
+        return out;
+    };
+    const base = scrub(e?.message ?? String(err));
+    const code = typeof e?.cause?.code === 'string' ? e.cause.code : undefined;
+    const causeMessage = typeof e?.cause?.message === 'string' ? scrub(e.cause.message) : '';
+    const cause = (code && !causeMessage.includes(code) ? `${code} ${causeMessage}` : causeMessage || code || '').trim();
+    const where = host ? ` \u2014 ${host}` : '';
+    if (!cause) return `${base}${where}`;
+    const clipped = cause.length > MAX_CAUSE_CHARS ? `${cause.slice(0, MAX_CAUSE_CHARS)}\u2026` : cause;
+    return `${base}${where}: ${clipped}`;
 }
 
 /** Read a response body as JSON, falling back to text (empty body → null). */

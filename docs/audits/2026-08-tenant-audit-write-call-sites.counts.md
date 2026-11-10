@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 292 |
-| Object name statically decidable | 203 |
-| Object name chosen at run time | 89 |
-| Against a tenancy-enabled object | 196 |
+| Write call sites | 294 |
+| Object name statically decidable | 204 |
+| Object name chosen at run time | 90 |
+| Against a tenancy-enabled object | 197 |
 | Against an object declaring tenancy off | 7 |
-| Threading a tenant context | 225 |
-| Provably carrying none | 10 |
+| Threading a tenant context | 226 |
+| Provably carrying none | 11 |
 | …and decidably tenancy-enabled | 3 |
 | Options argument unreadable | 57 |
 | …and decidably tenancy-enabled | 30 |
-| Threading a decidably elevated context | 161 |
+| Threading a decidably elevated context | 162 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 121 |
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-09 at `fbc9f95c7`.
+Measured on 2026-11-10 at `c6e96d157`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1099 |
-| engine-shaped types recognised | 126 |
-| declared objects in the registry | 133 |
-| same-named calls subtracted as non-engine | 255 |
+| tracked non-test sources scanned | 1112 |
+| engine-shaped types recognised | 128 |
+| declared objects in the registry | 136 |
+| same-named calls subtracted as non-engine | 261 |
 
 ## Every site
 
@@ -162,6 +162,7 @@ Measured on 2026-11-09 at `fbc9f95c7`.
 | `packages/plugins/plugin-auth/src/idp-group-mapping-admin.ts` | `insert` | `IDP_GROUP_MAPPING_OBJECT` | undecidable | options unreadable | 1 |
 | `packages/plugins/plugin-auth/src/idp-group-mapping-admin.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/idp-group-mapping-admin.ts` | `delete` | `sys_user_permission_set` | enabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/idp-group-mapping-match.ts` | `update` | `IDP_GROUP_MAPPING_OBJECT` | undecidable | PROVABLY NONE | 1 |
 | `packages/plugins/plugin-auth/src/idp-locale-claim.ts` | `update` | `sys_user` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/mcp-client-last-use.ts` | `update` | `sys_oauth_consent` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/member-role-canonical.ts` | `update` | `MEMBER_OBJECT` | undecidable | elevated | 1 |
@@ -179,7 +180,7 @@ Measured on 2026-11-09 at `fbc9f95c7`.
 | `packages/plugins/plugin-auth/src/reconcile-membership.ts` | `insert` | `sys_member` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-auth/src/scim-connection-admin.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/scim-connection-service.ts` | `insert` | `sys_scim_connection_credential` | enabled | PROVABLY NONE | 1 |
-| `packages/plugins/plugin-auth/src/scim-connection-service.ts` | `update` | `sys_scim_connection_credential` | enabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/scim-connection-service.ts` | `update` | `sys_scim_connection_credential` | enabled | elevated | 2 |
 | `packages/plugins/plugin-auth/src/scim-group-projection.ts` | `delete` | `sys_user_permission_set` | enabled | PROVABLY NONE | 1 |
 | `packages/plugins/plugin-auth/src/scim-group-projection.ts` | `insert` | `sys_user_permission_set` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/service-account-doors.ts` | `insert` | `sys_api_key` | disabled | context, elevation undecidable | 1 |

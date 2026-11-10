@@ -278,9 +278,10 @@
  *     is confirmed INSIDE the run — a 2xx carrying a `ghsa_id`, a draft's
  *     reading state `draft` — and the run
  *     names that id in an annotation this file reads and hands on as
- *     `result.annotations.advisories` (`--json`: `advisories`), so the seat
- *     follows with `advisory_collaborators_add` and then reads the advisory
- *     with `advisory_read`. `advisory_collaborators_add`, `advisory_versions`
+ *     `result.annotations.advisories` (`--json`: `advisories`); the seat
+ *     reads the advisory with `advisory_read`, and `advisory_collaborators_add`
+ *     adds a collaborator only when a maintainer asks for it.
+ *     `advisory_collaborators_add`, `advisory_versions`
  *     and `advisory_state` carry no prose and are confirmed inside the run on
  *     their own PATCH answer (every login sent listed, the entries sent
  *     listed, the state asked for shown) after the executor's fences on the
@@ -1284,8 +1285,8 @@ export function parseRelayAnnotation(message) {
 /**
  * The ops whose landing the executor reports as an ADVISORY annotation — the
  * two that file a finding, a private report or a draft advisory, whose id the
- * seat needs for its next stroke (`advisory_collaborators_add`): the App files
- * either, so the finding seat is no collaborator until that stroke lands. The message is
+ * seat needs for any later stroke on it (`advisory_read`, or `advisory_collaborators_add`
+ * when a maintainer asks for it): the App files either, so the finding seat is no collaborator on it. The message is
  * `fleet-write action=<i> op=<op> ghsa_id=<id>` and names nothing else — an id
  * exposes no content, and the run log is public (`ops.mjs`, the advisory rows).
  */
@@ -1725,7 +1726,7 @@ async function runAnnotationsFor(payload, run, deps) {
     log(
       r.op === ADVISORY_PUBLISH_OP
         ? `fleet-write: run ${run.id}'s annotation names action ${r.action} ${r.op} → advisory ${r.ghsaId} PUBLISHED, read back with its versions — record run ${run.id} on the seat post, the id alone.`
-        : `fleet-write: run ${run.id}'s annotation names action ${r.action} ${r.op} → advisory ${r.ghsaId} (the platform's own answer) — add whoever works it with advisory_collaborators_add.`,
+        : `fleet-write: run ${run.id}'s annotation names action ${r.action} ${r.op} → advisory ${r.ghsaId} (the platform's own answer).`,
     );
   }
   for (const r of filed.ignored) log(`fleet-write: run ${run.id}'s annotation for action ${r.action} ${r.op} is ignored — ${r.why}.`);
@@ -2957,12 +2958,12 @@ export async function selfTest() {
       const filed = await drive({ runs: () => [RUN('completed', 'success')], notes: () => ({ status: 200, json: [RUNNER_NOTICE, withNote] }) }, { stroke: reportStroke });
       const sent = filed.seen.filter((s) => s.call === DISPATCH);
       const atTarget = filed.seen.filter((s) => !s.call.includes(`/repos/${RELAY_REPO}/`));
-      t('⭐ a filed report: ONE dispatch carrying it as judged, nothing read back at the target, and the run\'s advisory annotation handed on as the id to follow with — said in one line — exit 0', [sent.length, sent[0]?.body?.client_payload?.actions, filed.state, filed.readBack?.state, atTarget.length, filed.annotations?.advisories, filed.logs.some((l) => l.includes(`advisory ${GHSA}`) && l.includes('advisory_collaborators_add')), exitForResult(filed)], [1, [REPORT], 'success', 'none', 0, [{ action: 1, op: 'advisory_report', ghsaId: GHSA }], true, EXIT_OK], filed.logs.join(' | '));
+      t('⭐ a filed report: ONE dispatch carrying it as judged, nothing read back at the target, and the run\'s advisory annotation handed on as the id to follow with — said in one line — exit 0', [sent.length, sent[0]?.body?.client_payload?.actions, filed.state, filed.readBack?.state, atTarget.length, filed.annotations?.advisories, filed.logs.some((l) => l.endsWith(`→ advisory ${GHSA} (the platform's own answer).`)) && !filed.logs.some((l) => l.includes('advisory_collaborators_add')), exitForResult(filed)], [1, [REPORT], 'success', 'none', 0, [{ action: 1, op: 'advisory_report', ghsaId: GHSA }], true, EXIT_OK], filed.logs.join(' | '));
       const unnamed = await drive({ runs: () => [RUN('completed', 'success')] }, { stroke: reportStroke });
       t('a filed report no annotation names: still exit 0 — the run confirmed it — no id handed on, and one line saying where the id is and that the report is never re-sent', [unnamed.state, unnamed.annotations?.advisories, unnamed.logs.some((l) => l.includes("action 1 advisory_report's advisory id") && l.includes('do not re-send')), exitForResult(unnamed)], ['success', [], true, EXIT_OK], unnamed.logs.join(' | '));
       const DRAFT_NOTE = relayAdvisoryAnnotationMessage({ action: 1, op: 'advisory_create', ghsaId: GHSA });
       const drafted = await drive({ runs: () => [RUN('completed', 'success')], notes: () => ({ status: 200, json: [RUNNER_NOTICE, { ...withNote, title: 'fleet-write advisory_create', message: DRAFT_NOTE }] }) }, { stroke: draftStroke });
-      t('⭐ a created draft: ONE dispatch carrying it as judged, nothing read back at the target, and the run\'s advisory annotation — its own spelling, read back exactly — handed on as the id to follow with; exit 0', [DRAFT_NOTE, parseRelayAdvisoryAnnotation(DRAFT_NOTE), drafted.seen.filter((s) => s.call === DISPATCH).map((s) => s.body?.client_payload?.actions), drafted.state, drafted.readBack?.state, drafted.seen.filter((s) => !s.call.includes(`/repos/${RELAY_REPO}/`)).length, drafted.annotations?.advisories, drafted.logs.some((l) => l.includes(`advisory ${GHSA}`) && l.includes('advisory_collaborators_add')), exitForResult(drafted)], [`fleet-write action=1 op=advisory_create ghsa_id=${GHSA}`, { action: 1, op: 'advisory_create', ghsaId: GHSA }, [[DRAFT]], 'success', 'none', 0, [{ action: 1, op: 'advisory_create', ghsaId: GHSA }], true, EXIT_OK], drafted.logs.join(' | '));
+      t('⭐ a created draft: ONE dispatch carrying it as judged, nothing read back at the target, and the run\'s advisory annotation — its own spelling, read back exactly — handed on as the id to follow with; exit 0', [DRAFT_NOTE, parseRelayAdvisoryAnnotation(DRAFT_NOTE), drafted.seen.filter((s) => s.call === DISPATCH).map((s) => s.body?.client_payload?.actions), drafted.state, drafted.readBack?.state, drafted.seen.filter((s) => !s.call.includes(`/repos/${RELAY_REPO}/`)).length, drafted.annotations?.advisories, drafted.logs.some((l) => l.endsWith(`→ advisory ${GHSA} (the platform's own answer).`)) && !drafted.logs.some((l) => l.includes('advisory_collaborators_add')), exitForResult(drafted)], [`fleet-write action=1 op=advisory_create ghsa_id=${GHSA}`, { action: 1, op: 'advisory_create', ghsaId: GHSA }, [[DRAFT]], 'success', 'none', 0, [{ action: 1, op: 'advisory_create', ghsaId: GHSA }], true, EXIT_OK], drafted.logs.join(' | '));
       const draftUnnamed = await drive({ runs: () => [RUN('completed', 'success')] }, { stroke: draftStroke });
       t('a created draft no annotation names: still exit 0, no id handed on, and one line saying to ask the maintainer and never to re-send the draft', [draftUnnamed.annotations?.advisories, draftUnnamed.logs.some((l) => l.includes("action 1 advisory_create's advisory id") && l.includes('do not re-send the draft')), exitForResult(draftUnnamed)], [[], true, EXIT_OK], draftUnnamed.logs.join(' | '));
       const idRows = [];

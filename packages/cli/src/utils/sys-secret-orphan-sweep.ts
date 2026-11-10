@@ -23,7 +23,7 @@
  *    `secret-reference-union.test.ts` and again in this module's own test.
  *    ⛔ That bucket is therefore NOT a deletion list, and this module never
  *    treats it as one: the reference side comes from
- *    {@link SecretReferenceUnion} over all three producer families.
+ *    {@link SecretReferenceUnion} over every producer family.
  *  - Attribution stays exactly as narrow as it is: `(namespace, key)`
  *    membership in the registered manifests' encrypted specifiers. It is a
  *    NAME MATCH, not proof of ownership, so it can only ever be used to
@@ -86,9 +86,10 @@ import type {
   SecretRowSnapshot,
   SettingRowSnapshot,
 } from '@objectstack/service-settings';
-import type {
-  SecretReferenceFamily,
-  SecretReferenceUnion,
+import {
+  SECRET_REFERENCE_FAMILIES,
+  type SecretReferenceFamily,
+  type SecretReferenceUnion,
 } from './secret-reference-union.js';
 
 export type { EncryptedSpecifierRef, SecretRowSnapshot, SettingRowSnapshot };
@@ -317,7 +318,7 @@ export function planSysSecretOrphanSweep(input: {
       status: 428,
       gaps: union.gaps,
       message:
-        `Refusing to delete: ${union.gaps.length} of 3 sys_secret producer families could not be `
+        `Refusing to delete: ${union.gaps.length} of ${SECRET_REFERENCE_FAMILIES.length} sys_secret producer families could not be `
         + `enumerated (${union.gaps.map((g) => g.family).join(', ')}). A handle absent from an `
         + 'INCOMPLETE union is not thereby unreferenced — the missing family may hold it — and '
         + 'the audit trail records digests rather than handles, so an erroneous delete cannot be '

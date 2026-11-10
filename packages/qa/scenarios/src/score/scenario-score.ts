@@ -80,6 +80,12 @@ export interface CheckResult {
   check: string;
   pass: boolean;
   detail?: string;
+  /**
+   * Why this check measured nothing (an operation's platform half that met the
+   * build's own lock, `scenario-operation-grade.ts`). A not-measured check
+   * counts in neither passed nor total and is never a pass: `pass` is false.
+   */
+  notMeasured?: string;
 }
 
 export interface ScoreResult {
