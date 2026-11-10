@@ -53,6 +53,7 @@ import { codeInviteRoleNotFound } from './invite-role-not-found-code.js';
 import { readRequestClientAddress } from './request-client-address.js';
 import { stampRoleChangeGrantedSet } from './role-change-granted-set.js';
 import { attachSessionToCredentialResponse } from './session-envelope-completion.js';
+import { SSO_PROVIDER_DELETE_PATH } from './sign-in-method-floor.js';
 import { resetVerifiedOnTwoFactorReenrollment } from './two-factor-reenrollment-verified-reset.js';
 import { echoInstalledSessionToken } from './two-factor-rotated-token-echo.js';
 
@@ -229,7 +230,7 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // users the delete unlinked, those it locked out, and what was
   // removed (counted by the before-hook ahead of the vendor's writes).
   // See `sso-provider-lifecycle.ts`.
-  await this.settleSsoProviderDelete(ctx);
+  if (ctx?.path === SSO_PROVIDER_DELETE_PATH) await this.settleSsoProviderDelete(ctx);
 
   // ── ADR-0069 D2: account lockout (counter) ──────────────────
   // better-auth catches an INVALID_EMAIL_OR_PASSWORD APIError and runs
