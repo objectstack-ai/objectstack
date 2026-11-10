@@ -27,6 +27,21 @@
  *
  * A non-system insert or update that would STORE an assignment naming one of
  * those sets is refused, for every caller, a platform administrator included.
+ * So is every other way the platform offers to give a person a set — each door
+ * below refuses with the one refusal this module builds
+ * ({@link agentCeilingGrantError}), worded for where the set was named
+ * ({@link AgentCeilingCarrier}):
+ *
+ * - a position definition whose `permissionSets` names one, at the metadata
+ *   door ({@link registerPositionAgentCeilingGate}): a holder of a position
+ *   holds every set it names;
+ * - an assignment of a position whose definition names one (a definition a
+ *   package or the stack declares in code never meets the metadata door), at
+ *   every write of `sys_user_position`;
+ * - the deployment's baseline (`SecurityPlugin`'s `fallbackPermissionSet` and
+ *   `acceptedDefaultPermissionSets` options), at construction;
+ * - the self-registration set, by the audience validation in
+ *   `@objectstack/plugin-auth`.
  *
  * ## Which rows it judges
  *
@@ -42,13 +57,17 @@
  *   window or reason on it) is refused as well as one that renames a grant to
  *   a ceiling. Such an assignment is not edited; it is removed.
  *
+ * The `sys_user_position` hooks judge the position the row holds after the
+ * write the same way, by its definition in the security catalog. They judge
+ * a system write too when it names the position (see `onPositionInsert`).
+ *
  * A DELETE is never judged here: removing such an assignment is always open
  * to a caller the delegated-administration gate lets remove it.
  *
  * It stands down on:
  *
- * - every `isSystem` write: the stand-down the sibling refusals on this table
- *   and the security middleware take. Which system writer can store an
+ * - every `isSystem` write but a seed: the stand-down the sibling refusals on
+ *   this table and the security middleware take. Which system writer can store an
  *   agent ceiling set, writer by writer:
  *   - the platform-admin promotion and the organization-admin reconcile name
  *     their sets in code, and neither is a ceiling;
@@ -56,8 +75,17 @@
  *     `audience.selfRegistrationPermissionSet`, and the audience validation
  *     that admits that configuration (`assertAudienceConfig`,
  *     `@objectstack/plugin-auth`) refuses an agent ceiling set there;
- *   - seed replay, and the development-only demo-staff seed, write the sets
- *     their stack declares, and nothing judges those against this rule;
+ *   - an identity-provider group mapping's projection writes the mapped set,
+ *     and the mapping's save refuses a set outside the organization boundary,
+ *     which keeps every agent ceiling out by name;
+ *   - the development-only demo accounts are given only sets their stack
+ *     declares in `permissions` (the stack's own validation), and no stack
+ *     declares an agent ceiling's name: this plugin holds those names, and a
+ *     second holder is refused at registration;
+ *   - seed replay — a stack's `data`, a published `seed` item — writes the
+ *     sets it declares. A SEED write (`seedReplay`) is therefore judged like
+ *     any other: a seed is a declared fact, and every other validation runs
+ *     on it already;
  * - a value no by-name reader matches to any set (not a string, or blank):
  *   the engine's `required` and the catalog refusal answer those.
  *
@@ -88,12 +116,15 @@
  * reasoning `objects/reserved-identity-names.ts` gives for its own refusal.
  */
 
+import { securityCatalogReaderOf } from '@objectstack/core';
 import { MCP_AGENT_PERMISSION_SETS } from '@objectstack/spec/ai';
 import type { FieldErrorCode } from '@objectstack/spec/api';
 import { isPlainRecord } from '@objectstack/spec/data';
 import { validationFailure } from '@objectstack/types';
 import { GRANT_OBJECT, GRANT_SET_NAME_FIELD, grantSetNameOf } from './grant-permission-set-name.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
+import { SysUserPosition } from './objects/sys-user-position.object.js';
+import { POSITION_ASSIGNMENT_OBJECT, POSITION_FIELD as POSITION_ASSIGNMENT_FIELD } from './position-catalog-refusal.js';
 
 /** The `packageId` both hooks register under, so they bind (and re-bind) as one. */
 export const AGENT_CEILING_GRANT_HOOK_PACKAGE = 'plugin-security:agent-ceiling-grant';
@@ -107,6 +138,13 @@ const nameDef = (SysUserPermissionSet as any).fields?.[GRANT_SET_NAME_FIELD] ?? 
 /** The column's declared label — what the refusal names it by. */
 const NAME_LABEL: string = typeof nameDef.label === 'string' ? nameDef.label : 'Permission Set';
 
+const positionDef = (SysUserPosition as any).fields?.[POSITION_ASSIGNMENT_FIELD] ?? {};
+/** The assignment's `position` column label — what the refusal names it by. */
+const POSITION_LABEL: string = typeof positionDef.label === 'string' ? positionDef.label : 'Position';
+
+/** The position definition key that binds its permission sets (`PositionSchema.permissionSets`, ADR-0131 D3/D4). */
+const POSITION_SETS_KEY = 'permissionSets';
+
 /** Is `name` one of the [ADR-0090 D10] agent ceiling sets? Exact match: set names are machine names. */
 export function isAgentCeilingPermissionSet(name: unknown): boolean {
   return typeof name === 'string' && AGENT_CEILING_SETS.has(name);
@@ -119,31 +157,88 @@ interface AgentCeilingFieldError {
   message: string;
   label: string;
   value: string;
-  constraint: { principalKind: 'agent' };
+  constraint: { principalKind: 'agent'; permissionSet: string };
+}
+
+/**
+ * Where a refused agent ceiling set was named, which the one refusal below is
+ * worded and addressed by: the column or key that names it (`field`, `label`),
+ * the thing that would have given it to a person (`carrier`), and, for an
+ * assignment of a position, the position that names it (`via`, which is then
+ * the refused value). Every door that refuses the rule builds its answer from
+ * {@link agentCeilingGrantError} with one of the carriers below — one predicate,
+ * one sentence.
+ */
+export interface AgentCeilingCarrier {
+  readonly field: string;
+  readonly label: string;
+  readonly carrier: string;
+  /** What to choose instead: a different `permission set`, or a different `position`. */
+  readonly choice: 'permission set' | 'position';
+  readonly via?: string;
+  readonly wayThrough?: string;
+}
+
+/** A `sys_user_permission_set` row: a user's own assignment of the set. */
+export const AGENT_CEILING_ASSIGNMENT: AgentCeilingCarrier = Object.freeze({
+  field: GRANT_SET_NAME_FIELD,
+  label: NAME_LABEL,
+  carrier: GRANT_OBJECT,
+  choice: 'permission set',
+  wayThrough: 'To take it away from a user who already holds it, delete the assignment.',
+});
+
+/** A position definition's `permissionSets`: every holder of the position holds each set it names. */
+export const AGENT_CEILING_POSITION_DEFINITION: AgentCeilingCarrier = Object.freeze({
+  field: POSITION_SETS_KEY,
+  label: 'Permission Sets',
+  carrier: 'a position',
+  choice: 'permission set',
+  wayThrough: 'To take it away from the people who hold the position, remove it from the position\'s permission sets.',
+});
+
+/** A `sys_user_position` row naming a position whose definition names the set. */
+export function agentCeilingPositionAssignment(position: string): AgentCeilingCarrier {
+  return {
+    field: POSITION_ASSIGNMENT_FIELD,
+    label: POSITION_LABEL,
+    carrier: POSITION_ASSIGNMENT_OBJECT,
+    choice: 'position',
+    via: position,
+    wayThrough: 'Remove it from the position\'s permission sets, or assign a different position.',
+  };
 }
 
 /** The sentence an administrator reads: the value, why no assignment may hold it, the way through. */
-export function agentCeilingGrantMessage(name: string): string {
+export function agentCeilingGrantMessage(name: string, at: AgentCeilingCarrier = AGENT_CEILING_ASSIGNMENT): string {
+  const head = at.via === undefined ? `${at.label}: '${name}' is` : `${at.label}: '${at.via}' names '${name}', which is`;
   return (
-    `${NAME_LABEL}: '${name}' is the permission ceiling of an AI assistant connected over MCP, not a ` +
+    `${head} the permission ceiling of an AI assistant connected over MCP, not a ` +
     `permission set for a person. The assistant receives it from the access its user consented to, never from ` +
-    `an assignment, so ${GRANT_OBJECT} cannot give it to a user: choose a different permission set. To take it ` +
-    `away from a user who already holds it, delete the assignment.`
+    `an assignment, so ${at.carrier} cannot give it to a user: choose a different ${at.choice}.` +
+    (at.wayThrough ? ` ${at.wayThrough}` : '')
   );
 }
 
-/** The refusal: `VALIDATION_FAILED` (400 at both HTTP doors), `invalid_value` at `permission_set`. */
-export function agentCeilingGrantError(name: string): Error {
-  const message = agentCeilingGrantMessage(name);
+/** The refusal: `VALIDATION_FAILED` (400 at both HTTP doors), `invalid_value` at the carrier's field. */
+export function agentCeilingGrantError(name: string, at: AgentCeilingCarrier = AGENT_CEILING_ASSIGNMENT): Error {
+  const message = agentCeilingGrantMessage(name, at);
   const entry: AgentCeilingFieldError = {
-    field: GRANT_SET_NAME_FIELD,
+    field: at.field,
     code: 'invalid_value',
     message,
-    label: NAME_LABEL,
-    value: name,
-    constraint: { principalKind: 'agent' },
+    label: at.label,
+    value: at.via ?? name,
+    constraint: { principalKind: 'agent', permissionSet: name },
   };
   return validationFailure(message, [entry]);
+}
+
+/** The first agent ceiling set a position definition names in `permissionSets`, or `undefined`. */
+export function agentCeilingSetOfPosition(definition: unknown): string | undefined {
+  const sets = isPlainRecord(definition) ? definition[POSITION_SETS_KEY] : undefined;
+  if (!Array.isArray(sets)) return undefined;
+  return sets.find((name): name is string => isAgentCeilingPermissionSet(name));
 }
 
 const hasOwn = (o: object, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k);
@@ -153,9 +248,20 @@ function assertNotAgentCeiling(name: string | undefined): void {
   if (name !== undefined && isAgentCeilingPermissionSet(name)) throw agentCeilingGrantError(name);
 }
 
+/**
+ * Does this write meet the rule? Every non-system write, and a SEED write
+ * (`seedReplay`, `SEED_WRITE_EXECUTION_CONTEXT`): a seed is the stack's or a
+ * package's declared fact, and every other validation already runs on it. Read
+ * from the hook's `input.options.context`, the caller's own options bag: the
+ * engine copies `isSystem` onto the hook session, never `seedReplay`.
+ */
+function judges(ctx: any): boolean {
+  return ctx?.session?.isSystem !== true || ctx?.input?.options?.context?.seedReplay === true;
+}
+
 /** `beforeInsert`: one dispatch per row, handed the caller's row as sent. */
 function onInsert(ctx: any): void {
-  if (ctx?.object !== GRANT_OBJECT || ctx?.session?.isSystem === true) return;
+  if (ctx?.object !== GRANT_OBJECT || !judges(ctx)) return;
   const row = ctx?.input?.data;
   if (!isPlainRecord(row)) return;
   assertNotAgentCeiling(grantSetNameOf(row));
@@ -163,10 +269,110 @@ function onInsert(ctx: any): void {
 
 /** `beforeUpdate`: one dispatch per matched row, `previous` bound on both dispatch paths. */
 function onUpdate(ctx: any): void {
-  if (ctx?.object !== GRANT_OBJECT || ctx?.session?.isSystem === true) return;
+  if (ctx?.object !== GRANT_OBJECT || !judges(ctx)) return;
   const data = ctx?.input?.data;
   if (!isPlainRecord(data)) return;
   assertNotAgentCeiling(hasOwn(data, GRANT_SET_NAME_FIELD) ? grantSetNameOf(data) : grantSetNameOf(ctx?.previous));
+}
+
+/**
+ * Refuse an assignment of `position` when its definition — read from the
+ * security catalog bound to `engine`, the one source the authorization resolver
+ * grants a held position through — names an agent ceiling set. A position the
+ * catalog does not hold names nothing (the catalog refusal answers it), and an
+ * engine with no catalog bound judges nothing.
+ */
+async function assertPositionGivesNoAgentCeiling(engine: unknown, position: unknown): Promise<void> {
+  if (typeof position !== 'string' || position === '') return;
+  const catalog = securityCatalogReaderOf(engine);
+  if (!catalog) return;
+  const entry = await catalog.resolve('position', position);
+  const set = agentCeilingSetOfPosition(entry?.definition);
+  if (set !== undefined) throw agentCeilingGrantError(set, agentCeilingPositionAssignment(position));
+}
+
+/**
+ * `beforeInsert` on `sys_user_position`: EVERY write, a system one included.
+ * Unlike the grant table, no system writer of this table has a position of its
+ * own to assign — invitation acceptance, the development demo accounts and seed
+ * replay each write a position someone declared — so the system stand-down
+ * would only carry a declared position past the rule.
+ */
+function onPositionInsert(engine: unknown) {
+  return async (ctx: any): Promise<void> => {
+    if (ctx?.object !== POSITION_ASSIGNMENT_OBJECT) return;
+    const row = ctx?.input?.data;
+    if (!isPlainRecord(row)) return;
+    await assertPositionGivesNoAgentCeiling(engine, row[POSITION_ASSIGNMENT_FIELD]);
+  };
+}
+
+/**
+ * `beforeUpdate` on `sys_user_position`: an update naming a position is judged
+ * on it, for every writer; one that leaves the position as stored is judged on
+ * the stored one for the writers {@link judges} reads, as the grant table's is.
+ */
+function onPositionUpdate(engine: unknown) {
+  return async (ctx: any): Promise<void> => {
+    if (ctx?.object !== POSITION_ASSIGNMENT_OBJECT) return;
+    const data = ctx?.input?.data;
+    if (!isPlainRecord(data)) return;
+    if (hasOwn(data, POSITION_ASSIGNMENT_FIELD)) {
+      await assertPositionGivesNoAgentCeiling(engine, data[POSITION_ASSIGNMENT_FIELD]);
+    } else if (judges(ctx) && isPlainRecord(ctx?.previous)) {
+      await assertPositionGivesNoAgentCeiling(engine, ctx.previous[POSITION_ASSIGNMENT_FIELD]);
+    }
+  };
+}
+
+/**
+ * The metadata door's half: a position whose definition names an agent ceiling
+ * set is refused before it is stored — on a draft and an active save, and on a
+ * restore, every door that runs the protocol's authoring gate for `position`.
+ * Feature-detected, as the sibling gates are: a protocol without the seam keeps
+ * its behavior, and the call answers `false`.
+ */
+export function registerPositionAgentCeilingGate(protocol: any): boolean {
+  if (!protocol || typeof protocol.registerAuthoringGate !== 'function') return false;
+  protocol.registerAuthoringGate('position', (ctx: { body?: unknown }) => {
+    const set = agentCeilingSetOfPosition(ctx?.body);
+    if (set !== undefined) throw agentCeilingGrantError(set, AGENT_CEILING_POSITION_DEFINITION);
+  });
+  return true;
+}
+
+/** The deployment's baseline as `SecurityPlugin` options name it: who holds it, and the option. */
+function agentCeilingBaselineOption(option: string): AgentCeilingCarrier {
+  return {
+    field: option,
+    label: `The SecurityPlugin option \`${option}\``,
+    carrier: 'the baseline every signed-in person holds',
+    choice: 'permission set',
+  };
+}
+
+/**
+ * The construction-time half: the deployment's baseline — the
+ * `fallbackPermissionSet` every signed-in person holds (whether named directly
+ * or as the `isDefault` set of the plugin's `defaultPermissionSets`), and the
+ * package defaults a walled host accepts for the `everyone` anchor
+ * (`acceptedDefaultPermissionSets`) — never names an agent ceiling set. Thrown
+ * from `SecurityPlugin`'s constructor, so such a composition does not boot,
+ * as an audience configuration naming one does not.
+ */
+export function refuseAgentCeilingInBaselineOptions(
+  fallbackPermissionSet: string | null | undefined,
+  acceptedDefaultPermissionSets: readonly string[] | undefined,
+): void {
+  const named: Array<[string, unknown]> = [
+    ['fallbackPermissionSet', fallbackPermissionSet],
+    ...(acceptedDefaultPermissionSets ?? []).map((name): [string, unknown] => ['acceptedDefaultPermissionSets', name]),
+  ];
+  for (const [option, name] of named) {
+    if (isAgentCeilingPermissionSet(name)) {
+      throw agentCeilingGrantError(name as string, agentCeilingBaselineOption(option));
+    }
+  }
 }
 
 interface AgentCeilingEngine {
@@ -179,8 +385,10 @@ interface AgentCeilingEngine {
 }
 
 /**
- * Bind both hooks on the engine — idempotently: a re-run of the plugin's
- * `start()` on the same engine replaces the binding instead of doubling it.
+ * Bind the four hooks on the engine — the grant table's and the position
+ * assignment table's, insert and update — idempotently: a re-run of the
+ * plugin's `start()` on the same engine replaces the binding instead of
+ * doubling it.
  * Returns `false`, after saying so at `warn`, when the engine exposes no hook
  * registry (a test double): the refusal is then not in force.
  */
@@ -191,7 +399,8 @@ export function registerAgentCeilingGrantRefusal(
   if (!engine || typeof engine.registerHook !== 'function') {
     logger?.warn?.(
       `[security] the ObjectQL engine exposes no hook registry — a ${GRANT_OBJECT} write naming an agent ceiling ` +
-        `permission set (${[...AGENT_CEILING_SETS].join(', ')}) is NOT refused`,
+        `permission set (${[...AGENT_CEILING_SETS].join(', ')}), and a ${POSITION_ASSIGNMENT_OBJECT} write naming a ` +
+        'position whose definition names one, are NOT refused',
     );
     return false;
   }
@@ -203,6 +412,16 @@ export function registerAgentCeilingGrantRefusal(
   });
   engine.registerHook('beforeUpdate', onUpdate, {
     object: GRANT_OBJECT,
+    priority: HOOK_PRIORITY,
+    packageId: AGENT_CEILING_GRANT_HOOK_PACKAGE,
+  });
+  engine.registerHook('beforeInsert', onPositionInsert(engine), {
+    object: POSITION_ASSIGNMENT_OBJECT,
+    priority: HOOK_PRIORITY,
+    packageId: AGENT_CEILING_GRANT_HOOK_PACKAGE,
+  });
+  engine.registerHook('beforeUpdate', onPositionUpdate(engine), {
+    object: POSITION_ASSIGNMENT_OBJECT,
     priority: HOOK_PRIORITY,
     packageId: AGENT_CEILING_GRANT_HOOK_PACKAGE,
   });

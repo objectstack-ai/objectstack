@@ -41,6 +41,7 @@ import {
   refuseAcceptedDefaultsWithoutWall,
   type DeploymentAcceptance,
 } from './suggested-audience-bindings.js';
+import { refuseAgentCeilingInBaselineOptions } from './agent-ceiling-grant-refusal.js';
 import { RLSCompiler, RLS_DENY_FILTER, policyDeclaresClause } from './rls-compiler.js';
 import {
   andComposeLayers,
@@ -1603,6 +1604,9 @@ export class SecurityPlugin implements Plugin {
     // with the platform's own, never one displacing the other (ADR-0090 D5).
     this.baselinePermissionSets = composeHumanBaselinePermissionSets(this.fallbackPermissionSet);
     this.acceptedDefaultPermissionSets = readAcceptedDefaultPermissionSetsOption(options.acceptedDefaultPermissionSets);
+    // [ADR-0090 D10] The baseline is held by every signed-in person, so an
+    // agent ceiling set is never part of it, however it was named.
+    refuseAgentCeilingInBaselineOptions(this.fallbackPermissionSet, this.acceptedDefaultPermissionSets);
   }
 
   /**
