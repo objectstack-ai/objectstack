@@ -1,5 +1,6 @@
 ---
 '@objectstack/plugin-auth': patch
+'@objectstack/client': patch
 ---
 
 fix(plugin-auth)!: an account with an enrolled second factor is signed in by no one-time code or sign-in link alone
@@ -13,5 +14,7 @@ Metadata-protocol: none
 
 - **Now.** For an account with an enrolled second factor, `POST /phone-number/verify`, `GET /magic-link/verify` and `GET /verify-email` (with `emailVerification.autoSignInAfterVerification`) answer `{ "twoFactorRedirect": true, "twoFactorMethods": [...] }` with the pending two-factor cookie and no session, as `POST /sign-in/email` does; on the link doors' `callbackURL` redirect lane no session is issued either. The session is issued by `/two-factor/verify-totp`, `/two-factor/verify-otp` or `/two-factor/verify-backup-code`, and a valid trust-device cookie skips the challenge as it does at password sign-in. A call that issues no new session is unchanged: `/phone-number/verify` with `disableSession: true` or `updatePhoneNumber: true`, and `/verify-email` for a caller already holding the session it answers with.
 - **Who moves.** A client of a code or link door that signs in an account with an enrolled second factor: it now completes the two-factor challenge (read `twoFactorRedirect`, then verify the second factor) before it holds a session. Accounts with no enrolled factor, and deployments with two-factor off, change nothing.
+
+`@objectstack/client`: the `AuthEmailVerificationResult.status` documentation now says a `/verify-email` request that would sign in an enrolled account answers the two-factor challenge instead of the receipt; no type changes.
 
 **Fails closed on vendor drift.** Building the auth instance throws when the installed two-factor plugin no longer exposes the password sign-in challenge these doors reuse, rather than starting with the doors open to a code or link alone.

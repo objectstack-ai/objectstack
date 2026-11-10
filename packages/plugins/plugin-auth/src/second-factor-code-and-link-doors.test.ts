@@ -226,8 +226,8 @@ const arrange = async (options: { twoFactor?: boolean } = {}) => {
 
 interface Door {
   path: string;
-  /** Drive the door for one of the two accounts; `cookie` rides on the door call itself. */
-  pass(rig: Rig, who: 'enrolled' | 'plain', cookie?: string): Promise<Response>;
+  /** Drive the door for one of the two accounts; `headers` ride on the door call itself. */
+  pass(rig: Rig, who: 'enrolled' | 'plain', headers?: Record<string, string>): Promise<Response>;
 }
 
 const accountOf = (who: 'enrolled' | 'plain') =>
@@ -261,28 +261,28 @@ const verifyEmailUrl = async (rig: Rig, email: string, callbackURL?: string): Pr
 
 const PHONE_CODE: Door = {
   path: '/phone-number/verify',
-  async pass(rig, who, cookie) {
+  async pass(rig, who, headers = {}) {
     const { phone } = accountOf(who);
     const code = await smsCode(rig, phone);
-    return rig.post('/phone-number/verify', { phoneNumber: phone, code }, cookie ? { cookie } : {});
+    return rig.post('/phone-number/verify', { phoneNumber: phone, code }, headers);
   },
 };
 
 const MAGIC_LINK: Door = {
   path: '/magic-link/verify',
-  async pass(rig, who, cookie) {
+  async pass(rig, who, headers = {}) {
     const url = await magicLinkUrl(rig, accountOf(who).email);
     // The JSON lane: the link without its `callbackURL`. The redirect lane has
     // its own case below.
     url.searchParams.delete('callbackURL');
-    return rig.get(url.toString(), cookie ? { cookie } : {});
+    return rig.get(url.toString(), headers);
   },
 };
 
 const VERIFY_EMAIL: Door = {
   path: '/verify-email',
-  async pass(rig, who, cookie) {
-    return rig.get(await verifyEmailUrl(rig, accountOf(who).email), cookie ? { cookie } : {});
+  async pass(rig, who, headers = {}) {
+    return rig.get(await verifyEmailUrl(rig, accountOf(who).email), headers);
   },
 };
 
@@ -384,7 +384,7 @@ describe.each(DOORS.map((door) => [door.path, door] as const))(
       expect(trustCookie, 'verify-totp set a trust-device cookie').toBeTruthy();
       const trustPair = `${cookieHeader(trusted).split('; ').find((p) => p.split('=')[0].endsWith('trust_device'))}`;
 
-      const res = await door.pass(rig, 'enrolled', trustPair);
+      const res = await door.pass(rig, 'enrolled', { cookie: trustPair });
 
       expect(res.status, await res.clone().text()).toBe(200);
       expect(((await res.clone().json()) as any).twoFactorRedirect).toBeUndefined();
@@ -393,6 +393,28 @@ describe.each(DOORS.map((door) => [door.path, door] as const))(
       expect(rotated, 'the trust-device cookie was rotated').toBeTruthy();
       expect(rotated).not.toBe(trustCookie);
     }, 60_000);
+
+    it.each(['cookie', 'bearer'] as const)(
+      'a session held for another account does not stand in for the second factor (%s)',
+      async (carrier) => {
+        const rig = await arrange();
+        // ANOTHER account's live session, signed in through the password door.
+        const foreign = await rig.post(PASSWORD_SIGN_IN_PATH, { email: PLAIN_EMAIL, password: PASSWORD });
+        expect(foreign.status, await foreign.clone().text()).toBe(200);
+        const foreignCookie = cookieHeader(foreign);
+        const foreignBearer = String(foreign.headers.get('set-auth-token'));
+        const carried = carrier === 'cookie' ? { cookie: foreignCookie } : { authorization: `Bearer ${foreignBearer}` };
+        expect(await rig.whoIs(carried), 'the carried session is live for the other account').toBe(rig.plainId);
+        const rowsBefore = rig.sessionRowsOf(rig.enrolledId);
+
+        const res = await door.pass(rig, 'enrolled', carried);
+
+        await expectChallenge(res);
+        await expectNoUsableCredential(rig, res);
+        expect(rig.sessionRowsOf(rig.enrolledId), 'no session row was left behind').toBe(rowsBefore);
+      },
+      60_000,
+    );
 
     it('CONTROL: an account with no enrolled factor is signed in as before', async () => {
       const rig = await arrange();
@@ -442,6 +464,47 @@ describe('a sign-in link asks for the second factor on its redirect lane too', (
     const res = await rig.get((await magicLinkUrl(rig, PLAIN_EMAIL, '/console/home')).toString());
     expect(res.status).toBe(302);
     expect(await rig.whoIs({ cookie: cookieHeader(res) })).toBe(rig.plainId);
+  }, 60_000);
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+describe('the address-change link on /verify-email asks an enrolled account for its second factor', () => {
+  const NEW_ADDRESS = 'moved@example.com';
+  /** The two address-change token types: the legacy one (no type) and the verification step. */
+  const TOKEN_TYPES = [
+    ['legacy', undefined],
+    ['change-email-verification', { requestType: 'change-email-verification' }],
+  ] as const;
+  const changeLink = async (extra: { requestType: string } | undefined): Promise<string> => {
+    const { createEmailVerificationToken } = await import('better-auth/api');
+    const token = await createEmailVerificationToken(SECRET, ENROLLED_EMAIL, NEW_ADDRESS, undefined, extra);
+    return `/verify-email?token=${token}`;
+  };
+  const rowById = (rig: Rig, id: string) =>
+    ((rig.engine.tables.get('sys_user') ?? []) as any[]).find((r) => String(r.id) === id);
+
+  it.each(TOKEN_TYPES)('%s token, no session: an enrolled account gets the challenge and no usable credential', async (_type, extra) => {
+    const rig = await arrange();
+    const rowsBefore = rig.sessionRowsOf(rig.enrolledId);
+
+    const res = await rig.get(await changeLink(extra));
+
+    await expectChallenge(res);
+    await expectNoUsableCredential(rig, res);
+    expect(rig.sessionRowsOf(rig.enrolledId), 'no session row was left behind').toBe(rowsBefore);
+  }, 60_000);
+
+  it.each(TOKEN_TYPES)('%s token, signed in as the same account: not challenged, the session is kept and the address changes', async (_type, extra) => {
+    const rig = await arrange();
+    const rowsBefore = rig.sessionRowsOf(rig.enrolledId);
+
+    const res = await rig.get(await changeLink(extra), { cookie: rig.enrolledCookie });
+
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(((await res.clone().json()) as any).twoFactorRedirect).toBeUndefined();
+    expect(await rig.whoIs({ cookie: rig.enrolledCookie }), 'the caller keeps the session it held').toBe(rig.enrolledId);
+    expect(rig.sessionRowsOf(rig.enrolledId)).toBe(rowsBefore);
+    expect(rowById(rig, rig.enrolledId)?.email).toBe(NEW_ADDRESS);
   }, 60_000);
 });
 
@@ -574,6 +637,14 @@ describe('the door matcher', () => {
     for (const path of SECOND_FACTOR_CODE_AND_LINK_DOOR_PATHS) {
       expect(isCodeOrLinkDoorSignIn({ path, context: { newSession: null, session: null } })).toBe(false);
       expect(isCodeOrLinkDoorSignIn({ path, context: { newSession: issued, session: issued } })).toBe(false);
+    }
+  });
+  it('fails closed: an issued session whose token cannot be read still counts as a sign-in', () => {
+    for (const path of SECOND_FACTOR_CODE_AND_LINK_DOOR_PATHS) {
+      for (const unreadable of [{}, { session: {} }, { session: { token: '' } }, { session: { token: 42 } }]) {
+        expect(isCodeOrLinkDoorSignIn({ path, context: { newSession: unreadable, session: null } })).toBe(true);
+        expect(isCodeOrLinkDoorSignIn({ path, context: { newSession: unreadable, session: issued } })).toBe(true);
+      }
     }
   });
   it('does not ask on any other path', () => {

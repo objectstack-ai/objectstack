@@ -75,12 +75,18 @@ function sessionTokenOf(value: unknown): string | undefined {
  * Read after the endpoint has answered (after-hooks run then): the session it
  * issued is `context.newSession`, and the session the caller arrived holding,
  * if the endpoint read one, is `context.session`. Answering with the session
- * the caller already holds signs nobody in.
+ * the caller already holds signs nobody in; a session held for another
+ * account never stands in for the second factor, and an issued session whose
+ * token cannot be read counts as a sign-in (fail closed).
  */
 export function isCodeOrLinkDoorSignIn(hookContext: any): boolean {
   if (!SECOND_FACTOR_CODE_AND_LINK_DOOR_PATHS.includes(hookContext?.path)) return false;
-  const issued = sessionTokenOf(hookContext?.context?.newSession);
-  if (!issued) return false;
+  const newSession = hookContext?.context?.newSession;
+  if (!newSession) return false;
+  const issued = sessionTokenOf(newSession);
+  // Fail closed: an issued session whose token cannot be read is still a
+  // sign-in, so the challenge applies.
+  if (!issued) return true;
   return sessionTokenOf(hookContext?.context?.session) !== issued;
 }
 
