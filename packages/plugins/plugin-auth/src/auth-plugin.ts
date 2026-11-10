@@ -5332,6 +5332,26 @@ export class AuthPlugin implements Plugin {
     });
 
     // ────────────────────────────────────────────────────────────────────
+    // The OAuth consent page's account of the request it asks a person to
+    // approve: the redirect the provider validated and signed, read only after
+    // the provider's own signature check, and whether any account registered
+    // the client. Session-required. See oauth-consent-request.ts.
+    rawApp.post(`${basePath}/oauth-consent/request`, async (c: any) => {
+      try {
+        const { oauthConsentRequestDepsFor, runOAuthConsentRequestRead } = await import('./oauth-consent-request.js');
+        const answer = await runOAuthConsentRequestRead(oauthConsentRequestDepsFor(this.authManager!), {
+          raw: c.req.raw,
+          queries: (c.req.queries() ?? {}) as Record<string, string[]>,
+        });
+        return c.json(answer.body, answer.status as any, answer.headers);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] oauth-consent/request failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'The authorization request could not be read.' } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
     // Self-service resend of the email-verification link. SHADOWS better-auth's
     // native `/send-verification-email` (registered before the catch-all below).
     //
