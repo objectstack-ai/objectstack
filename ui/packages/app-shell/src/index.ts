@@ -327,6 +327,9 @@ export {
   type ConnectedEntry,
 } from './console/connect/connectedAccess.js';
 export { connectAssistantPath } from './console/connect/connectAssistantPath.js';
+// The frame the lazy `developer` i18n namespace's readers render under
+// (#32225): the console's Developer pages wrap their bodies in it.
+export { DeveloperNamespaceGate } from './console/connect/DeveloperNamespaceGate.js';
 export { OrganizationsLayout as DefaultOrganizationsLayout } from './console/organizations/OrganizationsLayout.js';
 export { OrganizationsPage as DefaultOrganizationsPage } from './console/organizations/OrganizationsPage.js';
 

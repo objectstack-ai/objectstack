@@ -21,11 +21,13 @@
  *
  * Some of a language's strings are not in its pack: the `marketplace.*` group
  * is a lazy namespace (`../namespaces/marketplace/`), fetched when a
- * marketplace page mounts so the console's eager `en` pack does not carry it.
+ * marketplace page mounts, and `console.developer.*` / `connectAgent.*` are
+ * another (`../namespaces/developer/`), so the console's eager `en` pack does
+ * not carry them.
  * This door's two purposes both want every string, so each language it hands
  * out is its pack deep-merged with its catalogue from every such namespace:
  * the parity / drift suites keep walking the moved keys, and an app that makes
- * every catalogue resident gets the marketplace text resident too. A key in
+ * every catalogue resident gets the namespaces' text resident too. A key in
  * both places is refused at module evaluation — the gates refuse it as well.
  *
  * ⚠️ So `en` here is not the same object as the package entry's `en`, which is
@@ -54,6 +56,17 @@ import esMarketplace from '../namespaces/marketplace/es.js';
 import ptBrMarketplace from '../namespaces/marketplace/pt-BR.js';
 import ruMarketplace from '../namespaces/marketplace/ru.js';
 import arMarketplace from '../namespaces/marketplace/ar.js';
+import enDeveloper from '../namespaces/developer/en.js';
+import zhHansDeveloper from '../namespaces/developer/zh-Hans.js';
+import zhHantDeveloper from '../namespaces/developer/zh-Hant.js';
+import jaDeveloper from '../namespaces/developer/ja.js';
+import koDeveloper from '../namespaces/developer/ko.js';
+import deDeveloper from '../namespaces/developer/de.js';
+import frDeveloper from '../namespaces/developer/fr.js';
+import esDeveloper from '../namespaces/developer/es.js';
+import ptBrDeveloper from '../namespaces/developer/pt-BR.js';
+import ruDeveloper from '../namespaces/developer/ru.js';
+import arDeveloper from '../namespaces/developer/ar.js';
 import type { PlatformLocaleTag } from '@objectstack/spec/system';
 
 export type { TranslationKeys } from './en.js';
@@ -62,12 +75,12 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /**
- * `pack` deep-merged with a namespace's partial pack. Groups both sides hold
- * (`marketplace`, `marketplace.install`) merge; a LEAF both sides hold is a
- * key defined twice, which no reader could resolve the same way twice, and
- * throws.
+ * `pack` deep-merged with each namespace's partial pack. Groups both sides
+ * hold (`marketplace`, `marketplace.install`, `console`) merge; a LEAF both
+ * sides hold is a key defined twice, which no reader could resolve the same
+ * way twice, and throws.
  */
-function complete<P extends object, N extends object>(pack: P, partial: N, label: string): P & N {
+function complete<P extends object, N extends object>(pack: P, partials: readonly object[], label: string): P & N {
   const merge = (into: Record<string, unknown>, from: Record<string, unknown>, at: string) => {
     const out: Record<string, unknown> = { ...into };
     for (const key of Object.keys(from)) {
@@ -83,7 +96,9 @@ function complete<P extends object, N extends object>(pack: P, partial: N, label
     }
     return out;
   };
-  return merge(pack as Record<string, unknown>, partial as Record<string, unknown>, '') as P & N;
+  let out = pack as Record<string, unknown>;
+  for (const partial of partials) out = merge(out, partial as Record<string, unknown>, '');
+  return out as P & N;
 }
 
 // Export names are JavaScript identifiers, not pack keys: `zh` is the zh-Hans
@@ -93,17 +108,61 @@ function complete<P extends object, N extends object>(pack: P, partial: N, label
 // Annotated rather than inferred: the inferred type spells the packs' literal
 // types out inline in the emitted declaration, which outgrew what tsc will
 // serialize (TS7056). Each `typeof` is emitted as a reference.
-export const en: typeof enPack & typeof enMarketplace = complete(enPack, enMarketplace, 'en');
-export const zh: typeof zhHansPack & typeof zhHansMarketplace = complete(zhHansPack, zhHansMarketplace, 'zh-Hans');
-export const zhHant: typeof zhHantPack & typeof zhHantMarketplace = complete(zhHantPack, zhHantMarketplace, 'zh-Hant');
-export const ja: typeof jaPack & typeof jaMarketplace = complete(jaPack, jaMarketplace, 'ja');
-export const ko: typeof koPack & typeof koMarketplace = complete(koPack, koMarketplace, 'ko');
-export const de: typeof dePack & typeof deMarketplace = complete(dePack, deMarketplace, 'de');
-export const fr: typeof frPack & typeof frMarketplace = complete(frPack, frMarketplace, 'fr');
-export const es: typeof esPack & typeof esMarketplace = complete(esPack, esMarketplace, 'es');
-export const pt: typeof ptBrPack & typeof ptBrMarketplace = complete(ptBrPack, ptBrMarketplace, 'pt-BR');
-export const ru: typeof ruPack & typeof ruMarketplace = complete(ruPack, ruMarketplace, 'ru');
-export const ar: typeof arPack & typeof arMarketplace = complete(arPack, arMarketplace, 'ar');
+export const en: typeof enPack & typeof enMarketplace & typeof enDeveloper = complete(
+  enPack,
+  [enMarketplace, enDeveloper],
+  'en',
+);
+export const zh: typeof zhHansPack & typeof zhHansMarketplace & typeof zhHansDeveloper = complete(
+  zhHansPack,
+  [zhHansMarketplace, zhHansDeveloper],
+  'zh-Hans',
+);
+export const zhHant: typeof zhHantPack & typeof zhHantMarketplace & typeof zhHantDeveloper = complete(
+  zhHantPack,
+  [zhHantMarketplace, zhHantDeveloper],
+  'zh-Hant',
+);
+export const ja: typeof jaPack & typeof jaMarketplace & typeof jaDeveloper = complete(
+  jaPack,
+  [jaMarketplace, jaDeveloper],
+  'ja',
+);
+export const ko: typeof koPack & typeof koMarketplace & typeof koDeveloper = complete(
+  koPack,
+  [koMarketplace, koDeveloper],
+  'ko',
+);
+export const de: typeof dePack & typeof deMarketplace & typeof deDeveloper = complete(
+  dePack,
+  [deMarketplace, deDeveloper],
+  'de',
+);
+export const fr: typeof frPack & typeof frMarketplace & typeof frDeveloper = complete(
+  frPack,
+  [frMarketplace, frDeveloper],
+  'fr',
+);
+export const es: typeof esPack & typeof esMarketplace & typeof esDeveloper = complete(
+  esPack,
+  [esMarketplace, esDeveloper],
+  'es',
+);
+export const pt: typeof ptBrPack & typeof ptBrMarketplace & typeof ptBrDeveloper = complete(
+  ptBrPack,
+  [ptBrMarketplace, ptBrDeveloper],
+  'pt-BR',
+);
+export const ru: typeof ruPack & typeof ruMarketplace & typeof ruDeveloper = complete(
+  ruPack,
+  [ruMarketplace, ruDeveloper],
+  'ru',
+);
+export const ar: typeof arPack & typeof arMarketplace & typeof arDeveloper = complete(
+  arPack,
+  [arMarketplace, arDeveloper],
+  'ar',
+);
 
 /**
  * Map of all built-in locales, keyed by platform locale table tag
