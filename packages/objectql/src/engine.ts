@@ -4536,6 +4536,10 @@ export class ObjectQL implements IObjectQLEngine {
       getSummaryDescriptors: (...a) => this.getSummaryDescriptors(...a),
       assertReferencesResolve: (...a) => this.assertReferencesResolve(...a),
       previewHomeAmounts: (...a) => this.previewHomeAmounts(...a),
+      homeAmountServing: (...a) => this.homeAmountServing(...a),
+      find: (...a) => this.find(...a),
+      getDriver: (...a) => this.getDriver(...a),
+      buildDriverOptions: (...a) => this.buildDriverOptions(...a),
     };
     return validate.call(host, object, data, options);
   }

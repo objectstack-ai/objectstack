@@ -162,6 +162,23 @@ export class ReferencesAndMasterDetailFacet {
           effectiveDate: effective instanceof Date ? effective.toISOString().slice(0, 10) : (typeof effective === 'string' ? effective : undefined),
         };
       },
+      // [ADR-0144 D2, amended] The parents a child amount follows the code of,
+      // one read per batch: the write's own elevated, organization-kept read
+      // (`referenceCheckContext`, the reference check's authority), so a
+      // writer reads its parent's code whatever its field-level read of the
+      // parent, and never a parent of another organization. A row this read
+      // does not return is left out: the write's reference check answers for
+      // it. A failed read fails the write; no currency is ever assumed.
+      parentRows: async (master, ids, fields) => {
+        const rows = await this.find(master, {
+          where: { id: { $in: [...ids] } },
+          fields: ['id', ...fields],
+          context: ObjectQL.referenceCheckContext(context),
+        }) as Array<Record<string, unknown>>;
+        const byId = new Map<string, Record<string, unknown>>();
+        for (const row of Array.isArray(rows) ? rows : []) if (row?.id != null) byId.set(String(row.id), row);
+        return byId;
+      },
     });
   }
 

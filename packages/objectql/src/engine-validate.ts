@@ -50,7 +50,8 @@ import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 import { validateRecordInScope, normalizeBlankTypedValues, normalizeNumericStringValues, ValidationError, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import { evaluateValidationRules, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
 import { createBatchSummaryAccumulator } from './summary-batch-accumulation.js';
-import { assertRecordCurrencyCodes, RecordCurrencyCodeRequiredError } from './validation/record-currency-code.js';
+import { assertRecordCurrencyCodes, followParentCurrencyCodes, recordCurrencyPairs, RecordCurrencyCodeRequiredError, touchesRecordCurrency } from './validation/record-currency-code.js';
+import { assertFollowedCurrencyCodesUnchanged, parentCurrencyLockReads, touchesFollowedCurrencyCode } from './record-currency-parent-lock.js';
 import { isHomeAmountRefusal } from './home-amount-projection.js';
 import { referencesCheckedBeforeRules } from './engine-referential-integrity.js';
 import { resolveEngineUpdateDispatch, type EngineUpdateDispatchData } from './engine-update-dispatch.js';
@@ -64,6 +65,7 @@ import {
   updateStaticReadonlySubject,
 } from './engine.js';
 import type { ObjectQL, WriteWallRowVerdict } from './engine.js';
+import { ObjectQLStatics } from './engine.js';
 
 /**
  * The `ObjectQL` members the functions below read — every one of them, and no
@@ -96,11 +98,15 @@ export interface ValidateHost {
   getSummaryDescriptors: ObjectQL['getSummaryDescriptors'];
   assertReferencesResolve: ObjectQL['assertReferencesResolve'];
   previewHomeAmounts: ObjectQL['previewHomeAmounts'];
+  homeAmountServing: ObjectQL['homeAmountServing'];
+  find: ObjectQL['find'];
+  getDriver: ObjectQL['getDriver'];
+  buildDriverOptions: ObjectQL['buildDriverOptions'];
 }
 
 /** The body of `ObjectQL#validate`; the method's docblock there is its contract. */
 export async function validate(
-  this: Pick<ValidateHost, 'resolveObjectName' | '_registry' | 'permissionResolution' | 'resolveDefaultPermissions' | 'initializeSummaryFields' | 'applyFieldDefaults' | '_writeWallVerdict' | 'staticReadonlyCreateStrip' | 'logger' | 'mediaValueShapeStrictFor' | 'valueShapeStrictFor' | 'validationMessageContext' | 'buildEvalUser' | 'findOne' | 'readUpdatePriorRow' | 'resolvePreviewParents' | '_writeGateProbe' | 'resolvePredicateRelated' | 'resolveOptionPermissions' | 'getSummaryDescriptors' | 'assertReferencesResolve' | 'previewHomeAmounts'>,
+  this: Pick<ValidateHost, 'resolveObjectName' | '_registry' | 'permissionResolution' | 'resolveDefaultPermissions' | 'initializeSummaryFields' | 'applyFieldDefaults' | '_writeWallVerdict' | 'staticReadonlyCreateStrip' | 'logger' | 'mediaValueShapeStrictFor' | 'valueShapeStrictFor' | 'validationMessageContext' | 'buildEvalUser' | 'findOne' | 'readUpdatePriorRow' | 'resolvePreviewParents' | '_writeGateProbe' | 'resolvePredicateRelated' | 'resolveOptionPermissions' | 'getSummaryDescriptors' | 'assertReferencesResolve' | 'previewHomeAmounts' | 'homeAmountServing' | 'find' | 'getDriver' | 'buildDriverOptions'>,
   object: string,
   data: Record<string, unknown> | Record<string, unknown>[],
   options?: {
@@ -564,10 +570,32 @@ export async function validate(
       // from this caller is absent from the stored row, so the preview reads
       // it as blank — stricter than the write, never laxer.
       if (mode === 'insert' || storedRows[i]) {
+        // [ADR-0144 D2, amended] A child amount's code is its parent's, read
+        // as the write reads it and laid on a copy of the image.
+        const currencyFields = (schemaForValidation as { fields?: unknown } | undefined)?.fields;
+        const currencyImage = mode === 'insert' ? row : judgedViews[i];
+        const followCodes = currencyImage && (mode === 'insert' || touchesRecordCurrency(currencyFields, row))
+          ? await followParentCurrencyCodes(recordCurrencyPairs(currencyFields), [currencyImage], this.homeAmountServing(options?.context).parentRows)
+          : undefined;
         assertRecordCurrencyCodes(
-          object, (schemaForValidation as { fields?: unknown } | undefined)?.fields,
-          mode === 'insert' ? row : judgedViews[i], mode, mode === 'insert' ? undefined : row, storedIds[i],
+          object, currencyFields,
+          followCodes && currencyImage ? followCodes(currencyImage) : currencyImage, mode, mode === 'insert' ? undefined : row, storedIds[i],
         );
+        // [ADR-0144 D2, amended] …and the write's parent-code lock, on the
+        // stored row the by-id update writes: a record a child row follows
+        // keeps its code field.
+        if (mode === 'update' && touchesFollowedCurrencyCode(this._registry as never, object, row)) {
+          await assertFollowedCurrencyCodesUnchanged(
+            this._registry as never,
+            parentCurrencyLockReads({
+              _registry: this._registry,
+              find: (o, q) => this.find(o, q as never),
+              getDriver: (o) => this.getDriver(o),
+              buildDriverOptions: (o, c) => this.buildDriverOptions(o, c),
+            }, ObjectQLStatics.referenceCheckContext(options?.context)),
+            object, row, [storedRows[i]],
+          );
+        }
         // [ADR-0144 D5] The write's home projection, on the same image and
         // under the same condition: a row the write refuses for no home
         // currency or no rate on its document date (or a blank document date)

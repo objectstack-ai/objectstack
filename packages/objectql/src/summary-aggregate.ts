@@ -24,6 +24,8 @@
  * nothing.
  */
 
+import { ROLLUP_AGGREGATE_OPTION } from './record-currency-aggregate-door.js';
+
 /** A roll-up `summary` field on a parent object that aggregates a child. */
 export interface SummaryDescriptor {
   parentObject: string;
@@ -120,7 +122,10 @@ export async function aggregateSummaryValue(
       alias: 'value',
     }],
     context: execCtx,
-  });
+  // [ADR-0144 D6, amended] The rows are one parent's, through `fkField`: a
+  // child amount that follows that parent's currency through it is one
+  // currency, which the record-currency door admits on this channel alone.
+  }, { [ROLLUP_AGGREGATE_OPTION]: desc.fkField });
   const value = rows?.[0]?.value;
   return value == null ? summaryEmptySetValue(desc.fn) : value;
 }
