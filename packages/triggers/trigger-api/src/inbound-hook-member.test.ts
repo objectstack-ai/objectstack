@@ -131,12 +131,12 @@ class FixturePlugin implements Plugin {
 
 /** The real plugin, with what it logs during boot observed. */
 class ObservedApiTriggerPlugin extends ApiTriggerPlugin {
-    readonly logs: Array<{ level: string; message: string }> = [];
+    readonly logs: Array<{ level: string; message: string; fields?: unknown }> = [];
 
     override async init(ctx: PluginContext): Promise<void> {
         for (const level of ['debug', 'info', 'warn', 'error'] as const) {
-            vi.spyOn(ctx.logger, level).mockImplementation((message: unknown) => {
-                this.logs.push({ level, message: String(message) });
+            vi.spyOn(ctx.logger, level).mockImplementation((message: unknown, fields?: unknown) => {
+                this.logs.push({ level, message: String(message), ...(fields !== undefined ? { fields } : {}) });
             });
         }
         await super.init(ctx);
@@ -665,6 +665,9 @@ describe('[ADR-0150 D5] the qualified hook on http.server', () => {
             expect(answer, label).toEqual(viaMember);
             expect(fixture.published, label).toEqual([]);
             expect(causesLogged(plugin), label).toEqual(['unadmitted-address']);
+            // The one record of the cause carries the qualifier that caused it, as the hosted face's does.
+            expect(plugin.logs.filter((l) => l.message.includes('(unadmitted-address)')).map((l) => l.fields), label)
+                .toEqual([{ cause: 'unadmitted-address', flowName: FLOW, qualifier }]);
             const text = new TextDecoder().decode(answer.body);
             for (const word of ['unadmitted', qualifier, FLOW, HOOK_ID, 'namespace', 'package']) {
                 expect(text.includes(word), `${label}: the answer names ${word}`).toBe(false);
@@ -684,5 +687,33 @@ describe('[ADR-0150 D5] the qualified hook on http.server', () => {
         }
         expect(fixture.flowOwnerReads).not.toHaveBeenCalled();
         expect(fixture.published).toEqual([]);
+    });
+    // [ADR-0150 D5, contract review S1] Equal in when it is sent too: the
+    // refusal waits for the whole body, as the bare mount reads every post's
+    // body before it answers.
+    it('⭐ a body that has not arrived gets no answer, on an admitted address and on an unadmitted one alike; once it arrives, each gets its own', async () => {
+        for (const [label, qualifier, status] of [['admitted', 'crm', 202], ['unadmitted', 'nowhere', 401], ['unadmitted `_env`', '_env', 401]] as const) {
+            const { fixture } = await boot({ server: 'canonical', flowOwner: () => PACKAGE, namespaces: { crm: [PACKAGE] } });
+            let ctl!: ReadableStreamDefaultController<Uint8Array>;
+            const stream = new ReadableStream<Uint8Array>({ start(c) { ctl = c; } });
+            ctl.enqueue(new TextEncoder().encode(BODY.slice(0, 10)));
+            const request = new Request(`${ORIGIN}/api/v1/automation/hooks/${qualifier}/${FLOW}/${HOOK_ID}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...sig(BODY) },
+                body: stream,
+                duplex: 'half',
+            } as RequestInit);
+            let settled = false;
+            const answer = Promise.resolve(fixture.canonicalApp.fetch(request));
+            answer.then(() => { settled = true; }, () => { settled = true; });
+            // Real time, not the faked Date: let the handler run as far as it will.
+            for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
+            expect(settled, `${label}: answered before its body arrived`).toBe(false);
+            ctl.enqueue(new TextEncoder().encode(BODY.slice(10)));
+            ctl.close();
+            const res = await answer;
+            expect(res.status, label).toBe(status);
+            expect(fixture.published.length, label).toBe(status === 202 ? 1 : 0);
+        }
     });
 });

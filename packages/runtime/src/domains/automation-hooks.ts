@@ -176,28 +176,6 @@ export async function handleInboundHookRequest(
     const request = context.request as Request;
     const logger = deps.logger ?? console;
 
-    // [ADR-0150 D5, child G1] THE QUALIFIED HOOK. Served only when its
-    // qualifier names the package that ships the flow (core's
-    // `admitInboundHookAddress`, over the request kernel's engine and namespace
-    // table), decided before the body or the signature is read. An address that
-    // does not is answered with the door's one refusal, rendered by core as the
-    // trigger renders its own: the same status, header and body as a bad
-    // signature on the same hook, so the answer tells no installed namespace
-    // from another. The cause goes to the server log only.
-    if (hook.qualifier !== undefined) {
-        const flowName = decodeHookSegment(hook.flowName);
-        const qualifier = decodeHookSegment(hook.qualifier);
-        if (!(await isInboundHookAddressAdmitted(deps, context, qualifier, flowName))) {
-            logger?.warn?.(
-                '[automation-hooks] refused an inbound post (unadmitted-address): its qualifier (a namespace, or '
-                + '`_env`) does not name the package that ships the flow it names (ADR-0150 D5). The sender got the '
-                + 'one answer every unverified post gets; this line is the only record of the cause.',
-                { cause: 'unadmitted-address', flowName, qualifier },
-            );
-            return { handled: true, result: inboundHookRefusalResponse() };
-        }
-    }
-
     // The member verifies its signature over the raw body. A body the
     // transport already read cannot be read again, so the member would refuse
     // a correctly signed post as unsigned — a transport fault shown to the
@@ -211,6 +189,39 @@ export async function handleInboundHookRequest(
         return { handled: true, response: deps.error(INTERNAL_ERROR_MESSAGE, 500) };
     }
 
+    // [ADR-0150 D5, child G1] THE QUALIFIED HOOK. Served only when its
+    // qualifier names the package that ships the flow (core's
+    // `admitInboundHookAddress`, over the request kernel's engine and namespace
+    // table), judged before the signature is read. An address that does not is
+    // answered with the door's one refusal, rendered by core as the trigger
+    // renders its own: the same status, header and body as a bad signature on
+    // the same hook. It is answered only once its body has been read in full,
+    // as the member reads every post's body before it answers (an unknown flow
+    // included), so an admitted and an unadmitted address cost the sender the
+    // same: a body that never arrives gets no answer on either, and a body the
+    // transport cannot deliver is the member's own sanitised 500 on both (the
+    // consumed-body 500 above is asked first for the same reason). So neither
+    // the answer nor its timing tells an installed namespace from another. The
+    // cause goes to the server log only.
+    if (hook.qualifier !== undefined) {
+        const flowName = decodeHookSegment(hook.flowName);
+        const qualifier = decodeHookSegment(hook.qualifier);
+        if (!(await isInboundHookAddressAdmitted(deps, context, qualifier, flowName))) {
+            try {
+                await request.text();
+            } catch (err) {
+                return memberFaultAnswer(deps, logger, err);
+            }
+            logger?.warn?.(
+                '[automation-hooks] refused an inbound post (unadmitted-address): its qualifier (a namespace, or '
+                + '`_env`) does not name the package that ships the flow it names (ADR-0150 D5). The sender got the '
+                + 'one answer every unverified post gets; this line is the only record of the cause.',
+                { cause: 'unadmitted-address', flowName, qualifier },
+            );
+            return { handled: true, result: inboundHookRefusalResponse() };
+        }
+    }
+
     const params = Object.freeze({
         flowName: decodeHookSegment(hook.flowName),
         hookId: decodeHookSegment(hook.hookId),
@@ -222,12 +233,25 @@ export async function handleInboundHookRequest(
         // reads and every answer it means to give, so a throw out of it is
         // unattributable here and its message never reaches the sender. The
         // original error goes to the server log.
-        logger?.error?.(
-            '[automation-hooks] the trigger-api service threw while serving an inbound hook; the sender was '
-            + 'answered with a sanitised 500: the message is withheld unconditionally, and this line is where '
-            + 'the original error is read',
-            err instanceof Error ? err : new Error(String(err)),
-        );
-        return { handled: true, response: deps.error(INTERNAL_ERROR_MESSAGE, 500) };
+        return memberFaultAnswer(deps, logger, err);
     }
+}
+
+/**
+ * The sanitised 500 for a throw while serving an inbound hook: the member's
+ * own, or [ADR-0150 D5] the body read of an unadmitted qualified address,
+ * which answers what the member's read of the same body would have.
+ */
+function memberFaultAnswer(
+    deps: DomainHandlerDeps,
+    logger: { error?: (...args: unknown[]) => void } | undefined,
+    err: unknown,
+): HttpDispatcherResult {
+    logger?.error?.(
+        '[automation-hooks] the trigger-api service threw while serving an inbound hook; the sender was '
+        + 'answered with a sanitised 500: the message is withheld unconditionally, and this line is where '
+        + 'the original error is read',
+        err instanceof Error ? err : new Error(String(err)),
+    );
+    return { handled: true, response: deps.error(INTERNAL_ERROR_MESSAGE, 500) };
 }

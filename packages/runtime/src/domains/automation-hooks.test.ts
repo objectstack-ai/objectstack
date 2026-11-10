@@ -749,4 +749,89 @@ describe('[ADR-0150 D5] the qualified inbound hook on a kernel with no http.serv
             expect((services.automation as any).packagedFlowOwner, method).not.toHaveBeenCalled();
         }
     });
+    // [ADR-0150 D5, contract review S1] The refusal is equal in bytes AND in
+    // when it is sent: an unadmitted address is answered only once its body
+    // has been read in full, as the member reads every post's body before it
+    // answers. Without that, a sender that declares a body and withholds it
+    // would see an unadmitted address answered at once and an admitted one
+    // wait — an install fingerprint with no signature.
+    /** A request body the test feeds by hand. */
+    function trickle() {
+        let ctl!: ReadableStreamDefaultController<Uint8Array>;
+        const stream = new ReadableStream<Uint8Array>({ start(c) { ctl = c; } });
+        return {
+            stream,
+            push: (text: string) => ctl.enqueue(new TextEncoder().encode(text)),
+            close: () => ctl.close(),
+            fail: (err: Error) => ctl.error(err),
+        };
+    }
+    const streamed = (path: string, stream: ReadableStream<Uint8Array>) => new Request(`${ORIGIN}/api/v1${path}`, {
+        method: 'POST',
+        headers: { ...JSON_HEADERS, 'x-objectstack-signature': sign(BODY, SECRET) },
+        body: stream,
+        duplex: 'half',
+    } as RequestInit);
+    /** Has `promise` settled after `ms` of wall time? */
+    async function settledWithin(promise: Promise<unknown>, ms: number): Promise<boolean> {
+        let settled = false;
+        promise.then(() => { settled = true; }, () => { settled = true; });
+        await new Promise((resolve) => setTimeout(resolve, ms));
+        return settled;
+    }
+
+    it('⭐ a body that has not arrived gets no answer, on an admitted address and on an unadmitted one alike; once it arrives, each gets its own', async () => {
+        const cases = [
+            ['admitted', `/automation/hooks/crm/${FLOW}/${HOOK}`, 202],
+            ['unadmitted (a namespace nothing is installed under)', `/automation/hooks/nowhere/${FLOW}/${HOOK}`, 401],
+            ['unadmitted (`_env` for a packaged flow)', `/automation/hooks/_env/${FLOW}/${HOOK}`, 401],
+        ] as const;
+        for (const [label, path, status] of cases) {
+            const member = verifierMember();
+            const { dispatcher } = makeDispatcher(addressedHost(member, { flowOwner: () => PACKAGE, namespaces: { crm: [PACKAGE] } }));
+            const body = trickle();
+            body.push(BODY.slice(0, 10));
+            const answer = dispatcher.dispatch('POST', path, {}, {}, ctx(streamed(path, body.stream)));
+            expect(await settledWithin(answer, 60), `${label}: answered before its body arrived`).toBe(false);
+            body.push(BODY.slice(10));
+            body.close();
+            const result = await answer;
+            expect((result.result as Response | undefined)?.status, `${label} ${JSON.stringify(result.response?.body)}`).toBe(status);
+            expect(member.handleInboundHook, label).toHaveBeenCalledTimes(status === 202 ? 1 : 0);
+        }
+    });
+
+    it('⭐ a transport fault answers an unadmitted address as it answers an admitted one: a consumed body the same 500, a body that fails mid-read the same sanitised 500', async () => {
+        for (const path of [`/automation/hooks/crm/${FLOW}/${HOOK}`, `/automation/hooks/nowhere/${FLOW}/${HOOK}`]) {
+            // Consumed before the route got it: the 500 is asked before the address.
+            {
+                const member = verifierMember();
+                const { dispatcher, logger } = makeDispatcher(addressedHost(member, { flowOwner: () => PACKAGE, namespaces: { crm: [PACKAGE] } }));
+                const request = post(path);
+                await request.text();
+                const result = await dispatcher.dispatch('POST', path, {}, {}, ctx(request));
+                expect(envelope(result), path).toEqual({ status: 500, code: 'INTERNAL_ERROR' });
+                expect(member.handleInboundHook, path).not.toHaveBeenCalled();
+                expect(logger.warn.mock.calls.filter((c) => String(c[0]).includes('unadmitted-address')), path).toEqual([]);
+                // The same fault, named as the transport's, on both: asked before the address is judged.
+                expect(logger.error.mock.calls.filter((c) => String(c[0]).includes('consumed before')), path).toHaveLength(1);
+            }
+            // The body fails mid-read: the member's read throws on the admitted
+            // address, the route's own read on the unadmitted one; both are the
+            // member-fault 500, with the message withheld.
+            {
+                const member = verifierMember();
+                const { dispatcher, logger } = makeDispatcher(addressedHost(member, { flowOwner: () => PACKAGE, namespaces: { crm: [PACKAGE] } }));
+                const body = trickle();
+                body.push(BODY.slice(0, 10));
+                const answer = dispatcher.dispatch('POST', path, {}, {}, ctx(streamed(path, body.stream)));
+                await new Promise((resolve) => setTimeout(resolve, 10));
+                body.fail(new Error('connection reset by peer'));
+                const result = await answer;
+                expect(envelope(result), path).toEqual({ status: 500, code: 'INTERNAL_ERROR' });
+                expect(JSON.stringify(result.response?.body), path).not.toContain('connection reset');
+                expect(logger.warn.mock.calls.filter((c) => String(c[0]).includes('unadmitted-address')), path).toEqual([]);
+            }
+        }
+    });
 });

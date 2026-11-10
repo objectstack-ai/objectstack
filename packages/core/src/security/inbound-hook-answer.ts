@@ -82,8 +82,10 @@ export interface InboundHookAddress {
 /**
  * Does the qualified address name the hook's flow? `_env`: a flow no package
  * ships. A namespace: a flow one of the namespace's packages ships. Anything
- * else is refused with {@link inboundHookRefusal}, before the body or the
- * signature is read.
+ * else is refused with {@link inboundHookRefusal}: judged before the
+ * signature is read, and answered only once the body has been read in full, as
+ * the door reads every post's body before it answers, so the refusal's timing
+ * tells no installed namespace from another.
  */
 export function admitInboundHookAddress(address: InboundHookAddress): boolean {
   if (address.qualifier === ENVIRONMENT_ADDRESS_SEGMENT) return address.flowOwner === undefined;

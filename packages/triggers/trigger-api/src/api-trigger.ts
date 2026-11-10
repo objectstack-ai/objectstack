@@ -525,11 +525,13 @@ export class ApiTrigger implements FlowTrigger {
 
     /**
      * [ADR-0150 D5] The qualified hook whose qualifier does not name the
-     * package shipping its flow: the one refusal, its cause logged here only.
-     * Decided by the mount before the body or the signature is read.
+     * package shipping its flow: the one refusal, its cause logged here only,
+     * with the qualifier beside the flow name (as the hosted face logs it).
+     * Judged by the mount before the signature is read, and answered once the
+     * body has been read in full.
      */
-    refuseUnadmittedAddress(flowName: string): { status: number; body: Record<string, unknown> } {
-        return this.refuseUnverified('unadmitted-address', flowName);
+    refuseUnadmittedAddress(flowName: string, qualifier: string): { status: number; body: Record<string, unknown> } {
+        return this.refuseUnverified('unadmitted-address', flowName, { qualifier });
     }
 
     /**
@@ -538,11 +540,15 @@ export class ApiTrigger implements FlowTrigger {
      * the cause and the flow name the post carried, as structured fields, and
      * ⛔ never the secret, the signature value or the body.
      */
-    private refuseUnverified(cause: UnverifiedPostCause, flowName: string): { status: number; body: Record<string, unknown> } {
+    private refuseUnverified(
+        cause: UnverifiedPostCause,
+        flowName: string,
+        extra?: { readonly qualifier: string },
+    ): { status: number; body: Record<string, unknown> } {
         this.logger.warn(
             `[trigger-api] refused an inbound post (${cause}): ${UNVERIFIED_POST_CAUSE_TEXT[cause]}. ` +
                 `The sender got the one answer every unverified post gets; this line is the only record of the cause.`,
-            { cause, flowName },
+            { cause, flowName, ...extra },
         );
         return unverifiedPostAnswer();
     }

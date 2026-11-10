@@ -133,9 +133,10 @@ export const TRIGGER_API_ROUTE_LEDGER: readonly TriggerApiRouteLedgerEntry[] = [
         note:
             '[ADR-0150 D5] The same door named by its flow\'s namespace, or `_env`: served as the row above once core\'s '
             + '`admitInboundHookAddress` admits the qualifier (it names the package that ships the flow, read from the engine\'s '
-            + '`packagedFlowOwner` and the registry\'s namespace table; `_env` a flow no package ships), judged before the body or '
-            + 'the signature is read. An address it does not admit gets the door\'s one refusal, `401 INVALID_SIGNATURE`, rendered by '
-            + 'core as every unverified post is, its cause in the server log only. The qualifier `runs` is never this route: that '
+            + '`packagedFlowOwner` and the registry\'s namespace table; `_env` a flow no package ships), judged before the '
+            + 'signature is read. An address it does not admit gets the door\'s one refusal, `401 INVALID_SIGNATURE`, rendered by '
+            + 'core as every unverified post is, answered only once its body has been read in full as every post\'s is, so its '
+            + 'timing is an admitted address\'s too; its cause in the server log only. The qualifier `runs` is never this route: that '
             + 'verb and arity are the run-lifecycle doors of a flow named `hooks`, so the handler passes the request on. '
             + 'server-only for the reason the row above states.',
     },

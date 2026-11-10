@@ -218,8 +218,14 @@ export class ApiTriggerPlugin implements Plugin {
             // flow named `hooks` have this verb and arity) is not this route,
             // and the request goes on to the route that serves it. Otherwise
             // the qualifier must name the package that ships the flow, judged
-            // before the body or the signature is read; an address that does
-            // not is the door's one refusal, its cause in the server log only.
+            // before the signature is read; an address that does not is the
+            // door's one refusal, its cause in the server log only. The refusal
+            // is answered only once the body has been read in full, as
+            // `serveInboundHook` reads every post's body before it answers, so
+            // an admitted and an unadmitted address cost the sender the same (a
+            // body that never arrives gets no answer on either, and one the
+            // transport cannot deliver fails the same read on both): its timing
+            // tells no installed namespace from another.
             rawApp.post(HOOKS_ADDRESSED_PATH, async (c: any, next: () => Promise<void>) => {
                 const qualifier: string = c.req.param('ns');
                 if (INBOUND_HOOK_QUALIFIER_EXCLUSIONS.includes(qualifier)) return next();
@@ -233,7 +239,8 @@ export class ApiTriggerPlugin implements Plugin {
                     namespaceOwners: typeof getNamespaceOwners === 'function' ? getNamespaceOwners.call(objectql!.registry, qualifier) ?? [] : [],
                 });
                 if (!admitted) {
-                    const refusal = trigger.refuseUnadmittedAddress(flowName);
+                    await c.req.text();
+                    const refusal = trigger.refuseUnadmittedAddress(flowName, qualifier);
                     return c.json(refusal.body, refusal.status);
                 }
                 return serveInboundHook(trigger, c, { flowName, hookId: c.req.param('hookId') });
