@@ -1969,6 +1969,16 @@ export class AnalyticsService implements IAnalyticsService {
     // `DATASET_INVALID` no longer answers it.
     const allowedRelationships = query.cube ? scope.getCompiledDataset(query.cube)?.allowedRelationships : undefined;
     this.assertDimensionJoinsBacked(query, query.cube ? scope.getCube(query.cube) : undefined, allowedRelationships);
+    // [#31944] …and a relationship hop that names no field of the object it
+    // leaves (`nope.region`): on a hand-authored cube the hop resolver's alias
+    // tier named an object the column gate below cannot probe, so it stood
+    // down and the native strategy answered `DATABASE_ERROR` / 500. Before the
+    // column gate, so a path is judged hop first, column last.
+    this.assertRelationshipHopsDeclared(
+      query,
+      query.cube ? scope.getCube(query.cube) : undefined,
+      query.cube ? reads.getAllowedRelationships(query.cube) : undefined,
+    );
     // [#28558] …and a declared path to a column the related object does not
     // have, which reached SQL as a 500 on the native strategy. [#31881] On
     // every cube, a hand-authored one included: its path is judged against
@@ -4490,6 +4500,66 @@ export class AnalyticsService implements IAnalyticsService {
           `Valid dimensions: ${Object.keys(cube.dimensions).join(', ') || '(none)'}.`,
         { member, param, cube: cube.name },
       );
+    }
+  }
+
+  /**
+   * [#31944] Refuse a member spelled through a relationship hop that names no
+   * field of the object it leaves — `INVALID_FIELD` / 400, naming the member
+   * and the hop — before either strategy compiles it.
+   *
+   * Measured on `c9246279` (real SQLite), a hand-authored cube over a deal with
+   * no field `nope`: `nope.region` answered `DATABASE_ERROR` / 500 on the
+   * native strategy as a `where` leaf, a dimension and a windowed time
+   * dimension, and three different 400 sentences on the engine-aggregate
+   * strategy (its cross-object filter refusal, the engine's groupBy guard, its
+   * cross-object bucket refusal). The hop resolver's alias tier names an object
+   * `nope` for it, which the field probe cannot answer for, so
+   * {@link assertRelationshipColumnsExist} stands down. A compiled dataset
+   * refuses the same input through {@link assertDimensionJoinsBacked} (its
+   * `include`), which a hand-authored cube does not have.
+   *
+   * Each hop is read through the one hop resolver ({@link resolvePathHops},
+   * with {@link hopReference}), and only a hop the cube does not declare as a
+   * join is judged: its field must be among
+   * {@link AnalyticsServiceConfig.getObjectFieldNames}' answer for the object
+   * it leaves. Stands down as the other source-field gates do: no probe, no
+   * answer for that object (an unknown hop past the first leaves an object
+   * nobody can probe), or a cube whose `sql` is a statement rather than an
+   * object name. A path the cube's allowlist does not back
+   * (`getAllowedRelationships`) is left to its owner's refusal, as in
+   * {@link assertRelationshipColumnsExist}. A field that exists but is not a
+   * relationship is not judged here.
+   */
+  private assertRelationshipHopsDeclared(
+    query: AnalyticsQuery,
+    cube: Cube | undefined,
+    allowed: ReadonlySet<string> | undefined,
+  ): void {
+    const probe = this.getObjectFieldNames;
+    if (!probe || !cube) return;
+    const baseObject = typeof cube.sql === 'string' ? cube.sql.trim() : '';
+    if (!baseObject || !BARE_IDENTIFIER.test(baseObject)) return;
+    for (const { member, param, column } of relationshipMembers(query, cube, true)) {
+      if (allowed && unbackedRelationshipPath(column, allowed) !== null) continue;
+      const segments = column.split('.');
+      for (const hop of resolvePathHops(cube, baseObject, segments.slice(0, -1), this.hopReference)) {
+        if (hop.via === 'join') continue;
+        const fieldNames = probe(hop.from);
+        if (!fieldNames || fieldNames.length === 0) break;
+        if (fieldNames.includes(hop.field)) continue;
+        const path = hop.alias.replace(/__/g, '.');
+        const err = invalidMemberError(
+          `${RELATIONSHIP_MEMBER_NOUN[param]} '${member}' on cube '${cube.name}' walks relationship '${hop.field}' ` +
+            `(path '${path}'), which object '${hop.from}' does not have as a field. Each segment before the column ` +
+            `must name a relationship field of the object before it — known fields of '${hop.from}': ` +
+            `${[...fieldNames].sort().join(', ')}.`,
+          { member, param, cube: cube.name },
+        ) as Error & { field?: string; object?: string };
+        err.field = hop.field;
+        err.object = hop.from;
+        throw err;
+      }
     }
   }
 

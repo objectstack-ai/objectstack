@@ -606,7 +606,9 @@ describe('#5669 — what the gate must NOT do', () => {
             dimensions: {},
             public: true,
         };
-        const { service } = makeService({ cubes: [joined] });
+        // [#31944] `owner` is a field of the account, as a relationship hop is: a
+        // hop naming no field of the object it leaves is refused by its own gate.
+        const { service } = makeService({ cubes: [joined], fields: [...ACCOUNT_FIELDS, 'owner'] });
 
         const settled = await settle(
             service.query({ cube: 'joined_cube', measures: ['count'], where: { 'owner.region': 'NA' } } as any),
@@ -681,7 +683,9 @@ describe('#5669 — what the gate must NOT do', () => {
         //
         // The gate's own code is untouched by #5739; what moved is the cube it
         // reads. Both keys are asserted here for that reason.
-        const { service, aggregated } = makeService({ native: true });
+        // [#31944] `owner` is a field of the account, as a relationship hop is: a
+        // hop naming no field of the object it leaves is refused by its own gate.
+        const { service, aggregated } = makeService({ native: true, fields: [...ACCOUNT_FIELDS, 'owner'] });
 
         const viaWhere = await settle(
             service.query({ cube: 'crm_account', measures: ['count'], where: { 'owner.region': 'NA' } } as any),
