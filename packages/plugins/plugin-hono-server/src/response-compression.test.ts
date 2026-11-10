@@ -152,8 +152,8 @@ describe('HonoHttpServer response compression', () => {
         let finish: (() => void) | undefined;
         const port = await boot((s) => s.get('/api/v1/events', (_req, res) => {
             res.header('Content-Type', 'text/event-stream');
-            res.write(`data: ${'first-event '.repeat(200)}\n\n`);
-            finish = () => { res.write('data: last\n\n'); res.end(); };
+            res.write!(`data: ${'first-event '.repeat(200)}\n\n`);
+            finish = () => { res.write!('data: last\n\n'); res.end!(); };
         }));
 
         const firstChunk = await new Promise<{ headers: Record<string, unknown>; chunk: string; rest: Promise<string> }>((resolve, reject) => {
@@ -176,10 +176,10 @@ describe('HonoHttpServer response compression', () => {
     it('leaves a text/plain stream written through res.write() (the AI data stream shape) unencoded', async () => {
         const port = await boot((s) => s.get('/api/v1/ai/chat', async (_req, res) => {
             res.header('Content-Type', 'text/plain; charset=utf-8');
-            res.write('0:"'.concat('token '.repeat(400), '"\n'));
+            res.write!('0:"'.concat('token '.repeat(400), '"\n'));
             await sleep(20);
-            res.write('0:"done"\n');
-            res.end();
+            res.write!('0:"done"\n');
+            res.end!();
         }));
 
         const answer = await get(port, '/api/v1/ai/chat', { 'accept-encoding': 'gzip, br' });
