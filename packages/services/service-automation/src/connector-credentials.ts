@@ -471,21 +471,34 @@ export function withoutCredential(message: string, secret: WithheldCredential): 
 export function withoutCredentialThrown(err: unknown, secret: WithheldCredential): unknown {
     const forms = withheldForms(secret);
     if (forms.length === 0 || !(err instanceof Error)) return err;
-    let leaks = false;
+    return rewrittenThrown(err, (text) => withoutCredential(text, forms));
+}
+
+/**
+ * `err` with every text it carries passed through `rewrite`, keeping the
+ * structural marks a caller branches on (`code`, `status`, `name`). Returned
+ * unchanged when `rewrite` changes no message or stack along its cause chain;
+ * otherwise rebuilt from its rewritten message, without its stack and cause,
+ * which carry the same text. A thrown string is rewritten as it is.
+ */
+export function rewrittenThrown(err: unknown, rewrite: (text: string) => string): unknown {
+    if (typeof err === 'string') return rewrite(err);
+    if (!(err instanceof Error)) return err;
+    let changes = false;
     let cur: unknown = err;
     for (let depth = 0; depth < 8 && cur instanceof Error; depth++) {
         const text = `${cur.message}\n${cur.stack ?? ''}`;
-        if (forms.some((f) => text.includes(f))) leaks = true;
+        if (rewrite(text) !== text) changes = true;
         cur = (cur as { cause?: unknown }).cause;
     }
-    if (!leaks) return err;
-    const scrubbed = new Error(withoutCredential(err.message, forms));
-    scrubbed.name = err.name;
-    scrubbed.stack = undefined;
+    if (!changes) return err;
+    const rewritten = new Error(rewrite(err.message));
+    rewritten.name = err.name;
+    rewritten.stack = undefined;
     const marks = err as { code?: unknown; status?: unknown };
-    if (marks.code !== undefined) (scrubbed as { code?: unknown }).code = marks.code;
-    if (marks.status !== undefined) (scrubbed as { status?: unknown }).status = marks.status;
-    return scrubbed;
+    if (marks.code !== undefined) (rewritten as { code?: unknown }).code = marks.code;
+    if (marks.status !== undefined) (rewritten as { status?: unknown }).status = marks.status;
+    return rewritten;
 }
 
 /** The three arms of the chain, as the plugin composes them. */
@@ -629,10 +642,15 @@ export const UPSTREAM_REFUSAL_MESSAGE_MAX_LENGTH = 500;
  * The upstream's own words from a refused call's body — the body itself when
  * it is text, else its usual `message` / `error_description` / `error` /
  * `error.message` / `detail` / `title` key — on one line, bounded, and with
- * `secret` withheld BEFORE the bound is applied, so a cut can never leave part
- * of it behind.
+ * `secret` withheld and `rewrite` applied BEFORE the bound is applied, so a
+ * cut can never leave part of either behind. `rewrite` is the instance's
+ * `connectorReadWithheldText` (./connector-read-withheld-text.ts).
  */
-export function upstreamRefusalMessage(body: unknown, secret: WithheldCredential): string | undefined {
+export function upstreamRefusalMessage(
+    body: unknown,
+    secret: WithheldCredential,
+    rewrite: (text: string) => string = (text) => text,
+): string | undefined {
     let text: unknown;
     if (typeof body === 'string') {
         text = body;
@@ -644,7 +662,7 @@ export function upstreamRefusalMessage(body: unknown, secret: WithheldCredential
         );
     }
     if (typeof text !== 'string') return undefined;
-    const flat = withoutCredential(text, secret).replace(/\s+/g, ' ').trim();
+    const flat = rewrite(withoutCredential(text, secret)).replace(/\s+/g, ' ').trim();
     if (flat.length === 0) return undefined;
     return flat.length > UPSTREAM_REFUSAL_MESSAGE_MAX_LENGTH ? `${flat.slice(0, UPSTREAM_REFUSAL_MESSAGE_MAX_LENGTH)}…` : flat;
 }
