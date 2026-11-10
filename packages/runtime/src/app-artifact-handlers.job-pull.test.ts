@@ -195,7 +195,27 @@ describe('#20281 stage ③ (Q1-B): a job pulls a mapping by declaration, through
 
         const out = await h.schedule([PULL_JOB], { mappings: [importOnly] });
         expect(out.notScheduled).toEqual(['orders_pull_hourly']);
-        expect(h.said('warn').some((m) => m.includes('connectorSource'))).toBe(true);
+        expect(h.said('warn').some((m) => m.includes('connectorSource') && m.includes('datasourceSource'))).toBe(true);
+    });
+
+    it('[ADR-0153 D1] a pull whose mapping declares a datasourceSource is scheduled, and a degraded run names the object it read', async () => {
+        const h = harness();
+        const { connectorSource: _dropped, ...rest } = MAPPING;
+        const sourced = { ...rest, datasourceSource: { object: 'erp_order', watermark: { field: 'updated_at', start: '2026-01-01' } } };
+        h.defaultAutomation.pullConnectorSource.mockResolvedValueOnce({
+            source: 'datasource', mapping: 'orders_pull', targetObject: 'order', object: 'erp_order', datasource: 'erp',
+            readPath: 'builtin', watermark: { field: 'updated_at', from: '2026-01-01T00:00:00.000Z' }, pulled: 4,
+            summary: { total: 4, processed: 4, created: 3, updated: 0, skipped: 0, errors: 1, ok: 3, cancelled: false },
+        });
+
+        const out = await h.schedule([PULL_JOB], { mappings: [sourced] });
+        expect(out.pulls).toEqual(['orders_pull_hourly']);
+        expect(out.notScheduled).toEqual([]);
+        const outcome = (await h.run('orders_pull_hourly')) as { outcome: string; reason?: string };
+        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true } }]);
+        expect(outcome.outcome).toBe('degraded');
+        expect(outcome.reason).toContain("from 'erp_order'");
+        expect(outcome.reason).toContain('1 of 4');
     });
 
     it('a pull beside a body is NOT scheduled — neither run form runs', async () => {
@@ -272,7 +292,7 @@ describe('collectJobsWithoutBody judges a pull job by the binder\'s own judgeJob
         });
         expect(byName.get('sourceless_pull')).toEqual({
             name: 'sourceless_pull',
-            pullRefusal: expect.stringMatching(/^pull\.mapping: mapping 'orders_import' declares no connectorSource/),
+            pullRefusal: expect.stringMatching(/^pull\.mapping: mapping 'orders_import' declares no source/),
         });
         // Code beside the `pull` is the pull's refusal — judged before the body
         // beside it, as the binder judges it — never a `bodyRefusal`.
