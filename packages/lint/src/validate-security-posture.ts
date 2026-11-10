@@ -23,6 +23,7 @@
  * | security-modify-all-delete-withheld(error) | #25575 Modify All includes delete — UNPARSED intakes only, see the arm |
  * | security-controlled-by-parent-owner-policy-without-opt-in (warning) | ADR-0055 §3 amendment (ruling 6398566164): a caller-keyed update policy on a detail admits nobody the master gate refuses — unless it keys `owner_id` and the detail opted in (#26591: the opt-in is prescribed only there) |
  * | security-superuser-field-mask-inert (warning) | ADR-0066 D2 ⑧ as amended (ruling 6573563853, letter A): a set's View All / Modify All on an object votes on every field of it, so its own `readable: false` (or, under Modify All, its edit lock) on that object binds none of its holders |
+ * | security-update-policy-no-check (info) | ADR-0058 D4 write-check composition: a USING-only `update` / `all` policy keyed on a caller column other than `created_by` lets the ownership floor admit a row's new image too; info tier, so `--strict` does not fail on it |
  *
  * Per ADR-0049 discipline these are NOT advisory security: every `error` rule
  * mirrors a runtime enforcement point (D1 fail-closed OWD default, D4
@@ -166,6 +167,7 @@ export const SECURITY_CBP_AMBIGUOUS_RELATION = 'security-controlled-by-parent-am
 export const SECURITY_MODIFY_ALL_DELETE_WITHHELD = 'security-modify-all-delete-withheld';
 export const SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN = 'security-controlled-by-parent-owner-policy-without-opt-in';
 export const SECURITY_SUPERUSER_FIELD_MASK_INERT = 'security-superuser-field-mask-inert';
+export const SECURITY_UPDATE_POLICY_NO_CHECK = 'security-update-policy-no-check';
 
 export type SecuritySeverity = 'error' | 'warning' | 'info';
 
@@ -645,6 +647,43 @@ function pushCbpCallerPolicyOffOwnerColumn(
 }
 
 /**
+ * [ADR-0058 D4] The one caller column the platform's ownership floor keys
+ * (`owner_only_writes`: `created_by == current_user.id`, plugin-security
+ * `platform-ownership-policies.ts`). A policy keyed on it alone admits on the
+ * new row exactly whom the floor admits, so the update-check arm below skips it.
+ */
+const OWNERSHIP_FLOOR_COLUMN = 'created_by';
+
+/**
+ * `security-update-policy-no-check` for one policy, at `path` (the `check` it
+ * does not declare). One verdict sentence that states the composition rule and
+ * one remedy line that states its side effect; why both hold is this id's
+ * `os explain` entry. ⛔ It prescribes no way to hand a row back to its creator.
+ */
+function pushUpdatePolicyNoCheck(
+  findings: SecurityFinding[],
+  psName: string,
+  path: string,
+  policyName: string,
+  operation: string,
+  fields: readonly string[],
+): void {
+  const keyed = fields.map((f) => `${f} == current_user.id`).join(', ');
+  findings.push({
+    severity: 'info',
+    rule: SECURITY_UPDATE_POLICY_NO_CHECK,
+    where: `permission set "${psName}"`,
+    path,
+    message:
+      `${operation} policy "${policyName}" (${keyed}) declares no check. A row-level policy with no ` +
+      '`check` also admits new rows the ownership floor admits; declare `check` to bound what an update may write.',
+    hint:
+      'Declaring `check` on any applicable policy takes the USING-only siblings and the floor out of the check, ' +
+      'so a creator who is not the owner loses update unless a `check` admits them.',
+  });
+}
+
+/**
  * `security-controlled-by-parent-no-relation` for one object, at `path`. One
  * site for the declared object and the merged one
  * ({@link pushExtensionMergedCbpFindings}), so the two read in one wording.
@@ -1015,6 +1054,49 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
           else pushCbpCallerPolicyOffOwnerColumn(findings, psName, path, policyName, detailName, fields, detail);
         }
       }
+    }
+  }
+
+  // ── [ADR-0058 D4] a caller-keyed update policy that declares no check ──
+  // When no applicable policy for an update declares `check`, each applicable
+  // policy's `using` stands in as its check, OR-combined, and the platform's
+  // ownership floor (`owner_only_writes`, `created_by == current_user.id`)
+  // takes part where the write's pre-image gate kept it (plugin-security
+  // `writeCheckPolicies`, rule 3; `rls.zod.ts` `check`). So a USING-only
+  // `update` / `all` policy keyed on another caller column (`owner_id`, an
+  // assignee) admits a new row its creator writes as well as one its keyed
+  // user writes. That is the published composition; this arm states it where
+  // the policy is authored. Advisory `info`: the composition is correct as
+  // published, nothing refuses the shape, and `--strict` promotes warnings,
+  // never an `info`.
+  //
+  // Judged per policy, as declared: whether a sibling policy declares `check`
+  // for a given caller depends on the sets and positions that caller holds,
+  // which an authored stack does not settle. The caller columns are read by
+  // the owner arm's recogniser above (`callerIdentityKeyedFields`), never a
+  // second one; a blank `check` declares nothing, as the runtime reads it.
+  for (let i = 0; i < permissionSets.length; i++) {
+    const ps = permissionSets[i];
+    if (!ps || typeof ps !== 'object') continue;
+    const psName = typeof ps.name === 'string' ? ps.name : `(permission set ${i})`;
+    const policies = recordsOf(ps.rowLevelSecurity);
+    for (let j = 0; j < policies.length; j++) {
+      const policy = policies[j];
+      if (!policy || typeof policy !== 'object' || policy.enabled === false) continue;
+      const operation = String(policy.operation ?? '');
+      if (!UPDATE_CLASS_RLS_OPERATIONS.has(operation)) continue;
+      if (typeof policy.check === 'string' && policy.check.trim() !== '') continue;
+      const fields = callerIdentityKeyedFields(policy.using).filter((f) => f !== OWNERSHIP_FLOOR_COLUMN);
+      if (fields.length === 0) continue;
+      const policyName = typeof policy.name === 'string' ? policy.name : `(policy ${j})`;
+      pushUpdatePolicyNoCheck(
+        findings,
+        psName,
+        `permissions[${i}].rowLevelSecurity[${j}].check`,
+        policyName,
+        operation,
+        fields,
+      );
     }
   }
 

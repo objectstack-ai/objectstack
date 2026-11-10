@@ -367,6 +367,7 @@ export {
   SECURITY_CBP_AMBIGUOUS_RELATION,
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
   SECURITY_SUPERUSER_FIELD_MASK_INERT,
+  SECURITY_UPDATE_POLICY_NO_CHECK,
   holdsSuperuserBypass,
 } from './validate-security-posture.js';
 export type { SecurityFinding, SecuritySeverity } from './validate-security-posture.js';
