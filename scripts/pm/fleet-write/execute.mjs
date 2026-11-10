@@ -225,8 +225,8 @@
  *     endpoint, and nothing is read first. It LANDS on a 2xx whose answer
  *     carries a `ghsa_id` in its shape (`advisoryReportReadBack`): the row
  *     names that id and the state, and a notice annotation names the id
- *     (`relayAdvisoryAnnotationMessage`, `dispatch.mjs`), so the seat follows
- *     with `advisory_collaborators_add`. A 2xx without an id is a FAILED
+ *     (`relayAdvisoryAnnotationMessage`, `dispatch.mjs`), and the seat is done
+ *     (`advisory_collaborators_add` only when a maintainer asks for it). A 2xx without an id is a FAILED
  *     action whose sentence says UNCONFIRMED — a report may have been filed,
  *     so ⛔ never re-sent.
  *   - `advisory_create` is the same shape: ONE POST of the row's body to the
@@ -3143,7 +3143,7 @@ export async function selfTest() {
       // ── advisory_report
       const filed = await advRun([report({ severity: 'high', cwe_ids: ['CWE-79'] })], { ...allowed, [REPORTS]: advisory({ state: 'triage' }, 201) });
       t('⭐ report: the sender gate, then ONE POST to the reports endpoint — nothing read first — whose body is exactly the summary, description, severity and cwe_ids sent; exit 0', [filed.exit, filed.seen.map((s) => s.call), writes(filed.seen)[0]?.body], [EXIT_OK, [PERM, REPORTS], { summary: `${MARKER} — the summary`, description: `${MARKER} — the description`, severity: 'high', cwe_ids: ['CWE-79'] }], filed.logs.join(' | '));
-      const REPORTED = `reported ${GHSA} · state triage — add whoever works it with advisory_collaborators_add`;
+      const REPORTED = `reported ${GHSA} · state triage`;
       t('…its row names the id the platform gave and the state, and nothing else of the answer; the summary row carries it', [filed.rows.map((r) => [r.call, r.status, r.result]), filed.summary.includes(`| 1 | \`advisory_report\` | \`${REPORTS}\` | 201 | ${REPORTED} |`)], [[[REPORTS, 201, REPORTED]], true], filed.summary);
       t('…and ONE notice annotation names that id for the seat, which the reader\'s own parser reads back', [filed.annotations, filed.logs.filter((l) => l.startsWith('::')), parseRelayAdvisoryAnnotation(relayAdvisoryAnnotationMessage(filed.annotations[0] ?? {}))], [[{ action: 1, op: 'advisory_report', ghsaId: GHSA }], [`::notice title=fleet-write advisory_report::fleet-write action=1 op=advisory_report ghsa_id=${GHSA}`], { action: 1, op: 'advisory_report', ghsaId: GHSA }]);
       const noId = await advRun([report()], { ...allowed, [REPORTS]: advisory({ ghsa_id: MARKER }, 201) });
@@ -3173,7 +3173,7 @@ export async function selfTest() {
       // ── advisory_create
       const drafted = await advRun([draft({ severity: 'high', cwe_ids: ['CWE-863'] })], { ...allowed, [CREATE]: advisory({}, 201) });
       t('⭐ draft: the sender gate, then ONE POST to the bare collection — nothing read first — whose body is exactly the summary, description, one npm vulnerabilities entry per package, severity and cwe_ids sent; exit 0', [drafted.exit, drafted.seen.map((s) => s.call), writes(drafted.seen)[0]?.body], [EXIT_OK, [PERM, CREATE], { summary: `${MARKER} — the summary`, description: `${MARKER} — the description`, vulnerabilities: [{ package: { ecosystem: 'npm', name: '@objectstack/rest' } }], severity: 'high', cwe_ids: ['CWE-863'] }], drafted.logs.join(' | '));
-      const CREATED = `created ${GHSA} · state draft — add whoever works it with advisory_collaborators_add`;
+      const CREATED = `created ${GHSA} · state draft`;
       t('…its row names the id the platform gave and the state, and nothing else of the answer; the summary row carries it', [drafted.rows.map((r) => [r.call, r.status, r.result]), drafted.summary.includes(`| 1 | \`advisory_create\` | \`${CREATE}\` | 201 | ${CREATED} |`)], [[[CREATE, 201, CREATED]], true], drafted.summary);
       t('…and ONE notice annotation names that id for the seat, which the reader\'s own parser reads back', [drafted.annotations, drafted.logs.filter((l) => l.startsWith('::')), parseRelayAdvisoryAnnotation(relayAdvisoryAnnotationMessage(drafted.annotations[0] ?? {}))], [[{ action: 1, op: 'advisory_create', ghsaId: GHSA }], [`::notice title=fleet-write advisory_create::fleet-write action=1 op=advisory_create ghsa_id=${GHSA}`], { action: 1, op: 'advisory_create', ghsaId: GHSA }]);
       const draftNoId = await advRun([draft()], { ...allowed, [CREATE]: advisory({ ghsa_id: MARKER }, 201) });

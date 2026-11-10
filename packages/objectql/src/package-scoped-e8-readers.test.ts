@@ -49,8 +49,8 @@ const P = 'com.acme.caller';
 
 /** The nine types this card wires, as the registry spells them. */
 const E8_TYPES = ['app', 'page', 'dashboard', 'report', 'book', 'analytics_cube', 'tool', 'skill', 'agent'] as const;
-/** The types wired since, each by its own card: `api` (#32069) and the picklist's bare read (#32070). */
-const WIRED_SINCE = ['api', 'picklist'] as const;
+/** The types wired since, each by its own card: `api` (#32069), the picklist's bare read (#32070), `mapping` (#32071) and `dataset` (#32072). */
+const WIRED_SINCE = ['api', 'picklist', 'mapping', 'dataset'] as const;
 /** Of them, the ones phase 1's one-holder refusal does not cover: two package holders can exist today. */
 const UNCOVERED = E8_TYPES.filter((t) => !(BARE_NAME_REGISTRY_TYPES as readonly string[]).includes(t));
 
@@ -271,6 +271,50 @@ describe('the types E8 does not wire keep the legacy read', () => {
 });
 
 /**
+ * #32071 (ADR-0150 D3; a reader the picklist-family backstop #31700 needs):
+ * `mapping` joins the by-name readers that consult `(package, name)`. Its two
+ * readers outside `/meta` — the import door's `mappingName` and the connector
+ * pull — read through the protocol's by-name read naming no package, so they
+ * are pinned here at that read; their own refusal answers are pinned beside
+ * them (`@objectstack/rest` `import-integration.test.ts`,
+ * `@objectstack/service-automation` `connector-pull.test.ts`).
+ */
+describe('#32071 — mapping: a bare name two packages hold is refused, one holder answers as before', () => {
+  it('two holders: the protocol read naming no package (both faces) and the facade refuse naming both', async () => {
+    ship('mapping', 'feed', A);
+    ship('mapping', 'feed', B);
+    await expectRefusal(() => protocol.getMetaItem({ type: 'mapping', name: 'feed' }), 'ambiguous-in-environment', [A, B]);
+    await expectRefusal(() => protocol.getMetaItemForExecution({ type: 'mapping', name: 'feed' }), 'ambiguous-in-environment', [A, B]);
+    await expectRefusal(() => facade.get('mapping', 'feed'), 'ambiguous-in-environment', [A, B]);
+  });
+
+  it('two holders: each package caller reads its own, and the exact qualifier reaches each holder', async () => {
+    ship('mapping', 'feed', A);
+    ship('mapping', 'feed', B);
+    expect(labelOf(await facade.get('mapping', 'feed', A))).toBe('alpha mapping');
+    expect(labelOf(await facade.get('mapping', 'feed', B))).toBe('beta mapping');
+    expect(labelOf((await protocol.getMetaItem({ type: 'mapping', name: 'feed', packageId: A }))?.item)).toBe('alpha mapping');
+    expect(labelOf((await protocol.getMetaItem({ type: 'mapping', name: 'feed', packageId: B }))?.item)).toBe('beta mapping');
+  });
+
+  it('CONTROL: one package holder is served to a caller with no package exactly as getItem served it', async () => {
+    ship('mapping', 'solo', A);
+    const before = registry.getItem('mapping', 'solo');
+    expect(labelOf(before)).toBe('alpha mapping');
+    expect((await protocol.getMetaItem({ type: 'mapping', name: 'solo' }))?.item).toMatchObject(before as object);
+    expect((await protocol.getMetaItemForExecution({ type: 'mapping', name: 'solo' }))?.item).toMatchObject(before as object);
+    expect(await facade.get('mapping', 'solo')).toBe(before);
+    expect((await protocol.getMetaItem({ type: 'mapping', name: 'solo', packageId: A }))?.item).toMatchObject(before as object);
+  });
+
+  it('CONTROL: the environment\'s own mapping is served, and zero holders stays not-found', async () => {
+    envItem('mapping', 'local');
+    expect(labelOf((await protocol.getMetaItem({ type: 'mapping', name: 'local' }))?.item)).toBe('env mapping');
+    expect((await protocol.getMetaItem({ type: 'mapping', name: 'nothing' }))?.item).toBeUndefined();
+  });
+});
+
+/**
  * #32070 (a reader epic #31527's child B for the data family needs first): the
  * bare `GET /meta/picklist/NAME` read answers by ADR-0150 D3. A field's
  * `picklist:` already resolves by its referrer's package (child E6,
@@ -327,5 +371,40 @@ describe('#32070 — the picklist\'s by-name read answers by package (ADR-0150 D
   it('the exact qualifier of a package that does not hold the name is refused naming the holder, never another package\'s list', async () => {
     solo();
     await expectRefusal(() => protocol.getMetaItem({ type: 'picklist', name: 'tone', packageId: B }), 'not-held-by-qualifier', [A]);
+  });
+});
+
+describe('[#32072] dataset: the by-name read is the package-scoped resolver\'s', () => {
+  it('a dataset two packages hold: a caller with no package is refused at the protocol read, the registry and the facade, naming both', async () => {
+    ship('dataset', 'sales', A);
+    ship('dataset', 'sales', B);
+    await expectRefusal(() => protocol.getMetaItem({ type: 'dataset', name: 'sales' }), 'ambiguous-in-environment', [A, B]);
+    await expectRefusal(() => registry.resolveItem('dataset', 'sales'), 'ambiguous-in-environment', [A, B]);
+    await expectRefusal(() => facade.get('dataset', 'sales'), 'ambiguous-in-environment', [A, B]);
+  });
+
+  it('…and the read that names a package (the exact qualifier) serves that package\'s dataset, each its own', async () => {
+    ship('dataset', 'sales', A);
+    ship('dataset', 'sales', B);
+    expect(labelOf((await protocol.getMetaItem({ type: 'dataset', name: 'sales', packageId: A }))?.item)).toBe('alpha dataset');
+    expect(labelOf((await protocol.getMetaItem({ type: 'dataset', name: 'sales', packageId: B }))?.item)).toBe('beta dataset');
+  });
+
+  it('…and a package that holds none of the name is refused by the exact qualifier, naming the holders', async () => {
+    install(P);
+    ship('dataset', 'sales', A);
+    ship('dataset', 'sales', B);
+    await expectRefusal(() => protocol.getMetaItem({ type: 'dataset', name: 'sales', packageId: P }), 'not-held-by-qualifier', [A, B]);
+  });
+
+  it('CONTROL: one holder, or the environment\'s own item, is served to a caller with no package exactly as getItem served it', async () => {
+    ship('dataset', 'solo', A);
+    envItem('dataset', 'local');
+    for (const name of ['solo', 'local']) {
+      const before = registry.getItem('dataset', name);
+      expect(before).toBeDefined();
+      expect(registry.resolveItem('dataset', name)).toBe(before);
+      expect(labelOf((await protocol.getMetaItem({ type: 'dataset', name }))?.item)).toBe(labelOf(before));
+    }
   });
 });

@@ -6,6 +6,7 @@ import { ObjectStackDefinitionSchema, normalizeStackInput } from '@objectstack/s
 
 import { DEFAULT_METADATA_EVAL_CORPUS } from '../../../../cli/src/lint/corpus.js';
 import { artifactToEvalGraph } from '../../src/score/scenario-graph.js';
+import { scoreGraph } from '../../src/score/scenario-score.js';
 
 type Bag = Record<string, any>;
 
@@ -146,5 +147,44 @@ describe('artifactToEvalGraph', () => {
     expect(() => artifactToEvalGraph({ objects: [{ fields: {} }] })).toThrow(TypeError);
     expect(() => artifactToEvalGraph({ objects: [{ name: 'a', fields: [{ name: 'x', type: 'text' }] }] }))
       .toThrow(/not a name-keyed record/);
+  });
+});
+
+describe('artifactToEvalGraph — objectExtensions merged as the registry serves them (QA scenario round 1)', () => {
+  const channel = (n: number) => ({
+    type: 'select',
+    label: 'Channel',
+    options: Array.from({ length: n }, (_, i) => ({ label: `C${i}`, value: `c${i}` })),
+  });
+
+  it('a field declared only through an extension is a field of the build, and the select check reads it', () => {
+    const artifact = parsedArtifact({ manifest, objects, objectExtensions: [{ extend: 'loan', fields: { channel: channel(2) } }] });
+    const loan = artifactToEvalGraph(artifact).objects.find((o) => o.name === 'loan')!;
+    expect(loan.fields.map((f) => f.name)).toEqual(['book', 'borrower', 'status', 'channel']);
+    const graph = artifactToEvalGraph(artifact);
+    const select = scoreGraph(graph, { objects: ['loan'], selectFields: [{ object: 'loan', field: 'channel', minOptions: 2 }] }).checks.find((c) => c.check.startsWith('select:'));
+    expect(select).toEqual({ check: 'select:loan.channel>=2opts', pass: true, detail: 'has 2' });
+  });
+
+  it('applies extensions in ascending priority, a later field of one name replacing the earlier, and none for an object the build does not declare', () => {
+    const artifact = {
+      objects,
+      objectExtensions: [
+        { extend: 'loan', priority: 300, fields: { channel: channel(4) } },
+        { extend: 'loan', priority: 100, fields: { channel: channel(1) } },
+        { extend: 'loan', fields: { channel: channel(3) } },
+        { extend: 'sys_user', fields: { nickname: { type: 'text', label: 'Nickname' } } },
+        { extend: 'book', label: 'Title' },
+      ],
+    };
+    const graph = artifactToEvalGraph(artifact);
+    expect(graph.objects.find((o) => o.name === 'loan')!.fields.find((f) => f.name === 'channel')!.options).toHaveLength(4);
+    expect(graph.objects.map((o) => o.name)).toEqual(['loan', 'book']);
+    expect(graph.objects.find((o) => o.name === 'book')!.fields.map((f) => f.name)).toEqual(['title']);
+  });
+
+  it('refuses an extension that names no object, and fields that are not a name-keyed record', () => {
+    expect(() => artifactToEvalGraph({ objects, objectExtensions: [{ fields: {} }] })).toThrow(/no `extend`/);
+    expect(() => artifactToEvalGraph({ objects, objectExtensions: [{ extend: 'loan', fields: [] }] })).toThrow(/not a name-keyed record/);
   });
 });

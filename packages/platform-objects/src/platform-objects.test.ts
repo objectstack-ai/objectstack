@@ -727,6 +727,8 @@ describe('feature-gate lowering matrix (#2874)', () => {
     ['SysSsoProvider', SysSsoProvider, 'verify_domain', STANDING],
     ['SysSsoProvider', SysSsoProvider, 'show_sso_groups_claim', STANDING],
     ['SysSsoProvider', SysSsoProvider, 'edit_sso_groups_claim', STANDING],
+    ['SysSsoProvider', SysSsoProvider, 'show_sso_attribute_mapping', STANDING],
+    ['SysSsoProvider', SysSsoProvider, 'edit_sso_attribute_mapping', STANDING],
     ['SysMember', SysMember, 'update_member_role', `${ADMINS} && ${ORG}`],
     ['SysMember', SysMember, 'remove_member', `${ADMINS} && ${ORG}`],
     ['SysMember', SysMember, 'transfer_ownership', `((has(record.role) && record.role != 'owner') && ${OWNER}) && ${ORG}`],

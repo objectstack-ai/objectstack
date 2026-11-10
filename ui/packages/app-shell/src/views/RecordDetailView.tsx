@@ -982,7 +982,33 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // `recordInvalidationNonce` is the read side: it bumps when THIS record (or
   // its object) is invalidated by anyone — the form overlay, an action, an
   // undo, or any dataSource write via the MutationEvent bridge.
-  const recordInvalidationNonce = useDataInvalidation(objectName || undefined, pureRecordId || undefined);
+  const liveRecordNonce = useDataInvalidation(objectName || undefined, pureRecordId || undefined);
+  // A write that DELETES this record leaves the page nothing to read: the
+  // record is not read again (the delete from this page's own header then
+  // navigates away). The delete's mutation event is caught here, in the same
+  // synchronous dispatch that invalidates the record on the bus, so the
+  // render that event causes already holds the record's reads (the nonce
+  // stays at the value it had) and draws the missing state instead of the
+  // body, whose readers (the field access, the approvals) would each ask the
+  // server for the gone record. Router navigation runs as a transition, so
+  // it lands after that render.
+  const committedRecordNonce = useRef(liveRecordNonce);
+  useEffect(() => {
+    committedRecordNonce.current = liveRecordNonce;
+  }, [liveRecordNonce]);
+  const deletedRecordKey = objectName && pureRecordId ? JSON.stringify([objectName, pureRecordId]) : null;
+  const [deletedRecord, setDeletedRecord] = useState<{ key: string; nonce: number } | null>(null);
+  useEffect(() => {
+    if (!deletedRecordKey || typeof dataSource?.onMutation !== 'function') return;
+    const object = String(objectName).toLowerCase();
+    return dataSource.onMutation((e: { type?: string; resource?: string; id?: string | number }) => {
+      if (e?.type !== 'delete' || e.id == null || String(e.id) !== pureRecordId) return;
+      if (String(e.resource ?? '').toLowerCase() !== object) return;
+      setDeletedRecord({ key: deletedRecordKey, nonce: committedRecordNonce.current });
+    });
+  }, [dataSource, deletedRecordKey, objectName, pureRecordId]);
+  const recordDeleted = deletedRecord !== null && deletedRecord.key === deletedRecordKey;
+  const recordInvalidationNonce = recordDeleted ? deletedRecord.nonce : liveRecordNonce;
   // objectui#12244 — the record load's SECOND trigger: a write to one of this
   // record's related CHILD objects. Bumped by the subscription beside
   // `childRelations` below, which explains why it exists.
@@ -4363,7 +4389,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // (rail, discussion, breadcrumb with the truncated raw id) even when the
   // record didn't exist, which made invalid links look like a partially-
   // broken page instead of a clean 404.
-  if (pageRecordStatus === 'missing') {
+  // A write deleted the record (`recordDeleted`): it is missing, and no body
+  // is drawn, so none of its readers asks the server for it again.
+  if (pageRecordStatus === 'missing' || recordDeleted) {
     return withPhoneBar(
       <div className="flex h-full items-center justify-center p-4">
         <Empty>

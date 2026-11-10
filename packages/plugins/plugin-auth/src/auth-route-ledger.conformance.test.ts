@@ -295,10 +295,18 @@ describe('auth route ledger hygiene', () => {
       // catch-all), and the `live.has(route)` loop below holds them to the same
       // proof — `@better-auth/sso` serves no groups-claim endpoint. The set row
       // sorts below, after request-domain-verification.
+      // [#32086] The attribute-mapping show and edit of the SSO Providers form,
+      // on the same terms as the groups-claim pair: `auth-plugin.ts` mounts
+      // both itself (`${basePath}/admin/sso/get-attribute-mapping` and
+      // `${basePath}/admin/sso/set-attribute-mapping`, ahead of the
+      // catch-all), and `@better-auth/sso` serves no mapping endpoint. Each
+      // sorts just above its groups-claim sibling.
+      'POST /api/v1/auth/admin/sso/get-attribute-mapping',
       'POST /api/v1/auth/admin/sso/get-groups-claim',
       'POST /api/v1/auth/admin/sso/register',
       'POST /api/v1/auth/admin/sso/register-saml',
       'POST /api/v1/auth/admin/sso/request-domain-verification',
+      'POST /api/v1/auth/admin/sso/set-attribute-mapping',
       'POST /api/v1/auth/admin/sso/set-groups-claim',
       'POST /api/v1/auth/admin/sso/verify-domain',
       'POST /api/v1/auth/admin/unlock-user',

@@ -180,7 +180,7 @@ export interface TwoFactorChallenge {
   methods: TwoFactorMethod[];
 }
 
-/** What `AuthClient.signIn` answers: a session, or a pending two-factor challenge. */
+/** What a sign-in (`AuthClient.signIn`, `signInWithPhonePassword`, `signInWithPhoneOtp`) answers: a session, or a pending two-factor challenge. */
 export type SignInResult =
   | { user: AuthUser; session: AuthClientSession; twoFactor?: undefined }
   | { twoFactor: TwoFactorChallenge; user?: undefined; session?: undefined };
@@ -457,10 +457,20 @@ export interface AuthClient {
   resetPassword: (token: string, newPassword: string) => Promise<void>;
   /** framework#2780 — request a sign-in/verification OTP SMS for the phone number. */
   sendPhoneOtp: (phoneNumber: string) => Promise<void>;
-  /** framework#2780 — verify a phone OTP; signs in the number's user. */
-  signInWithPhoneOtp: (phoneNumber: string, code: string) => Promise<{ user: AuthUser; session: AuthClientSession }>;
-  /** framework#2780 — sign in with phone number + password (no SMS; gated by `features.phoneNumber`). */
-  signInWithPhonePassword: (phoneNumber: string, password: string) => Promise<{ user: AuthUser; session: AuthClientSession }>;
+  /**
+   * framework#2780 — verify a phone OTP; signs in the number's user. For an
+   * account with an enrolled second factor, the answer is a `twoFactor`
+   * challenge instead of a session, as `signIn` answers: finish it with
+   * `verifySignInTwoFactor`.
+   */
+  signInWithPhoneOtp: (phoneNumber: string, code: string) => Promise<SignInResult>;
+  /**
+   * framework#2780 — sign in with phone number + password (no SMS; gated by
+   * `features.phoneNumber`). For an account with two-factor sign-in on, the
+   * answer is a `twoFactor` challenge instead of a session, as `signIn`
+   * answers (objectstack#32107): finish it with `verifySignInTwoFactor`.
+   */
+  signInWithPhonePassword: (phoneNumber: string, password: string) => Promise<SignInResult>;
   /** framework#2780 — request a password-reset OTP SMS for the phone number. */
   requestPhonePasswordReset: (phoneNumber: string) => Promise<void>;
   /** framework#2780 — reset the password using a phone OTP. */
