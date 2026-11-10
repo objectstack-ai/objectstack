@@ -322,8 +322,9 @@ describe('[ADR-0151 D5] a hook reads principalKind for both kinds of agent, and 
   let driver: SqliteWasmDriver;
   let engine: ObjectQL;
   let sql: (statement: string, bindings?: unknown[]) => Promise<unknown>;
-  /** What the hook saw, keyed by the record it saw it for. */
+  /** What the hook saw, keyed by the record it saw it for (the writes run one after another). */
   const seen: Record<string, { userId: unknown; principalKind: unknown; hasKind: boolean; performedByClientId: unknown }> = {};
+  let writing = '';
 
   const assemble = (authz: Record<string, unknown>, oauth?: Record<string, unknown>) =>
     assembleExecutionContext({
@@ -352,13 +353,13 @@ describe('[ADR-0151 D5] a hook reads principalKind for both kinds of agent, and 
 
     engine.registerHook('beforeInsert', async (ctx: any) => {
       const session = ctx.session ?? {};
-      seen[String(ctx.input?.id)] = {
+      seen[writing] = {
         userId: session.userId,
         principalKind: session.principalKind,
         hasKind: 'principalKind' in session,
         performedByClientId: ctx.provenance?.performedByClientId,
       };
-    }, { object: AUDITED_OBJECT, packageId: HARNESS_PACKAGE });
+    }, { object: AUDITED_OBJECT });
 
     const oauthCtx = assemble({ ...AUTHZ }, {
       userId: HUMAN,
@@ -377,8 +378,11 @@ describe('[ADR-0151 D5] a hook reads principalKind for both kinds of agent, and 
     });
     const personCtx = assemble({ ...AUTHZ });
 
+    writing = OAUTH_RECORD;
     await engine.insert(AUDITED_OBJECT, { id: OAUTH_RECORD, full_name: 'Via OAuth' }, { context: oauthCtx as any });
+    writing = ACCOUNT_RECORD;
     await engine.insert(AUDITED_OBJECT, { id: ACCOUNT_RECORD, full_name: 'Via account' }, { context: accountCtx as any });
+    writing = PERSON_RECORD;
     await engine.insert(AUDITED_OBJECT, { id: PERSON_RECORD, full_name: 'Via person' }, { context: personCtx as any });
   }, 120_000);
 
