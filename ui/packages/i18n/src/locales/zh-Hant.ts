@@ -4391,6 +4391,16 @@ const zhHant = {
       expandTable: '展開',
       exitExpandedTable: '關閉',
     },
+    answerSource: {
+      title: '計算方式',
+      object: '物件',
+      filter: '篩選條件',
+      allRecords: '全部記錄',
+      groupedBy: '分組依據',
+      aggregations: '彙總',
+      records: '記錄',
+      visibleToYou: '僅包含你可見的記錄',
+    },
     tool: {
       aggregate_data: '彙總相關資料',
       get_record: '讀取這條記錄',

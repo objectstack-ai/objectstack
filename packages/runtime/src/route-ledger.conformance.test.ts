@@ -289,4 +289,48 @@ describe('address grammar ↔ route ledger (ADR-0150 D5, #31691)', () => {
       expect([...served].sort(), `door ${door} (${position.prefix})`).toEqual([...position.literals].sort());
     }
   });
+
+  // Seat ruling Q1 = A: a sub-resource literal in a flow door's name position
+  // keeps its bare route (`/automation/crm/runs` is the runs of the flow
+  // `crm`). The set the domain reads (`AUTOMATION_FLOW_SUBRESOURCE_SEGMENTS`)
+  // is exactly the segments the ledger's `/automation/:name/<segment>` rows
+  // serve, so a sub-resource a new row adds joins it.
+  it('the flow doors\' sub-resource literals are exactly the segments the ledger serves after `/automation/:name`', async () => {
+    const { AUTOMATION_FLOW_SUBRESOURCE_SEGMENTS } = await import('./domains/automation-address.js');
+    const served = new Set<string>();
+    for (const row of ROUTE_LEDGER) {
+      const path = row.route.slice(row.route.indexOf(' ') + 1).split('?')[0];
+      const match = /^\/automation\/:name\/([^/:]+)/.exec(path);
+      if (match) served.add(match[1]);
+    }
+    expect([...served].sort()).toEqual([...AUTOMATION_FLOW_SUBRESOURCE_SEGMENTS].sort());
+  });
+
+  // [ADR-0150 D5, child G1] The domain's `405` names the verbs a bare shape is
+  // served under (`automationRouteAllow`), since every two-segment path reaches
+  // it under every verb. Those verbs are the ledger's: for each bare
+  // `/automation` row's path (parameters filled), every bare row whose pattern
+  // matches that path, and nothing else.
+  it('the `/automation` domain\'s `Allow` for each bare shape is exactly the verbs the ledger serves there', async () => {
+    const { automationRouteAllow } = await import('./domains/automation-address.js');
+    const rows = ROUTE_LEDGER
+      .map((row) => {
+        const [verb, rest] = [row.route.slice(0, row.route.indexOf(' ')), row.route.slice(row.route.indexOf(' ') + 1).split('?')[0]];
+        return { verb, segments: rest.split('/').filter(Boolean) };
+      })
+      // The domain root is left out: its `GET` (the retired flow list, #19543)
+      // is declined by the domain, so the host answers it, never this table.
+      .filter(({ segments }) => segments[0] === 'automation' && segments.length > 1 && !segments.includes(':ns'));
+    expect(rows.length).toBeGreaterThan(20);
+    expect(automationRouteAllow([])).toEqual([]);
+    const fill = (seg: string) => (seg.startsWith(':') ? `${seg.slice(1)}_1` : seg);
+    const matches = (pattern: string[], path: string[]) =>
+      pattern.length === path.length && pattern.every((seg, i) => seg.startsWith(':') || seg === path[i]);
+    const VERBS = ['GET', 'POST', 'PUT', 'DELETE'];
+    for (const { segments } of rows) {
+      const path = segments.map(fill);
+      const served = VERBS.filter((verb) => rows.some((row) => row.verb === verb && matches(row.segments, path)));
+      expect([path.join('/'), automationRouteAllow(path.slice(1))]).toEqual([path.join('/'), served]);
+    }
+  });
 });

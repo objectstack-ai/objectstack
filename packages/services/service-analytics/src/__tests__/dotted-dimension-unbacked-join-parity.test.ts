@@ -762,3 +762,163 @@ describe('[#31881] a hand-authored cube member naming a column its related objec
     ]);
   });
 });
+
+/**
+ * [#31944] A dotted member whose relationship hop names no field of the object
+ * it leaves, on a HAND-AUTHORED cube (`query`), on both live strategies, on
+ * real SQLite.
+ *
+ * The deal has no field `nope`. Before, the hop resolver's alias tier named an
+ * object `nope` the field probe cannot answer for, so the related-column gate
+ * (#28558, asked on a cube since #31881) stood down, and the native strategy
+ * joined a table `nope` and answered `DATABASE_ERROR` / 500 as a `where` leaf,
+ * a dimension and a windowed time dimension. The engine-aggregate strategy
+ * answered three different 400 sentences (its cross-object filter refusal, the
+ * engine's groupBy guard, its cross-object bucket refusal). Now the cube path
+ * refuses the hop `INVALID_FIELD` / 400 before either strategy compiles, naming
+ * the member and the hop, so both strategies answer one sentence. A compiled
+ * dataset's answer is unchanged: its `include` gate refuses the path first.
+ */
+describe('[#31944] a hand-authored cube member whose relationship hop the object does not have', () => {
+  const DEAL = 'os31944_deal';
+  const SUPPLIER = 'os31944_supplier';
+  /** A hand-authored cube over the deal, named apart from the object; no joins, no allowlist. */
+  const CUBE = {
+    name: 'os31944_cube',
+    sql: DEAL,
+    dimensions: { region: { sql: 'region', type: 'string' } },
+    measures: { count: { type: 'count', sql: '*' } },
+  };
+  /** The same deal as a compiled dataset including the one lookup: its `include` gate answers first. */
+  const DATASET = DatasetSchema.parse({
+    name: 'os31944_deals',
+    label: 'Deals',
+    object: DEAL,
+    include: ['supplier'],
+    dimensions: [{ name: 'region', field: 'region', type: 'string' }],
+    measures: [{ name: 'total', aggregate: 'sum', field: 'amount' }],
+  });
+  /** The member, the hop it names that the object it leaves lacks, and that object. */
+  const UNKNOWN = [
+    ['nope.region', 'nope', DEAL],
+    ['supplier.nope.region', 'nope', SUPPLIER],
+  ] as const;
+
+  let engine: ObjectQL;
+  const services: Partial<Record<'native' | 'objectql', AnalyticsService>> = {};
+  const LIVE = ['native', 'objectql'] as const;
+
+  /** The member in each request position that reaches a join on the native strategy. */
+  const positions = (member: string) =>
+    [
+      ['where', { dimensions: [`${CUBE.name}.region`], where: { [member]: 'x' } }],
+      ['dimensions', { dimensions: [member] }],
+      ['timeDimensions', { timeDimensions: [{ dimension: member, dateRange: ['2026-01-01', '2026-12-31'] }] }],
+    ] as const;
+  const askCube = (face: (typeof LIVE)[number], shape: Record<string, unknown>) =>
+    services[face]!.query({ cube: CUBE.name, measures: [`${CUBE.name}.count`], ...shape } as never);
+  const rowsOf = (rows: unknown) =>
+    (rows as Array<Record<string, unknown>>)
+      .map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, typeof v === 'string' ? v : Number(v)])))
+      .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+
+  beforeAll(async () => {
+    const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as never);
+    engine = new ObjectQL({ logger: quiet } as never);
+    engine.registerDriver(driver as never, true);
+    await engine.init();
+    engine.registry.registerObject({
+      name: SUPPLIER,
+      label: 'Supplier',
+      fields: { name: { name: 'name', type: 'text' }, region: { name: 'region', type: 'text' } },
+    } as never);
+    engine.registry.registerObject({
+      name: DEAL,
+      label: 'Deal',
+      fields: {
+        region: { name: 'region', type: 'text' },
+        amount: { name: 'amount', type: 'number' },
+        supplier: { name: 'supplier', type: 'lookup', reference: SUPPLIER },
+      },
+    } as never);
+    await engine.syncSchemas();
+    await installDefaultOrganization(engine as never);
+    await engine.insert(SUPPLIER, { id: 's1', name: 'Hooli', region: 'apac' } as never);
+    await engine.insert(SUPPLIER, { id: 's2', name: 'Umbrella', region: 'emea' } as never);
+    // The deal's OWN region and its supplier's region disagree on every row.
+    for (const row of [
+      { id: 'd1', region: 'emea', amount: 1, supplier: 's1' },
+      { id: 'd2', region: 'emea', amount: 10, supplier: 's1' },
+      { id: 'd3', region: 'amer', amount: 100, supplier: 's2' },
+    ]) await engine.insert(DEAL, row as never);
+
+    for (const [face, caps] of [
+      ['native', undefined],
+      ['objectql', () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false })],
+    ] as const) {
+      const registered: Record<string, unknown> = {};
+      const provided: Record<string, unknown> = { data: engine };
+      await new AnalyticsServicePlugin({ cubes: [CUBE], ...(caps ? { queryCapabilities: caps } : {}) } as never).init({
+        getService: (name: string) => provided[name] ?? registered[name],
+        registerService: (name: string, svc: unknown) => { registered[name] = svc; },
+        replaceService: (name: string, svc: unknown) => { registered[name] = svc; },
+        hook: () => {},
+        logger: quiet,
+      } as never);
+      services[face] = registered.analytics as AnalyticsService;
+    }
+  });
+
+  afterAll(async () => {
+    try { await engine?.destroy(); } catch { /* noop */ }
+  });
+
+  it("refuses 'nope.region' and 'supplier.nope.region' INVALID_FIELD / 400 on the native strategy, as a where leaf, a dimension and a time dimension", async () => {
+    for (const [member, hop, object] of UNKNOWN) {
+      for (const [param, shape] of positions(member)) {
+        const err = await refusalOf(askCube('native', shape)) as Refusal & { object?: string };
+        expect(err.code, `${param} ${member}: ${err.message}`).toBe('INVALID_FIELD');
+        expect(err.status).toBe(400);
+        expect(err.param).toBe(param);
+        expect(err.member).toBe(member);
+        expect(err.field).toBe(hop);
+        expect(err.object).toBe(object);
+      }
+    }
+  });
+
+  it('the engine-aggregate strategy answers the same sentence in every position', async () => {
+    for (const [member] of UNKNOWN) {
+      for (const [param, shape] of positions(member)) {
+        const native = await refusalOf(askCube('native', shape));
+        const objectql = await refusalOf(askCube('objectql', shape));
+        expect(objectql.code, `${param} ${member}: ${objectql.message}`).toBe('INVALID_FIELD');
+        expect(objectql.status).toBe(400);
+        expect(objectql.message).toBe(native.message);
+      }
+    }
+  });
+
+  it("CONTROL: a compiled dataset keeps its own `include` refusal for 'nope.region', on both strategies", async () => {
+    for (const face of LIVE) {
+      const err = await refusalOf(
+        services[face]!.queryDataset(DATASET, { dimensions: ['region'], measures: ['total'], runtimeFilter: { 'nope.region': 'x' } } as never),
+      );
+      expect(err.code, `${face}: ${err.message}`).toBe('INVALID_FIELD');
+      expect(err.status).toBe(400);
+      expect(err.message).toContain("traverses relationship path 'nope', which the dataset does not declare in its `include`");
+    }
+  });
+
+  it("CONTROL: the declared 'supplier.region' still joins, filters and groups on the native strategy", async () => {
+    const filtered = await askCube('native', { dimensions: [`${CUBE.name}.region`], where: { 'supplier.region': 'apac' } });
+    expect(rowsOf(filtered.rows)).toEqual([{ [`${CUBE.name}.region`]: 'emea', [`${CUBE.name}.count`]: 2 }]);
+    const grouped = await askCube('native', { dimensions: ['supplier.region'] });
+    expect(rowsOf(grouped.rows)).toEqual([
+      { 'supplier.region': 'apac', [`${CUBE.name}.count`]: 2 },
+      { 'supplier.region': 'emea', [`${CUBE.name}.count`]: 1 },
+    ]);
+    const engineGrouped = await askCube('objectql', { dimensions: ['supplier.region'] });
+    expect(rowsOf(engineGrouped.rows)).toEqual(rowsOf(grouped.rows));
+  });
+});

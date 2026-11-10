@@ -4181,6 +4181,16 @@ const de = {
       expandTable: 'Erweitern',
       exitExpandedTable: 'Schließen',
     },
+    answerSource: {
+      title: 'So wurde das berechnet',
+      object: 'Objekt',
+      filter: 'Filter',
+      allRecords: 'Alle Datensätze',
+      groupedBy: 'Gruppiert nach',
+      aggregations: 'Aggregationen',
+      records: 'Datensätze',
+      visibleToYou: 'Nur Datensätze, die Sie sehen können',
+    },
     tool: {
       aggregate_data: "Die Daten zusammenfassen",
       get_record: "Den Datensatz lesen",

@@ -4180,6 +4180,16 @@ const ko = {
       expandTable: '펼치기',
       exitExpandedTable: '닫기',
     },
+    answerSource: {
+      title: '계산 방법',
+      object: '오브젝트',
+      filter: '필터',
+      allRecords: '모든 레코드',
+      groupedBy: '그룹 기준',
+      aggregations: '집계',
+      records: '레코드',
+      visibleToYou: '내가 볼 수 있는 레코드만',
+    },
     tool: {
       aggregate_data: "관련 데이터 집계하기",
       get_record: "이 레코드 읽기",

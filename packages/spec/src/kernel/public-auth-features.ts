@@ -316,6 +316,18 @@ export const PUBLIC_AUTH_FEATURES = {
         'address: the reset request answers known and unknown addresses alike.',
     },
   },
+  developerEditionCreate: {
+    surface: 'login',
+    semantics: 'opt-in',
+    exempt: {
+      reason:
+        'No spec input gates it: a host option (AuthManagerOptions.' +
+        'developerEditionCreate) sets it, true only where the host\'s ' +
+        'organization-create door accepts the developer edition. Read straight ' +
+        'off /auth/config by the console create-organization form, which ' +
+        'offers the Developer Edition choice only when it is true.',
+    },
+  },
 } as const satisfies Record<string, PublicAuthFeatureEntry>;
 
 export type PublicAuthFeatureName = keyof typeof PUBLIC_AUTH_FEATURES;

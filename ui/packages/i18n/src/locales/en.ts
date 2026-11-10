@@ -5044,6 +5044,16 @@ const en = {
       expandTable: 'Expand',
       exitExpandedTable: 'Close',
     },
+    answerSource: {
+      title: 'How this was computed',
+      object: 'Object',
+      filter: 'Filter',
+      allRecords: 'All records',
+      groupedBy: 'Grouped by',
+      aggregations: 'Aggregations',
+      records: 'Records',
+      visibleToYou: 'Only records visible to you',
+    },
     tool: {
       aggregate_data: 'Aggregate the data',
       get_record: 'Read the record',

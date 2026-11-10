@@ -171,7 +171,7 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
   // `requiredPermissions` action closed on exactly the deployments this
   // doctrine exists to protect (objectui#4656).
   const { systemPermissions } = usePermissions();
-  const { fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionDescription, actionSubmitText, actionCancelText, actionResultDialog } = useObjectLabel();
+  const { fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionDescription, actionSubmitText, actionCancelText, actionResultDialog, actionPreflight } = useObjectLabel();
   // Entitlement 403s render as a dialog, not a toast — its copy is localized
   // here rather than taken from the server (objectui#2458 / cloud#959).
   // `language` also resolves inline per-locale action-param labels below, and
@@ -375,14 +375,18 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
         // The action's declared `preflight` read joins the same slot
         // (objectstack#31808): judged against the params the runner handed
         // over, its URL filled by the runner's `interpolateRead`.
+        // Its `fields` row labels read the bundle's
+        // `…preflight.fields.PATH` strings first (objectstack#31937).
         companion: resolveParamDialogCompanion(objForI18n, action?.name, row, {
-          preflight: action?.preflight,
+          preflight: action?.preflight
+            ? actionPreflight(objForI18n, action?.name, action.preflight)
+            : action?.preflight,
           params,
           interpolateRead,
         }),
       });
     })(); });
-  }, [objectName, objectDef, objects, metadata, fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionSubmitText, actionCancelText, language]);
+  }, [objectName, objectDef, objects, metadata, fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionSubmitText, actionCancelText, actionPreflight, language]);
 
   const currentUser = user
     ? { id: user.id, name: user.name, avatar: user.image, isPlatformAdmin: (user as any)?.isPlatformAdmin ?? false, systemPermissions }
