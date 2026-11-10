@@ -87,7 +87,7 @@ const ALL_OFF: SsoProviderSignInOptions = { allowIdpInitiated: false, allowJit: 
  * `auth-manager-password-session-policy.ts` reads `two_factor_enabled` in).
  * Anything else, missing included, is OFF.
  */
-function storedOn(value: unknown): boolean {
+export function ssoToggleStoredOn(value: unknown): boolean {
   return value === true || value === 1;
 }
 
@@ -111,8 +111,8 @@ export async function readSsoProviderSignInOptions(
     const row = Array.isArray(rows) ? (rows[0] as Record<string, unknown> | undefined) : undefined;
     if (!row || row.provider_id !== providerId) return ALL_OFF;
     return {
-      allowIdpInitiated: storedOn(row[SSO_ALLOW_IDP_INITIATED_FIELD]),
-      allowJit: storedOn(row[SSO_ALLOW_JIT_FIELD]),
+      allowIdpInitiated: ssoToggleStoredOn(row[SSO_ALLOW_IDP_INITIATED_FIELD]),
+      allowJit: ssoToggleStoredOn(row[SSO_ALLOW_JIT_FIELD]),
     };
   } catch {
     return ALL_OFF;
@@ -171,7 +171,7 @@ export function applyIdpInitiatedToOidcConfigOnRead(objectName: string, row: unk
   const record = row as Record<string, unknown>;
   const parsed = parseBlob(record[SSO_OIDC_CONFIG_FIELD]);
   if (!parsed) return;
-  parsed.config[OIDC_IDP_INITIATED_KEY] = storedOn(record[SSO_ALLOW_IDP_INITIATED_FIELD]);
+  parsed.config[OIDC_IDP_INITIATED_KEY] = ssoToggleStoredOn(record[SSO_ALLOW_IDP_INITIATED_FIELD]);
   record[SSO_OIDC_CONFIG_FIELD] = serialize(parsed);
 }
 

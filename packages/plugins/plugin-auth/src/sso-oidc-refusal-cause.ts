@@ -363,7 +363,7 @@ export function ssoSamlAcsProviderId(endpointPath: string | undefined): string |
 
 /** One SSO callback request that runs inside the refusal scope. */
 export type SsoCallbackRequest =
-  | { protocol: 'oidc'; providerId: string }
+  | { protocol: 'oidc'; providerId: string; request: Request }
   | { protocol: 'saml'; providerId: string; request: Request };
 
 /**
@@ -372,7 +372,7 @@ export type SsoCallbackRequest =
  */
 export function ssoCallbackOf(endpointPath: string | undefined, request: Request): SsoCallbackRequest | undefined {
   const oidc = ssoOidcCallbackProviderId(endpointPath);
-  if (oidc !== undefined) return { protocol: 'oidc', providerId: oidc };
+  if (oidc !== undefined) return { protocol: 'oidc', providerId: oidc, request };
   const saml = ssoSamlAcsProviderId(endpointPath);
   if (saml !== undefined && request.method === 'POST') return { protocol: 'saml', providerId: saml, request };
   return undefined;

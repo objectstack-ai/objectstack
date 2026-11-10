@@ -266,6 +266,7 @@ import { createAuthInstance, type AuthInstanceHost } from './auth-manager-auth-i
 import { readSamlAcsLanding, runSsoCallbackScope, type SamlLandingContext, type SsoCallbackRequest } from './sso-oidc-refusal-cause.js';
 import { readSsoProviderSignInOptions, runWithSamlIdpInitiated } from './sso-sign-in-options.js';
 import { readStoredSamlConfig, runSsoSamlRefusalCauseScope } from './sso-saml-refusal-cause.js';
+import { readThirdPartyLoginProvider, runThirdPartyInitiatedLogin, type ThirdPartyLoginContext } from './sso-third-party-initiated-login.js';
 // [#25224 cut 16] The body of `buildPluginList`; the method of the same name
 // below hands it the members it reads (`PluginListHost`). The organization
 // plugin's factory (cut 15) is now imported there, by the arrow that moved
@@ -4068,7 +4069,9 @@ export class AuthManager {
    * one `warn` line on this manager's logger, and a SAML ACS
    * (`/sso/saml2/sp/acs/:providerId`) whose refusal lands on the sign-in's error
    * URL, read from the relay state before better-auth consumes it, or for an
-   * IdP-initiated response (no relay state) on the platform error page.
+   * IdP-initiated response (no relay state) on the platform error page. An
+   * OIDC callback of the third-party-initiated shape (`iss`, no code) passes
+   * the entry of `sso-third-party-initiated-login.ts` first.
    */
   private runSsoCallback(callback: SsoCallbackRequest, run: () => Promise<Response>): Promise<Response> {
     // A SAML ACS request runs with its provider's IdP-initiated toggle in
@@ -4094,15 +4097,37 @@ export class AuthManager {
             );
           }
         : run;
-    return runSsoCallbackScope(
+    const callbackScope = (): Promise<Response> =>
+      runSsoCallbackScope(
+        callback,
+        this.config.logger,
+        async (saml) => {
+          const auth: any = await this.getOrCreateAuth();
+          const context = (await auth.$context) as SamlLandingContext;
+          return readSamlAcsLanding(context, saml.providerId, saml.request);
+        },
+        scoped,
+      );
+    if (callback.protocol !== 'oidc') return callbackScope();
+    // [#32086] An IdP app tile's third-party-initiated request (`iss`, no code)
+    // starts the vendor's own sign-in when the four checks of ruling 6764924025
+    // hold; anything else reaches the vendor callback unchanged
+    // (`sso-third-party-initiated-login.ts`).
+    const engine = this.config.dataEngine;
+    return runThirdPartyInitiatedLogin(
       callback,
-      this.config.logger,
-      async (saml) => {
-        const auth: any = await this.getOrCreateAuth();
-        const context = (await auth.$context) as SamlLandingContext;
-        return readSamlAcsLanding(context, saml.providerId, saml.request);
+      {
+        readProvider: () =>
+          readThirdPartyLoginProvider(engine ? (withSystemReadContext(engine) as never) : undefined, callback.providerId),
+        context: async () => {
+          const auth: any = await this.getOrCreateAuth();
+          return (await auth.$context) as ThirdPartyLoginContext;
+        },
+        startUrl: new URL(`${this.getBasePath()}/sign-in/sso`, callback.request.url).href,
+        dispatch: (request) => this.handleRequest(request),
+        logger: this.config.logger,
       },
-      scoped,
+      callbackScope,
     );
   }
 
