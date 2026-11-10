@@ -1,12 +1,12 @@
 ---
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 '@objectstack/types': patch
 ---
 
 fix(spec, types): retired-key, aggregation and filter-comparand refusals answer a one-line message on the data doors, with the full prescription as a hint
 
 Clause-②: yes (widening)
-Metadata-protocol: none
+Metadata-protocol: added
 
 The data doors used to answer these refusals with the spec's whole author-facing prescription as the message, 300 to 1,300 characters, which a toast cannot show. Each one now also carries a hand-written head (one line, at most 160 characters, naming the refused key or shape and the fix):
 
