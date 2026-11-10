@@ -274,6 +274,8 @@ export class HonoServerPlugin implements Plugin {
 
     private options: HonoPluginOptions;
     private server: HonoHttpServer;
+    /** The drain {@link drain} started, shared by `kernel:shutdown` and {@link destroy}. */
+    private drained: Promise<void> | undefined;
 
     constructor(options: HonoPluginOptions = {}) {
         this.options = {
@@ -699,6 +701,17 @@ export class HonoServerPlugin implements Plugin {
             }
         });
 
+        // Drain the HTTP server FIRST on shutdown, and wait for it. The kernel
+        // runs every `kernel:shutdown` handler before any plugin's `destroy()`,
+        // so a request still being served (its body still arriving, or its
+        // handler still running) finishes against live services: the plugins
+        // registered after this one, which a request needs (auth, data, ...),
+        // are destroyed in reverse order and so BEFORE this plugin's own
+        // `destroy()`. The adapter bounds the wait by its drain window.
+        ctx.hook('kernel:shutdown', async () => {
+            await this.drain();
+        });
+
         // Open the listening socket on kernel:listening — this fires
         // STRICTLY AFTER every kernel:ready handler completes, so all
         // plugins have finished registering routes by the time the
@@ -740,8 +753,18 @@ export class HonoServerPlugin implements Plugin {
      * Destroy phase - Stop server
      */
     async destroy() {
-        this.server.close();
+        // Awaited: a kernel exits the process once `shutdown()` resolves, so a
+        // drain left running here is cut off with the process, and every
+        // connection it was draining closes with no answer. Usually already
+        // done, by the `kernel:shutdown` hook above.
+        await this.drain();
         // Note: Can't use ctx.logger here since we're in destroy
         console.log('[HonoServerPlugin] Server stopped');
+    }
+
+    /** Close the server and drain it, once; later calls share that drain. */
+    private drain(): Promise<void> {
+        this.drained ??= this.server.close();
+        return this.drained;
     }
 }

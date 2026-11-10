@@ -327,3 +327,60 @@ describe('backfillActivationLedgerAtBoot — a row whose write fails', () => {
     expect(warning).toContain('connection reset');
   });
 });
+
+/**
+ * [#32096] The one-shot boot (`runPlatformMigrations: false`, the CLI's
+ * `bootSchemaStack`) repairs nothing behind the operator's back: the backfill
+ * only names what the next served boot binds. The boot `os migrate plan`
+ * makes over a real database is pinned in
+ * `packages/cli/src/utils/schema-migrate.activation-ledger-backfill.integration.test.ts`.
+ */
+describe('backfillActivationLedgerAtBoot — on a one-shot boot', () => {
+  const pending = () => {
+    install(A);
+    ship('flow', 'nightly_sync', A);
+    registry.sealBareNameHolders();
+    return makeLedger([{ id: 'r1', metadata_type: 'flow', name: 'nightly_sync', package_id: null, active: false }]);
+  };
+
+  it('writes nothing, and names in one line the row the next served boot binds and to which package', async () => {
+    const { engine, table } = pending();
+    const log = logger();
+
+    const report = await backfillActivationLedgerAtBoot(engine, bootRegistry(), log, { runPlatformMigrations: false });
+
+    expect(engine.update).not.toHaveBeenCalled();
+    expect(table[0].package_id).toBeNull();
+    expect(report?.bound).toMatchObject([{ metadataType: 'flow', name: 'nightly_sync', packageId: A }]);
+    expect(log.info).toHaveBeenCalledTimes(1);
+    const line = String(log.info.mock.calls[0]?.[0]);
+    expect(line).toContain(`flow 'nightly_sync' → ${A}`);
+    expect(line).toContain('next served boot');
+    expect(line).not.toContain('now name');
+    expect(log.warn).not.toHaveBeenCalled();
+    expect(log.error).not.toHaveBeenCalled();
+  });
+
+  it('a ledger it cannot read is not an upgrade that failed: debug only, no warning', async () => {
+    registry.sealBareNameHolders();
+    const engine = { find: vi.fn(async () => { throw new Error('no such table'); }), update: vi.fn() };
+    const log = logger();
+
+    expect(await backfillActivationLedgerAtBoot(engine, bootRegistry(), log, { runPlatformMigrations: false })).toBeUndefined();
+    expect(engine.update).not.toHaveBeenCalled();
+    expect(log.warn).not.toHaveBeenCalled();
+    expect(log.debug).toHaveBeenCalledTimes(1);
+    expect(log.debug.mock.calls[0]?.[1]).toEqual({ error: 'no such table' });
+  });
+
+  it('CONTROL: a boot that declares nothing, or declares it repairs (the served boot), binds the row', async () => {
+    for (const options of [undefined, { runPlatformMigrations: true }]) {
+      registry = new SchemaRegistry();
+      registry.logLevel = 'silent';
+      const { engine, table } = pending();
+      await backfillActivationLedgerAtBoot(engine, bootRegistry(), logger(), options);
+      expect(engine.update).toHaveBeenCalledTimes(1);
+      expect(table[0].package_id).toBe(A);
+    }
+  });
+});

@@ -29,35 +29,38 @@ curl -b cookies.txt "http://localhost:3000/api/v1/data/<your_object>"
 ## The sample `note` object
 
 `src/objects/note.object.ts` is a **sample**, there so a blank project has one
-object to boot, query and test on day one. It is not part of your app: until
-you remove it, it ships in every build, is served over REST, and is listed to
-any MCP client next to your own objects. Delete or replace it once your own
-objects exist:
+object to boot, query and test on day one. It is not part of the app you are
+building: until you remove it, it ships in every build, is served over REST,
+is listed to any MCP client next to your own objects, and is the one entry of
+the starter app. Delete or replace it once your own objects exist:
 
 1. Delete `src/objects/note.object.ts` and its export line in
    `src/objects/index.ts`.
-2. Point `note.test.ts` at one of your own objects (rename the file to match).
-   It imports `Note`, so it stops compiling until you do.
-3. Run `pnpm validate` and `pnpm test`.
+2. Delete `src/views/note.view.ts` and its export line in
+   `src/views/index.ts`, and the `Notes` entry in `src/apps/main.app.ts` (put
+   your own objects there instead — see [The Console](#the-console) below).
+3. Point `note.test.ts` at one of your own objects (rename the file to match).
+   It imports `Note`, as do the view and the app, so they stop compiling until
+   you do.
+4. Run `pnpm validate` and `pnpm test`.
 
-## The Console — this starter ships no app
+## The Console
 
 `pnpm dev` also serves the admin Console at `http://localhost:3000/_console/`,
-and prints the link on boot. Open it and you will see the platform's own apps
-(Setup, Account) and **not** the object in `src/objects/` — this starter ships
-objects only, with no app and no views.
+and prints the link on boot. Open it and you will see this project's app,
+**Main**, beside the platform's own apps (Setup, Account); its `Notes` entry
+opens the list of sample notes.
 
-That is the intended starting point, not a broken install. The object is live
-the whole time — the `curl` above returns it, and an MCP client can read and
-write it. What it has no route into is the Console's navigation.
-
-**An object appears in Console navigation only when an app lists it.** Add an
-`*.app.ts` under `src/apps/` (plus the views it points at), export each one from
-its directory's `index.ts`, and the Console renders it after the next `pnpm dev`
-rebuild. `objectstack generate app NAME` and `objectstack generate view NAME`
-write the file and its export line together. The `objectstack-ui` skill covers
-the shape; describing the app you want to your coding agent is the intended
-path.
+**An object appears in Console navigation only when an app lists it.**
+`src/apps/main.app.ts` lists the sample object, and `src/views/note.view.ts`
+draws its list. To show another object, add an entry for it to the app's
+`navigation` (or add an app of its own under `src/apps/`) and give it a view,
+exporting each new file from its directory's `index.ts`.
+`objectstack generate app NAME --object OBJECT` and
+`objectstack generate view OBJECT` write the file and its export line
+together; the Console renders it after the next `pnpm dev` rebuild. The
+`objectstack-ui` skill covers the shape; describing the app you want to your
+coding agent is the intended path.
 
 ## Your app is an MCP server
 
@@ -83,9 +86,11 @@ for OAuth, API keys, and which objects/actions become tools.
   the wiring for every directory below
 - `src/objects/` — object definitions (one file per object); `note.object.ts`
   is the sample described [above](#the-sample-note-object)
-- `src/views/`, `src/actions/`, `src/flows/`, `src/dashboards/`, `src/apps/`,
-  `src/skills/`, `src/picklists/`, `src/security/` (permission sets),
-  `src/datasets/` (analytics datasets) — empty to start. Each directory's `index.ts`
+- `src/apps/` — the starter app, `main.app.ts`, described in
+  [The Console](#the-console); `src/views/` — the sample object's list view
+- `src/actions/`, `src/flows/`, `src/dashboards/`, `src/skills/`,
+  `src/picklists/`, `src/security/` (permission sets), `src/datasets/`
+  (analytics datasets) — empty to start. Each directory's `index.ts`
   exports what it holds and `objectstack.config.ts` hands those exports to the
   stack, so `objectstack generate flow NAME` (or `view`, `action`, …) adds a
   file and one export line, and the item is loaded, and counted by

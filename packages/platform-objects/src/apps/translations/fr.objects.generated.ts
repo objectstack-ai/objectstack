@@ -2208,6 +2208,26 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
             helpText: "Facultatif. Format de NameID SAML demandé. Par défaut, le format configuré sur l’IdP.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          mapEmail: {
+            label: "Mappage : attribut e-mail",
+            helpText: "Facultatif. Attribut d’assertion mappé à l’e-mail de l’utilisateur. Par défaut « email », puis le NameID. Entra ID : http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          mapFirstName: {
+            label: "Mappage : attribut prénom",
+            helpText: "Facultatif. Attribut d’assertion mappé au prénom de l’utilisateur. Par défaut « givenName ». Entra ID : http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          mapLastName: {
+            label: "Mappage : attribut nom",
+            helpText: "Facultatif. Attribut d’assertion mappé au nom de famille de l’utilisateur. Par défaut « surname ». Entra ID : http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          mapName: {
+            label: "Mappage : attribut nom d’affichage",
+            helpText: "Facultatif. Attribut d’assertion mappé au nom complet de l’utilisateur, utilisé lorsque les attributs prénom et nom sont absents. Par défaut « displayName », puis le NameID. Okta : name. Entra ID : http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          },
           mapGroups: {
             label: "Mappage : attribut groupes",
             helpText: "Facultatif. Attribut d’assertion qui contient les groupes de l’utilisateur. Chaque connexion accorde les ensembles d’autorisations mappés à ces groupes. Laissez vide pour ne mapper aucun groupe.",
@@ -2267,6 +2287,57 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Terminé",
           fields: {
             groupsClaim: "Revendication des groupes"
+          }
+        }
+      },
+      show_sso_attribute_mapping: {
+        label: "Afficher le mappage des attributs",
+        resultDialog: {
+          title: "Mappage des attributs",
+          description: "Les attributs de l’IdP (SAML) ou les revendications (OIDC) dans lesquels ce fournisseur lit l’e-mail et le nom de l’utilisateur à chaque connexion. Vide signifie la valeur par défaut : e-mail depuis « email » (SAML : puis le NameID) ; nom depuis « givenName » + « surname », puis « displayName » (OIDC : « name »). Le prénom et le nom ne s’appliquent qu’à SAML. Modifiez-le avec « Modifier le mappage des attributs ».",
+          acknowledge: "Terminé",
+          fields: {
+            protocol: "Protocole",
+            email: "E-mail",
+            firstName: "Prénom",
+            lastName: "Nom",
+            name: "Nom d’affichage"
+          }
+        }
+      },
+      edit_sso_attribute_mapping: {
+        label: "Modifier le mappage des attributs",
+        params: {
+          email: {
+            label: "Attribut e-mail",
+            helpText: "L’attribut ou la revendication de l’IdP mappé à l’e-mail de l’utilisateur. Laissez tel quel pour conserver la valeur actuelle ; videz-le pour revenir à la valeur par défaut (« email »). Entra ID SAML : http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          firstName: {
+            label: "Attribut prénom (SAML)",
+            helpText: "SAML uniquement. L’attribut d’assertion mappé au prénom de l’utilisateur. Laissez tel quel pour conserver la valeur actuelle. Entra ID : http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          lastName: {
+            label: "Attribut nom (SAML)",
+            helpText: "SAML uniquement. L’attribut d’assertion mappé au nom de famille de l’utilisateur. Laissez tel quel pour conserver la valeur actuelle. Entra ID : http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          name: {
+            label: "Attribut nom d’affichage",
+            helpText: "L’attribut ou la revendication de l’IdP mappé au nom complet de l’utilisateur (SAML : utilisé lorsque le prénom et le nom sont absents). Laissez tel quel pour conserver la valeur actuelle. Okta SAML : name. Entra ID : http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          }
+        },
+        resultDialog: {
+          title: "Mappage des attributs enregistré",
+          description: "Les attributs ou revendications dans lesquels ce fournisseur lit désormais l’e-mail et le nom de l’utilisateur à chaque connexion. Vide signifie que la valeur par défaut s’applique.",
+          acknowledge: "Terminé",
+          fields: {
+            email: "E-mail",
+            firstName: "Prénom",
+            lastName: "Nom",
+            name: "Nom d’affichage"
           }
         }
       }
@@ -2800,7 +2871,64 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "Tous"
+        label: "Tous",
+        emptyState: {
+          title: "Aucune correspondance de groupe pour l’instant",
+          message: "Accordez un ensemble d’autorisations aux membres d’un groupe du fournisseur d’identité avec « Associer un groupe SSO » (un groupe qu’un fournisseur SSO envoie à la connexion) ou « Associer un groupe SCIM » (un groupe qu’une connexion SCIM provisionne)."
+        }
+      }
+    },
+    _actions: {
+      map_sso_group: {
+        label: "Associer un groupe SSO",
+        description: "Accorder un ensemble d’autorisations à chaque membre d’un groupe qu’un fournisseur SSO envoie à la connexion. S’applique à la prochaine connexion de chaque membre via le fournisseur.",
+        successMessage: "Correspondance de groupe enregistrée. Elle s’applique à la prochaine connexion de chaque membre via le fournisseur.",
+        params: {
+          providerId: {
+            label: "ID du fournisseur SSO",
+            helpText: "L’ID du fournisseur SSO dont la connexion transmet le groupe, par ex. « okta ». Le fournisseur doit avoir une revendication de groupes (Modifier la revendication de groupes sur le fournisseur SSO)."
+          },
+          groupExternalId: {
+            label: "ID externe du groupe",
+            helpText: "La valeur du groupe telle que la revendication de groupes l’envoie quand c’est un ID, par ex. un ID d’objet de groupe Entra ID. Renseignez ce champ ou le nom d’affichage du groupe, pas les deux."
+          },
+          groupDisplayName: {
+            label: "Nom d’affichage du groupe",
+            helpText: "La valeur du groupe telle que la revendication de groupes l’envoie quand c’est un nom, par ex. « Sales ». Renseignez ce champ ou l’ID externe du groupe, pas les deux."
+          },
+          permissionSet: {
+            label: "Ensemble d’autorisations",
+            helpText: "L’ensemble d’autorisations accordé à un membre du groupe, dans l’organisation du fournisseur. Les ensembles d’administrateur sont refusés."
+          }
+        }
+      },
+      map_scim_group: {
+        label: "Associer un groupe SCIM",
+        description: "Accorder un ensemble d’autorisations à chaque membre d’un groupe qu’une connexion SCIM provisionne. Les membres actuels du groupe le reçoivent immédiatement.",
+        successMessage: "Correspondance de groupe enregistrée",
+        params: {
+          connectionId: {
+            label: "ID de connexion SCIM",
+            helpText: "La connexion SCIM par laquelle le groupe est provisionné, par ex. « okta-prod » : l’ID de connexion de son identifiant."
+          },
+          groupExternalId: {
+            label: "ID externe du groupe",
+            helpText: "L’externalId du groupe tel que le fournisseur d’identité l’envoie. Renseignez ce champ ou le nom d’affichage du groupe, pas les deux."
+          },
+          groupDisplayName: {
+            label: "Nom d’affichage du groupe",
+            helpText: "Le displayName du groupe, comparé à l’identique. Renseignez ce champ ou l’ID externe du groupe, pas les deux."
+          },
+          permissionSet: {
+            label: "Ensemble d’autorisations",
+            helpText: "L’ensemble d’autorisations accordé à un membre du groupe, dans l’organisation de la connexion. Les ensembles d’administrateur sont refusés."
+          }
+        }
+      },
+      delete_group_mapping: {
+        label: "Supprimer la correspondance",
+        confirmText: "Supprimer cette correspondance de groupe ? Les membres du groupe ne reçoivent plus son ensemble d’autorisations. Pour une connexion SCIM, les membres du groupe sont reprojetés immédiatement et perdent les attributions faites par cette correspondance. Pour un fournisseur SSO, les attributions que ses connexions ont faites pour cet ensemble sont retirées immédiatement, sauf si une autre correspondance du fournisseur nomme le même ensemble. Pour la rétablir, associez de nouveau le groupe.",
+        successMessage: "Correspondance de groupe supprimée"
       }
     }
   },
@@ -3602,6 +3730,55 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       note: {
         label: "Note"
+      }
+    }
+  },
+  sys_metadata_commit: {
+    label: "Metadata Commit",
+    pluralLabel: "Metadata Commits",
+    description: "Package-scoped commit log grouping a turn’s metadata changes.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      package_id: {
+        label: "Package"
+      },
+      operation: {
+        label: "Operation",
+        options: {
+          apply: "apply",
+          revert: "revert"
+        }
+      },
+      message: {
+        label: "Message",
+        help: "Change summary; for AI turns, the user instruction that produced it."
+      },
+      actor: {
+        label: "Actor"
+      },
+      ai_model: {
+        label: "AI Model"
+      },
+      parent_commit_id: {
+        label: "Parent Commit"
+      },
+      event_seq_start: {
+        label: "Event Seq Start"
+      },
+      event_seq_end: {
+        label: "Event Seq End"
+      },
+      items: {
+        label: "Items",
+        help: "JSON: [{ type, name, existedBefore, prevVersion }] — the revert plan."
+      },
+      item_count: {
+        label: "Item Count"
+      },
+      created_at: {
+        label: "Created At"
       }
     }
   },

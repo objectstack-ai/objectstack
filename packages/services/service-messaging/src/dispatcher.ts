@@ -449,6 +449,9 @@ export class NotificationDispatcher {
             // Read the actor back off the snapshot `enqueueDeliveries` took —
             // no read of `sys_notification` here, by design.
             actorId: typeof p.actorId === 'string' ? p.actorId : undefined,
+            // [#32240] The snapshot's keys, validated above, for a channel that
+            // stores the text (the inbox) to keep beside it.
+            ...(keys ? { keyedText: keys } : {}),
             payload: p,
         };
 

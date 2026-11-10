@@ -384,8 +384,11 @@ cannot take over a package's set (two-doors separation — an edit of a set
 shipped in code is refused; clone it instead, see below), which is what makes
 package uninstall well-defined — and enforced: uninstalling a package
 (`DELETE /api/v1/packages/:id`) takes its sets and positions out of the
-catalog, revokes every `sys_user_permission_set` grant naming one of its sets,
-and removes its audience-binding suggestions in the
+catalog, revokes every `sys_user_permission_set` grant naming one of its sets
+that is bound to that package or to no package (a grant bound to another
+package stays; an unbound grant of a name another holder still serves is
+revoked and named under `reportedGrants`, so the operator can grant it again
+with the package named), and removes its audience-binding suggestions in the
 same request (no ghost grants); the uninstall response reports the revocation
 under `data.persisted.cleanups` (the dispatcher's `/packages` domain answers
 the route, and it nests the protocol's uninstall report under `persisted`).

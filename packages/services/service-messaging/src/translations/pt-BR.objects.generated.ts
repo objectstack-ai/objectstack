@@ -60,6 +60,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       created_at: {
         label: "Criado em"
+      },
+      keyed_text: {
+        label: "Chaves de texto",
+        help: "As chaves de catálogo e os parâmetros a partir dos quais o título e o corpo foram renderizados na entrega. Uma leitura renderiza novamente o título e o corpo a partir delas no idioma do leitor; null quando a notificação não trazia chaves, e o título e o corpo armazenados são então servidos como foram gravados."
       }
     },
     _views: {
