@@ -3288,7 +3288,7 @@ export class AutomationEngine implements IAutomationService {
                 return { flowName, ...(packageId ? { flowPackage: packageId } : {}) };
             },
             key: (flowName, flowPackage) => {
-                if (!flowPackage) return flowName;
+                if (!flowPackage) return this.flowSlots.isShared(flowName) ? unfiledFlowKey(flowName) : flowName;
                 const key = this.flowSlots.keyOf(flowName, flowPackage);
                 if (key !== undefined) return key;
                 // The package holds no flow of the name now: a key no slot
@@ -6180,7 +6180,7 @@ export class AutomationEngine implements IAutomationService {
      */
     private resolvedFlowCallKey(name: string, callerPackageId: string | null): string {
         const resolved = this.resolveFlowKey(name, callerPackageId);
-        return 'key' in resolved ? resolved.key : name;
+        return 'key' in resolved ? resolved.key : unfiledFlowKey(name);
     }
 
     /**
