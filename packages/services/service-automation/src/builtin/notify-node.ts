@@ -743,6 +743,20 @@ function withoutTemplateCallerPackage(payload: unknown): Record<string, unknown>
     return rest;
 }
 
+/**
+ * [ADR-0150 D3, #31699 contract review F-A] Whether a node's literal `payload`
+ * carries a template reference the delivery channels take the template path
+ * on (`payload.template`, a non-blank string, read exactly as the email and
+ * inbox channels read it). Such a reference is resolved from the flow's armed
+ * package like `template:` is, so this spelling never resolves the name
+ * environment-wide from a packaged flow.
+ */
+function literalPayloadTemplate(payload: unknown): boolean {
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return false;
+    const template = (payload as { template?: unknown }).template;
+    return typeof template === 'string' && template.trim() !== '';
+}
+
 export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext): void {
     const getMessaging = (): MessagingServiceSurface | undefined => {
         try {
@@ -1007,7 +1021,11 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             // armed, never a stamp on the definition. An environment-authored
             // flow (or an environment override of a packaged one) names none,
             // and the delivery resolves the name as a caller with no package.
-            const templateCallerPackageId = template ? engine.flowCallerPackage(context) : null;
+            // A template reference written in the literal `payload` (which the
+            // channels read just the same) names it too.
+            const templateCallerPackageId = template || literalPayloadTemplate(cfg.payload)
+                ? engine.flowCallerPackage(context)
+                : null;
             const templateData = cfg.templateData
                 ? resolveValueSlotMap(engine, cfg.templateData, variables, 'templateData', context)
                 : undefined;
@@ -1183,7 +1201,7 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                                 ...(templateData !== undefined ? { templateData } : {}),
                                 ...(templateCallerPackageId ? { templateCallerPackageId } : {}),
                             }
-                            : { title, body }),
+                            : { title, body, ...(templateCallerPackageId ? { templateCallerPackageId } : {}) }),
                         url: actionUrl,
                     },
                     severity,

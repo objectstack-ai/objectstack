@@ -49,8 +49,11 @@
  * the base it customizes. Each such holder's exact read refuses the row,
  * naming every one (`pairMemberOwners`, `@objectstack/metadata-protocol`; the
  * epic ruling on #31699 F2). Not bindable by `bind`: the row's package column
- * already names the pair, and the fix is the row declaring its base
- * (`overrides.package`), after which only that base serves it.
+ * already names the pair. A row declaring its base (`overrides.package`) is
+ * served by that base only, but the save gate refuses that declaration on a
+ * member the base does not ship (`declared_package_ships_no_such_item`,
+ * #28777), so no door binds an added member to one base today: the row stays
+ * refused, and listed here, until it is deleted.
  *
  * Beside them it lists each package-less `sys_metadata` row of such a type
  * (any type whose readers consult `(package, name)`, not only a bundled one)
@@ -58,8 +61,9 @@
  * holder and cannot say which (ADR-0150 D4), so each holder's exact read
  * refuses it and the list scoped to a holder leaves it out
  * (`packageLessRowOwners`, `@objectstack/metadata-protocol`; epic ruling
- * 6761802819 on #31699). The fix is saving the row under the one package it
- * customizes.
+ * 6761802819 on #31699). Where one holder ships the item, the fix is saving
+ * the customization into that holder's pair declaring it and deleting the
+ * row; otherwise no door binds it to one package today.
  *
  * ## A database this release has not booted yet
  *

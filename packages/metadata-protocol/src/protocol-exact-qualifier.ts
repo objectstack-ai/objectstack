@@ -160,9 +160,10 @@ export async function admitExactQualifier(
  * of the name (two packages of one App share its pair, and the row declares
  * no `overrides` naming one of them) is no package's own: it is refused on
  * each such holder's address, naming every one ({@link pairMemberOwners},
- * epic ruling on #31699 F2). The App's own address keeps #28390 ruling A, and
- * a row that declares the base it customizes is served on that base's address
- * only.
+ * epic ruling on #31699 F2). The App's own address keeps #28390 ruling A, a
+ * row that declares the base it customizes is served on that base's address
+ * only, and a row whose sole owner is not one of the address's bases is that
+ * owner's, not this address's ({@link pairRowOnAddress}).
  *
  * @returns the item to serve (unchanged when it is the address's).
  */
@@ -196,15 +197,14 @@ export function exactQualifierItem(
         const installed = installedManifestsOfEngine(host.engine);
         const bases = [address.packageId, ...address.registryHolders];
         if (bases.some((base) => isPairOf(served, base, installed))) {
-            if (isAppPairOf(served, address.packageId, installed)) return item;
-            const owners = pairMemberOwners(served, registry.packageScopedHoldersOf(request.type, request.name) ?? [], installed, item);
-            if (owners.length > 1) {
+            const verdict = pairRowOnAddress(served, item, address.packageId, bases,
+                registry.packageScopedHoldersOf(request.type, request.name) ?? [], installed);
+            if (verdict === 'serve') return item;
+            if (verdict !== 'not-member') {
                 throw refusal(request.type, request.name, address.packageId, 'ambiguous-in-closure',
-                    owners.map((owner) => ({ kind: 'package' as const, packageId: owner })));
+                    verdict.refuse.map((owner) => ({ kind: 'package' as const, packageId: owner })));
             }
-            const declared = declaredOverrideBase(item);
-            if (declared === undefined || bases.includes(declared)) return item;
-            // Bound to another holder: not this address's member.
+            // Another package's member: not this address's.
         }
     }
     if (address.registryHolders.length > 1) {
@@ -310,11 +310,43 @@ export function pairMemberWithheldAt(
 ): boolean {
     const registry = exactQualifierRegistry(host);
     if (!registry || !registry.readsByPackage(type)) return false;
-    const installed = installedManifestsOfEngine(host.engine);
-    if (isAppPairOf(pairId, base, installed)) return false;
-    if (pairMemberOwners(pairId, registry.packageScopedHoldersOf(type, name) ?? [], installed, item).length > 1) return true;
+    return pairRowOnAddress(pairId, item, base, [base], registry.packageScopedHoldersOf(type, name) ?? [],
+        installedManifestsOfEngine(host.engine)) !== 'serve';
+}
+
+/**
+ * [#31699 F2, contract review F-B, delta review S2] The one owner check for a
+ * customization pair's member row `item` (stored under `pairId`) met on the
+ * exact address of `addressPackageId`, whose admitted bases are `bases` (the
+ * address's package and the holders it admitted), given every package
+ * `holders` holding the name. Self-contained, so a generic pair line (#32277)
+ * can hoist it to the top of {@link exactQualifierItem}; the scoped list asks
+ * the same question ({@link pairMemberWithheldAt}).
+ *
+ * - A row that declares the base it customizes (`overrides.package`) is that
+ *   base's member only, the App's own address included: read first (F-B).
+ * - Else the App's own pair keeps its added member on the App's address
+ *   (#28390 ruling A).
+ * - Else two or more holders could own it: refuse, naming every one (F2).
+ * - Else a sole owner that is not one of the address's bases owns it: not
+ *   this address's member (S2).
+ * - Else (the sole owner is a base, or no holder pairs it) it is served.
+ */
+export function pairRowOnAddress(
+    pairId: string,
+    item: unknown,
+    addressPackageId: string,
+    bases: readonly string[],
+    holders: readonly string[],
+    installed: InstalledManifestLookup,
+): 'serve' | 'not-member' | { refuse: string[] } {
     const declared = declaredOverrideBase(item);
-    return declared !== undefined && declared !== base;
+    if (declared !== undefined) return bases.includes(declared) ? 'serve' : 'not-member';
+    if (isAppPairOf(pairId, addressPackageId, installed)) return 'serve';
+    const owners = pairMemberOwners(pairId, holders, installed, item);
+    if (owners.length > 1) return { refuse: owners };
+    if (owners.length === 1 && !bases.includes(owners[0]!)) return 'not-member';
+    return 'serve';
 }
 
 /**

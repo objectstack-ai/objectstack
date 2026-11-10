@@ -8724,6 +8724,11 @@ export class SchemaRegistry {
    * one package's item never shadows another package's same-named item, which
    * is the one difference from {@link getItem}'s bare-slot-first answer.
    *
+   * A paired `<base>.custom` row that declares another holder as the base it
+   * customizes (`overrides.package`, ADR-0146 D2; the App's pair shared by
+   * every package of the App) is that holder's, never the App's: the App's
+   * address skips it and falls to the App's own item (#31699, epic ruling).
+   *
    * @param member - As on {@link getItem}: one bundle member, for a type whose
    *   identity is a pair; omitted, the canonical member first.
    */
@@ -8732,7 +8737,8 @@ export class SchemaRegistry {
     if (!collection) return undefined;
     const holders = new Set(this.compositeHoldersOf(collection, name));
     const bound = this.bareSlotEntriesOf(type, collection, name)
-      .filter(({ item }) => this.overlaySlotBinding(item, name, collection, holders) === packageId);
+      .filter(({ item }) => this.overlaySlotBinding(item, name, collection, holders) === packageId
+        && !pairRowDeclaresAnotherHolder(item, packageId, holders));
     const disc = ITEM_KEY_DISCRIMINATORS[type];
     if (disc) {
       const { local } = collectBundle(collection, name, disc, packageId);
@@ -10558,4 +10564,19 @@ export class SchemaRegistry {
     this._objectRevision += 1;
     this.log('[Registry] Reset complete');
   }
+}
+
+/**
+ * [#31699, epic ruling on the App pair's plain slot] Whether `item`, a row of a
+ * paired `<base>.custom` package that binds to `packageId` (its base), declares
+ * another holder of the name as the base it customizes (`overrides.package`,
+ * ADR-0146 D2): that holder's member, never `packageId`'s.
+ */
+function pairRowDeclaresAnotherHolder(item: unknown, packageId: string, holders: ReadonlySet<string>): boolean {
+  const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
+  if (typeof stamped !== 'string' || customizationBasePackageId(stamped) === null) return false;
+  const declaration = (item as { overrides?: unknown }).overrides;
+  if (declaration === null || typeof declaration !== 'object' || Array.isArray(declaration)) return false;
+  const declared = (declaration as { package?: unknown }).package;
+  return typeof declared === 'string' && declared !== '' && declared !== packageId && holders.has(declared);
 }

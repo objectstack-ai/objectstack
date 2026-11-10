@@ -374,6 +374,27 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
     expect(await listed(X)).toContain('pair fr-FR');
     expect(await listed(Y)).not.toContain('pair fr-FR');
   });
+
+  it('a bound row is served on its base only, even when the App itself holds the name beside it (contract review F-B)', async () => {
+    tpl('en-US', APP);
+    tpl('en-US', X);
+    pairRow({ overrides: { package: X } });
+    expect(labelOf(await read(X, 'fr-FR'))).toBe('pair fr-FR');
+    expect(await listed(X)).toContain('pair fr-FR');
+    expect((await read(APP, 'fr-FR'))?.item, 'the App\'s own address').toBeUndefined();
+    expect(await listed(APP)).not.toContain('pair fr-FR');
+  });
+
+  it('a sole owner keeps its member: another package of the pair does not serve it (delta review S2; through the doors the qualifier refuses the non-holder first)', async () => {
+    tpl('en-US', X);
+    pairRow();
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([X]);
+    expect(labelOf(await read(X, 'fr-FR')), 'the owner').toBe('pair fr-FR');
+    let served: unknown;
+    try { served = labelOf(await read(Y, 'fr-FR')); } catch (e) { served = (e as { code?: string }).code; }
+    expect(served, 'Y shares the pair but holds no template of the name').toBe('RESOURCE_CONFLICT');
+    expect(await listed(Y)).not.toContain('pair fr-FR');
+  });
 });
 
 /**

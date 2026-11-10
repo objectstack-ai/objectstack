@@ -548,6 +548,15 @@ describe('notify records the package its email template resolves from (ADR-0150 
         expect(messaging.emitted[0].payload.kept).toBe('yes');
     });
 
+    it('a template reference written in the literal payload (which the channels read alike) names the armed package too (contract review F-A)', async () => {
+        engine.registerFlow('notify_flow', notifyFlow({
+            recipients: ['user_1'], channels: ['email'], title: 'Hi', payload: { template: 'welcome', templateCallerPackageId: 'com.other.beta' },
+        }), { source: 'package', packageId: P } as never);
+        const result = await engine.execute('notify_flow');
+        expect(result.success, String(result.error)).toBe(true);
+        expect(messaging.emitted[0].payload).toMatchObject({ template: 'welcome', templateCallerPackageId: P });
+    });
+
     it('CONTROL — the inline path names no caller package even from a package\'s own body', async () => {
         engine.registerFlow('notify_flow', notifyFlow({ recipients: ['user_1'], title: 'Hi' }), { source: 'package', packageId: P } as never);
         const result = await engine.execute('notify_flow');

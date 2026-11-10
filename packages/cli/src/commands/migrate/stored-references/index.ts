@@ -240,7 +240,7 @@ function printReport(report: StoredPackageReferenceReport, database: string): vo
     for (const f of report.pairMembers) {
       console.log(`  • ${f.table} "${f.id}" ${f.type} "${f.name}"${f.member ? ` member "${f.member}"` : ''} in "${f.pairId}"`);
       console.log(`      could be the added member of: ${f.candidates.map(describeCandidate).join('; ')}`);
-      console.log('      Declare in the row the package it customizes (overrides.package); only that package then serves it.');
+      console.log('      No door binds an added member to one base today (the save gate refuses overrides.package naming a base that does not ship it, #28777): the row stays refused, and listed here, until it is deleted.');
     }
     console.log('');
   }
@@ -249,7 +249,7 @@ function printReport(report: StoredPackageReferenceReport, database: string): vo
     for (const f of report.packageLessRows) {
       console.log(`  • ${f.table} "${f.id}" ${f.type} "${f.name}"${f.member ? ` member "${f.member}"` : ''}`);
       console.log(`      could be the customization of: ${f.candidates.map(describeCandidate).join('; ')}`);
-      console.log('      Save the row under the one package it customizes; no package serves it until then.');
+      console.log('      Where one of these packages ships the item, save the customization into its pair declaring it (overrides.package) and delete this row; otherwise no door binds the row to one package today, and it stays refused until it is deleted.');
     }
     console.log('');
   }

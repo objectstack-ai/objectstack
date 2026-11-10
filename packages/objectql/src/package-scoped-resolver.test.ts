@@ -403,6 +403,36 @@ describe('ADR-0150 D4 — the per-package overlay slot', () => {
     expect(resolve('flow', 'send_email')).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment' });
   });
 
+  it('[#31699] a pair row that declares another holder as its base is skipped on the base\'s address, which falls to its own item', () => {
+    install(A);
+    install(B);
+    ship('email_template', 'welcome', A);
+    ship('email_template', 'welcome', B);
+    ship('page', 'home', A);
+    ship('page', 'home', B);
+    const pairRow = (type: string, nameOf: string, tag: string, declared?: string) => registry.registerItem(type, {
+      ...body(type, nameOf, tag), _packageId: `${A}.custom`, _provenance: 'org',
+      ...(declared ? { overrides: { package: declared } } : {}),
+    }, 'name' as never);
+    pairRow('email_template', 'welcome', 'bound-to-beta', B);
+    pairRow('page', 'home', 'bound-to-beta', B);
+    expect(registry.getPackageScopedItem<{ label: string }>('email_template', 'welcome', A)?.label).toBe('alpha template');
+    expect(registry.getPackageScopedItem<{ label: string }>('page', 'home', A)?.label).toBe('alpha page');
+    // CONTROL: the other holder's own item is unchanged.
+    expect(registry.getPackageScopedItem<{ label: string }>('page', 'home', B)?.label).toBe('beta page');
+  });
+
+  it('[#31699] CONTROL — a pair row that declares its own base, or none, is still the base\'s', () => {
+    install(A);
+    install(B);
+    ship('page', 'home', A);
+    ship('page', 'home', B);
+    registry.registerItem('page', { ...body('page', 'home', 'pair-own'), _packageId: `${A}.custom`, _provenance: 'org', overrides: { package: A } }, 'name' as never);
+    expect(registry.getPackageScopedItem<{ label: string }>('page', 'home', A)?.label).toBe('pair-own page');
+    registry.registerItem('page', { ...body('page', 'home', 'pair-plain'), _packageId: `${A}.custom`, _provenance: 'org' }, 'name' as never);
+    expect(registry.getPackageScopedItem<{ label: string }>('page', 'home', A)?.label).toBe('pair-plain page');
+  });
+
   it("a bundle's overlay members bind per member", () => {
     install(A);
     ship('email_template', 'welcome', A);

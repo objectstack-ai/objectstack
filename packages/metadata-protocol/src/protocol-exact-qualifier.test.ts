@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { exactQualifierItem, packageLessRowOwners } from './protocol-exact-qualifier.js';
+import { exactQualifierItem, packageLessRowOwners, pairRowOnAddress } from './protocol-exact-qualifier.js';
 
 const BASE = 'com.acme.alpha';
 const PAIR = `${BASE}.custom`;
@@ -77,5 +77,47 @@ describe('[#31699] packageLessRowOwners', () => {
     it('CONTROL — a platform-requested name (an auth mail) and a type not read by package name none', () => {
         expect(packageLessRowOwners(registry(['a.x', 'b.y']), 'email_template', 'auth.password_reset')).toEqual([]);
         expect(packageLessRowOwners(registry(['a.x', 'b.y'], false), 'email_template', 'welcome')).toEqual([]);
+    });
+});
+
+/**
+ * [#31699 F2, contract review F-B, delta review S2] The one owner check for a
+ * customization pair's member row on an exact address, which the exact read
+ * and the scoped list both ask. Two packages of one App share the App's pair.
+ */
+describe('[#31699] pairRowOnAddress', () => {
+    const APP = 'com.acme.suite';
+    const X = 'com.acme.suitex';
+    const Y = 'com.acme.suitey';
+    const APP_PAIR = `${APP}.custom`;
+    const manifests: Record<string, { type: string; namespace: string; dependencies?: Record<string, string> }> = {
+        [APP]: { type: 'app', namespace: 'suite' },
+        [X]: { type: 'module', namespace: 'suitex', dependencies: { [APP]: '^1.0.0' } },
+        [Y]: { type: 'module', namespace: 'suitey', dependencies: { [APP]: '^1.0.0' } },
+        [APP_PAIR]: { type: 'module', namespace: 'suite' },
+    };
+    const installed = (id: string) => manifests[id];
+    const row = (over: Record<string, unknown> = {}) => ({ name: 'welcome', locale: 'fr-FR', _packageId: APP_PAIR, ...over });
+
+    it('a sole owner that is not among the address\'s bases keeps its member: not this address\'s (S2)', () => {
+        expect(pairRowOnAddress(APP_PAIR, row(), Y, [Y], [X], installed)).toBe('not-member');
+    });
+
+    it('CONTROL — the sole owner\'s own address serves it (#28390 ruling A)', () => {
+        expect(pairRowOnAddress(APP_PAIR, row(), X, [X], [X], installed)).toBe('serve');
+    });
+
+    it('two owners: refused, naming both (F2)', () => {
+        expect(pairRowOnAddress(APP_PAIR, row(), X, [X], [X, Y], installed)).toEqual({ refuse: [X, Y] });
+    });
+
+    it('a declared base is read first: the App\'s own address does not serve a row bound to X (F-B); X does', () => {
+        const bound = row({ overrides: { package: X } });
+        expect(pairRowOnAddress(APP_PAIR, bound, APP, [APP], [APP, X], installed)).toBe('not-member');
+        expect(pairRowOnAddress(APP_PAIR, bound, X, [X], [APP, X], installed)).toBe('serve');
+    });
+
+    it('CONTROL — the App\'s own address serves its pair\'s undeclared added member', () => {
+        expect(pairRowOnAddress(APP_PAIR, row(), APP, [APP], [APP, X], installed)).toBe('serve');
     });
 });
