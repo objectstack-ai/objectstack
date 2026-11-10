@@ -8,6 +8,7 @@ feat(metadata-protocol, objectql, driver-mongodb): the permission-set grant tabl
 
 Clause-②: no
 - A runtime-owned unique on MongoDB (`RUNTIME_OWNED_UNIQUES`: the activation ledger's `uniq_sys_metadata_activation_packageless`, and now the grant's) that the server refuses at collection sync: on a duplicate (`E11000`), FROM the collection's whole sync failing (reported by the engine as "Schema sync FAILED", the declared indexes after it and the widening arm not run) TO one `error` line naming the index, its key, the consequence and the aggregation that lists the duplicates, with the sync going on; on an options or key-spec conflict (85, 86), FROM skipped without a word TO one `error` line naming the index and what to inspect. Either way the index is not built, and the widening arm keeps any older unique it stands in for, as it did. A declared index the server refuses is unchanged.
+
 Metadata-protocol: none
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any authorable schema is added, removed, renamed or re-shaped. The change adds a runtime-managed physical index beside a platform table's declared key, a kernel-bus event, and an error line. No stored metadata row is rewritten, so there is nothing for `objectstack migrate meta` to rewrite. -->

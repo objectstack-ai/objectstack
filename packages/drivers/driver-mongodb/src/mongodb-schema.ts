@@ -354,13 +354,16 @@ function reportRuntimeOwnedUniqueFailure(
   } else {
     cause = 'Fix the cause the server gave, then restart.';
   }
-  (logger.error ?? logger.warn)(head + cause, {
+  const meta = {
     collection: collectionName,
     index: name,
     key: fields,
     code,
     error: String(error?.message ?? error),
-  });
+  };
+  // Called through the property, so a class logger keeps its receiver.
+  if (logger.error) logger.error(head + cause, meta);
+  else logger.warn(head + cause, meta);
 }
 
 /**
