@@ -2208,6 +2208,26 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
             helpText: "Opcional. Formato de NameID SAML solicitado. Por defecto, el formato configurado en el IdP.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          mapEmail: {
+            label: "Mapeo: atributo de correo",
+            helpText: "Opcional. Atributo de la aserción asignado al correo del usuario. Por defecto, «email» y, si falta, el NameID. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          mapFirstName: {
+            label: "Mapeo: atributo de nombre",
+            helpText: "Opcional. Atributo de la aserción asignado al nombre del usuario. Por defecto, «givenName». Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          mapLastName: {
+            label: "Mapeo: atributo de apellido",
+            helpText: "Opcional. Atributo de la aserción asignado al apellido del usuario. Por defecto, «surname». Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          mapName: {
+            label: "Mapeo: atributo de nombre visible",
+            helpText: "Opcional. Atributo de la aserción asignado al nombre completo del usuario, que se usa cuando faltan los atributos de nombre y apellido. Por defecto, «displayName» y, si falta, el NameID. Okta: name. Entra ID: http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          },
           mapGroups: {
             label: "Mapeo: atributo de grupos",
             helpText: "Opcional. Atributo de la aserción que contiene los grupos del usuario. Cada inicio de sesión concede los conjuntos de permisos asignados a esos grupos. Déjelo en blanco para no asignar grupos.",
@@ -2267,6 +2287,57 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Hecho",
           fields: {
             groupsClaim: "Reclamo de grupos"
+          }
+        }
+      },
+      show_sso_attribute_mapping: {
+        label: "Mostrar asignación de atributos",
+        resultDialog: {
+          title: "Asignación de atributos",
+          description: "Los atributos del IdP (SAML) o reclamos (OIDC) de los que este proveedor lee el correo y el nombre del usuario en cada inicio de sesión. Vacío significa el valor predeterminado: correo de «email» (SAML: si falta, el NameID); nombre de «givenName» + «surname» y, si faltan, de «displayName» (OIDC: «name»). El nombre y el apellido solo se aplican a SAML. Cámbiela con «Editar asignación de atributos».",
+          acknowledge: "Hecho",
+          fields: {
+            protocol: "Protocolo",
+            email: "Correo",
+            firstName: "Nombre",
+            lastName: "Apellido",
+            name: "Nombre visible"
+          }
+        }
+      },
+      edit_sso_attribute_mapping: {
+        label: "Editar asignación de atributos",
+        params: {
+          email: {
+            label: "Atributo de correo",
+            helpText: "El atributo o reclamo del IdP asignado al correo del usuario. Si no lo toca, se conserva el actual; vacíelo para volver al predeterminado («email»). Entra ID SAML: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          firstName: {
+            label: "Atributo de nombre (SAML)",
+            helpText: "Solo SAML. El atributo de la aserción asignado al nombre del usuario. Si no lo toca, se conserva el actual. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          lastName: {
+            label: "Atributo de apellido (SAML)",
+            helpText: "Solo SAML. El atributo de la aserción asignado al apellido del usuario. Si no lo toca, se conserva el actual. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          name: {
+            label: "Atributo de nombre visible",
+            helpText: "El atributo o reclamo del IdP asignado al nombre completo del usuario (SAML: se usa cuando faltan el nombre y el apellido). Si no lo toca, se conserva el actual. Okta SAML: name. Entra ID: http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          }
+        },
+        resultDialog: {
+          title: "Asignación de atributos guardada",
+          description: "Los atributos o reclamos de los que este proveedor lee ahora el correo y el nombre del usuario en cada inicio de sesión. Vacío significa que se aplica el valor predeterminado.",
+          acknowledge: "Hecho",
+          fields: {
+            email: "Correo",
+            firstName: "Nombre",
+            lastName: "Apellido",
+            name: "Nombre visible"
           }
         }
       }

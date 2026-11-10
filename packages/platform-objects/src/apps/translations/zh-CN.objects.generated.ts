@@ -2208,6 +2208,26 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
             helpText: "可选。请求的 SAML NameID 格式。默认为 IdP 配置的格式。",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          mapEmail: {
+            label: "映射：邮箱属性",
+            helpText: "可选。映射为用户邮箱的断言属性。默认为“email”，其次为 NameID。Entra ID：http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          mapFirstName: {
+            label: "映射：名字属性",
+            helpText: "可选。映射为用户名字的断言属性。默认为“givenName”。Entra ID：http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          mapLastName: {
+            label: "映射：姓氏属性",
+            helpText: "可选。映射为用户姓氏的断言属性。默认为“surname”。Entra ID：http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          mapName: {
+            label: "映射：显示名称属性",
+            helpText: "可选。映射为用户全名的断言属性，在缺少名字和姓氏属性时使用。默认为“displayName”，其次为 NameID。Okta：name。Entra ID：http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          },
           mapGroups: {
             label: "映射：组属性",
             helpText: "可选。携带用户所属组的断言属性。每次登录都会授予映射到这些组的权限集。留空则不映射任何组。",
@@ -2267,6 +2287,57 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "完成",
           fields: {
             groupsClaim: "组 claim"
+          }
+        }
+      },
+      show_sso_attribute_mapping: {
+        label: "查看属性映射",
+        resultDialog: {
+          title: "属性映射",
+          description: "此提供方在每次登录时读取用户邮箱和姓名所用的 IdP 属性（SAML）或 claim（OIDC）。为空表示使用默认值：邮箱取自“email”（SAML 其次为 NameID）；姓名取自“givenName” + “surname”，其次为“displayName”（OIDC 为“name”）。名字和姓氏仅适用于 SAML。可通过“编辑属性映射”修改。",
+          acknowledge: "完成",
+          fields: {
+            protocol: "协议",
+            email: "邮箱",
+            firstName: "名字",
+            lastName: "姓氏",
+            name: "显示名称"
+          }
+        }
+      },
+      edit_sso_attribute_mapping: {
+        label: "编辑属性映射",
+        params: {
+          email: {
+            label: "邮箱属性",
+            helpText: "映射为用户邮箱的 IdP 属性或 claim。不修改则保留当前值；清空则恢复默认值（“email”）。Entra ID SAML：http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          firstName: {
+            label: "名字属性（SAML）",
+            helpText: "仅 SAML。映射为用户名字的断言属性。不修改则保留当前值。Entra ID：http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          lastName: {
+            label: "姓氏属性（SAML）",
+            helpText: "仅 SAML。映射为用户姓氏的断言属性。不修改则保留当前值。Entra ID：http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          name: {
+            label: "显示名称属性",
+            helpText: "映射为用户全名的 IdP 属性或 claim（SAML：在缺少名字和姓氏时使用）。不修改则保留当前值。Okta SAML：name。Entra ID：http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          }
+        },
+        resultDialog: {
+          title: "属性映射已保存",
+          description: "此提供方此后每次登录时读取用户邮箱和姓名所用的属性或 claim。为空表示使用默认值。",
+          acknowledge: "完成",
+          fields: {
+            email: "邮箱",
+            firstName: "名字",
+            lastName: "姓氏",
+            name: "显示名称"
           }
         }
       }
