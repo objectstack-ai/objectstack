@@ -249,6 +249,14 @@ describe('one package holder per picklist, mapping and dataset name, on a booted
     }
   });
 
+  it('mapping: an address naming a package that does not hold the name is 409 naming its holder, never the holder\'s item under that address', async () => {
+    for (const path of [`/meta/mapping/beta/${ZETA_MAPPING}`, `/meta/mapping/${ZETA_MAPPING}?package=com.qa.bare.beta`]) {
+      const { status, body } = await metaRead(path);
+      expect([status, codeOf(body)], `${path} ${JSON.stringify(body)}`).toEqual([409, 'RESOURCE_CONFLICT']);
+      expect(JSON.stringify(body)).toContain('com.qa.bare.zeta');
+    }
+  });
+
   it('CONTROL — mapping: one holder answers as before, a package\'s mapping into the object of a package it depends on included', async () => {
     const own = await metaRead(`/meta/mapping/${SHOWCASE_MAPPING}`);
     expect([own.status, own.body?.item?._packageId ?? own.body?.data?.item?._packageId]).toEqual([200, SHOWCASE_PKG]);
