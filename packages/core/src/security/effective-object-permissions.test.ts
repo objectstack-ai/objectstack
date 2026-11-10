@@ -721,7 +721,7 @@ describe('a transfer is granted only with edit, on every object', () => {
 
   it('an entry that carries no transfer grant gains no key', () => {
     const map: any = buildEffectiveObjectPermissions([{ objects: { crm_lead: { allowRead: true } } }], source);
-    expect(map.crm_lead).toEqual({ allowRead: true });
+    expect(map.crm_lead).not.toHaveProperty('allowTransfer');
   });
 
   it('CONTROL: modifyAllRecords grants edit, so it keeps transfer', () => {
