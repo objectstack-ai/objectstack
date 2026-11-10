@@ -94,7 +94,7 @@ export const SemanticZooLegacy = ObjectSchema.create({
   description: 'ADR-0085 semantic-role runtime fixture (stageField:false suppression)',
 
   fields: {
-    name: Field.text({ label: 'Name', required: true }),
+    name: Field.text({ label: 'Name', required: true, group: 'details' }),
     // Named `status` ON PURPOSE: the stepper heuristic would pick it up —
     // `stageField: false` below is what keeps it suppressed. Option `color`
     // pins the badge tint (spec-typed; without it renderers fall back to a
@@ -105,9 +105,18 @@ export const SemanticZooLegacy = ObjectSchema.create({
         { label: 'Red', value: 'red', color: 'red', default: true },
         { label: 'Green', value: 'green', color: 'green' },
       ],
+      group: 'details',
     }),
-    amount: Field.number({ label: 'Amount' }),
+    amount: Field.number({ label: 'Amount', group: 'details' }),
   },
+
+  // ADR-0085 §5: one keyed section, so `status` (the stageField:false specimen) is
+  // placed in the derived layout rather than left to the untitled fallback (#32168).
+  // `showcase_semantic_zoo.notes` above stays ungrouped on purpose: it is that
+  // fixture's trailing untitled bucket, which the semantic-roles dogfood suite asserts.
+  fieldGroups: [
+    { key: 'details', label: 'Details' },
+  ],
 
   // (This fixture authored the deprecated `compactLayout` spelling during the
   // ADR-0085 alias window; retired by framework#2536.)

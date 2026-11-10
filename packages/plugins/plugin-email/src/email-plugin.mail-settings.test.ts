@@ -11,10 +11,11 @@
 // be LOUD (error log + a failing test action), never a LogTransport reporting
 // success.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import net from 'node:net';
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
 import { EmailServicePlugin } from './email-plugin.js';
 import { EmailService, LogTransport } from './email-service.js';
-import { SmtpTransport } from './transports/smtp.js';
+import { SmtpTransport, type SmtpConnectPolicy, type SmtpConnectRequest } from './transports/smtp.js';
 import { ResendTransport } from './transports/resend.js';
 
 const nm = vi.hoisted(() => ({ createTransport: vi.fn(), sendMail: vi.fn() }));
@@ -617,5 +618,198 @@ describe('sender display name follows the product name when none is set', () => 
     });
     expect(result).toMatchObject({ ok: true });
     expect(fromOnWire()).toBe('Acme Portal <no-reply@acme.test>');
+  });
+});
+
+// ── a host's SMTP connect policy ─────────────────────────────────────────────
+//
+// The rule: a host that passes `smtpConnect` decides where every SMTP
+// transport the plugin builds may connect — the one built at boot, the live
+// one built from saved `mail` settings, and the one-shot `mail/test` builds.
+// nodemailer is mocked in this file, so "reaches" is read off the options each
+// transport hands `createTransport`, by calling the `getSocket` it carries the
+// way nodemailer does before it connects. The real library is exercised in
+// `transports/smtp.wire.test.ts`.
+
+describe('a host SMTP connect policy reaches every SMTP transport the plugin builds', () => {
+  // The host's own relay: an admitting policy opens a real socket to it and hands it back.
+  let relay: net.Server;
+  let relayPort = 0;
+  beforeAll(async () => {
+    relay = net.createServer((s) => s.on('error', () => {}));
+    await new Promise<void>((resolve) => relay.listen(0, '127.0.0.1', resolve));
+    relayPort = (relay.address() as net.AddressInfo).port;
+  });
+  afterAll(async () => {
+    await new Promise<void>((resolve) => relay.close(() => resolve()));
+  });
+
+  function hostPolicy(answer: (req: SmtpConnectRequest) => Error | null = () => null) {
+    const seen: Array<{ host?: string; port?: number }> = [];
+    const smtpConnect: SmtpConnectPolicy = {
+      getSocket(request, callback) {
+        seen.push({ host: request.host, port: request.port });
+        const refusal = answer(request);
+        if (refusal) return callback(refusal);
+        const socket = net.connect(relayPort, '127.0.0.1');
+        const onError = (err: Error) => callback(err);
+        socket.once('error', onError);
+        socket.once('connect', () => {
+          socket.removeListener('error', onError);
+          callback(null, { connection: socket });
+        });
+      },
+    };
+    return { smtpConnect, seen };
+  }
+
+  /** Call the `getSocket` nodemailer was handed, the way nodemailer does before it connects. */
+  function dial(options: Record<string, unknown>): Promise<Error | 'admitted' | 'no hook'> {
+    const getSocket = options.getSocket;
+    if (typeof getSocket !== 'function') return Promise.resolve('no hook');
+    return new Promise((resolve) => getSocket({ ...options }, (err: Error | null, answer?: { connection?: net.Socket }) => {
+      answer?.connection?.destroy();
+      resolve(err ?? 'admitted');
+    }));
+  }
+
+  const lastCreateOptions = () => {
+    const calls = nm.createTransport.mock.calls;
+    return calls[calls.length - 1][0] as Record<string, unknown>;
+  };
+
+  const SAVED_SMTP: Record<string, Resolved> = {
+    provider: { value: 'smtp', source: 'global' },
+    smtp_host: { value: 'smtp.saved.test', source: 'global' },
+    smtp_port: { value: 465, source: 'global' },
+    smtp_user: { value: 'ops@example.test', source: 'global' },
+    smtp_password: { value: 'sekrit', source: 'global' },
+  };
+
+  const TIMEOUTS = { connectionTimeout: 20_000, greetingTimeout: 20_000, socketTimeout: 20_000 };
+
+  it('reaches the transport built at boot', async () => {
+    const { smtpConnect, seen } = hostPolicy();
+    const { service } = await boot({}, { provider: 'smtp', providerOptions: { host: 'smtp.boot.test' }, smtpConnect });
+    expect(transportOf(service)).toBeInstanceOf(SmtpTransport);
+    await service.send({ to: 'user@example.test', subject: 's', text: 't' });
+    expect(await dial(lastCreateOptions())).toBe('admitted');
+    expect(seen).toEqual([{ host: 'smtp.boot.test', port: 587 }]);
+  });
+
+  it('reaches the live transport built from saved settings, and again after every later save', async () => {
+    const { smtpConnect, seen } = hostPolicy();
+    const { service, settings } = await boot(SAVED_SMTP, { smtpConnect });
+    await service.send({ to: 'user@example.test', subject: 's', text: 't' });
+    expect(await dial(lastCreateOptions())).toBe('admitted');
+
+    await settings.save({ smtp_host: { value: 'smtp.second.test', source: 'global' } });
+    await service.send({ to: 'user@example.test', subject: 's', text: 't' });
+    expect(await dial(lastCreateOptions())).toBe('admitted');
+
+    expect(seen).toEqual([
+      { host: 'smtp.saved.test', port: 465 },
+      { host: 'smtp.second.test', port: 465 },
+    ]);
+  });
+
+  it.each([
+    ['log', {}],
+    ['resend', { api_key: { value: 're_key', source: 'global' } }],
+  ] as const)('reaches the transport rebuilt after the provider moves to %s and back to smtp', async (away, extra) => {
+    const { smtpConnect, seen } = hostPolicy();
+    const { service, settings } = await boot(SAVED_SMTP, { smtpConnect });
+    await settings.save({ provider: { value: away, source: 'global' }, ...extra });
+    expect(transportOf(service)).not.toBeInstanceOf(SmtpTransport);
+    await settings.save({ provider: { value: 'smtp', source: 'global' } });
+    expect(transportOf(service)).toBeInstanceOf(SmtpTransport);
+    await service.send({ to: 'user@example.test', subject: 's', text: 't' });
+    expect(await dial(lastCreateOptions())).toBe('admitted');
+    expect(seen).toEqual([{ host: 'smtp.saved.test', port: 465 }]);
+  });
+
+  it('reaches the one-shot transport mail/test builds from an unsaved host and port', async () => {
+    const { smtpConnect, seen } = hostPolicy();
+    const { settings } = await boot(SAVED_SMTP, { smtpConnect });
+    const result = await settings.action('test')!({
+      values: { provider: 'smtp', smtp_host: 'smtp.form.test', smtp_port: 2525, from_email: 'no-reply@example.test' },
+      payload: { to: 'admin@example.test' },
+    });
+    expect(result).toMatchObject({ ok: true });
+    expect(await dial(lastCreateOptions())).toBe('admitted');
+    expect(seen).toEqual([{ host: 'smtp.form.test', port: 2525 }]);
+  });
+
+  it('mail/test answers with the policy\'s own words when the policy refuses', async () => {
+    const { smtpConnect } = hostPolicy(() => new Error('the host does not allow this destination'));
+    // As nodemailer does: ask getSocket before connecting, and fail the send with its error.
+    nm.createTransport.mockImplementation((options: Record<string, unknown>) => ({
+      sendMail: async () => {
+        const answer = await dial(options);
+        if (answer instanceof Error) throw answer;
+        return { messageId: '<wire-1@smtp>', response: '250 2.0.0 Ok' };
+      },
+      close: vi.fn(),
+    }));
+    const { settings } = await boot(SAVED_SMTP, { smtpConnect });
+    const result = await settings.action('test')!({
+      values: { provider: 'smtp', smtp_host: 'smtp.form.test', from_email: 'no-reply@example.test' },
+      payload: { to: 'admin@example.test' },
+    });
+    expect(result).toMatchObject({ ok: false, severity: 'error' });
+    expect(result.message).toContain('the host does not allow this destination');
+  });
+
+  it('a settings snapshot cannot carry a getSocket, transportOptions or connect of its own past the policy', async () => {
+    const { smtpConnect, seen } = hostPolicy();
+    const stray = vi.fn((_o: unknown, cb: (e: Error | null) => void) => cb(null));
+    const { service, settings } = await boot({
+      ...SAVED_SMTP,
+      getSocket: { value: stray, source: 'global' },
+      transportOptions: { value: { getSocket: stray, proxy: 'http://proxy.example.test' }, source: 'global' },
+      connect: { value: { getSocket: stray }, source: 'global' },
+    }, { smtpConnect });
+    await service.send({ to: 'user@example.test', subject: 's', text: 't' });
+    const live = lastCreateOptions();
+    expect(live).not.toHaveProperty('proxy');
+    expect(await dial(live)).toBe('admitted');
+
+    await settings.action('test')!({
+      values: { provider: 'smtp', smtp_host: 'smtp.form.test', from_email: 'no-reply@example.test',
+        getSocket: stray, transportOptions: { getSocket: stray }, connect: { getSocket: stray } },
+      payload: { to: 'admin@example.test' },
+    });
+    expect(await dial(lastCreateOptions())).toBe('admitted');
+    expect(stray).not.toHaveBeenCalled();
+    expect(seen).toEqual([{ host: 'smtp.saved.test', port: 465 }, { host: 'smtp.form.test', port: 587 }]);
+  });
+
+  // CONTROL: no policy — each site hands nodemailer the options it always did.
+  it('CONTROL: without a policy, the boot-built transport\'s options are unchanged', async () => {
+    const { service } = await boot({}, { provider: 'smtp', providerOptions: { host: 'smtp.boot.test' } });
+    await service.send({ to: 'user@example.test', subject: 's', text: 't' });
+    expect(lastCreateOptions()).toStrictEqual({
+      host: 'smtp.boot.test', port: 587, secure: false, requireTLS: true, ...TIMEOUTS,
+    });
+  });
+
+  it('CONTROL: without a policy, the settings-built transport\'s options are unchanged', async () => {
+    const { service } = await boot(SAVED_SMTP);
+    await service.send({ to: 'user@example.test', subject: 's', text: 't' });
+    expect(lastCreateOptions()).toStrictEqual({
+      host: 'smtp.saved.test', port: 465, secure: true, requireTLS: false, ...TIMEOUTS,
+      auth: { user: 'ops@example.test', pass: 'sekrit' },
+    });
+  });
+
+  it('CONTROL: without a policy, the mail/test transport\'s options are unchanged', async () => {
+    const { settings } = await boot(SAVED_SMTP);
+    await settings.action('test')!({
+      values: { provider: 'smtp', smtp_host: 'smtp.form.test', smtp_port: 2525, smtp_secure: false, from_email: 'no-reply@example.test' },
+      payload: { to: 'admin@example.test' },
+    });
+    expect(lastCreateOptions()).toStrictEqual({
+      host: 'smtp.form.test', port: 2525, secure: false, requireTLS: false, ...TIMEOUTS,
+    });
   });
 });
