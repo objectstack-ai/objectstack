@@ -4810,7 +4810,7 @@ function pickActionHolder(
  *
  *  - `actions` — `OWNER:NAME` of each package-less standalone action row,
  *    OWNER its owner key ({@link standaloneActionOwnerKey}: its object, or
- *    `global` when object-less);
+ *    {@link GLOBAL_ACTION_OBJECT_KEY} when object-less);
  *  - `embedded` — `OBJECT:NAME` of each action a package-less object row
  *    embeds.
  */
@@ -5666,8 +5666,11 @@ async function resolveRouteActionByPackage(deps: ActionExecutionDeps,
  *
  * Fail closed (epic record 6762108144, review F1). A CAPABILITY that is
  * absent judges nothing — no `protocol` with a merged listing and no
- * `metadata` service with a listing (`listObjects` / `loadMany`), the
- * fixtures and hosts where nothing can hold two items. A read that THROWS
+ * `metadata` service with a listing (`listObjects` / `loadMany`), or a
+ * protocol whose own engine registers no `sys_metadata` object, so its merged
+ * listing has no store to read (the in-process fixtures that compose a bare
+ * engine; every served kernel registers it, ObjectQL's plugin syncs it
+ * first). A read that THROWS
  * once the capability is there is the metadata plane failing to answer
  * (ADR-0110 D3): `degraded` (503), ⛔ never the rungs, which would serve the
  * object's own declaration or the first registered while the refusal is
@@ -5692,6 +5695,7 @@ async function bareRouteHolderRefusal(deps: ActionExecutionDeps,
     };
     const protocol = await resolved('protocol');
     const merged = typeof protocol?.getMetaItems === 'function';
+    if (merged && !holdsMetadataStore(protocol.engine)) return undefined;
     let meta: any;
     if (!merged) {
         meta = await resolved('metadata');
@@ -5716,6 +5720,22 @@ async function bareRouteHolderRefusal(deps: ActionExecutionDeps,
     } catch (err: any) {
         if (err instanceof PackageScopedNameRefusedError) return { action: undefined, obj, refusal: err.refusal };
         return degraded(err);
+    }
+}
+
+/**
+ * [#31697] Does the engine the protocol reads its merged listings through
+ * register the environment's metadata store, the `sys_metadata` object?
+ * `true` when that engine cannot say (it has no schema read): only a
+ * structural NO lets the bare door's holder rule judge nothing
+ * ({@link bareRouteHolderRefusal}).
+ */
+function holdsMetadataStore(engine: any): boolean {
+    if (typeof engine?.getSchema !== 'function') return true;
+    try {
+        return Boolean(engine.getSchema('sys_metadata'));
+    } catch {
+        return true;
     }
 }
 

@@ -318,25 +318,29 @@ describe('REST `POST /actions/:object/:action` — a handler another declared ac
         expect(h.planeOwnerHandler).not.toHaveBeenCalled();
     });
 
-    it('with the metadata plane unreadable, an action reaching its own plane-built handler still runs', async () => {
+    // [#31697, epic record 6762108144; review 6762242732 F1] The bare door
+    // reads the declaration listing to judge whether two holders answer the
+    // name; with the listing unreadable it cannot know, so every bare call
+    // answers 503 (fail closed) — it ran the action's own handler before.
+    it('with the metadata plane unreadable, an action reaching its own plane-built handler answers 503 SERVICE_UNAVAILABLE, nothing run (#31697: the two-holder judgement cannot be made)', async () => {
         const h = boot({ planeDown: true });
 
         const res = await h.dispatcher.handleActions(`/${OBJECT}/${PLANE_SELF.name}`, 'POST', {}, CTX());
 
-        expect(statusOf(res)).toBe(200);
-        expect(h.planeSelfHandler).toHaveBeenCalledTimes(1);
+        expect(statusOf(res)).toBe(503);
+        expect(codeOf(res)).toBe('SERVICE_UNAVAILABLE');
+        expect(h.planeSelfHandler).not.toHaveBeenCalled();
     });
 
-    it('with the metadata plane unreadable, a handler a package registered is still judged by the engine\'s own declarations', async () => {
+    it('with the metadata plane unreadable, a handler a package registered answers 503 SERVICE_UNAVAILABLE before any gate, nothing run (#31697)', async () => {
         const h = boot({ planeDown: true });
 
         const plain = await h.dispatcher.handleActions(`/${OBJECT}/${PLAIN.name}`, 'POST', {}, CTX());
-        expect(statusOf(plain)).toBe(200);
-        expect(h.plainHandler).toHaveBeenCalledTimes(1);
+        expect(statusOf(plain)).toBe(503);
+        expect(h.plainHandler).not.toHaveBeenCalled();
 
         const borrowed = await h.dispatcher.handleActions(`/${OBJECT}/${VIA_TARGET.name}`, 'POST', {}, CTX());
-        expect(statusOf(borrowed)).toBe(403);
-        expect(codeOf(borrowed)).toBe('PERMISSION_DENIED');
+        expect(statusOf(borrowed)).toBe(503);
         expect(h.ownerTargetHandler).not.toHaveBeenCalled();
     });
 });
