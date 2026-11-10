@@ -23,6 +23,8 @@
  * Every service is scripted, so "never ran" is a fact about a spy.
  */
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/metadata';
 import { describe, it, expect, vi } from 'vitest';
 import { actionsDoorAnswerOf } from '@objectstack/types';
 import { assertEngineFindOnePredicate } from '@objectstack/objectql';

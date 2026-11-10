@@ -25,6 +25,8 @@
 // forward.dogfood.test.ts`; this file drives the doors over fakes so each
 // forwarded byte can be asserted.
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/metadata';
 import { describe, it, expect, vi } from 'vitest';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
