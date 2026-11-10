@@ -638,6 +638,33 @@ function clampExternalReadOnlyWrites(objects: Record<string, any>, forbidden: Re
 }
 
 /**
+ * [Ruling of record 6755714726 on #32004] An entry grants `transfer` only
+ * where it also grants edit — on EVERY object, the `'*'` entry included,
+ * never only on the guarded managed objects {@link clampManagedObjectWrites}
+ * clamps.
+ *
+ * The map's `transfer` answers whether the record could be edited and its
+ * owner changed: the owner-change door is the by-id update of `owner_id`,
+ * admitted by the update grant (edit, which implies read) and then by the
+ * ownership gate's transfer grant. `security.explain`'s `transfer` answers the
+ * same question, so the client map and the explanation give one answer. The
+ * transfer grant alone stays what that gate reads — it also lets an insert
+ * name another owner (ADR-0142's create-and-assign) — and enforcement is not
+ * read from this map.
+ *
+ * Edit is read through the spec's `objectPermissionGrants`, so
+ * `modifyAllRecords` (which grants edit) keeps transfer, and runs after every
+ * clamp that can take edit away. Only a `true` bit is lowered: an entry that
+ * carries no `allowTransfer` gains no key.
+ */
+function clampTransferToEdit(objects: Record<string, any>): void {
+  for (const acc of Object.values(objects) as any[]) {
+    if (!acc || acc.allowTransfer !== true) continue;
+    if (!objectPermissionGrants(acc as EffectiveObjectPermission, 'allowEdit')) acc.allowTransfer = false;
+  }
+}
+
+/**
  * [#30370] The {@link EffectiveObjectPermissionsSchemaSource.isExternalWriteForbidden}
  * accessor over an engine: its `isExternalWriteForbidden`, the verdict objectql's
  * own write gate (`assertWriteAllowed`) reads before it refuses a write
@@ -762,10 +789,12 @@ export interface EffectiveObjectPermissionsInputSet {
  *     one; the verdict is judged for every entry before anything is clamped,
  *     and a predicate that throws is reported and clamps nothing (guarded
  *     like (2));
- *  7. {@link annotateEffectiveApiOperations} — guarded like (2); [#30370] it
+ *  7. {@link clampTransferToEdit} — [ruling of record 6755714726 on #32004]
+ *     an entry grants `transfer` only where it grants edit, on every object;
+ *  8. {@link annotateEffectiveApiOperations} — guarded like (2); [#30370] it
  *     reads the same verdicts, so a closed gate's object is served no write
  *     operation;
- *  8. {@link omitDisabledPackageObjects} — [#28877] an object whose owning
+ *  9. {@link omitDisabledPackageObjects} — [#28877] an object whose owning
  *     package is disabled is left out, as the data plane refuses it; guarded
  *     like (2).
  *
@@ -841,6 +870,8 @@ export function buildEffectiveObjectPermissions(
     }
   }
   clampExternalReadOnlyWrites(objects, externalWriteForbidden);
+  // Last of the clamps: every clamp above may take edit away, and transfer follows it.
+  clampTransferToEdit(objects);
   // [#3391] Annotate the per-object effective API operation set. Guarded: on
   // failure `apiOperations` is simply omitted and a client falls back to its
   // default-allow behaviour.
