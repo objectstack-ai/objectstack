@@ -239,6 +239,20 @@ describe('[ADR-0153 D2] floored: windows bounded on both sides, through the floo
         expect(lastOf(rec.commits)?.position).toBe(2);
     });
 
+    it('a bounded window halved to one canon step and still over the cap refuses sync_window_unsplittable at that value', async () => {
+        const crowded = seqRows([5, 5, 5, 5, 5]).map((r, i) => ({ ...r, id: `c${i}` }));
+        const { engine } = flooredEngine({ rows: [...crowded, ...seqRows([9])], rowCap: 4 });
+        const rec = recorder();
+        const err = await refusalOf(readSourceInWindows(FLOORED_SOURCE, {
+            find: (q) => engine.find('wh_order', q), ...rec,
+        }, { path: 'floored', from: 0 }));
+        expect(err.code).toBe('EXTERNAL_ROW_CAP_EXCEEDED');
+        expect(err.status).toBe(422);
+        expect(err.reason).toBe('sync_window_unsplittable');
+        // Halving reached the one-step window [5, 6) before refusing: nothing below 5 was there to write.
+        expect(rec.written).toEqual([]);
+    });
+
     for (const mode of ['lower', 'upper', 'none'] as const) {
         it(`a driver that pushes ${mode === 'none' ? 'neither bound' : `only the ${mode} bound`} refuses sync_bounds_not_pushed (422), never a halving loop`, async () => {
             const values = Array.from({ length: 12 }, (_, i) => 10 + i);
