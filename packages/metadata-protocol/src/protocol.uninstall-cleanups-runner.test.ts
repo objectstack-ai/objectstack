@@ -23,6 +23,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// The first load of `@objectstack/lint` (reached through `deletePackage`) paid at
+// module top, never inside a clocked `it` (`scripts/check-test-source-alias.mjs`).
+import '@objectstack/lint';
 import { ObjectStackProtocolImplementation } from './index.js';
 
 const PACKAGE_ID = 'com.example.tasksapp';

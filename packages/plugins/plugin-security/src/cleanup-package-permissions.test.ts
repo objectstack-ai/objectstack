@@ -4,7 +4,6 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { cleanupPackagePermissions } from './cleanup-package-permissions';
-import { assertEngineFindOnePredicate, assertEngineUpdateDispatch, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { SecurityPlugin } from './security-plugin.js';
 
 /**
@@ -374,10 +373,8 @@ describe('[ADR-0150 D8] the registered uninstall cleanup answers the reported gr
         getItem: (type: string, name: string) => (type === 'permission' ? registryItems.find((i) => i.name === name) : undefined),
         isPackageDisabled: () => false,
       },
-      findOne: async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; },
       count: async () => 0,
       insert: async (_object: string, data: any) => ({ id: 'row_1', ...data }),
-      update: async (_object: string, data: any, options?: any) => { assertEngineUpdateDispatch(data, options); return 0; },
     };
     const cleanups = new Map<string, (args: any) => Promise<any>>();
     const protocol = {
