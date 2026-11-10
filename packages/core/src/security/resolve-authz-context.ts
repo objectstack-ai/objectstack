@@ -86,12 +86,14 @@ import {
 } from './organization-reach.js';
 import { derivePosture } from './posture-ladder.js';
 import {
+  resolveCatalogReference,
   securityCatalogReaderOf,
   storedPermissionSetScope,
   type SecurityCatalogEntry,
   type SecurityCatalogReader,
   type SecurityCatalogReferenceScope,
 } from './security-catalog.js';
+import type { PermissionSetAddressParsed } from '@objectstack/spec/kernel';
 import { resolveSystemWriteOrganization, type SystemWriteOrganizationDecision } from './system-write-organization.js';
 import { METADATA_ACTIVATION_TABLE } from '../utils/metadata-activation-store.js';
 
@@ -122,6 +124,14 @@ export interface ResolvedAuthzContext {
    * the explainer to tell an assignment row from a position definition.
    */
   directPermissions: string[];
+  /**
+   * [ADR-0150 D3] Each permission set this resolution granted, as the
+   * `(packageId, name)` the catalog resolved it to
+   * ({@link UserAuthzGrants.permissionSetAddresses}) — what the security
+   * plugin's evaluator resolves exactly, so it never picks between two holders
+   * of a name. Carried onto `ExecutionContext.permissionSetAddresses`.
+   */
+  permissionSetAddresses?: PermissionSetAddressParsed[];
   systemPermissions: string[];
   tabPermissions?: Record<string, 'visible' | 'hidden' | 'default_on' | 'default_off'>;
   /** Fellow-org user IDs for RLS scoping of identity tables (`id IN (...)`). */
@@ -562,6 +572,7 @@ async function anonymousEntry(ctx: ResolvedAuthzContext, input: ResolveAuthzInpu
     if (guest) {
       ctx.tenantId = guest.organizationId;
       ctx.permissions = guest.permissions;
+      ctx.permissionSetAddresses = guest.permissionSetAddresses;
       ctx.systemPermissions = guest.systemPermissions;
       if (guest.tabPermissions) ctx.tabPermissions = guest.tabPermissions;
     }
@@ -840,6 +851,7 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
 
   ctx.positions = grants.positions;
   ctx.permissions = grants.permissions;
+  if (grants.permissionSetAddresses) ctx.permissionSetAddresses = grants.permissionSetAddresses;
   ctx.directPermissions = grants.directPermissions;
   ctx.systemPermissions = grants.systemPermissions;
   ctx.org_user_ids = grants.org_user_ids;
@@ -891,6 +903,20 @@ export interface UserAuthzGrants {
   permissions: string[];
   /** [#25799] {@link ResolvedAuthzContext.directPermissions}: the names held through the user's own grant rows. */
   directPermissions: string[];
+  /**
+   * [ADR-0150 D3] The address of every permission set in `permissions` this
+   * resolution granted through the catalog — its grant rows (§6b, R1's column
+   * or the D3 answer), its positions' definitions (§6a, from the position's
+   * package) and the `everyone` anchor's accepted sets (R3's column) — each as
+   * the catalog resolved it: `packageId` is the holder that answered, `null`
+   * for a set no package holds. One entry per `(packageId, name)`, so two
+   * packages' sets of one name are both here while `permissions` lists the
+   * name once. A name the resolution rule refused never appears. A name
+   * `permissions` carries without an address (a caller's seed, the
+   * configured-administrator derivation, `ai_seat`) has none, and the
+   * evaluator resolves it by D3 with no caller.
+   */
+  permissionSetAddresses?: PermissionSetAddressParsed[];
   systemPermissions: string[];
   /** Fellow-org user IDs for RLS scoping of identity tables (`id IN (...)`). */
   org_user_ids: string[];
@@ -1376,6 +1402,101 @@ function ledgerUnregistered(ql: any): boolean {
 }
 
 /**
+ * [ADR-0150 D3] The key one permission-set holder is judged under: its
+ * `(packageId, name)` address, `null` standing for a set no package holds.
+ * Two packages' sets of one name are two keys.
+ */
+export function permissionSetAddressKey(packageId: string | null | undefined, name: string): string {
+  return `${packageId ?? ''}\u0000${name}`;
+}
+
+/**
+ * The `_packageId` a definition rehydrated from `sys_metadata` carries: the
+ * environment's own row, not a package (the security catalog reads it the same
+ * way when it picks a reference's caller).
+ */
+const OVERLAY_PROVENANCE_SENTINEL = 'sys_metadata';
+
+/**
+ * [ADR-0150 D3] The address of the set a catalog entry is: the package that
+ * holds it, or `null` for one no package holds (an environment-authored set).
+ * Exported so every reader that keys a resolved set by its holder spells the
+ * holder one way.
+ */
+export function catalogEntryAddress(entry: { name: string; packageId?: string }): PermissionSetAddressParsed {
+  const owner = entry.packageId;
+  return { packageId: owner && owner !== OVERLAY_PROVENANCE_SENTINEL ? owner : null, name: entry.name };
+}
+
+/** What the activation ledger switches off ({@link readDisabledCatalogNames}). */
+export interface DisabledCatalogItems {
+  /** Positions switched off, by name: positions are one environment-wide slot (ADR-0150 D7). */
+  positions: Set<string>;
+  /**
+   * [ADR-0150 D4, D8 R4] Permission-set holders switched off, by
+   * {@link permissionSetAddressKey}: a row disables the one holder its
+   * `package_id` names, never another package's set of the same name. Ask it
+   * with {@link permissionSetSwitchedOff}.
+   */
+  permissionSets: Set<string>;
+  /**
+   * Permission sets switched off, by name: a name is here when a row
+   * switches off any holder of it. The answer before ADR-0150, kept for
+   * callers that read it; with two holders of a name it cannot say which, so
+   * every reader in this repository asks {@link permissionSetSwitchedOff}.
+   */
+  permissions: Set<string>;
+}
+
+/** Whether the ledger answer `disabled` switches off the set held at `(packageId, name)`. */
+export function permissionSetSwitchedOff(
+  disabled: Pick<DisabledCatalogItems, 'permissionSets'>,
+  packageId: string | null | undefined,
+  name: string,
+): boolean {
+  return disabled.permissionSets.has(permissionSetAddressKey(packageId, name));
+}
+
+/** [ADR-0150 D8 R4] Each ambiguous ledger row is said once per process, not once per request. */
+const ambiguousLedgerRowsSaid = new Set<string>();
+
+/**
+ * [ADR-0150 D8 R4] The holders one switched-off `permission` row of the
+ * ledger disables, read the way every other stored reference to a set is: the
+ * row's `package_id` names its holder (the exact arm); a null one — or a stale
+ * one, whose package no longer serves the name — is read by the D3 rule with
+ * no caller, and keeps disabling the holder that rule answers (the catalog
+ * says the stale column once). A row the rule refuses (two holders, none
+ * named) disables every holder of the name and is said once: a switch-off
+ * that cannot be placed is never read as no switch-off.
+ */
+async function ledgerRowHolders(
+  catalog: SecurityCatalogReader | undefined,
+  name: string,
+  packageColumn: unknown,
+): Promise<Array<string | null>> {
+  const scope = storedPermissionSetScope(packageColumn);
+  const named = scope?.packageId ?? null;
+  if (!catalog) return [named];
+  const answer = await resolveCatalogReference(catalog, 'permission', name, scope);
+  if (answer.status === 'resolved') return [catalogEntryAddress(answer.entry).packageId];
+  if (answer.status === 'not-found') return [named];
+  const holders = (await catalog.list('permission'))
+    .filter((entry) => entry.name === name)
+    .map((entry) => catalogEntryAddress(entry).packageId);
+  const said = `${named ?? ''}\u0000${name}`;
+  if (!ambiguousLedgerRowsSaid.has(said)) {
+    ambiguousLedgerRowsSaid.add(said);
+    console.warn(
+      `[security] the activation ledger switches off permission set "${name}"${named ? ` of package "${named}", which no longer serves it,` : ' with no package named'}, `
+      + `and that name has more than one holder (${answer.candidates.join(', ')}); every holder of the name is switched off. `
+      + 'Name the package on the ledger row to switch off one holder only.',
+    );
+  }
+  return holders.length > 0 ? holders : [named];
+}
+
+/**
  * [ADR-0049, ADR-0131 D3, ADR-0126 §4] Which of `positions` and `sets` are
  * switched OFF for this deployment: the `sys_metadata_activation` rows of type
  * `position` / `permission` whose `active` is false. ADR-0131 moves the
@@ -1383,6 +1504,12 @@ function ledgerUnregistered(ql: any): boolean {
  * definition's lifecycle, since there is no row", and regime C's "disable is
  * one `active` bit of deployment-level state in the tenant-less activation
  * ledger". So the catalog ROW's `active` column is not read here at all.
+ *
+ * [ADR-0150 D4, D8 R4] A permission set is switched off per HOLDER: the row's
+ * `package_id` names which package's set ({@link ledgerRowHolders}), so
+ * switching off one package's `sales_rep` leaves another package's
+ * `sales_rep` granting. The answer is keyed by {@link permissionSetAddressKey};
+ * ask it with {@link permissionSetSwitchedOff}.
  *
  * The ledger is deployment-level (no tenant column): a disabled set is
  * disabled in every organization. Absence of a row means ACTIVE, and a driver
@@ -1407,21 +1534,37 @@ export async function readDisabledCatalogNames(
   ql: any,
   positions: readonly string[],
   sets: readonly string[],
-): Promise<{ positions: Set<string>; permissions: Set<string> }> {
-  const disabled = { positions: new Set<string>(), permissions: new Set<string>() };
+): Promise<DisabledCatalogItems> {
+  const disabled: DisabledCatalogItems = {
+    positions: new Set<string>(),
+    permissionSets: new Set<string>(),
+    permissions: new Set<string>(),
+  };
   const names = [...new Set([...positions, ...sets])];
   if (names.length === 0) return disabled;
   if (ledgerUnregistered(ql)) return disabled;
-  const rows = await tryFind(
-    ql,
-    METADATA_ACTIVATION_TABLE,
-    { metadata_type: { $in: [...LEDGER_CATALOG_TYPES] }, name: { $in: names } },
-    names.length * LEDGER_CATALOG_TYPES.length,
-  );
+  const where = { metadata_type: { $in: [...LEDGER_CATALOG_TYPES] }, name: { $in: names } };
+  // One row per (type, name) is the common case, and the first read's bound.
+  // The ledger keys a row by (type, package, name) (R4), so a name two
+  // packages hold may carry a row per holder: a read that comes back full is
+  // read again, wider, until it is not — a row it cut off would leave a set
+  // granting that its row switches off.
+  let limit = names.length * LEDGER_CATALOG_TYPES.length;
+  let rows = await tryFind(ql, METADATA_ACTIVATION_TABLE, where, limit);
+  while (rows.length >= limit) {
+    limit *= 4;
+    rows = await tryFind(ql, METADATA_ACTIVATION_TABLE, where, limit);
+  }
+  const catalog = rows.length > 0 ? securityCatalogReaderOf(ql) : undefined;
   for (const row of rows) {
     if (typeof row?.name !== 'string' || !(row.active === false || row.active === 0)) continue;
     if (row.metadata_type === 'position') disabled.positions.add(row.name);
-    else if (row.metadata_type === 'permission') disabled.permissions.add(row.name);
+    else if (row.metadata_type === 'permission') {
+      disabled.permissions.add(row.name);
+      for (const holder of await ledgerRowHolders(catalog, row.name, row.package_id)) {
+        disabled.permissionSets.add(permissionSetAddressKey(holder, row.name));
+      }
+    }
   }
   return disabled;
 }
@@ -1440,6 +1583,8 @@ function positionSetNamesOf(definition: Readonly<Record<string, unknown>> | unde
 /** What §6b derives from one held set: its catalog body, read from the definition. */
 interface CatalogSetBody {
   name: string;
+  /** [ADR-0150 D3] The holder the catalog resolved the set to; `null` when no package holds it. */
+  packageId: string | null;
   systemPermissions: unknown;
   tabPermissions: unknown;
 }
@@ -1465,9 +1610,85 @@ async function catalogSetBody(
   if (!entry) return undefined;
   return {
     name: entry.name,
+    packageId: catalogEntryAddress(entry).packageId,
     systemPermissions: entry.definition.systemPermissions,
     tabPermissions: entry.definition.tabPermissions,
   };
+}
+
+/**
+ * [ADR-0150 D8 R3] The stored scope of each set an audience anchor carries
+ * because a deployment ACCEPTED it (`sys_audience_binding_suggestion`), by
+ * anchor and set name — bound by the security plugin each time it derives the
+ * `everyone` anchor again ({@link bindAudienceAnchorSetScopes}), keyed on the
+ * engine and its registry as the catalog reader is. A cache rebuilt from those
+ * rows alone: nothing here is persisted, and the anchor's definition still
+ * lists only names.
+ */
+const audienceAnchorSetScopes = new WeakMap<object, Map<string, ReadonlyMap<string, readonly SecurityCatalogReferenceScope[]>>>();
+
+/**
+ * [ADR-0150 D8 R3] Bind, for `anchor` on `engine`, the stored scope each
+ * accepted set resolves through: the suggestion row's `permission_set_package`
+ * (the exact holder) and its `package_id` (the D3 caller of a null or stale
+ * column) — `storedPermissionSetScope`. A set the anchor names with no entry
+ * here (a baseline set, a name the host declared) resolves with no caller, as
+ * ADR-0150 D3 reads an anchor's bindings. Each call REPLACES the anchor's map:
+ * the caller derives it whole from the rows it read. A name may carry several
+ * scopes — two packages' accepted sets of one name — and each grants its own.
+ */
+export function bindAudienceAnchorSetScopes(
+  engine: unknown,
+  anchor: string,
+  scopes: ReadonlyMap<string, readonly SecurityCatalogReferenceScope[]>,
+): boolean {
+  if (!engine || typeof engine !== 'object') return false;
+  const targets: object[] = [engine];
+  const registry = (engine as { registry?: unknown }).registry;
+  if (registry && typeof registry === 'object') targets.push(registry);
+  for (const target of targets) {
+    const byAnchor = audienceAnchorSetScopes.get(target) ?? new Map();
+    byAnchor.set(anchor, new Map(scopes));
+    audienceAnchorSetScopes.set(target, byAnchor);
+  }
+  return true;
+}
+
+/** The stored scopes {@link bindAudienceAnchorSetScopes} bound for `name` on `anchor`, if any. */
+function audienceAnchorSetScopesOf(ql: unknown, anchor: string, name: string): readonly SecurityCatalogReferenceScope[] | undefined {
+  if (!ql || typeof ql !== 'object') return undefined;
+  const own = audienceAnchorSetScopes.get(ql);
+  const registry = (ql as { registry?: unknown }).registry;
+  const byAnchor = own ?? (registry && typeof registry === 'object' ? audienceAnchorSetScopes.get(registry) : undefined);
+  const scopes = byAnchor?.get(anchor)?.get(name);
+  return scopes && scopes.length > 0 ? scopes : undefined;
+}
+
+/**
+ * [ADR-0150 D7, D8 R3] The bodies a position's binding of `name` grants: the
+ * set resolved from the position's package (D7) — or, for an audience anchor's
+ * ACCEPTED set, one body per stored scope its suggestion rows carry
+ * ({@link bindAudienceAnchorSetScopes}). A name a scope's rule refuses grants
+ * nothing through that scope.
+ */
+async function positionSetBodies(
+  ql: unknown,
+  catalog: SecurityCatalogReader | undefined,
+  name: string,
+  positionName: string,
+  position: SecurityCatalogEntry | undefined,
+): Promise<CatalogSetBody[]> {
+  const scopes = audienceAnchorSetScopesOf(ql, positionName, name);
+  if (!scopes) {
+    const body = await catalogSetBody(catalog, name, position);
+    return body ? [body] : [];
+  }
+  const bodies: CatalogSetBody[] = [];
+  for (const scope of scopes) {
+    const body = await catalogSetBody(catalog, name, undefined, scope);
+    if (body && !bodies.some((b) => b.packageId === body.packageId)) bodies.push(body);
+  }
+  return bodies;
 }
 
 /** What {@link positionBoundSetNames} reads: each position's set names, and the position each was read from. */
@@ -1578,28 +1799,30 @@ function holdsExternalIdentity(held: readonly string[]): boolean {
 }
 
 /**
- * [ADR-0131 D3/D4, ADR-0049] The sets each of `positions` grants through its
- * definition, IN FORCE: a position the activation ledger switched off grants
- * nothing, and a set it switched off is not granted. `namedByPosition` is
+ * [ADR-0131 D3/D4, ADR-0049] The sets each of `positions` names through its
+ * definition, for the positions IN FORCE: a position the activation ledger
+ * switched off grants nothing. `namedByPosition` is
  * {@link positionBoundSetNames}' answer and `disabled` the ledger's
  * ({@link readDisabledCatalogNames}). A switched-off position is absent from
  * the answer. §6a asks this; so does {@link readPositionGrantsInForce}.
  *
  * What a set confers once named (its catalog body, §6b) is not decided here: a
- * name the catalog holds no set for is still listed, and confers nothing.
+ * name the catalog holds no set for is still listed, and confers nothing. Nor
+ * is whether a named set is switched off: [ADR-0150 D4] the ledger switches off
+ * one holder, and which holder a name is, is the catalog's answer, read after
+ * this ({@link permissionSetSwitchedOff}).
  */
 function setsInForceByPosition(
   positions: readonly string[],
   namedByPosition: ReadonlyMap<string, readonly string[]>,
-  disabled: { positions: ReadonlySet<string>; permissions: ReadonlySet<string> },
+  disabled: { positions: ReadonlySet<string> },
 ): Map<string, string[]> {
   const inForce = new Map<string, string[]>();
   for (const positionName of positions) {
     if (disabled.positions.has(positionName)) continue;
-    inForce.set(
-      positionName,
-      (namedByPosition.get(positionName) ?? []).filter((setName) => !disabled.permissions.has(setName)),
-    );
+    // [ADR-0150 D4] A set is switched off per holder, so whether a named set
+    // is in force is known only once it resolves (§6b, after its body).
+    inForce.set(positionName, [...(namedByPosition.get(positionName) ?? [])]);
   }
   return inForce;
 }
@@ -1624,21 +1847,34 @@ function setsInForceByPosition(
 export async function readPositionGrantsInForce(
   ql: any,
   positions: readonly string[],
-): Promise<{ inForce: Map<string, string[]>; disabledPositions: Set<string> }> {
+): Promise<{
+  inForce: Map<string, string[]>;
+  /** [ADR-0150 D3] The address each in-force set of each position resolved to, in the order of `inForce`. */
+  addresses: Map<string, PermissionSetAddressParsed[]>;
+  disabledPositions: Set<string>;
+}> {
   const names = [...new Set(positions.filter((n) => typeof n === 'string' && n !== ''))];
   const catalog = securityCatalogReaderOf(ql);
   const { named: namedByPosition, entries: positionEntries } = await positionBoundSetNames(catalog, names);
   const disabled = await readDisabledCatalogNames(ql, names, [...namedByPosition.values()].flat());
   const inForce = setsInForceByPosition(names, namedByPosition, disabled);
+  const addresses = new Map<string, PermissionSetAddressParsed[]>();
   for (const [positionName, setNames] of inForce) {
     const held: string[] = [];
+    const heldAddresses: PermissionSetAddressParsed[] = [];
     for (const setName of setNames) {
       if (held.includes(setName)) continue;
-      if (await catalogSetBody(catalog, setName, positionEntries.get(positionName))) held.push(setName);
+      // [ADR-0150 D7] Resolved from the position's package; [D4] switched off per holder.
+      for (const body of await positionSetBodies(ql, catalog, setName, positionName, positionEntries.get(positionName))) {
+        if (permissionSetSwitchedOff(disabled, body.packageId, body.name)) continue;
+        if (!held.includes(setName)) held.push(setName);
+        heldAddresses.push({ packageId: body.packageId, name: body.name });
+      }
     }
     inForce.set(positionName, held);
+    addresses.set(positionName, heldAddresses);
   }
-  return { inForce, disabledPositions: disabled.positions };
+  return { inForce, addresses, disabledPositions: disabled.positions };
 }
 
 /**
@@ -1715,16 +1951,29 @@ type TabVisibility = 'visible' | 'hidden' | 'default_on' | 'default_off';
  * `permissions`, its system permissions onto `systemPermissions`, and its tab
  * permissions merged by highest visibility — the derivation every held set
  * takes, the user's (§6b) and the guest's ({@link resolveGuestAnchorGrants})
- * alike. Bodies arrive already filtered: a switched-off set is never handed in.
+ * alike — and [ADR-0150 D3] each set's `(packageId, name)` onto
+ * `permissionSetAddresses`. Bodies arrive already filtered: a switched-off set
+ * is never handed in.
  */
 function foldCatalogSetBodies(
-  target: { permissions: string[]; systemPermissions: string[]; tabPermissions?: Record<string, TabVisibility> },
+  target: {
+    permissions: string[];
+    permissionSetAddresses?: PermissionSetAddressParsed[];
+    systemPermissions: string[];
+    tabPermissions?: Record<string, TabVisibility>;
+  },
   bodies: readonly CatalogSetBody[],
 ): void {
   const tabRank: Record<string, number> = { hidden: 0, default_off: 1, default_on: 2, visible: 3 };
   const mergedTabs: Record<string, TabVisibility> = {};
+  const addresses = (target.permissionSetAddresses ??= []);
   for (const ps of bodies) {
     if (ps.name && !target.permissions.includes(ps.name)) target.permissions.push(ps.name);
+    // [ADR-0150 D3] Every held holder keeps its own address: two packages'
+    // sets of one name are two entries here and one name above.
+    if (ps.name && !addresses.some((a) => a.packageId === ps.packageId && a.name === ps.name)) {
+      addresses.push({ packageId: ps.packageId, name: ps.name });
+    }
     const sysPerms = ps.systemPermissions;
     if (Array.isArray(sysPerms)) {
       for (const p of sysPerms) {
@@ -1818,6 +2067,8 @@ interface GuestAnchorGrants {
   /** The organization D4 derived — the guest's `tenantId`. */
   organizationId: string;
   permissions: string[];
+  /** [ADR-0150 D3] Each bound set's address, as the catalog resolved it. */
+  permissionSetAddresses: PermissionSetAddressParsed[];
   systemPermissions: string[];
   tabPermissions?: Record<string, TabVisibility>;
 }
@@ -1872,15 +2123,18 @@ async function resolveGuestAnchorGrants(
   const grants: GuestAnchorGrants = {
     organizationId: organization.organizationId,
     permissions: [],
+    permissionSetAddresses: [],
     systemPermissions: [],
   };
   const disabled = await readDisabledCatalogNames(ql, [GUEST_POSITION], bound);
   if (disabled.positions.has(GUEST_POSITION)) return grants;
   const bodies: CatalogSetBody[] = [];
   for (const name of bound) {
-    if (disabled.permissions.has(name)) continue;
-    const body = await catalogSetBody(catalog, name, guestBindings.entries.get(GUEST_POSITION));
-    if (body && !bodies.some((b) => b.name === body.name)) bodies.push(body);
+    for (const body of await positionSetBodies(ql, catalog, name, GUEST_POSITION, guestBindings.entries.get(GUEST_POSITION))) {
+      // [ADR-0150 D4] Switched off per holder: the one this name resolved to.
+      if (permissionSetSwitchedOff(disabled, body.packageId, body.name)) continue;
+      if (!bodies.some((b) => b.name === body.name && b.packageId === body.packageId)) bodies.push(body);
+    }
   }
   foldCatalogSetBodies(grants, bodies);
   return grants;
@@ -1966,6 +2220,7 @@ export async function resolveUserAuthzGrants(
     positions: [],
     permissions: Array.isArray(opts.seedPermissions) ? [...opts.seedPermissions] : [],
     directPermissions: [],
+    permissionSetAddresses: [],
     systemPermissions: [],
     org_user_ids: [userId],
     accessible_org_ids: [],
@@ -2231,13 +2486,13 @@ export async function resolveUserAuthzGrants(
   const readPositionLedger = async (): Promise<{
     namedByPosition: Map<string, string[]>;
     positionEntries: Map<string, SecurityCatalogEntry>;
-    disabled: { positions: Set<string>; permissions: Set<string> };
+    disabled: DisabledCatalogItems;
   }> => {
     if (grants.positions.length === 0) {
       return {
         namedByPosition: new Map(),
         positionEntries: new Map(),
-        disabled: { positions: new Set(), permissions: new Set() },
+        disabled: { positions: new Set(), permissionSets: new Set(), permissions: new Set() },
       };
     }
     // The definitions first (in-process), so the ONE ledger read can ask about
@@ -2290,10 +2545,13 @@ export async function resolveUserAuthzGrants(
   //     Each body is its catalog definition; whether it is switched off is the
   //     activation ledger's answer (§6a).
   const psRowsAll: Array<CatalogSetBody & { active: boolean }> = [];
-  const takenNames = new Set<string>();
+  // [ADR-0150 D3] One body per HOLDER, keyed by `(packageId, name)`: two
+  // packages' sets of one name are two grants, and neither displaces the other.
+  const takenHolders = new Set<string>();
   const take = (body: CatalogSetBody, active: boolean): void => {
-    if (takenNames.has(body.name)) return;
-    takenNames.add(body.name);
+    const key = permissionSetAddressKey(body.packageId, body.name);
+    if (takenHolders.has(key)) return;
+    takenHolders.add(key);
     psRowsAll.push({ ...body, active });
   };
   for (const grant of applyingGrants) {
@@ -2305,7 +2563,8 @@ export async function resolveUserAuthzGrants(
     // picked (`storedPermissionSetScope`).
     const body = await catalogSetBody(catalog, name, undefined, storedPermissionSetScope((grant as Record<string, unknown>).permission_set_package));
     if (!body) continue;
-    const active = !disabled.permissions.has(name);
+    // [ADR-0150 D4] Switched off per holder: the one this grant resolved to.
+    const active = !permissionSetSwitchedOff(disabled, body.packageId, body.name);
     take(body, active);
     // [#25799] The direct channel, as the explainer reads it: a name this
     // resolution confers through the user's own grant row.
@@ -2335,11 +2594,12 @@ export async function resolveUserAuthzGrants(
   for (const { setName: name, positionName } of boundSets) {
     // Asked per naming position, never once per name: a reference one
     // position's package cannot resolve (ADR-0150 D3) must not withhold the
-    // set another position names in a scope that resolves it.
-    if (takenNames.has(name)) continue;
-    const body = await catalogSetBody(catalog, name, positionEntries.get(positionName));
-    if (!body) continue;
-    take(body, !disabled.permissions.has(name));
+    // set another position names in a scope that resolves it — and a name a
+    // grant row already took may name another holder here, which is granted
+    // too (`take` keys by holder).
+    for (const body of await positionSetBodies(ql, catalog, name, positionName, positionEntries.get(positionName))) {
+      take(body, !permissionSetSwitchedOff(disabled, body.packageId, body.name));
+    }
   }
   if (psRowsAll.length > 0) {
     // [ADR-0049] A DEACTIVATED permission set grants nothing — the
@@ -2386,6 +2646,13 @@ export async function resolveUserAuthzGrants(
     // envelope a grant-derived one carries.
     hasPlatformAdminGrant = true;
     if (!grants.permissions.includes(ADMIN_FULL_ACCESS)) grants.permissions.push(ADMIN_FULL_ACCESS);
+    // [ADR-0150 D3] Its address, as a grant row's would be: the set the name
+    // resolves to with no caller — the identical envelope again.
+    const addresses = (grants.permissionSetAddresses ??= []);
+    if (!addresses.some((a) => a.name === ADMIN_FULL_ACCESS)) {
+      const body = await catalogSetBody(catalog, ADMIN_FULL_ACCESS);
+      addresses.push({ packageId: body?.packageId ?? null, name: ADMIN_FULL_ACCESS });
+    }
     recordOrigin(ADMIN_FULL_ACCESS, { kind: 'derived', source: 'platform_admin_config' });
     for (const p of ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions ?? []) {
       if (!grants.systemPermissions.includes(p)) grants.systemPermissions.push(p);
@@ -2415,6 +2682,9 @@ export async function resolveUserAuthzGrants(
     grants.systemPermissions = [];
     grants.permissions = grants.permissions.filter(
       (n) => n !== ADMIN_FULL_ACCESS && !ORGANIZATION_ADMIN_GRANTS.includes(n),
+    );
+    grants.permissionSetAddresses = (grants.permissionSetAddresses ?? []).filter(
+      (a) => grants.permissions.includes(a.name),
     );
   }
 

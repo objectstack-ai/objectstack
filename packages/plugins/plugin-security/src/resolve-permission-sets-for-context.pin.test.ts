@@ -84,7 +84,9 @@ function bootPlugin(catalog: PermissionSet[] = [], dbRows: Array<Record<string, 
     },
   };
   const metadata: any = {
-    get: async (_type: string, name: string) => (name === 'deal' ? schema : null),
+    // The catalog reads a set by name (ADR-0150 D3): served from the same list.
+    get: async (type: string, name: string) =>
+      (type === 'permission' ? (name === MEMBER_DEFAULT.name ? MEMBER_DEFAULT : null) : name === 'deal' ? schema : null),
     list: async () => [MEMBER_DEFAULT],
   };
   const services: Record<string, any> = { manifest: { register: vi.fn() }, objectql: ql, metadata };

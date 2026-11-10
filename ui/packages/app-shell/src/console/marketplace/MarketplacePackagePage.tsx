@@ -406,7 +406,9 @@ function MarketplacePackagePageBody() {
   const requestedInstallMode: LocalInstallMode | undefined = !declaredModes
     ? undefined
     : declaredModes.length === 1 ? declaredModes[0] : (chosenMode || undefined);
-  // The hosted install (a cloud base, no install-local door) sends the same
+  // The hosted install (a cloud base, no install-local route: a hosted
+  // environment's install-local door is reached only in process, after the
+  // control plane grants an unmanaged copy) sends the same
   // resolved mode, except where the package permits nothing beyond `managed`:
   // that request stays the one every hosted install sent before the mode.
   const hostedModeDoor = !getRuntimeConfig().features.installLocal && !!getCloudBase();

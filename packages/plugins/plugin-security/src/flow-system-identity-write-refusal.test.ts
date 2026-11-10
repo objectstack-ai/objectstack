@@ -174,7 +174,9 @@ async function boot(): Promise<ObjectQL> {
     manifest: { register: vi.fn() },
     objectql: engine,
     metadata: {
-      get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+      // The catalog reads a set by name (ADR-0150 D3): served from the same list.
+      get: async (type: string, name: string) =>
+        (type === 'permission' ? ([MEMBER, TENANT_ADMIN]).find((s: any) => s?.name === name) : engine.getSchema(name)) ?? null,
       list: async () => [MEMBER, TENANT_ADMIN],
     },
   };
