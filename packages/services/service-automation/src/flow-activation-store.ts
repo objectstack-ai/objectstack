@@ -51,6 +51,15 @@ import type { FlowActivationStore } from './engine.js';
 const METADATA_TYPE = 'flow';
 
 /**
+ * [ADR-0150 D4, #31696] Flow rows are addressed by `(package, name)`: two
+ * packages that ship a flow of one name each keep their own row, and switching
+ * one package's flow never re-attributes the other's (see
+ * `MetadataActivationRowAddressing` in `@objectstack/core`). Both stores use it,
+ * so the in-memory double keeps rows exactly as the durable ledger does.
+ */
+const ADDRESSING = { addressing: 'package-and-name' } as const;
+
+/**
  * The exact ObjectQL slice this store needs: a keyed read, an insert, and an
  * update. Narrower than `SuspendedRunStoreEngine` on purpose, and deliberately
  * WITHOUT `delete`: re-enabling updates the `active` bit, it never removes the
@@ -73,7 +82,11 @@ export type FlowActivationStoreEngine = MetadataActivationStoreEngine;
  */
 export class InMemoryFlowActivationStore
   extends InMemoryMetadataActivationStore
-  implements FlowActivationStore {}
+  implements FlowActivationStore {
+  constructor() {
+    super(ADDRESSING);
+  }
+}
 
 /**
  * Durable {@link FlowActivationStore} backed by the `sys_metadata_activation`
@@ -93,6 +106,6 @@ export class ObjectStoreFlowActivationStore
   extends ObjectStoreMetadataActivationStore
   implements FlowActivationStore {
   constructor(engine: FlowActivationStoreEngine) {
-    super(engine, METADATA_TYPE);
+    super(engine, METADATA_TYPE, ADDRESSING);
   }
 }

@@ -42,8 +42,10 @@ export interface FlowActivationProjectionReaders {
     readonly slotOf?: (key: string) => { name: string; packageId: string | null; shared: boolean } | undefined;
     /**
      * [#31696, ADR-0150 D4] A row naming no package switches off a name two
-     * packages hold: it overlays neither (a package-less row binds to ONE
-     * holder, and there are two). Reported once per name by the projection.
+     * packages hold. It binds to ONE holder (D8), and nothing says which, so
+     * it keeps every holder's flow off that has no row of its own, until an
+     * operator switches each package's flow (that writes its own row).
+     * Reported once per name by the projection.
      */
     readonly reportPackagelessOverShared?: (overlay: { name: string }) => void;
 }
@@ -57,8 +59,21 @@ export class FlowActivationProjection {
     private readonly rows = new Map<string, Map<string, boolean>>();
     /** The `(name, row package)` pairs whose stale row has been reported. */
     private readonly staleReported = new Set<string>();
-    /** The names whose package-less row over two holders has been reported. */
+    /**
+     * The names whose package-less row has been read while two packages held
+     * the name: reported once, and never bound to one of them later
+     * ({@link canBindPackageless}). Such a row was never shown to be one
+     * holder's switch, so binding it on a later drop to one holder would be a
+     * pick decided by arrival order.
+     */
     private readonly packagelessSharedReported = new Set<string>();
+    /**
+     * The names whose package-less row is being bound to the name's first
+     * holder ({@link beginBindPackageless}): until the durable write lands,
+     * the row keeps every holder off, as any package-less row over two
+     * holders does, but it is not reported — it is not ambiguous.
+     */
+    private readonly packagelessBinding = new Set<string>();
 
     constructor(private readonly readers: FlowActivationProjectionReaders) {}
 
@@ -103,40 +118,64 @@ export class FlowActivationProjection {
 
     /**
      * [#31696, ADR-0150 D4] Is the slot `(packageId, name)` of a name two or
-     * more slots hold switched off? Only its own package's row decides. A row
-     * naming no package overlays neither holder (it binds to one, and there
-     * are two — {@link bindPackageless} binds it while there is one), and is
-     * reported once; a row of another package keys that package's slot.
+     * more slots hold switched off? Its own package's row decides. Else a row
+     * naming no package that switches the name off keeps this slot off too:
+     * it binds to one holder and nothing says which, so it fails closed for
+     * every holder without a row of its own, and is reported once. A row of
+     * another package keys that package's slot only.
      */
     private hasShared(name: string, packageId: string | null): boolean {
         const packages = this.rows.get(name);
         if (!packages || packages.size === 0) return false;
         if (packageId !== null && packages.has(packageId)) return packages.get(packageId) === true;
-        if (packages.get('') === true && !this.packagelessSharedReported.has(name)) {
+        if (packages.get('') !== true) return false;
+        if (!this.packagelessBinding.has(name) && !this.packagelessSharedReported.has(name)) {
             this.packagelessSharedReported.add(name);
             this.readers.reportPackagelessOverShared?.({ name });
         }
-        return false;
+        return true;
     }
 
     /**
-     * [#31696, ADR-0150 D4, epic red line 1] Bind the row naming no package
-     * to `packageId`, the name's one holder, before a second holder arrives:
-     * the row was that holder's switch (D8: a package-less row binds to the
-     * one holder), so it stays its switch once the name has two. Answers
-     * whether a switched-off row was bound, so the caller can make the bind
-     * durable. A holder with a row of its own keeps it, and the package-less
-     * row is dropped from the projection either way: under two holders it
-     * overlays neither.
+     * [#31696, ADR-0150 D4, epic red line 1] May the row naming no package be
+     * bound to `packageId`, the name's one holder, now that a second holder
+     * arrives? Only a row that switches the name off, that this projection
+     * has only ever read over one holder, and where the holder has no row of
+     * its own (that row is its switch; the package-less one then switches
+     * nothing).
      */
-    bindPackageless(name: string, packageId: string): boolean {
+    canBindPackageless(name: string, packageId: string): boolean {
+        const packages = this.rows.get(name);
+        if (packages?.get('') !== true || packages.has(packageId)) return false;
+        return !this.packagelessSharedReported.has(name) && !this.packagelessBinding.has(name);
+    }
+
+    /** The durable bind of {@link canBindPackageless} has begun. */
+    beginBindPackageless(name: string): void {
+        this.packagelessBinding.add(name);
+    }
+
+    /**
+     * The durable bind landed: the row naming no package is now
+     * `packageId`'s own row, here as in the ledger.
+     */
+    bindPackageless(name: string, packageId: string): void {
+        this.packagelessBinding.delete(name);
         const packages: Map<string, boolean> | undefined = this.rows.get(name);
-        if (!packages?.has('')) return false;
+        if (!packages?.has('')) return;
         const off = packages.get('') === true;
         packages.delete('');
-        if (packages.has(packageId)) return false;
-        packages.set(packageId, off);
-        return off;
+        if (!packages.has(packageId)) packages.set(packageId, off);
+    }
+
+    /**
+     * The durable bind failed: the row still names no package in the ledger,
+     * so it stays as it is here — off for every holder without a row of its
+     * own — and is never bound later.
+     */
+    failBindPackageless(name: string): void {
+        this.packagelessBinding.delete(name);
+        this.packagelessSharedReported.add(name);
     }
 
     /** Record a row switching `(packageId, name)` off. */

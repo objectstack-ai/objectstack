@@ -467,15 +467,17 @@ export async function hydrateFlowActivations(this: Pick<FlowDefinitionsHost, 'fl
     if (!this.flowActivationStore) return [];
     const rows = await this.flowActivationStore.list();
     const disabled: string[] = [];
+    // [ADR-0150 D4] The row's own package goes into the projection with the
+    // name, so it switches off that package's flow of the name and no other
+    // (`FlowActivationProjection.has`). [#31696] Every row is in before any
+    // flow is judged, so a package's own row is read with the row naming no
+    // package beside it, whichever the ledger lists first.
     for (const row of rows) {
-        // [ADR-0150 D4] The row's own package goes into the projection with
-        // the name, so it switches off that package's flow of the name and no
-        // other (`FlowActivationProjection.has`).
-        if (row.active) {
-            this.flowLedgerDisabled.delete(row.name, row.packageId);
-            continue;
-        }
-        this.flowLedgerDisabled.add(row.name, row.packageId);
+        if (row.active) this.flowLedgerDisabled.delete(row.name, row.packageId);
+        else this.flowLedgerDisabled.add(row.name, row.packageId);
+    }
+    for (const row of rows) {
+        if (row.active) continue;
         // Only a flow this engine actually holds can be unbound; a row for
         // a flow this deployment does not ship is kept in the projection
         // (it costs one string, and the flow may be registered later by a
@@ -563,6 +565,11 @@ export async function toggleFlow(this: Pick<FlowDefinitionsHost, 'flows' | 'refu
     // The durable row FIRST. A store that throws aborts the flip with
     // nothing changed in process, so the engine never reports an
     // activation state the ledger does not carry.
+    // [ADR-0150 D4, #31696] The row is addressed by `(package, name)`. While
+    // the package is the name's one holder, a row naming no package is its
+    // switch, and this write takes that row over; under two holders it is
+    // neither's, and stays as it is.
+    const shared = this.isSharedFlowKey(name);
     if (this.flowActivationStore) {
         await this.flowActivationStore.setActive({
             name: flowName,
@@ -571,7 +578,7 @@ export async function toggleFlow(this: Pick<FlowDefinitionsHost, 'flows' | 'refu
             // from an authoring door. Read once, up top, with the verdict.
             packageId: packageOwner,
             active: enabled,
-        }, flowActivationWriteOptions(caller));
+        }, { ...flowActivationWriteOptions(caller), ...(shared ? {} : { adoptPackageless: true }) });
     } else {
         // Degrading to in-process is a legitimate mode for a host with no
         // ObjectQL — degrading to it while REPORTING durability is not
@@ -588,8 +595,8 @@ export async function toggleFlow(this: Pick<FlowDefinitionsHost, 'flows' | 'refu
     // row that named no package bound to this one holder, and the write above
     // is now that holder's row, so it goes too.
     // [#31696] Not under a name two packages hold: there the row naming no
-    // package overlays neither holder, so it is not this holder's row.
-    if (!this.isSharedFlowKey(name)) this.flowLedgerDisabled.delete(flowName);
+    // package is neither holder's row.
+    if (!shared) this.flowLedgerDisabled.delete(flowName);
     if (enabled) this.flowLedgerDisabled.delete(flowName, packageOwner);
     else this.flowLedgerDisabled.add(flowName, packageOwner);
 

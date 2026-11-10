@@ -134,6 +134,40 @@ export interface MetadataActivationWriteOptions {
      * context, and the row names nobody.
      */
     context?: MetadataActivationWriteContext;
+    /**
+     * [ADR-0150 D4, D8 row R4] Only for a store whose rows are addressed by
+     * `(package, name)` ({@link MetadataActivationRowAddressing}), and only for
+     * a row that names a package: where that package holds no row of the name
+     * yet and a row naming no package does, the write turns THAT row into the
+     * package's row, instead of adding a second row beside it.
+     *
+     * The caller passes it when the package is the name's one holder, which is
+     * exactly when the row naming no package is that package's switch (D8: a
+     * package-less row binds to the name's one holder). Never for a name two
+     * packages hold: there the row is neither's, and nothing picks.
+     */
+    adoptPackageless?: boolean;
+}
+
+/**
+ * [ADR-0150 D4] How a store finds the row a write is for.
+ *
+ *  - `'name'` — by `(metadata_type, name)`, one row per name: the write
+ *    re-attributes that row to the package it names. The bare path, kept
+ *    (ADR-0150 red line 3) for every type whose readers still consult the
+ *    ledger by name.
+ *  - `'package-and-name'` — by `(metadata_type, package_id, name)`, the
+ *    object's declared unique key: two packages each keep their own row of one
+ *    name, and a write for one never touches the other's. A type moves here in
+ *    its own ADR-0150 child, once its readers consult the ledger by
+ *    `(package, name)` (flows: #31696).
+ */
+export type MetadataActivationRowAddressing = 'name' | 'package-and-name';
+
+/** Options for constructing a {@link MetadataActivationStore}. */
+export interface MetadataActivationStoreOptions {
+    /** Default `'name'`: see {@link MetadataActivationRowAddressing}. */
+    addressing?: MetadataActivationRowAddressing;
 }
 
 /**
@@ -225,16 +259,45 @@ function refuseEmptyPackageId(row: MetadataActivationRow, subject: string): void
  */
 export class InMemoryMetadataActivationStore implements MetadataActivationStore {
     private readonly rows = new Map<string, MetadataActivationRow>();
+    private readonly addressing: MetadataActivationRowAddressing;
+
+    constructor(options?: MetadataActivationStoreOptions) {
+        this.addressing = options?.addressing ?? 'name';
+    }
 
     async list(): Promise<MetadataActivationRow[]> {
         return [...this.rows.values()];
     }
 
-    /** The caller is not recorded: a map has no `created_by` to stamp. */
-    async setActive(row: MetadataActivationRow, _options?: MetadataActivationWriteOptions): Promise<void> {
+    /**
+     * The caller is not recorded: a map has no `created_by` to stamp. Rows are
+     * found as the durable store finds them ({@link MetadataActivationRowAddressing},
+     * {@link MetadataActivationWriteOptions.adoptPackageless}).
+     */
+    async setActive(row: MetadataActivationRow, options?: MetadataActivationWriteOptions): Promise<void> {
         refuseEmptyPackageId(row, `'${row.name}'`);
-        this.rows.set(row.name, { ...row });
+        if (this.addressing === 'name') {
+            this.rows.set(row.name, { ...row });
+            return;
+        }
+        const own = activationRowKey(row.name, row.packageId);
+        const packageless = activationRowKey(row.name, undefined);
+        if (row.packageId !== undefined && options?.adoptPackageless && !this.rows.has(own) && this.rows.has(packageless)) {
+            this.rows.delete(packageless);
+        }
+        this.rows.set(own, { ...row });
     }
+}
+
+/** The in-memory key of a row addressed by `(package, name)`. */
+function activationRowKey(name: string, packageId: string | undefined): string {
+    return JSON.stringify([packageId ?? null, name]);
+}
+
+/** Does a stored `package_id` name the package `packageId` (`undefined`: none)? */
+function storedPackageIs(stored: unknown, packageId: string | undefined): boolean {
+    const own = typeof stored === 'string' && stored !== '' ? stored : undefined;
+    return own === packageId;
 }
 
 /**
@@ -260,6 +323,8 @@ export class ObjectStoreMetadataActivationStore implements MetadataActivationSto
          * argument.
          */
         private readonly metadataType: string,
+        /** Default `'name'`: see {@link MetadataActivationRowAddressing}. */
+        private readonly options?: MetadataActivationStoreOptions,
     ) {}
 
     /**
@@ -284,14 +349,21 @@ export class ObjectStoreMetadataActivationStore implements MetadataActivationSto
      * store controls: there is no id to collide on, so an insert-and-catch
      * could not tell "already there" from a real store failure.
      *
-     * The write still addresses the row by `(metadata_type, name)`: the bare
-     * path, kept (ADR-0150 red line 3). This is the ledger's only writer, and it
-     * inserts only where that read finds nothing, so it keeps one row per
+     * By default the write addresses the row by `(metadata_type, name)`: the
+     * bare path, kept (ADR-0150 red line 3). This is the ledger's only writer,
+     * and it inserts only where that read finds nothing, so it keeps one row per
      * `(metadata_type, name)` and taking the FIRST match is taking the only one.
      * The wider index permits a second package's row of the same name; nothing
      * writes one until a type's own readers consult the ledger by
      * `(package, name)` (that type's ADR-0150 child), so no name-keyed reader
      * ever sees two rows for one name.
+     *
+     * A store constructed with `addressing: 'package-and-name'` is that child's
+     * store: it reads the name's rows and writes the one whose `package_id` is
+     * the row's package (none: the one with none), so one package's write never
+     * re-attributes another package's row. With
+     * {@link MetadataActivationWriteOptions.adoptPackageless}, a package with no
+     * row of its own takes the row naming no package over.
      *
      * `packageId` absent writes NO package (`null`), the ledger's spelling for
      * an item no package ships. An empty string is refused before anything is
@@ -310,7 +382,14 @@ export class ObjectStoreMetadataActivationStore implements MetadataActivationSto
             where: { metadata_type: this.metadataType, name: row.name },
             context,
         });
-        const current = Array.isArray(existing) ? existing[0] : undefined;
+        const candidates: Array<{ id?: unknown; package_id?: unknown }> = Array.isArray(existing) ? existing : [];
+        let current: { id?: unknown; package_id?: unknown } | undefined = candidates[0];
+        if (this.options?.addressing === 'package-and-name') {
+            current = candidates.find((r) => storedPackageIs(r.package_id, row.packageId));
+            if (!current && row.packageId !== undefined && options?.adoptPackageless) {
+                current = candidates.find((r) => storedPackageIs(r.package_id, undefined));
+            }
+        }
 
         if (current && (current as { id?: unknown }).id != null) {
             await this.engine.update(

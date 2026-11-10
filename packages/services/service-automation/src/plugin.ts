@@ -1294,7 +1294,14 @@ export function findInertDeclaredConnectors(
  *
  * [ADR-0150 D4, #31696] Asked with a package id, it answers that package's
  * own question through the protocol's `shippedArtifactsOf` — see
- * `PackagedFlowSource`.
+ * `PackagedFlowSource`. ⚠️ That method is TypeScript-`private` on
+ * `ObjectStackProtocolImplementation` and is reached here at runtime, by
+ * duck type, as the service is. A protocol that does not carry it answers
+ * `undefined` for every package: precedence then takes the one-owner path,
+ * where a name two packages hold is refused (E1) — fail-safe, never a pick.
+ * A protocol refactor that renames it turns two packages' same-named flows
+ * back into that refusal, which `flow-slots-per-package.test.ts` and the boot
+ * pull's integration test would read as red.
  */
 export function packagedFlowReader(ctx: Pick<PluginContext, 'getService'>): (name: string, packageId?: string) => string | undefined {
     return (name, packageId) => {

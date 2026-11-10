@@ -332,16 +332,21 @@ describe('#31696 the activation ledger per slot (epic red line 1)', () => {
         expect((await engine.execute('f')).code).toBe('FLOW_DISABLED');
 
         ship(P2, leaf('f', 'p2'));
+        await engine.flowActivationBinds();
         const p1 = await engine.executeSlot(P1, 'f');
         expect(p1).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
         expect((await engine.executeSlot(P2, 'f')).success).toBe(true);
         expect(ran).toEqual(['p2']);
 
-        // …and bound durably: P1's own row is written, so a restart reads it.
-        await vi.waitFor(async () => {
-            const rows = await store.list();
-            expect(rows).toContainEqual(expect.objectContaining({ name: 'f', packageId: P1, active: false }));
-        });
+        // …and bound durably: the row naming no package is now P1's own row.
+        expect(await store.list()).toEqual([{ name: 'f', packageId: P1, active: false }]);
+        // Switching P2's flow writes P2's own row beside it, never over it.
+        await engine.toggleFlowSlot(P2, 'f', false);
+        await engine.toggleFlowSlot(P2, 'f', true);
+        expect(await store.list()).toEqual([
+            { name: 'f', packageId: P1, active: false },
+            { name: 'f', packageId: P2, active: true },
+        ]);
         const restarted = newEngine();
         restarted.setFlowActivationStore(store);
         ship(P1, leaf('f', 'p1'), restarted);
@@ -351,19 +356,103 @@ describe('#31696 the activation ledger per slot (epic red line 1)', () => {
         expect((await restarted.executeSlot(P2, 'f')).success).toBe(true);
     });
 
-    it('a package-less row read under two holders overlays neither: both run, one warning', async () => {
+    it('red line: a package-less disable row first read under two holders fails closed: neither runs, one warning', async () => {
         const store = new InMemoryFlowActivationStore();
         await store.setActive({ name: 'f', active: false });
         engine.setFlowActivationStore(store);
         ship(P1, leaf('f', 'p1'));
         ship(P2, leaf('f', 'p2'));
         await engine.hydrateFlowActivations();
-        expect((await engine.executeSlot(P1, 'f')).success).toBe(true);
-        expect((await engine.executeSlot(P2, 'f')).success).toBe(true);
-        expect(ran).toEqual(['p1', 'p2']);
+        expect(await engine.executeSlot(P1, 'f')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
+        expect(await engine.executeSlot(P2, 'f')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
+        expect(ran).toEqual([]);
         const warned = engineLogger.warn.mock.calls.filter(([message]: [string]) => /names no package/.test(message));
         expect(warned).toHaveLength(1);
         expect(warned[0][1]).toMatchObject({ flow: 'f', holders: [P1, P2] });
+        // Nothing was bound: the row still names no package.
+        await engine.flowActivationBinds();
+        expect(await store.list()).toEqual([{ name: 'f', active: false }]);
+
+        // An operator switching one package's flow on writes that package's own row; the other stays off.
+        await engine.toggleFlowSlot(P2, 'f', true);
+        expect((await engine.executeSlot(P2, 'f')).success).toBe(true);
+        expect(await engine.executeSlot(P1, 'f')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
+        expect(await store.list()).toEqual([{ name: 'f', active: false }, { name: 'f', packageId: P2, active: true }]);
+    });
+
+    it('a package-less row read under two holders is never bound later, when the name drops to one holder and comes back', async () => {
+        const store = new InMemoryFlowActivationStore();
+        await store.setActive({ name: 'f', active: false });
+        engine.setFlowActivationStore(store);
+        ship(P1, leaf('f', 'p1'));
+        ship(P2, leaf('f', 'p2'));
+        await engine.hydrateFlowActivations();
+        engine.withdrawFlowSlot(P2, 'f');
+        // One holder again: the row is its switch, as before slots.
+        expect(engine.flowSlotKey(P1, 'f')).toBe('f');
+        expect(await engine.executeSlot(P1, 'f')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
+        ship(P2, leaf('f', 'p2'));
+        await engine.flowActivationBinds();
+        expect(await store.list()).toEqual([{ name: 'f', active: false }]);
+        expect(await engine.executeSlot(P2, 'f')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
+        expect(await engine.executeSlot(P1, 'f')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
+    });
+
+    it('the second holder is off until the bind lands; a bind that fails keeps both off, says so, and binds nothing', async () => {
+        const rows = new InMemoryFlowActivationStore();
+        await rows.setActive({ name: 'f', active: false });
+        let release!: (fail: boolean) => void;
+        const store = {
+            list: () => rows.list(),
+            setActive: (row: never, options?: never) => new Promise<void>((resolve, reject) => {
+                release = (fail) => (fail ? reject(new Error('ledger unreachable')) : resolve(rows.setActive(row, options)));
+            }),
+        };
+        engine.setFlowActivationStore(store);
+        ship(P1, leaf('f', 'p1'));
+        await engine.hydrateFlowActivations();
+        ship(P2, leaf('f', 'p2'));
+        await Promise.resolve();
+        // In flight: the row still names no package, so it keeps both off.
+        expect(await engine.executeSlot(P2, 'f')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
+        release(true);
+        await engine.flowActivationBinds();
+        expect(await rows.list()).toEqual([{ name: 'f', active: false }]);
+        expect(await engine.executeSlot(P2, 'f')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
+        expect(await engine.executeSlot(P1, 'f')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
+        expect(ran).toEqual([]);
+        const warned = engineLogger.warn.mock.calls.filter(([message]: [string]) => /failed, so the row still names no package/.test(message));
+        expect(warned).toHaveLength(1);
+        // …and after a restart the ledger reads the same: both off.
+        const restarted = newEngine();
+        restarted.setFlowActivationStore(rows);
+        ship(P1, leaf('f', 'p1'), restarted);
+        ship(P2, leaf('f', 'p2'), restarted);
+        await restarted.hydrateFlowActivations();
+        expect(await restarted.executeSlot(P2, 'f')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
+    });
+
+    it('the bind lands: the second holder\'s flow runs once its write has', async () => {
+        const rows = new InMemoryFlowActivationStore();
+        await rows.setActive({ name: 'f', active: false });
+        let release!: () => void;
+        const store = {
+            list: () => rows.list(),
+            setActive: (row: never, options?: never) => new Promise<void>((resolve) => {
+                release = () => resolve(rows.setActive(row, options));
+            }),
+        };
+        engine.setFlowActivationStore(store);
+        ship(P1, leaf('f', 'p1'));
+        await engine.hydrateFlowActivations();
+        ship(P2, leaf('f', 'p2'));
+        await Promise.resolve();
+        expect(await engine.executeSlot(P2, 'f')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
+        release();
+        await engine.flowActivationBinds();
+        expect((await engine.executeSlot(P2, 'f')).success).toBe(true);
+        expect(await engine.executeSlot(P1, 'f')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
+        expect(await rows.list()).toEqual([{ name: 'f', packageId: P1, active: false }]);
     });
 
     it('switching one package\'s flow writes that package\'s row and switches no other', async () => {
@@ -417,6 +506,55 @@ describe('#31696 R8 — a stored run names its flow\'s package and resumes on it
         expect(ran).toEqual([]);
     });
 
+    it('a run in flight when its slot\'s key moves is stored as its own package\'s run, never under a key', async () => {
+        const store = new InMemorySuspendedRunStore();
+        const a = newEngine(store);
+        let proceed!: () => void;
+        const gate = new Promise<void>((resolve) => { proceed = resolve; });
+        a.registerNodeExecutor({
+            type: 'hold',
+            async execute() {
+                await gate;
+                return { success: true, suspend: true, correlation: 'held' };
+            },
+        } as unknown as NodeExecutor);
+        // A run of P1's flow under its qualified key; P2 leaves while it is in flight.
+        ship(P1, pausing('f', 'p1'), a);
+        ship(P2, pausing('f', 'p2'), a);
+        const first = a.executeSlot(P1, 'f');
+        await Promise.resolve();
+        a.withdrawFlowSlot(P2, 'f');
+        proceed();
+        const one = ((await first) as { runId?: string }).runId!;
+        expect(await store.load(one)).toMatchObject({ flowName: 'f', flowPackage: P1 });
+
+        // A run of P1's flow under the bare key; P2 arrives while it is in flight.
+        let proceed2!: () => void;
+        const gate2 = new Promise<void>((resolve) => { proceed2 = resolve; });
+        a.registerNodeExecutor({
+            type: 'hold',
+            async execute() {
+                await gate2;
+                return { success: true, suspend: true, correlation: 'held' };
+            },
+        } as unknown as NodeExecutor);
+        expect(a.flowSlotKey(P1, 'f')).toBe('f');
+        const second = a.executeSlot(P1, 'f');
+        await Promise.resolve();
+        ship(P2, pausing('f', 'p2'), a);
+        proceed2();
+        const two = ((await second) as { runId?: string }).runId!;
+        expect(await store.load(two)).toMatchObject({ flowName: 'f', flowPackage: P1 });
+
+        // Each resumes on P1's flow, on a replica that holds both.
+        const b = newEngine(store);
+        ship(P2, pausing('f', 'p2'), b);
+        ship(P1, pausing('f', 'p1'), b);
+        expect((await resume(b, one)).success).toBe(true);
+        expect((await resume(b, two)).success).toBe(true);
+        expect(ran).toEqual(['p1', 'p1']);
+    });
+
     it('the run-store view maps key ↔ (name, package), and passes a package-less record through', async () => {
         const inner = new InMemorySuspendedRunStore();
         const view = flowSlotRunStore(inner, {
@@ -458,7 +596,7 @@ describe('#31696 R9 — the credential channel reads one package\'s rows for a n
         expect(await channel.resolve('f', 'start', 'secret', P1)).toBe('plain-1');
     });
 
-    it('the engine asks the channel by package only for a slot of a name two packages hold', () => {
+    it('the engine asks the channel by package only for a slot of a name two packages hold', async () => {
         const asked: unknown[][] = [];
         engine.setFlowCredentialSource({
             holds: (...a: unknown[]) => { asked.push(a); return false; },
@@ -470,6 +608,10 @@ describe('#31696 R9 — the credential channel reads one package\'s rows for a n
         ship(P2, leaf('f', 'p2'));
         engine.holdsFlowCredential(`${P2}/f`, 'start', 'secret');
         expect(asked).toEqual([['f', 'start', 'secret'], ['f', 'start', 'secret', P2]]);
+        // A bare name two packages hold names neither flow's credentials: refused, naming both, never asked.
+        expect(() => engine.holdsFlowCredential('f', 'start', 'secret')).toThrow(/held by 2 packages/);
+        await expect(engine.resolveFlowCredential('f', 'start', 'secret')).rejects.toMatchObject({ code: 'RESOURCE_CONFLICT' });
+        expect(asked).toHaveLength(2);
     });
 });
 
@@ -504,5 +646,89 @@ describe('#31696 precedence — one winner per package that holds the name', () 
         const winners = resolveFlowPrecedence([code(P1, 'p1'), code(P2, 'p2')], silentLogger(), reader, installed);
         expect(winners).toHaveLength(1);
         expect(winners[0].holder).toBeUndefined();
+    });
+});
+
+describe('#31696 a slot key is no flow\'s name at a bare door', () => {
+    it('every bare door answers a PACKAGE/NAME spelling as a flow it does not hold, and nothing runs or changes', async () => {
+        ship(P1, leaf('f', 'p1'));
+        ship(P2, leaf('f', 'p2'));
+        const key = `${P2}/f`;
+        expect(engine.flowSlotKey(P2, 'f')).toBe(key);
+
+        expect(await engine.execute(key)).toMatchObject({ success: false, error: `Flow '${key}' not found` });
+        expect(await engine.getFlow(key)).toBeNull();
+        await expect(engine.toggleFlow(key, false)).rejects.toThrow(`Flow '${key}' not found`);
+        expect(engine.getFlowVersionHistory(key)).toEqual([]);
+        expect(() => engine.rollbackFlow(key, 1)).toThrow(`Flow '${key}' has no version history`);
+        expect(engine.getFlowRegistration(key)).toEqual({ state: 'unregistered' });
+        engine.unregisterFlow(key);
+        engine.withdrawFlow(key);
+        expect(ran).toEqual([]);
+        expect(engine.getFlowSlots('f')).toHaveLength(2);
+        expect(engine.getFlowRuntimeStates().map((row) => row.enabled)).toEqual([true, true]);
+    });
+
+    it('a subflow node naming a slot key calls no flow', async () => {
+        ship(P1, leaf('f', 'p1'));
+        ship(P2, leaf('f', 'p2'));
+        ship(P2, caller('go', `${P2}/f`));
+        expect((await engine.execute('go')).success).toBe(false);
+        expect(ran).toEqual([]);
+    });
+});
+
+describe('#31696 a run of a flow whose name two packages hold reads its own flow', () => {
+    /** start → ask (a screen that pauses) → end. */
+    function screened(name: string, title: string) {
+        return {
+            name,
+            label: name,
+            type: 'screen',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'ask', type: 'screen', label: 'Ask', config: { waitForInput: true, title, fields: [{ name: 'ok', label: 'OK', type: 'checkbox' }] } },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'ask' },
+                { id: 'e2', source: 'ask', target: 'end' },
+            ],
+        };
+    }
+
+    it('a screen pauses in each package\'s flow, with its own progress', async () => {
+        ship(P1, screened('f', 'one'));
+        ship(P2, screened('f', 'two'));
+        for (const packageId of [P1, P2]) {
+            const paused = await engine.executeSlot(packageId, 'f');
+            expect(paused).toMatchObject({ success: true, status: 'paused' });
+            expect((paused as { screen?: { progress?: unknown } }).screen?.progress).toBeDefined();
+        }
+    });
+
+    it('getRunFlow reads the flow of the run\'s own slot; getFlow refuses the bare name', async () => {
+        ship(P1, leaf('f', 'p1'));
+        ship(P2, leaf('f', 'p2'));
+        const run = { flowName: 'f', [Symbol.for('objectstack.automation.flowRunSlotKey')]: `${P2}/f` };
+        expect(engine.getRunFlow(run as never)).toBe(engine.getFlowSlot(P2, 'f'));
+        expect(engine.getRunFlow(undefined)).toBeNull();
+        await expect(engine.getFlow('f')).rejects.toMatchObject({ code: 'RESOURCE_CONFLICT' });
+    });
+});
+
+describe('#31696 the trigger decline is said again for a name shared again', () => {
+    it('a pair that drops to one holder and shares again warns again', () => {
+        engine.registerTrigger({
+            type: 'record_change',
+            start: () => undefined,
+            stop: () => undefined,
+        } as unknown as FlowTrigger);
+        ship(P1, triggered('t', 'p1'));
+        ship(P2, triggered('t', 'p2'));
+        engine.withdrawFlowSlot(P2, 't');
+        ship(P2, triggered('t', 'p2'));
+        const warned = engineLogger.warn.mock.calls.filter(([message]: [string]) => /NOT armed on trigger/.test(message));
+        expect(warned).toHaveLength(4);
     });
 });

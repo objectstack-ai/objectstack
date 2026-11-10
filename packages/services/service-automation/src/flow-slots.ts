@@ -56,6 +56,23 @@ export function qualifiedFlowKey(packageId: string, name: string): string {
 }
 
 /**
+ * [#31696] No flow name contains `/`, so a "name" that does spells a slot key
+ * (`PACKAGE/NAME`). A bare door never takes one: it names no flow there.
+ */
+export function isSlotKeySpelling(name: string): boolean {
+    return name.includes('/');
+}
+
+/**
+ * [#31696] The key a bare door reads a slot-key spelling under: one no slot is
+ * ever filed under (it starts with a NUL), so the door finds no flow, exactly
+ * as for a name it does not hold.
+ */
+export function unfiledFlowKey(name: string): string {
+    return `\u0000${name}`;
+}
+
+/**
  * The property a run's context carries the key of the slot whose run it is,
  * so a `subflow` / `map` child, which inherits its parent's context, resolves
  * its own name from the package of the flow that names it. A symbol: copied
@@ -63,6 +80,15 @@ export function qualifiedFlowKey(packageId: string, name: string): string {
  * reaches no store and no wire.
  */
 export const FLOW_RUN_SLOT_KEY: unique symbol = Symbol.for('objectstack.automation.flowRunSlotKey');
+
+/**
+ * [ADR-0150 D8 row R8, #31696] The package whose flow a run executes, stamped
+ * when the run starts ({@link stampFlowRunSlot}): the run is stored under it
+ * even when its slot's key moves while the run is in flight. In-process only,
+ * like {@link FLOW_RUN_SLOT_KEY}: a stored run carries its package as
+ * `flowPackage` instead.
+ */
+const FLOW_RUN_PACKAGE: unique symbol = Symbol('objectstack.automation.flowRunPackage');
 
 /** A key that moved: `from` is the key the records were under, `to` the key they move to. */
 export interface FlowKeyMove {
@@ -183,10 +209,31 @@ export class FlowSlotTable {
  * inherited from a calling run otherwise, so a child reads its own slot and
  * never its parent's. `context` is the run's own copy.
  */
-export function stampFlowRunSlot(context: object, key: string): void {
-    const stamped = context as { flowName?: unknown; [FLOW_RUN_SLOT_KEY]?: string };
+export function stampFlowRunSlot(context: object, key: string, packageId?: string | null): void {
+    const stamped = context as { flowName?: unknown; [FLOW_RUN_SLOT_KEY]?: string; [FLOW_RUN_PACKAGE]?: string };
     if (stamped.flowName !== key) stamped[FLOW_RUN_SLOT_KEY] = key;
     else delete stamped[FLOW_RUN_SLOT_KEY];
+    if (typeof packageId === 'string' && packageId !== '') stamped[FLOW_RUN_PACKAGE] = packageId;
+    else delete stamped[FLOW_RUN_PACKAGE];
+}
+
+/** The package {@link stampFlowRunSlot} stamped on `context`, if any. */
+export function flowRunPackage(context: unknown): string | undefined {
+    const stamped = (context as { [FLOW_RUN_PACKAGE]?: unknown } | undefined)?.[FLOW_RUN_PACKAGE];
+    return typeof stamped === 'string' && stamped !== '' ? stamped : undefined;
+}
+
+/**
+ * [#31696] The key of the slot whose run `context` is: the stamped key
+ * ({@link FLOW_RUN_SLOT_KEY}) where the run's flow has a name two slots hold,
+ * else the flow name the context carries, which is then its key. `undefined`
+ * for a context that is no run's.
+ */
+export function flowRunKey(context: unknown): string | undefined {
+    const run = context as { flowName?: unknown; [FLOW_RUN_SLOT_KEY]?: unknown } | undefined;
+    const stamped = run?.[FLOW_RUN_SLOT_KEY];
+    if (typeof stamped === 'string' && stamped !== '') return stamped;
+    return typeof run?.flowName === 'string' && run.flowName !== '' ? run.flowName : undefined;
 }
 
 /**
