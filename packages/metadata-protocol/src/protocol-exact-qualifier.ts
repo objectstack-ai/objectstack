@@ -268,7 +268,10 @@ export async function admitExactQualifier(
  * The item an admitted exact read serves, when a layer below answered another
  * package's item: the registry's own item of the holder the address admitted.
  * Another package's item is never served for the address; two bases the
- * package is a pair of, both holding the name, are refused naming both.
+ * package is a pair of, both holding the name, are refused naming both. A
+ * customization pair's item is its base's: the base's address serves the
+ * pair's override and its added bundle member (ADR-0146 D2, #28802), so it is
+ * kept, never replaced by the base's own member.
  *
  * @returns the item to serve (unchanged when it is the address's).
  */
@@ -284,6 +287,9 @@ export function exactQualifierItem(
     if (!registry) return item;
     const served = (item as { _packageId?: unknown })._packageId;
     if (typeof served !== 'string' || served === address.packageId || address.registryHolders.includes(served)) return item;
+    // [#32076] A pair of the package the address names, or of a base it admitted, serves on that base's address.
+    const installed = installedManifestsOfEngine(host.engine);
+    if ([address.packageId, ...address.registryHolders].some((base) => pairsOf(base, installed).includes(served))) return item;
     // A provenance sentinel or a package this registry does not hold is not another package's item.
     if (typeof registry.getPackage === 'function' && registry.getPackage(served) === undefined) return item;
     if (address.registryHolders.length > 1) {
