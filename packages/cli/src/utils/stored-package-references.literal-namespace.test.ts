@@ -42,9 +42,11 @@ const report = () => collectStoredPackageReferences(NO_ENGINE, registry as unkno
 
 describe('the upgrade report names an installed package under an address-literal namespace', () => {
   it('THE PIN: a held `hooks` package is named with its id, the literal and the install door\'s sentence', async () => {
-    // The cold boot's installs: both are kept, the `hooks` one with a warning.
-    registry.installPackage(manifest(HOOKS, 'hooks'), 'code');
-    registry.installPackage(manifest(TRIGGERS, 'triggers'), 'code');
+    // The cold boot re-registers what an earlier release installed (source
+    // `marketplace`): both are kept, the `hooks` one with a warning. A package
+    // the deployment's own code ships (`code`) is held the same way.
+    registry.installPackage(manifest(HOOKS, 'hooks'), 'marketplace');
+    registry.installPackage(manifest(TRIGGERS, 'triggers'), 'marketplace');
     registry.sealBareNameHolders();
 
     const answer = await report();
@@ -58,14 +60,14 @@ describe('the upgrade report names an installed package under an address-literal
   });
 
   it('CONTROL: a deployment whose packages spell no literal (`triggers`) reports none', async () => {
-    registry.installPackage(manifest(TRIGGERS, 'triggers'), 'code');
+    registry.installPackage(manifest(TRIGGERS, 'triggers'), 'marketplace');
     registry.sealBareNameHolders();
     expect((await report()).literalNamespaces).toEqual([]);
   });
 
   it('CONTROL: a new `hooks` package after the seal is refused at install, so the report never holds it', async () => {
     registry.sealBareNameHolders();
-    expect(() => registry.installPackage(manifest(HOOKS, 'hooks'), 'code')).toThrow(
+    expect(() => registry.installPackage(manifest(HOOKS, 'hooks'), 'marketplace')).toThrow(
       expect.objectContaining({ code: 'NAMESPACE_CONFLICT', status: 422 }),
     );
     expect((await report()).literalNamespaces).toEqual([]);

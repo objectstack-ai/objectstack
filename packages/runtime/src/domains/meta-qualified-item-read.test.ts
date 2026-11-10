@@ -209,7 +209,7 @@ describe('a package already installed under an address-literal namespace (ADR-01
         // The server's load of an `objectstack.config.ts`: a strict `defineStack`
         // call. It warns (the author's doors, `os validate` / `os build`, refuse),
         // so a deployment holding such a package keeps booting after an upgrade.
-        const HOOKS = 'com.acme.hooks_config';
+        const HOOKS = 'com.acme.hooks-config';
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         let stack: ReturnType<typeof defineStack> | undefined;
         try {
@@ -228,7 +228,7 @@ describe('a package already installed under an address-literal namespace (ADR-01
         ship('page', 'home', HOOKS);
         const answer = await read('/page/home', { package: HOOKS });
         expect(answer.status, JSON.stringify(answer.body)).toBe(200);
-        expect(labelOf(answer)).toBe('hooks_config page');
+        expect(labelOf(answer)).toBe('hooks-config page');
     });
 });
 
