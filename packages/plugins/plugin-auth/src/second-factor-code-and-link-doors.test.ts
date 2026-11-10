@@ -403,7 +403,8 @@ describe.each(DOORS.map((door) => [door.path, door] as const))(
         expect(foreign.status, await foreign.clone().text()).toBe(200);
         const foreignCookie = cookieHeader(foreign);
         const foreignBearer = String(foreign.headers.get('set-auth-token'));
-        const carried = carrier === 'cookie' ? { cookie: foreignCookie } : { authorization: `Bearer ${foreignBearer}` };
+        const carried: Record<string, string> =
+          carrier === 'cookie' ? { cookie: foreignCookie } : { authorization: `Bearer ${foreignBearer}` };
         expect(await rig.whoIs(carried), 'the carried session is live for the other account').toBe(rig.plainId);
         const rowsBefore = rig.sessionRowsOf(rig.enrolledId);
 
