@@ -4032,7 +4032,8 @@ export class AuthManager {
    * whose refusal names its cause on the redirect's `error_description` and in
    * one `warn` line on this manager's logger, and a SAML ACS
    * (`/sso/saml2/sp/acs/:providerId`) whose refusal lands on the sign-in's error
-   * URL, read from the relay state before better-auth consumes it.
+   * URL, read from the relay state before better-auth consumes it, or for an
+   * IdP-initiated response (no relay state) on the platform error page.
    */
   private runSsoCallback(callback: SsoCallbackRequest, run: () => Promise<Response>): Promise<Response> {
     // A SAML ACS request runs with its provider's IdP-initiated toggle in

@@ -79,9 +79,23 @@
  * is then a redirect carrying `error=` that is not the success URL, it is
  * re-based onto that error URL with its `error` and `error_description` as
  * the vendor wrote them, built the way the vendor builds every other SAML
- * refusal. A refusal already on the error URL comes out byte-identical; a
- * success, an IdP-initiated response (no relay state), and a relay state the
- * vendor itself cannot read are left as the vendor answered them.
+ * refusal. A refusal already on the error URL comes out byte-identical, and a
+ * success is left as the vendor answered it.
+ *
+ * A response with no relay-state row to read (IdP-initiated: no `RelayState`,
+ * or one this app never wrote or cannot read) names no error URL. The vendor
+ * lands it, success and refusal alike, on the provider's IdP-initiated
+ * callback, and with none configured (every provider the Register SAML
+ * Provider bridge stores) on its fallback, the bare app origin. The site root
+ * reads no `?error=`: the console mount redirects `/` to the console without
+ * the query, so the refusal reached the sign-in page with nothing to show.
+ * {@link readSamlAcsLanding} answers such a response with the platform error
+ * page (`onAPIError.errorURL`, the default a sign-in that names no
+ * `errorCallbackURL` lands on), and only a refusal on the bare fallback (the
+ * site root, with no query but the refusal's own `error` and
+ * `error_description`) is re-based onto it. Any other IdP-initiated callback an
+ * operator configured is their landing and is left as the vendor answered it.
+ * The refusal stays a refusal: only its `Location` moves.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -371,11 +385,16 @@ export interface SamlLandingContext {
   internalAdapter: { findVerificationValue: (identifier: string) => Promise<{ value: string } | null | undefined> };
 }
 
-/** Where one SAML sign-in lands: its success URL, and the error URL for every refusal. */
-export interface SamlAcsLanding {
-  success: string;
-  error: string;
-}
+/**
+ * Where one SAML sign-in lands.
+ *
+ * - A sign-in this app started (its relay-state row read): its `success` URL,
+ *   and the `error` URL for every refusal.
+ * - A response with no relay-state row to read (IdP-initiated): `fallback` is
+ *   the vendor's last-resort landing, the bare app origin, and only a refusal
+ *   on it is re-based onto `error`, the platform error page.
+ */
+export type SamlAcsLanding = { success: string; error: string } | { fallback: string; error: string };
 
 /** The `RelayState` an ACS `POST` carries, form-encoded or JSON (the two media types the vendor admits). */
 async function relayStateOf(request: Request): Promise<string | undefined> {
@@ -427,19 +446,15 @@ function safeSamlTarget(
 }
 
 /**
- * Where this ACS request's refusals land, read BEFORE the vendor runs: the
- * relay-state row the vendor wrote at `/sign-in/sso` (`auth-state:<RelayState>`,
- * read through the vendor's own `internalAdapter`, which the vendor deletes
- * once it has read it), with the same default and the same safety rule the
- * vendor applies to it. `undefined` when there is no relay state, the row is
- * gone or unreadable, or the error URL is not a safe target: the vendor then
- * has no error URL either, and its answer stands.
+ * The relay-state row the vendor wrote at `/sign-in/sso` for this ACS request
+ * (`auth-state:<RelayState>`, read through the vendor's own `internalAdapter`,
+ * which the vendor deletes once it has read it), or `undefined` when there is
+ * no relay state, the row is gone, or it is unreadable.
  */
-export async function readSamlAcsLanding(
+async function readRelayStateRow(
   context: SamlLandingContext,
-  providerId: string,
   request: Request,
-): Promise<SamlAcsLanding | undefined> {
+): Promise<{ callbackURL: string; errorURL?: unknown } | undefined> {
   const relayState = await relayStateOf(request);
   if (!relayState) return undefined;
   const row = await context.internalAdapter.findVerificationValue(`auth-state:${relayState}`);
@@ -450,14 +465,37 @@ export async function readSamlAcsLanding(
   } catch {
     return undefined;
   }
-  if (typeof state?.callbackURL !== 'string') return undefined;
-  const errorURL =
-    typeof state.errorURL === 'string' && state.errorURL
-      ? state.errorURL
-      : context.options.onAPIError?.errorURL || `${context.baseURL}/error`;
+  return typeof state?.callbackURL === 'string' ? { callbackURL: state.callbackURL, errorURL: state.errorURL } : undefined;
+}
+
+/**
+ * Where this ACS request's refusals land, read BEFORE the vendor runs, with the
+ * same default and the same safety rule the vendor applies to an error URL:
+ *
+ * - with a relay-state row, the sign-in's own error URL (its
+ *   `errorCallbackURL`, else the platform error page);
+ * - with none (an IdP-initiated response), the platform error page, for a
+ *   refusal the vendor puts on its bare app-origin fallback.
+ *
+ * `undefined` when that error URL is not a safe target: the vendor then has no
+ * error URL either, and its answer stands.
+ */
+export async function readSamlAcsLanding(
+  context: SamlLandingContext,
+  providerId: string,
+  request: Request,
+): Promise<SamlAcsLanding | undefined> {
+  const platformErrorURL = context.options.onAPIError?.errorURL || `${context.baseURL}/error`;
   const appOrigin = new URL(context.baseURL).origin;
   const acsPathname = new URL(`${context.baseURL}${SAML_ACS_PATH_PREFIX}${providerId}`).pathname;
-  const error = safeSamlTarget(errorURL, acsPathname, appOrigin, context.isTrustedOrigin);
+  const safe = (url: string) => safeSamlTarget(url, acsPathname, appOrigin, context.isTrustedOrigin);
+  const state = await readRelayStateRow(context, request);
+  if (!state) {
+    const error = safe(platformErrorURL);
+    return error ? { fallback: appOrigin, error } : undefined;
+  }
+  const errorURL = typeof state.errorURL === 'string' && state.errorURL ? state.errorURL : platformErrorURL;
+  const error = safe(errorURL);
   return error ? { success: state.callbackURL, error } : undefined;
 }
 
@@ -478,13 +516,36 @@ function rebaseSamlRefusal(location: string, target: string): string {
 }
 
 /**
+ * Whether `location` is a refusal on the vendor's bare app-origin fallback:
+ * the site root, with no query but the `error` and `error_description` the
+ * vendor sets on it. The fallback itself carries no query, so a success there
+ * never matches.
+ */
+function isOnBareFallback(location: string, fallback: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(location, fallback);
+  } catch {
+    return false;
+  }
+  return (
+    url.origin === new URL(fallback).origin &&
+    url.pathname === '/' &&
+    url.hash === '' &&
+    [...url.searchParams.keys()].every((key) => key === 'error' || key === 'error_description')
+  );
+}
+
+/**
  * Put one SAML ACS answer on its landing: a redirect that carries `error=` and
- * is not the success URL is re-based onto the error URL. Every other answer is
- * returned untouched.
+ * is not the success URL (for an IdP-initiated response: that sits on the bare
+ * fallback) is re-based onto the error URL. Every other answer is returned
+ * untouched.
  */
 export function landSamlRefusal(response: Response, landing: SamlAcsLanding): Response {
   const location = response.headers.get('location');
-  if (!location || location === landing.success) return response;
+  if (!location) return response;
+  if ('success' in landing ? location === landing.success : !isOnBareFallback(location, landing.fallback)) return response;
   if (!new URL(location, 'http://better-auth.local').searchParams.has('error')) return response;
   const landed = rebaseSamlRefusal(location, landing.error);
   if (landed === location) return response;
