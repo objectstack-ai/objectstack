@@ -21,6 +21,7 @@
  * - MCP             — references and bindings to external MCP servers
  * - AI face name    — the derived flat name an item is listed under (ADR-0150 D6)
  * - Dataset tools   — `list_datasets` / `query_dataset` inputs and outputs (ADR-0149 D2)
+ * - Object-query source — the `source` block the Ask data tools answer beside their result
  * - Build Progress  — phase vocabulary for the agent loop's `data-build-progress` frames
  */
 
@@ -37,6 +38,7 @@ export * from './usage.zod';
 export * from './mcp.zod';
 export * from './face-name';
 export * from './dataset-tools.zod';
+export * from './object-query-source.zod';
 export * from './knowledge-source.zod';
 export * from './knowledge-document.zod';
 export * from './solution-blueprint.zod';
