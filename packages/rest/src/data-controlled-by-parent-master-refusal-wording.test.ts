@@ -33,12 +33,15 @@ const GRANTS = {
   cbw_vault: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
 };
 // The master row-level security leg: an account in region LOCKED is not editable.
+// (The record sharing leg is asked of a master with no authored update policy,
+// the ledger: an authored policy that admits the row retracts that refusal.)
 const RLS = [{ name: 'cbw_account_update', object: 'cbw_account', operation: 'update', using: "record.region != 'LOCKED'" }];
 const HIDDEN_SET = PermissionSetSchema.parse({
   name: 'cbw_hidden', label: 'Reference hidden', objects: GRANTS, rowLevelSecurity: RLS,
   fields: {
     'cbw_line.account': { readable: false, editable: true },
     'cbw_note.vault': { readable: false, editable: true },
+    'cbw_entry.ledger': { readable: false, editable: true },
   },
 });
 const READABLE_SET = PermissionSetSchema.parse({ name: 'cbw_readable', label: 'Reference readable', objects: GRANTS, rowLevelSecurity: RLS });
@@ -56,11 +59,19 @@ const OBJECTS = [
     fields: { name: { name: 'name', type: 'text' }, region: { name: 'region', type: 'text' } },
   },
   { name: 'cbw_vault', label: 'Vault', sharingModel: 'public_read_write', fields: { name: { name: 'name', type: 'text' } } },
+  { name: 'cbw_ledger', label: 'Ledger', sharingModel: 'public_read_write', fields: { name: { name: 'name', type: 'text' } } },
   {
     name: 'cbw_line', label: 'Line', sharingModel: 'controlled_by_parent',
     fields: {
       qty: { name: 'qty', type: 'number' },
       account: { name: 'account', type: 'master_detail', reference: 'cbw_account', required: true },
+    },
+  },
+  {
+    name: 'cbw_entry', label: 'Entry', sharingModel: 'controlled_by_parent',
+    fields: {
+      amount: { name: 'amount', type: 'number' },
+      ledger: { name: 'ledger', type: 'master_detail', reference: 'cbw_ledger', required: true },
     },
   },
   {
@@ -117,8 +128,8 @@ describe('[ADR-0055 §3] REST: a refused controlled_by_parent write names no mas
           (type === 'permission' ? SETS.find((s: any) => s?.name === name) : engine.getSchema(name)) ?? null,
         list: async () => SETS,
       },
-      // The master record sharing leg: account `acc_shared` is editable by nobody.
-      sharing: { canEdit: async (object: string, id: string) => !(object === 'cbw_account' && id === 'acc_shared') },
+      // The master record sharing leg: ledger `ledger_shared` is editable by nobody.
+      sharing: { canEdit: async (object: string, id: string) => !(object === 'cbw_ledger' && id === 'ledger_shared') },
     };
     const ctx = {
       logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -138,14 +149,14 @@ describe('[ADR-0055 §3] REST: a refused controlled_by_parent write names no mas
     await engine.insert('cbw_account', [
       { id: 'acc_open', name: 'Open', region: 'NA' },
       { id: 'acc_locked', name: 'Locked', region: 'LOCKED' },
-      { id: 'acc_shared', name: 'Shared', region: 'NA' },
     ], { context: SYS_CTX } as never);
+    await engine.insert('cbw_ledger', [{ id: 'ledger_shared', name: 'Ledger' }], { context: SYS_CTX } as never);
     await engine.insert('cbw_vault', [{ id: 'vault_1', name: 'Vault' }], { context: SYS_CTX } as never);
     await engine.insert('cbw_line', [
       { id: 'line_open', qty: 1, account: 'acc_open' },
       { id: 'line_locked', qty: 1, account: 'acc_locked' },
-      { id: 'line_shared', qty: 1, account: 'acc_shared' },
     ], { context: SYS_CTX } as never);
+    await engine.insert('cbw_entry', [{ id: 'entry_shared', amount: 1, ledger: 'ledger_shared' }], { context: SYS_CTX } as never);
     await engine.insert('cbw_note', [{ id: 'note_1', body: 'note', vault: 'vault_1' }], { context: SYS_CTX } as never);
 
     const protocol = new ObjectStackProtocolImplementation(engine as any);
@@ -186,8 +197,8 @@ describe('[ADR-0055 §3] REST: a refused controlled_by_parent write names no mas
     },
     {
       leg: 'record sharing on the master, by-id update',
-      method: 'PATCH', path: UPDATE, req: { params: { object: 'cbw_line', id: 'line_shared' }, body: { qty: 2 } },
-      specific: "master 'cbw_account' not editable by this user (record sharing)",
+      method: 'PATCH', path: UPDATE, req: { params: { object: 'cbw_entry', id: 'entry_shared' }, body: { amount: 2 } },
+      specific: "master 'cbw_ledger' not editable by this user (record sharing)",
     },
     {
       leg: 'row-level security on the master, create naming it',
@@ -202,7 +213,7 @@ describe('[ADR-0055 §3] REST: a refused controlled_by_parent write names no mas
     const wire = JSON.stringify(res.body);
     expect(wire).toContain('PERMISSION_DENIED');
     expect(wire).toContain('no edit permission on the parent record of this detail');
-    expect(wire).not.toMatch(/cbw_account|cbw_vault|acc_locked|acc_shared|vault_1|row-level security|record sharing|recordId/);
+    expect(wire).not.toMatch(/cbw_account|cbw_vault|cbw_ledger|acc_locked|ledger_shared|vault_1|row-level security|record sharing|recordId/);
   });
 
   it.each(LEGS)('$leg: CONTROL — a writer who can read the reference gets the specific refusal', async ({ method, path, req, specific }) => {

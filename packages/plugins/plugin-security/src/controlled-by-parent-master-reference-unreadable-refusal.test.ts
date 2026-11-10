@@ -15,7 +15,8 @@
  * `SqlDriver`, through the engine's own writes, on every leg the gate refuses
  * with: the master's object permission, its row-level security, its record
  * sharing, a chain leg above the master, and the owner rule of a row whose
- * optional master is empty. Each case runs the same write for two writers whose
+ * optional master is empty (asked of the gate itself: no engine write of a
+ * writer who cannot read that reference reaches it). Each case runs the same write for two writers whose
  * sets differ ONLY in `readable` on the reference, so the admit/refuse answer is
  * held equal across them. The REST door's wire body is pinned in
  * `packages/rest/src/data-controlled-by-parent-master-refusal-wording.test.ts`.
@@ -40,16 +41,21 @@ const GRANTS = {
   '*': CRUD,
   // The master object leg: read, never edit.
   mrr_vault: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
-  // Read every row of the two objects whose rows are otherwise their owner's,
-  // so the writer can address them, with no Modify All to write them.
+  // Read every campaign, a middle master whose rows are otherwise their
+  // owner's, so the writer can address the steps under it, with no Modify All
+  // to write it. (Not on a detail whose reference a case hides: View All votes
+  // every field of its object readable, which would unmask the reference.)
   mrr_campaign: { ...CRUD, viewAllRecords: true },
-  mrr_contact: { ...CRUD, viewAllRecords: true },
 };
-// The master's row-level security leg: an account in region LOCKED is not editable.
+// The master's row-level security leg: an account in region LOCKED is not
+// editable. (The record sharing leg is asked of a master with no authored
+// update policy, the ledger: an authored policy that admits the row retracts
+// that leg's refusal.)
 const RLS = [{ name: 'mrr_account_update', object: 'mrr_account', operation: 'update', using: "record.region != 'LOCKED'" }];
 /** Every master reference the writer of the `hidden` set may write and not read. */
 const HIDDEN_REFERENCES = {
   'mrr_line.account': { readable: false, editable: true },
+  'mrr_entry.ledger': { readable: false, editable: true },
   'mrr_note.vault': { readable: false, editable: true },
   'mrr_step.campaign': { readable: false, editable: true },
   'mrr_contact.account': { readable: false, editable: true },
@@ -74,10 +80,15 @@ const OBJECTS = [
   SysUser,
   { name: 'mrr_account', label: 'Account', sharingModel: 'public_read_write', fields: { name: text('name'), region: text('region') } },
   { name: 'mrr_vault', label: 'Vault', sharingModel: 'public_read_write', fields: { name: text('name') } },
+  { name: 'mrr_ledger', label: 'Ledger', sharingModel: 'public_read_write', fields: { name: text('name') } },
   { name: 'mrr_program', label: 'Program', sharingModel: 'public_read_write', fields: { name: text('name') } },
   {
     name: 'mrr_line', label: 'Line', sharingModel: 'controlled_by_parent',
     fields: { name: text('name'), account: { name: 'account', type: 'master_detail', reference: 'mrr_account', required: true } },
+  },
+  {
+    name: 'mrr_entry', label: 'Entry', sharingModel: 'controlled_by_parent',
+    fields: { name: text('name'), ledger: { name: 'ledger', type: 'master_detail', reference: 'mrr_ledger', required: true } },
   },
   {
     name: 'mrr_note', label: 'Note', sharingModel: 'controlled_by_parent',
@@ -132,8 +143,8 @@ beforeAll(async () => {
         (type === 'permission' ? SETS.find((s) => s.name === name) : engine.getSchema(name)) ?? null,
       list: async () => SETS,
     },
-    // Record sharing on the master: account `acc_shared` is not editable by anyone.
-    sharing: { canEdit: async (object: string, id: string) => !(object === 'mrr_account' && id === 'acc_shared') },
+    // Record sharing on the master: ledger `ledger_shared` is not editable by anyone.
+    sharing: { canEdit: async (object: string, id: string) => !(object === 'mrr_ledger' && id === 'ledger_shared') },
   };
   const ctx = {
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -155,14 +166,14 @@ beforeAll(async () => {
   await engine.insert('mrr_account', [
     { id: 'acc_open', name: 'open', region: 'NA' },
     { id: 'acc_locked', name: 'locked', region: 'LOCKED' },
-    { id: 'acc_shared', name: 'shared', region: 'NA' },
   ], SYS);
+  await engine.insert('mrr_ledger', [{ id: 'ledger_shared', name: 'ledger' }], SYS);
   await engine.insert('mrr_vault', [{ id: 'vault_1', name: 'vault' }], SYS);
   await engine.insert('mrr_line', [
     { id: 'line_open', name: 'line', account: 'acc_open' },
     { id: 'line_locked', name: 'line', account: 'acc_locked' },
-    { id: 'line_shared', name: 'line', account: 'acc_shared' },
   ], SYS);
+  await engine.insert('mrr_entry', [{ id: 'entry_shared', name: 'entry', ledger: 'ledger_shared' }], SYS);
   await engine.insert('mrr_note', [{ id: 'note_1', name: 'note', vault: 'vault_1' }], SYS);
   await engine.insert('mrr_campaign', [{ id: 'cmp_orphan', name: 'campaign', program: null, owner_id: OTHER }], SYS);
   await engine.insert('mrr_step', [{ id: 'step_1', name: 'step', campaign: 'cmp_orphan' }], SYS);
@@ -187,11 +198,26 @@ const update = (object: string, id: string, data: Record<string, unknown>, calle
   answer(engine.update(object, data, { where: { id }, context: { ...(caller as object) } } as never));
 const insert = (object: string, data: Record<string, unknown>, caller: unknown) =>
   answer(engine.insert(object, data, { context: { ...(caller as object) } } as never));
+/**
+ * The gate itself, asked of a by-id update for `caller` with the caller's own
+ * resolved set, as the write path's step 2.8 asks it. Used for the one refusal
+ * no engine write of a writer who cannot read the reference reaches: a contact
+ * whose optional master is empty is read only by its owner and by View All,
+ * and View All on the contact votes the reference readable; the owner may
+ * write it.
+ */
+const gateUpdate = (object: string, id: string, data: Record<string, unknown>, caller: typeof HIDDEN) =>
+  answer((plugin as unknown as {
+    assertControlledByParentWrite(sets: PermissionSet[], o: string, op: string, opCtx: unknown, ctx: unknown): Promise<void>;
+  }).assertControlledByParentWrite(
+    [caller === HIDDEN ? HIDDEN_SET : READABLE_SET], object, 'update',
+    { object, operation: 'update', options: { where: { id } }, data, context: { ...caller } }, { ...caller },
+  ));
 
 const GENERIC = 'requires edit access to its master record (no edit permission on the parent record of this detail)';
 
 /** Each refusal the gate gives, the write that reaches it, and the words only the readable writer may see. */
-const REFUSALS: Array<{ leg: string; write: (caller: unknown) => Promise<Awaited<ReturnType<typeof answer>>>; specific: string[] }> = [
+const REFUSALS: Array<{ leg: string; write: (caller: typeof HIDDEN) => Promise<Awaited<ReturnType<typeof answer>>>; specific: string[] }> = [
   {
     leg: 'object_permission (update)',
     write: (caller) => update('mrr_note', 'note_1', { name: 'edited' }, caller),
@@ -204,8 +230,8 @@ const REFUSALS: Array<{ leg: string; write: (caller: unknown) => Promise<Awaited
   },
   {
     leg: 'record_sharing (update)',
-    write: (caller) => update('mrr_line', 'line_shared', { name: 'edited' }, caller),
-    specific: ["master 'mrr_account' not editable by this user (record sharing)"],
+    write: (caller) => update('mrr_entry', 'entry_shared', { name: 'edited' }, caller),
+    specific: ["master 'mrr_ledger' not editable by this user (record sharing)"],
   },
   {
     leg: 'master_chain (update)',
@@ -213,8 +239,8 @@ const REFUSALS: Array<{ leg: string; write: (caller: unknown) => Promise<Awaited
     specific: ["master 'mrr_campaign' record 'cmp_orphan' names no master of its own"],
   },
   {
-    leg: 'the owner rule of a row whose optional master is empty (update)',
-    write: (caller) => update('mrr_contact', 'ct_orphan', { name: 'edited' }, caller),
+    leg: 'the owner rule of a row whose optional master is empty (update, asked of the gate)',
+    write: (caller) => gateUpdate('mrr_contact', 'ct_orphan', { name: 'edited' }, caller),
     specific: ["the record names no master record ('account' is empty)"],
   },
   {
@@ -240,8 +266,8 @@ describe('[ADR-0055 §3] a writer who cannot read the master reference is refuse
     expect({ code: refused.code, status: refused.status }).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
     expect(refused.message).toContain(GENERIC);
     for (const words of specific) expect(refused.message).not.toContain(words);
-    expect(refused.message).not.toMatch(/mrr_account|mrr_vault|mrr_campaign|acc_|vault_1|cmp_orphan|row-level security|record sharing|'account'|'vault'|'campaign'/);
-    expect(JSON.stringify(refused.details ?? {})).not.toMatch(/acc_|vault_1|cmp_orphan|mrr_account|mrr_vault|mrr_campaign/);
+    expect(refused.message).not.toMatch(/mrr_account|mrr_vault|mrr_ledger|mrr_campaign|acc_|vault_1|ledger_shared|cmp_orphan|row-level security|record sharing|'account'|'vault'|'ledger'|'campaign'|is empty/);
+    expect(JSON.stringify(refused.details ?? {})).not.toMatch(/acc_|vault_1|ledger_shared|cmp_orphan|mrr_account|mrr_vault|mrr_ledger|mrr_campaign/);
   });
 
   it.each(REFUSALS)('$leg: CONTROL — a writer who can read the reference keeps the specific refusal', async ({ write, specific }) => {
@@ -268,7 +294,7 @@ describe('[ADR-0055 §3] a writer who cannot read the master reference is refuse
   });
 
   it('the served check names the same leg for both writers', async () => {
-    for (const [object, id] of [['mrr_note', 'note_1'], ['mrr_line', 'line_locked'], ['mrr_line', 'line_shared'], ['mrr_step', 'step_1'], ['mrr_contact', 'ct_orphan'], ['mrr_line', 'line_open']]) {
+    for (const [object, id] of [['mrr_note', 'note_1'], ['mrr_line', 'line_locked'], ['mrr_entry', 'entry_shared'], ['mrr_step', 'step_1'], ['mrr_contact', 'ct_orphan'], ['mrr_line', 'line_open']]) {
       const hidden = await security.checkControlledByParentWrite(object, id, { ...HIDDEN });
       const readable = await security.checkControlledByParentWrite(object, id, { ...READABLE });
       expect(hidden, `${object} ${id}`).toEqual(readable);
