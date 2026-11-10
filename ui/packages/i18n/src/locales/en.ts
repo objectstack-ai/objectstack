@@ -3420,6 +3420,9 @@ const en = {
       // `LoginForm`'s own default for that label, so an English session reads
       // the same with or without the pack.
       ssoButton: 'Sign in with SSO',
+      // Shown before any request when "Sign in with SSO" is pressed with no
+      // email: single sign-on routes by the email's domain (objectstack#32087).
+      ssoEmailRequiredText: "Enter your work email to sign in with SSO.",
       ssoOnlyDescription: "Sign in with your organization's single sign-on",
       noSignInMethodText: 'No sign-in method is available. Contact your administrator.',
       usePasswordText: 'Use a password instead',
@@ -3474,6 +3477,14 @@ const en = {
         invalidCredentials: 'Invalid email or password. After several failed attempts, sign-in is paused for a while. Forgot your password? Reset it to sign in right away.',
         emailNotVerified: 'Please verify your email address before signing in.',
         oauthCallbackFailed: 'Single sign-on could not be completed — the sign-in link expired or was already used. Please try again.',
+        // objectstack#32087 — a refused single sign-on, by the code it lands
+        // with (`ssoCallbackRefusal.ts` in the console). `oauthCallbackFailed`
+        // above stays for a code with no sentence of its own.
+        ssoAccountNotInvited: "Your account isn't set up for this system yet. Ask your administrator to invite you.",
+        ssoAccountNotLinked: "An account with your email already exists here, but it isn't connected to single sign-on. Sign in another way, or ask your administrator to connect it.",
+        ssoResponseRejected: "Your organization's sign-in service sent a response this system could not accept. Ask your administrator to check the single sign-on setup.",
+        ssoStartFromLoginPage: "Sign-in has to start from this system's login page. Enter your work email here and choose Sign in with SSO.",
+        ssoTechnicalDetails: "Technical details",
         // objectstack#29105 — refusals of the two-factor sign-in step, by the
         // server's code (`signInRefusalMessages`).
         twoFactorInvalidCode: 'That code is not valid. Check your authenticator app and try again.',
@@ -3732,6 +3743,16 @@ const en = {
       // `client_id` labelled `clientId` — the id is never shown as the name.
       unidentified: 'This application could not be identified.',
       clientId: 'Client ID',
+      // The server's account of the signed request (`oauth-consent/request`):
+      // `sentTo` labels where a consent sends the grant (`{{destination}}` is
+      // the redirect's host, or a native app's redirect as it is);
+      // `unverified` marks a client no platform administrator registered;
+      // `destinationUnconfirmed` is shown, with Authorize disabled, when the
+      // server could not answer.
+      unverified: 'Unverified application',
+      unverifiedHint: 'No administrator here registered this application, so its name has not been checked. Authorize it only if you trust {{destination}}.',
+      destinationUnconfirmed: 'Where this access would be sent could not be confirmed, so it cannot be authorized here.',
+      sentTo: 'Access will be sent to:',
       willAllow: 'This app will be able to:',
       // One sentence per scope the page names. The MCP agent scopes take their
       // English from `@objectstack/spec`'s `MCP_OAUTH_SCOPE_CONSENT_COPY` (the

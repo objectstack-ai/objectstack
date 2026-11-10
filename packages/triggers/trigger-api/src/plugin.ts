@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
+import { admitInboundHookAddress, inboundHookJsonResponse, INBOUND_HOOK_QUALIFIER_EXCLUSIONS } from '@objectstack/core';
 import type { ITriggerApiService } from '@objectstack/spec/contracts';
 import { ApiTrigger } from './api-trigger.js';
 import type { FlowTrigger, QueueServiceSurface } from './api-trigger.js';
@@ -13,17 +14,32 @@ import type { FlowTrigger, QueueServiceSurface } from './api-trigger.js';
 interface AutomationTriggerRegistry {
     registerTrigger(trigger: FlowTrigger): void;
     unregisterTrigger?(type: string): void;
+    /** [ADR-0150 D5] The package that ships `name`'s flow, or `undefined` (the engine's own read). */
+    packagedFlowOwner?(name: string): string | undefined;
+}
+
+/** [ADR-0150 D5] The slice of the ObjectQL service the qualified hook reads: the namespace table. */
+interface NamespaceRegistrySurface {
+    registry?: { getNamespaceOwners?(namespace: string): string[] };
 }
 
 /** The slice of the Hono host server this plugin needs. */
 interface HttpServerSurface {
     getRawApp(): {
-        post(path: string, handler: (c: any) => Promise<unknown> | unknown): void;
+        post(path: string, handler: (c: any, next: () => Promise<void>) => Promise<unknown> | unknown): void;
     } | null;
 }
 
 /** Mount point for inbound hooks on the host HTTP server. */
 export const HOOKS_PATH = '/api/v1/automation/hooks/:flowName/:hookId';
+
+/**
+ * [ADR-0150 D5, child G1] The qualified hook's mount: the flow named by its
+ * package's namespace, or `_env`, in front of its name. The same door as
+ * {@link HOOKS_PATH} once the qualifier is admitted
+ * (`admitInboundHookAddress`, core); otherwise the door's one refusal.
+ */
+export const HOOKS_ADDRESSED_PATH = '/api/v1/automation/hooks/:ns/:flowName/:hookId';
 
 /**
  * [#22774] The service slot this plugin fills: `ITriggerApiService`
@@ -68,10 +84,9 @@ function requestDoorContext(request: Request): InboundHookDoorContext<Response> 
             text: () => request.text(),
             header: (name) => request.headers.get(name) ?? undefined,
         },
-        json: (body, status) => new Response(JSON.stringify(body), {
-            status,
-            headers: { 'Content-Type': 'application/json' },
-        }),
+        // [ADR-0150 D5] Core's rendering, which the hosted face's refusal of an
+        // unadmitted address renders through too.
+        json: (body, status) => inboundHookJsonResponse(body, status),
     };
 }
 
@@ -198,7 +213,41 @@ export class ApiTriggerPlugin implements Plugin {
                 flowName: c.req.param('flowName'),
                 hookId: c.req.param('hookId'),
             }));
-            ctx.logger.info(`ApiTriggerPlugin: api trigger registered, hooks mounted at POST ${HOOKS_PATH}`);
+            // [ADR-0150 D5, child G1] The qualified hook. A qualifier the
+            // allow-list row never admits (`runs`: the run-lifecycle doors of a
+            // flow named `hooks` have this verb and arity) is not this route,
+            // and the request goes on to the route that serves it. Otherwise
+            // the qualifier must name the package that ships the flow, judged
+            // before the signature is read; an address that does not is the
+            // door's one refusal, its cause in the server log only. The refusal
+            // is answered only once the body has been read in full, as
+            // `serveInboundHook` reads every post's body before it answers, so
+            // an admitted and an unadmitted address cost the sender the same (a
+            // body that never arrives gets no answer on either, and one the
+            // transport cannot deliver fails the same read on both): its timing
+            // tells no installed namespace from another.
+            rawApp.post(HOOKS_ADDRESSED_PATH, async (c: any, next: () => Promise<void>) => {
+                const qualifier: string = c.req.param('ns');
+                if (INBOUND_HOOK_QUALIFIER_EXCLUSIONS.includes(qualifier)) return next();
+                const flowName: string = c.req.param('flowName');
+                const objectql = this.resolveService<NamespaceRegistrySurface>(ctx, 'objectql');
+                const getNamespaceOwners = objectql?.registry?.getNamespaceOwners;
+                // An engine that cannot say who ships the flow admits no address.
+                const admitted = typeof automation.packagedFlowOwner === 'function' && admitInboundHookAddress({
+                    qualifier,
+                    flowOwner: automation.packagedFlowOwner(flowName),
+                    namespaceOwners: typeof getNamespaceOwners === 'function' ? getNamespaceOwners.call(objectql!.registry, qualifier) ?? [] : [],
+                });
+                if (!admitted) {
+                    await c.req.text();
+                    const refusal = trigger.refuseUnadmittedAddress(flowName, qualifier);
+                    return c.json(refusal.body, refusal.status);
+                }
+                return serveInboundHook(trigger, c, { flowName, hookId: c.req.param('hookId') });
+            });
+            ctx.logger.info(
+                `ApiTriggerPlugin: api trigger registered, hooks mounted at POST ${HOOKS_PATH} and POST ${HOOKS_ADDRESSED_PATH}`,
+            );
         });
     }
 

@@ -245,8 +245,9 @@ export const OUTSIDE_FAMILIES: readonly OutsideFamily[] = [
     id: 'signed-inbound-hook',
     reason:
       'ADR-0041 signed inbound hook (trigger-api verifySignature): the per-flow secret is the credential, and ' +
-      'D2 states the answer to a missing or bad signature: 401',
-    match: routeIs('POST /api/v1/automation/hooks/:flowName/:hookId'),
+      'D2 states the answer to a missing or bad signature: 401. The qualified hook (ADR-0150 D5) is the same door, ' +
+      'and an address its qualifier does not admit gets that same 401',
+    match: routeIs('POST /api/v1/automation/hooks/:flowName/:hookId', 'POST /api/v1/automation/hooks/:ns/:flowName/:hookId'),
     expect: statusIs401,
   },
   {

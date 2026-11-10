@@ -89,7 +89,7 @@ import { actionInvocationBranch, actionInvocationFailure, actionInvocationTarget
 import type { HttpProtocolContext } from './http-dispatcher.js';
 // The ONE admitted sequence every action door shares; `invokeBusinessAction`
 // below is its MCP door (posture `ai`).
-import { refuseDispatchToDisabledObject, runResolvedAction, type ActionRefusal } from './action-dispatch.js';
+import { addressedUnknownNameRefusal, refusalOfThrown, refuseDispatchToDisabledObject, runResolvedAction, type ActionRefusal } from './action-dispatch.js';
 import { admittingCredentialKind, type AdmittingCredentialKind } from './security/admitting-credential.js';
 import {
     GLOBAL_ACTION_OBJECT_KEY,
@@ -4514,9 +4514,7 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     if (!resolved && !askedObject) {
         // No object named: nothing for the shared undeclared answer to name.
         // Refused `404` as the REST door refuses a name nothing declares.
-        throw Object.assign(new Error(`Action '${name}' not found`), {
-            code: standardErrorCodeForHttpStatus(404), status: 404,
-        });
+        throw objectlessNameNotFoundError(name);
     }
     // [ADR-0150 D4] Set only for a qualified call: the resolved holder's
     // package, whose handler the dispatch runs (the engine's package key).
@@ -4560,6 +4558,12 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
         objectName,
         actionName: name,
         declaration: { action, obj, ...(packageId !== undefined ? { packageId } : {}) },
+        // [ADR-0106 D1] This door's answer for a name nothing declares, where
+        // it is not the shared undeclared `404`: an action the caller is not
+        // shown is answered with it.
+        ...(qualifier
+            ? { unknownName: addressedUnknownNameRefusal(name, input?.objectName, qualifier) }
+            : askedObject ? {} : { unknownName: refusalOfThrown(objectlessNameNotFoundError(name)) }),
         body: { params, ...(recordId !== undefined ? { recordId } : {}) },
         confirmation: input,
         ql: engine,
@@ -4625,6 +4629,17 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     }
     await recordActionInvocation(deps, requestContext, envId, { ...invocation, outcome: 'failed', ...actionInvocationFailure(err) });
     throw err;
+}
+
+/**
+ * The MCP `run_action` door's `404` for a name nothing declares, on a call
+ * naming no object — and, [ADR-0106 D1], for an action the caller is not
+ * shown, on such a call ({@link invokeBusinessAction}).
+ */
+function objectlessNameNotFoundError(name: string): Error & { code: string; status: number } {
+    return Object.assign(new Error(`Action '${name}' not found`), {
+        code: standardErrorCodeForHttpStatus(404), status: 404,
+    });
 }
 
 /**
@@ -4796,7 +4811,7 @@ function resolveQualifiedActionDeclaration(
         );
     }
     const inNamespace = decls.filter((d) => d.action?.name === name && d.packageId !== undefined && owners.has(d.packageId));
-    return pickActionHolder(addressedActionHits(inNamespace, name, objectName, `namespace '${namespace}'`), name, true);
+    return pickActionHolder(addressedActionHits(inNamespace, name, objectName, actionAddressScope(qualifier)), name, true);
 }
 
 /**
@@ -4811,7 +4826,27 @@ function resolveEnvironmentActionDeclaration(
     objectName: string | undefined,
 ): { action: any; objectName: string; obj: any; packageId?: string } {
     const own = decls.filter((d) => d.action?.name === name && d.packageId === undefined);
-    return pickActionHolder(addressedActionHits(own, name, objectName, 'the environment'), name, false);
+    return pickActionHolder(addressedActionHits(own, name, objectName, actionAddressScope({ environment: true })), name, false);
+}
+
+/** [ADR-0150 D5] The scope an addressed call names, as its refusals word it. */
+export function actionAddressScope(qualifier: ActionAddressQualifier): string {
+    return 'environment' in qualifier ? 'the environment' : `namespace '${qualifier.namespace}'`;
+}
+
+/**
+ * [ADR-0150 D5] The `404` an addressed call answers for a name its scope
+ * (`where`, {@link actionAddressScope}) declares none of — and, [ADR-0106 D1],
+ * for an action the caller is not shown, which is answered as one
+ * (`action-dispatch.ts`).
+ */
+export function addressedActionNotFoundError(name: string, objectName: string | undefined, where: string): Error & { code: string; status: number } {
+    return Object.assign(
+        new Error(objectName
+            ? `Action '${name}' not found on object '${objectName}' in ${where}`
+            : `Action '${name}' not found in ${where}`),
+        { code: standardErrorCodeForHttpStatus(404), status: 404 },
+    );
 }
 
 /**
@@ -4845,14 +4880,7 @@ function addressedActionHits(
             );
         }
     }
-    if (hits.length === 0) {
-        throw Object.assign(
-            new Error(objectName
-                ? `Action '${name}' not found on object '${objectName}' in ${where}`
-                : `Action '${name}' not found in ${where}`),
-            { code: standardErrorCodeForHttpStatus(404), status: 404 },
-        );
-    }
+    if (hits.length === 0) throw addressedActionNotFoundError(name, objectName, where);
     return hits;
 }
 

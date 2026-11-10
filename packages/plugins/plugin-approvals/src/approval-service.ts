@@ -70,6 +70,7 @@ import type { EnableLike, ObjectCapabilitiesParsed } from '@objectstack/spec/dat
 // (`approval_recall_not_submitter`) into it ahead of this consumer half.
 import { renderOperationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
 import {
+  holdsPlatformPermissionSet,
   isGrantActive,
   omitInternalFieldsFromWriteResponse,
   resolveReadableParentIds,
@@ -77,7 +78,7 @@ import {
   vetOrganizationClaim,
   withoutOperationPrivateKeys,
 } from '@objectstack/core';
-import type { PackageScopedRefusal } from '@objectstack/core';
+import type { HeldPermissionSets, PackageScopedRefusal } from '@objectstack/core';
 import type { TenancyPosture } from '@objectstack/spec/security';
 import { normalizeTenancyPosture, postureEnforcesWall } from '@objectstack/spec/security';
 import {
@@ -1431,8 +1432,10 @@ const PERSON_APPROVER_TYPES: ReadonlySet<string> = new Set(['manager', 'field'])
  * One predicate, so the people a rescue request is routed to and the people
  * the override admits as tenant administrators cannot drift apart.
  */
-function holdsTenantAdminRung(permissions: readonly string[]): boolean {
-  return ORGANIZATION_ADMIN_GRANTS.some((n) => permissions.includes(n));
+function holdsTenantAdminRung(engine: unknown, held: HeldPermissionSets): boolean {
+  // [ADR-0150 D3] The PLATFORM's organization-administrator set: another
+  // package's set of that name confers no rung (`holdsPlatformPermissionSet`).
+  return ORGANIZATION_ADMIN_GRANTS.some((n) => holdsPlatformPermissionSet(engine, held, n));
 }
 
 /**
@@ -2350,8 +2353,10 @@ export class ApprovalService implements IApprovalService {
     // member of one tenant the power to decide another tenant's pending
     // request. Driven in `approval-positions-name-authority.test.ts`.
     const posture = context.posture;
+    // [ADR-0150 D3] The name read is the PLATFORM's `admin_full_access` only.
+    const held = { permissions: perms, permissionSetAddresses: context.permissionSetAddresses };
     const isPlatformAdmin = posture === 'PLATFORM_ADMIN'
-      || perms.includes(ADMIN_FULL_ACCESS);
+      || holdsPlatformPermissionSet(this.engine, held, ADMIN_FULL_ACCESS);
     if (isPlatformAdmin) return true;
     // ⛔ [#16166] The tenant counterpart of the platform rule above — and
     // deliberately NOT the same expression. ADR-0095 D3 derives `TENANT_ADMIN`
@@ -2377,7 +2382,7 @@ export class ApprovalService implements IApprovalService {
     // [#22824] `holdsTenantAdminRung` is that same grant read, shared with the
     // administrators' slate an empty `admin_rescue` request opens on.
     const isTenantAdmin = posture === 'TENANT_ADMIN'
-      || holdsTenantAdminRung(perms);
+      || holdsTenantAdminRung(this.engine, held);
     if (!isTenantAdmin) return false;
     // A tenant admin's authority stops at their own org. [ADR-0131 D1] NULL is
     // not a state and names no owner, so a request with no organization is no
@@ -3808,7 +3813,7 @@ export class ApprovalService implements IApprovalService {
         const batch = members.slice(at, at + 8);
         const verdicts = await Promise.all(batch.map(async (userId) => {
           const grants = await resolveUserAuthzGrants(this.engine, userId, { tenantId: org });
-          return holdsTenantAdminRung(grants.permissions);
+          return holdsTenantAdminRung(this.engine, grants);
         }));
         batch.forEach((userId, i) => { if (verdicts[i]) administrators.push(userId); });
       }

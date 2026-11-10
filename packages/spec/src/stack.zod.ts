@@ -12,6 +12,7 @@ import {
 } from './kernel/unmanaged-install';
 import { PLURAL_TO_SINGULAR, pluralToSingular } from './meta-spelling/manifest-collection-spelling';
 import { findNamespaceObjectNameClashes, validateObjectNamespacePrefix } from './kernel/namespace-prefix';
+import { validateNamespaceNotAddressLiteral } from './kernel/address-grammar';
 import { PLATFORM_CAPABILITY_TOKENS, RETIRED_PLATFORM_CAPABILITY_GUIDANCE } from './kernel/platform-capabilities';
 import { DatasourceSchema } from './data/datasource.zod';
 import { TranslationBundleSchema, TranslationConfigSchema } from './system/translation.zod';
@@ -4718,8 +4719,9 @@ function lineItemsChildObject(
 
 /**
  * A job's `pull.mapping` must name a mapping this stack declares, and that
- * mapping must carry a `connectorSource` (ruling Q1-B on the connector-sync
- * card: "`os validate` checks the mapping name").
+ * mapping must carry a source — a `connectorSource`, or since ADR-0153 D1 a
+ * `datasourceSource` (ruling Q1-B on the connector-sync card: "`os validate`
+ * checks the mapping name").
  *
  * Both halves are refused here rather than at the first tick, where the
  * automation service would reject the run (`mapping_not_found` /
@@ -4733,7 +4735,7 @@ function collectJobPullMappingErrors(config: ObjectStackDefinition): string[] {
   const errors: string[] = [];
   const jobs = Array.isArray(config.jobs) ? config.jobs : [];
   if (jobs.length === 0) return errors;
-  const mappings = new Map<string, { connectorSource?: unknown }>();
+  const mappings = new Map<string, { connectorSource?: unknown; datasourceSource?: unknown }>();
   for (const m of Array.isArray(config.mappings) ? config.mappings : []) {
     if (isRecord(m) && typeof m.name === 'string') mappings.set(m.name, m);
   }
@@ -4746,15 +4748,227 @@ function collectJobPullMappingErrors(config: ObjectStackDefinition): string[] {
       errors.push(
         `Job '${String(job.name)}' pulls mapping '${name}' which is not defined in mappings. ` +
           `Declare the mapping (its targetObject, fieldMapping and a connectorSource naming the ` +
-          `rest or openapi connector it pulls from) or correct the name.`,
+          `rest or openapi connector it pulls from, or a datasourceSource naming the federated ` +
+          `object it reads) or correct the name.`,
       );
       continue;
     }
-    if (mapping.connectorSource === undefined) {
+    // [ADR-0153 D1] `job.pull` accepts either source.
+    if (mapping.connectorSource === undefined && mapping.datasourceSource === undefined) {
       errors.push(
-        `Job '${String(job.name)}' pulls mapping '${name}', which declares no connectorSource — ` +
+        `Job '${String(job.name)}' pulls mapping '${name}', which declares no source — ` +
           `there is nothing to pull. Add connectorSource: { connector, action } to the mapping, ` +
-          `naming the rest or openapi connector it reads from.`,
+          `naming the rest or openapi connector it reads from, or datasourceSource: { object, watermark } ` +
+          `naming the federated object it reads.`,
+      );
+    }
+  }
+  return errors;
+}
+
+/**
+ * [ADR-0153 D2 invariant 7] The largest number of decimal digits an integer
+ * column may declare and still read back as an exact JavaScript number: every
+ * 15-digit integer is inside ±2^53. A 16-digit one may not be, and no dialect
+ * client is verified (by the P2 engine card) to read wider ones as a `bigint`
+ * or a string, so a wider or undeclared precision is refused at build.
+ */
+const SYNC_EXACT_INTEGER_PRECISION = 15;
+
+/**
+ * The field types whose value a pull reads as a string (ADR-0153 D2 invariant
+ * 7: "the key is a string or an integer"). A key of any other type — a
+ * fraction, a date, a JSON value — is not one a key cursor compares exactly.
+ */
+const SYNC_STRING_KEY_TYPES: ReadonlySet<string> = new Set([
+  'text', 'textarea', 'email', 'url', 'phone', 'select', 'radio', 'autonumber', 'lookup', 'master_detail', 'user',
+]);
+
+/**
+ * A field's declared exactness as a pull key or an integer watermark: an
+ * integer `number` (`scale: 0`) that declares a `precision` of at most
+ * {@link SYNC_EXACT_INTEGER_PRECISION} digits. Answers why it is not, or
+ * `undefined` when it is.
+ */
+function inexactIntegerReason(field: Record<string, unknown>): string | undefined {
+  const precision = field.precision;
+  if (typeof precision !== 'number') {
+    return `declares no precision, so a value past 2^53 could read back rounded — declare precision: ` +
+      `${SYNC_EXACT_INTEGER_PRECISION} or fewer digits`;
+  }
+  if (precision > SYNC_EXACT_INTEGER_PRECISION) {
+    return `declares precision ${precision}, past the ${SYNC_EXACT_INTEGER_PRECISION} digits every value of ` +
+      `which reads back as an exact JavaScript integer — declare precision: ${SYNC_EXACT_INTEGER_PRECISION} ` +
+      `or fewer, or key the source on a string column`;
+  }
+  return undefined;
+}
+
+/**
+ * [ADR-0153 D1–D4] The build refusals over a SOURCED mapping that need the
+ * stack's objects — live as they land, ahead of the pull that reads the keys
+ * (the P2 engine card), because each one refuses a binding no pull could
+ * honour. The rules the mapping alone can judge (one source, `upsert` with a
+ * key) are `MappingSchema`'s own refinement and are refused at parse.
+ *
+ *  - **A `synced` target** (D4): a mapping carrying either source writes an
+ *    object whose `managedBy` is `'synced'`, the bucket every write guard
+ *    holds read-only to members. A pull into an ordinary object leaves the
+ *    rows editable by members, and the next pull keeps or overwrites the edit
+ *    silently.
+ *  - **A federated source object** (D1): `datasourceSource.object` names an
+ *    object of this stack that declares an `external` binding (ADR-0015). A
+ *    managed object's rows are already local.
+ *  - **`source_key_missing`** (D2 invariant 6): that object's
+ *    `external.columnMap` maps a remote column onto `id`, the key the rows are
+ *    matched and paged by.
+ *  - **`source_key_not_exact`** (invariant 7): the key's declared type (the
+ *    object's own `id` field, when it declares one) is a string, or an
+ *    integer of an exact precision.
+ *  - **A halvable `watermark.field`** (invariant 1): a field of the source
+ *    object of type `datetime`, `date`, or `number` with `scale: 0` — and an
+ *    integer one of an exact precision (**`watermark_not_exact`**, invariant 7).
+ *  - **`watermark_field_unmapped`** (D3): a `fieldMapping` entry copies
+ *    `watermark.field` unchanged (transform `none`) onto a target field of
+ *    the same type, which the mark's range compares with `watermark.start`.
+ *
+ * Resolved against this stack's own objects, like the mapping's `targetObject`
+ * above it; a target this stack does not define is already refused there and
+ * gets no second finding here.
+ */
+function collectSourcedMappingErrors(config: ObjectStackDefinition): string[] {
+  const errors: string[] = [];
+  const mappings = Array.isArray(config.mappings) ? config.mappings : [];
+  if (mappings.length === 0) return errors;
+  const objects = new Map<string, Record<string, unknown>>();
+  for (const obj of Array.isArray(config.objects) ? config.objects : []) {
+    if (isRecord(obj) && typeof obj.name === 'string') objects.set(obj.name, obj);
+  }
+  const fieldOf = (obj: Record<string, unknown> | undefined, name: string): Record<string, unknown> | undefined => {
+    const fields = obj?.fields;
+    const field = isRecord(fields) ? fields[name] : undefined;
+    return isRecord(field) ? field : undefined;
+  };
+
+  for (const m of mappings) {
+    if (!isRecord(m)) continue;
+    const source = m.datasourceSource !== undefined ? 'datasourceSource'
+      : m.connectorSource !== undefined ? 'connectorSource' : undefined;
+    if (source === undefined) continue;
+    const subject = `Mapping '${String(m.name)}'`;
+
+    const target = typeof m.targetObject === 'string' ? objects.get(m.targetObject) : undefined;
+    if (target !== undefined && target.managedBy !== 'synced') {
+      errors.push(
+        `${subject} pulls rows into object '${String(m.targetObject)}' through its ${source}, but that object ` +
+          `is not managedBy: 'synced' (it is ${target.managedBy === undefined ? 'unset' : `'${String(target.managedBy)}'`}). ` +
+          `A pulled copy is read-only to members, so a member's edit is never kept or lost silently by the next ` +
+          `pull; declare managedBy: 'synced' on the target object (ADR-0153 D4).`,
+      );
+    }
+
+    if (source !== 'datasourceSource' || !isRecord(m.datasourceSource)) continue;
+    const ds = m.datasourceSource;
+    const objectName = typeof ds.object === 'string' ? ds.object : undefined;
+    if (objectName === undefined) continue;
+    const at = `${subject} (datasourceSource.object '${objectName}')`;
+    const sourceObject = objects.get(objectName);
+    if (sourceObject === undefined) {
+      errors.push(
+        `${at} names an object which is not defined in objects. A datasource source reads a federated object ` +
+          `this stack declares; declare it (its datasource and external binding) or correct the name.`,
+      );
+      continue;
+    }
+    if (!isRecord(sourceObject.external)) {
+      errors.push(
+        `${at} names an object that is not federated: it declares no external binding (ADR-0015), so its rows ` +
+          `are already local and there is nothing to copy. Name a federated object — one on an external ` +
+          `datasource whose external binding addresses the remote table.`,
+      );
+      continue;
+    }
+
+    // Invariant 6: the key is the remote column the binding maps onto `id`.
+    const columnMap = isRecord(sourceObject.external.columnMap) ? sourceObject.external.columnMap : {};
+    const keyColumn = Object.keys(columnMap).find((remote) => columnMap[remote] === 'id');
+    if (keyColumn === undefined) {
+      errors.push(
+        `${at}: source_key_missing — the object's external.columnMap maps no remote column onto 'id', so the ` +
+          `pull has no key to match a row's copy by or to page by. Map the source's unique, never-null key ` +
+          `column onto id in external.columnMap.`,
+      );
+    } else {
+      const idField = fieldOf(sourceObject, 'id');
+      const idType = typeof idField?.type === 'string' ? idField.type : undefined;
+      let notExact: string | undefined;
+      if (idField !== undefined && idType === 'number') {
+        notExact = idField.scale !== 0
+          ? 'its id field is a number that does not declare scale: 0, and a key is a string or an integer'
+          : (() => {
+            const why = inexactIntegerReason(idField);
+            return why === undefined ? undefined : `its integer id field ${why}`;
+          })();
+      } else if (idType !== undefined && !SYNC_STRING_KEY_TYPES.has(idType)) {
+        notExact = `its id field is of type '${idType}', and a key is a string or an integer`;
+      }
+      if (notExact !== undefined) {
+        errors.push(
+          `${at}: source_key_not_exact — the key column '${keyColumn}' cannot be compared exactly: ${notExact}.`,
+        );
+      }
+    }
+
+    // Invariant 1 and 7: the watermark field windows are cut on.
+    const watermark = isRecord(ds.watermark) ? ds.watermark : undefined;
+    const wmName = typeof watermark?.field === 'string' ? watermark.field : undefined;
+    if (wmName === undefined) continue;
+    const wmField = fieldOf(sourceObject, wmName);
+    const wmType = typeof wmField?.type === 'string' ? wmField.type : undefined;
+    if (wmField === undefined) {
+      errors.push(
+        `${at}: watermark.field '${wmName}' is not a field of the source object. Name the datetime, date or ` +
+          `integer field the source stamps on every write.`,
+      );
+      continue;
+    }
+    if (wmType === 'number' && wmField.scale === 0) {
+      const why = inexactIntegerReason(wmField);
+      if (why !== undefined) {
+        errors.push(`${at}: watermark_not_exact — watermark.field '${wmName}' is an integer field that ${why}.`);
+      }
+    } else if (wmType !== 'datetime' && wmType !== 'date') {
+      errors.push(
+        `${at}: watermark.field '${wmName}' is ${wmType === 'number' ? "a number field that does not declare scale: 0" : `of type '${String(wmType)}'`}, ` +
+          `which a read window cannot be halved on. Name a datetime or date field, or a number field that ` +
+          `declares scale: 0 (an integer).`,
+      );
+      continue;
+    }
+
+    // D3: the watermark is copied unchanged onto a target field of its type.
+    const copies = (Array.isArray(m.fieldMapping) ? (m.fieldMapping as unknown[]) : []).filter(
+      (entry): entry is Record<string, unknown> =>
+        isRecord(entry) &&
+        (entry.transform === undefined || entry.transform === 'none') &&
+        (entry.source === wmName || (Array.isArray(entry.source) && entry.source.length === 1 && entry.source[0] === wmName)),
+    );
+    const targetName = (entry: Record<string, unknown>): string | undefined =>
+      typeof entry.target === 'string' ? entry.target
+        : Array.isArray(entry.target) && entry.target.length === 1 && typeof entry.target[0] === 'string'
+          ? entry.target[0] : undefined;
+    const typed = copies.some((entry) => {
+      const name = targetName(entry);
+      if (name === undefined) return false;
+      if (target === undefined) return true; // no target to judge the type against; refused above
+      return fieldOf(target, name)?.type === wmType;
+    });
+    if (!typed) {
+      errors.push(
+        `${at}: watermark_field_unmapped — no fieldMapping entry copies watermark.field '${wmName}' unchanged ` +
+          `(transform none) onto a ${wmType} field of the target object. Every pulled row must carry its ` +
+          `watermark value, which a delete mark's range compares with watermark.start; add ` +
+          `{ source: '${wmName}', target: FIELD } to fieldMapping, FIELD naming a ${wmType} field of the target.`,
       );
     }
   }
@@ -5480,6 +5694,10 @@ function validateCrossReferences(
       }
     }
   }
+
+  // [ADR-0153 D1–D4] A sourced mapping's target, source object, key and
+  // watermark, judged against this stack's objects.
+  errors.push(...collectSourcedMappingErrors(config));
 
   // Validate permission-set / profile object grants → object references.
   // ARTIFACT-SCOPED (#18202) — the rule's own doc carries why it fails loudly.
@@ -6308,6 +6526,49 @@ function warnUnknownAuthoringKeys(raw: unknown): void {
   }
 }
 
+const warnedAddressLiteralNamespaces = new Set<string>();
+
+/**
+ * [ADR-0150 D5, child G1] Warn, once per package and namespace, about a
+ * namespace this stack declares (its own `manifest.namespace` or a
+ * `packages[]` body's) that spells a literal segment of the address grammar
+ * (`actions`, `connectors`, `global`, `hooks`, `oauth`, `trigger`). The
+ * sentence is the install door's own judge
+ * (`validateNamespaceNotAddressLiteral`).
+ *
+ * ## Why a warning here and a refusal at the build
+ *
+ * `defineStack` runs at every load of a config, the server's included
+ * (`os serve`, `os dev`, every host importing a stack), so a throw here would
+ * stop a deployment that already holds such a package from booting after an
+ * upgrade — the very thing the boot exemption keeps (the registry warns once
+ * and keeps a package the boot registers, read by `?package=`). The author's
+ * doors refuse it instead: `os validate` and `os build` exit 1 with the same
+ * sentence, and the running install door refuses a new one.
+ */
+function warnAddressLiteralNamespaces(data: ObjectStackDefinition): void {
+  const bodies: Array<Record<string, unknown> | undefined> = [];
+  for (const entry of Array.isArray((data as { packages?: unknown }).packages)
+    ? (data as { packages: unknown[] }).packages : []) {
+    bodies.push(isRecord(entry) && isRecord(entry.manifest) ? entry.manifest : undefined);
+  }
+  bodies.push(data.manifest as Record<string, unknown> | undefined);
+  for (const body of bodies) {
+    const namespace = typeof body?.namespace === 'string' ? body.namespace : undefined;
+    const message = validateNamespaceNotAddressLiteral(namespace);
+    if (message === null) continue;
+    const packageId = typeof body?.id === 'string' && body.id !== '' ? body.id : undefined;
+    const key = `${packageId ?? ''} ${namespace}`;
+    if (warnedAddressLiteralNamespaces.has(key)) continue;
+    warnedAddressLiteralNamespaces.add(key);
+    console.warn(
+      `defineStack: ${packageId ? `package '${packageId}': ` : ''}${message} `
+      + `It still loads, and a server that already holds it keeps booting, its items read with \`?package=${packageId ?? 'ID'}\`; `
+      + '`os validate` and `os build` refuse it, and the install door refuses a new package under it.',
+    );
+  }
+}
+
 const warnedEmailTemplateFloors = new Set<string>();
 
 /**
@@ -6695,6 +6956,7 @@ function buildDefinedStack(
   // and/or `objects` (bound-action merge, `order` sort) before the result
   // reaches the caller.
   warnEmailTemplateLocaleFloor(data);
+  warnAddressLiteralNamespaces(data);
 
   // [#20367 ruling B] The mark the author-time doors and `composeStacks` check:
   // this value went through the judgement above. Non-enumerable, so it reaches
