@@ -355,6 +355,29 @@ describe('[ADR-0150 D8 row R9, #31696] under a flow name two packages hold, a sa
         expect(await channelRows(ql)).toEqual(before);
     });
 
+    it('[R1] a row naming no package may be any holder\'s: a save that drops it, or a publish that would consume or remove it, is refused and it stays', async () => {
+        const ql = await boot();
+        const unstamped = new FlowCredentialChannel(() => ql as never, undefined, () => null);
+        await unstamped.store({ name: 'pin_inbound', state: 'active', body: inbound({ sign: SIGN }) });
+        await unstamped.store({ name: 'pin_inbound', state: 'draft', body: inbound({ hook: HOOK }) });
+        const before = await channelRows(ql);
+        expect(before.map((r) => `${r.node_id}:${r.state}:${r.flow_package ?? ''}`).sort()).toEqual(['begin:draft:', 'callout:active:']);
+        const channel = new FlowCredentialChannel(() => ql as never, shared, () => null);
+        for (const attempt of [
+            () => channel.store({ name: 'pin_inbound', state: 'active', body: withoutCallout(inbound()) }),
+            () => channel.promote({ name: 'pin_inbound', body: inbound() }),
+            () => channel.promote({ name: 'pin_inbound', body: withoutCallout(inbound()) }),
+        ]) {
+            const refused = await attempt().catch((e: unknown) => e);
+            expect(refused).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+            expect((refused as Error).message).toContain(`package "${P2}"`);
+            expect(await channelRows(ql)).toEqual(before);
+        }
+        // A save that touches no row (the served form) still saves.
+        await expect(channel.store({ name: 'pin_inbound', state: 'active', body: inbound() })).resolves.toBeDefined();
+        expect(await channelRows(ql)).toEqual(before);
+    });
+
     it('CONTROL: under a name one package holds, the same save rotates, clears and drops as before', async () => {
         const ql = await boot();
         const channel = new FlowCredentialChannel(() => ql as never, () => undefined, () => P1);

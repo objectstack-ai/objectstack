@@ -670,10 +670,14 @@ describe('#31696 R9 — the engine asks a credential source by package only for 
         const channel = new FlowCredentialChannel(() => ({ find: async () => rows, resolveSecretField: async (_o: string, id: string) => `plain-${id}` }) as never);
         await channel.loadIndex();
         expect([channel.holds('f', 'start', 'secret'), channel.holds('f', 'start', 'secret', P1)]).toEqual([true, true]);
-        expect([channel.holds('f', 'start', 'secret', P2), channel.holds('f', 'call', 'signingSecret', P1)]).toEqual([false, false]);
+        expect(channel.holds('f', 'start', 'secret', P2)).toBe(false);
         expect(channel.held('f')).toHaveLength(2);
         expect(await channel.resolve('f', 'start', 'secret', P2)).toBeUndefined();
         expect(await channel.resolve('f', 'start', 'secret', P1)).toBe('plain-1');
+        // [R1] The row naming no package is any holder's: held for every slot, and its reads refused.
+        expect([channel.holds('f', 'call', 'signingSecret', P1), channel.holds('f', 'call', 'signingSecret', P2)]).toEqual([true, true]);
+        expect(() => channel.held('f', P2)).toThrow(/names no package/);
+        await expect(channel.resolve('f', 'call', 'signingSecret', P1)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
     });
 
     it('the engine asks the channel by package only for a slot of a name two packages hold', async () => {

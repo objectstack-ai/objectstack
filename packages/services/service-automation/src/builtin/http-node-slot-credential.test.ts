@@ -17,6 +17,7 @@ import { signHttpBody } from '@objectstack/core';
 
 import { AutomationEngine } from '../engine.js';
 import type { FlowCredentialSource } from '../engine.js';
+import { FlowCredentialChannel } from '../flow-credential-channel.js';
 import { registerHttpNodes } from './http-nodes.js';
 
 const P1 = 'com.acme.alpha';
@@ -118,6 +119,22 @@ describe('[#31696] the http node signs with its own package\'s secret when two p
 
         // The channel was only ever asked for one package.
         expect(held.asked).toEqual([P1, P2]);
+    });
+
+    it('[R1] a stored row naming no package is no slot\'s: the node is refused, sent neither unsigned nor with its literal', async () => {
+        const rows = [{ id: '1', flow_name: 'f', flow_package: null, node_id: 'call', credential_key: 'signingSecret', state: 'active' }];
+        const real = new FlowCredentialChannel(() => ({ find: async () => rows, resolveSecretField: async () => 'unbound-secret' }) as never);
+        await real.loadIndex();
+        const engine = engineWithBoth(real);
+        const literal = callout('p1-literal');
+        (literal.nodes[1].config as Record<string, unknown>).signingSecret = 'pin-authored-literal-5e2a';
+        engine.registerFlow('f', literal as never, { source: 'package', packageId: P1, holder: P1 });
+        for (const packageId of [P1, P2]) {
+            const run = await engine.executeSlot(packageId, 'f');
+            expect(run.success).toBe(false);
+            expect(run.error).toContain('names no package');
+        }
+        expect(received).toEqual([]);
     });
 
     it('S3: a source that reads by name alone never signs P1\'s request with P2\'s secret: the node is refused, nothing is sent', async () => {

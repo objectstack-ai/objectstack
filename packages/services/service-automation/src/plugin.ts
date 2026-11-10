@@ -1921,8 +1921,8 @@ export class AutomationServicePlugin implements Plugin {
         // flow's credentials from it at verification and execution, and the
         // metadata save door stores them in it (registered at `start()`).
         // [ADR-0150 D8 row R9, #31696] Each row it writes names the flow's one package holder, and a
-        // read for a slot of a shared name answers by that package. Under a shared name a write touches
-        // only the rows naming no package, and one that sets a credential, or clears a standing one, is refused.
+        // read for a slot of a shared name answers by that package (a row naming none is refused). Under a
+        // shared name a save writes no row: one that would set, clear or remove a stored credential is refused.
         const engine = this.engine;
         this.credentialChannel = new FlowCredentialChannel(
             () => this.resolveDataEngine(ctx),

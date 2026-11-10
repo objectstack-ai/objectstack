@@ -2677,9 +2677,10 @@ export interface FlowCredentialSource {
     /**
      * [ADR-0150 D8 row R9, #31696] `flowPackage`, when given, is the package
      * whose flow `flowName` names — `sys_flow_credential.flow_package` — and
-     * only that package's rows answer. The engine gives it for a flow of a
-     * name two packages hold, and only then; absent, every row of the name
-     * answers, as before.
+     * only that package's rows answer; a row naming no package fails closed
+     * (`holds` true, `held` / `resolve` throw), since whose it is cannot be
+     * told. The engine gives it for a flow of a name two packages hold, and
+     * only then; absent, every row of the name answers, as before.
      */
     holds(flowName: string, nodeId: string, key: string, flowPackage?: string): boolean;
     held(flowName: string, flowPackage?: string): Array<{ nodeId: string; key: string }>;
