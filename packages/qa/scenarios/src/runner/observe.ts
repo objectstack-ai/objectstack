@@ -39,7 +39,7 @@
  *   7. nothing attempted                              → `refused (no write attempted)`
  *
  * A coded answer keeps the envelope's `status` beside its `code`: the grader
- * reads an app-defined validation refusal by both (`refusalMeets`).
+ * reads an app-defined refusal by both (`refusalMeets`).
  *
  * Rule 4 is the overstep refused before any write: a persona that may not read
  * the object is refused on the read it needs first (the id of the row to
@@ -82,7 +82,7 @@
 import { ErrorCode } from '@objectstack/spec/api';
 
 import type { ScenarioCard, Scalar } from '../schema.js';
-import { declines, flowRefusalOf, type ObservedAnswer, type OperationObservation, type ProbeObservation } from '../score/index.js';
+import { declines, flowRefusalOf, flowRefused, type ObservedAnswer, type OperationObservation, type ProbeObservation } from '../score/index.js';
 import type { ToolAnswer } from './app.js';
 import { refusalCodeOf, refusalOf, type ParsedTurn, type RunnerToolCall } from './transcript.js';
 
@@ -94,8 +94,8 @@ export const WRITE_TOOLS = ['create_record', 'update_record', 'delete_record', '
 
 export const noWriteAttempted = '(no write attempted)';
 export const uncodedToolError = '(tool error without a code)';
-/** A `run_action` whose flow ended on its own declared refusal (rule 3): an answer, not an applied write. */
-export const flowRefused = '(the flow refused)';
+/** A `run_action` whose flow ended on its own declared refusal (rule 3): an answer, not an applied write. Owned by the grader, which reads it. */
+export { flowRefused };
 /**
  * The confirmation gate's refusal, as the runner READS it. The runner emits no
  * code, so it holds no copy of one: the value is taken through the spec's

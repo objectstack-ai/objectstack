@@ -36,6 +36,7 @@ import { isProbedOperation, PERSON_USER_FIELD, scenarioNamespace, type CardTitle
 import {
   gradeCardAnswer,
   gradeCardOperation,
+  readArtifactFacts,
   scoreCardArtifact,
   type OperationGrade,
   type OperationObservation,
@@ -443,6 +444,43 @@ export function probeValues(card: Card, op: Operation, accounts: readonly Person
   return out;
 }
 
+/**
+ * The build's own lock on a probed operation's write, read from the built
+ * artifact (ruling A on #31999 item 9): the acting persona's permission set
+ * (`permissionSetName`) carries a field entry that grants no edit
+ * (`editable` is not `true`, the spec's default) on a field the probe writes,
+ * AND the build declares an action on the operation's object, the door it
+ * routed the write through. Its text names both; `undefined` when either is
+ * missing, or the artifact cannot be read.
+ *
+ * A lock alone is not enough: with no action, the build left the persona no
+ * way to make the write, and the door's refusal is the platform's answer to
+ * judge. The grader uses it only when the door refused the probe 403
+ * `PERMISSION_DENIED` and nothing was written.
+ */
+export function buildLockOf(built: unknown, card: Card, op: Operation): string | undefined {
+  if (built === undefined) return undefined;
+  let facts: ReturnType<typeof readArtifactFacts>;
+  try {
+    facts = readArtifactFacts(built);
+  } catch {
+    return undefined;
+  }
+  const setName = permissionSetName(card, op.actingAs);
+  const set = facts.permissionSets.find((p) => p.name === setName);
+  const entries = set && typeof set.fields === 'object' && set.fields !== null ? (set.fields as Record<string, unknown>) : {};
+  const locked = Object.keys(op.values ?? {})
+    .map((f) => `${op.object}.${f}`)
+    .filter((key) => {
+      const e = entries[key];
+      return typeof e === 'object' && e !== null && (e as { editable?: unknown }).editable !== true;
+    });
+  if (locked.length === 0) return undefined;
+  const actions = facts.actions.filter((a) => a.object === op.object).map((a) => String(a.action.name));
+  if (actions.length === 0) return undefined;
+  return `${setName} locks ${locked.join(', ')} and the build declares the action${actions.length > 1 ? 's' : ''} ${actions.join(', ')} on ${op.object}`;
+}
+
 function personaOfUser(userId: string | null, accounts: readonly PersonaAccount[], adminId: string): string | null {
   if (userId === null) return null;
   const hit = accounts.find((a) => a.userId === userId);
@@ -703,6 +741,8 @@ export async function runHalf(
             const call = probeCall(op, probeValues(card, op, accounts, app.adminUserId()));
             const answer = await app.callTool(keyOf(op.actingAs), call.tool, call.args);
             probe = observeProbe(call, answer, after, (await app.listRows(op.object)).rows as Row[]);
+            const lock = buildLockOf(built, card, op);
+            if (lock !== undefined) probe.buildLock = lock;
           } catch (e) {
             res.error = `probe: ${errText(e)}`;
           }

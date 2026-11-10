@@ -67,8 +67,13 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   asks for a correction) and the platform half, `platform:` checks (the runner's own write of
   the declared values, the probe, was refused with that code and stored nothing); so is every
   other `refused` create or update, permission oversteps included (`isProbedOperation`). A
-  declared `VALIDATION_FAILED` is met by an app-defined code at a validation-class status
-  (`refusalMeets`), and a declared value equal to the card's `asOf` by the run date, only in a
+  declared `VALIDATION_FAILED` is met by an app-defined code at any 4xx status, or by the
+  app's flow refusal (`refusalMeets`); a platform catalogue code other than the declared one
+  never is. The platform half is not measured, out of passed and total with the reason in the
+  scorecard's findings, when the probe met the build's own lock: refused 403
+  `PERMISSION_DENIED`, nothing written, and the build locks a field the probe writes for the
+  persona and declares an action on the object (`buildLockOf`; ruling A on #31999 item 9).
+  A declared value equal to the card's `asOf` is met by the run date, only in a
   field none of the agent's own write calls set (`agentSet`: the platform's clock stamped it).
 - `scenario-run-grade.ts` — an answer graded on correct / cited / leaks, per persona against
   that persona's truth; a `withheld` truth is must-not-reveal. A figure computed over rows
