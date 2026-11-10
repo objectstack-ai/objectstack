@@ -117,10 +117,17 @@ describe('[#20333] the blank config wires what `os init` wires, in its lines', (
 });
 
 describe('[#20333] the blank template ships every wired barrel', () => {
+  // [#32212] `os init -t app` ships a starter app and list view, so its apps
+  // and views barrels carry the export lines `os g app` / `os g view` append
+  // after the empty barrel. The barrel compared is what `os init` writes
+  // before those lines: the empty barrel itself, byte for byte.
+  const GENERATED_EXPORT_LINE = /^export \{ default as \w+ \} from '\.\/[\w.-]+';$/;
+  const withoutGeneratedExports = (source: string): string =>
+    source.split('\n').filter((line) => !GENERATED_EXPORT_LINE.test(line)).join('\n');
   const barrels = SCAFFOLD_WIRED_BARRELS.map((b) => {
     const file = `${b.dir}/index.ts`;
     const render = TEMPLATES.app.srcFiles[file];
-    return { ...b, file, init: render ? render('my-app', 'my_app') : undefined };
+    return { ...b, file, init: render ? withoutGeneratedExports(render('my-app', 'my_app')) : undefined };
   });
 
   it.each(barrels.map((b) => [b.file, b] as const))('%s exists', (_file, b) => {
