@@ -18,7 +18,9 @@
  * measured: a duplicate create (409), an unknown user (404) and a refused
  * PATCH path or value (400) are answered after the bearer verified; a PATCH
  * whose body fails the vendor's schema (400) is refused BEFORE the bearer is
- * verified, so that row names no connection, exactly as a 401 does.
+ * verified. [#32116] That row used to name no connection, exactly as a 401
+ * does; it now names the connection a LIVE credential resolves to, read once
+ * after the response by the verifier's own read-only lookup (block (6)).
  *
  *  (1) the four refusals of the card — 401 bad bearer, 409 duplicate create,
  *      400 malformed PATCH, 404 unknown user — and a 400 refused after the
@@ -32,7 +34,11 @@
  *      throws;
  *  (5) CONTROL: an accepted SCIM write hands the slot no refusal and its
  *      writes still name the connection; a refused non-SCIM sign-in is
- *      unchanged (its `login_failed` event, and no SCIM refusal).
+ *      unchanged (its `login_failed` event, and no SCIM refusal);
+ *  (6) [#32116] a schema-refused request (400 `invalidValue`) with a valid
+ *      bearer names its connection; CONTROLS: a forged, a revoked and an
+ *      expired SCIM bearer still name none, a non-SCIM credential is
+ *      unchanged, and the lookup writes nothing to the credential row.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -43,8 +49,10 @@ import { authIdentityObjects } from './manifest.js';
 import { createTenancyService } from './tenancy-service.js';
 import {
   SCIM_BEARER_PREFIX,
+  SCIM_CREDENTIAL_OBJECT,
   digestScimBearerToken,
   mintScimConnectionCredential,
+  revokeScimConnectionCredential,
 } from './scim-connection-service.js';
 
 const BASE = 'http://localhost:3000';
@@ -81,6 +89,7 @@ interface Harness {
   engine: ObjectQL;
   manager: AuthManager;
   token: string;
+  credentialId: string;
   refusals: Event[];
   authEvents: Event[];
   send: (request: Request) => Promise<Response>;
@@ -124,7 +133,7 @@ async function boot(sinkShape: SinkShape = 'full'): Promise<Harness> {
     plugins: { scim: true, organization: true },
   } as never);
 
-  const { token } = await mintScimConnectionCredential(engine as never, SECRET, {
+  const { token, credentialId } = await mintScimConnectionCredential(engine as never, SECRET, {
     connectionId: CONNECTION,
     organizationId: ORG,
   });
@@ -132,6 +141,7 @@ async function boot(sinkShape: SinkShape = 'full'): Promise<Harness> {
     engine,
     manager,
     token,
+    credentialId,
     refusals,
     authEvents,
     send: (request) => manager.handleRequest(request, { remoteAddress: CLIENT }),
@@ -212,7 +222,7 @@ describe('[#31829] each refused SCIM request hands the audit slot one event nami
     ]);
   }, 60_000);
 
-  it('(1) 400 malformed PATCH (refused by the schema BEFORE the bearer verifies): one event, no connection', async () => {
+  it('(1) 400 malformed PATCH (refused by the schema BEFORE the bearer verifies): one event naming the connection', async () => {
     const h = await boot();
     const id = await provisionAlice(h);
     const res = await h.send(
@@ -224,7 +234,7 @@ describe('[#31829] each refused SCIM request hands the audit slot one event nami
     expect(res.status).toBe(400);
     await settle(h.refusals, 1);
     expect(h.refusals).toEqual([
-      { presentedCredential: 'scim_bearer', resource: 'Users', method: 'PATCH', status: 400, scimType: 'invalidValue', ipAddress: CLIENT },
+      { connectionId: CONNECTION, organizationId: ORG, resource: 'Users', method: 'PATCH', status: 400, scimType: 'invalidValue', ipAddress: CLIENT },
     ]);
   }, 60_000);
 
@@ -395,5 +405,106 @@ describe('[#31829] CONTROL — accepted SCIM writes and non-SCIM refusals are un
     await quiesce();
     expect(h.authEvents.filter((e) => e.action === 'login_failed')).toHaveLength(1);
     expect(h.refusals).toEqual([]);
+  }, 60_000);
+});
+
+/** A create the vendor's schema refuses before its bearer verifier runs: no `userName`. */
+const NO_USERNAME = { schemas: [USER_SCHEMA], name: { givenName: 'Nobody' } };
+
+/** Record every write the engine is handed for the credential object. */
+function credentialWrites(h: Harness): unknown[][] {
+  const writes: unknown[][] = [];
+  const engine = h.engine as unknown as Record<string, (...a: unknown[]) => unknown>;
+  for (const method of ['insert', 'update', 'delete'] as const) {
+    const original = engine[method]!.bind(h.engine);
+    vi.spyOn(engine, method).mockImplementation(async (...args: unknown[]) => {
+      if (args[0] === SCIM_CREDENTIAL_OBJECT) writes.push([method, ...args]);
+      return original(...args);
+    });
+  }
+  return writes;
+}
+
+describe('[#32116] a schema-refused SCIM request names the connection its live bearer resolves to', () => {
+  it('(6) 400 create with no userName and a valid bearer: one event naming the connection, and no credential write', async () => {
+    const h = await boot();
+    const before = await h.engine.findOne(SCIM_CREDENTIAL_OBJECT, { where: { id: h.credentialId } }, { context: { isSystem: true } } as never);
+    const writes = credentialWrites(h);
+    const res = await h.send(scimRequest(h, 'POST', '/Users', NO_USERNAME));
+    expect(res.status).toBe(400);
+    await settle(h.refusals, 1);
+    await quiesce();
+    expect(h.refusals).toEqual([
+      { connectionId: CONNECTION, organizationId: ORG, resource: 'Users', method: 'POST', status: 400, scimType: 'invalidValue', ipAddress: CLIENT },
+    ]);
+    // Read-only: the lookup wrote nothing to the credential, its last use included.
+    expect(writes).toEqual([]);
+    const after = await h.engine.findOne(SCIM_CREDENTIAL_OBJECT, { where: { id: h.credentialId } }, { context: { isSystem: true } } as never);
+    expect(after).toEqual(before);
+  }, 60_000);
+
+  it('(6) CONTROL: a forged SCIM-prefixed bearer on a schema 400 still names no connection', async () => {
+    const h = await boot();
+    const res = await h.send(scimRequest(h, 'POST', '/Users', NO_USERNAME, FOREIGN_BEARER));
+    expect(res.status).toBe(400);
+    await settle(h.refusals, 1);
+    expect(h.refusals).toEqual([
+      { presentedCredential: 'scim_bearer', resource: 'Users', method: 'POST', status: 400, scimType: 'invalidValue', ipAddress: CLIENT },
+    ]);
+  }, 60_000);
+
+  it('(6) CONTROL: a revoked bearer on a schema 400 still names no connection', async () => {
+    const h = await boot();
+    expect((await revokeScimConnectionCredential(h.engine as never, h.credentialId)).outcome).toBe('revoked');
+    const res = await h.send(scimRequest(h, 'POST', '/Users', NO_USERNAME));
+    expect(res.status).toBe(400);
+    await settle(h.refusals, 1);
+    expect(h.refusals).toEqual([
+      { presentedCredential: 'scim_bearer', resource: 'Users', method: 'POST', status: 400, scimType: 'invalidValue', ipAddress: CLIENT },
+    ]);
+  }, 60_000);
+
+  it('(6) CONTROL: an expired bearer on a schema 400 still names no connection', async () => {
+    const h = await boot();
+    const { token: expired } = await mintScimConnectionCredential(h.engine as never, SECRET, {
+      connectionId: 'okta-expired-32116',
+      organizationId: ORG,
+      expiresAt: new Date(Date.now() - 60_000),
+    });
+    const res = await h.send(scimRequest(h, 'POST', '/Users', NO_USERNAME, expired));
+    expect(res.status).toBe(400);
+    await settle(h.refusals, 1);
+    expect(h.refusals).toEqual([
+      { presentedCredential: 'scim_bearer', resource: 'Users', method: 'POST', status: 400, scimType: 'invalidValue', ipAddress: CLIENT },
+    ]);
+  }, 60_000);
+
+  it('(6) CONTROL: a non-SCIM credential on a schema 400 is unchanged, and is never looked up', async () => {
+    const h = await boot();
+    const reads: unknown[] = [];
+    const engine = h.engine as unknown as Record<string, (...a: unknown[]) => unknown>;
+    const findOne = engine.findOne!.bind(h.engine);
+    vi.spyOn(engine, 'findOne').mockImplementation(async (...args: unknown[]) => {
+      if (args[0] === SCIM_CREDENTIAL_OBJECT) reads.push(args[1]);
+      return findOne(...args);
+    });
+    const res = await h.send(scimRequest(h, 'POST', '/Users', NO_USERNAME, 'not-a-scim-bearer-32116'));
+    expect(res.status).toBe(400);
+    await settle(h.refusals, 1);
+    await quiesce();
+    expect(h.refusals).toEqual([
+      { presentedCredential: 'other', resource: 'Users', method: 'POST', status: 400, scimType: 'invalidValue', ipAddress: CLIENT },
+    ]);
+    expect(reads).toEqual([]);
+  }, 60_000);
+
+  it('(6) the event never carries the resolved bearer, any part of it or its digest', async () => {
+    const h = await boot();
+    await h.send(scimRequest(h, 'POST', '/Users', NO_USERNAME));
+    await settle(h.refusals, 1);
+    const recorded = JSON.stringify(h.refusals);
+    for (const value of [h.token, h.token.slice(SCIM_BEARER_PREFIX.length, SCIM_BEARER_PREFIX.length + 8), digestScimBearerToken(SECRET, h.token)]) {
+      expect(recorded.includes(value), `an event carries ${JSON.stringify(value)}`).toBe(false);
+    }
   }, 60_000);
 });

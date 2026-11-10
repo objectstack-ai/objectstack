@@ -86,7 +86,7 @@
 import type { AuthEventAuditSurface, ScimRefusalAuditEventInput } from './auth-session-audit.js';
 import { canonicalClientAddress } from './client-address-canonical.js';
 import { runAfterResponse } from './run-after-response.js';
-import { SCIM_BEARER_PREFIX } from './scim-connection-service.js';
+import { SCIM_BEARER_PREFIX, findLiveScimCredential } from './scim-connection-service.js';
 
 /** The window a key's rows are counted in. */
 export const SCIM_REFUSAL_AUDIT_WINDOW_MS = 10 * 60_000;
@@ -273,6 +273,28 @@ function scimBearerOf(authorization: string | null | undefined): string | undefi
 export type ScimRefusalConnectionResolver = (
   token: string,
 ) => Promise<{ connectionId: string; organizationId?: string } | null>;
+
+/**
+ * The resolver `handleRequest` hands {@link observeScimRefusal}: the verifier's
+ * read-only lookup ({@link findLiveScimCredential}) over `engine`, with the
+ * auth secret read only when a lookup runs. No engine: no resolver, and the
+ * row names no connection, as the verifier fails closed without one.
+ */
+export function scimRefusalConnectionResolver(
+  engine: Parameters<typeof findLiveScimCredential>[0] | undefined,
+  secret: () => string,
+): ScimRefusalConnectionResolver | undefined {
+  if (!engine) return undefined;
+  return async (token) => {
+    const row = await findLiveScimCredential(engine, secret(), token);
+    if (!row) return null;
+    const organization = row.organization_id;
+    return {
+      connectionId: String(row.connection_id),
+      ...(typeof organization === 'string' && organization !== '' ? { organizationId: organization } : {}),
+    };
+  };
+}
 
 /**
  * The observation with the connection a schema-refused request's bearer
