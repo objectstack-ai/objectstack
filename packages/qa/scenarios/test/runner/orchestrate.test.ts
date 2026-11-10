@@ -1051,3 +1051,100 @@ describe('runCard — every turn states the model it was served, and a mismatch 
     expect(table).toContain('| Build · author | success · elapsed not recorded |');
   });
 });
+
+// ── The authoring cost a driver reports ─────────────────────────────────────
+
+/**
+ * A driver that answers as `inner` does, each authoring turn stamped with the
+ * cost its driver reported (`meta.reportedCostUsd`) by `mode/phase` — a step
+ * missing from `costs` reported none — and every persona turn with `askCost`.
+ */
+class ReportedCosts implements AgentDriver {
+  constructor(
+    private readonly inner: AgentDriver,
+    private readonly costs: Readonly<Record<string, number>>,
+    private readonly askCost?: number,
+  ) {}
+  info(): DriverInfo {
+    return this.inner.info();
+  }
+  async author(task: AuthorTask) {
+    const r = await this.inner.author(task);
+    const cost = this.costs[`${task.mode}/${task.phase}`];
+    return cost === undefined ? r : { ...r, turn: { ...r.turn, meta: { ...r.turn.meta, reportedCostUsd: cost } } };
+  }
+  async ask(task: AskTask): Promise<ParsedTurn> {
+    const t = await this.inner.ask(task);
+    return this.askCost === undefined ? t : { ...t, meta: { ...t.meta, reportedCostUsd: this.askCost } };
+  }
+}
+
+describe('runCard — the authoring cost a driver reports is stated only when every authoring turn reported one', () => {
+  const run = async (costs: Record<string, number>, askCost?: number) => {
+    const { scenario, ops, driver } = setup();
+    return runCard(scenario, new ReportedCosts(driver, costs, askCost), ops, { modes: ['scratch', 'template'], admin: ADMIN });
+  };
+  const written = (r: Awaited<ReturnType<typeof runCard>>) =>
+    JSON.parse(JSON.stringify(runRecord({ run: 'r', date: '2026-11-10', packages: PUBLISHED, driver: { driver: 'claude-code-cli', apiBilled: false }, runner: 'test', evidenceDir: '/tmp' }, r)));
+
+  it('every authoring turn reported: the record carries each turn’s cost, and the scorecard sums them per mode and for the card', async () => {
+    const r = await run({ 'scratch/build': 0.1, 'scratch/iterate': 0.2, 'template/iterate': 0.05 }, 0.01);
+    expect([r.modes[0]!.build!.author!.reportedCostUsd, r.modes[0]!.iterate!.build.author!.reportedCostUsd, r.modes[1]!.iterate!.build.author!.reportedCostUsd]).toEqual([0.1, 0.2, 0.05]);
+    const sc = cardScorecard(r);
+    // The persona turns' cost is carried per turn, and is no part of the authoring cost.
+    expect(r.modes[0]!.run!.questions.every((q) => q.turn!.reportedCostUsd === 0.01)).toBe(true);
+    expect(sc.authorCost).toEqual({ turns: 3, reported: 3, usd: 0.35 });
+    expect(sc.modes.map((m) => m.authorCost)).toEqual([
+      { turns: 2, reported: 2, usd: 0.3 },
+      { turns: 1, reported: 1, usd: 0.05 },
+    ]);
+    const table = renderScorecard(sc);
+    expect(table).toContain('author cost: $0.35 over 3 author turns\n');
+    expect(table).toContain('| Author cost | $0.30 over 2 author turns | $0.05 over 1 author turn |');
+    const w = written(r);
+    expect([w.cardRun.modes[0].build.author.reportedCostUsd, w.scorecard.authorCost.usd]).toEqual([0.1, 0.35]);
+  });
+
+  it('one authoring turn reported none: the card’s cost and that mode’s are not reported — never a partial sum, never that turn read as zero', async () => {
+    const r = await run({ 'scratch/build': 0.1, 'scratch/iterate': 0.2 });
+    const sc = cardScorecard(r);
+    expect(r.modes[1]!.iterate!.build.author).not.toHaveProperty('reportedCostUsd');
+    expect(sc.authorCost).toEqual({ turns: 3, reported: 2 });
+    expect(sc.modes.map((m) => m.authorCost)).toEqual([
+      { turns: 2, reported: 2, usd: 0.3 },
+      { turns: 1, reported: 0 },
+    ]);
+    const table = renderScorecard(sc);
+    expect(table).toContain('author cost: not reported (2 of 3 author turns reported a cost)\n');
+    expect(table).toContain('| Author cost | $0.30 over 2 author turns | not reported |');
+    expect(written(r).scorecard.authorCost).toEqual({ turns: 3, reported: 2 });
+  });
+
+  it('a reported zero is a reading: a free turn sums as zero, and the cost is stated', async () => {
+    const sc = cardScorecard(await run({ 'scratch/build': 0, 'scratch/iterate': 0, 'template/iterate': 0.004 }));
+    expect(sc.authorCost).toEqual({ turns: 3, reported: 3, usd: 0.004 });
+    expect(renderScorecard(sc)).toContain('| Author cost | $0 over 2 author turns | $0.004 over 1 author turn |');
+  });
+
+  it('no turn reported a cost: no turn in the record carries one, and the scorecard says not reported', async () => {
+    const r = await run({});
+    const w = written(r);
+    expect(JSON.stringify(w.cardRun)).not.toContain('reportedCostUsd');
+    expect(w.scorecard.authorCost).toEqual({ turns: 3, reported: 0 });
+    const table = renderScorecard(cardScorecard(r));
+    expect(table).toContain('author cost: not reported\n');
+    expect(table).toContain('| Author cost | not reported | not reported |');
+  });
+
+  it('a skipped mode has no authoring turn of its own; a scorecard written before the cost was carried reads as not reported', async () => {
+    const { scenario, ops, driver } = setup({ degradedBuild: true });
+    const sc = cardScorecard(await runCard(scenario, new ReportedCosts(driver, { 'scratch/build': 0.1, 'scratch/iterate': 0.2 }), ops, { modes: ['scratch', 'template'], admin: ADMIN }));
+    expect(sc.modes[1]!.skipped).toMatch(/no verified build/);
+    expect(sc.modes[1]!.authorCost).toEqual({ turns: 0, reported: 0 });
+    expect(sc.authorCost).toEqual({ turns: 2, reported: 2, usd: 0.3 });
+    const { authorCost: _card, ...older } = sc;
+    const olderTable = renderScorecard({ ...older, modes: older.modes.map(({ authorCost: _mode, ...m }) => m) });
+    expect(olderTable).toContain('author cost: not reported\n');
+    expect(olderTable).toContain('| Author cost | not reported | skipped |');
+  });
+});

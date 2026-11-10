@@ -84,10 +84,16 @@ export interface ParsedTurn extends RunTranscript {
     resultSubtype?: string;
     isError?: boolean;
     /**
-     * The CLI's own cost estimate. Under a subscription login it is notional —
-     * nothing is billed per token — and the run record says which login ran.
+     * The CLI's own cost estimate (the result line's `total_cost_usd`), or the
+     * cost an external command reported. Under a subscription login it is
+     * notional — nothing is billed per token — and the run record says which
+     * login ran. Absent ⇒ the turn reported none: never read as zero.
      */
     reportedCostUsd?: number;
+    /** The input tokens the turn used, as an external command reported them; absent ⇒ none reported. */
+    inputTokens?: number;
+    /** The output tokens the turn used, as an external command reported them; absent ⇒ none reported. */
+    outputTokens?: number;
   };
 }
 
