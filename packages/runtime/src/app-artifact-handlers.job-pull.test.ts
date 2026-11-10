@@ -37,6 +37,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PluginContext } from '@objectstack/core';
+import type { ConnectorSourcePullResult } from '@objectstack/spec/contracts';
 import { SCHEDULED_WORK_ENV } from '@objectstack/types';
 import { runImport, type ExportFieldMeta, type ImportProtocolLike, type ImportRunSummary } from '@objectstack/core';
 import { ObjectQL } from '@objectstack/objectql';
@@ -202,11 +203,13 @@ describe('#20281 stage ③ (Q1-B): a job pulls a mapping by declaration, through
         const h = harness();
         const { connectorSource: _dropped, ...rest } = MAPPING;
         const sourced = { ...rest, datasourceSource: { object: 'erp_order', watermark: { field: 'updated_at', start: '2026-01-01' } } };
-        h.defaultAutomation.pullConnectorSource.mockResolvedValueOnce({
+        const datasourceResult: ConnectorSourcePullResult = {
             source: 'datasource', mapping: 'orders_pull', targetObject: 'order', object: 'erp_order', datasource: 'erp',
             readPath: 'builtin', watermark: { field: 'updated_at', from: '2026-01-01T00:00:00.000Z' }, pulled: 4,
             summary: { total: 4, processed: 4, created: 3, updated: 0, skipped: 0, errors: 1, ok: 3, cancelled: false },
-        });
+        };
+        // The harness mock is typed from the connector fixture (`result`); the datasource arm is the contract's own.
+        h.defaultAutomation.pullConnectorSource.mockResolvedValueOnce(datasourceResult as unknown as ReturnType<typeof result>);
 
         const out = await h.schedule([PULL_JOB], { mappings: [sourced] });
         expect(out.pulls).toEqual(['orders_pull_hourly']);
