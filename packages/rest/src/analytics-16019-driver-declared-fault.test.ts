@@ -75,6 +75,10 @@ import { AnalyticsService } from '@objectstack/service-analytics';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { INTERNAL_ERROR_MESSAGE, declaresServerFault, looksLikeInternalErrorLeak } from '@objectstack/types';
 import { RestServer } from './rest-server';
+// The server reaches `@objectstack/objectql` only through a dynamic import inside a
+// handler; paid here at module scope so the first load lands during collection,
+// not inside a clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/objectql';
 
 // [#17865] This file observes the REST fault log, so it declares the level it
 // asserts against instead of inheriting the suite's quiet one. 'info' is the
@@ -97,7 +101,10 @@ function mockProtocol(savedDatasets: unknown[] = []) {
   return {
     getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
     getMetaTypes: vi.fn().mockResolvedValue([]),
-    getMetaItems: vi.fn().mockResolvedValue(savedDatasets),
+    // [#32072] Read BY NAME, as the door reads a `datasetName`.
+    getMetaItem: vi.fn(async ({ name }: { name: string }) => ({
+      type: 'dataset', name, item: (savedDatasets as Array<{ name?: string }>).find((d) => d?.name === name),
+    })),
   };
 }
 function mockRes() {

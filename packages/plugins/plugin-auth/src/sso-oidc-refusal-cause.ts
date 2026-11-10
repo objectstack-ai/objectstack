@@ -45,8 +45,9 @@
  *   nothing that depends on whether an account exists. The refusal happens
  *   before any user lookup, so the answer is the same for every account.
  * - SAML causes: the vendor discards the SAML cause inside the package (a
- *   bare `catch` around `parseLoginResponse`), so it is not readable here; that
- *   half waits on the vendor. Where a SAML refusal LANDS is this module's,
+ *   bare `catch` around `parseLoginResponse`), so it is not readable from the
+ *   vendor's lines; `sso-saml-refusal-cause.ts` diagnoses it from the posted
+ *   response instead (#32086). Where a SAML refusal LANDS is this module's,
  *   below.
  *
  * The values are lowercase `error_description` tokens in the vendor's own

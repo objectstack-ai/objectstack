@@ -2212,6 +2212,26 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
             helpText: "Opcional. Formato de NameID SAML solicitado. O padrão é o formato configurado no IdP.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          mapEmail: {
+            label: "Mapear: atributo de e-mail",
+            helpText: "Opcional. Atributo da asserção mapeado para o e-mail do usuário. O padrão é \"email\" e, depois, o NameID. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          mapFirstName: {
+            label: "Mapear: atributo de nome",
+            helpText: "Opcional. Atributo da asserção mapeado para o nome do usuário. O padrão é \"givenName\". Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          mapLastName: {
+            label: "Mapear: atributo de sobrenome",
+            helpText: "Opcional. Atributo da asserção mapeado para o sobrenome do usuário. O padrão é \"surname\". Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          mapName: {
+            label: "Mapear: atributo de nome de exibição",
+            helpText: "Opcional. Atributo da asserção mapeado para o nome completo do usuário, usado quando os atributos de nome e sobrenome estão ausentes. O padrão é \"displayName\" e, depois, o NameID. Okta: name. Entra ID: http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          },
           mapGroups: {
             label: "Mapear: atributo de grupos",
             helpText: "Opcional. Atributo da asserção que contém os grupos do usuário. Cada login concede os conjuntos de permissões mapeados para esses grupos. Deixe em branco para não mapear grupos.",
@@ -2271,6 +2291,57 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Concluído",
           fields: {
             groupsClaim: "Declaração de grupos"
+          }
+        }
+      },
+      show_sso_attribute_mapping: {
+        label: "Mostrar mapeamento de atributos",
+        resultDialog: {
+          title: "Mapeamento de atributos",
+          description: "Os atributos do IdP (SAML) ou declarações (OIDC) de onde este provedor lê o e-mail e o nome do usuário a cada login. Vazio significa o padrão: e-mail de \"email\" (SAML: depois o NameID); nome de \"givenName\" + \"surname\" e, depois, \"displayName\" (OIDC: \"name\"). Nome e sobrenome se aplicam apenas a SAML. Altere com \"Editar mapeamento de atributos\".",
+          acknowledge: "Concluído",
+          fields: {
+            protocol: "Protocolo",
+            email: "E-mail",
+            firstName: "Nome",
+            lastName: "Sobrenome",
+            name: "Nome de exibição"
+          }
+        }
+      },
+      edit_sso_attribute_mapping: {
+        label: "Editar mapeamento de atributos",
+        params: {
+          email: {
+            label: "Atributo de e-mail",
+            helpText: "O atributo ou declaração do IdP mapeado para o e-mail do usuário. Deixe como está para manter o atual; limpe para voltar ao padrão (\"email\"). Entra ID SAML: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          firstName: {
+            label: "Atributo de nome (SAML)",
+            helpText: "Somente SAML. O atributo da asserção mapeado para o nome do usuário. Deixe como está para manter o atual. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          lastName: {
+            label: "Atributo de sobrenome (SAML)",
+            helpText: "Somente SAML. O atributo da asserção mapeado para o sobrenome do usuário. Deixe como está para manter o atual. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          name: {
+            label: "Atributo de nome de exibição",
+            helpText: "O atributo ou declaração do IdP mapeado para o nome completo do usuário (SAML: usado quando nome e sobrenome estão ausentes). Deixe como está para manter o atual. Okta SAML: name. Entra ID: http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          }
+        },
+        resultDialog: {
+          title: "Mapeamento de atributos salvo",
+          description: "Os atributos ou declarações de onde este provedor passa a ler o e-mail e o nome do usuário a cada login. Vazio significa que o padrão se aplica.",
+          acknowledge: "Concluído",
+          fields: {
+            email: "E-mail",
+            firstName: "Nome",
+            lastName: "Sobrenome",
+            name: "Nome de exibição"
           }
         }
       }
@@ -3606,6 +3677,55 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       note: {
         label: "Nota"
+      }
+    }
+  },
+  sys_metadata_commit: {
+    label: "Metadata Commit",
+    pluralLabel: "Metadata Commits",
+    description: "Package-scoped commit log grouping a turn’s metadata changes.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      package_id: {
+        label: "Package"
+      },
+      operation: {
+        label: "Operation",
+        options: {
+          apply: "apply",
+          revert: "revert"
+        }
+      },
+      message: {
+        label: "Message",
+        help: "Change summary; for AI turns, the user instruction that produced it."
+      },
+      actor: {
+        label: "Actor"
+      },
+      ai_model: {
+        label: "AI Model"
+      },
+      parent_commit_id: {
+        label: "Parent Commit"
+      },
+      event_seq_start: {
+        label: "Event Seq Start"
+      },
+      event_seq_end: {
+        label: "Event Seq End"
+      },
+      items: {
+        label: "Items",
+        help: "JSON: [{ type, name, existedBefore, prevVersion }] — the revert plan."
+      },
+      item_count: {
+        label: "Item Count"
+      },
+      created_at: {
+        label: "Created At"
       }
     }
   },

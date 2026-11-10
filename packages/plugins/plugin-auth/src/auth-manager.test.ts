@@ -19,8 +19,15 @@ vi.mock('better-auth/plugins/organization', () => ({
   organization: vi.fn((opts: any) => ({ id: 'organization', _opts: opts })),
 }));
 
+// The vendor's shape includes the password sign-in challenge after-hook: the
+// build refuses a two-factor plugin without one (fail closed), see
+// `second-factor-code-and-link-doors.ts`.
 vi.mock('better-auth/plugins/two-factor', () => ({
-  twoFactor: vi.fn((opts: any) => ({ id: 'two-factor', _opts: opts })),
+  twoFactor: vi.fn((opts: any) => ({
+    id: 'two-factor',
+    _opts: opts,
+    hooks: { after: [{ matcher: (ctx: any) => ctx?.path === '/sign-in/email', handler: async () => undefined }] },
+  })),
 }));
 
 vi.mock('better-auth/plugins/magic-link', () => ({

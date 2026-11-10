@@ -5,11 +5,15 @@ import { betterAuth } from 'better-auth';
 import { memoryAdapter } from 'better-auth/adapters/memory';
 import { sso } from '@better-auth/sso';
 import {
+  attributeMappingOf,
   groupsClaimOfMapping,
+  mappingWithAttributes,
   mappingWithGroupsClaim,
   runRegisterSamlProviderFromForm,
   runRegisterSsoProviderFromForm,
+  runSetSsoAttributeMapping,
   runSetSsoGroupsClaim,
+  runShowSsoAttributeMapping,
   runShowSsoGroupsClaim,
   type StoredSsoProviderConfigs,
 } from './register-sso-provider';
@@ -323,6 +327,46 @@ describe('Register SAML Provider through the REAL route — the INSTALLED @bette
     expect(JSON.parse(db.ssoProvider.find((p) => p.providerId === 'acme-saml').samlConfig).mapping).toBeUndefined();
   });
 
+  it('[#32086] the attribute names on the form are stored where the register door stores them: mapping.email / firstName / lastName / name', async () => {
+    const ENTRA = 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims';
+    const res = await post({
+      ...COMPLETE_FORM,
+      providerId: 'acme-saml-mapped',
+      mapEmail: ` ${ENTRA}/emailaddress `,
+      mapFirstName: `${ENTRA}/givenname`,
+      mapLastName: `${ENTRA}/surname`,
+      mapName: 'http://schemas.microsoft.com/identity/claims/displayname',
+      mapGroups: 'memberOf',
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const door = await app.request(`${ORIGIN}${BASE}/sso/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: ORIGIN, cookie },
+      body: JSON.stringify({
+        providerId: 'acme-saml-mapped-door',
+        issuer: COMPLETE_FORM.issuer,
+        domain: COMPLETE_FORM.domain,
+        samlConfig: {
+          entryPoint: COMPLETE_FORM.entryPoint,
+          cert: COMPLETE_FORM.cert,
+          idpMetadata: { entityID: COMPLETE_FORM.issuer },
+          spMetadata: { entityID: 'door-sp' },
+          mapping: {
+            email: `${ENTRA}/emailaddress`,
+            firstName: `${ENTRA}/givenname`,
+            lastName: `${ENTRA}/surname`,
+            name: 'http://schemas.microsoft.com/identity/claims/displayname',
+            extraFields: { groups: 'memberOf' },
+          },
+        },
+      }),
+    });
+    expect(door.status, await door.clone().text()).toBe(200);
+    const mappingOf = (providerId: string) => JSON.parse(db.ssoProvider.find((p) => p.providerId === providerId).samlConfig).mapping;
+    expect(mappingOf('acme-saml-mapped')).toEqual(mappingOf('acme-saml-mapped-door'));
+    expect(mappingOf('acme-saml-mapped').email).toBe(`${ENTRA}/emailaddress`);
+  });
+
   // A SAML EntityID is a URI, and many IdPs publish a URN. The bridge sends the
   // form's Entity ID both as the top-level `issuer` and as
   // `idpMetadata.entityID`, and the vendor's register body types `issuer` as
@@ -576,5 +620,168 @@ describe('the Register SSO Provider form names the userinfo endpoint and the use
     );
     expect(res.body.error?.message ?? '').not.toMatch(/Unrecognized key|Invalid/);
     expect(res.status).toBe(401);
+  });
+});
+
+describe('[#32086] the attribute names on the SAML register form: mapping.email / firstName / lastName / name', () => {
+  const sentFor = async (extra: Record<string, unknown>) => {
+    let dispatched: any = null;
+    const handle = vi.fn(async (req: Request) => {
+      if (req.url.endsWith('/get-session')) return new Response('null', { status: 200 });
+      dispatched = await req.clone().json();
+      return new Response(JSON.stringify({ providerId: 'p' }), { status: 200 });
+    });
+    const res = await runRegisterSamlProviderFromForm(handle, makeReq({ providerId: 'p', issuer: 'https://idp.acme.com/entity', domain: 'acme.com', entryPoint: 'https://idp.acme.com/sso', cert: 'c', ...extra }));
+    expect(res.status).toBe(200);
+    return dispatched.samlConfig;
+  };
+
+  it('each named attribute is sent trimmed, beside the groups attribute', async () => {
+    const sent = await sentFor({ mapEmail: ' mail ', mapFirstName: 'first', mapLastName: 'last', mapName: 'name', mapGroups: 'memberOf' });
+    expect(sent.mapping).toEqual({ email: 'mail', firstName: 'first', lastName: 'last', name: 'name', extraFields: { groups: 'memberOf' } });
+  });
+
+  it('only the attributes named are sent; a blank one is left to the vendor default', async () => {
+    expect((await sentFor({ mapName: 'name', mapEmail: '   ', mapFirstName: '' })).mapping).toEqual({ name: 'name' });
+  });
+
+  it('CONTROL: a form naming none of them still sends no mapping', async () => {
+    expect('mapping' in (await sentFor({ mapEmail: '', mapFirstName: ' ', mapLastName: undefined, mapName: '' }))).toBe(false);
+  });
+});
+
+describe('[#32086] the attribute-mapping bridges: show it, change some members, keep the rest, answer nothing else', () => {
+  const CLIENT_SECRET = 'SECRET-VALUE-NEVER-ANSWERED';
+  const CERT = 'CERT-BODY-NEVER-ANSWERED';
+  const OIDC_STORED = {
+    issuer: 'https://idp.acme.com',
+    clientId: 'cid',
+    clientSecret: CLIENT_SECRET,
+    mapping: { id: 'sub', email: 'upn', name: 'display_name', image: 'picture', emailVerified: 'email_verified', extraFields: { groups: 'groups', department: 'dept' } },
+  };
+  const SAML_STORED = {
+    entryPoint: 'https://idp.acme.com/sso',
+    cert: CERT,
+    privateKey: CLIENT_SECRET,
+    mapping: { email: 'mail', firstName: 'givenName', emailVerified: 'verified', extraFields: { groups: 'memberOf' } },
+  };
+
+  const storeOf = (configs: Record<string, StoredSsoProviderConfigs>) => {
+    const read = vi.fn(async (providerId: string) => configs[providerId] ?? null);
+    const sent: any[] = [];
+    const handle = vi.fn(async (req: Request) => {
+      const body = await req.clone().json();
+      sent.push({ url: req.url, body });
+      const row = configs[body.providerId];
+      const key = body.samlConfig ? 'samlConfig' : 'oidcConfig';
+      row[key] = JSON.stringify({ ...JSON.parse(String(row[key])), mapping: body[key].mapping });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+    return { read, handle, sent };
+  };
+  const stores = () =>
+    storeOf({
+      okta: { oidcConfig: JSON.stringify(OIDC_STORED), samlConfig: null },
+      saml: { oidcConfig: null, samlConfig: JSON.stringify(SAML_STORED) },
+      bare: { oidcConfig: null, samlConfig: JSON.stringify({ entryPoint: 'https://idp.acme.com/sso', cert: CERT }) },
+    });
+  const call = (path: string, body: Record<string, unknown>) =>
+    new Request(`http://localhost:3000/api/v1/auth/admin/sso/${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'http://localhost:3000' },
+      body: JSON.stringify(body),
+    });
+  const show = (read: any, providerId: string) => runShowSsoAttributeMapping(call('get-attribute-mapping', { providerId }), read);
+  const set = (handle: any, read: any, body: Record<string, unknown>) => runSetSsoAttributeMapping(handle, call('set-attribute-mapping', body), read);
+
+  it('mappingWithAttributes changes only the members named: a value sets, a blank removes, the rest is kept', () => {
+    const before = { email: 'mail', name: 'cn', extraFields: { groups: 'g' } };
+    expect(mappingWithAttributes(before, { name: ' displayName ', firstName: 'given' })).toEqual({ email: 'mail', name: 'displayName', firstName: 'given', extraFields: { groups: 'g' } });
+    expect(mappingWithAttributes(before, { email: '  ' })).toEqual({ name: 'cn', extraFields: { groups: 'g' } });
+    expect(before).toEqual({ email: 'mail', name: 'cn', extraFields: { groups: 'g' } });
+    expect(mappingWithAttributes(undefined, { email: '' })).toEqual({});
+    expect(attributeMappingOf({ email: 'upn', firstName: 'f' }, 'oidc')).toEqual({ email: 'upn', firstName: null, lastName: null, name: null });
+  });
+
+  it('show answers each protocol\'s members, null where the default applies', async () => {
+    const { read } = stores();
+    expect((await show(read, 'okta')).body).toEqual({ success: true, data: { providerId: 'okta', protocol: 'oidc', email: 'upn', firstName: null, lastName: null, name: 'display_name' } });
+    expect((await show(read, 'saml')).body).toEqual({ success: true, data: { providerId: 'saml', protocol: 'saml', email: 'mail', firstName: 'givenName', lastName: null, name: null } });
+    expect((await show(read, 'bare')).body).toEqual({ success: true, data: { providerId: 'bare', protocol: 'saml', email: null, firstName: null, lastName: null, name: null } });
+  });
+
+  it('set sends update-provider the stored mapping with only the given members changed, and answers it read back', async () => {
+    const { read, handle, sent } = stores();
+    const saml = await set(handle, read, { providerId: 'saml', name: 'name', lastName: ' sn ' });
+    expect(saml.status).toBe(200);
+    expect(saml.body).toEqual({ success: true, data: { providerId: 'saml', protocol: 'saml', email: 'mail', firstName: 'givenName', lastName: 'sn', name: 'name' } });
+    expect(sent[0].url).toBe('http://localhost:3000/api/v1/auth/sso/update-provider');
+    expect(sent[0].body).toEqual({ providerId: 'saml', samlConfig: { mapping: { ...SAML_STORED.mapping, lastName: 'sn', name: 'name' } } });
+
+    const oidc = await set(handle, read, { providerId: 'okta', email: 'email' });
+    expect(oidc.body.data).toEqual({ providerId: 'okta', protocol: 'oidc', email: 'email', firstName: null, lastName: null, name: 'display_name' });
+    expect(sent[1].body).toEqual({ providerId: 'okta', oidcConfig: { mapping: { ...OIDC_STORED.mapping, email: 'email' } } });
+  });
+
+  it('a blank member is removed, so the default applies again; an absent or null one is kept', async () => {
+    const { read, handle, sent } = stores();
+    const res = await set(handle, read, { providerId: 'saml', email: '  ', firstName: null });
+    expect(res.body.data).toEqual({ providerId: 'saml', protocol: 'saml', email: null, firstName: 'givenName', lastName: null, name: null });
+    expect(sent[0].body.samlConfig.mapping).toEqual({ firstName: 'givenName', emailVerified: 'verified', extraFields: { groups: 'memberOf' } });
+  });
+
+  it('a body naming no member is 400 INVALID_REQUEST and nothing is written', async () => {
+    const { read, handle } = stores();
+    for (const body of [{ providerId: 'saml' }, { providerId: 'saml', email: null, name: undefined }]) {
+      const res = await set(handle, read, body);
+      expect(res.status).toBe(400);
+      expect(res.body.error?.code).toBe('INVALID_REQUEST');
+      expect(res.body.error?.message).toContain('Nothing to change');
+    }
+    expect(handle).not.toHaveBeenCalled();
+  });
+
+  it('first or last name on an OIDC provider is 400 INVALID_REQUEST naming the one claim it reads, and nothing is written', async () => {
+    const { read, handle } = stores();
+    const res = await set(handle, read, { providerId: 'okta', name: 'name', firstName: 'given_name' });
+    expect(res.status).toBe(400);
+    expect(res.body.error?.code).toBe('INVALID_REQUEST');
+    expect(res.body.error?.message).toContain('map "name", not firstName');
+    expect(handle).not.toHaveBeenCalled();
+  });
+
+  it('an unknown provider is 404 RESOURCE_NOT_FOUND on both; a non-text member and a missing providerId are 400; nothing is written', async () => {
+    const { read, handle } = stores();
+    for (const res of [await show(read, 'nobody'), await set(handle, read, { providerId: 'nobody', name: 'n' })]) {
+      expect(res.status).toBe(404);
+      expect(res.body.error?.code).toBe('RESOURCE_NOT_FOUND');
+    }
+    for (const body of [{ providerId: 'saml', name: ['n'] }, { providerId: 'saml', email: 7 }, { name: 'n' }]) {
+      const res = await set(handle, read, body);
+      expect(res.status).toBe(400);
+      expect(res.body.error?.code).toBe('INVALID_REQUEST');
+    }
+    expect(handle).not.toHaveBeenCalled();
+  });
+
+  it('no answer carries another member of the stored configuration: not on show, not on set, not on a vendor refusal', async () => {
+    const { read, handle } = stores();
+    const answers: unknown[] = [];
+    for (const providerId of ['okta', 'saml']) {
+      answers.push((await show(read, providerId)).body);
+      answers.push((await set(handle, read, { providerId, name: 'n' })).body);
+    }
+    const refusing = vi.fn(async () => new Response(JSON.stringify({ message: `bad config: ${CLIENT_SECRET} ${CERT}` }), { status: 400 }));
+    const refused = await set(refusing, read, { providerId: 'okta', name: 'n2' });
+    expect(refused.status).toBe(400);
+    expect(refused.body.error?.code).toBe('VALIDATION_ERROR');
+    answers.push(refused.body);
+
+    for (const answer of answers) {
+      const text = JSON.stringify(answer);
+      for (const leaked of [CLIENT_SECRET, CERT, 'cid', 'https://idp.acme.com', 'dept', 'memberOf', 'picture', 'verified']) expect(text).not.toContain(leaked);
+      const data = (answer as { data?: Record<string, unknown> }).data;
+      if (data) expect(Object.keys(data).sort()).toEqual(['email', 'firstName', 'lastName', 'name', 'protocol', 'providerId']);
+    }
   });
 });

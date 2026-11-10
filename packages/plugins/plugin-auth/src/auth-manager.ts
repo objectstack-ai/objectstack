@@ -266,6 +266,7 @@ import { createAuthInstance, type AuthInstanceHost } from './auth-manager-auth-i
 import { readSamlAcsLanding, runSsoCallbackScope, type SamlLandingContext, type SsoCallbackRequest } from './sso-oidc-refusal-cause.js';
 import { createEngineSsoProviderConfigReader, emailClaimOfStoredOidcConfig, type SsoProviderConfigEngine } from './register-sso-provider.js';
 import { readSsoProviderSignInOptions, runWithSamlIdpInitiated } from './sso-sign-in-options.js';
+import { readStoredSamlConfig, runSsoSamlRefusalCauseScope } from './sso-saml-refusal-cause.js';
 // [#25224 cut 16] The body of `buildPluginList`; the method of the same name
 // below hands it the members it reads (`PluginListHost`). The organization
 // plugin's factory (cut 15) is now imported there, by the arrow that moved
@@ -4082,7 +4083,16 @@ export class AuthManager {
               engine ? (withSystemReadContext(engine) as never) : undefined,
               callback.providerId,
             );
-            return runWithSamlIdpInitiated(options.allowIdpInitiated, run);
+            // [#32086] The vendor's opaque `Invalid SAML response` names its
+            // cause, read against the provider's stored configuration
+            // (`sso-saml-refusal-cause.ts`).
+            const readSamlConfig = async () => {
+              const auth: any = await this.getOrCreateAuth();
+              return readStoredSamlConfig(await auth.$context, callback.providerId);
+            };
+            return runWithSamlIdpInitiated(options.allowIdpInitiated, () =>
+              runSsoSamlRefusalCauseScope(callback, this.config.logger, readSamlConfig, run),
+            );
           }
         : run;
     return runSsoCallbackScope(

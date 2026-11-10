@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 20 — spawns the real producer once per single-cause fixture: a fresh real ObjectQL engine and SecurityPlugin per case across three postures, 60 cases that each write and read back the same holder's assignments, so no boot can be shared; 4.3 s in a local run; slowest CI reading 10.9 s (scheduled full-battery run 41199450735, Test Core shard log) x 1.25, rounded up
+// test-budget: 20 — spawns the real producer once per single-cause fixture: a fresh real ObjectQL engine and SecurityPlugin per case across three postures, 92 cases that each write and read back the same holder's assignments, so no boot is shared across cases, save the three delegated cases split one `it` per table, whose tables run in order on one boot and write ids of their own; 17.5 s in a local run on a shared 4-core box (18.2 s before the split); slowest CI reading 10.9 s (scheduled full-battery run 41199450735, Test Core shard log) x 1.25, rounded up
 
 /**
  * [ADR-0090 D12, amended 2026-10-17] The organization administrator's
@@ -32,7 +32,7 @@
  * column a masking rule partially masks alike.
  */
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import { recordNotFoundError } from '@objectstack/core';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
@@ -605,124 +605,158 @@ async function writeCountingCallerReads(h: Harness, table: Table, op: 'update' |
   }
 }
 
+/**
+ * One booted, delegation-seeded engine shared by the cases of the enclosing
+ * `describe`, destroyed after its last case. For a case split into one `it`
+ * per table only: the `it`s run in file order, so the shared engine sees
+ * exactly the operations the one case ran before, in the same order, and
+ * each table's writes name ids of their own — every read reads what it read
+ * when the case was whole. The engine leaves the per-case teardown's list.
+ */
+function sharedDelegationBoot(posture: Posture) {
+  let h: Harness | undefined;
+  beforeAll(async () => {
+    h = await boot(posture);
+    engines.splice(engines.indexOf(h.engine), 1);
+    await seedDelegation(h);
+  });
+  // The per-case teardown restores every spy: keep the engine's warn quiet in each case, as `boot` does.
+  beforeEach(() => { vi.spyOn((h!.engine as any).logger, 'warn').mockImplementation(() => undefined); });
+  afterAll(async () => { await h?.engine.destroy(); });
+  return () => h!;
+}
+
+const TABLE_NAMES = Object.keys(TABLES) as Table[];
+
 describe("[ADR-0090 D12; ruling of record 5985885287] a delegated administrator's assignment write to a row it cannot read, or to an id naming none, answers the read door's not-found", () => {
   for (const posture of ['group', 'isolated'] as const) {
     describe(`posture '${posture}'`, () => {
-      it("update and delete of a row the caller cannot read, and of an id naming no row, answer the read door's not-found for that id, whole, for every delegated principal class — and a caller the read door refuses gets that refusal — and leave the row", async () => {
-        const h = await boot(posture);
-        await seedDelegation(h);
-        for (const table of Object.keys(TABLES) as Table[]) {
-          const id = `unreadable_${table}`;
-          await seedHolding(h, table, id, ORG_B, 'u_other_org', 'bu_b1');
-          const before = await stored(h, table, { id });
-          expect(before, `${table}: the row exists`).toHaveLength(1);
-          for (const caller of Object.keys(DELEGATES) as Delegate[]) {
-            const context = DELEGATES[caller];
-            for (const target of [id, NOWHERE]) {
-              // The precondition, read off the read door: no row for this caller.
-              expect(await readOutcome(h, table, target, context), `${caller} reads ${table} ${target}`)
-                .toBe(caller === 'writeOnlyDelegate' ? 403 : 'none');
-              const readDoor = caller === 'writeOnlyDelegate'
-                ? await wholeAnswerOf(() => h.engine.findOne(table, { where: { id: target }, context: structuredClone(context) }))
-                : await readDoorNotFound(table, target);
-              for (const op of ['update', 'delete'] as const) {
-                expect(await wholeWrite(h, table, op, target, context), `${caller} ${op} ${table} ${target}`).toEqual(readDoor);
+      describe("update and delete of a row the caller cannot read, and of an id naming no row, answer the read door's not-found for that id, whole, for every delegated principal class — and a caller the read door refuses gets that refusal — and leave the row", () => {
+        const harness = sharedDelegationBoot(posture);
+        for (const table of TABLE_NAMES) {
+          it(table, async () => {
+            const h = harness();
+            const id = `unreadable_${table}`;
+            await seedHolding(h, table, id, ORG_B, 'u_other_org', 'bu_b1');
+            const before = await stored(h, table, { id });
+            expect(before, `${table}: the row exists`).toHaveLength(1);
+            for (const caller of Object.keys(DELEGATES) as Delegate[]) {
+              const context = DELEGATES[caller];
+              for (const target of [id, NOWHERE]) {
+                // The precondition, read off the read door: no row for this caller.
+                expect(await readOutcome(h, table, target, context), `${caller} reads ${table} ${target}`)
+                  .toBe(caller === 'writeOnlyDelegate' ? 403 : 'none');
+                const readDoor = caller === 'writeOnlyDelegate'
+                  ? await wholeAnswerOf(() => h.engine.findOne(table, { where: { id: target }, context: structuredClone(context) }))
+                  : await readDoorNotFound(table, target);
+                for (const op of ['update', 'delete'] as const) {
+                  expect(await wholeWrite(h, table, op, target, context), `${caller} ${op} ${table} ${target}`).toEqual(readDoor);
+                }
               }
             }
-          }
-          expect(await stored(h, table, { id }), `${table}: refused means untouched`).toEqual(before);
+            expect(await stored(h, table, { id }), `${table}: refused means untouched`).toEqual(before);
+          });
         }
       });
 
-      it('control: a row it reads keeps its verdict and its guidance — admitted inside the scope, refused outside it after one read as the caller, judged on the stored row', async () => {
-        const h = await boot(posture);
-        await seedDelegation(h);
-        let holder = 0;
-        for (const table of Object.keys(TABLES) as Table[]) {
-          for (const caller of ['delegate', 'orgAdminDelegate'] as const) {
-            const context = DELEGATES[caller];
-            // Inside the scope: admitted.
-            const id = `in_scope_${caller}_${table}`;
-            await seedHolding(h, table, id, ORG_A, IN_SCOPE_HOLDERS[holder++], 'bu_a_ops');
-            expect(await readOutcome(h, table, id, context), `${caller} reads ${table} ${id}`).toBe('row');
-            for (const op of ['update', 'delete'] as const) {
-              const r = await write(h, table, op, id, context);
-              expect(r, `${caller} ${op} ${table}: ${r.message}`).toEqual({ status: 200 });
+      describe('control: a row it reads keeps its verdict and its guidance — admitted inside the scope, refused outside it after one read as the caller, judged on the stored row', () => {
+        const harness = sharedDelegationBoot(posture);
+        TABLE_NAMES.forEach((table, t) => {
+          it(table, async () => {
+            const h = harness();
+            // Two in-scope holders per table, in table order.
+            let holder = t * 2;
+            for (const caller of ['delegate', 'orgAdminDelegate'] as const) {
+              const context = DELEGATES[caller];
+              // Inside the scope: admitted.
+              const id = `in_scope_${caller}_${table}`;
+              await seedHolding(h, table, id, ORG_A, IN_SCOPE_HOLDERS[holder++], 'bu_a_ops');
+              expect(await readOutcome(h, table, id, context), `${caller} reads ${table} ${id}`).toBe('row');
+              for (const op of ['update', 'delete'] as const) {
+                const r = await write(h, table, op, id, context);
+                expect(r, `${caller} ${op} ${table}: ${r.message}`).toEqual({ status: 200 });
+              }
+              expect(await stored(h, table, { id }), `${caller} ${table}: the delete landed`).toHaveLength(0);
             }
-            expect(await stored(h, table, { id }), `${caller} ${table}: the delete landed`).toHaveLength(0);
-          }
-          // Outside the scope, in its own organization: the guidance names the
-          // unit or the holder, and is not the answer for no row. The row is
-          // read as the caller once: the gate's read is the operation's own
-          // pre-image read, which the refusal's read-door question reuses.
-          const outId = `out_of_scope_${table}`;
-          await seedHolding(h, table, outId, ORG_A, 'u_seeded', 'bu_a_other');
-          for (const op of ['update', 'delete'] as const) {
-            const { answer: out, reads } = await writeCountingCallerReads(h, table, op, outId, DELEGATES.delegate);
-            expect(reads, `delegate ${op} ${table}: caller reads of the row`).toBe(1);
-            expect([out.status, out.code], `delegate ${op} ${table}: ${out.message}`).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
-            expect(out.message).toMatch(table === 'sys_user_position' ? /business unit 'bu_a_other' is outside/ : /target user 'u_seeded' is outside/);
-            expect(out).not.toEqual(await write(h, table, op, NOWHERE, DELEGATES.delegate));
-          }
-          expect(await stored(h, table, { id: outId }), `${table}: refused means untouched`).toHaveLength(1);
-        }
+            // Outside the scope, in its own organization: the guidance names the
+            // unit or the holder, and is not the answer for no row. The row is
+            // read as the caller once: the gate's read is the operation's own
+            // pre-image read, which the refusal's read-door question reuses.
+            const outId = `out_of_scope_${table}`;
+            await seedHolding(h, table, outId, ORG_A, 'u_seeded', 'bu_a_other');
+            for (const op of ['update', 'delete'] as const) {
+              const { answer: out, reads } = await writeCountingCallerReads(h, table, op, outId, DELEGATES.delegate);
+              expect(reads, `delegate ${op} ${table}: caller reads of the row`).toBe(1);
+              expect([out.status, out.code], `delegate ${op} ${table}: ${out.message}`).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+              expect(out.message).toMatch(table === 'sys_user_position' ? /business unit 'bu_a_other' is outside/ : /target user 'u_seeded' is outside/);
+              expect(out).not.toEqual(await write(h, table, op, NOWHERE, DELEGATES.delegate));
+            }
+            expect(await stored(h, table, { id: outId }), `${table}: refused means untouched`).toHaveLength(1);
+          });
+        });
 
         // A position the holder's field rules hide from its reads: still held
         // to the allowlist, because the stored row is what is judged — and
         // the refusal names no value the holder cannot read.
-        await h.engine.insert('sys_user_position',
-          { id: 'hidden_out', user_id: IN_SCOPE_HOLDERS[holder], position: 'qa_out_pos', business_unit_id: 'bu_a_ops', organization_id: ORG_A },
-          { context: { isSystem: true, tenantId: ORG_A } } as any);
-        const seen = await h.engine.findOne('sys_user_position', { where: { id: 'hidden_out' }, context: structuredClone(POSITION_HIDDEN) });
-        expect(seen, 'the holder reads the row').toBeTruthy();
-        expect(seen, 'without its position').not.toHaveProperty('position');
-        for (const op of ['update', 'delete'] as const) {
-          const r = await write(h, 'sys_user_position', op, 'hidden_out', POSITION_HIDDEN);
-          expect([r.status, r.code], `${op}: ${r.message}`).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
-          expect(JSON.stringify(r), `${op}: no hidden value in the refusal`).not.toMatch(/qa_out_pos|admin_full_access/);
-        }
-        expect(await stored(h, 'sys_user_position', { id: 'hidden_out' })).toHaveLength(1);
+        it('a position the holder\'s field rules hide', async () => {
+          const h = harness();
+          await h.engine.insert('sys_user_position',
+            { id: 'hidden_out', user_id: IN_SCOPE_HOLDERS[TABLE_NAMES.length * 2], position: 'qa_out_pos', business_unit_id: 'bu_a_ops', organization_id: ORG_A },
+            { context: { isSystem: true, tenantId: ORG_A } } as any);
+          const seen = await h.engine.findOne('sys_user_position', { where: { id: 'hidden_out' }, context: structuredClone(POSITION_HIDDEN) });
+          expect(seen, 'the holder reads the row').toBeTruthy();
+          expect(seen, 'without its position').not.toHaveProperty('position');
+          for (const op of ['update', 'delete'] as const) {
+            const r = await write(h, 'sys_user_position', op, 'hidden_out', POSITION_HIDDEN);
+            expect([r.status, r.code], `${op}: ${r.message}`).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+            expect(JSON.stringify(r), `${op}: no hidden value in the refusal`).not.toMatch(/qa_out_pos|admin_full_access/);
+          }
+          expect(await stored(h, 'sys_user_position', { id: 'hidden_out' })).toHaveLength(1);
+        });
       });
     });
   }
 
-  it("control, 'single': a row of another organization that a delegate reads keeps its guidance, and every in-scope write it made before still lands — except a stored grant without read, which writes nothing — reading the row as the caller once", async () => {
-    const h = await boot('single');
-    await seedDelegation(h);
-    let holder = 0;
-    for (const table of Object.keys(TABLES) as Table[]) {
-      const id = `readable_${table}`;
-      await seedHolding(h, table, id, ORG_B, 'u_other_org', 'bu_b1');
-      for (const caller of ['delegate', 'orgAdminDelegate'] as const) {
-        expect(await readOutcome(h, table, id, DELEGATES[caller]), `${caller} reads ${table}`).toBe('row');
-        for (const op of ['update', 'delete'] as const) {
-          const r = await write(h, table, op, id, DELEGATES[caller]);
-          expect([r.status, r.code], `${caller} ${op} ${table}: ${r.message}`).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
-          expect(r.message).toMatch(table === 'sys_user_position' ? /business unit 'bu_b1' is outside/ : /target user 'u_other_org' is outside/);
-        }
-      }
-      expect(await stored(h, table, { id }), `${table}: refused means untouched`).toHaveLength(1);
-
-      for (const caller of Object.keys(DELEGATES) as Delegate[]) {
-        const inId = `in_scope_${caller}_${table}`;
-        await seedHolding(h, table, inId, ORG_A, IN_SCOPE_HOLDERS[holder++], 'bu_a_ops');
-        for (const op of ['update', 'delete'] as const) {
-          const { answer: r, reads } = await writeCountingCallerReads(h, table, op, inId, DELEGATES[caller]);
-          if (caller === 'writeOnlyDelegate') {
-            // An object permission that edits or deletes a record also reads
-            // it: the stored write grant without read grants neither verb.
-            expect([r.status, r.code], `${caller} ${op} ${table}: ${r.message}`).toEqual([403, 'PERMISSION_DENIED']);
-            continue;
+  describe("control, 'single': a row of another organization that a delegate reads keeps its guidance, and every in-scope write it made before still lands — except a stored grant without read, which writes nothing — reading the row as the caller once", () => {
+    const harness = sharedDelegationBoot('single');
+    TABLE_NAMES.forEach((table, t) => {
+      it(table, async () => {
+        const h = harness();
+        const id = `readable_${table}`;
+        await seedHolding(h, table, id, ORG_B, 'u_other_org', 'bu_b1');
+        for (const caller of ['delegate', 'orgAdminDelegate'] as const) {
+          expect(await readOutcome(h, table, id, DELEGATES[caller]), `${caller} reads ${table}`).toBe('row');
+          for (const op of ['update', 'delete'] as const) {
+            const r = await write(h, table, op, id, DELEGATES[caller]);
+            expect([r.status, r.code], `${caller} ${op} ${table}: ${r.message}`).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+            expect(r.message).toMatch(table === 'sys_user_position' ? /business unit 'bu_b1' is outside/ : /target user 'u_other_org' is outside/);
           }
-          expect(r, `${caller} ${op} ${table}: ${r.message}`).toEqual({ status: 200 });
-          // The gate's read is the pre-image the write door's own read question
-          // asks after it.
-          expect(reads, `${caller} ${op} ${table}: caller reads of the row`).toBe(1);
         }
-        expect(await stored(h, table, { id: inId }), `${caller} ${table}: the delete landed — or, refused, the row is untouched`)
-          .toHaveLength(caller === 'writeOnlyDelegate' ? 1 : 0);
-      }
-    }
+        expect(await stored(h, table, { id }), `${table}: refused means untouched`).toHaveLength(1);
+
+        // One in-scope holder per delegate, in table order.
+        let holder = t * Object.keys(DELEGATES).length;
+        for (const caller of Object.keys(DELEGATES) as Delegate[]) {
+          const inId = `in_scope_${caller}_${table}`;
+          await seedHolding(h, table, inId, ORG_A, IN_SCOPE_HOLDERS[holder++], 'bu_a_ops');
+          for (const op of ['update', 'delete'] as const) {
+            const { answer: r, reads } = await writeCountingCallerReads(h, table, op, inId, DELEGATES[caller]);
+            if (caller === 'writeOnlyDelegate') {
+              // An object permission that edits or deletes a record also reads
+              // it: the stored write grant without read grants neither verb.
+              expect([r.status, r.code], `${caller} ${op} ${table}: ${r.message}`).toEqual([403, 'PERMISSION_DENIED']);
+              continue;
+            }
+            expect(r, `${caller} ${op} ${table}: ${r.message}`).toEqual({ status: 200 });
+            // The gate's read is the pre-image the write door's own read question
+            // asks after it.
+            expect(reads, `${caller} ${op} ${table}: caller reads of the row`).toBe(1);
+          }
+          expect(await stored(h, table, { id: inId }), `${caller} ${table}: the delete landed — or, refused, the row is untouched`)
+            .toHaveLength(caller === 'writeOnlyDelegate' ? 1 : 0);
+        }
+      });
+    });
   });
 });
 
