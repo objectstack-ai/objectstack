@@ -2224,6 +2224,7 @@ export class SettingsService {
     const provider = this.liveStatusProviders.get(namespace);
     if (!provider) return {};
     let status: SettingsLiveStatus | undefined;
+    let live: Record<string, SettingsLiveValue> | undefined;
     try {
       status = await provider({
         namespace,
@@ -2231,6 +2232,18 @@ export class SettingsService {
         organizationId: async () => organizationReachRowOwner(await this.organizationReachOf(ctx)),
         locale: display.locale,
       });
+      // Read inside the same guard: a statement whose `values` cannot be read
+      // (a throwing accessor) is a provider that could not answer, not a 500.
+      if (status?.values !== undefined) {
+        const { served, dropped } = this.servedLiveValues(namespace, status.values);
+        if (dropped.length > 0) {
+          this.logger?.warn?.(
+            `SettingsService: the live status of settings namespace '${namespace}' states values this page `
+            + `cannot serve; they are left out, so those keys read as not stated: ${dropped.join('; ')}`,
+          );
+        }
+        if (Object.keys(served).length > 0) live = served;
+      }
     } catch (err: any) {
       this.logger?.warn?.(
         `SettingsService: the live status of settings namespace '${namespace}' could not be read — `
@@ -2242,17 +2255,7 @@ export class SettingsService {
           + 'The values below are what is stored, which is not necessarily what is in use.',
         bannerSeverity: 'error',
       };
-    }
-    let live: Record<string, SettingsLiveValue> | undefined;
-    if (status?.values !== undefined) {
-      const { served, dropped } = this.servedLiveValues(namespace, status.values);
-      if (dropped.length > 0) {
-        this.logger?.warn?.(
-          `SettingsService: the live status of settings namespace '${namespace}' states values this page `
-          + `cannot serve; they are left out, so those keys read as not stated: ${dropped.join('; ')}`,
-        );
-      }
-      if (Object.keys(served).length > 0) live = served;
+      live = undefined;
     }
     if (!status) return {};
     const banner = {
@@ -2288,35 +2291,38 @@ export class SettingsService {
     }
     const reg = this.registry.get(namespace);
     for (const [key, entry] of Object.entries(values as Record<string, unknown>)) {
-      const why = this.liveValueMiss(namespace, reg, key, entry);
-      if (why) {
-        dropped.push(`'${key}' ${why}`);
-        continue;
-      }
-      const { value, source } = entry as SettingsLiveValue;
-      served[key] = { value, source };
+      const judged = this.judgeLiveValue(namespace, reg, entry, key);
+      if ('why' in judged) dropped.push(`'${key}' ${judged.why}`);
+      else served[key] = judged.served;
     }
     return { served, dropped };
   }
 
-  /** Why one stated live value cannot be served, or `undefined` when it can. */
-  private liveValueMiss(
+  /**
+   * One stated live value judged once: the `{ value, source }` pair it is
+   * served as, read from the entry a single time, or why it cannot be served.
+   */
+  private judgeLiveValue(
     namespace: string,
     reg: RegisteredManifest | undefined,
-    key: string,
     entry: unknown,
-  ): string | undefined {
-    if (!reg?.scopes.has(key)) return 'is not a key of this namespace';
+    key: string,
+  ): { served: SettingsLiveValue } | { why: string } {
+    if (!reg?.scopes.has(key)) return { why: 'is not a key of this namespace' };
     const table = this.optionTableOf(namespace, key, reg.optionTables.get(key) ?? []);
-    if (!table.sourced && table.allowed.length === 0) return 'has no option table to serve a value from';
-    if (!entry || typeof entry !== 'object') return 'is not stated as { value, source }';
+    if (!table.sourced && table.allowed.length === 0) return { why: 'has no option table to serve a value from' };
+    if (!entry || typeof entry !== 'object') return { why: 'is not stated as { value, source }' };
     const { value, source } = entry as { value?: unknown; source?: unknown };
     if (source !== 'settings' && source !== 'environment' && source !== 'none') {
-      return "names no source this page serves ('settings', 'environment' or 'none')";
+      return { why: "names no source this page serves ('settings', 'environment' or 'none')" };
     }
-    if (source === 'none') return value === null ? undefined : "states a value under source 'none'";
-    if (typeof value !== 'string' || table.judge(value) !== null) return 'states a value that is not one of its options';
-    return undefined;
+    if (source === 'none') {
+      return value === null ? { served: { value: null, source } } : { why: "states a value under source 'none'" };
+    }
+    if (typeof value !== 'string' || table.judge(value) !== null) {
+      return { why: 'states a value that is not one of its options' };
+    }
+    return { served: { value, source } };
   }
 
   // ---------------------------------------------------------------------

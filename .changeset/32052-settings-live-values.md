@@ -1,12 +1,12 @@
 ---
 '@objectstack/service-settings': patch
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 ---
 
 feat(service-settings, spec): a settings page read serves the values its keys have in the running system, as the runtime that owns them states them
 
 Clause-②: yes (widening)
-Metadata-protocol: none
+Metadata-protocol: added
 
 `GET /api/settings/:namespace` now answers an optional `live` field beside `values`: `{ provider: { value: 'openai', source: 'environment' } }`. `values` says what the settings resolve; `live` says what is in use, which can come from elsewhere. With nothing saved, the AI runtime detects its provider from its own boot environment, so `values.provider` reading `null` never meant the built-in AI was off. `source` is `settings`, `environment` or `none`. A key absent from `live`, or no `live` at all, means not stated (unknown), which is not `none`. The field sits behind the page's own read permission (`manage_platform_settings` for `ai`).
 

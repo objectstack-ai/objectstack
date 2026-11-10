@@ -244,6 +244,19 @@ describe('GET /api/settings/:namespace — the live values the runtime states', 
     expect(SettingsNamespacePayloadSchema.safeParse(body.data).success).toBe(true);
   });
 
+  it('answers the error banner, not a 500, when the stated values cannot be read', async () => {
+    const { svc, read, logger } = rig(aiSettingsManifest);
+    svc.registerLiveStatus('ai', () => ({
+      label: 'Built-in AI', bannerText: 'In use.', bannerSeverity: 'info',
+      get values(): never { throw new Error('values unreadable'); },
+    }));
+    const { status, body } = await read();
+    expect(status).toBe(200);
+    expect('live' in body.data).toBe(false);
+    expect(body.data.manifest.specifiers[0]).toMatchObject({ id: SETTINGS_LIVE_STATUS_BANNER_ID, bannerSeverity: 'error' });
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+  });
+
   it('serves no live values when the provider throws: the error banner alone', async () => {
     const { svc, read } = rig(aiSettingsManifest);
     svc.registerLiveStatus('ai', () => { throw new Error('boom'); });
