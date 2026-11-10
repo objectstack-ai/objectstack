@@ -2937,7 +2937,64 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "Tous"
+        label: "Tous",
+        emptyState: {
+          title: "Aucune correspondance de groupe pour l’instant",
+          message: "Accordez un ensemble d’autorisations aux membres d’un groupe du fournisseur d’identité avec « Associer un groupe SSO » (un groupe qu’un fournisseur SSO envoie à la connexion) ou « Associer un groupe SCIM » (un groupe qu’une connexion SCIM provisionne)."
+        }
+      }
+    },
+    _actions: {
+      map_sso_group: {
+        label: "Associer un groupe SSO",
+        description: "Accorder un ensemble d’autorisations à chaque membre d’un groupe qu’un fournisseur SSO envoie à la connexion. S’applique à la prochaine connexion de chaque membre via le fournisseur.",
+        successMessage: "Correspondance de groupe enregistrée. Elle s’applique à la prochaine connexion de chaque membre via le fournisseur.",
+        params: {
+          providerId: {
+            label: "ID du fournisseur SSO",
+            helpText: "L’ID du fournisseur SSO dont la connexion transmet le groupe, par ex. « okta ». Le fournisseur doit avoir une revendication de groupes (Modifier la revendication de groupes sur le fournisseur SSO)."
+          },
+          groupExternalId: {
+            label: "ID externe du groupe",
+            helpText: "La valeur du groupe telle que la revendication de groupes l’envoie quand c’est un ID, par ex. un ID d’objet de groupe Entra ID. Renseignez ce champ ou le nom d’affichage du groupe, pas les deux."
+          },
+          groupDisplayName: {
+            label: "Nom d’affichage du groupe",
+            helpText: "La valeur du groupe telle que la revendication de groupes l’envoie quand c’est un nom, par ex. « Sales ». Renseignez ce champ ou l’ID externe du groupe, pas les deux."
+          },
+          permissionSet: {
+            label: "Ensemble d’autorisations",
+            helpText: "L’ensemble d’autorisations accordé à un membre du groupe, dans l’organisation du fournisseur. Les ensembles d’administrateur sont refusés."
+          }
+        }
+      },
+      map_scim_group: {
+        label: "Associer un groupe SCIM",
+        description: "Accorder un ensemble d’autorisations à chaque membre d’un groupe qu’une connexion SCIM provisionne. Les membres actuels du groupe le reçoivent immédiatement.",
+        successMessage: "Correspondance de groupe enregistrée",
+        params: {
+          connectionId: {
+            label: "ID de connexion SCIM",
+            helpText: "La connexion SCIM par laquelle le groupe est provisionné, par ex. « okta-prod » : l’ID de connexion de son identifiant."
+          },
+          groupExternalId: {
+            label: "ID externe du groupe",
+            helpText: "L’externalId du groupe tel que le fournisseur d’identité l’envoie. Renseignez ce champ ou le nom d’affichage du groupe, pas les deux."
+          },
+          groupDisplayName: {
+            label: "Nom d’affichage du groupe",
+            helpText: "Le displayName du groupe, comparé à l’identique. Renseignez ce champ ou l’ID externe du groupe, pas les deux."
+          },
+          permissionSet: {
+            label: "Ensemble d’autorisations",
+            helpText: "L’ensemble d’autorisations accordé à un membre du groupe, dans l’organisation de la connexion. Les ensembles d’administrateur sont refusés."
+          }
+        }
+      },
+      delete_group_mapping: {
+        label: "Supprimer la correspondance",
+        confirmText: "Supprimer cette correspondance de groupe ? Les membres du groupe ne reçoivent plus son ensemble d’autorisations. Pour une connexion SCIM, les membres du groupe sont reprojetés immédiatement et perdent les attributions faites par cette correspondance. Pour un fournisseur SSO, les attributions que ses connexions ont faites pour cet ensemble sont retirées immédiatement, sauf si une autre correspondance du fournisseur nomme le même ensemble. Pour la rétablir, associez de nouveau le groupe.",
+        successMessage: "Correspondance de groupe supprimée"
       }
     }
   },

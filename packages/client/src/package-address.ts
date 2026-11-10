@@ -208,8 +208,8 @@ export function metaItemQualifier(type: string, name: string, address: Qualified
 
 /**
  * The candidates a door's `409 RESOURCE_CONFLICT` names, off an error this
- * SDK's fetch layer threw: `details.candidates`, as the `/actions` and
- * `/automation` doors send it. `undefined` when the answer carried none.
+ * SDK's fetch layer threw: `details.candidates`, as the `/actions`,
+ * `/automation` and `/meta` doors send it. `undefined` when the answer carried none.
  */
 export function addressCandidatesOf(error: unknown): readonly PackageScopedHolder[] | undefined {
   const candidates = (error as { details?: { candidates?: unknown } } | null | undefined)?.details?.candidates;

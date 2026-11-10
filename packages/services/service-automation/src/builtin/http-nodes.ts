@@ -231,7 +231,10 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
             // channel is not asked. A held secret that does not come back
             // refuses the node — it is never sent unsigned.
             let raw = authored;
-            const flowName = context.flowName;
+            // [ADR-0150 D8 row R9] The channel is asked for the running flow's
+            // own slot, so a flow of a name two packages hold reads only its
+            // own package's rows.
+            const flowName = engine.flowKeyOfRun(context);
             if (
                 typeof flowName === 'string'
                 && authored.signingSecret !== FLOW_CREDENTIAL_CLEARED

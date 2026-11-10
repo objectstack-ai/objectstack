@@ -2937,7 +2937,64 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "全部"
+        label: "全部",
+        emptyState: {
+          title: "还没有组映射",
+          message: "使用“映射 SSO 组”（SSO 提供方在登录时发送的组）或“映射 SCIM 组”（SCIM 连接开通的组），为身份提供方某个组的成员授予权限集。"
+        }
+      }
+    },
+    _actions: {
+      map_sso_group: {
+        label: "映射 SSO 组",
+        description: "为 SSO 提供方在登录时发送的某个组的每位成员授予一个权限集。成员下次通过该提供方登录时生效。",
+        successMessage: "组映射已保存。成员下次通过该提供方登录时生效。",
+        params: {
+          providerId: {
+            label: "SSO 提供方 ID",
+            helpText: "其登录会携带该组的 SSO 提供方的提供方 ID，例如 “okta”。该提供方必须已设置组声明（在 SSO 提供方上使用“编辑组声明”）。"
+          },
+          groupExternalId: {
+            label: "组外部 ID",
+            helpText: "组声明发送的值为 ID 时，按原样填写，例如 Entra ID 的组对象 ID。与“组显示名称”二选一，不要同时填写。"
+          },
+          groupDisplayName: {
+            label: "组显示名称",
+            helpText: "组声明发送的值为名称时，按原样填写，例如 “Sales”。与“组外部 ID”二选一，不要同时填写。"
+          },
+          permissionSet: {
+            label: "权限集",
+            helpText: "该组成员在提供方所属组织中获得的权限集。管理员权限集会被拒绝。"
+          }
+        }
+      },
+      map_scim_group: {
+        label: "映射 SCIM 组",
+        description: "为某个 SCIM 连接开通的组的每位成员授予一个权限集。该组的现有成员会立即获得。",
+        successMessage: "组映射已保存",
+        params: {
+          connectionId: {
+            label: "SCIM 连接 ID",
+            helpText: "开通该组所经由的 SCIM 连接，例如 “okta-prod”：即其凭据的连接 ID。"
+          },
+          groupExternalId: {
+            label: "组外部 ID",
+            helpText: "身份提供方发送的组 externalId。与“组显示名称”二选一，不要同时填写。"
+          },
+          groupDisplayName: {
+            label: "组显示名称",
+            helpText: "组的 displayName，需完全一致。与“组外部 ID”二选一，不要同时填写。"
+          },
+          permissionSet: {
+            label: "权限集",
+            helpText: "该组成员在连接所属组织中获得的权限集。管理员权限集会被拒绝。"
+          }
+        }
+      },
+      delete_group_mapping: {
+        label: "删除映射",
+        confirmText: "删除此组映射？该组成员将不再获得它的权限集。对于 SCIM 连接，会立即重新投影该组成员，并移除此映射授予的权限。对于 SSO 提供方，会立即移除其登录为该权限集授予的权限，除非该提供方的另一条映射仍指向同一权限集。如需恢复，请重新映射该组。",
+        successMessage: "组映射已删除"
       }
     }
   },
