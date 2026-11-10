@@ -195,3 +195,159 @@ describe('plain metric tiles — the same rule (objectui#12623)', () => {
     expect(expectTileContainer(value)).toContainElement(title);
   });
 });
+
+/**
+ * objectstack#32165 — a tile never draws a subtitle that only repeats its
+ * title. QA on the showcase's Chart Gallery read "Avg Progress / 47.0 / Avg
+ * Progress": the dataset-bound tile's title is the widget's title, and its
+ * caption fell back to the measure label, which the dataset authors with the
+ * same text. One rule decides it for every tile, on the localized texts the
+ * tile draws (`metricTileSubtitle` in `../metricTile`).
+ */
+describe('a subtitle equal to the title is not drawn (objectstack#32165)', () => {
+  const wrap = (ui: React.ReactElement, language = 'en') =>
+    render(<I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }}>{ui}</I18nProvider>);
+
+  const datasetTile = (widget: Record<string, unknown>) =>
+    wrap(
+      <DashboardRenderer
+        schema={{ type: 'dashboard', name: 'gallery', widgets: [widget] } as unknown as DashboardComponentSchema}
+        dataSource={{
+          queryDataset: vi.fn(async () => ({
+            rows: [{ avg_progress: 47 }],
+            fields: [{ name: 'avg_progress', label: 'Avg Progress', type: 'number' }],
+          })),
+        }}
+      />,
+    );
+  const TILE = { id: 'kpi_avg_progress', type: 'metric', dataset: 'task_metrics', values: ['avg_progress'] };
+
+  it('dataset-bound tile: a measure label equal to the title draws no caption, and the tooltip names it once', async () => {
+    datasetTile({ ...TILE, title: 'Avg Progress' });
+    await screen.findByText('47');
+    expect(screen.queryByTestId('dataset-metric-label')).toBeNull();
+    // The caption's line is kept, empty and hidden from assistive tech, so
+    // tiles side by side keep their lines aligned.
+    const spacer = screen.getByTestId('dataset-metric-label-spacer');
+    expect(spacer).toHaveAttribute('aria-hidden', 'true');
+    expect(spacer.textContent?.trim()).toBe('');
+    expect(screen.getAllByText('Avg Progress')).toHaveLength(1);
+    expect(screen.getByTestId('dataset-metric-title')).toHaveAttribute('title', 'Avg Progress');
+  });
+
+  it('dataset-bound tile: equal up to case and spacing still counts as the title', async () => {
+    datasetTile({ ...TILE, title: '  avg   progress ' });
+    await screen.findByText('47');
+    expect(screen.queryByTestId('dataset-metric-label')).toBeNull();
+  });
+
+  it('dataset-bound tile: a description equal to the title gives way to a distinct measure label', async () => {
+    datasetTile({ ...TILE, title: 'Task Progress', description: 'Task Progress' });
+    await screen.findByText('47');
+    expect(screen.getByTestId('dataset-metric-label')).toHaveTextContent('Avg Progress');
+  });
+
+  it('CONTROL dataset-bound tile: a distinct measure label is still the caption', async () => {
+    datasetTile({ ...TILE, title: 'Task Progress' });
+    await screen.findByText('47');
+    expect(screen.getByTestId('dataset-metric-label')).toHaveTextContent('Avg Progress');
+    expect(screen.getByTestId('dataset-metric-title')).toHaveAttribute('title', 'Task Progress\nAvg Progress');
+  });
+
+  it('MetricWidget: a description equal to the label is not drawn', () => {
+    const { container } = wrap(<MetricWidget label="Revenue" value={42} description="Revenue" />);
+    expect(screen.getAllByText('Revenue')).toHaveLength(1);
+    expect(container.querySelector('.text-muted-foreground.mt-1')).toBeNull();
+  });
+
+  it('MetricWidget: the localized description is compared with the localized label', () => {
+    wrap(
+      <MetricWidget label={{ en: 'Revenue', 'zh-CN': '收入' }} value={42} description={{ en: 'Booked revenue', 'zh-CN': '收入' }} />,
+      'zh-CN',
+    );
+    expect(screen.getAllByText('收入')).toHaveLength(1);
+  });
+
+  it('MetricWidget: the trend label is kept, and takes the place of a description that repeats the label', () => {
+    wrap(<MetricWidget label="Revenue" value={42} description="Revenue" trend={{ value: 12, direction: 'up', label: 'vs last month' }} />);
+    expect(screen.getAllByText('Revenue')).toHaveLength(1);
+    expect(screen.getByText('vs last month')).toBeInTheDocument();
+  });
+
+  it('CONTROL MetricWidget: a distinct description is drawn', () => {
+    wrap(<MetricWidget label="Revenue" value={42} description="Closed-won, this quarter" />);
+    expect(screen.getByText('Closed-won, this quarter')).toBeInTheDocument();
+  });
+
+  it('MetricCard: a description equal to the title is not drawn; a distinct one is (CONTROL)', () => {
+    wrap(<MetricCard title="Open Deals" value="12" description="Open Deals" />);
+    expect(screen.getAllByText('Open Deals')).toHaveLength(1);
+    cleanup();
+    wrap(<MetricCard title="Open Deals" value="12" description="All owners" />);
+    expect(screen.getByText('All owners')).toBeInTheDocument();
+  });
+
+  it('object-metric: a description equal to the label is not drawn', () => {
+    render(
+      <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
+        <SchemaRendererProvider dataSource={undefined as never}>
+          <SchemaRenderer
+            schema={{
+              type: 'object-metric',
+              properties: { objectName: 'crm_opportunity', label: 'Revenue (Won)', description: 'Revenue (Won)', fallbackValue: 42 },
+            } as never}
+          />
+        </SchemaRendererProvider>
+      </I18nProvider>,
+    );
+    expect(screen.getAllByText('Revenue (Won)')).toHaveLength(1);
+  });
+});
+
+/**
+ * objectstack#32165 — a dataset-bound metric tile sits in the middle of its
+ * card. The card spans its grid rows (two 5 rem rows, 176 px measured), the
+ * tile's content is about 90 px, and it drew at the top of an empty card. The
+ * card is now a column whose body takes the rest of the box; the tile's
+ * `justify-center` centres it. jsdom has no layout: this pins the classes; the
+ * measured heights are in the pull request.
+ */
+describe('a dataset-bound metric tile is centred in its card (objectstack#32165)', () => {
+  it('makes the card a column and the body fill it; a chart card is untouched (CONTROL)', async () => {
+    render(
+      <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
+        <DashboardRenderer
+          schema={{
+            type: 'dashboard',
+            name: 'gallery',
+            columns: 12,
+            widgets: [
+              { id: 'kpi', type: 'metric', title: 'Total Tasks', dataset: 'task_metrics', values: ['task_count'], layout: { x: 0, y: 0, w: 4, h: 2 } },
+              { id: 'tbl', type: 'table', title: 'By Status', dataset: 'task_metrics', dimensions: ['status'], values: ['task_count'], layout: { x: 4, y: 0, w: 8, h: 4 } },
+            ],
+          } as unknown as DashboardComponentSchema}
+          dataSource={{
+            queryDataset: vi.fn(async () => ({
+              rows: [{ task_count: 10, status: 'done' }],
+              fields: [
+                { name: 'task_count', label: 'Tasks', type: 'number' },
+                { name: 'status', label: 'Status', type: 'text' },
+              ],
+            })),
+          }}
+        />
+      </I18nProvider>,
+    );
+    const caption = await screen.findByTestId('dataset-metric-label');
+    const tile = caption.closest('.justify-center') as HTMLElement;
+    expect(tile).not.toBeNull();
+    const body = tile.parentElement!.parentElement!;
+    const card = body.parentElement!;
+    expect(card).toHaveClass('flex', 'flex-col');
+    expect(body).toHaveClass('flex', 'flex-1', 'flex-col');
+    expect(tile.parentElement).toHaveClass('flex-1');
+
+    const tableCard = screen.getByText('By Status').closest('.overflow-hidden') as HTMLElement;
+    expect(tableCard).not.toHaveClass('flex-col');
+  });
+});

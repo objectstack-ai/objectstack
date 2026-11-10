@@ -100,6 +100,7 @@ import {
   METRIC_TILE_TITLE_CLASS,
   METRIC_TILE_MEASURE_LABEL_CLASS,
   METRIC_TILE_DATASET_VALUE_LADDER,
+  metricTileSubtitle,
   metricTileTooltip,
   metricTileValueClass,
   metricTileValueTitle,
@@ -1399,7 +1400,10 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
     // surface's to resolve: handed in through `heading`, it is the caption
     // under the value, in place of the measure label, which then rides only in
     // the title's tooltip (objectstack#27430).
-    const caption = heading?.description || measureLabel;
+    // objectstack#32165 — never a caption that only repeats the title: a
+    // description equal to it gives way to the measure label, and a measure
+    // label equal to it draws no caption (`metricTileSubtitle`).
+    const caption = metricTileSubtitle(heading?.title, heading?.description, measureLabel);
     const shownValue = formatMeasure(value, f?.format, f?.currency, f?.percentScale, displayLocale);
     // ── The records behind the number (ADR-0021 D2) ────────────────────────
     // The tile opens the list its number counts, through the same drawer the
@@ -1451,6 +1455,13 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
         <span className={cn(heading ? cn('font-semibold', metricTileValueClass(shownValue, METRIC_TILE_DATASET_VALUE_LADDER)) : 'text-2xl font-semibold tabular-nums', accentClass)} title={heading ? metricTileValueTitle(shownValue) : undefined}>{shownValue}</span>
         {heading && caption && (
           <span className={METRIC_TILE_MEASURE_LABEL_CLASS} data-testid="dataset-metric-label">{caption}</span>
+        )}
+        {/* objectstack#32165 — a tile whose caption repeats the title draws
+            none, but keeps the caption's line, empty: the tile is centred in
+            its card, and tiles side by side keep their titles and values on
+            one line. */}
+        {heading && !caption && (
+          <span className={METRIC_TILE_MEASURE_LABEL_CLASS} aria-hidden="true" data-testid="dataset-metric-label-spacer">{'\u00a0'}</span>
         )}
         {delta && (
           <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground" data-testid="dataset-compare-trend">
