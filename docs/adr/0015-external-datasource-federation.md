@@ -165,7 +165,7 @@ enforced inside the runtime gates and the driver layer.
 > where a mirror goes.** Two non-goals above send ingestion and mirrored dimension tables to `DataSync`, a layer
 > retired whole in protocol 17 and not revived (the path note at the top; ruling `6731568115` on #31763). A mirror of
 > remote rows into a local object is ADR-0153's one-way sync-in: a `mapping` whose source is a connector or a
-> federated datasource (a warehouse included), pulled by a `job`, into an object marked `managedBy: 'synced'`.
+> federated object (a warehouse table included), pulled by a `job`, into an object marked `managedBy: 'synced'`.
 > Transforms stay out of the platform: they are the warehouse's or the ETL vendor's. The non-goals themselves are
 > unchanged.
 

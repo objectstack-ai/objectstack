@@ -11,7 +11,7 @@
 - **Key names** are the `domain:spec` seat's under the maintainer's standing rule; the card's working names stand as this record's proposed spelling.
 - **Builds on**: [ADR-0015](./0015-external-datasource-federation.md) (federation, `external_catalog`, the 2026-11-03 organization-scope note), [ADR-0062](./0062-external-datasource-runtime.md) (the datasource connection service a pull reads through), [ADR-0049](./0049-no-unenforced-security-properties.md) and [ADR-0078](./0078-no-silently-inert-metadata.md) (declared ⇒ enforced; a rule ships with the runtime line that makes it true), [ADR-0103](./0103-managedby-write-policy-and-engine-write-guard.md) (buckets; the engine write guard, the `apiMethods` reconciliation and the `/me/permissions` clamp, which the 2026-07-20 addendum names as what made a new bucket safe), [ADR-0090](./0090-permission-model-v2-concept-convergence.md) (D1: an unset `sharingModel` is not public, and an authored one is required), [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) (no NULL organization; D7 deployment-level state; D9 the refused stamp), [ADR-0073](./0073-automation-execution-identity.md) (execution identity; D3 attribution is not ownership), [ADR-0148](./0148-recycle-bin-separate-store-restore-under-original-ids-retention-in-days.md) (a delete stays physical, the recycle bin is a separate store), [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (a connector's credential), [ADR-0057-system-data-lifecycle-and-retention](./0057-system-data-lifecycle-and-retention.md) (retention).
 - **Leaves unchanged**: federation as ADR-0015 decides it (a virtual object stays the answer for live, computed or must-not-land data); the import door and its mapping semantics; a connector's actions and the flow `connector_action` node; `job` schedules and the job ledger; every existing bucket's affordances; the retirement entries `etl-pipeline-layer-retired` and `connector-sync-keys-retired`, whose ENFORCE route this record walks rather than reverses.
-- **Consumers**: `@objectstack/spec` (`mapping`, `job`, `managedBy`, the injected-columns plan), `@objectstack/objectql` (the sync reader beneath the external-driver floor, the reconciliation, the readonly-strip mirror), `@objectstack/service-automation` (the pull executor), `@objectstack/core` (the import runner, the `/me/permissions` clamp), `@objectstack/runtime` (the job binder, its organization refusal and the runtime job bridge), `@objectstack/plugin-security` (the bucket's write guard), `@objectstack/platform-objects` (the run record), `@objectstack/lint`, `ui/` (the bucket union, the Studio wizard, read-only rendering), `content/docs` and `skills/`.
+- **Consumers**: `@objectstack/spec` (`mapping`, `job`, `managedBy`, the injected-columns plan), `@objectstack/objectql` (the windowed read through the external-driver floor, the organization-delete arm, the reconciliation, the readonly-strip mirror), `@objectstack/service-automation` (the pull executor), `@objectstack/core` (the import runner, the `/me/permissions` clamp), `@objectstack/runtime` (the job binder, its organization refusal and the runtime job bridge), `@objectstack/plugin-security` (the bucket's write guard), `@objectstack/platform-objects` (the run record), `@objectstack/lint`, `ui/` (the bucket union, the Studio wizard, read-only rendering), `content/docs` and `skills/`.
 
 ---
 
@@ -27,8 +27,8 @@
 ## TL;DR
 
 1. **Sync-in is a second way in, beside federation, not a replacement for it.** A remote table or API collection becomes an ordinary object whose rows were **copied** by a pull. Every platform surface (permissions, RLS, reports, datasets, flows, MCP, AI) reads it as it reads any object. Federation stays the answer when a copy would be wrong ([D10](#d10--the-three-way-rule-and-the-partner-stance)).
-2. **Three sources, one binding home.** `mapping.connectorSource` (a `rest` / `openapi` connector) stays; a sibling `mapping.datasourceSource { datasource, remoteName, remoteSchema?, watermark? }` makes any federated datasource a pull source, a warehouse included; exactly one source per mapping. A plugin driver's row cap does not bound a pull: the sync reader reads beneath the engine's floor in verified keyset batches. Snowflake and BigQuery drivers move from the engine child to a child of their own (a departure from the epic's row) ([D1](#d1--pull-sources-a-sibling-datasourcesource-beside-connectorsource)).
-3. **A pull reads every page.** A declared `paging { style, param, nextPath }` on the connector source; keyset batches on the datasource source; the starting point of the next pull is the watermark a pull has **committed** ([D2](#d2--paging-every-page-is-read-the-watermark-advances-only-when-committed)).
+2. **Three sources, one binding home.** `mapping.connectorSource` (a `rest` / `openapi` connector) stays; a sibling `mapping.datasourceSource { object, watermark: { field, start }, full? }` makes any federated object a pull source, a warehouse's included; exactly one source per mapping. The pull reads a table of any size through the engine's external-driver floor, in windows bounded on both sides and halved when one comes back over the cap: more round trips, nothing in ruling `6487532394` lifted. Snowflake and BigQuery drivers move from the engine child to plugin packages outside this repository, per ruling `6731568115` (a departure from the epic's row) ([D1](#d1--pull-sources-a-sibling-datasourcesource-beside-connectorsource)).
+3. **A pull reads every page.** A declared `paging { style, param, nextPath }` on the connector source; bounded windows on the datasource source; the starting point of the next pull is the position a pull has **committed** ([D2](#d2--paging-every-page-is-read-the-watermark-advances-only-when-committed)).
 4. **A source delete is marked, never applied.** `deletePolicy: 'mark' | 'ignore'`, default `mark`, stamping `_sync_deleted_at` ([D3](#d3--deletes-mark-or-ignore-never-a-physical-delete)).
 5. **`managedBy: 'synced'`** marks the object: read-only to members at every mechanism ADR-0103 guards a bucket with, five platform columns under the reserved `_sync_` prefix, no person owner, and an authored `sharingModel` like any custom object (ADR-0090 D1). A mapping that carries a source must target a `synced` object ([D4](#d4--provenance-the-synced-bucket-and-the-_sync_-columns)).
 6. **Write-back is a declared action** that calls the source; the next pull brings the change home. No bidirectional sync, no merge, no overlay ([D5](#d5--write-back-only-through-declared-actions)).
@@ -95,67 +95,80 @@ pulled row carries no person owner, so an owner-scoped sharing model hides it fr
 
 ```ts
 datasourceSource: {
-  datasource: 'warehouse',        // a datasource whose schemaMode is 'external' or 'validate-only'
-  remoteName: 'fact_orders',      // the remote table or view
-  remoteSchema: 'mart',           // optional — the remote schema, as object.external.remoteSchema spells it
-  watermark: { field: 'updated_at' },  // optional — timestamp-incremental; no `param`, the reader writes the predicate
+  object: 'warehouse_fact_orders',                         // a federated object (ADR-0015) the pull reads
+  watermark: { field: 'updated_at', start: '2020-01-01' },  // the field windows are cut on, and the lowest value read
+  full: true,                                               // optional — re-read from `start` on every run (D3)
 }
 ```
 
 - **Exactly one source per mapping.** A mapping carrying both `connectorSource` and `datasourceSource` is refused at
   parse; a mapping carrying neither stays the import door's mapping, unchanged.
-- **The reader is the datasource's own driver**, through the connection service (ADR-0062 D1), selecting the source
-  columns `fieldMapping` names. The pull only reads, so the datasource's write gate (ADR-0015 gate 3) is never asked.
-- **How the reader addresses the remote table.** A built-in SQL driver finds a remote table only through an external
-  binding (`remoteName`, `remoteSchema`, the column map) that `registerExternalObject` installs
-  (`packages/spec/src/contracts/data-driver.ts#IDataDriver`). The reader installs that binding itself, under a
-  reader-private name derived from the mapping, and ⛔ never registers an object: no federated object is declared, so
-  the remote table gets no REST route, no Console surface and no permission row. A driver without
-  `registerExternalObject` (a plugin driver) is handed `remoteName` as the object it reads, which is how its `find`
-  addresses a table.
-- **A managed datasource is refused as a source.** Its objects are already local; a pull from it would make a second
-  copy of rows the platform already owns.
-- **The sync reader reads beneath the external-driver floor.** A plugin driver on a non-managed datasource runs under
-  the engine's correctness floor (`packages/objectql/src/external-driver-floor.ts#createExternalDriverFloor`, ruling
-  `6487532394` on #27277). The floor sends the driver `where`, `orderBy` and `limit` cap + 1, never `offset`, and it
-  throws `ExternalRowCapExceededError` when more than the cap comes back. The cap defaults to 1,000 and is never above
-  `packages/spec/src/data/datasource.zod.ts#EXTERNAL_ROW_CAP_CEILING` (10,000). It sends cap + 1 whatever limit the
-  caller asked for, so through the floor any batch whose predicate matches more than the cap is refused. Keyset
-  batches cannot get past that, and neither can a smaller `limit`. A table above the cap could then never be pulled.
-  So the P2 engine child builds **one caller beneath the floor**: the sync reader. It is system-only and read-only,
-  and it reads the driver behind the floor (`packages/objectql/src/external-driver-floor.ts#unwrapExternalDriverFloor`)
-  on these terms:
-  - each batch is a **keyset read**: `where` = after the last read position (D2), `orderBy` = the watermark field then
-    the source key, `limit` = B. It ⛔ never sends `offset`. B is the datasource's resolved row cap
-    (`packages/objectql/src/external-driver-errors.ts#resolveExternalRowCap`), so a batch holds no more rows in memory
-    than a federated read may;
-  - **every answer is verified before anything is written.** The batch has at most B rows. Every row satisfies the
-    `where` that was sent, re-evaluated in memory with the floor's own evaluator
-    (`packages/objectql/src/driver-query-in-memory.ts#applyDriverQueryInMemory`). The rows ascend strictly by
-    (watermark, key). A batch that fails any check refuses the pull by name (`sync_read_unverified`, naming the check),
-    and nothing past the last verified batch is committed;
-  - **what this cannot see.** A driver that silently leaves out rows that match is not detectable from its answer.
-    That is the trust a `rest` source already gets, and the pull-path conformance cases the engine child adds to
-    `packages/objectql/src/plugin-driver-conformance.ts#definePluginDriverConformanceSuite` test for it;
-  - every other read keeps the floor. The verified-pushdown credential (#27261's P3) is neither needed nor built here.
-
-  A built-in driver is not floored. It is read by the same reader under the same checks, which cost it nothing.
+- **The source is a declared federated object.** The pull reads the rows of a federated object (ADR-0015): an object
+  on a datasource whose `schemaMode` is `external` or `validate-only`, bound to its remote table by `object.external`
+  (`packages/spec/src/data/object.zod.ts#ObjectExternalBindingSchema`: `remoteName`, `remoteSchema`, `columnMap`). An
+  object on a managed datasource is refused as a source: its rows are already local, and a pull would copy rows the
+  platform already owns. Reading through a declared object is what keeps the pull inside the platform's existing
+  read path:
+  - **addressing is federation's own.** The federated binding pass installs the object's remote table, schema and
+    column map on the driver (`IDataDriver.registerExternalObject`,
+    `packages/spec/src/contracts/data-driver.ts#IDataDriver`), as it does for every federated object. The pull
+    writes no driver state of its own. A reader-private binding would not be safe: `SqlDriver.registerExternalObject`
+    keeps one entry per physical table, last writer wins (`objectByPhysicalTable`, read by the driver's coercion
+    lookup), so a second binding of a table that a federated object already binds would change how that object's reads
+    are coerced. The contract has no unregister;
+  - **`remoteSchema` and every other binding term come from the object**, so a driver addresses `mart.fact_orders`
+    however it addresses that object today, and a driver that cannot address a federated object cannot be a source;
+  - **the engine knows the source's field types**, so the floor compares a window's bounds by the field's storage
+    rule ([D2](#d2--paging-every-page-is-read-the-watermark-advances-only-when-committed));
+  - **the object's own posture applies, and the pull does not widen it.** The pull reads as the system (D8). A member
+    reads the federated object only through a grant on it, and a deployment that wants members to read only the
+    copy grants nothing on the source. Under a walled posture the source object states its organization scope like
+    any external object (ADR-0015, the 2026-11-03 note).
+- **The read stays under the floor.** A plugin driver on a non-managed datasource runs under the engine's
+  correctness floor (`packages/objectql/src/external-driver-floor.ts#createExternalDriverFloor`), which ruling
+  `6487532394` Q1 = B on #27277 gives to every plugin driver that holds no verified-pushdown credential. That set is
+  empty: the credential is #27261's P3 and is not built. The floor sends the driver `where`, `orderBy` and `limit`
+  cap + 1, never `offset`, and throws `ExternalRowCapExceededError` when more than the cap comes back. The cap
+  defaults to 1,000 and is never above `packages/spec/src/data/datasource.zod.ts#EXTERNAL_ROW_CAP_CEILING` (10,000).
+  It sends cap + 1 whatever limit the caller asked for. So no read whose predicate matches more than the cap can pass,
+  however its batches are cut. The pull therefore reads in **windows bounded by the predicate itself**, each a plain
+  `find` through the floor ([D2](#d2--paging-every-page-is-read-the-watermark-advances-only-when-committed)). ⛔
+  Nothing in ruling `6487532394` is lifted, and the pull relies on nothing the floor does not already rely on.
+  - **What it buys.** The pull is correct under any driver the floor admits. It relies on no driver ordering, no
+    top-N and no pushdown. The floor re-applies each window's `where` in memory, and its failure mapping keeps a
+    remote's raw error off the wire and off the run record (D7 stores the floor's refusal, not the driver's message).
+  - **What it costs.** More round trips on a large table. A window that comes back over the cap is read again,
+    halved, and the rows of a refused read are transferred and discarded. A driver that pushes no `where` down
+    returns the whole table to every window, so a source above the cap on such a driver can never be pulled: every
+    window is refused until it cannot be halved, and the pull then refuses by name
+    ([D2](#d2--paging-every-page-is-read-the-watermark-advances-only-when-committed)). That is the floor's answer to
+    the same table read through federation.
+  - **What it trusts.** It trusts what the floor trusts: an answer at or under the cap is the whole set the window
+    matches. A driver that silently returns fewer matching rows than exist (a remote that pages below the cap and
+    says nothing) is no more visible to the pull than to a federated read.
+  - **A built-in driver is not floored.** It runs the whole query, as `find()`'s contract requires. The pull sends it
+    the same windows and applies the same rule itself: `limit` cap + 1, and more than the cap is treated as
+    exceeded. A window therefore never holds more than the cap in memory, whichever driver serves it.
 - **Warehouses: a departure from the epic's P2 engine row.** That row reads "datasource-as-source reader incl.
-  Snowflake / BigQuery dialects", and amendment `6731744658` makes a warehouse a first-class pull source. This record
-  keeps the first-class source and moves the two drivers out of the engine child:
-  - the repository spells a warehouse driver as a plugin. `com.vendor.snowflake` is the driver vocabulary's own
-    example of a plugin-contributed driver, and `DRIVER_VOCABULARY` names no warehouse id
-    (`packages/spec/src/data/driver/config-registry.zod.ts#BUILTIN_DRIVER_IDS`);
-  - the reader beneath the floor is what makes a plugin warehouse pullable at any size. The engine child owes that
-    reader and its conformance cases; it owes no vendor dialect;
-  - Snowflake and BigQuery go to a child of their own, **P3 — warehouse drivers**: one plugin package per warehouse,
-    verified by the conformance kit including the pull-path cases. Whether those packages live in this repository or
-    with a partner is the maintainer's call when the epic files that child. The #27261 close-out
-    [`6523503305`](https://github.com/objectstack-ai/objectstack/issues/27261#issuecomment-6523503305) keeps "vendor
-    drivers such as Salesforce and SAP v2" out of this repository, and it does not name a warehouse.
+  Snowflake / BigQuery dialects". Amendment `6731744658` makes a warehouse a first-class pull source, and ruling
+  `6731568115`, which this record executes, reads: "Vendor-specific drivers and connectors stay out of this
+  repository (#27261 P2 ruling)". The #27261 close-out
+  [`6523503305`](https://github.com/objectstack-ai/objectstack/issues/27261#issuecomment-6523503305) names "vendor
+  drivers such as Salesforce and SAP v2". This record follows the ruling over the epic's row:
+  - a warehouse is a first-class source through whatever driver serves its dialect, and the windowed read makes it
+    pullable at any size;
+  - the repository already spells a warehouse driver as a plugin. `com.vendor.snowflake` is the driver vocabulary's
+    own example of a plugin-contributed driver, and `DRIVER_VOCABULARY` names no warehouse id
+    (`packages/spec/src/data/driver/config-registry.zod.ts#BUILTIN_DRIVER_IDS`). The engine child owes no vendor
+    dialect;
+  - Snowflake and BigQuery drivers go to a child of their own, **P3 — warehouse drivers**: plugin packages outside
+    this repository, per `6731568115`, verified by the conformance kit
+    (`packages/objectql/src/plugin-driver-conformance.ts#definePluginDriverConformanceSuite`) with the windowed-read
+    cases the engine child adds. Who builds them, a partner or this project in a separate repository, is the
+    maintainer's call when the epic files that child.
 
-  The SQL driver's federated dialects (ADR-0015 §4.6: Postgres, MySQL, SQLite, and the federation-only Oracle and
-  SQL Server) serve as pull sources as soon as the engine child lands.
+  The SQL driver's federated dialects (ADR-0015 §4.6: Postgres, MySQL, SQLite, and the federation-only Oracle and SQL
+  Server) serve as pull sources as soon as the engine child lands.
 - **`job.pull` widens to either source.** `defineStack` today refuses a pull whose mapping declares no
   `connectorSource` (`packages/spec/src/stack.zod.ts#collectJobPullMappingErrors`); it accepts either source.
 
@@ -163,9 +176,11 @@ datasourceSource: {
 it into a union renames it for every author for no new capability; a sibling adds one optional key and leaves every
 existing binding as it is. ⛔ Not a new metadata type: the sync stays defined on its target, the `mapping`.
 
-*Departure from the card's default:* `remoteSchema` is added beside the three working names. A warehouse table is
-addressed by schema and name (`mart.fact_orders`, ADR-0015 §8), and federation spells the pair the same way
-(`packages/spec/src/data/object.zod.ts#ObjectExternalBindingSchema`).
+*Departure from the card's default:* the card's working names `{ datasource, remoteName, watermark? }` become
+`{ object, watermark: { field, start }, full? }`. The datasource, the remote table and its schema are the federated
+object's binding, spelled once, as ADR-0015 spells them. A declared object is the addressing that touches no shared
+driver state, and it gives the floor the field types it compares by. `watermark` is required, because the windows are
+cut on it ([D2](#d2--paging-every-page-is-read-the-watermark-advances-only-when-committed)).
 
 ### D2 — Paging: every page is read, the watermark advances only when committed
 
@@ -185,44 +200,78 @@ paging: { style: 'page' | 'cursor' | 'offset' | 'none', param: 'page', nextPath:
 - With no `paging`, a pull keeps today's one-response reading, the `watermark` describe keeps saying so, and the
   platform does not treat that response as complete ([D3](#d3--deletes-mark-or-ignore-never-a-physical-delete)).
 
-**Datasource source.** The reader reads keyset batches ([D1](#d1--pull-sources-a-sibling-datasourcesource-beside-connectorsource)):
-ascending by the watermark field, then by the source key, each batch starting strictly after the last (watermark,
-key) pair read, `limit` B, never `offset`. The pair, not the watermark alone, is the read position, so rows that tie
-on the watermark across a batch boundary are neither skipped nor read twice. A full pull (no `watermark`) keys on the
-source key alone. Writes go through the import runner in its own batches
-(`packages/core/src/utils/import-runner.ts#MAX_CREATE_BATCH_SIZE`). It needs no declaration.
+**Datasource source: windows bounded on both sides.** The pull reads its source object in windows of
+`watermark.field`, each `lo < field <= hi`, each a plain `find` through the floor ([D1](#d1--pull-sources-a-sibling-datasourcesource-beside-connectorsource)):
 
-**The starting point is a committed watermark.** Today's starting point is the highest value already written to the
-target (the executor's W1 read). It becomes the highest watermark a pull has **committed**, stored on the run record
+- **The field.** `watermark.field` is a `datetime`, `date` or integer `number` field of the source object, since a
+  window must be halvable down to one value. Any other type is refused at build. Its smallest width is one step of
+  its type: a millisecond, a day, or 1.
+- **The first window** starts above the read position: the committed position on an incremental run, else just below
+  `watermark.start`. The engine child sets the first width and how it grows; the record fixes only the rule.
+- **On `ExternalRowCapExceededError` the window is halved** (`hi` moves to the midpoint) and read again. A window one
+  step wide that still exceeds the cap (one value holding more rows than the cap) refuses the pull by name
+  (`sync_window_unsplittable`, naming the value and the cap). The remedies are a larger `external.rowCap` (at most
+  10,000) or a finer window field. A compound window (the watermark, then a second field) is open for the engine
+  child.
+- **A window under the cap is the whole set it matches.** Its rows are written through the import runner in the
+  runner's own batches (`packages/core/src/utils/import-runner.ts#MAX_CREATE_BATCH_SIZE`). Its `hi` becomes the
+  committed position, and the next window starts there.
+- **The end.** After each window answered under the cap, the pull may read the window open above, `lo < field`. When
+  that answers under the cap, the pull has read everything above `lo`, and it ends. How often that probe is tried is
+  the engine child's choice; each failed probe costs one refused read.
+- **How a bound is compared.** The `where` is pushed to the driver, and the floor re-evaluates it in memory by the
+  source field's declared class (`packages/objectql/src/driver-query-in-memory.ts#applyDriverQueryInMemory`; a
+  temporal comparand by its column's storage rule). No ordering of the driver's answer is read or checked, so no
+  collation enters.
+- **A NULL watermark** is in no window: `lo < NULL` is false in SQL and in the floor's null-safe walker alike. Such a
+  row is never read. A full pull's delete mark must not read that as an absence, so it checks first
+  ([D3](#d3--deletes-mark-or-ignore-never-a-physical-delete)).
+- **The batch size is the cap.** A window holds at most the datasource's resolved row cap
+  (`packages/objectql/src/external-driver-errors.ts#resolveExternalRowCap`). An operator who lowers `external.rowCap`
+  to keep federated reads narrow also narrows the pull's windows, which costs round trips and not correctness. A cap
+  low enough that one value cannot fit is `sync_window_unsplittable`.
+
+**The starting point is a committed position.** Today's starting point is the highest value already written to the
+target (the executor's W1 read). It becomes the position a pull has **committed**, stored on the run record
 ([D7](#d7--the-run-record-sys_sync_run-beside-sys_job_run)):
 
-- a **datasource source** reads in ascending (watermark, key) order, so it commits that pair after each written
-  batch, and an interrupted pull resumes after its last committed batch;
+- a **datasource source** commits each window's `hi` after the window is written. The window includes every row at
+  `hi`, so rows that share a value are never split, and an interrupted pull resumes after its last committed window;
 - a **connector source** cannot see the source's order, so it commits once, after its last page. An interrupted
   connector pull re-reads from the previous commit, and the upsert makes the re-read idempotent. This closes the
   newest-first loss the `watermark` describe warns about.
 
-*Departure from the card's default:* "the watermark is committed per batch" holds for the datasource source only.
-Committing per page on a source whose order the platform cannot see would advance past pages it never read.
+*Departure from the card's default:* "the watermark is committed per batch" holds for the datasource source only,
+per window. Committing per page on a source whose order the platform cannot see would advance past pages it never
+read.
 
 ### D3 — Deletes: mark or ignore, never a physical delete
 
-Each source block gains `deletePolicy: 'mark' | 'ignore'`, default `mark`.
+Each source block gains `deletePolicy: 'mark' | 'ignore'`. Absent, it reads as `mark`. The schema declares no
+`.default()`, so an authored value stays distinguishable from an absent one, which its liveness row needs
+([Children](#children-the-epic-files-on-acceptance)).
 
 - **`mark`** stamps the platform column `_sync_deleted_at` ([D4](#d4--provenance-the-synced-bucket-and-the-_sync_-columns))
   on a row the source no longer has, and clears it if the row comes back. Two detections:
-  - a **full** pull (no `watermark`) marks every row of this mapping that a completed pull did not read, **only when
-    the pull read a set it can prove complete**. A datasource source's keyset read is complete when its last batch
-    comes back short. A connector source is complete only when it declares `paging` ([D2](#d2--paging-every-page-is-read-the-watermark-advances-only-when-committed)),
-    `none` included, and the pull read to its last page. A full connector pull with no `paging` marks nothing, and its
-    run record says so (`deletes: unjudged, no paging declared`): P0 measured a paged endpoint read as one response
-    (100 of 250 rows, every run `success`), and marking from that read would mark every row past page one. An
-    interrupted or refused pull marks nothing;
+  - a **full** pull (a connector source with no `watermark`, or a datasource source with `full: true`) marks every
+    row of this mapping that a completed pull did not read, **only when the read is complete on the terms below**:
+    - a datasource source is complete when every window from `watermark.start` up to and including the window open
+      above answered under the cap ([D2](#d2--paging-every-page-is-read-the-watermark-advances-only-when-committed)).
+      That rests on the floor's own trust, that an answer at or under the cap is the whole set it matches, and on
+      nothing more. Before it marks, the pull reads the source rows whose watermark is NULL, through the floor. Any
+      such row, or a refusal of that read, leaves the run unmarked (`deletes: unjudged, null watermark`), because
+      those rows are outside every window and would read as absent;
+    - a connector source is complete only when it declares `paging` ([D2](#d2--paging-every-page-is-read-the-watermark-advances-only-when-committed)),
+      `none` included, and the pull read to its last page. A full connector pull with no `paging` marks nothing, and
+      its run record says so (`deletes: unjudged, no paging declared`): P0 measured a paged endpoint read as one
+      response (100 of 250 rows, every run `success`), and marking from that read would mark every row past page one;
+    - an interrupted or refused pull marks nothing;
   - an **incremental** pull cannot see an absence, so it reads a source soft-delete field: `deletedField`, a source
     field whose truthy value means the row was deleted at the source.
-- **An incremental source that cannot see deletes refuses at build.** `watermark` with `deletePolicy: 'mark'` and no
-  `deletedField` is a declared policy no runtime line could honour (ADR-0078): the author states `deletedField` or
-  `deletePolicy: 'ignore'`.
+- **An incremental source that cannot see deletes refuses at build.** An incremental source with `deletePolicy`
+  absent or `'mark'` and no `deletedField` declares a policy no runtime line could honour (ADR-0078): the author
+  states `deletedField` or `deletePolicy: 'ignore'`. The refusal lands with the reader that marks, in the P2 engine
+  child, so that between the two PRs no author is made to write a key that still warns it is not read.
 - **`ignore`** leaves the row as it is.
 - **No `delete` value in this record.** A pull never deletes a row physically.
 
@@ -264,13 +313,24 @@ is a decision of its own record.
     `packages/plugins/organizations/src/claim-org-seed-ownership.ts`) and the install-local seed owner
     (`packages/cloud-connection/src/marketplace-install-local-seed-owner.ts`) skip it. A `synced` row has no owner
     column to claim;
-  - `ObjectQL.outlivesOrganization` (`packages/objectql/src/engine-cascade-planning.ts`) does **not** take `synced`.
-    Synced rows are the organization's business data and go with an organization delete as any object's rows do. The
-    engine child pins that the cascade's system delete passes the guard.
+  - `ObjectQL.outlivesOrganization` (`packages/objectql/src/engine-cascade-planning.ts`) does **not** take `synced`,
+    and the organization delete gains an arm for it instead. Today no object's rows go with an organization delete:
+    `refuseOrganizationDeleteWhileOwned` refuses it with `DELETE_RESTRICTED` while any row outside the two outliving
+    buckets names the organization ("Delete or move those records first"). On a `synced` object nobody can do that:
+    the guard refuses a member's and an administrator's delete, `userActions` cannot open one, and D3 never deletes.
+    Counted as today, a synced row would make every organization that ever pulled undeletable through every door,
+    the failure seat decision `6307135388` recorded for `engine-owned`. Kept as an outliving row, it would leave a
+    copy of an external system's data in place after its organization is gone. So:
+    - **an organization delete deletes that organization's `synced` rows**, as the system, inside the same delete and
+      before the ownership count, together with its `sys_sync_run` rows. A synced row is a copy, and the source still
+      holds every fact it held. The right to do it is the right to delete the organization, and nothing more;
+    - the refusal still counts every other object's rows, so a local record that looks a synced row up still holds
+      the delete as it does today;
+    - a pull job whose organization is gone refuses its next run by name, and the engine child pins both.
 - **Declared actions may write the mapped fields, and nothing writes the `_sync_` columns except the pull.** An
   action's script body runs as the system (`packages/spec/src/ui/action.zod.ts#ActionSchema`, the `body` note), so a
   declared action may write a synced row's mapped fields. The next pull overwrites them, and the action is the
-  reviewed place to make that choice. The declarative `type: 'update'` row write runs as the caller and is refused
+  reviewed place to make that choice. The declarative `operation: 'update'` row write runs as the caller and is refused
   like any member edit. A `_sync_` column in any write except the pull's is refused by name, whatever the caller's
   context (the engine child's writer). Write-back to the source is [D5](#d5--write-back-only-through-declared-actions)'s.
 - **A sourced mapping targets a `synced` object, in `upsert` mode.** A `mapping` carrying `connectorSource` or
@@ -348,9 +408,13 @@ is missing refuses the whole pull (`source_column_missing`), never a run that sk
 - **`rest` connector source, or a source that declares no shape:** judged on **full pulls only**. A mapped source
   field absent from every record of a non-empty full pull refuses it, and absence on some records stays row data. An
   incremental pull often carries one or two records, and many APIs leave out a null field, so judging it would stall
-  a healthy mapping on one sparse record. Its run record says `drift: unjudged`. The fields a pull needs on every
-  record keep their own refusals whatever the pull: the watermark field, and the `upsertKey` sources through the blank
-  match key's row error.
+  a healthy mapping on one sparse record. Its run record says `drift: unjudged`. A blank match key stays a row error
+  whatever the pull (below). A record that lacks its watermark field is not judged today: the executor's
+  `watermark_field_unmapped` judges the mapping (that some `fieldMapping` copies the watermark field), never a record.
+  A source that drops the watermark column would then write on, G6's silent case, and a connector source would
+  commit a position it cannot have read. So the engine child adds a **record-level refusal**: on an incremental
+  connector pull, a record with no value at the watermark field refuses the pull (`source_watermark_missing`) before the position
+  moves. A datasource source never reads such a row, since a NULL watermark is in no window (D2).
 - A blank match key stays [#31810](https://github.com/objectstack-ai/objectstack/issues/31810)'s row error.
 
 *Departure from the card's default:* the OpenAPI document is not hashed into a stored snapshot. The connector re-reads
@@ -401,12 +465,21 @@ mapping's read position; how the sweep keeps it is open for the engine child.
     (`packages/runtime/src/app-artifact-handlers.ts#resolveJobPullOrganization`), else with none, and every
     tenant-scoped write then fails at ADR-0131 D9. This record makes the organization **required under `group` for
     the pull form only**. The body and handler forms keep Q2-O1, and `single` is unchanged.
-  - **Where it is judged.** At boot, where the binder arms package jobs, the refusal takes the place of today's
-    `isolated` skip and `group` arming. At the runtime door ([D11](#d11--the-studio-door-a-runtime-pull-job)) there
-    is no boot, so a pull job written without one is refused at the write, with the same sentence.
+  - **Where it is judged.** `packages/runtime/src/app-artifact-handlers.ts#scheduleAppArtifactJobs` arms package
+    jobs for two callers: `AppPlugin` on `kernel:ready`, and the install-local plugin on its install route and its
+    rehydrate (`packages/cloud-connection/src/marketplace-install-local-plugin.ts`). A runtime-stored job adds a
+    third door. The refusal at each:
+    - **at boot** (`AppPlugin`, and the install-local rehydrate, which runs at boot): the boot is refused by name, as
+      the standing rule says. This takes the place of today's `isolated` skip and `group` arming;
+    - **at the install route**: the install is refused by name (`422`) before anything it carries lands, so a running
+      deployment never holds a package whose next boot it would refuse;
+    - **at the runtime door** ([D11](#d11--the-studio-door-a-runtime-pull-job)): the write is refused, with the same
+      sentence.
   - **When scheduled work is switched off.** `OS_AUTOMATION_SCHEDULED_WORK_ENABLED` is off by default in every
     posture. With it off, the binder arms no package job and says so once at `info`. A job that is never armed writes
-    nothing, so no pull job is judged and no boot is refused. The next boot with the switch on judges every pull job.
+    nothing, so the boot judges no pull job and is not refused; the next boot with the switch on judges every one.
+    The install route and the runtime door judge regardless of the switch, because the author is there to fix the
+    job when it is written.
   - **The describe changes with the binder.** `JOB_ORGANIZATION_DESCRIPTION` (`packages/spec/src/system/job.zod.ts`)
     states today's split, and it becomes false the day the binder changes. It is rewritten in the PR that changes the
     binder, by that PR's child ([P2 — engine](#children-the-epic-files-on-acceptance)).
@@ -419,9 +492,10 @@ mapping's read position; how the sweep keeps it is open for the engine child.
 
 Recorded, not re-opened: the sync kernel — the `mapping` / `job` / pull executor, a datasource as a pull source,
 paging, the delete policy, the provenance columns and the `synced` bucket — ships in this repository under
-Apache-2.0, as federation does (`6731568115`; the edition table of `6738924490`). Vendor drivers such as Salesforce
-and SAP v2 stay outside this repository (#27261 close-out); where the warehouse driver packages live is decided when
-the P3 warehouse-drivers child is filed ([D1](#d1--pull-sources-a-sibling-datasourcesource-beside-connectorsource)). Record-level lineage is Enterprise and is not this
+Apache-2.0, as federation does (`6731568115`; the edition table of `6738924490`). The same ruling reads: "Vendor-specific
+drivers and connectors stay out of this repository (#27261 P2 ruling)". The Snowflake and BigQuery drivers are
+therefore plugin packages outside it, and who builds them is decided when the P3 warehouse-drivers child is filed
+([D1](#d1--pull-sources-a-sibling-datasourcesource-beside-connectorsource)). Record-level lineage is Enterprise and is not this
 record's; the `_sync_` columns are the kernel's operational metadata, not lineage.
 
 ### D10 — The three-way rule, and the partner stance
@@ -453,9 +527,8 @@ This record meets both halves for the pull form, and only for it:
 - **A handler a runtime writer can name.** A `pull` job names no handler. It names a `mapping`, which a runtime writer
   can already create. So the runtime door accepts a `job` whose only run form is `pull`, and refuses a `body` or a
   `handler` there.
-- **The bridge.** Today only `AppPlugin` schedules jobs, from the artifact
-  (`packages/runtime/src/app-artifact-handlers.ts#scheduleAppArtifactJobs` has one caller), and nothing schedules a
-  job stored at runtime. The bridge arms a stored pull job on `IJobService.schedule` when it is written, re-arms it
+- **The bridge.** Today jobs are armed only from a package: `packages/runtime/src/app-artifact-handlers.ts#scheduleAppArtifactJobs`,
+  called by `AppPlugin` and by the install-local plugin (D8), and nothing schedules a job stored at runtime. The bridge arms a stored pull job on `IJobService.schedule` when it is written, re-arms it
   when it changes, cancels it when it is deleted, and re-arms every stored pull job at boot.
 - **The two rules at that door.** The scheduled-work switch gates a runtime pull job as it gates a package one. With
   the switch off, the job is stored and not armed, and the write answer says so: the author is not left with a job
@@ -472,20 +545,20 @@ The Studio sync wizard creates the `synced` object, the `mapping` and that `job`
 Filed by the epic [#31763](https://github.com/objectstack-ai/objectstack/issues/31763) after this record is accepted;
 ⛔ none is filed by this record.
 
-Every row carries its own `Clause-②` and `Metadata-protocol` lines. A row that changes more than one kind names each
-kind, and each PR that carries one declares it.
+Every row carries its own `Clause-②` arm (`scripts/pm/clause2-line.mjs`) and one `Metadata-protocol` line per PR;
+where a PR changes more than one kind, the line names the strongest (`narrowed` over `semantic` over `added`, AGENTS.md).
 
 | Child | Lane · size | Scope | Declaration | Order |
 |:--|:--|:--|:--|:--|
-| **P2 — spec** | `domain:spec` · M | The keys `datasourceSource`, `paging` (`none` included), `deletePolicy` and `deletedField`, each as a `planned` liveness row under `authorWarn`. The refusals, which are live as they land: exclusive source, sourced target, `upsert` mode, the `_sync_` reservation, and an incremental `mark` with no `deletedField`. `job.pull` accepting either source. `managedBy: 'synced'` **with every mechanism that enforces it**: the guard set, the reconciliation, the clamp, both mirrors and the `ui/` bucket union, since a security bucket never lands unenforced (ADR-0049). The `userActions` exception (D4). `security-owd-unset`'s `synced` fix-it (D4). `CONNECTOR_SOURCE_NO_POLICY`'s `deleteMode` guidance re-pointed at `deletePolicy`. | `Clause-②: yes (widening)` for the keys. `Metadata-protocol: added` for the keys, `narrowed` for the refusals. | first |
-| **P2 — engine** | `domain:server` · L | The sync reader beneath the floor, its addressing and its verification (D1). The paging loop, the keyset read and the committed read position (D2). Delete marking with the completeness rule (D3). Provenance stamping, the injected-columns plan rows (`resolveInjectedSystemColumns`, in `packages/spec`), the `_sync_` write refusal and the cascade pin (D4). The three drift arms (D6). `sys_sync_run`, its writer, its retention rule, the end-of-pull log line and the interrupted-run close (D7). D8's refusal at boot, with `JOB_ORGANIZATION_DESCRIPTION` rewritten. The pull-path conformance cases. Each `planned` row flips to `live` with the reader that makes it true, and its `authorWarn` is dropped. | `Clause-②: no`. `Metadata-protocol: semantic`: a connector pull's starting point moves from the target's highest value to the committed position, and the `watermark` describe changes with it. `narrowed`: D8 makes `job.organization` required for a pull job under `group`. | after P2 spec |
+| **P2 — spec** | `domain:spec` · M | The keys `datasourceSource`, `paging` (`none` included), `deletePolicy` (no schema default: absence reads as `mark`) and `deletedField`, each as a `planned` liveness row under `authorWarn`. The refusals, which are live as they land: exclusive source, a federated source object, a halvable `watermark.field`, sourced target, `upsert` mode and the `_sync_` reservation. `job.pull` accepting either source. `managedBy: 'synced'` **with every mechanism that enforces it**: the guard set, the reconciliation, the clamp, both mirrors and the `ui/` bucket union, since a security bucket never lands unenforced (ADR-0049). The `userActions` exception (D4). `security-owd-unset`'s `synced` fix-it (D4). `CONNECTOR_SOURCE_NO_POLICY`'s `deleteMode` guidance re-pointed at `deletePolicy`. | `Clause-②: yes (narrowing)`: the keys widen and the refusals narrow, so it is breaking, with the migration and ADR-0087 disposition that brings. `Metadata-protocol: narrowed`. | first |
+| **P2 — engine** | `domain:server` · L | The windowed read through the floor, the halving and `sync_window_unsplittable`, and the same rule on a built-in driver (D1, D2). The paging loop and the committed position (D2). Delete marking with the completeness rule and the NULL-watermark check, and the incremental-`mark` refusal (D3). Provenance stamping, the injected-columns plan rows (`resolveInjectedSystemColumns`, in `packages/spec`), the `_sync_` write refusal and the organization-delete arm (D4). The three drift arms and the record-level watermark refusal (D6). `sys_sync_run`, its writer, its retention rule, the end-of-pull log line and the interrupted-run close (D7). D8 at boot and at the install route, with `JOB_ORGANIZATION_DESCRIPTION` rewritten. `ExternalRowCapExceededError`'s remedy re-pointed from the retired `DataSync` to sync-in. The windowed-read conformance cases. Each `planned` row flips to `live` with the reader that makes it true, and its `authorWarn` is dropped. | `Clause-②: no (narrowing)`: D8 makes `job.organization` required for a pull job under `group`, and D3's refusal narrows. A connector pull's starting point also moves to the committed position, which is a change of meaning. `Metadata-protocol: narrowed` (narrowed over semantic). | after P2 spec |
 | **P2 — runtime job door** | `domain:server` · M | D11: the pull-only acceptance, the flag flip in `DEFAULT_METADATA_TYPE_REGISTRY`, the bridge to `IJobService.schedule` (arm, re-arm, cancel, boot re-arm), the scheduled-work switch at the write and D8's refusal at the write. | `Clause-②: yes (widening)`: `job` becomes writable at runtime, for the pull form only. `Metadata-protocol: added`. | after P2 engine |
-| **P3 — Studio** | ui · M | The sync wizard beside the virtual-object one (`offersSync`'s page): source, remote table or operation, field map, sharing model, cadence, organization. Read-only rendering of `synced` objects. Run history (D7). | `Clause-②: no`. `Metadata-protocol: none`. | after P2 runtime job door |
+| **P3 — Studio** | ui · M | The sync wizard beside the virtual-object one (`offersSync`'s page): the source object (drafting it when the table has none), field map, sharing model, cadence, organization. Read-only rendering of `synced` objects. Run history (D7). | `Clause-②: no`. `Metadata-protocol: none`. | after P2 runtime job door |
 | **P3 — guide + skills** | devx / skills · S | The three-way rule and the partner stance (D10), the write-back answer (D5), and `SYNC_ARCHITECTURE.md` and the skills pointing at `mapping` / `job`, never at the retired vocabulary. | `Clause-②: no`. `Metadata-protocol: none`. | after P2 engine |
-| **P3 — warehouse drivers** | `domain:server`, or a partner · M each | Snowflake and BigQuery plugin driver packages, verified by the conformance kit with the pull-path cases (D1). Where they live is the maintainer's call when this row is filed. | Per package. | after P2 engine |
+| **P3 — warehouse drivers** | outside this repository · M each | Snowflake and BigQuery plugin driver packages, out of this repository per ruling `6731568115`, verified by the conformance kit with the windowed-read cases (D1). Who builds them is the maintainer's call when this row is filed. | Declared by each package. | after P2 engine |
 
-**Workload, re-estimated.** The epic's estimate (P2 ≈ 5–8 agent-days, P3 ≈ 3–4) predates four additions: the reader
-beneath the floor, `sys_sync_run` with a committed read position, D11's bridge, and three drift arms. Re-estimated:
+**Workload, re-estimated.** The epic's estimate (P2 ≈ 5–8 agent-days, P3 ≈ 3–4) predates four additions: the windowed
+read with its halving, `sys_sync_run` with a committed read position, D11's bridge, and three drift arms. Re-estimated:
 P2 spec ≈ 2–3 agent-days, P2 engine ≈ 6–9, P2 runtime job door ≈ 2–3, P3 Studio ≈ 3, P3 guide + skills ≈ 1, and each
 warehouse driver ≈ 2–3. P2 in total is about 10–15 agent-days.
 
@@ -501,6 +574,7 @@ land before their reader land as `planned` rows under `authorWarn`, which the re
 What each PR can prove is the order's test. P2 spec proves its refusals and the bucket's enforcement; its keys
 warn their author until P2 engine proves the readers. P2 engine proves every reader against stored shapes the spec
 already parses. The runtime job door proves the bridge against a stored pull job.
+
 ---
 
 ## Consequences
@@ -517,11 +591,17 @@ already parses. The runtime job door proves the bridge against a stored pull job
     known producer is affected: D4 measures both;
   - a pull job under `group` must declare its organization, which narrows ruling `5974483403` Q2-O1 for the pull
     form (D8);
-  - a `synced` object's `userActions` cannot open a write (D4).
+  - a `synced` object's `userActions` cannot open a write (D4);
+  - an incremental source with `deletePolicy` absent or `'mark'` must state `deletedField`, or write
+    `deletePolicy: 'ignore'`. Because absence reads as `mark`, this refuses every incremental sourced mapping that
+    states only a watermark (D3);
+  - a datasource source reads a declared federated object, on a halvable watermark field (D1, D2).
 
   The children declare each one.
-- **A plugin driver's row cap no longer bounds a pull.** One system-only reader runs beneath the floor, on verified
-  keyset batches. Every member and federated read keeps the floor (D1).
+- **A plugin driver's row cap no longer bounds a pull, and the floor stays whole.** The pull reads through the floor
+  in windows bounded on both sides, halving a window that comes back over the cap. It costs round trips on a large
+  table and lifts nothing in ruling `6487532394`. A driver that pushes no `where` down still cannot be pulled past
+  the cap, as it cannot be read past it through federation (D1, D2).
 - Synced tables become the largest tables. Retention and archive under ADR-0057-system-data-lifecycle-and-retention
   apply to them as to any object; a `synced` object may declare its own lifecycle.
 - The retired `DataSync` / `ETLPipeline` words stay retired: every surface this record names teaches `mapping` and
@@ -535,8 +615,12 @@ already parses. The runtime job door proves the bridge against a stored pull job
   its TARGET". Not taken.
 - **Reuse `engine-owned` for synced objects**: no provenance plan, and a bucket that means "no business rows". Not taken
   (D4).
-- **Read a warehouse through the floor in keyset batches**: the floor sends cap + 1 whatever the batch limit, so any
-  predicate matching more than the cap is refused; a table above 10,000 rows could never be pulled. Not taken (D1).
+- **Read in open-ended keyset batches through the floor**: the floor sends cap + 1 whatever the batch limit, so a
+  batch whose predicate matches more than the cap is refused however small its `limit`. Not taken (D1).
+- **One reader beneath the floor, checking each batch** (this record's previous draft): it skips the floor that ruling
+  `6487532394` Q1 = B gives every plugin driver, and its checks cannot see a driver that, correctly for the floor,
+  sorts a remote page itself. Each batch would then not be the first rows in order, and the committed position would
+  pass rows never read. Not taken (D1).
 - **Pull the verified-pushdown credential (#27261 P3) into this epic**: it would lift the floor for every read of a
   certified driver, a wider change than a pull needs. Not taken (D1).
 - **A `public_read` default on the bucket**: a fail-open default for business data, against ADR-0090 D1 and the
@@ -556,11 +640,15 @@ already parses. The runtime job door proves the bridge against a stored pull job
 - ⛔ Local-only editable fields on a `synced` object (annotations live on a local object that looks the synced row
   up).
 - ⛔ Change-data-capture or push from a source; a pull is scheduled.
-- ⛔ Any vendor driver or connector; where the warehouse driver packages live (the P3 warehouse-drivers child, D1).
+- ⛔ Any vendor driver or connector; who builds the warehouse driver packages outside this repository (the P3
+  warehouse-drivers child, D1).
 
 **Open points left to the engine child**, each to be decided in its PR and said there:
 
-- the reader-private binding's name and its isolation from the object registry (D1);
+- the first window width, how it grows, and how often the open-above window is tried (D2);
+- a compound window (the watermark, then a second field) for a value that holds more rows than the cap (D2);
+- rows that reach the source with a watermark below a position already committed (late writes): whether a window
+  trails the present by a declared settle time (D2);
 - `sys_sync_run` retention against the read position it holds: the latest committed run of a mapping must survive
   the sweep (D7);
 - a composite `upsertKey` written as `_sync_external_id` text: the encoding, and an order that stays stable (D4);
