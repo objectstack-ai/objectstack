@@ -218,6 +218,12 @@ export function registrationChecks(
     { advisory }: { advisory: boolean },
 ): ReadonlyArray<(flowName: string, flow: FlowParsed) => RegistrationCheckRefusal | undefined> {
     return [
+        // A flow whose top-level graph holds no `start` node can never run:
+        // `execute()` begins at that node, so every trigger and every explicit
+        // run would be refused with FLOW_NO_START_NODE. Refused here, first,
+        // so the author learns at the save rather than at the first trigger.
+        // A plain function, not an engine member: it reads no engine state.
+        (flowName, flow) => validateStartNode(flowName, flow),
         // #4277 — config keys the node's descriptor does not declare (the
         // tightened #4059 warning; a `visibleIf` typo used to register in
         // silence), with per-key prescriptions: see validateNodeConfigKeys
@@ -259,6 +265,49 @@ export function registrationCheckRefusals(this: Pick<RegistrationCheckHost, 'reg
         if (refusal) refusals.push(refusal);
     }
     return refusals;
+}
+
+/**
+ * REFUSE a flow whose top-level `nodes` hold no `start` node — the one shape
+ * that can never run. `AutomationEngine.execute()` begins a run at the flow's
+ * first `start` node and follows edges from there; nothing else schedules a
+ * top-level node, so without one every trigger and every explicit run answers
+ * `FLOW_NO_START_NODE` (422 at the trigger doors). `FlowSchema` requires no
+ * such member, so the parse accepts the shape and this is the first door that
+ * can say so.
+ *
+ * Status-agnostic, as every other check in {@link registrationChecks} is: a
+ * `draft` flow is enabled in this engine (only `obsolete` / `invalid` are
+ * disabled), so a start-less draft fails its first run exactly as an `active`
+ * one does. The metadata save door does not run these checks at the save, so a
+ * draft kept there mid-edit still saves; the engine refuses to register it and
+ * records the refusal, which the metadata read serves beside the stored flow.
+ *
+ * Only the flow's own graph: a region body (`loop`, `parallel`, `try_catch`)
+ * is entered at its single entry node, not at a `start` node, and
+ * `validateControlFlow` judges it. More than one `start` node is not refused
+ * here: a run starts at the first, and `os lint`'s unreachable-node rule names
+ * the extra one.
+ */
+export function validateStartNode(flowName: string, flow: FlowParsed): RegistrationCheckRefusal | undefined {
+    if (flow.nodes.some((node) => node.type === 'start')) return undefined;
+    const types = flow.nodes.map((node) => node.type);
+    const found = types.length === 0
+        ? 'the list is empty'
+        : `found ${types.length} node(s), of type ${[...new Set(types)].map((t) => `\`${t}\``).join(', ')}`;
+    const why =
+        `the flow's top-level \`nodes\` hold no \`start\` node (${found}). A run begins at the start node and ` +
+        `follows edges from there, so this flow could never run: every trigger and every explicit run would be ` +
+        `refused with FLOW_NO_START_NODE. Add a node with \`type: 'start'\` to the top-level \`nodes\` and an edge ` +
+        `from it to the first step; a record-change or schedule flow declares its trigger in that node's \`config\`.`;
+    return {
+        message: `Flow '${flowName}' rejected: ${why}`,
+        sites: [{
+            path: `${STORED_FLOW_PATH}.nodes`,
+            from: JSON.stringify(types),
+            detail: `the flow at nodes: ${why}`,
+        }],
+    };
 }
 
 /** The body of {@link AutomationEngine.validateNodeConfigKeys}, moved unedited; that method's docblock is its contract. */

@@ -559,7 +559,9 @@ export class ObjectQL implements IObjectQLEngine {
   }> = [];
 
   // Action registry: key = "objectName:actionName" — the UNQUALIFIED slot, what
-  // a call that names no package runs ([#31673] unchanged until #31697).
+  // a call that names no package runs ([ADR-0150 D5, #31697]: two packages
+  // on one key, and a package beside host code or a plugin on the object-less
+  // key, are refused, `executeAction`).
   private actions = new Map<string, ActionHandlerEntry>();
 
   // [ADR-0150 D4, #31673] The action engine keyed `(package, objectName, name)`:
@@ -1054,9 +1056,14 @@ export class ObjectQL implements IObjectQLEngine {
    * action's declaration to (`resolveActionByPackage`; `''` the environment's
    * own): that package's handler runs, else the one handler registered under
    * the key when there is exactly one, else nothing (the "not found" miss).
-   * Omitted, the call names no package and runs the handler the last
-   * registration under `objectName:actionName` left — today's answer, kept
-   * until the action backstop (#31697) decides a two-package key.
+   * Omitted, the call names no package: it runs the handler registered under
+   * `objectName:actionName`, except that it is refused `409 RESOURCE_CONFLICT`
+   * naming every owner — never the last registration — when two or more
+   * packages hold a handler under the key (epic ruling record 6729825528,
+   * letter A), or when the key is object-less and a package holds one beside
+   * host code or a plugin (the G2 obligation, record 6742974046). Host code or
+   * a plugin beside one package on an object-bound key keeps the last
+   * registration (ADR-0150 D5, #31697; epic ruling record 6762267053).
    */
   executeAction(objectName: string, actionName: string, ctx: any, options?: ExecuteActionOptions): Promise<any> {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).

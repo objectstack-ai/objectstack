@@ -62,6 +62,7 @@ import { FlowValueSlotSchema, VALUE_ENVELOPE_REFUSAL } from '@objectstack/spec/a
 import { ExpressionEngine, validateExpression } from '@objectstack/formula';
 import { readPartialSteps } from './partial-steps.js';
 import { isRegionSuspensionRefusal, refuseRegionSuspension } from './region-suspension-refusal.js';
+import { stampFlowRunSlot } from './flow-slots.js';
 
 /**
  * The value the flow CEL scope binds as `current_user` for a run (#19939 —
@@ -118,6 +119,7 @@ function decisionTakesEveryBranch(node: FlowNodeParsed): boolean {
  * is the field, including where an async body reads it after an `await`.
  */
 export interface DagTraversalHost {
+    readonly flowSlotPackage: AutomationEngine['flowSlotPackage'];
     readonly renderRefusalMessage: AutomationEngine['renderRefusalMessage'];
     readonly nodeExecutors: AutomationEngine['nodeExecutors'];
     readonly executeWithTimeout: AutomationEngine['executeWithTimeout'];
@@ -1185,12 +1187,15 @@ export function seedRunVariables(
 
 /** The body of {@link AutomationEngine.executeWithoutRetry}, moved unedited; that method's docblock is its contract. */
 export async function executeWithoutRetry(
-    this: Pick<DagTraversalHost, 'flows' | 'isFlowEnabled' | 'describeDisabledFlow' | 'nextRunId' | 'seedRunVariables' | 'resolveRunContext' | 'validateNodeInputSchemas' | 'executeNode' | 'recordLog' | 'logger' | 'finishRefusedRun' | 'persistSuspendedRun' | 'flowChecksumOf' | 'renderFlowTerminalMessage'>,
+    this: Pick<DagTraversalHost, 'flows' | 'isFlowEnabled' | 'describeDisabledFlow' | 'nextRunId' | 'seedRunVariables' | 'resolveRunContext' | 'validateNodeInputSchemas' | 'executeNode' | 'recordLog' | 'logger' | 'finishRefusedRun' | 'persistSuspendedRun' | 'flowChecksumOf' | 'renderFlowTerminalMessage' | 'flowSlotPackage'>,
     flowName: string,
     context?: AutomationContext,
     dispatched?: { errorMessage: string | undefined },
 ): Promise<AutomationResult> {
     const startTime = Date.now();
+    // [#31696] Read before any await: the slot's key can move while the run
+    // is in flight, its package cannot.
+    const runPackage = this.flowSlotPackage(flowName);
     const flow = this.flows.get(flowName);
 
     if (!flow) {
@@ -1233,8 +1238,10 @@ export async function executeWithoutRetry(
 
     // ADR-0049 / #1888 — establish the run's effective execution identity
     // from flow.runAs (see execute() / resolveRunContext); threaded below.
-    // `flowRunId` is stamped here too (#3456).
+    // `flowRunId` is stamped here too (#3456). [#31696] And the slot, as
+    // `execute()` stamps it.
     const runContext = await this.resolveRunContext(flow, context, runId);
+    stampFlowRunSlot(runContext, flowName, runPackage);
 
     try {
         const startNode = flow.nodes.find(n => n.type === 'start');

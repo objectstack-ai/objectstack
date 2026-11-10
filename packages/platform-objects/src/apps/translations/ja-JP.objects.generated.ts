@@ -2432,6 +2432,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "トークンダイジェスト",
         help: "デプロイメントの認証シークレットを鍵とする、ベアラーの HMAC-SHA-256（base64url）— 一方向。平文は発行時に一度だけ表示され、保存されません。"
       },
+      token_hint: {
+        label: "トークンのヒント",
+        help: "ベアラートークンの末尾 4 文字。発行時に記録され、同じ接続の資格情報を見分けるために使います。トークン本体やそのダイジェストではありません。ヒントの記録が始まる前に発行された資格情報では空です。"
+      },
       active: {
         label: "有効",
         help: "失効スイッチ — 無効な資格情報は検証時に拒否されます"
@@ -2439,6 +2443,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       expires_at: {
         label: "有効期限",
         help: "段階的な資格情報ローテーションのための任意の強制有効期限。期限切れの資格情報は拒否されます"
+      },
+      last_used_at: {
+        label: "最終使用日時",
+        help: "この資格情報が最後に SCIM リクエストを認証した日時(最大 1 分に 1 回記録)。使用記録がない場合は空です"
       },
       user_id: {
         label: "発行者",
@@ -2488,6 +2496,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "トークンを保存しました",
           fields: {
             token: "トークン",
+            tokenHint: "トークンのヒント",
             connectionId: "接続 ID",
             expiresAt: "有効期限"
           }
@@ -2871,7 +2880,64 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "すべて"
+        label: "すべて",
+        emptyState: {
+          title: "グループマッピングはまだありません",
+          message: "「SSO グループをマッピング」（SSO プロバイダーがサインイン時に送るグループ）または「SCIM グループをマッピング」（SCIM 接続がプロビジョニングするグループ）で、ID プロバイダーのグループのメンバーに権限セットを付与します。"
+        }
+      }
+    },
+    _actions: {
+      map_sso_group: {
+        label: "SSO グループをマッピング",
+        description: "SSO プロバイダーがサインイン時に送るグループのすべてのメンバーに権限セットを付与します。各メンバーが次にそのプロバイダー経由でサインインしたときに適用されます。",
+        successMessage: "グループマッピングを保存しました。各メンバーが次にそのプロバイダー経由でサインインしたときに適用されます。",
+        params: {
+          providerId: {
+            label: "SSO プロバイダー ID",
+            helpText: "サインインでグループを送る SSO プロバイダーのプロバイダー ID（例: “okta”）。プロバイダーにグループクレームが設定されている必要があります（SSO プロバイダーの「グループクレームを編集」）。"
+          },
+          groupExternalId: {
+            label: "グループ外部 ID",
+            helpText: "グループクレームが ID を送る場合、その値をそのまま入力します（例: Entra ID のグループオブジェクト ID）。グループ表示名とどちらか一方だけを設定してください。"
+          },
+          groupDisplayName: {
+            label: "グループ表示名",
+            helpText: "グループクレームが名前を送る場合、その値をそのまま入力します（例: “Sales”）。グループ外部 ID とどちらか一方だけを設定してください。"
+          },
+          permissionSet: {
+            label: "権限セット",
+            helpText: "グループのメンバーに、プロバイダーの組織内で付与される権限セット。管理者権限セットは拒否されます。"
+          }
+        }
+      },
+      map_scim_group: {
+        label: "SCIM グループをマッピング",
+        description: "SCIM 接続がプロビジョニングするグループのすべてのメンバーに権限セットを付与します。グループの現在のメンバーにはすぐに付与されます。",
+        successMessage: "グループマッピングを保存しました",
+        params: {
+          connectionId: {
+            label: "SCIM 接続 ID",
+            helpText: "グループをプロビジョニングする SCIM 接続（例: “okta-prod”）。資格情報の接続 ID です。"
+          },
+          groupExternalId: {
+            label: "グループ外部 ID",
+            helpText: "ID プロバイダーが送るグループの externalId。グループ表示名とどちらか一方だけを設定してください。"
+          },
+          groupDisplayName: {
+            label: "グループ表示名",
+            helpText: "グループの displayName。完全一致で照合されます。グループ外部 ID とどちらか一方だけを設定してください。"
+          },
+          permissionSet: {
+            label: "権限セット",
+            helpText: "グループのメンバーに、接続の組織内で付与される権限セット。管理者権限セットは拒否されます。"
+          }
+        }
+      },
+      delete_group_mapping: {
+        label: "マッピングを削除",
+        confirmText: "このグループマッピングを削除しますか？グループのメンバーにはこの権限セットが付与されなくなります。SCIM 接続の場合、グループのメンバーはすぐに再投影され、このマッピングによる付与が取り消されます。SSO プロバイダーの場合、そのサインインでこの権限セットに付与されたものがすぐに取り消されます（同じ権限セットを指すプロバイダーの別のマッピングがある場合を除く）。元に戻すには、グループを再度マッピングしてください。",
+        successMessage: "グループマッピングを削除しました"
       }
     }
   },

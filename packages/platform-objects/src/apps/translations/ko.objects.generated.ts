@@ -2432,6 +2432,10 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         label: "토큰 다이제스트",
         help: "배포 인증 비밀을 키로 한 Bearer의 HMAC-SHA-256(base64url)입니다. 단방향이며, 평문은 발급할 때 한 번만 표시되고 저장되지 않습니다."
       },
+      token_hint: {
+        label: "토큰 힌트",
+        help: "베어러 토큰의 마지막 네 글자로, 발급 시 기록되어 한 연결의 자격 증명을 서로 구분하는 데 쓰입니다. 토큰이나 그 다이제스트는 절대 아닙니다. 힌트 기록 이전에 발급된 자격 증명은 비어 있습니다."
+      },
       active: {
         label: "활성",
         help: "취소 스위치입니다. 비활성 자격 증명은 검증 시 거부됩니다"
@@ -2439,6 +2443,10 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       expires_at: {
         label: "만료 시각",
         help: "단계적 자격 증명 교체를 위한 선택적 만료 시각입니다. 만료된 자격 증명은 거부됩니다"
+      },
+      last_used_at: {
+        label: "마지막 사용 시각",
+        help: "자격 증명이 마지막으로 SCIM 요청을 인증한 시각으로, 1분에 최대 한 번 기록됩니다. 사용 기록이 없으면 비어 있습니다"
       },
       user_id: {
         label: "발급한 사람",
@@ -2488,6 +2496,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "토큰을 저장했습니다",
           fields: {
             token: "토큰",
+            tokenHint: "토큰 힌트",
             connectionId: "연결 ID",
             expiresAt: "만료 시각"
           }
@@ -2871,7 +2880,64 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "전체"
+        label: "전체",
+        emptyState: {
+          title: "아직 그룹 매핑이 없습니다",
+          message: "\"SSO 그룹 매핑\"(SSO 제공자가 로그인 시 보내는 그룹) 또는 \"SCIM 그룹 매핑\"(SCIM 연결이 프로비저닝하는 그룹)으로 ID 제공자 그룹의 구성원에게 권한 세트를 부여합니다."
+        }
+      }
+    },
+    _actions: {
+      map_sso_group: {
+        label: "SSO 그룹 매핑",
+        description: "SSO 제공자가 로그인 시 보내는 그룹의 모든 구성원에게 권한 세트를 부여합니다. 각 구성원이 다음에 해당 제공자로 로그인할 때 적용됩니다.",
+        successMessage: "그룹 매핑을 저장했습니다. 각 구성원이 다음에 해당 제공자로 로그인할 때 적용됩니다.",
+        params: {
+          providerId: {
+            label: "SSO 제공자 ID",
+            helpText: "로그인 시 그룹을 보내는 SSO 제공자의 제공자 ID(예: \"okta\"). 제공자에 그룹 클레임이 설정되어 있어야 합니다(SSO 제공자의 그룹 클레임 편집)."
+          },
+          groupExternalId: {
+            label: "그룹 외부 ID",
+            helpText: "그룹 클레임이 ID를 보내는 경우 그 값을 그대로 입력합니다(예: Entra ID 그룹 개체 ID). 그룹 표시 이름과 둘 중 하나만 설정하세요."
+          },
+          groupDisplayName: {
+            label: "그룹 표시 이름",
+            helpText: "그룹 클레임이 이름을 보내는 경우 그 값을 그대로 입력합니다(예: \"Sales\"). 그룹 외부 ID와 둘 중 하나만 설정하세요."
+          },
+          permissionSet: {
+            label: "권한 세트",
+            helpText: "그룹 구성원이 제공자의 조직에서 부여받는 권한 세트입니다. 관리자 권한 세트는 거부됩니다."
+          }
+        }
+      },
+      map_scim_group: {
+        label: "SCIM 그룹 매핑",
+        description: "SCIM 연결이 프로비저닝하는 그룹의 모든 구성원에게 권한 세트를 부여합니다. 그룹의 현재 구성원에게 즉시 부여됩니다.",
+        successMessage: "그룹 매핑을 저장했습니다",
+        params: {
+          connectionId: {
+            label: "SCIM 연결 ID",
+            helpText: "그룹을 프로비저닝하는 SCIM 연결(예: \"okta-prod\"). 자격 증명의 연결 ID입니다."
+          },
+          groupExternalId: {
+            label: "그룹 외부 ID",
+            helpText: "ID 제공자가 보내는 그룹의 externalId입니다. 그룹 표시 이름과 둘 중 하나만 설정하세요."
+          },
+          groupDisplayName: {
+            label: "그룹 표시 이름",
+            helpText: "그룹의 displayName이며 정확히 일치해야 합니다. 그룹 외부 ID와 둘 중 하나만 설정하세요."
+          },
+          permissionSet: {
+            label: "권한 세트",
+            helpText: "그룹 구성원이 연결의 조직에서 부여받는 권한 세트입니다. 관리자 권한 세트는 거부됩니다."
+          }
+        }
+      },
+      delete_group_mapping: {
+        label: "매핑 삭제",
+        confirmText: "이 그룹 매핑을 삭제할까요? 그룹 구성원은 더 이상 이 권한 세트를 부여받지 않습니다. SCIM 연결의 경우 그룹 구성원이 즉시 다시 프로젝션되어 이 매핑이 부여한 권한을 잃습니다. SSO 제공자의 경우 해당 로그인이 이 권한 세트로 부여한 권한이 즉시 제거됩니다(같은 권한 세트를 가리키는 제공자의 다른 매핑이 있는 경우 제외). 복원하려면 그룹을 다시 매핑하세요.",
+        successMessage: "그룹 매핑을 삭제했습니다"
       }
     }
   },
