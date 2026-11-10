@@ -41,6 +41,7 @@ import {
   refuseAcceptedDefaultsWithoutWall,
   type DeploymentAcceptance,
 } from './suggested-audience-bindings.js';
+import { refuseAgentCeilingInBaselineOptions } from './agent-ceiling-grant-refusal.js';
 import { RLSCompiler, RLS_DENY_FILTER, policyDeclaresClause } from './rls-compiler.js';
 import {
   andComposeLayers,
@@ -1611,6 +1612,9 @@ export class SecurityPlugin implements Plugin {
     // with the platform's own, never one displacing the other (ADR-0090 D5).
     this.baselinePermissionSets = composeHumanBaselinePermissionSets(this.fallbackPermissionSet);
     this.acceptedDefaultPermissionSets = readAcceptedDefaultPermissionSetsOption(options.acceptedDefaultPermissionSets);
+    // [ADR-0090 D10] The baseline is held by every signed-in person, so an
+    // agent ceiling set is never part of it, however it was named.
+    refuseAgentCeilingInBaselineOptions(this.fallbackPermissionSet, this.acceptedDefaultPermissionSets);
   }
 
   /**
@@ -5361,6 +5365,14 @@ export class SecurityPlugin implements Plugin {
    * `ERR_DATASOURCE_UNAVAILABLE` → `503`) and this gate answers nothing. It
    * used to answer the 404 above, because the existence probe flattened a
    * fault into "absent" — the one thing an outage must never be reported as.
+   *
+   * [ADR-0055 §3] Every `403` above is decided on the master the STORED
+   * reference names, whatever the caller may read, and worded by what the
+   * caller may read: a caller whose field-level security does not let them
+   * read the detail's master reference ({@link getReadableFields}, failing
+   * closed) gets the same `403 PERMISSION_DENIED`, for the same leg, with a
+   * sentence that names no master, no master record and no leg. A caller who
+   * can read the reference gets the specific sentence.
    */
   private assertControlledByParentWrite(
     permissionSets: PermissionSet[],
@@ -5371,11 +5383,12 @@ export class SecurityPlugin implements Plugin {
   ): Promise<void> {
     // [#25223 cut 3] The body moved to `security-plugin-cbp-write-gate.ts` (see `CbpWriteGateHost`).
     const readPermissionEvaluator = () => this.permissionEvaluator;
-    const host: Pick<CbpWriteGateHost, 'assertControlledByParentChainEditable' | 'controlledByParentPredicateWriteMasters' | 'declaresControlledByParent' | 'extractSingleId' | 'permissionEvaluator' | 'readRowById' | 'resolveCbpRelation'> = {
+    const host: Pick<CbpWriteGateHost, 'assertControlledByParentChainEditable' | 'controlledByParentPredicateWriteMasters' | 'declaresControlledByParent' | 'extractSingleId' | 'getReadableFields' | 'permissionEvaluator' | 'readRowById' | 'resolveCbpRelation'> = {
       assertControlledByParentChainEditable: (...a) => this.assertControlledByParentChainEditable(...a),
       controlledByParentPredicateWriteMasters: (...a) => this.controlledByParentPredicateWriteMasters(...a),
       declaresControlledByParent: (...a) => this.declaresControlledByParent(...a),
       extractSingleId: (...a) => this.extractSingleId(...a),
+      getReadableFields: (...a) => this.getReadableFields(...a),
       get permissionEvaluator() { return readPermissionEvaluator(); },
       readRowById: (...a) => this.readRowById(...a),
       resolveCbpRelation: (...a) => this.resolveCbpRelation(...a),

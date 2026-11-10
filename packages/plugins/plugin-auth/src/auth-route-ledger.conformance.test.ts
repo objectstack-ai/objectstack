@@ -303,6 +303,11 @@ describe('auth route ledger hygiene', () => {
       'POST /api/v1/auth/admin/sso/verify-domain',
       'POST /api/v1/auth/admin/unlock-user',
       'POST /api/v1/auth/authorized-clients/withdraw',
+      // On this pin's own terms: `auth-plugin.ts` mounts it itself (a
+      // `rawApp.post` on the `${basePath}/oauth-consent/request` template,
+      // ahead of the catch-all), and the `live.has(route)` loop below holds it
+      // to the same proof — better-auth's consent door is `/oauth2/consent`.
+      'POST /api/v1/auth/oauth-consent/request',
       'POST /api/v1/auth/organization/add-member',
       // [ADR-0151 D1/D4/D6] The AI service account's registration, key mint
       // and lifecycle, on this pin's own terms: `auth-plugin.ts` mounts all

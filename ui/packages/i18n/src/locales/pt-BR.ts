@@ -3170,6 +3170,10 @@ const pt = {
       unknownApp: "um aplicativo",
       unidentified: "Não foi possível identificar este aplicativo.",
       clientId: "ID do cliente",
+      unverified: "Aplicativo não verificado",
+      unverifiedHint: "Nenhum administrador daqui registrou este aplicativo, então o nome dele não foi verificado. Autorize-o somente se você confiar em {{destination}}.",
+      destinationUnconfirmed: "Não foi possível confirmar para onde este acesso seria enviado, então ele não pode ser autorizado aqui.",
+      sentTo: "O acesso será enviado para:",
       willAllow: "Este aplicativo poderá:",
       scope: {
         openid: "Confirmar sua identidade",
