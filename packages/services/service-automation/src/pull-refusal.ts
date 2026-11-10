@@ -2,9 +2,10 @@
 
 /**
  * The refusal every pull throws — a connector source's (`./connector-pull.ts`)
- * and a datasource source's windowed read (`./datasource-window-read.ts`,
- * ADR-0153 D2) alike — so a caller of `IAutomationService.pullConnectorSource`
- * branches on one type, one `code` + `status` pair and one `reason` union.
+ * and a datasource source's (`./datasource-pull.ts`, reading through
+ * `./datasource-window-read.ts`, ADR-0153 D1/D2) alike — so a caller of
+ * `IAutomationService.pullConnectorSource` branches on one type, one `code` +
+ * `status` pair and one `reason` union, whichever source the mapping names.
  */
 
 /** Which part of the binding a refused pull failed on. */
@@ -36,7 +37,13 @@ export type ConnectorPullRefusalReason =
     | 'sync_bounds_not_pushed'
     | 'source_key_not_exact'
     | 'watermark_not_exact'
-    | 'watermark_start_invalid';
+    | 'watermark_start_invalid'
+    // [ADR-0153 D1, D2, D8] The datasource source's binding, judged before the
+    // first read (`./datasource-pull.ts`): the build's tokens where it has one.
+    | 'source_key_missing'
+    | 'source_binding_invalid'
+    | 'source_organization_scope_unstated'
+    | 'job_organization_missing';
 
 /**
  * A refused pull. `code` + `status` are the ADR-0112 pair a door would put on

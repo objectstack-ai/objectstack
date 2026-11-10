@@ -471,12 +471,12 @@ function collectBundleMappings(bundle: unknown): Array<Record<string, unknown>> 
  *
  * It binds when the job declares no code beside it (the declaration refuses
  * `pull` + `body` / `handler`), `pull` parses against `JobSchema.pull`, and the
- * artifact declares the named mapping WITH a `connectorSource` — the reference
- * `defineStack` (and so `os validate`) checks against the stack's mappings. A
- * pull that does not bind is not scheduled: a run of it could only ever be
- * refused by the automation service (`mapping_not_found` /
- * `no_connector_source`), so the reason is said once, at bind, rather than on
- * every tick.
+ * artifact declares the named mapping WITH a source — a `connectorSource`, or
+ * [ADR-0153 D1] a `datasourceSource` — the reference `defineStack` (and so
+ * `os validate`) checks against the stack's mappings. A pull that does not
+ * bind is not scheduled: a run of it could only ever be refused by the
+ * automation service (`mapping_not_found` / `no_connector_source`), so the
+ * reason is said once, at bind, rather than on every tick.
  *
  * `refusal` is the sentence the author acts on, prefixed with the key it names.
  */
@@ -503,14 +503,18 @@ export function judgeJobPull(
         return {
             binds: false,
             refusal: `pull.mapping: this artifact declares no mapping '${mapping}' — declare it (its targetObject, fieldMapping `
-                + 'and a connectorSource naming the rest or openapi connector it pulls from) beside the job, or correct the name',
+                + 'and a connectorSource naming the rest or openapi connector it pulls from, or a datasourceSource naming the '
+                + 'federated object it copies) beside the job, or correct the name',
         };
     }
-    if (declared.connectorSource === undefined) {
+    // [ADR-0153 D1] Either source binds: the automation service's pull reads a
+    // connector action or, for a `datasourceSource`, the federated object in windows.
+    if (declared.connectorSource === undefined && declared.datasourceSource === undefined) {
         return {
             binds: false,
-            refusal: `pull.mapping: mapping '${mapping}' declares no connectorSource, so there is nothing to pull — add `
-                + 'connectorSource: { connector, action } naming the rest or openapi connector it reads from',
+            refusal: `pull.mapping: mapping '${mapping}' declares no source, so there is nothing to pull — add `
+                + 'connectorSource: { connector, action } naming the rest or openapi connector it reads from, or '
+                + 'datasourceSource: { object, watermark: { field, start } } naming the federated object it copies',
         };
     }
     return { binds: true, mapping };
@@ -604,9 +608,11 @@ export function pullRunOutcomeOf(result: ConnectorSourcePullResult): JobRunOutco
     const summary = result?.summary;
     const errors = Number(summary?.errors ?? 0);
     if (errors > 0) {
+        // [ADR-0153 D1] A datasource pull names the federated object it read.
+        const from = result.source === 'datasource' ? ` (from '${result.object}')` : '';
         return {
             outcome: 'degraded',
-            reason: `mapping '${result.mapping}': ${errors} of ${result.pulled} pulled record(s) were refused by the import runner `
+            reason: `mapping '${result.mapping}'${from}: ${errors} of ${result.pulled} pulled record(s) were refused by the import runner `
                 + `(${Number(summary?.created ?? 0)} created, ${Number(summary?.updated ?? 0)} updated, ${Number(summary?.skipped ?? 0)} skipped)`,
         };
     }
@@ -954,8 +960,9 @@ export async function scheduleAppArtifactJobs(
         let form: 'body' | 'handler' | 'pull';
         if (job.pull !== undefined) {
             // The declarative run form. Judged against the artifact first: a
-            // pull whose mapping is missing (or has no `connectorSource`)
-            // could only ever be refused, so it is not scheduled.
+            // pull whose mapping is missing, or has no source (`connectorSource`
+            // or `datasourceSource`), could only ever be refused, so it is not
+            // scheduled.
             const judged = judgeJobPull(job, bundle);
             if (!judged.binds) {
                 logger.warn(`${tag} job pull does not bind — the job is NOT scheduled: ${judged.refusal}`, {
