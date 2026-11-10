@@ -66,7 +66,7 @@ function makeSource({ batch = true, refuse, refusal }: { batch?: boolean; refuse
     if (dataset === refuse) throw refusal;
     return answerFor(dataset, selection);
   });
-  const batchDoor = vi.fn(async (queries: Array<{ dataset: string; selection: Selection }>) =>
+  const batchDoor = vi.fn(async (queries: Array<{ dataset: string; selection: Selection }>, _options?: { packageId?: string }) =>
     queries.map(({ dataset, selection }) => (dataset === refuse
       ? { status: 'rejected' as const, reason: refusal }
       : { status: 'fulfilled' as const, value: answerFor(dataset, selection) })));

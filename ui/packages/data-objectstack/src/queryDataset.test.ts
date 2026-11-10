@@ -983,8 +983,8 @@ function makeBatchFetch({ batch, single }: {
 
 const batchAdapter = (fetchImpl: unknown) =>
   new ObjectStackAdapter({ baseUrl: 'http://localhost:3000', token: 'tok_b', autoReconnect: false, fetch: fetchImpl as any });
-const batchCalls = (calls: Array<{ url: string }>) => calls.filter((c) => c.url.includes('/dataset/query/batch'));
-const singleCalls = (calls: Array<{ url: string }>) => calls.filter((c) => /\/dataset\/query(\?|$)/.test(c.url));
+const batchCalls = (calls: Array<{ url: string; body?: any }>) => calls.filter((c) => c.url.includes('/dataset/query/batch'));
+const singleCalls = (calls: Array<{ url: string; body?: any }>) => calls.filter((c) => /\/dataset\/query(\?|$)/.test(c.url));
 /** Every query answered: `{ data }` carrying the dataset name it asked for. */
 const answerAll = (queries: Array<Record<string, unknown>>): WireAnswer => ({
   status: 200,
