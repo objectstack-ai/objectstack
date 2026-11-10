@@ -2,44 +2,23 @@
 
 /**
  * [ADR-0150 D4, epic #31527 child B (flow)] The automation engine holds flows
- * by `(package, name)`: one SLOT per item, and every same-named flow of two
- * packages is held, armed and dispatched as its own.
+ * by `(package, name)`: one SLOT per item, each held, armed and dispatched as
+ * its own.
  *
- * ## The slot and its key
+ * A slot is `(packageId, name)`: the package whose ITEM the flow is (the
+ * shipper; for its declared `.custom` override, the package it overrides), or
+ * `null` for a flow no package holds. Every per-flow record the engine keeps
+ * is keyed by the slot's KEY: the bare name while ONE slot holds the name (so
+ * a one-holder deployment keeps every key, log line and answer it had), and
+ * `PACKAGE/NAME` ({@link qualifiedFlowKey}) while two or more do. A flow name
+ * admits `[a-z0-9_]` only, so the last `/` splits the two. A key moves only
+ * when a name gains or loses its second slot; {@link FlowSlotTable.add} and
+ * {@link FlowSlotTable.remove} answer which keys moved.
  *
- * A slot is `(packageId, name)`. `packageId` is the package whose ITEM the
- * flow is (ADR-0150 D4 identity): the package that ships it, and for the
- * shipping package's declared `.custom` override (ADR-0146 D9) the package it
- * overrides, because the override is that package's item customized. `null`
- * is a flow no package holds: one authored in this environment, or one
- * registered straight into the engine.
- *
- * Every per-flow record the engine keeps (the flow map, the version history,
- * the status switch, the trigger binding and its decline records) is keyed by
- * the slot's KEY:
- *
- *  - while ONE slot holds a name, its key is the bare name — byte for byte
- *    the key every record had before slots, so a deployment where each name
- *    has one holder (every deployment phase 1 admits) keeps every key, log
- *    line and answer it had;
- *  - while TWO OR MORE slots hold it, each key is `PACKAGE/NAME`
- *    ({@link qualifiedFlowKey}). No name and no package id contains `/`'s
- *    meaning here: a flow name admits `[a-z0-9_]` only, so the last `/`
- *    always splits the two.
- *
- * So a key moves when a name gains or loses its second holder, and only
- * then; {@link FlowSlotTable.add} and {@link FlowSlotTable.remove} answer
- * which keys moved, and the engine moves its records with them.
- *
- * ## The invariant: a package-less slot never sits beside a package slot
- *
- * ADR-0150 D4: a package-less item that bears a package-held name is a
- * customization of that holder, never a second item, so it never arms beside
- * the item it shadows. The engine keeps that by construction: a package slot
- * arriving for a name a package-less slot holds takes that slot over
- * ({@link FlowSlotTable.adopt}), and a package-less registration of a name
- * one package slot holds lands in that slot. A bare key therefore names the
- * one slot of its name, whichever kind it is.
+ * Invariant (D4): a package-less slot never sits beside a package slot. A
+ * package arriving for a name a package-less slot holds takes it over
+ * ({@link FlowSlotTable.adopt}), and a package-less registration of a name one
+ * package slot holds lands in that slot.
  */
 
 /** One flow the engine holds: the package whose item it is, and its name. */
@@ -55,38 +34,26 @@ export function qualifiedFlowKey(packageId: string, name: string): string {
     return `${packageId}/${name}`;
 }
 
-/**
- * [#31696] No flow name contains `/`, so a "name" that does spells a slot key
- * (`PACKAGE/NAME`). A bare door never takes one: it names no flow there.
- */
+/** [#31696] No flow name contains `/`: a "name" that does spells a slot key, which a bare door never takes. */
 export function isSlotKeySpelling(name: string): boolean {
     return name.includes('/');
 }
 
-/**
- * [#31696] The key a bare door reads a slot-key spelling under: one no slot is
- * ever filed under (it starts with a NUL), so the door finds no flow, exactly
- * as for a name it does not hold.
- */
+/** [#31696] A key no slot is filed under (NUL-led): a bare door reads a slot-key spelling under it and finds no flow. */
 export function unfiledFlowKey(name: string): string {
     return `\u0000${name}`;
 }
 
 /**
- * The property a run's context carries the key of the slot whose run it is,
- * so a `subflow` / `map` child, which inherits its parent's context, resolves
- * its own name from the package of the flow that names it. A symbol: copied
- * by a spread like every other key of the context, and never serialized, so it
- * reaches no store and no wire.
+ * The run context's slot key, so a `subflow` / `map` child resolves names from
+ * its caller's package. A symbol: copied by a spread, never serialized.
  */
 export const FLOW_RUN_SLOT_KEY: unique symbol = Symbol.for('objectstack.automation.flowRunSlotKey');
 
 /**
  * [ADR-0150 D8 row R8, #31696] The package whose flow a run executes, stamped
- * when the run starts ({@link stampFlowRunSlot}): the run is stored under it
- * even when its slot's key moves while the run is in flight. In-process only,
- * like {@link FLOW_RUN_SLOT_KEY}: a stored run carries its package as
- * `flowPackage` instead.
+ * at start ({@link stampFlowRunSlot}), so the run is stored under it even when
+ * its key moves in flight. In-process only (stored: `flowPackage`).
  */
 const FLOW_RUN_PACKAGE: unique symbol = Symbol('objectstack.automation.flowRunPackage');
 
@@ -125,12 +92,7 @@ export class FlowSlotTable {
         return this.byName.get(name)?.get(packageId ?? '');
     }
 
-    /**
-     * Is `name` shared: do two or more slots hold it, or does one while the
-     * registry holds it under two or more packages (the other's body refused)?
-     * The one predicate every reader asks, so a lone slot is never read as the
-     * name's one holder while the resolver refuses the bare name.
-     */
+    /** [M1] Is `name` shared: two or more slots hold it, or one does while the registry holds it twice. Every reader asks this. */
     isShared(name: string): boolean {
         const size = this.byName.get(name)?.size ?? 0;
         return size > 1 || (size === 1 && this.heldByMany?.(name) === true);
@@ -141,11 +103,7 @@ export class FlowSlotTable {
         return [...this.byKey.keys()];
     }
 
-    /**
-     * File the slot `(packageId, name)`, which no slot is yet. Answers its key
-     * and the keys of the name's other slots that moved: the one slot that
-     * held the name alone moves from the bare name to its qualified key.
-     */
+    /** File the slot `(packageId, name)`: its key, and the name's lone slot's move to its qualified key, if any. */
     add(slot: FlowSlot): { key: string; moved: FlowKeyMove[] } {
         const packages = this.byName.get(slot.name) ?? new Map<string, string>();
         const moved: FlowKeyMove[] = [];
@@ -165,10 +123,7 @@ export class FlowSlotTable {
         return { key, moved };
     }
 
-    /**
-     * Drop the slot `key` files. Answers the keys that moved: a name left with
-     * one slot files it under the bare name again.
-     */
+    /** Drop the slot `key` files: a name left with one slot files it under the bare name again (the move answered). */
     remove(key: string): FlowKeyMove[] {
         const slot = this.byKey.get(key);
         if (!slot) return [];
@@ -187,12 +142,7 @@ export class FlowSlotTable {
         return [{ from: onlyKey, to: slot.name }];
     }
 
-    /**
-     * The package-less slot `key` becomes package `packageId`'s slot, under the
-     * same key: the name's one holder is now that package's item, and the
-     * package-less flow its customization (ADR-0150 D4). Only for the name's
-     * ONE slot, so its key is the bare name either way.
-     */
+    /** The name's one, package-less slot `key` becomes `packageId`'s under the same key (D4: the flow is its customization). */
     adopt(key: string, packageId: string): void {
         const slot = this.byKey.get(key);
         if (!slot || slot.packageId !== null) return;
@@ -212,11 +162,9 @@ export class FlowSlotTable {
 }
 
 /**
- * Stamp a run's own context with the key of its flow's slot
- * ({@link FLOW_RUN_SLOT_KEY}), where that key is not the name the context
- * already carries — a slot of a name two slots hold — and clear a stamp
- * inherited from a calling run otherwise, so a child reads its own slot and
- * never its parent's. `context` is the run's own copy.
+ * Stamp a run's own context with its slot key where that is not the name it
+ * carries, and clear an inherited stamp otherwise, so a child reads its own
+ * slot, never its parent's.
  */
 export function stampFlowRunSlot(context: object, key: string, packageId?: string | null): void {
     const stamped = context as { flowName?: unknown; [FLOW_RUN_SLOT_KEY]?: string; [FLOW_RUN_PACKAGE]?: string };
@@ -232,12 +180,7 @@ export function flowRunPackage(context: unknown): string | undefined {
     return typeof stamped === 'string' && stamped !== '' ? stamped : undefined;
 }
 
-/**
- * [#31696] The key of the slot whose run `context` is: the stamped key
- * ({@link FLOW_RUN_SLOT_KEY}) where the run's flow has a name two slots hold,
- * else the flow name the context carries, which is then its key. `undefined`
- * for a context that is no run's.
- */
+/** [#31696] The slot key of the run `context`: the stamped key, else its flow name; `undefined` for no run. */
 export function flowRunKey(context: unknown): string | undefined {
     const run = context as { flowName?: unknown; [FLOW_RUN_SLOT_KEY]?: unknown } | undefined;
     const stamped = run?.[FLOW_RUN_SLOT_KEY];

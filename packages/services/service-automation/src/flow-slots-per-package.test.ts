@@ -335,14 +335,14 @@ describe('#31696 two packages\' flows of one name — both armed, each its own',
         loaderSets.f = [P2, P1];
         engine.recordFlowRefusal('f', new Error('refused: p1 body'));
         ship(P1, caller('c', 'f'));
-        expect(engine.getActiveTriggerBindings()).toEqual([]);
-        expect(engine.getFlowRegistration('f')).toMatchObject({ state: 'refused' });
         expect((await engine.execute('c')).success).toBe(false);
         const bare = await engine.execute('f');
         expect([bare.success, bare.error]).toEqual([false, expect.stringContaining(P1)]);
         await expect(engine.getFlow('f')).rejects.toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
         expect(() => engine.withdrawFlow('f')).toThrow(/held by 2 packages/);
         expect(ran).toEqual([]);
+        expect(engine.getActiveTriggerBindings()).toEqual([]);
+        expect(engine.getFlowRegistration('f')).toMatchObject({ state: 'refused' });
         expect((await engine.executeSlot(P2, 'f')).success).toBe(true);
         expect(ran).toEqual(['p2']);
     });
