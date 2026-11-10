@@ -1067,3 +1067,232 @@ else is missing. No live run was made: every clause is read from source, and eac
 ### 16d. Security note
 
 No security finding was made, and none is withheld.
+
+## 17. Scoped sweep 2026-11-10 — themes 2, 4 and 5 since 18.3.0 (#32020, epic #32022 M2)
+
+**Not a full sweep.** One writer worked sequentially, with no hunter subagents. The scope is
+the epic's theme 2 (multi-replica on Redis), theme 4 (the recycle bin) and theme 5
+(multi-currency record-mode amounts), read from source at `43a51b55` against the 18.3.0
+subject `83d7e4ae`. The pass enumerated the commits of those themes since 18.3.0 (51 match
+the card's premise grep) and ran these SWEEP.md angles on what they touched:
+
+- angle 3: the route ledgers (`rest-route-ledger.ts`'s four recycle-bin rows, the runtime
+  `route-ledger.ts` `/packages` rows and `GET /ready`, the settings ledger, the install-local
+  routes);
+- angle 2: the spec constants that bound each refusal (the four restore refusal codes, the two
+  grant keys, the retention default and variable, the `homeAmount` pointers and rate scale);
+- angle 1, limited to the theme's own surfaces: the delete toast, the Setup recycle-bin page,
+  the form's home-amount preview and Studio's `homeAmount` editor;
+- angle 5: ADR-0144 (as amended), ADR-0148 and `content/docs/kernel/cluster.mdx` against what
+  the runtime serves.
+
+Angles 4 and 6 were not run, so this section supports **no** claim about what else is
+missing. No live run was made: every clause is read from source, and each item's
+`automated.ref` names the pins that hold it today.
+
+- **16 new items**, all `since: "v18.4"` except the one `planned` item (`since: null`).
+  - Theme 4, 4 items (all active): `api-backend.recycle-bin-delete-entry-restore`,
+    `api-backend.recycle-bin-refusals-purge-empty`, `records-forms.delete-toast-undo-restore`
+    and `records-forms.setup-recycle-bin-page`.
+  - Theme 5, 4 items (3 active, 1 planned): `records-forms.home-amount-preview-states`,
+    `studio-authoring.currency-home-amount-editor`,
+    `studio-authoring.currency-field-repointed-refusal`; planned:
+    `records-forms.master-detail-child-follows-parent-currency`.
+  - Theme 2, 8 items (all active, 6 of them `blocked(fixture)`, see 17c): runnable today,
+    `cli.serve-multi-replica-local-database-refusal` and
+    `cli.start-multi-replica-auth-secret-refusal`; blocked,
+    `attachments-storage.multi-replica-local-root-refusal`,
+    `platform-core.multi-replica-package-change-refusal` (the seven package doors,
+    install-local and the clone that would create a customization package),
+    `platform-core.ready-cluster-driver-health`, `platform-core.cluster-membership-heartbeat`,
+    `platform-core.settings-change-reaches-every-replica` and
+    `platform-core.shared-redis-cache-across-replicas`.
+- **Accuracy fix, a revision with its history row:** `records-forms.multi-currency-invoice`
+  (rev 2) carried `since: "v18"`, but the showcase invoice became the multi-currency example
+  in #31757, after 18.3.0, and the hint and preview its `acceptance[5]` reads landed in #31638
+  and #31724. It is `v18.4` now. Its knownGaps[0] said a child amount cannot take its
+  parent's currency; the spec admits that since #31956, and the engine half is the planned
+  item above.
+- **`coverage.json`**: the recycle-bin items are mapped to `crud_endpoints` (and the grants
+  item to `permission`); the currency items to `field`, and the re-point refusal to `object`
+  and `metadata_endpoints`. The invoice item, never mapped, is now under `field`. The six
+  blocked theme-2 items are mapped nowhere: an item no run can drive does not carry a kind.
+- **Commits the premise grep matches that no item here covers.** Docs, ADR, skills and test
+  commits change no surface (#30182, #30186, #30263, #30755, #30776, #30929, #30994, #31769,
+  #31917, #31986). Outside the card's named list, and not checked against existing items: the
+  home-amount recompute and the record-currency code backfill (#30183, #30737, #30809, #30867),
+  the rate-scale and summary refusals at the authoring door (#30644, #31976), the analytics
+  home-field proof (#30176), the automation currency screen field (#30269), the console fixes
+  (#30495, #30868), the replica fixes with no new surface (#31584, #31721, #31747, #31816,
+  #31996, #32204) and the objectql delete fix #31702. #31848 is a false match: "concurrency"
+  contains the grep's "currency".
+
+### 17a. Declared but not landed — written as `planned`, already carded
+
+- A `master_detail` child following its parent's currency (ADR-0144 D2 as amended, #31917).
+  The authoring door admits the `PARENT_FIELD.CODE_FIELD` path (#31956), but at `43a51b55`
+  the engine reads `currencyField` as a field of the same row
+  (`packages/objectql/src/validation/record-currency-code.ts`), so a path reads no code.
+  Tracked by #31911 (open).
+
+### 17b. Measured from source — notes for owners, no card filed
+
+- **A storage settings change to the local adapter under declared replicas is saved but not
+  applied.** The refusal is the settings subscriber's
+  (`packages/services/service-storage/src/storage-service-plugin.ts`): it logs the refusal and
+  "The storage settings change was NOT applied: the current adapter keeps serving.", while the
+  settings door has already stored the value. The next boot then reads the stored value and
+  stops at the `kernel:ready` refusal. An operator who changed it in Setup sees a saved setting
+  and a replica that will not restart. The item scores the subscriber's refusal and says the
+  PUT may answer 200. No card filed: whether the door should refuse first is the owner's call.
+- **`readClusterMembers()` has no consumer.** No HTTP door, CLI command or console surface
+  reads it at `43a51b55`, so `platform-core.cluster-membership-heartbeat` reads the keys in
+  Redis. The function is the read half a later surface would use.
+- **No stock persona holds `allowRestoreOwnDeleted` without `manageRecycleBin`.** The admin
+  holds both through `modifyAllRecords`, and `showcase_contributor` holds neither. So the
+  own-entry half of the restore rule (D5) and an Undo withheld from a caller without the grant
+  are pinned by tests only (see 17c).
+
+### 17c. Fixtures worth adding
+
+- **Two replicas on Redis, gated.** Six theme-2 items need two replicas declared on the redis
+  cluster driver over one Redis and one shared Postgres, with one `OS_AUTH_SECRET`. The open
+  tree registers no multi-node gate: `checkMultiNodeAllowed` fails closed with none
+  registered, `os serve` falls back to the in-process driver, and the split-brain guard refuses
+  the declared topology. So no declared multi-replica boot on Redis reaches `kernel:ready` on a
+  stock tree. The carriers ship with a distribution. The open-tree route the CLI pin uses is an
+  app whose own `@objectstack/service-cluster` calls `registerMultiNodeGate` on the instance
+  `os serve` imports from the host
+  (`packages/cli/test/serve-multi-node-gate-declaration.integration.test.ts`, `writeApp`),
+  there with a memory stand-in for the driver. A run that does the same with the real redis
+  driver, and proves it with the premise check each item states, should become an area-level
+  recipe with that provenance, and lift `blocked` on the six items in the same edit. The two
+  CLI refusals need no gate and are runnable now.
+- **A restore-own-deleted persona.** A permission set granting `allowRestoreOwnDeleted` alone
+  on one writable showcase object, bound to a member, would let
+  `api-backend.recycle-bin-refusals-purge-empty` drive "a caller restores the entries it
+  deleted, and only those", and `records-forms.delete-toast-undo-restore` show the Undo
+  withheld from a caller without it.
+- **A unique field on a showcase business object.** `RESTORE_UNIQUE_VALUE_TAKEN` has no live
+  fixture: no showcase business object declares a unique field.
+
+### 17d. Security note
+
+No security finding was made, and none is withheld.
+
+## 18. Scoped sweep 2026-11-10 — themes 6, 7 and 8 since 18.3.0 (#32269, epic #32022 M3)
+
+**Not a full sweep.** One writer worked sequentially, with no hunter subagents. The scope is
+the epic's theme 6 (action preflight and page bindings), theme 7 (AI data tools and MCP) and
+theme 8 (federation and the CLI), read from source at `9091955b` against the 18.3.0 subject
+`83d7e4ae`. The pass enumerated the commits of those themes since 18.3.0 (29 match the card's
+premise grep) and ran these SWEEP.md angles on what they touched:
+
+- angle 2: the spec constants and refusals that bound each surface (the `preflight` cross-key
+  refusals, the closed hole set, the dataset synonym limits, the read_file caps and host
+  variables, the federation-only driver set, the restriction profile keys);
+- angle 3: the routes and tool registrations (`registerDatasetTools`, `registerFileTools`,
+  the interceptor route, `GET /api/v1/datasources/drivers`, install-local `dryRun`, the
+  restriction-profile route);
+- angle 1, limited to the themes' own surfaces: the param dialog's preflight panel, the
+  `row-table` block, the page re-read, the list link's filter, Studio's dataset form and the
+  New datasource dialog;
+- angle 5: ADR-0149 and ADR-0015 §4.6 against what the runtime serves.
+
+Angles 4 and 6 were not run, so this section supports **no** claim about what else is
+missing. No live run was made: every clause is read from source, and each item's
+`automated.ref` names the pins that hold it today.
+
+- **19 new items**, all `since: "v18.4"` except the one `planned` item (`since: null`).
+  - Theme 6, 5 items (4 active, 1 planned): `studio-authoring.action-preflight-authoring-refusals`,
+    `records-forms.action-preflight-panel`, `studio-authoring.page-row-table-block`,
+    `studio-authoring.page-api-binding-reread-after-action`; planned:
+    `ai.pending-action-held-approval`.
+  - Theme 7, 6 items (all active, 1 of them `blocked(environment)`): `ai.mcp-dataset-tools`,
+    `studio-authoring.dataset-member-vocabulary`, `ai.mcp-read-file-pdf-word-extraction`,
+    `ai.mcp-tool-call-interceptor`, `records-forms.list-link-filter-refused-whole`; blocked:
+    `ai.chat-answer-list-link`.
+  - Theme 8, 8 items (all active, 3 of them `blocked(fixture)`, see 18c): runnable today,
+    `integration-system.federation-only-driver-catalog`,
+    `integration-system.federation-only-managed-refusal`, `cli.deploy-runtime-dry-run-json`,
+    `cli.validate-target-restriction-profile` and `cli.package-upgrade-plan-override-advice`;
+    blocked, `integration-system.oracle-federated-read-write`,
+    `integration-system.oracle-raw16-uuid-reference` and
+    `integration-system.mssql-federated-read-write`.
+- **Accuracy fix, a revision with its history row:** `ai.mcp-http-surface` (rev 10).
+  Its `acceptance[4]` counted 15 HTTP tools and 10 on stdio, measured at `0647dabb` before
+  #31773. `list_datasets` and `query_dataset` now register on both doors wherever the bridge
+  carries the dataset executor, and analytics is the foundational capability the showcase
+  always loads, so the counts read 17 and 12. Read from source, not counted live.
+- **`coverage.json`**: the preflight items are mapped to `action`, the row-table and re-read
+  items to `page`, the dataset items to `dataset`, the federation-only items to `datasource`,
+  the list-link item to `view`, the deploy and upgrade-plan items to `manifest`, and the
+  restriction-profile item to `hook` (its refusal rows are hooks and actions). The read_file
+  and interceptor items exercise MCP, which is no governed metadata kind, so they carry none.
+  The planned item and the four blocked items are mapped nowhere.
+- **The 29 commits the premise grep matches.** 26 are covered by an item here: the preflight
+  (#31859, #31924, #31933, #32015), the row-table (#31883), read_file (#31009, #31848,
+  #31894), the interceptor (#31633, #31875), the dataset tools and vocabulary (#31652, #31772,
+  #31773), Oracle (#31351, #31642, #31786), SQL Server (#31381, #31623, #31625, #31770), the
+  catalog and dialog (#31632), `os deploy` (#31776) and `os validate --target` (#31237,
+  #31276, #31277, #31766). #31276 (devPlugins are not read) and #31277 (parallel and try_catch
+  are always allowed) are held by the pins the item names, not by a live clause. Two are
+  skills docs with no surface (#32088, #32189). #30862 is a false match: "snapshot preflight"
+  is the release workflow. Items here also cover commits the grep does not match: the page
+  re-read (#31936), the list link and the chat answer's link (#31902), and the upgrade plan's
+  override advice (#31627).
+
+### 18a. Declared but not landed — written as `planned`
+
+- **A pending action held for an approver.** `PendingActionStatus` and
+  `AiPendingActionStatusSchema` declare `held`, and the AI approvals inbox draws it as
+  "Waiting for approval", but at `9091955b` nothing in the open tree sets it: the AI service
+  that would is Cloud/EE. `McpToolCallRefusal` names a later `hold` outcome beside `deny`; today
+  an interceptor's `hold` is refused as a malformed verdict, which
+  `ai.mcp-tool-call-interceptor` scores. No card filed: the producer is not in this
+  repository.
+
+### 18b. Measured from source — notes for owners, no card filed
+
+- **The open runtime serves no restriction profile.** `os validate --target URL` fetches
+  `/api/v1/discovery/restriction-profile` (`RESTRICTION_PROFILE_ROUTE`), and no open-tree
+  server registers that route, so a URL target on a stock boot answers 404 and is refused
+  ("no environment is served at this host"). The item scores the refusal and the file form.
+  The route is a hosted environment's to serve.
+- **No stock installer for the MCP tool-call interceptor.** `setToolInterceptor` is a host
+  seam with no caller in the open tree. `ai.mcp-tool-call-interceptor` provisions an inline
+  plugin in a scratch copy of the showcase; that recipe is read from the plugin contract and
+  has not been booted (see 18c).
+- **A preflight `waiting` state has no stock read to show it on.** A `${param.X}` hole needs a
+  query parameter the read accepts, and the record read door accepts only `select` and
+  `expand` (`DATA_RECORD_READ_PARAMS`). The live leg of `records-forms.action-preflight-panel`
+  therefore reads by `${ctx.recordId}`, and its pins hold `waiting`, the stale-answer drop and
+  the seed cleared on a URL change.
+- **`ai.mcp-http-surface` drifts each time a tool family lands.** Its `acceptance[4]` names
+  every tool and both counts, so each new family is a checklist-accuracy finding the next
+  weekly run reports. Not changed here beyond the count.
+
+### 18c. Fixtures worth adding
+
+- **A credentialed Oracle Database and SQL Server.** Three theme-8 items need one each.
+  `node scripts/qa/qa-fixture.mjs external-database` (#32233, merged as #32277) provisions
+  PostgreSQL only and refuses an `OS_TEST_EXTERNAL_DB_URL` that is not `postgres://`. The
+  driver's live suites read `OS_TEST_ORACLE_URL` and `OS_TEST_MSSQL_URL`, and no CI job runs
+  either engine. Extending the fixture command with an `oracle` and an `mssql` arm (a container
+  image or a URL the runner brings, the login bound through the top-level `secret`) would let a
+  run lift `blocked` on all three in the same edit. Until then the federation-only refusals are
+  runnable, since they are refused before any connection.
+- **An AI service that answers the console chat.** `ai.chat-answer-list-link` needs an agent
+  with a model; service-ai is Cloud/EE, the same gap the entitled side of
+  `ai.console-ai-surface-gating` records. The link parse and the target it builds are pinned.
+- **The interceptor plugin, booted once.** A run that boots the scratch copy with the inline
+  plugin `ai.mcp-tool-call-interceptor` describes, and sees its log line, should record that
+  as an area-level recipe with its provenance.
+- **Synonyms on a showcase dataset.** No showcase dataset declares synonyms or member
+  descriptions, so `ai.mcp-dataset-tools` matches by name and label only and
+  `studio-authoring.dataset-member-vocabulary` saves a scratch dataset. One synonym on
+  `showcase_invoice_metrics` would let the first item score a synonym match on stock data.
+
+### 18d. Security note
+
+No security finding was made, and none is withheld.

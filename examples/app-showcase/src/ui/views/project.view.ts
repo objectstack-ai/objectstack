@@ -30,6 +30,10 @@ export const ProjectViews = defineView({
       { field: 'team_members' },
       { field: 'budget' },
       { field: 'budget_remaining' },
+      // The two roll-ups over the project's tasks: summary fields nothing else
+      // draws, so they were only carried by the bundle's labels (#32168).
+      { field: 'task_count' },
+      { field: 'total_estimate' },
       { field: 'end_date' },
     ],
     // Rich bulk-edit definitions (#2185) — select rows, then "set the same

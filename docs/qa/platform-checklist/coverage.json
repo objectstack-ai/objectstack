@@ -13,7 +13,9 @@
         "records-forms.script-action-hook-refusal-toast",
         "studio-authoring.actions-tab-presets",
         "api-backend.actions-namespace-address",
-        "ai.mcp-namespace-faces"
+        "ai.mcp-namespace-faces",
+        "studio-authoring.action-preflight-authoring-refusals",
+        "records-forms.action-preflight-panel"
       ]
     },
     "agent": {
@@ -80,7 +82,9 @@
       "items": [
         "api-backend.rest-crud-config-contract",
         "api-backend.query-contract-matrix",
-        "records-forms.crud-roundtrip"
+        "records-forms.crud-roundtrip",
+        "api-backend.recycle-bin-delete-entry-restore",
+        "api-backend.recycle-bin-refusals-purge-empty"
       ]
     },
     "dashboard": {
@@ -101,7 +105,9 @@
         "dashboards.dataset-report-authoring",
         "api-backend.aggregate-contract-matrix",
         "studio-authoring.report-authoring-options",
-        "studio-authoring.no-entry-property-matrix"
+        "studio-authoring.no-entry-property-matrix",
+        "ai.mcp-dataset-tools",
+        "studio-authoring.dataset-member-vocabulary"
       ]
     },
     "datasource": {
@@ -111,7 +117,9 @@
         "integration-system.external-schema-drift-gate",
         "records-forms.field-unique-enforcement",
         "integration-system.external-schema-browser-ui",
-        "cli.dev-automigrate-policy"
+        "cli.dev-automigrate-policy",
+        "integration-system.federation-only-driver-catalog",
+        "integration-system.federation-only-managed-refusal"
       ]
     },
     "doc": {
@@ -146,7 +154,11 @@
         "studio-authoring.summary-field-authoring",
         "studio-authoring.no-entry-property-matrix",
         "studio-authoring.api-written-keys-survive-studio-save",
-        "studio-authoring.removed-key-save-door-refusal"
+        "studio-authoring.removed-key-save-door-refusal",
+        "records-forms.multi-currency-invoice",
+        "records-forms.home-amount-preview-states",
+        "studio-authoring.currency-home-amount-editor",
+        "records-forms.master-detail-child-follows-parent-currency"
       ]
     },
     "flow": {
@@ -188,7 +200,8 @@
         "cli.hook-body-extraction-gates",
         "access-security.record-view-read-audit",
         "records-forms.script-action-hook-refusal-toast",
-        "studio-authoring.hooks-tab-authoring"
+        "studio-authoring.hooks-tab-authoring",
+        "cli.validate-target-restriction-profile"
       ]
     },
     "job": {
@@ -207,7 +220,9 @@
         "platform-core.namespace-object-name-refusal",
         "platform-core.namespace-co-owner-name-refusal",
         "platform-core.bare-name-one-holder-refusal",
-        "cli.address-grammar-reserved-names"
+        "cli.address-grammar-reserved-names",
+        "cli.deploy-runtime-dry-run-json",
+        "cli.package-upgrade-plan-override-advice"
       ]
     },
     "mapping": {
@@ -219,7 +234,8 @@
     "metadata_endpoints": {
       "items": [
         "api-backend.rest-metadata-config-contract",
-        "platform-core.metadata-registry-serving"
+        "platform-core.metadata-registry-serving",
+        "studio-authoring.currency-field-repointed-refusal"
       ]
     },
     "object": {
@@ -247,7 +263,8 @@
         "studio-authoring.removed-key-save-door-refusal",
         "studio-authoring.uninstalled-package-refused",
         "studio-authoring.package-extension-field-c",
-        "platform-core.namespace-object-name-refusal"
+        "platform-core.namespace-object-name-refusal",
+        "studio-authoring.currency-field-repointed-refusal"
       ]
     },
     "page": {
@@ -260,7 +277,9 @@
         "studio-authoring.authored-page-slots-and-variables",
         "studio-authoring.uninstalled-package-refused",
         "api-backend.meta-qualified-item-read",
-        "platform-core.namespace-co-owner-name-refusal"
+        "platform-core.namespace-co-owner-name-refusal",
+        "studio-authoring.page-row-table-block",
+        "studio-authoring.page-api-binding-reread-after-action"
       ]
     },
     "permission": {
@@ -285,7 +304,8 @@
         "access-security.ai-service-account-agent-ceiling",
         "identity-auth.idp-group-permission-set-mapping",
         "access-security.permission-set-address-in-execution-context",
-        "access-security.agent-ceiling-set-assignment-refusal"
+        "access-security.agent-ceiling-set-assignment-refusal",
+        "api-backend.recycle-bin-refusals-purge-empty"
       ]
     },
     "picklist": {
@@ -401,7 +421,8 @@
         "studio-authoring.package-customize-restore-display",
         "records-forms.field-history-tracking",
         "studio-authoring.no-entry-property-matrix",
-        "studio-authoring.removed-key-save-door-refusal"
+        "studio-authoring.removed-key-save-door-refusal",
+        "records-forms.list-link-filter-refused-whole"
       ]
     },
     "webhook": {

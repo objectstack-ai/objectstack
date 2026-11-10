@@ -136,6 +136,10 @@ export const SysScimConnectionCredential = ObjectSchema.create({
         acknowledge: 'I have saved the token',
         fields: [
           { path: 'token', label: 'Token', format: 'secret' },
+          // [#32120] The last four characters of the token, as the credentials
+          // list shows them: the admin can match this row to what they pasted
+          // into the identity provider. Not a secret on its own.
+          { path: 'tokenHint', label: 'Token Hint', format: 'text' },
           { path: 'connectionId', label: 'Connection ID', format: 'text' },
           { path: 'expiresAt', label: 'Expires At', format: 'text' },
         ],
@@ -187,8 +191,11 @@ export const SysScimConnectionCredential = ObjectSchema.create({
       label: 'All',
       data: { provider: 'object', object: 'sys_scim_connection_credential' },
       // token_digest is intentionally excluded — never surface the credential
-      // column, even though it is one-way.
-      columns: ['connection_id', 'label', 'organization_id', 'active', 'expires_at', 'created_at'],
+      // column, even though it is one-way. [#32120] `token_hint` and
+      // `last_used_at` tell two credentials of one connection apart during a
+      // rotation: which one the identity provider holds, and whether it still
+      // uses it.
+      columns: ['connection_id', 'label', 'token_hint', 'organization_id', 'active', 'expires_at', 'last_used_at', 'created_at'],
       sort: [{ field: 'connection_id', order: 'asc' }],
       pagination: { pageSize: 50 },
     },
@@ -244,6 +251,19 @@ export const SysScimConnectionCredential = ObjectSchema.create({
       group: 'Secret',
     }),
 
+    // [#32120] Written once, at mint, by plugin-auth's SCIM connection service;
+    // readonly to every writer (the data API serves this object list-only).
+    // A credential minted before the column existed has none, and none can be
+    // backfilled: the bearer is not stored.
+    token_hint: Field.text({
+      label: 'Token Hint',
+      required: false,
+      readonly: true,
+      maxLength: 4,
+      description: 'The last four characters of the bearer, recorded at mint so credentials of one connection can be told apart; never the bearer or its digest. Empty on a credential minted before hints were recorded.',
+      group: 'Identity',
+    }),
+
     active: Field.boolean({
       label: 'Active',
       required: true,
@@ -256,6 +276,17 @@ export const SysScimConnectionCredential = ObjectSchema.create({
       label: 'Expires At',
       required: false,
       description: 'Optional hard expiry for staged credential rotation; an expired credential is refused',
+      group: 'Lifecycle',
+    }),
+
+    // [#32120] Written only by the bearer verifier, on a successful
+    // verification, at most once a minute per credential
+    // (`ScimCredentialLastUseStamper`); readonly to every writer.
+    last_used_at: Field.datetime({
+      label: 'Last Used At',
+      required: false,
+      readonly: true,
+      description: 'When the credential last authenticated a SCIM request, recorded at most once a minute; empty when no use has been recorded',
       group: 'Lifecycle',
     }),
 

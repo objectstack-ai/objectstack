@@ -60,6 +60,10 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       },
       created_at: {
         label: "생성 일시"
+      },
+      keyed_text: {
+        label: "텍스트 키",
+        help: "전달 시 제목과 본문을 렌더링하는 데 사용된 카탈로그 키와 매개변수입니다. 읽을 때 이를 사용해 읽는 사람의 언어로 제목과 본문을 다시 렌더링합니다. 알림에 키가 없으면 null이며, 저장된 제목과 본문이 그대로 제공됩니다."
       }
     },
     _views: {

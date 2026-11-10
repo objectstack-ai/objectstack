@@ -4,6 +4,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SysUser } from '@objectstack/platform-objects';
+import { createMemoryI18n } from '@objectstack/core';
 import { installDefaultOrganization, DEFAULT_ORGANIZATION_ID } from './default-organization.testkit.js';
 import { MessagingServicePlugin } from './messaging-service-plugin.js';
 import type { MessagingService } from './messaging-service.js';
@@ -97,6 +98,28 @@ describe('MessagingServicePlugin', () => {
         await new MessagingServicePlugin({ registerInbox: false }).init(ctx);
         const messaging = services.get('messaging') as MessagingService;
         expect(messaging.getRegisteredChannels()).toEqual([]);
+    });
+
+    it("[#32240] installs the reader-locale middleware on sys_inbox_message, over the delivery renderer", async () => {
+        const { ctx, services } = fakeCtx();
+        const middlewares: Array<{ fn: (c: any, next: () => Promise<void>) => Promise<void>; object?: string }> = [];
+        services.set('objectql', {
+            registerMiddleware(fn: any, options?: { object?: string }) { middlewares.push({ fn, object: options?.object }); },
+        });
+        const i18n = createMemoryI18n();
+        i18n.loadTranslations('zh-CN', { messages: { dealWonTitle: '赢单', dealWonBody: '{{account}} 已签约' } });
+        services.set('i18n', i18n);
+        await new MessagingServicePlugin().init(ctx);
+
+        const inbox = middlewares.filter((m) => m.object === 'sys_inbox_message');
+        expect(inbox).toHaveLength(1);
+        const row = {
+            title: 'Deal won', body_md: 'Acme signed',
+            keyed_text: JSON.stringify({ titleKey: 'messages.dealWonTitle', bodyKey: 'messages.dealWonBody', params: { account: 'Acme' } }),
+        };
+        const op: any = { operation: 'find', context: { userId: 'u1', locale: 'zh-CN' }, ast: { fields: ['title', 'body_md'] } };
+        await inbox[0].fn(op, async () => { op.result = [row]; });
+        expect(op.result).toEqual([{ title: '赢单', body_md: 'Acme 已签约' }]);
     });
 });
 

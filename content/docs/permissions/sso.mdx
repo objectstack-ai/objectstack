@@ -307,7 +307,7 @@ any token content, and the answer does not depend on whether the account exists.
 | `token_not_verified` | Any other refusal of the ID token. The server log carries the detail. |
 
 The list is exported as `SSO_OIDC_REFUSAL_CAUSES` from `@objectstack/plugin-auth`.
-SAML refusals do not name their cause yet.
+SAML refusals name theirs too: see [Why a SAML sign-in was refused](#why-a-saml-sign-in-was-refused).
 
 ---
 
@@ -330,6 +330,11 @@ Fill in the IdP details collected by the **Register SAML Provider** action:
 | `entryPoint` | ✅ | The IdP's SAML single sign-on (redirect) URL that receives the `SAMLRequest`. |
 | `cert` | ✅ | The IdP's X.509 signing certificate (PEM body) — used to verify assertion signatures. |
 | `identifierFormat` | — | Requested SAML NameID format (defaults to the IdP's configured format), e.g. `urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress`. |
+| `mapEmail` | — | Assertion attribute the user's email is read from. Defaults to `email`, then the NameID. |
+| `mapFirstName` | — | Assertion attribute the user's first name is read from. Defaults to `givenName`. |
+| `mapLastName` | — | Assertion attribute the user's last name is read from. Defaults to `surname`. |
+| `mapName` | — | Assertion attribute the user's full name is read from when the first and last name are absent. Defaults to `displayName`, then the NameID. |
+| `mapGroups` | — | Assertion attribute that carries the user's groups (see [Grant permission sets from IdP groups](#grant-permission-sets-from-idp-groups)). |
 
 On success the response returns the two **Service Provider (SP)** URLs you
 configure on the IdP side:
@@ -365,6 +370,58 @@ configure on the IdP side:
 
 > Signature, timestamp, and replay validation are handled by `@better-auth/sso`
 > (samlify). You only supply the IdP's signing certificate at registration time.
+
+### Map the user's email and name
+
+A SAML sign-in reads the user's email and name from assertion attributes. With
+nothing mapped, the email is the `email` attribute (else the NameID) and the name
+is `givenName` + `surname`, else `displayName`, else the NameID. Okta and Entra ID
+use other attribute names, so their users are named after their NameID until the
+provider maps them:
+
+| Member | Default | Okta (common) | Entra ID |
+| :--- | :--- | :--- | :--- |
+| Email | `email` | `email` | `http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress` |
+| First name | `givenName` | — | `http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname` |
+| Last name | `surname` | — | `http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname` |
+| Display name | `displayName` | `name` | `http://schemas.microsoft.com/identity/claims/displayname` |
+
+Okta sends the attributes its application's attribute statements name, so check
+those statements for the exact names. Map them on the **Register SAML Provider**
+form, or on an existing provider:
+
+- **Show Attribute Mapping** shows the attributes (SAML) or claims (OIDC) the
+  provider reads now; an empty member uses the default.
+- **Edit Attribute Mapping** changes the members you fill in. A member you leave
+  untouched keeps its value, and a member you clear goes back to the default.
+  The groups claim and every other member of the mapping are kept as stored.
+  An OIDC provider maps `email` and `name` only (its default claims are `email`
+  and `name`).
+
+Both run on platform-admin standing, through `POST
+/api/v1/auth/admin/sso/get-attribute-mapping` and `POST
+/api/v1/auth/admin/sso/set-attribute-mapping` (`{ providerId, email?, firstName?,
+lastName?, name? }`). The email member decides which account a sign-in is linked
+to, so change it with care on a provider that already has users.
+
+### Why a SAML sign-in was refused
+
+When the identity provider's SAML response is not accepted, the sign-in lands on
+your `errorCallbackURL` (or the platform's sign-in page) with `error=saml_error`.
+For the four common configuration mistakes, `error_description` names the cause
+instead of `Invalid SAML response`, and the server writes one `warn` log line
+with the `providerId`, `protocol: 'saml'` and the same `cause`. The cause is read
+from the response the IdP posted, compared with the provider's configured signing
+certificate and IdP entity ID; neither the redirect nor the log line carries any
+assertion content, and the answer does not depend on whether the account exists.
+
+| `error_description` | What to check |
+| :--- | :--- |
+| `saml_idp_status_not_success` | The IdP answered with a failure status instead of an assertion: for example Entra ID's "user is not assigned to the application". Check the user's assignment and the IdP's sign-in log. |
+| `saml_response_unsigned` | Neither the response nor its assertion is signed. Turn on response or assertion signing in the IdP application. |
+| `saml_signing_certificate_mismatch` | The response is signed with a certificate the provider does not have, usually after the IdP rotated its signing certificate. Update the provider's certificate (several can be configured while both are in use). |
+| `saml_issuer_mismatch` | The response is signed with the configured certificate but comes from another IdP entity ID. Check the provider's IdP Entity ID against the IdP's issuer. |
+| `Invalid SAML response` | Any other refusal of the response (for example an expired assertion or a broken signature). The server log carries the vendor's line. |
 
 ---
 
@@ -454,9 +511,25 @@ without the API:
   member of the provider's mapping is kept as stored. A provider without a
   groups claim signs users in as one registered without it.
 
-**Saving a mapping.** A platform administrator saves one mapping per group and
-permission set through `POST /api/v1/auth/admin/scim/set-group-mapping`, naming
-the provider with `providerId`:
+**Saving a mapping in Setup.** In **Setup → IdP Group Mappings**, a platform
+administrator manages the mappings without the API:
+
+- **Map SSO Group** saves a mapping for an SSO provider: its Provider ID, the
+  group as the groups claim sends it (a Group External ID or a Group Display
+  Name), and a permission set picked from the security catalog.
+- **Map SCIM Group** does the same for a SCIM connection, named by its
+  connection ID.
+- **Delete Mapping**, on a mapping's row, asks for confirmation and then deletes
+  the mapping, as the delete route below does.
+
+A save or a delete the server refuses shows the server's own message in the
+dialog, and nothing is stored. There is no generic New or Edit form on the
+list: a mapping changes only through these actions or the routes below.
+
+**Saving a mapping through the API.** Operators and scripts save one mapping
+per group and permission set through
+`POST /api/v1/auth/admin/scim/set-group-mapping`, naming the provider with
+`providerId`:
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/auth/admin/scim/set-group-mapping \

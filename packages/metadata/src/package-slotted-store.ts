@@ -28,8 +28,13 @@
  *    D3 for a caller with no package (`@objectstack/core`'s one rule): the
  *    environment's own item, else the unique holder, else a refusal naming
  *    every holder ({@link PackageScopedNameRefusedError}, `409`).
- *  - **enumerate / remove**: every slot of a name answers to that name
+ *  - **enumerate**: every slot of a name answers to that name
  *    ({@link storedNameOf}, {@link storeKeysNamed}).
+ *  - **remove** ({@link storeRemovalKeys}): a removal naming a package drops
+ *    that package's slot only — ⛔ never another package's item; a removal
+ *    naming none drops every slot of the name while at most one package holds
+ *    it, and is refused naming every holder when two or more do (D3), so it
+ *    never takes both and never picks one.
  *
  * ⛔ `api`'s endpoint matcher keys its routes by METHOD + path (bucket 1);
  * nothing here resolves a path. What changes is that the matcher now sees
@@ -52,7 +57,9 @@
 import {
   PackageScopedNameRefusedError,
   packageScopedHolderSource,
+  packageScopedRefusalMessage,
   resolvePackageScopedHolders,
+  type PackageScopedRefusal,
   type PackageScopedResolvableType,
 } from '@objectstack/core';
 import { peelStoredEnvelope } from './stored-envelope.js';
@@ -146,6 +153,55 @@ export function storeWriteKey(
 /** Whether a package id names a caller with a package (not empty, not the provenance sentinel). */
 function isPackageCaller(packageId: string | null | undefined): packageId is string {
   return typeof packageId === 'string' && packageId !== '' && packageId !== OVERLAY_SENTINEL;
+}
+
+/**
+ * [ADR-0150 D3/D4, #32198] What a removal of `(type, name)` takes out of the
+ * store: the keys it drops, and — for a type stored per `(package, name)`
+ * removed by one package — that package, which the storage half deletes by
+ * and the `deleted` announcement names.
+ *
+ *  - **naming a package**: that package's slot only; no key when it holds no
+ *    slot of the name. ⛔ Never another package's item, and never the name's
+ *    bare slot (the environment's own item, or a customization of a holder).
+ *  - **naming none**: every slot of the name while at most one package holds
+ *    it — the one item the bare-name map held, removed as it was. With two or
+ *    more package holders the removal is refused before anything is touched,
+ *    naming every holder ({@link PackageScopedNameRefusedError},
+ *    `ambiguous-in-environment`, `409`): it never takes both, and it never
+ *    picks one — not even where a read naming no package would resolve to a
+ *    unique non-baseline holder, because a removal acts on what it names.
+ *
+ * A type outside {@link PACKAGE_SLOTTED_STORE_TYPES} keeps one item per name:
+ * the name's key, whatever package is named, and no package to delete by.
+ *
+ * @throws {PackageScopedNameRefusedError} a removal naming no package of a
+ *   name two or more packages hold.
+ */
+export function storeRemovalKeys(
+  store: ReadonlyMap<string, unknown> | undefined,
+  type: string,
+  name: string,
+  packageId?: string | null,
+): { keys: string[]; packageId?: string } {
+  if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) return { keys: storeKeysNamed(store, type, name) };
+  if (isPackageCaller(packageId)) {
+    const key = slotKey(packageId, name);
+    return { keys: store?.has(key) ? [key] : [], packageId };
+  }
+  const holders = store ? packageSlotsOf(store, name) : [];
+  if (holders.length > 1) {
+    const base: Omit<PackageScopedRefusal, 'message'> = {
+      status: 'refused',
+      reason: 'ambiguous-in-environment',
+      type: type as PackageScopedResolvableType,
+      name,
+      callerPackageId: null,
+      candidates: holders.map((holder) => ({ kind: 'package' as const, packageId: holder })),
+    };
+    throw new PackageScopedNameRefusedError({ ...base, message: packageScopedRefusalMessage(base) });
+  }
+  return { keys: storeKeysNamed(store, type, name) };
 }
 
 /**

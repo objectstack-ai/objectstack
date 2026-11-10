@@ -46,7 +46,7 @@ export const Account = ObjectSchema.create({
   enable: { trackHistory: true },
 
   fields: {
-    name: Field.text({ label: 'Account Name', required: true, searchable: true, maxLength: 200 }),
+    name: Field.text({ label: 'Account Name', required: true, searchable: true, maxLength: 200, group: 'profile' }),
     industry: Field.select({
       label: 'Industry',
       trackHistory: true,
@@ -56,6 +56,7 @@ export const Account = ObjectSchema.create({
         { label: 'Healthcare', value: 'healthcare' },
         { label: 'Retail', value: 'retail' },
       ],
+      group: 'profile',
     }),
     // Explicit ISO code (spec channel: `currencyConfig.defaultCurrency`, read
     // only under `currencyMode: 'fixed'`): a currency field without a
@@ -66,9 +67,10 @@ export const Account = ObjectSchema.create({
       label: 'Annual Revenue',
       min: 0,
       currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' },
+      group: 'profile',
     }),
-    website: Field.url({ label: 'Website' }),
-    hq: Field.location({ label: 'Headquarters' }),
+    website: Field.url({ label: 'Website', group: 'contact' }),
+    hq: Field.location({ label: 'Headquarters', group: 'contact' }),
     status: Field.select({
       label: 'Lifecycle',
       required: true,
@@ -78,6 +80,7 @@ export const Account = ObjectSchema.create({
         { label: 'Active', value: 'active', color: '#10B981' },
         { label: 'Churned', value: 'churned', color: '#EF4444' },
       ],
+      group: 'profile',
     }),
     // Region + signed date power the Revenue Pulse dashboard's dashboard-level
     // filters (framework#2501): the shared "region" filter maps to THIS
@@ -91,22 +94,32 @@ export const Account = ObjectSchema.create({
         { label: 'EMEA', value: 'emea' },
         { label: 'APAC', value: 'apac' },
       ],
+      group: 'profile',
     }),
-    signed_on: Field.date({ label: 'Customer Since' }),
+    signed_on: Field.date({ label: 'Customer Since', group: 'profile' }),
     // EIN-style tax id — the `format` rule below enforces the NN-NNNNNNN shape
     // with a regex (a deliberately non-trivial pattern, unlike the built-in
     // email/url field validators).
-    tax_id: Field.text({ label: 'Tax ID (EIN)', maxLength: 20 }),
+    tax_id: Field.text({ label: 'Tax ID (EIN)', maxLength: 20, group: 'tax_support' }),
     // Free-form integration settings stored as JSON — the `json_schema` rule
     // below constrains its shape.
-    support_config: Field.json({ label: 'Support Config' }),
+    support_config: Field.json({ label: 'Support Config', group: 'tax_support' }),
     // Captured only when an account churns; required by the `conditional` rule.
-    churn_reason: Field.text({ label: 'Churn Reason', maxLength: 500 }),
+    churn_reason: Field.text({ label: 'Churn Reason', maxLength: 500, group: 'tax_support' }),
     // A plain text field (deliberately NOT Field.email) so the `format` rule's
     // named `email` format is what enforces validity — demonstrating the named
     // format branch rather than the field-type's built-in check.
-    billing_email: Field.text({ label: 'Billing Email', maxLength: 200 }),
+    billing_email: Field.text({ label: 'Billing Email', maxLength: 200, group: 'contact' }),
   },
+
+  // ADR-0085 §5: the form, detail and drawer layout is derived from these
+  // groups, so each field is placed in a named section rather than left to the
+  // untitled fallback, which the field-no-consumers rule credits to no one (#32168).
+  fieldGroups: [
+    { key: 'profile', label: 'Profile' },
+    { key: 'contact', label: 'Contact & Location' },
+    { key: 'tax_support', label: 'Tax & Support' },
+  ],
 
   // A third `state_machine` example with a different topology than
   // Task/Project: a re-entrant lifecycle (a churned account can be won

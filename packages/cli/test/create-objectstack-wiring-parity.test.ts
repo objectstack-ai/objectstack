@@ -117,10 +117,18 @@ describe('[#20333] the blank config wires what `os init` wires, in its lines', (
 });
 
 describe('[#20333] the blank template ships every wired barrel', () => {
+  // [#32212] `os init -t app` ships a starter app and list view, so its apps
+  // and views barrels carry the export lines `os g app` / `os g view` append
+  // after the empty barrel. The barrel compared is what `os init` writes
+  // before those lines: the empty barrel itself, byte for byte.
+  // One `export { default as … } from './…';` line, as `os generate` appends it.
+  const GENERATED_EXPORT = /^export \{ default as \w+ \} from '\.\/[\w.-]+';$/;
+  const withoutGeneratedExports = (source: string): string =>
+    source.split('\n').filter((line) => !GENERATED_EXPORT.test(line)).join('\n');
   const barrels = SCAFFOLD_WIRED_BARRELS.map((b) => {
     const file = `${b.dir}/index.ts`;
     const render = TEMPLATES.app.srcFiles[file];
-    return { ...b, file, init: render ? render('my-app', 'my_app') : undefined };
+    return { ...b, file, init: render ? withoutGeneratedExports(render('my-app', 'my_app')) : undefined };
   });
 
   it.each(barrels.map((b) => [b.file, b] as const))('%s exists', (_file, b) => {
@@ -135,7 +143,34 @@ describe('[#20333] the blank template ships every wired barrel', () => {
       .toEqual(SCAFFOLD_WIRED_BARRELS.map((b) => b.stackKey).filter((k) => k !== 'objects').sort());
   });
 
-  it.each(empty.map((b) => [b.file, b] as const))('%s is byte-identical to the one `os init` writes', (_file, b) => {
-    expect(readFileSync(join(BLANK, b.file), 'utf8')).toBe(b.init);
+  // [#32152] The blank starter ships a starter app and the sample object's
+  // list view, so `src/apps/index.ts` and `src/views/index.ts` carry what
+  // `os g app` / `os g view` append to the barrel `os init` writes: its bytes
+  // verbatim, then one `export { default as … } from './…';` line per
+  // scaffold. Every other wired barrel stays byte-identical. So the binding
+  // holds either way: the barrel `os init` writes is the template's prefix,
+  // and nothing but generator export lines follows it (`GENERATED_EXPORT`,
+  // above).
+
+  it.each(empty.map((b) => [b.file, b] as const))(
+    '%s is the one `os init` writes, plus only the export lines `os generate` appends',
+    (_file, b) => {
+      const shipped = readFileSync(join(BLANK, b.file), 'utf8');
+      expect(shipped.startsWith(b.init as string), `${b.file} starts with the barrel \`os init\` writes`).toBe(true);
+      const appended = shipped.slice((b.init as string).length).split('\n').filter((line) => line !== '');
+      for (const line of appended) expect(line).toMatch(GENERATED_EXPORT);
+    },
+  );
+
+  it('the starter app and list view are what the apps and views barrels append', () => {
+    // Vacuity guard: the prefix rule above must be exercised, not only
+    // satisfied by barrels that append nothing.
+    const appendedTo = (file: string): string[] => {
+      const b = empty.find((e) => e.file === file);
+      expect(b, file).toBeDefined();
+      return readFileSync(join(BLANK, file), 'utf8').slice((b!.init as string).length).split('\n').filter(Boolean);
+    };
+    expect(appendedTo('src/apps/index.ts')).toEqual(["export { default as main } from './main.app';"]);
+    expect(appendedTo('src/views/index.ts')).toEqual(["export { default as note } from './note.view';"]);
   });
 });

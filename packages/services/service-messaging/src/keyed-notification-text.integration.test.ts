@@ -42,7 +42,8 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { createMemoryI18n } from '@objectstack/core';
 import { SysNotification } from '@objectstack/platform-objects';
 import { MessagingService, NOTIFICATION_EVENT_OBJECT, type EmitInput } from './messaging-service.js';
-import { createInboxChannel, INBOX_OBJECT } from './inbox-channel.js';
+import { createInboxChannel, INBOX_OBJECT, INBOX_TEXT_KEYS_FIELD } from './inbox-channel.js';
+import { installInboxReaderLocale } from './inbox-reader-locale.js';
 import { createEmailChannel } from './email-channel.js';
 import { createSmsChannel } from './sms-channel.js';
 import { createPushChannel, type PushSenderSurface } from './push-channel.js';
@@ -199,6 +200,7 @@ interface Composition {
     warnings: string[];
     localeReads: () => number;
     dispatcher?: NotificationDispatcher;
+    textRenderer?: NotificationTextRenderer;
 }
 
 /**
@@ -252,7 +254,7 @@ function compose(
             partitionCount: 1, intervalMs: 10_000, textRenderer,
         })
         : undefined;
-    return { messaging, mail, texts, warnings, localeReads, dispatcher };
+    return { messaging, mail, texts, warnings, localeReads, dispatcher, textRenderer };
 }
 
 async function inboxOf(ql: ObjectQL, userId: string): Promise<Array<{ title: string; body_md: string }>> {
@@ -617,5 +619,106 @@ describe("a push reaches the recipient in the recipient's language, not in its d
 
         expect(toToken(pushed, 'tok-zh')).toEqual([ZH]);
         expect(toToken(pushed, 'tok-en')).toEqual([LITERAL]);
+    });
+});
+
+describe("#32240 — an inbox row reads in the READER's language", () => {
+    /**
+     * The plugin's composition plus the reader-locale middleware it installs on
+     * `sys_inbox_message`, over the same renderer. The recipient is `u_none`:
+     * no saved locale, and the deployment default is English — so the row is
+     * stored in English, the showcase admin's case.
+     */
+    async function withReaderLocale(opts: { outbox?: 'sql' } = {}) {
+        const ql = await boot();
+        const c = compose(ql, { ...opts, deploymentDefault: 'en' });
+        expect(installInboxReaderLocale(ql, c.textRenderer!)).toBe(true);
+        return { ql, c };
+    }
+
+    /** What a signed-in reader whose request resolved `locale` reads of `userId`'s inbox. */
+    async function readAs(
+        ql: ObjectQL,
+        userId: string,
+        locale: string | undefined,
+        fields: string[] = ['title', 'body_md'],
+    ): Promise<Array<Record<string, unknown>>> {
+        const context = { userId, ...(locale ? { locale } : {}) } as ExecutionContext;
+        return ((await ql.find(INBOX_OBJECT, { where: { user_id: userId }, fields }, { context })) ?? []) as any[];
+    }
+
+    const storedKeysOf = async (ql: ObjectQL, userId: string) => {
+        const [row] = (await ql.find(INBOX_OBJECT, { where: { user_id: userId }, fields: [INBOX_TEXT_KEYS_FIELD] }, SYSTEM)) as any[];
+        const raw = row?.[INBOX_TEXT_KEYS_FIELD];
+        return typeof raw === 'string' ? JSON.parse(raw) : raw ?? null;
+    };
+
+    it('inline fan-out: stored in English with its keys; a zh-CN reader reads Chinese, an en reader English', async () => {
+        const { ql, c } = await withReaderLocale();
+
+        expect((await c.messaging.emit(emitTo(['u_none']))).delivered).toBe(1);
+
+        // At rest: the delivery-time text, as before, and the keys beside it.
+        expect(await inboxOf(ql, 'u_none')).toEqual([{ title: LITERAL.title, body_md: LITERAL.body }]);
+        expect(await storedKeysOf(ql, 'u_none')).toEqual(KEYED);
+
+        expect(await readAs(ql, 'u_none', 'zh-CN')).toEqual([{ title: ZH.title, body_md: ZH.body }]);
+        expect(await readAs(ql, 'u_none', 'en')).toEqual([{ title: LITERAL.title, body_md: LITERAL.body }]);
+        // A bare `zh` negotiates to the zh-CN pack, as at delivery.
+        expect(await readAs(ql, 'u_none', 'zh')).toEqual([{ title: ZH.title, body_md: ZH.body }]);
+        // A read that carries no locale is served the stored text.
+        expect(await readAs(ql, 'u_none', undefined)).toEqual([{ title: LITERAL.title, body_md: LITERAL.body }]);
+    });
+
+    it('durable path (SQL outbox + dispatcher): the same', async () => {
+        const { ql, c } = await withReaderLocale({ outbox: 'sql' });
+
+        expect((await c.messaging.emit(emitTo(['u_none']))).enqueued).toBe(1);
+        await c.dispatcher!.tick();
+
+        expect(await storedKeysOf(ql, 'u_none')).toEqual(KEYED);
+        expect(await readAs(ql, 'u_none', 'zh-CN')).toEqual([{ title: ZH.title, body_md: ZH.body }]);
+        expect(await readAs(ql, 'u_none', 'en')).toEqual([{ title: LITERAL.title, body_md: LITERAL.body }]);
+    });
+
+    it('a row without keys reads its stored text unchanged, in every locale', async () => {
+        const { ql, c } = await withReaderLocale();
+
+        await c.messaging.emit({
+            topic: 'order.shipped', audience: ['u_none'], organizationId: ORG, channels: ['inbox'],
+            payload: { ...LITERAL },
+        });
+
+        expect(await storedKeysOf(ql, 'u_none')).toBeNull();
+        expect(await readAs(ql, 'u_none', 'zh-CN')).toEqual([{ title: LITERAL.title, body_md: LITERAL.body }]);
+    });
+
+    it("a producer payload member named keyedText is never stored as the row's keys (inline fan-out)", async () => {
+        const { ql, c } = await withReaderLocale();
+
+        await c.messaging.emit({
+            topic: 'order.shipped', audience: ['u_none'], organizationId: ORG, channels: ['inbox'],
+            payload: { ...LITERAL, keyedText: KEYED },
+        });
+
+        expect(await storedKeysOf(ql, 'u_none')).toBeNull();
+        expect(await readAs(ql, 'u_none', 'zh-CN')).toEqual([{ title: LITERAL.title, body_md: LITERAL.body }]);
+    });
+
+    it('a projection naming only the title gets the rendered title, and no keys column it did not ask for', async () => {
+        const { ql, c } = await withReaderLocale();
+
+        await c.messaging.emit(emitTo(['u_none']));
+
+        expect(await readAs(ql, 'u_none', 'zh-CN', ['title'])).toEqual([{ title: ZH.title }]);
+    });
+
+    it("a locale the catalog cannot answer is served the stored text, member by member", async () => {
+        const { ql, c } = await withReaderLocale();
+
+        await c.messaging.emit(emitTo(['u_none']));
+
+        // ja-JP holds the object label and no message entries: nothing renders.
+        expect(await readAs(ql, 'u_none', 'ja-JP')).toEqual([{ title: LITERAL.title, body_md: LITERAL.body }]);
     });
 });
