@@ -318,8 +318,10 @@ describe('AutomationEngine', () => {
             expect(result.error).toContain('No executor registered');
         });
 
-        it('should fail when flow has no start node', async () => {
-            engine.registerFlow('no_start', {
+        it('should refuse to register a flow with no start node — it could never run', async () => {
+            // Registration refuses the shape a run can never begin from, so the
+            // author learns at the save instead of at the first trigger.
+            expect(() => engine.registerFlow('no_start', {
                 name: 'no_start',
                 label: 'No Start',
                 type: 'autolaunched',
@@ -327,11 +329,12 @@ describe('AutomationEngine', () => {
                     { id: 'end', type: 'end', label: 'End' },
                 ],
                 edges: [],
-            });
+            })).toThrow(/^Flow 'no_start' rejected: the flow's top-level `nodes` hold no `start` node/);
 
+            // Nothing was armed, so a run of the name finds no flow at all.
             const result = await engine.execute('no_start');
             expect(result.success).toBe(false);
-            expect(result.error).toContain('no start node');
+            expect(result.error).toContain('not found');
         });
 
         it('should handle node execution failure', async () => {
@@ -3306,17 +3309,18 @@ describe('#9378 — execute() classifies terminal exits for the trigger transpor
         expect(disabled.error).toContain('is turned off for this deployment');
         expect(disabled.status).toBeUndefined();
 
-        // 3. Malformed definition: no start node. Registration accepts it —
-        // `FlowSchema` requires no `start` member — so this exit is reachable
-        // from the trigger door and is not dead code.
-        engine.registerFlow('startless', {
+        // 3. Malformed definition: no start node. Registration now refuses it
+        // (`FlowSchema` requires no `start` member, the registration check
+        // does), so nothing is armed and the trigger door meets exit 1 for
+        // the name — still never dispatched, still no status.
+        expect(() => engine.registerFlow('startless', {
             name: 'startless', label: 'Startless', type: 'autolaunched',
             nodes: [{ id: 'middle', type: 'script', label: 'Middle', config: { function: 'noop' } }],
             edges: [],
-        });
+        })).toThrow(/hold no `start` node/);
         const startless = await engine.execute('startless');
         expect(startless.success).toBe(false);
-        expect(startless.error).toBe('Flow has no start node');
+        expect(startless.error).toContain('not found');
         expect(startless.status).toBeUndefined();
     });
 
@@ -3344,19 +3348,23 @@ describe('#9378 — execute() classifies terminal exits for the trigger transpor
         expect(disabled.code).toBe('FLOW_DISABLED');
         expect(disabled.status).toBeUndefined();
 
-        engine.registerFlow('startless_coded', {
-            name: 'startless_coded', label: 'Startless', type: 'autolaunched',
-            nodes: [{ id: 'middle', type: 'script', label: 'Middle', config: { function: 'noop' } }],
-            edges: [],
-        });
-        const startless = await engine.execute('startless_coded');
-        expect(startless.success).toBe(false);
-        expect(startless.code).toBe('FLOW_NO_START_NODE');
-        expect(startless.status).toBeUndefined();
-
-        // The two are DISTINCT vocabulary, not one refusal with two spellings —
-        // the transport answers them 409 and 422 respectively.
-        expect(disabled.code).not.toBe(startless.code);
+        // A start-less definition no longer reaches the `FLOW_NO_START_NODE`
+        // exit through any door: registration refuses it, and its refusal
+        // names the code a run of it would have answered, so the author meets
+        // the same fact at the save.
+        let startlessRefusal: unknown;
+        try {
+            engine.registerFlow('startless_coded', {
+                name: 'startless_coded', label: 'Startless', type: 'autolaunched',
+                nodes: [{ id: 'middle', type: 'script', label: 'Middle', config: { function: 'noop' } }],
+                edges: [],
+            });
+        } catch (e) {
+            startlessRefusal = e;
+        }
+        expect(startlessRefusal).toBeInstanceOf(Error);
+        expect((startlessRefusal as Error).message).toMatch(/hold no `start` node .* refused with FLOW_NO_START_NODE/);
+        expect(await engine.getFlow('startless_coded')).toBeNull();
 
         // A run that DISPATCHED and failed carries the opposite pair: a
         // lifecycle verdict and no refusal code. Asserted here so the two

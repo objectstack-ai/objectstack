@@ -1179,3 +1179,120 @@ missing. No live run was made: every clause is read from source, and each item's
 ### 17d. Security note
 
 No security finding was made, and none is withheld.
+
+## 18. Scoped sweep 2026-11-10 — themes 6, 7 and 8 since 18.3.0 (#32269, epic #32022 M3)
+
+**Not a full sweep.** One writer worked sequentially, with no hunter subagents. The scope is
+the epic's theme 6 (action preflight and page bindings), theme 7 (AI data tools and MCP) and
+theme 8 (federation and the CLI), read from source at `9091955b` against the 18.3.0 subject
+`83d7e4ae`. The pass enumerated the commits of those themes since 18.3.0 (29 match the card's
+premise grep) and ran these SWEEP.md angles on what they touched:
+
+- angle 2: the spec constants and refusals that bound each surface (the `preflight` cross-key
+  refusals, the closed hole set, the dataset synonym limits, the read_file caps and host
+  variables, the federation-only driver set, the restriction profile keys);
+- angle 3: the routes and tool registrations (`registerDatasetTools`, `registerFileTools`,
+  the interceptor route, `GET /api/v1/datasources/drivers`, install-local `dryRun`, the
+  restriction-profile route);
+- angle 1, limited to the themes' own surfaces: the param dialog's preflight panel, the
+  `row-table` block, the page re-read, the list link's filter, Studio's dataset form and the
+  New datasource dialog;
+- angle 5: ADR-0149 and ADR-0015 §4.6 against what the runtime serves.
+
+Angles 4 and 6 were not run, so this section supports **no** claim about what else is
+missing. No live run was made: every clause is read from source, and each item's
+`automated.ref` names the pins that hold it today.
+
+- **19 new items**, all `since: "v18.4"` except the one `planned` item (`since: null`).
+  - Theme 6, 5 items (4 active, 1 planned): `studio-authoring.action-preflight-authoring-refusals`,
+    `records-forms.action-preflight-panel`, `studio-authoring.page-row-table-block`,
+    `studio-authoring.page-api-binding-reread-after-action`; planned:
+    `ai.pending-action-held-approval`.
+  - Theme 7, 6 items (all active, 1 of them `blocked(environment)`): `ai.mcp-dataset-tools`,
+    `studio-authoring.dataset-member-vocabulary`, `ai.mcp-read-file-pdf-word-extraction`,
+    `ai.mcp-tool-call-interceptor`, `records-forms.list-link-filter-refused-whole`; blocked:
+    `ai.chat-answer-list-link`.
+  - Theme 8, 8 items (all active, 3 of them `blocked(fixture)`, see 18c): runnable today,
+    `integration-system.federation-only-driver-catalog`,
+    `integration-system.federation-only-managed-refusal`, `cli.deploy-runtime-dry-run-json`,
+    `cli.validate-target-restriction-profile` and `cli.package-upgrade-plan-override-advice`;
+    blocked, `integration-system.oracle-federated-read-write`,
+    `integration-system.oracle-raw16-uuid-reference` and
+    `integration-system.mssql-federated-read-write`.
+- **Accuracy fix, a revision with its history row:** `ai.mcp-http-surface` (rev 10).
+  Its `acceptance[4]` counted 15 HTTP tools and 10 on stdio, measured at `0647dabb` before
+  #31773. `list_datasets` and `query_dataset` now register on both doors wherever the bridge
+  carries the dataset executor, and analytics is the foundational capability the showcase
+  always loads, so the counts read 17 and 12. Read from source, not counted live.
+- **`coverage.json`**: the preflight items are mapped to `action`, the row-table and re-read
+  items to `page`, the dataset items to `dataset`, the federation-only items to `datasource`,
+  the list-link item to `view`, the deploy and upgrade-plan items to `manifest`, and the
+  restriction-profile item to `hook` (its refusal rows are hooks and actions). The read_file
+  and interceptor items exercise MCP, which is no governed metadata kind, so they carry none.
+  The planned item and the four blocked items are mapped nowhere.
+- **The 29 commits the premise grep matches.** 26 are covered by an item here: the preflight
+  (#31859, #31924, #31933, #32015), the row-table (#31883), read_file (#31009, #31848,
+  #31894), the interceptor (#31633, #31875), the dataset tools and vocabulary (#31652, #31772,
+  #31773), Oracle (#31351, #31642, #31786), SQL Server (#31381, #31623, #31625, #31770), the
+  catalog and dialog (#31632), `os deploy` (#31776) and `os validate --target` (#31237,
+  #31276, #31277, #31766). #31276 (devPlugins are not read) and #31277 (parallel and try_catch
+  are always allowed) are held by the pins the item names, not by a live clause. Two are
+  skills docs with no surface (#32088, #32189). #30862 is a false match: "snapshot preflight"
+  is the release workflow. Items here also cover commits the grep does not match: the page
+  re-read (#31936), the list link and the chat answer's link (#31902), and the upgrade plan's
+  override advice (#31627).
+
+### 18a. Declared but not landed — written as `planned`
+
+- **A pending action held for an approver.** `PendingActionStatus` and
+  `AiPendingActionStatusSchema` declare `held`, and the AI approvals inbox draws it as
+  "Waiting for approval", but at `9091955b` nothing in the open tree sets it: the AI service
+  that would is Cloud/EE. `McpToolCallRefusal` names a later `hold` outcome beside `deny`; today
+  an interceptor's `hold` is refused as a malformed verdict, which
+  `ai.mcp-tool-call-interceptor` scores. No card filed: the producer is not in this
+  repository.
+
+### 18b. Measured from source — notes for owners, no card filed
+
+- **The open runtime serves no restriction profile.** `os validate --target URL` fetches
+  `/api/v1/discovery/restriction-profile` (`RESTRICTION_PROFILE_ROUTE`), and no open-tree
+  server registers that route, so a URL target on a stock boot answers 404 and is refused
+  ("no environment is served at this host"). The item scores the refusal and the file form.
+  The route is a hosted environment's to serve.
+- **No stock installer for the MCP tool-call interceptor.** `setToolInterceptor` is a host
+  seam with no caller in the open tree. `ai.mcp-tool-call-interceptor` provisions an inline
+  plugin in a scratch copy of the showcase; that recipe is read from the plugin contract and
+  has not been booted (see 18c).
+- **A preflight `waiting` state has no stock read to show it on.** A `${param.X}` hole needs a
+  query parameter the read accepts, and the record read door accepts only `select` and
+  `expand` (`DATA_RECORD_READ_PARAMS`). The live leg of `records-forms.action-preflight-panel`
+  therefore reads by `${ctx.recordId}`, and its pins hold `waiting`, the stale-answer drop and
+  the seed cleared on a URL change.
+- **`ai.mcp-http-surface` drifts each time a tool family lands.** Its `acceptance[4]` names
+  every tool and both counts, so each new family is a checklist-accuracy finding the next
+  weekly run reports. Not changed here beyond the count.
+
+### 18c. Fixtures worth adding
+
+- **A credentialed Oracle Database and SQL Server.** Three theme-8 items need one each.
+  `node scripts/qa/qa-fixture.mjs external-database` (#32233, merged as #32277) provisions
+  PostgreSQL only and refuses an `OS_TEST_EXTERNAL_DB_URL` that is not `postgres://`. The
+  driver's live suites read `OS_TEST_ORACLE_URL` and `OS_TEST_MSSQL_URL`, and no CI job runs
+  either engine. Extending the fixture command with an `oracle` and an `mssql` arm (a container
+  image or a URL the runner brings, the login bound through the top-level `secret`) would let a
+  run lift `blocked` on all three in the same edit. Until then the federation-only refusals are
+  runnable, since they are refused before any connection.
+- **An AI service that answers the console chat.** `ai.chat-answer-list-link` needs an agent
+  with a model; service-ai is Cloud/EE, the same gap the entitled side of
+  `ai.console-ai-surface-gating` records. The link parse and the target it builds are pinned.
+- **The interceptor plugin, booted once.** A run that boots the scratch copy with the inline
+  plugin `ai.mcp-tool-call-interceptor` describes, and sees its log line, should record that
+  as an area-level recipe with its provenance.
+- **Synonyms on a showcase dataset.** No showcase dataset declares synonyms or member
+  descriptions, so `ai.mcp-dataset-tools` matches by name and label only and
+  `studio-authoring.dataset-member-vocabulary` saves a scratch dataset. One synonym on
+  `showcase_invoice_metrics` would let the first item score a synonym match on stock data.
+
+### 18d. Security note
+
+No security finding was made, and none is withheld.
