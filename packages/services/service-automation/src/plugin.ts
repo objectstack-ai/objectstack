@@ -4,7 +4,6 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import { effectiveTenancyPosture, isServiceNotRegisteredError, resolveLocalizationContext, resolveUserAuthzGrants } from '@objectstack/core';
 import type { IClusterService, IJobService, IPubSub } from '@objectstack/spec/contracts';
 import { installedManifestsOf, type InstalledPackageSource } from '@objectstack/metadata-core';
-import type { FlowFunctionEffect } from '@objectstack/spec/automation';
 import type {
     Connector,
     ConnectorInstanceAuth,
@@ -75,6 +74,7 @@ import { connectorReadWithheldText, type ConnectorFailureTextRewrite } from './c
 import { CONNECTOR_CREDENTIAL_SOURCE_SERVICE } from '@objectstack/types';
 import { createConnectorCredentialSource } from './connector-credential-source.js';
 import { connectorNameResolver, packageScopedRegistryOf, refusedConnectorNames } from './connector-package-scope.js';
+import { functionResolverOf, packageScopedFunctionEngineOf } from './function-package-scope.js';
 import type { PackageScopedRefusal, PackageScopedRegistry } from '@objectstack/objectql';
 import { createConnectorRequestSigner } from './request-signing/index.js';
 import { ConnectorConnectionStore, type ConnectorConnectionRecord } from './connector-connections.js';
@@ -1920,8 +1920,9 @@ export class AutomationServicePlugin implements Plugin {
         // [#20790] The write-only flow credential channel — the engine reads a
         // flow's credentials from it at verification and execution, and the
         // metadata save door stores them in it (registered at `start()`).
-        // [ADR-0150 D8 row R9, #31696] By name alone: under a name two packages hold, a write that would
-        // touch a row is refused, and the engine never asks it for such a flow's credential.
+        // [ADR-0150 D8 row R9, #31696] Each row it writes names the flow's one package holder, and a
+        // read for a slot of a shared name answers by that package (a row naming none is refused). Under a
+        // shared name a save writes no row: one that would set, clear or remove a stored credential is refused.
         const engine = this.engine;
         this.credentialChannel = new FlowCredentialChannel(
             () => this.resolveDataEngine(ctx),
@@ -1929,6 +1930,7 @@ export class AutomationServicePlugin implements Plugin {
                 const answer = engine.flowHolder(name);
                 return answer?.status === 'refused' ? answer : undefined;
             },
+            (name) => engine.flowHolderPackage(name),
         );
         this.engine.setFlowCredentialSource(this.credentialChannel);
 
@@ -2232,35 +2234,22 @@ export class AutomationServicePlugin implements Plugin {
         // count-based bound the declarative contract can't express).
 
         // #1870 — bridge `script`-node function calls to the host function
-        // registry. ObjectQL holds the name→handler map populated from
-        // `bundle.functions` / `defineStack({ functions })` (the same registry
-        // hooks/actions resolve through). Wiring it here lets a `script` node
-        // invoke an authored function by name; an unresolved name fails the step
-        // loudly. Best-effort: without ObjectQL, function-calling script nodes
-        // fail with a clear "no function registered" error when executed.
+        // registry. ObjectQL holds the functions populated from
+        // `bundle.functions` / `defineStack({ functions })`, by registering
+        // package. Wiring it here lets a `script` node invoke an authored
+        // function by name; an unresolved name fails the step loudly.
+        // [ADR-0150 D3, #32073] The name is resolved in the package of the
+        // calling flow (`resolvePackageScopedFunction`), never as the bare
+        // map's last registration: a name that means no single function for
+        // that caller throws the resolver's refusal and the step fails with it.
+        // Best-effort: without ObjectQL (or one that keeps no holder set),
+        // function-calling script nodes fail with a clear "no function
+        // registered" error when executed.
         try {
-            const fnRegistry = ctx.getService<{
-                resolveFunction?: (name: string) => ((c: unknown) => unknown) | undefined;
-                // #4396 — the same lookup, with what the function declared about
-                // itself. Optional: an older/foreign `objectql` service exposes
-                // only the handler, and every such function is then read as the
-                // contract's default (pure), exactly as before this existed.
-                resolveFunctionEntry?: (name: string) => {
-                    handler?: (c: unknown) => unknown;
-                    effect?: FlowFunctionEffect;
-                } | undefined;
-            }>('objectql');
-            if (fnRegistry && typeof fnRegistry.resolveFunction === 'function') {
-                this.engine.setFunctionResolver((name) => {
-                    const entry = fnRegistry.resolveFunctionEntry?.(name);
-                    const fn = entry?.handler ?? fnRegistry.resolveFunction!(name);
-                    if (typeof fn !== 'function') return undefined;
-                    return {
-                        handler: (fnCtx) => (fn as (c: unknown) => unknown)(fnCtx),
-                        ...(entry?.effect ? { effect: entry.effect } : {}),
-                    };
-                });
-                ctx.logger.debug('[Automation] script-node function registry bridged to objectql.resolveFunction');
+            const fnEngine = packageScopedFunctionEngineOf(ctx.getService('objectql'));
+            if (fnEngine) {
+                this.engine.setFunctionResolver(functionResolverOf(fnEngine));
+                ctx.logger.debug('[Automation] script-node function registry bridged to objectql functionHoldersOf (by package)');
             }
         } catch {
             ctx.logger.debug('[Automation] objectql not present — script-node function calls will fail loudly when used');

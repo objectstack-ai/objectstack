@@ -7,6 +7,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { isEmptyForRequired } from '@objectstack/core';
 import { validationFailure } from '@objectstack/types';
 import { callerContext } from './attachment-access-hooks.js';
+import { buildKey } from './storage-key.js';
 import {
   findReferenceableFile,
   unreadableFileMessage,
@@ -668,9 +669,8 @@ async function copyOwnedFile(
   const bytes = await storage.download(srcKey);
   const newId = randomUUID();
   const name = typeof src.name === 'string' && src.name ? src.name : newId;
-  const ext = name.includes('.') ? '.' + name.split('.').pop() : '';
   const scope = typeof src.scope === 'string' && src.scope ? src.scope : 'user';
-  const newKey = `${scope}/${newId}${ext}`;
+  const newKey = buildKey(scope, newId, name);
 
   await storage.upload(newKey, bytes, {
     contentType: typeof src.mime_type === 'string' ? src.mime_type : undefined,

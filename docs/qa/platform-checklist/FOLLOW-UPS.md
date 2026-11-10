@@ -1384,6 +1384,11 @@ listed in `releaseSweeps` with why.
   is not a `source[]` line, so it is outside the order's one exception. It is a
   checklist-accuracy fix for those items' next edit, and a runner who meets it before then
   substitutes the hyphen.
+  - **Fixed by #32330**, read at `7575116c`. Twelve items carried the ids, not eleven: the
+    promoted `api-backend.client-sdk-namespace-address` also spelled `com.qa.addr_a` in its
+    fixture's aside on the rule. Every item now spells `com.qa.addr-a`, `com.qa.addr-b`,
+    `com.qa.n-one` and `com.qa.n-two`, with `revision` bumped and a history row. The namespaces
+    (`qa_a`, `qa_b`, and `qa_n` for the `n` pair) are unchanged.
 - **`api-backend.automation-namespace-address` corrected (revision 2).** A variant line and the
   route-ledger `source[]` line said the 16 addressed `/automation` rows are server-only
   because the SDK names no namespace. Since #32197, eleven are `disposition: 'sdk'`, and the

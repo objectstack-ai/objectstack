@@ -33,6 +33,7 @@ import './lint-root-preload.testkit.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, hashSpec } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 
 /** The LIVE object universe: a deal with a formula field, and its account. */
 const liveDealObject = {
@@ -198,6 +199,7 @@ function makeStubEngine() {
                 ? { ok: false, code: 'FILTER_FIELD_NOT_STORED', status: 400, message: 'Field "deal_score" is a formula field and cannot be filtered.' }
                 : { ok: true },
         registry: {
+            ...NO_PACKAGE_SCOPED_READS,
             registerItem: () => {},
             registerObject: () => {},
             // The LIVE universe: the objects and the one dataset the fixtures
@@ -521,6 +523,24 @@ const CASES: Array<{ rule: string; type: string; item: { name: string } & Record
         },
     },
     {
+        // [#32289] A flow whose top-level nodes hold no start node: it saved,
+        // read valid:true and PUBLISHED, and the engine then refused to
+        // register it, so it could never run. Refused by lint rather than the
+        // flow parse, so the draft below still saves.
+        rule: 'flow-start-node-missing',
+        type: 'flow',
+        item: {
+            name: 'startless_flow',
+            label: 'Startless Flow',
+            type: 'autolaunched',
+            nodes: [
+                { id: 'stamp', type: 'assignment', label: 'Stamp' },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [{ id: 'e1', source: 'stamp', target: 'end' }],
+        },
+    },
+    {
         // [#29233] A loop whose body closes on itself (body a → b → a, the
         // card's reproduction). It saved, read valid:true and PUBLISHED, and
         // the engine's region check then refused to register it.
@@ -636,6 +656,20 @@ describe('a draft reads the verdict its publish gives (#26707)', () => {
         const first = res.failed[0];
         const diagnostics = await draftDiagnostics(protocol, first.type, first.name);
         expect(diagnostics.valid).toBe(false);
+    });
+
+    it('[#32289] a live save of a flow with no start node is refused, and nothing is stored', async () => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const item = structuredClone(CASES.find((c) => c.rule === 'flow-start-node-missing')!.item);
+
+        const refusal: any = await (protocol as any)
+            .saveMetaItem({ type: 'flow', name: item.name, item, packageId: PKG })
+            .then(() => null, (e: unknown) => e);
+
+        expect({ code: refusal?.code, status: refusal?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(refusal.issues.map((i: any) => i.rule)).toContain('flow-start-node-missing');
+        expect([...rows.values()].filter((r) => r.name === item.name)).toEqual([]);
     });
 
     it('a clean draft still reads valid:true, with no entry added', async () => {

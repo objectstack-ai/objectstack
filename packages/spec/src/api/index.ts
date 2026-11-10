@@ -59,6 +59,11 @@ export * from './errors.zod';
 // `FieldErrorCode` in the repo (#8124); `@objectstack/rest` and
 // `@objectstack/types` both consume it.
 export { zodIssuesToFields } from './zod-issues-to-fields';
+// [#32279] The one reader of a refusal's one-line head (a thrown error's
+// `refusalHead`, a zod issue's `params.refusalHead`, or the head registered for
+// a retired-key prescription), which the mapper above and `@objectstack/types`'
+// thrown-error answer both ask, and the bound every head keeps.
+export { refusalHeadOf, REFUSAL_HEAD_MAX } from '../shared/refusal-head';
 export * from './error-code-ledger.zod';
 export * from './protocol.zod';
 export * from './push-delivery.zod';
