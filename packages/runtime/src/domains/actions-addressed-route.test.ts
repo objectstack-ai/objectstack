@@ -477,9 +477,15 @@ describe('[ADR-0106 D6] a run whose action definition read fails is refused 503 
         expect(ran).toEqual([]);
     });
 
-    it('CONTROL — with no security service the posture is a passthrough, no definition is read, and the failing read refuses nothing', async () => {
+    it('CONTROL — with no security service the visibility question reads no definition and refuses nothing; the call reaches the later gates', async () => {
         const { post } = failingReads({});
-        const answer = await post(`/${DEAL.name}/set_margin`);
-        expect(codeOf(answer)).not.toBe('FIELD_VISIBILITY_UNRESOLVED');
+        // A later gate (the handler-owner check) reads the same registry, so the
+        // call ends there: by that gate's throw, never by this question's 503.
+        const outcome = await post(`/${DEAL.name}/set_margin`).then(
+            (answer) => ({ code: codeOf(answer) }),
+            (error: unknown) => ({ thrown: String((error as Error)?.message) }),
+        );
+        expect(outcome).not.toEqual({ code: 'FIELD_VISIBILITY_UNRESOLVED' });
+        expect(outcome).toEqual({ thrown: 'schema registry unavailable' });
     });
 });
