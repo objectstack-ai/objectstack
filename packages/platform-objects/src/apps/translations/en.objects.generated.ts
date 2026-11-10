@@ -2432,6 +2432,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Token Digest",
         help: "HMAC-SHA-256 (base64url) of the bearer, keyed by the deployment auth secret — one-way; the plaintext is shown once at mint and never stored."
       },
+      token_hint: {
+        label: "Token Hint",
+        help: "The last four characters of the bearer, recorded at mint so credentials of one connection can be told apart; never the bearer or its digest. Empty on a credential minted before hints were recorded."
+      },
       active: {
         label: "Active",
         help: "Revocation switch — an inactive credential is refused at verification"
@@ -2439,6 +2443,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       expires_at: {
         label: "Expires At",
         help: "Optional hard expiry for staged credential rotation; an expired credential is refused"
+      },
+      last_used_at: {
+        label: "Last Used At",
+        help: "When the credential last authenticated a SCIM request, recorded at most once a minute; empty when no use has been recorded"
       },
       user_id: {
         label: "Minted By",
@@ -2488,6 +2496,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "I have saved the token",
           fields: {
             token: "Token",
+            tokenHint: "Token Hint",
             connectionId: "Connection ID",
             expiresAt: "Expires At"
           }
