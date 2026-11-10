@@ -855,8 +855,8 @@ export interface ISecurityService {
    * (`GetEffectivePermissionsResponseSchema`), because it is the same answer
    * computed once rather than twice — but for one bit the served slot derives
    * from it: there, `allowTransfer` follows edit (ruling of record 6755714726,
-   * a client-hint carrier), while this map keeps the transfer grant the
-   * predicate reads.
+   * a client-hint carrier, which a predicate the Console evaluates also reads),
+   * while this map keeps the transfer grant the server-evaluated predicate reads.
    *
    * **Why the map, when {@link resolvePermissionSetsForContext} already hands
    * over the sets.** That method's note — the merge stays with the CALLER,
