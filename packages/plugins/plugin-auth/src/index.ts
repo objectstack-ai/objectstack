@@ -106,8 +106,10 @@ export * from './rate-limit-storage.js';
 export * from './secondary-storage.js';
 export * from './register-sso-provider.js';
 // The closed list of causes an enterprise OIDC callback names when it refuses
-// the IdP's ID token (`error_description` on the redirect, and the log line).
+// the IdP's ID token (`error_description` on the redirect, and the log line),
+// and the one it names when the accepted claims carry no email address.
 export {
+  SSO_OIDC_EMAIL_CLAIM_MISSING,
   SSO_OIDC_REFUSAL_CAUSES,
   SSO_OIDC_UNCLASSIFIED_REFUSAL,
   type SsoOidcRefusalCause,

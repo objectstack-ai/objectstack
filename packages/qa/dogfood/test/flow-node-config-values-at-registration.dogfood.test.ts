@@ -35,7 +35,10 @@
 //     the flow is not left registered; its valid sibling is;
 //   - the admin door: both approval refusals answer `400 VALIDATION_FAILED`
 //     located at the config path, and nothing is registered under either name;
-//   - the admin door, the control: a valid escalation registers.
+//   - the admin door, the control: a valid escalation registers;
+//   - a flow with no `start` node, which can never run: the admin door answers
+//     `400 VALIDATION_FAILED` naming the missing node, and nothing registers;
+//     at package load the boot completes, refuses the flow and names it.
 //
 // The fixture is built with `strict: false`, on purpose: the build door judges
 // the same flows on its own, and this file pins the two runtime doors behind
@@ -66,6 +69,8 @@ const PACKAGED_PLUGIN_VALID = 'esc_value_packaged_plugin_valid';
 const DOOR_SUB_HOUR = 'esc_value_door_sub_hour';
 const DOOR_UNKNOWN_KEY = 'esc_value_door_unknown_key';
 const DOOR_VALID = 'esc_value_door_valid';
+const PACKAGED_NO_START = 'esc_value_packaged_no_start';
+const DOOR_NO_START = 'esc_value_door_no_start';
 
 /** The config path the flow parse locates, on the approval node (`nodes[1]`). */
 const SUB_HOUR_PATH = 'nodes.1.config.escalation.timeoutHours';
@@ -103,6 +108,16 @@ function gatedFlow(name: string, escalation: Record<string, unknown>) {
       { id: 'e2', source: 'gate', target: 'approved', label: 'approve' },
       { id: 'e3', source: 'gate', target: 'rejected', label: 'reject' },
     ],
+  };
+}
+
+/** {@link gatedFlow} with its `start` node removed: a shape no run can begin from. */
+function startlessFlow(name: string) {
+  const flow = gatedFlow(name, { enabled: true, timeoutHours: 4, action: 'notify' });
+  return {
+    ...flow,
+    nodes: flow.nodes.filter((node) => node.type !== 'start'),
+    edges: flow.edges.filter((edge) => edge.source !== 'start'),
   };
 }
 
@@ -190,6 +205,7 @@ const fixtureStack = defineStack(
       // `cuont` is a key the plugin node type's descriptor does not declare.
       stampFlow(PACKAGED_PLUGIN_TYPO, { cuont: 2 }),
       stampFlow(PACKAGED_PLUGIN_VALID, { count: 2 }),
+      startlessFlow(PACKAGED_NO_START),
     ] as never,
   },
   { strict: false },
@@ -307,6 +323,24 @@ describe('a flow node config its contract refuses is refused at registration, an
       const read = await call('GET', `/automation/${name}`);
       expect(read.status, JSON.stringify(read.json)).toBe(404);
     }
+  });
+
+  it('a flow with no start node: the admin door answers 400 VALIDATION_FAILED naming the missing node, and nothing registers', async () => {
+    const refused = await call('POST', '/automation', startlessFlow(DOOR_NO_START));
+    expect(refused.status, JSON.stringify(refused.json)).toBe(400);
+    expect(refused.json.error?.code).toBe('VALIDATION_FAILED');
+    expect(refused.json.error?.message).toMatch(
+      new RegExp(`^Flow '${DOOR_NO_START}' rejected: the flow's top-level \`nodes\` hold no \`start\` node`),
+    );
+
+    const read = await call('GET', `/automation/${DOOR_NO_START}`);
+    expect(read.status, JSON.stringify(read.json)).toBe(404);
+  });
+
+  it('a flow with no start node at package load: the boot completes, and refuses and names that flow alone', async () => {
+    const read = await call('GET', `/automation/${PACKAGED_NO_START}`);
+    expect(read.status, JSON.stringify(read.json)).toBe(404);
+    expect(bootLines(PACKAGED_NO_START, 'hold no `start` node').length, bootOutput.slice(-4000)).toBeGreaterThan(0);
   });
 
   it('the admin door, the control: a valid escalation registers', async () => {

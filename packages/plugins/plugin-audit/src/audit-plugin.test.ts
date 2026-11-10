@@ -117,8 +117,50 @@ describe('AuditPlugin — system table provisioning', () => {
  * not pinned: the pins hold the level, the count, the named object, the named
  * remedy command and the driver's refusal in meta.
  */
+/**
+ * [ADR-0154, #31908 P1b-1] The plugin registers the two tamper-evidence objects
+ * the sealer and signer write, `sys_audit_checkpoint` and
+ * `sys_audit_signing_key`, ahead of those writers, so their tables exist when
+ * the sealer lands. `sys_audit_amendment` is registered with its first writer
+ * (the redaction amendments), not before: an object the plugin registers is an
+ * object whose `get` / `list` doors and table it serves.
+ */
+describe('AuditPlugin — registers the checkpoint and signing-key objects (ADR-0154)', () => {
+  async function registeredNames(): Promise<string[]> {
+    const names: string[] = [];
+    const { ctx } = makeCtx({ async find() { return []; } });
+    ctx.getService = (name: string) => (name === 'manifest'
+      ? { register(m: { objects?: Array<{ name: string }> }) { for (const o of m?.objects ?? []) names.push(o.name); } }
+      : undefined);
+    await new AuditPlugin().init(ctx);
+    return names;
+  }
+
+  it('registers sys_audit_checkpoint and sys_audit_signing_key beside the four ledger and comment objects', async () => {
+    expect(await registeredNames()).toEqual([
+      'sys_audit_log',
+      'sys_activity',
+      'sys_comment',
+      'sys_comment_reaction',
+      'sys_audit_checkpoint',
+      'sys_audit_signing_key',
+    ]);
+  });
+
+  it('does not register sys_audit_amendment before its writer exists', async () => {
+    expect(await registeredNames()).not.toContain('sys_audit_amendment');
+  });
+});
+
 describe('AuditPlugin — a failed provision is an error, once per object (#22913)', () => {
-  const OBJECTS = ['sys_audit_log', 'sys_activity', 'sys_comment', 'sys_comment_reaction'];
+  const OBJECTS = [
+    'sys_audit_log',
+    'sys_activity',
+    'sys_comment',
+    'sys_comment_reaction',
+    'sys_audit_checkpoint',
+    'sys_audit_signing_key',
+  ];
 
   /** Every DDL succeeds except the named object's, which the driver refuses. */
   function makeEngine(refused?: string) {
@@ -155,7 +197,7 @@ describe('AuditPlugin — a failed provision is an error, once per object (#2291
     expect(line.meta).toEqual({ object: name, error: `there is already an index named ${name}` });
     // …and it is not ALSO reported at a quieter level.
     expect(logs.warn.filter((m) => m.includes('could not provision'))).toEqual([]);
-    // The other three objects still provisioned.
+    // Every other object still provisioned.
     const placement = logs.info.find((m) => m.includes('system tables provisioned'));
     for (const other of OBJECTS.filter((o) => o !== name)) expect(placement).toContain(`${other}→sqlite`);
     expect(placement).not.toContain(`${name}→`);
@@ -223,6 +265,9 @@ describe('AuditPlugin — provisioning is audible (#4887)', () => {
       sys_activity: 'telemetry',
       sys_comment: 'sqlite',
       sys_comment_reaction: 'sqlite',
+      // No lifecycle class: the two ADR-0154 objects stay on the primary.
+      sys_audit_checkpoint: 'sqlite',
+      sys_audit_signing_key: 'sqlite',
     });
     const { ctx, logs, fireReady } = makeCtx(engine);
     const plugin = new AuditPlugin();
@@ -254,6 +299,8 @@ describe('AuditPlugin — provisioning is audible (#4887)', () => {
       sys_activity: 'sqlite',
       sys_comment: 'sqlite',
       sys_comment_reaction: 'sqlite',
+      sys_audit_checkpoint: 'sqlite',
+      sys_audit_signing_key: 'sqlite',
     });
     const { ctx, logs, fireReady } = makeCtx(engine);
     const plugin = new AuditPlugin();
@@ -275,6 +322,8 @@ describe('AuditPlugin — provisioning is audible (#4887)', () => {
       sys_activity: 'sqlite',
       sys_comment: 'sqlite',
       sys_comment_reaction: 'sqlite',
+      sys_audit_checkpoint: 'sqlite',
+      sys_audit_signing_key: 'sqlite',
     });
     const { ctx, logs, fireReady } = makeCtx(engine);
     const plugin = new AuditPlugin();
@@ -285,7 +334,7 @@ describe('AuditPlugin — provisioning is audible (#4887)', () => {
     const warned = logs.warn.find((m) => m.includes('NO datasource driver'));
     expect(warned).toBeDefined();
     expect(warned).toContain('sys_audit_log');
-    // The other two still provisioned — one unroutable object does not stop them.
+    // The others still provisioned — one unroutable object does not stop them.
     const placement = logs.info.find((m) => m.includes('system tables provisioned'));
     expect(placement).toContain('sys_activity→sqlite');
     expect(placement).toContain('sys_comment→sqlite');
@@ -322,7 +371,14 @@ describe('AuditPlugin — provisioning is audible (#4887)', () => {
  * pinned; the level, the count and the named subjects are.
  */
 describe('AuditPlugin — boot provisioning honours skipSchemaSync (#22984)', () => {
-  const OBJECTS = ['sys_audit_log', 'sys_activity', 'sys_comment', 'sys_comment_reaction'];
+  const OBJECTS = [
+    'sys_audit_log',
+    'sys_activity',
+    'sys_comment',
+    'sys_comment_reaction',
+    'sys_audit_checkpoint',
+    'sys_audit_signing_key',
+  ];
   const SKIP = 'NOT provisioned at boot';
 
   /**

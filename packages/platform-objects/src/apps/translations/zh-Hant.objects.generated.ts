@@ -2106,6 +2106,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "允許即時開通帳號",
         help: "在僅限邀請的受眾策略下，為透過此提供方登入、但既無帳號也無邀請的人建立帳號。預設關閉：此類人員會被拒絕。其他策略照舊開通帳號。請透過「編輯登入選項」修改。"
       },
+      skip_user_info: {
+        label: "僅從 ID 權杖讀取宣告",
+        help: "僅適用於 OIDC。從身分識別提供者已驗證的 ID 權杖讀取電子郵件、名稱和群組，不呼叫其 userinfo 端點。Microsoft Entra ID 需開啟此項：它的 userinfo 回應不含群組，也不含 preferred_username。預設關閉：設定了 userinfo 端點的提供者從該回應讀取宣告。請透過「編輯登入選項」修改。"
+      },
       user_id: {
         label: "註冊者",
         help: "註冊該提供方的使用者"
@@ -2432,6 +2436,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "權杖摘要",
         help: "Bearer 權杖的 HMAC-SHA-256（base64url），以部署的驗證金鑰為鍵——單向；明文僅在簽發時顯示一次，且絕不儲存。"
       },
+      token_hint: {
+        label: "權杖提示",
+        help: "Bearer 權杖的最後四個字元，於簽發時記錄，用於區分同一連線的多個憑證；絕非權杖本身或其摘要。提示功能上線前簽發的憑證此項為空。"
+      },
       active: {
         label: "啟用",
         help: "撤銷開關——未啟用的憑證在驗證時會被拒絕"
@@ -2439,6 +2447,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       expires_at: {
         label: "到期時間",
         help: "用於分階段憑證輪換的可選硬性過期時間；已過期的憑證會被拒絕"
+      },
+      last_used_at: {
+        label: "最近使用時間",
+        help: "該憑證最近一次通過驗證的 SCIM 請求的時間，每分鐘至多記錄一次；尚無使用記錄時為空"
       },
       user_id: {
         label: "簽發者",
@@ -2488,6 +2500,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "我已儲存權杖",
           fields: {
             token: "權杖",
+            tokenHint: "權杖提示",
             connectionId: "連線 ID",
             expiresAt: "到期時間"
           }

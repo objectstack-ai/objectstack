@@ -90,6 +90,9 @@ export interface FlowDefinitionsHost {
     readonly refuseEnableOntoDisabledSubflow: AutomationEngine['refuseEnableOntoDisabledSubflow'];
     readonly parkedRunsOf: AutomationEngine['parkedRunsOf'];
     readonly activateFlowTrigger: AutomationEngine['activateFlowTrigger'];
+    readonly flowSlotName: AutomationEngine['flowSlotName'];
+    readonly flowSlotKeysOf: AutomationEngine['flowSlotKeysOf'];
+    readonly isSharedFlowKey: AutomationEngine['isSharedFlowKey'];
 }
 
 /** The body of {@link AutomationEngine.resolveFunction}, moved unedited; that method's docblock is its contract. */
@@ -248,7 +251,7 @@ export function recordFlowRefusal(this: Pick<FlowDefinitionsHost, 'flows' | 'flo
 }
 
 /** The body of {@link AutomationEngine.getFlowRuntimeStates}, moved unedited; that method's docblock is its contract. */
-export function getFlowRuntimeStates(this: Pick<FlowDefinitionsHost, 'flows' | 'resolveTriggerBinding' | 'flowShadowing' | 'describeUnboundReason' | 'isFlowEnabled' | 'boundFlowTriggers'>): Array<{
+export function getFlowRuntimeStates(this: Pick<FlowDefinitionsHost, 'flows' | 'resolveTriggerBinding' | 'flowShadowing' | 'describeUnboundReason' | 'isFlowEnabled' | 'boundFlowTriggers' | 'flowSlotName'>): Array<{
     name: string;
     enabled: boolean;
     bound: boolean;
@@ -268,7 +271,9 @@ export function getFlowRuntimeStates(this: Pick<FlowDefinitionsHost, 'flows' | '
         const shadowing = this.flowShadowing.get(name);
         const unbound = this.describeUnboundReason(name, resolved);
         return {
-            name,
+            // [#31696] One row per slot, under the flow's own name: two
+            // packages' flows of one name are two rows of that name.
+            name: this.flowSlotName(name),
             enabled: this.isFlowEnabled(name),
             bound: this.boundFlowTriggers.has(name),
             status: (this.flows.get(name) as { status?: string } | undefined)?.status,
@@ -458,27 +463,33 @@ export function withdrawFlow(this: Pick<FlowDefinitionsHost, 'deactivateFlowTrig
 }
 
 /** The body of {@link AutomationEngine.hydrateFlowActivations}, moved unedited; that method's docblock is its contract. */
-export async function hydrateFlowActivations(this: Pick<FlowDefinitionsHost, 'flowActivationStore' | 'flowLedgerDisabled' | 'flows' | 'deactivateFlowTrigger' | 'rejudgeSubflowCallers'>): Promise<string[]> {
+export async function hydrateFlowActivations(this: Pick<FlowDefinitionsHost, 'flowActivationStore' | 'flowLedgerDisabled' | 'flows' | 'deactivateFlowTrigger' | 'rejudgeSubflowCallers' | 'flowSlotKeysOf'>): Promise<string[]> {
     if (!this.flowActivationStore) return [];
     const rows = await this.flowActivationStore.list();
     const disabled: string[] = [];
+    // [ADR-0150 D4] The row's own package goes into the projection with the
+    // name, so it switches off that package's flow of the name and no other
+    // (`FlowActivationProjection.has`). [#31696] Every row is in before any
+    // flow is judged, so a package's own row is read with the row naming no
+    // package beside it, whichever the ledger lists first.
     for (const row of rows) {
-        // [ADR-0150 D4] The row's own package goes into the projection with
-        // the name, so it switches off that package's flow of the name and no
-        // other (`FlowActivationProjection.has`).
-        if (row.active) {
-            this.flowLedgerDisabled.delete(row.name, row.packageId);
-            continue;
-        }
-        this.flowLedgerDisabled.add(row.name, row.packageId);
+        if (row.active) this.flowLedgerDisabled.delete(row.name, row.packageId);
+        else this.flowLedgerDisabled.add(row.name, row.packageId);
+    }
+    for (const row of rows) {
+        if (row.active) continue;
         // Only a flow this engine actually holds can be unbound; a row for
         // a flow this deployment does not ship is kept in the projection
         // (it costs one string, and the flow may be registered later by a
         // hot reload) but has nothing to disarm now — nor has a row of
         // another package than the one that ships the name now.
-        if (this.flows.has(row.name) && this.flowLedgerDisabled.has(row.name)) {
-            this.deactivateFlowTrigger(row.name);
-            disabled.push(row.name);
+        // [#31696] Each slot of the name is asked for itself: a row of one
+        // package switches off that package's flow of the name only.
+        for (const key of this.flowSlotKeysOf(row.name)) {
+            if (this.flows.has(key) && this.flowLedgerDisabled.has(key) && !disabled.includes(key)) {
+                this.deactivateFlowTrigger(key);
+                disabled.push(key);
+            }
         }
     }
     // [#20725, ADR-0126 §7.3] The callers of what the ledger just switched
@@ -508,7 +519,7 @@ function flowActivationWriteOptions(caller: Pick<AutomationContext, 'userId'> | 
 }
 
 /** The body of {@link AutomationEngine.toggleFlow}; that method's docblock is its contract. */
-export async function toggleFlow(this: Pick<FlowDefinitionsHost, 'flows' | 'refuseCustomerAuthoredToggle' | 'packagedFlowOwner' | 'refuseEnableOntoDisabledSubflow' | 'packagedSubflowCallers' | 'isFlowEnabled' | 'parkedRunsOf' | 'refuseUnderReachingCallers' | 'flowActivationStore' | 'logger' | 'flowLedgerDisabled' | 'activateFlowTrigger' | 'deactivateFlowTrigger' | 'rejudgeSubflowCallers'>, name: string, enabled: boolean, caller?: Pick<AutomationContext, 'userId'>): Promise<void> {
+export async function toggleFlow(this: Pick<FlowDefinitionsHost, 'flows' | 'refuseCustomerAuthoredToggle' | 'packagedFlowOwner' | 'refuseEnableOntoDisabledSubflow' | 'packagedSubflowCallers' | 'isFlowEnabled' | 'parkedRunsOf' | 'refuseUnderReachingCallers' | 'flowActivationStore' | 'logger' | 'flowLedgerDisabled' | 'activateFlowTrigger' | 'deactivateFlowTrigger' | 'rejudgeSubflowCallers' | 'flowSlotName' | 'isSharedFlowKey'>, name: string, enabled: boolean, caller?: Pick<AutomationContext, 'userId'>): Promise<void> {
     const flow = this.flows.get(name);
     if (!flow) {
         throw new Error(`Flow '${name}' not found`);
@@ -525,6 +536,8 @@ export async function toggleFlow(this: Pick<FlowDefinitionsHost, 'flows' | 'refu
     // is attributed to exactly that one — read with the verdict, so the
     // run-store await below cannot separate the two.
     const packageOwner = this.packagedFlowOwner(name) as string;
+    // [#31696] `name` is the flow's slot key; the ledger row names the flow.
+    const flowName = this.flowSlotName(name);
 
     // [ADR-0126 §7.3] The subflow guard runs in BOTH directions, because
     // a subflow pair breaks from either end. Disabling a child breaks the
@@ -552,15 +565,20 @@ export async function toggleFlow(this: Pick<FlowDefinitionsHost, 'flows' | 'refu
     // The durable row FIRST. A store that throws aborts the flip with
     // nothing changed in process, so the engine never reports an
     // activation state the ledger does not carry.
+    // [ADR-0150 D4, #31696] The row is addressed by `(package, name)`. While
+    // the package is the name's one holder, a row naming no package is its
+    // switch, and this write takes that row over; under two holders it is
+    // neither's, and stays as it is.
+    const shared = this.isSharedFlowKey(name);
     if (this.flowActivationStore) {
         await this.flowActivationStore.setActive({
-            name,
+            name: flowName,
             // [#20761] The package the LOADER's set names, never the
             // definition's stamps — so no row is attributed to a package
             // from an authoring door. Read once, up top, with the verdict.
             packageId: packageOwner,
             active: enabled,
-        }, flowActivationWriteOptions(caller));
+        }, { ...flowActivationWriteOptions(caller), ...(shared ? {} : { adoptPackageless: true }) });
     } else {
         // Degrading to in-process is a legitimate mode for a host with no
         // ObjectQL — degrading to it while REPORTING durability is not
@@ -576,9 +594,11 @@ export async function toggleFlow(this: Pick<FlowDefinitionsHost, 'flows' | 'refu
     // [ADR-0150 D4] Under the same `(package, name)` the durable row names. A
     // row that named no package bound to this one holder, and the write above
     // is now that holder's row, so it goes too.
-    this.flowLedgerDisabled.delete(name);
-    if (enabled) this.flowLedgerDisabled.delete(name, packageOwner);
-    else this.flowLedgerDisabled.add(name, packageOwner);
+    // [#31696] Not under a name two packages hold: there the row naming no
+    // package is neither holder's row.
+    if (!shared) this.flowLedgerDisabled.delete(flowName);
+    if (enabled) this.flowLedgerDisabled.delete(flowName, packageOwner);
+    else this.flowLedgerDisabled.add(flowName, packageOwner);
 
     this.logger.info(`Flow '${name}' ${enabled ? 'enabled' : 'disabled'}`);
     // A disabled flow should stop receiving trigger events; a re-enabled one

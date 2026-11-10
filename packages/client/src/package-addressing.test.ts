@@ -502,6 +502,8 @@ describe('4c. the /meta door: a qualified read reaches its holder, and a 409 rej
         const err = await refusalOf(client.meta.getItem('page', 'home', { namespace: 'gamma' }));
         expect([err.httpStatus, err.code]).toEqual([409, 'RESOURCE_CONFLICT']);
         expect(err.message).toContain(`package "${A}"`);
+        // [#32201] …and its holders, structured, where the SDK reads them.
+        expect(err.details?.candidates).toEqual([{ kind: 'package', packageId: A }]);
         // CONTROL — the bare read of the same one-holder name is served.
         expect(((await client.meta.getItem('page', 'home')).item as { label?: string } | undefined)?.label).toBe('alpha page');
     });
@@ -515,6 +517,7 @@ describe('4c. the /meta door: a qualified read reaches its holder, and a 409 rej
         expect([err.httpStatus, err.code]).toEqual([409, 'RESOURCE_CONFLICT']);
         expect(err.message).toContain(`package "${A}"`);
         expect(err.message).toContain(`package "${B}"`);
+        expect(err.details?.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
     });
 
     it('both qualifiers on one read are refused by the door, never one picked', async () => {

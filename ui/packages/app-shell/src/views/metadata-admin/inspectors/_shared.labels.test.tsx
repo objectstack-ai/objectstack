@@ -70,8 +70,11 @@
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import '@testing-library/jest-dom/vitest';
+import userEvent from '@testing-library/user-event';
 import { Label } from '@object-ui/components';
 import {
+  InspectorReorderButtons,
   InspectorTextField,
   InspectorNumberField,
   InspectorSelectField,
@@ -453,5 +456,64 @@ describe('InspectorCheckboxField — the wrapping-label form still names its box
     expect(box).toBe(screen.getByRole('checkbox'));
     expect(box).not.toHaveAttribute('id');
     expect(labelTargets()).toEqual([]);
+  });
+});
+
+/**
+ * objectstack#32103 — the inspector's reorder pair (the field inspector's
+ * "Move up" / "Move down", and every other inspector's) disabled its boundary
+ * arrow with only its own name as a `title`: no reason on hover, none on
+ * focus, none in the accessibility tree, and Tab skipped it. The boundary
+ * arrow now sits in a focusable wrapper described by the reason
+ * (`DisabledControlReason`), keeping its name.
+ */
+describe('InspectorReorderButtons — a boundary arrow says why it is off (objectstack#32103)', () => {
+  const describedBy = (el: HTMLElement) =>
+    document.getElementById(el.getAttribute('aria-describedby') ?? '') as HTMLElement | null;
+
+  it('the first item: Tab reaches the disabled "Move up", which gives the reason; "Move down" stays plain', async () => {
+    const user = userEvent.setup();
+    const onMove = vi.fn();
+    render(
+      <div>
+        <button type="button">before</button>
+        <InspectorReorderButtons index={0} total={3} onMove={onMove} />
+      </div>,
+    );
+    const up = screen.getByRole('button', { name: 'Move up' });
+    const down = screen.getByRole('button', { name: 'Move down' });
+    expect(up).toBeDisabled();
+    expect(up).not.toHaveAttribute('title');
+    expect(describedBy(up)).toHaveTextContent('Already first');
+
+    screen.getByRole('button', { name: 'before' }).focus();
+    await user.tab();
+    expect(up.parentElement).toHaveFocus();
+    expect(describedBy(up.parentElement as HTMLElement)).toHaveTextContent('Already first');
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Already first');
+
+    // CONTROL — the arrow that can move is a plain button, next in Tab order.
+    expect(down).toBeEnabled();
+    expect(down).not.toHaveAttribute('aria-describedby');
+    await user.tab();
+    expect(down).toHaveFocus();
+    await user.click(down);
+    expect(onMove).toHaveBeenCalledWith(1);
+  });
+
+  it('the last item: the disabled "Move down" gives its own reason', () => {
+    render(<InspectorReorderButtons index={2} total={3} onMove={vi.fn()} />);
+    expect(describedBy(screen.getByRole('button', { name: 'Move down' }))).toHaveTextContent('Already last');
+    expect(screen.getByRole('button', { name: 'Move up' })).not.toHaveAttribute('aria-describedby');
+  });
+
+  it('CONTROL — a pair the host disabled carries no boundary reason (the host owns that reason)', () => {
+    render(<InspectorReorderButtons index={0} total={3} onMove={vi.fn()} disabled />);
+    for (const name of ['Move up', 'Move down']) {
+      const btn = screen.getByRole('button', { name });
+      expect(btn).toBeDisabled();
+      expect(btn).not.toHaveAttribute('aria-describedby');
+      expect(btn.parentElement).not.toHaveAttribute('data-disabled-reason');
+    }
   });
 });

@@ -349,6 +349,79 @@ describe('ObjectStoreMetadataActivationStore — an item no package ships', () =
     });
 });
 
+// [ADR-0150 D4, #31696] A type whose readers consult the ledger by
+// `(package, name)` constructs its store with `addressing: 'package-and-name'`:
+// one package's write never re-attributes another package's row of the name.
+describe('the ledger addressed by (package, name)', () => {
+    const BY_PACKAGE = { addressing: 'package-and-name' } as const;
+
+    it('ObjectStore: a write for one package updates that package\'s row and leaves the other\'s', async () => {
+        const { engine, calls } = makeStoreEngine([
+            { id: 'r1', metadata_type: 'flow', name: 'f', package_id: 'p1', active: false },
+            { id: 'r2', metadata_type: 'flow', name: 'f', package_id: 'p2', active: false },
+        ]);
+        await new ObjectStoreMetadataActivationStore(engine, 'flow', BY_PACKAGE).setActive({ name: 'f', packageId: 'p2', active: true });
+        expect(calls.filter((c) => c.op === 'update').map((c) => c.data)).toEqual([{ id: 'r2', active: true, package_id: 'p2' }]);
+        expect(calls.filter((c) => c.op === 'insert')).toHaveLength(0);
+    });
+
+    it('ObjectStore: a package with no row of its own gets one beside the other package\'s, which it never takes over', async () => {
+        const { engine, calls } = makeStoreEngine([
+            { id: 'r1', metadata_type: 'flow', name: 'f', package_id: 'p1', active: false },
+        ]);
+        await new ObjectStoreMetadataActivationStore(engine, 'flow', BY_PACKAGE).setActive({ name: 'f', packageId: 'p2', active: true });
+        expect(calls.filter((c) => c.op === 'update')).toHaveLength(0);
+        expect(calls.find((c) => c.op === 'insert')?.data).toEqual({ metadata_type: 'flow', name: 'f', package_id: 'p2', active: true });
+    });
+
+    it('ObjectStore: the row naming no package is taken over only when the write says so', async () => {
+        const rows = [{ id: 'r0', metadata_type: 'flow', name: 'f', package_id: null, active: false }];
+        const plain = makeStoreEngine(rows);
+        await new ObjectStoreMetadataActivationStore(plain.engine, 'flow', BY_PACKAGE).setActive({ name: 'f', packageId: 'p1', active: false });
+        expect(plain.calls.filter((c) => c.op === 'update')).toHaveLength(0);
+        expect(plain.calls.find((c) => c.op === 'insert')?.data).toMatchObject({ package_id: 'p1' });
+
+        const adopting = makeStoreEngine(rows);
+        await new ObjectStoreMetadataActivationStore(adopting.engine, 'flow', BY_PACKAGE).setActive(
+            { name: 'f', packageId: 'p1', active: false },
+            { adoptPackageless: true },
+        );
+        expect(adopting.calls.filter((c) => c.op === 'insert')).toHaveLength(0);
+        expect(adopting.calls.find((c) => c.op === 'update')?.data).toEqual({ id: 'r0', active: false, package_id: 'p1' });
+    });
+
+    it('ObjectStore: a package-less write updates the package-less row, never a package\'s', async () => {
+        const { engine, calls } = makeStoreEngine([
+            { id: 'r1', metadata_type: 'flow', name: 'f', package_id: 'p1', active: false },
+            { id: 'r0', metadata_type: 'flow', name: 'f', package_id: null, active: false },
+        ]);
+        await new ObjectStoreMetadataActivationStore(engine, 'flow', BY_PACKAGE).setActive({ name: 'f', active: true });
+        expect(calls.find((c) => c.op === 'update')?.data).toEqual({ id: 'r0', active: true, package_id: null });
+    });
+
+    it('by name (the default), the one row of the name is re-attributed, as before', async () => {
+        const { engine, calls } = makeStoreEngine([
+            { id: 'r1', metadata_type: 'action', name: 'a', package_id: 'p1', active: false },
+        ]);
+        await new ObjectStoreMetadataActivationStore(engine, 'action').setActive({ name: 'a', packageId: 'p2', active: true });
+        expect(calls.find((c) => c.op === 'update')?.data).toEqual({ id: 'r1', active: true, package_id: 'p2' });
+    });
+
+    it('InMemory keeps rows exactly as the durable store does, in both modes', async () => {
+        const byPackage = new InMemoryMetadataActivationStore(BY_PACKAGE);
+        await byPackage.setActive({ name: 'f', active: false });
+        await byPackage.setActive({ name: 'f', packageId: 'p2', active: true });
+        expect(await byPackage.list()).toEqual([{ name: 'f', active: false }, { name: 'f', packageId: 'p2', active: true }]);
+        await byPackage.setActive({ name: 'f', packageId: 'p1', active: false }, { adoptPackageless: true });
+        expect(await byPackage.list()).toEqual([{ name: 'f', packageId: 'p2', active: true }, { name: 'f', packageId: 'p1', active: false }]);
+
+        const byName = new InMemoryMetadataActivationStore();
+        await byName.setActive({ name: 'a', packageId: 'p1', active: false });
+        await byName.setActive({ name: 'a', packageId: 'p2', active: true });
+        expect(await byName.list()).toEqual([{ name: 'a', packageId: 'p2', active: true }]);
+    });
+});
+
 // [#26474] A door writes the row ON BEHALF of the administrator who asked, so
 // the write runs under that caller's own envelope, elevated — the engine stamps
 // `created_by` / `updated_by` from its `userId`, and the audit plugin reads
