@@ -123,6 +123,13 @@ const zhHant = {
           unmanagedHint: '一次性複製到本執行環境，成為它自己的中繼資料：每個條目都可在此編輯，副本不再接收升級。',
           required: '請先選擇安裝方式，再安裝此軟體包。',
         },
+        targetNamespace: {
+          label: '目標名稱空間',
+          placeholder: '例如 crm_copy',
+          hint: '這份副本的中繼資料寫入的名稱空間。可修改為其他名稱後安裝。',
+          noDefault: '未能讀取預設名稱空間。請輸入這份副本要使用的名稱空間。',
+          taken: '名稱空間 "{{namespace}}" 已屬於另一個包。請換一個名稱後重新安裝。',
+        },
         unmanagedSuccess: '已將 "{{name}}" 的 v{{version}} 複製到本執行環境，成為它自己的中繼資料，位於基礎包 {{base}} 中。副本可編輯，且不再接收升級。',
         unmanagedStrippedLocks: '軟體包鎖定了以下條目。副本可編輯，因此這些鎖未被複制：',
         unmanagedIgnored: '本執行環境不支援非託管安裝，因此 "{{name}}" 以託管方式安裝（以程式碼形式註冊），而不是被複制。請先升級執行環境，然後解除安裝該軟體包，再以非託管副本重新安裝。',

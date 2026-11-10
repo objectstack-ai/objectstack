@@ -1445,7 +1445,12 @@ export interface AuthPasswordChangeResult {
  * `callbackURL`.
  */
 export interface AuthEmailVerificationResult {
-    /** Always `true`; a bad or expired token is a 401 raised by `this.fetch`. */
+    /**
+     * Always `true`; a bad or expired token is a 401 raised by `this.fetch`.
+     * A request that would sign in an account with an enrolled second factor
+     * answers the two-factor challenge (`twoFactorRedirect`) instead of this
+     * receipt: no one-time code or sign-in link alone signs such an account in.
+     */
     status: true;
     /**
      * The updated user when the token was minted by `changeEmail` (the address
@@ -2087,8 +2092,10 @@ export class ObjectStackClient {
      * When the door refuses the read for its holders (a qualifier whose
      * package holds no item of the name while another holder does, or a name
      * the address cannot tell apart), the promise REJECTS with
-     * `409 RESOURCE_CONFLICT` (`err.code`, `err.httpStatus`), and `err.message`
-     * names every holder; the door never picks one. An item
+     * `409 RESOURCE_CONFLICT` (`err.code`, `err.httpStatus`): `err.message`
+     * names every holder, and `err.details.candidates` lists them
+     * (`{ kind: 'package', packageId }` or `{ kind: 'environment' }`), so a
+     * caller can retry with the one it means; the door never picks one. An item
      * named like one of the door's sub-resources (`history`, `audit`, `diff`,
      * …) has no qualified path, so a `namespace` for it is refused before any
      * request with `400 VALIDATION_ERROR`: read it with `packageId`.

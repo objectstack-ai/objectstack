@@ -900,6 +900,7 @@
     "defineSeed": "src/data/seed.zod.ts#defineSeed (function)",
     "deriveFieldGroupLayout": "src/data/field-group-layout.ts#deriveFieldGroupLayout (function)",
     "deriveInlineGridColumns": "src/data/inline-grid-columns.ts#deriveInlineGridColumns (function)",
+    "deriveInlineGridSortField": "src/data/inline-grid-columns.ts#deriveInlineGridSortField (function)",
     "deriveInlineRowFormFields": "src/data/inline-grid-columns.ts#deriveInlineRowFormFields (function)",
     "deriveRecordFlowSurface": "src/data/record-surface.ts#deriveRecordFlowSurface (function)",
     "deriveRecordSurface": "src/data/record-surface.ts#deriveRecordSurface (function)",

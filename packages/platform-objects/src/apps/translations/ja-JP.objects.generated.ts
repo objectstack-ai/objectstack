@@ -2208,6 +2208,26 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
             helpText: "任意。要求する SAML NameID フォーマット。既定では IdP に設定されたフォーマットを使用します。",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          mapEmail: {
+            label: "マッピング: メール属性",
+            helpText: "任意。ユーザーのメールアドレスにマッピングするアサーション属性です。既定は「email」、なければ NameID です。Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          mapFirstName: {
+            label: "マッピング: 名属性",
+            helpText: "任意。ユーザーの名にマッピングするアサーション属性です。既定は「givenName」です。Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          mapLastName: {
+            label: "マッピング: 姓属性",
+            helpText: "任意。ユーザーの姓にマッピングするアサーション属性です。既定は「surname」です。Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          mapName: {
+            label: "マッピング: 表示名属性",
+            helpText: "任意。ユーザーのフルネームにマッピングするアサーション属性で、名と姓の属性がない場合に使われます。既定は「displayName」、なければ NameID です。Okta: name。Entra ID: http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          },
           mapGroups: {
             label: "マッピング: グループ属性",
             helpText: "任意。ユーザーのグループを含むアサーション属性。サインインのたびに、それらのグループにマッピングされた権限セットが付与されます。空欄の場合、グループはマッピングされません。",
@@ -2267,6 +2287,57 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "完了",
           fields: {
             groupsClaim: "グループクレーム"
+          }
+        }
+      },
+      show_sso_attribute_mapping: {
+        label: "属性マッピングを表示",
+        resultDialog: {
+          title: "属性マッピング",
+          description: "このプロバイダーがサインインのたびにユーザーのメールアドレスと名前を読み取る IdP 属性（SAML）またはクレーム（OIDC）です。空の場合は既定値が使われます: メールアドレスは「email」（SAML ではなければ NameID）、名前は「givenName」+「surname」、なければ「displayName」（OIDC では「name」）。名と姓は SAML にのみ適用されます。「属性マッピングを編集」で変更できます。",
+          acknowledge: "完了",
+          fields: {
+            protocol: "プロトコル",
+            email: "メール",
+            firstName: "名",
+            lastName: "姓",
+            name: "表示名"
+          }
+        }
+      },
+      edit_sso_attribute_mapping: {
+        label: "属性マッピングを編集",
+        params: {
+          email: {
+            label: "メール属性",
+            helpText: "ユーザーのメールアドレスにマッピングする IdP 属性またはクレームです。変更しなければ現在の値が保持されます。空にすると既定値（「email」）に戻ります。Entra ID SAML: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          firstName: {
+            label: "名属性 (SAML)",
+            helpText: "SAML のみ。ユーザーの名にマッピングするアサーション属性です。変更しなければ現在の値が保持されます。Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          lastName: {
+            label: "姓属性 (SAML)",
+            helpText: "SAML のみ。ユーザーの姓にマッピングするアサーション属性です。変更しなければ現在の値が保持されます。Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          name: {
+            label: "表示名属性",
+            helpText: "ユーザーのフルネームにマッピングする IdP 属性またはクレームです（SAML: 名と姓がない場合に使用）。変更しなければ現在の値が保持されます。Okta SAML: name。Entra ID: http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          }
+        },
+        resultDialog: {
+          title: "属性マッピングを保存しました",
+          description: "このプロバイダーが今後サインインのたびにユーザーのメールアドレスと名前を読み取る属性またはクレームです。空の場合は既定値が使われます。",
+          acknowledge: "完了",
+          fields: {
+            email: "メール",
+            firstName: "名",
+            lastName: "姓",
+            name: "表示名"
           }
         }
       }
@@ -2361,6 +2432,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "トークンダイジェスト",
         help: "デプロイメントの認証シークレットを鍵とする、ベアラーの HMAC-SHA-256（base64url）— 一方向。平文は発行時に一度だけ表示され、保存されません。"
       },
+      token_hint: {
+        label: "トークンのヒント",
+        help: "ベアラートークンの末尾 4 文字。発行時に記録され、同じ接続の資格情報を見分けるために使います。トークン本体やそのダイジェストではありません。ヒントの記録が始まる前に発行された資格情報では空です。"
+      },
       active: {
         label: "有効",
         help: "失効スイッチ — 無効な資格情報は検証時に拒否されます"
@@ -2368,6 +2443,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       expires_at: {
         label: "有効期限",
         help: "段階的な資格情報ローテーションのための任意の強制有効期限。期限切れの資格情報は拒否されます"
+      },
+      last_used_at: {
+        label: "最終使用日時",
+        help: "この資格情報が最後に SCIM リクエストを認証した日時(最大 1 分に 1 回記録)。使用記録がない場合は空です"
       },
       user_id: {
         label: "発行者",
@@ -2417,6 +2496,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "トークンを保存しました",
           fields: {
             token: "トークン",
+            tokenHint: "トークンのヒント",
             connectionId: "接続 ID",
             expiresAt: "有効期限"
           }
@@ -2800,7 +2880,64 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "すべて"
+        label: "すべて",
+        emptyState: {
+          title: "グループマッピングはまだありません",
+          message: "「SSO グループをマッピング」（SSO プロバイダーがサインイン時に送るグループ）または「SCIM グループをマッピング」（SCIM 接続がプロビジョニングするグループ）で、ID プロバイダーのグループのメンバーに権限セットを付与します。"
+        }
+      }
+    },
+    _actions: {
+      map_sso_group: {
+        label: "SSO グループをマッピング",
+        description: "SSO プロバイダーがサインイン時に送るグループのすべてのメンバーに権限セットを付与します。各メンバーが次にそのプロバイダー経由でサインインしたときに適用されます。",
+        successMessage: "グループマッピングを保存しました。各メンバーが次にそのプロバイダー経由でサインインしたときに適用されます。",
+        params: {
+          providerId: {
+            label: "SSO プロバイダー ID",
+            helpText: "サインインでグループを送る SSO プロバイダーのプロバイダー ID（例: “okta”）。プロバイダーにグループクレームが設定されている必要があります（SSO プロバイダーの「グループクレームを編集」）。"
+          },
+          groupExternalId: {
+            label: "グループ外部 ID",
+            helpText: "グループクレームが ID を送る場合、その値をそのまま入力します（例: Entra ID のグループオブジェクト ID）。グループ表示名とどちらか一方だけを設定してください。"
+          },
+          groupDisplayName: {
+            label: "グループ表示名",
+            helpText: "グループクレームが名前を送る場合、その値をそのまま入力します（例: “Sales”）。グループ外部 ID とどちらか一方だけを設定してください。"
+          },
+          permissionSet: {
+            label: "権限セット",
+            helpText: "グループのメンバーに、プロバイダーの組織内で付与される権限セット。管理者権限セットは拒否されます。"
+          }
+        }
+      },
+      map_scim_group: {
+        label: "SCIM グループをマッピング",
+        description: "SCIM 接続がプロビジョニングするグループのすべてのメンバーに権限セットを付与します。グループの現在のメンバーにはすぐに付与されます。",
+        successMessage: "グループマッピングを保存しました",
+        params: {
+          connectionId: {
+            label: "SCIM 接続 ID",
+            helpText: "グループをプロビジョニングする SCIM 接続（例: “okta-prod”）。資格情報の接続 ID です。"
+          },
+          groupExternalId: {
+            label: "グループ外部 ID",
+            helpText: "ID プロバイダーが送るグループの externalId。グループ表示名とどちらか一方だけを設定してください。"
+          },
+          groupDisplayName: {
+            label: "グループ表示名",
+            helpText: "グループの displayName。完全一致で照合されます。グループ外部 ID とどちらか一方だけを設定してください。"
+          },
+          permissionSet: {
+            label: "権限セット",
+            helpText: "グループのメンバーに、接続の組織内で付与される権限セット。管理者権限セットは拒否されます。"
+          }
+        }
+      },
+      delete_group_mapping: {
+        label: "マッピングを削除",
+        confirmText: "このグループマッピングを削除しますか？グループのメンバーにはこの権限セットが付与されなくなります。SCIM 接続の場合、グループのメンバーはすぐに再投影され、このマッピングによる付与が取り消されます。SSO プロバイダーの場合、そのサインインでこの権限セットに付与されたものがすぐに取り消されます（同じ権限セットを指すプロバイダーの別のマッピングがある場合を除く）。元に戻すには、グループを再度マッピングしてください。",
+        successMessage: "グループマッピングを削除しました"
       }
     }
   },
@@ -3602,6 +3739,55 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       note: {
         label: "メモ"
+      }
+    }
+  },
+  sys_metadata_commit: {
+    label: "メタデータコミット",
+    pluralLabel: "メタデータコミット",
+    description: "1 回の操作で行われたメタデータ変更をまとめる、パッケージ単位のコミットログ。",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      package_id: {
+        label: "パッケージ"
+      },
+      operation: {
+        label: "操作",
+        options: {
+          apply: "適用",
+          revert: "ロールバック"
+        }
+      },
+      message: {
+        label: "メッセージ",
+        help: "変更の概要。AI による操作では、その変更を生んだユーザーの指示。"
+      },
+      actor: {
+        label: "実行主体"
+      },
+      ai_model: {
+        label: "AI モデル"
+      },
+      parent_commit_id: {
+        label: "親コミット"
+      },
+      event_seq_start: {
+        label: "開始イベントシーケンス"
+      },
+      event_seq_end: {
+        label: "終了イベントシーケンス"
+      },
+      items: {
+        label: "項目",
+        help: "JSON: [{ type, name, existedBefore, prevVersion }] — ロールバック計画。"
+      },
+      item_count: {
+        label: "項目数"
+      },
+      created_at: {
+        label: "作成日時"
       }
     }
   },

@@ -38,9 +38,9 @@ import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, cleanup, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
-import { useEffect, type ReactNode } from 'react';
-import { AuthProvider, useAuth } from '@object-ui/auth';
+import { MemoryRouter, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
+import { useEffect, useState, type ReactNode } from 'react';
+import { AuthProvider, useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import type { AuthClient } from '@object-ui/auth';
 
 vi.mock('@object-ui/app-shell', async (importOriginal) => ({
@@ -322,5 +322,202 @@ describe('an explicit sign-out leaves no return link (objectstack#30125)', () =>
     await expireSession();
 
     expect((await loginRedirect()).redirect).toBe(SETUP_PAGE);
+  });
+});
+
+/**
+ * objectstack#32138 — after the session ends on the server, in-app navigation
+ * kept the signed-in shell and read every 401 as "Page Not Found" or "Couldn't
+ * load records"; only a full reload reached `/login?redirect=…`.
+ *
+ * The console's data and metadata calls ride `createAuthenticatedFetch`. A 401
+ * answered to one of them is now reported to `AuthProvider`, which asks the
+ * server once whether a session is still held. When the server says no, the
+ * guard sends the visitor to `/login` with the page as `?redirect=` — the place
+ * the reload path goes. Same real composition as the blocks above, plus a real
+ * `<Link>` click and a real `Response` for each status.
+ */
+describe('a 401 on in-app navigation returns to the login page (objectstack#32138)', () => {
+  const HOME = '/apps/demo/home';
+  const TARGET = '/apps/demo/page/showcase_capability_map';
+  const META_URL = '/api/v1/meta/page/showcase_capability_map';
+
+  /** What the API answers next, as a real `Response`. */
+  let answer: () => Response;
+
+  function jsonResponse(status: number, body: unknown): Response {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const UNAUTHENTICATED = () =>
+    jsonResponse(401, { success: false, error: { code: 'UNAUTHENTICATED', message: 'Authentication required' } });
+  const FORBIDDEN = () =>
+    jsonResponse(403, { success: false, error: { code: 'PERMISSION_DENIED', message: 'Forbidden' } });
+  const NOT_FOUND = () =>
+    jsonResponse(404, { success: false, error: { code: 'NOT_FOUND', message: 'Not found' } });
+
+  /** Home: one tile, a real router link. */
+  function HomePage() {
+    return (
+      <Link to={TARGET} data-testid="home-page">
+        Showcase
+      </Link>
+    );
+  }
+
+  /** The page the tile opens: it reads its metadata over the console's authenticated fetch. */
+  function MetadataPage() {
+    const [state, setState] = useState<'loading' | 'ok' | 'missing'>('loading');
+    useEffect(() => {
+      let live = true;
+      void createAuthenticatedFetch()(META_URL).then((res) => {
+        if (live) setState(res.ok ? 'ok' : 'missing');
+      });
+      return () => {
+        live = false;
+      };
+    }, []);
+    return <div data-testid="metadata-page">{state === 'missing' ? 'Page Not Found' : state}</div>;
+  }
+
+  /** The login page, with a control that makes the same authenticated call from there. */
+  function LoginWithProbe() {
+    return (
+      <>
+        <LoginPage />
+        <button type="button" onClick={() => void createAuthenticatedFetch()(META_URL)}>
+          Call the API from the login page
+        </button>
+      </>
+    );
+  }
+
+  function renderNavigableConsole(client: AuthClient) {
+    return render(
+      <AuthProvider authUrl="/api/v1/auth" client={client}>
+        <MemoryRouter initialEntries={[HOME]}>
+          <LocationProbe />
+          <Routes>
+            <Route path="/login" element={<LoginWithProbe />} />
+            <Route
+              path="/apps/demo/home"
+              element={
+                <ProtectedRoute requireOrganization={false}>
+                  <HomePage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/apps/demo/page/:name"
+              element={
+                <ProtectedRoute requireOrganization={false}>
+                  <MetadataPage />
+                </ProtectedRoute>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </AuthProvider>,
+    );
+  }
+
+  async function signedInOnHome(): Promise<AuthClient> {
+    serverUser = USER_A;
+    const client = createClient();
+    renderNavigableConsole(client);
+    await screen.findByTestId('home-page');
+    return client;
+  }
+
+  async function clickShowcase() {
+    await userEvent.setup().click(screen.getByRole('link', { name: 'Showcase' }));
+  }
+
+  beforeEach(() => {
+    answer = UNAUTHENTICATED;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => answer()),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('the session ended on the server: a click on a Home tile lands on /login with the page as ?redirect=', async () => {
+    const client = await signedInOnHome();
+
+    // Signed out elsewhere: the server holds no session, and every API call answers 401.
+    serverUser = null;
+    answer = UNAUTHENTICATED;
+    await clickShowcase();
+
+    const { url, redirect } = await loginRedirect();
+    expect(url).toBe(`/login?redirect=${encodeURIComponent(TARGET)}`);
+    expect(redirect).toBe(TARGET);
+    expect(screen.queryByText('Page Not Found')).not.toBeInTheDocument();
+    expect(client.signOut).not.toHaveBeenCalled();
+  });
+
+  it('a 403 still renders the page as today, and asks the server nothing about the session', async () => {
+    const client = await signedInOnHome();
+    const asked = vi.mocked(client.getSession).mock.calls.length;
+
+    answer = FORBIDDEN;
+    await clickShowcase();
+
+    expect(await screen.findByText('Page Not Found')).toBeInTheDocument();
+    expect(seen[seen.length - 1]).toBe(TARGET);
+    expect(vi.mocked(client.getSession).mock.calls.length).toBe(asked);
+  });
+
+  it('a real 404 still renders "Page Not Found" as today, and asks the server nothing about the session', async () => {
+    const client = await signedInOnHome();
+    const asked = vi.mocked(client.getSession).mock.calls.length;
+
+    answer = NOT_FOUND;
+    await clickShowcase();
+
+    expect(await screen.findByText('Page Not Found')).toBeInTheDocument();
+    expect(seen[seen.length - 1]).toBe(TARGET);
+    expect(vi.mocked(client.getSession).mock.calls.length).toBe(asked);
+  });
+
+  it('a 401 while the server still holds the session keeps the person on the page', async () => {
+    const client = await signedInOnHome();
+    const asked = vi.mocked(client.getSession).mock.calls.length;
+
+    // The session is live; only this call was refused.
+    answer = UNAUTHENTICATED;
+    await clickShowcase();
+
+    // The provider asked once, heard "still signed in", and left the page alone.
+    await waitFor(() => expect(vi.mocked(client.getSession).mock.calls.length).toBe(asked + 1));
+    expect(await screen.findByText('Page Not Found')).toBeInTheDocument();
+    expect(seen[seen.length - 1]).toBe(TARGET);
+    expect(seen.some((u) => u.startsWith('/login'))).toBe(false);
+  });
+
+  it('on the login page a 401 changes nothing: no session re-check, no redirect loop', async () => {
+    const client = await signedInOnHome();
+    serverUser = null;
+    await clickShowcase();
+    const { url } = await loginRedirect();
+    const asked = vi.mocked(client.getSession).mock.calls.length;
+    const settled = seen.length;
+
+    answer = UNAUTHENTICATED;
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Call the API from the login page' }));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(vi.mocked(client.getSession).mock.calls.length).toBe(asked);
+    expect(seen.slice(settled).every((u) => u === url)).toBe(true);
+    expect(seen[seen.length - 1]).toBe(url);
   });
 });
