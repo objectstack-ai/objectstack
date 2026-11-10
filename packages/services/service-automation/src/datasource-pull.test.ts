@@ -93,7 +93,8 @@ function protocolOver(ql: ObjectQL, meta: Harness['meta']): ConnectorPullProtoco
             return item ? { type, name, item } : undefined;
         },
         async findData({ object, query, context }) {
-            const { object: _omit, ...rest } = (query ?? {}) as EngineQueryOptions & { object?: string };
+            // `count` is the door's own (it decides whether to count beside the page); the engine never sees it.
+            const { object: _omit, count: _count, ...rest } = (query ?? {}) as EngineQueryOptions & { object?: string; count?: unknown };
             return { object, records: await ql.find(object, { ...rest, context: context as EngineQueryOptions['context'] }) };
         },
         async createData({ object, data, context }) {
