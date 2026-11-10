@@ -349,9 +349,15 @@ export async function checkControlledByParentWrite(
  * read the detail's master reference ({@link callerReadsMasterReference}) as
  * the same `403 PERMISSION_DENIED`, for the same leg, with a sentence that
  * names no master, no leg and no master id
- * ({@link MASTER_REFERENCE_UNREADABLE_REASON}). A caller who can read the
- * reference gets the specific refusal unchanged, and every other error passes
- * through as raised.
+ * ({@link MASTER_REFERENCE_UNREADABLE_REASON}). The same caller meets a
+ * STORED row whose required master reference is empty — the
+ * {@link MasterReferenceMissingError} that carries a `recordId`, from a by-id
+ * write and from a predicate write alike — as the same `422
+ * MISSING_REQUIRED_FIELD` in its rule-level form
+ * ({@link MasterReferenceMissingError.ruleLevel}), naming no field and no row.
+ * A caller who can read the reference gets the specific answer unchanged, and
+ * every other error passes through as raised: the insert and body shapes of
+ * that error answer what the caller's own request carried.
  */
 export async function assertControlledByParentWrite(
   this: Pick<CbpWriteGateHost, 'assertControlledByParentChainEditable' | 'controlledByParentPredicateWriteMasters' | 'declaresControlledByParent' | 'extractSingleId' | 'getReadableFields' | 'permissionEvaluator' | 'readRowById' | 'resolveCbpRelation'>,
@@ -365,10 +371,12 @@ export async function assertControlledByParentWrite(
     await judgeControlledByParentWrite.call(this, permissionSets, object, operation, opCtx, context);
   } catch (e) {
     const leg = e instanceof PermissionDeniedError ? MASTER_EDIT_DENIAL_LEG.get(e) : undefined;
-    if (!leg) throw e;
+    const storedRowMissing = e instanceof MasterReferenceMissingError && e.recordId != null;
+    if (!leg && !storedRowMissing) throw e;
     const rel = this.resolveCbpRelation(object);
     const readerContext = opCtx?.context ?? context;
     if (rel && (await callerReadsMasterReference(this, object, rel.fk, readerContext))) throw e;
+    if (!leg) throw MasterReferenceMissingError.ruleLevel(object, operation);
     const withheld = new PermissionDeniedError(
       `[Security] Access denied: ${operation} on '${object}' requires edit access to its master record ` +
         `(${MASTER_REFERENCE_UNREADABLE_REASON})`,

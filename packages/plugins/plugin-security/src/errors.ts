@@ -242,6 +242,12 @@ export class DetailRecordNotFoundError extends Error {
 }
 
 /**
+ * [ADR-0055 §3] The rule {@link MasterReferenceMissingError.ruleLevel} states:
+ * it names no field, no master and no row.
+ */
+const MASTER_REFERENCE_MISSING_RULE = 'a required reference of this detail is not set';
+
+/**
  * The detail carries no value in its master reference, so there is no master to
  * derive access from → `422 MISSING_REQUIRED_FIELD`.
  *
@@ -290,11 +296,17 @@ export class MasterReferenceMissingError extends Error {
   readonly code = 'MISSING_REQUIRED_FIELD';
   readonly status = 422;
   readonly statusCode = 422;
-  readonly field: string;
-  readonly recordId: unknown;
-  constructor(object: string, operation: string, field: string, recordId?: unknown) {
+  /** The master reference; not set on the rule-level answer ({@link MasterReferenceMissingError.ruleLevel}). */
+  declare readonly field?: string;
+  /** The stored row; not set on the rule-level answer ({@link MasterReferenceMissingError.ruleLevel}). */
+  declare readonly recordId?: unknown;
+  /** `field` is `null` only for {@link MasterReferenceMissingError.ruleLevel}. */
+  constructor(object: string, operation: string, field: string | null, recordId?: unknown) {
     super(
-      recordId == null
+      field === null
+        ? `[Security] Missing master reference: ${operation} on '${object}' cannot be authorized because `
+          + `${MASTER_REFERENCE_MISSING_RULE}.`
+        : recordId == null
         ? `[Security] Missing master reference: ${operation} on '${object}' did not supply '${field}'. `
           + `A controlled_by_parent detail derives its access from its master, so '${field}' must carry a `
           + `master record id on every write.`
@@ -303,8 +315,23 @@ export class MasterReferenceMissingError extends Error {
           + `its access from its master, so that reference must be populated.`,
     );
     this.name = 'MasterReferenceMissingError';
+    if (field === null) return;
     this.field = field;
     this.recordId = recordId;
+  }
+
+  /**
+   * [ADR-0055 §3] The STORED-ROW shape, answered to a caller who cannot read
+   * the detail's master reference: the same `422 MISSING_REQUIRED_FIELD`,
+   * with a rule-level sentence ({@link MASTER_REFERENCE_MISSING_RULE}) that
+   * names no field and no row, and with neither {@link field} nor
+   * {@link recordId} set, so no property of the error carries what
+   * field-level security keeps from that caller. Which answer a caller gets is
+   * the write gate's decision (`assertControlledByParentWrite`); this class
+   * only spells it.
+   */
+  static ruleLevel(object: string, operation: string): MasterReferenceMissingError {
+    return new MasterReferenceMissingError(object, operation, null);
   }
 }
 
