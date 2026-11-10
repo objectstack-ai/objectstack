@@ -3209,6 +3209,9 @@ const de = {
     settings: "Organisationseinstellungen",
     multiOrgDisabled: "Das Erstellen neuer Organisationen ist auf dieser Instanz deaktiviert.",
     createFailed: 'Organisation konnte nicht erstellt werden',
+    developerEdition: 'Developer Edition',
+    developerEditionHint_one: 'Kostenlos, nicht für den Produktivbetrieb, bis zu {{count}} Mitglied',
+    developerEditionHint_other: 'Kostenlos, nicht für den Produktivbetrieb, bis zu {{count}} Mitglieder',
   },
   help: {
     onThisPage: "Auf dieser Seite",

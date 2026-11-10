@@ -3290,6 +3290,9 @@ const zhHant = {
     settings: '組織設定',
     multiOrgDisabled: '此實例已停用建立新組織。',
     createFailed: '建立組織失敗',
+    developerEdition: '開發者版',
+    developerEditionHint_one: '免費，非生產用途，最多 {{count}} 名成員',
+    developerEditionHint_other: '免費，非生產用途，最多 {{count}} 名成員',
   },
   help: {
     keyboardShortcuts: '鍵盤快捷鍵',

@@ -3346,6 +3346,11 @@ const ru = {
     settings: "Настройки организации",
     multiOrgDisabled: "Создание новых организаций отключено в этой среде.",
     createFailed: 'Не удалось создать организацию',
+    developerEdition: 'Developer Edition',
+    developerEditionHint_one: 'Бесплатно, не для рабочей среды, до {{count}} участника',
+    developerEditionHint_few: 'Бесплатно, не для рабочей среды, до {{count}} участников',
+    developerEditionHint_many: 'Бесплатно, не для рабочей среды, до {{count}} участников',
+    developerEditionHint_other: 'Бесплатно, не для рабочей среды, до {{count}} участника',
   },
   help: {
     onThisPage: "На этой странице",

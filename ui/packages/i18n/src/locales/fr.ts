@@ -3271,6 +3271,10 @@ const fr = {
     settings: "Paramètres de l'organisation",
     multiOrgDisabled: "La création de nouvelles organisations est désactivée sur cette instance.",
     createFailed: "Échec de la création de l'organisation",
+    developerEdition: 'Developer Edition',
+    developerEditionHint_one: "Gratuite, hors production, jusqu'à {{count}} membre",
+    developerEditionHint_many: "Gratuite, hors production, jusqu'à {{count}} de membres",
+    developerEditionHint_other: "Gratuite, hors production, jusqu'à {{count}} membres",
   },
   help: {
     onThisPage: "Sur cette page",

@@ -13,6 +13,11 @@
  * continues; the field stays editable and nothing is created until the user
  * clicks. Creating a further organization opens with an empty name.
  *
+ * Where the host serves `features.developerEditionCreate: true`, the dialog
+ * also offers one unchecked "Developer Edition" checkbox; checked, the
+ * organization is created with `edition: 'developer'`. Without that flag the
+ * dialog draws no choice and sends no edition.
+ *
  * @module
  */
 
@@ -25,6 +30,7 @@ import {
   DialogHeader,
   DialogTitle,
   Button,
+  Checkbox,
   Input,
   Label,
 } from '@object-ui/components';
@@ -113,22 +119,41 @@ function browserTimeZone(): string | undefined {
 }
 
 /**
+ * The member cap of a Developer Edition organization, shown in the choice's
+ * hint line. A product constant of the hosted edition; the hint interpolates
+ * it as `count`, so a change is this one value, not every language pack.
+ */
+const DEVELOPER_EDITION_MEMBER_LIMIT = 5;
+
+/**
  * Create the organization under the generated slug, retrying a slug collision
  * with a suffixed variant (at most `SLUG_ATTEMPTS` calls in all). The user
  * cannot see or edit the slug in this dialog, so a collision is not theirs to
  * resolve; any other refusal is rethrown unchanged. Every attempt carries the
- * same `timezone`, and none carries the key when there is no zone.
+ * same `timezone` and the same `edition`, and none carries a key whose value
+ * is absent. A refusal is never retried without the edition.
  */
 async function createWithGeneratedSlug(
-  create: (data: { name: string; slug: string; timezone?: string }) => Promise<AuthOrganization>,
+  create: (data: {
+    name: string;
+    slug: string;
+    timezone?: string;
+    edition?: 'developer';
+  }) => Promise<AuthOrganization>,
   name: string,
   slug: string,
   timezone: string | undefined,
+  edition: 'developer' | undefined,
 ): Promise<AuthOrganization> {
   let attemptSlug = slug;
   for (let attempt = 1; ; attempt++) {
     try {
-      return await create({ name, slug: attemptSlug, ...(timezone ? { timezone } : {}) });
+      return await create({
+        name,
+        slug: attemptSlug,
+        ...(timezone ? { timezone } : {}),
+        ...(edition ? { edition } : {}),
+      });
     } catch (err) {
       if (attempt >= SLUG_ATTEMPTS || !isSlugTaken(err)) throw err;
       attemptSlug = suffixedSlug(slug);
@@ -194,6 +219,10 @@ export function CreateWorkspaceDialog({
   // dialog by another path we still want to fail fast with a friendly message
   // instead of bouncing off the server's FORBIDDEN.
   const [multiOrgDisabled, setMultiOrgDisabled] = useState(false);
+  // The Developer Edition choice is drawn only on the host's explicit
+  // `features.developerEditionCreate === true`; it starts unchecked.
+  const [developerEditionOffered, setDeveloperEditionOffered] = useState(false);
+  const [developerEdition, setDeveloperEdition] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -202,6 +231,7 @@ export function CreateWorkspaceDialog({
       .then((cfg) => {
         if (cancelled) return;
         setMultiOrgDisabled(cfg?.features?.multiOrgEnabled === false);
+        setDeveloperEditionOffered(cfg?.features?.developerEditionCreate === true);
       })
       .catch(() => {
         /* leave default — server still enforces */
@@ -215,6 +245,7 @@ export function CreateWorkspaceDialog({
   useEffect(() => {
     if (open) {
       setName(defaultNameRef.current);
+      setDeveloperEdition(false);
       setError(null);
     }
   }, [open]);
@@ -241,6 +272,7 @@ export function CreateWorkspaceDialog({
           name.trim(),
           slug.trim(),
           browserTimeZone(),
+          developerEditionOffered && developerEdition ? 'developer' : undefined,
         );
         // Born-with-env: eagerly ensure the new org's production environment so
         // the user lands in a ready workspace with no onboarding-wizard detour.
@@ -276,7 +308,7 @@ export function CreateWorkspaceDialog({
         setIsSubmitting(false);
       }
     },
-    [name, slug, multiOrgDisabled, t, createOrganization, onCreated],
+    [name, slug, multiOrgDisabled, developerEditionOffered, developerEdition, t, createOrganization, onCreated],
   );
 
   return (
@@ -308,6 +340,30 @@ export function CreateWorkspaceDialog({
                 data-testid="workspace-name-input"
               />
             </div>
+
+            {developerEditionOffered && (
+              <div className="flex items-start gap-2">
+                <Checkbox
+                  id="workspace-developer-edition"
+                  checked={developerEdition}
+                  onCheckedChange={(v) => setDeveloperEdition(v === true)}
+                  disabled={isSubmitting}
+                  aria-describedby="workspace-developer-edition-hint"
+                  data-testid="workspace-developer-edition"
+                />
+                <div className="grid gap-1 leading-none">
+                  <Label htmlFor="workspace-developer-edition">
+                    {t('workspace.developerEdition', { defaultValue: 'Developer Edition' })}
+                  </Label>
+                  <p id="workspace-developer-edition-hint" className="text-sm text-muted-foreground">
+                    {t('workspace.developerEditionHint', {
+                      count: DEVELOPER_EDITION_MEMBER_LIMIT,
+                      defaultValue: 'Free, non-production, up to {{count}} members',
+                    })}
+                  </p>
+                </div>
+              </div>
+            )}
 
             {error && (
               <p className="text-sm text-destructive" data-testid="workspace-create-error">

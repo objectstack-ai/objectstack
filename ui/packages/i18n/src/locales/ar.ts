@@ -3467,6 +3467,13 @@ const ar = {
     settings: "إعدادات المؤسسة",
     multiOrgDisabled: "إنشاء مؤسسات جديدة معطّل في هذا النشر.",
     createFailed: 'تعذّر إنشاء المؤسسة',
+    developerEdition: 'إصدار المطوّرين',
+    developerEditionHint_zero: 'مجاني، لغير بيئة الإنتاج، حتى {{count}} عضو',
+    developerEditionHint_one: 'مجاني، لغير بيئة الإنتاج، حتى {{count}} عضو',
+    developerEditionHint_two: 'مجاني، لغير بيئة الإنتاج، حتى عضوين ({{count}})',
+    developerEditionHint_few: 'مجاني، لغير بيئة الإنتاج، حتى {{count}} أعضاء',
+    developerEditionHint_many: 'مجاني، لغير بيئة الإنتاج، حتى {{count}} عضوًا',
+    developerEditionHint_other: 'مجاني، لغير بيئة الإنتاج، حتى {{count}} عضو',
   },
   help: {
     onThisPage: "في هذه الصفحة",
