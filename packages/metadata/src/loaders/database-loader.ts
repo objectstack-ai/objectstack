@@ -1521,14 +1521,14 @@ export class DatabaseLoader implements MetadataLoader {
    * one holder's row (D4: its customization) or the name's package-less row.
    * A package's first item takes over the name's package-less row when no
    * other package holds the name, as the in-memory store does, so that row is
-   * updated and bound rather than left beside it. `version` is the name's
-   * next, across every package's row.
+   * updated and bound rather than left beside it. `rows` are the name's rows,
+   * from which {@link nextNameVersion} numbers a write.
    */
   private async slottedSaveTarget(
     type: string,
     name: string,
     data: unknown,
-  ): Promise<{ existing: Record<string, unknown> | null; packageId?: string; version: number }> {
+  ): Promise<{ existing: Record<string, unknown> | null; packageId?: string; rows: Array<Record<string, unknown>> }> {
     const rows = await this._find(this.tableName, { where: this.baseFilter(type, name) });
     const bySlot = new Map<string, Record<string, unknown>>();
     for (const row of rows) {
@@ -1537,12 +1537,35 @@ export class DatabaseLoader implements MetadataLoader {
     }
     const { key, replaces } = storeRowWriteKey(bySlot, type, name, data);
     const existing = bySlot.get(key) ?? replaces.map((replaced) => bySlot.get(replaced)).find(Boolean) ?? null;
-    return { existing, packageId: slotPackageOf(key), version: highestVersion(rows) + 1 };
+    return { existing, packageId: slotPackageOf(key), rows };
   }
 
-  /** [#32246] The next version of `name` across every row of it. */
-  private async nextNameVersion(type: string, name: string): Promise<number> {
-    return highestVersion(await this._find(this.tableName, { where: this.baseFilter(type, name) })) + 1;
+  /**
+   * [#32246] The next version of `name`, a by-package type: one past the
+   * highest it has had — over every package's row of it and, while history is
+   * tracked, over its `sys_metadata_history` rows, which are unique on
+   * `(type, name, version)` and outlive a removed package's row. So a package
+   * removed and saved again never reuses a version the history holds. An
+   * unreadable history leaves the rows' number: the history insert then
+   * reports its own failure, the write itself having succeeded.
+   */
+  private async nextNameVersion(
+    type: string,
+    name: string,
+    rows?: ReadonlyArray<Record<string, unknown>>,
+  ): Promise<number> {
+    let highest = highestVersion(rows ?? (await this._find(this.tableName, { where: this.baseFilter(type, name) })));
+    if (this.trackHistory) {
+      try {
+        await this.ensureHistorySchema();
+        highest = Math.max(highest, highestVersion(await this._find(this.historyTableName, { where: { type, name } })));
+      } catch (error) {
+        if (!isMissingTableError(error, this.historyTableName)) {
+          console.warn(`[Metadata] Could not read \`${this.historyTableName}\` for the next version of ${type}/${name}; numbering from its rows.`, error);
+        }
+      }
+    }
+    return highest + 1;
   }
 
   async save(
@@ -1598,7 +1621,7 @@ export class DatabaseLoader implements MetadataLoader {
         }
 
         // Update existing record
-        const version = slot ? slot.version : ((existing.version as number) ?? 0) + 1;
+        const version = slot ? await this.nextNameVersion(type, name, slot.rows) : ((existing.version as number) ?? 0) + 1;
 
         await this._update(this.tableName, existing.id as string, {
           metadata: metadataJson,
@@ -1631,7 +1654,7 @@ export class DatabaseLoader implements MetadataLoader {
       } else {
         // Create new record
         const id = generateId();
-        const version = slot ? slot.version : 1;
+        const version = slot ? await this.nextNameVersion(type, name, slot.rows) : 1;
         await this._create(this.tableName, {
           id,
           name,

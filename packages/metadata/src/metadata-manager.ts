@@ -1070,13 +1070,15 @@ export class MetadataManager implements IMetadataService {
     // Check in-memory registry first
     const entry = readStoreEntry(this.registry.get(type), type, name, packageId);
     if (entry.found) return entry.data;
-    if (entry.settled) return undefined;
 
-    // [ADR-0150 D3, #32246] A by-package type: the loaders' stored items of
-    // the name, read for the package by the same rule.
+    // [ADR-0150 D3, #32246] A by-package type the registry cannot answer (no
+    // slot of the name, or a read naming a package where only other packages'
+    // slots are registered): the registry's slots and the loaders' stored
+    // items of the name, read for the package by the same rule.
     if (PACKAGE_SLOTTED_STORE_TYPES.has(type)) {
       return (await this.loadSlottedDiagnosed(type, name, packageId)).data ?? undefined;
     }
+    if (entry.settled) return undefined;
 
     // Fallback to loaders
     const result = await this.load(type, name);
@@ -1118,26 +1120,29 @@ export class MetadataManager implements IMetadataService {
     // `get`, read by the same rule.
     const entry = readStoreEntry(this.registry.get(type), type, name, packageId);
     if (entry.found) return { data: entry.data, degraded: false, errors: [] };
+
+    // [#32246] A by-package type the registry cannot answer: read for the
+    // package as on `get`, keeping the verdict.
+    if (PACKAGE_SLOTTED_STORE_TYPES.has(type)) {
+      const { data, degraded, errors } = await this.loadSlottedDiagnosed(type, name, packageId);
+      return { data: data ?? undefined, degraded, errors };
+    }
     if (entry.settled) return { data: undefined, degraded: false, errors: [] };
 
-    // Fallback to loaders, keeping the verdict this time. [#32246] For a
-    // by-package type, read for the package as on `get`.
-    const { data, degraded, errors } = PACKAGE_SLOTTED_STORE_TYPES.has(type)
-      ? await this.loadSlottedDiagnosed(type, name, packageId)
-      : await this.loadDiagnosed(type, name);
+    // Fallback to loaders, keeping the verdict this time.
+    const { data, degraded, errors } = await this.loadDiagnosed(type, name);
     return { data: data ?? undefined, degraded, errors };
   }
 
   /**
-   * [ADR-0150 D3/D4, #32246] The loaders' answer to a read of a type stored
-   * per `(package, name)` that the in-memory registry could not answer: every
-   * loader's stored items of the name, each in the slot of the package it is
-   * held for ({@link MetadataLoader.loadSlots}; a loader without it answers
-   * with its one `load` body, read for the package that body carries), an
-   * earlier loader's item kept over a later one's of the same slot — then the
-   * store's own rule over them ({@link readStoreEntry}), as for the registry:
-   * a read naming a package is that package's item, ⛔ never another
-   * package's; a read naming none is refused when two packages hold the name.
+   * [ADR-0150 D3/D4, #32246] The answer to a read of a type stored per
+   * `(package, name)` that the in-memory registry could not answer: the
+   * holders of the name as one store ({@link slotViewOf} — the registry's
+   * slots, then every loader's stored items), and the store's own rule over
+   * them ({@link readStoreEntry}), as for the registry: a read naming a
+   * package is that package's item — a loader's even beside another package's
+   * registry slot — and ⛔ never another package's; a read naming none is
+   * refused when two packages hold the name.
    *
    * `degraded` as on {@link loadDiagnosed}: a loader threw and nothing
    * answered with the item.
@@ -1150,6 +1155,24 @@ export class MetadataManager implements IMetadataService {
     name: string,
     packageId?: string | null,
   ): Promise<{ data: unknown | null; degraded: boolean; errors: string[] }> {
+    const { slots, errors } = await this.loaderSlotsNamed(type, name);
+    const entry = readStoreEntry(this.slotViewOf(type, name, slots), type, name, packageId);
+    return entry.found
+      ? { data: entry.data, degraded: false, errors }
+      : { data: null, degraded: errors.length > 0, errors };
+  }
+
+  /**
+   * [ADR-0150 D3/D4, #32246] Every loader's stored items of `name`, a type
+   * stored per `(package, name)`, each with the package it is held for
+   * ({@link MetadataLoader.loadSlots}; a loader without it answers with its
+   * one `load` body, read for the package that body carries), in loader
+   * order. A loader that throws is reported in `errors` and skipped.
+   */
+  private async loaderSlotsNamed(
+    type: string,
+    name: string,
+  ): Promise<{ slots: Array<{ packageId?: string; data: unknown }>; errors: string[] }> {
     const slots: Array<{ packageId?: string; data: unknown }> = [];
     const errors: string[] = [];
     for (const loader of this.loaders.values()) {
@@ -1166,10 +1189,29 @@ export class MetadataManager implements IMetadataService {
         this.logger.warn(`Loader ${loader.contract.name} failed to load ${type}:${name}`, { error: e });
       }
     }
-    const entry = readStoreEntry(slotStoreOf(type, name, slots), type, name, packageId);
-    return entry.found
-      ? { data: entry.data, degraded: false, errors }
-      : { data: null, degraded: errors.length > 0, errors };
+    return { slots, errors };
+  }
+
+  /**
+   * [ADR-0150 D3/D4, #32246] The holders of `name` as one store: the
+   * registry's slots of the name, then the loaders' stored items keyed as the
+   * store keys them ({@link slotStoreOf}), what the registry (then an earlier
+   * loader) holds kept over a later item of the same slot. Reads and removals
+   * judge a name the registry cannot answer alone over this view, so they
+   * agree on who holds it.
+   */
+  private slotViewOf(
+    type: string,
+    name: string,
+    slots: Iterable<{ readonly packageId?: string; readonly data: unknown }>,
+  ): Map<string, unknown> {
+    const registryStore = this.registry.get(type);
+    const view = new Map<string, unknown>();
+    for (const key of storeKeysNamed(registryStore, type, name)) view.set(key, registryStore!.get(key));
+    for (const [key, data] of slotStoreOf(type, name, slots)) {
+      if (!view.has(key)) view.set(key, data);
+    }
+    return view;
   }
 
   /**
@@ -1774,16 +1816,46 @@ export class MetadataManager implements IMetadataService {
   }
 
   /**
+   * [ADR-0150 D3/D4, #32198, #32246] What {@link unregister} removes, judged
+   * before anything is touched: the registry's keys `storeRemovalKeys` picks,
+   * and the package a removal names. For a type stored per `(package, name)`
+   * removed with no package, the holders are judged over the registry AND the
+   * loaders' stored items of the name ({@link slotViewOf}, as a read judges
+   * them): a name two packages hold only in the loaders (an empty registry
+   * over stored rows, a cluster peer after its replay) is refused here, with
+   * the `409` naming every holder, where the storage loop would have caught
+   * each loader's own refusal as a failed delete and announced a removal that
+   * never happened. Every loader's holders of the name are within this view,
+   * so a loader the removal deletes from does not refuse once it has passed —
+   * ⛔ except an object-bound action's slots, which the holder count does not
+   * read (the registry's own rule; a separate card).
+   *
+   * @throws {PackageScopedNameRefusedError} no package named, two or more
+   *   packages holding the name in the registry or the loaders.
+   */
+  private async removalOf(
+    type: string,
+    name: string,
+    packageId?: string | null,
+  ): Promise<{ keys: string[]; packageId?: string }> {
+    const removal = storeRemovalKeys(this.registry.get(type), type, name, packageId);
+    if (!PACKAGE_SLOTTED_STORE_TYPES.has(type) || removal.packageId !== undefined) return removal;
+    const { slots } = await this.loaderSlotsNamed(type, name);
+    storeRemovalKeys(this.slotViewOf(type, name, slots), type, name);
+    return removal;
+  }
+
+  /**
    * {@link unregister}, given what it removes.
    *
    * [ADR-0150 D3/D4, #32198] `removal` is the store keys the in-memory half
    * drops and, for a type stored per `(package, name)` removed by one package,
    * that package: the storage half deletes only its row, and the realtime
    * `deleted` event names it. {@link unregisterPackage} passes the entry it
-   * found; {@link unregister} judges it from the store with
-   * `storeRemovalKeys` — BEFORE anything is touched, so a refused removal (a
-   * name two packages hold, with no package named) deletes nothing from
-   * storage or memory and announces nothing.
+   * found; {@link unregister} judges it with {@link removalOf} — BEFORE
+   * anything is touched, so a refused removal (a name two packages hold, with
+   * no package named) deletes nothing from storage or memory and announces
+   * nothing.
    */
   private async unregisterAt(
     type: string,
@@ -1793,7 +1865,7 @@ export class MetadataManager implements IMetadataService {
   ): Promise<void> {
     // [#7378 row 2] Remove from the store `register` wrote: the canonical type.
     type = canonicalMetadataServiceType(type);
-    const { keys, packageId } = removal ?? storeRemovalKeys(this.registry.get(type), type, name, options?.packageId);
+    const { keys, packageId } = removal ?? (await this.removalOf(type, name, options?.packageId));
     // ── 1. Storage first ────────────────────────────────────────────────
     // Delete only from database-backed loaders that declare write capability.
     // [ADR-0150 D4, #32246] For a type stored per `(package, name)`, also from
