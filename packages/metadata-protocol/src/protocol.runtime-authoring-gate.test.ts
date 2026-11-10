@@ -47,6 +47,7 @@ import { validateSemanticRoles } from '@objectstack/lint';
 // verdict against the build's real output, never a restatement of it.
 import { EXPRESSION_INVALID, runAuthoringRules } from '@objectstack/lint';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 import type { MetadataAuthoringChannel } from './protocol.js';
 import { SDUI_MANIFEST_SERVICE } from './index.js';
 import { RLS_MEMBERSHIP_RESOLVER_SERVICE } from '@objectstack/spec/contracts';
@@ -182,6 +183,7 @@ function makeStubEngine() {
             return true;
         },
         registry: {
+            ...NO_PACKAGE_SCOPED_READS,
             registerItem: () => {},
             registerObject: () => {},
             // The live object universe the rules resolve names against — the

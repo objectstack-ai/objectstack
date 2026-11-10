@@ -37,6 +37,7 @@ import './lint-root-preload.testkit.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { assertEngineFindOnePredicate, isCodeArtifactBody } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 
 const PACKAGE_ID = 'com.example.pkg';
 const ENV_ID = 'env_1';
@@ -96,6 +97,7 @@ const whereValueMatches = (actual: unknown, want: unknown): boolean =>
 
 function harness(environmentId: string | undefined, rows: StoredRow[] = [], artifacts: Artifacts = {}) {
     const registry = {
+        ...NO_PACKAGE_SCOPED_READS,
         getArtifactItem(type: string, name: string) {
             const hit = artifacts[type]?.[name];
             return hit && isCodeArtifactBody(hit) ? hit : undefined;

@@ -267,6 +267,7 @@ import { readSamlAcsLanding, runSsoCallbackScope, type SamlLandingContext, type 
 import { createEngineSsoProviderConfigReader, emailClaimOfStoredOidcConfig, type SsoProviderConfigEngine } from './register-sso-provider.js';
 import { readSsoProviderSignInOptions, runWithSamlIdpInitiated } from './sso-sign-in-options.js';
 import { readStoredSamlConfig, runSsoSamlRefusalCauseScope } from './sso-saml-refusal-cause.js';
+import { readThirdPartyLoginProvider, runThirdPartyInitiatedLogin, type ThirdPartyLoginContext } from './sso-third-party-initiated-login.js';
 // [#25224 cut 16] The body of `buildPluginList`; the method of the same name
 // below hands it the members it reads (`PluginListHost`). The organization
 // plugin's factory (cut 15) is now imported there, by the arrow that moved
@@ -4050,7 +4051,7 @@ export class AuthManager {
    */
   handleRequest(request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
     // [#25224 cut 10] The body moved to `auth-manager-request-routing.ts` (see `RequestRoutingHost`).
-    const host: Pick<RequestRoutingHost, 'config' | 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoCallback'> = {
+    const host: Pick<RequestRoutingHost, 'config' | 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoCallback' | 'resolveAuthSecret'> = {
       config: this.config,
       betterAuthEndpointPath: (...a) => this.betterAuthEndpointPath(...a),
       getOrCreateAuth: (...a) => this.getOrCreateAuth(...a),
@@ -4058,6 +4059,7 @@ export class AuthManager {
       runSubjectErasureAtomically: (...a) => this.runSubjectErasureAtomically(...a),
       answerOAuthTokenRevocation: (...a) => this.answerOAuthTokenRevocation(...a),
       runSsoCallback: (...a) => this.runSsoCallback(...a),
+      resolveAuthSecret: (...a) => this.resolveAuthSecret(...a),
     };
     return handleRequest.call(host, request, transport);
   }
@@ -4069,9 +4071,17 @@ export class AuthManager {
    * one `warn` line on this manager's logger, and a SAML ACS
    * (`/sso/saml2/sp/acs/:providerId`) whose refusal lands on the sign-in's error
    * URL, read from the relay state before better-auth consumes it, or for an
-   * IdP-initiated response (no relay state) on the platform error page.
+   * IdP-initiated response (no relay state) on the platform error page. An
+   * OIDC callback of the third-party-initiated shape (`iss`, no code) passes
+   * the entry of `sso-third-party-initiated-login.ts` first. `transport` is the
+   * one {@link handleRequest} was handed for the callback: the entry's
+   * re-dispatched start is handed it too (#24877).
    */
-  private runSsoCallback(callback: SsoCallbackRequest, run: () => Promise<Response>): Promise<Response> {
+  private runSsoCallback(
+    callback: SsoCallbackRequest,
+    run: () => Promise<Response>,
+    transport?: { remoteAddress?: string },
+  ): Promise<Response> {
     // A SAML ACS request runs with its provider's IdP-initiated toggle in
     // scope: the vendor's one plugin-wide option answers it per provider
     // (`sso-sign-in-options.ts`, ruling record 6718355623).
@@ -4095,23 +4105,45 @@ export class AuthManager {
             );
           }
         : run;
-    return runSsoCallbackScope(
+    const callbackScope = (): Promise<Response> =>
+      runSsoCallbackScope(
+        callback,
+        this.config.logger,
+        async (saml) => {
+          const auth: any = await this.getOrCreateAuth();
+          const context = (await auth.$context) as SamlLandingContext;
+          return readSamlAcsLanding(context, saml.providerId, saml.request);
+        },
+        scoped,
+        // Read only when the vendor refused the sign-in for a missing email: the
+        // claim the provider's email mapping names, for the refusal's log line.
+        async (providerId) => {
+          const stored = await createEngineSsoProviderConfigReader(
+            () => this.config.dataEngine as SsoProviderConfigEngine | undefined,
+          )(providerId);
+          return stored ? emailClaimOfStoredOidcConfig(stored.oidcConfig) : undefined;
+        },
+      );
+    if (callback.protocol !== 'oidc') return callbackScope();
+    // [#32086] An IdP app tile's third-party-initiated request (`iss`, no code)
+    // starts the vendor's own sign-in when the four checks of ruling 6764924025
+    // hold; anything else reaches the vendor callback unchanged
+    // (`sso-third-party-initiated-login.ts`).
+    const engine = this.config.dataEngine;
+    return runThirdPartyInitiatedLogin(
       callback,
-      this.config.logger,
-      async (saml) => {
-        const auth: any = await this.getOrCreateAuth();
-        const context = (await auth.$context) as SamlLandingContext;
-        return readSamlAcsLanding(context, saml.providerId, saml.request);
+      {
+        readProvider: () =>
+          readThirdPartyLoginProvider(engine ? (withSystemReadContext(engine) as never) : undefined, callback.providerId),
+        context: async () => {
+          const auth: any = await this.getOrCreateAuth();
+          return (await auth.$context) as ThirdPartyLoginContext;
+        },
+        startUrl: new URL(`${this.getBasePath()}/sign-in/sso`, callback.request.url).href,
+        dispatch: (request) => this.handleRequest(request, transport),
+        logger: this.config.logger,
       },
-      scoped,
-      // Read only when the vendor refused the sign-in for a missing email: the
-      // claim the provider's email mapping names, for the refusal's log line.
-      async (providerId) => {
-        const stored = await createEngineSsoProviderConfigReader(
-          () => this.config.dataEngine as SsoProviderConfigEngine | undefined,
-        )(providerId);
-        return stored ? emailClaimOfStoredOidcConfig(stored.oidcConfig) : undefined;
-      },
+      callbackScope,
     );
   }
 

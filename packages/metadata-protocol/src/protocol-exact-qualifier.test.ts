@@ -1,13 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [ADR-0150 D5, child G1; #31699] What the exact qualifier keeps of an answer
- * the layers below reached ({@link exactQualifierItem}), per type. The keep of
- * a customization pair's item on its base's address is gated to a bundled type
- * (`ITEM_KEY_DISCRIMINATORS`: the email template's locale), so for every other
- * type of `PACKAGE_SCOPED_READ_TYPES` the answer is the one it was before
- * email_template joined the readers: another installed package's item is
- * replaced by the admitted holder's.
+ * [ADR-0150 D5, child G1; #31699, #32277] What the exact qualifier keeps of an
+ * answer the layers below reached ({@link exactQualifierItem}), per type. A
+ * customization pair's item is its base's own, served as reached, for every
+ * package-scoped type (#32277 made the pair line generic; before it the keep
+ * was gated to a bundled type); another installed package's item is replaced
+ * by the admitted holder's.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -34,7 +33,7 @@ function host(own: Record<string, unknown>) {
 }
 const ADDRESS = { packageId: BASE, registryHolders: [BASE] };
 
-describe('the exact qualifier keeps a pair\'s item on its base\'s address for a bundled type only (#31699)', () => {
+describe('the exact qualifier keeps a pair\'s item on its base\'s address (#31699, #32277)', () => {
     it('email_template: the pair\'s added member is the base\'s own, served as reached', () => {
         const pairMember = { name: 'welcome', locale: 'fr-FR', _packageId: PAIR };
         expect(exactQualifierItem(host({ email_template: undefined }), { type: 'email_template', name: 'welcome' }, ADDRESS, pairMember, 'fr-FR'))
@@ -42,11 +41,12 @@ describe('the exact qualifier keeps a pair\'s item on its base\'s address for a 
     });
 
     it.each(['app', 'page', 'dashboard', 'report', 'book', 'analytics_cube', 'tool', 'skill', 'agent'])(
-        'CONTROL — %s: an item stamped with the pair is replaced by the admitted holder\'s, as before',
+        '%s: an item stamped with the pair is the base\'s own too, served as reached (#32277: the pair line is generic)',
         (type) => {
             const own = { name: 'x', label: 'base own', _packageId: BASE };
-            expect(exactQualifierItem(host({ [type]: own }), { type, name: 'x' }, ADDRESS, { name: 'x', _packageId: PAIR }, undefined))
-                .toBe(own);
+            const pairItem = { name: 'x', _packageId: PAIR };
+            expect(exactQualifierItem(host({ [type]: own }), { type, name: 'x' }, ADDRESS, pairItem, undefined))
+                .toBe(pairItem);
         },
     );
 

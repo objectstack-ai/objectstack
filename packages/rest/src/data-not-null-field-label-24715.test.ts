@@ -222,7 +222,8 @@ describe('[#24768] the batch rows answer the same refusal by the same label', ()
       records: [{ data: { id: 'b1', name: 'new', list_price: 1, drift_col: 'd' } }],
       options: { atomic: false },
     });
-    expect(door.status, JSON.stringify(door.body)).toBe(200);
+    // The row failed, so the per-row report answers 207 Multi-Status.
+    expect(door.status, JSON.stringify(door.body)).toBe(207);
     expect(door.body).toMatchObject({ succeeded: 0, failed: 1 });
     expect(door.body.results[0].errors).toEqual([
       expect.objectContaining({ code: 'VALIDATION_FAILED', message: requiredSentence('Sales Price', 'unit_price') }),

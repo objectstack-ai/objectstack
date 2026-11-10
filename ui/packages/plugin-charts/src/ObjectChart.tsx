@@ -501,6 +501,13 @@ export interface ObjectChartProps {
    * widget's own object-drill drawer is suppressed.
    */
   onSegmentClick?: (ev: ChartSegmentClickEvent) => void;
+  /**
+   * The package of the item the chart's `dataset` was authored in, as served
+   * (`servedPackageId`, ADR-0150 D5): a host-owned value, never a schema key.
+   * A dataset-bound chart names it as `?package=` on its query. A host that
+   * knows no package leaves it out, and the query sends the bare name.
+   */
+  packageId?: string;
 }
 
 export const ObjectChart = (props: ObjectChartProps) => {
@@ -852,7 +859,7 @@ export const ObjectChart = (props: ObjectChartProps) => {
                   dimensions: Array.isArray(schema.dimensions) ? schema.dimensions : [],
                   measures: Array.isArray(schema.values) ? schema.values : [],
                   ...(runtimeFilter ? { runtimeFilter } : {}),
-              });
+              }, ...(props.packageId ? [{ packageId: props.packageId }] : []));
               if (mounted.current) {
                   setFetchedData(Array.isArray(res?.rows) ? res.rows : []);
                   setDatasetFields(Array.isArray(res?.fields) ? res.fields : null);
@@ -1015,7 +1022,7 @@ export const ObjectChart = (props: ObjectChartProps) => {
       // this list (`schema.aggregate`, `schema.dataset`, ...), which predate
       // this change.
       // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schema.objectName, datasetKey, aggregateKey, filterKey, compareToKey, schema.xAxisKey, chartFamily, runAggregate, filterScope, fieldOptionLabel]);
+  }, [schema.objectName, datasetKey, aggregateKey, filterKey, compareToKey, schema.xAxisKey, chartFamily, runAggregate, filterScope, fieldOptionLabel, props.packageId]);
 
   // objectui#10035 — the refresh input this chart had none of, so a host could
   // show it a write only by remounting it (AGENTS.md #8's corollary: refresh

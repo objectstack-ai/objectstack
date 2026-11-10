@@ -16,6 +16,12 @@
  * lists the objects whose metadata names it, and a `400` refusal is reported in
  * the console's language, naming those objects and what to do. Expectations are
  * read from Studio's table, never retyped; no case matches the server's English.
+ *
+ * objectstack#32305: the bound-object refusal is told by `details.reason ===
+ * 'objects_bound'`, never by its status, so another 400 of the family falls to
+ * the generic text with its own hint even while objects are bound. The refusal
+ * fixture carries the `details` `boundObjectsError` answers on `main`; before
+ * this card it carried none, which the status-keyed branch never read.
  */
 
 import * as React from 'react';
@@ -125,10 +131,17 @@ const OBJECTS = [
 ];
 /** The server's own refusal text: what the page shows when it cannot name the objects. */
 const SERVER_REFUSAL = "Cannot remove datasource 'parts_db': 3 object(s) are still bound to it.";
+/** The `details` `boundObjectsError` answers beside it. */
+const BOUND_DETAILS = { reason: 'objects_bound', count: 3, objects: ['part', 'stock_level', 'supplier'] };
 
 function renderBound(
   language: string,
-  { objects = OBJECTS, deleteStatus = 400 }: { objects?: unknown[]; deleteStatus?: number } = {},
+  {
+    objects = OBJECTS,
+    deleteStatus = 400,
+    message = SERVER_REFUSAL,
+    details = BOUND_DETAILS as Record<string, unknown> | null,
+  }: { objects?: unknown[]; deleteStatus?: number; message?: string; details?: Record<string, unknown> | null } = {},
 ) {
   const deletes: string[] = [];
   state.metadataClient = { list: async (type: string) => (type === 'object' ? objects : []) };
@@ -139,7 +152,7 @@ function renderBound(
     }
     if (method === 'DELETE') {
       deletes.push(url);
-      return reply(deleteStatus, { success: false, error: { code: 'DATASOURCE_ADMIN_ERROR', message: SERVER_REFUSAL } });
+      return reply(deleteStatus, { success: false, error: { code: 'DATASOURCE_ADMIN_ERROR', message, ...(details ? { details } : {}) } });
     }
     return reply(404, { success: false, error: { message: `unexpected ${method} ${url}` } });
   }) as typeof state.fetch;
@@ -210,7 +223,7 @@ describe('DatasourceResourcePage — the objects that still use a datasource are
   });
 
   it('CONTROL: a failure that is not a 400 keeps the server\'s message even while objects are bound', async () => {
-    renderBound('en', { deleteStatus: 503 });
+    renderBound('en', { deleteStatus: 503, details: null });
     const dialog = await openConfirm('Delete');
     await within(dialog).findByTestId('datasource-delete-bound');
     fireEvent.click(within(dialog).getByTestId('datasource-delete-confirm'));
@@ -218,5 +231,30 @@ describe('DatasourceResourcePage — the objects that still use a datasource are
     expect(vi.mocked(toast.error).mock.calls[0][0]).toBe(
       tFormat('engine.datasource.deleteFailed', 'en-US', { name: 'parts_db', error: SERVER_REFUSAL }),
     );
+  });
+
+  it('a 400 whose reason is not objects_bound keeps the server\'s line, with its hint, even while objects are bound', async () => {
+    const line = "Cannot remove datasource 'parts_db': it is defined in code.";
+    const hint = 'Remove it from the code that declares it.';
+    renderBound('en', { message: line, details: { reason: 'code_defined', hint } });
+    const dialog = await openConfirm('Delete');
+    await within(dialog).findByTestId('datasource-delete-bound');
+    fireEvent.click(within(dialog).getByTestId('datasource-delete-confirm'));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(toast.error).mock.calls[0][0]).toBe(
+      tFormat('engine.datasource.deleteFailed', 'en-US', { name: 'parts_db', error: line }),
+    );
+    expect(vi.mocked(toast.error).mock.calls[0][1]).toMatchObject({ description: hint });
+  });
+
+  it('a 400 with no details.reason keeps the server\'s line alone, even while objects are bound', async () => {
+    renderBound('en', { details: null });
+    const dialog = await openConfirm('Delete');
+    await within(dialog).findByTestId('datasource-delete-bound');
+    fireEvent.click(within(dialog).getByTestId('datasource-delete-confirm'));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(toast.error).mock.calls[0]).toEqual([
+      tFormat('engine.datasource.deleteFailed', 'en-US', { name: 'parts_db', error: SERVER_REFUSAL }),
+    ]);
   });
 });

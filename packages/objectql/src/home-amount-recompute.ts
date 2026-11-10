@@ -49,6 +49,12 @@
  *   time, then re-run. That command refuses an unscoped run over the rows of
  *   more than one organization (Open item 13), and the report's
  *   per-organization `code_blank` count says which organizations owe codes.
+ *   For an amount that follows its parent's code (ADR-0144 D2, amended) the
+ *   code is the parent's: the run reads each row's parent through the
+ *   `master_detail`, as a write reads it, and a row whose parent holds no
+ *   code, or names none the run can read, is `code_blank`. Remedy: write the
+ *   code on the parent record, which a first code over a blank one always
+ *   may.
  * - `document_date_blank` — a foreign amount with no document date.
  * - `home_currency_unset` — the organization has no `localization.currency`.
  * - `unconvertible` — the code is not ISO 4217, or the amount or document
@@ -123,7 +129,13 @@ import {
   type HomeAmountReads,
   type HomeAmountServing,
 } from './home-amount-projection.js';
-import { isRecordCurrencyBlank } from './validation/record-currency-code.js';
+import {
+  followParentCurrencyCodes,
+  isRecordCurrencyBlank,
+  PARENT_CODE_UNREAD,
+  recordCurrencyInputOf,
+  recordCurrencyPathOf,
+} from './validation/record-currency-code.js';
 import { isFederatedUnprovisionedInjectedColumn } from './federated-object.js';
 import { VALIDATION_FAILED_CODE } from './validation/record-validator.js';
 
@@ -443,7 +455,12 @@ export async function recomputeHomeAmounts(
   for (const name of ['organization_id', 'updated_at']) {
     if (name in declared && !isFederatedUnprovisionedInjectedColumn(schema, name)) columns.add(name);
   }
-  for (const e of plan) for (const name of [e.amountField, e.codeField, e.rateDateField, e.homeField, e.rateField]) columns.add(name);
+  // [ADR-0144 D2, amended] An amount that follows its parent's code reads the master_detail column,
+  // never the dotted pointer (the read door refuses a dotted projection): the parent's code is laid
+  // on each row of a page below, from one parent read per page, as a write lays it.
+  for (const e of plan) {
+    for (const name of [e.amountField, recordCurrencyInputOf(e), e.rateDateField, e.homeField, e.rateField]) columns.add(name);
+  }
   // A limited run needs the column it is limited by: an object that stores none has rows of no organization.
   if (organizationScope !== undefined && !columns.has('organization_id')) {
     throw refusal(
@@ -475,7 +492,9 @@ export async function recomputeHomeAmounts(
       // The write's own reads, memoized across this page as one write memoizes across its batch.
       const reads = engine.homeAmountReadsFor({ ...scopedCtx });
       const serving = reads.serving;
-      for (const row of page) {
+      const followCodes = await followParentCurrencyCodes(plan, page, serving.parentRows);
+      for (const storedRow of page) {
+        const row = followCodes(storedRow);
         report.scannedRecords++;
         const id = row.id;
         if (id == null || id === '') continue;
@@ -510,7 +529,9 @@ export async function recomputeHomeAmounts(
 
           // A blank code beside an amount is its own class: there is no currency to convert from
           // (the projection leaves such an entry out, so the code-blank refusal can answer instead).
-          if (!isRecordCurrencyBlank(row[entry.amountField]) && isRecordCurrencyBlank(row[entry.codeField])) {
+          // A row whose parent the run cannot read has no code to convert from either.
+          if (!isRecordCurrencyBlank(row[entry.amountField])
+            && (isRecordCurrencyBlank(row[entry.codeField]) || row[entry.codeField] === PARENT_CODE_UNREAD)) {
             skip('code_blank');
             continue;
           }
@@ -734,10 +755,21 @@ export function formatHomeAmountRecomputeReport(report: HomeAmountRecomputeRepor
     const remedies: string[] = [];
     if (report.skippedByReason.rate_missing > 0) remedies.push('rate_missing: add the exchange rate (Setup → Exchange Rates) and re-run');
     if (report.skippedByReason.code_blank > 0) {
-      remedies.push(
-        `code_blank: write the codes with \`os migrate record-currency-codes --object ${report.object} --field <amount> --code <ISO 4217> --org <organization>\`,`
-          + ' one organization at a time with the code its rows are in (the code_blank count per organization is above), then re-run',
-      );
+      const followed = report.fields.filter((f) => recordCurrencyPathOf(f.codeField) !== undefined);
+      if (followed.length < report.fields.length) {
+        remedies.push(
+          `code_blank: write the codes with \`os migrate record-currency-codes --object ${report.object} --field <amount> --code <ISO 4217> --org <organization>\`,`
+            + ' one organization at a time with the code its rows are in (the code_blank count per organization is above), then re-run',
+        );
+      }
+      for (const f of followed) {
+        const path = recordCurrencyPathOf(f.codeField)!;
+        remedies.push(
+          `code_blank (${f.field}): the amount follows its parent's code '${f.codeField}', so ${report.object} stores none; `
+            + `write the ISO 4217 code on each parent record the listed rows name in '${path.via}' (a first code over a `
+            + 'blank one is always accepted), then re-run',
+        );
+      }
     }
     if (report.skippedByReason.document_date_blank > 0) remedies.push('document_date_blank: fill the document date, then re-run');
     if (report.skippedByReason.home_currency_unset > 0) remedies.push('home_currency_unset: set Localization → Default currency for the organization, then re-run');

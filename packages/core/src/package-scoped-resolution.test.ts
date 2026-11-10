@@ -14,10 +14,14 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  BARE_NAME_ONE_HOLDER_TYPES,
   ENGINE_FUNCTION_TYPE,
+  NAMESPACE_SCOPED_BARE_NAME_TYPES,
   OVERRIDABLE_BASELINE_PACKAGES,
   PackageScopedNameRefusedError,
   RUNTIME_COMPATIBILITY_PACKAGE_ID,
+  isNamespaceScopedBareNameType,
+  isPackageScopedType,
   packageScopedHolderSource,
   resolvePackageScopedHolders,
   type PackageResolutionClosureOf,
@@ -222,5 +226,18 @@ describe('the one refusal class every package-scoped by-name door throws (ADR-01
     expect(err.httpStatus).toBe(409);
     expect(err.refusal).toBe(refusal);
     expect(err.message).toBe(refusal.message);
+  });
+});
+
+describe('the types narrowed to the namespace (ADR-0150 D2/D9)', () => {
+  it('each is a phase-1 type ADR-0150 addresses by package, so a reader that refuses a bare read of a narrowed type it cannot judge reaches every one', () => {
+    expect(NAMESPACE_SCOPED_BARE_NAME_TYPES.length).toBeGreaterThan(0);
+    for (const type of NAMESPACE_SCOPED_BARE_NAME_TYPES) {
+      expect(BARE_NAME_ONE_HOLDER_TYPES, type).toContain(type);
+      expect(isPackageScopedType(type), type).toBe(true);
+      expect(isNamespaceScopedBareNameType(type), type).toBe(true);
+    }
+    expect(isNamespaceScopedBareNameType('flow')).toBe(false);
+    expect(isNamespaceScopedBareNameType(undefined)).toBe(false);
   });
 });

@@ -60,7 +60,71 @@ export interface MessagingServiceSurface {
          * only answer such a stack could honestly give.
          */
         enqueued?: number;
+        /**
+         * One outcome per `(channel x recipient)` pair this emit attempted,
+         * failed ones carrying the channel's own reason (an unregistered
+         * channel answers `channel 'NAME' not registered`). Read only to name
+         * the channels of a failed delivery on the step's warning
+         * ({@link deliveryFailureWarning}).
+         *
+         * Optional for the same reason as `enqueued`: a messaging
+         * implementation that does not report it still has its `failed` count
+         * read, and the warning then says that no channel was named.
+         */
+        deliveries?: ReadonlyArray<{ channel: string; recipient: string; ok: boolean; error?: string }>;
     }>;
+}
+
+/**
+ * The step warning for a `notify` whose emit reported failed deliveries, or
+ * `undefined` when none failed.
+ *
+ * Without it, a node whose only channel was refused (`push`, with no push
+ * channel registered) recorded a clean `success` step: the run history an
+ * admin reads was green, and the one place that said why nobody was notified
+ * was a server log line. The step is still a SUCCESS, deliberately. A failing
+ * result aborts the run, or routes it down a `fault` edge, so turning a refused
+ * channel into a failure would change what every flow with such a channel
+ * DOES. The advisory step warning (`NodeExecutionResult.warnings`) is the
+ * engine's channel for a legal outcome that must not read as a clean success,
+ * and the Runs surface shows it on the step.
+ *
+ * Partial delivery is warned on too (one channel refused while another
+ * delivered or was enqueued): the step did reach somebody, but not on every
+ * channel its author named, and the warning names which.
+ *
+ * The reason text is each failed delivery's own, passed through verbatim; the
+ * node never branches on it.
+ */
+function deliveryFailureWarning(
+    results: ReadonlyArray<Awaited<ReturnType<MessagingServiceSurface['emit']>>>,
+): string | undefined {
+    const failed = results.reduce((sum, result) => sum + (Number(result.failed) || 0), 0);
+    if (failed <= 0) return undefined;
+    const reached = results.reduce(
+        (sum, result) => sum + (Number(result.delivered) || 0) + (Number(result.enqueued) || 0),
+        0,
+    );
+    // One entry per (channel, reason), in first-seen order, with its count.
+    const groups = new Map<string, { channel: string; error: string | undefined; count: number }>();
+    for (const result of results) {
+        for (const delivery of result.deliveries ?? []) {
+            if (delivery.ok) continue;
+            const key = JSON.stringify([delivery.channel, delivery.error ?? null]);
+            const group = groups.get(key);
+            if (group) group.count += 1;
+            else groups.set(key, { channel: delivery.channel, error: delivery.error, count: 1 });
+        }
+    }
+    const named = [...groups.values()].map(({ channel, error, count }) =>
+        `channel '${channel}' (${count} ${count === 1 ? 'delivery' : 'deliveries'})${error ? `: ${error}` : ''}`,
+    );
+    const which = named.length > 0
+        ? named.join('; ')
+        : 'the messaging service named no channel for them';
+    return reached === 0
+        ? `notify delivered nothing: every delivery it attempted failed (${failed}). ${which}.`
+        : `notify: ${failed} of ${failed + reached} deliveries failed. ${which}.`;
 }
 
 /**
@@ -1233,8 +1297,13 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                 const delivered = results.reduce((sum, result) => sum + (Number(result.delivered) || 0), 0);
                 const enqueued = results.reduce((sum, result) => sum + (Number(result.enqueued) || 0), 0);
                 const failed = results.reduce((sum, result) => sum + (Number(result.failed) || 0), 0);
+                // A refused or failed delivery is named on the step itself, so
+                // the run history says why nobody was notified; the step stays a
+                // success (see `deliveryFailureWarning`).
+                const warning = deliveryFailureWarning(results);
                 return {
                     success: true,
+                    ...(warning ? { warnings: [warning] } : {}),
                     output: {
                         notificationId: results[0]?.notificationId,
                         delivered,

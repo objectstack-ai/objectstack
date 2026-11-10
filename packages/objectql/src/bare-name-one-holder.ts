@@ -204,6 +204,8 @@ import {
   isBareNameOneHolderType,
   isOverridableBaseline,
   describeBareNameHolder,
+  NAMESPACE_SCOPED_BARE_NAME_TYPES,
+  isNamespaceScopedBareNameType,
   type BareNameHolder,
   type BareNameOneHolderType,
   type BareNameRegistryType,
@@ -215,7 +217,9 @@ import { isObjectLessActionKey, standaloneActionOwnerKey } from './action-govern
 // overridable baselines and the holder spelling — lives in `@objectstack/core`
 // (`package-scoped-resolution.ts`) beside the package-scoped resolution rule
 // that is written in it, so every reader of either reads one copy. Re-exported
-// here under the same names; the rule it serves is this module's.
+// here under the same names; the rule it serves is this module's. [#32076] The
+// narrowed types (`NAMESPACE_SCOPED_BARE_NAME_TYPES`) joined them, so the
+// metadata protocol, which objectql depends on, reads the same list.
 export type { BareNameRegistryType, BareNameOneHolderType, BareNameHolder } from '@objectstack/core';
 export {
   BARE_NAME_ONE_HOLDER_TYPES,
@@ -223,6 +227,8 @@ export {
   isBareNameOneHolderType,
   isOverridableBaseline,
   describeBareNameHolder,
+  NAMESPACE_SCOPED_BARE_NAME_TYPES,
+  isNamespaceScopedBareNameType,
 };
 
 /** The covered registry types, in the order a refusal lists them. */
@@ -338,27 +344,6 @@ export function declaredBuiltInBoundActions(manifest: ObjectStackManifest | unkn
   const plugins = (manifest as { plugins?: unknown } | null | undefined)?.plugins;
   if (Array.isArray(plugins)) for (const plugin of plugins) read(plugin);
   return out;
-}
-
-/**
- * [ADR-0150 D2/D9, child B] The covered types whose one-holder rule has
- * narrowed from the deployment to the namespace (module doc, "The narrowing").
- * Each type joins in its own trailing change, once its by-name readers, its
- * AI faces and its stored references all carry the package: the AI family's
- * `agent` and `skill` first (#31701), then the object-less `action` (#31697),
- * then `email_template` (#31699). A type not listed here keeps one package
- * holder per deployment.
- */
-export const NAMESPACE_SCOPED_BARE_NAME_TYPES: readonly BareNameOneHolderType[] = Object.freeze([
-  'agent',
-  'skill',
-  'action',
-  'email_template',
-]);
-
-/** Has `type`'s one-holder rule narrowed to the namespace ({@link NAMESPACE_SCOPED_BARE_NAME_TYPES})? */
-export function isNamespaceScopedBareNameType(type: unknown): boolean {
-  return typeof type === 'string' && (NAMESPACE_SCOPED_BARE_NAME_TYPES as readonly string[]).includes(type);
 }
 
 /**

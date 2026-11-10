@@ -90,7 +90,7 @@ import { isSandboxOrigin, isSandboxOwnFault, keysetWalk, mapDataError, sandboxBu
 import { objectNotFoundError, sanitizeRowError, withTransientRetry, type RetryOptions } from '@objectstack/core';
 import { isValueDomainMember } from '@objectstack/spec/shared';
 
-import { isRecordCurrencyBlank, recordCurrencyFieldOf } from './validation/record-currency-code.js';
+import { isRecordCurrencyBlank, recordCurrencyFieldOf, recordCurrencyPathOf } from './validation/record-currency-code.js';
 import { isFederatedUnprovisionedInjectedColumn } from './federated-object.js';
 
 /** One row whose code could not be written. */
@@ -267,6 +267,23 @@ function resolvePair(
           : `it does not declare currencyConfig: { currencyMode: 'record', currencyField }. `) +
         'Only a currency field whose records each name their own currency owes a code. ' +
         'Refused before the walk read or wrote any row.',
+    );
+  }
+  // [ADR-0144 D2, amended; Open item 14] An amount that follows its parent's
+  // code stores none of its own: there is no column on this object to fill.
+  // Its rows are refused at their next write while the parent's code is
+  // blank, and the remedy is the parent's code, which a first code over a
+  // blank one may always set. Whether this command should write parents'
+  // codes is Open item 14's, undecided; it writes none.
+  const path = recordCurrencyPathOf(codeField, schema.fields);
+  if (path) {
+    throw invalidField(
+      field,
+      `[record-currency-backfill] '${object}.${field}' follows its parent's currency: its currencyField is the path `
+        + `'${codeField}', the code on the ${path.master === undefined ? 'parent' : `'${path.master}'`} record each row `
+        + `names in '${path.via}', so '${object}' stores no code to backfill. Write the ISO 4217 code on each parent `
+        + `record that holds none (a first code over a blank one is always accepted); its rows then read it. `
+        + 'Refused before the walk read or wrote any row.',
     );
   }
   if (!isValueDomainMember('iso_4217_currency', code)) {
