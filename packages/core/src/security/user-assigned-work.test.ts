@@ -50,6 +50,14 @@ describe('[#30205] userAssignedWorkFields', () => {
     expect(fields).toEqual([{ object: 'deal', field: 'owner_id', multiple: false }]);
   });
 
+  it('[ADR-0153 D4] leaves a synced object out — a user field on a pulled row is source data, not reassignable work', () => {
+    const copy = { name: 'erp_ticket_copy', managedBy: 'synced', fields: { owner_id: OWNER_FIELD_DEF, assignee: { type: 'lookup', reference: 'sys_user' } } };
+    expect(userAssignedWorkFields([copy]).fields).toEqual([]);
+    // twin: the same object unmanaged is counted
+    const { managedBy: _m, ...unmanaged } = copy;
+    expect(userAssignedWorkFields([unmanaged]).fields.map((f) => f.field)).toEqual(['owner_id', 'assignee']);
+  });
+
   it('stops at the cap and says so', () => {
     const { fields, truncated } = userAssignedWorkFields([ticket, account], 2);
     expect(fields).toHaveLength(2);

@@ -2392,13 +2392,14 @@ export function stripRuntimeOwnedFields(
  * The carve-over from the deleted ingress copy tested `managedBy` for mere
  * PRESENCE, which is wider than the ADR-0086 argument it rests on. The enum's
  * own docblock (`object.zod.ts`, "Enforcement happens in three places", item 3)
- * splits the six buckets by whether an engine write guard fails closed on a
+ * splits the seven buckets by whether an engine write guard fails closed on a
  * user-context generic write, and that split is this list:
  *
  * | bucket         | its own refusal                              | this strip |
  * | -------------- | -------------------------------------------- | ---------- |
  * | `engine-owned` | ADR-0103 engine-owned write guard             | steps around |
  * | `append-only`  | ADR-0103, same guard (locked default)         | steps around |
+ * | `synced`       | ADR-0103 guard, `userActions` locked (ADR-0153 D4) | steps around |
  * | `better-auth`  | ADR-0092 identity write guard                 | steps around |
  * | `platform`     | none — full user CRUD by default              | JUDGES     |
  * | `config`       | none — admin-authored, writable by default    | JUDGES     |
@@ -2439,6 +2440,7 @@ export function stripRuntimeOwnedFields(
 const PLATFORM_INTERNAL_MANAGED_BUCKETS: ReadonlySet<string> = new Set([
   'engine-owned',
   'append-only',
+  'synced',
   'better-auth',
 ]);
 

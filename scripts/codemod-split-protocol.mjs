@@ -1993,8 +1993,45 @@ function classPositions(ts, cls) {
 // body could tell apart: a static reached through it runs with the class as
 // `this` (a moved static of a subclass's call would see the class, not the
 // subclass); the class's statics are all private, so no subclass reaches one.
+//
+// The identity port (#30020 R1, the `engine.ts` codemod's R1 ported to this
+// pass, design ruling A 6687865760: the facade stays the sole state owner and
+// each host gains a `facade` port). In the `.call(host)` receiver form a bare
+// `this` would hand the HOST on where the method handed the instance, so it
+// refused. Now each bare `this` an instance body hands on (`f(this)`,
+// `(this as any).x`, `return this`) reads `this.facade`, a host entry the
+// factory fills with the instance itself (`facade: protocol`), typed as the
+// class; it is the one edit the receiver form makes to a body. Its undo is the
+// one inverse rewrite, every `this.facade` back to a bare `this`, unambiguous
+// because a base body that reads `this.facade` refuses (no declared member)
+// and so does a class that declares `facade`. An indexed `this`, a `typeof
+// this` and a static's bare `this` (the class) still refuse.
 
 const RECEIVER_CARD = '#30147';
+const FACADE_MEMBER = 'facade';
+/** The identity port's host entry: the interface line (its note on the line, so the sorted block keeps it whole) and the factory line. */
+const FACADE_ENTRY = Object.freeze({
+  iface: `    readonly ${FACADE_MEMBER}: ${CLASS_NAME}; // the instance itself: a moved body's bare \`this\` reads \`this.${FACADE_MEMBER}\` (#30020 R1)`,
+  factory: `            ${FACADE_MEMBER}: protocol,`,
+});
+
+/**
+ * The identity port's undo (#30020 R1): a receiver facet member's body with
+ * each `this.facade` its own `this` reads put back to a bare `this`. Pure.
+ */
+function undoIdentity(ts, sf, member) {
+  const edits = [];
+  const visit = (node) => {
+    if (ts.isPropertyAccessExpression(node) && node.expression.kind === ts.SyntaxKind.ThisKeyword
+      && ts.isIdentifier(node.name) && node.name.text === FACADE_MEMBER && T_isMethodThis(ts, node.expression, member)) {
+      edits.push({ start: node.expression.getEnd(), end: node.getEnd(), text: '' });
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(member.body, visit);
+  const start = member.body.getStart(sf);
+  return applyEdits(sf.text.slice(start, member.body.getEnd()), edits.map((e) => ({ ...e, start: e.start - start, end: e.end - start })));
+}
 const STATICS_NAME = `${CLASS_NAME}Statics`;
 const STATICS_HOST_NAME = `${CLASS_NAME}StaticsHost`;
 
@@ -2034,16 +2071,24 @@ function predicateEntry(ts, sf, cls, table, member) {
  * member read through `this` (an instance member for an instance method, a
  * static for a static) to `{ read, write, call }`; `statics` maps each static
  * read through the class name (and, for a static, through `this`) to `method`
- * or `getter`, its forwarder's kind. `refusals` names what neither form
- * carries: a bare or indexed `this`, `this.constructor`, `super`, the method's
- * `arguments`, a method read as a value, a static written or a static field
- * called (the forwarder is read-only and is another receiver), a member the
- * class does not declare, and the class named other than as `<Class>.<static>`.
+ * or `getter`, its forwarder's kind; `identity` lists the span of each bare
+ * `this` an instance body hands on (`(this as any).x`, `f(this)`), which the
+ * facet member reads as `this.facade` (#30020 R1). `refusals` names what
+ * neither form carries: an indexed `this`, a `typeof this`, a static's bare
+ * `this`, a bare `this` in a class that declares `facade`, `this.constructor`,
+ * `super`, the method's `arguments`, a method read as a value, a static
+ * written or a static field called (the forwarder is read-only and is another
+ * receiver), a member the class does not declare (`this.facade` included, so
+ * the undo's inverse rewrite is unambiguous), and the class named other than
+ * as `<Class>.<static>`.
  */
 function receiverReads(ts, sf, m, table, isStatic) {
   const self = new Map();
   const statics = new Map();
   const refusals = [];
+  // The identity port (#30020 R1): the `{ start, end }` of each bare `this` an
+  // instance body hands on, which its facet member reads as `this.facade`.
+  const identity = [];
   const no = (why) => { if (!refusals.includes(why)) refusals.push(why); };
   const isCallee = (n) => ts.isCallExpression(n.parent) && n.parent.expression === n;
   const written = (n) => {
@@ -2064,7 +2109,16 @@ function receiverReads(ts, sf, m, table, isStatic) {
   const visit = (node) => {
     if (node.kind === ts.SyntaxKind.ThisKeyword && T_isMethodThis(ts, node, m)) {
       const p = node.parent;
-      if (!ts.isPropertyAccessExpression(p) || p.expression !== node || !ts.isIdentifier(p.name)) { no('a bare or indexed `this`'); return; }
+      if (!ts.isPropertyAccessExpression(p) || p.expression !== node || !ts.isIdentifier(p.name)) {
+        // R1 (#30020): an instance body's bare `this` hands the instance on, and
+        // reads the host's identity port. An indexed `this`, a `typeof this` and
+        // a static's `this` (the class) still refuse.
+        if (isStatic || ts.isElementAccessExpression(p)) { no('a bare `this` in a static, or an indexed `this`'); return; }
+        if (ts.isTypeQueryNode(p)) { no('`typeof this` (the type would name the host)'); return; }
+        if (table.instance.has(FACADE_MEMBER) || table.statics.has(FACADE_MEMBER)) { no(`facade-taken: the class declares a member named \`${FACADE_MEMBER}\` (the identity port would shadow it)`); return; }
+        identity.push({ start: node.getStart(sf), end: node.getEnd() });
+        return;
+      }
       const name = p.name.text;
       if (name === 'constructor') { no('`this.constructor`'); return; }
       if (isStatic) {
@@ -2087,6 +2141,7 @@ function receiverReads(ts, sf, m, table, isStatic) {
       return;
     }
     if (node.kind === ts.SyntaxKind.SuperKeyword) { no('`super`'); return; }
+    if (ts.isIdentifier(node) && node.text === 'this' && ts.isTypeQueryNode(node.parent)) { no('`typeof this` (the type would name the host)'); return; }
     if (ts.isIdentifier(node) && !inJsDoc(ts, node) && !isPropertyNameIdentifier(ts, node)) {
       if (node.text === 'arguments') {
         let p = node.parent;
@@ -2109,7 +2164,7 @@ function receiverReads(ts, sf, m, table, isStatic) {
     scan(region);
   }
   if (m.body) ts.forEachChild(m.body, visit);
-  return { self, statics, refusals };
+  return { self, statics, refusals, identity };
 }
 
 /** host-split's `isMethodThis`, on this script's TypeScript instance: `this` reached from `m` through arrows only. */
@@ -2150,13 +2205,16 @@ function receiverMove(T, planned, r) {
   if (reads.refusals.length > 0) return { refusals: reads.refusals.map((x) => `receiver: ${x}`) };
   if (!r.module) return { refusals: ['section-kept'] };
   const facet = facetNameOf(r.module);
-  const names = [...reads.self.keys()].sort();
+  const names = [...reads.self.keys(), ...(reads.identity.length > 0 ? [FACADE_MEMBER] : [])].sort();
   const form = names.length === 0 ? 'plain' : isStatic ? 'statics' : 'receiver';
   const routed = new Map(reads.statics);
   const isPrivate = isPrivateMember(ts, m);
   const span = isPrivate ? movableDocSpan(ts, sf, m) : null;
   const ownedDoc = span ? span.text : null;
-  const body = sf.text.slice(m.body.getStart(sf), m.body.getEnd());
+  // R1 (#30020): each bare `this` reads the identity port; no other byte changes.
+  const bodyStart = m.body.getStart(sf);
+  const body = applyEdits(sf.text.slice(bodyStart, m.body.getEnd()),
+    reads.identity.map((at) => ({ start: at.end - bodyStart, end: at.end - bodyStart, text: `.${FACADE_MEMBER}` })));
   const thisParam = form === 'receiver' ? `this: ${pickTypeOf('ProtocolHost', names)}`
     : form === 'statics' ? `this: ${pickTypeOf(STATICS_HOST_NAME, names)}` : null;
   const params = [thisParam, paramsTextOf(sf, m)].filter(Boolean).join(', ');
@@ -2174,10 +2232,11 @@ function receiverMove(T, planned, r) {
         ? `${lead}; it reads this class's statics through \`${STATICS_NAME}\`.\n        return ${facet}.${r.name}(${args});\n`
         : `${lead}; it reads nothing of this class.\n        return ${facet}.${r.name}(${args});\n`) + '    }';
   const hostEntries = form === 'receiver' ? T.hs.hostEntriesFor({ instance: reads.self, statics: new Set() }, ctx.table, CLASS_NAME) : new Map();
+  if (reads.identity.length > 0) hostEntries.set(FACADE_MEMBER, FACADE_ENTRY);
   const predicates = new Set(cls.members.filter((x) => ts.isMethodDeclaration(x) && x.type && ts.isTypePredicateNode(x.type) && !x.type.assertsModifier && x.name && ts.isIdentifier(x.name)).map((x) => x.name.text));
   for (const k of [...hostEntries.keys()]) if (predicates.has(k)) hostEntries.set(k, predicateEntry(ts, sf, cls, ctx.table, k));
   return {
-    refusals: [], form, name: r.name, module: r.module, isStatic, stub, member, ownedDoc, hostEntries, routed, picks: names, body,
+    refusals: [], form, name: r.name, module: r.module, isStatic, stub, member, ownedDoc, hostEntries, routed, picks: names, body, identity: reads.identity.length,
     imports: r.imports ?? new Map(), moduleRefs: new Map([...(r.moduleRefs ?? new Map())].filter(([n]) => n !== CLASS_NAME)),
   };
 }
@@ -2664,9 +2723,11 @@ function verifyMembers(T, base, head, { anchors = SECTION_ANCHORS, pins = PATH_R
     for (const [k, e] of (e1 ? r.hostEntries : rm.hostEntries)) if (!expectedEntries.has(k) || e.factory.includes('\n')) expectedEntries.set(k, e);
     if (!e1) {
       for (const [n, kind] of rm.routed) routed.set(n, kind);
-      // The body moved unedited: its undo is the facet member's body, byte for byte.
-      mv.restored = modText.slice(fm.node.body.getStart(fo.sf), fm.node.body.getEnd());
-      if (mv.restored !== base.text.slice(bm.body.getStart(baseSf), bm.body.getEnd())) fail(`${name}: its moved body is not the base body, byte for byte`);
+      // The body moved unedited but for R1's identity port (#30020): its undo is
+      // the facet member's body, each `this.facade` back to a bare `this`, byte for byte.
+      mv.restored = mv.form === 'receiver' ? undoIdentity(ts, fo.sf, fm.node) : modText.slice(fm.node.body.getStart(fo.sf), fm.node.body.getEnd());
+      mv.identity = rm.identity;
+      if (mv.restored !== base.text.slice(bm.body.getStart(baseSf), bm.body.getEnd())) fail(`${name}: its moved body (each \`this.${FACADE_MEMBER}\` back to \`this\`) is not the base body, byte for byte`);
       const thisParam = fm.node.parameters[0];
       const pk = thisParam && ts.isIdentifier(thisParam.name) && thisParam.name.text === 'this'
         ? /^this: Pick<(\w+), (.+)>$/s.exec(modText.slice(thisParam.getStart(fo.sf), thisParam.getEnd())) : null;
@@ -2805,7 +2866,7 @@ function printVerifyMembers(v) {
   const forms = Object.entries(v.forms ?? {}).map(([f, n]) => `${f} ${n}`).join(', ') || 'none';
   const e1 = v.checks.filter((c) => c.form === 'e1');
   console.log(`undo proof (${MEMBERS_CARD}, ${RECEIVER_CARD}): ${v.moved.length} moved member(s) (${v.moved.join(', ') || 'none'}); forms: ${forms}; ` +
-    `host-split check: ${e1.filter((c) => c.ok).length}/${e1.length} E1 move(s) pass (the receiver forms move bodies unedited, proved byte-equal); ${HOST_BASENAME} ${v.linesBefore} -> ${v.linesAfter} lines; ` +
+    `host-split check: ${e1.filter((c) => c.ok).length}/${e1.length} E1 move(s) pass (the receiver forms move bodies unedited but for #30020 R1's \`this.facade\`, proved byte-equal); ${HOST_BASENAME} ${v.linesBefore} -> ${v.linesAfter} lines; ` +
     `undoing the moves ${v.failures.length > 0 ? 'does NOT' : 'does'} rebuild the base ${HOST_BASENAME}, ${HOST_MODULE_BASENAME} and section modules byte-for-byte ` +
     `once the ${v.pruned.length} import binding(s) only moved bodies read are pruned from the base (${v.pruned.join(', ') || 'none'})`);
 }
@@ -2842,7 +2903,7 @@ async function mainMembers(T, argv) {
   console.log(`# codemod-split-protocol --members (${MEMBERS_CARD}): named methods onto the landed facade`);
   for (const r of out.records) {
     if (r.leaf) console.log(`- ${r.name} (a static table) -> ${tablesClassOf(r.module)} (${r.leaf}): its initializer`);
-    else console.log(`- ${r.name} -> ${facetNameOf(r.module)} (${r.module}), ${r.form}: ${r.bodyLines} body lines${r.ownedDoc ? ', its docblock with it' : ''}`);
+    else console.log(`- ${r.name} -> ${facetNameOf(r.module)} (${r.module}), ${r.form}: ${r.bodyLines} body lines${r.mv?.identity ? `, ${r.mv.identity} bare \`this\` -> \`this.${FACADE_MEMBER}\` (#30020 R1)` : ''}${r.ownedDoc ? ', its docblock with it' : ''}`);
   }
   const head = { text: out.host, host: out.hostModule, modules: new Map([...base.modules, ...out.modules]) };
   console.log(`output tree sha256: ${treeHash(new Map([[HOST_BASENAME, out.host], [HOST_MODULE_BASENAME, out.hostModule], ...out.modules]))}`);
@@ -2963,6 +3024,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'receiver forms': 10,
   'receiver proof': 10,
   'receiver refusals': 7,
+  'identity port': 14,
 });
 const SELF_TEST_BATTERY_FLOOR = 5;
 
@@ -3336,7 +3398,9 @@ ${pad}
       refuses('a name given twice refuses', () => gen(['engineReader', 'engineReader']));
       refuses('a name the class does not declare refuses', () => gen(['nothingLikeThis']));
       refuses('a member already moved refuses', () => gen(['movable']));
-      refuses('a member a stay rule holds refuses (closed-set)', () => gen(['bareThis']));
+      // A bare `this` moves by R1's identity port (#30020) now; an indexed one stays held.
+      const indexed = base.text.replace('        return this;\n    }\n\n    private viaConstructor', "        return this['count'];\n    }\n\n    private viaConstructor");
+      check('a member a stay rule holds refuses (closed-set: an indexed `this`)', indexed !== base.text && refused(() => gen(['bareThis'], { ...base, text: indexed })));
       refuses('a static refuses (only instance methods move)', () => gen(['secret']));
       refuses('an unsplit protocol.ts refuses (that is the first pass\'s)', () => generateMembers(T, src, FIXTURE_HOST, new Map(), ['engineReader'], opts));
       refuses('a body that reads an unexported top-level name refuses (the export list is not widened)', () => gen(['readsLocal']));
@@ -3449,7 +3513,8 @@ ${pad}
       open('receiver refusals');
       {
         const refuses = (label, fn) => check(label, refused(fn));
-        refuses('a bare `this` refuses (the receiver would hand back the host)', () => rgen(['bareStatic']));
+        const indexedR = rbase.text.replace(`    private bareStatic(): unknown {\n${pad}\n        return this;`, `    private bareStatic(): unknown {\n${pad}\n        return this['flag'];`);
+        check('an indexed `this` refuses (no receiver form carries it; R1 takes a bare one only)', indexedR !== rbase.text && refused(() => rgen(['bareStatic'], { ...rbase, text: indexedR })));
         refuses('`this.constructor` refuses (constructor-rewrite is not a receiver reason)', () => rgen(['viaConstructor']));
         refuses('a static written through the class refuses (the forwarder is read-only)',
           () => rgen(['readsThis'], { ...rbase, text: rbase.text.replace('return this.secret(n) + ObjectStackProtocolImplementation.TABLE.size;', 'ObjectStackProtocolImplementation.TABLE = new Set();\n        return this.secret(n);') }));
@@ -3461,6 +3526,63 @@ ${pad}
           () => rgen(['hostLocal'], { ...rbase, text: rbase.text.replace('(this.flag ? 1 : 0)', 'this.count') }));
         refuses('a table whose initializer reads a top-level name of protocol.ts refuses',
           () => rgen(['TABLE'], { ...rbase, text: rbase.text.replace("new Set(['a', 'b'])", 'new Set([String(LOCAL)])') }));
+      }
+
+      // The identity port (#30020 R1): a bare `this` an instance body hands on
+      // reads `this.facade`, the host entry the factory fills with the instance.
+      open('identity port');
+      {
+        const IBODY = `    private bareStatic(): unknown {\n${pad}\n        return this;`;
+        const ibase = { ...rbase, text: rbase.text.replace(IBODY, `    private bareStatic(): unknown {\n${pad}\n`
+          + '        const self = (this as any).flag ? this : null;\n'
+          + '        const read = async () => (this as any).engine;\n'
+          + '        const own = { m() { return this; } };\n'
+          + '        return [self ?? this, this.engine.v, read, own];') };
+        check('the identity fixture lands', ibase.text !== rbase.text);
+        const igen = (b = ibase) => generateMembers(T, b.text, b.host, b.modules, ['bareStatic'], opts);
+        let iout = null;
+        try { iout = igen(); } catch (e) { iout = { error: String(e.message ?? e) }; }
+        const ihead = iout.error ? ibase : { text: iout.host, host: iout.hostModule, modules: new Map([...ibase.modules, ...iout.modules]) };
+        const ivm = (h) => verifyMembers(T, ibase, h, opts);
+        const iv = iout.error ? { failures: [iout.error], moved: [], forms: {} } : ivm(ihead);
+        const ifacet = ihead.modules.get('protocol-first.ts') ?? '';
+        check('a body that hands `this` on moves in the receiver form and proves by its undo',
+          iv.failures.length === 0 && iv.moved.join() === 'bareStatic' && JSON.stringify(iv.forms) === JSON.stringify({ receiver: 1 }), [...iv.failures, JSON.stringify(iv.forms)].join(' | '));
+        check('each bare `this` reads `this.facade`; an object-literal method keeps its own `this`; `this.<member>` is unedited',
+          ifacet.includes('        const self = (this.facade as any).flag ? this.facade : null;\n        const read = async () => (this.facade as any).engine;\n'
+            + '        const own = { m() { return this; } };\n        return [self ?? this.facade, this.engine.v, read, own];'), ifacet);
+        check('the facet member takes the port in its Pick, sorted with what it reads',
+          ifacet.includes("static bareStatic(this: Pick<ProtocolHost, 'engine' | 'facade'>): unknown {"), ifacet);
+        check('the stub runs the body on the host, as every receiver stub does',
+          ihead.text.includes('return ProtocolFirstFacet.bareStatic.call(protocolHost(this));'), ihead.text);
+        check('the interface gains the port typed as the class, and the factory fills it with the instance',
+          ihead.host.includes(`${FACADE_ENTRY.iface}\n`) && ihead.text.includes(`\n${FACADE_ENTRY.factory}\n`), `${ihead.host}\n${ihead.text}`);
+        let again = null;
+        try { again = igen(); } catch { again = null; }
+        check('two runs write byte-identical trees', again !== null && !iout.error
+          && treeHash(new Map([['h', again.host], ['p', again.hostModule], ...again.modules])) === treeHash(new Map([['h', iout.host], ['p', iout.hostModule], ...iout.modules])));
+        const same = (a, b) => a.text === b.text && a.host === b.host && [...a.modules].every(([f, t]) => b.modules.get(f) === t);
+        const fails = (label, h) => {
+          const v = ivm(h);
+          check(label, !iout.error && !same(h, ihead) && v.failures.length > 0, same(h, ihead) ? 'the mutation did not land' : 'proved');
+        };
+        const withIFacet = (text) => ({ ...ihead, modules: new Map([...ihead.modules, ['protocol-first.ts', text]]) });
+        fails('a `this.facade` the rewrite did not write fails (the undo alone would take it back)', withIFacet(ifacet.replace('this.engine.v, read', 'this.facade.engine.v, read')));
+        fails('a rewritten site put back to a bare `this` fails', withIFacet(ifacet.replace('self ?? this.facade', 'self ?? this')));
+        fails('a factory port that hands anything but the instance fails', { ...ihead, text: ihead.text.replace(`\n${FACADE_ENTRY.factory}\n`, '\n            facade: protocol.engine,\n') });
+        const refusesFor = (label, why, text) => {
+          let msg = '';
+          try { igen({ ...ibase, text }); } catch (e) { msg = String(e.message ?? e); }
+          check(label, text !== ibase.text && why.test(msg), msg || 'not refused');
+        };
+        refusesFor('a class that declares `facade` refuses (the port would shadow it)', /facade-taken/,
+          ibase.text.replace('    private flag = false;\n', '    private flag = false;\n    private facade = 0;\n'));
+        refusesFor('a body that already reads `this.facade` refuses (the undo stays the one inverse)', /`this\.facade` names no declared instance member/,
+          ibase.text.replace('this.engine.v, read', 'this.facade, read'));
+        refusesFor('a `typeof this` refuses (the type would name the host)', /`typeof this`/,
+          ibase.text.replace('        const own = {', '        const t: typeof this = this;\n        const own = {'));
+        refusesFor('an indexed `this` beside a bare one refuses', /an indexed `this`/,
+          ibase.text.replace('this.engine.v, read', "this['engine'], read"));
       }
     }
   }

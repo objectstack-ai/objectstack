@@ -13,6 +13,9 @@
  *   - Otherwise the prompt's first word decides: `HANG` waits to be killed
  *     (exit 143 on SIGTERM), `CRASH` exits 3, `GARBAGE` prints prose, `SHAPE`
  *     prints JSON of another shape, anything else echoes the call it read.
+ *   - With `FAKE_DRIVER_USAGE=JSON`, the echo answer also carries those keys
+ *     (the usage fields: `reportedCostUsd`, `inputTokens`, `outputTokens`);
+ *     without it the answer reports no usage at all.
  *   - With `FAKE_DRIVER_LOG=FILE`, every call appends one line: its kind, its
  *     step and, for an ask, what it saw of the key — the config file's mode, a
  *     fingerprint of the key it read there (FNV-1a, not the key), and whether
@@ -113,5 +116,6 @@ process.stdin.on('end', () => {
     ],
     model: 'fake-model-1',
     numTurns: 2,
+    ...(process.env.FAKE_DRIVER_USAGE ? JSON.parse(process.env.FAKE_DRIVER_USAGE) : {}),
   });
 });

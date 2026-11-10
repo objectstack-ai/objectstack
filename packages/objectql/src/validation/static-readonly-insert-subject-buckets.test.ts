@@ -31,7 +31,7 @@ import '@objectstack/spec';
  * `engine-owned` / `append-only` via plugin-security's engine-owned write
  * guard (ADR-0103).
  */
-const PLATFORM_INTERNAL = ['engine-owned', 'append-only', 'better-auth'] as const;
+const PLATFORM_INTERNAL = ['engine-owned', 'append-only', 'synced', 'better-auth'] as const;
 /**
  * The buckets `object.zod.ts` calls writable by default — "no such guard; its
  * writes are adjudicated by the delegated-admin gate / RLS / permission sets".
