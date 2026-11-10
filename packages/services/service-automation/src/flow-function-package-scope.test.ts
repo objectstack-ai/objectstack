@@ -28,6 +28,7 @@ import { LiteKernel } from '@objectstack/core';
 import { bindStoredRow } from '@objectstack/metadata-protocol';
 import { installedManifestsOf } from '@objectstack/metadata-core';
 import { AutomationEngine } from './engine.js';
+import type { NodeExecutor } from './engine.js';
 import { installBuiltinNodes } from './builtin/index.js';
 import { AutomationServicePlugin, flowNameResolver } from './plugin.js';
 import { functionResolverOf, isPackageScopedRefusal, packageScopedFunctionEngineOf } from './function-package-scope.js';
@@ -241,6 +242,48 @@ describe('#32073 — a name that means no single function is refused (409 RESOUR
         ship(P, scripted('p_flow'));
         const result = await engine.execute('p_flow');
         expectRefusedRun(result, A, 'the platform');
+    });
+
+    it('the failed step hands the flow `$error.code` RESOURCE_CONFLICT: a try_catch catch region reads it', async () => {
+        install(A);
+        install(Q);
+        holds(A);
+        holds(Q);
+        const seen: unknown[] = [];
+        engine.registerNodeExecutor({
+            type: 'read_error',
+            async execute(_node: unknown, variables: Map<string, unknown>) {
+                seen.push(variables.get('$error'));
+                return { success: true };
+            },
+        } as unknown as NodeExecutor);
+        author({
+            name: 'env_flow',
+            label: 'env_flow',
+            type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start', config: {} },
+                {
+                    id: 'guard', type: 'try_catch', label: 'Guard',
+                    config: {
+                        try: { nodes: [{ id: 'run', type: 'script', label: 'Run', config: { function: FN, outputVariable: 'out' } }], edges: [] },
+                        catch: { nodes: [{ id: 'read', type: 'read_error', label: 'Read' }], edges: [] },
+                    },
+                },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'guard' },
+                { id: 'e2', source: 'guard', target: 'end' },
+            ],
+        } as never);
+        await engine.execute('env_flow');
+        expect(seen, 'the catch region ran once').toHaveLength(1);
+        // The try_catch container stamps its own id on the `$error` its region
+        // reads; the code is the script node's, carried through.
+        expect((seen[0] as { code?: unknown }).code).toBe('RESOURCE_CONFLICT');
+        expect(String((seen[0] as { message?: unknown }).message)).toContain(A);
+        expect(ran, 'a candidate ran on a refused name').toEqual([]);
     });
 
     it('a refusal is a guard: a fault edge does not route the run past it', async () => {

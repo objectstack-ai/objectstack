@@ -198,19 +198,22 @@ export function bindHooksToEngine(
   // caller reads both off the one registry.
   //
   // BEFORE the no-hooks bail-out below, deliberately: `functions` is not a
-  // hook accessory. It also feeds `Action.target` string refs and a flow
-  // `script` node's `config.function`, so a stack that declares functions and
-  // no hooks — the shape #4396's example has — registered NOTHING and every
-  // such `script` node failed with "no function named 'x' is registered",
-  // naming the one thing the author had actually done.
+  // hook accessory. It also feeds a flow `script` node's `config.function`
+  // (an action `target` is a handler key, never a function), so a stack that
+  // declares functions and no hooks — the shape #4396's example has —
+  // registered NOTHING and every such `script` node failed with "no function
+  // named 'x' is registered", naming the one thing the author had actually
+  // done.
   if (opts.functions && typeof (engine as any).registerFunction === 'function') {
     // [#30803] One name, one package holder for a function
-    // (`bare-name-one-holder.ts`): the engine's function registry keeps one
-    // function per name and a `script` node or an action `target` resolves it
-    // with no package, so once the cold boot has sealed the registry a bind
-    // bringing a function another package holds is refused here, ahead of
-    // every registration below, naming both holders. Before the seal the
-    // claims are only recorded, for the cold boot to read.
+    // (`bare-name-one-holder.ts`, phase 1 of ADR-0150): once the cold boot
+    // has sealed the registry a bind bringing a function another package
+    // holds is refused here, ahead of every registration below, naming both
+    // holders. Before the seal the claims are only recorded, for the cold
+    // boot to read. The engine keeps every holder of a name
+    // (`functionHoldersOf`) and a flow `script` node resolves it in the
+    // calling flow's package (#32073); this refusal stays until the trailing
+    // backstop child (ADR-0150 D9) narrows it.
     const claimable = Object.entries(opts.functions)
       .filter(([, entry]) => normalizeFlowFunctionEntry(entry) !== undefined)
       .map(([name]) => name);

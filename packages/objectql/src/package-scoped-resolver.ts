@@ -32,7 +32,7 @@
  *    D4), and the environment's own item (`getEnvironmentScopedItem`);
  *  - {@link resolvePackageScopedFunction} — the engine's function registry: a
  *    function is not a metadata type, so it resolves in the package of the
- *    flow or action that names it (D4's last row), over the per-package
+ *    flow whose `script` node names it (D4's last row), over the per-package
  *    function holders the engine keeps (`ObjectQL#functionHoldersOf`).
  *
  * **A package-less row that bears a package-held name is a customization,
@@ -153,12 +153,13 @@ export function resolvePackageScopedName<T = unknown>(
   );
 }
 
-/** What {@link resolvePackageScopedFunction} is asked: a function's name, and the package of the flow or action naming it. */
+/** What {@link resolvePackageScopedFunction} is asked: a function's name, and the package of the flow naming it. */
 export interface PackageScopedFunctionQuery {
   readonly name: string;
   /**
-   * The package of the flow or action that names the function; omitted,
-   * `null`, `''` or the `sys_metadata` sentinel is a caller with no package.
+   * The package of the flow whose `script` node names the function (the
+   * package whose own body is armed under the flow's name); omitted, `null`,
+   * `''` or the `sys_metadata` sentinel is a caller with no package.
    */
   readonly callerPackageId?: string | null;
 }
@@ -167,8 +168,8 @@ export interface PackageScopedFunctionQuery {
 export type PackageScopedFunctionEngine = Pick<ObjectQL, 'registry' | 'functionHoldersOf'>;
 
 /**
- * Resolve the function a flow or an action names, in the package of that
- * referrer (ADR-0150 D4's last row): the rule (`resolvePackageScopedHolders`)
+ * Resolve the function a flow's `script` node names, in the package of that
+ * flow (ADR-0150 D4's last row): the rule (`resolvePackageScopedHolders`)
  * with the engine's per-package function holders (`ObjectQL#functionHoldersOf`)
  * and the caller's closure from the one walk ({@link packageResolutionClosure}
  * over the engine's registry). An owner-less registration is the platform's
