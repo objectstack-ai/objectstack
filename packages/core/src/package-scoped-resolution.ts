@@ -127,6 +127,30 @@ export function isBareNameOneHolderType(type: unknown): type is BareNameOneHolde
 }
 
 /**
+ * [ADR-0150 D2/D9, child B] The covered types whose one-holder rule has
+ * narrowed from the deployment to the namespace (`@objectstack/objectql`'s
+ * `bare-name-one-holder.ts` module doc, "The narrowing"). Each type joins in
+ * its own trailing change, once its by-name readers, its AI faces and its
+ * stored references all carry the package: the AI family's `agent` and
+ * `skill` first (#31701). A type not listed here keeps one package holder per
+ * deployment.
+ *
+ * Here, not in objectql, so a reader objectql depends on can read it too: the
+ * metadata protocol refuses a bare read of a narrowed type that an engine
+ * reads through `getItem` (epic #31527, #32076), since two packages may hold
+ * its name. objectql re-exports it under the same name.
+ */
+export const NAMESPACE_SCOPED_BARE_NAME_TYPES: readonly BareNameOneHolderType[] = Object.freeze([
+  'agent',
+  'skill',
+]);
+
+/** Has `type`'s one-holder rule narrowed to the namespace ({@link NAMESPACE_SCOPED_BARE_NAME_TYPES})? */
+export function isNamespaceScopedBareNameType(type: unknown): boolean {
+  return typeof type === 'string' && (NAMESPACE_SCOPED_BARE_NAME_TYPES as readonly string[]).includes(type);
+}
+
+/**
  * Per covered type, the packages whose items are an OVERRIDABLE BASELINE: the
  * platform's copies, which that type's one consumer serves any other package's
  * same-named item over, by contract. Such a package neither holds a name of

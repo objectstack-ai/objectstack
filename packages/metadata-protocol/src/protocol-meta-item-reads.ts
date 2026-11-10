@@ -101,14 +101,18 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // packages hold is refused HERE, before any layer below is read, naming
     // both (a thrown `409 RESOURCE_CONFLICT`); it served the first registered.
     // Step 3 serves this answer in place of `getItem`'s, and nothing else
-    // below changes. A read that names a package (`?package=`) keeps
-    // `getItem`'s prefer-local read: that address is the exact qualifier of
-    // child G1 (ADR-0150 D5), not a caller.
-    // [ADR-0150 D3, epic #31527] On an engine whose registry has no
-    // package-scoped resolver, the read that names no package of a type
-    // ADR-0150 addresses by `(package, name)` cannot be judged: nothing can
-    // count its holders, and `getItem` would serve the first match. Refused
-    // here, before any layer is read ({@link refuseUnjudgeableByNameRead}).
+    // below changes. A read that names a package (`?package=`) is not a
+    // caller: that address is the exact qualifier of child G1 (ADR-0150 D5),
+    // judged below for every covered type.
+    // [ADR-0150 D3, epic #31527] The read that names no package of a type
+    // ADR-0150 addresses by `(package, name)` cannot be judged on an engine
+    // whose registry cannot say how it reads the type, or reads it by
+    // package with no resolver, or reads through `getItem` a type whose
+    // names are scoped to the namespace (two packages may hold one): nothing
+    // can count its holders, and `getItem` would serve the first match.
+    // Refused here, before any layer is read ({@link refuseUnjudgeableByNameRead}).
+    // A type the registry reads through `getItem` whose one-holder rule
+    // still holds keeps `getItem`'s read: one package holds the name.
     if (!request.packageId) refuseUnjudgeableByNameRead(host, request, { kind: 'none' });
     const registry = host.engine?.registry;
     const packagelessScopedRead: { item: unknown } | undefined =
