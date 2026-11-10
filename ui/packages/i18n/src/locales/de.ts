@@ -3110,7 +3110,7 @@ const de = {
       unidentified: "Diese Anwendung konnte nicht identifiziert werden.",
       clientId: "Client-ID",
       unverified: "Nicht verifizierte Anwendung",
-      unverifiedHint: "Diese Anwendung hat sich selbst registriert, ihr Name wurde hier von niemandem geprüft. Autorisieren Sie sie nur, wenn Sie {{destination}} vertrauen.",
+      unverifiedHint: "Diese Anwendung wurde von keinem Administrator hier registriert, ihr Name wurde daher nicht geprüft. Autorisieren Sie sie nur, wenn Sie {{destination}} vertrauen.",
       destinationUnconfirmed: "Wohin dieser Zugriff gesendet würde, konnte nicht bestätigt werden, daher kann er hier nicht autorisiert werden.",
       sentTo: "Der Zugriff wird gesendet an:",
       willAllow: "Diese App kann dann:",

@@ -34,11 +34,12 @@
  * never lets them stand alone as the identity a person approves. It asks
  * `POST /api/v1/auth/oauth-consent/request` with the signed query, and the
  * server answers from the request it signed: the redirect a consent sends the
- * code to (`redirectUri`), and whether any account registered the client
- * (`registeredAnonymously`). The page names that destination — the host of an
- * `http(s)` redirect, a loopback one included, and any other redirect (a
- * native app's custom scheme) as it is — and marks a client no account
- * registered as unverified. Until the server has answered, Authorize is
+ * code to (`redirectUri`), and whether a platform administrator registered the
+ * client (`registeredByAdministrator`). The page names that destination — the
+ * host of an `http(s)` redirect, a loopback one included, and any other
+ * redirect (a native app's custom scheme) as it is — and marks every client no
+ * administrator registered as unverified, a dynamically registered one
+ * included. Until the server has answered, Authorize is
  * disabled; when it cannot answer, the page says the destination could not be
  * confirmed and Authorize stays disabled. Deny always works.
  */
@@ -85,7 +86,7 @@ const UNIDENTIFIED: ClientLookup = { state: 'unidentified' };
 /** What the server established about the signed request being authorized. */
 type RequestLookup =
   | { state: 'pending' }
-  | { state: 'confirmed'; destination: string; registeredAnonymously: boolean }
+  | { state: 'confirmed'; destination: string; registeredByAdministrator: boolean }
   | { state: 'unconfirmed' };
 
 const REQUEST_PENDING: RequestLookup = { state: 'pending' };
@@ -109,14 +110,14 @@ function redirectDestination(redirectUri: string): string {
 async function readConsentRequest(res: Response): Promise<RequestLookup> {
   if (!res.ok) return REQUEST_UNCONFIRMED;
   const body = (await res.json().catch(() => null)) as {
-    data?: { redirectUri?: unknown; registeredAnonymously?: unknown };
+    data?: { redirectUri?: unknown; registeredByAdministrator?: unknown };
   } | null;
   const redirectUri = body?.data?.redirectUri;
-  const registeredAnonymously = body?.data?.registeredAnonymously;
-  if (typeof redirectUri !== 'string' || !redirectUri || typeof registeredAnonymously !== 'boolean') {
+  const registeredByAdministrator = body?.data?.registeredByAdministrator;
+  if (typeof redirectUri !== 'string' || !redirectUri || typeof registeredByAdministrator !== 'boolean') {
     return REQUEST_UNCONFIRMED;
   }
-  return { state: 'confirmed', destination: redirectDestination(redirectUri), registeredAnonymously };
+  return { state: 'confirmed', destination: redirectDestination(redirectUri), registeredByAdministrator };
 }
 
 /** Read the server's answer: identified only by a non-empty `client_name`. */
@@ -313,7 +314,7 @@ export function OAuthConsentPage() {
             </Alert>
           )}
 
-          {confirmed?.registeredAnonymously && (
+          {confirmed && !confirmed.registeredByAdministrator && (
             <Alert data-testid="oauth-consent-unverified">
               <ShieldAlert className="size-4" />
               <AlertTitle>
@@ -323,7 +324,7 @@ export function OAuthConsentPage() {
                 {t('oauth.consent.unverifiedHint', {
                   destination: confirmed.destination,
                   defaultValue:
-                    'This application registered itself, so its name has not been checked by anyone here. Authorize it only if you trust {{destination}}.',
+                    'No administrator here registered this application, so its name has not been checked. Authorize it only if you trust {{destination}}.',
                 })}
               </AlertDescription>
             </Alert>

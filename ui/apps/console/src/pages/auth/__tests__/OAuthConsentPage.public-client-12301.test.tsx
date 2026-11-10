@@ -42,13 +42,13 @@ type Answer =
   | { kind: 'network' }
   | { kind: 'never' };
 
-/** The server's account of the signed request, for a client an account registered. */
-const ACCOUNT_REGISTERED: Answer = {
+/** The server's account of the signed request, for a client a platform administrator registered. */
+const ADMIN_REGISTERED: Answer = {
   kind: 'http',
   status: 200,
   body: {
     success: true,
-    data: { clientId: CLIENT_ID, redirectUri: 'https://acme.example/cb', registeredAnonymously: false },
+    data: { clientId: CLIENT_ID, redirectUri: 'https://acme.example/cb', registeredByAdministrator: true },
   },
 };
 
@@ -94,7 +94,7 @@ function authClient(signedIn: boolean): AuthClient {
   } as unknown as AuthClient;
 }
 
-function stubLookup(answer: Answer, request: Answer = ACCOUNT_REGISTERED) {
+function stubLookup(answer: Answer, request: Answer = ADMIN_REGISTERED) {
   const fetchMock = vi.fn((input: unknown) => {
     const url = String(input);
     if (url.includes(CONSENT_REQUEST_PATH)) return respond(request);
@@ -208,11 +208,11 @@ describe('OAuthConsentPage — the public-client lookup (objectui#12301)', () =>
   });
 });
 
-/** The server's account of the signed request, answering `redirectUri` and `registeredAnonymously`. */
-const requestAnswer = (redirectUri: string, registeredAnonymously: boolean): Answer => ({
+/** The server's account of the signed request, answering `redirectUri` and `registeredByAdministrator`. */
+const requestAnswer = (redirectUri: string, registeredByAdministrator: boolean): Answer => ({
   kind: 'http',
   status: 200,
-  body: { success: true, data: { clientId: CLIENT_ID, redirectUri, registeredAnonymously } },
+  body: { success: true, data: { clientId: CLIENT_ID, redirectUri, registeredByAdministrator } },
 });
 
 const NAMED: Answer = {
@@ -228,7 +228,7 @@ const denyButton = () => screen.getByRole('button', { name: /Deny/ });
 
 describe('OAuthConsentPage — where the grant goes, and an unverified client', () => {
   it('asks the server about the signed request, sending the query it was given verbatim', async () => {
-    const fetchMock = stubLookup(NAMED, requestAnswer('https://acme.example/cb', false));
+    const fetchMock = stubLookup(NAMED, requestAnswer('https://acme.example/cb', true));
     renderConsent();
 
     await screen.findByTestId('oauth-consent-destination');
@@ -241,7 +241,7 @@ describe('OAuthConsentPage — where the grant goes, and an unverified client', 
   });
 
   it('names the host the server says the grant is sent to, never a redirect the client declared', async () => {
-    stubLookup(NAMED, requestAnswer('https://acme.example/cb?x=1', false));
+    stubLookup(NAMED, requestAnswer('https://acme.example/cb?x=1', true));
     renderConsent();
 
     const destination = await screen.findByTestId('oauth-consent-destination');
@@ -250,23 +250,23 @@ describe('OAuthConsentPage — where the grant goes, and an unverified client', 
     expect(screen.queryAllByText('declared.example', { exact: false })).toHaveLength(0);
   });
 
-  it('marks a client no account registered as unverified, naming the destination, and still lets the person decide', async () => {
-    stubLookup(NAMED, requestAnswer('https://helper.example.net/oauth/cb', true));
+  it('marks a dynamically registered client as unverified, naming the destination, and still lets the person decide', async () => {
+    stubLookup(NAMED, requestAnswer('https://helper.example.net/oauth/cb', false));
     renderConsent();
 
     const mark = await screen.findByTestId('oauth-consent-unverified');
     expect(within(mark).getByText('Unverified application')).toBeTruthy();
     expect(
       within(mark).getByText(
-        'This application registered itself, so its name has not been checked by anyone here. Authorize it only if you trust helper.example.net.',
+        'No administrator here registered this application, so its name has not been checked. Authorize it only if you trust helper.example.net.',
       ),
     ).toBeTruthy();
     expect(within(screen.getByTestId('oauth-consent-destination')).getByText('helper.example.net')).toBeTruthy();
     expect(authorizeButton().hasAttribute('disabled')).toBe(false);
   });
 
-  it('shows a client an account registered without the unverified mark', async () => {
-    stubLookup(NAMED, requestAnswer('https://acme.example/cb', false));
+  it('shows a client a platform administrator registered without the unverified mark', async () => {
+    stubLookup(NAMED, requestAnswer('https://acme.example/cb', true));
     renderConsent();
 
     await screen.findByTestId('oauth-consent-destination');
@@ -286,13 +286,14 @@ describe('OAuthConsentPage — where the grant goes, and an unverified client', 
 
     const destination = await screen.findByTestId('oauth-consent-destination');
     expect(within(destination).getByText(shown).tagName).toBe('CODE');
+    expect(screen.getByTestId('oauth-consent-unverified')).toBeTruthy();
   });
 
   it.each<[string, Answer]>([
     ['refused (400)', { kind: 'http', status: 400, body: { success: false, error: { code: 'VALIDATION_ERROR' } } }],
     ['an unknown client (404)', { kind: 'http', status: 404, body: { success: false, error: { code: 'RESOURCE_NOT_FOUND' } } }],
     ['a network failure', { kind: 'network' }],
-    ['an answer without a redirect', { kind: 'http', status: 200, body: { success: true, data: { registeredAnonymously: false } } }],
+    ['an answer without a redirect', { kind: 'http', status: 200, body: { success: true, data: { registeredByAdministrator: true } } }],
     ['an answer without the registration fact', { kind: 'http', status: 200, body: { success: true, data: { redirectUri: 'https://acme.example/cb' } } }],
   ])('cannot be authorized when the destination is not confirmed: %s', async (_label, request) => {
     stubLookup(NAMED, request);

@@ -20,14 +20,14 @@
  *    client's registered list, and the one `/oauth2/consent` will use. It is
  *    never read from the client's registration metadata or from anything the
  *    page sends beside the signed request.
- *  - `registeredAnonymously` — `true` when no account of this deployment
- *    registered the client: its stored row carries neither a `user_id` nor a
- *    `reference_id`. Every registration door that takes a session stamps the
- *    caller on the row (the Setup create action's
- *    `/sys-oauth-application/register`, `/oauth2/create-client`, and
- *    `/oauth2/register` called with a session); a dynamic registration made
- *    with no credential stamps nobody. Read from the stored row, never from a
- *    field the client declared. The page marks such a client unverified.
+ *  - `registeredByAdministrator` — `true` only when the account the stored
+ *    client row names as its registrant (`user_id`) holds platform-admin
+ *    standing (ADR-0068 D2, `hasPlatformAdminStanding`, fail-closed). Every
+ *    other client answers `false`: one registered dynamically, with or without
+ *    a session, and one any other account registered through a self-service
+ *    door. Read from the stored row and the standing tables, never from a
+ *    field the client declared. The page marks every `false` client
+ *    unverified.
  *
  * Session-required, like the consent door and the public-client read the page
  * already makes. A request that names a client the provider no longer serves
@@ -35,7 +35,7 @@
  *
  * ## The answer
  *
- * `200 { success: true, data: { clientId, redirectUri, registeredAnonymously } }`,
+ * `200 { success: true, data: { clientId, redirectUri, registeredByAdministrator } }`,
  * `Cache-Control: no-store`. Nothing else about the client is answered.
  *
  * ## Refusals (ADR-0112: code AND status)
@@ -52,6 +52,7 @@
  *  - a client the provider does not serve: `404 RESOURCE_NOT_FOUND`.
  */
 
+import { hasPlatformAdminStanding } from '@objectstack/core';
 import { unknownQueryParamRefusalMessage } from '@objectstack/rest';
 import type { AuthSessionApi } from '@objectstack/spec/contracts';
 import { inProcessSessionReadInput } from '@objectstack/types';
@@ -76,8 +77,8 @@ export interface OAuthConsentRequestData {
   clientId: string;
   /** Where a consent on this request sends the authorization code. */
   redirectUri: string;
-  /** `true` when no account of this deployment registered the client. */
-  registeredAnonymously: boolean;
+  /** `true` only when a platform administrator registered the client. */
+  registeredByAdministrator: boolean;
 }
 
 export interface OAuthConsentRequestResult {
@@ -93,7 +94,7 @@ type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>
 
 /** The stored client, as this read decodes it. */
 export interface ConsentRequestClient {
-  /** The registering account (`user_id`, else `reference_id`), `null` when none. */
+  /** The registering account (`user_id`), `null` when the row names none. */
   registeredBy: string | null;
   disabled: boolean;
 }
@@ -106,6 +107,8 @@ export interface OAuthConsentRequestDeps {
   verifySignedRequest(oauthQuery: string): Promise<boolean>;
   /** The stored client with this `client_id`, `null` when there is none. */
   readClient(clientId: string): Promise<ConsentRequestClient | null>;
+  /** Does this account hold platform-admin standing now? Fail-closed. */
+  isPlatformAdministrator(userId: string): Promise<boolean>;
 }
 
 /** The slice of `AuthManager` the real seams are built from. */
@@ -151,7 +154,7 @@ export function oauthConsentRequestDepsFor(manager: OAuthConsentRequestManager):
         'sys_oauth_application',
         {
           where: { client_id: clientId },
-          fields: ['client_id', 'user_id', 'reference_id', 'disabled'],
+          fields: ['client_id', 'user_id', 'disabled'],
           limit: 1,
         },
         SYSTEM_READ,
@@ -159,9 +162,12 @@ export function oauthConsentRequestDepsFor(manager: OAuthConsentRequestManager):
       const row = Array.isArray(found) ? (found[0] as Record<string, unknown> | undefined) : undefined;
       if (!row) return null;
       return {
-        registeredBy: nonEmpty(row.user_id) || nonEmpty(row.reference_id) || null,
+        registeredBy: nonEmpty(row.user_id) || null,
         disabled: row.disabled === true || row.disabled === 1,
       };
+    },
+    isPlatformAdministrator(userId) {
+      return hasPlatformAdminStanding(manager.getDataEngine(), userId);
     },
   };
 }
@@ -239,11 +245,13 @@ export async function runOAuthConsentRequestRead(
   if (!client || client.disabled) {
     return refusal(404, 'RESOURCE_NOT_FOUND', OAUTH_CONSENT_REQUEST_CLIENT_NOT_FOUND_MESSAGE);
   }
+  const registeredByAdministrator =
+    client.registeredBy !== null && (await deps.isPlatformAdministrator(client.registeredBy));
   return {
     status: 200,
     body: {
       success: true,
-      data: { clientId, redirectUri, registeredAnonymously: client.registeredBy === null },
+      data: { clientId, redirectUri, registeredByAdministrator },
     },
     headers: { ...NO_STORE },
   };

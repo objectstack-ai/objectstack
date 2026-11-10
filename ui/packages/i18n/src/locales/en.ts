@@ -3735,11 +3735,11 @@ const en = {
       // The server's account of the signed request (`oauth-consent/request`):
       // `sentTo` labels where a consent sends the grant (`{{destination}}` is
       // the redirect's host, or a native app's redirect as it is);
-      // `unverified` marks a client no account registered;
+      // `unverified` marks a client no platform administrator registered;
       // `destinationUnconfirmed` is shown, with Authorize disabled, when the
       // server could not answer.
       unverified: 'Unverified application',
-      unverifiedHint: 'This application registered itself, so its name has not been checked by anyone here. Authorize it only if you trust {{destination}}.',
+      unverifiedHint: 'No administrator here registered this application, so its name has not been checked. Authorize it only if you trust {{destination}}.',
       destinationUnconfirmed: 'Where this access would be sent could not be confirmed, so it cannot be authorized here.',
       sentTo: 'Access will be sent to:',
       willAllow: 'This app will be able to:',

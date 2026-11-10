@@ -5334,8 +5334,8 @@ export class AuthPlugin implements Plugin {
     // ────────────────────────────────────────────────────────────────────
     // The OAuth consent page's account of the request it asks a person to
     // approve: the redirect the provider validated and signed, read only after
-    // the provider's own signature check, and whether any account registered
-    // the client. Session-required. See oauth-consent-request.ts.
+    // the provider's own signature check, and whether a platform administrator
+    // registered the client. Session-required. See oauth-consent-request.ts.
     rawApp.post(`${basePath}/oauth-consent/request`, async (c: any) => {
       try {
         const { oauthConsentRequestDepsFor, runOAuthConsentRequestRead } = await import('./oauth-consent-request.js');

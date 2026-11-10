@@ -12,15 +12,17 @@
  *
  *  - the answer's `redirectUri` is the redirect of the signed request, and a
  *    request whose bytes differ from what the provider signed is refused;
- *  - a client registered with no credential through `/oauth2/register` reads
- *    `registeredAnonymously: true`; a client registered through the Setup
- *    create door reads `false`;
+ *  - only a client a platform administrator registered reads
+ *    `registeredByAdministrator: true`: one registered with no credential
+ *    through `/oauth2/register`, and one an account without platform-admin
+ *    standing registered through the Setup create door, both read `false`;
  *  - the door needs a session, takes `oauth_query` only, and answers a client
  *    the provider does not serve `404`.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import { Hono } from 'hono';
+import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
 import type { PluginContext } from '@objectstack/core';
 import { AuthManager } from './auth-manager';
 import { AuthPlugin } from './auth-plugin';
@@ -38,6 +40,7 @@ const PASSWORD = 'S3cure!Passw0rd-consent-request';
 const ORIGIN = 'http://localhost:3000';
 const BASE = '/api/v1/auth';
 const EMAIL = 'mia@consent-request.example.com';
+const PS_ADMIN = 'ps_admin_full_access';
 
 const DCR_REDIRECT = 'http://127.0.0.1:56789/callback';
 const SETUP_REDIRECT = 'http://localhost:47011/oauth/done';
@@ -67,6 +70,24 @@ const cookieFrom = (response: Response): string =>
 const readJson = async (res: Response) => {
   const text = await res.text();
   return { status: res.status, body: JSON.parse(text) as any, cacheControl: res.headers.get('cache-control') };
+};
+
+/** ADR-0068 D2 standing, granted the way the platform grants it: the Default Organization's admin_full_access grant. */
+const grantPlatformAdmin = async (engine: any, userId: string) => {
+  let org = (engine.tables.get('sys_organization') ?? []).find((r: any) => r.slug === 'default');
+  if (!org) {
+    await engine.insert('sys_organization', { id: 'org_default', name: 'Default Organization', slug: 'default' });
+    org = { id: 'org_default' };
+  }
+  if (!(engine.tables.get('sys_permission_set') ?? []).some((r: any) => r.id === PS_ADMIN)) {
+    await engine.insert('sys_permission_set', { id: PS_ADMIN, name: ADMIN_FULL_ACCESS });
+  }
+  await engine.insert('sys_user_permission_set', {
+    user_id: userId,
+    permission_set_id: PS_ADMIN,
+    permission_set: 'admin_full_access',
+    organization_id: String(org.id),
+  });
 };
 
 const arrange = async () => {
@@ -153,7 +174,22 @@ const arrange = async () => {
 
   const clientRows = () => (engine.tables.get('sys_oauth_application') ?? []) as any[];
 
-  return { cookie, post, registerWithoutCredential, registerThroughSetup, signedConsentQuery, clientRows };
+  /** Give the signed-in person platform-admin standing. */
+  const makeSignedInPersonPlatformAdmin = async () => {
+    const user = ((engine.tables.get('sys_user') ?? []) as any[]).find((r) => r.email === EMAIL);
+    expect(user, 'the signed-in person\'s sys_user row').toBeTruthy();
+    await grantPlatformAdmin(engine, String(user.id));
+  };
+
+  return {
+    cookie,
+    post,
+    registerWithoutCredential,
+    registerThroughSetup,
+    signedConsentQuery,
+    clientRows,
+    makeSignedInPersonPlatformAdmin,
+  };
 };
 
 beforeEach(() => {
@@ -177,7 +213,7 @@ const scrypt = memoizeScrypt();
 afterAll(scrypt.restore);
 
 describe('POST /oauth-consent/request — what the consent page names about the request', () => {
-  it('answers the signed redirect, and marks a client registered with no credential as registered anonymously', async () => {
+  it('answers the signed redirect, and a client registered dynamically with no credential as not registered by an administrator', async () => {
     const rig = await arrange();
     const clientId = await rig.registerWithoutCredential();
     const query = await rig.signedConsentQuery(clientId, DCR_REDIRECT);
@@ -188,19 +224,33 @@ describe('POST /oauth-consent/request — what the consent page names about the 
     expect(answer.cacheControl).toBe('no-store');
     expect(answer.body).toEqual({
       success: true,
-      data: { clientId, redirectUri: DCR_REDIRECT, registeredAnonymously: true },
+      data: { clientId, redirectUri: DCR_REDIRECT, registeredByAdministrator: false },
     });
   });
 
-  it('reads a client registered through the Setup create door as registered by an account', async () => {
+  it('reads a client a platform administrator registered through the Setup create door as registered by an administrator', async () => {
     const rig = await arrange();
+    await rig.makeSignedInPersonPlatformAdmin();
     const clientId = await rig.registerThroughSetup();
     const query = await rig.signedConsentQuery(clientId, SETUP_REDIRECT);
 
     const answer = await readJson(await rig.post(OAUTH_CONSENT_REQUEST_PATH, { oauth_query: query }, { cookie: rig.cookie }));
 
     expect(answer.status, JSON.stringify(answer.body)).toBe(200);
-    expect(answer.body.data).toEqual({ clientId, redirectUri: SETUP_REDIRECT, registeredAnonymously: false });
+    expect(answer.body.data).toEqual({ clientId, redirectUri: SETUP_REDIRECT, registeredByAdministrator: true });
+  });
+
+  it('reads a client an account without platform-admin standing registered as not registered by an administrator', async () => {
+    const rig = await arrange();
+    const clientId = await rig.registerThroughSetup();
+    const row = rig.clientRows().find((r) => r.client_id === clientId);
+    expect(row?.user_id, 'the self-service door stamps the registering account').toBeTruthy();
+    const query = await rig.signedConsentQuery(clientId, SETUP_REDIRECT);
+
+    const answer = await readJson(await rig.post(OAUTH_CONSENT_REQUEST_PATH, { oauth_query: query }, { cookie: rig.cookie }));
+
+    expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+    expect(answer.body.data).toEqual({ clientId, redirectUri: SETUP_REDIRECT, registeredByAdministrator: false });
   });
 
   it('accepts the query with its leading question mark, as the page reads it from the address bar', async () => {
