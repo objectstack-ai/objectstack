@@ -31,6 +31,7 @@
 import '@objectstack/spec/api';
 import '@objectstack/spec/data';
 import '@objectstack/spec/ui';
+import '@objectstack/objectql';
 
 import { describe, it, expect, vi } from 'vitest';
 import { RestServer } from './rest-server';

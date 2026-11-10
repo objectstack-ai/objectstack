@@ -75,6 +75,10 @@ import { AnalyticsService } from '@objectstack/service-analytics';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { INTERNAL_ERROR_MESSAGE, declaresServerFault, looksLikeInternalErrorLeak } from '@objectstack/types';
 import { RestServer } from './rest-server';
+// The server reaches `@objectstack/objectql` only through a dynamic import inside a
+// handler; paid here at module scope so the first load lands during collection,
+// not inside a clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/objectql';
 
 // [#17865] This file observes the REST fault log, so it declares the level it
 // asserts against instead of inheriting the suite's quiet one. 'info' is the
