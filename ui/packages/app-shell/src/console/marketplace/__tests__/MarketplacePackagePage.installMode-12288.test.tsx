@@ -463,7 +463,11 @@ describe('the hosted install path sends the mode the package permits (objectstac
   async function installHosted() {
     fireEvent.click(installToCloud());
     const dialog = await screen.findByRole('dialog');
-    fireEvent.click(within(dialog).getByRole('button', { name: '«marketplace.action.install»' }));
+    // An unmanaged install holds Install while its namespace default is read
+    // (objectstack#32040): a click before the read settles is not a click.
+    const dialogInstall = within(dialog).getByRole('button', { name: '«marketplace.action.install»' });
+    await waitFor(() => expect(dialogInstall).toBeEnabled());
+    fireEvent.click(dialogInstall);
     await waitFor(() => expect(cloudPosts).toHaveLength(1));
     return dialog;
   }
