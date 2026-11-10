@@ -10,6 +10,7 @@ import type { BaseSchema, DashboardComponentSchema, DataSource, ObjectChartSchem
 import { SchemaRenderer, useActionEngine, useObjectLabel, PageVariablesProvider, usePageVariables, useResolvedDataSource, type SchemaRendererProps } from '@object-ui/react';
 import { useObjectTranslation, useSafeTranslate, pickLocalized, useDisplayLocale } from '@object-ui/i18n';
 import type { ActionDef, ActionResult, ActionContext, ModalHandler, SduiDomPassThroughKey } from '@object-ui/core';
+import { servedPackageId } from '@object-ui/core';
 import {
   resolveDashboardFilterDefs,
   dashboardFilterVariableDefs,
@@ -335,6 +336,9 @@ export interface DashboardRendererProps
 
 const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps>(
   ({ schema, className, dataSource: dataSourceProp, onRefresh, recordCount, userActions, designMode, selectedWidgetId, onWidgetClick, onWidgetsReorder, modalHandler, scriptHandlers, hideHeaderText, onRefreshStateChange, localized, ...props }: DashboardRendererProps & { [key: string]: any }, ref) => {
+    // ADR-0150 D5 — the package this dashboard is served from: its widgets'
+    // datasets were authored against it, so each dataset query names it.
+    const dashboardPackageId = servedPackageId(schema);
     // objectui#10815 — the adapter every child of this dashboard reads, resolved
     // ONCE here the way the page-embeddable blocks of the family resolve theirs
     // (`useResolvedDataSource`, the `object-grid` / `object-form` /
@@ -1171,6 +1175,7 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
                           ? <DatasetWidget
                               widget={datasetWidget}
                               dataSource={dataSource}
+                              packageId={dashboardPackageId}
                               onForbidden={refusedTileKey ? () => markTileRefused(refusedTileKey) : undefined}
                               heading={datasetMetric
                                 ? { title: resolvedTitle || '', description: resolvedDescription || undefined }

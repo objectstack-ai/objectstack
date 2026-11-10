@@ -435,9 +435,6 @@ export function ListPreferencesProvider({ children }: { children: ReactNode }) {
     };
   }, [family, userId]);
 
-  // A list-filter write still waiting on its debounce is dropped before the
-  // session ends, so none lands after the sign-out sweep.
-  useEffect(() => registerBeforeSignOut(async () => discardPendingListFilterWrites()), []);
   // A session that ends without `signOut()` (a session read the server answers
   // with "no session") drops them as soon as the user is gone.
   const signedInUserRef = useRef(userId);
@@ -452,13 +449,37 @@ export function ListPreferencesProvider({ children }: { children: ReactNode }) {
   const pendingRef = useRef(
     new Map<string, { timer: ReturnType<typeof setTimeout>; value: ObjectListPreference; family: ListFamily }>(),
   );
+  // Saves sent and not yet answered, so a sign-out can wait for them.
+  const inFlightRef = useRef(new Set<Promise<void>>());
   const flushOne = useCallback((objectName: string) => {
     const pending = pendingRef.current.get(objectName);
     if (!pending) return;
     clearTimeout(pending.timer);
     pendingRef.current.delete(objectName);
-    void pending.family.save(listPreferenceKey(objectName), pending.value);
+    const inFlight = inFlightRef.current;
+    const sent = pending.family.save(listPreferenceKey(objectName), pending.value);
+    inFlight.add(sent);
+    const settle = () => {
+      inFlight.delete(sent);
+    };
+    sent.then(settle, settle);
   }, []);
+
+  // Before `signOut()` ends the session (objectstack#32298): a list change
+  // still waiting on its debounce is saved now, and every save already sent
+  // is waited for, because the server refuses a write that arrives after the
+  // session has ended and the user's last change would be lost on every
+  // device. `runBeforeSignOut` bounds the wait. A list-filter write still
+  // waiting on its debounce is dropped, so none lands after the sign-out sweep.
+  useEffect(
+    () =>
+      registerBeforeSignOut(async () => {
+        discardPendingListFilterWrites();
+        for (const objectName of [...pendingRef.current.keys()]) flushOne(objectName);
+        await Promise.allSettled([...inFlightRef.current]);
+      }),
+    [flushOne],
+  );
   useEffect(() => {
     const pending = pendingRef.current;
     return () => {
