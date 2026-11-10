@@ -240,14 +240,10 @@ function makeStubEngine() {
         },
         async syncObjectSchema() { return true; },
         registry: {
-            // A registry that reads no type by package (ADR-0150): every by-name read
-            // stays this double's `getItem`. Without the slice, the protocol refuses a
-            // by-name read of a package-scoped type it cannot judge.
+            // A registry that reads no type by package (ADR-0150): every by-name read stays
+            // this double's `getItem`. Undeclared, the protocol refuses a by-name read of a
+            // package-scoped type, since it cannot tell how this registry reads it.
             readsByPackage: () => false,
-            packageScopedHoldersOf: () => [],
-            getEnvironmentScopedItem: () => undefined,
-            getPackageScopedItem: () => undefined,
-            resolveItem: () => { throw new Error('[test double] this registry reads no type by package'); },
             registerItem: () => {}, registerObject: () => {},
             // [#19542] The live resolution universe the runtime publish gate
             // reads. It answered `[]` for every type, which was harmless while

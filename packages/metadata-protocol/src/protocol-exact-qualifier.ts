@@ -90,20 +90,42 @@ export type UnjudgeableReadAddress =
     | { readonly kind: 'none' };
 
 /**
+ * Can the engine's registry judge a by-name read of `type` by `(package, name)`?
+ *
+ * Only a type ADR-0150 addresses by `(package, name)` is asked about — core's
+ * static `PACKAGE_SCOPED_TYPES`, never a list the registry would have to
+ * supply. For such a type:
+ *  - a registry with no `readsByPackage` cannot say how it reads the type: it
+ *    cannot judge;
+ *  - a registry whose `readsByPackage` answers `false` declares that its
+ *    by-name readers do not consult `(package, name)` for the type, and reads
+ *    it through `getItem`, as `SchemaRegistry` does for a type no child of
+ *    epic #31527 has wired yet: nothing here changes;
+ *  - a registry that reads the type by package judges it through the whole
+ *    slice ({@link exactQualifierRegistry}); missing any read of it, it cannot.
+ */
+function cannotJudgeByPackage(host: Pick<ProtocolHost, 'engine'>, type: string): boolean {
+    if (!isPackageScopedType(type)) return false;
+    const registry = (host.engine as { registry?: Partial<ExactQualifierRegistry> } | undefined)?.registry;
+    if (typeof registry?.readsByPackage !== 'function') return true;
+    if (!registry.readsByPackage(type)) return false;
+    return exactQualifierRegistry(host) === undefined;
+}
+
+/**
  * [ADR-0150 D3/D5, epic #31527] A by-name read the composition cannot judge
- * fails closed. A type ADR-0150 addresses by `(package, name)` (core's static
- * `PACKAGE_SCOPED_TYPES`, never the registry that is missing) is read by
- * package only through the registry's package-scoped resolver slice
- * ({@link exactQualifierRegistry}). On an engine whose registry lacks it, the
+ * fails closed. A type ADR-0150 addresses by `(package, name)` is read by
+ * package only through the registry's package-scoped resolver
+ * ({@link cannotJudgeByPackage}). On an engine whose registry has none, the
  * only read left is `getItem`'s first match, which may be another package's
  * item; so such a read is refused here, before any layer is read, with
  * `501 NOT_IMPLEMENTED` naming the cause. Never a first match (red line 1),
  * never a guess (red line 2).
  *
- * Every production composition carries the slice (`ObjectQL`'s
+ * Every production composition carries the resolver (`ObjectQL`'s
  * `SchemaRegistry`); only an engine without it, such as a test double or an
  * embedder's own engine, reaches the refusal. A type outside the set, and an
- * engine with the slice, are unchanged.
+ * engine with the resolver, are unchanged.
  *
  * @throws a `501 NOT_IMPLEMENTED` refusal (`refusal: true`, so the 5xx keeps
  *   its sentence at the transport) when the read cannot be judged.
@@ -113,7 +135,7 @@ export function refuseUnjudgeableByNameRead(
     request: { type: string; name: string },
     address: UnjudgeableReadAddress,
 ): void {
-    if (!isPackageScopedType(request.type) || exactQualifierRegistry(host) !== undefined) return;
+    if (!cannotJudgeByPackage(host, request.type)) return;
     const naming = address.kind === 'package'
         ? `naming package '${address.packageId}'`
         : address.kind === 'environment' ? 'naming the environment' : 'naming no package';
