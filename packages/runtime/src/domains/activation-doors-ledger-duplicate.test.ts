@@ -41,10 +41,12 @@
  *    answer it through `errorFromThrown`;
  *  - `POST /automation/:name/toggle` lets it leave `dispatch()` and answers it
  *    through the throw-transparent exit. Its service is a stand-in that writes
- *    through the real store with the package the loader names, as the engine's
- *    `toggleFlow` does (runtime does not depend on service-automation; the
- *    engine's own half, that a refused write moves nothing in process, is
- *    pinned in that package's `flow-activation-ledger.test.ts`).
+ *    through the real store as the engine's `toggleFlow` does: addressed by
+ *    `(package, name)` (the flow store's `addressing`), the package the loader
+ *    names, and `adoptPackageless` (the flow is its name's one holder). Runtime
+ *    does not depend on service-automation; the engine's own half, that a
+ *    refused write moves nothing in process, is pinned in that package's
+ *    `flow-activation-ledger.test.ts`.
  */
 
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
@@ -158,7 +160,10 @@ async function boot(): Promise<Rig> {
         getFlow: async (name: string) => (name === FLOW ? { name, label: 'Switch', type: 'autolaunched', nodes: [], edges: [] } : null),
         // The engine's durable write, with the loader's package (see the module doc).
         toggleFlow: async (name: string, enabled: boolean) => {
-            await new ObjectStoreMetadataActivationStore(ql, 'flow').setActive({ name, packageId: FLOW_PACKAGE, active: enabled });
+            await new ObjectStoreMetadataActivationStore(ql, 'flow', { addressing: 'package-and-name' }).setActive(
+                { name, packageId: FLOW_PACKAGE, active: enabled },
+                { adoptPackageless: true },
+            );
         },
     };
     const services: Record<string, unknown> = { objectql: engine, data: engine, automation };

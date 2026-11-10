@@ -1099,6 +1099,29 @@ describe('ADR-0126 §4/§5 — the row this line writes', () => {
         expect((await engine.execute('f')).success).toBe(true);
     });
 
+    // [ADR-0150 D4] Two packages' flows of one name each keep their own row
+    // (the flow store is addressed by `(package, name)`). A switch of the flow
+    // `crm` ships, over a ledger holding only another package's row of the
+    // name, adds crm's own row and lands every later switch there; the other
+    // package's row is never rewritten.
+    it('a switch for one package that finds only another package\'s row writes its own row, never that one', async () => {
+        const fake = fakeEngine([
+            { id: 'a1', metadata_type: 'flow', name: 'f', package_id: 'com.example.other', active: false },
+        ]);
+        const engine = withLoaderSetFromPull(new AutomationEngine(createTestLogger()));
+        engine.setFlowActivationStore(new ObjectStoreFlowActivationStore(fake as any));
+        engine.registerFlow('f', packagedFlow('f'));
+
+        await engine.toggleFlow('f', false);
+        await engine.toggleFlow('f', true);
+
+        expect(fake.inserted).toEqual([{ metadata_type: 'flow', name: 'f', package_id: 'crm', active: false }]);
+        expect(fake.updated).toEqual([{ id: 'row_1', active: true, package_id: 'crm' }]);
+        expect(fake.rows.find((r: any) => r.id === 'a1')).toEqual(
+            { id: 'a1', metadata_type: 'flow', name: 'f', package_id: 'com.example.other', active: false },
+        );
+    });
+
     it('with no store attached the flip still applies, and WARNS that it is not durable', async () => {
         const logger = createTestLogger();
         const engine = withLoaderSetFromPull(new AutomationEngine(logger));
