@@ -52,9 +52,10 @@
  *    connector picker reads) serves the FIRST-registered package's
  *    declaration; a provider-bound instance is the engine's one connector
  *    per name, and a second one at boot already refuses the boot (ADR-0097);
- *  - `email_template` — a send's `template: NAME` resolves the
+ *  - `email_template` — a send's `template: NAME` resolved the
  *    FIRST-registered package's bundle, and `/meta/email_template/NAME`
- *    serves the same one;
+ *    served the same one (both since narrowed to the namespace: "The
+ *    narrowing");
  *  - `agent` — `/meta/agent/NAME` served the FIRST-registered package's
  *    agent, the one by-name read of an agent the open framework serves (the
  *    agent runtime that resolves an agent by name is the cloud's);
@@ -140,6 +141,20 @@
  * built-in name (D9: the refusal narrows, it does not go). `agent` and `skill`
  * narrowed first (#31701): `/meta/agent|skill/NAME` read through
  * `readPackageScopedItem`, and the MCP prompt and agent faces are `NS-NAME`.
+ * `email_template` followed (#31699): `/meta/email_template/NAME` reads
+ * through `readPackageScopedItem` member by member, and a send resolves the
+ * name caller-less (a refusal names both holders) and reads the resolved
+ * holder's bundle only (plugin-email's template loader).
+ *
+ * Two holdings still meet under a narrowed type, whatever the namespaces:
+ *
+ *  - a name the platform requests by its bare spelling
+ *    (`PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE`, `@objectstack/core`) — the
+ *    `auth.*` mails the platform sends name no package, so a deployment keeps
+ *    one overriding package per name;
+ *  - a bundle ADDITION ({@link isBundleAdditionPair}) — a dependent package's
+ *    member its base does not ship, under the base's name, is no second
+ *    address: it names its base's template, and is refused as before.
  *
  * ## What it deliberately does not judge
  *
@@ -171,6 +186,8 @@ import type { ObjectStackManifest } from '@objectstack/spec/kernel';
 import {
   artifactPackageId,
   BARE_NAME_ONE_HOLDER_TYPES,
+  isPackageScopedType,
+  isPlatformRequestedBareName,
   OVERRIDABLE_BASELINE_PACKAGES,
   isBareNameOneHolderType,
   isOverridableBaseline,
@@ -179,6 +196,7 @@ import {
   type BareNameOneHolderType,
   type BareNameRegistryType,
 } from '@objectstack/core';
+import { ITEM_KEY_DISCRIMINATORS, readDiscriminatorValue } from '@objectstack/metadata-core';
 import { isObjectLessActionKey, standaloneActionOwnerKey } from './action-governance.js';
 
 // [epic #31527 child R2] The holder vocabulary — the covered types, the
@@ -262,12 +280,13 @@ export const BUILT_IN_BARE_NAMES: Readonly<Record<BareNameOneHolderType, Readonl
  * narrowed from the deployment to the namespace (module doc, "The narrowing").
  * Each type joins in its own trailing change, once its by-name readers, its
  * AI faces and its stored references all carry the package: the AI family's
- * `agent` and `skill` first (#31701). A type not listed here keeps one package
- * holder per deployment.
+ * `agent` and `skill` first (#31701), then `email_template` (#31699). A type
+ * not listed here keeps one package holder per deployment.
  */
 export const NAMESPACE_SCOPED_BARE_NAME_TYPES: readonly BareNameOneHolderType[] = Object.freeze([
   'agent',
   'skill',
+  'email_template',
 ]);
 
 /** Has `type`'s one-holder rule narrowed to the namespace ({@link NAMESPACE_SCOPED_BARE_NAME_TYPES})? */
@@ -283,13 +302,22 @@ export function isNamespaceScopedBareNameType(type: unknown): boolean {
  * (`NS/NAME`) and two AI faces (`NS-NAME`), and every by-name reader resolves
  * a bare name by `(package, name)` or refuses it naming both. A package with
  * no namespace has no address of its own, so it still meets every holder.
+ *
+ * A name the PLATFORM requests by its bare spelling, with no package
+ * (`PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE`, `@objectstack/core`; ADR-0150 D3
+ * Exceptions) keeps one holder per deployment whatever the namespaces: its
+ * requester can name no package, so two holders would leave it refused as
+ * ambiguous on every request (`email_template`'s `auth.*` mails, #31699).
+ * `name` omitted judges by the type alone.
  */
 export function bareNameHoldersMeet(
   type: BareNameOneHolderType,
   incomingNamespace: string | undefined,
   holderNamespace: string | undefined,
+  name?: string,
 ): boolean {
   if (!isNamespaceScopedBareNameType(type)) return true;
+  if (name !== undefined && isPackageScopedType(type) && isPlatformRequestedBareName(type, name)) return true;
   return !(incomingNamespace && holderNamespace && incomingNamespace !== holderNamespace);
 }
 
@@ -375,6 +403,64 @@ export function declaredBareNames(manifest: ObjectStackManifest | unknown): Decl
   const plugins = (manifest as { plugins?: unknown } | null | undefined)?.plugins;
   if (Array.isArray(plugins)) for (const plugin of plugins) read(plugin);
   return out;
+}
+
+/**
+ * [ADR-0150 D9, #31699] The members of the bundle `(type, name)` a manifest
+ * declares — each item's discriminator value (an email template's `locale`,
+ * its canonical value when it states none), read from the same sources as
+ * {@link declaredBareNames}. Empty for a type that is no bundle.
+ */
+export function declaredBundleMembers(
+  manifest: ObjectStackManifest | unknown,
+  type: BareNameRegistryType,
+  name: string,
+): Set<string> {
+  const members = new Set<string>();
+  const disc = ITEM_KEY_DISCRIMINATORS[type];
+  if (!disc) return members;
+  const read = (source: unknown) => {
+    if (!source || typeof source !== 'object') return;
+    const items = (source as Record<string, unknown>)[COLLECTION_KEY[type]];
+    if (!Array.isArray(items)) return;
+    for (const item of items) {
+      if (itemName(item) === name) members.add(readDiscriminatorValue(item, disc.field) || disc.canonical);
+    }
+  };
+  read(manifest);
+  const plugins = (manifest as { plugins?: unknown } | null | undefined)?.plugins;
+  if (Array.isArray(plugins)) for (const plugin of plugins) read(plugin);
+  return members;
+}
+
+/**
+ * One package's holding of a bundled name, as {@link isBundleAdditionPair}
+ * reads it: the members it holds, and its declared dependency closure.
+ */
+export interface BundleHolding {
+  readonly packageId: string;
+  readonly members: ReadonlySet<string>;
+  readonly reach: ReadonlySet<string>;
+}
+
+/**
+ * [ADR-0150 D9, #31699] Is one of two package holdings of a bundled name an
+ * ADDITION to the other's bundle — the adding package declares (transitively)
+ * the other, the other does not declare it back, and the two hold no member in
+ * common (a dependent's `fr-FR` beside its base's `en-US`, #28802)? The test
+ * the registry's package-scoped holder read drops a dependent's addition by.
+ *
+ * An addition is no second address: it names its base's template, so it
+ * meets the base under the one-holder rule whatever the two namespaces
+ * declare, and stays refused once the type narrows to the namespace, as it was
+ * refused before.
+ */
+export function isBundleAdditionPair(a: BundleHolding, b: BundleHolding): boolean {
+  const adds = (adding: BundleHolding, base: BundleHolding): boolean =>
+    adding.reach.has(base.packageId)
+    && !base.reach.has(adding.packageId)
+    && ![...adding.members].some((member) => base.members.has(member));
+  return adds(a, b) || adds(b, a);
 }
 
 /** How a refusal names a covered type. */

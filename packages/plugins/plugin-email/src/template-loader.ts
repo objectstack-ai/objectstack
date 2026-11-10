@@ -38,10 +38,19 @@
  * package, so every send is context-free — the environment's own item, else
  * the unique package holder (the built-ins rank below it, ADR-0150 D3 (b)),
  * else a refusal naming every candidate, which fails the send
- * ({@link EmailTemplateAmbiguousError}). ⛔ Never a first-listed pick. While
- * phase 1's one-holder refusal stands (`email_template` is one of its types)
- * no two packages hold a name, so every name resolves as before, and the
- * layered list below answers the bundle exactly as it did.
+ * ({@link EmailTemplateAmbiguousError}). ⛔ Never a first-listed pick.
+ *
+ * Since the type's one-holder rule narrowed to the namespace (ADR-0150 D9,
+ * #31699), two packages of two namespaces may each ship a name. A resolved
+ * name is then read from its resolved holder's bundle only: the layered list
+ * below is filtered by name, so every member another package holder ships
+ * under that name (its own, its `.custom` pair's) is left out, and a locale
+ * the winner lacks is never answered from another package's template. The
+ * overridable baseline (the built-ins) is never left out: it stays under
+ * every app's override, member by member. With one holder — every name a
+ * deployment held before the narrowing — nothing is left out, and the bundle
+ * reads exactly as it did. The `auth.*` mails the platform sends keep one
+ * holder per deployment (`PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE`).
  */
 
 import {
@@ -50,7 +59,8 @@ import {
   type PackageScopedRefusal,
   type PackageScopedRegistry,
 } from '@objectstack/objectql';
-import { stripReadDecorations } from '@objectstack/spec/kernel';
+import { isOverridableBaseline } from '@objectstack/core';
+import { isCustomizationPairOf, stripReadDecorations } from '@objectstack/spec/kernel';
 import { EmailTemplateDefinitionSchema, type EmailTemplateDefinitionParsed } from '@objectstack/spec/system';
 import { DEFAULT_TEMPLATE_LOCALE, TEMPLATE_BUNDLE_LOCALES, type EmailTemplateRow, type TemplateLoader, type TemplateBundleLocales } from './email-service.js';
 
@@ -197,10 +207,23 @@ export function createRegistryEmailTemplateLoader(
     // as a caller with no package. A refusal fails the send, naming every
     // candidate; any other answer leaves the bundle to the read below.
     const scoped = packageScopedRegistryOf(registry);
+    // [ADR-0150 D9, #31699] The package holders the resolved answer is NOT:
+    // their members of the name are not this send's bundle.
+    let otherHolders: readonly string[] = [];
     if (scoped) {
       const resolved = resolvePackageScopedName(scoped, { type: EMAIL_TEMPLATE_TYPE, name });
       if (resolved.status === 'refused') throw new EmailTemplateAmbiguousError(resolved);
+      if (resolved.status === 'resolved') {
+        const winner = resolved.holder.kind === 'package' ? resolved.holder.packageId : undefined;
+        otherHolders = scoped.packageScopedHoldersOf(EMAIL_TEMPLATE_TYPE, name)
+          .filter((id) => id !== winner && !isOverridableBaseline(EMAIL_TEMPLATE_TYPE, id));
+      }
     }
+    const heldByAnother = (item: Record<string, unknown>): boolean => {
+      const owner = item._packageId;
+      return typeof owner === 'string'
+        && otherHolders.some((holder) => owner === holder || isCustomizationPairOf(owner, holder));
+    };
     let items: unknown[];
     if (typeof protocol?.getMetaItemsForExecution === 'function') {
       const listed = await protocol.getMetaItemsForExecution({ type: EMAIL_TEMPLATE_TYPE });
@@ -212,7 +235,8 @@ export function createRegistryEmailTemplateLoader(
     }
     return items.filter(
       (item): item is Record<string, unknown> =>
-        !!item && typeof item === 'object' && (item as Record<string, unknown>).name === name,
+        !!item && typeof item === 'object' && (item as Record<string, unknown>).name === name
+        && !heldByAnother(item as Record<string, unknown>),
     );
   };
 

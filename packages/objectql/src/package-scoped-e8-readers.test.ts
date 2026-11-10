@@ -115,8 +115,10 @@ beforeEach(() => {
 });
 
 describe('E8 wires exactly the nine types, every one of them package-scoped', () => {
-  it('PACKAGE_SCOPED_READ_TYPES is the card\'s nine, each one R addresses by package', () => {
-    expect([...PACKAGE_SCOPED_READ_TYPES].sort()).toEqual([...E8_TYPES].sort());
+  it('PACKAGE_SCOPED_READ_TYPES is the card\'s nine and the later children\'s own, each one R addresses by package', () => {
+    // Later children of epic #31527 append their own type in their own change.
+    const LATER = ['email_template'];
+    expect([...PACKAGE_SCOPED_READ_TYPES].sort()).toEqual([...E8_TYPES, ...LATER].sort());
     for (const type of PACKAGE_SCOPED_READ_TYPES) expect(isPackageScopedType(type), type).toBe(true);
   });
 });

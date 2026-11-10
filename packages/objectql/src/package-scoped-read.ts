@@ -13,7 +13,8 @@
  *
  * {@link PACKAGE_SCOPED_READ_TYPES}: the presentation and AI types of child E8
  * (#31680) — app, page, dashboard, report, book, analytics cube, tool, skill
- * and agent. A later child adds its own types to the list in its own change;
+ * and agent — and since #31699 the email template, read member by member
+ * (`member`, its locale). A later child adds its own types to the list in its own change;
  * until then a type's by-name read stays `SchemaRegistry.getItem`'s, exactly
  * as before (`SchemaRegistry.resolveItem`).
  *
@@ -59,7 +60,7 @@ import {
 
 /**
  * The types whose by-name readers consult `(package, name)` today — child E8's
- * nine (#31680), as the registry spells them. Each later child of epic #31527
+ * nine (#31680) and child B's `email_template` (#31699), as the registry spells them. Each later child of epic #31527
  * appends its own.
  */
 export const PACKAGE_SCOPED_READ_TYPES = Object.freeze([
@@ -72,6 +73,10 @@ export const PACKAGE_SCOPED_READ_TYPES = Object.freeze([
   'tool',
   'skill',
   'agent',
+  // [ADR-0150 D9, #31699] child B's webhook family, one type per change:
+  // `/meta/email_template/NAME` and its qualified address read through the
+  // resolver before the type's one-holder rule narrows to the namespace.
+  'email_template',
 ] as const);
 
 /** A type whose by-name readers consult `(package, name)` ({@link PACKAGE_SCOPED_READ_TYPES}). */
