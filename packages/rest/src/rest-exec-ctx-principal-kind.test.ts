@@ -24,6 +24,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { hashApiKey, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS } from '@objectstack/core';
 import { runWithPerfDisclosure, type PerfDisclosureGate } from '@objectstack/observability';
 import { RestServer } from './rest-server';
+// Paid at collection, not inside a case's clocked window: the routes reach it by dynamic import.
+import '@objectstack/objectql';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 const TASK = {

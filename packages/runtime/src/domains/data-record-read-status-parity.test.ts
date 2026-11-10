@@ -38,6 +38,8 @@ import { RestServer } from '@objectstack/rest';
 import { declaredEnvelopeForThrow } from '@objectstack/plugin-hono-server';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { HttpDispatcher } from '../http-dispatcher.js';
+// Paid at collection, not inside a case's clocked window: the stack reaches it by dynamic import.
+import '@objectstack/metadata';
 import { installDefaultOrganization } from '../default-organization.testkit.js';
 
 const PREFIX = '/api/v1';
