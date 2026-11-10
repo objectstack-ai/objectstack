@@ -91,6 +91,26 @@ export const METRIC_TILE_DATASET_VALUE_LADDER: ReadonlyArray<{ readonly maxEm: n
   { maxEm: 12.5, sizes: 'text-sm @[200px]:text-base @[225px]:text-lg @[250px]:text-xl @[300px]:text-2xl' },
 ];
 
+/**
+ * The `bare` tile's ladder (`MetricWidget variant="bare"`, the big-number face
+ * data screens draw: no Card, no inset, 32 px). Its short rung is that face
+ * unchanged, at every width; a longer value starts at 14 px and climbs through
+ * the type scale to the same 32 px, each step at `ceil(maxEm * px)` against the
+ * tile's own box. The `metricTileValueScale-12942` test re-derives these steps
+ * (objectstack#32165: a seven-digit budget with cents drew "$1,090,0…" in a
+ * six-across hero strip).
+ *
+ * Literals only: Tailwind's content scanner must see every class.
+ */
+export const METRIC_TILE_BARE_VALUE_LADDER: ReadonlyArray<{ readonly maxEm: number; readonly sizes: string }> = [
+  { maxEm: 4.5, sizes: 'text-[2rem]' },
+  { maxEm: 5.5, sizes: 'text-sm @[88px]:text-base @[99px]:text-lg @[110px]:text-xl @[132px]:text-2xl @[165px]:text-3xl @[176px]:text-[2rem]' },
+  { maxEm: 6.75, sizes: 'text-sm @[108px]:text-base @[122px]:text-lg @[135px]:text-xl @[162px]:text-2xl @[203px]:text-3xl @[216px]:text-[2rem]' },
+  { maxEm: 8, sizes: 'text-sm @[128px]:text-base @[144px]:text-lg @[160px]:text-xl @[192px]:text-2xl @[240px]:text-3xl @[256px]:text-[2rem]' },
+  { maxEm: 10, sizes: 'text-sm @[160px]:text-base @[180px]:text-lg @[200px]:text-xl @[240px]:text-2xl @[300px]:text-3xl @[320px]:text-[2rem]' },
+  { maxEm: 12.5, sizes: 'text-sm @[200px]:text-base @[225px]:text-lg @[250px]:text-xl @[300px]:text-2xl @[375px]:text-3xl @[400px]:text-[2rem]' },
+];
+
 /** Past the ladder's last rung: 14 px at every width. */
 export const METRIC_TILE_VALUE_FINAL_SIZES = 'text-sm';
 
@@ -136,8 +156,34 @@ export const METRIC_TILE_MEASURE_LABEL_CLASS = 'hidden max-w-full truncate text-
  * a tile too narrow to draw it.
  */
 export function metricTileTooltip(title: string | undefined, description?: string, measureLabel?: string): string | undefined {
-  const text = [description || title, measureLabel].filter(Boolean).join('\n');
+  const lead = description || title;
+  // Never the same line twice (objectstack#32165): a label equal to the lead line is dropped.
+  const text = [lead, metricTileSubtitle(lead, measureLabel)].filter(Boolean).join('\n');
   return text || undefined;
+}
+
+/** Two texts read alike when they match after trimming, collapsing whitespace and folding case. */
+function metricTileSameText(a: string, b: string): boolean {
+  const norm = (s: string) => s.trim().replace(/\s+/gu, ' ').toLocaleLowerCase();
+  return norm(a) === norm(b);
+}
+
+/**
+ * The tile's subtitle (objectstack#32165) — ONE rule, read by every metric
+ * tile in this package: the first non-empty candidate, in order, whose text is
+ * not the title's. Both sides are the LOCALIZED texts the tile would draw, so
+ * a description or a measure label that only repeats the title
+ * ("Avg Progress / 47.0 / Avg Progress") is dropped, and the next candidate
+ * (a trend label, the measure label) takes its place. A distinct candidate is
+ * kept as it is. Undefined when none is left.
+ */
+export function metricTileSubtitle(title: string | undefined, ...candidates: ReadonlyArray<string | undefined>): string | undefined {
+  for (const candidate of candidates) {
+    if (!candidate || !candidate.trim()) continue;
+    if (title && metricTileSameText(title, candidate)) continue;
+    return candidate;
+  }
+  return undefined;
 }
 
 /**

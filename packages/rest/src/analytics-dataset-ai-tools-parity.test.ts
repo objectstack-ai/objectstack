@@ -132,7 +132,7 @@ type FaceAnswer = { rows: Record<string, unknown>[] } | { refused: { status: num
 let engine: ObjectQL;
 let service: AnalyticsService;
 let restRoute: any;
-let protocol: { getMetaItems: ReturnType<typeof vi.fn> } & Record<string, unknown>;
+let protocol: { getMetaItem: ReturnType<typeof vi.fn> } & Record<string, unknown>;
 
 const byKey = (rows: Record<string, unknown>[]) =>
   [...rows].map((r) => JSON.stringify(Object.keys(r).sort().map((k) => [k, r[k]]))).sort();
@@ -201,7 +201,10 @@ beforeAll(async () => {
   protocol = {
     getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
     getMetaTypes: vi.fn().mockResolvedValue([]),
-    getMetaItems: vi.fn().mockImplementation(async () => SAVED.map((d) => ({ ...d }))),
+    // [#32072] Read BY NAME, as the door reads a `datasetName`.
+    getMetaItem: vi.fn().mockImplementation(async ({ name }: { name: string }) => ({
+      type: 'dataset', name, item: SAVED.map((d) => ({ ...d })).find((d) => d.name === name),
+    })),
   };
   const rest = new RestServer(
     mockServer() as any, protocol as any, { api: { requireAuth: false } } as any,
@@ -285,7 +288,7 @@ describe('a FAILED saved-dataset read is answered alike by the REST door and que
     const outage = new Error('the metadata store is unreachable');
     const selection = { measures: ['revenue'] };
 
-    protocol.getMetaItems.mockRejectedValueOnce(outage);
+    protocol.getMetaItem.mockRejectedValueOnce(outage);
     const rest = await faces.rest('u_me', selection);
 
     const tools = service.datasetTools({ loadDatasets: async () => { throw outage; } });

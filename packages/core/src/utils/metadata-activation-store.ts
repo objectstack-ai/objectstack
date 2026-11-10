@@ -134,6 +134,40 @@ export interface MetadataActivationWriteOptions {
      * context, and the row names nobody.
      */
     context?: MetadataActivationWriteContext;
+    /**
+     * [ADR-0150 D4, D8 row R4] Only for a store whose rows are addressed by
+     * `(package, name)` ({@link MetadataActivationRowAddressing}), and only for
+     * a row that names a package: where that package holds no row of the name
+     * yet and a row naming no package does, the write turns THAT row into the
+     * package's row, instead of adding a second row beside it.
+     *
+     * The caller passes it when the package is the name's one holder, which is
+     * exactly when the row naming no package is that package's switch (D8: a
+     * package-less row binds to the name's one holder). Never for a name two
+     * packages hold: there the row is neither's, and nothing picks.
+     */
+    adoptPackageless?: boolean;
+}
+
+/**
+ * [ADR-0150 D4] How a store finds the row a write is for.
+ *
+ *  - `'name'` — by `(metadata_type, name)`, one row per name: the write
+ *    re-attributes that row to the package it names. The bare path, kept
+ *    (ADR-0150 red line 3) for every type whose readers still consult the
+ *    ledger by name.
+ *  - `'package-and-name'` — by `(metadata_type, package_id, name)`, the
+ *    object's declared unique key: two packages each keep their own row of one
+ *    name, and a write for one never touches the other's. A type moves here in
+ *    its own ADR-0150 child, once its readers consult the ledger by
+ *    `(package, name)` (flows: #31696).
+ */
+export type MetadataActivationRowAddressing = 'name' | 'package-and-name';
+
+/** Options for constructing a {@link MetadataActivationStore}. */
+export interface MetadataActivationStoreOptions {
+    /** Default `'name'`: see {@link MetadataActivationRowAddressing}. */
+    addressing?: MetadataActivationRowAddressing;
 }
 
 /**
@@ -225,16 +259,45 @@ function refuseEmptyPackageId(row: MetadataActivationRow, subject: string): void
  */
 export class InMemoryMetadataActivationStore implements MetadataActivationStore {
     private readonly rows = new Map<string, MetadataActivationRow>();
+    private readonly addressing: MetadataActivationRowAddressing;
+
+    constructor(options?: MetadataActivationStoreOptions) {
+        this.addressing = options?.addressing ?? 'name';
+    }
 
     async list(): Promise<MetadataActivationRow[]> {
         return [...this.rows.values()];
     }
 
-    /** The caller is not recorded: a map has no `created_by` to stamp. */
-    async setActive(row: MetadataActivationRow, _options?: MetadataActivationWriteOptions): Promise<void> {
+    /**
+     * The caller is not recorded: a map has no `created_by` to stamp. Rows are
+     * found as the durable store finds them ({@link MetadataActivationRowAddressing},
+     * {@link MetadataActivationWriteOptions.adoptPackageless}).
+     */
+    async setActive(row: MetadataActivationRow, options?: MetadataActivationWriteOptions): Promise<void> {
         refuseEmptyPackageId(row, `'${row.name}'`);
-        this.rows.set(row.name, { ...row });
+        if (this.addressing === 'name') {
+            this.rows.set(row.name, { ...row });
+            return;
+        }
+        const own = activationRowKey(row.name, row.packageId);
+        const packageless = activationRowKey(row.name, undefined);
+        if (row.packageId !== undefined && options?.adoptPackageless && !this.rows.has(own) && this.rows.has(packageless)) {
+            this.rows.delete(packageless);
+        }
+        this.rows.set(own, { ...row });
     }
+}
+
+/** The in-memory key of a row addressed by `(package, name)`. */
+function activationRowKey(name: string, packageId: string | undefined): string {
+    return JSON.stringify([packageId ?? null, name]);
+}
+
+/** Does a stored `package_id` name the package `packageId` (`undefined`: none)? */
+function storedPackageIs(stored: unknown, packageId: string | undefined): boolean {
+    const own = typeof stored === 'string' && stored !== '' ? stored : undefined;
+    return own === packageId;
 }
 
 /**
@@ -260,6 +323,8 @@ export class ObjectStoreMetadataActivationStore implements MetadataActivationSto
          * argument.
          */
         private readonly metadataType: string,
+        /** Default `'name'`: see {@link MetadataActivationRowAddressing}. */
+        private readonly options?: MetadataActivationStoreOptions,
     ) {}
 
     /**
@@ -284,14 +349,21 @@ export class ObjectStoreMetadataActivationStore implements MetadataActivationSto
      * store controls: there is no id to collide on, so an insert-and-catch
      * could not tell "already there" from a real store failure.
      *
-     * The write still addresses the row by `(metadata_type, name)`: the bare
-     * path, kept (ADR-0150 red line 3). This is the ledger's only writer, and it
-     * inserts only where that read finds nothing, so it keeps one row per
+     * By default the write addresses the row by `(metadata_type, name)`: the
+     * bare path, kept (ADR-0150 red line 3). This is the ledger's only writer,
+     * and it inserts only where that read finds nothing, so it keeps one row per
      * `(metadata_type, name)` and taking the FIRST match is taking the only one.
      * The wider index permits a second package's row of the same name; nothing
      * writes one until a type's own readers consult the ledger by
      * `(package, name)` (that type's ADR-0150 child), so no name-keyed reader
      * ever sees two rows for one name.
+     *
+     * A store constructed with `addressing: 'package-and-name'` is that child's
+     * store: it reads the name's rows and writes the one whose `package_id` is
+     * the row's package (none: the one with none), so one package's write never
+     * re-attributes another package's row. With
+     * {@link MetadataActivationWriteOptions.adoptPackageless}, a package with no
+     * row of its own takes the row naming no package over.
      *
      * `packageId` absent writes NO package (`null`), the ledger's spelling for
      * an item no package ships. An empty string is refused before anything is
@@ -310,7 +382,14 @@ export class ObjectStoreMetadataActivationStore implements MetadataActivationSto
             where: { metadata_type: this.metadataType, name: row.name },
             context,
         });
-        const current = Array.isArray(existing) ? existing[0] : undefined;
+        const candidates: Array<{ id?: unknown; package_id?: unknown }> = Array.isArray(existing) ? existing : [];
+        let current: { id?: unknown; package_id?: unknown } | undefined = candidates[0];
+        if (this.options?.addressing === 'package-and-name') {
+            current = candidates.find((r) => storedPackageIs(r.package_id, row.packageId));
+            if (!current && row.packageId !== undefined && options?.adoptPackageless) {
+                current = candidates.find((r) => storedPackageIs(r.package_id, undefined));
+            }
+        }
 
         if (current && (current as { id?: unknown }).id != null) {
             await this.engine.update(
@@ -380,14 +459,20 @@ async function readActivationLedgerRows(
             // A row with no package — an environment-authored item — reads
             // back with `packageId` absent, the spelling it was written in.
             ...(typeof r.package_id === 'string' && r.package_id !== '' ? { packageId: r.package_id } : {}),
-            // The column defaults to `true`; only an explicit `false`
-            // disarms. A driver that round-trips booleans as 0/1
-            // (SQLite/libsql) is read through the same `=== false || === 0`
-            // test, so a `0` is not mistaken for `true`.
-            active: !(r.active === false || r.active === 0),
+            active: readActiveColumn(r.active),
         });
     }
     return out;
+}
+
+/**
+ * The one read of a stored `active` column. The column defaults to `true`;
+ * only an explicit `false` disarms. A driver that round-trips booleans as 0/1
+ * (SQLite/libsql) is read through the same `=== false || === 0` test, so a `0`
+ * is not mistaken for `true`.
+ */
+function readActiveColumn(value: unknown): boolean {
+    return !(value === false || value === 0);
 }
 
 /**
@@ -442,6 +527,16 @@ export interface ActivationLedgerUnboundRow {
     readonly name: string;
 }
 
+/** One stored row of an item that holds more than one, as the backfill reports it. */
+export interface ActivationLedgerDuplicateRow {
+    /** The row's id: what an operator deletes it by. */
+    readonly id: string;
+    /** The package the row names. Absent when it names none. */
+    readonly packageId?: string;
+    /** The switch the row records (a driver `0` reads as false). */
+    readonly active: boolean;
+}
+
 /** What one backfill run did, or would do in a dry run. */
 export interface ActivationLedgerBackfillReport {
     /** Rows given the package that holds their item: written, or to be written in a dry run. */
@@ -450,6 +545,23 @@ export interface ActivationLedgerBackfillReport {
     readonly ambiguous: ReadonlyArray<ActivationLedgerUnboundRow & { readonly candidates: readonly string[] }>;
     /** Rows left null with no question to ask: the environment's own item, an unheld name, an unaddressed type. */
     readonly unchanged: ReadonlyArray<ActivationLedgerUnboundRow & { readonly reason: 'environment' | 'unheld' | 'unaddressed' }>;
+    /**
+     * Items one package holds whose rows are left null because the item has
+     * more than one row: two or more naming no package, or one naming no
+     * package beside one that already names the holder. Every such row is
+     * named, `packageId` is the holder, and none is bound (module doc of
+     * {@link backfillActivationLedgerPackages}).
+     */
+    readonly duplicated: ReadonlyArray<
+        ActivationLedgerUnboundRow & { readonly packageId: string; readonly rows: readonly ActivationLedgerDuplicateRow[] }
+    >;
+    /**
+     * Rows whose write was refused or failed: each still names no package,
+     * with the error text. Every other row was still handled.
+     */
+    readonly failed: ReadonlyArray<
+        ActivationLedgerUnboundRow & { readonly id: string; readonly packageId: string; readonly error: string }
+    >;
 }
 
 /** Options for {@link backfillActivationLedgerPackages}. */
@@ -469,6 +581,28 @@ export interface ActivationLedgerBackfillOptions {
  * covered types, so a name it left held twice, and a name of an uncovered type
  * two packages hold, is the ambiguous set: the row is left null and reported
  * with every candidate, ⛔ never bound to one of them.
+ *
+ * ## An item with more than one row is reported, ⛔ never bound
+ *
+ * A row is bound only when it is the item's ONE row. When the item has two or
+ * more rows that name no package, binding one would take it out of the
+ * package-less index's reach (`activation-ledger-packageless-index.ts`, which
+ * refuses to build while they coexist), so the next boot would build that index
+ * over the pair and the duplicate would never be reported again; the second
+ * write would also collide with the first under the declared key. When a row
+ * names no package beside one that already names the holder, the write would
+ * collide. Either way two administrators' switches stand for one item, so the
+ * item is reported in `duplicated` with every one of those rows, and none of
+ * them is written: the operator deletes the row that should not apply, and the
+ * next run binds the one left. Nothing here deletes or picks one.
+ *
+ * ## Every question is asked before the first write
+ *
+ * The run reads the ledger and asks `holderOf` for every item first, then
+ * writes. A failure there (the read, a resolver that throws) leaves the ledger
+ * as it was. A write that is refused or fails is reported in `failed` with its
+ * error, and the run goes on to the next row, so one row never stops the rows
+ * stored after it.
  *
  * Re-runnable: it reads only rows with no package and writes only the package,
  * so a second run over the same environment finds nothing to bind and writes
@@ -490,34 +624,81 @@ export async function backfillActivationLedgerPackages(
     const bound: Array<ActivationLedgerUnboundRow & { packageId: string }> = [];
     const ambiguous: Array<ActivationLedgerUnboundRow & { candidates: string[] }> = [];
     const unchanged: Array<ActivationLedgerUnboundRow & { reason: 'environment' | 'unheld' | 'unaddressed' }> = [];
+    const duplicated: Array<ActivationLedgerUnboundRow & { packageId: string; rows: ActivationLedgerDuplicateRow[] }> = [];
+    const failed: Array<ActivationLedgerUnboundRow & { id: string; packageId: string; error: string }> = [];
     const rows = await engine.find(METADATA_ACTIVATION_TABLE, { where: {}, context: SYSTEM_CTX });
-    if (!Array.isArray(rows)) return { bound, ambiguous, unchanged };
+    if (!Array.isArray(rows)) return { bound, ambiguous, unchanged, duplicated, failed };
+
+    // Every row of each item, in storage order; items in the order first seen.
+    type LedgerRow = { id?: unknown; metadata_type: string; name: string; package_id?: unknown; active?: unknown };
+    const items = new Map<string, LedgerRow[]>();
     for (const row of rows) {
-        const r = row as { id?: unknown; metadata_type?: unknown; name?: unknown; package_id?: unknown };
-        // Only a row with NO package is a backfill candidate. An empty string
-        // is not a spelling the writer produces ({@link refuseEmptyPackageId}),
-        // so it is left as it stands rather than read as "no package".
-        if (r.package_id !== null && r.package_id !== undefined) continue;
-        if (r.id == null || typeof r.name !== 'string' || r.name === '' || typeof r.metadata_type !== 'string') continue;
-        const at = { metadataType: r.metadata_type, name: r.name };
-        const holder = holderOf(r.metadata_type, r.name);
+        const r = row as { metadata_type?: unknown; name?: unknown };
+        if (typeof r.name !== 'string' || r.name === '' || typeof r.metadata_type !== 'string') continue;
+        const key = JSON.stringify([r.metadata_type, r.name]);
+        const list = items.get(key) ?? [];
+        list.push(row as LedgerRow);
+        items.set(key, list);
+    }
+    // Only a row with NO package is a backfill candidate. An empty string is
+    // not a spelling the writer produces ({@link refuseEmptyPackageId}), so it
+    // is left as it stands rather than read as "no package".
+    const namesNoPackage = (r: LedgerRow): boolean => r.package_id === null || r.package_id === undefined;
+
+    // Ask every question first (module doc): nothing below writes.
+    const writes: Array<ActivationLedgerUnboundRow & { id: unknown; packageId: string }> = [];
+    for (const itemRows of items.values()) {
+        const candidates = itemRows.filter((r) => namesNoPackage(r) && r.id != null);
+        if (candidates.length === 0) continue;
+        const at = { metadataType: candidates[0].metadata_type, name: candidates[0].name };
+        const holder = holderOf(at.metadataType, at.name);
         switch (holder.kind) {
-            case 'package':
-                if (!options?.dryRun) {
-                    await engine.update(
-                        METADATA_ACTIVATION_TABLE,
-                        { id: r.id, package_id: holder.packageId },
-                        { context: SYSTEM_CTX },
-                    );
+            case 'package': {
+                const holderRow = (r: LedgerRow) => r.package_id === holder.packageId;
+                if (candidates.length > 1 || itemRows.some(holderRow)) {
+                    duplicated.push({
+                        ...at,
+                        packageId: holder.packageId,
+                        rows: itemRows
+                            .filter((r) => r.id != null && (namesNoPackage(r) || holderRow(r)))
+                            .map((r) => ({
+                                id: String(r.id),
+                                ...(holderRow(r) ? { packageId: holder.packageId } : {}),
+                                active: readActiveColumn(r.active),
+                            })),
+                    });
+                    break;
                 }
-                bound.push({ ...at, packageId: holder.packageId });
+                writes.push({ ...at, id: candidates[0].id, packageId: holder.packageId });
                 break;
+            }
             case 'ambiguous':
-                ambiguous.push({ ...at, candidates: [...holder.candidates] });
+                ambiguous.push(...candidates.map(() => ({ ...at, candidates: [...holder.candidates] })));
                 break;
-            default:
-                unchanged.push({ ...at, reason: holder.kind });
+            default: {
+                const reason = holder.kind;
+                unchanged.push(...candidates.map(() => ({ ...at, reason })));
+            }
         }
     }
-    return { bound, ambiguous, unchanged };
+
+    for (const { id, ...write } of writes) {
+        if (!options?.dryRun) {
+            try {
+                await engine.update(
+                    METADATA_ACTIVATION_TABLE,
+                    { id, package_id: write.packageId },
+                    { context: SYSTEM_CTX },
+                );
+            } catch (e: unknown) {
+                // Reported to the caller, never swallowed: the row still names
+                // no package, which every reader handles, and the next run
+                // tries it again.
+                failed.push({ ...write, id: String(id), error: e instanceof Error ? e.message : String(e) });
+                continue;
+            }
+        }
+        bound.push(write);
+    }
+    return { bound, ambiguous, unchanged, duplicated, failed };
 }

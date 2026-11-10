@@ -13,6 +13,7 @@ import {
   OneTimeTokenHandoffQuerySchema,
   OneTimeTokenVerifyRequestSchema,
   OneTimeTokenVerifyResponseSchema,
+  OrganizationEditionChoiceSchema,
 } from './auth-endpoints.zod';
 import {
   PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS,
@@ -236,7 +237,8 @@ describe('AuthFeaturesConfig declares every classified served key', () => {
     phoneNumberOtp: false,
     emailDelivery: false,
     cloudManaged: false,
-    developerEditionCreate: false,
+    developerEditionCreate: true,
+    organizationEditions: [{ edition: 'developer', label: 'Host label', hint: 'Host hint', memberLimit: 5 }],
     termsUrl: 'https://objectstack.ai/terms',
     privacyUrl: 'https://objectstack.ai/privacy',
     turnstileSiteKey: '0x4AAAAAAA',
@@ -277,6 +279,78 @@ describe('AuthFeaturesConfig declares every classified served key', () => {
     expect(result.error.issues).toEqual([
       expect.objectContaining({ code: 'invalid_type', expected: 'string', path: [key] }),
     ]);
+  });
+});
+
+// The host-declared organization-create choices (objectui ADR-0060 contract
+// door): the door's edition value, the host's words, an optional cap, and
+// nothing a renderer could mistake for a default pick.
+describe('OrganizationEditionChoice', () => {
+  const choice = { edition: 'developer', label: 'Host label', hint: 'Host hint', memberLimit: 5 };
+
+  it('keeps a whole choice, words unchanged, through a parse', () => {
+    expect(OrganizationEditionChoiceSchema.parse(choice)).toEqual(choice);
+  });
+
+  it('memberLimit is optional and no default is invented', () => {
+    const { memberLimit: _cap, ...uncapped } = choice;
+    expect(OrganizationEditionChoiceSchema.parse(uncapped)).toEqual(uncapped);
+  });
+
+  it('declares no default-selected key: the shape is exactly edition, label, hint, memberLimit', () => {
+    expect(Object.keys(OrganizationEditionChoiceSchema.shape).sort()).toEqual(['edition', 'hint', 'label', 'memberLimit']);
+  });
+
+  it.each([
+    ['edition', 'Developer'],
+    ['edition', 'dev-edition'],
+    ['edition', ''],
+    ['label', '   '],
+    ['hint', ''],
+    ['memberLimit', 0],
+    ['memberLimit', 2.5],
+    ['memberLimit', '5'],
+  ])('refuses `%s` = %j', (key, value) => {
+    const result = OrganizationEditionChoiceSchema.safeParse({ ...choice, [key]: value });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.path)).toEqual([[key]]);
+  });
+
+  it.each(['edition', 'label', 'hint'])('requires `%s`', (key) => {
+    const { [key as keyof typeof choice]: _dropped, ...rest } = choice;
+    const result = OrganizationEditionChoiceSchema.safeParse(rest);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues).toEqual([expect.objectContaining({ code: 'invalid_type', path: [key] })]);
+  });
+
+  it('features.organizationEditions refuses a list holding a malformed choice', () => {
+    const result = AuthFeaturesConfigSchema.safeParse({ organizationEditions: [{ ...choice, label: '' }] });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.path)).toEqual([['organizationEditions', 0, 'label']]);
+  });
+
+  it('features.organizationEditions refuses an edition value used twice', () => {
+    const result = AuthFeaturesConfigSchema.safeParse({
+      organizationEditions: [choice, { ...choice, label: 'Another label', hint: 'Another hint' }],
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues).toEqual([expect.objectContaining({ code: 'custom', path: ['organizationEditions'] })]);
+  });
+
+  it('CONTROL: distinct edition values pass', () => {
+    const list = [choice, { edition: 'trial', label: 'Trial label', hint: 'Trial hint' }];
+    expect(AuthFeaturesConfigSchema.parse({ organizationEditions: list }).organizationEditions).toEqual(list);
+  });
+
+  it('states the renderer\'s unchecked-default rule and the request-language resolution in its describe', () => {
+    const description = AuthFeaturesConfigSchema.shape.organizationEditions.description ?? '';
+    expect(description).toMatch(/unchecked/);
+    expect(description).toMatch(/request language/);
+    expect(description).toMatch(/appears once/);
   });
 });
 

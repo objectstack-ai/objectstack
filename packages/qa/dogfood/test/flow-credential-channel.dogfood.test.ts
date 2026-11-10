@@ -46,6 +46,7 @@ import { createHmac } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import crmStack from '@objectstack/example-crm';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
+import { FlowCredentialChannel } from '@objectstack/service-automation';
 import { ApiTrigger } from '@objectstack/trigger-api';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 
@@ -352,10 +353,9 @@ describe('[#20790] flow credentials live in the write-only channel, not the stor
             automation.setFlowCredentialSource(live);
         }
     }
-    const channelClass = () => automation.flowCredentialSource.constructor as new (resolveEngine: () => unknown) => any;
 
     it('9 — Q3 A: a packaged literal hook verifies on its literal when the credential store is unreachable', async () => {
-        const unreachable = new (channelClass())(() => undefined);
+        const unreachable = new FlowCredentialChannel(() => undefined);
         await withSource(unreachable, async () => {
             automation.registerFlow('zz_channel_packaged', inbound('zz_channel_packaged', { hook: PACKAGED_LITERAL }));
             expect(await post('zz_channel_packaged', PACKAGED_LITERAL)).toBe(202);
@@ -365,7 +365,7 @@ describe('[#20790] flow credentials live in the write-only channel, not the stor
 
     it('10 — the control: a held hook secret whose store becomes unreachable answers 503, never the literal', async () => {
         let reachable: unknown = ql;
-        const channel = new (channelClass())(() => reachable);
+        const channel = new FlowCredentialChannel(() => reachable as never);
         await channel.store({ name: 'zz_channel_heldpack', state: 'active', body: inbound('zz_channel_heldpack', { hook: HOOK_V2 }) });
         expect(channel.holds('zz_channel_heldpack', 'start', 'secret')).toBe(true);
         try {

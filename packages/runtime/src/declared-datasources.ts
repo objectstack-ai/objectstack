@@ -53,10 +53,20 @@
  * name, one connection serves the name — the one opened from the first
  * declaration to connect — and the boot logs that once, at `error`, naming
  * the name and both packages, and continues (`reportBootNameClashes`).
+ *
+ * One identity per datasource name in an environment (ADR-0150): the metadata
+ * registration of such a name is the declaration of the package that holds it
+ * — the one whose connection serves it, else the first to declare it — never
+ * another declarer's, as the rehydrate leaves a held name with its holder. A
+ * declaration the connect may still make the holder is registered once the
+ * connect verdict says so (`settleBootNames`), so Setup → Datasources lists the
+ * configuration that serves the name and {@link datasourceNameHolder} names
+ * its holder.
  */
 
 import type { PluginContext } from '@objectstack/core';
 import { applyProtection } from '@objectstack/spec/shared';
+import { isDatasourceAddressed } from '@objectstack/service-datasource';
 import {
     CODE_DATASOURCE_NAMES_SERVICE,
     contributeCodeDatasourceNames,
@@ -206,7 +216,12 @@ export async function connectPackageDatasources(
     // A boot notes the names this package declares beside every other package
     // the boot composes, and reports a name two packages declare once the
     // connect has said whose connection serves it (`reportBootNameClashes`).
-    const boot = installed ? undefined : noteBootDeclarations(ctx, appId, ownedOf, datasources);
+    const boot = installed
+        ? undefined
+        : noteBootDeclarations(ctx, appId, ownedOf, datasources, {
+            objects: options.objects ?? [],
+            mappedObjects: options.mappedObjects ?? {},
+        });
 
     // 1. The metadata registration — lenient: a registry that refuses leaves
     //    the datasource unlisted, never the package unloaded.
@@ -217,7 +232,13 @@ export async function connectPackageDatasources(
         if (typeof metadata?.registerInMemory === 'function') {
             for (const { datasource: ds, owner } of ownedOf()) {
                 if (!ds?.name || left.has(ds.name)) continue;
+                // A boot registers a name two packages declare as its holder's
+                // declaration only (`settleBootNames` follows the connect).
+                const packageId = declaringPackage(owner, appId);
+                if (boot && !holdsBootName(boot, ds.name, packageId)) continue;
                 metadata.registerInMemory('datasource', ds.name, applyProtection({ ...ds, origin: 'code' }, owner));
+                const record = boot?.names.get(ds.name);
+                if (record) record.registered = packageId;
             }
             ctx.logger.info('Registered code-defined datasources in metadata registry', {
                 appId,
@@ -243,7 +264,7 @@ export async function connectPackageDatasources(
     }
     if (typeof connection?.connectDeclared !== 'function') {
         ctx.logger.debug('No datasource-connection service — declared datasources stay metadata-only', { appId });
-        if (boot) reportBootNameClashes(ctx, tag, boot, []);
+        if (boot) settleBootNames(ctx, tag, boot, []);
         return [];
     }
     try {
@@ -253,7 +274,7 @@ export async function connectPackageDatasources(
             mappedObjects: options.mappedObjects ?? {},
         });
         if (key) recordFound(key, appId, results);
-        if (boot) reportBootNameClashes(ctx, tag, boot, results);
+        if (boot) settleBootNames(ctx, tag, boot, results);
         const connected = results.filter((r) => r.status === 'connected');
         if (connected.length > 0) {
             ctx.logger.info('Auto-connected declared datasources', {
@@ -279,7 +300,7 @@ export async function connectPackageDatasources(
                 const state = connection.getConnectionState?.(name);
                 if (state) retained.push({ name: state.name, status: state.status });
             }
-            reportBootNameClashes(ctx, tag, boot, retained);
+            settleBootNames(ctx, tag, boot, retained);
         }
         if (!installed) throw err;
         // In a running kernel there is no boot to refuse. `connectDeclared`
@@ -476,12 +497,36 @@ async function leaveHeldNames(
 /**
  * One datasource name the packages a boot composes declare: each declaring
  * package in boot order, the one whose declaration opened the connection that
- * serves the name, and the packages already reported against it.
+ * serves the name, the packages already reported against it, each declaring
+ * package's declaration of it (its last one, as a lone package's registration
+ * is), and the package whose declaration the boot registered under the name.
  */
 interface BootDatasourceName {
     declarers: string[];
     opener?: string;
     reported: Set<string>;
+    declarations: Map<string, { datasource: any; owner: DeclaredDatasourceOwner }>;
+    registered?: string;
+}
+
+/** The package a declaration is stamped with, else the call's own app id. */
+function declaringPackage(owner: DeclaredDatasourceOwner | undefined, appId: string): string {
+    return typeof owner?.packageId === 'string' && owner.packageId.length > 0 ? owner.packageId : appId;
+}
+
+/** The package holding a boot's datasource name: the opener of its connection, else its first declarer. */
+function bootHolder(record: BootDatasourceName): string | undefined {
+    return record.opener ?? record.declarers[0];
+}
+
+/**
+ * Whether `packageId`'s declaration of `name` is the one a boot registers: a
+ * name one package declares is registered as it always was, and a name two
+ * packages declare only as its holder's.
+ */
+function holdsBootName(boot: BootDeclarations, name: string, packageId: string): boolean {
+    const record = boot.names.get(name);
+    return !record || record.declarers.length < 2 || bootHolder(record) === packageId;
 }
 
 /**
@@ -500,6 +545,10 @@ interface BootDeclarations {
      * when every declaration of it is switched off.
      */
     declared: Map<string, string | undefined>;
+    /** Each name this call declares → its declarations, in order, with the package each is stamped with. */
+    attempts: Map<string, Array<{ packageId: string; datasource: any }>>;
+    /** What this call's connect is given to judge which declarations it addresses (D2); absent ⇒ every one. */
+    gate?: Parameters<typeof isDatasourceAddressed>[1];
     names: Map<string, BootDatasourceName>;
 }
 
@@ -513,14 +562,18 @@ function noteBootDeclarations(
     appId: string,
     owned: () => OwnedDatasources,
     datasources: readonly any[],
+    gate?: Parameters<typeof isDatasourceAddressed>[1],
 ): BootDeclarations {
     let list: OwnedDatasources;
+    let resolved = true;
     try {
         list = owned();
     } catch {
         // The ownership resolution is lenient (the registration's catch says
-        // why); the call's own id then stands for every declaration.
+        // why); the call's own id then stands for every declaration, and none
+        // of them is kept for registration — the registration lists nothing.
         list = datasources.map((datasource) => ({ datasource, owner: { packageId: appId } }));
+        resolved = false;
     }
     const key = kernelKey(ctx);
     let names = key ? BOOT_DECLARED.get(key) : undefined;
@@ -529,28 +582,48 @@ function noteBootDeclarations(
         if (key) BOOT_DECLARED.set(key, names);
     }
     const declared = new Map<string, string | undefined>();
+    const attempts = new Map<string, Array<{ packageId: string; datasource: any }>>();
     for (const { datasource, owner } of list) {
         const name = datasource?.name;
         if (typeof name !== 'string' || name.length === 0) continue;
-        const packageId = typeof owner?.packageId === 'string' && owner.packageId.length > 0 ? owner.packageId : appId;
+        const packageId = declaringPackage(owner, appId);
         if (declared.get(name) === undefined) declared.set(name, datasource?.active === false ? undefined : packageId);
+        attempts.set(name, [...(attempts.get(name) ?? []), { packageId, datasource }]);
         let record = names.get(name);
         if (!record) {
-            record = { declarers: [], reported: new Set() };
+            record = { declarers: [], reported: new Set(), declarations: new Map() };
             names.set(name, record);
         }
         if (!record.declarers.includes(packageId)) record.declarers.push(packageId);
+        if (resolved) record.declarations.set(packageId, { datasource, owner });
     }
-    return { declared, names };
+    return { declared, attempts, gate, names };
 }
 
-/** A name whose connect answered `connected` in this call was opened from this call's declaration of it. */
+/**
+ * A name whose connect answered `connected` in this call was opened from this
+ * call's declaration of it — the one that verdict answers. The connect
+ * attempts, in order, each declaration not switched off that the D2 gate
+ * addresses ({@link isDatasourceAddressed}), one verdict per attempt, so the
+ * `connected` verdict's position among the name's verdicts is its
+ * declaration's position among those attempts: a later declaration when an
+ * earlier one's connect failed. Verdicts that do not line up with the attempts
+ * (a connect that threw, read back from its retained state) answer the first
+ * declaration not switched off.
+ */
 function noteBootOpeners(boot: BootDeclarations, verdicts: ReadonlyArray<{ name: string; status: string }>): void {
+    const position = new Map<string, number>();
     for (const { name, status } of verdicts) {
+        const index = position.get(name) ?? 0;
+        position.set(name, index + 1);
         if (status !== 'connected') continue;
         const record = boot.names.get(name);
-        const opener = boot.declared.get(name);
-        if (record && record.opener === undefined && opener !== undefined) record.opener = opener;
+        if (!record || record.opener !== undefined) continue;
+        const attempted = (boot.attempts.get(name) ?? []).filter(({ datasource }) =>
+            datasource?.active !== false && (boot.gate === undefined || isDatasourceAddressed(datasource, boot.gate)));
+        const answered = verdicts.filter((verdict) => verdict.name === name).length;
+        const opener = attempted.length === answered ? attempted[index]?.packageId : boot.declared.get(name);
+        if (opener !== undefined) record.opener = opener;
     }
 }
 
@@ -572,6 +645,56 @@ export function recordBootDatasourceConnect(
 }
 
 /**
+ * After a boot call's connect (or with no connection service to run one):
+ * note whose declaration opened each connection, register each name two
+ * packages declare as its holder's declaration ({@link registerBootHolders}),
+ * and report each clash once ({@link reportBootNameClashes}).
+ */
+function settleBootNames(
+    ctx: PluginContext,
+    tag: string,
+    boot: BootDeclarations,
+    verdicts: ReadonlyArray<{ name: string; status: string }>,
+): void {
+    noteBootOpeners(boot, verdicts);
+    registerBootHolders(ctx, tag, boot);
+    reportBootNameClashes(ctx, tag, boot);
+}
+
+/**
+ * One identity per datasource name: each name this call declares that two
+ * packages declare is registered as its holder's declaration — the package
+ * whose connection serves it, else its first declarer — whenever the
+ * registration is not that package's yet. Registration runs before the
+ * connect, so this is where a declaration the connect made the holder (an
+ * earlier declarer's connect failed) replaces the earlier one. Lenient, as the
+ * registration is: a registry that refuses leaves the item as it was.
+ */
+function registerBootHolders(ctx: PluginContext, tag: string, boot: BootDeclarations): void {
+    const metadata = optionalService<{ registerInMemory?: (t: string, n: string, d: unknown) => void }>(ctx, 'metadata');
+    if (typeof metadata?.registerInMemory !== 'function') return;
+    for (const name of boot.declared.keys()) {
+        const record = boot.names.get(name);
+        if (!record || record.declarers.length < 2) continue;
+        const holder = bootHolder(record);
+        const declaration = holder === undefined ? undefined : record.declarations.get(holder);
+        if (holder === undefined || !declaration || record.registered === holder) continue;
+        try {
+            metadata.registerInMemory(
+                'datasource',
+                name,
+                applyProtection({ ...declaration.datasource, origin: 'code' }, declaration.owner),
+            );
+            record.registered = holder;
+        } catch (err) {
+            ctx.logger.warn(`${tag} failed to register code-defined datasources`, {
+                error: (err as Error)?.message ?? String(err),
+            });
+        }
+    }
+}
+
+/**
  * A boot composing two packages that declare one datasource name keeps ONE
  * connection for the name — the one opened from the first declaration to
  * connect — and every other declaring package's objects bound to the name are
@@ -582,17 +705,11 @@ export function recordBootDatasourceConnect(
  * database while everything looks normal, the same consequence the rehydrate
  * of an older install reports ({@link leaveHeldNames}).
  */
-function reportBootNameClashes(
-    ctx: PluginContext,
-    tag: string,
-    boot: BootDeclarations,
-    verdicts: ReadonlyArray<{ name: string; status: string }>,
-): void {
-    noteBootOpeners(boot, verdicts);
+function reportBootNameClashes(ctx: PluginContext, tag: string, boot: BootDeclarations): void {
     for (const name of boot.declared.keys()) {
         const record = boot.names.get(name);
         if (!record || record.declarers.length < 2) continue;
-        const holder = record.opener ?? record.declarers[0];
+        const holder = bootHolder(record)!;
         const others = record.declarers.filter((packageId) => packageId !== holder && !record.reported.has(packageId));
         if (others.length === 0) continue;
         for (const packageId of others) record.reported.add(packageId);

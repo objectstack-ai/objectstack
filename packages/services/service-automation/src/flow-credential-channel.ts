@@ -56,6 +56,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { PackageScopedNameRefusedError, type PackageScopedRefusal } from '@objectstack/core';
 import type { FlowCredentialSource } from './engine.js';
 import {
     FLOW_METADATA_TYPE,
@@ -172,7 +173,15 @@ export class FlowCredentialChannel implements FlowCredentialSource {
     /** flow name → the ACTIVE positions the channel holds. */
     private readonly activeIndex = new Map<string, Set<string>>();
 
-    constructor(private readonly resolveEngine: () => FlowCredentialEngine | undefined) {}
+    /**
+     * @param sharedRefusalOf [ADR-0150 D8 row R9, #31696] The refusal of `name` for a writer with no package
+     *   when two or more packages hold it (the engine's `flowHolder`), else `undefined`: this channel reads
+     *   and writes by name, so there a write that would touch a row is refused ({@link store}, {@link promote}).
+     */
+    constructor(
+        private readonly resolveEngine: () => FlowCredentialEngine | undefined,
+        private readonly sharedRefusalOf?: (name: string) => PackageScopedRefusal | undefined,
+    ) {}
 
     // ── the presence index ─────────────────────────────────────────────────
 
@@ -315,10 +324,14 @@ export class FlowCredentialChannel implements FlowCredentialSource {
      *
      * Throws {@link FlowCredentialChannelRefusal} (503) when a value cannot be
      * stored safely; nothing is written in that case.
+     * [#31696] Under a name two or more packages hold, a save that would write or remove a row is refused
+     * (409, naming every holder) before anything is written: any row may be another package's.
      */
     async store(args: { name: string; state: FlowCredentialState; body: unknown }): Promise<unknown> {
         const positions = flowCredentialPositions(args.body);
         const explicit = positions.filter((p) => p.form === 'value');
+        const shared = this.sharedRefusalOf?.(args.name);
+        if (shared && explicit.length > 0) throw sharedNameWriteRefusal(args.name, shared);
         const engine = this.resolveEngine();
         if (!engine) {
             // Nothing to write and nothing held: a body with no credential keeps
@@ -327,6 +340,9 @@ export class FlowCredentialChannel implements FlowCredentialSource {
             return stripFlowCredentialValues(args.body);
         }
         const rows = await this.readRows(engine, args.name, args.state);
+        if (shared && [...rows.keys()].some((k) => !keptPositions(positions).has(k))) {
+            throw sharedNameWriteRefusal(args.name, shared);
+        }
 
         // 1. Every explicit value FIRST. With no crypto provider the engine
         //    refuses the first write before any row exists, so a refused save
@@ -427,12 +443,17 @@ export class FlowCredentialChannel implements FlowCredentialSource {
      * absent position with no draft row keeps the active one; a cleared,
      * unusable or vanished position loses its active row. The draft rows are
      * consumed either way.
+     * [#31696] Under a name two or more packages hold, one that would touch a row is refused, as {@link store} is.
      */
     async promote(args: { name: string; body: unknown }): Promise<{ promoted: number; removed: number }> {
         const engine = this.requireEngine(args.name);
         const positions = flowCredentialPositions(args.body);
         const draft = await this.readRows(engine, args.name, 'draft');
         const active = await this.readRows(engine, args.name, 'active');
+        const shared = this.sharedRefusalOf?.(args.name);
+        if (shared && (draft.size > 0 || [...active.keys()].some((k) => !keptPositions(positions).has(k)))) {
+            throw sharedNameWriteRefusal(args.name, shared);
+        }
         let promoted = 0;
         let removed = 0;
         for (const position of positions) {
@@ -485,6 +506,21 @@ export class FlowCredentialChannel implements FlowCredentialSource {
         }
         return removed;
     }
+}
+
+/** The positions whose row a write keeps: withheld (absent) or rotated (an explicit value). */
+function keptPositions(positions: readonly FlowCredentialPosition[]): Set<string> {
+    return new Set(positions.filter((p) => p.form === 'absent' || p.form === 'value').map((p) => positionKey(p.nodeId, p.key)));
+}
+
+/** [#31696] The ADR-0150 refusal (409) of a credential write under a shared flow name, prefixed with what was refused. */
+function sharedNameWriteRefusal(name: string, refusal: PackageScopedRefusal): PackageScopedNameRefusedError {
+    return new PackageScopedNameRefusedError({
+        ...refusal,
+        message: `Flow '${name}' was not saved: it would write or remove a stored flow credential, and a flow `
+            + 'credential belongs to one package\'s flow, but this save names no package. Nothing was written. '
+            + refusal.message,
+    });
 }
 
 /**

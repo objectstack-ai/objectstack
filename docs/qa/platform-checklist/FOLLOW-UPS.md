@@ -939,3 +939,243 @@ the run's boot.
    /api/v1/packages/com.example.showcase`.
 6. **The pair's extension has no name in the list.** The All metadata `object_extension` list
    draws the pair's extension row with "—" in the name column. This is a display issue only.
+
+## 16. Scoped sweep 2026-11-10 — themes 1 and 3 since 18.3.0 (#32019, epic #32022 M1)
+
+**Not a full sweep.** One writer worked sequentially, with no hunter subagents. The scope is
+the epic's theme 1 (ADR-0150 package namespaces) and theme 3 (AI service accounts and
+identity), read from source at `60f8149e` against the 18.3.0 subject `83d7e4ae`. The pass
+enumerated the PRs of those two themes that landed since 18.3.0. It then ran three of the six
+SWEEP.md angles on what they touched:
+
+- angle 3: the route ledgers (`route-ledger.ts`, `auth-route-ledger.ts`);
+- angle 2: the spec and objectql constants that bound each refusal (the refused literals, the
+  one-holder, co-owner and read-by-package type lists), used as `variants`;
+- angle 5: ADR-0150 and ADR-0151 against what the runtime serves.
+
+Angles 1, 4 and 6 (console surfaces, built-in apps, the design system) were not run. The one
+browser clause is the SSO Providers record. So this section supports **no** claim about what
+else is missing. No live run was made: every clause is read from source, and each item's
+`automated.ref` names the pins that hold it today.
+
+- **25 new items**, all `since: "v18.4"` except the one `planned` item, whose `since` is
+  `null`: a planned item's `since` is a target release, and none is chosen.
+  - Theme 1, 17 items (16 active, 1 planned):
+    - `api-backend.meta-qualified-item-read`, `api-backend.actions-namespace-address` and
+      `api-backend.automation-namespace-address`;
+    - `ai.mcp-namespace-faces`;
+    - `platform-core.namespace-object-name-refusal`,
+      `platform-core.namespace-co-owner-name-refusal` and `platform-core.bare-name-one-holder-refusal`;
+    - `cli.address-grammar-reserved-names`;
+    - `access-security.permission-set-package-resolution`,
+      `access-security.permission-set-address-in-execution-context` and
+      `access-security.sharing-queue-assignment-package-resolution`;
+    - `automation.flow-reference-package-resolution`;
+    - `integration-system.job-package-key`;
+    - the upgrade pair `platform-core.activation-ledger-package-key-upgrade` and
+      `platform-core.stored-reference-package-backfill-upgrade`, with `cli.migrate-stored-references`;
+    - planned: `api-backend.client-sdk-namespace-address`.
+  - Theme 3, 8 items (all active):
+    - `identity-auth.ai-service-account-register-and-key` and `identity-auth.ai-service-account-lifecycle`;
+    - `access-security.ai-service-account-agent-ceiling`,
+      `access-security.agent-ceiling-set-assignment-refusal` and `access-security.credential-use-audit-row`;
+    - `identity-auth.scim-refused-audit-row`, `identity-auth.idp-group-permission-set-mapping` and
+      `identity-auth.sso-provider-groups-claim`.
+- **Re-read at the merged base `0f7389cc`.** main moved 31 commits before this landed.
+  Two surfaces first written here as `planned` landed in that time: the qualified
+  `/automation`, hook and connector doors (#32001, #32049), and the context's permission set
+  addresses (#32027). Both items are now active. They are new items, not promotions, because
+  neither reached main as `planned`. #32056 widened the MCP agent ceiling set rule (ADR-0090
+  D10) to four more doors. That rule is not the AI service account's ceiling (ADR-0151 D3), so
+  it has its own item, `access-security.agent-ceiling-set-assignment-refusal`.
+  `access-security.ai-service-account-agent-ceiling` now covers both of its own paths (a set
+  and a position, by insert and by update) and the point where the two rules meet. #31968
+  made `os validate` and `os build` refuse a namespace that spells an address literal. That
+  left `cli.address-grammar-reserved-names` with a fixture no build can produce, so that item
+  now drives the build refusal and hand-edits the artifact for its install leg.
+  `cli.migrate-stored-references` gains the report's new `literalNamespaces` section as a
+  variant. Those six items are read at `0f7389cc`; the rest at `60f8149e`.
+- **The upgrade path.** The epic asks for the upgrade from an 18.3.0 database's stored
+  references, not only fresh installs. The two upgrade items and the CLI item boot this tree
+  on an 18.3.0-shaped SQLite copy, built by one of two routes:
+  - a blank scaffold written by npm `@objectstack/cli@18.3.0`;
+  - or a copy of this tree's own database with the new columns set back to NULL.
+
+  Every dogfood pin named in their `automated.ref` boots a database this tree wrote. None
+  boots a file 18.3.0 wrote, so the first live run of route (a) is new evidence.
+- **Accuracy fixes, each a revision with its history row:**
+  - `platform-core.activation-ledger-row-contract` (rev 10) still said one row per
+    `(metadata_type, name)` over exactly two key parts. The key is now
+    `(metadata_type, package_id, name)`, plus the boot-built package-less partial index.
+  - `ai.skill-instructions-mcp-prompts` (rev 5): a package skill is now listed under its face
+    `NS-NAME`.
+- **`coverage.json`**: the new items are mapped to the kinds they drive. The `queue` and
+  `assignment_rule` waivers were re-audited. They stand, because the new item declares both
+  only to drive the activation door's 409, and the entries now say so.
+
+### 16a. Declared but not landed — written as `planned`, already carded
+
+- The client SDK takes no namespace: `actions.invoke` takes `objectName, actionName`, and
+  `meta.getItem` takes `{ packageId }`. Tracked by #31695 (open).
+- The same-object, same-name action pair's 409 on the bare door is not landed (#31697). The
+  actions item says not to score its absence.
+- Landed before merge, so no longer listed here: the qualified `/automation`, hook and
+  connector doors (#32001, #32049; #31691 is closed) and the context's permission set
+  addresses (#32027, part of #31971). Both are active items now.
+
+### 16b. Measured from source — notes for owners, no card filed
+
+- **The two transports spell the qualified read's 404 differently.** The REST route manager
+  answers `404 ENDPOINT_NOT_FOUND` "Not found" for a middle segment that is no namespace, and
+  a dispatcher host answers `404 ROUTE_NOT_FOUND` (the `ROUTE_LEDGER` note). Each keeps its own
+  unmatched answer, so this is by design. The item accepts either.
+- **`ObjectStoreMetadataActivationStore.setActive` finds its row by `(metadata_type, name)`.**
+  That is narrower than the three-column key. It is consistent today, because no door writes
+  two rows for one name: the catalog door refuses a name two packages hold with 409, and the
+  flow, action and webhook names have one holder. A future writer for an uncovered type that
+  lets two packages each switch one name would need the package in that lookup.
+  `platform-core.activation-ledger-row-contract` source[2] now says this.
+- **`create-key` past the expiry ceiling** answers `400 VALIDATION_FAILED` at `expires_at`,
+  with `POST /keys`'s message, rather than `API_KEY_EXPIRY_TOO_LONG`. The route-ledger row
+  records this as the accepted shape. No action.
+
+- **`assemble-execution-context.test.ts` still calls the addresses "decided but not yet
+  filled".** #32027 fills them. The case passes only because its authz fixture carries no
+  addresses, so it cannot tell the OAuth agent arm (no addresses, by design) from the human
+  arm. A case whose authz carries addresses would pin the agent arm. Until then,
+  `access-security.permission-set-address-in-execution-context` scores that clause from the
+  source and says so.
+- **The MCP ceiling set's refusal sentence says "a person" to an AI service account too.** The
+  rule judges every holder, so granting `mcp_agent_data_read` to an account is refused, which
+  is right, with "…not a permission set for a person…". The wording reads oddly for an agent
+  holder. No action proposed.
+
+### 16c. Fixtures worth adding
+
+- **An 18.3.0 database recipe.** QA record #32093 proved route (a) on a real 18.3.0 database
+  made with npm `create-objectstack@18.3.0`. Its environment fingerprint should become an
+  area-level recipe in `platform-core`, with that provenance. The three upgrade items would
+  then reference it instead of carrying the prose. The same run's item-text findings (PR
+  comment 6765257068) are applied to those three items: the plan order, the index-listing
+  oracle, the rows 18.3.0 cannot write, the fresh-install comparison, the scaffold's
+  `approvals`, the telemetry sibling and `--dev`, and the TTY-only prompt. Its product defects
+  are carded separately: #32094, #32095, #32096.
+- **An OIDC identity provider** (§3, still open). It blocks the SSO leg of
+  `identity-auth.idp-group-permission-set-mapping`. It also gates provider registration for
+  `identity-auth.sso-provider-groups-claim` if registration needs a reachable issuer.
+
+### 16d. Security note
+
+No security finding was made, and none is withheld.
+
+## 17. Scoped sweep 2026-11-10 — themes 2, 4 and 5 since 18.3.0 (#32020, epic #32022 M2)
+
+**Not a full sweep.** One writer worked sequentially, with no hunter subagents. The scope is
+the epic's theme 2 (multi-replica on Redis), theme 4 (the recycle bin) and theme 5
+(multi-currency record-mode amounts), read from source at `43a51b55` against the 18.3.0
+subject `83d7e4ae`. The pass enumerated the commits of those themes since 18.3.0 (51 match
+the card's premise grep) and ran these SWEEP.md angles on what they touched:
+
+- angle 3: the route ledgers (`rest-route-ledger.ts`'s four recycle-bin rows, the runtime
+  `route-ledger.ts` `/packages` rows and `GET /ready`, the settings ledger, the install-local
+  routes);
+- angle 2: the spec constants that bound each refusal (the four restore refusal codes, the two
+  grant keys, the retention default and variable, the `homeAmount` pointers and rate scale);
+- angle 1, limited to the theme's own surfaces: the delete toast, the Setup recycle-bin page,
+  the form's home-amount preview and Studio's `homeAmount` editor;
+- angle 5: ADR-0144 (as amended), ADR-0148 and `content/docs/kernel/cluster.mdx` against what
+  the runtime serves.
+
+Angles 4 and 6 were not run, so this section supports **no** claim about what else is
+missing. No live run was made: every clause is read from source, and each item's
+`automated.ref` names the pins that hold it today.
+
+- **16 new items**, all `since: "v18.4"` except the one `planned` item (`since: null`).
+  - Theme 4, 4 items (all active): `api-backend.recycle-bin-delete-entry-restore`,
+    `api-backend.recycle-bin-refusals-purge-empty`, `records-forms.delete-toast-undo-restore`
+    and `records-forms.setup-recycle-bin-page`.
+  - Theme 5, 4 items (3 active, 1 planned): `records-forms.home-amount-preview-states`,
+    `studio-authoring.currency-home-amount-editor`,
+    `studio-authoring.currency-field-repointed-refusal`; planned:
+    `records-forms.master-detail-child-follows-parent-currency`.
+  - Theme 2, 8 items (all active, 6 of them `blocked(fixture)`, see 17c): runnable today,
+    `cli.serve-multi-replica-local-database-refusal` and
+    `cli.start-multi-replica-auth-secret-refusal`; blocked,
+    `attachments-storage.multi-replica-local-root-refusal`,
+    `platform-core.multi-replica-package-change-refusal` (the seven package doors,
+    install-local and the clone that would create a customization package),
+    `platform-core.ready-cluster-driver-health`, `platform-core.cluster-membership-heartbeat`,
+    `platform-core.settings-change-reaches-every-replica` and
+    `platform-core.shared-redis-cache-across-replicas`.
+- **Accuracy fix, a revision with its history row:** `records-forms.multi-currency-invoice`
+  (rev 2) carried `since: "v18"`, but the showcase invoice became the multi-currency example
+  in #31757, after 18.3.0, and the hint and preview its `acceptance[5]` reads landed in #31638
+  and #31724. It is `v18.4` now. Its knownGaps[0] said a child amount cannot take its
+  parent's currency; the spec admits that since #31956, and the engine half is the planned
+  item above.
+- **`coverage.json`**: the recycle-bin items are mapped to `crud_endpoints` (and the grants
+  item to `permission`); the currency items to `field`, and the re-point refusal to `object`
+  and `metadata_endpoints`. The invoice item, never mapped, is now under `field`. The six
+  blocked theme-2 items are mapped nowhere: an item no run can drive does not carry a kind.
+- **Commits the premise grep matches that no item here covers.** Docs, ADR, skills and test
+  commits change no surface (#30182, #30186, #30263, #30755, #30776, #30929, #30994, #31769,
+  #31917, #31986). Outside the card's named list, and not checked against existing items: the
+  home-amount recompute and the record-currency code backfill (#30183, #30737, #30809, #30867),
+  the rate-scale and summary refusals at the authoring door (#30644, #31976), the analytics
+  home-field proof (#30176), the automation currency screen field (#30269), the console fixes
+  (#30495, #30868), the replica fixes with no new surface (#31584, #31721, #31747, #31816,
+  #31996, #32204) and the objectql delete fix #31702. #31848 is a false match: "concurrency"
+  contains the grep's "currency".
+
+### 17a. Declared but not landed — written as `planned`, already carded
+
+- A `master_detail` child following its parent's currency (ADR-0144 D2 as amended, #31917).
+  The authoring door admits the `PARENT_FIELD.CODE_FIELD` path (#31956), but at `43a51b55`
+  the engine reads `currencyField` as a field of the same row
+  (`packages/objectql/src/validation/record-currency-code.ts`), so a path reads no code.
+  Tracked by #31911 (open).
+
+### 17b. Measured from source — notes for owners, no card filed
+
+- **A storage settings change to the local adapter under declared replicas is saved but not
+  applied.** The refusal is the settings subscriber's
+  (`packages/services/service-storage/src/storage-service-plugin.ts`): it logs the refusal and
+  "The storage settings change was NOT applied: the current adapter keeps serving.", while the
+  settings door has already stored the value. The next boot then reads the stored value and
+  stops at the `kernel:ready` refusal. An operator who changed it in Setup sees a saved setting
+  and a replica that will not restart. The item scores the subscriber's refusal and says the
+  PUT may answer 200. No card filed: whether the door should refuse first is the owner's call.
+- **`readClusterMembers()` has no consumer.** No HTTP door, CLI command or console surface
+  reads it at `43a51b55`, so `platform-core.cluster-membership-heartbeat` reads the keys in
+  Redis. The function is the read half a later surface would use.
+- **No stock persona holds `allowRestoreOwnDeleted` without `manageRecycleBin`.** The admin
+  holds both through `modifyAllRecords`, and `showcase_contributor` holds neither. So the
+  own-entry half of the restore rule (D5) and an Undo withheld from a caller without the grant
+  are pinned by tests only (see 17c).
+
+### 17c. Fixtures worth adding
+
+- **Two replicas on Redis, gated.** Six theme-2 items need two replicas declared on the redis
+  cluster driver over one Redis and one shared Postgres, with one `OS_AUTH_SECRET`. The open
+  tree registers no multi-node gate: `checkMultiNodeAllowed` fails closed with none
+  registered, `os serve` falls back to the in-process driver, and the split-brain guard refuses
+  the declared topology. So no declared multi-replica boot on Redis reaches `kernel:ready` on a
+  stock tree. The carriers ship with a distribution. The open-tree route the CLI pin uses is an
+  app whose own `@objectstack/service-cluster` calls `registerMultiNodeGate` on the instance
+  `os serve` imports from the host
+  (`packages/cli/test/serve-multi-node-gate-declaration.integration.test.ts`, `writeApp`),
+  there with a memory stand-in for the driver. A run that does the same with the real redis
+  driver, and proves it with the premise check each item states, should become an area-level
+  recipe with that provenance, and lift `blocked` on the six items in the same edit. The two
+  CLI refusals need no gate and are runnable now.
+- **A restore-own-deleted persona.** A permission set granting `allowRestoreOwnDeleted` alone
+  on one writable showcase object, bound to a member, would let
+  `api-backend.recycle-bin-refusals-purge-empty` drive "a caller restores the entries it
+  deleted, and only those", and `records-forms.delete-toast-undo-restore` show the Undo
+  withheld from a caller without it.
+- **A unique field on a showcase business object.** `RESTORE_UNIQUE_VALUE_TAKEN` has no live
+  fixture: no showcase business object declares a unique field.
+
+### 17d. Security note
+
+No security finding was made, and none is withheld.

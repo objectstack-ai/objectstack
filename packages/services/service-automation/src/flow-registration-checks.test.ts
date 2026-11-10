@@ -82,3 +82,62 @@ describe('registration advisory: a time-relative flow is typed against the swept
             .toMatch(/unknown field `industry`/);
     });
 });
+
+/**
+ * A flow with no `start` node can never run: `execute()` begins at that node,
+ * so before this check the shape registered (and the `POST /automation` door
+ * answered 200 for it) and failed only at the first trigger, with
+ * `FLOW_NO_START_NODE`. The check refuses it at registration, located at the
+ * flow's `nodes` and naming the missing `start` node, whatever the status.
+ */
+describe('registration: a flow with no start node is refused, naming the missing node', () => {
+    const silent = () => loggerCapturing([]);
+    const startless = (status: string, nodes: unknown[] = [{ id: 'notify_owner', type: 'end', label: 'End' }]) => ({
+        name: 'no_start', label: 'No Start', type: 'autolaunched', status, nodes, edges: [],
+    });
+    const refusalOf = (flow: unknown): Error => {
+        try {
+            new AutomationEngine(silent()).registerFlow('no_start', flow as never);
+        } catch (e) {
+            return e as Error;
+        }
+        throw new Error('control: registerFlow was expected to refuse this flow');
+    };
+
+    it.each(['active', 'draft', 'obsolete'])('status %s: refused, the message names the missing start node and the cure', async (status) => {
+        const engine = new AutomationEngine(silent());
+        expect(() => engine.registerFlow('no_start', startless(status) as never))
+            .toThrow(/^Flow 'no_start' rejected: the flow's top-level `nodes` hold no `start` node \(found 1 node\(s\), of type `end`\)/);
+        const message = refusalOf(startless(status)).message;
+        expect(message).toContain('FLOW_NO_START_NODE');
+        expect(message).toContain("Add a node with `type: 'start'`");
+        // Nothing was armed: the refusal is thrown before anything is held.
+        expect(await engine.getFlow('no_start')).toBeNull();
+    });
+
+    it('an empty `nodes` list is refused the same way', () => {
+        expect(refusalOf(startless('active', [])).message).toMatch(/hold no `start` node \(the list is empty\)/);
+    });
+
+    it('a start node only inside a loop body does not count: the flow\'s own graph has none', () => {
+        const flow = startless('active', [{
+            id: 'each', type: 'loop', label: 'Each',
+            config: {
+                collection: { dialect: 'cel', source: 'items' },
+                body: { nodes: [{ id: 'inner', type: 'notify', label: 'Tell', config: { recipients: ['usr_1'], title: 'Hi', message: 'Done' } }], edges: [] },
+            },
+        }]);
+        expect(refusalOf(flow).message).toMatch(/hold no `start` node \(found 1 node\(s\), of type `loop`\)/);
+    });
+
+    it('control: the same flow with a start node registers, in every status', async () => {
+        for (const status of ['active', 'draft', 'obsolete']) {
+            const engine = new AutomationEngine(silent());
+            engine.registerFlow('no_start', startless(status, [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'notify_owner', type: 'end', label: 'End' },
+            ]) as never);
+            expect(await engine.getFlow('no_start'), status).not.toBeNull();
+        }
+    });
+});
