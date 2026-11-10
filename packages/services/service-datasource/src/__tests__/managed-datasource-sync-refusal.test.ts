@@ -37,6 +37,9 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+// Pay the driver's first load at collection, not inside a clocked `it()`
+// (`check:test-source-alias`).
+import '@objectstack/driver-sql';
 import { ObjectQL } from '@objectstack/objectql';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 import type { IDataDriver } from '@objectstack/spec/contracts';
@@ -47,6 +50,7 @@ import type { ExternalDatasourceService } from '../external-datasource-service.j
 import { DatasourceAdminService, type StoredDatasource } from '../datasource-admin-service.js';
 import { registerDatasourceAdminRoutes } from '../admin-routes.js';
 import { ENTITLED_CREDENTIAL, createSessionAuthService, createGrantsEngine } from './entitled-caller.fixture.js';
+import { thrownRefusalText } from '../datasource-refusal.js';
 
 const teardowns: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -214,7 +218,8 @@ describe('every Sync door refuses a managed datasource', () => {
     expect(tables.status).toBe(400);
     expect(tables.body.error.code).toBe('EXTERNAL_DATASOURCE_ERROR');
     expect(tables.body.error.message).toContain(`Datasource '${name}' is managed`);
-    expect(tables.body.error.message).toContain(REMEDY);
+    expect(tables.body.error.details).toMatchObject({ reason: 'not_federation_source' });
+    expect(tables.body.error.details.hint).toContain(REMEDY);
 
     const draft = await call('POST', `/${name}/object-draft`, { table: 'orders' });
     expect(draft.status).toBe(400);
@@ -230,7 +235,7 @@ describe('every Sync door refuses a managed datasource', () => {
     expect(await thrown(external.refreshCatalog(name))).toMatchObject({ code: 'EXTERNAL_DATASOURCE_ERROR', status: 400 });
     const imported = await thrown(external.importObject(name, 'orders'));
     expect(imported).toMatchObject({ code: 'EXTERNAL_IMPORT_ERROR', status: 400 });
-    expect(imported.message).toContain(REMEDY);
+    expect(thrownRefusalText(imported)).toContain(REMEDY);
     expect(saves).toEqual([]);
   });
 

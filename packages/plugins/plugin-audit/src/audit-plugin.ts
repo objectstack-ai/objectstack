@@ -15,7 +15,14 @@ import type {
   ISecurityService,
   ISharingService,
 } from '@objectstack/spec/contracts';
-import { SysAuditLog, SysActivity, SysComment, SysCommentReaction } from './objects/index.js';
+import {
+  SysAuditLog,
+  SysActivity,
+  SysComment,
+  SysCommentReaction,
+  SysAuditCheckpoint,
+  SysAuditSigningKey,
+} from './objects/index.js';
 import { SysAuditLogDetailPage } from './sys-audit-log.page.js';
 // `sys_notification` was parked here "until that [ADR-0030] migration lands".
 // It has landed, so the contribution moved to @objectstack/service-messaging —
@@ -288,7 +295,12 @@ export class AuditPlugin implements Plugin {
       scope: 'system',
       defaultDatasource: 'cloud',
       namespace: 'sys',
-      objects: [SysAuditLog, SysActivity, SysComment, SysCommentReaction],
+      // [ADR-0154] The checkpoints and the signing keys are registered ahead
+      // of the sealer and signer that write them (#31908 P1b-1), so their
+      // tables, translations and `get` / `list` doors exist when the sealer
+      // lands. `sys_audit_amendment` is registered with its first writer, the
+      // redaction amendments of P3; until then it is declared and unregistered.
+      objects: [SysAuditLog, SysActivity, SysComment, SysCommentReaction, SysAuditCheckpoint, SysAuditSigningKey],
       // The ledger row's record page: its fields, and every ledger row about
       // the same record beside it, so a `config_change` row sits next to the
       // mirror's rows about the same settings row (`sys-audit-log.page.ts`).
@@ -736,7 +748,8 @@ export class AuditPlugin implements Plugin {
    * declared this. If a table is in fact missing, the audit writers report the
    * missing-table failure at `error` on the first write that needs it, and
    * `os migrate apply`, the documented path, was measured to create all four
-   * tables. `syncObjectSchema` itself stays ungated, because it is also how a
+   * tables this method provisioned then (the two ADR-0154 tables were added
+   * after that measurement and take the same path). `syncObjectSchema` itself stays ungated, because it is also how a
    * runtime publish gives a new object its table.
    *
    * ## Why this method reports where each table landed (#4887)
@@ -763,7 +776,7 @@ export class AuditPlugin implements Plugin {
    * different problems, and the log now distinguishes them.
    */
   private async provisionSystemTables(engine: IDataEngine, ctx: PluginContext): Promise<void> {
-    const objects = [SysAuditLog, SysActivity, SysComment, SysCommentReaction];
+    const objects = [SysAuditLog, SysActivity, SysComment, SysCommentReaction, SysAuditCheckpoint, SysAuditSigningKey];
     // [#22984] FIRST: a deployment that declared its DDL managed out-of-band
     // gets none from here either. See "Why the flag skips this provisioning".
     if (bootSchemaSyncSkipped(engine)) {
@@ -779,8 +792,7 @@ export class AuditPlugin implements Plugin {
       // wholesale" and "provisioning ran fine" produced identical logs. Name
       // the consequence, not just the condition.
       ctx.logger.warn(
-        'AuditPlugin: this engine exposes no syncObjectSchema() — sys_audit_log / sys_activity / sys_comment / ' +
-          'sys_comment_reaction were NOT ' +
+        `AuditPlugin: this engine exposes no syncObjectSchema() — ${objects.map((obj) => obj.name).join(' / ')} were NOT ` +
           'provisioned up-front and stay lazy-created on first WRITE. An env that READS one first (the home page ' +
           'activity feed queries sys_activity before any mutation) will log "no such table" until something writes to it.',
       );

@@ -2106,6 +2106,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Permitir aprovisionamiento just-in-time",
         help: "Con la política de audiencia solo por invitación, crea una cuenta para quien inicia sesión a través de este proveedor sin cuenta ni invitación. Desactivado de forma predeterminada: esa persona es rechazada. Las demás políticas aprovisionan como antes. Cámbielo con «Editar opciones de inicio de sesión»."
       },
+      skip_user_info: {
+        label: "Leer las notificaciones solo del token de ID",
+        help: "Solo OIDC. Lee el correo electrónico, el nombre y los grupos del token de ID verificado del proveedor de identidad y no llama a su endpoint userinfo. Actívalo para Microsoft Entra ID, cuya respuesta de userinfo no incluye grupos ni preferred_username. Desactivado de forma predeterminada: un proveedor con endpoint userinfo lee sus notificaciones de esa respuesta. Cámbialo con «Editar opciones de inicio de sesión»."
+      },
       user_id: {
         label: "Registrado por",
         help: "Usuario que registró este proveedor"
@@ -2432,6 +2436,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Resumen del token",
         help: "HMAC-SHA-256 (base64url) del token de portador, con clave derivada del secreto de autenticación del despliegue; unidireccional: el texto sin cifrar se muestra una vez al emitirlo y nunca se almacena."
       },
+      token_hint: {
+        label: "Pista del token",
+        help: "Los últimos cuatro caracteres del token bearer, registrados al emitirlo para distinguir las credenciales de una misma conexión; nunca el token ni su resumen. Vacío en una credencial emitida antes de que se registraran las pistas."
+      },
       active: {
         label: "Activa",
         help: "Interruptor de revocación: una credencial inactiva se rechaza al verificarla."
@@ -2439,6 +2447,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       expires_at: {
         label: "Caduca el",
         help: "Caducidad estricta opcional para la rotación escalonada de credenciales; una credencial caducada se rechaza."
+      },
+      last_used_at: {
+        label: "Último uso",
+        help: "Cuándo autenticó la credencial una solicitud SCIM por última vez, registrado como máximo una vez por minuto; vacío si no se ha registrado ningún uso"
       },
       user_id: {
         label: "Emitida por",
@@ -2488,6 +2500,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "He guardado el token",
           fields: {
             token: "Token de portador",
+            tokenHint: "Pista del token",
             connectionId: "ID de conexión",
             expiresAt: "Caduca el"
           }

@@ -25,10 +25,14 @@
 
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { I18nProvider } from '@object-ui/i18n';
+import { AuthProvider } from '@object-ui/auth';
+import type { AuthClient } from '@object-ui/auth';
 import { VerifyEmailPage } from '../VerifyEmailPage';
+import { LoginPage } from '../LoginPage';
 
 afterEach(() => {
   cleanup();
@@ -38,6 +42,8 @@ afterEach(() => {
 const VALID = 'eyJhbGciOiJIUzI1NiJ9.valid+token/with=chars';
 const EXPIRED = 'eyJhbGciOiJIUzI1NiJ9.expired';
 const GARBAGE = 'not-a-jwt';
+/** A token whose verification would also sign in an account with an enrolled second factor. */
+const SECOND_FACTOR = 'eyJhbGciOiJIUzI1NiJ9.second-factor';
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), {
@@ -69,6 +75,8 @@ function verifyEmailServer(opts: { htmlOk?: boolean } = {}) {
     }
     const token = url.searchParams.get('token');
     if (token === VALID) return json(200, { status: true, user: null });
+    // The address is verified; the sign-in it would make waits for the second factor.
+    if (token === SECOND_FACTOR) return json(200, { twoFactorRedirect: true, twoFactorMethods: ['totp'] });
     if (token === EXPIRED) return json(401, { code: 'TOKEN_EXPIRED', message: 'Token expired' });
     return json(401, { code: 'INVALID_TOKEN', message: 'Invalid token' });
   });
@@ -127,6 +135,73 @@ describe('VerifyEmailPage verifies through GET ?token= (objectui#11633)', () => 
     renderAt(`?token=${encodeURIComponent(VALID)}`);
 
     expect(await screen.findByText('Verification failed')).toBeInTheDocument();
+    expect(screen.queryByText('Email verified')).toBeNull();
+  });
+});
+
+describe('VerifyEmailPage — a verification that signs in an account with an enrolled second factor continues to the two-factor prompt', () => {
+  const USER = { id: 'u1', name: 'Totp User', email: 'totp@example.com' };
+
+  function stubClient(): AuthClient {
+    return {
+      getSession: vi.fn().mockResolvedValue(null),
+      getConfig: vi.fn().mockResolvedValue({}),
+      signOut: vi.fn().mockResolvedValue(undefined),
+      // The password door answers the challenge for this account, as better-auth's `/sign-in/email` does.
+      signIn: vi.fn().mockResolvedValue({ twoFactor: { methods: ['totp'] } }),
+      verifySignInTwoFactor: vi.fn().mockResolvedValue({ user: USER, session: { token: 'session-token' } }),
+    } as unknown as AuthClient;
+  }
+
+  function renderConsoleAt(search: string, client: AuthClient) {
+    return render(
+      <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
+        <AuthProvider authUrl="/api/v1/auth" client={client}>
+          <MemoryRouter initialEntries={[`/verify-email${search}`]}>
+            <Routes>
+              <Route path="/verify-email" element={<VerifyEmailPage />} />
+              <Route path="/login" element={<LoginPage />} />
+            </Routes>
+          </MemoryRouter>
+        </AuthProvider>
+      </I18nProvider>,
+    );
+  }
+
+  it('says the address is verified, shows no error, and the sign-in it leads to asks for the second factor', async () => {
+    verifyEmailServer();
+    const client = stubClient();
+    renderConsoleAt(`?token=${encodeURIComponent(SECOND_FACTOR)}`, client);
+
+    expect(await screen.findByText('Email verified')).toBeInTheDocument();
+    expect(screen.queryByText('Verification failed')).toBeNull();
+
+    fireEvent.click(screen.getByRole('link', { name: 'Go to sign in' }));
+
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText('Email'), USER.email);
+    await user.type(screen.getByLabelText('Password'), 'correct horse');
+    await user.click(screen.getByRole('button', { name: 'Sign In' }));
+
+    expect(await screen.findByTestId('two-factor-challenge')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('CONTROL: a plain account verifies as today', async () => {
+    verifyEmailServer();
+    renderConsoleAt(`?token=${encodeURIComponent(VALID)}`, stubClient());
+
+    expect(await screen.findByText('Email verified')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Go to sign in' })).toBeInTheDocument();
+    expect(screen.queryByText('Verification failed')).toBeNull();
+  });
+
+  it('CONTROL: a bad token still shows the existing error', async () => {
+    verifyEmailServer();
+    renderConsoleAt(`?token=${GARBAGE}`, stubClient());
+
+    expect(await screen.findByText('Verification failed')).toBeInTheDocument();
+    expect(screen.getByText('Invalid token')).toBeInTheDocument();
     expect(screen.queryByText('Email verified')).toBeNull();
   });
 });

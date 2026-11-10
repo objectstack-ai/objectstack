@@ -2106,6 +2106,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         label: "Just-in-Time-Bereitstellung zulassen",
         help: "Bei der Zielgruppenrichtlinie „Nur auf Einladung“ ein Konto für eine Person anlegen, die sich ohne Konto oder Einladung über diesen Anbieter anmeldet. Standardmäßig deaktiviert: Eine solche Person wird abgewiesen. Andere Richtlinien stellen wie bisher bereit. Ändern Sie dies mit „Anmeldeoptionen bearbeiten“."
       },
+      skip_user_info: {
+        label: "Claims nur aus dem ID-Token lesen",
+        help: "Nur OIDC. Liest E-Mail-Adresse, Name und Gruppen aus dem verifizierten ID-Token des Identitätsanbieters und ruft dessen Userinfo-Endpunkt nicht auf. Für Microsoft Entra ID einschalten: Dessen Userinfo-Antwort enthält keine Gruppen und kein preferred_username. Standardmäßig aus: Ein Anbieter mit Userinfo-Endpunkt liest seine Claims aus dieser Antwort. Änderung über „Anmeldeoptionen bearbeiten“."
+      },
       user_id: {
         label: "Registriert von",
         help: "Benutzer, der diesen Anbieter registriert hat"
@@ -2432,6 +2436,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         label: "Token-Digest",
         help: "HMAC-SHA-256 (base64url) des Bearer-Tokens, verschlüsselt mit dem Authentifizierungsgeheimnis der Bereitstellung – nur in eine Richtung; der Klartext wird beim Ausstellen einmal angezeigt und nie gespeichert."
       },
+      token_hint: {
+        label: "Token-Hinweis",
+        help: "Die letzten vier Zeichen des Bearer-Tokens, bei der Ausstellung erfasst, damit sich die Anmeldedaten einer Verbindung unterscheiden lassen; nie das Token oder sein Digest. Leer bei Anmeldedaten, die ausgestellt wurden, bevor Hinweise erfasst wurden."
+      },
       active: {
         label: "Aktiv",
         help: "Widerrufsschalter – inaktive Anmeldedaten werden bei der Prüfung abgelehnt"
@@ -2439,6 +2447,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       expires_at: {
         label: "Läuft ab am",
         help: "Optionaler fester Ablauf für eine gestaffelte Rotation der Anmeldedaten; abgelaufene Anmeldedaten werden abgelehnt"
+      },
+      last_used_at: {
+        label: "Zuletzt verwendet am",
+        help: "Wann die Anmeldedaten zuletzt eine SCIM-Anfrage authentifiziert haben, höchstens einmal pro Minute erfasst; leer, wenn keine Verwendung erfasst wurde"
       },
       user_id: {
         label: "Ausgestellt von",
@@ -2488,6 +2500,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Ich habe das Token gespeichert",
           fields: {
             token: "Token",
+            tokenHint: "Token-Hinweis",
             connectionId: "Verbindungs-ID",
             expiresAt: "Läuft ab am"
           }
