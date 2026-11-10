@@ -1041,8 +1041,17 @@ export const CEILINGS = new Map([
   // Ctrl+Z works too` — the `undoable` bullet). The file is 8602 -> 9035 bytes -> 2259 tokens,
   // zero headroom to absorb any of it, ceiling +108, pinned AT the measurement. Same ruling as
   // the line above (2026-10-27, tap A: 「A:先削重复,余额按实测提高」).
-  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(9035 / 4)
-  ['skills/objectstack-ui/rules/actions.md', 2259],
+  // 2259 -> 2453: the `preflight` teaching beside `submitText` — one bullet (the read's shape, its
+  // closed hole set, `GET` only, `fields` rows as in `resultDialog.fields`, `seed` filling a
+  // read-only param, the two places it is refused). PAID DOWN FIRST by 79 bytes of true
+  // restatement in this file: the H2 "Opening in a New Tab" loses its key list (the two H3s right
+  // below it name `openIn` and `opensInNewTab` + `newTabUrl`), and the `openIn` H3 loses its tail
+  // "— simplest case (static `target`)" (the paragraph's first sentence says "A static `target`
+  // URL on a `type: 'url'` action"). The file is 9028 -> 9810 bytes -> 2453 tokens, the row's 8
+  // bytes of headroom absorbed, ceiling +194, pinned AT the measurement. Same ruling as the lines
+  // above (2026-10-27, tap A): 「A:先削重复,余额按实测提高」.
+  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(9810 / 4)
+  ['skills/objectstack-ui/rules/actions.md', 2453],
   // 6090 -> 6252 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +162 tokens,
   // zero headroom to absorb any of it, ceiling +162. Maintainer ruling

@@ -18,7 +18,6 @@ import {
     FEDERATION_WRITE_CAPABILITY,
     federationCapabilityRefusal,
     metaRequestLocale,
-    projectMetaActionForCaller,
     translateMetaList,
     type FederationCallKind,
 } from '@objectstack/rest';
@@ -43,6 +42,8 @@ import { classifyResumeResult } from './automation.js';
 // imported, never restated, so `describe_object` and `list_objects` answer a
 // caller the same field set the `/meta` object read answers that caller.
 import { maskObjectSchema, resolveObjectMasker } from './meta.js';
+// [ADR-0106 D1] The run doors' visibility question, asked where an action is listed or run.
+import { actionRunFieldVisibilityRefusal, actionRunMasker, projectActionForCaller } from '../action-run-visibility.js';
 
 /** Typed as the registered vocabulary, so a misspelling fails to compile. */
 const FIELD_VISIBILITY_UNRESOLVED: ErrorCode = 'FIELD_VISIBILITY_UNRESOLVED';
@@ -711,6 +712,9 @@ export function buildMcpBridge(
         return masked.document;
     };
 
+    /** This request's masker ({@link resolveObjectMasker}), asked per object. */
+    const callerMasker = async (name: string) => (await (masker ??= resolveObjectMasker(deps, context, 'object')))(name);
+
     /**
      * [ADR-0106 D1] The object one action is summarised against, as THIS
      * caller is served it — or `undefined` when the `/meta` object door's
@@ -733,13 +737,13 @@ export function buildMcpBridge(
         obj: any,
         objects: ReadonlyMap<string, any>,
     ): Promise<{ obj: any } | undefined> => {
-        const ownerName = obj && typeof obj === 'object'
-            ? objectName
-            : (actionExec.isObjectLessActionKey(objectName) ? undefined : objectName);
-        const projected = await projectMetaActionForCaller({
-            masker: async (name) => (await (masker ??= resolveObjectMasker(deps, context, 'object')))(name),
-            readObject: async (name) => (name === objectName && obj ? obj : objects.get(name)),
-        }, action, ownerName);
+        // The object it is judged against is the run doors' own
+        // (`projectActionForCaller`), so an action listed here is one
+        // `run_action` runs for this caller, and one left out is one it answers
+        // as an unknown name.
+        const projected = await projectActionForCaller(callerMasker, {
+            action, objectName, obj, readObject: (name) => objects.get(name),
+        });
         if (projected.kind === 'fault') throw fieldVisibilityRefusal(projected.object);
         if (projected.kind === 'withhold') return undefined;
         return { obj: projected.object ?? obj };
@@ -1060,6 +1064,16 @@ export function buildMcpBridge(
             );
             const found = declarations.find((d) => d.objectName === objectName && d.action?.name === name);
             if (!found) return undefined;
+            // [ADR-0106 D1] An action this caller is not shown is answered as
+            // a name nothing declares, as `run_action` answers it: never its
+            // gate's refusal.
+            const objects = new Map<string, any>();
+            for (const o of await readServedObjects()) if (typeof o?.name === 'string') objects.set(o.name, o);
+            const projected = await projectActionForCaller(actionRunMasker(deps, context), {
+                action: found.action, objectName, obj: found.obj, readObject: (other) => objects.get(other),
+            });
+            if (projected.kind === 'fault') throw actionRunFieldVisibilityRefusal(projected.object);
+            if (projected.kind === 'withhold') return undefined;
             if (actionExec.systemObjectActionExposureError(deps, found.action, objectName)) return undefined;
             if (actionExec.actionAiExposureError(deps, found.action)) return undefined;
             return actionExec.actionPermissionRefusal(deps, found.action, ec, objectName) ?? undefined;
@@ -1627,7 +1641,8 @@ export async function resumeActionRun(
     const flowName: unknown = run.flowName;
     const runObject = typeof trigger?.object === 'string' && trigger.object !== '' ? trigger.object : undefined;
     const meta: any = await getMeta();
-    const declarations = await actionExec.collectActionDeclarations(deps, meta, await readObjects?.(), await readActions?.());
+    const objectsListing = await readObjects?.();
+    const declarations = await actionExec.collectActionDeclarations(deps, meta, objectsListing, await readActions?.());
     const candidates = declarations.filter(({ action, objectName }) =>
         action?.type === 'flow'
         && !actionExec.isDeclarativeUpdateAction(action)
@@ -1637,7 +1652,19 @@ export async function resumeActionRun(
     const activationEngine: any = await deps.getObjectQL(context, envId).catch(() => undefined);
     let admitted: { action: any; objectName: string } | undefined;
     let firstRefusal: Error | undefined;
+    // [ADR-0106 D1] A candidate this caller is not shown does not exist for
+    // them, as `run_action` answers it: it admits nothing and is no refusal.
+    const callerMasker = actionRunMasker(deps, context);
+    const objectsByName = new Map<string, any>();
+    for (const o of objectsListing ?? []) if (typeof o?.name === 'string') objectsByName.set(o.name, o);
     for (const candidate of candidates) {
+        const projected = await projectActionForCaller(callerMasker, {
+            action: candidate.action, objectName: candidate.objectName, obj: candidate.obj,
+            readObject: async (other) => objectsByName.get(other)
+                ?? (typeof meta?.getObject === 'function' ? await meta.getObject(other) : undefined),
+        });
+        if (projected.kind === 'fault') throw actionRunFieldVisibilityRefusal(projected.object);
+        if (projected.kind === 'withhold') continue;
         const refusal = resumeAdmissionRefusal(deps, candidate, ec, input, activationEngine);
         if (!refusal) {
             admitted = candidate;

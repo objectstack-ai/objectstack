@@ -412,3 +412,89 @@ describe('LoginForm — config-loading gate (#2625)', () => {
     expect(screen.queryByTestId('login-config-loading')).toBeNull();
   });
 });
+
+describe('LoginForm — "Sign in with SSO" with no email (objectstack#32087)', () => {
+  const NO_EMAIL = 'Enter your work email to sign in with SSO.';
+
+  function ssoFetchSpy() {
+    return vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ message: 'email, organizationSlug, domain or providerId is required' }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+  }
+
+  it('says to enter a work email and sends no request when the field is empty', async () => {
+    const fetchSpy = ssoFetchSpy();
+    try {
+      renderLogin(createMockClient({ features: { sso: true } }));
+      fireEvent.click(await screen.findByRole('button', SSO_BUTTON));
+
+      const alert = await screen.findByRole('alert');
+      expect(alert.textContent).toBe(NO_EMAIL);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('treats a whitespace-only field as empty', async () => {
+    const fetchSpy = ssoFetchSpy();
+    try {
+      renderLogin(createMockClient({ features: { sso: true } }));
+      const button = await screen.findByRole('button', SSO_BUTTON);
+      fireEvent.change(screen.getByLabelText('Email'), { target: { value: '   ' } });
+      fireEvent.click(button);
+
+      expect((await screen.findByRole('alert')).textContent).toBe(NO_EMAIL);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('the SSO-only form answers an empty submit the same way, with no request', async () => {
+    const fetchSpy = ssoFetchSpy();
+    try {
+      renderLogin(createMockClient({ features: { sso: true, ssoEnforced: true } }));
+      fireEvent.submit(await screen.findByTestId('login-sso-email-form'));
+
+      expect((await screen.findByRole('alert')).textContent).toBe(NO_EMAIL);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('draws the host label in place of the English default', async () => {
+    const fetchSpy = ssoFetchSpy();
+    try {
+      renderLogin(createMockClient({ features: { sso: true } }), {
+        labels: { ssoEmailRequiredText: '请输入你的工作邮箱，再使用 SSO 登录。' },
+      });
+      fireEvent.click(await screen.findByRole('button', SSO_BUTTON));
+
+      expect((await screen.findByRole('alert')).textContent).toBe('请输入你的工作邮箱，再使用 SSO 登录。');
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('CONTROL: with an email in the field, the SSO request goes out', async () => {
+    const fetchSpy = ssoFetchSpy();
+    try {
+      renderLogin(createMockClient({ features: { sso: true } }));
+      const button = await screen.findByRole('button', SSO_BUTTON);
+      fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'a@corp.example' } });
+      fireEvent.click(button);
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+      expect(String(fetchSpy.mock.calls[0][0])).toBe('/api/v1/auth/sign-in/sso');
+      expect(screen.queryByText(NO_EMAIL)).toBeNull();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+});
