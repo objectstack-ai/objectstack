@@ -104,12 +104,13 @@ export function assertRefusalHead(head: string): void {
 }
 
 /**
- * A field name as a head prints it: whole up to 48 characters, then elided.
+ * A field name as a head prints it: whole up to 40 characters, then elided.
  * A head that names a caller's field (a `where` key) must stay inside the
- * bound whatever the caller sent.
+ * bound whatever the caller sent; at 40 the longest comparand head (the
+ * `$notContains` list arm) is 151 characters.
  */
 export function headFieldName(field: string): string {
-  return field.length > 48 ? `${field.slice(0, 47)}…` : field;
+  return field.length > 40 ? `${field.slice(0, 39)}…` : field;
 }
 
 /**

@@ -476,7 +476,7 @@ import {
 } from './filter-comparand-refusal-text';
 import { SCALAR_COMPARAND_OPERATORS } from './filter-comparand-operators';
 import { isReadableIds } from './readable-ids';
-import { REFUSAL_HEAD_MAX, assertRefusalHead, headFieldName } from '../shared/refusal-head';
+import { REFUSAL_HEAD_MAX, headFieldName } from '../shared/refusal-head';
 
 /**
  * [ADR-0139 D1] What a caller of {@link assertListComparandShapes} declares
@@ -616,7 +616,8 @@ function invalidFilterComparandError(context: string | undefined, message: strin
   };
   err.code = 'INVALID_FILTER';
   err.status = 400;
-  err.refusalHead = comparandRefusalHead(context, head);
+  const refusalHead = comparandRefusalHead(context, head);
+  if (refusalHead !== undefined) err.refusalHead = refusalHead;
   return err;
 }
 
@@ -632,8 +633,12 @@ function invalidFilterComparandError(context: string | undefined, message: strin
  * field and the fix, which is what a reader acts on, and the message keeps
  * the context either way.
  */
-function comparandRefusalHead(context: string | undefined, head: string): string {
-  assertRefusalHead(head);
+function comparandRefusalHead(context: string | undefined, head: string): string | undefined {
+  // ⛔ Never thrown from here: this runs while a refusal is being built, and a
+  // throw would replace the 400 with a fault. A head past the bound (which the
+  // field elision keeps from happening, pinned per arm at a 200-character
+  // field) is dropped, and the door answers the whole message as before.
+  if (head.trim() === '' || head.includes('\n') || head.length > REFUSAL_HEAD_MAX) return undefined;
   const led = context ? `${context}: ${head}` : head;
   return led.length <= REFUSAL_HEAD_MAX ? led : head;
 }
@@ -801,7 +806,7 @@ function blankRangeBoundError(
     `one-sided range use {"$gte": min} / {"$lte": max}. Authoring spellings: ` +
     `${spellings.join(', ')}. The filter was NOT applied, and an unapplied filter would have ` +
     `returned the UNFILTERED result set.`,
-    `${headPosition('$between', field)} requires two non-blank bounds: write the bound, or use ` +
+    `${headPosition('$between', field)} requires two non-blank bounds: write both, or use ` +
     `"$gte" or "$lte" for one side.`,
   );
 }
