@@ -30,6 +30,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { RECYCLE_BIN_ENTRY_FIELDS, RECYCLE_BIN_OBJECT, type EngineAggregateOptions, type EngineUpdateOptions } from '@objectstack/spec/data';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { ObjectQL } from './engine.js';
+import { aggregateSummaryValue } from './summary-aggregate.js';
+import { assertRecordCurrencyCodes, followParentCurrencyCodes, recordCurrencyPairs } from './validation/record-currency-code.js';
 
 function makeDriver() {
   const stores = new Map<string, Map<string, any>>();
@@ -645,5 +647,226 @@ describe('a record a child row follows keeps its code field (ADR-0144 D2, amende
     await engine.purge(entry.id, { context: { isSystem: true } } as any);
     await engine.update('pp_invoice', { id: 'inv_usd', currency_code: 'EUR' });
     expect(storeFor('pp_invoice').get('inv_usd').currency_code).toBe('EUR');
+  });
+});
+
+// ── [ADR-0144 D2, amended] The parent a child amount follows is read through the writer's read door ──
+//
+// Review record 6773022506 on PR #32216, F1 and F2. A non-system writer that
+// names a parent it cannot read (another owner's row, another organization's
+// row) is answered `reference_not_found` before any currency verdict, exactly
+// as a parent that exists nowhere: no missing-rate refusal naming the
+// parent's currency, no blank-code refusal saying the parent has none. A
+// writer with no read door (a system writer) never stores a following amount
+// without a currency either: a parent its elevated read does not find is no
+// code, and the amount is refused.
+
+const ORG_X = 'org_x_acme';
+const ORG_Y = 'org_y_globex';
+const GP_INVOICE = {
+  name: 'gp_invoice',
+  fields: { title: { type: 'text' }, owner_name: { type: 'text' }, currency_code: CODE_FIELD },
+};
+const GP_LINE = {
+  name: 'gp_line',
+  fields: {
+    title: { type: 'text' },
+    invoice: { type: 'master_detail', reference: 'gp_invoice' },
+    line_date: { type: 'date' },
+    amount: {
+      type: 'currency',
+      currencyConfig: {
+        currencyMode: 'record',
+        currencyField: 'invoice.currency_code',
+        homeAmount: { field: 'amount_home', rateDate: 'line_date', rateField: 'amount_rate' },
+      },
+    },
+    amount_home: { type: 'currency', readonly: true },
+    amount_rate: { type: 'number', readonly: true },
+  },
+};
+/** Alice, a member of organization X, reads the invoices she owns. */
+const ALICE = { context: { userId: 'alice', tenantId: ORG_X } } as const;
+/** Carol's read of the invoice object fails outright. */
+const CAROL = { context: { userId: 'carol', tenantId: ORG_X } } as const;
+/** A system writer bound to organization X. */
+const SYSTEM_X = { context: { isSystem: true, tenantId: ORG_X } } as const;
+
+/** The guards' driver, scoped to the organization the driver options name (`SqlDriver.applyTenantScope`). */
+function makeTenantDriver() {
+  const d = makeDriver();
+  const inScope = (row: Record<string, unknown>, options: any): boolean => {
+    const tenantId = options?.tenantId;
+    if (tenantId === undefined || tenantId === null || tenantId === '') return true;
+    const own = row?.organization_id ?? null;
+    return own === null || String(own) === String(tenantId);
+  };
+  const find = d.driver.find.bind(d.driver);
+  d.driver.find = async (o: string, ast: any, options?: any) => (await find(o, ast)).filter((r: any) => inScope(r, options));
+  d.driver.findOne = async (o: string, ast: any, options?: any) => (await d.driver.find(o, ast, options))[0] ?? null;
+  return d;
+}
+
+async function bootGated() {
+  const engine = new ObjectQL();
+  engine.setTenancyPostureProvider(() => 'isolated');
+  const d = makeTenantDriver();
+  engine.registerDriver(d.driver, true);
+  await engine.init();
+  engine.registry.registerObject(GP_INVOICE as any);
+  engine.registry.registerObject(GP_LINE as any);
+  engine.setHomeLocalizationResolver(async () => ({ currency: 'CNY' }));
+  // A non-system caller reads only the invoices it owns; Carol's read fails.
+  engine.registerMiddleware(async (ctx: any, next: () => Promise<void>) => {
+    if (ctx.object === 'gp_invoice' && ['find', 'findOne'].includes(ctx.operation) && ctx.context?.isSystem !== true) {
+      if (ctx.context?.userId === 'carol') throw Object.assign(new Error('[Security] Access denied: read on gp_invoice'), { code: 'PERMISSION_DENIED', status: 403 });
+      const scoped = { owner_name: ctx.context?.userId ?? '' };
+      const ast: any = ctx.ast ?? { object: ctx.object };
+      ast.where = ast.where ? { $and: [ast.where, scoped] } : scoped;
+      ctx.ast = ast;
+    }
+    await next();
+  });
+  // No rate table is registered: an amount converted from any code but the home one (CNY) would be
+  // refused ERR_EXCHANGE_RATE_MISSING naming that code, the oracle these pins rule out.
+  const invoices = d.storeFor('gp_invoice');
+  invoices.set('inv_mine', { id: 'inv_mine', title: 'mine', owner_name: 'alice', currency_code: 'CNY', organization_id: ORG_X });
+  invoices.set('inv_hidden', { id: 'inv_hidden', title: 'hidden', owner_name: 'bob', currency_code: 'EUR', organization_id: ORG_X });
+  invoices.set('inv_other_org', { id: 'inv_other_org', title: 'other org', owner_name: 'alice', currency_code: 'JPY', organization_id: ORG_Y });
+  const lines = d.storeFor('gp_line');
+  for (const [id, title] of [['l1', 'one'], ['b1', 'batch'], ['b2', 'batch']] as const) {
+    lines.set(id, { id, title, invoice: 'inv_mine', line_date: '2026-03-15', amount: 10, amount_home: 10, amount_rate: 1, organization_id: ORG_X });
+  }
+  return { engine, storeFor: d.storeFor };
+}
+
+/** The answer with the parent's id taken out, so two refusals of two ids compare. */
+const withoutId = (err: Thrown, id: string) => ({
+  ...httpOf(err),
+  fields: ((err as any)?.fields ?? []).map((f: any) => [f.field, f.code]),
+  message: String(err?.message ?? '').split(id).join('ID'),
+});
+
+describe('a followed parent the writer cannot read answers reference_not_found before any currency verdict (F1)', () => {
+  let engine: ObjectQL;
+  let storeFor: ReturnType<typeof makeDriver>['storeFor'];
+
+  beforeEach(async () => {
+    ({ engine, storeFor } = await bootGated());
+  });
+
+  /** The reference check's answer for a parent that exists nowhere: the answer an unreadable one must give. */
+  const nowhere = async () => withoutId(
+    await refusalOf(engine.insert('gp_line', { title: 'n', invoice: 'inv_nowhere', line_date: '2026-03-15', amount: 5 }, ALICE as any)),
+    'inv_nowhere',
+  );
+  const expectAsNowhere = async (err: Thrown, id: string) => {
+    const answer = withoutId(err, id);
+    expect(answer).toMatchObject({ code: 'VALIDATION_FAILED', status: 400, fields: [['invoice', 'reference_not_found']] });
+    expect(answer.message).not.toMatch(/EUR|JPY|currenc|rate/i);
+    expect(answer).toEqual(await nowhere());
+  };
+
+  it('the control: a line under an invoice the writer reads is written and converted', async () => {
+    const row = await engine.insert('gp_line', { title: 'ok', invoice: 'inv_mine', line_date: '2026-03-15', amount: 5 }, ALICE as any);
+    expect(storeFor('gp_line').get(row.id)).toMatchObject({ amount_home: 5, amount_rate: 1 });
+  });
+
+  for (const [parent, why] of [['inv_hidden', 'another owner\'s invoice'], ['inv_other_org', 'another organization\'s invoice']] as const) {
+    it(`insert under ${why}`, async () => {
+      const before = storeFor('gp_line').size;
+      await expectAsNowhere(await refusalOf(engine.insert('gp_line', { title: 'x', invoice: parent, line_date: '2026-03-15', amount: 5 }, ALICE as any)), parent);
+      expect(storeFor('gp_line').size).toBe(before);
+    });
+
+    it(`by-id update moving a line under ${why}`, async () => {
+      await expectAsNowhere(await refusalOf(engine.update('gp_line', { id: 'l1', invoice: parent }, ALICE as any)), parent);
+      expect(storeFor('gp_line').get('l1')).toMatchObject({ invoice: 'inv_mine', amount_home: 10 });
+    });
+
+    it(`predicate update moving lines under ${why}`, async () => {
+      await expectAsNowhere(await refusalOf(engine.update('gp_line', { invoice: parent }, { where: { title: 'batch' }, multi: true, ...ALICE } as any)), parent);
+      expect(storeFor('gp_line').get('b1')).toMatchObject({ invoice: 'inv_mine' });
+    });
+
+    it(`the validate() previews of an insert and an update under ${why}`, async () => {
+      const inserted = await engine.validate('gp_line', { title: 'x', invoice: parent, line_date: '2026-03-15', amount: 5 }, ALICE as any);
+      const moved = await engine.validate('gp_line', { id: 'l1', invoice: parent }, { mode: 'update', ...ALICE } as any);
+      for (const preview of [inserted, moved]) {
+        expect(preview.valid).toBe(false);
+        expect(preview.results?.[0]?.errors?.map((e) => [e.field, e.code])).toEqual([['invoice', 'reference_not_found']]);
+        expect(JSON.stringify(preview.results?.[0]?.errors)).not.toMatch(/EUR|JPY|currenc|rate/i);
+      }
+    });
+  }
+
+  it('a read door that fails answers as one that returns nothing: reference_not_found, no currency', async () => {
+    const err = await refusalOf(engine.insert('gp_line', { title: 'c', invoice: 'inv_hidden', line_date: '2026-03-15', amount: 5 }, CAROL as any));
+    expect(withoutId(err, 'inv_hidden')).toMatchObject({ code: 'VALIDATION_FAILED', status: 400, fields: [['invoice', 'reference_not_found']] });
+    expect(String(err?.message)).not.toMatch(/EUR|currenc|rate/i);
+  });
+});
+
+describe('no following amount is stored without a currency, whoever writes it (F2)', () => {
+  let engine: ObjectQL;
+  let storeFor: ReturnType<typeof makeDriver>['storeFor'];
+
+  beforeEach(async () => {
+    ({ engine, storeFor } = await bootGated());
+  });
+
+  it('a system insert naming a parent that is not there, or one in another organization, is refused ERR_CURRENCY_CODE_REQUIRED', async () => {
+    for (const parent of ['inv_nowhere', 'inv_other_org']) {
+      const before = storeFor('gp_line').size;
+      const err = await refusalOf(engine.insert('gp_line', { title: 's', invoice: parent, line_date: '2026-03-15', amount: 5 }, SYSTEM_X as any));
+      expect(envelopeOf(err), parent).toEqual(CODE_REQUIRED);
+      expect(err?.field).toBe('invoice.currency_code');
+      expect(storeFor('gp_line').size, parent).toBe(before);
+    }
+  });
+
+  it('a system update moving a line under a parent that is not there is refused, and the old home amount is not kept beside it', async () => {
+    const err = await refusalOf(engine.update('gp_line', { id: 'l1', invoice: 'inv_nowhere' }, SYSTEM_X as any));
+    expect(envelopeOf(err)).toEqual(CODE_REQUIRED);
+    expect(storeFor('gp_line').get('l1')).toMatchObject({ invoice: 'inv_mine', amount_home: 10, amount_rate: 1 });
+  });
+
+  it('an update that would convert a line again (its document date) is judged too: under a parent that is gone it is refused', async () => {
+    storeFor('gp_line').set('orphan', { id: 'orphan', title: 'o', invoice: 'inv_gone', line_date: '2026-03-15', amount: 7, amount_home: 7, amount_rate: 1, organization_id: ORG_X });
+    const err = await refusalOf(engine.update('gp_line', { id: 'orphan', line_date: '2026-04-01' }, SYSTEM_X as any));
+    expect(envelopeOf(err)).toEqual(CODE_REQUIRED);
+    expect(storeFor('gp_line').get('orphan')).toMatchObject({ line_date: '2026-03-15', amount_home: 7 });
+    // The control: under a parent with a code, the same update converts again.
+    await engine.update('gp_line', { id: 'l1', line_date: '2026-04-01' }, SYSTEM_X as any);
+    expect(storeFor('gp_line').get('l1')).toMatchObject({ line_date: '2026-04-01', amount_home: 10, amount_rate: 1 });
+  });
+
+  it('a parent named by a value that is no row id reads as no code', async () => {
+    const follow = await followParentCurrencyCodes(
+      recordCurrencyPairs(GP_LINE.fields),
+      [{ invoice: { id: 'inv_mine' } }, { invoice: ['inv_mine'] }],
+      async () => new Map([['inv_mine', { id: 'inv_mine', currency_code: 'CNY' }]]),
+    );
+    for (const invoice of [{ id: 'inv_mine' }, ['inv_mine']]) {
+      const image = follow({ invoice, amount: 5 });
+      expect(image['invoice.currency_code']).toBeNull();
+      const err = await refusalOf(() => assertRecordCurrencyCodes('gp_line', GP_LINE.fields, image, 'insert'));
+      expect(envelopeOf(err)).toEqual(CODE_REQUIRED);
+    }
+  });
+});
+
+describe('the roll-up channel rides one concrete parent id (F3)', () => {
+  it('aggregateSummaryValue, a public export, admits one parent\'s total and refuses a cross-parent sum', async () => {
+    const { engine } = await bootFollowing();
+    await engine.insert('pp_line', { title: 'u', invoice: 'inv_usd', amount: 100 });
+    await engine.insert('pp_line', { title: 'e', invoice: 'inv_eur', amount: 100 });
+    const desc = { parentObject: 'pp_invoice', summaryField: 'subtotal', childObject: 'pp_line', fkField: 'invoice', fn: 'sum', sourceField: 'amount' } as const;
+    expect(await aggregateSummaryValue(engine as never, desc as never, 'inv_usd')).toBe(100);
+    for (const parentId of [{ $ne: null }, { $in: ['inv_usd', 'inv_eur'] }, '']) {
+      const err = await refusalOf(aggregateSummaryValue(engine as never, desc as never, parentId as never));
+      expect(envelopeOf(err), JSON.stringify(parentId)).toEqual(INVALID_FIELD);
+      expect(err?.field).toBe('amount');
+    }
   });
 });
