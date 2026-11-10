@@ -56,7 +56,8 @@ export interface DatasetBatchCapableSource {
 export interface DatasetQueryCoalescer {
   /** The data source this coalescer batches for; a caller holding another one asks that one. */
   readonly source: DatasetBatchCapableSource;
-  queryDataset(dataset: string | Record<string, unknown>, selection: unknown, options?: DatasetQueryOptions): Promise<any>;
+  /** Resolves to whatever the source's single door resolves to for this query; the caller names that type. */
+  queryDataset<R = unknown>(dataset: string | Record<string, unknown>, selection: unknown, options?: DatasetQueryOptions): Promise<R>;
 }
 
 interface PendingQuery {
@@ -75,7 +76,7 @@ interface PendingQuery {
  */
 export function createDatasetQueryCoalescer(source: DatasetBatchCapableSource): DatasetQueryCoalescer {
   if (typeof source.queryDatasetBatch !== 'function') {
-    return { source, queryDataset: (...args) => source.queryDataset(...args) };
+    return { source, queryDataset: <R>(...args: PendingQuery['args']) => source.queryDataset(...args) as Promise<R> };
   }
   let pending: PendingQuery[] = [];
 
@@ -115,9 +116,9 @@ export function createDatasetQueryCoalescer(source: DatasetBatchCapableSource): 
 
   return {
     source,
-    queryDataset: (...args) => new Promise((resolve, reject) => {
+    queryDataset: <R>(...args: PendingQuery['args']) => new Promise<R>((resolve, reject) => {
       if (pending.length === 0) queueMicrotask(flush);
-      pending.push({ args, resolve, reject });
+      pending.push({ args, resolve: resolve as (value: unknown) => void, reject });
     }),
   };
 }
