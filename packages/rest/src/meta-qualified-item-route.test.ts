@@ -346,13 +346,20 @@ describe('[#32310] GET /meta/dataset/:name?callerPackage= (ADR-0150 D3)', () => 
         expect(viaArm.body).toEqual(viaQualifier.body);
     });
 
-    it('refused 400 beside `?package=`, blank, on another type, and beside a qualified path — each naming both addresses', async () => {
+    it('refused 400 beside `?package=`, blank, `all`, on another type (also beside a layered member), and beside a qualified path — each naming both addresses', async () => {
         ship('dataset', 'pipeline', A);
         ship('page', 'home', A);
         for (const [path, params, query] of [
             [ITEM, { type: 'dataset', name: 'pipeline' }, { callerPackage: P, package: A }],
             [ITEM, { type: 'dataset', name: 'pipeline' }, { callerPackage: '' }],
+            // `all` names no package to `?package=`; read through, it was the bare read.
+            [ITEM, { type: 'dataset', name: 'pipeline' }, { callerPackage: 'all' }],
             [ITEM, { type: 'page', name: 'home' }, { callerPackage: P }],
+            // Rule 4 is asked before rule 3 (a member on the layered view), so
+            // the arm's own refusal answers, never a resolution.
+            [ITEM, { type: 'page', name: 'home' }, { layers: 'true', member: 'm', callerPackage: P }],
+            [ITEM, { type: 'dataset', name: 'pipeline' }, { layers: 'true', member: 'm', callerPackage: P, package: A }],
+            [ITEM, { type: 'dataset', name: 'pipeline' }, { layers: 'true', member: 'm', callerPackage: '' }],
             [ITEM, { type: 'datasets', name: 'pipeline' }, { callerPackage: P, package: A }],
             [QUALIFIED, { type: 'dataset', ns: 'alpha', name: 'pipeline' }, { callerPackage: P }],
         ] as const) {

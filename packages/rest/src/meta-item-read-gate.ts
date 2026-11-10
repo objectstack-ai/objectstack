@@ -2541,8 +2541,9 @@ export interface MetaItemQueryRefusal {
  *     package, beside `?package=` (two addresses on one read: the exact
  *     qualifier and the caller's resolution; neither is picked), or on a
  *     `target.type` outside {@link META_ITEM_CALLER_PACKAGE_TYPES} (a type
- *     that does not serve it; an unnamed type fails closed). Answered at the
- *     entry, with rules 1 and 2.
+ *     that does not serve it; an unnamed type fails closed). `all` names no
+ *     package, as it does for `?package=`. Answered at the entry, with rules 1
+ *     and 2, and asked before rule 3, which the transports answer later.
  *
  * `undefined` — go on, nothing sent — otherwise. A query that is not an object
  * carries no name, so it is judged by rule 3 alone (and passes it).
@@ -2575,14 +2576,19 @@ export function metaItemQueryRefusal(
         const repeated = repeatedOnceRefusal(query as Record<string, unknown>, once);
         if (repeated) return repeated;
     }
+    // [#32310] Rule 4 is asked BEFORE rule 3, never after it: both transports
+    // let rule 3 through at the entry (they answer it later, where the read
+    // chooses the layered view) and resolve the caller arm before that, so a
+    // rule 4 refusal decided after rule 3 was never answered — the arm then
+    // resolved on a type that does not serve it, or beside `?package=`.
+    if (door === 'item' && query && typeof query === 'object') {
+        const message = metaItemCallerPackageRefusalMessage(query as Readonly<Record<string, unknown>>, target?.type);
+        if (message !== undefined) return { status: 400, code: 'VALIDATION_ERROR', message, rule: 'caller-package' };
+    }
     if (door === 'item'
         && wantsMetaItemLayers(query as Readonly<Record<string, unknown>> | undefined)
         && metaMemberSelector(query).member !== undefined) {
         return { status: 400, code: 'VALIDATION_ERROR', message: LAYERED_VIEW_MEMBER_MESSAGE, rule: 'layered-member' };
-    }
-    if (door === 'item' && query && typeof query === 'object') {
-        const message = metaItemCallerPackageRefusalMessage(query as Readonly<Record<string, unknown>>, target?.type);
-        if (message !== undefined) return { status: 400, code: 'VALIDATION_ERROR', message, rule: 'caller-package' };
     }
     return undefined;
 }
@@ -2601,7 +2607,11 @@ export function metaItemCallerPackageRefusalMessage(
 ): string | undefined {
     if (!Object.prototype.hasOwnProperty.call(query, META_ITEM_CALLER_PACKAGE_PARAM)) return undefined;
     const caller = query[META_ITEM_CALLER_PACKAGE_PARAM];
-    if (typeof caller !== 'string' || caller.trim() === '') {
+    // `all` is refused with the blank value: the exact qualifier reads it as
+    // naming no package (`metaItemPackageBinding`), so an `all` that reached
+    // the resolution would fall through to the bare read, which the arm never
+    // answers.
+    if (typeof caller !== 'string' || caller.trim() === '' || caller === 'all') {
         return `\`?${META_ITEM_CALLER_PACKAGE_PARAM}=\` must name the package id of the item that reads this one; it names `
             + 'no package. Send the reader\'s package id, or address the holder exactly with `?package=`.';
     }

@@ -174,11 +174,19 @@ describe('1b. `callerPackage` builds `?callerPackage=` on the bare path (ADR-015
         expect(sent.map((s) => `${s.method} ${s.url}`)).toEqual([`POST ${BASE}/api/v1/analytics/dataset/query?callerPackage=${CRM}`]);
     });
 
-    it('CONTROL: omitted, both calls send what they sent before', async () => {
+    it('analytics.queryDatasetBatch sends it once, on the batch URL', async () => {
+        const queries = [{ datasetName: 'pipeline', selection: { measures: ['revenue'] } }];
+        const sent = await sentBy((c) => c.client.analytics.queryDatasetBatch(queries, { callerPackage: CRM }));
+        expect(sent.map((s) => `${s.method} ${s.url}`)).toEqual([`POST ${BASE}/api/v1/analytics/dataset/query/batch?callerPackage=${CRM}`]);
+    });
+
+    it('CONTROL: omitted, every call sends what it sent before', async () => {
         expect((await sentBy((c) => c.client.meta.getItem('dataset', 'pipeline'))).map((s) => s.url))
             .toEqual([`${BASE}/api/v1/meta/dataset/pipeline`]);
         const sent = await sentBy((c) => c.client.analytics.queryDataset({ datasetName: 'pipeline', selection: { measures: ['revenue'] } }));
         expect(sent.map((s) => s.url)).toEqual([`${BASE}/api/v1/analytics/dataset/query`]);
+        const batch = await sentBy((c) => c.client.analytics.queryDatasetBatch([{ datasetName: 'pipeline', selection: { measures: ['revenue'] } }]));
+        expect(batch.map((s) => s.url)).toEqual([`${BASE}/api/v1/analytics/dataset/query/batch`]);
     });
 });
 

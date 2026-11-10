@@ -552,11 +552,15 @@ describe('[#32310] POST /analytics/dataset/query?callerPackage= — the dataset 
 
   it('refused 400 beside `?package=`, blank, and repeated; each sentence names both parameters, nothing run', async () => {
     ship('sales', A);
-    for (const query of [{ callerPackage: P, package: A }, { callerPackage: '' }, { callerPackage: [P, A] }]) {
+    for (const query of [
+      { callerPackage: P, package: A }, { callerPackage: '' }, { callerPackage: [P, A] },
+      // `all` names no package to `?package=`; read through, it was the bare read.
+      { callerPackage: 'all' }, { callerPackage: { x: P } },
+    ] as Record<string, unknown>[]) {
       const answer = await send(query);
       expect([answer.status, answer.code], JSON.stringify(query)).toEqual([400, 'VALIDATION_ERROR']);
       expect(answer.queryDataset).not.toHaveBeenCalled();
-      if (!Array.isArray(query.callerPackage)) {
+      if (typeof query.callerPackage === 'string') {
         expect(answer.message, JSON.stringify(query)).toContain('?callerPackage=');
         expect(answer.message, JSON.stringify(query)).toContain('?package=');
       }
@@ -573,6 +577,53 @@ describe('[#32310] POST /analytics/dataset/query?callerPackage= — the dataset 
     expect(res.statusCode).toBe(503);
     expect(bare.getMetaItem).not.toHaveBeenCalled();
     expect(queryDataset).not.toHaveBeenCalled();
+  });
+
+  // [#32310, seat ruling M2] The batch door reads the arm once, from its URL,
+  // for every query: a malformed arm refuses the whole batch up front; the
+  // name's resolution is each query's own entry.
+  const sendBatch = async (query: Record<string, unknown>, names: string[]) => {
+    const queryDataset = vi.fn(async (dataset: any) => ({ rows: [], fields: [], object: dataset.object }));
+    const { rest } = buildServer(async () => ({ queryDataset }), protocol);
+    const batch = rest.getRoutes().find((r) => r.method === 'POST' && r.path.endsWith('/analytics/dataset/query/batch'));
+    const res = mockRes();
+    const queries = names.map((datasetName) => ({ datasetName, selection: { measures: ['revenue'] } }));
+    await batch!.handler({ method: 'POST', params: {}, query, headers: {}, body: { queries } } as any, res);
+    return { status: res.statusCode as number, body: res.body, queryDataset };
+  };
+
+  it('batch: each query resolves from the URL\'s caller package, and a name it cannot resolve is that query\'s 409 entry', async () => {
+    ship('sales', A);
+    ship('orders', A);
+    ship('orders', B);
+    ship('stock', C);
+    const answer = await sendBatch({ callerPackage: P }, ['sales', 'orders', 'stock', 'nowhere']);
+    expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+    const [dependency, ambiguous, outside, missing] = answer.body.data.results;
+    expect(dependency.data.object).toBe('alpha_item');
+    expect([ambiguous.status, ambiguous.error.code]).toEqual([409, 'RESOURCE_CONFLICT']);
+    expect(ambiguous.error.message).toContain(`package "${A}"`);
+    expect(ambiguous.error.message).toContain(`package "${B}"`);
+    expect([outside.status, outside.error.code]).toEqual([409, 'RESOURCE_CONFLICT']);
+    expect(outside.error.message).toContain(`package "${C}"`);
+    expect([missing.status, missing.error.code]).toEqual([404, 'NOT_FOUND']);
+    expect(answer.queryDataset).toHaveBeenCalledTimes(1);
+    // CONTROL: without the arm the batch's bare read of a dependency's name is unchanged.
+    const bare = await sendBatch({}, ['sales']);
+    expect(bare.body.data.results[0]).toEqual(dependency);
+  });
+
+  it('batch: a malformed arm refuses the whole batch 400 before any query runs', async () => {
+    ship('sales', A);
+    for (const query of [
+      { callerPackage: P, package: A }, { callerPackage: '' }, { callerPackage: 'all' },
+      { callerPackage: [P, A] }, { callerPackage: { x: P } },
+    ] as Record<string, unknown>[]) {
+      const answer = await sendBatch(query, ['sales', 'sales']);
+      expect([answer.status, answer.body?.success, answer.body?.error?.code], JSON.stringify(query))
+        .toEqual([400, false, 'VALIDATION_ERROR']);
+      expect(answer.queryDataset).not.toHaveBeenCalled();
+    }
   });
 
   it('CONTROL: the bare read and `?package=` answer as before', async () => {

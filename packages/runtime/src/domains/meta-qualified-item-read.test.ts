@@ -380,13 +380,19 @@ describe('[#32310] GET /meta/dataset/:name?callerPackage= on the dispatcher (ADR
         expect(far.body?.error?.message).toContain(`held outside the declared dependency closure of package "${P}"`);
     });
 
-    it('refused 400 beside `?package=`, on another type, and beside a qualified path', async () => {
+    it('refused 400 beside `?package=`, blank, `all`, on another type (also beside a layered member), and beside a qualified path', async () => {
         ship('dataset', 'pipeline', A);
         ship('page', 'home', A);
         for (const [path, query] of [
             ['/dataset/pipeline', { callerPackage: P, package: A }],
             ['/page/home', { callerPackage: P }],
             ['/dataset/alpha/pipeline', { callerPackage: P }],
+            // `all` names no package to `?package=`; read through, it was the bare read.
+            ['/dataset/pipeline', { callerPackage: 'all' }],
+            ['/dataset/pipeline', { callerPackage: '' }],
+            // Rule 4 is asked before rule 3 (a member on the layered view).
+            ['/page/home', { layers: 'true', member: 'm', callerPackage: P }],
+            ['/dataset/pipeline', { layers: 'true', member: 'm', callerPackage: P, package: A }],
         ] as const) {
             const answer = await read(path, { ...query });
             expect([answer.status, answer.body?.error?.code], `${path} ${JSON.stringify(answer.body)}`).toEqual([400, 'VALIDATION_ERROR']);
