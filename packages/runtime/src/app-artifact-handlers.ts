@@ -131,7 +131,13 @@
  */
 
 import type { PluginContext, SystemWriteOrganizationDecision } from '@objectstack/core';
-import { artifactPackageId, resolveArtifactPackageOrder } from '@objectstack/core';
+import {
+    PackageScopedNameRefusedError,
+    artifactPackageId,
+    describePackageScopedHolder,
+    resolveArtifactPackageOrder,
+    type PackageScopedRefusal,
+} from '@objectstack/core';
 import type {
     ConnectorSourcePullResult,
     IAutomationService,
@@ -536,13 +542,22 @@ export function judgeJobPull(
  * "the residual is not a package") unless a body carries it, so such a job
  * answers `undefined` and its pull names no package — the no-package read,
  * as before. An artifact without `packages[]` declares every job from `appId`.
+ *
+ * A job name more than one body declares, met by name (a JSON-loaded
+ * artifact binds the flattened top-level copies, so this is the usual path),
+ * answers a REFUSAL naming every declaring body (ADR-0150 D3,
+ * `ambiguous-in-environment`), never the first body in package order: the
+ * binder fails that job's run with it before any call or write.
  */
-export function jobDeclaringPackages(bundle: unknown, appId: string): (job: unknown) => string | undefined {
+export function jobDeclaringPackages(
+    bundle: unknown,
+    appId: string,
+): (job: unknown) => string | undefined | PackageScopedRefusal {
     if (bundle === null || typeof bundle !== 'object' || (bundle as { packages?: unknown }).packages === undefined) {
         return () => appId;
     }
     const byIdentity = new Map<unknown, string>();
-    const byName = new Map<string, string>();
+    const byName = new Map<string, string[]>();
     // The residual's owner is a package only when a body carries its id.
     let residual: string | undefined;
     for (const body of resolveArtifactPackageOrder(bundle)) {
@@ -554,14 +569,35 @@ export function jobDeclaringPackages(bundle: unknown, appId: string): (job: unkn
             if (!job || typeof job !== 'object') continue;
             byIdentity.set(job, id);
             const name = (job as { name?: unknown }).name;
-            if (typeof name === 'string' && !byName.has(name)) byName.set(name, id);
+            if (typeof name !== 'string') continue;
+            const declarers = byName.get(name) ?? [];
+            if (!declarers.includes(id)) declarers.push(id);
+            byName.set(name, declarers);
         }
     }
     return (job) => {
         const held = byIdentity.get(job);
         if (held !== undefined) return held;
         const name = (job as { name?: unknown } | null | undefined)?.name;
-        return (typeof name === 'string' ? byName.get(name) : undefined) ?? residual;
+        const declarers = typeof name === 'string' ? byName.get(name) : undefined;
+        if (declarers === undefined) return residual;
+        return declarers.length === 1 ? declarers[0] : jobNameRefusal(name as string, declarers);
+    };
+}
+
+/** [#32071] The refusal of a job name several package bodies declare: nothing picks one of them. */
+function jobNameRefusal(name: string, packageIds: readonly string[]): PackageScopedRefusal {
+    const candidates = packageIds.map((packageId) => ({ kind: 'package' as const, packageId }));
+    return {
+        status: 'refused',
+        reason: 'ambiguous-in-environment',
+        type: 'job',
+        name,
+        callerPackageId: null,
+        candidates,
+        message: `The job "${name}" is declared by ${packageIds.length} package bodies of this artifact: `
+            + `${candidates.map(describePackageScopedHolder).join('; ')}. Nothing picks one of them, so its pull reads `
+            + 'as none of them: rename the job in all but one package so each name has one declaring package.',
     };
 }
 
@@ -1021,7 +1057,9 @@ export async function scheduleAppArtifactJobs(
                 continue;
             }
             const mapping = judged.mapping;
-            const callerPackageId = declaringPackageOf(job);
+            const declarer = declaringPackageOf(job);
+            const callerPackageId = typeof declarer === 'string' ? declarer : undefined;
+            const declarerRefusal = typeof declarer === 'object' ? declarer : undefined;
             let automation: IAutomationService | undefined;
             try { automation = ctx.getService<IAutomationService>('automation'); } catch { /* not installed */ }
             if (typeof automation?.pullConnectorSource !== 'function') {
@@ -1045,6 +1083,9 @@ export async function scheduleAppArtifactJobs(
                         + '`pullConnectorSource` — nothing was pulled',
                     );
                 }
+                // [#32071] A job name two bodies declare is attributed to neither:
+                // refused before any call or write, naming every declaring body.
+                if (declarerRefusal !== undefined) throw new PackageScopedNameRefusedError(declarerRefusal);
                 // [#31823] Resolved once per run, before the pull reads or writes:
                 // a job with no organization pulls as the one its writes are
                 // stamped with, where the engine derives one.

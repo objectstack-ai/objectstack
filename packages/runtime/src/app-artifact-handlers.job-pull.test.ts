@@ -692,6 +692,39 @@ describe('[#32071] a pull job names the package that declares it', () => {
         // No `packages[]`: every job is the app's.
         expect(jobDeclaringPackages({ id: APP_ID, jobs: [PULL_JOB] }, APP_ID)(PULL_JOB)).toBe(APP_ID);
     });
+    it('two bodies each declaring job `sync`, loaded as top-level copies: neither run pulls as the other — each is refused 409 naming both', async () => {
+        // A JSON-loaded artifact binds the flattened top-level copies, so the
+        // job is met by name, and the name is the two bodies'.
+        const h = harness();
+        const runs: Array<(c: unknown) => Promise<unknown>> = [];
+        h.services.job = { ...(h.services.job as object), schedule: async (_n: string, _s: unknown, run: (c: unknown) => Promise<unknown>) => { runs.push(run); } };
+        const sync = { ...PULL_JOB, name: 'sync' };
+        const bundle = JSON.parse(JSON.stringify({
+            manifest: { id: 'com.example.top', name: 'Top', version: '0.1.0', type: 'app' },
+            jobs: [sync, sync],
+            packages: [
+                { manifest: { id: 'com.example.alpha', name: 'Alpha', version: '0.1.0', type: 'app', mappings: [MAPPING], jobs: [sync] } },
+                { manifest: { id: 'com.example.beta', name: 'Beta', version: '0.1.0', type: 'app', mappings: [MAPPING], jobs: [sync] } },
+            ],
+        }));
+        const of = jobDeclaringPackages(bundle, 'com.example.top');
+        expect(typeof of({ ...sync }), 'never the first body').toBe('object');
+        await scheduleAppArtifactJobs(
+            { logger: h.logger, getService: (n: string) => h.services[n] } as unknown as PluginContext,
+            bundle,
+            { appId: 'com.example.top', ql: undefined, source: 'Test' },
+        );
+        expect(runs.length).toBeGreaterThan(0);
+        for (const run of runs) {
+            const err = await run({ jobId: 'sync' }).then(() => undefined, (e: unknown) => e as { code?: string; status?: number; message?: string });
+            expect({ code: err?.code, status: err?.status }).toEqual({ code: 'RESOURCE_CONFLICT', status: 409 });
+            expect(err?.message).toContain('com.example.alpha');
+            expect(err?.message).toContain('com.example.beta');
+        }
+        // Before any call or write: no pull was asked for, as any package or as none.
+        expect(h.pulls).toEqual([]);
+    });
+
     it('a residual top-level job\'s run names no package, so the pull reads by no package as before', async () => {
         const h = harness();
         const residual = { ...PULL_JOB, name: 'residual_pull' };

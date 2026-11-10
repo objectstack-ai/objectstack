@@ -288,7 +288,9 @@ export const OrdersPullJob = defineJob({
   a job a package body declares reads from that body, not from the artifact's
   top-level id. A top-level job that no body declares belongs to no package, so
   it reads with no package: the environment's own mapping, else the one package
-  that holds the name.
+  that holds the name. A job name that two package bodies both declare belongs
+  to neither: its run is refused with `409 RESOURCE_CONFLICT` naming both, so
+  give each package's job its own name.
 
   When two packages in that reach hold the name, or only a package outside it
   does, the pull is refused before any call or write, with
