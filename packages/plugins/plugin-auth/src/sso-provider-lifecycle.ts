@@ -117,7 +117,7 @@ export async function findSsoDomainClaim(
   domains: readonly string[],
   exceptProviderId?: string,
 ): Promise<SsoDomainClaim | undefined> {
-  const reader = withSystemContext(engine);
+  const reader: IDataEngine = withSystemContext(engine);
   for (const domain of domains) {
     const rows = rowsOf(
       await reader.find(SSO_PROVIDER_OBJECT, { where: { domain: { $icontains: domain } }, fields: ['provider_id', 'domain'] } as never),
@@ -177,7 +177,7 @@ export interface SsoProviderDeleteImpact {
 
 /** Count what deleting `providerId` removes. Throws when a read fails: the caller decides what an unreadable count means. */
 export async function readSsoProviderDeleteImpact(engine: IDataEngine, providerId: string): Promise<SsoProviderDeleteImpact> {
-  const reader = withSystemContext(engine);
+  const reader: IDataEngine = withSystemContext(engine);
   const linked = new Set<string>();
   if (registered(engine, ACCOUNT_OBJECT)) {
     for (const row of rowsOf(await reader.find(ACCOUNT_OBJECT, { where: { provider_id: providerId }, fields: ['user_id'] } as never))) {
@@ -277,19 +277,16 @@ export interface SsoProviderDependentsRemoved {
  * that projected it wrote it. Throws on the first failed write.
  */
 export async function removeSsoProviderDependents(engine: IDataEngine, providerId: string): Promise<SsoProviderDependentsRemoved> {
-  const reader = withSystemContext(engine);
-  const writer = withSystemContext(engine);
+  const reader: IDataEngine = withSystemContext(engine);
+  const writer: IDataEngine = withSystemContext(engine);
   let removedGrants = 0;
   if (registered(engine, GRANT_OBJECT)) {
     const grants = rowsOf(
       await reader.find(GRANT_OBJECT, { where: { reason: ssoGroupProjectionReason(providerId) }, fields: ['id', 'organization_id'] } as never),
     );
     for (const grant of grants) {
-      const tenantId = text(grant.organization_id);
-      await writer.delete(GRANT_OBJECT, {
-        where: { id: text(grant.id) },
-        ...(tenantId ? { context: { isSystem: true, tenantId } } : {}),
-      } as never);
+      const tenantId = text(grant.organization_id) || undefined;
+      await writer.delete(GRANT_OBJECT, { where: { id: text(grant.id) }, context: { isSystem: true, tenantId } });
       removedGrants++;
     }
   }
@@ -299,7 +296,7 @@ export async function removeSsoProviderDependents(engine: IDataEngine, providerI
       await reader.find(IDP_GROUP_MAPPING_OBJECT, { where: { source_kind: SSO_MAPPING_SOURCE_KIND, source_id: providerId }, fields: ['id'] } as never),
     );
     for (const mapping of mappings) {
-      await writer.delete(IDP_GROUP_MAPPING_OBJECT, { where: { id: text(mapping.id) } } as never);
+      await writer.delete(IDP_GROUP_MAPPING_OBJECT, { where: { id: text(mapping.id) } });
       removedGroupMappings++;
     }
   }
