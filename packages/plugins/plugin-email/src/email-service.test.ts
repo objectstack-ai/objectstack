@@ -145,6 +145,27 @@ describe('normalizeMessage — a non-string subject / text / html is the caller\
     expect(message.slice('VALIDATION_FAILED: '.length).startsWith(`\`${field}\` `)).toBe(true);
   });
 
+  // An object whose own `toString` is not callable makes `String()` THROW, so
+  // the rejection row's writer must not coerce it — else a TypeError replaces
+  // the caller's VALIDATION_FAILED and no row is written.
+  it.each([
+    ['an object whose toString is not callable', { toString: 1 }],
+    ['an array holding such an object', [{ toString: 1 }]],
+  ])('`subject` as %s: send() rejects VALIDATION_FAILED naming `subject`, and the rejection row is written', async (_label, subject) => {
+    const rows: Array<Record<string, any>> = [];
+    const persistence: EmailPersistence = {
+      async insert(row) { rows.push({ ...row }); return { id: row.id }; },
+      async update() { /* no-op */ },
+    };
+    const transport = { send: vi.fn(async () => ({ messageId: '<m@x>' })) };
+    const svc = new EmailService({ transport, defaultFrom: FROM, persistence });
+
+    await expect(svc.send({ to: 'a@b.com', subject, html: 'hello' } as any)).rejects.toThrow(/^VALIDATION_FAILED: `subject` /);
+    expect(transport.send).not.toHaveBeenCalled();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: 'failed', attempt_count: 0, subject: '(none)' });
+  });
+
   it('EmailService.send refuses before any transport call, and still records the rejection row', async () => {
     const rows: Array<Record<string, any>> = [];
     const persistence: EmailPersistence = {

@@ -364,8 +364,10 @@ function kindOf(value: unknown): string {
  * a non-string `text` / `html` passed the truthiness presence check and threw
  * inside the transport's stream, which `send` records as a delivery failure —
  * a `200 status: failed` for input the caller wrote. Refused here instead, as
- * `VALIDATION_FAILED` naming the field, before any row or transport call: the
- * same refusal path, and so the same REST `400`, as a malformed recipient.
+ * `VALIDATION_FAILED` naming the field, before any `sys_email` delivery row or
+ * transport call: the same refusal path, and so the same REST `400` and the
+ * same `failed` rejection row ({@link EmailService.recordRejectedMessage}), as
+ * a malformed recipient.
  *
  * `undefined` and `null` are absence, not a wrong type: whether an absent
  * field is acceptable stays the presence checks' question, exactly as before
@@ -1042,7 +1044,7 @@ export class EmailService implements IEmailService {
   /**
    * Write the `sys_email` record for a message REJECTED before delivery —
    * a `normalizeMessage` throw (bad/absent `from`, no recipient, no subject,
-   * no body).
+   * no body, a non-string `subject` / `text` / `html`).
    *
    * ## Why a row for something that was never sent
    * `sys_email` is documented as the log of "every email the platform has
@@ -1080,7 +1082,12 @@ export class EmailService implements IEmailService {
       ...(rawAddressText(raw.cc) ? { cc_addresses: rawAddressText(raw.cc) } : {}),
       ...(rawAddressText(raw.bcc) ? { bcc_addresses: rawAddressText(raw.bcc) } : {}),
       ...(rawAddressText(raw.replyTo) ? { reply_to: rawAddressText(raw.replyTo) } : {}),
-      subject: String(raw.subject ?? '').trim() || UNSTATED_COLUMN,
+      // Only a string is recorded, as for the body columns below: a
+      // non-string subject is one of the refusals recorded here, and
+      // `String()` on it either invents `[object Object]` or THROWS (an object
+      // whose own `toString` is not callable), which would replace the
+      // caller's `VALIDATION_FAILED` with a TypeError — a 500, and no row.
+      subject: (typeof raw.subject === 'string' ? raw.subject.trim() : '') || UNSTATED_COLUMN,
       ...(typeof raw.text === 'string' ? { body_text: raw.text } : {}),
       ...(typeof raw.html === 'string' ? { body_html: raw.html } : {}),
       ...(raw.relatedObject ? { related_object: raw.relatedObject } : {}),

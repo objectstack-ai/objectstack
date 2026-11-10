@@ -184,6 +184,25 @@ describe('POST /api/v1/email/send — a non-string subject / text / html is the 
     });
   }
 
+  // `String()` THROWS on an object whose own `toString` is not callable; the
+  // rejection row's writer must not coerce it, or the refusal becomes a 500
+  // `EMAIL_SEND_FAILED` with no row.
+  for (const [what, subject] of [
+    ['`subject: {toString: 1}`', { toString: 1 }],
+    ['`subject: [{toString: 1}]`', [{ toString: 1 }]],
+  ] as Array<[string, unknown]>) {
+    it(`${what}: 400 VALIDATION_FAILED naming \`subject\`, and a failed rejection row`, async () => {
+      const { post, rows } = await boot();
+      const out = await post({ to: OK, subject, html: 'hello' });
+
+      expect(out.status).toBe(400);
+      expect(out.body.code).toBe('VALIDATION_FAILED');
+      expect(String(out.body.error).startsWith('`subject` ')).toBe(true);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].row).toMatchObject({ status: 'failed', attempt_count: 0 });
+    });
+  }
+
   it('CONTROL — a string subject and body still send (200 sent)', async () => {
     const { post } = await boot();
     const out = await post({ to: OK, subject: 'x', html: '<p>hello</p>', text: 'hello' });
