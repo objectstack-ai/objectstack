@@ -321,6 +321,35 @@ describe('[#32310] the caller arm: a package\'s reader resolves a dataset from i
     }
   });
 
+  it('`?callerPackage=all` is refused 400 on every door, never the bare read', async () => {
+    const door = await query('qa_far_dataset', '?callerPackage=all');
+    expect([door.status, codeOf(door.body)], door.text).toEqual([400, 'VALIDATION_ERROR']);
+    const item = await meta('/meta/dataset/qa_far_dataset?callerPackage=all');
+    expect([item.status, codeOf(item.body)], JSON.stringify(item.body)).toEqual([400, 'VALIDATION_ERROR']);
+  });
+
+  it('the batch door: each query resolves from the URL\'s caller package, one entry per query; a malformed arm refuses the batch', async () => {
+    const batch = async (qs: string, names: string[]) => {
+      const res = await stack.apiAs(admin, 'POST', `/analytics/dataset/query/batch${qs}`, {
+        queries: names.map((datasetName) => ({ datasetName, selection: { measures: ['row_count'] } })),
+      });
+      return { status: res.status, body: (await res.json()) as any };
+    };
+    const answer = await batch(`?callerPackage=${CALLER}`, ['qa_dep_dataset', 'qa_own_dataset', 'qa_twin_dataset', 'qa_far_dataset']);
+    expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+    const [dep, own, twin, far] = answer.body.data.results;
+    expect(dep.data.object).toBe('cdep_item');
+    expect(own.data.object).toBe('capp_item');
+    expect([twin.status, twin.error.code]).toEqual([409, 'RESOURCE_CONFLICT']);
+    expect([far.status, far.error.code]).toEqual([409, 'RESOURCE_CONFLICT']);
+    expect(far.error.message).toContain('held outside the declared dependency closure');
+    const both = await batch(`?callerPackage=${CALLER}&package=com.qa.caller.dep`, ['qa_dep_dataset']);
+    expect([both.status, both.body.error?.code], JSON.stringify(both.body)).toEqual([400, 'VALIDATION_ERROR']);
+    // CONTROL: without the arm the batch's bare read of the dependency's dataset is unchanged.
+    const bare = await batch('', ['qa_dep_dataset']);
+    expect(bare.body.data.results[0]).toEqual(dep);
+  });
+
   it('CONTROL: the bare read and `?package=` answer as before, on both doors', async () => {
     const bare = await query('qa_dep_dataset');
     expect(bare.status, bare.text).toBe(200);
