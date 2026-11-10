@@ -93,7 +93,7 @@ afterEach(() => {
 });
 
 describe('CloudConnectionPlugin — mounting', () => {
-    it('mounts all 8 routes on kernel:ready', async () => {
+    it('mounts all 9 routes on kernel:ready', async () => {
         const rawApp = makeRawApp();
         const { ctx, fireKernelReady } = makeCtx({ rawApp });
         const plugin = new CloudConnectionPlugin({ controlPlaneUrl: 'http://cloud.test' });
@@ -107,10 +107,11 @@ describe('CloudConnectionPlugin — mounting', () => {
             'POST /api/v1/cloud-connection/unbind',
             'POST /api/v1/cloud-connection/install',
             'GET /api/v1/cloud-connection/installation',
+            'GET /api/v1/cloud-connection/install-namespace',
             'GET /api/v1/cloud-connection/installed',
             'GET /api/v1/cloud-connection/org-packages',
         ]));
-        expect(keys).toHaveLength(8);
+        expect(keys).toHaveLength(9);
     });
 
     it('warns and mounts nothing without an http-server', async () => {
@@ -856,5 +857,122 @@ describe('[#30964] an unmanaged grant hands the copy to the environment\'s insta
         const errors = (logger.error as any).mock.calls.map((call: unknown[]) => String(call[0])).join('\n');
         expect(errors).toContain('package_unmanaged_import');
         expect(errors).toContain('ledger offline');
+    });
+});
+
+describe('[#32083] GET /install-namespace — the control plane\'s default namespace, read same-origin', () => {
+    const ENV = 'env-123';
+    const ROUTE = 'GET /api/v1/cloud-connection/install-namespace';
+    const URL_BASE = 'https://t1.example.com/api/v1/cloud-connection/install-namespace';
+    const services = (userId?: string, environmentId: string | undefined = ENV) => ({
+        'env-registry': { resolveByHostname: async () => (environmentId ? { environmentId } : null) },
+        'kernel-manager': { getOrCreate: async () => ({ getServiceAsync: async () => sessionAuth(userId) }) },
+    });
+
+    async function mount(opts: { userId?: string; environmentId?: string; apiKey?: string; answer?: () => Promise<Response> } = {}) {
+        const rawApp = makeRawApp();
+        const { ctx, fireKernelReady } = makeCtx({ rawApp, services: services(opts.userId, 'environmentId' in opts ? opts.environmentId : ENV) });
+        const fetchSpy = vi.fn(async (_url: string, _init?: RequestInit) => (opts.answer
+            ? opts.answer()
+            : new Response(JSON.stringify({ success: true, data: { namespace: 'crm_copy' } }), { status: 200 })));
+        vi.stubGlobal('fetch', fetchSpy);
+        await new CloudConnectionPlugin({ controlPlaneUrl: 'http://cloud.test', controlPlaneApiKey: opts.apiKey ?? 'svc-key' }).start(ctx as any);
+        await fireKernelReady();
+        const drive = (query: string) => rawApp.routes.get(ROUTE)!(makeC(`${URL_BASE}${query}`));
+        return { drive, fetchSpy, logger: ctx.logger };
+    }
+
+    // ── refusal pins: status + nested code, and the control plane never asked ──
+
+    it('refuses a query parameter outside the closed set (the /installation alias, a caller-named environment, a typo)', async () => {
+        for (const query of ['?packageId=pkg_1', '?package_id=pkg_1&environment_id=env-other', '?package_id=pkg_1&pkg=x']) {
+            const { drive, fetchSpy } = await mount({ userId: 'user-1' });
+            const res = await drive(query);
+            expect(res.status, query).toBe(400);
+            expect(res.payload.success, query).toBe(false);
+            expect(res.payload.error.code, query).toBe('VALIDATION_ERROR');
+            expect(fetchSpy, query).not.toHaveBeenCalled();
+        }
+    });
+
+    it('refuses package_id supplied twice rather than choosing one', async () => {
+        const { drive, fetchSpy } = await mount({ userId: 'user-1' });
+        const res = await drive('?package_id=pkg_1&package_id=pkg_2');
+        expect(res.status).toBe(400);
+        expect(res.payload.error.code).toBe('VALIDATION_ERROR');
+        expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('refuses a caller with no session 401 UNAUTHENTICATED', async () => {
+        const { drive, fetchSpy } = await mount({ userId: undefined });
+        const res = await drive('?package_id=pkg_1');
+        expect(res.status).toBe(401);
+        expect(res.payload.error.code).toBe('UNAUTHENTICATED');
+        expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('refuses a host that resolves to no environment 404 ENVIRONMENT_NOT_FOUND', async () => {
+        const { drive, fetchSpy } = await mount({ userId: 'user-1', environmentId: undefined });
+        const res = await drive('?package_id=pkg_1');
+        expect(res.status).toBe(404);
+        expect(res.payload.error.code).toBe('ENVIRONMENT_NOT_FOUND');
+        expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('refuses a missing or blank package_id 400 INVALID_REQUEST', async () => {
+        for (const query of ['', '?package_id=', '?package_id=%20']) {
+            const { drive, fetchSpy } = await mount({ userId: 'user-1' });
+            const res = await drive(query);
+            expect(res.status, query).toBe(400);
+            expect(res.payload.error.code, query).toBe('INVALID_REQUEST');
+            expect(fetchSpy, query).not.toHaveBeenCalled();
+        }
+    });
+
+    it('refuses on an unbound runtime 503 CLOUD_UNCONFIGURED: no default, never a guessed one', async () => {
+        const { drive, fetchSpy } = await mount({ userId: 'user-1', apiKey: '' });
+        const res = await drive('?package_id=pkg_1');
+        expect(res.status).toBe(503);
+        expect(res.payload.success).toBe(false);
+        expect(res.payload.error.code).toBe('CLOUD_UNCONFIGURED');
+        expect(res.payload.data).toBeUndefined();
+        expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('answers an unreachable control plane 502 EXTERNAL_SERVICE_ERROR, carrying no namespace', async () => {
+        const { drive, fetchSpy } = await mount({ userId: 'user-1', answer: async () => { throw new Error('ECONNREFUSED'); } });
+        const res = await drive('?package_id=pkg_1');
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        expect(res.status).toBe(502);
+        expect(res.payload.error.code).toBe('EXTERNAL_SERVICE_ERROR');
+        expect(res.payload.data).toBeUndefined();
+    });
+
+    // ── preservation pins: what the control plane received, and its answer unchanged ──
+
+    it('asks the control plane for this host\'s environment with the service credential, and relays its answer unchanged', async () => {
+        const answer = { success: true, data: { namespace: 'crm_copy', packageId: 'pkg/1', source: 'grant' } };
+        const { drive, fetchSpy } = await mount({
+            userId: 'user-1',
+            answer: async () => new Response(JSON.stringify(answer), { status: 200 }),
+        });
+        const res = await drive('?package_id=pkg%2F1');
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        const [url, init] = fetchSpy.mock.calls[0]!;
+        expect(url).toBe(`http://cloud.test/api/v1/cloud/packages/pkg%2F1/install-namespace?environment_id=${ENV}`);
+        expect((init as any).headers.Authorization).toBe('Bearer svc-key');
+        expect(res.status).toBe(200);
+        expect(res.payload).toEqual(answer);
+    });
+
+    it('relays a control-plane refusal with its own status and body', async () => {
+        const refusal = { success: false, error: { code: 'RESOURCE_NOT_FOUND', message: 'No package pkg_gone.' } };
+        const { drive } = await mount({
+            userId: 'user-1',
+            answer: async () => new Response(JSON.stringify(refusal), { status: 404 }),
+        });
+        const res = await drive('?package_id=pkg_gone');
+        expect(res.status).toBe(404);
+        expect(res.payload).toEqual(refusal);
     });
 });
