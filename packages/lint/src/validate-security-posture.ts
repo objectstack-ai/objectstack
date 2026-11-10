@@ -1762,7 +1762,6 @@ export function validateSecurityRoleWord(stack: AnyRec): SecurityFinding[] {
         flagRole('field', f.name, f.label, `field "${target}.${fieldName}"`, `${visible.path}.fields.${fieldName}.name`);
       }
       for (const [fieldName, displayPatch] of Object.entries(visible.fieldPatches)) {
-        if (!displayPatch || typeof displayPatch !== 'object') continue;
         flagRoleLabel(
           'field',
           displayPatch.label,
