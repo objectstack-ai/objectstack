@@ -304,7 +304,7 @@ export function registerSettingsRoutes(
       const payload = await service.getNamespace(ns, ctx, { locale: requestLocaleOf(req) });
       // The page states what is LIVE, not only what is stored: the owning
       // package's statement heads the specifiers as an `info_banner`, asked on
-      // this read (see `SettingsService.liveStatusOf`). Added here and not in
+      // this read (see `SettingsService.liveStatementOf`). Added here and not in
       // `getNamespace`, which in-process consumers call to read values: the
       // mail plugin reads `getNamespace('mail')` while rebuilding the very
       // transport its statement waits on.

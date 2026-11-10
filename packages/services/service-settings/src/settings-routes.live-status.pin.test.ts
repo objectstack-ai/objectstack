@@ -200,6 +200,7 @@ describe('GET /api/settings/:namespace — the live values the runtime states', 
   it.each([
     ['a key with no option table (a credential)', { openai_api_key: { value: SECRET, source: 'environment' } }],
     ['a key with no option table (free text)', { openai_model: { value: 'gpt-4o', source: 'environment' } }],
+    ['a key with no option table, even as "none"', { openai_model: { value: null, source: 'none' } }],
     ['a key the namespace does not declare', { api_key: { value: 'openai', source: 'environment' } }],
     ['a source outside the closed set', { provider: { value: 'openai', source: 'env' } }],
     ['a value under source "none"', { provider: { value: 'openai', source: 'none' } }],
