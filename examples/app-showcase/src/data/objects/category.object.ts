@@ -18,9 +18,17 @@ export const Category = ObjectSchema.create({
   description: 'Hierarchical tagging tree — demonstrates self-referencing relations.',
 
   fields: {
-    name: Field.text({ label: 'Name', required: true, searchable: true, maxLength: 120 }),
-    parent: Field.lookup('showcase_category', { label: 'Parent Category', allowCreate: true }),
-    color: Field.color({ label: 'Color' }),
-    sort_order: Field.number({ label: 'Sort Order', min: 0, defaultValue: 0 }),
+    name: Field.text({ label: 'Name', required: true, searchable: true, maxLength: 120, group: 'category' }),
+    parent: Field.lookup('showcase_category', { label: 'Parent Category', allowCreate: true, group: 'category' }),
+    color: Field.color({ label: 'Color', group: 'display' }),
+    sort_order: Field.number({ label: 'Sort Order', min: 0, defaultValue: 0, group: 'display' }),
   },
+
+  // ADR-0085 §5: the form, detail and drawer layout is derived from these
+  // groups, so each field is placed in a named section rather than left to the
+  // untitled fallback, which the field-no-consumers rule credits to no one (#32168).
+  fieldGroups: [
+    { key: 'category', label: 'Category' },
+    { key: 'display', label: 'Display' },
+  ],
 });

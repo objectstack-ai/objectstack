@@ -42,7 +42,10 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { render, waitFor, fireEvent } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import '@testing-library/jest-dom';
 import React from 'react';
+import { I18nProvider } from '@object-ui/i18n';
 import { valueSchemaFor } from '@objectstack/spec/data';
 
 import { ObjectForm } from './ObjectForm';
@@ -73,6 +76,15 @@ const waitInput = (c: HTMLElement, name: string) =>
     if (!el) throw new Error(`${name} not ready`);
     return el;
   });
+
+/**
+ * The form's own error line for a field — `<FormMessage/>`, the text a submit
+ * refusal draws — or `null` while the field carries none. Distinct from the
+ * widget's own refusal line, which shows before any validation has run.
+ */
+function formError(container: HTMLElement, name: string): string | null {
+  return container.querySelector(`[data-field="${name}"] [id$="-form-item-message"]`)?.textContent ?? null;
+}
 
 /** The whole rendered row for `place`, so any text the field draws is seen. */
 function placeRowText(container: HTMLElement): string {
@@ -114,10 +126,12 @@ describe('ObjectForm shows WHY a location was refused (objectui#6716)', () => {
     // 3. The text that was refused is still in the box to be corrected.
     expect(after.domValue).toBe(typed);
 
-    // 4. #6714's rule is untouched: the value is still NOT stored.
+    // 4. #6714's rule is untouched: the value is still NOT stored. Since
+    //    objectstack#32139 the refusal is also this field's validation error,
+    //    so the submit is refused and nothing is written at all.
     fireEvent.submit(container.querySelector('form') as HTMLFormElement);
-    await waitFor(() => expect(ds.create).toHaveBeenCalled());
-    expect(ds.create.mock.calls[0][1].place).toBeUndefined();
+    await waitFor(() => expect(formError(container, 'place')).toContain('Not saved:'));
+    expect(ds.create).not.toHaveBeenCalled();
   });
 
   it('clears the announcement when the coordinate is corrected, and stores it', async () => {
@@ -160,5 +174,125 @@ describe('the announcement is still the widget\'s, not the host rule\'s (objectu
     // A control from the same call, so the reading above cannot be an artefact
     // of a helper that answers the same way for everything.
     expect(buildValidationRules({ type: 'text', name: 'title', required: true })).toEqual({ required: true });
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* objectstack#32139 — a refused draft blocks the save on an edit form.        */
+/* -------------------------------------------------------------------------- */
+
+describe('a refused location draft blocks Update on an edit form (objectstack#32139)', () => {
+  const STORED = { lat: 22.54, lng: 114.05 };
+
+  async function mountEdit(language?: string) {
+    const ds = {
+      getObjectSchema: vi.fn().mockResolvedValue(siteSchema),
+      findOne: vi.fn().mockResolvedValue({ id: 'r1', title: 'HQ', place: STORED }),
+      create: vi.fn(),
+      update: vi.fn(async (_o: string, _id: string, d: any) => ({ id: 'r1', ...d })),
+    };
+    const user = userEvent.setup();
+    const form = (
+      <ObjectForm
+        schema={{ type: 'object-form', objectName: 'site', mode: 'edit', recordId: 'r1' } as any}
+        dataSource={ds as any}
+      />
+    );
+    const { container } = render(
+      language
+        ? (
+          <I18nProvider persistLanguage={false} config={{ defaultLanguage: language, detectBrowserLanguage: false }}>
+            {form}
+          </I18nProvider>
+        )
+        : form,
+    );
+    const box = await waitInput(container, 'place');
+    await waitFor(() => expect(box.value).toBe('22.54, 114.05'));
+    // The form's submit button, whatever the reader's language calls it.
+    const update = () => user.click(container.querySelector('button[type="submit"]') as HTMLButtonElement);
+    return { ds, user, container, box, update };
+  }
+
+  /** Settle a submit that may be refused: wait for the write or for the form's field error. */
+  async function settled(ds: { update: { mock: { calls: unknown[] } } }, container: HTMLElement) {
+    await waitFor(() => {
+      if (!ds.update.mock.calls.length && formError(container, 'place') === null) {
+        throw new Error('form has neither written nor refused yet');
+      }
+    });
+  }
+
+  /** How many times the refusal sentence is drawn in the row: once, never twice. */
+  const timesShown = (container: HTMLElement, text: string) => placeRowText(container).split(text).length - 1;
+
+  it.each([
+    ['cleared first, then typed', true],
+    ['typed over the selected value', false],
+  ])('non-coordinate text %s refuses the save and writes nothing', async (_how, clearFirst) => {
+    const { ds, user, container, box, update } = await mountEdit();
+    if (clearFirst) await user.clear(box);
+    else await user.tripleClick(box);
+    await user.keyboard('Shenzhen 深圳');
+    expect(box.value).toBe('Shenzhen 深圳');
+
+    await update();
+    await settled(ds, container);
+    expect(ds.update).not.toHaveBeenCalled();
+    expect(box).toHaveAttribute('aria-invalid', 'true');
+    // The refusal is the FORM's error now, and the widget does not repeat it.
+    expect(formError(container, 'place')).toContain('Not saved:');
+    expect(timesShown(container, 'Not saved:')).toBe(1);
+    // The refused text stays in the box to be corrected.
+    expect(box.value).toBe('Shenzhen 深圳');
+  });
+
+  it('the refusal is translated: a zh-CN reader sees the field error in Chinese', async () => {
+    const { ds, user, container, box, update } = await mountEdit('zh-CN');
+    await user.clear(box);
+    await user.keyboard('Shenzhen 深圳');
+    await update();
+    await waitFor(() => expect(formError(container, 'place')).toContain('未保存'));
+    expect(placeRowText(container)).not.toContain('Not saved:');
+    expect(ds.update).not.toHaveBeenCalled();
+    expect(box).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('a valid pair typed over the old one still saves', async () => {
+    const { ds, user, box, update } = await mountEdit();
+    await user.clear(box);
+    await user.type(box, '31.23, 121.47');
+    await update();
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+    expect(ds.update.mock.calls[0][2]).toMatchObject({ place: { lat: 31.23, lng: 121.47 } });
+  });
+
+  it('clearing the box on purpose still writes null', async () => {
+    const { ds, user, box, update } = await mountEdit();
+    await user.clear(box);
+    expect(box).toHaveAttribute('aria-invalid', 'false');
+    await update();
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+    expect(ds.update.mock.calls[0][2]).toMatchObject({ place: null });
+  });
+
+  it('correcting a refused draft withdraws the error and saves the pair', async () => {
+    const { ds, user, container, box, update } = await mountEdit();
+    await user.clear(box);
+    await user.keyboard('Shenzhen');
+    await update();
+    await settled(ds, container);
+    expect(ds.update).not.toHaveBeenCalled();
+
+    expect(formError(container, 'place')).toContain('Not saved:');
+
+    await user.clear(box);
+    await user.type(box, '31.23, 121.47');
+    await waitFor(() => expect(placeRowText(container)).not.toContain('Not saved:'));
+    expect(formError(container, 'place')).toBeNull();
+    expect(box).toHaveAttribute('aria-invalid', 'false');
+    await update();
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+    expect(ds.update.mock.calls[0][2]).toMatchObject({ place: { lat: 31.23, lng: 121.47 } });
   });
 });

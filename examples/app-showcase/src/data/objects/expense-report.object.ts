@@ -52,8 +52,8 @@ export const ExpenseReport = ObjectSchema.create({
   description: 'An expense report whose parent totals are filtered roll-ups of its line items.',
 
   fields: {
-    name: Field.text({ label: 'Report Title', required: true, searchable: true, maxLength: 120 }),
-    employee: Field.text({ label: 'Employee', searchable: true, maxLength: 120 }),
+    name: Field.text({ label: 'Report Title', required: true, searchable: true, maxLength: 120, group: 'report' }),
+    employee: Field.text({ label: 'Employee', searchable: true, maxLength: 120, group: 'report' }),
     status: Field.select({
       label: 'Status',
       required: true,
@@ -63,8 +63,9 @@ export const ExpenseReport = ObjectSchema.create({
         { label: 'Approved', value: 'approved', color: '#10B981' },
         { label: 'Reimbursed', value: 'reimbursed', color: '#6366F1' },
       ],
+      group: 'report',
     }),
-    submitted_on: Field.date({ label: 'Submitted On' }),
+    submitted_on: Field.date({ label: 'Submitted On', group: 'report' }),
 
     // ── Filtered roll-ups (the point of this object) ─────────────────────────
     // Child FK is auto-detected (showcase_expense_line.expense_report), so none
@@ -80,6 +81,7 @@ export const ExpenseReport = ObjectSchema.create({
       label: 'Total',
       scale: 2,
       summaryOperations: { object: 'showcase_expense_line', field: 'amount', function: 'sum' },
+      group: 'totals',
     }),
     /** Filtered SUM (equality) — only lines a manager has approved. */
     approved_amount: Field.summary({
@@ -91,6 +93,7 @@ export const ExpenseReport = ObjectSchema.create({
         function: 'sum',
         filter: { status: 'approved' },
       },
+      group: 'totals',
     }),
     /** Filtered SUM (boolean) — only lines billable back to a client. */
     reimbursable_amount: Field.summary({
@@ -102,11 +105,13 @@ export const ExpenseReport = ObjectSchema.create({
         function: 'sum',
         filter: { billable: true },
       },
+      group: 'totals',
     }),
     /** Baseline: unfiltered line count. */
     line_count: Field.summary({
       label: 'Lines',
       summaryOperations: { object: 'showcase_expense_line', field: 'amount', function: 'count' },
+      group: 'totals',
     }),
     /** Filtered COUNT (equality) — lines a manager rejected. */
     rejected_count: Field.summary({
@@ -117,6 +122,7 @@ export const ExpenseReport = ObjectSchema.create({
         function: 'count',
         filter: { status: 'rejected' },
       },
+      group: 'totals',
     }),
     /** Filtered COUNT (operator) — lines at or above the $500 receipt-required
      *  threshold. Shows the FilterCondition operator form, not just equality. */
@@ -128,8 +134,17 @@ export const ExpenseReport = ObjectSchema.create({
         function: 'count',
         filter: { amount: { $gte: 500 } },
       },
+      group: 'totals',
     }),
   },
+
+  // ADR-0085 §5: the form, detail and drawer layout is derived from these
+  // groups, so each field is placed in a named section rather than left to the
+  // untitled fallback, which the field-no-consumers rule credits to no one (#32168).
+  fieldGroups: [
+    { key: 'report', label: 'Report' },
+    { key: 'totals', label: 'Totals' },
+  ],
 });
 
 /** Expense line item — owned by its report, entered inline in the grid. */
