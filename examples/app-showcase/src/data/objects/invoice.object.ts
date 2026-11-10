@@ -20,12 +20,20 @@ export const Product = ObjectSchema.create({
   description: 'A sellable product with a catalog price.',
 
   fields: {
-    name: Field.text({ label: 'Name', required: true, searchable: true, maxLength: 120 }),
-    sku: Field.text({ label: 'SKU', searchable: true, maxLength: 40 }),
-    description: Field.text({ label: 'Description', maxLength: 200 }),
-    unit_price: Field.currency({ label: 'Unit Price', min: 0 }),
-    active: Field.boolean({ label: 'Active', defaultValue: true }),
+    name: Field.text({ label: 'Name', required: true, searchable: true, maxLength: 120, group: 'product' }),
+    sku: Field.text({ label: 'SKU', searchable: true, maxLength: 40, group: 'product' }),
+    description: Field.text({ label: 'Description', maxLength: 200, group: 'product' }),
+    unit_price: Field.currency({ label: 'Unit Price', min: 0, group: 'pricing' }),
+    active: Field.boolean({ label: 'Active', defaultValue: true, group: 'product' }),
   },
+
+  // ADR-0085 §5: the form, detail and drawer layout is derived from these
+  // groups, so each field is placed in a named section rather than left to the
+  // untitled fallback, which the field-no-consumers rule credits to no one (#32168).
+  fieldGroups: [
+    { key: 'product', label: 'Product' },
+    { key: 'pricing', label: 'Pricing' },
+  ],
 });
 
 /**

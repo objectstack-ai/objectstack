@@ -2208,6 +2208,26 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
             helpText: "可選。請求的 SAML NameID 格式。預設為 IdP 設定的格式。",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          mapEmail: {
+            label: "對應：電子郵件屬性",
+            helpText: "可選。對應到使用者電子郵件的斷言屬性。預設為「email」，其次為 NameID。Entra ID：http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          mapFirstName: {
+            label: "對應：名字屬性",
+            helpText: "可選。對應到使用者名字的斷言屬性。預設為「givenName」。Entra ID：http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          mapLastName: {
+            label: "對應：姓氏屬性",
+            helpText: "可選。對應到使用者姓氏的斷言屬性。預設為「surname」。Entra ID：http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          mapName: {
+            label: "對應：顯示名稱屬性",
+            helpText: "可選。對應到使用者全名的斷言屬性，在缺少名字與姓氏屬性時使用。預設為「displayName」，其次為 NameID。Okta：name。Entra ID：http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          },
           mapGroups: {
             label: "對應：群組屬性",
             helpText: "可選。攜帶使用者所屬群組的斷言屬性。每次登入都會授予對應到這些群組的權限集。留空則不對應任何群組。",
@@ -2267,6 +2287,57 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "完成",
           fields: {
             groupsClaim: "群組 claim"
+          }
+        }
+      },
+      show_sso_attribute_mapping: {
+        label: "檢視屬性對應",
+        resultDialog: {
+          title: "屬性對應",
+          description: "此提供者在每次登入時讀取使用者電子郵件與姓名所用的 IdP 屬性（SAML）或 claim（OIDC）。空白表示使用預設值：電子郵件取自「email」（SAML 其次為 NameID）；姓名取自「givenName」+「surname」，其次為「displayName」（OIDC 為「name」）。名字與姓氏僅適用於 SAML。可透過「編輯屬性對應」變更。",
+          acknowledge: "完成",
+          fields: {
+            protocol: "通訊協定",
+            email: "電子郵件",
+            firstName: "名字",
+            lastName: "姓氏",
+            name: "顯示名稱"
+          }
+        }
+      },
+      edit_sso_attribute_mapping: {
+        label: "編輯屬性對應",
+        params: {
+          email: {
+            label: "電子郵件屬性",
+            helpText: "對應到使用者電子郵件的 IdP 屬性或 claim。不變更則保留目前的值；清空則恢復預設值（「email」）。Entra ID SAML：http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          firstName: {
+            label: "名字屬性（SAML）",
+            helpText: "僅限 SAML。對應到使用者名字的斷言屬性。不變更則保留目前的值。Entra ID：http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          lastName: {
+            label: "姓氏屬性（SAML）",
+            helpText: "僅限 SAML。對應到使用者姓氏的斷言屬性。不變更則保留目前的值。Entra ID：http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          name: {
+            label: "顯示名稱屬性",
+            helpText: "對應到使用者全名的 IdP 屬性或 claim（SAML：在缺少名字與姓氏時使用）。不變更則保留目前的值。Okta SAML：name。Entra ID：http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          }
+        },
+        resultDialog: {
+          title: "屬性對應已儲存",
+          description: "此提供者此後每次登入時讀取使用者電子郵件與姓名所用的屬性或 claim。空白表示使用預設值。",
+          acknowledge: "完成",
+          fields: {
+            email: "電子郵件",
+            firstName: "名字",
+            lastName: "姓氏",
+            name: "顯示名稱"
           }
         }
       }
@@ -2774,6 +2845,23 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "組織",
         help: "授權所在的組織：擁有該 SCIM 連線或 SSO 提供者的組織。"
       },
+      match_status: {
+        label: "比對狀態",
+        help: "此對應指定的群組是否為其 SCIM 連線目前推送的群組。未比對到時不授予任何權限。SSO 提供者不儲存群組清單，因此不適用。",
+        options: {
+          matched: "已比對",
+          unmatched: "未比對到任何現有群組",
+          not_applicable: "不適用"
+        }
+      },
+      matched_group_id: {
+        label: "比對到的群組 ID",
+        help: "此對應目前比對到的 SCIM 群組的 ID。未比對到任何群組時為空。"
+      },
+      match_changed_at: {
+        label: "比對變更時間",
+        help: "比對狀態或比對到的群組最近一次變更的時間。"
+      },
       created_at: {
         label: "建立時間"
       },
@@ -2783,7 +2871,64 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "全部"
+        label: "全部",
+        emptyState: {
+          title: "尚無群組對應",
+          message: "使用「對應 SSO 群組」（SSO 提供者在登入時傳送的群組）或「對應 SCIM 群組」（SCIM 連線佈建的群組），為身分提供者某個群組的成員授予權限集。"
+        }
+      }
+    },
+    _actions: {
+      map_sso_group: {
+        label: "對應 SSO 群組",
+        description: "為 SSO 提供者在登入時傳送的某個群組的每位成員授予一個權限集。成員下次透過該提供者登入時生效。",
+        successMessage: "群組對應已儲存。成員下次透過該提供者登入時生效。",
+        params: {
+          providerId: {
+            label: "SSO 提供者 ID",
+            helpText: "其登入會攜帶該群組的 SSO 提供者的提供者 ID，例如「okta」。該提供者必須已設定群組宣告（在 SSO 提供者上使用「編輯群組宣告」）。"
+          },
+          groupExternalId: {
+            label: "群組外部 ID",
+            helpText: "群組宣告傳送的值為 ID 時，照原樣填寫，例如 Entra ID 的群組物件 ID。與「群組顯示名稱」擇一，不要同時填寫。"
+          },
+          groupDisplayName: {
+            label: "群組顯示名稱",
+            helpText: "群組宣告傳送的值為名稱時，照原樣填寫，例如「Sales」。與「群組外部 ID」擇一，不要同時填寫。"
+          },
+          permissionSet: {
+            label: "權限集",
+            helpText: "該群組成員在提供者所屬組織中獲得的權限集。管理員權限集會被拒絕。"
+          }
+        }
+      },
+      map_scim_group: {
+        label: "對應 SCIM 群組",
+        description: "為某個 SCIM 連線佈建的群組的每位成員授予一個權限集。該群組的現有成員會立即獲得。",
+        successMessage: "群組對應已儲存",
+        params: {
+          connectionId: {
+            label: "SCIM 連線 ID",
+            helpText: "佈建該群組所經由的 SCIM 連線，例如「okta-prod」：即其憑證的連線 ID。"
+          },
+          groupExternalId: {
+            label: "群組外部 ID",
+            helpText: "身分提供者傳送的群組 externalId。與「群組顯示名稱」擇一，不要同時填寫。"
+          },
+          groupDisplayName: {
+            label: "群組顯示名稱",
+            helpText: "群組的 displayName，需完全一致。與「群組外部 ID」擇一，不要同時填寫。"
+          },
+          permissionSet: {
+            label: "權限集",
+            helpText: "該群組成員在連線所屬組織中獲得的權限集。管理員權限集會被拒絕。"
+          }
+        }
+      },
+      delete_group_mapping: {
+        label: "刪除對應",
+        confirmText: "刪除此群組對應？該群組成員將不再獲得它的權限集。對於 SCIM 連線，會立即重新投影該群組成員，並移除此對應授予的權限。對於 SSO 提供者，會立即移除其登入為該權限集授予的權限，除非該提供者的另一條對應仍指向同一權限集。如需恢復，請重新對應該群組。",
+        successMessage: "群組對應已刪除"
       }
     }
   },
@@ -3585,6 +3730,55 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       },
       note: {
         label: "備註"
+      }
+    }
+  },
+  sys_metadata_commit: {
+    label: "Metadata Commit",
+    pluralLabel: "Metadata Commits",
+    description: "Package-scoped commit log grouping a turn’s metadata changes.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      package_id: {
+        label: "Package"
+      },
+      operation: {
+        label: "Operation",
+        options: {
+          apply: "apply",
+          revert: "revert"
+        }
+      },
+      message: {
+        label: "Message",
+        help: "Change summary; for AI turns, the user instruction that produced it."
+      },
+      actor: {
+        label: "Actor"
+      },
+      ai_model: {
+        label: "AI Model"
+      },
+      parent_commit_id: {
+        label: "Parent Commit"
+      },
+      event_seq_start: {
+        label: "Event Seq Start"
+      },
+      event_seq_end: {
+        label: "Event Seq End"
+      },
+      items: {
+        label: "Items",
+        help: "JSON: [{ type, name, existedBefore, prevVersion }] — the revert plan."
+      },
+      item_count: {
+        label: "Item Count"
+      },
+      created_at: {
+        label: "Created At"
       }
     }
   },

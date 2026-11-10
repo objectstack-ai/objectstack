@@ -1,121 +1,82 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The record title of the three permission-assignment tables, which declared a
- * `titleFormat` and no title pointer (#20044): `sys_position_permission_set`,
- * `sys_user_permission_set` and `sys_user_position`.
+ * `sys_user_position`'s record title names the PERSON who holds a position,
+ * not the raw user id.
  *
- * ADR-0079 resolves a record's title as `nameField ?? displayNameField ??
- * derivation`, and an explicit `nameField` takes precedence over the
- * render-only `titleFormat`. With no pointer declared, the registry's
- * designate-only pass (`provisionPrimary(…, { synthesize: false })`) stamped
- * `nameField: 'id'` — the first title-eligible field — onto each registered
- * body, and a `/meta` read serves that stamp as if the author had written it.
- * A renderer honouring the order therefore drew the raw id as the record
- * page's H1.
+ * The object declared a `titleFormat` and no title pointer (#20044); it now
+ * points at `display_title` (`nameField`), the title Setup's User Positions
+ * list, the assignment's record page H1 and the audit log's Record cell read.
+ * That formula used to compose the stored foreign key, `record.user_id + ' → '
+ * + record.position`, so every row read like
+ * `v34DfZXycmuAzUro8kwhiHrFNRR5WXDR → showcase_exec`. It now reads the user's
+ * `name` — their `email` where the name is blank — ONE hop through `user_id`,
+ * the traversal the formula read path serves (ADR-0079 addendum), the same
+ * mechanism `sys_user_permission_set`'s title uses
+ * (`sys-user-permission-set-person-title.test.ts`). No column is stored for it.
  *
- * Each object now points at `display_title`, a text formula over the columns
- * its `titleFormat` names. `sys_user_permission_set`'s title names the PERSON
- * through `user_id` instead, so its pins live in
- * `sys-user-permission-set-person-title.test.ts`; this file holds the rest.
- * Through the real engine this file asserts, per object:
+ * The position half is read as stored: `position` is a security-catalog NAME
+ * (a text column, neither a lookup nor a select), so a formula can reach no
+ * label for it — `label(record.position)` is refused at authoring
+ * (`label-field-no-options`) and reads null at runtime.
  *
- *  1. the body the registry holds after registration names `display_title`;
- *  2. a seeded row's H1 is the `titleFormat` text, not the id, and the
- *     server-side accessor (`resolveRecordTitle`) agrees;
- *  3. a row missing a title column is refused by the write path, so the
- *     formula never sees a NULL part;
- *  4. the formula adds no stored column, and no search companion column
- *     either — not even where pinyin search provisions one (a formula is
- *     never a companion source).
+ * Through the real engine, the real `sys_user` and the real assignment
+ * definition, this file asserts:
  *
- * And, because these are permission-assignment tables, the property the new
- * field must not break: the formula reads exactly the columns `titleFormat`
- * names, on this row only — a foreign key, never a field of the record it
- * points at — and none of them is hidden, guarded by `requiredPermissions` or
- * masked. So the title carries nothing the object's declared read path
- * withholds from a reader of the row. No row scope, permission set or
- * `apiMethods` entry changes; the formula is a read-only computed field.
+ *  1. the registered body points at `display_title`, a text formula that reads
+ *     `user_id` only through the hop, and only columns `sys_user` declares;
+ *  2. the title a read serves names the person — on the write's response, on
+ *     `findOne`, on a `find` whose projection names only the title — and the
+ *     server's title accessors answer the same text;
+ *  3. a user whose stored name is blank is titled by their email;
+ *  4. this is a permission-assignment table, so the property the hop must not
+ *     break: it is read as the READER. A user the reader may not read leaves
+ *     the title null, and neither the name nor the email reaches the row;
+ *     SYSTEM reads the name. A user that no longer exists leaves it null too;
+ *  5. a row missing a title column is refused by the write path;
+ *  6. the formula adds no stored column and no search companion column.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import {
   ObjectQL,
   SEARCH_COMPANION_FIELD,
   provisionSearchCompanion,
-  resolveRecordTitle,
   resolveSearchCompanionSources,
+  servedRecordTitle,
 } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { resolveDisplayField } from '@objectstack/spec/data';
+import { SysUser } from '@objectstack/platform-objects';
+import { resolveDisplayField, resolveRecordDisplayName } from '@objectstack/spec/data';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { SysUserPosition } from './sys-user-position.object.js';
 import { installDefaultOrganization } from '../default-organization.testkit.js';
 
-/**
- * The `titleFormat` template each object declared before the ruling of record
- * on #29007 (6574393684, letter B) retired it: an object definition that
- * declares one is refused at the metadata save gate and by `os validate`, so
- * the object no longer carries it. Kept here as the reference text the title
- * has to reproduce — the text the template drew — not as a title resolver.
- */
-const RETIRED_TITLE_TEMPLATES: Readonly<Record<string, string>> = {
-  sys_user_position: '{user_id} → {position}',
-};
-
 const SYS = { context: { isSystem: true } } as any;
+const OBJECT = 'sys_user_position';
 
-interface Case {
-  schema: any;
-  row: Record<string, string>;
-  title: string;
-}
-
-const CASES: Case[] = [
-  {
-    schema: SysUserPosition,
-    row: { user_id: 'usr_alice', position: 'sales_manager' },
-    title: 'usr_alice → sales_manager',
-  },
-];
-
-/** The `titleFormat` source: the parsed schema carries it as an envelope. */
-function titleFormatSource(schema: unknown): string {
-  const tf = RETIRED_TITLE_TEMPLATES[(schema as { name: string }).name];
-  const source = typeof tf === 'string' ? tf : (tf as { source?: unknown })?.source;
-  if (typeof source !== 'string') throw new Error(`titleFormat carries no template source: ${JSON.stringify(tf)}`);
-  return source;
-}
-
-/**
- * The H1 a `titleFormat`-first renderer draws: each `{field}` placeholder
- * substituted with the row's value. It is the reference the formula has to
- * reproduce, not a second title resolver.
- */
-function renderTitleFormat(schema: unknown, row: Record<string, unknown>): string {
-  return titleFormatSource(schema).replace(/\{\{?\s*([a-zA-Z0-9_.]+)\s*\}?\}/g, (_m, key: string) => String(row[key] ?? ''));
-}
-
-/** The columns `titleFormat` names. */
-function titleFormatColumns(schema: unknown): string[] {
-  return [...titleFormatSource(schema).matchAll(/\{\{?\s*([a-zA-Z0-9_.]+)\s*\}?\}/g)].map((m) => m[1]).sort();
-}
+/** A reader who is not SYSTEM: the shape every request's context has. */
+const READER: ExecutionContext = { userId: 'usr_reader', tenantId: 'org_1' };
 
 /** Every `record.<path>` the `display_title` expression reads, as written. */
-function formulaReads(schema: { fields: Record<string, any> }): string[] {
-  const source = schema.fields.display_title?.expression?.source;
+function formulaReads(): string[] {
+  const source = (SysUserPosition as any).fields.display_title?.expression?.source;
   if (typeof source !== 'string') throw new Error('display_title carries no expression source');
-  return [...source.matchAll(/record\.([A-Za-z_][A-Za-z0-9_.]*)/g)].map((m) => m[1]).sort();
+  return [...new Set([...source.matchAll(/record\.([A-Za-z_][A-Za-z0-9_.]*)/g)].map((m) => m[1]))].sort();
 }
 
-/** The stored row as a hook body holds it: no formula value on it. */
-function storedOnly(row: Record<string, unknown>): Record<string, unknown> {
-  const { display_title: _omit, ...rest } = row;
-  return rest;
-}
-
-describe('[#20044] permission-assignment tables resolve a real record title under ADR-0079 order', () => {
+describe('sys_user_position is titled by the person, not the raw user id', () => {
   let engine: ObjectQL;
   let driver: SqlDriver;
+  /** Ids of `sys_user` rows a reader that is not SYSTEM may read. */
+  const readable = new Set<string>();
+
+  const user = async (name: string, email: string): Promise<string> => {
+    const row = await engine.insert('sys_user', { name, email }, SYS);
+    return String(row.id);
+  };
+  const assign = async (userId: string, position = 'showcase_contributor') =>
+    engine.insert(OBJECT, { user_id: userId, position }, SYS);
 
   beforeAll(async () => {
     engine = new ObjectQL();
@@ -126,86 +87,129 @@ describe('[#20044] permission-assignment tables resolve a real record title unde
     });
     engine.registerDriver(driver, true);
     await engine.init();
-    for (const { schema } of CASES) {
-      engine.registry.registerObject(schema, 'com.objectstack.test.20044');
-    }
+    engine.registry.registerObject(SysUser as any, 'com.objectstack.test.position-title');
+    engine.registry.registerObject(SysUserPosition as any, 'com.objectstack.test.position-title');
     await engine.syncSchemas();
     // A real `single` install's Default Organization: the system writes below
     // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
     await installDefaultOrganization(engine);
+    // Row-level security on `sys_user` for a reader that is not SYSTEM — the
+    // composition the security plugin makes (its own row scope is "own row or
+    // an organization member"; here, the ids in `readable`).
+    engine.registerMiddleware(async (ctx: any, next: () => Promise<void>) => {
+      if (ctx.object === 'sys_user' && ['find', 'findOne'].includes(ctx.operation) && !ctx.context?.isSystem) {
+        const scoped = { id: { $in: [...readable] } };
+        ctx.ast = { ...(ctx.ast ?? {}), where: ctx.ast?.where ? { $and: [ctx.ast.where, scoped] } : scoped };
+      }
+      await next();
+    });
   });
+
+  beforeEach(() => readable.clear());
 
   afterAll(async () => {
     try { await engine?.destroy(); } catch { /* noop */ }
   });
 
-  for (const { schema, row: data, title } of CASES) {
-    const object: string = schema.name;
+  it('the registered body points at display_title, a text formula reading user_id only through the hop', () => {
+    const registered = engine.registry.getObject(OBJECT) as any;
+    expect(registered.nameField).toBe('display_title');
+    expect(registered.displayNameField).toBe('display_title');
+    expect(resolveDisplayField(registered)).toBe('display_title');
+    expect(registered.fields.display_title?.type).toBe('formula');
+    expect(registered.fields.display_title?.returnType).toBe('text');
+    // `user_id` itself is never read bare: a bare read beside a traversal is
+    // the `traversal-bare-and-traversed` refusal.
+    expect(formulaReads()).toEqual(['position', 'user_id.email', 'user_id.name']);
+    const userFields = (engine.registry.getObject('sys_user') as any).fields;
+    for (const column of ['name', 'email']) expect(userFields[column], column).toBeDefined();
+  });
 
-    it(`${object}: the registered body points at display_title, a text formula — not the id the designation pass stamped`, () => {
-      const registered = engine.registry.getObject(object) as any;
-      expect(registered.nameField).toBe('display_title');
-      expect(registered.displayNameField).toBe('display_title');
-      expect(resolveDisplayField(registered)).toBe('display_title');
-      expect(registered.fields.display_title?.type).toBe('formula');
-      expect(registered.fields.display_title?.returnType).toBe('text');
+  it('a read serves the person\'s name — on the write response, findOne and a projected find', async () => {
+    const member = await user('QA Member S2', 'qa.member@example.com');
+    const created = await assign(member);
+    expect(created.display_title).toBe('QA Member S2 → showcase_contributor');
+
+    const registered = engine.registry.getObject(OBJECT) as any;
+    const row = await engine.findOne(OBJECT, { where: { id: created.id } }, SYS);
+    expect(row!.display_title).toBe('QA Member S2 → showcase_contributor');
+    expect(row!.display_title).not.toContain(member);
+    // The row still holds the foreign KEY; only the title reads through it.
+    expect(row!.user_id).toBe(member);
+    expect(row![resolveDisplayField(registered)!]).not.toBe(row!.id);
+    expect(resolveRecordDisplayName(registered, row)).toBe('QA Member S2 → showcase_contributor');
+    expect(servedRecordTitle(registered, row)).toBe('QA Member S2 → showcase_contributor');
+
+    // The list's title column: a projection naming only the title.
+    const listed = await engine.find(OBJECT, { where: { id: created.id }, fields: ['display_title'] }, SYS);
+    expect(listed).toEqual([{ display_title: 'QA Member S2 → showcase_contributor' }]);
+  });
+
+  it('a user whose stored name is blank is titled by their email — the declared fallback', async () => {
+    // The write door refuses a blank `name` (it is required), so a nameless
+    // user is a row written past it: an import, or a row older than the rule.
+    const empty = await user('Placeholder', 'no-name@example.com');
+    const spaces = await user('Placeholder', 'spaces@example.com');
+    await driver.getKnex()('sys_user').where({ id: empty }).update({ name: '' });
+    await driver.getKnex()('sys_user').where({ id: spaces }).update({ name: '   ' });
+
+    const a = await assign(empty);
+    const b = await assign(spaces, 'showcase_exec');
+    expect((await engine.findOne(OBJECT, { where: { id: a.id } }, SYS))!.display_title).toBe('no-name@example.com → showcase_contributor');
+    expect((await engine.findOne(OBJECT, { where: { id: b.id } }, SYS))!.display_title).toBe('spaces@example.com → showcase_exec');
+  });
+
+  describe('the hop is read as the reader', () => {
+    it('a user the reader may read is named for that reader', async () => {
+      const bob = await user('Bob Kinney', 'bob@example.com');
+      const g = await assign(bob);
+      readable.add(bob);
+      const row = await engine.findOne(OBJECT, { where: { id: g.id } }, { context: READER });
+      expect(row!.display_title).toBe('Bob Kinney → showcase_contributor');
     });
 
-    it(`${object}: the H1 is "${titleFormatSource(schema)}", not the id`, async () => {
-      const registered = engine.registry.getObject(object) as any;
-      const created = await engine.insert(object, data, SYS);
-      expect(created.display_title).toBe(title);
-      const row = await engine.findOne(object, { where: { id: created.id } }, SYS);
-      expect(row).not.toBeNull();
-
-      const h1 = row![resolveDisplayField(registered)!];
-      expect(h1).toBe(title);
-      expect(h1).not.toBe(row!.id);
-      expect(h1).toBe(renderTitleFormat(schema, row!));
-      expect(resolveRecordTitle(registered, storedOnly(row!))).toBe(title);
+    it('a user the reader may not read leaves the title null, and nothing of the user reaches the row', async () => {
+      const carol = await user('Carol Hidden', 'carol.hidden@example.com');
+      const g = await assign(carol);
+      // The reader's own read of that user returns nothing…
+      expect(await engine.find('sys_user', { where: { id: carol } }, { context: READER })).toEqual([]);
+      // …so the title over it has no value, and neither the name nor the email leaks.
+      const row = await engine.findOne(OBJECT, { where: { id: g.id } }, { context: READER });
+      expect(row!.display_title).toBeNull();
+      expect(JSON.stringify(row)).not.toContain('Carol Hidden');
+      expect(JSON.stringify(row)).not.toContain('carol.hidden@example.com');
+      // SYSTEM reads the user directly, so it reads the name through the hop.
+      expect((await engine.findOne(OBJECT, { where: { id: g.id } }, SYS))!.display_title).toBe('Carol Hidden → showcase_contributor');
     });
 
-    it(`${object}: a row missing a title column is refused, so the formula never sees a NULL part`, async () => {
-      for (const omit of Object.keys(data)) {
-        const partial: Record<string, string> = { ...data };
-        delete partial[omit];
-        await expect(engine.insert(object, partial, SYS)).rejects.toMatchObject({
-          code: 'VALIDATION_FAILED',
-          fields: expect.arrayContaining([expect.objectContaining({ field: omit, code: 'required' })]),
-        });
-      }
+    it('an assignment whose user no longer exists has no title — never one computed in its place', async () => {
+      const g = await assign('usr_gone');
+      const row = await engine.findOne(OBJECT, { where: { id: g.id } }, SYS);
+      expect(row!.display_title).toBeNull();
     });
+  });
 
-    it(`${object}: the formula reads exactly the titleFormat columns, on this row, each required and none withheld`, () => {
-      const fields = schema.fields as Record<string, any>;
-      const reads = formulaReads(schema);
-      // One level deep: a dotted path would read a looked-up record's field,
-      // which a reader of this row may not be allowed to see.
-      expect(reads).toEqual(titleFormatColumns(schema));
-      for (const column of reads) {
-        expect(fields[column], column).toBeDefined();
-        expect(fields[column].required, column).toBe(true);
-        expect(fields[column].hidden ?? false, column).toBe(false);
-        expect(fields[column].requiredPermissions ?? [], column).toEqual([]);
-        expect(fields[column].maskingRule, column).toBeUndefined();
-      }
-    });
+  it('a row missing a title column is refused, so the formula never sees a NULL part', async () => {
+    const dan = await user('Dan Ortiz', 'dan@example.com');
+    for (const [omit, partial] of [
+      ['user_id', { position: 'showcase_contributor' }],
+      ['position', { user_id: dan }],
+    ] as const) {
+      await expect(engine.insert(OBJECT, partial, SYS)).rejects.toMatchObject({
+        code: 'VALIDATION_FAILED',
+        fields: expect.arrayContaining([expect.objectContaining({ field: omit, code: 'required' })]),
+      });
+    }
+  });
 
-    it(`${object}: adds no stored column — the formula is computed on read`, async () => {
-      const columns = Object.keys(await driver.getKnex()(object).columnInfo());
-      expect(columns).toContain(Object.keys(data)[0]);
-      expect(columns).not.toContain('display_title');
-    });
-
-    it(`${object}: provisions no search companion column, even where pinyin search is on`, () => {
-      // The companion (`__search`) is a real column fed by the title field. A
-      // registry provisions it only where pinyin search is on, by running
-      // `provisionSearchCompanion` over the body it has just designated, so
-      // run that step over the registered body. A formula title is never a
-      // source.
-      const registered = engine.registry.getObject(object) as any;
-      expect(resolveSearchCompanionSources(registered)).toEqual([]);
-      expect(provisionSearchCompanion(registered).fields[SEARCH_COMPANION_FIELD]).toBeUndefined();
-    });
-  }
+  it('adds no stored column and no search companion column', async () => {
+    const columns = Object.keys(await driver.getKnex()(OBJECT).columnInfo());
+    expect(columns).toContain('user_id');
+    expect(columns).not.toContain('display_title');
+    // The companion (`__search`) is a real column fed by the title field, and
+    // a formula title is never a source — not even where pinyin search is on.
+    const registered = engine.registry.getObject(OBJECT) as any;
+    expect(resolveSearchCompanionSources(registered)).toEqual([]);
+    expect(provisionSearchCompanion(registered).fields[SEARCH_COMPANION_FIELD]).toBeUndefined();
+  });
 });

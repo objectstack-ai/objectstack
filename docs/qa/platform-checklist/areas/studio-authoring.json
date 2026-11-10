@@ -4961,6 +4961,151 @@
           "ref": "#29906"
         }
       ]
+    },
+    {
+      "id": "studio-authoring.currency-home-amount-editor",
+      "title": "Studio's Home currency amount editor on a record-mode amount offers only the fields the engine can write, saves the three homeAmount pointers, and clears them",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123): every step"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh showcase boot on its own port and DB (dogfood §0) with OS_PORT exported and a console built from this tree (pnpm console:build)",
+          "a writable package PKG (studio-authoring.object-designer-roundtrip's requires) holding the scratch object qa_fx_order with: currency_code (text, valueDomain iso_4217_currency); amount (currency, currencyMode record, currencyField currency_code); order_date (date); amount_home (currency, dynamic, readonly: true); amount_rate (number, scale 12, readonly: true); and three decoys: amount_home_rw (currency, dynamic, not readonly), rate_low (number, scale 4, readonly: true) and total_fixed (currency, fixed USD, readonly: true)"
+        ]
+      },
+      "steps": [
+        "open qa_fx_order in /_console/studio/PKG/data → Form and select the field amount; in its inspector find the Home currency amount section (data-testid currency-config-home-amount) and open each of its three pickers",
+        "pick Home amount field amount_home, Document date order_date, Rate field amount_rate; save, publish, and GET /api/v1/meta/object/qa_fx_order",
+        "POST /api/v1/data/qa_fx_order with currency_code EUR, amount 100 and an order_date the stock EUR rates cover; read amount_home and amount_rate",
+        "back in the inspector set all three pickers to their empty choice; save and GET the object again"
+      ],
+      "acceptance": [
+        {
+          "clause": "each picker lists only the fields the engine may write into, of the right type",
+          "oracle": "dom",
+          "verify": "Home amount field lists amount_home and not amount_home_rw (not readonly), total_fixed (not dynamic) or amount itself; Document date lists order_date; Rate field lists amount_rate and not rate_low (scale below 12) (ui/packages/app-shell/src/views/metadata-admin/inspectors/CurrencyConfigField.tsx#homeAmountCandidates)",
+          "evidence": "a screenshot of each open picker"
+        },
+        {
+          "clause": "the save stores the three pointers on the amount's currencyConfig",
+          "oracle": "api",
+          "verify": "fields.amount.currencyConfig.homeAmount reads { field: 'amount_home', rateDate: 'order_date', rateField: 'amount_rate' }",
+          "evidence": "the meta read"
+        },
+        {
+          "clause": "a record saved after publish stores its home amount through what the editor wrote",
+          "oracle": "api",
+          "verify": "amount_rate is the EUR rate in force on order_date and amount_home = 100 ÷ that rate rounded to 2 decimals (the arithmetic records-forms.multi-currency-invoice acceptance[0] checks)",
+          "evidence": "the record read and the rate row"
+        },
+        {
+          "clause": "emptying the three pickers removes homeAmount from the config",
+          "oracle": "api",
+          "verify": "the second meta read has no homeAmount key on fields.amount.currencyConfig (setHomeAmountPointer deletes homeAmount once no pointer is left, ui/packages/app-shell/src/views/metadata-admin/inspectors/CurrencyConfigField.tsx#setHomeAmountPointer)",
+          "evidence": "the meta read"
+        }
+      ],
+      "negative": [
+        "a picker that offers a field the save door then refuses (a writable home field, a rate field under scale 12) is a FAIL",
+        "reading the editor's absence on a dynamic or fixed amount as a defect is wrong: the section is offered on a record-mode amount only"
+      ],
+      "traps": [
+        "stale-console-bundle",
+        "automation-input"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/app-shell/src/views/metadata-admin/inspectors/CurrencyConfigField.recordMode-27188.test.tsx; no live spec drives the editor"
+      },
+      "source": [
+        "ui/packages/app-shell/src/views/metadata-admin/inspectors/CurrencyConfigField.tsx#homeAmountCandidates and #setHomeAmountPointer",
+        "ui/packages/i18n/src/namespaces/studio/en.ts (designer.field.currency.homeAmount, homeField, rateDate, rateField)",
+        "packages/spec/src/data/field.zod.ts#CurrencyConfigSchema (homeAmount: a dynamic currency field, a date field and a number field, all three required)",
+        "#31638 (the Studio homeAmount editor and the converted-at hint)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0144 multi-currency: the Studio homeAmount editor (#31638). Scoped sweep #32020 (epic #32022 M2), read from source at 43a51b55; no live run made",
+          "ref": "#32020"
+        }
+      ]
+    },
+    {
+      "id": "studio-authoring.currency-field-repointed-refusal",
+      "title": "A save that re-points a stored record-mode amount's currencyField answers 409 DESTRUCTIVE_CHANGE with the currency_field_repointed finding, naming what it does to stored rows and the remedies, and force lifts it",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123): every call"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a showcase boot on its own port and file DB (dogfood §0), signed in as the seeded admin",
+          "the environment object qa_fx_repoint saved with PUT /api/v1/meta/object/qa_fx_repoint (no ?package=): code_a and code_b (text, valueDomain iso_4217_currency), amount (currency, currencyMode record, currencyField code_a, homeAmount { field: amount_home, rateDate: doc_date, rateField: amount_rate }), doc_date (date), amount_home (currency, dynamic, readonly: true), amount_rate (number, scale 12, readonly: true); one row with code_a EUR, amount 100 and a covered doc_date"
+        ]
+      },
+      "steps": [
+        "GET /api/v1/meta/object/qa_fx_repoint, change fields.amount.currencyConfig.currencyField to code_b, and PUT it back",
+        "PUT the same body with ?force=true, then GET the object and the row",
+        "PUT the body unchanged (currencyField code_b again)"
+      ],
+      "acceptance": [
+        {
+          "clause": "the re-point is refused 409 DESTRUCTIVE_CHANGE with one currency_field_repointed issue for the field, and nothing is saved",
+          "oracle": "api",
+          "verify": "the PUT answers 409 code DESTRUCTIVE_CHANGE with issues holding { code: 'currency_field_repointed', field: 'amount', message }; a GET still reads currencyField code_a (packages/metadata-protocol/src/protocol-write-face.ts, the \"currency_field_repointed\" finding; packages/metadata-protocol/src/protocol-save.ts, the 409)",
+          "evidence": "the 409 body and the unchanged read"
+        },
+        {
+          "clause": "the finding says what happens to stored rows and names the remedies that exist",
+          "oracle": "api",
+          "verify": "the message names code_a and code_b, says no stored amount is converted, names the code backfill (os migrate record-currency-codes --object qa_fx_repoint --field amount, or POST /api/v1/meta/_migrate-record-currency-codes, packages/metadata-protocol/src/protocol-write-face.ts#recordCurrencyCodeBackfillRemedy), and, since the amount declares homeAmount, os migrate recompute-home-amounts --object qa_fx_repoint --field amount as a shell command with no REST door",
+          "evidence": "the message text"
+        },
+        {
+          "clause": "force lifts it and converts nothing; an identical pointer raises nothing",
+          "oracle": "api",
+          "verify": "the forced PUT answers 200 and the object reads currencyField code_b; the row keeps amount 100, amount_home and amount_rate as before; the unchanged PUT answers 200 with no finding",
+          "evidence": "the forced answer, the two reads and the last answer"
+        }
+      ],
+      "negative": [
+        "a re-point saved without force, or a forced save that rewrites stored amounts or home amounts, is a FAIL"
+      ],
+      "traps": [
+        "destructive-in-place"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/objectql/src/protocol-destructive-currency-mode.test.ts (the currency_field_repointed describe; run with --project local)"
+      },
+      "source": [
+        "docs/adr/0144-multi-currency-record-currency-dated-rates-write-time-home-projection.md (D5, the currency_field_repointed finding, #31986)",
+        "packages/metadata-protocol/src/protocol-write-face.ts#recordCurrencyCodeBackfillRemedy and the \"currency_field_repointed\" finding",
+        "packages/metadata-protocol/src/protocol-save.ts (DESTRUCTIVE_CHANGE, 409, issues)",
+        "#31969 (the refusal), #31986 (the ADR record)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0144 multi-currency: the currency_field_repointed destructive finding (#31969, #31986). Scoped sweep #32020 (epic #32022 M2), read from source at 43a51b55; no live run made",
+          "ref": "#32020"
+        }
+      ]
     }
   ]
 }
