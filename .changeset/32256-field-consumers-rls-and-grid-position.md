@@ -5,7 +5,7 @@
 
 fix(lint): `field-no-consumers` stops reporting a field that only a row-level security predicate or an inline grid's line-position derivation reads
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 `field-no-consumers` reported two kinds of field that something in the stack does read:
