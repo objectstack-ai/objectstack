@@ -891,20 +891,23 @@ describe('[ADR-0106 D1] an action the caller is not shown is answered on every r
         { recordId: 'p1', params: { budget: 5, rate: 5 } },
     ];
 
-    const member = { userId: 'usr_member', positions: [] as string[], permissions: ['run_fls_member'], systemPermissions: [] as string[] };
+    const ORG = 'org_run_fls';
+    const member = {
+        userId: 'usr_member', organizationId: ORG, positions: [] as string[], permissions: ['run_fls_member'], systemPermissions: [] as string[],
+    };
     const PERSONAS = {
         /** Denied `budget` here and `rate` on the other object. */
         member,
         /** As the member, and holding the approve capability. */
         approver: { ...member, userId: 'usr_approver', systemPermissions: [APPROVE] },
         /** Denied nothing: the control. */
-        staff: { userId: 'usr_staff', positions: [] as string[], permissions: ['run_fls_staff'], systemPermissions: [] as string[] },
+        staff: { ...member, userId: 'usr_staff', permissions: ['run_fls_staff'] },
         /** Denied every field of the project object. */
-        walled: { userId: 'usr_walled', positions: [] as string[], permissions: ['run_fls_walled'], systemPermissions: [] as string[] },
+        walled: { ...member, userId: 'usr_walled', permissions: ['run_fls_walled'] },
         /** D4: holds the member's denies and may write the schema. */
         author: { ...member, userId: 'usr_author', systemPermissions: ['manage_metadata'] },
         /** The system context. */
-        system: { userId: 'usr_system', isSystem: true },
+        system: { userId: 'usr_system', organizationId: ORG, isSystem: true },
     } as const;
     type Persona = Record<string, unknown>;
 
@@ -1002,7 +1005,7 @@ describe('[ADR-0106 D1] an action the caller is not shown is answered on every r
 
     /** A project row, written in the system context, read back the same way. */
     const seed = async (id: string) => {
-        await engine.insert(OBJ, { id, title: 'Apollo', stage: 'open', budget: 100 }, { context: { isSystem: true } } as any);
+        await engine.insert(OBJ, { id, title: 'Apollo', stage: 'open', budget: 100, organization_id: ORG }, { context: { isSystem: true } } as any);
     };
     const rowOf = async (id: string) => (await engine.find(OBJ, { where: { id } } as any, { context: { isSystem: true } } as any) as any[])?.[0];
 
