@@ -440,7 +440,7 @@ function renderReport(report: SysSecretRewrapReport, noteSuffix: ReadonlyMap<str
   printInfo(
     `${report.mode === 'apply' ? 're-wrapped' : 'would re-wrap'} ${report.counts.rewrap} `
     + `(settings ${s.settings} · object_secret_field ${s.object_secret_field} · `
-    + `datasource_credential ${s.datasource_credential})`,
+    + `datasource_credential ${s.datasource_credential} · audit_seal ${s.audit_seal})`,
   );
   printInfo(`done (already current) ${report.counts.done}`);
   printInfo(

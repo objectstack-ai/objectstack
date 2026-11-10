@@ -12,6 +12,7 @@
  *   POST /api/v1/cloud-connection/bind/poll     — poll device token + persist the binding
  *   POST /api/v1/cloud-connection/install       — install a package via the control plane
  *   GET  /api/v1/cloud-connection/installation  — single-package installed-state probe
+ *   GET  /api/v1/cloud-connection/install-namespace — the control plane's default namespace for an unmanaged copy
  *   GET  /api/v1/cloud-connection/installed     — env's full installed list (Installed view)
  *   GET  /api/v1/cloud-connection/org-packages  — owning org's own catalog ("Your organization")
  *
@@ -167,6 +168,7 @@ import { createCloudBinding } from './cloud-binding.js';
 import { CLOUD_BINDING_SERVICE, type ICloudBindingService } from '@objectstack/spec/contracts';
 import { CLOUD_CONNECTION_CAPABILITY, CLOUD_CONNECTION_UI_BUNDLE } from './cloud-connection-ui.js';
 import { readJsonRequestBody } from './request-json-body.js';
+import { repeatedQueryParamMessage, unknownQueryParamRefusalMessage } from '@objectstack/rest';
 // [#30964] The install mode's one declaration, read by reference: never a copy of its two spellings.
 import { InstallModeSchema, ManifestSchema, SEMVER_2_0_0_VERSION_PATTERN, type InstallMode } from '@objectstack/spec/kernel';
 import {
@@ -175,6 +177,17 @@ import {
 } from './install-local-door-service.js';
 
 const CLOUD_CONNECTION_PREFIX = '/api/v1/cloud-connection';
+
+/**
+ * [#32083] The closed query-parameter set of `GET /install-namespace`
+ * (AGENTS.md, route rule 5), measured from the handler's one read point: the
+ * package whose default namespace is asked for. ⛔ No `packageId` alias (the
+ * `/installation` probe beside it honours one; this door is new and takes one
+ * spelling), and no `environment_id`: the environment is this request's host,
+ * never a value the caller names. Any other name is refused with a located
+ * `400 VALIDATION_ERROR` before the control plane is asked anything.
+ */
+export const INSTALL_NAMESPACE_QUERY_PARAMS: readonly string[] = Object.freeze(['package_id']);
 
 /** [#31963] A JSON object (not an array, not null): the only shape a grant's `data.manifest` is read in. */
 const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
@@ -1691,6 +1704,79 @@ export class CloudConnectionPlugin implements Plugin {
                 }
             }));
 
+            // GET /install-namespace?package_id=… — [#32083] the namespace the
+            // control plane would give an UNMANAGED copy of this package in
+            // this environment, read same-origin so the Console's install
+            // dialog can show it as the editable default. The control plane
+            // answers it on `GET /api/v1/cloud/packages/:id/install-namespace
+            // ?environment_id=` (cloud#4206), which a tenant console cannot
+            // call: it is cross-origin, and the console does not know its own
+            // environment id.
+            //
+            // Gated as `POST /install` is: this request's environment, a
+            // signed-in session of it, a held session refused (ADR-0069), all
+            // before the control plane is asked. Unlike the read-only probes
+            // beside it, it never degrades to a made-up answer: no connection
+            // is `503 CLOUD_UNCONFIGURED` and an unreachable control plane is
+            // `502`, so the dialog reads "no default" and leaves the field
+            // empty — never a guessed namespace the copy would not take. The
+            // control plane's answer (its status and its body) is relayed as
+            // it was: the default is the control plane's, and this door adds
+            // and drops nothing.
+            rawApp.get(`${CLOUD_CONNECTION_PREFIX}/install-namespace`, door(async (c: any) => {
+                // AGENTS.md route rule 5: recognition first, then arity, both
+                // the nested ADR-0112 `VALIDATION_ERROR`, before anything is read.
+                let params: URLSearchParams;
+                try { params = new URL(c.req.url).searchParams; } catch { params = new URLSearchParams(); }
+                const unknownParam = unknownQueryParamRefusalMessage(Object.fromEntries(params), INSTALL_NAMESPACE_QUERY_PARAMS);
+                if (unknownParam) return c.json({ success: false, error: { code: 'VALIDATION_ERROR', message: unknownParam } }, 400);
+                const asked = params.getAll('package_id');
+                if (asked.length > 1) {
+                    return c.json({ success: false, error: { code: 'VALIDATION_ERROR', message: repeatedQueryParamMessage('package_id', asked.length) } }, 400);
+                }
+
+                const environmentId = await resolveEnvironmentId(c);
+                if (!environmentId) return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND', message: ENVIRONMENT_NOT_FOUND_MESSAGE } }, 404);
+
+                const session = await resolveSession(environmentId, c.req.raw);
+                if (session?.authGate) return refuseHeldSession(c, session.authGate);
+                if (!session?.userId) {
+                    return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to install apps.' } }, 401);
+                }
+
+                const packageId = String(asked[0] ?? '').trim();
+                if (!packageId) return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'package_id is required' } }, 400);
+
+                if (!cloudUrl || !credential()) {
+                    return c.json({
+                        success: false,
+                        error: {
+                            code: 'CLOUD_UNCONFIGURED',
+                            message: 'This runtime is not connected to a cloud account, so it has no default install namespace to read.',
+                        },
+                    }, 503);
+                }
+
+                try {
+                    const resp = await fetch(
+                        `${cloudUrl}/api/v1/cloud/packages/${encodeURIComponent(packageId)}/install-namespace`
+                            + `?environment_id=${encodeURIComponent(environmentId)}`,
+                        { headers: { Accept: 'application/json', ...authHeaders() } },
+                    );
+                    const json: unknown = await resp.json();
+                    return c.json(json, resp.status as any);
+                } catch (err: any) {
+                    ctx.logger?.warn?.(`[CloudConnectionPlugin] install-namespace read failed: ${String(err?.message ?? err)}`);
+                    return c.json({
+                        success: false,
+                        error: {
+                            code: 'EXTERNAL_SERVICE_ERROR',
+                            message: `The control plane did not answer the default install namespace of '${packageId}'; no default was read.`,
+                        },
+                    }, 502);
+                }
+            }));
+
             // GET /installed — env's FULL installed set from the control
             // plane's `sys_package_installation`, so the Console "Installed"
             // view reflects packages installed via ANY path (CLI, marketplace,
@@ -1775,7 +1861,7 @@ export class CloudConnectionPlugin implements Plugin {
                 }
             }));
 
-            ctx.logger?.info?.(`[CloudConnectionPlugin] mounted ${CLOUD_CONNECTION_PREFIX}/{status,bind/start,bind/poll,install,installation,installed,org-packages} → ${cloudUrl || '(cloud unconfigured)'}`);
+            ctx.logger?.info?.(`[CloudConnectionPlugin] mounted ${CLOUD_CONNECTION_PREFIX}/{status,bind/start,bind/poll,install,installation,install-namespace,installed,org-packages} → ${cloudUrl || '(cloud unconfigured)'}`);
         });
     };
 }
