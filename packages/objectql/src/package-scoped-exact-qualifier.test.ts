@@ -444,6 +444,87 @@ describe('a covered type the registry reads through `getItem` (seat rulings (a),
 });
 
 /**
+ * The pair line in `exactQualifierItem` (#32076) under the epic's ruling on
+ * #31699 F2 (red-line review 6772561368 on #32277): two packages of one App
+ * share the App's customization pair, so a pair row with no `overrides`
+ * naming one of them cannot say whose item it is. Serving it on both holders'
+ * exact addresses would give one package's item to the other; it is refused
+ * on both, naming both. One holder, the App's own address (#28390 ruling A)
+ * and a row that declares its base keep their answers.
+ */
+describe('[#32076] a pair row two holders could own is refused on both exact reads, naming both', () => {
+  const APP = 'com.acme.suite';
+  const X = 'com.acme.suitex';
+  const Y = 'com.acme.suitey';
+  const PAIR = `${APP}.custom`;
+  /** A package of the App: its own namespace, depending on the App. */
+  const memberOf = (id: string) => ({
+    id, name: id, version: '1.0.0', type: 'module', namespace: id.split('.').pop()!,
+    dependencies: { [APP]: '^1.0.0' },
+  }) as never;
+  const tpl = (locale: string, packageId: string) => registry.registerItem('email_template', {
+    name: 'welcome', label: `${packageId.split('.').pop()} ${locale}`, locale,
+    subject: `${packageId.split('.').pop()} ${locale}`, bodyHtml: '<p>x</p>',
+  }, 'name' as never, packageId);
+  const read = (packageId: string, member: string) => protocol.getMetaItem({
+    type: 'email_template', name: 'welcome', packageId, member,
+  } as never);
+  const pairRow = (over: Record<string, unknown> = {}) => rows.push({
+    id: 'row_fr', type: 'email_template', name: 'welcome', state: 'active', package_id: PAIR, bundle_member: 'fr-FR',
+    metadata: JSON.stringify({ name: 'welcome', label: 'pair fr-FR', locale: 'fr-FR', subject: 'pair fr-FR', bodyHtml: '<p>p</p>', ...over }),
+  });
+
+  beforeEach(() => {
+    registry.installPackage(manifest(APP), 'code');
+    registry.installPackage(memberOf(X), 'code');
+    registry.installPackage(memberOf(Y), 'code');
+    registry.installPackage(manifest(PAIR), 'code');
+  });
+
+  it('the premise: the registry reads an email template through `getItem`, so the 409 below is the pair line\'s, under (c)', () => {
+    expect(registry.readsByPackage('email_template')).toBe(false);
+  });
+
+  it('two holders share the pair: both exact reads of the pair\'s member refuse 409, naming both (BASE: each served the pair\'s)', async () => {
+    tpl('en-US', X);
+    tpl('en-US', Y);
+    pairRow();
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([X, Y]);
+    for (const at of [X, Y]) {
+      const err = await refusalOf(() => read(at, 'fr-FR'));
+      expect([err.code, err.status, err.refusal.reason], at).toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-closure']);
+      expect(err.refusal.candidates, at).toEqual([{ kind: 'package', packageId: X }, { kind: 'package', packageId: Y }]);
+    }
+    // CONTROL: each holder's own member is still its own.
+    expect(labelOf(await read(X, 'en-US'))).toBe('suitex en-US');
+    expect(labelOf(await read(Y, 'en-US'))).toBe('suitey en-US');
+  });
+
+  it('one holder of the pair: the pair\'s member is served on its address (#28802, #28390 ruling A)', async () => {
+    tpl('en-US', X);
+    pairRow();
+    const answer = await read(X, 'fr-FR');
+    expect(labelOf(answer)).toBe('pair fr-FR');
+    expect((answer as { item?: { _packageId?: string } }).item?._packageId).toBe(PAIR);
+  });
+
+  it('the App\'s own address keeps ruling A: its pair\'s added member is served there, even beside a package of the App holding the name', async () => {
+    tpl('en-US', APP);
+    tpl('en-US', X);
+    pairRow();
+    expect(labelOf(await read(APP, 'fr-FR'))).toBe('pair fr-FR');
+  });
+
+  it('a row that declares the base it customizes is served on that base only', async () => {
+    tpl('en-US', X);
+    tpl('en-US', Y);
+    pairRow({ overrides: { package: X } });
+    expect(labelOf(await read(X, 'fr-FR'))).toBe('pair fr-FR');
+    expect(labelOf(await read(Y, 'fr-FR'))).not.toBe('pair fr-FR');
+  });
+});
+
+/**
  * [#32069] The exact read never serves a body under a package it was not read
  * from. On main ff04ad81, `GET /meta/api/alpha/NAME` of an api two packages
  * hold answered beta's body stamped `_packageId: alpha`: the metadata service
