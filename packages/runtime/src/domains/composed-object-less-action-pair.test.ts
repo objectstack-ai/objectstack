@@ -140,7 +140,7 @@ describe('[ADR-0150 D4] the composed artifact of two namespaces\' same-named obj
             }
         });
 
-        it('the bare call is refused 409 naming both packages\' qualified addresses, and nothing runs', async () => {
+        it('the bare call is refused 409 naming both packages, and nothing runs', async () => {
             const answer = await post(booted!.kernel, `/actions/global/${SHARED}`);
             expect([answer.status, answer.code], answer.message).toEqual([409, 'RESOURCE_CONFLICT']);
             for (const holder of [ALPHA, BETA]) expect(answer.message).toContain(holder);
