@@ -4179,6 +4179,16 @@ const ja = {
       expandTable: '展開',
       exitExpandedTable: '閉じる',
     },
+    answerSource: {
+      title: '計算方法',
+      object: 'オブジェクト',
+      filter: 'フィルター',
+      allRecords: 'すべてのレコード',
+      groupedBy: 'グループ化',
+      aggregations: '集計',
+      records: 'レコード',
+      visibleToYou: 'あなたが閲覧できるレコードのみ',
+    },
     tool: {
       aggregate_data: "関連データを集計する",
       get_record: "このレコードを読み込む",

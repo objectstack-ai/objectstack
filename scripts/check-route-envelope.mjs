@@ -1050,7 +1050,17 @@ const DISPATCHER_DOMAINS = {
   // refusal it makes itself — the two 501s, the sanitised 500s — goes through
   // `deps.error`.
   'approvals.ts': { handBuilt: 0 },
-  'automation.ts': { handBuilt: 0 },
+  // [ADR-0150 D5] Kind 1: the `405` for a shape the domain serves under
+  // another verb must carry an `Allow:` header (`deps.error` takes none), as
+  // `/actions`' does; its body is `buildApiError`'s declared envelope.
+  'automation.ts': {
+    handBuilt: 1,
+    note: 'one 405 for a served shape under another verb, which must carry an `Allow:` header (`deps.error` takes none); the body is `buildApiError`\'s declared envelope',
+  },
+  // [ADR-0150 D5] Not a domain: the `/automation` address read and admission
+  // the domain calls. It answers nothing itself — its refusals are values the
+  // domain hands to `deps.error`.
+  'automation-address.ts': { handBuilt: 0 },
   // [#22773] The inbound-hook door the `/automation` domain hands its one
   // admitted route to: the trigger-api member's own JSON `Response` is handed
   // back as `result` (the `/webhooks/redeliver` shape), and every refusal it
