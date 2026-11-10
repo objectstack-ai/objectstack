@@ -10,7 +10,7 @@
 //
 // [#31701, ADR-0150 D2/D9, child B] An agent and a skill have since narrowed
 // to the namespace: two packages of two namespaces may each hold the name.
-// A tool has not.
+// [#31985] A tool has followed them.
 //
 // The registry's own pins (`registry-bare-name-one-holder-ai-family.test.ts`)
 // drive the engine's package door and the item seam in-process. This file
@@ -18,9 +18,8 @@
 //
 //   - the cold boot of a deployment where two `AppPlugin` packages of two
 //     namespaces, `alpha` and `beta`, ship one agent, one skill and one tool
-//     under the same names boots, and logs ONE bare-name warning line naming
-//     the tool alone: the agent and the skill are no clash between two
-//     namespaces;
+//     under the same names boots, and logs NO bare-name warning: none of the
+//     three is a clash between two namespaces;
 //   - [#31680, ADR-0150 D3] the by-name read that names no package —
 //     `/meta/agent/NAME`, `/meta/skill/NAME`, `/meta/tool/NAME` — refuses
 //     `409 RESOURCE_CONFLICT` naming both holders; the read that names the
@@ -30,10 +29,10 @@
 //     serves its own package's skill (`agent_prompt` is the stdio transport's
 //     alone: its faces are pinned beside it, in `packages/mcp`);
 //   - `POST /marketplace/install-local` of a package of a THIRD namespace
-//     declaring the held agent and skill names installs; of a co-owner of
-//     `alpha`'s namespace declaring either is 422 PLUGIN_REGISTER_FAILED
-//     naming the holder and the rename, as before; of a package declaring the
-//     held tool name is the same 422 naming both holders; none installs;
+//     declaring the held agent, skill and tool names installs; of a co-owner
+//     of `alpha`'s namespace declaring any of them is 422
+//     PLUGIN_REGISTER_FAILED naming the holder and the rename, as before, and
+//     does not install;
 //   - CONTROL: a package declaring fresh agent, skill and tool names installs,
 //     and every AI door serves it as before.
 
@@ -115,7 +114,7 @@ function levelOf(line: string): string | undefined {
 const codeOf = (body: any) =>
   (body?.error && typeof body.error === 'object' ? body.error.code : undefined) ?? body?.code ?? null;
 
-describe('agent and skill names held per namespace, a tool name per deployment, on a booted showcase', () => {
+describe('agent, skill and tool names held per namespace, on a booted showcase', () => {
   let stack: VerifyStack;
   let admin: string;
   let storageDir: string;
@@ -222,19 +221,12 @@ describe('agent and skill names held per namespace, a tool name per deployment, 
     if (storageDir) rmSync(storageDir, { recursive: true, force: true });
   });
 
-  it('two namespaces\' packages holding one agent, skill and tool name both boot; the cold boot warns once, naming the tool alone', async () => {
+  it('two namespaces\' packages holding one agent, skill and tool name both boot, with no bare-name warning', async () => {
     expect(await packageIds(), 'both packages booted').toEqual(expect.arrayContaining(['com.qa.bare.alpha', 'com.qa.bare.beta']));
-    const warnings = bootLines.filter((l) => l.includes('Bare-name conflict at boot'));
-    expect(warnings, 'one warning line').toHaveLength(1);
-    const line = warnings[0]!;
-    expect(levelOf(line)).toBe('WARN');
-    expect(line).toContain(`the tool "${TOOL}"`);
-    expect(line).toContain(`"beta_${TOOL}"`);
-    expect(line).toContain('package "com.qa.bare.alpha"');
-    expect(line).toContain('package "com.qa.bare.beta"');
-    // [#31701] Two namespaces' agents and skills are no clash.
-    expect(line).not.toContain(`the agent "${AGENT}"`);
-    expect(line).not.toContain(`the skill "${SKILL}"`);
+    // [#31701, #31985] Two namespaces' agents, skills and tools are no clash.
+    // The capture itself is live: it saw the boot's own output.
+    expect(bootLines.some((l) => levelOf(l) !== undefined), 'the capture saw the kernel logger').toBe(true);
+    expect(bootLines.filter((l) => l.includes('Bare-name conflict at boot'))).toEqual([]);
   });
 
   it('the bare by-name read refuses 409 naming both holders; `?package=` serves each package\'s own', async () => {
@@ -251,7 +243,7 @@ describe('agent and skill names held per namespace, a tool name per deployment, 
   // namespace's address serves its own agent and skill; `_env` serves only an
   // environment item, so for a name only packages hold it is refused naming
   // them; the bare read stays the 409 naming both.
-  it('the qualified read `/meta/TYPE/:ns/NAME` serves each namespace\'s own agent and skill, `_env` none, on both transports', async () => {
+  it('the qualified read `/meta/TYPE/:ns/NAME` serves each namespace\'s own agent, skill and tool, `_env` none, on both transports', async () => {
     const dispatcher = new HttpDispatcher(stack.kernel as never);
     const viaDispatcher = async (path: string) => {
       const answered = await dispatcher.handleMetadata(path, {
@@ -268,7 +260,7 @@ describe('agent and skill names held per namespace, a tool name per deployment, 
     const itemOf = (body: any) => { const d = body?.data ?? body; return d?.item ?? d; };
     const messageOf = (body: any) => String(typeof body?.error === 'string' ? body.error : body?.error?.message ?? body?.message ?? '');
     for (const [transport, read] of [['rest', viaRest], ['dispatcher', viaDispatcher]] as const) {
-      for (const [type, name] of [['agent', AGENT], ['skill', SKILL]] as const) {
+      for (const [type, name] of [['agent', AGENT], ['skill', SKILL], ['tool', TOOL]] as const) {
         for (const ns of ['alpha', 'beta'] as const) {
           const answer = await read(`/${type}/${ns}/${name}`);
           expect([transport, type, ns, answer.status], JSON.stringify(answer.body)).toEqual([transport, type, ns, 200]);
@@ -295,10 +287,11 @@ describe('agent and skill names held per namespace, a tool name per deployment, 
     expect([...(bare.error?.data?.candidates ?? [])].sort()).toEqual([`alpha-${SKILL}`, `beta-${SKILL}`]);
   });
 
-  it('install-local of a co-owner of `alpha`\'s namespace declaring the held agent or skill name is 422 PLUGIN_REGISTER_FAILED, naming the holder and the rename, as before; nothing is installed', async () => {
+  it('install-local of a co-owner of `alpha`\'s namespace declaring the held agent, skill or tool name is 422 PLUGIN_REGISTER_FAILED, naming the holder and the rename, as before; nothing is installed', async () => {
     for (const [p, collections, type, name] of [
       ['alphamod', { agents: [agent('alphamod')] }, 'agent', AGENT],
       ['alphaext', { skills: [skill('alphaext')] }, 'skill', SKILL],
+      ['alphatool', { tools: [tool('alphatool')] }, 'tool', TOOL],
     ] as const) {
       const before = await packageIds();
       const { status, body } = await installLocal(inline(p, collections as never, 'alpha'));
@@ -311,19 +304,6 @@ describe('agent and skill names held per namespace, a tool name per deployment, 
       expect(await packageIds(), 'the package list is unchanged').toEqual(before);
     }
     expect(await metaAt('agent', AGENT, 'com.qa.bare.alpha')).toEqual(['com.qa.bare.alpha', 'alpha agent']);
-  });
-
-  it('install-local of a package declaring the held tool name is 422 PLUGIN_REGISTER_FAILED naming both holders and the rename; nothing is installed', async () => {
-    const before = await packageIds();
-    const { status, body } = await installLocal(inline('zeta', { tools: [tool('zeta')] }));
-    expect([status, codeOf(body)], JSON.stringify(body)).toEqual([422, 'PLUGIN_REGISTER_FAILED']);
-    const message = String(body?.error?.message ?? '');
-    expect(message).toContain(`the tool "${TOOL}"`);
-    expect(message).toContain('com.qa.bare.alpha');
-    expect(message).toContain('com.qa.bare.beta');
-    expect(message).toContain(`"zeta_${TOOL}"`);
-    expect(await packageIds(), 'the package list is unchanged').toEqual(before);
-    await expectMetaRefused('tool', TOOL);
   });
 
   it('CONTROL — install-local of a package declaring fresh agent, skill and tool names installs, and every AI door serves it', async () => {
@@ -341,15 +321,18 @@ describe('agent and skill names held per namespace, a tool name per deployment, 
     expect(await promptText('epsilon_skill'), 'one holder: the bare name still answers').toContain('epsilon skill instructions');
   });
 
-  it('[#31701] install-local of a package of a THIRD namespace declaring the held agent and skill names installs; the bare read then names all three holders', async () => {
-    const { status, body } = await installLocal(inline('gamma', { agents: [agent('gamma')], skills: [skill('gamma')] }));
+  it('[#31701, #31985] install-local of a package of a THIRD namespace declaring the held agent, skill and tool names installs; the bare read then names all three holders', async () => {
+    const { status, body } = await installLocal(inline('gamma', { agents: [agent('gamma')], skills: [skill('gamma')], tools: [tool('gamma')] }));
     expect(status, JSON.stringify(body)).toBeLessThan(300);
     expect(await packageIds()).toContain('com.qa.bare.gamma');
     expect(await metaAt('agent', AGENT, 'com.qa.bare.gamma')).toEqual(['com.qa.bare.gamma', 'gamma agent']);
     expect(await metaAt('skill', SKILL, 'com.qa.bare.gamma')).toEqual(['com.qa.bare.gamma', 'gamma skill']);
+    expect(await metaAt('tool', TOOL, 'com.qa.bare.gamma')).toEqual(['com.qa.bare.gamma', 'gamma tool']);
     const all = ['com.qa.bare.alpha', 'com.qa.bare.beta', 'com.qa.bare.gamma'];
     await expectMetaRefused('agent', AGENT, all);
     await expectMetaRefused('skill', SKILL, all);
+    await expectMetaRefused('tool', TOOL, all);
+    expect(await metaAt('tool', TOOL, 'com.qa.bare.alpha')).toEqual(['com.qa.bare.alpha', 'alpha tool']);
     // The first packages' items are unchanged.
     expect(await metaAt('agent', AGENT, 'com.qa.bare.alpha')).toEqual(['com.qa.bare.alpha', 'alpha agent']);
     expect(await promptText(`alpha-${SKILL}`)).toContain('alpha skill instructions');

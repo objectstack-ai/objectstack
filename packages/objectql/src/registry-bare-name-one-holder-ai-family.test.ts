@@ -18,14 +18,14 @@
  *    and another's of another under one name never meet (CONTROL);
  *  - two packages' tools under different names both install (CONTROL).
  *
- * [ADR-0150 D2/D9, child B, #31701] `agent` and `skill` have narrowed to the
- * namespace (`NAMESPACE_SCOPED_BARE_NAME_TYPES`): the matrix below refuses
- * their second holder as a CO-OWNER of the first holder's namespace (a
- * package of namespace `alpha` that depends on `com.acme.alpha`), and a
- * `tool`'s as a package of another namespace, as before. "the narrowing" pins
- * what changed: two namespaces' packages each hold the name, at every door and
- * through the cold boot, while a co-owner, a package with no namespace and a
- * built-in name are still refused.
+ * [ADR-0150 D2/D9, child B, #31701 and #31985] `agent`, `skill` and `tool`
+ * have narrowed to the namespace (`NAMESPACE_SCOPED_BARE_NAME_TYPES`): the
+ * matrix below refuses their second holder as a CO-OWNER of the first
+ * holder's namespace (a package of namespace `alpha` that depends on
+ * `com.acme.alpha`). "the narrowing" pins what changed: two namespaces'
+ * packages each hold the name, at every door and through the cold boot, while
+ * a co-owner, a package with no namespace, two packages of one shareable
+ * namespace and a built-in name are still refused.
  *
  * Every refusal is asserted by its ADR-0112 envelope (`code` + `status`), the
  * two holders it names and the rename it carries.
@@ -321,11 +321,11 @@ describe.each(TYPES)('%s — after the cold boot, a second package declaring a n
   });
 });
 
-describe('the narrowing — agent and skill hold one name per namespace (ADR-0150 D2/D9, child B)', () => {
-  const NARROWED = ['agent', 'skill'] as const;
+describe('the narrowing — agent, skill and tool hold one name per namespace (ADR-0150 D2/D9, child B)', () => {
+  const NARROWED = ['agent', 'skill', 'tool'] as const;
 
-  it('the switch holds agent and skill, and no other covered type', () => {
-    expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).toEqual(['agent', 'skill']);
+  it('the switch holds agent, skill and tool, and no other covered type', () => {
+    expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).toEqual(['agent', 'skill', 'tool']);
     for (const type of BARE_NAME_ONE_HOLDER_TYPES) {
       // A type that has not narrowed meets every holder, namespaces or not.
       expect(bareNameHoldersMeet(type, 'alpha', 'beta'), type).toBe(NARROWED.includes(type as never) ? false : true);
@@ -418,10 +418,16 @@ describe('the narrowing — agent and skill hold one name per namespace (ADR-015
     });
   });
 
-  it('CONTROL — a tool has not narrowed: a package of another namespace is still refused its name', async () => {
-    const { register } = await boot();
+  it('[#31985] a tool of a package of another namespace installs beside the holder\'s and each package serves its own; the bare read refuses naming both', async () => {
+    const { registry, register } = await boot();
     expect(await register(pkg('com.acme.alpha', { tool: ['shared_tool'] }))).toBeUndefined();
-    expectRefusal(await register(pkg('com.acme.beta', { tool: ['shared_tool'] })), 'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' }, 'beta_shared_tool');
+    expect(await register(pkg('com.acme.beta', { tool: ['shared_tool'] }))).toBeUndefined();
+    expect(marker(registry.resolveItem('tool', 'shared_tool', 'com.acme.alpha'))).toBe('alpha tool');
+    expect(marker(registry.resolveItem('tool', 'shared_tool', 'com.acme.beta'))).toBe('beta tool');
+    const refused = await caught(() => registry.resolveItem('tool', 'shared_tool'));
+    expect([refused?.code, refused?.status]).toEqual(['RESOURCE_CONFLICT', 409]);
+    expect(refused!.message).toContain('com.acme.alpha');
+    expect(refused!.message).toContain('com.acme.beta');
   });
 });
 

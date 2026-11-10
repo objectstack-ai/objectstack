@@ -66,7 +66,7 @@
  *    and every reference to a tool carries its bare name alone: a skill's
  *    `tools` list admits only a snake_case name, an AI tool definition and a
  *    tool call carry a name and no package, and an MCP server registers one
- *    tool per name.
+ *    tool per name (since narrowed to the namespace: "The narrowing").
  *
  * Every one of them flips with registration order, and none says so (the
  * object-less action's handler bind warns that it replaces one, and names
@@ -140,6 +140,14 @@
  * built-in name (D9: the refusal narrows, it does not go). `agent` and `skill`
  * narrowed first (#31701): `/meta/agent|skill/NAME` read through
  * `readPackageScopedItem`, and the MCP prompt and agent faces are `NS-NAME`.
+ * `tool` followed (#31985): `/meta/tool/NAME` reads through
+ * `readPackageScopedItem` (child E8), and a package's `tool` record has no
+ * other reader and no AI face to carry. Every tool an MCP client or a model is
+ * shown comes from the AI service's live tool registry (platform tools and
+ * action-backed tools), never from a `tool` record, and a skill's `tools`
+ * names resolve against that registry. Once tool records become live, the
+ * resolver of a skill's `tools` resolves from the skill's package (ADR-0150
+ * D3) and refuses two holders, naming them.
  *
  * ## What it deliberately does not judge
  *
@@ -239,7 +247,10 @@ const COLLECTION_KEY: Readonly<Record<BareNameRegistryType, string>> = Object.fr
  * The names the platform itself holds, whichever package registers first.
  * None today: the platform ships no item of a covered type under a name a
  * package could take. Applied at the package door only, as the security
- * catalog applies its own.
+ * catalog applies its own. For `tool` the platform requests no tool record by
+ * name (ADR-0150 D3's exception list holds none): the tools the AI service
+ * registers by name (`PLATFORM_PROVIDED_TOOL_NAMES`) live in its own tool
+ * registry, not in this registry, so none is a built-in here.
  */
 export const BUILT_IN_BARE_NAMES: Readonly<Record<BareNameOneHolderType, ReadonlySet<string>>> = Object.freeze({
   picklist: new Set<string>(),
@@ -262,12 +273,13 @@ export const BUILT_IN_BARE_NAMES: Readonly<Record<BareNameOneHolderType, Readonl
  * narrowed from the deployment to the namespace (module doc, "The narrowing").
  * Each type joins in its own trailing change, once its by-name readers, its
  * AI faces and its stored references all carry the package: the AI family's
- * `agent` and `skill` first (#31701). A type not listed here keeps one package
- * holder per deployment.
+ * `agent` and `skill` first (#31701), then `tool` (#31985). A type not listed
+ * here keeps one package holder per deployment.
  */
 export const NAMESPACE_SCOPED_BARE_NAME_TYPES: readonly BareNameOneHolderType[] = Object.freeze([
   'agent',
   'skill',
+  'tool',
 ]);
 
 /** Has `type`'s one-holder rule narrowed to the namespace ({@link NAMESPACE_SCOPED_BARE_NAME_TYPES})? */
