@@ -228,8 +228,9 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // `/sso/delete-provider` only, and only once the vendor answered
   // `success`: remove the provider's IdP group mappings and the grants
   // whose reason is its projection marker, then name in the answer the
-  // users the delete unlinked, those it locked out, and what was
-  // removed (counted by the before-hook ahead of the vendor's writes).
+  // users the delete unlinked, those with no other sign-in method linked,
+  // and what was removed (counted by the before-hook ahead of the
+  // vendor's writes).
   // See `sso-provider-lifecycle.ts`.
   if (ctx?.path === SSO_PROVIDER_DELETE_PATH) await this.settleSsoProviderDelete(ctx);
 

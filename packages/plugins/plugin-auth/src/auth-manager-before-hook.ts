@@ -331,7 +331,7 @@ export async function globalBeforeHook(
   // ── [#32085] nor move a provider onto a domain another one serves ──
   // A domain edit through `/sso/update-provider` is the second door to
   // the state the register check below refuses (two providers on one
-  // domain, the second unreachable by address). Asked after the
+  // domain, the second not reached by address). Asked after the
   // held-caller refusal, before the vendor writes.
   if (ctx?.path === '/sso/update-provider') {
     await this.assertSsoProviderDomainFree(ctx);
@@ -344,9 +344,10 @@ export async function globalBeforeHook(
   // could sign in again (measured on a real boot). Asked after the
   // held-caller refusal above and before the vendor's first write; the
   // sign-in method floor decides (`sign-in-method-floor.ts`). [#32085] A
-  // delete it admits is then counted (users unlinked and locked out,
-  // mappings and projected grants left behind) for the after-hook,
-  // which removes those and names the counts in the answer.
+  // delete it admits is then counted (users unlinked, those with no
+  // other sign-in method linked, mappings and projected grants left
+  // behind) for the after-hook, which removes those and names the
+  // counts in the answer.
   if (ctx?.path === SSO_PROVIDER_DELETE_PATH) {
     await this.assertSsoProviderDeletable(ctx);
     // fall through — the vendor's own provider-access check still runs
