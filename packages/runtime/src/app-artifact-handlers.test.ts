@@ -21,6 +21,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
+// Paid during collection, not inside a case's clock (check:test-source-alias): the binder's module reaches `import('@objectstack/metadata')`.
+import '@objectstack/metadata';
 import { ObjectQL } from '@objectstack/objectql';
 import { composeStacks, defineStack } from '@objectstack/spec';
 import { bindAppArtifactHandlers, appArtifactHandlerOwner, collectHooksWithoutBody } from './app-artifact-handlers.js';
