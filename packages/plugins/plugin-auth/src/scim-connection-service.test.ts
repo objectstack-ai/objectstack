@@ -4,6 +4,7 @@
 // [#32120] Also the token hint the mint stores and the verifier's throttled
 // last-use stamp, over an in-memory store whose every write is recorded.
 import { describe, it, expect, vi } from 'vitest';
+import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import {
   SCIM_BEARER_PREFIX,
   SCIM_CREDENTIAL_LAST_USED_STAMP_INTERVAL_MS,
@@ -56,13 +57,15 @@ function memoryEngine() {
       rows.set(String(stored.id), stored);
       return stored;
     },
-    async findOne(_object: string, query: { where: Record<string, unknown> }) {
+    async findOne(object: string, query: { where: Record<string, unknown> }) {
+      assertEngineFindOnePredicate(object, query);
       for (const row of rows.values()) {
         if (Object.entries(query.where).every(([k, v]) => row[k] === v)) return { ...row };
       }
       return null;
     },
     update: vi.fn(async (object: string, data: Record<string, unknown>, options?: { context?: { isSystem?: boolean; actor?: string } }) => {
+      assertEngineUpdateDispatch(data, options);
       if (engine.failUpdatesWith) throw engine.failUpdatesWith;
       updates.push({ object, data, options });
       const row = rows.get(String(data.id));
