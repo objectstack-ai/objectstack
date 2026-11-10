@@ -1,6 +1,6 @@
 # ADR-0142: An ownership queue is a platform primitive — a queue entity, membership through the existing recipient kinds, claim through the ownership-transfer gate, and declarative assignment rules evaluated on insert
 
-**Status**: Proposed (2026-10-25) · **Amended** (2026-10-28, ruling [`6457475657`](https://github.com/objectstack-ai/objectstack/issues/25769#issuecomment-6457475657) on #25769, letter A) — D3's `current_user.queues` producer is `@objectstack/plugin-security`, kernel-side, under the reserved key `queues`; see the note in D3 · **Amended** (2026-11-03, ruling records [`6594432222`](https://github.com/objectstack-ai/objectstack/issues/29604#issuecomment-6594432222) and [`6599731698`](https://github.com/objectstack-ai/objectstack/issues/29604#issuecomment-6599731698) on #29604, letter B in both) — D2 tells an empty expansion (a fact) from a failed read behind the queue (a fault): the admission consumers (D3, D4, D5) keep "nobody" on a failed read, the D7 grant recompute refuses it, and the D6 approver slate refuses it with the approval node refusing to open; see the notes in D2, D6 and D7 · **Amended** (2026-11-05, ruling A on [#30066](https://github.com/objectstack-ai/objectstack/issues/30066) (record [`6631036940`](https://github.com/objectstack-ai/objectstack/issues/30066#issuecomment-6631036940), with the execution parameters of [`6670178869`](https://github.com/objectstack-ai/objectstack/issues/30066#issuecomment-6670178869), agreed 「同意」)) — D5 gains its second source: an organization authors its own assignment rules as `sys_assignment_rule` rows, evaluated before the declared rules, and merge question 11 is answered; see the note in D5 · **Amended** (2026-11-10, ruling of record [`6755714726`](https://github.com/objectstack-ai/objectstack/issues/32004#issuecomment-6755714726) on #32004) — explain's `transfer` and the `/me/permissions` `allowTransfer` hint answer edit and the transfer grant together; enforcement is unchanged; see the note in Context §1. `docs/adr/**` is Tier H (Prime Directive #14): this record becomes **Accepted** by the
+**Status**: Proposed (2026-10-25) · **Amended** (2026-10-28, ruling [`6457475657`](https://github.com/objectstack-ai/objectstack/issues/25769#issuecomment-6457475657) on #25769, letter A) — D3's `current_user.queues` producer is `@objectstack/plugin-security`, kernel-side, under the reserved key `queues`; see the note in D3 · **Amended** (2026-11-03, ruling records [`6594432222`](https://github.com/objectstack-ai/objectstack/issues/29604#issuecomment-6594432222) and [`6599731698`](https://github.com/objectstack-ai/objectstack/issues/29604#issuecomment-6599731698) on #29604, letter B in both) — D2 tells an empty expansion (a fact) from a failed read behind the queue (a fault): the admission consumers (D3, D4, D5) keep "nobody" on a failed read, the D7 grant recompute refuses it, and the D6 approver slate refuses it with the approval node refusing to open; see the notes in D2, D6 and D7 · **Amended** (2026-11-05, ruling A on [#30066](https://github.com/objectstack-ai/objectstack/issues/30066) (record [`6631036940`](https://github.com/objectstack-ai/objectstack/issues/30066#issuecomment-6631036940), with the execution parameters of [`6670178869`](https://github.com/objectstack-ai/objectstack/issues/30066#issuecomment-6670178869), agreed 「同意」)) — D5 gains its second source: an organization authors its own assignment rules as `sys_assignment_rule` rows, evaluated before the declared rules, and merge question 11 is answered; see the note in D5 · **Amended** (2026-11-10, ruling of record [`6755714726`](https://github.com/objectstack-ai/objectstack/issues/32004#issuecomment-6755714726) on #32004) — explain's `transfer` and the `/me/permissions` `allowTransfer` hint answer edit and the transfer grant together; enforcement and `current_user.can()` are unchanged; see the note in Context §1. `docs/adr/**` is Tier H (Prime Directive #14): this record becomes **Accepted** by the
 maintainer's merge, and ⛔ the one PR under [Execution plan](#execution-plan-after-acceptance) is cut after that merge,
 never before it. Until a published `@objectstack/*` release carries that PR, HotCRM keeps the STOPGAP module this record
 exists to retire. **This record declares; it implements nothing** — no schema, no code, no changeset.
@@ -116,8 +116,9 @@ permission bit's description records the same fact from the spec side: `allowTra
 insert/update owner_id guard"* and *"the dedicated M2 `transfer` operation will reuse the same bit"*
 (`packages/spec/src/security/permission.zod.ts#ObjectPermissionSchema`). `transfer` is a member of the explain vocabulary
 (`packages/spec/src/security/explain.zod.ts#ExplainOperationSchema`), resolves to the edit grant and the `allowTransfer`
-grant bit together (`packages/core/src/security/effective-object-permissions.ts#GRANT_BITS`; amended 2026-11-10, see the
-note below), and is **not** an engine operation: the
+grant bit together (`packages/plugins/plugin-security/src/explain-engine.ts#objectGrantOf` for explain,
+`packages/core/src/security/effective-object-permissions.ts#clampTransferToEdit` for the client hint; amended 2026-11-10,
+see the note below), and is **not** an engine operation: the
 engine's dispatch vocabulary test lists it among the verbs that never reach the engine
 (`packages/objectql/src/engine-middleware-operation-vocabulary.test.ts#DESTRUCTIVE_LIFECYCLE_VERBS`), and the explain
 engine defers a `transfer` to the by-id update of `owner_id` (`packages/plugins/plugin-security/src/explain-engine.ts`).
@@ -127,7 +128,8 @@ on #32004) — explain's `transfer` reports a transfer only where the record cou
 (which implies read) and the transfer grant, at the object and at the record level. The client permission hint
 (`/me/permissions`, `allowTransfer`) gives the same answer, on every object: it reads `true` only with edit. Enforcement
 is unchanged: the transfer grant is what step 3.5 reads, on an update and on an insert naming another owner, so an
-insert that creates a record and assigns it to another owner is admitted without edit, as above.
+insert that creates a record and assigns it to another owner is admitted without edit, as above. `current_user.can()` in
+an expression is unchanged: it reads the transfer grant.
 
 **Every reader of the owner anchor reads `owner_id`, a lookup to `sys_user`; the owner match is built in
 `plugin-sharing`, and one ownership gate reads `created_by`.** The injected column is
@@ -425,7 +427,8 @@ authorising the write. No membership is re-tested, a record with no `queue` is c
 basis, and HotCRM's claimant set (*"a write carrying a real user id claims for that user, whoever they are"*: the agent,
 the manager on the escalation share, the admin) is kept. Under delegation both principals pass the same gate, and the
 delegated by-id write keeps the `created_by` floor whatever the verdict, so a delegated claim of a guest-written record
-is refused. Merge question 14 carries the alternatives. Explain gains the reason `queue-claim`.
+is refused. Merge question 14 carries the alternatives. Explain gains the reason `queue-claim`; a claim is reported by
+that reason, not by explain's `object_crud` verdict for `transfer` (amended 2026-11-10, Context §1).
 
 **One owner.** The write is conditional on the pre-image — "where `owner_id` is still empty" — so two callers claiming
 at once produce exactly one owner. The engine has no such primitive on its by-id update today (the by-id branch reads the
