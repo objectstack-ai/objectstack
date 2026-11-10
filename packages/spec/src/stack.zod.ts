@@ -7771,9 +7771,11 @@ function mergeObjects(
  * - An embedded action reaches the output through exactly ONE stack's object —
  *   the one `mergeObjects` handed the object's `actions` to (`actionsOwner`).
  *   Under `objectConflict: 'override'` the other stacks' embedded declarations
- *   on that object are not in the artifact at all, so they cannot collide with
+ *   on that object are not in the COMPOSED object, so they cannot collide with
  *   anything; that loss is the object strategy's own semantics, not an action
- *   collision. Under `'merge'` two objects declaring DIFFERENT `actions` are
+ *   collision. (A `manifest: 'preserve'` artifact still carries them in their
+ *   own package bodies; the runtime binder binds what the composed artifact
+ *   carries, so they are bound at no address.) Under `'merge'` two objects declaring DIFFERENT `actions` are
  *   refused at `mergeObjects` before this walk runs (#14848), and identical
  *   ones are one declaration carried once — so the array attributed here never
  *   displaced another stack's entries.
@@ -7872,7 +7874,10 @@ function collectComposedActionKeyCollisions(
   }
 
   const errors: string[] = [];
-  let preserveWouldAdmit = false;
+  // [ADR-0150 D2/D4] Whether `preserve` would admit EVERY refused key: the
+  // refusal names it only then, never beside a key it would refuse too.
+  let admissible = 0;
+  let inadmissible = 0;
   for (const [key, byStack] of sitesByKey) {
     if (byStack.size < 2) continue;
     // [ADR-0150 D2/D4] The object-less key, held apart by its packages: admitted
@@ -7880,7 +7885,9 @@ function collectComposedActionKeyCollisions(
     if (!embeddedKeys.has(key) && key.startsWith(`${GLOBAL_ACTION_SCOPE}:`)
       && composedPackagesHoldApart(stacks, [...byStack.keys()])) {
       if (preserve) continue;
-      preserveWouldAdmit = true;
+      admissible += 1;
+    } else {
+      inadmissible += 1;
     }
     // Stack order, not note order — standalone declarations are walked before
     // embedded ones, so a later stack's standalone would otherwise be named
@@ -7890,7 +7897,7 @@ function collectComposedActionKeyCollisions(
       .map(([index, sites]) => `${stackLabel(stacks[index], index)} at ${sites.join(' + ')}`);
     errors.push(`Action key '${key}' is declared by ${byStack.size} stacks: ${joinDeclarationOrigins(parties)}.`);
   }
-  return { lines: errors, preserveWouldAdmit };
+  return { lines: errors, preserveWouldAdmit: admissible > 0 && inadmissible === 0 };
 }
 
 /**
@@ -7945,10 +7952,10 @@ function formatComposedActionKeyCollisions(lines: readonly string[], preserveWou
   const fix =
     `Fix: rename one of the colliding actions within its scope, bind one of them to a different ` +
     `object, or remove the duplicate from one of the stacks. composeStacks does not pick a winner for actions.`;
-  // [ADR-0150 D2/D4] Only where `preserve` would admit a refused key: each
-  // package of its own namespace keeps its object-less action there.
+  // [ADR-0150 D2/D4] Only where `preserve` would admit every refused key:
+  // each package of its own namespace keeps its object-less action there.
   const preserve = preserveWouldAdmit
-    ? `\nTo keep both object-less actions, compose with { manifest: 'preserve' }: it keeps each package's ` +
+    ? `\nTo keep each package's object-less action, compose with { manifest: 'preserve' }: it keeps each package's ` +
       `body under its own package, so two packages of two namespaces may each declare one object-less ` +
       `action of a name, called at '/actions/NAMESPACE/${GLOBAL_ACTION_SCOPE}/NAME'.`
     : '';

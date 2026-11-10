@@ -378,7 +378,7 @@ describe('composeStacks - what stays accepted', () => {
 describe('composeStacks - two packages\' object-less action of one name, held per namespace', () => {
   const COLLISION = 'STACK_COMPOSE_ACTION_KEY_COLLISION';
   const PRESERVE_SENTENCE =
-    "To keep both object-less actions, compose with { manifest: 'preserve' }: it keeps each package's body " +
+    "To keep each package's object-less action, compose with { manifest: 'preserve' }: it keeps each package's body " +
     'under its own package, so two packages of two namespaces may each declare one object-less action of a ' +
     "name, called at '/actions/NAMESPACE/global/NAME'.";
   const pkg = (id: string, namespace: string | undefined, actions: ReturnType<typeof act>[], objectName?: string) =>
@@ -440,6 +440,20 @@ describe('composeStacks - two packages\' object-less action of one name, held pe
       );
     }
     expect(codeOf(() => composeStacks([alpha(), beta()]))).toBe(COLLISION);
+  });
+
+  it("names 'preserve' only when it would admit EVERY refused key: not beside a key it refuses too", () => {
+    const alphaMore = pkg('com.example.alpha', 'alpha', [act('send_note'), act('archive_note', { objectName: 'alpha_item' })], 'alpha_item');
+    const betaMore = defineStack(
+      { manifest: { ...mf('com.example.beta'), namespace: 'beta' }, actions: [act('send_note'), act('archive_note', { objectName: 'alpha_item' })] },
+      { strict: false },
+    );
+    const msg = refusal(() => composeStacks([alphaMore, betaMore]));
+    expect(msg).toContain("Action key 'global:send_note'");
+    expect(msg).toContain("Action key 'alpha_item:archive_note'");
+    expect(msg).not.toContain(PRESERVE_SENTENCE);
+    const gamma = pkg('com.example.gamma', 'gamma', [act('send_note')]);
+    expect(refusal(() => composeStacks([alpha(), beta(), gamma]))).toContain(PRESERVE_SENTENCE);
   });
 
   it("refuses two bodies of ONE package under 'preserve', even of two namespaces", () => {
