@@ -52,7 +52,7 @@ import { POSITION_ASSIGNMENT_OBJECT, createPositionCatalogRefusal } from './posi
 import { registerGrantHolderMembershipRefusal } from './grant-holder-membership-refusal.js';
 import { registerGrantPermissionSetNameHooks } from './grant-permission-set-name.js';
 import { registerPermissionSetPackageStamp } from './stored-permission-set-package-stamp.js';
-import { registerAgentCeilingGrantRefusal } from './agent-ceiling-grant-refusal.js';
+import { registerAgentCeilingGrantRefusal, registerPositionAgentCeilingGate } from './agent-ceiling-grant-refusal.js';
 import { registerAgentAccountGrantRefusal } from './agent-account-grant-refusal.js';
 import { reportCatalogReferences } from './catalog-reference-report.js';
 import { backfillStoredPermissionSetPackagesAtBoot } from './stored-permission-set-package-backfill.js';
@@ -143,10 +143,11 @@ export function registerStartHooks(
     );
   }
   // [ADR-0090 D10] A `sys_user_permission_set` row is a person's grant, and an
-  // agent ceiling set is not a person's set: a non-system write that would
-  // store one is refused (`400 VALIDATION_FAILED`, `invalid_value` at
-  // `permission_set`), for every caller. Engine hooks; see
-  // `agent-ceiling-grant-refusal.ts`.
+  // agent ceiling set is not a person's set: a non-system or seed write that
+  // would store one is refused (`400 VALIDATION_FAILED`, `invalid_value` at
+  // `permission_set`), for every caller; and so is a `sys_user_position` write
+  // naming a position whose definition names one (`invalid_value` at
+  // `position`). Engine hooks; see `agent-ceiling-grant-refusal.ts`.
   registerAgentCeilingGrantRefusal(ql, ctx.logger);
   // [ADR-0151 D3] An AI service account is never assigned a set above the
   // agent ceiling: a non-system `sys_user_permission_set` or
@@ -295,6 +296,10 @@ export function registerStartHooks(
         // Feature-detected; protocols predating registerAuthoringGate keep
         // the legacy (CLI-lint-only) behavior.
         registerObjectPostureGate(protocol);
+        // [ADR-0090 D10] A position gives every holder each set its definition
+        // names, so a position naming an agent ceiling set is refused at the
+        // metadata door before it is stored (`agent-ceiling-grant-refusal.ts`).
+        registerPositionAgentCeilingGate(protocol);
         // [commit 5619aace3 — maintainer ruling 2026-08-25, option B] The packaged-
         // permission-set lock's METADATA-door registration: the same
         // classifier and error classes the data door runs

@@ -84,3 +84,39 @@ describe('createOrganization sends the zone as a query parameter (objectui#11908
     expect(Object.keys(calls[0].body).sort()).toEqual(['name', 'slug']);
   });
 });
+
+describe('createOrganization sends the edition as a query parameter, only when asked', () => {
+  it('edition: developer → ?edition=developer, body exactly { name, slug }', async () => {
+    const { client, createCalls } = recordingFetch();
+
+    await client.createOrganization({ name: 'Acme', slug: 'acme', edition: 'developer' });
+
+    const calls = createCalls();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url.pathname).toBe('/api/v1/auth/organization/create');
+    expect(calls[0].url.search).toBe('?edition=developer');
+    expect(Object.keys(calls[0].body).sort()).toEqual(['name', 'slug']);
+  });
+
+  it('edition and zone together → both ride the query, neither the body', async () => {
+    const { client, createCalls } = recordingFetch();
+
+    await client.createOrganization({ name: 'Acme', slug: 'acme', timezone: 'Asia/Shanghai', edition: 'developer' });
+
+    const [call] = createCalls();
+    expect(call.url.searchParams.get('edition')).toBe('developer');
+    expect(call.url.searchParams.get('timezone')).toBe('Asia/Shanghai');
+    expect([...call.url.searchParams.keys()].sort()).toEqual(['edition', 'timezone']);
+    expect(Object.keys(call.body).sort()).toEqual(['name', 'slug']);
+  });
+
+  it('control: no edition → no edition parameter, the zone alone as before', async () => {
+    const { client, createCalls } = recordingFetch();
+
+    await client.createOrganization({ name: 'Acme', slug: 'acme', timezone: 'Asia/Shanghai' });
+
+    const [call] = createCalls();
+    expect(call.url.searchParams.has('edition')).toBe(false);
+    expect(call.url.search).toBe('?timezone=Asia%2FShanghai');
+  });
+});

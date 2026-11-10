@@ -114,11 +114,11 @@ beforeEach(() => {
   install(B);
 });
 
-/** The types a later child of epic #31527 wired, after E8: `mapping` (#32071). */
-const LATER_TYPES = ['mapping'] as const;
+/** The types later children of epic #31527 wired, after E8: `api` (#32069), `mapping` (#32071). */
+const LATER_TYPES = ['api', 'mapping'] as const;
 
 describe('E8 wires exactly the nine types, every one of them package-scoped', () => {
-  it('PACKAGE_SCOPED_READ_TYPES is the card\'s nine and the later children\'s, each one R addresses by package', () => {
+  it('PACKAGE_SCOPED_READ_TYPES is the card\'s nine and the later children\'s (api #32069, mapping #32071), each one R addresses by package', () => {
     expect([...PACKAGE_SCOPED_READ_TYPES].sort()).toEqual([...E8_TYPES, ...LATER_TYPES].sort());
     for (const type of PACKAGE_SCOPED_READ_TYPES) expect(isPackageScopedType(type), type).toBe(true);
   });
