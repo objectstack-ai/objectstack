@@ -22,6 +22,10 @@
  * each other's filters (a filter value can be sensitive). Column state
  * (`grid-columns-*`) predates this and is deliberately NOT user-scoped —
  * column widths are cosmetic; filter values are not.
+ *
+ * Sign-out removes every key (`@object-ui/auth`'s signed-out sweep), and a
+ * write still waiting on the debounce below is dropped before the session ends
+ * ({@link discardPendingListFilterWrites}), so none lands after that sweep.
  */
 
 const PREFIX = 'list-filters';
@@ -100,6 +104,19 @@ export function writeListFilterState(key: string | undefined, patch: ListFilterS
       /* quota / private-mode — restoring filters is best-effort, never fatal */
     }
   }, 300);
+}
+
+/**
+ * Drop every write still waiting on the debounce, for every key.
+ * `ListPreferencesProvider` runs it before each sign-out, so no write queued
+ * under the signed-out user's key lands after the sign-out sweep.
+ */
+export function discardPendingListFilterWrites(): void {
+  for (const key of Object.keys(timers)) {
+    clearTimeout(timers[key]);
+    delete timers[key];
+  }
+  for (const key of Object.keys(pending)) delete pending[key];
 }
 
 /** Drop any cached (and pending) state for a key. */

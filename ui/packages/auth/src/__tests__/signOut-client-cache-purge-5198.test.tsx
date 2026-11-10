@@ -33,6 +33,7 @@ import { AuthProvider } from '../AuthProvider';
 import { useAuth } from '../useAuth';
 import { TokenStorage } from '../createAuthClient';
 import { ActiveOrganizationStorage } from '../createAuthenticatedFetch';
+import { SessionUserScope, purgeSignedOutUserClientState } from '../ActiveOrganizationStorage';
 import type { AuthClient } from '../types';
 import type { AuthContextValue } from '../AuthContext';
 
@@ -144,10 +145,10 @@ describe('signOut purges the signed-out principal’s client caches (#5198)', ()
 
     expect(metadataKeys()).toEqual([]);
     expect(ActiveOrganizationStorage.get()).toBeNull();
-    // Scoped to the caches of the ended session: unrelated client state — a UI
-    // preference, a theme — is nobody's permission-filtered data and stays.
-    expect(sessionStorage.getItem('objectui:sidebar:collapsed')).toBe('true');
-    expect(localStorage.getItem('objectui:theme')).toBe('dark');
+    // Every other key the session wrote goes with it: the sweep is an
+    // allowlist, so a key nobody named here is covered too.
+    expect(sessionStorage.getItem('objectui:sidebar:collapsed')).toBeNull();
+    expect(localStorage.getItem('objectui:theme')).toBeNull();
   });
 
   it('purges even when the sign-out request FAILS', async () => {
@@ -212,7 +213,7 @@ describe('signOut purges the signed-out principal’s client caches (#5198)', ()
     const POISON_KEY = 'objectui:metadata:nav:org_a:abc';
     sessionStorage.setItem(POISON_KEY, JSON.stringify(['accounts']));
     sessionStorage.setItem('objectui:metadata:object:org_a:abc', JSON.stringify([{ name: 'account' }]));
-    // Non-matching key — never a removal candidate either way.
+    // A key outside the metadata prefix, swept like the rest.
     sessionStorage.setItem('objectui:sidebar:collapsed', 'true');
     ActiveOrganizationStorage.set('org_a');
 
@@ -238,8 +239,8 @@ describe('signOut purges the signed-out principal’s client caches (#5198)', ()
       expect(sessionStorage.getItem('objectui:metadata:app:org_a:abc')).toBeNull();
       expect(sessionStorage.getItem('objectui:metadata:object:org_a:abc')).toBeNull();
 
-      // Non-matching keys were never removal candidates either way.
-      expect(sessionStorage.getItem('objectui:sidebar:collapsed')).toBe('true');
+      // A key outside the metadata prefix is swept as well.
+      expect(sessionStorage.getItem('objectui:sidebar:collapsed')).toBeNull();
 
       // The active-org clear is unconditional and runs after the sweep either way.
       expect(ActiveOrganizationStorage.get()).toBeNull();
@@ -287,5 +288,168 @@ describe('signOut purges the signed-out principal’s client caches (#5198)', ()
 
     expect(view.getByTestId('orgs').textContent).toBe('');
     expect(view.getByTestId('active-org').textContent).toBe('none');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Every sign-out path, and the keys that stay
+// ---------------------------------------------------------------------------
+
+const ALICE = { id: 'u_alice', name: 'Alice', email: 'alice@test.com' };
+
+/** Keys a signed-in user's session writes, in both stores. */
+function seedSignedInUserKeys() {
+  localStorage.setItem('list-state:u_alice:account', JSON.stringify({ perView: { all: { sort: [] } } }));
+  localStorage.setItem('list-filters:u_alice:account:all', JSON.stringify({ search: 'term' }));
+  localStorage.setItem('objectui-recent-items:u:u_alice', JSON.stringify([]));
+  sessionStorage.setItem('objectui-ctx-scope', 'x');
+}
+
+/** Keys that describe the device or the sign-in page, not the user. */
+function seedDeviceKeys() {
+  localStorage.setItem('vite-ui-theme', 'dark');
+  localStorage.setItem('objectui-locale', 'de');
+  localStorage.setItem('objectui-locale-seed', 'de');
+}
+
+function userKeysLeft(): string[] {
+  return [
+    ...['list-state:u_alice:account', 'list-filters:u_alice:account:all', 'objectui-recent-items:u:u_alice']
+      .filter((k) => localStorage.getItem(k) !== null),
+    ...['objectui-ctx-scope'].filter((k) => sessionStorage.getItem(k) !== null),
+  ];
+}
+
+function expectDeviceKeysKept() {
+  expect(localStorage.getItem('vite-ui-theme')).toBe('dark');
+  expect(localStorage.getItem('objectui-locale')).toBe('de');
+  expect(localStorage.getItem('objectui-locale-seed')).toBe('de');
+}
+
+describe('purgeSignedOutUserClientState keeps only the device and sign-in-language keys', () => {
+  beforeEach(() => {
+    SessionUserScope._resetForTests();
+  });
+
+  it('removes every other key in both stores and keeps the session-user pointer', () => {
+    SessionUserScope.adopt(ALICE.id);
+    seedSignedInUserKeys();
+    seedDeviceKeys();
+    TokenStorage.set('tok-device');
+
+    purgeSignedOutUserClientState();
+
+    expect(userKeysLeft()).toEqual([]);
+    expectDeviceKeysKept();
+    expect(TokenStorage.get()).toBe('tok-device');
+    expect(SessionUserScope.current()).toBe(ALICE.id);
+    expect(localStorage.getItem('auth-session-user-id')).toBe(ALICE.id);
+  });
+
+  it('a removal that throws costs exactly that key, and is reported', () => {
+    seedSignedInUserKeys();
+    const POISON = 'list-filters:u_alice:account:all';
+    const realRemoveItem = localStorage.removeItem.bind(localStorage);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const removeItemSpy = vi.spyOn(localStorage, 'removeItem').mockImplementation((key: string) => {
+      if (key === POISON) throw new Error('simulated removeItem failure');
+      realRemoveItem(key);
+    });
+    try {
+      purgeSignedOutUserClientState();
+      expect(userKeysLeft()).toEqual([POISON]);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0]?.[0]).toContain(POISON);
+    } finally {
+      removeItemSpy.mockRestore();
+    }
+  });
+});
+
+describe('every sign-out path clears the signed-out user\u2019s client state', () => {
+  beforeEach(() => {
+    SessionUserScope._resetForTests();
+  });
+
+  it('signOut() clears it and keeps the device and sign-in-language keys', async () => {
+    const client = createMockClient();
+    await renderSignedIn(client);
+    seedSignedInUserKeys();
+    seedDeviceKeys();
+
+    await act(async () => {
+      await authRef.current!.signOut();
+    });
+
+    expect(userKeysLeft()).toEqual([]);
+    expectDeviceKeysKept();
+    // The pointer stays, so a different user's sign-in still sees an owner.
+    expect(localStorage.getItem('auth-session-user-id')).toBe(ALICE.id);
+  });
+
+  it('a boot whose session read answers no session clears what the last owner left', async () => {
+    localStorage.setItem('auth-session-user-id', ALICE.id);
+    seedSignedInUserKeys();
+    seedDeviceKeys();
+    const client = createMockClient({ getSession: vi.fn().mockResolvedValue(null) });
+
+    const view = render(
+      <AuthProvider authUrl="/api/auth" client={client}>
+        <Probe />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(authRef.current?.isLoading).toBe(false));
+
+    expect(view.getByTestId('user').textContent).toBe('none');
+    expect(userKeysLeft()).toEqual([]);
+    expectDeviceKeysKept();
+  });
+
+  it('a session read in place that answers no session clears the signed-out user\u2019s keys', async () => {
+    let live = true;
+    const client = createMockClient({
+      getSession: vi.fn().mockImplementation(async () => (live ? { user: ALICE, session: { token: 'tok-alice' } } : null)),
+    });
+    const view = await renderSignedIn(client);
+    seedSignedInUserKeys();
+    seedDeviceKeys();
+
+    live = false;
+    await act(async () => {
+      await authRef.current!.refreshSession();
+    });
+
+    expect(view.getByTestId('user').textContent).toBe('none');
+    expect(userKeysLeft()).toEqual([]);
+    expectDeviceKeysKept();
+  });
+
+  it('a browser that has never held a session keeps its keys when the read answers none', async () => {
+    seedSignedInUserKeys();
+    const client = createMockClient({ getSession: vi.fn().mockResolvedValue(null) });
+
+    render(
+      <AuthProvider authUrl="/api/auth" client={client}>
+        <Probe />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(authRef.current?.isLoading).toBe(false));
+
+    expect(userKeysLeft()).toHaveLength(4);
+  });
+
+  it('a session read that fails is not a sign-out and clears nothing', async () => {
+    localStorage.setItem('auth-session-user-id', ALICE.id);
+    seedSignedInUserKeys();
+    const client = createMockClient({ getSession: vi.fn().mockRejectedValue(new Error('network down')) });
+
+    render(
+      <AuthProvider authUrl="/api/auth" client={client}>
+        <Probe />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(authRef.current?.isLoading).toBe(false));
+
+    expect(userKeysLeft()).toHaveLength(4);
   });
 });

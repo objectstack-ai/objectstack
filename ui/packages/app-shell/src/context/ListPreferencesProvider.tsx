@@ -55,10 +55,11 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { useAuth } from '@object-ui/auth';
+import { registerBeforeSignOut, useAuth } from '@object-ui/auth';
 import { ROW_HEIGHT_TO_DENSITY_MODE, type RowHeight } from '@object-ui/core';
 import type { UserPreferenceFamily } from '@object-ui/data-objectstack';
 import { useListStateFamily } from './UserStateAdapters.js';
+import { discardPendingListFilterWrites } from '../views/listFilterStorage.js';
 
 // ---------------------------------------------------------------------------
 // The slot's shape
@@ -433,6 +434,10 @@ export function ListPreferencesProvider({ children }: { children: ReactNode }) {
       clearTimeout(wait);
     };
   }, [family, userId]);
+
+  // A list-filter write still waiting on its debounce is dropped before the
+  // session ends, so none lands after the sign-out sweep.
+  useEffect(() => registerBeforeSignOut(async () => discardPendingListFilterWrites()), []);
 
   // Debounced remote writes, one per object, each bound to the family that
   // was attached when it was made (a user switch flushes to the right user).
