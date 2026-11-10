@@ -20,9 +20,10 @@
  *   - that action runs on its own package's address too, though its package is
  *     not the artifact's own id (alpha; the artifact takes beta's, the last
  *     input's manifest).
- *   - NARROWING: the artifact's own id (beta's address, `packageId:
- *     app:<beta>`) no longer reaches alpha's action; it did when every action
- *     sat under the artifact's id.
+ *   - NARROWING: `executeAction` qualified by the artifact's own id
+ *     (`packageId` = beta's) no longer reaches alpha's action; it did when
+ *     every action sat under the artifact's id. (The REST door answered 404
+ *     there on base too: it resolves the namespace's declarations first.)
  *
  * ## The boot defect this also holds
  *
@@ -165,18 +166,19 @@ describe('[ADR-0150 D4] the composed artifact of two namespaces\' same-named obj
             expect(answer.text).toContain('"from":"alpha-solo"');
         });
 
-        it('NARROWING — the artifact\'s own id no longer reaches another package\'s action (base: 200, every action bound under the artifact\'s id)', async () => {
-            // The artifact takes beta's manifest (the last input's), so beta's
-            // address and `packageId: app:<beta>` qualified by the artifact's
-            // own id; alpha's one-holder action is alpha's alone now.
-            const answer = await post(booted!.kernel, `/actions/beta/global/${SOLO}`);
-            expect(answer.status, answer.message).toBe(404);
-            expect(answer.text).not.toContain('"from"');
+        it('NARROWING — qualifying by the artifact\'s own id no longer reaches another package\'s action (base: it ran, every action bound under the artifact\'s id)', async () => {
+            // The artifact takes beta's manifest (the last input's). On base,
+            // `executeAction` with `packageId` = the artifact's id ran alpha's
+            // one-holder action (measured: `{ from: 'alpha-solo' }`); it is
+            // alpha's alone now.
             const direct = await booted!.engine
-                .executeAction('global', SOLO, { params: {} }, { packageId: `app:${BETA}` })
+                .executeAction('global', SOLO, { params: {} }, { packageId: BETA })
                 .then((value: unknown) => ({ value }), (error: Error) => ({ error: error.message }));
-            expect(direct).toHaveProperty('error');
-            expect(JSON.stringify(direct)).not.toContain('alpha-solo');
+            expect(direct).toEqual({ error: `Action '${SOLO}' on object 'global' not found` });
+            // Unchanged, read beside it: the REST door resolves the namespace's
+            // declarations first, so beta's address answered 404 on base too.
+            const answer = await post(booted!.kernel, `/actions/beta/global/${SOLO}`);
+            expect([answer.status, answer.code], answer.message).toEqual([404, 'RESOURCE_NOT_FOUND']);
         });
     });
 });
