@@ -411,6 +411,13 @@ export * from './injected-system-column-provenance';
 // that writes `controlled_by_parent` asks the spec instead of restating it.
 export * from './controlled-by-parent-master';
 
+// record-currency path refusals (ADR-0144 D2/D6, amended) — the one wording of
+// "segment 2 of a `PARENT_FIELD.CODE_FIELD` path names no code field" and of a
+// `record` roll-up over a child amount that follows no parent. Read by
+// `defineStack` and the `@objectstack/objectql` registry, so a stack author and a
+// single-object author read the same words.
+export * from './record-currency-path';
+
 // related-list body-table predicate (#27478, ruling B on #27055) — the single
 // source for "is this inbound relationship a body table of its parent's record
 // page", and the refusal a field group's `relatedList` earns for naming one that

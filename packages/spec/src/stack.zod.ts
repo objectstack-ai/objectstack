@@ -42,7 +42,13 @@ import { ObjectSchema, ObjectExtensionSchema } from './data/object.zod';
 import { controlledByParentMasterRefusal } from './data/controlled-by-parent-master';
 import { fieldGroupBodyTableRefusal, type NamedInboundRelationship } from './data/related-list-body-table';
 import { externalBindingDatasourceRefusal } from './data/external-binding-datasource';
-import { InlineGridColumnSchema, summaryFunctionReadsField, VALUE_DOMAIN_FIELD_TYPES } from './data/field.zod';
+import { InlineGridColumnSchema, summaryFunctionReadsField } from './data/field.zod';
+import {
+  isRecordCurrencyCodeField,
+  recordCurrencyFollowedCodeError,
+  recordCurrencyRecordRollupError,
+  recordCurrencyUnfollowedRollupError,
+} from './data/record-currency-path';
 import { AUDIT_FIELD_DEFS } from './data/injected-system-column-provenance';
 import { pageComponentSlotPositions } from './ui/component.zod';
 import { SeedSchema } from './data/seed.zod';
@@ -4492,30 +4498,6 @@ function recordCurrencyPathOf(field: unknown): { via: string; code: string } | u
 }
 
 /**
- * Why a child amount that follows no parent cannot be the subject of a
- * `record` roll-up, and what to declare instead: the end of the refusal
- * {@link collectRecordCurrencyPathErrors} (c) prints.
- */
-function unfollowedAmountReason(childObject: string, childField: string, def: unknown): string {
-  const named = `'${childObject}.${childField}'`;
-  const config = isRecord(def) && isRecord(def.currencyConfig) ? def.currencyConfig : undefined;
-  if (config?.currencyMode === 'record' && typeof config.currencyField === 'string') {
-    return `${named} is in each '${childObject}' record's own currency (the code in '${config.currencyField}'), so the `
-      + 'roll-up would add amounts in several currencies. Make the child amount follow this record '
-      + '(`currencyField: \'MASTER_DETAIL_FIELD.CODE_FIELD\'`), or roll up a stored home-currency amount of the child '
-      + 'instead and declare that currency.';
-  }
-  if (config?.currencyMode === 'fixed' && typeof config.defaultCurrency === 'string') {
-    return `${named} is fixed to ${config.defaultCurrency}, so the total is in ${config.defaultCurrency} whatever this `
-      + `record's code holds. Declare \`currencyConfig: { currencyMode: 'fixed', defaultCurrency: '${config.defaultCurrency}' }\` `
-      + 'on the summary instead.';
-  }
-  return `${named} declares no currency that follows this record, so the total is not in the currency this record's `
-    + 'code holds. Delete `currencyConfig` on the summary, or declare `currencyMode: \'fixed\'` if every amount it reads '
-    + 'is in one currency.';
-}
-
-/**
  * [ADR-0144 D2 and D6, amended 2026-11-09 by #31743, ruling A recorded in
  * 6739066323] The two halves of a child that follows its parent's currency
  * that need both objects, judged where the stack holds both — the
@@ -4565,6 +4547,10 @@ function unfollowedAmountReason(childObject: string, childField: string, def: un
  * extension or a child field it does not hold; and neither is a roll-up whose
  * relationship field is neither written nor the child's one relation back to
  * the parent.
+ *
+ * The (a) and (c)-unfollowed wording is `data/record-currency-path.ts`'s,
+ * shared with the engine registry, which judges the same pairs at a
+ * single-object save.
  */
 function collectRecordCurrencyPathErrors(config: ObjectStackDefinition): string[] {
   const errors: string[] = [];
@@ -4572,14 +4558,6 @@ function collectRecordCurrencyPathErrors(config: ObjectStackDefinition): string[
   // fields elsewhere: judging a code field or a roll-up against it would refuse
   // what the owner declares. Such a parent is skipped (not in `declared`).
   const { fieldsByObject, declared } = stackObjectFields(config);
-  const codeTypes = [...VALUE_DOMAIN_FIELD_TYPES].map((t) => `\`${t}\``).join(' or ');
-  const isCodeField = (f: unknown): boolean =>
-    isRecord(f) && typeof f.type === 'string' && VALUE_DOMAIN_FIELD_TYPES.has(f.type) && f.valueDomain === 'iso_4217_currency';
-  const codeFieldsOf = (fields: Record<string, unknown>): string =>
-    ((names) => (names.length > 0
-      ? `candidates: ${names.map((n) => `'${n}'`).join(', ')}`
-      : 'it has none; declare one, conventionally `currency_code: Field.text({ valueDomain: \'iso_4217_currency\' })`'))(
-      Object.keys(fields).filter((k) => isCodeField(fields[k])));
 
   for (const [objectName, fields] of fieldsByObject) {
     for (const [fieldName, field] of Object.entries(fields)) {
@@ -4590,23 +4568,10 @@ function collectRecordCurrencyPathErrors(config: ObjectStackDefinition): string[
         const parentName = isRecord(via) && via.type === 'master_detail' && typeof via.reference === 'string' ? via.reference : undefined;
         const parent = parentName === undefined || !declared.has(parentName) ? undefined : fieldsByObject.get(parentName);
         if (parentName !== undefined && parent !== undefined) {
-          const where = `Object '${objectName}' field '${fieldName}' currencyConfig.currencyField`;
-          const code = hasOwnKey(parent, followed.code) ? parent[followed.code] : undefined;
-          if (!isRecord(code)) {
-            errors.push(
-              `${where}: '${followed.via}.${followed.code}' follows '${parentName}', the object the master_detail `
-                + `'${followed.via}' references, and '${parentName}' declares no field '${followed.code}', so the amount `
-                + `has no code to follow. Name the field of '${parentName}' that holds its ISO 4217 code — `
-                + `${codeFieldsOf(parent)}.`,
-            );
-          } else if (!isCodeField(code)) {
-            errors.push(
-              `${where}: '${followed.via}.${followed.code}' follows '${parentName}.${followed.code}', a `
-                + `'${String(code.type)}' field that does not hold an ISO 4217 code, so a write could store any value as `
-                + `the currency. A followed code field is a ${codeTypes} field declaring \`valueDomain: 'iso_4217_currency'\` `
-                + `on '${parentName}' — ${codeFieldsOf(parent)}.`,
-            );
-          }
+          const refusal = recordCurrencyFollowedCodeError({
+            object: objectName, field: fieldName, via: followed.via, code: followed.code, parent: parentName, parentFields: parent,
+          });
+          if (refusal !== undefined) errors.push(refusal);
         }
       }
 
@@ -4623,17 +4588,13 @@ function collectRecordCurrencyPathErrors(config: ObjectStackDefinition): string[
       // unresolved or extension-only child is skipped, as (a) and (b) skip one.
       const childField = hasOwnKey(child, ops.field) ? child[ops.field] : undefined;
       const judgeRecord = summaryCurrency?.currencyMode === 'record' && declared.has(ops.object) && childField !== undefined;
+      const rollup = { object: objectName, field: fieldName, fn: String(ops.function), childObject: ops.object, childField: ops.field };
       const refuseRecord = (why: string): void => {
-        errors.push(
-          `Object '${objectName}' field '${fieldName}' currencyConfig: \`currencyMode: 'record'\` on a summary is admitted `
-            + `only for a roll-up through a master_detail whose child amounts follow this record's currency through that `
-            + `very field (\`currencyField: 'MASTER_DETAIL_FIELD.CODE_FIELD'\` on the child amount). This summary rolls up `
-            + `${String(ops.function)}(${ops.object}.${ops.field}), and ${why}`,
-        );
+        errors.push(recordCurrencyRecordRollupError(rollup, why));
       };
       const amount = recordCurrencyPathOf(childField);
       if (amount === undefined) {
-        if (judgeRecord) refuseRecord(unfollowedAmountReason(ops.object, ops.field, childField));
+        if (judgeRecord) errors.push(recordCurrencyUnfollowedRollupError(rollup, childField));
         continue;
       }
       const amountVia = child[amount.via];
@@ -4668,7 +4629,7 @@ function collectRecordCurrencyPathErrors(config: ObjectStackDefinition): string[
         continue;
       }
       // A path whose code the parent does not hold is (a)'s finding, told once at the amount.
-      if (!isCodeField(hasOwnKey(fields, amount.code) ? fields[amount.code] : undefined)) continue;
+      if (!isRecordCurrencyCodeField(hasOwnKey(fields, amount.code) ? fields[amount.code] : undefined)) continue;
       if (summaryCurrency?.currencyMode === 'record' && summaryCurrency.currencyField === amount.code) continue;
       const spelling = `\`currencyConfig: { currencyMode: 'record', currencyField: '${amount.code}' }\``;
       errors.push(

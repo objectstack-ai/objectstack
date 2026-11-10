@@ -81,6 +81,7 @@
  */
 
 import { StandardErrorCode } from '@objectstack/spec/api';
+import { recordCurrencyFollowedCodeError, recordCurrencyUnfollowedRollupError } from '@objectstack/spec/data';
 import { recordCurrencyFieldOf, recordCurrencyPathOf, type RecordCurrencyPath } from './validation/record-currency-code.js';
 
 /**
@@ -396,4 +397,160 @@ export function recordCurrencySummaryRefusal(
     }
   }
   return undefined;
+}
+
+/**
+ * [ADR-0144 D2 and D6, amended] A declaration that claims a currency it does
+ * not follow, refused at registration: the two cross-object halves
+ * `defineStack` judges where a stack holds both objects
+ * (`collectRecordCurrencyPathErrors`), for the single-object save that holds
+ * one, in the same words (`@objectstack/spec/data`'s
+ * `record-currency-path.ts`). See {@link recordCurrencyFollowRefusal}.
+ * The ADR-0112 envelope (`code` + `status: 422`), never a bare throw.
+ */
+export class RecordCurrencyFollowRefusedError extends Error {
+  readonly code = RECORD_CURRENCY_SUMMARY_REFUSED_CODE;
+  readonly status = 422;
+  /** ADR-0112 D5's spelling of the same number, as {@link RecordCurrencySummaryRefusedError} carries it. */
+  readonly httpStatus = 422;
+  /** The object declaring the refused field (the child, for an amount; the parent, for a roll-up). */
+  readonly objectName: string;
+  /** The refused field: a record-mode amount following its parent, or a `record` roll-up. */
+  readonly fieldName: string;
+
+  constructor(objectName: string, fieldName: string, message: string) {
+    super(message);
+    this.name = 'RecordCurrencyFollowRefusedError';
+    this.objectName = objectName;
+    this.fieldName = fieldName;
+  }
+}
+
+/** A `summary` field declaring `currencyConfig.currencyMode: 'record'`. */
+function declaresRecordCurrency(def: unknown): boolean {
+  const config = (def as { currencyConfig?: unknown } | null)?.currencyConfig;
+  return config !== null && typeof config === 'object' && (config as { currencyMode?: unknown }).currencyMode === 'record';
+}
+
+/** How {@link recordCurrencyFollowRefusal} reads the registry. */
+export interface RecordCurrencyFollowRegistryView {
+  /** A REGISTERED object by name, as served. */
+  readonly lookup: (name: string) => ObjectLike | undefined;
+  /** Every registered object, as served. */
+  readonly all: () => readonly ObjectLike[];
+  /** The fields the registered `extend` contributions of `name` add (they fold onto any base that registers). */
+  readonly extensionFieldsOf: (name: string) => Record<string, unknown> | undefined;
+  /** The incoming body is an `extend` contribution: its fields are not the object's whole field map. */
+  readonly partial: boolean;
+}
+
+/**
+ * [ADR-0144 D2 and D6, amended] The refusal for an object about to register,
+ * or `undefined`. Two pairs, each judged at whichever registration completes
+ * it; a pair with an end not registered yet is no verdict:
+ *
+ * - (a) a record-mode amount whose `currencyField` is the path
+ *   `MASTER_DETAIL.CODE` (segment 1 is the spec object door's) and whose
+ *   segment 2 names no field of the `master_detail` target, or a field that
+ *   holds no ISO 4217 code. Judged at the child's registration with the
+ *   parent registered, and at the parent's (re-)registration with a following
+ *   child registered. Every write of such an amount is otherwise refused
+ *   `ERR_CURRENCY_CODE_REQUIRED` (no code to read) or labelled with whatever
+ *   the field holds;
+ * - (c) a `summary` declaring `currencyMode: 'record'` that rolls up `sum` /
+ *   `avg` / `min` / `max` of a child field following no record's currency (a
+ *   `fixed` amount, a `dynamic` one, a plain number). Judged at the parent's
+ *   registration with the child registered, and at the child's with the
+ *   parent registered. A child amount in its own record currency, or
+ *   following another record, is D6's ({@link recordCurrencySummaryRefusal}),
+ *   which refuses any such roll-up whatever it declares.
+ *
+ * An `extend` body ({@link RecordCurrencyFollowRegistryView.partial}) holds
+ * only the fields it adds, so only its own roll-ups are judged; a parent known
+ * only through extensions is not registered, so it is no verdict, as
+ * `defineStack` skips it. The parent's fields at its own registration are its
+ * body with its registered extensions' fields under it.
+ *
+ * The registry asks this only once the cold boot has ended (the AGENTS.md
+ * startup-registry rule): during the boot an `extend` contribution or the
+ * other end can still register and contradict a verdict, and a stored row is
+ * hydrated in no particular order.
+ */
+export function recordCurrencyFollowRefusal(
+  incoming: ObjectLike,
+  view: RecordCurrencyFollowRegistryView,
+): RecordCurrencyFollowRefusedError | undefined {
+  const name = typeof incoming.name === 'string' ? incoming.name : undefined;
+  const own = fieldsOf(incoming);
+  if (!name || !own) return undefined;
+
+  // (c) at the parent: the incoming body's `record` roll-ups, over a child already registered (or itself).
+  for (const [summaryField, def] of Object.entries(own)) {
+    const rollup = rawRollupOf(def);
+    if (!rollup || !declaresRecordCurrency(def)) continue;
+    const childFields = rollup.child === name && !view.partial ? own : fieldsOf(view.lookup(rollup.child));
+    const childDef = childFields && Object.prototype.hasOwnProperty.call(childFields, rollup.childField)
+      ? childFields[rollup.childField]
+      : undefined;
+    if (childDef === undefined || recordCurrencyAggregandOf(childDef) !== undefined) continue;
+    return new RecordCurrencyFollowRefusedError(name, summaryField, recordCurrencyUnfollowedRollupError(
+      { object: name, field: summaryField, fn: rollup.fn, childObject: rollup.child, childField: rollup.childField },
+      childDef,
+    ));
+  }
+  if (view.partial) return undefined;
+
+  // (a) at the child: the incoming body's following amounts, under a parent already registered (or itself).
+  for (const [field, def] of Object.entries(own)) {
+    const pointer = recordCurrencyFieldOf(def);
+    const path = pointer === undefined ? undefined : recordCurrencyPathOf(pointer, own);
+    if (!path || path.master === undefined) continue;
+    const parentFields = path.master === name ? parentFieldsAt(name, own, view) : fieldsOf(view.lookup(path.master));
+    if (!parentFields) continue;
+    const message = recordCurrencyFollowedCodeError({
+      object: name, field, via: path.via, code: path.code, parent: path.master, parentFields,
+    });
+    if (message !== undefined) return new RecordCurrencyFollowRefusedError(name, field, message);
+  }
+
+  // The other ends, already registered: (a) at the parent, (c) at the child.
+  let incomingAsParent: Record<string, unknown> | undefined;
+  for (const other of view.all()) {
+    const otherName = typeof other.name === 'string' ? other.name : undefined;
+    const otherFields = fieldsOf(other);
+    if (!otherName || otherName === name || !otherFields) continue;
+    for (const [field, def] of Object.entries(otherFields)) {
+      const pointer = recordCurrencyFieldOf(def);
+      const path = pointer === undefined ? undefined : recordCurrencyPathOf(pointer, otherFields);
+      if (path?.master === name) {
+        incomingAsParent ??= parentFieldsAt(name, own, view);
+        const message = recordCurrencyFollowedCodeError({
+          object: otherName, field, via: path.via, code: path.code, parent: name, parentFields: incomingAsParent,
+        });
+        if (message !== undefined) {
+          return new RecordCurrencyFollowRefusedError(
+            otherName,
+            field,
+            `'${name}' would no longer hold the code a registered amount follows. ${message}`,
+          );
+        }
+        continue;
+      }
+      const rollup = rawRollupOf(def);
+      if (!rollup || rollup.child !== name || !declaresRecordCurrency(def)) continue;
+      const childDef = Object.prototype.hasOwnProperty.call(own, rollup.childField) ? own[rollup.childField] : undefined;
+      if (childDef === undefined || recordCurrencyAggregandOf(childDef) !== undefined) continue;
+      return new RecordCurrencyFollowRefusedError(otherName, field, recordCurrencyUnfollowedRollupError(
+        { object: otherName, field, fn: rollup.fn, childObject: name, childField: rollup.childField },
+        childDef,
+      ));
+    }
+  }
+  return undefined;
+}
+
+/** The incoming body's fields as a parent: its registered extensions' fields under its own. */
+function parentFieldsAt(name: string, own: Record<string, unknown>, view: RecordCurrencyFollowRegistryView): Record<string, unknown> {
+  const extended = view.extensionFieldsOf(name);
+  return extended ? { ...extended, ...own } : own;
 }

@@ -2030,7 +2030,9 @@ const RECORD_CURRENCY_PATH_SEGMENT = /^[a-z_][a-z0-9_]*$/;
  * Segment 2 lives on the object segment 1 references, which this object does
  * not hold: `defineStack`'s cross-reference pass judges it where the stack
  * holds both (`collectRecordCurrencyPathErrors`, stack.zod.ts), and the
- * registry judges it at runtime registration.
+ * engine registry judges it, in the same words (`record-currency-path.ts`), at
+ * a registration after the cold boot (`record-currency-follow-door.ts`,
+ * `@objectstack/objectql`).
  */
 function refuseDishonestRecordCurrencyPath(
   objectName: string,

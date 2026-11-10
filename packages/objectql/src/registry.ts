@@ -169,7 +169,7 @@ import {
 } from './package-scoped-resolver.js';
 import { standaloneActionOwnerKey, isObjectLessActionKey, GLOBAL_ACTION_OBJECT_KEY } from './action-governance.js';
 import { actionOwnerScopedRegistry, resolveActionByPackage } from './action-package-addressing.js';
-import { recordCurrencySummaryRefusal } from './record-currency-aggregate-door.js';
+import { recordCurrencyFollowRefusal, recordCurrencySummaryRefusal } from './record-currency-aggregate-door.js';
 
 /**
  * [#24400] A bound top-level action whose target object no package has
@@ -5217,8 +5217,8 @@ export class SchemaRegistry {
    * shape as the ADR-0029 D9.9 representability refusal they already ask.
    *
    * Covers the doors that judge the body ALONE. The record-currency
-   * `summary` door is left out: it judges the body against the registry as it
-   * stands (the pair is judged at whichever registration completes it), so
+   * `summary` door and its follow door are left out: each judges the body
+   * against the registry as it stands (the pair is judged at whichever registration completes it), so
    * asked of a draft before its batch registers it answers both ways wrong —
    * it refuses a draft whose sibling in the same batch takes the child amount
    * out of record-currency mode, and it passes one whose sibling completes the
@@ -5315,6 +5315,29 @@ export class SchemaRegistry {
       () => this.getAllObjects(),
     );
     if (recordCurrencySummary) return { refusal: recordCurrencySummary };
+    // [ADR-0144 D2 and D6, amended] Beside it, for the same reason: a
+    // following amount whose parent holds no code field under that name, and a
+    // `record` roll-up over a child amount that follows nothing — the halves
+    // `defineStack` judges where a stack holds both objects, for the
+    // single-object save that holds one. Asked once the cold boot has sealed
+    // the registry (AGENTS.md, startup registry reads): before that an `extend`
+    // contribution or the other end can still register and contradict the
+    // verdict, so the boot registers what it registered before.
+    if (this.bareNameHoldersAreSealed) {
+      const recordCurrencyFollow = recordCurrencyFollowRefusal(schema, {
+        lookup: (name) => this.getObject(name),
+        all: () => this.getAllObjects(),
+        extensionFieldsOf: (name) => {
+          const fqn = this.resolveObjectKey(name);
+          const extensions = fqn === undefined ? [] : this.getObjectContributors(fqn).filter((c) => c.ownership === 'extend');
+          return extensions.length === 0
+            ? undefined
+            : Object.assign({}, ...extensions.map((c) => (c.definition as { fields?: Record<string, unknown> }).fields ?? {}));
+        },
+        partial: ownership === 'extend',
+      });
+      if (recordCurrencyFollow) return { refusal: recordCurrencyFollow };
+    }
     return { schema };
   }
 
