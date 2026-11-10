@@ -143,6 +143,8 @@ function seqRows(values: number[], extra: Partial<Row> = {}): Row[] {
     return values.map((seq, i) => ({ id: `o${String(i).padStart(3, '0')}`, seq, amount: i, ...extra }));
 }
 
+const lastOf = <T>(list: T[]): T | undefined => list[list.length - 1];
+
 async function refusalOf(p: Promise<unknown>): Promise<ConnectorPullError> {
     const err = await p.then(() => undefined, (e) => e);
     expect(err).toBeInstanceOf(ConnectorPullError);
@@ -213,7 +215,7 @@ describe('[ADR-0153 D2] floored: windows bounded on both sides, through the floo
         expect(err.message).toContain('external.rowCap');
         // The windows below the crowded value were read to their end and committed first.
         expect(rec.written.map((r) => r.seq).sort()).toEqual([1, 2]);
-        expect(rec.commits.at(-1)?.position).toBe(2);
+        expect(lastOf(rec.commits)?.position).toBe(2);
     });
 
     for (const mode of ['lower', 'upper', 'none'] as const) {
@@ -311,7 +313,7 @@ describe('[ADR-0153 D2] floored: windows bounded on both sides, through the floo
         await readSourceInWindows(FLOORED_SOURCE, { find: (q) => engine.find('wh_order', q as any), ...rec },
             { path: 'floored', from: 0 });
         // (a) of invariant 9 is the largest value WRITTEN: the refused 8 is read again next run.
-        expect(rec.commits.at(-1)?.position).toBe(5);
+        expect(lastOf(rec.commits)?.position).toBe(5);
     });
 });
 
@@ -370,8 +372,8 @@ describe('[ADR-0153 D2] builtin: aligned windows read whole, paged by key', () =
         for (const c of rec.commits) {
             if (c.window.hi !== undefined) expect(c.window.hi).toBeLessThanOrEqual(report.highWater as number);
         }
-        expect(rec.commits.at(-1)?.window.hi).toBeUndefined();
-        expect(rec.commits.at(-1)?.position).toBe(report.highWater);
+        expect(lastOf(rec.commits)?.window.hi).toBeUndefined();
+        expect(lastOf(rec.commits)?.position).toBe(report.highWater);
     });
 
     it('more rows than a page sharing ONE millisecond are paged by key to the end, never re-read for ever', async () => {
@@ -391,7 +393,7 @@ describe('[ADR-0153 D2] builtin: aligned windows read whole, paged by key', () =
         const rec = recorder();
         const failing = {
             ...rec,
-            async write(batch: Row[], window: SyncWindow) {
+            async write(batch: Row[]) {
                 if (++batches === 2) throw new Error('the server stopped');
                 return rec.write(batch);
             },
@@ -399,7 +401,7 @@ describe('[ADR-0153 D2] builtin: aligned windows read whole, paged by key', () =
         const from = canonOfStart(BUILTIN_SOURCE, '2026-01-01');
         await expect(readSourceInWindows(BUILTIN_SOURCE, { find, ...failing }, { path: 'builtin', from, pageSize: 2 }))
             .rejects.toThrow('the server stopped');
-        const resumeFrom = rec.commits.at(-1)?.position ?? from;
+        const resumeFrom = lastOf(rec.commits)?.position ?? from;
         expect(resumeFrom).toBe(from);
         const again = recorder();
         await readSourceInWindows(BUILTIN_SOURCE, { find, ...again }, { path: 'builtin', from: resumeFrom, pageSize: 2 });
