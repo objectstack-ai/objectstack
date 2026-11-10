@@ -20,7 +20,7 @@ import type { ObjectMetricProps } from '@objectstack/spec/ui';
 import { ArrowDownIcon, ArrowUpIcon, MinusIcon, AlertCircle, Loader2 } from 'lucide-react';
 import { VARIANT_ICON_CLASSES, VARIANT_TEXT_CLASSES, type MetricColorVariant } from './colorVariants';
 import { hostDomProps, type SchemaHostProps } from './schemaHostProps';
-import { METRIC_TILE_CONTAINER_CLASS, METRIC_TILE_TITLE_CLASS, metricTileValueClass, metricTileValueTitle } from './metricTile';
+import { METRIC_TILE_BARE_VALUE_LADDER, METRIC_TILE_CONTAINER_CLASS, METRIC_TILE_TITLE_CLASS, metricTileSubtitle, metricTileValueClass, metricTileValueTitle } from './metricTile';
 import { formatMetricDeltaPercent, deltaToneClass, type MetricDelta } from './utils';
 
 const TREND_LABEL_DEFAULTS: Record<string, string> = {
@@ -396,12 +396,22 @@ export const MetricWidget = ({
 
   const resolvedLabel = useMemo(() => pickLocalized(label, language) || undefined, [label, language]);
 
+  // The subtitle under the value: the description, else the trend label, each
+  // as the tile draws it (localized, a known trend phrase translated), and
+  // never one that only repeats the title (objectstack#32165,
+  // `metricTileSubtitle` in `./metricTile`).
   const localizedTrendLabel = useMemo(() => {
-    const raw = pickLocalized(description, language) || pickLocalized(shownTrend?.label, language) || undefined;
-    if (!raw) return raw;
-    const key = trendLabelKey(raw);
-    return key ? tTrend(key) : raw;
-  }, [description, shownTrend?.label, tTrend, language]);
+    const localize = (raw: string | undefined) => {
+      if (!raw) return undefined;
+      const key = trendLabelKey(raw);
+      return key ? tTrend(key) : raw;
+    };
+    return metricTileSubtitle(
+      resolvedLabel,
+      localize(pickLocalized(description, language) || undefined),
+      localize(pickLocalized(shownTrend?.label, language) || undefined),
+    );
+  }, [resolvedLabel, description, shownTrend?.label, tTrend, language]);
 
   const displayValue = useMemo(() => {
     const formatted = typeof value === 'number' || (typeof value === 'string' && value.trim() !== '' && isFinite(Number(value)))
@@ -430,7 +440,7 @@ export const MetricWidget = ({
     const textClasses = VARIANT_TEXT_CLASSES[colorVariant] || VARIANT_TEXT_CLASSES.default;
     return (
       <div
-        className={cn('flex flex-col gap-1 min-w-0', onClick && 'cursor-pointer', className)}
+        className={cn('flex flex-col gap-1 min-w-0', METRIC_TILE_CONTAINER_CLASS, onClick && 'cursor-pointer', className)}
         onClick={onClick}
         role={onClick ? 'button' : undefined}
         tabIndex={onClick ? 0 : undefined}
@@ -446,7 +456,14 @@ export const MetricWidget = ({
           </div>
         ) : (
           <>
-            <div className={cn('text-[2rem] leading-none font-extrabold tabular-nums tracking-tight truncate', textClasses)}>{displayValue}</div>
+            {/* objectstack#32165 — the big number scales before it would clip,
+                against the tile's own box (`METRIC_TILE_BARE_VALUE_LADDER`);
+                a short value keeps the 32 px face, and a long one carries the
+                full figure as its tooltip. The line box stays 32 px at every
+                size (`leading-8`, after the size classes: `cn` drops a
+                line-height written before a font size), so a scaled value's
+                label lines up with its neighbours'. */}
+            <div className={cn(metricTileValueClass(displayValue, METRIC_TILE_BARE_VALUE_LADDER), 'leading-8 font-extrabold tracking-tight', textClasses)} title={metricTileValueTitle(displayValue)}>{displayValue}</div>
             <div className="text-xs font-medium text-muted-foreground truncate">{resolvedLabel}</div>
           </>
         )}
@@ -504,7 +521,7 @@ export const MetricWidget = ({
         ) : (
           <>
             <div className={cn('font-bold tracking-tight', metricTileValueClass(displayValue))} title={metricTileValueTitle(displayValue)}>{displayValue}</div>
-            {(shownTrend || description) && (
+            {(shownTrend || localizedTrendLabel) && (
               <div className="text-xs text-muted-foreground mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0">
                 {shownTrend && (
                   <span className={cn(
