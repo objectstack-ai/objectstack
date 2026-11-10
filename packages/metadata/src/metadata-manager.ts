@@ -88,12 +88,16 @@ import { EndpointMatcher } from './endpoint-matcher.js';
 import {
   PACKAGE_SLOTTED_STORE_TYPES,
   readStoreEntry,
+  slotPackageOf,
+  slotStoreOf,
   storedItemPackageId as indexedItemPackageId,
   storedNameOf,
   storeKeysNamed,
   storeRemovalKeys,
+  storeSlotKey,
   storeWriteKey,
 } from './package-slotted-store.js';
+import { PackageScopedNameRefusedError } from '@objectstack/core';
 // [#5309] The stored ENVELOPE / authored BODY split — peeled before any spec
 // schema parses a stored row. See `stored-envelope.ts`.
 import { peelStoredEnvelope, STORED_ENVELOPE_KEYS } from './stored-envelope.js';
@@ -137,10 +141,31 @@ export interface MetadataUnregisterOptions extends MetadataWriteOptions {
  * here, and the ONLY key such an item carries). The one membership rule of
  * the package-wide verbs: {@link MetadataManager.unregisterPackage},
  * `publishPackage` and `revertPackage` (`collectPackageMembers`).
+ *
+ * [#32246] Deliberately not the store's slot rule (`storedItemPackageId`),
+ * which differs on three inputs: the legacy `package` key (read only here), a
+ * nested envelope's body `_packageId` (read only there), and an item whose
+ * keys name two packages (any of them matches here; the envelope's wins
+ * there). This is the membership of the package-wide verbs over every type,
+ * the legacy key included; for a type stored per `(package, name)`,
+ * `unregisterPackage` also takes every item in the package's slot, whatever
+ * its body names.
  */
 function isPackageMember(item: unknown, packageId: string): boolean {
   const meta = item as { packageId?: unknown; package?: unknown; _packageId?: unknown } | null | undefined;
   return meta?.packageId === packageId || meta?.package === packageId || meta?._packageId === packageId;
+}
+
+/**
+ * [#5276, #32246] Whether {@link MetadataManager.unregister}'s storage half
+ * deletes from `loader`: a `datasource:` loader that declares write
+ * capability, for every type; and for a type stored per `(package, name)`,
+ * also a `memory:` loader that can delete (the artifact door's store). ⛔ Not
+ * the `memory:` loaders for any other type: their residue is a separate card.
+ */
+function isRemovalTarget(loader: MetadataLoader, type: string): boolean {
+  if (loader.contract.protocol === 'datasource:') return Boolean(loader.contract.capabilities.write);
+  return loader.contract.protocol === 'memory:' && PACKAGE_SLOTTED_STORE_TYPES.has(type) && typeof loader.delete === 'function';
 }
 
 /**
@@ -921,9 +946,12 @@ export class MetadataManager implements IMetadataService {
     // Publish metadata.{type}.created / .updated event to realtime service.
     // An overwrite is an UPDATE, mirroring the 'added' vs 'changed' split the
     // watcher event below already makes (#4602).
+    // [#32246] The package read by the store's rule — the envelope's
+    // `packageId`, else the `_packageId` stamp a code-shipped item carries
+    // alone — so a `created`/`updated` names the package the way `deleted` does.
     await this.publishRealtimeMetadataEvent(existed ? 'updated' : 'created', type, name, {
       definition: data,
-      packageId: (data as any)?.packageId,
+      packageId: indexedItemPackageId(data),
       userId: options?.userId,
     });
 
@@ -1042,6 +1070,12 @@ export class MetadataManager implements IMetadataService {
     if (entry.found) return entry.data;
     if (entry.settled) return undefined;
 
+    // [ADR-0150 D3, #32246] A by-package type: the loaders' stored items of
+    // the name, read for the package by the same rule.
+    if (PACKAGE_SLOTTED_STORE_TYPES.has(type)) {
+      return (await this.loadSlottedDiagnosed(type, name, packageId)).data ?? undefined;
+    }
+
     // Fallback to loaders
     const result = await this.load(type, name);
     return result ?? undefined;
@@ -1084,9 +1118,57 @@ export class MetadataManager implements IMetadataService {
     if (entry.found) return { data: entry.data, degraded: false, errors: [] };
     if (entry.settled) return { data: undefined, degraded: false, errors: [] };
 
-    // Fallback to loaders, keeping the verdict this time.
-    const { data, degraded, errors } = await this.loadDiagnosed(type, name);
+    // Fallback to loaders, keeping the verdict this time. [#32246] For a
+    // by-package type, read for the package as on `get`.
+    const { data, degraded, errors } = PACKAGE_SLOTTED_STORE_TYPES.has(type)
+      ? await this.loadSlottedDiagnosed(type, name, packageId)
+      : await this.loadDiagnosed(type, name);
     return { data: data ?? undefined, degraded, errors };
+  }
+
+  /**
+   * [ADR-0150 D3/D4, #32246] The loaders' answer to a read of a type stored
+   * per `(package, name)` that the in-memory registry could not answer: every
+   * loader's stored items of the name, each in the slot of the package it is
+   * held for ({@link MetadataLoader.loadSlots}; a loader without it answers
+   * with its one `load` body, read for the package that body carries), an
+   * earlier loader's item kept over a later one's of the same slot — then the
+   * store's own rule over them ({@link readStoreEntry}), as for the registry:
+   * a read naming a package is that package's item, ⛔ never another
+   * package's; a read naming none is refused when two packages hold the name.
+   *
+   * `degraded` as on {@link loadDiagnosed}: a loader threw and nothing
+   * answered with the item.
+   *
+   * @throws {PackageScopedNameRefusedError} a read naming no package of a name
+   *   two or more packages store.
+   */
+  private async loadSlottedDiagnosed(
+    type: string,
+    name: string,
+    packageId?: string | null,
+  ): Promise<{ data: unknown | null; degraded: boolean; errors: string[] }> {
+    const slots: Array<{ packageId?: string; data: unknown }> = [];
+    const errors: string[] = [];
+    for (const loader of this.loaders.values()) {
+      try {
+        if (typeof loader.loadSlots === 'function') {
+          slots.push(...(await loader.loadSlots(type, name)));
+          continue;
+        }
+        const result = await loader.load(type, name);
+        if (result.data) slots.push({ packageId: indexedItemPackageId(result.data), data: result.data });
+      } catch (e) {
+        if (e instanceof PackageScopedNameRefusedError) throw e;
+        const message = e instanceof Error ? e.message : String(e);
+        errors.push(`${loader.contract.name}: ${message}`);
+        this.logger.warn(`Loader ${loader.contract.name} failed to load ${type}:${name}`, { error: e });
+      }
+    }
+    const entry = readStoreEntry(slotStoreOf(name, slots), type, name, packageId);
+    return entry.found
+      ? { data: entry.data, degraded: false, errors }
+      : { data: null, degraded: errors.length > 0, errors };
   }
 
   /**
@@ -1258,11 +1340,46 @@ export class MetadataManager implements IMetadataService {
   ): Promise<void> {
     // [ADR-0150 D4] A registry entry's key can be a package slot; a loader's
     // item is shadowed by any registry entry of its NAME, as before.
+    if (PACKAGE_SLOTTED_STORE_TYPES.has(type)) return this.admitLoaderSlots(loader, type, items);
     const held = new Set([...items.keys()].map(storedNameOf));
     for (const entry of await this.loaderEntries(loader, type)) {
       if (held.has(entry.name)) continue;
       held.add(entry.name);
       items.set(entry.name, entry.data);
+    }
+  }
+
+  /**
+   * [ADR-0150 D4, #32246] {@link admitLoaderItems} for a type stored per
+   * `(package, name)`: a loader's item fills the slot of the package it is
+   * held for (the loader's own answer, else the package its body carries), so
+   * two packages' stored items of one name are both listed, as the registry
+   * lists them. What an earlier source (the registry, an earlier loader)
+   * already holds shadows it, as before:
+   *
+   *  - a package's item, by that package's slot — or by the name's
+   *    package-less slot when no package slot of the name is held (a
+   *    package's first item takes that slot over in the store);
+   *  - an item held for no package, by any slot of its name (D4: under a
+   *    package-held name it is that holder's customization, never a second
+   *    item).
+   *
+   * One loader's own slots of a name do not shadow each other.
+   */
+  private async admitLoaderSlots(loader: MetadataLoader, type: string, items: Map<string, unknown>): Promise<void> {
+    const prior = new Set(items.keys());
+    const heldNames = new Set<string>();
+    const packageHeldNames = new Set<string>();
+    for (const key of prior) {
+      heldNames.add(storedNameOf(key));
+      if (slotPackageOf(key) !== undefined) packageHeldNames.add(storedNameOf(key));
+    }
+    for (const entry of await this.loaderEntries(loader, type)) {
+      const key = storeSlotKey(entry.name, entry.packageId ?? indexedItemPackageId(entry.data));
+      const shadowed = items.has(key) || (key === entry.name
+        ? heldNames.has(entry.name)
+        : prior.has(entry.name) && !packageHeldNames.has(entry.name));
+      if (!shadowed) items.set(key, entry.data);
     }
   }
 
@@ -1273,12 +1390,18 @@ export class MetadataManager implements IMetadataService {
    * reading, for loaders that cannot produce keys). An item with no key is
    * left out, as {@link admitLoaderItems} always left it.
    */
-  private async loaderEntries(loader: MetadataLoader, type: string): Promise<Array<{ name: string; data: unknown }>> {
-    const entries: Array<{ name: string; data: unknown }> = [];
+  private async loaderEntries(
+    loader: MetadataLoader,
+    type: string,
+  ): Promise<Array<{ name: string; data: unknown; packageId?: string }>> {
+    const entries: Array<{ name: string; data: unknown; packageId?: string }> = [];
     if (typeof loader.loadManyKeyed === 'function') {
       for (const entry of await loader.loadManyKeyed(type)) {
         if (!entry || typeof entry.name !== 'string' || entry.name === '') continue;
-        entries.push({ name: entry.name, data: entry.data });
+        // [#32246] The package a loader holds a by-package type's item for.
+        entries.push(entry.packageId === undefined
+          ? { name: entry.name, data: entry.data }
+          : { name: entry.name, data: entry.data, packageId: entry.packageId });
       }
       return entries;
     }
@@ -1531,7 +1654,9 @@ export class MetadataManager implements IMetadataService {
    * matcher keys its routes by METHOD + path (bucket 1).
    */
   private async listForPackageScopedIndex(type: string): Promise<unknown[]> {
-    const entries: Array<{ name: string; data: unknown }> = [];
+    // [#32246] A loader entry's package is the one the loader holds it for,
+    // else the one its body carries.
+    const entries: Array<{ name: string; data: unknown; packageId?: string }> = [];
     const typeStore = this.registry.get(type);
     if (typeStore) {
       for (const [key, data] of typeStore) entries.push({ name: storedNameOf(key), data });
@@ -1542,8 +1667,8 @@ export class MetadataManager implements IMetadataService {
     }
 
     const holders = new Map<string, Set<string>>();
-    for (const { name, data } of entries) {
-      const packageId = indexedItemPackageId(data);
+    for (const { name, data, packageId: heldFor } of entries) {
+      const packageId = heldFor ?? indexedItemPackageId(data);
       if (packageId === undefined) continue;
       let held = holders.get(name);
       if (!held) holders.set(name, (held = new Set()));
@@ -1551,9 +1676,9 @@ export class MetadataManager implements IMetadataService {
     }
 
     const slots = new Map<string, unknown>();
-    for (const { name, data } of entries) {
+    for (const { name, data, packageId: heldFor } of entries) {
       const held = holders.get(name);
-      const slotPackage = indexedItemPackageId(data) ?? (held?.size === 1 ? [...held][0] : '');
+      const slotPackage = heldFor ?? indexedItemPackageId(data) ?? (held?.size === 1 ? [...held][0] : '');
       const slot = `${slotPackage}\u0000${name}`;
       if (!slots.has(slot)) slots.set(slot, data);
     }
@@ -1653,8 +1778,12 @@ export class MetadataManager implements IMetadataService {
     const { keys, packageId } = removal ?? storeRemovalKeys(this.registry.get(type), type, name, options?.packageId);
     // ── 1. Storage first ────────────────────────────────────────────────
     // Delete only from database-backed loaders that declare write capability.
+    // [ADR-0150 D4, #32246] For a type stored per `(package, name)`, also from
+    // the in-memory loaders (the artifact door's store): its copy of the
+    // removed item would otherwise keep answering every read once the
+    // registry's slots are gone.
     for (const loader of this.loaders.values()) {
-      if (loader.contract.protocol !== 'datasource:' || !loader.contract.capabilities.write) continue;
+      if (!isRemovalTarget(loader, type)) continue;
       // [#5276] Defensive only — unreachable for a registered loader. This exact
       // combination (`datasource:` + `capabilities.write`, no `delete`) is
       // rejected by `registerLoader()`, the sole writer of `this.loaders`, so
@@ -2017,8 +2146,11 @@ export class MetadataManager implements IMetadataService {
     const itemsToDelete: Array<{ type: string; name: string; key: string }> = [];
 
     for (const [type, typeStore] of this.registry) {
+      const slotted = PACKAGE_SLOTTED_STORE_TYPES.has(type);
       for (const [key, data] of typeStore) {
-        if (isPackageMember(data, packageName)) {
+        // [#32246] A by-package type: also every item in the package's slot,
+        // a package-less customization of its item (D4) included.
+        if (isPackageMember(data, packageName) || (slotted && slotPackageOf(key) === packageName)) {
           itemsToDelete.push({ type, name: storedNameOf(key), key });
         }
       }
@@ -3087,6 +3219,9 @@ export class MetadataManager implements IMetadataService {
                 return { data: result.data as T, degraded: false, errors };
             }
         } catch (e) {
+            // [ADR-0150 D3, #32246] A loader's refusal of a bare read of a name
+            // two packages store is an answer, not an outage.
+            if (e instanceof PackageScopedNameRefusedError) throw e;
             const message = e instanceof Error ? e.message : String(e);
             errors.push(`${loader.contract.name}: ${message}`);
             this.logger.warn(`Loader ${loader.contract.name} failed to load ${type}:${name}`, { error: e });

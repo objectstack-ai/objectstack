@@ -36,6 +36,12 @@
  *    it, and is refused naming every holder when two or more do (D3), so it
  *    never takes both and never picks one.
  *
+ * [#32246] The loaders under the registry hold these types by the same rules:
+ * the artifact door's `MemoryLoader` under these keys, `DatabaseLoader` one
+ * row per `(package, name)`; and a read the registry cannot answer reads the
+ * loaders' stored items of the name through {@link readStoreEntry}
+ * ({@link slotStoreOf}).
+ *
  * ⛔ `api`'s endpoint matcher keys its routes by METHOD + path (bucket 1);
  * nothing here resolves a path. What changes is that the matcher now sees
  * every package's endpoint instead of the last one registered under a name.
@@ -87,9 +93,35 @@ export function storedNameOf(key: string): string {
 }
 
 /** The package of a package slot's key; `undefined` for a bare key. */
-function slotPackageOf(key: string): string | undefined {
+export function slotPackageOf(key: string): string | undefined {
   const at = key.indexOf(SLOT_SEPARATOR);
   return at === -1 ? undefined : key.slice(0, at);
+}
+
+/**
+ * [#32246] The store key of an item of `name` held for `packageId`: that
+ * package's slot, or the name's bare slot when it is held for no package.
+ */
+export function storeSlotKey(name: string, packageId?: string | null): string {
+  return isPackageCaller(packageId) ? slotKey(packageId, name) : name;
+}
+
+/**
+ * [ADR-0150 D3/D4, #32246] One loader's stored items of `name` (or every
+ * loader's, in precedence order), keyed the way the in-memory store keys
+ * them: an item held for a package fills that package's slot, one held for
+ * none fills the name's bare slot, and the first item of a slot is kept. The
+ * store's rules — {@link readStoreEntry}, {@link storeWriteKey},
+ * {@link storeRemovalKeys} — then answer for the loaders exactly as they
+ * answer for the registry, so the rule stays here, once.
+ */
+export function slotStoreOf<T>(name: string, items: Iterable<{ readonly packageId?: string; readonly data: T }>): Map<string, T> {
+  const store = new Map<string, T>();
+  for (const { packageId, data } of items) {
+    const key = storeSlotKey(name, packageId);
+    if (!store.has(key)) store.set(key, data);
+  }
+  return store;
 }
 
 /**

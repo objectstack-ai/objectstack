@@ -37,6 +37,15 @@ export interface MetadataKeyedItem<T = any> {
   readonly name: string;
   /** The stored body, exactly as {@link MetadataLoader.loadMany} would return it. */
   readonly data: T;
+  /**
+   * [ADR-0150 D4, #32246] The package this loader holds the item for, for a
+   * type stored per `(package, name)` (`PACKAGE_SLOTTED_STORE_TYPES`); absent
+   * for an item it holds for no package, and for every other type. A
+   * customization of a package's item (D4) is held for that package even
+   * though its body names none, which is why the package travels beside the
+   * body rather than being read off it.
+   */
+  readonly packageId?: string;
 }
 
 /**
@@ -104,6 +113,24 @@ export interface MetadataLoader {
     type: string,
     options?: MetadataLoadOptions
   ): Promise<MetadataKeyedItem<T>[]>;
+
+  /**
+   * [ADR-0150 D3/D4, #32246] Every item this loader holds under `name`, each
+   * with the package it holds it for ({@link MetadataKeyedItem.packageId}).
+   *
+   * Optional. `MetadataManager` asks it for a type stored per
+   * `(package, name)` when its in-memory registry holds no slot of the name,
+   * and reads the answer through the store's own rule (`readStoreEntry`): a
+   * read naming a package gets that package's item, never another package's,
+   * and a read naming none is refused when two packages hold the name. A
+   * loader without it answers with its one `load(type, name)` body, read for
+   * the package that body carries.
+   *
+   * @param type The metadata type
+   * @param name The item name
+   * @returns One entry per stored item of the name; `[]` when none
+   */
+  loadSlots?<T = any>(type: string, name: string): Promise<MetadataKeyedItem<T>[]>;
 
   /**
    * Check if item exists

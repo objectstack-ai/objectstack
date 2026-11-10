@@ -340,6 +340,32 @@ describe('DatabaseLoader', () => {
       await loader.delete('agent', 'helper');
       expect(await loader.exists('agent', 'helper')).toBe(false);
     });
+
+    // [#32246 item 5] The loader now fills `package_id`, so the column branch
+    // of the row's package is live: a customization's body names no package.
+    it('reads the package off the `package_id` column — a package-less customization in a holder\'s row goes with that holder (#32246)', async () => {
+      await loader.save('agent', 'helper', { name: 'helper', label: 'alpha', _packageId: 'com.acme.alpha' });
+      await loader.save('agent', 'helper', { name: 'helper', label: 'customized' });
+      await loader.delete('agent', 'helper', { packageId: 'com.acme.beta' });
+      expect((await loader.load('agent', 'helper')).data).toMatchObject({ label: 'customized' });
+      await loader.delete('agent', 'helper', { packageId: 'com.acme.alpha' });
+      expect(await loader.exists('agent', 'helper')).toBe(false);
+    });
+
+    it('keeps a row per package, and a delete naming no package of a name two packages hold is refused, deleting nothing (#32246)', async () => {
+      await loader.save('agent', 'helper', { name: 'helper', label: 'alpha', _packageId: 'com.acme.alpha' });
+      await loader.save('agent', 'helper', { name: 'helper', label: 'beta', _packageId: 'com.acme.beta' });
+      expect(await loader.list('agent')).toEqual(['helper']);
+      expect((await loader.loadSlots('agent', 'helper')).map((slot) => [slot.packageId, slot.data.label])).toEqual([
+        ['com.acme.alpha', 'alpha'],
+        ['com.acme.beta', 'beta'],
+      ]);
+      await expect(loader.load('agent', 'helper')).rejects.toMatchObject({ status: 409 });
+      await expect(loader.delete('agent', 'helper')).rejects.toMatchObject({ status: 409 });
+      expect(await loader.loadSlots('agent', 'helper')).toHaveLength(2);
+      await loader.delete('agent', 'helper', { packageId: 'com.acme.alpha' });
+      expect((await loader.load('agent', 'helper')).data).toMatchObject({ label: 'beta' });
+    });
   });
 
   describe('exists', () => {

@@ -12,6 +12,14 @@ export {
     type ProjectIdToEnvironmentIdResult,
 } from './migrate-project-id-to-environment-id.js';
 export { dropProjectionTables, type DropProjectionResult } from './drop-projection-tables.js';
+// [ADR-0150 D4, #32246] `DatabaseLoader` rows of a by-package type bound to
+// the package their body names.
+export {
+    migrateDatabaseLoaderRowPackages,
+    type DatabaseLoaderRowStore,
+    type DatabaseLoaderRowLeftReason,
+    type DatabaseLoaderRowPackagesResult,
+} from './bind-database-loader-row-packages.js';
 // Ruling 6677709817 step (b), first half: the read-only count of the history
 // snapshots the drained-key scrub would rewrite (its rewrite mode waits on the
 // maintainer's confirmation of that count).
