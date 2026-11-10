@@ -422,6 +422,17 @@ export type {
   ExternalOwnerSharingSeverity,
 } from './validate-external-owner-sharing.js';
 
+// [ADR-0153 D4] A `private` `synced` object that no sharing rule grants read on
+// shows a member none of its owner-less pulled rows.
+export {
+  validateSyncedPrivateReadability,
+  SECURITY_SYNCED_PRIVATE_UNREADABLE,
+} from './validate-synced-private-readability.js';
+export type {
+  SyncedPrivateReadabilityFinding,
+  SyncedPrivateReadabilitySeverity,
+} from './validate-synced-private-readability.js';
+
 // #4983 — the sibling surface, and ADR-0056 D4's gate finally wired. An RLS
 // `using` / `check` the runtime cannot compile is DROPPED (and, when it is the
 // only applicable policy, replaced by the deny sentinel), so the policy reads
