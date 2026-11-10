@@ -1,0 +1,17 @@
+---
+'@objectstack/driver-sql': patch
+---
+
+fix(driver-sql): the differ's widening arm keeps, or safely retires, a narrower unique an 18.0 database built in the NULL-safe form, and keeps one a hash shadow carries or whose gained column is not yet physical, instead of offering any of them as an orphan drop (#32164)
+
+Clause-②: no
+- The widening arm (the rule that retires a narrower unique key superseded by a declared global key that gained columns), on a narrower an 18.0 database built with its organization key part in the NULL-safe form (`COALESCE(organization_id, '__global__')`, under the same generated name): FROM an orphan, `drop_index` categorized `destructive` TO the widening arm's answer. On a certified table (ADR-0131 D1: the tenant column holds no NULL), the narrower is kept until a partial guard on its columns stands, then offered as the one `replace_unique_index`, categorized `safe`. On a table that is not certified, it is kept and nothing is offered, because the COALESCE form also keeps NULL-organization rows to one, which neither the wider key nor the guard does.
+- A plan read before the sync that adds a gained column (`os migrate plan` over an upgraded database): FROM the narrower an orphan, `drop_index` categorized `destructive` TO kept, nothing offered.
+- A narrower carried by a #11627 hash shadow (MySQL, MariaDB: a key over a long TEXT column), whose resolved key is exactly the superseded columns, plain or with the organization part NULL-safe: FROM an orphan, `drop_index` categorized `destructive` TO kept, nothing offered, certified or not and with or without the guard. `replace_unique_index` drops the legacy name and retires no shadow, so this arm never offers it.
+Metadata-protocol: none
+
+<!-- adr-0087: not-required (no-migration-prescription) No key of any authorable schema is added, removed, renamed or re-shaped. The change is in the SQL driver's schema-drift plan: which physical index it keeps or offers to replace. No stored metadata row is rewritten, so there is nothing for `objectstack migrate meta` to rewrite. -->
+
+Part of #32164 (ADR-0150 D8 R1). It lands ahead of the grant key's widening, where the restored 18.0 store's `uniq_sys_user_permission_set_ac248331` is the first narrower in this form. The grant key itself is still `unique: 'organization'`, which the widening arm does not take, so this change alone leaves the grant table's plan as it is. Any other declared global key that gained columns reaches the new answers only in the three shapes above. In each, a destructive offer becomes a kept index, or a safe replace once a guard stands. No answer is added that a sync would apply to drop a key that is still needed.
+
+Unchanged: a plain narrower is matched as before. A narrower whose key parts (read through a hash shadow's resolved key where one carries it) are not the superseded columns is still the orphan arm's, and a shadow carrier whose key could not be read is still left alone. Pinned at the differ with pure functions: no live MySQL or MariaDB has run this arm, and the live suites run on `main` only.
