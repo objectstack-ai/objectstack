@@ -191,9 +191,24 @@ export interface MetadataLoader {
    * gated: `MetadataManager` never writes to them at runtime, so it never has a
    * deletion of its own to take back.
    *
+   * [ADR-0150 D4, #32198] `options.packageId` is passed only when one package's
+   * item of a type stored per `(package, name)` is removed while another
+   * package may hold the same name. The loader then deletes its row of the
+   * name only when that row holds THAT package's item, and keeps a row that
+   * holds another package's item or one it cannot attribute — ⛔ never
+   * another package's stored item. A loader that ignores the option deletes by
+   * name, as every delete did before.
+   *
    * @param type The metadata type
    * @param name The item name
+   * @param options `packageId`: delete only that package's row of the name
    */
-  delete?(type: string, name: string): Promise<void>;
+  delete?(type: string, name: string, options?: MetadataLoaderDeleteOptions): Promise<void>;
+}
+
+/** [ADR-0150 D4, #32198] How {@link MetadataLoader.delete} scopes a removal. */
+export interface MetadataLoaderDeleteOptions {
+  /** Delete the name's row only when it holds this package's item. */
+  packageId?: string;
 }
 

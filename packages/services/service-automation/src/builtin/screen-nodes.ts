@@ -436,7 +436,9 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
         // parent may continue with screens of its own — so those are left out.
         const progress = async (): Promise<ScreenProgressSpec | undefined> => {
             if (flowName === undefined) return undefined;
-            const flow = await engine.getFlow(flowName);
+            // [#31696] The run's own flow: for a name two packages hold, the
+            // bare name names neither, and the run's slot names its own.
+            const flow = engine.getRunFlow(context);
             if (!flow?.nodes.some((n) => n.id === node.id && n.type === 'screen')) return undefined;
             const read = readScreenProgress(flow, node.id, (n) => {
                 if (n.type === 'subflow') return 'subflow';

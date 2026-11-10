@@ -73,6 +73,7 @@ import { refuseRequestNamingDifferentAccounts } from './one-account-per-request.
 import { ORGANIZATION_DELETE_PATH } from './organization-delete.js';
 import { carriesPrincipalSession } from './principal-session-mint.js';
 import { SSO_PROVIDER_DELETE_PATH } from './sign-in-method-floor.js';
+import { ssoDiscoveryCompanionContext } from './sso-discovery-companion-origins.js';
 import { snapshotRoleChangeGrants, UPDATE_MEMBER_ROLE_PATH } from './role-change-granted-set.js';
 import { refuseVisitorResendWithoutLiveTransport } from './visitor-verification-resend.js';
 
@@ -117,7 +118,7 @@ export async function globalBeforeHook(
   this: BeforeHookHost,
   ctx: any,
   setShouldSkipSessionRefresh: typeof import('better-auth/api').setShouldSkipSessionRefresh,
-) {
+): Promise<ReturnType<typeof ssoDiscoveryCompanionContext> | void> {
   // ── #4586: hand the attribution scope its actor resolver ─────
   // FIRST, and unconditionally: this global before-hook is the one
   // seam every better-auth endpoint passes through (`matcher: () =>
@@ -385,7 +386,11 @@ export async function globalBeforeHook(
         });
       }
     }
-    return;
+    // A known IdP's companion origins (Microsoft Entra ID's userinfo on
+    // graph.microsoft.com), trusted for this endpoint's discovery validation
+    // only: the router's origin check has already run, so the CSRF allow-list
+    // never carries them (`sso-discovery-companion-origins.ts`).
+    return ssoDiscoveryCompanionContext(ctx);
   }
 
   // ── D5.1: cloud-as-IdP authorization gate ───────────────────

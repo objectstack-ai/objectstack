@@ -264,6 +264,7 @@ import { resolvePasswordHasher } from './auth-manager-password-hasher.js';
 // two arrows that moved with it.
 import { createAuthInstance, type AuthInstanceHost } from './auth-manager-auth-instance.js';
 import { readSamlAcsLanding, runSsoCallbackScope, type SamlLandingContext, type SsoCallbackRequest } from './sso-oidc-refusal-cause.js';
+import { createEngineSsoProviderConfigReader, emailClaimOfStoredOidcConfig, type SsoProviderConfigEngine } from './register-sso-provider.js';
 import { readSsoProviderSignInOptions, runWithSamlIdpInitiated } from './sso-sign-in-options.js';
 import { readStoredSamlConfig, runSsoSamlRefusalCauseScope } from './sso-saml-refusal-cause.js';
 import { readThirdPartyLoginProvider, runThirdPartyInitiatedLogin, type ThirdPartyLoginContext } from './sso-third-party-initiated-login.js';
@@ -4113,6 +4114,14 @@ export class AuthManager {
           return readSamlAcsLanding(context, saml.providerId, saml.request);
         },
         scoped,
+        // Read only when the vendor refused the sign-in for a missing email: the
+        // claim the provider's email mapping names, for the refusal's log line.
+        async (providerId) => {
+          const stored = await createEngineSsoProviderConfigReader(
+            () => this.config.dataEngine as SsoProviderConfigEngine | undefined,
+          )(providerId);
+          return stored ? emailClaimOfStoredOidcConfig(stored.oidcConfig) : undefined;
+        },
       );
     if (callback.protocol !== 'oidc') return callbackScope();
     // [#32086] An IdP app tile's third-party-initiated request (`iss`, no code)

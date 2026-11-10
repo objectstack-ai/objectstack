@@ -84,6 +84,8 @@ import type { IDataDriver } from '@objectstack/spec/contracts';
 // would be a new unaliased artifact import (`check:test-source-alias`).
 import '@objectstack/core';
 import '@objectstack/driver-sql';
+import { refusalAccount } from './refusal-account.js';
+import { thrownRefusalText } from '../datasource-refusal.js';
 
 describe('#5714 — which driver arms read a declared `pool`', () => {
   it('names the two sqlite arms, `memory` and `turso` as unable to honour it (#5931 / #7243)', () => {
@@ -225,39 +227,39 @@ describe('#5714 — the driver factory rejects a pool it cannot honour', () => {
   }
 
   it('sqlite + pool is rejected instead of built with the block dropped', async () => {
-    await expect(
+    expect(await refusalAccount(
       factory().create({
         name: 'crm_primary',
         driver: 'sqlite',
         config: { filename: ':memory:' },
         pool: { min: 3, max: 9 },
       }),
-    ).rejects.toThrow(/Datasource 'crm_primary' declares a `pool` block/);
+    )).toMatch(/Datasource 'crm_primary' declares a `pool` block/);
   });
 
   it('sqlite-wasm + pool is rejected the same way', async () => {
-    await expect(
+    expect(await refusalAccount(
       factory().create({
         name: 'wasm_ds',
         driver: 'sqlite-wasm',
         config: { filename: ':memory:' },
         pool: { max: 9 },
       }),
-    ).rejects.toThrow(/does not read it/);
+    )).toMatch(/does not read it/);
   });
 
   // #5931 — the arm this file used to pin as deliberately unguarded. Before the
   // ruling this call RESOLVED, handing back an `InMemoryDriver` built from
   // `buildMemoryConfig(spec)` alone, with `pool` nowhere in it.
   it('memory + pool is rejected instead of built with the block dropped (#5931)', async () => {
-    await expect(
+    expect(await refusalAccount(
       factory().create({
         name: 'scratch',
         driver: 'memory',
         config: {},
         pool: { min: 3, max: 9 },
       }),
-    ).rejects.toThrow(/Datasource 'scratch' declares a `pool` block/);
+    )).toMatch(/Datasource 'scratch' declares a `pool` block/);
   });
 
   it('rejects the `inmemory` alias too, and says why in memory terms', async () => {
@@ -413,12 +415,12 @@ describe('#5714 — boot refuses a declared pool the driver cannot honour', () =
   // used to boot silently and run on a store no pool setting ever touched.
   it('refuses a memory datasource carrying a pool, before anything is connected (#5931)', async () => {
     const { service, factory, engine } = svc();
-    await expect(
+    expect(await refusalAccount(
       service.connectDeclared({
         datasources: [{ name: 'scratch', driver: 'memory', config: {}, pool: { min: 3, max: 9 } }],
         objects: [],
       }),
-    ).rejects.toThrow(/Datasource 'scratch' declares a `pool` block/);
+    )).toMatch(/Datasource 'scratch' declares a `pool` block/);
     expect((factory.create as any).mock.calls.length).toBe(0);
     expect(engine.drivers.size).toBe(0);
   });
@@ -479,9 +481,9 @@ describe('#5714 — boot refuses a declared pool the driver cannot honour', () =
   // than through the boot pre-pass, so it carries its own guard.
   it('rejects on the direct connect() path too, without registering anything', async () => {
     const { service, engine, factory } = svc();
-    await expect(
+    expect(await refusalAccount(
       service.connect(sqliteWithPool, { context: { origin: 'runtime', trigger: 'runtime-admin' } }),
-    ).rejects.toThrow(/declares a `pool` block/);
+    )).toMatch(/declares a `pool` block/);
     expect((factory.create as any).mock.calls.length).toBe(0);
     expect(engine.drivers.size).toBe(0);
   });
@@ -515,14 +517,14 @@ function adminHarness(seed: StoredDatasource[] = []) {
 describe('#5714 — the Setup wizard rejects it before the record is stored', () => {
   it('create: a sqlite draft carrying a pool never reaches the store', async () => {
     const { service, records, registered } = adminHarness();
-    await expect(
+    expect(await refusalAccount(
       service.createDatasource({
         name: 'local_cache',
         driver: 'sqlite',
         config: { filename: ':memory:' },
         pool: { min: 1, max: 5 },
       }),
-    ).rejects.toThrow(/declares a `pool` block/);
+    )).toMatch(/declares a `pool` block/);
     expect(records).toHaveLength(0);
     expect(registered).toHaveLength(0);
   });
@@ -542,14 +544,14 @@ describe('#5714 — the Setup wizard rejects it before the record is stored', ()
   // with `driver: memory`, since it is the dev/test choice the Setup UI offers.
   it('create: a memory draft carrying a pool never reaches the store (#5931)', async () => {
     const { service, records, registered } = adminHarness();
-    await expect(
+    expect(await refusalAccount(
       service.createDatasource({
         name: 'scratch',
         driver: 'memory',
         config: {},
         pool: { min: 1, max: 5 },
       }),
-    ).rejects.toThrow(/no pool to size, and no connection to pool/);
+    )).toMatch(/no pool to size, and no connection to pool/);
     expect(records).toHaveLength(0);
     expect(registered).toHaveLength(0);
   });
@@ -566,27 +568,27 @@ describe('#5714 — the Setup wizard rejects it before the record is stored', ()
     const { service } = adminHarness([
       { name: 'reporting', driver: 'postgres', config: {}, pool: { min: 3, max: 9 }, origin: 'runtime' },
     ]);
-    await expect(
+    expect(await refusalAccount(
       service.updateDatasource('reporting', { driver: 'memory', config: {} }),
-    ).rejects.toThrow(/declares a `pool` block/);
+    )).toMatch(/declares a `pool` block/);
   });
 
   it('update: patching a pool onto a stored sqlite datasource is rejected', async () => {
     const { service } = adminHarness([
       { name: 'local_cache', driver: 'sqlite', config: { filename: ':memory:' }, origin: 'runtime' },
     ]);
-    await expect(
+    expect(await refusalAccount(
       service.updateDatasource('local_cache', { pool: { min: 1, max: 5 } }),
-    ).rejects.toThrow(/declares a `pool` block/);
+    )).toMatch(/declares a `pool` block/);
   });
 
   it('update: switching a pooled datasource TO sqlite is rejected on the merged record', async () => {
     const { service } = adminHarness([
       { name: 'reporting', driver: 'postgres', config: {}, pool: { min: 3, max: 9 }, origin: 'runtime' },
     ]);
-    await expect(
+    expect(await refusalAccount(
       service.updateDatasource('reporting', { driver: 'sqlite', config: { filename: ':memory:' } }),
-    ).rejects.toThrow(/declares a `pool` block/);
+    )).toMatch(/declares a `pool` block/);
   });
 
   // A record written before this gate must stay editable — including the
@@ -950,7 +952,7 @@ describe('#7243 — boot and the Setup wizard refuse both remainders too', () =>
         name: 'edge', driver: 'turso', config: { url: 'libsql://x.turso.io' }, pool: { max: 9 },
       }),
     );
-    expect(err.message).toMatch(/neither libSQL transport has a connection pool to size/);
+    expect(thrownRefusalText(err)).toMatch(/neither libSQL transport has a connection pool to size/);
     expect(records).toHaveLength(0);
     expect(registered).toHaveLength(0);
   });
@@ -965,8 +967,8 @@ describe('#7243 — boot and the Setup wizard refuse both remainders too', () =>
         pool: { max: 20, connectionTimeoutMillis: 3000 },
       }),
     );
-    expect(err.message).toContain('`connectionTimeoutMillis`');
-    expect(err.message).toMatch(/does not read it/);
+    expect(thrownRefusalText(err)).toContain('`connectionTimeoutMillis`');
+    expect(thrownRefusalText(err)).toMatch(/does not read it/);
     expect(records).toHaveLength(0);
     expect(registered).toHaveLength(0);
   });
@@ -992,18 +994,18 @@ describe('#7243 — boot and the Setup wizard refuse both remainders too', () =>
         origin: 'runtime',
       },
     ]);
-    await expect(
+    expect(await refusalAccount(
       service.updateDatasource('orders', { pool: { max: 20, idleTimeoutMillis: 30_000 } }),
-    ).rejects.toThrow(/`idleTimeoutMillis`/);
+    )).toMatch(/`idleTimeoutMillis`/);
   });
 
   it('wizard: switching a pooled datasource TO turso is rejected on the merged record', async () => {
     const { service } = adminHarness([
       { name: 'reporting', driver: 'postgres', config: {}, pool: { min: 3, max: 9 }, origin: 'runtime' },
     ]);
-    await expect(
+    expect(await refusalAccount(
       service.updateDatasource('reporting', { driver: 'turso', config: { url: 'libsql://x.turso.io' } }),
-    ).rejects.toThrow(/neither libSQL transport has a connection pool to size/);
+    )).toMatch(/neither libSQL transport has a connection pool to size/);
   });
 
   // The same carve-out the block gate has: a record written before this gate

@@ -1694,10 +1694,10 @@ export class MessagingService {
 
     /**
      * [#24978] `notification` with its title and body rendered from `keys` in
-     * `recipient`'s language, each member falling back to the literal. With
-     * no renderer composed, the literal itself — said once, because a
-     * producer that keyed its text is then reaching every recipient in the
-     * language it emitted in.
+     * `recipient`'s language, each member falling back to the literal, and
+     * `keys` on it as `keyedText` (#32240). With no renderer composed, the
+     * literal text — said once, because a producer that keyed its text is
+     * then reaching every recipient in the language it emitted in.
      */
     private async renderedFor(
         notification: Notification,
@@ -1714,10 +1714,14 @@ export class MessagingService {
                     '(MessagingServicePlugin does) to render it in each recipient\'s language.',
                 );
             }
-            return notification;
+            // [#32240] The keys ride on even unrendered: a channel that stores
+            // the text keeps them, so a reader can still read it in their language.
+            return { ...notification, keyedText: keys };
         }
         const text = await renderer.renderFor(recipient, keys, { title: notification.title, body: notification.body });
-        return { ...notification, title: text.title, body: text.body };
+        // [#32240] The keys the text was rendered from travel with it — the
+        // inline path's only carrier, since `payload` is the producer's own.
+        return { ...notification, title: text.title, body: text.body, keyedText: keys };
     }
 }
 

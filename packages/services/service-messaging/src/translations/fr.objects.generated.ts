@@ -60,6 +60,10 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       created_at: {
         label: "Créé le"
+      },
+      keyed_text: {
+        label: "Clés de texte",
+        help: "Les clés de catalogue et paramètres à partir desquels le titre et le corps ont été rendus à la livraison. Une lecture rend à nouveau le titre et le corps à partir de ces clés dans la langue du lecteur ; null lorsque la notification ne portait aucune clé, et le titre et le corps stockés sont alors servis tels quels."
       }
     },
     _views: {

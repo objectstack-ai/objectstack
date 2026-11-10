@@ -2106,6 +2106,10 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         label: "السماح بالتزويد الفوري للحسابات",
         help: "في وضع الجمهور المقتصر على الدعوات، إنشاء حساب لشخص يسجّل الدخول عبر هذا المزوّد دون حساب أو دعوة. معطّل افتراضيًا: يُرفض هذا الشخص. الأوضاع الأخرى تنشئ الحسابات كما كانت. غيّره من خلال «تعديل خيارات تسجيل الدخول»."
       },
+      skip_user_info: {
+        label: "قراءة المطالبات من رمز المعرّف فقط",
+        help: "لـ OIDC فقط. تُقرأ عناوين البريد الإلكتروني والاسم والمجموعات من رمز المعرّف الذي تحقق منه موفر الهوية، ولا تُستدعى نقطة نهاية userinfo الخاصة به. فعّله لـ Microsoft Entra ID، إذ لا تتضمن استجابة userinfo لديه مجموعات ولا preferred_username. معطّل افتراضيًا: الموفر الذي لديه نقطة نهاية userinfo يقرأ مطالباته من تلك الاستجابة. غيّره عبر «تعديل خيارات تسجيل الدخول»."
+      },
       user_id: {
         label: "سجّله",
         help: "المستخدم الذي سجّل هذا المزوّد"
@@ -2432,6 +2436,10 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         label: "ملخّص الرمز",
         help: "قيمة HMAC-SHA-256 (base64url) لرمز الحامل، مفتاحها سر المصادقة للنشر — أحادية الاتجاه؛ يُعرض النص الصريح مرة واحدة عند الإصدار ولا يُخزَّن أبدًا."
       },
+      token_hint: {
+        label: "تلميح الرمز",
+        help: "آخر أربعة أحرف من رمز الحامل، تُسجَّل عند الإصدار للتمييز بين بيانات الاعتماد لاتصال واحد؛ ليست الرمز نفسه ولا ملخصه أبدًا. فارغ لبيانات الاعتماد الصادرة قبل بدء تسجيل التلميحات."
+      },
       active: {
         label: "نشط",
         help: "مفتاح الإبطال — تُرفض بيانات الاعتماد غير النشطة عند التحقق"
@@ -2439,6 +2447,10 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       expires_at: {
         label: "تاريخ الانتهاء",
         help: "انتهاء صلاحية صارم اختياري لتدوير بيانات الاعتماد على مراحل؛ تُرفض بيانات الاعتماد المنتهية الصلاحية"
+      },
+      last_used_at: {
+        label: "آخر استخدام",
+        help: "وقت آخر مصادقة لطلب SCIM باستخدام بيانات الاعتماد هذه، يُسجَّل مرة واحدة في الدقيقة على الأكثر؛ فارغ إذا لم يُسجَّل أي استخدام"
       },
       user_id: {
         label: "أصدرها",
@@ -2488,6 +2500,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "لقد حفظت الرمز",
           fields: {
             token: "الرمز",
+            tokenHint: "تلميح الرمز",
             connectionId: "معرّف الاتصال",
             expiresAt: "تاريخ الانتهاء"
           }
@@ -2871,7 +2884,64 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "الكل"
+        label: "الكل",
+        emptyState: {
+          title: "لا توجد روابط مجموعات بعد",
+          message: "امنح مجموعة أذونات لأعضاء مجموعة من موفّر الهوية باستخدام \"ربط مجموعة SSO\" (مجموعة يرسلها موفّر SSO عند تسجيل الدخول) أو \"ربط مجموعة SCIM\" (مجموعة يجهّزها اتصال SCIM)."
+        }
+      }
+    },
+    _actions: {
+      map_sso_group: {
+        label: "ربط مجموعة SSO",
+        description: "منح مجموعة أذونات لكل عضو في مجموعة يرسلها موفّر SSO عند تسجيل الدخول. يسري ذلك عند تسجيل الدخول التالي لكل عضو عبر الموفّر.",
+        successMessage: "تم حفظ ربط المجموعة. يسري عند تسجيل الدخول التالي لكل عضو عبر الموفّر.",
+        params: {
+          providerId: {
+            label: "معرّف موفّر SSO",
+            helpText: "معرّف موفّر SSO الذي يحمل تسجيل الدخول عبره المجموعة، مثل \"okta\". يجب أن يكون للموفّر مطالبة مجموعات (تحرير مطالبة المجموعات في موفّر SSO)."
+          },
+          groupExternalId: {
+            label: "المعرّف الخارجي للمجموعة",
+            helpText: "قيمة المجموعة كما ترسلها مطالبة المجموعات تمامًا عندما تكون معرّفًا، مثل معرّف كائن مجموعة في Entra ID. املأ هذا الحقل أو اسم عرض المجموعة، لا كليهما."
+          },
+          groupDisplayName: {
+            label: "اسم عرض المجموعة",
+            helpText: "قيمة المجموعة كما ترسلها مطالبة المجموعات تمامًا عندما تكون اسمًا، مثل \"Sales\". املأ هذا الحقل أو المعرّف الخارجي للمجموعة، لا كليهما."
+          },
+          permissionSet: {
+            label: "مجموعة الأذونات",
+            helpText: "مجموعة الأذونات التي يُمنحها عضو المجموعة في مؤسسة الموفّر. تُرفض مجموعات المسؤول."
+          }
+        }
+      },
+      map_scim_group: {
+        label: "ربط مجموعة SCIM",
+        description: "منح مجموعة أذونات لكل عضو في مجموعة يجهّزها اتصال SCIM. يحصل عليها الأعضاء الحاليون للمجموعة فورًا.",
+        successMessage: "تم حفظ ربط المجموعة",
+        params: {
+          connectionId: {
+            label: "معرّف اتصال SCIM",
+            helpText: "اتصال SCIM الذي تُجهَّز المجموعة عبره، مثل \"okta-prod\": معرّف الاتصال لبيانات اعتماده."
+          },
+          groupExternalId: {
+            label: "المعرّف الخارجي للمجموعة",
+            helpText: "قيمة externalId للمجموعة كما يرسلها موفّر الهوية. املأ هذا الحقل أو اسم عرض المجموعة، لا كليهما."
+          },
+          groupDisplayName: {
+            label: "اسم عرض المجموعة",
+            helpText: "قيمة displayName للمجموعة، وتُطابَق تمامًا. املأ هذا الحقل أو المعرّف الخارجي للمجموعة، لا كليهما."
+          },
+          permissionSet: {
+            label: "مجموعة الأذونات",
+            helpText: "مجموعة الأذونات التي يُمنحها عضو المجموعة في مؤسسة الاتصال. تُرفض مجموعات المسؤول."
+          }
+        }
+      },
+      delete_group_mapping: {
+        label: "حذف الربط",
+        confirmText: "حذف ربط المجموعة هذا؟ يتوقف منح أعضاء المجموعة مجموعة الأذونات الخاصة به. في اتصال SCIM، يُعاد إسقاط أعضاء المجموعة الآن ويفقدون المنح التي قام بها هذا الربط. في موفّر SSO، تُزال الآن المنح التي قامت بها عمليات تسجيل الدخول عبره لهذه المجموعة، ما لم يذكر ربط آخر للموفّر المجموعة نفسها. لاستعادته، اربط المجموعة مرة أخرى.",
+        successMessage: "تم حذف ربط المجموعة"
       }
     }
   },
@@ -3673,6 +3743,55 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       },
       note: {
         label: "ملاحظة"
+      }
+    }
+  },
+  sys_metadata_commit: {
+    label: "Metadata Commit",
+    pluralLabel: "Metadata Commits",
+    description: "Package-scoped commit log grouping a turn’s metadata changes.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      package_id: {
+        label: "Package"
+      },
+      operation: {
+        label: "Operation",
+        options: {
+          apply: "apply",
+          revert: "revert"
+        }
+      },
+      message: {
+        label: "Message",
+        help: "Change summary; for AI turns, the user instruction that produced it."
+      },
+      actor: {
+        label: "Actor"
+      },
+      ai_model: {
+        label: "AI Model"
+      },
+      parent_commit_id: {
+        label: "Parent Commit"
+      },
+      event_seq_start: {
+        label: "Event Seq Start"
+      },
+      event_seq_end: {
+        label: "Event Seq End"
+      },
+      items: {
+        label: "Items",
+        help: "JSON: [{ type, name, existedBefore, prevVersion }] — the revert plan."
+      },
+      item_count: {
+        label: "Item Count"
+      },
+      created_at: {
+        label: "Created At"
       }
     }
   },
