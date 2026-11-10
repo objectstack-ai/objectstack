@@ -43,7 +43,7 @@ export type { MarketplaceInstallLocalPluginConfig } from './marketplace-install-
 export { INSTALL_RENAME_PLANNER_SERVICE } from './marketplace-install-declared-renames.js';
 // [#31895, cloud#3862] The same planner with no install door: a plugin that
 // registers that one service and nothing else (no route, no install ledger),
-// for a kernel that serves no install-local door, a hosted environment's.
+// for a kernel that does not mount MarketplaceInstallLocalPlugin.
 export { MarketplaceInstallRenamePlannerPlugin } from './marketplace-install-rename-planner.js';
 export type {
     InstallRenameCarry,

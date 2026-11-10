@@ -434,7 +434,17 @@ export {
   type AuthGate,
   type InboundHookRouteMatch,
   type UserAuthGateSource,
+  INBOUND_HOOK_QUALIFIER_EXCLUSIONS,
 } from './auth-gate.js';
+// [ADR-0150 D5] The inbound hook's one refusal and its qualified address's admission.
+export {
+  INBOUND_HOOK_REFUSAL_STATUS,
+  inboundHookRefusal,
+  inboundHookJsonResponse,
+  inboundHookRefusalResponse,
+  admitInboundHookAddress,
+  type InboundHookAddress,
+} from './inbound-hook-answer.js';
 
 // Managing API keys is a signed-in-session act on every data door: the one
 // rule the runtime dispatcher's and RestServer's per-object gates ask.

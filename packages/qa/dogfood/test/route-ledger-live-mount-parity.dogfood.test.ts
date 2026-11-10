@@ -182,6 +182,10 @@ const UNEXERCISED_BY_THIS_BOOT: Record<string, string> = {
   // run: the path is never mounted twice.
   'POST /api/v1/automation/hooks/:flowName/:hookId':
     'self-hosted, the inbound-hook trigger (ApiTriggerPlugin) mounts this path with rawApp.post() directly on Hono, so it never passes through the IHttpServer port, and the dispatcher bridge mounts no route that answers it; the dispatcher domain this row ledgers serves only a kernel with no raw app. Pinned on the real HttpDispatcher by packages/runtime/src/domains/automation-hooks.test.ts',
+  // [ADR-0150 D5, child G1] The qualified hook: the same two doors, the same
+  // reason. The trigger's raw-app mount is HOOKS_ADDRESSED_PATH.
+  'POST /api/v1/automation/hooks/:ns/:flowName/:hookId':
+    'self-hosted, the inbound-hook trigger (ApiTriggerPlugin) mounts the qualified hook with rawApp.post() directly on Hono, so it never passes through the IHttpServer port, and the dispatcher bridge mounts no route that answers it; the dispatcher domain this row ledgers serves only a kernel with no raw app. Pinned on the real HttpDispatcher by packages/runtime/src/domains/automation-hooks.test.ts and on the mount by packages/triggers/trigger-api/src/inbound-hook-member.test.ts',
 };
 
 /** Segments a probe path uses for `:params` — must match no literal segment. */

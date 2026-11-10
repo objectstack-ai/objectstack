@@ -333,4 +333,35 @@ describe('address grammar ↔ route ledger (ADR-0150 D5, #31691)', () => {
       expect([path.join('/'), automationRouteAllow(path.slice(1))]).toEqual([path.join('/'), served]);
     }
   });
+  // [ADR-0150 D5, child G1] The qualified inbound hook,
+  // `POST /automation/hooks/:ns/:flowName/:hookId`, has the verb and arity of
+  // every five-segment `POST /automation/…` row whose second segment can read
+  // `hooks` (a parameter, or `hooks` itself): `…/:name/runs/:runId/cancel` is
+  // `hooks/runs/r1/cancel` for a flow named `hooks`. Its third and fourth
+  // segments match some path whatever they are, so each such row collides on
+  // the qualifier its second segment names. The allow-list row never admits
+  // those qualifiers (core's `INBOUND_HOOK_QUALIFIER_EXCLUSIONS`), so the set
+  // is exactly the ledger's; a row whose qualifier position is a parameter
+  // would collide on every qualifier, and none may exist.
+  it('the qualified hook\'s excluded qualifiers are exactly the qualifier-position literals of every five-segment `POST /automation` row that can read `hooks` there', async () => {
+    const { INBOUND_HOOK_QUALIFIER_EXCLUSIONS } = await import('@objectstack/core');
+    const colliding = new Set<string>();
+    const everyQualifier: string[] = [];
+    const hookRows: string[] = [];
+    for (const row of ROUTE_LEDGER) {
+      const verb = row.route.slice(0, row.route.indexOf(' '));
+      const segments = row.route.slice(row.route.indexOf(' ') + 1).split('?')[0].split('/').filter(Boolean);
+      if (verb !== 'POST' || segments.length !== 5 || segments[0] !== 'automation') continue;
+      const [, first, qualifierPosition] = segments;
+      if (!(first.startsWith(':') || first === 'hooks')) continue;
+      if (row.route === 'POST /automation/hooks/:ns/:flowName/:hookId') { hookRows.push(row.route); continue; }
+      if (qualifierPosition.startsWith(':')) everyQualifier.push(row.route);
+      else colliding.add(qualifierPosition);
+    }
+    // Anti-vacuity: the qualified hook's own row was seen.
+    expect(hookRows).toEqual(['POST /automation/hooks/:ns/:flowName/:hookId']);
+    expect(everyQualifier).toEqual([]);
+    expect([...colliding].sort()).toEqual([...INBOUND_HOOK_QUALIFIER_EXCLUSIONS].sort());
+    expect(colliding.size).toBeGreaterThan(0);
+  });
 });
