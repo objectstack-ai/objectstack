@@ -3191,6 +3191,10 @@ const zh = {
       unknownApp: '某个应用',
       unidentified: '无法识别此应用。',
       clientId: '客户端 ID',
+      unverified: '未经验证的应用',
+      unverifiedHint: '此应用是自行注册的，其名称未经此处任何人核实。仅在您信任 {{destination}} 时才授权。',
+      destinationUnconfirmed: '无法确认此访问权限将发送到何处，因此无法在此授权。',
+      sentTo: '访问权限将发送到：',
       willAllow: '此应用将能够：',
       scope: {
         openid: '确认您的身份',

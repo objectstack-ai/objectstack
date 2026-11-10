@@ -3111,6 +3111,10 @@ const ja = {
       unknownApp: "あるアプリケーション",
       unidentified: "このアプリケーションを識別できませんでした。",
       clientId: "クライアント ID",
+      unverified: "未確認のアプリケーション",
+      unverifiedHint: "このアプリケーションは自ら登録したもので、その名前はここで誰にも確認されていません。{{destination}} を信頼できる場合にのみ承認してください。",
+      destinationUnconfirmed: "このアクセス権の送信先を確認できなかったため、ここでは承認できません。",
+      sentTo: "アクセス権の送信先:",
       willAllow: "このアプリは次のことができます:",
       scope: {
         openid: "本人確認を行う",

@@ -3191,6 +3191,10 @@ const zhHant = {
       unknownApp: '某個應用',
       unidentified: '無法識別此應用。',
       clientId: '客戶端 ID',
+      unverified: '未經驗證的應用',
+      unverifiedHint: '此應用是自行註冊的，其名稱未經此處任何人核實。僅在您信任 {{destination}} 時才授權。',
+      destinationUnconfirmed: '無法確認此訪問權限將傳送到何處，因此無法在此授權。',
+      sentTo: '訪問權限將傳送到：',
       willAllow: '此應用將能夠：',
       scope: {
         openid: '確認您的身份',
