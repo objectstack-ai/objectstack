@@ -11,11 +11,11 @@
  * request, and how each caller gets its own outcome back.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { createDatasetQueryCoalescer, type DatasetBatchOutcome } from '../datasetQueryBatch';
+import { createDatasetQueryCoalescer, type DatasetQueryOutcome } from '../datasetQueryBatch';
 
 function makeSource(batch = true) {
   const queryDataset = vi.fn(async (dataset: unknown) => ({ single: dataset }));
-  const queryDatasetBatch = vi.fn(async (queries: Array<{ dataset: unknown }>, _options?: { packageId?: string }): Promise<DatasetBatchOutcome[]> =>
+  const queryDatasetBatch = vi.fn(async (queries: Array<{ dataset: unknown }>, _options?: { packageId?: string }): Promise<DatasetQueryOutcome[]> =>
     queries.map(({ dataset }) => (dataset === 'refused'
       ? { status: 'rejected', reason: new Error(`refused ${String(dataset)}`) }
       : { status: 'fulfilled', value: { batched: dataset } })));

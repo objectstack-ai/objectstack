@@ -35,7 +35,7 @@ export interface DatasetQueryOptions {
 }
 
 /** One query's outcome in a batch, in `Promise.allSettled`'s shape. */
-export type DatasetBatchOutcome =
+export type DatasetQueryOutcome =
   | { status: 'fulfilled'; value: unknown }
   | { status: 'rejected'; reason: unknown };
 
@@ -49,7 +49,7 @@ export interface DatasetBatchCapableSource {
   queryDatasetBatch?(
     queries: Array<{ dataset: string | Record<string, unknown>; selection: unknown }>,
     options?: DatasetQueryOptions,
-  ): Promise<DatasetBatchOutcome[]>;
+  ): Promise<DatasetQueryOutcome[]>;
 }
 
 /** The door a dashboard's dataset callers ask instead of the data source, for that data source. */
