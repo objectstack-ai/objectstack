@@ -79,6 +79,7 @@ import {
 } from '@objectstack/core';
 import type { PackageScopedRefusal } from '@objectstack/core';
 import type { TenancyPosture } from '@objectstack/spec/security';
+import { normalizeTenancyPosture, postureEnforcesWall } from '@objectstack/spec/security';
 import {
   filterApproversWhoCanRead,
   resolveApproverDirectoryOrg,
@@ -2312,7 +2313,10 @@ export class ApprovalService implements IApprovalService {
    *
    * A platform admin crosses the tenant wall (matching the unscoped
    * `admin_full_access` evidence); a tenant admin may override only within their
-   * own org (or an org-less request). A system context always passes. Signals are
+   * own org. A request that carries no organization belongs to no organization's
+   * administrator: under a walled posture only a platform admin or a system
+   * context acts on it, and under `single` a tenant admin still may
+   * ({@link ApprovalService.organizationWallStands}). A system context always passes. Signals are
    * read defensively off the resolved exec context (`permissions` and the derived
    * `posture`, ADR-0095) so any transport that resolves through the shared authz
    * resolver lights this up without extra wiring. ⛔ NOT `positions` — on BOTH
@@ -2375,8 +2379,13 @@ export class ApprovalService implements IApprovalService {
     const isTenantAdmin = posture === 'TENANT_ADMIN'
       || holdsTenantAdminRung(perms);
     if (!isTenantAdmin) return false;
-    // A tenant admin's authority stops at their own org; a null-org request is
-    // global and any admin may release it.
+    // A tenant admin's authority stops at their own org. [ADR-0131 D1] NULL is
+    // not a state and names no owner, so a request with no organization is no
+    // organization administrator's to act on: under a walled posture it is the
+    // platform admin's or the system's alone (the arms above). Under `single`
+    // there is no wall and one organization's administrators administer the
+    // deployment, so the tenant admin keeps it there.
+    if (requestOrg == null) return !this.organizationWallStands();
     // Only the `tenantId` half of this read lost its cast: `tenantId` is a
     // declared field of the envelope, `organizationId` is not a field of it at
     // ALL. That spelling has its own history (#5858 / `check:org-identifier`)
@@ -2384,7 +2393,19 @@ export class ApprovalService implements IApprovalService {
     // and the asymmetry is now the visible marker of which of the two names
     // the contract actually knows.
     const actorTenant = context.tenantId ?? (context as any).organizationId ?? null;
-    return requestOrg == null || (actorTenant != null && String(requestOrg) === String(actorTenant));
+    return actorTenant != null && String(requestOrg) === String(actorTenant);
+  }
+
+  /**
+   * [ADR-0105 D1] Does the posture in force enforce an organization wall?
+   * `postureEnforcesWall` over the tenancy service's posture — the shared
+   * predicate, never a second spelling of it. A stack with no tenancy service
+   * has no wall anywhere (the same reading `vetOrganizationClaim` takes), so an
+   * unresolvable posture answers `false`.
+   */
+  private organizationWallStands(): boolean {
+    const posture = normalizeTenancyPosture(this.tenancyPosture?.());
+    return posture !== undefined && postureEnforcesWall(posture);
   }
 
   /**
