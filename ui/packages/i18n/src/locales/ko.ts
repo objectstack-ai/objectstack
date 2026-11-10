@@ -3210,6 +3210,7 @@ const ko = {
     multiOrgDisabled: "이 인스턴스에서는 새 조직을 만들 수 없습니다.",
     createFailed: '조직을 만들지 못했습니다',
     developerEdition: '개발자 에디션',
+    developerEditionHint: '무료, 비프로덕션용, 멤버 최대 {{count}}명',
     developerEditionHint_one: '무료, 비프로덕션용, 멤버 최대 {{count}}명',
     developerEditionHint_other: '무료, 비프로덕션용, 멤버 최대 {{count}}명',
   },

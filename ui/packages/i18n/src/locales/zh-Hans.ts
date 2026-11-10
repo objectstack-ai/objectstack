@@ -3291,6 +3291,7 @@ const zh = {
     multiOrgDisabled: '此实例已禁用创建新组织。',
     createFailed: '创建组织失败',
     developerEdition: '开发者版',
+    developerEditionHint: '免费，非生产用途，最多 {{count}} 名成员',
     developerEditionHint_one: '免费，非生产用途，最多 {{count}} 名成员',
     developerEditionHint_other: '免费，非生产用途，最多 {{count}} 名成员',
   },

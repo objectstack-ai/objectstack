@@ -3212,6 +3212,7 @@ const ja = {
     multiOrgDisabled: "このインスタンスでは新しい組織の作成が無効です。",
     createFailed: '組織の作成に失敗しました',
     developerEdition: '開発者エディション',
+    developerEditionHint: '無料・本番環境以外向け・メンバーは最大 {{count}} 人',
     developerEditionHint_one: '無料・本番環境以外向け・メンバーは最大 {{count}} 人',
     developerEditionHint_other: '無料・本番環境以外向け・メンバーは最大 {{count}} 人',
   },

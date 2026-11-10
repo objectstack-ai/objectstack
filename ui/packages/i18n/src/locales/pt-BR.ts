@@ -3271,6 +3271,7 @@ const pt = {
     multiOrgDisabled: "A criação de novas organizações está desativada nesta instância.",
     createFailed: 'Falha ao criar a organização',
     developerEdition: 'Developer Edition',
+    developerEditionHint: 'Gratuita, não destinada à produção, até {{count}} membros',
     developerEditionHint_one: 'Gratuita, não destinada à produção, até {{count}} membro',
     developerEditionHint_many: 'Gratuita, não destinada à produção, até {{count}} de membros',
     developerEditionHint_other: 'Gratuita, não destinada à produção, até {{count}} membros',

@@ -3468,6 +3468,7 @@ const ar = {
     multiOrgDisabled: "إنشاء مؤسسات جديدة معطّل في هذا النشر.",
     createFailed: 'تعذّر إنشاء المؤسسة',
     developerEdition: 'إصدار المطوّرين',
+    developerEditionHint: 'مجاني، لغير بيئة الإنتاج، حتى {{count}} عضو',
     developerEditionHint_zero: 'مجاني، لغير بيئة الإنتاج، حتى {{count}} عضو',
     developerEditionHint_one: 'مجاني، لغير بيئة الإنتاج، حتى {{count}} عضو',
     developerEditionHint_two: 'مجاني، لغير بيئة الإنتاج، حتى عضوين ({{count}})',
