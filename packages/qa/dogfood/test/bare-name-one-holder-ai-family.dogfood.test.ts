@@ -31,8 +31,9 @@
 //   - `POST /marketplace/install-local` of a package of a THIRD namespace
 //     declaring the held agent, skill and tool names installs; of a co-owner
 //     of `alpha`'s namespace declaring any of them is 422
-//     PLUGIN_REGISTER_FAILED naming the holder and the rename, as before, and
-//     does not install;
+//     PLUGIN_REGISTER_FAILED naming the holder, as before (the agent's and the
+//     skill's with the rename; the tool's with the namespace co-owner rule's
+//     sentence, which refuses it first), and does not install;
 //   - CONTROL: a package declaring fresh agent, skill and tool names installs,
 //     and every AI door serves it as before.
 
@@ -287,11 +288,10 @@ describe('agent, skill and tool names held per namespace, on a booted showcase',
     expect([...(bare.error?.data?.candidates ?? [])].sort()).toEqual([`alpha-${SKILL}`, `beta-${SKILL}`]);
   });
 
-  it('install-local of a co-owner of `alpha`\'s namespace declaring the held agent, skill or tool name is 422 PLUGIN_REGISTER_FAILED, naming the holder and the rename, as before; nothing is installed', async () => {
+  it('install-local of a co-owner of `alpha`\'s namespace declaring the held agent or skill name is 422 PLUGIN_REGISTER_FAILED, naming the holder and the rename, as before; nothing is installed', async () => {
     for (const [p, collections, type, name] of [
       ['alphamod', { agents: [agent('alphamod')] }, 'agent', AGENT],
       ['alphaext', { skills: [skill('alphaext')] }, 'skill', SKILL],
-      ['alphatool', { tools: [tool('alphatool')] }, 'tool', TOOL],
     ] as const) {
       const before = await packageIds();
       const { status, body } = await installLocal(inline(p, collections as never, 'alpha'));
@@ -304,6 +304,20 @@ describe('agent, skill and tool names held per namespace, on a booted showcase',
       expect(await packageIds(), 'the package list is unchanged').toEqual(before);
     }
     expect(await metaAt('agent', AGENT, 'com.qa.bare.alpha')).toEqual(['com.qa.bare.alpha', 'alpha agent']);
+  });
+
+  // [#31985] A tool is also the namespace co-owner rule's type (child N), which
+  // refuses a co-owner's tool ahead of the bare-name rule, with its own sentence.
+  it('install-local of a co-owner of `alpha`\'s namespace declaring the held tool name is 422 PLUGIN_REGISTER_FAILED naming the namespace\'s holder, as before; nothing is installed', async () => {
+    const before = await packageIds();
+    const { status, body } = await installLocal(inline('alphatool', { tools: [tool('alphatool')] }, 'alpha'));
+    expect([status, codeOf(body)], JSON.stringify(body)).toEqual([422, 'PLUGIN_REGISTER_FAILED']);
+    const message = String(body?.error?.message ?? '');
+    expect(message).toContain('Namespace name conflict');
+    expect(message).toContain(`the tool "${TOOL}" in namespace "alpha", already held there by package "com.qa.bare.alpha"`);
+    expect(message).not.toContain('com.qa.bare.beta');
+    expect(await packageIds(), 'the package list is unchanged').toEqual(before);
+    expect(await metaAt('tool', TOOL, 'com.qa.bare.alpha')).toEqual(['com.qa.bare.alpha', 'alpha tool']);
   });
 
   it('CONTROL — install-local of a package declaring fresh agent, skill and tool names installs, and every AI door serves it', async () => {
