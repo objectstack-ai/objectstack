@@ -23,6 +23,9 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+// Paid at collection, not inside a case's clock (check:test-source-alias): the
+// dispatcher chain this file reaches loads it dynamically.
+import '@objectstack/metadata';
 import { ObjectQL, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { actionHandlerOwnerRefusal, executeRegisteredAction, resolveRouteActionDeclaration, type ActionExecutionDeps } from './action-execution.js';
