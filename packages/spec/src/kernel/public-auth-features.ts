@@ -54,8 +54,12 @@ import type { z } from 'zod';
  * - `login` — objectui login/auth UI reads the flag straight off
  *   `/auth/config` (no spec metadata in between).
  * - `status` — operational status indicator, not a capability gate.
+ * - `shell` — a console form outside the login/auth UI (the signed-in app
+ *   shell, e.g. the create-organization form) reads the flag straight off
+ *   `/auth/config` (no spec metadata in between). Not `login`, whose readers
+ *   are the sign-in pages, and not `crud`, which goes through spec predicates.
  */
-export type PublicAuthFeatureSurface = 'crud' | 'login' | 'status';
+export type PublicAuthFeatureSurface = 'crud' | 'login' | 'status' | 'shell';
 
 /**
  * Default semantics of the flag, which decide the lowered predicate:
@@ -317,16 +321,21 @@ export const PUBLIC_AUTH_FEATURES = {
     },
   },
   developerEditionCreate: {
-    surface: 'login',
+    surface: 'shell',
     semantics: 'opt-in',
     exempt: {
       reason:
-        'No spec input gates it: a host option (AuthManagerOptions.' +
-        'developerEditionCreate) sets it, true only where the host\'s ' +
-        'organization-create door accepts the developer edition. Read straight ' +
-        'off /auth/config by the console create-organization form, which ' +
-        'offers the Developer Edition choice only when it is true.',
+        'No spec input gates it: plugin-auth derives it from the host option ' +
+        'AuthManagerOptions.organizationEditions, true exactly when that list ' +
+        'holds a developer choice, i.e. only where the host\'s ' +
+        'organization-create door accepts the developer edition.',
     },
+    notes:
+      'Its intended reader is the console create-organization form, which ' +
+      'reads /auth/config straight (hence shell, not login). No form reads ' +
+      'it yet: the form is to draw organizationEditions (the non-flag list ' +
+      'carrying the host\'s label, hint and member cap), and this boolean is ' +
+      'the same fact kept for requiresFeature gates.',
   },
 } as const satisfies Record<string, PublicAuthFeatureEntry>;
 
@@ -366,8 +375,17 @@ export const PUBLIC_AUTH_FEATURE_NAMES = Object.keys(PUBLIC_AUTH_FEATURES) as [
  * signal: the sign-up form renders the widget and sends its token, because the
  * sign-up door then refuses a request without one. Absent ⇒ no challenge. The
  * secret is never served.
+ *
+ * `organizationEditions` lists the editions the host's organization-create
+ * door accepts besides its default (`OrganizationEditionChoiceSchema`: the
+ * door's edition value, a label and a hint the host resolved in the request
+ * language, an optional member cap). Served only when the host sets
+ * `AuthManagerOptions.organizationEditions`; absent ⇒ the door takes no
+ * edition. Its intended reader is the console create-organization form, which
+ * draws each entry with a generic block and no product words of its own (no
+ * form reads it yet). `developerEditionCreate` is derived from it.
  */
-export const PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS = ['termsUrl', 'privacyUrl', 'tenancyPosture', 'audiencePosture', 'turnstileSiteKey'] as const;
+export const PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS = ['termsUrl', 'privacyUrl', 'tenancyPosture', 'audiencePosture', 'turnstileSiteKey', 'organizationEditions'] as const;
 
 /**
  * Capabilities that are RESERVED but deliberately **not advertised** — the

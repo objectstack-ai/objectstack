@@ -68,7 +68,7 @@ const kernel = new LiteKernel({
 ## Plugin Interface — Quick Overview
 
 ```typescript
-import type { Plugin, PluginContext } from '@objectstack/core';
+import type { PluginContext, PluginType } from '@objectstack/core';
 
 export interface Plugin {
   name: string;               // Unique identifier (reverse domain recommended)
@@ -188,7 +188,7 @@ class AuditService {
 const AuditPlugin: Plugin = {
   name: 'com.example.audit',
   version: '1.0.0',
-  type: 'plugin',
+  type: 'standard',
 
   async init(ctx: PluginContext) {
     // Phase 1: Register service and kernel hooks

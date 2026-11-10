@@ -42,6 +42,15 @@ import { collectSecretReferenceUnion } from '../../utils/secret-reference-union.
 import type { SecretReferenceUnion } from '../../utils/secret-reference-union.js';
 import { JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 
+// Pay the first load of what `schema-migrate.ts` reaches through dynamic
+// `import()`s at MODULE LOAD, outside any clocked case
+// (`pnpm check:test-source-alias`).
+import '@objectstack/runtime';
+import '@objectstack/rest';
+import '@objectstack/driver-turso';
+import '@objectstack/driver-sql';
+import '@objectstack/plugin-security';
+
 // The command's own control flow is the subject here, so only the two seams
 // that would boot a database or walk a real engine are replaced. Everything
 // that decides WHICH rows are deletable — `planSysSecretOrphanSweep`,
@@ -181,6 +190,7 @@ const unreferencingCompleteUnion = (): SecretReferenceUnion => ({
     'settings': { family: 'settings', status: 'enumerated', references: [] },
     'object-field': { family: 'object-field', status: 'enumerated', references: [] },
     'datasource': { family: 'datasource', status: 'enumerated', references: [] },
+    'audit-seal': { family: 'audit-seal', status: 'enumerated', references: [] },
   },
   complete: true,
   gaps: [],
