@@ -25,7 +25,8 @@
  * `404 ENDPOINT_NOT_FOUND` "Not found". So does a middle segment that is
  * neither `_env` nor an installed namespace. A
  * qualified path that also sends `?package=` names two addresses and is
- * refused `400`.
+ * refused `400`; so is one that sends the caller arm, `?callerPackage=`
+ * (#32310).
  */
 
 import { sendError } from '@objectstack/types';
@@ -89,6 +90,16 @@ export function registerMetaQualifiedItemRoute(
                     : undefined;
                 if (!address) return routeNotFound(res);
                 const query = { ...((req.query ?? {}) as Record<string, unknown>) };
+                // [ADR-0150 D3, #32310] A qualified address is already exact,
+                // so the caller arm beside it names a second address: refused
+                // like `?package=`, naming both.
+                if (query.callerPackage !== undefined) {
+                    sendError(res, 400, 'VALIDATION_ERROR',
+                        `The path names its ${address.kind === 'environment' ? 'environment' : `namespace '${segment}'`} `
+                        + 'as the exact qualifier, so `?callerPackage=` cannot resolve the name from another package. Send one '
+                        + 'of the two: the bare path with `?callerPackage=`, or the qualified path (ADR-0150 D3, D5).');
+                    return;
+                }
                 // Two qualifiers on one read name two addresses; neither is picked.
                 if (query.package !== undefined) {
                     sendError(res, 400, 'VALIDATION_ERROR',

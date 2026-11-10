@@ -62,6 +62,7 @@ import { datasetQueryBodyRefusal } from './analytics-dataset-body-door.js';
 import { logError } from './log.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
 import { mayReadPendingDrafts, metaItemPackageBinding, type RestServer } from './rest-server.js';
+import { metaCallerPackageQuery, metaItemCallerPackageRefusalMessage } from './meta-item-read-gate.js';
 
 /**
  * The `RestServer` members {@link registerAnalyticsEndpoints} reads — every
@@ -183,7 +184,19 @@ export function registerAnalyticsEndpoints(this: AnalyticsRouteHost, basePath: s
                 // over PUBLISHED rows and looked like the draft had no data.
                 // [#32072] …and `?package=`, the exact qualifier below, for
                 // the same reason: a repeated value names no one package.
-                if (refuseRepeatedQueryParams(req, res, ['preview', 'package'])) return;
+                // [#32310] …and `?callerPackage=`, the caller arm below.
+                if (refuseRepeatedQueryParams(req, res, ['preview', 'package', 'callerPackage'])) return;
+                // [ADR-0150 D3, #32310] The caller arm refuses what it cannot
+                // read, in the `/meta` item read's words (rule 4 of its query
+                // decision): a blank value, and the arm beside `?package=` —
+                // two addresses on one read, neither picked. This door took
+                // no closed query set, so before the arm `?callerPackage=`
+                // was dropped and the bare read answered; it is now read, or
+                // refused, never dropped.
+                const callerArmRefusal = metaItemCallerPackageRefusalMessage(req.query ?? {}, 'dataset');
+                if (callerArmRefusal !== undefined) {
+                    return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: callerArmRefusal } });
+                }
                 // [#20338] …for a caller who may read drafts: both halves
                 // serve unpublished work (a draft definition, a pending
                 // seed's rows). Anyone else runs over the published
@@ -229,7 +242,21 @@ export function registerAnalyticsEndpoints(this: AnalyticsRouteHost, basePath: s
                             { code: 'SERVICE_UNAVAILABLE', status: 503, refusal: true },
                         );
                     }
-                    const packageId = metaItemPackageBinding(req.query?.package);
+                    // [ADR-0150 D3, #32310] `?callerPackage=P` is the caller
+                    // arm: the dashboard, report or chart of package P that
+                    // names this dataset. It resolves FROM P by D3 — P's own
+                    // dataset, else the unique holder in P's declared closure
+                    // plus `sys`, else `409 RESOURCE_CONFLICT` naming the
+                    // candidates (`ambiguous-in-closure`, `outside-closure`) —
+                    // through the protocol's one resolution, the `/meta` item
+                    // read's ({@link metaCallerPackageQuery}). The read below
+                    // then reads the resolved holder at its exact qualifier,
+                    // `?package=`, so what follows (the by-name read, the
+                    // parse, the query's admission of the caller) judges the
+                    // resolved item exactly as that address's. A protocol that
+                    // cannot resolve by caller fails closed, `503`.
+                    const callerQuery = metaCallerPackageQuery(p, { type: 'dataset', name: body.datasetName }, req.query);
+                    const packageId = metaItemPackageBinding((callerQuery ?? req.query)?.package);
                     const datasetRequest: GetMetaItemRequest = {
                         type: 'dataset',
                         name: body.datasetName,
