@@ -104,10 +104,11 @@ A `master_detail` child may follow its parent's currency instead, with the two-s
 `currencyField: 'PARENT_FIELD.CODE_FIELD'`. The object alone judges the first segment. The
 second names a field of the parent, so it is judged where both objects are known:
 `defineStack` refuses a path whose second segment is no field of the parent, or a field that
-does not hold an ISO 4217 code. On a running server the engine refuses the same pair when
-one of the two objects registers with the other already registered, with
-**`INVALID_METADATA` / 422** and the same message, whichever registers second; a parent
-registering without the code field a registered child follows is refused the same way.
+does not hold an ISO 4217 code. On a running server, saving one of the two objects through
+the metadata API (`PUT /meta/object/:name`) with the other already registered is refused
+with **`INVALID_METADATA` / 422** and the same message, whichever is saved second, and
+nothing is stored; a parent saved without the code field a registered child follows is
+refused the same way. Objects registered while the server boots are not judged this way.
 
 ### Writing a record
 
@@ -232,8 +233,8 @@ that column. A `count` column never carries `currencyField`. See the
   the `master_detail` its child amounts follow (`PARENT_FIELD.CODE_FIELD`), and names the
   parent's own code field. One whose child amount follows no record (a `fixed` amount, a
   `dynamic` one, a plain number) totals in no currency the parent holds: `defineStack`
-  refuses it, and on a running server the engine refuses it at registration with
-  **`INVALID_METADATA` / 422** and the same message, whichever object registers second.
+  refuses it, and on a running server a save through the metadata API refuses it with
+  **`INVALID_METADATA` / 422** and the same message, whichever object is saved second.
 - **A dataset measure that declares `currency` over a record-mode amount** is refused at
   compile with **`DATASET_INVALID` / 400**, and so is a `currency` on a derived measure that
   sums record-mode amounts. One code cannot label amounts in several currencies: delete
