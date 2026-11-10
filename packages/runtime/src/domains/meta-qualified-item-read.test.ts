@@ -338,3 +338,73 @@ describe('#32201 — the 409 carries `details.candidates` on every read form', (
         expect(conflictOf(answer), JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT', [pkg(SYS_ONE), pkg(SYS_TWO)]]);
     });
 });
+
+/**
+ * [#32310, ADR-0150 D3] The caller arm on the dispatcher's item read: the
+ * same reading `RestServer` reads (`metaCallerPackageQuery`), so
+ * `GET /meta/dataset/:name?callerPackage=P` resolves the name FROM P and reads
+ * the resolved holder at its exact address, on a host that mounts only the
+ * dispatcher.
+ *
+ * BASE (main 351c22c9): `callerPackage` was outside the item read's closed
+ * set, so the read answered `400` "not supported by this endpoint".
+ */
+describe('[#32310] GET /meta/dataset/:name?callerPackage= on the dispatcher (ADR-0150 D3)', () => {
+    const P = 'com.acme.app';
+    beforeEach(() => {
+        registry.installPackage({
+            id: P, name: P, version: '1.0.0', type: 'app', namespace: 'app',
+            dependencies: { [A]: '^1.0.0', [B]: '^1.0.0' },
+        } as never, 'code');
+    });
+
+    it('P\'s own dataset first; else the dependency\'s', async () => {
+        ship('dataset', 'pipeline', A);
+        const dep = await read('/dataset/pipeline', { callerPackage: P });
+        expect(dep.status, JSON.stringify(dep.body)).toBe(200);
+        expect(labelOf(dep)).toBe('alpha dataset');
+        ship('dataset', 'pipeline', P);
+        expect(labelOf(await read('/dataset/pipeline', { callerPackage: P }))).toBe('app dataset');
+    });
+
+    it('two holders in the closure, and a holder outside it: 409 naming the candidates', async () => {
+        ship('dataset', 'twin', A);
+        ship('dataset', 'twin', B);
+        ship('dataset', 'far', C);
+        const twin = await read('/dataset/twin', { callerPackage: P });
+        expect([twin.status, twin.body?.error?.code], JSON.stringify(twin.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(twin.body?.error?.message).toContain(`package "${A}"`);
+        expect(twin.body?.error?.message).toContain(`package "${B}"`);
+        const far = await read('/dataset/far', { callerPackage: P });
+        expect([far.status, far.body?.error?.code], JSON.stringify(far.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(far.body?.error?.message).toContain(`held outside the declared dependency closure of package "${P}"`);
+    });
+
+    it('refused 400 beside `?package=`, on another type, and beside a qualified path', async () => {
+        ship('dataset', 'pipeline', A);
+        ship('page', 'home', A);
+        for (const [path, query] of [
+            ['/dataset/pipeline', { callerPackage: P, package: A }],
+            ['/page/home', { callerPackage: P }],
+            ['/dataset/alpha/pipeline', { callerPackage: P }],
+        ] as const) {
+            const answer = await read(path, { ...query });
+            expect([answer.status, answer.body?.error?.code], `${path} ${JSON.stringify(answer.body)}`).toEqual([400, 'VALIDATION_ERROR']);
+            expect(answer.body?.error?.message, path).toContain('?callerPackage=');
+        }
+    });
+
+    it('an uninstalled caller package answers what `?package=` naming it answers', async () => {
+        ship('dataset', 'pipeline', A);
+        const viaArm = await read('/dataset/pipeline', { callerPackage: 'com.acme.ghost' });
+        const viaQualifier = await read('/dataset/pipeline', { package: 'com.acme.ghost' });
+        expect([viaArm.status, viaArm.body?.error?.code]).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(viaArm.body).toEqual(viaQualifier.body);
+    });
+
+    it('CONTROL: the bare read and `?package=` answer as before', async () => {
+        ship('dataset', 'pipeline', A);
+        expect(labelOf(await read('/dataset/pipeline'))).toBe('alpha dataset');
+        expect(labelOf(await read('/dataset/pipeline', { package: A }))).toBe('alpha dataset');
+    });
+});

@@ -205,3 +205,129 @@ describe('[#32072] the dataset readers resolve a dataset by package (ADR-0150 D3
     expect(JSON.parse(viaTool.text).provenance.dataset.name).toBe(SOLO);
   });
 });
+
+// ── [#32310, ADR-0150 D3] the caller arm: `?callerPackage=` ─────────────────
+// A dashboard, report or list chart of package P names a dataset FROM P. On a
+// booted showcase with four packages: `com.qa.caller.app` (P) declares
+// dependencies on `com.qa.caller.dep` and `com.qa.caller.twin`; dep alone holds
+// `qa_dep_dataset`, dep and twin both hold `qa_twin_dataset`, the undeclared
+// `com.qa.caller.far` holds `qa_far_dataset`, and P holds `qa_own_dataset`.
+//
+// BASE (main 351c22c9, this fixture): the door answered `?package=P` for dep's
+// dataset `409 not-held-by-qualifier` and dropped `?callerPackage=` (the bare
+// read answered, 200); `/meta` refused `?callerPackage=` 400 as an unknown
+// parameter.
+const CALLER = 'com.qa.caller.app';
+const callerPackage = (p: string, datasets: string[], deps: string[] = []) => defineStack({
+  manifest: {
+    id: `com.qa.caller.${p}`, namespace: `c${p}`, name: `qa_caller_${p}`, version: '1.0.0', type: 'app',
+    ...(deps.length ? { dependencies: Object.fromEntries(deps.map((d) => [`com.qa.caller.${d}`, '^1.0.0'])) } : {}),
+  },
+  objects: [{
+    name: `c${p}_item`, label: `${p} item`, sharingModel: 'public_read_write',
+    fields: { name: { type: 'text', label: 'Name' }, note: { type: 'text', label: 'Note' } },
+  }],
+  datasets: datasets.map((name) => ({
+    name, label: `${p} ${name}`, object: `c${p}_item`,
+    dimensions: [{ name: 'note', label: 'note', field: 'note', type: 'string' }],
+    measures: [{ name: 'row_count', label: `${p} count`, aggregate: 'count' }],
+  })),
+} as never);
+
+describe('[#32310] the caller arm: a package\'s reader resolves a dataset from its own package (ADR-0150 D3)', () => {
+  let stack: VerifyStack;
+  let admin: string;
+
+  const query = async (datasetName: string, qs = '') => {
+    const res = await stack.apiAs(admin, 'POST', `/analytics/dataset/query${qs}`, { datasetName, selection: { measures: ['row_count'] } });
+    const text = await res.text();
+    let body: any;
+    try { body = JSON.parse(text); } catch { body = undefined; }
+    return { status: res.status, text, body };
+  };
+  const meta = async (path: string) => {
+    const res = await stack.apiAs(admin, 'GET', path);
+    return { status: res.status, body: (await res.json()) as any };
+  };
+
+  beforeAll(async () => {
+    stack = await bootShowcase({
+      extraPlugins: [
+        new AppPlugin(callerPackage('dep', ['qa_dep_dataset', 'qa_twin_dataset']) as never),
+        new AppPlugin(callerPackage('twin', ['qa_twin_dataset']) as never),
+        new AppPlugin(callerPackage('far', ['qa_far_dataset']) as never),
+        new AppPlugin(callerPackage('app', ['qa_own_dataset'], ['dep', 'twin']) as never),
+      ],
+    });
+    admin = await stack.signIn();
+  }, 300_000);
+
+  afterAll(async () => {
+    await stack?.stop();
+  });
+
+  it('P\'s dashboard runs its dependency\'s dataset, where `?package=P` is refused', async () => {
+    const viaArm = await query('qa_dep_dataset', `?callerPackage=${CALLER}`);
+    expect(viaArm.status, viaArm.text).toBe(200);
+    expect(viaArm.body.object).toBe('cdep_item');
+    expect(viaArm.body.fields[0].label).toBe('dep count');
+    const exact = await query('qa_dep_dataset', `?package=${CALLER}`);
+    expect([exact.status, codeOf(exact.body)], exact.text).toEqual([409, 'RESOURCE_CONFLICT']);
+    const item = await meta(`/meta/dataset/qa_dep_dataset?callerPackage=${CALLER}`);
+    expect(item.status, JSON.stringify(item.body)).toBe(200);
+    expect(item.body.item._packageId).toBe('com.qa.caller.dep');
+  });
+
+  it('P\'s own dataset runs as P\'s', async () => {
+    const own = await query('qa_own_dataset', `?callerPackage=${CALLER}`);
+    expect(own.status, own.text).toBe(200);
+    expect(own.body.object).toBe('capp_item');
+  });
+
+  it('two holders in P\'s closure: 409 naming both, on the door and on /meta, nothing run', async () => {
+    const door = await query('qa_twin_dataset', `?callerPackage=${CALLER}`);
+    expect([door.status, codeOf(door.body)], door.text).toEqual([409, 'RESOURCE_CONFLICT']);
+    expect(messageOf(door.body)).toContain('com.qa.caller.dep');
+    expect(messageOf(door.body)).toContain('com.qa.caller.twin');
+    expect(door.text).not.toContain('FROM');
+    const item = await meta(`/meta/dataset/qa_twin_dataset?callerPackage=${CALLER}`);
+    expect([item.status, codeOf(item.body)]).toEqual([409, 'RESOURCE_CONFLICT']);
+    expect(item.body.details.candidates).toEqual([
+      { kind: 'package', packageId: 'com.qa.caller.dep' }, { kind: 'package', packageId: 'com.qa.caller.twin' },
+    ]);
+  });
+
+  it('a holder outside P\'s closure: 409 naming it (BASE: the dropped arm served it, 200)', async () => {
+    const door = await query('qa_far_dataset', `?callerPackage=${CALLER}`);
+    expect([door.status, codeOf(door.body)], door.text).toEqual([409, 'RESOURCE_CONFLICT']);
+    expect(messageOf(door.body)).toContain('held outside the declared dependency closure');
+    expect(messageOf(door.body)).toContain('com.qa.caller.far');
+  });
+
+  it('refused 400: beside `?package=`, an uninstalled caller is the `?package=` answer, another /meta type, a qualified path', async () => {
+    const both = await query('qa_dep_dataset', `?callerPackage=${CALLER}&package=com.qa.caller.dep`);
+    expect([both.status, codeOf(both.body)], both.text).toEqual([400, 'VALIDATION_ERROR']);
+    const ghost = await query('qa_dep_dataset', '?callerPackage=com.qa.caller.ghost');
+    const ghostExact = await query('qa_dep_dataset', '?package=com.qa.caller.ghost');
+    expect([ghost.status, codeOf(ghost.body)], ghost.text).toEqual([409, 'RESOURCE_CONFLICT']);
+    expect(ghost.text).toBe(ghostExact.text);
+    for (const path of [
+      `/meta/dataset/qa_dep_dataset?callerPackage=${CALLER}&package=com.qa.caller.dep`,
+      `/meta/object/cdep_item?callerPackage=${CALLER}`,
+      `/meta/dataset/cdep/qa_dep_dataset?callerPackage=${CALLER}`,
+    ]) {
+      const read = await meta(path);
+      expect([read.status, codeOf(read.body)], `${path} ${JSON.stringify(read.body)}`).toEqual([400, 'VALIDATION_ERROR']);
+    }
+  });
+
+  it('CONTROL: the bare read and `?package=` answer as before, on both doors', async () => {
+    const bare = await query('qa_dep_dataset');
+    expect(bare.status, bare.text).toBe(200);
+    expect(bare.body.object).toBe('cdep_item');
+    const exact = await query('qa_dep_dataset', '?package=com.qa.caller.dep');
+    expect(exact.text).toBe(bare.text);
+    expect((await meta('/meta/dataset/qa_dep_dataset')).body.item._packageId).toBe('com.qa.caller.dep');
+    expect((await meta('/meta/dataset/qa_dep_dataset?package=com.qa.caller.dep')).body.item._packageId).toBe('com.qa.caller.dep');
+  });
+});

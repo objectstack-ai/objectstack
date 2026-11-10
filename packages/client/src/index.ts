@@ -8621,12 +8621,18 @@ export class ScopedEnvironmentClient {
     },
     /**
      * Same `{ type, name, item }` envelope as the unscoped surface (#5563),
-     * and the same qualifiers: `packageId` or `namespace` (ADR-0150 D5).
+     * and the same qualifiers: `packageId` or `namespace` (ADR-0150 D5), and
+     * the same caller arm, `callerPackage` (ADR-0150 D3).
      */
-    getItem: async (type: string, name: string, options?: { packageId?: string } & QualifiedAddressOptions): Promise<GetMetaItemResponse> => {
+    getItem: async (
+      type: string,
+      name: string,
+      options?: { packageId?: string; callerPackage?: string } & QualifiedAddressOptions,
+    ): Promise<GetMetaItemResponse> => {
       const qualifier = metaItemQualifier(type, name, options);
       const params = new URLSearchParams();
       if (options?.packageId) params.set('package', options.packageId);
+      if (options?.callerPackage) params.set('callerPackage', options.callerPackage);
       const qs = params.toString();
       const res = await this.parent._fetch(this.metaUrl(`/${encodeURIComponent(type)}${qualifier}/${encodeURIComponent(name)}${qs ? `?${qs}` : ''}`));
       return this.parent._unwrap<GetMetaItemResponse>(res);

@@ -283,3 +283,91 @@ describe('#32201 — the 409 carries `details.candidates` on every read form', (
         expect(conflictOf(answer), JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT', [pkg(SYS_ONE), pkg(SYS_TWO)]]);
     });
 });
+
+/**
+ * [#32310, ADR-0150 D3] The caller arm on this transport's `/meta` item read:
+ * `GET /meta/dataset/:name?callerPackage=P` resolves the name FROM P (its own
+ * dataset, else the unique holder in its declared closure plus `sys`, else
+ * `409` naming the candidates) and reads that holder at its exact address.
+ * Real route table, real protocol, real registry.
+ *
+ * BASE (main 351c22c9): `?callerPackage=` was outside the item read's closed
+ * set, so every such read answered `400` "not supported by this endpoint".
+ */
+describe('[#32310] GET /meta/dataset/:name?callerPackage= (ADR-0150 D3)', () => {
+    const P = 'com.acme.app';
+    beforeEach(() => {
+        registry.installPackage({
+            id: P, name: P, version: '1.0.0', type: 'app', namespace: 'app',
+            dependencies: { [A]: '^1.0.0', [B]: '^1.0.0' },
+        } as never, 'code');
+    });
+
+    it('P\'s own dataset answers first, though a dependency holds the name too', async () => {
+        ship('dataset', 'pipeline', A);
+        ship('dataset', 'pipeline', P);
+        const answer = await drive(ITEM, { type: 'dataset', name: 'pipeline' }, { callerPackage: P });
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(labelOf(answer)).toBe('app dataset');
+    });
+
+    it('a dependency\'s dataset is served to P (`?package=P` refuses it)', async () => {
+        ship('dataset', 'pipeline', A);
+        const answer = await drive(ITEM, { type: 'dataset', name: 'pipeline' }, { callerPackage: P });
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(labelOf(answer)).toBe('alpha dataset');
+        expect(answer.body?.item?._packageId ?? answer.body?.data?.item?._packageId).toBe(A);
+        const exact = await drive(ITEM, { type: 'dataset', name: 'pipeline' }, { package: P });
+        expect([exact.status, codeOf(exact)]).toEqual([409, 'RESOURCE_CONFLICT']);
+    });
+
+    it('two holders in P\'s closure: 409 RESOURCE_CONFLICT naming both, with their candidates', async () => {
+        ship('dataset', 'pipeline', A);
+        ship('dataset', 'pipeline', B);
+        const answer = await drive(ITEM, { type: 'dataset', name: 'pipeline' }, { callerPackage: P });
+        expect([answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(messageOf(answer)).toContain(`declared dependency closure of package "${P}"`);
+        expect(answer.body?.details?.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
+    });
+
+    it('a holder outside P\'s closure: 409 naming it', async () => {
+        ship('dataset', 'pipeline', C);
+        const answer = await drive(ITEM, { type: 'dataset', name: 'pipeline' }, { callerPackage: P });
+        expect([answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(messageOf(answer)).toContain(`held outside the declared dependency closure of package "${P}"`);
+        expect(answer.body?.details?.candidates).toEqual([{ kind: 'package', packageId: C }]);
+    });
+
+    it('an uninstalled caller package answers what `?package=` naming it answers, never the bare read', async () => {
+        ship('dataset', 'pipeline', A);
+        const viaArm = await drive(ITEM, { type: 'dataset', name: 'pipeline' }, { callerPackage: 'com.acme.ghost' });
+        const viaQualifier = await drive(ITEM, { type: 'dataset', name: 'pipeline' }, { package: 'com.acme.ghost' });
+        expect([viaArm.status, codeOf(viaArm)]).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(viaArm.body).toEqual(viaQualifier.body);
+    });
+
+    it('refused 400 beside `?package=`, blank, on another type, and beside a qualified path — each naming both addresses', async () => {
+        ship('dataset', 'pipeline', A);
+        ship('page', 'home', A);
+        for (const [path, params, query] of [
+            [ITEM, { type: 'dataset', name: 'pipeline' }, { callerPackage: P, package: A }],
+            [ITEM, { type: 'dataset', name: 'pipeline' }, { callerPackage: '' }],
+            [ITEM, { type: 'page', name: 'home' }, { callerPackage: P }],
+            [ITEM, { type: 'datasets', name: 'pipeline' }, { callerPackage: P, package: A }],
+            [QUALIFIED, { type: 'dataset', ns: 'alpha', name: 'pipeline' }, { callerPackage: P }],
+        ] as const) {
+            const answer = await drive(path, params as never, query as never);
+            const at = `${path} ${JSON.stringify(params)} ${JSON.stringify(query)}`;
+            expect([answer.status, codeOf(answer)], at).toEqual([400, 'VALIDATION_ERROR']);
+            expect(messageOf(answer), at).toContain('?callerPackage=');
+            // The other address: `?package=`, or the qualified path's namespace segment.
+            expect(messageOf(answer), at).toContain(path === QUALIFIED ? "namespace 'alpha'" : '?package=');
+        }
+    });
+
+    it('CONTROL: the bare read and `?package=` answer as before', async () => {
+        ship('dataset', 'pipeline', A);
+        expect(labelOf(await drive(ITEM, { type: 'dataset', name: 'pipeline' }))).toBe('alpha dataset');
+        expect(labelOf(await drive(ITEM, { type: 'dataset', name: 'pipeline' }, { package: A }))).toBe('alpha dataset');
+    });
+});

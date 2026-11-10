@@ -35,8 +35,9 @@ const LAYERED_MEMBER = 'The "member" selector is not served by the layered view 
 const refusal = (rule: string, message: string) => ({ status: 400, code: 'VALIDATION_ERROR', message, rule });
 
 describe('[#23072] metaItemQueryRefusal — each door\'s closed set', () => {
-    it('the measured sets: the item read\'s six, `/layers`\' two, `/published`\' none, and the dispatcher save\'s three (no `force`)', () => {
-        expect([...META_ITEM_READ_PARAMS].sort()).toEqual(['layers', 'locale', 'member', 'package', 'preview', 'state']);
+    it('the measured sets: the item read\'s seven, `/layers`\' two, `/published`\' none, and the dispatcher save\'s three (no `force`)', () => {
+        // [#32310] The caller arm (`callerPackage`) joined the item read's set.
+        expect([...META_ITEM_READ_PARAMS].sort()).toEqual(['callerPackage', 'layers', 'locale', 'member', 'package', 'preview', 'state']);
         // [#26699] The bundle member selector joined `/layers` (ruling 6116165299's
         // door list, extended to the layered read by the option-A ruling on #26649).
         expect([...META_ITEM_LAYERS_PARAMS]).toEqual(['package', 'member']);
@@ -70,8 +71,15 @@ describe('[#23072] metaItemQueryRefusal — each door\'s closed set', () => {
 
         it(`${door}: every name it reads passes, and so does a query that is no object at all`, () => {
             // `layers` empty: the plain read, so the member beside it is not rule 3's case.
-            expect(metaItemQueryRefusal(door, Object.fromEntries(set.map((n) => [n, n === 'layers' ? '' : 'x']))))
+            // [#32310] `callerPackage` beside `package` is rule 4's case (two
+            // addresses on one read), so the arm is passed on its own, on the
+            // one type that serves it.
+            const together = set.filter((n) => n !== 'callerPackage');
+            expect(metaItemQueryRefusal(door, Object.fromEntries(together.map((n) => [n, n === 'layers' ? '' : 'x']))))
                 .toBeUndefined();
+            if (together.length !== set.length) {
+                expect(metaItemQueryRefusal(door, { callerPackage: 'x' }, { type: 'dataset' })).toBeUndefined();
+            }
             expect(metaItemQueryRefusal(door, {})).toBeUndefined();
             expect(metaItemQueryRefusal(door, undefined)).toBeUndefined();
             expect(metaItemQueryRefusal(door, 'member=zh-CN')).toBeUndefined();
@@ -192,5 +200,40 @@ describe('[#23072] RestServer\'s item read is re-pointed at the decision, its an
         const answer = await read({ member: ['zh-CN'], locale: 'zh-CN' });
         expect(answer.status, JSON.stringify(answer.body)).toBe(200);
         expect(protocol.getMetaItem.mock.calls[0][0]).toMatchObject({ member: 'zh-CN' });
+    });
+});
+
+describe('[#32310] rule 4 — the caller arm, for both transports', () => {
+    it('refused when blank, beside `?package=`, on a type that does not serve it, or with no type named', () => {
+        for (const [query, type] of [
+            [{ callerPackage: '' }, 'dataset'],
+            [{ callerPackage: '   ' }, 'dataset'],
+            [{ callerPackage: 'com.acme.app', package: 'com.acme.alpha' }, 'dataset'],
+            [{ callerPackage: 'com.acme.app' }, 'page'],
+            [{ callerPackage: 'com.acme.app' }, undefined],
+        ] as const) {
+            const decided = metaItemQueryRefusal('item', { ...query }, { type });
+            expect([decided?.status, decided?.code, decided?.rule], `${JSON.stringify(query)} ${type}`)
+                .toEqual([400, 'VALIDATION_ERROR', 'caller-package']);
+            expect(decided?.message).toContain('?callerPackage=');
+            expect(decided?.message).toContain('?package=');
+        }
+    });
+
+    it('admitted on `dataset` and its plural spelling; a repeated value is rule 2\'s', () => {
+        expect(metaItemQueryRefusal('item', { callerPackage: 'com.acme.app' }, { type: 'dataset' })).toBeUndefined();
+        expect(metaItemQueryRefusal('item', { callerPackage: 'com.acme.app' }, { type: 'datasets' })).toBeUndefined();
+        expect(metaItemQueryRefusal('item', { callerPackage: ['a.b', 'c.d'] }, { type: 'dataset' })?.rule).toBe('repeated-parameter');
+    });
+
+    it('the other doors keep it out of their closed sets', () => {
+        for (const door of ['layers', 'published', 'save'] as const) {
+            expect(metaItemQueryRefusal(door, { callerPackage: 'com.acme.app' }, { type: 'dataset' })?.rule, door).toBe('unknown-parameter');
+        }
+    });
+
+    it('CONTROL: a query without the arm is judged as before, whatever the type', () => {
+        expect(metaItemQueryRefusal('item', { package: 'com.acme.alpha' }, { type: 'page' })).toBeUndefined();
+        expect(metaItemQueryRefusal('item', {})).toBeUndefined();
     });
 });
