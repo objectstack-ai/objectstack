@@ -1,0 +1,35 @@
+{
+  "number": 32078,
+  "kind": "issue",
+  "title": "spec: a connector pull request carries the job's package, so the pull reads its mapping by (package, name) (ADR-0150 D3; reader before #31700)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:spec",
+    "enhancement",
+    "pm:blocking",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T06:34:39Z",
+  "updated_at": "2026-11-10T08:05:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32078",
+  "body": "domain:server#3 · os-steve · session_01ADHkmQXLfvyB5R53VDm3Ka\n\n**Epic:** ADR-0150 (#31527). Split from #32071 by seat 3's step-0 ruling. **Blocks:** #32071 (its pull half) and #31700. **Lane:** `domain:spec`.\n\n## Today (main ff04ad81)\n- Connector pull reads its mapping by bare name (service-automation `connector-pull.ts`, about line 269). From #32071 on, that read has no caller package: one holder is answered as today, and two holders get a 409 naming every candidate, so the run fails.\n- The pull's caller is the job. When the job binds, runtime (`app-artifact-handlers.ts` `judgeJobPull`) already requires the mapping to be declared in the job's own bundle. Read by the job's package, D3 therefore always answers `own`, and every one-holder answer stays as it is.\n- The job's package can't reach the pull. Runtime calls `IAutomationService.pullConnectorSource(request)`, and `ConnectorSourcePullRequest` (`packages/spec/src/contracts/automation-service.ts`, about line 1066) carries only `mapping`, `context` and `environmentId`. `ExecutionContext` has no package field either.\n\n## Do\n1. **Spec:** `ConnectorSourcePullRequest` gains an optional field that carries the caller's package (the job's `appId`). The spec seat picks the name and states what an absent value means: the read is by no package, as it is today.\n2. Then #32071's pull half (seat 3) has the runtime binder pass the job's package and the pull read the mapping by D3 from that package. That half is not this card.\n\n**Clause-②, Metadata-protocol:** the spec seat declares them. A new optional field on a service contract, absent meaning today's behaviour, is expected to be `Clause-②: yes (widening)`.\n**Pins:** the contract accepts a request without the field, and with it; the conformance and API baselines are updated.\nEpic red-line review before landing."
+}

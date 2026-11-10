@@ -1,0 +1,35 @@
+{
+  "number": 32054,
+  "kind": "pull_request",
+  "title": "fix(service-automation): a connector's failure text carries no credential part its metadata read withholds",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T03:55:33Z",
+  "updated_at": "2026-11-10T04:38:52Z",
+  "closed_at": "2026-11-10T04:38:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-10T04:38:50Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32054",
+  "body": "Clause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:连接器实例失败时由提供方抛出的错误文字,在被平台存储、对外返回或写入日志之前,先经过连接器元数据读取所用的同一个凭据判定改写;读取不返回的凭据部分,在这些文字里同样不出现。\n- 为什么改:规则是「元数据读取不返回的凭据部分,不得经由平台存储、返回或记录的任何其他文字回来」;失败文字是外来文字,可能原样带出存储的地址。\n- 风险与回滚:只改文字,不改实例状态、重试、错误的 code/status/name;不含地址与凭据的文字原样不变。回滚即还原本 PR,无数据迁移。\n- 先看:`packages/services/service-automation/src/connector-read-withheld-text.ts`(唯一判定入口,复用 `getMetadataTypeRedactor('connector')`);`plugin.ts` 物化失败的 catch 块与 `withFailureTextRewritten`;`connector-credentials.ts` 的 `upstreamRefusalMessage` 先判定后去值的顺序。\n- 两分钟验证:`pnpm --filter @objectstack/service-automation exec vitest run src/connector-read-withheld-text.test.ts`,预期 12 项全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nRule: a credential part the connector metadata read withholds never comes back in any other text the platform stores, serves or logs.\n\n- One predicate. `connectorReadWithheldText(entry)` (new, `connector-read-withheld-text.ts`) judges nothing itself: it applies the connector redactor every metadata read exit runs (`getMetadataTypeRedactor('connector')`) to the stored entry, and to every URL-shaped run in the text, and replaces each piece with the form that read serves. A string the read withholds whole (a header or environment map value, an inline `auth` secret) reads `[credential withheld]`.\n- Where it applies, once, where the text enters the platform: a provider factory's failure while an instance materializes (every reader below the catch takes the rewritten value: `degradedReason` on `GET /api/v1/automation/connectors` and `getConnectorDescriptors()`, the credential-reference listing, a `connector_action` refusal, a stored credential row's status reason, the degrade, hold and fail log records, a boot's failure); a handler's failure on a call (a flow run's step error, the pull door); an upstream's refusal words on a call.\n- Order: the read's predicate judges the provider's own text first, then the resolved credential value is withheld, so the predicate sees each URL as the provider wrote it.\n- A failure keeps its `code`, `status` and `name`; one that holds nothing to withhold is the thrown value itself.\n- Unchanged: the route's audience, the stored row, the URL the instance uses.\n\n## Tests\n\n- `connector-read-withheld-text.test.ts` (12): the rewrite against the read itself (stored URL, a parser re-rendered URL, the instance's `paramName` pair, a map the read withholds whole); every reader of a materialization failure (descriptor, degraded reason, log records, boot failure); a call's failure (message rewritten, `code`/`status` kept); an upstream's refusal words. Controls: a text with no URL, and a URL with no credential part, come back unchanged; a call failure with nothing to withhold is the same thrown value.\n- `connector-credential-door.test.ts`: the form-encoded spelling pin reads both predicates in one text (the read's pair removed, the value withheld under a name the read keeps).\n- Door level, `connector-failure-text-withheld.dogfood.test.ts` (showcase boot, openapi provider): `GET /automation/connectors` for a member and an administrator, the credential-reference listing and the log records carry the URL as the metadata read serves it; controls: the stored row keeps its URL whole, a URL with no credential part is served as stored.\n\n## Acceptance notes\n\n- The audience of `degradedReason` on `GET /automation/connectors` is unchanged by this PR; who should be served it is left to the seat.\n- `connector-credential-door.test.ts`: the form-encoded spelling pin now carries the value twice in one URL (under the instance's `paramName`, and under a name the read keeps), so it reads both predicates and their order.\n\n## Verification\n\nReadings at head `e05d695384` (this branch with `origin/main` merged in).\n\n<details><summary>Suites</summary>\n\n- `pnpm --filter @objectstack/service-automation test`: Test Files 270 passed (270), Tests 3561 passed (3561).\n- `pnpm --filter @objectstack/service-automation typecheck`, `pnpm --filter @objectstack/dogfood typecheck`: exit 0.\n- `pnpm --filter @objectstack/dogfood exec vitest run test/connector-failure-text-withheld.dogfood.test.ts`: 5 passed (5).\n- Full dogfood battery (`pnpm --filter @objectstack/dogfood test`): Test Files 444 passed, 2 failed, 3 skipped (449); Tests 3692 passed, 3 failed, 42 skipped (3737). The 3 failures are 5000 ms test timeouts in `package-commit-revert-path-package.dogfood.test.ts` and `wall-package-refusal.dogfood.test.ts`, which touch no connector; both files re-run under the verify lock: 2 passed (2), Tests 31 passed (31).\n</details>\n\n<details><summary>Ablations (each red, then restored: blob equal to HEAD, `git diff HEAD` empty)</summary>\n\n- The rewrite returning every text as given: `connector-read-withheld-text.test.ts` + `connector-credential-door.test.ts`, 10 failed of 39; restored.\n- The two predicates in the other order on the refusal path (value withheld first, then the read's predicate): `connector-credential-door.test.ts`, 1 failed of 27; restored.\n</details>\n\n<details><summary>Gates</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at `e05d695384`: 76 commands, each run with its exit code captured before any pipe: 76 exit 0 (`check:dual-build-cjs-loads` and `check:type-check-debt` after the workspace build their prerequisite names). `--ran` reconciliation: 76 derived, 76 run, 0 NOT-MEASURED (derived from recorded exit codes).\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYn5CmmdShCJifm6WYj)_\n"
+}

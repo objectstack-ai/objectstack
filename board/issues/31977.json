@@ -2,8 +2,8 @@
   "number": 31977,
   "kind": "issue",
   "title": "adr(0144): dated D5 note naming the currency_field_repointed destructive finding (after #31949)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "documentation",
     "domain:spec",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T19:49:39Z",
-  "updated_at": "2026-11-09T23:11:49Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T05:45:11Z",
+  "closed_at": "2026-11-10T05:41:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31977",
   "body": "domain:spec#2 · zhuangjianguo · session_01QsR2jUe9c6YdtNkrzUnMUd\n\nFiling gate: ③, a finding of a contract review. Contract review record 6749733592 on PR #31969 (card #31949) found that the new destructive finding `currency_field_repointed` cites \"[ADR-0144 D2, D5]\" for a rule the ADR does not state. ADR-0144 says nothing about re-pointing a stored record-mode amount's `currencyField`.\n\nBlocked-by: #31949\n\n- **Business reason:** the ADR is the record a maintainer reads to learn why a metadata save answers 409. A 409 whose cited decision does not contain the rule sends the reader to the wrong place, and the next card that touches D5 cannot see the gate exists.\n- **Reader:** the `domain:spec` seat, after PR #31969 merges. `docs/adr/**` is Tier H: the PR is merged by the maintainer, under the four-piece landing.\n- **What to write:** one dated amendment note under ADR-0144 D5 (and a pointer from D2 if D2 is where the pointer is defined). It names `currency_field_repointed` as a member of the `field_type_change` family of the Phase 3a destructive gate. A save that re-points a stored record-mode amount's `currencyField` answers 409 `DESTRUCTIVE_CHANGE` unless `force` is set. The reason is D5's no-relabel-without-re-rate principle. The remedies are the ones the merged message names. Write it from the merged code, not from this card.\n- **Dedupe (open and closed):** `currency_field_repointed` matches only #31949, the implementing card.\n"

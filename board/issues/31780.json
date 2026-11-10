@@ -2,8 +2,8 @@
   "number": 31780,
   "kind": "issue",
   "title": "ADR: one-way sync-in beside federation (epic #31763, P1) — pull sources incl. warehouses, paging, delete policy, synced bucket + provenance columns, run record, execution identity; write-back only through actions",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:spec",
     "enhancement",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T03:37:30Z",
-  "updated_at": "2026-11-10T01:59:30Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T05:45:03Z",
+  "closed_at": "2026-11-10T05:41:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 9,
+  "comments": 12,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31780",
   "body": "coordinator#1 · os-warren · session_01JQwxbaUTJVFuEz81NDUrnw\n\nFiling gate: ④ child of the coordination parent #31763 (ruled **A**, ruling 6731568115 — maintainer 「立专题卡」 / 「同意你的意见」, 2026-11-09). ⛔ Not a claim.\nRuling-ref: 6731568115 — letter A; the sync kernel is open source in this repository; the retired `DataSyncConfig` / `ETLPipeline` vocabulary is not revived; no bidirectional sync, no edits overlay. Amended by the maintainer in the same thread, 2026-11-09T03:33Z: 「数据仓库类的公司就是我们的合作伙伴」 — pipelines and transforms are NOT built here; warehouses and ETL vendors are partners, and a warehouse must be a first-class pull source.\nEpic: #31763 · Milestone P1 · Blocked-by: #31778\nLane: `domain:spec` · Tier H (`docs/adr/**`: GitHub Approve from hotlong / os-zhuang after contract review PASS) · p1 (「协议新增定 p1」) · model: fable + effort xhigh (the ADR standing order, maintainer 2026-11-03 03:05Z: docs-only `docs/adr/**` cards run `CONTRACT_REVIEW_TIER` + xhigh, no per-card ask)\nResponsibility: n/a — not a defect card\nMetadata-protocol: none in this card (the ADR designs the keys; the P2 spec child adds them under its own `Metadata-protocol: added` line)\nClause-②: no\nReader who acts on it: the `domain:spec` seat; the ADR's \"Current state\" section is written from #31778's report.\n\n## 维护者速读\n\n写 ADR，把「同步进来」定成和联邦并列的正式能力：拉取源（连接器、联邦数据源、数仓）、分页、删除策略、`synced` 桶与四个来源列、运行记录、执行身份；写回只走动作。键名由席位自裁，不回你；只有真分歧才回 fable 线程。\n\n## Decisions the ADR must take (numbered, each with the default the analysis recommended)\n\n- **D1 Pull sources.** Today only `mapping.connectorSource` (a rest / openapi connector action). Add a datasource source so a federated datasource (ADR-0015 `schemaMode: 'external'`: Postgres, MySQL, Oracle, SQL Server, OData, Mongo — and the warehouse dialects the type matrix already names, Snowflake, BigQuery) is a pull source. Default: a sibling key `mapping.datasourceSource { datasource, remoteName, watermark }`, additive; the reader is the datasource driver's `find`. Alternative: one `source` union. ⛔ Not a new metadata type.\n- **D2 Paging.** The executor reads one response per pull by design. Default: a declared paging convention on the connector source (`paging { style: page | cursor | offset, param, nextPath }`); the datasource source loops offset / limit; the watermark is committed per batch so an interrupted pull resumes.\n- **D3 Deletes.** Default `deletePolicy: 'mark'` (a `_sync_deleted_at` column, by full-snapshot diff or by a source soft-delete field) with `'ignore'` as the other value; never a hard delete (ADR-0148 recycle-bin posture).\n- **D4 Provenance.** Object level: a new `managedBy` bucket (working name `synced`, ADR-0103 split precedent) that renders read-only in the console, refuses member writes at the write guard, and lets declared actions write. Record level: four system columns — source name, external id, synced-at, run id — and whether they participate in FLS.\n- **D5 Write-back.** Only through actions (`connector_action` nodes or an action body calling a connector); no bidirectional sync, no conflict merge, no Writeback-Dataset edits overlay (#27261 N3 stands); the next pull reconciles. The guide's answer to 「改了能不能自动写回」 lives here.\n- **D6 Drift.** The datasource source reuses `external_catalog` (ADR-0015) as its drift snapshot; the connector source hashes the OpenAPI document (#27261 §5.2). A mapped column missing at the source refuses that pull loudly, never a silent skipped column.\n- **D7 Run record.** Per pull: rows read / written / refused, the watermark reached, the failure; where it lives (`sys_job` run rows versus a row of its own) and what Studio shows.\n- **D8 Execution identity and organization.** ADR-0073 for the job; every synced row carries an organization (ADR-0131); a pull in a multi-organization environment declares its organization or the boot refuses (the ADR-0015 2026-11-03 rule applied the same way).\n- **D9 Open-source placement.** Ruled: the kernel ships in this repository, Apache-2.0. Record it; do not reopen it.\n- **D10 The three-way rule** for the guide and skills: federation (live, single table, legacy must not be touched) · sync-in (reports, analysis, AI Q&A, cross-source joins, slow or fragile legacy, warehouse results) · connector action (trigger an external operation, no rows land). Plus the partner stance: transforms are the warehouse's or the ETL vendor's job; ObjectStack syncs the result in.\n\nKey names are PM discretion (the maintainer's standing rule); only a genuine divergence returns to the Fable decision thread.\n\n## Governing text\n\nADR-0015 §2 (non-goals; the DataSync pointer, now stale), ADR-0062, ADR-0049, ADR-0078, ADR-0103, ADR-0131, ADR-0073, ADR-0148; `packages/spec/src/migrations/entries/semantic/17.etl-pipeline-layer-retired.ts` and `18.connector-sync-keys-retired.ts` (why the old layers left, and the ENFORCE route back: engine first, vocabulary second); `packages/spec/src/data/mapping.zod.ts` (`connectorSource` describe); `packages/services/service-automation/src/connector-pull.ts` (header: one response per pull, nothing here schedules). Prior rulings read: 6471382887 (#27261 D1–D6), 6486136301 (D7), 6486145005 (OData), the #27261 close-out 6523503305 (vendor drivers out of repo).\n\n## Deliverable\n\n`docs/adr/<next free number>-one-way-sync-in-beside-federation.md` (numbers are never reassigned; take the next free one at filing), Status Proposed, with: Context; Current state (from #31778's report, by G1–G9); D1–D10; Consequences; the child cards the epic files on acceptance — P2 spec (the keys, `Metadata-protocol: added`), P2 engine (datasource reader, paging loop, delete marking, provenance stamping, the bucket's write guard, drift on pull, run record), P3 Studio (sync wizard beside the virtual-object wizard, read-only rendering), P3 guide + skills (the three-way rule, the partner stance). ADR-0015 gains an amendment note pointing here. Workload: 1–2 agent-days for the ADR; P2 ≈ 5–8, P3 ≈ 3–4 (the parent's table).\n\n## Acceptance\n\nThe ADR is merged under Tier H; the parent's P2 and P3 rows name the child cards it defines; ADR-0015's non-goals section points at it for mirrors.\n\nDedupe (2026-11-09): `sync-in` → #31763 only; `docs/adr` + `sync` → none open; the retirement entries above are the only prior protocol surface. No overlap."

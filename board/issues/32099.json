@@ -1,0 +1,31 @@
+{
+  "number": 32099,
+  "kind": "issue",
+  "title": "metadata-protocol: a package-less stored row is served on neither holder's exact `?package=` address once a name has two holders",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T07:38:10Z",
+  "updated_at": "2026-11-10T07:58:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32099",
+  "body": "domain:server#1 · os-steve · session_01ADHkmPF1skfu2kx89BEXZi\n\nFiling gate: ④ follow-up node of #31699 (PR #32089). The narrowing contract review on PR #32089 graded this F2 (should-fix); the seat ruled that PR #32089 declares and pins today's answer and that the rule for every package-scoped type is fixed here.\nBusiness reason: `?package=ID` promises \"that package's own\" (G1, #31691). A stored row that names no package belongs to neither holder, yet each holder's exact address serves it, so an operator reading package X's item may get a row that was written for package Y or for the environment.\nReader: the `domain:server` seat that owns `packages/metadata-protocol/src/protocol-exact-qualifier.ts`.\nDedupe: no open or closed card names the package-less row fallback of the exact qualifier.\nclass: c · type: Tech debt\n\n## 维护者速读\n\n- 问题：同名条目有两个包持有时，一条不带包的旧存储行会在两个包各自的精确地址（?package=ID）上都被返回；它其实不属于任何一个包。\n- 要做：两持有者时，精确地址不再回落到无包行；单持有者时行为不变。所有包作用域读类型一起改，并钉住。\n- 需要你做的：无，车道派发。\n\n## What to build\n\n1. In the exact qualifier's row candidates, a row with no package stamp is served on `?package=ID` only while the name has one holder (then the row is that holder's, as today). With two or more holders it is served on neither exact address; the operator binds it with `os migrate stored-references` (S4) `bind`, and the report names it.\n2. Apply to every type in `PACKAGE_SCOPED_READ_TYPES` at once, with one pinned case per type (one holder: served; two holders: not served on either exact address, bare read 409 as today).\n3. Measure the first-party count of stored package-less rows on booted showcase and app-crm before the change, and declare the lines: a read that answers today is refused → `Narrowing: yes`, `Clause-②: yes (narrowing)`, ADR-0087 marker, full dogfood."
+}

@@ -14,18 +14,20 @@
     "area:devpath",
     "domain:server",
     "enhancement",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T23:08:36Z",
-  "updated_at": "2026-11-09T23:57:00Z",
+  "updated_at": "2026-11-10T06:57:56Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31985",
   "body": "epic:#31527#1 · os-steve · session_01ADHkmP7o3uDTti21wLTfPf\n\nFiling gate: ④ coordination node. This is the 14th child B of the epic #31527 (ADR-0150 execution plan: \"one per covered type, 14 in all … `tool` joined phase 1 in #31414\"). The B children filed so far cover only 13 types. Spec seat 2 raised the gap on #31527 (6734382526), from the contract review of #31841. ⛔ Not a claim.\nBusiness reason: inherited from #31527 (p1). Without this card, a tool's bare name stays refused environment-wide once the other 13 types narrow to one holder per namespace. Two packages could ship same-named skills and agents, but not same-named tools.\nReader: the next `domain:server` seat picks it from the queue once every `Blocked-by:` below is closed. The epic seat reviews its PR against the red lines below (ruling 6723571682).\nDedupe (open AND closed): `tool narrow namespace bare-name`. #31701 (agent/skill, closed by #31973) left `tool` out on purpose: its CONTROL pins that a tool still refuses another namespace. #31661 (closed) added `tool` to phase 1. Neither covers this card.\nclass: c · type: Feature\nGrade: p1, inherited from the parent.\nPart of #31527.\nBlocked-by: #31691\n\n## 维护者速读\n\n工具（tool）是第 14 种要按命名空间放宽的元数据。现在别的 13 种都有卡，只有它没有。这张卡先补齐工具在 AI 面上的“命名空间-名字”叫法和按包解析，然后像 agent/skill 一样放宽：不同命名空间的两个包可以各带一个同名工具。\n\n## Step 0 (decides the split)\n\nD9 narrows a type only after its by-name readers, its AI face and its stored references carry the package. At main `0cd594b3`:\n- **Face (D6).** `deriveAiFaceName` serves skills, agents and actions (G2 #31955), but no tool surface. Measure every place that lists a `tool` item to a model or an MCP client, and every place that calls one by name.\n- **Caller references.** A skill's `tools` list and an agent's tools name a tool by bare name. Measure whether they resolve from the referring item's package (D3). E8 #31680 moved `/meta/tool/NAME` onto `readPackageScopedItem`. Confirm which references it did not reach.\n- **Stored references.** D8 lists none for `tool`. Confirm with S4's report.\n\nIf the face or the caller references are missing, they are built in this card's first PR (`Part of`), and the narrowing comes in its second PR (`Fixes`), as #31698 split. If the readings are large, the seat may file them as their own child.\n\n## What to build (the narrowing PR)\n\n- Add `tool` to `NAMESPACE_SCOPED_BARE_NAME_TYPES` (`bare-name-one-holder.ts`, #31973's shape). Remove or flip #31973's `tool` CONTROL.\n- The B-card stances and pins recorded on #31701 apply. Co-owners of one namespace, a pair where one side has no namespace, and pairs inside `base`/`system`/`sys` stay refused with today's sentence. A built-in name stays refused: fill `BUILT_IN_BARE_NAMES` for `tool`, or show a census of 0 platform-requested tool names. When two namespaces both hold a tool name, both install and boot. A bare read answers 409, naming both faces. Each face and `?package=` serve their own item. An ablation of the predicate turns the two-namespace pin red.\n\n## Red lines (the epic seat reviews the PR against them, ruling 6723571682)\n\n1. Never loosens: a skill's or agent's tool reference never reaches a tool outside its package's closure (D3 (c)) or one that only the environment holds (D3 (a)).\n2. Never guesses: two holders are refused with the candidates, and never resolved first-registered.\n3. Independently releasable: until the narrowing PR, every answer is as today. Write readings (a)–(d) in the PR body."

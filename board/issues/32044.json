@@ -1,0 +1,34 @@
+{
+  "number": 32044,
+  "kind": "pull_request",
+  "title": "test(spec, metadata-protocol): a provider URL is judged at both connector doors as a URL parser reads it, in every spelling",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T02:26:14Z",
+  "updated_at": "2026-11-10T03:36:28Z",
+  "closed_at": "2026-11-10T03:36:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-10T03:36:26Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32044",
+  "body": "Clause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:只加测试。连接器(rest 的 `baseUrl`、mcp 的 `transport.url`、openapi 的 `spec` 与 `baseUrl`)里凡是会被 URL 解析器当作 URL 读的值,在写入口与读出口两侧,对每种写法(首尾空格、制表符及解析器会剥掉的其它控制字符;一个斜杠、无斜杠、反斜杠;凭据在 userinfo 或查询参数里)都钉住同一条规则:写时拒收,读时扣下。\n- 为什么改:这条规则在 main 上已由同一个判定函数在两扇门共同执行;本 PR 把每种写法在两扇门、四个提供方字段上逐格钉死,以后任何改动让其中一格失守都会转红。\n- 风险与回滚:零运行时改动,不发布任何内容(两份 `.test.ts` 都不在 `files[]` 里);回滚即删掉这两段测试。\n- 先看:`packages/spec/src/integration/connector-entry-url-credentials.test.ts` 末尾新 describe(规则在 schema 层与读出脱敏层);其次 `packages/metadata-protocol/src/protocol.metadata-redaction.test.ts` 末尾新 describe(真实保存与读取入口)。\n- 两分钟验证:`pnpm --filter @objectstack/spec exec vitest run src/integration/connector-entry-url-credentials.test.ts`,预期全部通过。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nTests only. The rule they pin: whatever a provider parses as a URL — the `rest` `baseUrl`, the `mcp` `transport.url`, the `openapi` `spec` and `baseUrl` — is judged as a URL parser reads it, at the write door and the read door alike, by the one shared walk and predicate (`packages/spec/src/integration/connector-url-credentials.ts`). A credential in any spelling a URL parser reads one from is refused on write and withheld on read.\n\nSpellings pinned at every one of the four positions, at both doors:\n\n- leading and trailing space, tab, and every other character U+0000 to U+0020 a URL parser trims (the whole range, each code point, leading or trailing);\n- a special scheme followed by one slash, no slash, or backslashes;\n- the credential in the userinfo, in a credential query parameter, and in both at once.\n\nThe URL parser itself is the oracle in each test: every refused spelling is first asserted to be one `new URL()` reads a credential from, and every served value is asserted to be one it reads none from. Each refusal has a CONTROL beside it — the same spellings without a credential part are accepted and served byte for byte.\n\nHeader and environment maps are out of scope.\n\n## Tests\n\n- `packages/spec/src/integration/connector-entry-url-credentials.test.ts` — new top-level describe: `whatever a URL parser reads a credential from is refused on write and withheld on read, at every provider URL position` (schema refusal located at the URL's path, refusal text never echoes the value, read redactor names exactly that path, served value re-parses with no credential and is itself accepted).\n- `packages/metadata-protocol/src/protocol.metadata-redaction.test.ts` — new top-level describe: `the connector doors judge a provider URL the way a URL parser reads it` (real `saveMetaItem` refuses with `INVALID_METADATA` / 422 and stores nothing; `getMetaItem`, `getMetaItems` and `getMetaItemLayered` serve no credential from a seeded row).\n\n## Acceptance notes\n\n- This PR adds no fix: measured on `origin/main`, every cell of the spelling × door × provider-field matrix already holds the rule (table under Verification). It lands as a regression pin.\n- No changeset: both files are `.test.ts`, outside every package's `files[]` (`skip-changeset`).\n\n## Verification\n\n<details><summary>Cell matrix on the base tree (merge base 8e0e35c0a, the branch's code is main's)</summary>\n\nA temporary generated probe (not committed) ran 3,872 distinct spellings that `new URL()` reads a credential from (11 surroundings × 8 slash and backslash runs × 4 scheme casings × 11 credential placements) at each of the 4 positions: 15,488 cells per door. Write door open: 0. Read door open: 0.\n\n| spelling | write door (4 fields) | read door (4 fields) |\n|---|---|---|\n| leading or trailing space | held | held |\n| leading or trailing tab, LF, CR | held | held |\n| other U+0000 to U+001F, leading or trailing | held | held |\n| one slash after the scheme | held | held |\n| no slash after the scheme | held | held |\n| backslashes after the scheme | held | held |\n| credential in the userinfo | held | held |\n| credential in the query | held | held |\n\n</details>\n\n<details><summary>Pins and one-shot ablation</summary>\n\n- `connector-entry-url-credentials.test.ts`: 477/477 pass. `the connector doors judge a provider URL` block in `protocol.metadata-redaction.test.ts`: 13/13 pass.\n- Ablation of the parser trim in the shared boundary parse (`packages/spec/src/data/driver/url-boundary.ts`), spec rebuilt, marker confirmed in `dist/`: spec pins 117 red, door pins 8 red; then restored (blob equal to HEAD, `git diff HEAD` empty, marker absent from `dist/`): 477/477 and 13/13 green.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYn5CmmdShCJifm6WYj)_\n"
+}

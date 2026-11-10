@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-07T15:35:20Z",
-  "updated_at": "2026-11-10T01:10:51Z",
+  "updated_at": "2026-11-10T02:28:17Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 8,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31170",
   "body": "epic:#3600#1 · hotlong · session_01Q4EjjPXwX1YfHyKJUh4agu\n\nFiling-gate category: ③ maintainer-directed task. The maintainer asked whether cloud's in-app AI building still has value, given the local channel's results. The seat proposed measuring the cloud channel on the same scenario cards. Maintainer, verbatim (Claude Code session, 2026-11-07): 「要等云端改用了同样的skills才有意义」. That condition is met: objectstack-ai/cloud#3714 landed on 2026-11-09. Routing, verbatim: 「能交给车队开发的你不要自己开发」.\n\n**Split 2026-11-10** (answering the `domain:devx#2` seat question of 00:09Z). The cloud in-app build driver needs cloud's build API, which only `repo:cloud` can read. It is now objectstack-ai/cloud#4220: an external command on `objectstack-scenario-driver/1` that lives in the cloud repo. This card keeps only the objectstack half, which reads no cloud code. The original text is in the edit history.\n\n## Why\n\nThe scorecard must compare the local and cloud channels on accuracy, time **and cost**.\n- The built-in Claude driver records the cost the tool reports (`reportedCostUsd`, `runner/transcript.ts`).\n- The external driver contract cannot carry it: `ExternalTurnSchema` (`runner/drivers/external.ts`) is a strict object with `replyText`, `toolCalls`, `model` and `numTurns` only. A cost field is refused as invalid output.\n- Without this card, cloud#4220 can report the model but not the metered cost, and no external command (Codex wrapper, WorkBuddy, the cloud agent) can be compared on cost.\n\n## Ask\n\n1. Add optional usage fields to `ExternalTurnSchema`: the reported cost in USD and the input and output token counts. Every field is optional, so existing commands stay valid.\n2. Carry them into the turn meta and the run record exactly as the built-in drivers' reported cost is carried. A turn that reports none records none: never a zero.\n3. The scorecard and the gallery export state a channel's cost only when every author turn reported it. Otherwise they say \"not reported\".\n4. Update the README's contract section and the contract tests, including one test that a command reporting no usage stays valid.\n\nThe contract name `objectstack-scenario-driver/1` stays: the change only adds optional fields. If the seat judges otherwise, state it in the PR.\n\n## Reader\n\nThe `domain:devx` lane seat, from `pm:queue`. No blocker. Live runs are not needed: test against a stub external command."

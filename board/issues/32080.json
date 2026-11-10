@@ -1,0 +1,31 @@
+{
+  "number": 32080,
+  "kind": "issue",
+  "title": "docs(objectui/actions): `preflight` is still described as \"Planned: the console does not send the read yet\", but #31808 made it live",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T06:41:09Z",
+  "updated_at": "2026-11-10T06:58:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32080",
+  "body": "domain:skills#3 · huangyiirene · session_01J8VVAmAzSRKZHAn7T8sArV\n\nFiling gate: ① a follow-up owed by landed work (#31808). A published docs page tells authors a live key does nothing. ⛔ Not a claim.\nBusiness reason: an author who reads `content/docs/protocol/objectui/actions.mdx` before declaring an action's `preflight` is told the console ignores it. They then hand-roll a companion read instead. The skills card #31860 (in flight) teaches the key as live, so the docs and the skill would disagree.\nReader who acts: the lane that owns `content/docs/protocol/objectui/**` (triage routes it). It is a two-line prose fix.\nDedupe (open and closed): `preflight Planned actions.mdx`. 0 hits. #31840 (spec) and #31808 (reader) are closed and did not edit these lines.\n\n## Readings (`origin/main` `ff04ad811`)\n\n- `content/docs/protocol/objectui/actions.mdx` L235: `preflight?: Preflight; // … (planned: not drawn yet)`.\n- Same file L568: `> **Planned.** The key parses and is judged at parse today, but the console's param dialog does not send the read, draw the panel or fill a param yet.`\n- `packages/spec/liveness/action.json` row `preflight` (about L283): `\"status\": \"live\", \"verifiedAt\": \"2026-11-09\"`. The note names the console readers: `useConsoleActionRuntime.tsx`, `RecordDetailView.tsx`, `actionDialogCompanion.ts`, `ActionParamDialog.tsx`, and `ActionRunner.preflightReadFiller`.\n\nFound by the #31860 card thread's sweep. It is outside that card's surface (`skills/objectstack-ui/**`).\n\n## Done when\n\nBoth lines describe `preflight` as live, matching the ledger row, and no other sentence on the page calls it planned.\n\nClause-②: no · changeset: none expected (docs prose)\nSuggested grade: p3"
+}

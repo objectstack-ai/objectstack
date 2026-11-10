@@ -1,0 +1,31 @@
+{
+  "number": 32067,
+  "kind": "pull_request",
+  "title": "docs(adr-0150, adr-0151): dated amendment notes for what G1 and its follow-ups landed",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T05:53:22Z",
+  "updated_at": "2026-11-10T06:31:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32067",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi94hv8aAq8NNdK1XkR7nbh2C)_\n\nFixes #32060\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：在 ADR-0150 加 6 条、ADR-0151 加 1 条带日期的修订说明，并在两份记录的头部各加一条 Amended 记录；只追加，原句和状态行一个字没改。\n- 为什么改：G1 和它的跟进卡落地后，ADR 里有几处和代码不一致（例如地址字面量现在是 `os validate`/`os build` 拒、启动只告警；引擎在 B #31696 之前每个裸名只挂一个流程），读 ADR 的人和 AI 会被带偏。\n- 风险与回滚：纯文档，不发布任何包，不影响运行时；回滚就是 revert 本 PR。\n- 先看：ADR-0150 的 D5 两条注（第 1 步下面和 \"This is documented precedence\" 下面），然后 D4 表下的那条临时说明，最后 ADR-0151 \"What builds on this\" 下的注。\n- 两分钟验证：`pnpm check:adr-symbol-anchors`，预期全部锚点可解析（本 PR 新增 37 个，全部解析）。\n- 需要你做的：批准本 PR（`docs/adr/**` 受管面，Tier H）。\n\n## What changes\n\nAppend-only, dated notes in the form `> **Amendment note (2026-11-10, #32060 item N — PR #NNNN).**`, each directly under the sentence it amends, plus one header `**Amended**` entry per record. No ruled sentence, no `**Status**:` keyword and no README row moves.\n\n| Item | Where (ADR-0150 unless named) | What the note records, read off `main` 48f18b58 |\n|:--|:--|:--|\n| 1 | TL;DR 7, the address-literals bullet | The refused set is `NAMESPACE_REFUSED_LITERALS` (`actions`, `connectors`, `global`, `hooks`, `oauth`, `trigger`). `os validate` / `os build` refuse (#32016), `defineStack` warns once and loads (R1), the running install door refuses a new package, and `os migrate stored-references` lists a held one under `literalNamespaces`. |\n| 2 | D5, under \"This is documented precedence\" | Seat ruling Q1 = A (record 6754822117): after a namespace, a sub-resource literal in the name position keeps its bare route (`META_ITEM_SUBRESOURCE_SEGMENTS`, the automation twin `AUTOMATION_FLOW_SUBRESOURCE_SEGMENTS`). `bundle` is not in the `/meta` set; it keeps its route on the REST route manager by registration order. After a qualifier, a door's own literal is declined (#32001). |\n| 3 | Under the D5 door table | The qualified hook's qualifier is never `runs` (`INBOUND_HOOK_QUALIFIER_EXCLUSIONS`, #32049). Install still accepts a `runs` namespace; first-party count 0. Whether install should refuse it is recorded as open, not decided. |\n| 4 | Under the execution-plan table | Row K door by door: `defineStack` / `os validate` judge one artifact and not a dependency's namespace (a dependency carries none); install judges both directions; publish and the save door judge one direction; `MetadataManager.publishPackage()` reads no namespace, the publish door judges first. |\n| 5 | D5 step 1, the install-gate sub-bullet | R1: a package the boot registers under such a namespace keeps booting, is warned once naming `?package=ID`, and is read with `?package=`; an upgrade that moves to one is refused. |\n| 6 | Under the D4 table | Epic seat reading E3: between G1 and B #31696 the engine arms one flow per bare name, so a two-holder flow's address answers the same `409` as its bare path. It ends when B #31696 lands. |\n| 7 | ADR-0151, under \"What builds on this\" + header | O3 shipped as #31779, #31867, #31966 and #31981; O4 as #32036. One difference from D6: an account key's revoke and restore are dedicated `service-account/revoke-key` / `restore-key` doors, not the existing self-key doors. The status line is left as it is. |\n\n## Tests\n\nNo code changed, so no test was added or edited. Every statement in a note cites a `path#symbol` anchor on `main` and, where one exists, the test that pins it.\n\n## Acceptance notes\n\n- `docs/adr/README.md` is stale on `main` at 48f18b58 before this PR: `node scripts/adr-index.mjs` adds the missing ADR-0153 row (from #32014) and moves the Proposed count 7 to 8. This PR changes no row (the ADR-0150 and ADR-0151 rows regenerate byte-identical, since `Proposed` stays the earliest status keyword), so the regeneration is left to the ADR-0153 owner rather than ridden here.\n- ADR-0150 line 3 already carried the #31685 `**Amended**` entry on the status line, after the `Proposed` keyword; the new entry follows it the same way. ADR-0151 had none, so its entry is a header bullet, off the status line.\n\n## Verification\n\nGate readings are listed in the os-dev report on #32060, taken on this PR's final head.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmT2uyMEkw9cAQ8sLdd)_\n"
+}

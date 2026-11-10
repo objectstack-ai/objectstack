@@ -1,0 +1,35 @@
+{
+  "number": 32084,
+  "kind": "pull_request",
+  "title": "fix(runtime): a boot composing two packages that declare one datasource name logs one error naming both, and continues",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T07:12:22Z",
+  "updated_at": "2026-11-10T07:54:44Z",
+  "closed_at": "2026-11-10T07:54:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-10T07:54:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32084",
+  "body": "Clause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：同一次启动里组合进来的两个包声明了同名数据源时，启动在 error 级别记一条日志，写明数据源名、持有该名的包和另一个包，然后继续启动。\n- 为什么改：一个数据源名只有一个连接；第二个包绑定到该名的对象由持有者的连接服务，运维需要在启动日志里一次看清是谁、怎么修。\n- 风险与回滚：只新增一条日志，不拒绝启动，也不改变由哪个连接服务该名；回滚即还原本 PR 的 runtime 改动。\n- 先看：`packages/runtime/src/declared-datasources.ts`（`noteBootDeclarations`、`reportBootNameClashes` 与日志文本）、`packages/runtime/src/app-plugin.ts`（drivers-ready 钩子里新增的一行记录）、`packages/runtime/src/datasource-autoconnect.test.ts`（组合启动的钉子）。\n- 两分钟验证：`pnpm --filter @objectstack/runtime exec vitest run src/declared-datasources.test.ts src/datasource-autoconnect.test.ts`，预期全部通过，其中两包同名用例各断言恰好一条 error 且不含任何连接配置。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- A boot that composes two packages declaring one datasource name logs one `error` per name, through the AppPlugin logger the rehydrate path uses. The line names the datasource name, the package that holds it and the other package, says that the other package's objects bound to the name are served by the holder's connection, and gives the fix: rename the datasource in one of the packages, or remove one of them from the composition, and restart. It carries no connection configuration.\n- The holder named is the package whose declaration opened the connection that serves the name: the first declaration to connect in boot order. That is the first `start()`, unless a `datasourceMapping` connected another package's declaration earlier, at the drivers-ready hook; `AppPlugin` records that connect (`recordBootDatasourceConnect`) so the named holder follows the connection.\n- The boot continues. Which connection serves the name, the install door and the rehydrate path are unchanged.\n- A package that declares its own datasource twice, or is composed twice, is not a clash and logs nothing. Each clash is logged once per boot.\n\n## Tests\n\n- `packages/runtime/src/declared-datasources.test.ts`, new top-level describe (8 cases): two packages in two boot calls log one error naming the name and both packages with no configuration value; the holder named is the package whose declaration opened the connection; the boot continues; a connection opened at the drivers-ready hook makes that package the holder; one artifact whose two package bodies declare one name logs one error; logged once per boot; CONTROL one package alone; CONTROL a package re-declaring its own datasource, or composed twice.\n- `packages/runtime/src/datasource-autoconnect.test.ts`, new top-level describe (3 cases) on a real composed boot (ObjectQL, two `AppPlugin`s, the datasource-admin plugin, sqlite files): the first package's connection serves both packages' objects and one error names both; a package whose `datasourceMapping` connected first holds the name and is the one named; CONTROL one package alone.\n\n## Acceptance notes\n\n- The line is `error`, not `warn`, by AGENTS.md's degradation log-level rule (a data-consistency consequence), and it names its consequence and its fix in the one line.\n- The same-stack duplicate refusal in `defineStack` judges one stack; a composition of packages is judged here, at boot.\n\n## Verification\n\nAll at `cee05190ea` (`origin/main` merged in), under `scripts/pm/os-verify-lock.sh`:\n\n<details><summary>Suites and typecheck</summary>\n\n- `pnpm --filter @objectstack/runtime test`: Test Files 576 passed (576); Tests 9387 passed, 19 skipped (9406). Exit 0.\n- `pnpm --filter @objectstack/runtime typecheck` (tsc and `check:test-typecheck`): exit 0, the test-typecheck ledger held unchanged.\n- `pnpm check:type-check-debt`: exit 0, no entry above its recorded number.\n\n</details>\n\n<details><summary>Ablation of the new log line</summary>\n\nWith the `error` call in `reportBootNameClashes` replaced by a no-op (through `scripts/ablation-replace.mjs`, fix committed first): 7 red (every case asserting the error, unit and composed boot), 39 green including every CONTROL; then restored, blob equal to HEAD and `git diff HEAD` empty.\n\n</details>\n\n<details><summary>Gates</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands` derived 65 families for this diff; each was run and `--ran` reconciles 65 derived, 65 run, 0 not measured, every one recorded with exit 0. `pnpm lint` and the rest of the farm are CI's.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYn5CmmdShCJifm6WYj)_\n"
+}

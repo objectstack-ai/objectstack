@@ -1,0 +1,33 @@
+{
+  "number": 32060,
+  "kind": "issue",
+  "title": "docs/adr: dated amendment notes to ADR-0150 (D5 address literals, row K, the G1 interim) and ADR-0151 (status line) for what G1 and its follow-ups landed",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T05:43:31Z",
+  "updated_at": "2026-11-10T06:09:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32060",
+  "body": "domain:server#1 · os-steve · session_01ADHkmPF1skfu2kx89BEXZi\n\nFiling gate: ④ follow-up node of epic #31527 child G1 #31691, which closed 2026-11-10 with its four parts merged: #31959, #31979, #32001 and #32049. #31968 (PR #32016) and #31739 also closed. Each item below was routed to \"the ADR amendment card\" in a record:\n- the G1 (c) contract review 6754801375 and the seat rulings on #31691 (6754822117);\n- the epic seat's reading E3;\n- the #31968 contract records on PR #32016 (nit 3);\n- the G1 (d) contract review on PR #32049 (N3).\n\nBusiness reason: ADR-0150 and ADR-0151 are the records authors and agents read. Where a door now refuses somewhere other than the place the ADR names, or the ADR's status no longer matches what shipped, a reader follows the ADR and is wrong.\nReader: the `domain:server` seat (G1's owner). The epic seat (#31527) reads the PR before it lands.\nDedupe: there is no open card for ADR-0150 or ADR-0151 amendment notes after G1. #31685 (child A) wrote the pre-G1 rulings in.\nclass: c · type: Docs\n\n## 维护者速读\n\n- 问题：G1 和它的跟进卡落地后，ADR-0150 有几处写法和代码不一致。例如 D5 说地址字面量在安装时被拒，现在实际是 `os validate` 和 `os build` 拒，服务器启动只告警。ADR-0151 的状态行也没跟上。\n- 要做：在 ADR-0150 和 ADR-0151 上加带日期的修订说明，只追加，不改原句。\n- 需要你做的：批准本 PR（`docs/adr/**` 受管面）。\n\n## What to write (append-only dated notes, never rewriting a ruled sentence)\n\n1. **ADR-0150 D5 / the address-grammar literals line (line 36).** The line says the literals are \"refused as a namespace at install\". What shipped:\n   - `os validate` and `os build` refuse them (#31968, PR #32016).\n   - `defineStack` warns and returns, so a deployment already holding one keeps booting (red line R1 on PR #31959).\n   - The install door still refuses a new package.\n   - `os migrate stored-references` lists a held one under `literalNamespaces`.\n2. **ADR-0150 D5, the sub-resource literal rule.** After a namespace, Q1's sub-resource rule is read first (`crm/runs` keeps its bare route). After a qualifier, a door literal is declined as an unserved shape. That includes the automation twin and `bundle`. Cite `NAMESPACE_POSITION_LITERALS` in `packages/spec/src/kernel/address-grammar.ts` and the pins from #32001.\n3. **ADR-0150 D5, `runs` as a namespace (G1 (d) N3).** The qualified inbound-hook route excludes `runs` from its qualifier position. A namespace literally named `runs` is therefore never qualified there. Record that, and either record whether `runs` should join the refused literals at install, or file that question as its own card. Do not decide it in the note.\n4. **ADR-0150 row K wording.** Measure what row K's text says each door compares, against what `kernel/namespace-prefix.ts` and the doors do on `main`. Note any difference the G1 rulings recorded.\n5. **ADR-0150, the R1 boot reading.** A package already installed under a refused namespace keeps booting, is read by `?package=`, and is warned once.\n6. **ADR-0150, one dated line (epic seat reading E3):** \"between G1 and B #31696 the engine arms one flow per bare name\". D5's two-holder text stays as the end state after B #31696, which owns the engine re-key.\n7. **ADR-0151 status line.** Measure what shipped against the record. #31739 closed after PR-1 #31779, PR-2 #31867, 3a #31966 and 3b #31981. The O4 child is #31740. Add the dated note the file's convention allows. ⛔ Do not put \"Amended\" on the `**Status**:` line; see the `scripts/adr-index.mjs` keyword trap. If the status itself should change, that is the maintainer's call: put it in open_questions.\n\nAnchors are `path#symbol` only (`check:adr-symbol-anchors`). Every statement is read off `origin/main` source and its pins, never off this card.\n\n`Clause-②: no`, `Metadata-protocol: none`, `skip-changeset` (docs only). Tier H: the PR stays draft until a GOVERNED_APPROVERS approval."
+}

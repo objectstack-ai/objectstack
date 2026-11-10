@@ -1,0 +1,32 @@
+{
+  "number": 32083,
+  "kind": "issue",
+  "title": "cloud-connection: a same-origin read of the default install namespace for an unmanaged hosted install",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:blocking",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T07:08:46Z",
+  "updated_at": "2026-11-10T08:00:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32083",
+  "body": "domain:ui#2 · os-support-ai · session_01WGufzge87Pae2h7uSQzX8H\n\nFiling gate: **④ coordination child**, the server half of #32040 (the step-0 note in triage 6757661675 and 6760704002: \"the same-origin proxy route that reads the default namespace sits outside `ui/`. If it lands in a server-side package, it is a `domain:server` child filed at step 0, ahead of this card's dialog half\"). #32040 keeps the dialog half and waits on this card.\n\n## 维护者速读\n\n- 问题：托管环境里以\"非托管\"方式安装应用时，安装对话框要显示控制面给出的默认目标命名空间，但租户控制台读不到它：控制面那条接口跨域，控制台也不知道自己的环境 id。\n- 要做：在 `@objectstack/cloud-connection` 加一条同源只读转发路由，按主机名解析环境（与 `/cloud-connection/install` 相同），用服务凭证去问控制面，把默认命名空间原样带回。\n- 之后：界面卡 #32040 用它把默认值填进可编辑的命名空间输入框。\n- 需要你做的：无，车道派发。\n\n## What the console cannot read today (seat reading at `origin/main` `fe1249b7`)\n\n- The control plane answers the default on `GET /api/v1/cloud/packages/:id/install-namespace?environment_id=` (objectstack-ai/cloud PR #4206, merged 2026-11-10 00:17Z per triage 6760704002).\n- A tenant console cannot call it: it is cross-origin, and a tenant runtime has no `defaultEnvironmentId` (card #32040, Gap 3).\n- `packages/cloud-connection/src/cloud-connection-plugin.ts` already resolves the environment per request from the hostname (`resolveEnvironmentId`, `:804`) and proxies credentialed reads to the control plane for the marketplace (`GET /installation` `:1638`, `GET /installed`). `POST /install` (`:1345` onward) forwards `target_namespace` beside `install_mode: 'unmanaged'` since #31482's PR #32038 (`bfe5282e`).\n- No route of this package answers the default namespace today (`cloud-connection-route-ledger.ts`: sixteen routes, none for it).\n\n## Expected\n\n1. One read-only route in `@objectstack/cloud-connection`, beside `/installation`. The seat suggests `GET /api/v1/cloud-connection/install-namespace?package_id=<id>`; the lane may rename it, and #32040's order follows whatever lands.\n2. Its closed query-parameter set is declared on the day it lands (`package_id` only; anything else refused, the way this package's other doors treat unknown input).\n3. Gate: the same as `POST /install` (a signed-in session of this environment; a held session refused as `refuseHeldSession` does). It returns nothing a caller who may not install should see.\n4. It resolves the environment by hostname (or the single-environment config), calls the control plane's route with the env→cloud service credential, and returns the control plane's namespace value (and nothing secret). Control plane unreachable or unbound → a refusal the dialog can read as \"no default\" (the dialog then leaves the field empty for the user), never a guessed value.\n5. A row in `cloud-connection-route-ledger.ts` and its conformance guard; refusal pins (unknown parameter, no session, unbound) and a preservation pin (the control plane's value passed through unchanged).\n\n`Clause-②: yes (widening)` (a new route) · `Metadata-protocol: none` (no `packages/spec` key; the lane measures).\n\n## Who acts next\n\n`domain:server` builds the route. Then `domain:ui` builds the dialog on #32040 (default shown in an editable field, `target_namespace` sent, 409 / 400 re-ask).\n\n## Business reason\n\nThe consumers are objectstack-ai/cloud#3648 item 4 and objectstack-ai/cloud#3626. The server half of the unmanaged copy is on `main` (#31482); without this read the hosted dialog cannot show the default it will use.\n\nDedupe: `is:issue \"install-namespace\" in:body` → #32040 (the parent), #31994, #31482 (closed: the install forward itself), #29617, #31691, #31968, #30794, #31483 (closed), #32060, #32075 (other topics). `is:issue target_namespace proxy` → #32040 only. None is this route."
+}

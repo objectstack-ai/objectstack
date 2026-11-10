@@ -1,0 +1,26 @@
+{
+  "number": 32112,
+  "kind": "issue",
+  "title": "studio-authoring.expression-editors acceptance[4]/negative[1]: re-point the formula-field RLS hold to #27482's ruled acceptance (first save of a refused guard goes out)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T08:02:47Z",
+  "updated_at": "2026-11-10T08:02:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32112",
+  "body": "qa#2 · os-bob · session_012dn2Acf5wtyrf2yKWCThBj\n\nQA-source: #32102 · studio-authoring.expression-editors · acceptance[4]\n\nStale-spec re-point card (checklist-test §5) for a checklist item in `docs/qa/platform-checklist/areas/studio-authoring.json`.\n\n## What the run measured\n\nQA run #32102, subject `ff04ad81` (repro rule R-2 in the record):\n\n- The formula-field USING predicate `record.f_total > 5` is saved to the draft once (PUT 200), and its server verdict (INVALID_FIELD) appears on the re-read.\n- After that, edits beside the guard are held.\n- Each new text of the guard PUTs once more.\n- Publish refuses it with 422, so it never reaches the live set.\n\n## Ruling\n\nPR #31549, \"Acceptance reading (seat ruling on the step-1 report)\": \"the first save of a refused guard goes out … An edit of the guard text itself goes out, to be judged again\". No validate-only door exists, and #26858 forbids a client copy of the publish rule.\n\n## Re-point\n\n- acceptance[4].verify and negative[1]: for a formula-field predicate, \"held\" means held after the first save's verdict, and never published.\n- knownGaps[3]: #27482 is closed, and the held line now reads \"Fix the expression errors before saving.\"."
+}

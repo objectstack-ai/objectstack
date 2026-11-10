@@ -2,8 +2,8 @@
   "number": 31907,
   "kind": "issue",
   "title": "docs/adr: audit ledger tamper-evidence — an asynchronous sealer, signed per-organization checkpoints, redaction and expiry amendments, and `os audit verify`",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T11:34:14Z",
-  "updated_at": "2026-11-10T01:11:02Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T04:54:42Z",
+  "closed_at": "2026-11-10T04:33:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31907",
   "body": "repo:cloud#3 · os-warren · session_01JQwxbZqfEd7pcckjz3pGqn\n\nFiling gate: **③ a task on the maintainer's word.** The maintainer ruled **(c)** on cloud#4016 at 2026-11-09 11:30Z (decision card: 「(c) 封存链+检查点出主机」): build it in two stages, exactly as `docs/design/audit-tamper-evidence.md` §5 in objectstack-ai/cloud says (merged as cloud PR #4025). Stage 1 lives in the framework, behind an ADR. This card is that ADR.\n\n**Cloud consumer:** objectstack-ai/cloud#4016. Enterprise stage 2 anchors this stage's checkpoints outside the host. A security review asks for proof that the audit log was not changed or deleted, and today nothing can give one.\n\n## 维护者速读\n\n- 问题：审计日志现在只能做到\"数据接口和设置页面里改不了、删不了\"，拿数据库或主机权限的人改了删了，事后证明不了。\n- 裁定：Warren 已选 (c)，分两步做。第一步在开源框架做可验证的封存链，这张卡先把它写成 ADR。\n- 要做：ADR 定下规范化摘要、异步封存器、按组织签名的检查点、脱敏和到期删除的签名修正记录、`os audit verify` 校验命令，以及对象用什么声明加入。\n- 需要你做的：ADR 走正常的合同复核和批准。\n\n## What the ADR decides\n\nThe design doc's §3 (a) and §5 stage 1 are the input. Measurements are in its §2 (who can change a row today, the archive move, replicas, write cost).\n\n1. **Canonical form.** Which columns enter a row's leaf digest. Value-bearing columns (`old_value`, `new_value`, `metadata`) enter as salted commitments, so a later redaction still verifies. This keeps faith with objectstack#21207 (\"a copy never carries the hash\").\n2. **Sealer.** Asynchronous, after a settle lag, with one sealer at a time under the cluster lock. A row with a `created_at` inside an already-sealed window is sealed as **late**, never ignored. Nothing changes on the insert path.\n3. **Checkpoints.** One Merkle root per organization per window. Each checkpoint chains to the previous one and is signed with Ed25519. Checkpoints are rows of their own object; the ledger table is never written.\n4. **Amendments.** The three redaction rewrites and the 7-year prune write signed amendments. The prune deletes whole checkpoints, so the verifier reads an expired window as \"expired by policy\", never \"missing\".\n5. **Verify.** `os audit verify` exports a proof bundle and checks it, reporting each row as unmodified, modified, missing, late, redacted or expired.\n6. **Opt-in surface.** How an object declares that it is sealed. This is a spec surface. `sys_audit_log` opts in by default; Enterprise's `sys_ai_audit_log` opts in from cloud.\n7. **Export seam.** The interface stage 2 uses to take a checkpoint off the host (WORM, SIEM, KMS-held signing): it is named here and built there.\n\n## Done when\n\nThe ADR is merged. The implementation card (filed with this one) moves from blocked to queue.\n\n## Who acts\n\nThe server lane routes this through the ADR standing order. Implementation is a separate card.\n\nDedupe: `org:objectstack-ai is:issue tamper-evidence audit sealer`: 1 hit (cloud#4016 itself); `\"audit verify\"`: 283 hits, none on the ledger.\n\nRelated: cloud#4016, cloud PR #4025, cloud#3823 (item 7), cloud#3665, objectstack#21207."

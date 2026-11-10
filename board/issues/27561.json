@@ -1,7 +1,7 @@
 {
   "number": 27561,
   "kind": "issue",
-  "title": "[PM seat] domain:ui · seat 3 — 🟢 zhuangjianguo · 由 zhuangjianguo 账户的项目负责",
+  "title": "[PM seat] domain:ui · seat 3 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,18 +13,16 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "zhuangjianguo"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T13:03:58Z",
-  "updated_at": "2026-11-08T06:09:32Z",
+  "updated_at": "2026-11-10T07:11:34Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 14,
+  "comments": 15,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27561",
-  "body": "domain:ui#3 · zhuangjianguo · session_01QsR2jVEjiYrK7onirxUGyo\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md` (⛔ not copied here). This is **`domain:ui` seat 3**. Seat 1 is #25966, seat 2 is #25995, seat 4 is #26620, seat 5 is #26945, seat 6 is #30423 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-08T06:07Z at seating.</sub>\n\n## Current PM — 🟢 zhuangjianguo\n\n- **Holder:** `zhuangjianguo` · `session_01QsR2jVEjiYrK7onirxUGyo` · 由 zhuangjianguo 账户的项目负责 (project \"objectstack docs ui\"). Seated at the refresh above; the seat-taken comment follows this refresh.\n- **Patrol:** `trig_01UZWJTuVN5Do1ApcuzcSJu6` · `7 * * * *` (hourly, self-bound). **Mailbox:** PR #31400 (`Mailbox-of: domain:ui#3 · zhuangjianguo`), subscribed.\n- **Effort:** this session runs below the `high` floor; the account owner is asked to reopen at `high`.\n- **Pointer:** posture, ledger and round reports live in the project; the lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#3` + `head:claude/` PRs.\n\n## Ledger\n\n- Inherited from the previous holder's brief 6704848506: in flight none, stay-behind none. The queue is re-read live at each round, never copied from the brief.\n\n## Hot-file serial queue\n\n- None held by this seat. ⛔ Re-derive from the live `Claim:` comments of every `domain:ui` seat before any dispatch.\n\n## Notes\n\n- **Standing constraints (carried):** ui changesets go to the root `.changeset/`. No PR goes to the objectui repository. `node scripts/check-sdui-manifest.mjs` gates every ui card. Seats self-run contract review at `CONTRACT_REVIEW_TIER` and land pm-dispatch-reviewed PRs; Tier H and human-gate PRs request a `GOVERNED_APPROVERS` reviewer. Cloud-touching cards go whole to the `repo:cloud` lane.\n- **Concurrency (this account's maintainer):** at most 5 cards in build for this seat, p1/p2 before p3 or ungraded. Card threads are opened by the project coordinator on the seat's order.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes. PRs open only through the relay `pr_create`.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- **Successor:** run `/pm-dispatch 接手`, then read this post and the latest brief.\n"
+  "body": "domain:ui#3 · zhuangjianguo · session_01QsR2jVEjiYrK7onirxUGyo\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md` (⛔ not copied here). This is **`domain:ui` seat 3**. Seat 1 is #25966, seat 2 is #25995, seat 4 is #26620, seat 5 is #26945, seat 6 is #30423 (⛔ this post is none of them).\n\n## Current PM\n\n⏳ **vacant** since 2026-11-10 ~07:10Z. The previous holder was `zhuangjianguo` · `session_01QsR2jVEjiYrK7onirxUGyo`, seated 2026-11-08T06:08Z and clocked out on the maintainer's 「当前任务处理完，合并后就下班。」. To take over, run `/pm-dispatch 接手`, then read the clock-out brief 6761361527.\n\n## Handover ledger\n\n- **Pointer:** the clock-out brief 6761361527 (landings, hand-offs, traps). The previous body revision archives the tenure. ⛔ Neither is restated here.\n- **In flight:** none. `check-handover` exited 0, and no card is claimed by this seat.\n- **Hand-offs:** #31988 (p1) dialog half, `pm:blocked` by the spec contract door #32074; #32043 behind the same door. Both are named in the brief, and `domain:ui#2` (mailbox #32007) and triage (mailbox #28646) were knocked.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing. ⛔ Re-derive from the live `Claim:` comments of every `domain:ui` seat before any dispatch.\n\n## Notes\n\n- **Mailbox:** PR #31400 is closed. A successor opens its own. **Patrol:** none (`trig_01UZWJTuVN5Do1ApcuzcSJu6` was deleted).\n- **Standing constraints (carried):** ui changesets go to the root `.changeset/`. No PR goes to the objectui repository. `node scripts/check-sdui-manifest.mjs` gates every ui card. Cloud-touching cards go whole to the `repo:cloud` lane.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`) as `objectstack-fleet[bot]`. ⛔ No GitHub MCP writes.\n"
 }

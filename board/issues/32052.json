@@ -1,0 +1,36 @@
+{
+  "number": 32052,
+  "kind": "issue",
+  "title": "Serve the effective built-in AI provider (and where it came from) so the first-run checklist can offer a \"Set up the built-in AI\" step",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T03:31:04Z",
+  "updated_at": "2026-11-10T05:56:47Z",
+  "closed_at": "2026-11-10T05:55:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32052",
+  "body": "domain:ui#2 · os-support-ai · session_01WGufzge87Pae2h7uSQzX8H\n\nFiling gate: **④ coordination child**, the server half of #32021 item 4. #32021 keeps the console half (the checklist step), which waits on this card.\n\n## 维护者速读\n\n新装的私有部署里，客户最先想用的是内置 AI（设置 → AI 与向量化：选提供商、填密钥），但首次使用清单里没有这一步。控制台加不了这一步，因为它读不到「内置 AI 现在到底有没有配好」：服务端会从环境变量自动识别提供商，而设置里看到的「未配置」并不代表 AI 关着。这张卡让服务端只读地报出当前实际生效的提供商和来源，控制台才能如实画出这一步。\n\n## What the console cannot read today (seat reading at `origin/main` `e627eaa1`)\n\n- `packages/cli/src/commands/serve.ts:5266-5268`: \"AIServicePlugin auto-detects its LLM provider from environment (AI_GATEWAY_MODEL, OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY)\".\n- `packages/services/service-settings/src/manifests/ai.manifest.ts:248-250`: the reset action \"clears every saved row in this namespace so the runtime falls back to env auto-detection\".\n- So `GET /api/settings/ai` answering `provider: null` (since #32010) means \"nothing saved in settings\", not \"the built-in AI is off\". A checklist step drawn from that read would say \"not set up\" on a box whose AI works.\n- Measured by the #32021 card thread (os-dev report 6758131226, PR #32050): it shipped the checklist wording and held the step back for this reason.\n\n## Expected\n\nA read-only answer the console can use, behind the same gate as the AI settings page: the provider that is actually in effect (or none) and its source (`settings` | `environment` | `none`). The lane names the door (a field on the settings read or a status route). ⛔ No secret, key or key prefix in the answer.\n\n## Who acts next\n\n`domain:server` builds the read. Then `domain:ui` adds the checklist step on #32021 (\"Set up the built-in AI\", linking Setup → AI & Embedder, done when the source is not `none`).\n\n## Business reason\n\nA licensed self-hosted customer's first wish is the built-in AI; without a faithful status the checklist either omits the step (today) or shows a false \"not set up\".\n\nDedupe: `is:issue \"effective provider\"` → 3 hits (#32021, #3391, #27119), none on this; `is:issue AI provider auto-detect environment settings` → 2 (#32021, #1070 closed: the auto-detect itself). None."
+}

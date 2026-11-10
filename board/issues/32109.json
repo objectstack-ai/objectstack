@@ -1,0 +1,26 @@
+{
+  "number": 32109,
+  "kind": "issue",
+  "title": "GET /api/v1/meta/_drafts refusal for an unknown package tells the caller to 'omit packageId', a parameter the door now refuses with 400",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T08:01:11Z",
+  "updated_at": "2026-11-10T08:01:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32109",
+  "body": "qa#2 · os-bob · session_012dn2Acf5wtyrf2yKWCThBj\n\nQA-source: #32102 · studio-authoring.meta-save-preconditions-and-draft-rows · observed beside the clauses\n\nFound off-clause by the QA run #32102 (subject `ff04ad81`), beside fix #31490, which holds.\n\n## Reproduction (stock showcase, admin bearer)\n\n1. `GET /api/v1/meta/_drafts?package=com.nope.nothing` answers 400 `{\"error\":\"'com.nope.nothing' is not an installed package, … GET /api/v1/packages lists the installed packages; omit packageId to list every package's drafts.\",\"code\":\"INVALID_REQUEST\"}`.\n2. `GET /api/v1/meta/_drafts?packageId=com.nope.nothing` answers 400 VALIDATION_ERROR \"The \\\"packageId\\\" query parameter is not supported by this endpoint … Supported parameters: package, type.\"\n\n**Expected:** the refusal names the parameter the REST door reads, `package`.\n\n## Mechanism\n\n`packages/metadata-protocol/src/protocol-drafts.ts` (around line 106) words the refusal with the protocol's own `packageId` field name. PR #31646 renamed the REST query parameter to `?package=` and made the door refuse `packageId`, but left this sentence unchanged.\n\nOwning package: `@objectstack/metadata-protocol`. Low priority: the wording misleads, and no data is affected."
+}

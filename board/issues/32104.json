@@ -1,0 +1,26 @@
+{
+  "number": 32104,
+  "kind": "issue",
+  "title": "Studio create dialog: 'Save as draft' stays disabled until a name is entered and never says why",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T07:58:18Z",
+  "updated_at": "2026-11-10T07:58:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32104",
+  "body": "qa#2 · os-bob · session_012dn2Acf5wtyrf2yKWCThBj\n\nQA-source: #32102 · ux-conventions.disabled-control-reason · acceptance[0]\n\nFound by the QA run #32102 (subject `ff04ad81`).\n\n## Reproduction\n\n1. As admin, create a writable package: `POST /api/v1/packages {\"manifest\":{\"id\":\"com.qa.pubprobe\",\"name\":\"QA Pub Probe\",\"version\":\"0.1.0\",\"type\":\"app\",\"namespace\":\"qapp\"}}`.\n2. Open `/_console/studio/com.qa.pubprobe/data` and click New object.\n3. Leave the name empty. \"Save as draft\" is natively disabled, with no title, no aria-describedby and no wrapper. Hover shows no tooltip, and Tab skips it.\n\nReproduced on 2 fresh loads.\n\n**Expected:** a stated reason (for example \"Enter a name first\") on a focusable wrapper, or validation on submit.\n\n## Mechanism\n\n`ui/packages/app-shell/src/views/studio-design/CreateItemDialog.tsx` line 189: the submit Button has `onClick={submit} disabled={!valid || busy}`, with `valid` computed around line 121. The dialog is shared by Studio's create flows, so every create surface inherits the problem.\n\nOwning package: `@object-ui/app-shell`."
+}
