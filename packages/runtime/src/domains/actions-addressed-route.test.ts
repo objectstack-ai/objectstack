@@ -305,10 +305,13 @@ describe('carry-in: an addressed call on an object falls back to the holder\'s o
         }
     });
 
-    it('CONTROL — MCP bare run_action(log_call, { objectName: lead }) answers as it did: not found', async () => {
+    it('CONTROL — MCP bare run_action(log_call, { objectName: lead }) is refused as the REST door refuses it: 404, no declaration', async () => {
         const { bridge, ran } = fixture();
         const err = await refusalOf(bridge.runAction('log_call', { objectName: 'lead' }));
-        expect(String(err.message)).toContain("not found on object 'lead'");
+        // [#31923] C3: the REST door's undeclared 404 (was the bridge's own
+        // uncoded "not found on object" sentence).
+        expect(err.status).toBe(404);
+        expect(String(err.message)).toContain("Action 'log_call' on 'lead' has no declaration");
         expect(ran).toEqual([]);
     });
 

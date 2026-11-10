@@ -679,6 +679,61 @@ Only headless-callable types appear (`script` with body or handler, `flow`);
 enforced per invocation. Details: [Actions as Tools](/docs/ai/actions-as-tools)
 and [Connect an MCP Client](/docs/ai/connect-mcp).
 
+## Call it from your own host code
+
+A host that runs actions from its own door, outside REST and MCP (an
+in-product AI tool, a job runner), calls `dispatchAction` from
+`@objectstack/runtime` instead of re-implementing the door's checks. It runs
+the same admission and dispatch as `POST /api/v1/actions/...` and answers what
+that door answers for the same call: the sign-in floor, `requiredPermissions`,
+the packaged-action switch, the type check, the param contract, the subject-row
+load, then the handler, flow or forward.
+
+```typescript
+import { dispatchAction } from '@objectstack/runtime';
+
+const answer = await dispatchAction(kernel, {
+  executionContext,            // the caller, as your door authenticated it
+  environmentId,               // optional; the kernel's default environment when absent
+  objectName: 'crm_lead',      // omit for a global (object-less) action
+  actionName: 'convert',
+  recordId,
+  params: { owner: 'u_42' },
+  posture: 'ai',               // your AI tool's door: see below
+  confirm: humanApproved,      // only read under `posture: 'ai'`
+  credentialHeaders,           // optional: the caller's own credentials (e.g. `authorization`, `cookie`)
+});
+if (answer.status !== 200) throw answer.body.error; // the REST envelope's error
+```
+
+Pick the **posture** by who drives your door:
+
+| `posture` | Rules | Use it for |
+|:---|:---|:---|
+| `'rest'` (default) | Exactly the REST door's. | A door a person drives, or your own server code. |
+| `'ai'` | The REST door's, plus the three the MCP `run_action` tool adds: a `sys_*` action needs its own `ai.exposed`, every action needs `ai.exposed: true`, and an action with `ai.requiresConfirmation` is refused **428** `ACTION_CONFIRMATION_REQUIRED` until the call carries `confirm: true`. A script action with no handler binding is also refused. | **A host's in-product AI tool** — an agent picks the action, so it takes the AI door's rules. |
+
+`posture` is `'rest'`, `'ai'` or absent (`'rest'`); any other value is
+refused **400** `VALIDATION_FAILED` before anything runs, so a misspelt
+posture cannot quietly drop the AI rules.
+
+`credentialHeaders` are the caller's own credential headers, read the way the
+REST door reads its request's: a same-origin `type: 'api'` action forwards
+with them, and its target authorizes the caller itself. Omit them and such an
+action forwards with none. `environmentId` names the environment the action
+runs in; without it the kernel's default environment is used.
+
+`namespace` addresses an installed package's action the way the
+`/api/v1/actions/:namespace/:object/:action` path does (`_env` names the
+environment's own). A host call writes the usual invocation audit row,
+without a `surface`.
+
+The MCP `run_action` tool runs this same sequence under `'ai'`, so its
+refusals carry the REST door's status and code: a name nothing declares is
+**404** `RESOURCE_NOT_FOUND`, a flow action with no automation service is
+**503**, a caller without the action's capability is **403**, and an object
+whose package is disabled is **404** `OBJECT_PACKAGE_DISABLED`.
+
 ## Troubleshooting
 
 | Symptom | Cause → fix |

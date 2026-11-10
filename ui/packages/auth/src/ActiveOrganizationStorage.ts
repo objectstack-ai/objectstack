@@ -113,6 +113,26 @@ const DEVICE_SCOPED_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Keys that survive a SIGN-OUT, on top of {@link DEVICE_SCOPED_KEYS}: the
+ * language the sign-in page is painted in. `objectui-locale` (the language
+ * picked on this device) and `objectui-locale-seed` (the language this device
+ * was last served) are `@object-ui/i18n`'s `LOCALE_STORAGE_KEY` and
+ * `LOCALE_SEED_STORAGE_KEY`, whose declared signed-out behaviour is "the
+ * language of this browser's last owner, until someone else signs in". Each
+ * holds a language tag and nothing else. A change of owner still drops them
+ * ({@link purgePreviousUserClientState}).
+ *
+ * Spelled out rather than imported, for the same dependency reason as the
+ * token key above; `signOutPurge.test.tsx` in `@object-ui/app-shell` imports
+ * both constants and holds the spellings together by behaviour.
+ */
+const SIGNED_OUT_KEPT_KEYS: ReadonlySet<string> = new Set([
+  ...DEVICE_SCOPED_KEYS,
+  'objectui-locale',
+  'objectui-locale-seed',
+]);
+
+/**
  * `localStorage` / `sessionStorage`, or `undefined` where they are absent or
  * blocked. Accessing the global itself can throw (partitioned iframes, some
  * privacy modes), so the guard has to be a try/catch and not a `typeof` test
@@ -209,10 +229,12 @@ function removePersisted(key: string): boolean {
  * refactor" the card scopes this fix away from. What IS mirrored is the
  * reporting channel: a key whose `removeItem` throws is named in a
  * `console.warn`, same as `clear()`, so a partial sweep is discoverable
- * instead of silent — the caller (`SessionUserScope.adopt`, on the sign-in
- * path) still cannot act on it and must not throw either.
+ * instead of silent — the callers (`SessionUserScope.adopt` on the sign-in
+ * path, {@link purgeSignedOutUserClientState} on the sign-out path) still
+ * cannot act on it and must not throw either. `kept` is the allowlist of keys
+ * that survive; `caller` names the purge in the report.
  */
-function sweepStore(store: Storage | undefined): void {
+function sweepStore(store: Storage | undefined, kept: ReadonlySet<string>, caller: string): void {
   if (!store) return;
   let keys: string[];
   try {
@@ -222,7 +244,7 @@ function sweepStore(store: Storage | undefined): void {
   }
   const unswept: string[] = [];
   for (const key of keys) {
-    if (DEVICE_SCOPED_KEYS.has(key)) continue;
+    if (kept.has(key)) continue;
     try {
       store.removeItem(key);
     } catch {
@@ -231,7 +253,7 @@ function sweepStore(store: Storage | undefined): void {
   }
   if (unswept.length > 0) {
     console.warn(
-      `[purgePreviousUserClientState] could not remove ${unswept.length} key(s) from storage: ` +
+      `[${caller}] could not remove ${unswept.length} key(s) from storage: ` +
         `${unswept.join(', ')}. The previous user's state may still be readable under these keys.`,
     );
   }
@@ -254,8 +276,32 @@ function sweepStore(store: Storage | undefined): void {
  */
 export function purgePreviousUserClientState(): void {
   ActiveOrganizationStorage.clear();
-  sweepStore(safeStore('local'));
-  sweepStore(safeStore('session'));
+  sweepStore(safeStore('local'), DEVICE_SCOPED_KEYS, 'purgePreviousUserClientState');
+  sweepStore(safeStore('session'), DEVICE_SCOPED_KEYS, 'purgePreviousUserClientState');
+}
+
+/**
+ * Drop the signed-out user's client state: the same allowlist sweep as
+ * {@link purgePreviousUserClientState}, run when this browser no longer holds
+ * a session — every `AuthProvider.signOut()`, and every session read that
+ * answers "no session" on a browser that has held one (an expired, revoked or
+ * elsewhere-ended session, at boot or in place).
+ *
+ * Every key in both stores goes except {@link SIGNED_OUT_KEPT_KEYS}: what a
+ * list, a draft, a recents cache or any later feature wrote for the signed-out
+ * user is gone before the sign-in page is shown, without anyone naming it
+ * here. The session-user pointer is kept, so a DIFFERENT user's sign-in still
+ * sees a previous owner and runs its own purge.
+ *
+ * The sweep runs BEFORE {@link ActiveOrganizationStorage.clear}: the sweep
+ * needs no org scope, and `clear()` then nulls the in-memory copy and
+ * re-checks the persisted key by read-back. Never throws — the session has
+ * already ended, and nothing on that path can refuse it.
+ */
+export function purgeSignedOutUserClientState(): void {
+  sweepStore(safeStore('local'), SIGNED_OUT_KEPT_KEYS, 'purgeSignedOutUserClientState');
+  sweepStore(safeStore('session'), SIGNED_OUT_KEPT_KEYS, 'purgeSignedOutUserClientState');
+  ActiveOrganizationStorage.clear();
 }
 
 /**

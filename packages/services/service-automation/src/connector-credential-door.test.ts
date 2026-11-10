@@ -749,7 +749,7 @@ describe('[#27237] contract review: an encoded spelling of the value is withheld
         const factory: ConnectorProviderFactory = (ctx) => {
             provider.state.materialized.push(ctx);
             const key = ctx.auth?.type === 'api-key' ? ctx.auth.key : '';
-            const echo = `GET https://erp.example/orders?${new URLSearchParams({ api_key: key })} was refused`;
+            const echo = `GET https://erp.example/orders?${new URLSearchParams({ api_key: key, filter: key })} was refused`;
             return {
                 def: { name: ctx.name, label: ctx.label, type: 'api', actions: [{ key: 'request', label: 'Request' }] } as unknown as Connector,
                 handlers: { request: async () => ({ status: 401, ok: false, body: { message: echo } }) },
@@ -761,7 +761,11 @@ describe('[#27237] contract review: an encoded spelling of the value is withheld
         await engine.setConnectorCredential({ ref: REF, value: ENCODABLE, context: ADMIN });
         expect(await call('erp')).toMatchObject({ status: 401 });
         const reason = engine.getConnectorDegradedReason('erp') ?? '';
-        expect(reason).toContain('[credential withheld]');
+        // The instance's own `paramName` pair is a credential part the
+        // connector metadata read withholds, so it goes, pair and value
+        // together; the same value under a name the read keeps is withheld in
+        // its form-encoded spelling.
+        expect(reason).toContain('the upstream said: GET https://erp.example/orders?filter=[credential withheld] was refused');
 
         for (const [where, text] of [
             ['reason on a call', reason],

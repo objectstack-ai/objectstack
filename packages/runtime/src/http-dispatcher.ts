@@ -55,6 +55,7 @@ import { createApprovalsActDomain, APPROVALS_ACT_ROUTE } from './domains/approva
 import { createWebhooksRedeliverDomain } from './domains/webhooks.js';
 import { createAiDomain, handleAIRequest } from './domains/ai.js';
 import { createActionsDomain, handleActionsRequest } from './domains/actions.js';
+import { dispatchActionRequest, type ActionDispatchAnswer, type ActionDispatchRequest } from './action-dispatch.js';
 import { createMcpDomains, handleMcpRequest, handleMcpSkillRequest, buildMcpBridge } from './domains/mcp.js';
 import { createMetaDomain, handleMetadataRequest } from './domains/meta.js';
 import { createDataDomain, handleDataRequest } from './domains/data.js';
@@ -2869,6 +2870,15 @@ export class HttpDispatcher {
     /** Thin delegate — body extracted to `./domains/actions.ts` (D11③ PR-9). */
     async handleActions(path: string, method: string, body: any, _context: HttpProtocolContext): Promise<HttpDispatcherResult> {
         return handleActionsRequest(this.domainDeps, path, method, body, _context);
+    }
+
+    /**
+     * A host's own action door over this dispatcher's deps — the REST
+     * `/actions` door's sequence for a call that arrived as values
+     * (`./action-dispatch.ts#dispatchAction`, the published entry).
+     */
+    async dispatchHostAction(request: ActionDispatchRequest): Promise<ActionDispatchAnswer> {
+        return dispatchActionRequest(this.domainDeps, request);
     }
 
     /** Thin delegate — body extracted to `./domains/ai.ts` (D11③ PR-7). */
