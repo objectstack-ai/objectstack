@@ -72,7 +72,8 @@
         "integration-system.connector-auth-kind-application",
         "integration-system.connector-descriptor-audit",
         "integration-system.connector-degraded-recovery",
-        "automation.connector-dispatch-matrix"
+        "automation.connector-dispatch-matrix",
+        "api-backend.automation-namespace-address"
       ]
     },
     "crud_endpoints": {
@@ -177,7 +178,8 @@
         "automation.flow-reference-package-resolution",
         "platform-core.activation-ledger-package-key-upgrade",
         "platform-core.stored-reference-package-backfill-upgrade",
-        "cli.address-grammar-reserved-names"
+        "cli.address-grammar-reserved-names",
+        "api-backend.automation-namespace-address"
       ]
     },
     "hook": {
@@ -281,7 +283,9 @@
         "studio-authoring.access-owd-and-suggestions",
         "access-security.permission-set-package-resolution",
         "access-security.ai-service-account-agent-ceiling",
-        "identity-auth.idp-group-permission-set-mapping"
+        "identity-auth.idp-group-permission-set-mapping",
+        "access-security.permission-set-address-in-execution-context",
+        "access-security.agent-ceiling-set-assignment-refusal"
       ]
     },
     "picklist": {
@@ -298,7 +302,9 @@
         "approvals.dynamic-approver-routing",
         "identity-auth.teams-bu-membership",
         "approvals.approver-resolution-matrix",
-        "access-security.permission-set-package-resolution"
+        "access-security.permission-set-package-resolution",
+        "access-security.ai-service-account-agent-ceiling",
+        "access-security.agent-ceiling-set-assignment-refusal"
       ]
     },
     "qa": {
@@ -345,7 +351,8 @@
       "items": [
         "platform-core.seed-integrity",
         "platform-core.marketplace-install-local-lifecycle",
-        "platform-core.seed-mode-matrix"
+        "platform-core.seed-mode-matrix",
+        "access-security.agent-ceiling-set-assignment-refusal"
       ]
     },
     "sharing_rule": {

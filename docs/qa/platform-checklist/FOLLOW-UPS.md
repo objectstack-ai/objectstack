@@ -958,27 +958,43 @@ browser clause is the SSO Providers record. So this section supports **no** clai
 else is missing. No live run was made: every clause is read from source, and each item's
 `automated.ref` names the pins that hold it today.
 
-- **24 new items**, all `since: "v18.4"` except the three `planned` ones, whose `since` is
+- **25 new items**, all `since: "v18.4"` except the one `planned` item, whose `since` is
   `null`: a planned item's `since` is a target release, and none is chosen.
-  - Theme 1, 17 items (14 active, 3 planned):
-    - `api-backend.meta-qualified-item-read` and `api-backend.actions-namespace-address`;
+  - Theme 1, 17 items (16 active, 1 planned):
+    - `api-backend.meta-qualified-item-read`, `api-backend.actions-namespace-address` and
+      `api-backend.automation-namespace-address`;
     - `ai.mcp-namespace-faces`;
     - `platform-core.namespace-object-name-refusal`,
       `platform-core.namespace-co-owner-name-refusal` and `platform-core.bare-name-one-holder-refusal`;
     - `cli.address-grammar-reserved-names`;
-    - `access-security.permission-set-package-resolution` and
+    - `access-security.permission-set-package-resolution`,
+      `access-security.permission-set-address-in-execution-context` and
       `access-security.sharing-queue-assignment-package-resolution`;
     - `automation.flow-reference-package-resolution`;
     - `integration-system.job-package-key`;
     - the upgrade pair `platform-core.activation-ledger-package-key-upgrade` and
       `platform-core.stored-reference-package-backfill-upgrade`, with `cli.migrate-stored-references`;
-    - planned: `api-backend.automation-namespace-address`, `api-backend.client-sdk-namespace-address`
-      and `access-security.permission-set-address-in-execution-context`.
-  - Theme 3, 7 items (all active):
+    - planned: `api-backend.client-sdk-namespace-address`.
+  - Theme 3, 8 items (all active):
     - `identity-auth.ai-service-account-register-and-key` and `identity-auth.ai-service-account-lifecycle`;
-    - `access-security.ai-service-account-agent-ceiling` and `access-security.credential-use-audit-row`;
+    - `access-security.ai-service-account-agent-ceiling`,
+      `access-security.agent-ceiling-set-assignment-refusal` and `access-security.credential-use-audit-row`;
     - `identity-auth.scim-refused-audit-row`, `identity-auth.idp-group-permission-set-mapping` and
       `identity-auth.sso-provider-groups-claim`.
+- **Re-read at the merged base `0f7389cc`.** main moved 31 commits before this landed.
+  Two surfaces first written here as `planned` landed in that time: the qualified
+  `/automation`, hook and connector doors (#32001, #32049), and the context's permission set
+  addresses (#32027). Both items are now active. They are new items, not promotions, because
+  neither reached main as `planned`. #32056 widened the MCP agent ceiling set rule (ADR-0090
+  D10) to four more doors. That rule is not the AI service account's ceiling (ADR-0151 D3), so
+  it has its own item, `access-security.agent-ceiling-set-assignment-refusal`.
+  `access-security.ai-service-account-agent-ceiling` now covers both of its own paths (a set
+  and a position, by insert and by update) and the point where the two rules meet. #31968
+  made `os validate` and `os build` refuse a namespace that spells an address literal. That
+  left `cli.address-grammar-reserved-names` with a fixture no build can produce, so that item
+  now drives the build refusal and hand-edits the artifact for its install leg.
+  `cli.migrate-stored-references` gains the report's new `literalNamespaces` section as a
+  variant. Those six items are read at `0f7389cc`; the rest at `60f8149e`.
 - **The upgrade path.** The epic asks for the upgrade from an 18.3.0 database's stored
   references, not only fresh installs. The two upgrade items and the CLI item boot this tree
   on an 18.3.0-shaped SQLite copy, built by one of two routes:
@@ -999,16 +1015,13 @@ else is missing. No live run was made: every clause is read from source, and eac
 
 ### 16a. Declared but not landed — written as `planned`, already carded
 
-- ADR-0150 D5 declares the qualified doors on `/automation`, `/automation/hooks` and
-  `/automation/connectors`. `ROUTE_LEDGER` has no such row, and `readNamespacePositionSegment`
-  has no `/automation` caller. Tracked by #31691 (open), which landed only `/meta` and
-  `/actions`.
 - The client SDK takes no namespace: `actions.invoke` takes `objectName, actionName`, and
   `meta.getItem` takes `{ packageId }`. Tracked by #31695 (open).
-- `ExecutionContextSchema.permissionSetAddresses` is declared (#31978). However,
-  `assemble-execution-context.ts` always sets it to `undefined`. Tracked by #31971 (open).
 - The same-object, same-name action pair's 409 on the bare door is not landed (#31697). The
   actions item says not to score its absence.
+- Landed before merge, so no longer listed here: the qualified `/automation`, hook and
+  connector doors (#32001, #32049; #31691 is closed) and the context's permission set
+  addresses (#32027, part of #31971). Both are active items now.
 
 ### 16b. Measured from source — notes for owners, no card filed
 
@@ -1025,6 +1038,17 @@ else is missing. No live run was made: every clause is read from source, and eac
 - **`create-key` past the expiry ceiling** answers `400 VALIDATION_FAILED` at `expires_at`,
   with `POST /keys`'s message, rather than `API_KEY_EXPIRY_TOO_LONG`. The route-ledger row
   records this as the accepted shape. No action.
+
+- **`assemble-execution-context.test.ts` still calls the addresses "decided but not yet
+  filled".** #32027 fills them. The case passes only because its authz fixture carries no
+  addresses, so it cannot tell the OAuth agent arm (no addresses, by design) from the human
+  arm. A case whose authz carries addresses would pin the agent arm. Until then,
+  `access-security.permission-set-address-in-execution-context` scores that clause from the
+  source and says so.
+- **The MCP ceiling set's refusal sentence says "a person" to an AI service account too.** The
+  rule judges every holder, so granting `mcp_agent_data_read` to an account is refused, which
+  is right, with "…not a permission set for a person…". The wording reads oddly for an agent
+  holder. No action proposed.
 
 ### 16c. Fixtures worth adding
 

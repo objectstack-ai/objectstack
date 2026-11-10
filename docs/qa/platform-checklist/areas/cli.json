@@ -2623,7 +2623,7 @@
     },
     {
       "id": "cli.address-grammar-reserved-names",
-      "title": "The address grammar reserves its segments: a bucket 2/3 name led by _ is refused at defineStack and os validate, a namespace that spells a grammar literal is refused at the running install door (a boot-registered one boots with a warning), and lint's namespace-prefix rule judges only capabilities and positions",
+      "title": "The address grammar reserves its segments: a bucket 2/3 name led by _ is refused at defineStack and os validate; a namespace that spells a grammar literal is refused by os validate and os build (exit 1, no artifact) and at the running install door, while a package the boot registers keeps booting with a warning; and lint's namespace-prefix rule judges only capabilities and positions",
       "since": "v18.4",
       "status": "active",
       "revision": 1,
@@ -2633,13 +2633,15 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a scratch app that declares a flow named _qa_flow; a compiled scratch package whose manifest namespace is hooks (a NAMESPACE_REFUSED_LITERALS value); and a scratch app with a flow whose name carries no namespace prefix"
+          "a scratch app that declares a flow named _qa_flow; a scratch app whose manifest namespace is hooks (a NAMESPACE_REFUSED_LITERALS value), and a copy of it whose namespace is triggers (a namespace that only contains a literal); and a scratch app with a flow whose name carries no namespace prefix",
+          "for the install leg, an artifact that names the namespace hooks: os build refuses to write one since #31968, so build the hooks app under any other namespace and set manifest.namespace to hooks in its dist/objectstack.json by hand"
         ]
       },
       "steps": [
         "os validate the app with _qa_flow; record the exit code and output",
-        "install the hooks-namespaced package into a running boot: os package install FILE; record status and body",
-        "add the same package to a scratch app's code-registered packages and boot it; read the boot log",
+        "os validate, then os build, the hooks app; record each exit code and output, and whether dist/objectstack.json was written; repeat both with the triggers copy",
+        "install the hand-edited hooks artifact into a running boot: os package install FILE; record status and body",
+        "add the hooks package to a scratch app's code-registered packages and boot it with os dev (not a build); read the boot log",
         "os lint the app whose flow name has no namespace prefix; record findings for naming/namespace-prefix"
       ],
       "acceptance": [
@@ -2650,6 +2652,12 @@
           "evidence": "the output and exit code"
         },
         {
+          "clause": "os validate and os build refuse a namespace that spells a grammar literal, naming it, and the build writes no artifact; a namespace that only contains a literal passes",
+          "oracle": "build",
+          "verify": "for the hooks app both commands exit 1 with the judge's sentence naming hooks and the doors that serve it, and no dist/objectstack.json is written (packages/cli/src/utils/namespace-address-literals.ts#findNamespaceAddressLiteralRefusals, which asks packages/spec/src/kernel/address-grammar.ts#validateNamespaceNotAddressLiteral); the triggers copy validates and builds",
+          "evidence": "the exit codes and output of the four runs, and the dist directory listing"
+        },
+        {
           "clause": "the running install door refuses a namespace that spells a grammar literal with 422 naming it",
           "oracle": "api",
           "verify": "os package install answers 422 PLUGIN_REGISTER_FAILED whose message names the namespace hooks (packages/cloud-connection/src/marketplace-install-local-plugin.ts answers a register refusal of an inline manifest so; the registry raises 422 NAMESPACE_CONFLICT through packages/spec/src/kernel/address-grammar.ts#validateNamespaceNotAddressLiteral; #NAMESPACE_REFUSED_LITERALS holds actions, connectors, global, hooks, oauth and trigger)",
@@ -2658,7 +2666,7 @@
         {
           "clause": "a boot-registered package with such a namespace boots, with a warning naming it",
           "oracle": "log",
-          "verify": "the boot completes and the log names the namespace hooks (packages/objectql/src/registry-namespace-address-literal.test.ts)",
+          "verify": "the boot completes and the log names the namespace hooks: defineStack's one warning (packages/spec/src/stack.zod.ts) and the registry's (packages/objectql/src/registry-namespace-address-literal.test.ts)",
           "evidence": "the boot log lines"
         },
         {
@@ -2670,23 +2678,25 @@
       ],
       "negative": [
         "a _-led flow name accepted by os validate is a FAIL: the router reads _-led segments as its own",
-        "a hooks namespace installed at the running door is a FAIL"
+        "a hooks namespace installed at the running door is a FAIL",
+        "an artifact os build writes under the namespace hooks is a FAIL (#31968)"
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/spec/src/kernel/address-grammar.test.ts, packages/spec/src/kernel/router-reserved-name.test.ts, packages/objectql/src/registry-namespace-address-literal.test.ts"
+        "ref": "packages/spec/src/kernel/address-grammar.test.ts, packages/spec/src/kernel/router-reserved-name.test.ts, packages/objectql/src/registry-namespace-address-literal.test.ts, packages/cli/test/build-namespace-address-literal.test.ts, packages/cli/src/utils/namespace-address-literals.test.ts, packages/spec/src/stack-namespace-address-literal.test.ts"
       },
       "source": [
-        "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D5 (literal segments win; _-led names refused; the install gate refuses a literal namespace)",
+        "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D5 (literal segments win; _-led names refused; a literal namespace is refused at the build doors and the install gate)",
         "packages/spec/src/kernel/address-grammar.ts#NAMESPACE_REFUSED_LITERALS and #validateNamespaceNotAddressLiteral",
+        "packages/cli/src/utils/namespace-address-literals.ts#findNamespaceAddressLiteralRefusals (os validate and os build)",
         "packages/cli/src/commands/lint.ts#PREFIX_JUDGED_COLLECTIONS",
-        "#31765 (P), #31959 (the install door's literal refusal); #31968 (refusing it at build time) is open"
+        "#31765 (P), #31959 (the install door's literal refusal), #31968 (the build doors' refusal and defineStack's warning)"
       ],
       "history": [
         {
           "revision": 1,
           "date": "2026-11-10",
-          "change": "initial — ADR-0150 child P and the G1 install refusal (#31765, #31959). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
+          "change": "initial — ADR-0150 child P, the G1 install refusal and the build doors' refusal (#31765, #31959, #31968). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e and, after #31968 landed, at 0f7389cc; no live run made",
           "ref": "#32019"
         }
       ]
@@ -2736,21 +2746,24 @@
       "traps": ["destructive-in-place"],
       "automated": {
         "kind": "unit",
-        "ref": "packages/cli/src/commands/migrate/stored-references.integration.test.ts"
+        "ref": "packages/cli/src/commands/migrate/stored-references.integration.test.ts, packages/cli/src/utils/stored-package-references.literal-namespace.test.ts"
       },
       "source": [
         "packages/cli/src/utils/stored-package-references.ts#collectStoredPackageReferences and #bindStoredPackageReference",
         "packages/cli/src/commands/migrate/stored-references/index.ts (the read-only report and its deterministic --json)",
         "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D10",
-        "#31961 (S4)"
+        "#31961 (S4), #31968 (the literalNamespaces section)"
       ],
       "history": [
         {
           "revision": 1,
           "date": "2026-11-10",
-          "change": "initial — ADR-0150 child S4 (#31961). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
+          "change": "initial — ADR-0150 child S4 (#31961), with the literalNamespaces section #31968 added. Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e and, for that section, at 0f7389cc; no live run made",
           "ref": "#32019"
         }
+      ],
+      "variants": [
+        "an installed package whose namespace spells an address literal (one the boot kept, with its warning) is listed under literalNamespaces with its id, its namespace and the install door's sentence, and the text face says its items are read with ?package=ID (packages/cli/src/utils/stored-package-references.ts#LiteralNamespaceFinding, #31968)"
       ]
     }
   ]
