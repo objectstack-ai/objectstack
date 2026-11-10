@@ -233,6 +233,12 @@ describe('auth route ledger hygiene', () => {
       // of the catch-all), and the `live.has(route)` loop below holds it to the
       // same proof — better-auth serves no address read.
       'GET /api/v1/auth/admin/client-address',
+      // [#32085] The delete action's preflight, on this pin's own terms:
+      // `auth-plugin.ts` mounts it itself (a `rawApp.get` on the
+      // `${basePath}/admin/sso/delete-impact` template, ahead of the
+      // catch-all), and the `live.has(route)` loop below holds it to the same
+      // proof — `@better-auth/sso` serves no delete-impact read.
+      'GET /api/v1/auth/admin/sso/delete-impact',
       'GET /api/v1/auth/authorized-clients',
       'GET /api/v1/auth/bootstrap-status',
       // On this pin's own terms: `auth-plugin.ts` mounts it itself (a
@@ -300,6 +306,13 @@ describe('auth route ledger hygiene', () => {
       'POST /api/v1/auth/admin/sso/register-saml',
       'POST /api/v1/auth/admin/sso/request-domain-verification',
       'POST /api/v1/auth/admin/sso/set-groups-claim',
+      // [#32085] The provider edit of the SSO Providers form, on this pin's
+      // own terms: `auth-plugin.ts` mounts it itself (a `rawApp.post` on the
+      // `${basePath}/admin/sso/update-provider` template, ahead of the
+      // catch-all, a different path from the vendor's `/sso/update-provider`
+      // it re-dispatches to), and the `live.has(route)` loop below holds it to
+      // the same proof.
+      'POST /api/v1/auth/admin/sso/update-provider',
       'POST /api/v1/auth/admin/sso/verify-domain',
       'POST /api/v1/auth/admin/unlock-user',
       'POST /api/v1/auth/authorized-clients/withdraw',

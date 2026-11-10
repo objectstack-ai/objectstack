@@ -102,7 +102,7 @@ import { registerExternalMembershipGuard } from './external-membership.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { MANAGED_EXTENSION_EDITABLE_FIELDS } from './managed-extension-fields.js';
 import { runSetInitialPassword } from './set-initial-password.js';
-import { createEngineSsoProviderConfigReader, runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runSetSsoGroupsClaim, runShowSsoGroupsClaim, runVerifyDomain, type AuthRequestHandler, type SsoProviderConfigEngine } from './register-sso-provider.js';
+import { createEngineSsoProviderConfigReader, runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runSetSsoGroupsClaim, runShowSsoGroupsClaim, runSsoProviderDeleteImpact, runUpdateSsoProviderFromForm, runVerifyDomain, type AuthRequestHandler, type SsoProviderConfigEngine } from './register-sso-provider.js';
 import { runResendVerificationEmail } from './send-verification-email.js';
 import { runSysSessionRevoke, sysSessionRevokeDepsFor } from './sys-session-revoke.js';
 import { oneAccountReadFaultAtMount, oneAccountRefusalAtMount } from './one-account-per-request.js';
@@ -5096,6 +5096,51 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] sso/set-groups-claim bridge failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // [#32085] The provider lifecycle's two console doors, same ADR-0068 D4
+    // platform-admin gate as the other `/admin/sso/*` bridges, judged first:
+    //   • edit — the "Edit SAML Settings" / "Edit OIDC Settings" actions post
+    //     flat fields; the bridge writes through the vendor's own
+    //     /sso/update-provider (provider access, the held-caller refusal and
+    //     the identity-while-linked refusal all run) and answers the names of
+    //     the fields it changed, never a value (`register-sso-provider.ts`);
+    //   • delete impact — the delete action's preflight: how many users the
+    //     delete unlinks, how many of them lose access, and the group mappings
+    //     and projected grants that go with it (`sso-provider-lifecycle.ts`).
+    rawApp.post(`${basePath}/admin/sso/update-provider`, async (c: any) => {
+      try {
+        const gated = await gateAdmin(c);
+        if (gated instanceof Response) return gated;
+        const { status, body } = await runUpdateSsoProviderFromForm(handleWithTransportOf(c), c.req.raw, readSsoProviderConfigs);
+        return c.json(body, status as any);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] sso/update-provider bridge failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    rawApp.get(`${basePath}/admin/sso/delete-impact`, async (c: any) => {
+      try {
+        const gated = await gateAdmin(c);
+        if (gated instanceof Response) return gated;
+        const engine = this.authManager!.getDataEngine();
+        if (!engine) {
+          return c.json({ success: false, error: { code: 'SERVICE_UNAVAILABLE', message: 'No data engine is wired, so the users linked to the provider cannot be counted.' } }, 503);
+        }
+        const { status, body } = await runSsoProviderDeleteImpact(
+          (c.req.queries() ?? {}) as Record<string, string[]>,
+          readSsoProviderConfigs,
+          engine,
+        );
+        return c.json(body, status as any);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] sso/delete-impact read failed', err);
         return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
       }
     });

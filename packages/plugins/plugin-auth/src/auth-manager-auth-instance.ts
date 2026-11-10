@@ -132,6 +132,7 @@ export interface AuthInstanceHost {
   assertRemoveMemberPermitted: AuthManager['assertRemoveMemberPermitted'];
   assertRevokeSessionIdentifiesRecord: AuthManager['assertRevokeSessionIdentifiesRecord'];
   assertSsoProviderDeletable: AuthManager['assertSsoProviderDeletable'];
+  assertSsoProviderDomainFree: AuthManager['assertSsoProviderDomainFree'];
   auditRefusedSignIn: AuthManager['auditRefusedSignIn'];
   buildPluginList: AuthManager['buildPluginList'];
   clearSignInLockout: AuthManager['clearSignInLockout'];
@@ -168,6 +169,7 @@ export interface AuthInstanceHost {
   sendChangeEmailNotice: AuthManager['sendChangeEmailNotice'];
   sendExistingAccountSignUpNotice: AuthManager['sendExistingAccountSignUpNotice'];
   settleSignInAttempt: AuthManager['settleSignInAttempt'];
+  settleSsoProviderDelete: AuthManager['settleSsoProviderDelete'];
   signUpForcedOff: AuthManager['signUpForcedOff'];
   ssoDiscoveryTrustedOrigins: AuthManager['ssoDiscoveryTrustedOrigins'];
   stampLastLogin: AuthManager['stampLastLogin'];
@@ -801,6 +803,7 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
           assertRemoveMemberPermitted: (...a) => this.assertRemoveMemberPermitted(...a),
           assertRevokeSessionIdentifiesRecord: (...a) => this.assertRevokeSessionIdentifiesRecord(...a),
           assertSsoProviderDeletable: (...a) => this.assertSsoProviderDeletable(...a),
+          assertSsoProviderDomainFree: (...a) => this.assertSsoProviderDomainFree(...a),
           get config() { return readConfig(); },
           existingAddressSignUpAnswersSuccess: (...a) => this.existingAddressSignUpAnswersSuccess(...a),
           hasExistingUserFor: (...a) => this.hasExistingUserFor(...a),
@@ -829,6 +832,7 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
           roleChangeGrantDeps: (...a) => this.roleChangeGrantDeps(...a),
           sendChangeEmailNotice: (...a) => this.sendChangeEmailNotice(...a),
           settleSignInAttempt: (...a) => this.settleSignInAttempt(...a),
+          settleSsoProviderDelete: (...a) => this.settleSsoProviderDelete(...a),
           stampLastLogin: (...a) => this.stampLastLogin(...a),
           stampPasswordChangedAt: (...a) => this.stampPasswordChangedAt(...a),
         };
