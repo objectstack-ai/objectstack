@@ -51,6 +51,10 @@ interface RigOptions {
     packageDisabled?: boolean;
     /** The metadata plane reports a degraded read, or its object listing throws. */
     metaDegraded?: 'diagnosed' | 'listThrows';
+    /** What a script action answers on this kernel, so a two-kernel host can tell which kernel ran it. */
+    ranOn?: string;
+    /** Services this kernel registers beside the rig's own (`kernel-resolver`, `auth`). */
+    services?: Record<string, unknown>;
 }
 
 function makeRig(actions: any[], opts: RigOptions = {}) {
@@ -61,7 +65,7 @@ function makeRig(actions: any[], opts: RigOptions = {}) {
     const automation = opts.automation === false ? null : { execute, getFlow };
     const objectDef: any = { name: OBJECT, label: 'Task', actions, _packageId: PACKAGE };
     const schemaOf = (n: string) => (n === OBJECT ? objectDef : undefined);
-    const executeAction = vi.fn(async () => ({ ran: 'script' }));
+    const executeAction = vi.fn(async () => ({ ran: opts.ranOn ?? 'script' }));
     const disabled = new Set(opts.disabledActions ?? []);
     const ql: any = {
         executeAction,
@@ -117,7 +121,7 @@ function makeRig(actions: any[], opts: RigOptions = {}) {
                 : n === 'automation' ? automation
                     : n === 'protocol' ? protocol
                         : n === 'audit' ? audit
-                            : null;
+                            : opts.services?.[n] ?? null;
     const kernel: any = { getService: resolve, getServiceAsync: async (n: string) => resolve(n), context: { getService: resolve } };
     const dispatcher = new HttpDispatcher(kernel);
     const ran = () => executeAction.mock.calls.length + execute.mock.calls.length;
@@ -155,7 +159,7 @@ function makeRig(actions: any[], opts: RigOptions = {}) {
         }
     };
 
-    return { viaRest, viaHost, viaMcp, ran, rows };
+    return { viaRest, viaHost, viaMcp, ran, rows, kernel };
 }
 
 const gated = { name: 'gated_ping', label: 'Gated', type: 'script', target: 'gated_ping', requiredPermissions: ['manage_x'], ai: EXPOSED };
@@ -273,6 +277,125 @@ describe('dispatchAction answers what the REST /actions door answers', () => {
             expect((await rig.viaHost(MEMBER_EC, 'confirmed', { posture: 'ai', confirm: true })).status).toBe(200);
             expect((await makeRig([confirmed]).viaHost(MEMBER_EC, 'confirmed')).status).toBe(200);
         });
+
+        // The type refusal is the same 400 at the same point under both
+        // postures; only its sentence is the door's. `rest` prescribes the
+        // REST caller's next step (call the off-origin target, open the
+        // client-side target); `ai` answers the AI door's own sentence, which
+        // names no target, since an agent can do neither.
+        it.each([
+            ['a client-side (url) action', { name: 'go_url', label: 'Go', type: 'url', target: '/x/go', ai: EXPOSED }],
+            ['an off-origin api action', { name: 'remote_ping', label: 'Remote', type: 'api', target: 'https://elsewhere.example/ping', method: 'POST', ai: EXPOSED }],
+        ])('%s: 400 under both postures; rest names its target, ai answers the AI door\'s sentence without it', async (_label, action) => {
+            const rig = makeRig([action]);
+            const rest = await rig.viaHost(MEMBER_EC, action.name);
+            const restDoor = await rig.viaRest(MEMBER_EC, action.name);
+            const ai = await rig.viaHost(MEMBER_EC, action.name, { posture: 'ai' });
+
+            expect({ status: rest.status, code: rest.body.error!.code }).toEqual({ status: 400, code: 'VALIDATION_ERROR' });
+            expect(rest.body.error!.message).toBe(restDoor.body.error.message);
+            expect(rest.body.error!.message).toContain(action.target);
+
+            expect({ status: ai.status, code: ai.body.error!.code, message: ai.body.error!.message }).toEqual({
+                status: 400,
+                code: 'VALIDATION_ERROR',
+                message: `Action '${action.name}' (type='${action.type}') cannot be invoked via MCP`,
+            });
+            expect(ai.body.error!.message).not.toContain(action.target);
+            expect(rig.ran()).toBe(0);
+        });
+    });
+});
+
+/**
+ * A multi-kernel host: the host's kernel registers the `kernel-resolver`
+ * service, and environment A runs on its own kernel. The resolver keeps the
+ * `KernelResolver` contract (`http-dispatcher.ts`): it reads the dispatcher's
+ * scoped-URL hint (`urlEnvironmentId`), validates it, writes
+ * `environmentId`, and answers that environment's kernel; a request it does
+ * not place is served from the host kernel. Each kernel's script handler
+ * answers its own name, so `data.ran` says which kernel ran the action.
+ *
+ * The REST door is the real `dispatch()` on a scoped path, its caller
+ * admitted by the environment kernel's `auth` session; the host door is
+ * `dispatchAction` on the HOST kernel, naming the environment.
+ */
+describe('dispatchAction on a multi-kernel host runs on the environment\'s own kernel, as the REST door does', () => {
+    const plain = { name: 'plain_ping', label: 'Plain', type: 'script', target: 'plain_ping', ai: EXPOSED };
+    const auth = { api: { getSession: async () => ({ user: { id: MEMBER_EC.userId } }) } };
+    const ENV_A = 'env_a';
+
+    function twoKernelHost(resolve: (ctx: any, envKernel: unknown) => unknown) {
+        const env = makeRig([plain], { ranOn: ENV_A, services: { auth } });
+        const seen: Array<{ door: string; routePath: unknown; urlEnvironmentId: unknown }> = [];
+        let door = '';
+        const resolveKernel = vi.fn(async (ctx: any) => {
+            seen.push({ door, routePath: ctx.routePath, urlEnvironmentId: ctx.urlEnvironmentId });
+            return resolve(ctx, env.kernel);
+        });
+        const host = makeRig([plain], { ranOn: 'host', services: { auth, 'kernel-resolver': { resolveKernel } } });
+        const viaScopedRest = (environmentId: string) => {
+            door = 'rest';
+            return new HttpDispatcher(host.kernel).dispatch(
+                'POST', `/environments/${environmentId}/actions/${OBJECT}/${plain.name}`, {}, {}, { request: { headers: {} } } as any,
+            );
+        };
+        const viaHost = (environmentId: string) => {
+            door = 'host';
+            return dispatchAction(host.kernel, {
+                executionContext: MEMBER_EC as any, environmentId, objectName: OBJECT, actionName: plain.name,
+            });
+        };
+        return { env, host, seen, viaScopedRest, viaHost };
+    }
+
+    /** The contract's resolver: the scoped-URL hint names the environment. */
+    const placesByHint = (ctx: any, envKernel: unknown) => {
+        if (ctx.urlEnvironmentId !== ENV_A) return undefined;
+        ctx.environmentId = ENV_A;
+        return envKernel;
+    };
+
+    it('a call naming environment A runs on A\'s kernel through both doors, and the resolver is asked the same question', async () => {
+        const h = twoKernelHost(placesByHint);
+
+        const rest: any = (await h.viaScopedRest(ENV_A)).response;
+        const host = await h.viaHost(ENV_A);
+
+        expect({ status: rest.status, data: rest.body.data }).toEqual({ status: 200, data: { ran: ENV_A } });
+        expect({ status: host.status, data: host.body.data }).toEqual({ status: rest.status, data: rest.body.data });
+        expect(h.host.ran()).toBe(0);
+        expect(h.env.ran()).toBe(2);
+        // The first question each door puts to the resolver is the same one.
+        const first = (door: string) => {
+            const { door: _d, ...hints } = h.seen.find((s) => s.door === door)!;
+            return hints;
+        };
+        expect(first('host')).toEqual(first('rest'));
+        expect(first('rest')).toEqual({ routePath: `/environments/${ENV_A}/actions/${OBJECT}/${plain.name}`, urlEnvironmentId: ENV_A });
+    });
+
+    it('an environment the resolver does not place is served from the host kernel at both doors', async () => {
+        const h = twoKernelHost(placesByHint);
+
+        const rest: any = (await h.viaScopedRest('env_b')).response;
+        const host = await h.viaHost('env_b');
+
+        expect({ status: rest.status, data: rest.body.data }).toEqual({ status: 200, data: { ran: 'host' } });
+        expect({ status: host.status, data: host.body.data }).toEqual({ status: rest.status, data: rest.body.data });
+        expect(h.env.ran()).toBe(0);
+    });
+
+    it('a resolver that fails refuses the call at both doors; nothing runs on the host kernel in its place', async () => {
+        const fault = () => Object.assign(new Error(`Environment '${ENV_A}' is unavailable`), { status: 503, code: 'SERVICE_UNAVAILABLE' });
+        const h = twoKernelHost(() => { throw fault(); });
+
+        await expect(h.viaScopedRest(ENV_A)).rejects.toMatchObject({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+        const host = await h.viaHost(ENV_A);
+
+        expect({ status: host.status, code: host.body.error?.code }).toEqual({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+        expect(h.host.ran()).toBe(0);
+        expect(h.env.ran()).toBe(0);
     });
 });
 
@@ -316,12 +439,19 @@ describe('MCP run_action: served refusal codes that change (the REST door\'s seq
         expect(rig.ran()).toBe(0);
     });
 
-    it('C6 — an entitled url action: still 400, now with the REST door\'s prescription', async () => {
+    it('C6 — an entitled url action: still 400 with the AI door\'s sentence, which names no target; the REST door prescribes its target', async () => {
         const go = { name: 'go2', type: 'url', target: '/x', ai: EXPOSED };
-        const mcp: any = await makeRig([go]).viaMcp(MEMBER_EC, 'go2');
-        const rest = await makeRig([go]).viaRest(MEMBER_EC, 'go2');
+        const rig = makeRig([go]);
+        const mcp: any = await rig.viaMcp(MEMBER_EC, 'go2');
+        const host = await rig.viaHost(MEMBER_EC, 'go2', { posture: 'ai' });
+        const rest = await rig.viaRest(MEMBER_EC, 'go2');
         expect({ status: mcp.status, code: mcp.code, message: mcp.message })
-            .toEqual({ status: 400, code: 'VALIDATION_ERROR', message: rest.body.error.message });
+            .toEqual({ status: 400, code: 'VALIDATION_ERROR', message: "Action 'go2' (type='url') cannot be invoked via MCP" });
+        expect({ status: host.status, code: host.body.error!.code, message: host.body.error!.message })
+            .toEqual({ status: mcp.status, code: mcp.code, message: mcp.message });
+        expect({ status: rest.status, code: rest.body.error.code }).toEqual({ status: 400, code: 'VALIDATION_ERROR' });
+        expect(rest.body.error.message).toMatch(/^Action 'go2' on 'ad_task' is `type: 'url'` — a client-side action/);
+        expect(rig.ran()).toBe(0);
     });
 
     it('C7 — a flow run that failed: 400 FLOW_FAILED, now carrying the run details the REST door serves', async () => {
