@@ -252,7 +252,7 @@ indexes: [
 | Property | Type | Description |
 | :--- | :--- | :--- |
 | `isSystem` | `boolean` | System object, protected from deletion (default: `false`) |
-| `managedBy` | `enum` | Lifecycle bucket that sets the default CRUD affordances and write policy — `'platform'` (default), `'config'`, `'system-data'`, `'engine-owned'`, `'append-only'`, `'better-auth'`. See [Lifecycle bucket](#lifecycle-bucket-managedby) below. |
+| `managedBy` | `enum` | Lifecycle bucket that sets the default CRUD affordances and write policy — `'platform'` (default), `'config'`, `'system-data'`, `'engine-owned'`, `'append-only'`, `'synced'`, `'better-auth'`. See [Lifecycle bucket](#lifecycle-bucket-managedby) below. |
 | `userActions` | `object` | Per-object override of the CRUD affordances the `managedBy` default implies — `{ create?, edit?, delete?, import?, exportCsv? }`. This is what NARROWS a `system-data` object, opens CSV `import` on one, or opens a verb on an `engine-owned`/`append-only` one. See [Lifecycle bucket](#lifecycle-bucket-managedby). |
 | `sharingModel` | `enum` | Org-Wide Default record visibility (ADR-0055/0056/0090). Canonical four only: `'private'`, `'public_read'`, `'public_read_write'`, `'controlled_by_parent'` (detail visibility derived from its master). The legacy aliases (`'read'`, `'read_write'`, `'full'`) were removed from the enum (ADR-0090 D4) — authoring rejects them. Unset on a custom object resolves to `'private'` (ADR-0090 D1) |
 | `ownership` | `enum` | Record-ownership model: `'user'` (default — injects the reassignable `owner_id` lookup, engaging owner-scoped RLS, "My" views and owner reports, plus `owning_business_unit_id`), `'business_unit'` (owned by an org unit rather than a person — injects `owning_business_unit_id` and deliberately **no** `owner_id`; ADR-0117 D1), `'org'`, or `'none'` (no per-record owner of either kind — Dataverse-style catalog / junction tables). Distinct from the package `own`/`extend` contribution kind. |
@@ -273,6 +273,7 @@ bare bucket string.
 | `system-data` | Platform-defined schema holding **admin/user-writable data** (RBAC link tables, preferences, messaging config). New / Edit / Delete / Export by default — **no CSV import**, which is opt-in per object; narrow the rest with `userActions`. |
 | `engine-owned` | Runtime rows a platform service owns end to end — generic CRUD hidden, exposed `['get', 'list']` only, **no user writes ever**. |
 | `append-only` | Immutable audit trail — View + Export only. |
+| `synced` | Rows a scheduled pull copies from a connector or a federated source — View + Export only. The one bucket `userActions` cannot open a write on: a member's edit would be kept or overwritten by the next pull, so a change belongs in the source. The target of every mapping with a `connectorSource` or `datasourceSource`. |
 | `better-auth` | Identity tables owned by the better-auth driver — generic user-context CRUD is suppressed; mutations flow through the auth API (sign-in, invite, reset). |
 
 **`engine-owned` vs. `system-data` (ADR-0103, #3355).** Both hold a

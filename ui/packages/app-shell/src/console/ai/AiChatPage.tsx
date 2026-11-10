@@ -945,16 +945,32 @@ export function useDeferredFirstSend(opts: {
    * the correctly-bound pane can replay it after the route transition settles.
    */
   agentRoute?: string;
+  /**
+   * objectstack#32031 — creates the conversation on the first send
+   * (`useChatConversation().ensureConversation`). The host no longer mints a
+   * row on mount, so a stash with no id ASKS for one: from the send itself,
+   * and from the replay effect for a stash seeded out of band (the handoff).
+   * Idempotent on the host side, so calling it again while the create is on
+   * the wire makes no second row. Absent = wait for an id someone else makes.
+   */
+  ensureConversation?: () => unknown;
 }): (content: string, files?: File[]) => void {
-  const { chatApi, conversationId, pendingRef, doSend, pendingSignal, agentRoute } = opts;
+  const { chatApi, conversationId, pendingRef, doSend, pendingSignal, agentRoute, ensureConversation } = opts;
   const apiMode = Boolean(chatApi);
+  // Read through a ref: the replay effect must not re-run (or depend for
+  // correctness) on the identity of a host callback — ui/AGENTS.md #10. Synced
+  // in a layout effect, which runs before the replay effect below.
+  const ensureConversationRef = useRef(ensureConversation);
+  useLayoutEffect(() => {
+    ensureConversationRef.current = ensureConversation;
+  }, [ensureConversation]);
 
   // Replay a deferred first message the instant a conversation id exists — in
   // the freshly-mounted pane after the remount, or in place if none happened.
   // Clearing the ref before sending makes the replay fire at most once even
   // though `doSend` (and StrictMode's double-invoke) re-run this effect.
   useEffect(() => {
-    if (!apiMode || !conversationId) return;
+    if (!apiMode) return;
     const pending = pendingRef.current;
     if (!pending) return;
     // #2450 — a targeted stash (the handoff seed) must not be consumed by a
@@ -962,8 +978,29 @@ export function useDeferredFirstSend(opts: {
     // replay first, and a send issued there dies with its unmount before it
     // reaches the wire. Hold the stash; the matching pane replays it.
     if (pending.targetAgentRoute && pending.targetAgentRoute !== agentRoute) return;
-    pendingRef.current = null;
-    doSend(pending.content, pending.files);
+    // objectstack#32031 — no id yet: this stash is the first send, so ask the
+    // host to create the conversation (covers a stash seeded out of band, which
+    // never passed through the send callback below). Its id re-runs this effect.
+    if (!conversationId) {
+      void ensureConversationRef.current?.();
+      return;
+    }
+    // objectstack#32031 — replay on the next task, never inside this effect.
+    // The chat runtime stops its in-flight request when the pane's effects are
+    // torn down (`useChat`'s cleanup calls `chat.stop()`), and React tears them
+    // down right after this first run whenever it re-runs effects on mount
+    // (StrictMode, i.e. every dev build) — so a send issued here was aborted
+    // before it reached the wire and the first message vanished. That only
+    // happened in the old race window; with the row created by the first send
+    // it would be every first message. The timer is cleared with the effect,
+    // so the replay fires once, from the pane whose effects stayed up; a pane
+    // unmounted for real leaves the stash for the next one.
+    const timer = setTimeout(() => {
+      if (pendingRef.current !== pending) return;
+      pendingRef.current = null;
+      doSend(pending.content, pending.files);
+    }, 0);
+    return () => clearTimeout(timer);
   }, [apiMode, conversationId, pendingRef, doSend, pendingSignal, agentRoute]);
 
   return useCallback(
@@ -973,7 +1010,16 @@ export function useDeferredFirstSend(opts: {
       // down when the pane remounts as the id resolves. Stash it; the effect
       // above replays it once the id lands.
       if (apiMode && !conversationId) {
-        pendingRef.current = { content, files };
+        // objectstack#32031 — the first send is now what creates the
+        // conversation, so the create is on the wire for a moment after every
+        // first send. A second submit inside that moment must not replace the
+        // first message (it would be lost); the first one stands and is
+        // replayed once the id lands, and the host's create is shared, so no
+        // second row is made either. (A held handoff seed is still replaced
+        // by what the user typed, as before.)
+        const held = pendingRef.current;
+        if (!held || held.targetAgentRoute) pendingRef.current = { content, files };
+        void ensureConversationRef.current?.();
         return;
       }
       doSend(content, files);
@@ -1135,7 +1181,7 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
     [editPackageId],
   );
 
-  const { conversationId, conversationScope, initialMessages, rekeyScope } = useChatConversation({
+  const { conversationId, conversationScope, initialMessages, rekeyScope, ensureConversation } = useChatConversation({
     // Gate resolution on the agent being known: resolving while `activeAgent`
     // is still undefined (catalog loading) would bind a SCOPELESS conversation
     // that the per-(user,scope) guard then sticks with — so the agent surface
@@ -1608,6 +1654,7 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
             initialMessages={paneInitialMessages}
             pendingFirstMessageRef={pendingFirstMessageRef}
             pendingFirstMessageSeq={pendingFirstMessageSeq}
+            ensureConversation={ensureConversation}
             onSent={handleSent}
             onShare={() => setShareOpen(true)}
             onDebug={() => setDebugOpen(true)}
@@ -1678,6 +1725,10 @@ interface ChatPaneProps {
   /** Bumps when the page seeds `pendingFirstMessageRef` out of band (handoff), so
    *  the deferred-send replay re-runs. See {@link useDeferredFirstSend}. */
   pendingFirstMessageSeq?: number;
+  /** objectstack#32031 — creates the conversation on the first send (the host's
+   *  `useChatConversation().ensureConversation`); no row exists before it.
+   *  See {@link useDeferredFirstSend}. */
+  ensureConversation?: () => unknown;
   onSent: (firstUserMessage?: string) => void;
   onShare: () => void;
   /** Opens the Build Doctor drawer (build agent only). */
@@ -1706,6 +1757,7 @@ export function ChatPane({
   initialMessages,
   pendingFirstMessageRef,
   pendingFirstMessageSeq,
+  ensureConversation,
   onSent,
   onShare,
   onDebug,
@@ -2209,6 +2261,7 @@ export function ChatPane({
     // #2450 — this pane's agent surface; a stash targeted at another surface
     // (the handoff seed → 'build') is held, never consumed here.
     agentRoute: activeAgent ? agentRouteName(activeAgent) : undefined,
+    ensureConversation,
   });
 
   // #2458 / ADR-0057 Amendment A1.a — the package this build conversation is
