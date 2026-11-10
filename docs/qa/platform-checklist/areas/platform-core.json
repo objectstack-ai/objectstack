@@ -1857,10 +1857,10 @@
     },
     {
       "id": "platform-core.activation-ledger-row-contract",
-      "title": "sys_metadata_activation row contract: reads open / generic-data-API writes 405, one row per (metadata_type, name) with NO tenant column on the table at all, re-enable updates never deletes, and rows exist ONLY for the metadata types a shipped door writes — flow, action, position, permission, sharing_rule, webhook, queue, assignment_rule (the ADR-0126 scope wall, as ADR-0131 D2, D3 and D6 and ADR-0142 D1 and D5 widen it)",
+      "title": "sys_metadata_activation row contract: reads open / generic-data-API writes 405, one row per (metadata_type, package_id, name) with NO tenant column on the table at all, re-enable updates never deletes, and rows exist ONLY for the metadata types a shipped door writes — flow, action, position, permission, sharing_rule, webhook, queue, assignment_rule (the ADR-0126 scope wall, as ADR-0131 D2, D3 and D6 and ADR-0142 D1 and D5 widen it)",
       "since": "v17",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P2",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -1881,7 +1881,7 @@
         "scope wall sweep: the distinct metadata_type set over ALL rows is exactly {'flow','action','position','permission','sharing_rule','webhook'} — the six values steps[0]'s stock switches write. The wall itself is eight values: those six plus 'queue' and 'assignment_rule', which the same catalog door writes for a declared queue or assignment rule (ADR-0142 D1/D5), and the stock showcase declares neither. Any other value (hook/capability/tool/skill/…) is a FAIL of the model, not a coverage discovery: hooks are code-only by ADR-0126 §3 amendment ruling 1 (no ledger row, no disable switch), and a capability is code-only on the regime with no switch (catalog-activation.ts CATALOG_ACTIVATION_SUBJECTS). Then probe the door's own wall: POST /api/v1/security/_activation/capability/showcase.export_data {\"enabled\": false} answers 400 naming the six types it switches (position, permission, sharing_rule, webhook, queue, assignment_rule), and POST /api/v1/security/_activation/position/everyone {\"enabled\": false} answers 400 (an audience anchor) — re-read the ledger: neither left a row. Position and permission rows are no longer foreign here: ADR-0131 D3 moved the on/off switch of a position and of a permission set off the catalog row into this ledger (regime C as ADR-0131 D6 amends ADR-0126 §3; readDisabledCatalogNames in packages/core/src/security/resolve-authz-context.ts reads these two types and never the row's active column), which supersedes the 2026-08-26 #12159 ruling that a packaged permission set rides its kind's own active field. sharing_rule rows are not foreign either: ADR-0131 D6 charts a package-declared sharing rule under regime C, and the same door writes its row (packages/runtime/src/domains/catalog-activation.ts, CATALOG_ACTIVATION_SUBJECTS) — an organization-authored sys_sharing_rule row keeps its own switch and writes none. webhook rows are not foreign either: ADR-0131 D2/D6 put a stack-declared webhook (defineStack({ webhooks })) under regime C, the same door writes its row (CATALOG_ACTIVATION_SUBJECTS, WEBHOOK_ACTIVATION_SUBJECT), and plugin-webhooks reads it back (packages/plugins/plugin-webhooks/src/declared-webhooks.ts#readWebhookActivation) — an organization-authored sys_webhook row keeps its own active field and writes none",
         "write-refusal probes, all three verbs: POST /api/v1/data/sys_metadata_activation {metadata_type:'action',name:'qa_probe',package_id:'qa',active:false}, PATCH /api/v1/data/sys_metadata_activation/<existing id> {active:true}, DELETE /api/v1/data/sys_metadata_activation/<existing id> — each answers 405 naming the refused operation and the allowed set; re-read confirms every row unchanged",
         "re-enable every switch flipped in step 1 — the SAME rows update to active true (same ids, row count unchanged, nothing vanished). The webhook is the exception to \"on\": switch it on and then back off ({\"enabled\": true}, then {\"enabled\": false}) so it ends in its declared state — left on, it posts a failed delivery to the placeholder hooks.example endpoint on every task change — and its one row updates both times",
-        "uniqueness probe (direct DB): stop the server; in the sqlite file INSERT a second row for an existing (metadata_type, name) pair — the declared unique:'global' index over exactly those two columns refuses with a UNIQUE constraint error; capture it. Both key parts are required text, so no NULL arm is left to collapse: the earlier unique:'organization' spelling asked the driver to prepend the tenant column in its COALESCE'd form (ADR-0120 D3) against the #5030 NULL-distinct hole, and with the column gone normalizeDeclaredIndex resolves tenantField to null — so the materialized DDL is byte-identical either way and the current spelling is a re-SPELLING, not a change of shape (sys-metadata-activation.object.ts records it)",
+        "uniqueness probe (direct DB): stop the server; in the sqlite file (a) INSERT a second row for an existing (metadata_type, package_id, name) triple — the declared unique:'global' index over those three columns refuses with a UNIQUE constraint error; (b) INSERT a second package-less row (package_id NULL) for an existing package-less (metadata_type, name) pair — the partial index uniq_sys_metadata_activation_packageless (rows WHERE package_id IS NULL, built at boot, not declared) refuses it; (c) CONTROL: INSERT a row for an existing (metadata_type, name) with a package_id no row carries — it lands; DELETE it. UNIQUE is NULL-distinct, which is why (b) needs the partial index. On a database an earlier release built, (c) is refused until os migrate apply retires the earlier (metadata_type, name) index: that path is platform-core.activation-ledger-package-key-upgrade, not this item, whose boot is fresh. There is still no tenant key part: the earlier unique:'organization' spelling asked the driver to prepend the tenant column in its COALESCE'd form (ADR-0120 D3) against the #5030 NULL-distinct hole, and with the column gone normalizeDeclaredIndex resolves tenantField to null (sys-metadata-activation.object.ts records it)",
         "no-tenant-column probe (direct DB, server still stopped): read the physical schema — PRAGMA table_info(sys_metadata_activation) — and record the column list: metadata_type, name, package_id and active are present beside the driver's id, the injected audit family (created_at / created_by / updated_at / updated_by) and the search companion column __search (the object is searchable — packages/objectql/src/search-companion.ts#SEARCH_COMPANION_FIELD), and NOTHING tenant-shaped is — organization_id is absent from the list entirely. Then attempt INSERT INTO sys_metadata_activation (id, metadata_type, name, package_id, active, organization_id) VALUES ('qa_probe_no_tenant','action','qa_probe_no_tenant','qa',0,'org_qa') — sqlite refuses with `table sys_metadata_activation has no column named organization_id` and no row lands. CONTROL (anti-vacuity, same DB): the SAME statement with the organization_id column and its value dropped SUCCEEDS — so the refusal names the missing column, not a malformed statement and not the unique index (the (metadata_type, name) pair is fresh on purpose, so step 6's index cannot be what answered). DELETE the control row, then restart against the SAME DB and confirm the ledger reads exactly as it did before the probe",
         "record the operability posture: absence of a row reads as ACTIVE for flow, action, position, permission and sharing_rule, and as the declaration's own isActive for a declared webhook — a ledger row overrides the declared isActive, else the declaration stands (declared-webhooks.ts), and showcase_task_changed ships off (an empty ledger is the normal stock state, not an error), and the data-API read IS the only 'what is off here' surface today — ObjectQLEngine.listDisabledActions() (packages/objectql/src/engine.ts) has zero route consumers"
       ],
@@ -1893,10 +1893,10 @@
           "evidence": "the list read + the three refusal bodies + the empty diff"
         },
         {
-          "clause": "row identity holds over exactly two key parts: one row per (metadata_type, name), deployment-wide — and a second row for the same pair is REFUSED by the declared unique:'global' index, so one artifact can never carry two contradictory active rows",
+          "clause": "row identity is (metadata_type, package_id, name), deployment-wide: two packages may each hold a row for one name, one package may not hold two, and among rows naming no package one (metadata_type, name) holds one row — so one artifact can never carry two contradictory active rows",
           "oracle": "log",
-          "verify": "the row dump from step 2 + the UNIQUE constraint refusal from step 6, whose index names the two key columns and nothing else. ⚠️ The COALESCE(organization_id,'__global__') collapse ADR-0120 D3 provides is NOT reachable here and must not be looked for: with no tenant column normalizeDeclaredIndex has no part to prepend, and both key parts are required, so a plain two-column unique is the whole of the row identity (sys-metadata-activation.object.ts)",
-          "evidence": "the row dump + the refused INSERT with its constraint error"
+          "verify": "the row dump from step 2 + step 6's probes: (a) refused by the unique:'global' index over (metadata_type, package_id, name), (b) refused by uniq_sys_metadata_activation_packageless (packages/metadata-protocol/src/migrations/activation-ledger-packageless-index.ts#ACTIVATION_LEDGER_PACKAGELESS_ROW_SCOPE), (c) lands. ⚠️ The COALESCE(organization_id,'__global__') collapse ADR-0120 D3 provides is NOT reachable here and must not be looked for: there is no tenant column; the NULL that matters is package_id's, and the partial index is what covers it",
+          "evidence": "the row dump + the two refused INSERTs with their constraint errors + the control row and its delete"
         },
         {
           "clause": "the ledger carries NO tenant column, and cannot be handed a row that has one: PRAGMA table_info lists the four ledger columns beside id, the audit family and the __search companion column, with nothing tenant-shaped among them, and an INSERT naming organization_id is refused by sqlite while the same INSERT without it lands. A row here is DEPLOYMENT-level state no organization owns (ADR-0131 D7, which WITHDREW ADR-0126 D3's reserved-and-never-written column before 17.3), so there is no per-organization row left for a read to merge OR to skip",
@@ -1927,7 +1927,7 @@
         "a 2xx on ANY generic-data-API write to sys_metadata_activation is a FAIL of the engine-owned posture — these rows have exactly one writer class (the ADR-0126 doors)",
         "an organization_id column PRESENT on the physical table is the regression step 7 exists for, and it is WORSE than the shape it replaced: the store no longer filters or skips anything on read (there is no column left to filter on), so a resurrected tenant column would let an org-carrying row be merged straight into the deployment-wide answer — one organization's choice applied to the whole installation, #10243 from the read side. A P1-severity finding inside a P2 item, extract it",
         "a row deleted by re-enable is a FAIL of §6 wall 3 even though every door answered 200 — the wire looks identical either way, only the row read tells them apart",
-        "two contradictory active rows accepted for one artifact is a FAIL of the declared unique:'global' index — and ⛔ do not diagnose it as the #5030 NULL-distinct hole: that hole needed a nullable tenant column inside the key, and this table has none. Both key parts are required text, so a duplicate accepted here means the index is missing or was never materialized, not that a NULL slipped through",
+        "two contradictory active rows accepted for one artifact is a FAIL — for a packaged item, of the unique:'global' index over (metadata_type, package_id, name); for an item no package holds, of uniq_sys_metadata_activation_packageless, which the boot builds and whose build is refused, and logged, while duplicates exist. ⛔ Do not diagnose it as the #5030 NULL-distinct tenant hole: this table has no tenant column. A duplicate accepted among package-less rows means the partial index is missing: read the boot log for its build line first",
         "treating this item's variants as a pinned enum is a mis-read: they are hand-enumerated and un-pinned by construction — a stale value list over a tree that grew a new writer is a checklist defect, not a platform one; revise the item",
         "a catalog-door write for a :type other than position, permission, sharing_rule, webhook, queue or assignment_rule (capability, hook, …), or for an audience anchor (everyone, guest), that answers 2xx or leaves a ledger row is a FAIL of the door's closed :type set — it would switch off something the regime gives no switch"
       ],
@@ -1947,9 +1947,9 @@
         "ref": "packages/objectql/src/action-activation.test.ts + packages/services/service-automation/src/flow-activation-ledger.test.ts (the store-level pins: the unfiltered deployment-wide read — 'reads EVERY row … with no tenant axis', the pin that REPLACED the org-row-skip one — plus 0-reads-as-false, update-not-delete, and organization_id absent from the write payload asserted as a missing KEY); packages/qa/dogfood/test/packaged-activation-ledger-reach.dogfood.test.ts ('writes ONE deployment-level row, and the TABLE has no tenant column at all' — a key-set reading off the driver's own SELECT on a booted stack, i.e. a DDL reading rather than a re-statement of the declaration; plus update-not-delete on a live boot); packages/qa/dogfood/test/catalog-activation-door.dogfood.test.ts ('a type with no switch is refused 400 by the door itself' — the door half of acceptance[4] and negative[5] on a booted showcase; its position and permission cases also hold one row active again after off-then-on) + packages/runtime/src/domains/catalog-activation-door.test.ts (the audience anchors refused 400 with nothing written — the same door half at the handler; 're-enabling UPDATES the one row' writes insert then update for a position; its declared-webhook describe pins the one row of type webhook the door writes). What no pin carries: acceptance[2]'s refused INSERT and its control INSERT — the dogfood key-set reading proves only that the physical table has no organization_id — and acceptance[3] for a sharing_rule or webhook row: the pins assert update-not-delete for the action (HTTP) and flow (store) kinds, and the door pins for position and permission only"
       },
       "source": [
-        "packages/platform-objects/src/system/sys-metadata-activation.object.ts#apiMethods — apiMethods ['get','list']; the unique:'global' index over (metadata_type, name) and why the earlier 'organization' spelling was a re-spelling rather than a change of shape (the #5030 history it closes out); no-lifecycle ruling; what the object is NOT (§4 posture)",
+        "packages/platform-objects/src/system/sys-metadata-activation.object.ts#apiMethods — apiMethods ['get','list']; the unique:'global' index over (metadata_type, package_id, name) (ADR-0150 D4, D8 row R4) and why the earlier 'organization' spelling was a re-spelling rather than a change of shape (the #5030 history it closes out); no-lifecycle ruling; what the object is NOT (§4 posture)",
         "packages/platform-objects/src/system/sys-metadata-activation.object.ts#systemFields — systemFields { tenant: false }: the opt-out that REMOVES the tenant column, not one that merely leaves it unwritten (with no field declared the column would still be provisioned by injection), and why it is deliberately not the broader tenancy.enabled posture key",
-        "packages/core/src/utils/metadata-activation-store.ts#setActive — read-then-write setActive keyed on exactly the index's two columns (so taking the first match is taking the only one); organization_id never in the write payload; delete-less engine slice; 0-reads-as-false",
+        "packages/core/src/utils/metadata-activation-store.ts#setActive — read-then-write setActive finds the row by (metadata_type, name), narrower than the index's three columns: no door writes two rows for one name (the catalog door refuses a name two packages hold, 409), so taking the first match is taking the only one, and the write carries package_id; organization_id never in the write payload; delete-less engine slice; 0-reads-as-false",
         "packages/core/src/utils/metadata-activation-store.ts#list — list() is the whole read path: scoped by metadata_type and by nothing else, because the ledger is deployment-wide and has no second axis. ⚠️ There is no org-row skip here any more — the module header records that the NULL-organization filter and the org-row skip both went with the column",
         "packages/runtime/src/api-exposure.ts#checkApiExposure (checkApiExposure — the 405 shape for a whitelisted-methods object)",
         "packages/services/service-automation/src/flow-activation-store.ts + packages/objectql/src/action-activation.ts (the flow and action metadata_type string literals)",
@@ -2014,6 +2014,12 @@
           "date": "2026-10-31",
           "change": "variants, title, fixtures, steps[2], acceptance[4], negative[5] and source[6] add the catalog door's queue and assignment_rule types. Checklist-accuracy finding of QA run #27438 (18.3.0 wave 3, parked on anchor #27377; slice S4, #28338): ADR-0142 D1/D5 added queue and assignment_rule to CATALOG_ACTIVATION_SUBJECTS (packages/runtime/src/domains/catalog-activation.ts), so the door's closed :type set is six and its 400 lists six (read live at 3fd80337), while the item still said four. The stock showcase declares no queue and no assignment rule, so the stock sweep still reads six metadata_type values; the wall a value is judged against is now eight. Re-read at 3fd80337",
           "ref": "#27438"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-10",
+          "change": "title, steps[5], acceptance[1], negative[3], source[0] and source[2] re-keyed. ADR-0150 D4 (D8 row R4) widened the declared unique:'global' index to (metadata_type, package_id, name), so two packages may each hold a row for one name (sys-metadata-activation.object.ts), and the boot builds a partial index uniq_sys_metadata_activation_packageless that keeps one row per (metadata_type, name) among package-less rows (activation-ledger-packageless-index.ts). The item said one row per (metadata_type, name) over exactly two key parts, which no longer holds. The 18.3.0 upgrade path is platform-core.activation-ledger-package-key-upgrade. Checklist-accuracy finding of scoped sweep #32019 (#31727, #31831), read from source at 60f8149e",
+          "ref": "#32019"
         }
       ]
     },
@@ -4190,6 +4196,383 @@
           "date": "2026-11-04",
           "change": "new item from QA run #29870 (W5-EXPORT, at 589049b0), proposed by #29906 part D: no item covered GET /api/v1/packages/export (#29755), withheldMaps (#29746) or os package export. Acceptance[3] and [6] were proposed as failing (#29871, #29872); both cards are closed fixed at base f68b47ca, so the clauses state the fixed behaviour and name the card each regression would reopen. Read from source at base f68b47ca",
           "ref": "#29906"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.namespace-co-owner-name-refusal",
+      "title": "Packages that share a namespace keep each behavioural name unique across it: a second co-owner holding a sharing rule, queue, assignment rule, hook, job, app, page, dashboard, report, book, cube or tool name is refused at os validate, os build and install, while base, system and sys are exempt",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["developer at the CLI", "admin (the seeded admin): the install leg"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two scratch packages that both declare namespace qa_n (ids com.qa.n_one and com.qa.n_two), each holding a page qa_board; and a defineStack with packages[] whose residual top-level items hold a page qa_board under the same namespace as one of its packages",
+          "a boot of the showcase with com.qa.n_one installed"
+        ]
+      },
+      "steps": [
+        "os validate and objectstack build on a stack that composes both qa_n packages; record exit codes and output",
+        "install com.qa.n_two into the boot that holds com.qa.n_one; record status and body",
+        "os validate the packages[] stack whose residual items repeat qa_board",
+        "repeat the install with both packages in a shareable namespace (base) instead; record the answer"
+      ],
+      "acceptance": [
+        {
+          "clause": "the CLI refuses a name two co-owners hold, naming the type, the name and both packages",
+          "oracle": "build",
+          "verify": "both commands exit non-zero (packages/cli/src/utils/namespace-co-owner-names.ts#findNamespaceNameRefusals)",
+          "evidence": "both outputs and exit codes"
+        },
+        {
+          "clause": "the install door refuses 422 NAMESPACE_CONFLICT with conflicts[], and the second package is not installed",
+          "oracle": "api",
+          "verify": "the install answers 422 with code NAMESPACE_CONFLICT and conflicts[] naming page qa_board and both ids (packages/objectql/src/namespace-co-owner-names.ts#namespaceNameConflicts, #namespaceNameConflictMessage)",
+          "evidence": "the 422 body and the package list"
+        },
+        {
+          "clause": "a packages[] stack's residual top-level items are judged with the namespace they fall under",
+          "oracle": "build",
+          "verify": "os validate exits non-zero naming qa_board (packages/objectql/src/namespace-co-owner-names.ts#residualNamespacePackageOf, #31767)",
+          "evidence": "the output"
+        },
+        {
+          "clause": "the shareable namespaces base, system and sys are not judged",
+          "oracle": "api",
+          "verify": "the install in base answers 200 (packages/objectql/src/namespace-co-owner-names.ts#isNamespaceJudged)",
+          "evidence": "the 200 answer"
+        }
+      ],
+      "negative": [
+        "a second co-owner installed with a duplicate qa_board is a FAIL: the address qa_n/qa_board must name one item (ADR-0150 D2)",
+        "the same name held in two different namespaces refused is a FAIL: the rule is per namespace"
+      ],
+      "variants": [
+        "the twelve judged types (packages/objectql/src/namespace-co-owner-names.ts#NAMESPACE_UNIQUE_TYPES); a run drives page and names the others it did not drive"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/objectql/src/registry-namespace-co-owner-names.test.ts, packages/cli/src/utils/namespace-co-owner-names.test.ts"
+      },
+      "source": [
+        "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D2 (co-owners keep each behavioural name unique, ruled)",
+        "packages/objectql/src/namespace-co-owner-names.ts#NAMESPACE_UNIQUE_TYPES and #namespaceNameConflicts",
+        "packages/cli/src/utils/namespace-co-owner-names.ts#findNamespaceNameRefusals",
+        "#31717 (N), #31767 (residual items of a packages[] stack)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0150 child N, co-owner name uniqueness (#31717, #31767). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
+          "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.namespace-object-name-refusal",
+      "title": "A namespace never equals an object name: defineStack, os validate, os build, the install door and the publish doors all refuse a package whose namespace spells an installed object's name (or the reverse), naming both spellings",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["developer at the CLI", "admin (the seeded admin): the install and publish legs"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a scratch app directory whose manifest namespace is qa_k and which declares an object qa_k_case, plus a second scratch package (namespace qa_k_case) that is otherwise valid; and a scratch app (namespace qa_k) that declares an object qa_k_custom, whose short name is custom",
+          "a boot of the showcase with the qa_k app installed (os package install DIR/dist/objectstack.json)"
+        ]
+      },
+      "steps": [
+        "in the qa_k_case package directory: os validate, then objectstack build; record exit codes and output",
+        "try to install a compiled qa_k_case artifact into the boot that holds qa_k: os package install FILE (or POST /api/v1/marketplace/install-local with the file); record status and body",
+        "on a writable scratch package in the boot, save an object named after an installed namespace through the metadata door with publish mode, and publish package drafts that hold one (POST /api/v1/packages/:id/publish); record each answer",
+        "os validate the app that declares the object custom"
+      ],
+      "acceptance": [
+        {
+          "clause": "the CLI refuses the clash before anything is built: os validate and objectstack build exit non-zero naming the namespace and the object",
+          "oracle": "build",
+          "verify": "both commands exit non-zero and print the clash (packages/cli/src/utils/namespace-object-names.ts#findNamespaceObjectNameRefusals)",
+          "evidence": "both outputs and exit codes"
+        },
+        {
+          "clause": "the install door refuses 422 NAMESPACE_CONFLICT with the clashes listed, and nothing is installed",
+          "oracle": "api",
+          "verify": "the install answers 422 with code NAMESPACE_CONFLICT and clashes[] naming qa_k_case both ways; GET /api/v1/packages lists no qa_k_case package (packages/objectql/src/registry-namespace-object-name.test.ts pins the door)",
+          "evidence": "the 422 body and the package list"
+        },
+        {
+          "clause": "the publish doors refuse the clash too: a publish-mode save, a per-item publish and POST /packages/:id/publish answer 422 NAMESPACE_CONFLICT",
+          "oracle": "api",
+          "verify": "each answers 422 naming the namespace and the object (packages/metadata-protocol/src/protocol.namespace-object-name-doors.test.ts; packages/runtime/src/package-door-namespace-object-name.test.ts)",
+          "evidence": "each refusal body"
+        },
+        {
+          "clause": "an object whose short name is custom is refused",
+          "oracle": "build",
+          "verify": "os validate exits non-zero naming custom (packages/spec/src/stack-namespace-object-name.test.ts)",
+          "evidence": "the output and exit code"
+        }
+      ],
+      "negative": [
+        "a clash accepted at install and only refused when an action path is called is a FAIL: /actions/crm_lead/convert_lead/REC1 would read as qualified, which is the ambiguity Q3 closed",
+        "a refusal that names only one of the two spellings is a FAIL"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/cli/src/utils/namespace-object-names.test.ts, packages/spec/src/stack-namespace-object-name.test.ts, packages/objectql/src/registry-namespace-object-name.test.ts, packages/metadata-protocol/src/protocol.namespace-object-name-doors.test.ts, packages/runtime/src/package-door-namespace-object-name.test.ts"
+      },
+      "source": [
+        "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md Q3 (ruled A, refused in both directions at every object door)",
+        "packages/cli/src/utils/namespace-object-names.ts#findNamespaceObjectNameRefusals (os validate and os build)",
+        "packages/objectql/src/registry-namespace-object-name.test.ts (the install door's 422)",
+        "#31887 (K)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0150 child K, a namespace never equals an object name (#31887). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
+          "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.activation-ledger-package-key-upgrade",
+      "title": "An 18.3.0 database's activation ledger moves to the (metadata_type, package_id, name) key on its first boot: the package-less index is built, each package-less row binds to its one holder, ambiguous and environment rows stay null, a second boot writes nothing, and os migrate plan offers the old index as a safe replacement",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["operator at the CLI, with direct access to the database file"],
+      "fixtures": {
+        "app": "any",
+        "requires": [
+          "an 18.3.0-shaped SQLite file, copied, never the original, by one of two routes. (a) A file a boot of npm `@objectstack/cli@18.3.0` (published; the tree is 18.3.0 plus the unreleased v18.4 work) wrote for a blank scaffold, with the rows the steps name planted through that release's own doors; a blank scaffold, because the showcase is a private workspace package with no published build. (b) The planted shape: a copy of a file DB this tree's own boot wrote, in which the step's columns are set back to NULL (and, for the activation ledger, the index uniq_sys_metadata_activation_packageless is dropped), which is what a database an earlier release built holds once this release's schema sync has added the columns. Its sys_metadata_activation holds, all with package_id NULL: a row for a flow one installed package ships; a row for a position; and, for the planted route only, a row for a name two packages hold",
+          "a copy of the same file with two package-less rows planted for one (metadata_type, name), for the conflict leg"
+        ]
+      },
+      "steps": [
+        "boot this tree on the 18.3.0-shaped copy; read the boot log; then, with the server stopped, read the indexes on sys_metadata_activation and every row",
+        "boot it again; read the log and the rows",
+        "os migrate plan against the same DB; record the operation offered for the earlier (metadata_type, name) index; os migrate apply, then os migrate plan again",
+        "boot the conflict copy; read the log; delete one of the two rows, restart, and read the indexes"
+      ],
+      "acceptance": [
+        {
+          "clause": "the first boot builds uniq_sys_metadata_activation_packageless over (metadata_type, name) for rows with no package",
+          "oracle": "log",
+          "verify": "the index exists after the boot (packages/metadata-protocol/src/migrations/activation-ledger-packageless-index.ts#ACTIVATION_LEDGER_PACKAGELESS_INDEX_NAME, #ACTIVATION_LEDGER_PACKAGELESS_ROW_SCOPE)",
+          "evidence": "the index listing"
+        },
+        {
+          "clause": "a package-less row binds to the one package that holds its item; a position row, an environment item's row and a row whose name two packages hold stay null, the ambiguous one with a warning naming the candidates",
+          "oracle": "api",
+          "verify": "the flow row carries its package id; the position row is unchanged; the planted ambiguous row is null and the log names its candidates (packages/objectql/src/activation-ledger-backfill.ts#activationLedgerHolderOf)",
+          "evidence": "the rows before and after, and the warning"
+        },
+        {
+          "clause": "a second boot writes nothing",
+          "oracle": "api",
+          "verify": "the rows are byte-identical after the second boot, updated_at included",
+          "evidence": "both row dumps"
+        },
+        {
+          "clause": "os migrate plan offers the earlier (metadata_type, name) index as a safe replace_unique_index only while the package-less index stands, and apply leaves nothing to offer",
+          "oracle": "build",
+          "verify": "the plan lists the replacement as safe (packages/drivers/driver-sql/src/schema-drift.ts); after apply, the plan lists no operation for the table",
+          "evidence": "both plan outputs"
+        },
+        {
+          "clause": "a database that already holds two package-less rows for one name is not repaired silently: the index build is refused with the probe query and os migrate duplicates named, the boot continues, and the index is built once one row is deleted",
+          "oracle": "log",
+          "verify": "the log names the duplicates and both remedies (packages/metadata-protocol/src/migrations/activation-ledger-packageless-index.ts#buildActivationLedgerPackagelessDuplicateProbeSql); after the delete and restart the index exists",
+          "evidence": "the log lines and the index listing"
+        }
+      ],
+      "negative": [
+        "a row bound to a package that does not hold its item, or an ambiguous row bound to either candidate, is a FAIL",
+        "a duplicate row deleted by the boot is a FAIL: they are administrators' switches",
+        "the old index dropped before the package-less index exists is a FAIL: package-less rows would lose their only uniqueness rule"
+      ],
+      "traps": ["destructive-in-place", "first-boot-cold-start"],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/qa/dogfood/test/activation-ledger-package-key.dogfood.test.ts; packages/metadata-protocol/src/migrations/activation-ledger-packageless-index.test.ts; packages/objectql/src/activation-ledger-backfill.test.ts. None boots an 18.3.0-written file"
+      },
+      "source": [
+        "packages/platform-objects/src/system/sys-metadata-activation.object.ts (the unique: 'global' index over (metadata_type, package_id, name))",
+        "packages/metadata-protocol/src/migrations/activation-ledger-packageless-index.ts#ensureActivationLedgerPackagelessIndex (SQLite and PostgreSQL partial index, MySQL functional key, MariaDB invisible column, MongoDB partial filter)",
+        "packages/objectql/src/activation-ledger-backfill.ts#backfillActivationLedgerAtBoot (runs at kernel:bootstrapped, after the seal)",
+        "packages/drivers/driver-sql/src/schema-drift.ts (the widened-unique replacement, kept until the package-less guard stands)",
+        "#31727 (S1), #31831"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0150 child S1 on the upgrade path (#31727, #31831). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
+          "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.bare-name-one-holder-refusal",
+      "title": "A covered bare name has one package holder: installing a second package that holds a picklist, mapping, dataset, api, object-less action, function, flow, webhook, connector, email template or tool name is refused 422 naming both, agent and skill names are held per namespace, and a clash an earlier deployment already holds boots with a warning",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["admin (the seeded admin): every install"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr_a, namespace qa_a) and qa_b (manifest id com.qa.addr_b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Both hold a flow qa_sync and an agent qa_helper; qa_a also holds an email template auth.password_reset (a name the platform's email service ships as an overridable baseline)",
+          "for the cold-boot leg: a scratch app that registers two code packages which both hold the flow qa_sync (the doors judge nothing during a boot, so both register), booted on its own port and file DB"
+        ]
+      },
+      "steps": [
+        "install qa_a, then qa_b; record each answer and GET /api/v1/packages",
+        "rebuild qa_b without the flow qa_sync (keep the agent qa_helper) and install it again; record the answer",
+        "boot the cold-boot app and read the boot log; then POST /api/v1/automation/qa_sync/trigger and record the answer"
+      ],
+      "acceptance": [
+        {
+          "clause": "the second package holding a covered name is refused 422 NAMESPACE_CONFLICT naming both packages and a rename, and leaves nothing installed",
+          "oracle": "api",
+          "verify": "installing qa_b answers 422 with code NAMESPACE_CONFLICT naming flow qa_sync, com.qa.addr_a and com.qa.addr_b (packages/objectql/src/registry.ts#BareNameConflictError; packages/objectql/src/bare-name-one-holder.ts#suggestedBareNameRename); qa_b is absent from the package list",
+          "evidence": "the 422 body and the package list"
+        },
+        {
+          "clause": "agent and skill names are held per namespace: two packages in two namespaces may each hold the agent qa_helper",
+          "oracle": "api",
+          "verify": "the rebuilt qa_b installs 200 while both hold qa_helper (packages/objectql/src/bare-name-one-holder.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES, #31973); tool is still one holder per deployment",
+          "evidence": "the 200 answer"
+        },
+        {
+          "clause": "an overridable baseline holds no name: qa_a takes auth.password_reset over the platform's copy without a refusal",
+          "oracle": "api",
+          "verify": "qa_a installed 200 (packages/objectql/src/bare-name-one-holder.ts#OVERRIDABLE_BASELINE_PACKAGES maps email_template to com.objectstack.service.email)",
+          "evidence": "the install answer"
+        },
+        {
+          "clause": "a clash the deployment already holds does not stop the boot: it boots, warns once naming both holders and the rename, and the name is not armed for a caller with no package",
+          "oracle": "log",
+          "verify": "the boot log carries one warning naming qa_sync and both packages (packages/objectql/src/bare-name-one-holder.ts#BARE_NAME_COLD_BOOT_MODE is 'warn'); the trigger call answers a refusal naming both packages and starts no run",
+          "evidence": "the warning line and the trigger answer"
+        }
+      ],
+      "negative": [
+        "the second install answering 200 and the flow name then serving one of the two is a FAIL",
+        "a cold boot refused because of a pre-existing clash is a FAIL while the mode is warn"
+      ],
+      "variants": [
+        "the covered types (packages/objectql/src/bare-name-one-holder.ts#BARE_NAME_REGISTRY_TYPES); a run drives flow and agent and names the types it did not drive"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/objectql/src/registry-bare-name-one-holder.test.ts, registry-bare-name-one-holder-flow-family.test.ts, registry-bare-name-one-holder-request-family.test.ts, registry-bare-name-one-holder-ai-family.test.ts (all in packages/objectql/src)"
+      },
+      "source": [
+        "packages/objectql/src/bare-name-one-holder.ts#BARE_NAME_COLD_BOOT_MODE (the cold boot, and why the doors judge nothing during it)",
+        "packages/objectql/src/bare-name-one-holder.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES (agent and skill narrowed per namespace)",
+        "packages/objectql/src/registry.ts#BareNameConflictError (422 NAMESPACE_CONFLICT)",
+        "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D9 (phase 1 stands until each child B narrows it)",
+        "#30836, #31006, #31093, #31375, #31661 (phase 1, all after 18.3.0), #31973 (agent and skill per namespace)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — bare-name phase 1 (#30836 to #31661) and ADR-0150 child B for agent and skill (#31973). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
+          "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.stored-reference-package-backfill-upgrade",
+      "title": "An 18.3.0 database's stored references gain the package that holds them on the first boot: grants, binding suggestions, managed sharing rules, queue members, assignment cursors, open approvals, paused runs, flow credentials, connector connections and email templates are bound to their one holder, refused names stay null with one warning per table, dispatch keys are re-keyed by package, and a second boot writes nothing",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["operator, with direct access to the database file", "admin (the seeded admin): the permission parity read"],
+      "fixtures": {
+        "app": "any",
+        "requires": [
+          "an 18.3.0-shaped SQLite file, copied, never the original, by one of two routes. (a) A file a boot of npm `@objectstack/cli@18.3.0` (published; the tree is 18.3.0 plus the unreleased v18.4 work) wrote for a blank scaffold, with the rows the steps name planted through that release's own doors; a blank scaffold, because the showcase is a private workspace package with no published build. (b) The planted shape: a copy of a file DB this tree's own boot wrote, in which the step's columns are set back to NULL (and, for the activation ledger, the index uniq_sys_metadata_activation_packageless is dropped), which is what a database an earlier release built holds once this release's schema sync has added the columns. The rows planted: a sys_user_permission_set grant of a set one package holds; a managed sys_sharing_rule row; a paused sys_automation_run of a package flow; a pending sys_approval_request; a sys_email_template row for a platform template; a sys_flow_dispatch row keyed schedule:FLOW:WINDOW_START for a package flow inside 30 days, and one older than 30 days; and a sys_queue_member row naming a queue qa_desk that two installed packages in two namespaces both hold"
+        ]
+      },
+      "steps": [
+        "as admin on the copy BEFORE the upgrade boot (18.3.0 or the planted copy), read GET /api/v1/auth/me/permissions for the granted member; keep the body",
+        "boot this tree on the copy; read the boot log; with the server stopped, read each planted row's new package column and every sys_flow_dispatch key",
+        "restart; read the same permissions body for the member; then boot once more and diff every row"
+      ],
+      "acceptance": [
+        {
+          "clause": "each planted row whose item has one holder gains that package: permission_set_package, sys_sharing_rule.package_id, flow_package, process_package and sys_email_template.package_id (com.objectstack.service.email for a platform template)",
+          "oracle": "api",
+          "verify": "each column holds the holder's id (packages/plugins/plugin-security/src/stored-permission-set-package-backfill.ts#STORED_PERMISSION_SET_REFERENCES, packages/plugins/plugin-sharing/src/stored-declaration-package-backfill.ts#STORED_DECLARATION_REFERENCES, packages/services/service-automation/src/stored-reference-package-backfill.ts#STORED_AUTOMATION_REFERENCES, packages/plugins/plugin-approvals/src/stored-process-package-backfill.ts#backfillProcessPackages, packages/plugins/plugin-email/src/stored-template-package-backfill.ts#backfillTemplatePackages)",
+          "evidence": "each row before and after"
+        },
+        {
+          "clause": "a reference whose name is refused stays null, with one warning for its table",
+          "oracle": "log",
+          "verify": "the planted queue member's queue_package is null and the log carries one line for sys_queue_member (packages/plugins/plugin-sharing/src/stored-declaration-package-backfill.ts#logStoredDeclarationBackfill)",
+          "evidence": "the row and the warning"
+        },
+        {
+          "clause": "a dispatch key inside retention gains a scoped copy keyed by package, and the bare row stays; a key outside retention is not copied",
+          "oracle": "api",
+          "verify": "sys_flow_dispatch holds schedule:PACKAGE:FLOW:WINDOW_START beside the bare row; the old key has no copy (packages/services/service-automation/src/flow-dispatch-key-package-backfill.ts#scopedDispatchKey, #FLOW_DISPATCH_RETENTION_MS)",
+          "evidence": "the key list"
+        },
+        {
+          "clause": "the backfill changes no access answer",
+          "oracle": "api",
+          "verify": "the member's permissions body after the upgrade equals the body before it",
+          "evidence": "both bodies"
+        },
+        {
+          "clause": "a second boot writes nothing",
+          "oracle": "api",
+          "verify": "no planted row and no dispatch row differs after the further boot",
+          "evidence": "the diff"
+        }
+      ],
+      "negative": [
+        "a refused reference bound to one of its candidates is a FAIL: binding a refused name is the reviewed bind command's job, never the boot's",
+        "the bare dispatch row deleted by the re-key is a FAIL: a claim made before the upgrade must still be read"
+      ],
+      "traps": ["destructive-in-place", "first-boot-cold-start"],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/qa/dogfood/test/stored-reference-package-column.dogfood.test.ts (R1, R3, R5, R6, R13) and packages/qa/dogfood/test/automation-stored-reference-package-column.dogfood.test.ts (R7, R8, R10, R20); neither boots an 18.3.0-written file"
+      },
+      "source": [
+        "packages/plugins/plugin-security/src/stored-permission-set-package-backfill.ts#backfillStoredPermissionSetPackagesAtBoot (R1, R3)",
+        "packages/plugins/plugin-sharing/src/stored-declaration-package-backfill.ts#backfillStoredDeclarationPackagesAtBoot (R5, R6, R13)",
+        "packages/services/service-automation/src/stored-reference-package-backfill.ts#backfillStoredReferencePackagesAtBoot (R8, R9, R11)",
+        "packages/services/service-automation/src/flow-dispatch-key-package-backfill.ts#rekeyFlowDispatchesByPackage (R10)",
+        "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D8 (the stored-reference table) and D10 (the upgrade report and the bind)",
+        "#31872 (S2), #31903 (S3)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0150 children S2 and S3 on the upgrade path (#31872, #31903). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
+          "ref": "#32019"
         }
       ]
     }

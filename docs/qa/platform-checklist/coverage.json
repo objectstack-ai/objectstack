@@ -11,14 +11,17 @@
         "automation.setup-packaged-automation-board",
         "platform-core.activation-ledger-registration-home",
         "records-forms.script-action-hook-refusal-toast",
-        "studio-authoring.actions-tab-presets"
+        "studio-authoring.actions-tab-presets",
+        "api-backend.actions-namespace-address",
+        "ai.mcp-namespace-faces"
       ]
     },
     "agent": {
       "items": [
         "ai.agent-tool-skill-metadata-roundtrip",
         "ai.open-edition-honest-degradation",
-        "ai.console-ai-surface-gating"
+        "ai.console-ai-surface-gating",
+        "platform-core.bare-name-one-holder-refusal"
       ]
     },
     "analytics_cube": {
@@ -47,7 +50,7 @@
       ]
     },
     "assignment_rule": {
-      "waived": "WAIVED 2026-10-26 — no fixture declares one yet, measured rather than asserted. The runtime landed with ADR-0142 phase 2 (#25769): the engine routes each inserted row with no owner and no queue through the object's declared `assignmentRules` (park in a queue, `round_robin` or `least_loaded`), and `POST /security/_activation/assignment_rule/:name` switches one off. It is proven by unit and integration suites (packages/objectql/src/ownership-queue.test.ts, the runtime activation-door test), but no app this checklist drives (the showcase, the dev apps) declares an assignment rule, so an item written to RUN today has nothing to route. WHAT RETIRES THIS WAIVER — an app the checklist drives declares a queue and an assignment rule (the HotCRM adoption phase of #25769); an item then inserts a matching record and reads where it went (parked, or owned by the member the strategy chose), and the same edit replaces this waiver with `items` naming it. ⚠️ Re-audit it every sweep, as SWEEP.md asks of every waiver."
+      "waived": "WAIVED 2026-10-26 — no fixture declares one yet, measured rather than asserted. The runtime landed with ADR-0142 phase 2 (#25769): the engine routes each inserted row with no owner and no queue through the object's declared `assignmentRules` (park in a queue, `round_robin` or `least_loaded`), and `POST /security/_activation/assignment_rule/:name` switches one off. It is proven by unit and integration suites (packages/objectql/src/ownership-queue.test.ts, the runtime activation-door test), but no app this checklist drives (the showcase, the dev apps) declares an assignment rule, so an item written to RUN today has nothing to route. WHAT RETIRES THIS WAIVER — an app the checklist drives declares a queue and an assignment rule (the HotCRM adoption phase of #25769); an item then inserts a matching record and reads where it went (parked, or owned by the member the strategy chose), and the same edit replaces this waiver with `items` naming it. ⚠️ Re-audit it every sweep, as SWEEP.md asks of every waiver. Re-audited 2026-11-10 by scoped sweep #32019 (framework 60f8149e): access-security.sharing-queue-assignment-package-resolution now declares an assignment rule in two scratch packages, but only to drive the activation door's 409 for a name two packages hold. It inserts no record and reads no routing, so the premise above still holds and the waiver stands."
     },
     "batch_endpoints": {
       "items": [
@@ -120,7 +123,8 @@
     "email_template": {
       "items": [
         "integration-system.email-template-render",
-        "identity-auth.email-verification-loop"
+        "identity-auth.email-verification-loop",
+        "platform-core.bare-name-one-holder-refusal"
       ]
     },
     "field": {
@@ -168,7 +172,12 @@
         "studio-authoring.org-scope-flows",
         "studio-authoring.flow-status-matches-runtime",
         "studio-authoring.uninstalled-package-refused",
-        "automation.package-flow-override"
+        "automation.package-flow-override",
+        "platform-core.bare-name-one-holder-refusal",
+        "automation.flow-reference-package-resolution",
+        "platform-core.activation-ledger-package-key-upgrade",
+        "platform-core.stored-reference-package-backfill-upgrade",
+        "cli.address-grammar-reserved-names"
       ]
     },
     "hook": {
@@ -182,7 +191,8 @@
     },
     "job": {
       "items": [
-        "integration-system.job-scheduled-run"
+        "integration-system.job-scheduled-run",
+        "integration-system.job-package-key"
       ]
     },
     "manifest": {
@@ -191,7 +201,11 @@
         "cli.plugin-manifest-build-contract",
         "api-backend.package-rest-lifecycle",
         "platform-core.marketplace-install-local-lifecycle",
-        "platform-core.customization-pair-ensure-door"
+        "platform-core.customization-pair-ensure-door",
+        "platform-core.namespace-object-name-refusal",
+        "platform-core.namespace-co-owner-name-refusal",
+        "platform-core.bare-name-one-holder-refusal",
+        "cli.address-grammar-reserved-names"
       ]
     },
     "mapping": {
@@ -230,7 +244,8 @@
         "studio-authoring.api-written-keys-survive-studio-save",
         "studio-authoring.removed-key-save-door-refusal",
         "studio-authoring.uninstalled-package-refused",
-        "studio-authoring.package-extension-field-c"
+        "studio-authoring.package-extension-field-c",
+        "platform-core.namespace-object-name-refusal"
       ]
     },
     "page": {
@@ -241,7 +256,9 @@
         "platform-core.marketplace-console-honesty",
         "studio-authoring.interfaces-create-dialogs",
         "studio-authoring.authored-page-slots-and-variables",
-        "studio-authoring.uninstalled-package-refused"
+        "studio-authoring.uninstalled-package-refused",
+        "api-backend.meta-qualified-item-read",
+        "platform-core.namespace-co-owner-name-refusal"
       ]
     },
     "permission": {
@@ -261,7 +278,10 @@
         "api-backend.api-methods-verb-gate",
         "studio-authoring.access-permission-set-lifecycle",
         "studio-authoring.access-facets-runtime",
-        "studio-authoring.access-owd-and-suggestions"
+        "studio-authoring.access-owd-and-suggestions",
+        "access-security.permission-set-package-resolution",
+        "access-security.ai-service-account-agent-ceiling",
+        "identity-auth.idp-group-permission-set-mapping"
       ]
     },
     "picklist": {
@@ -277,7 +297,8 @@
         "approvals.per-group-signoff",
         "approvals.dynamic-approver-routing",
         "identity-auth.teams-bu-membership",
-        "approvals.approver-resolution-matrix"
+        "approvals.approver-resolution-matrix",
+        "access-security.permission-set-package-resolution"
       ]
     },
     "qa": {
@@ -292,7 +313,7 @@
       ]
     },
     "queue": {
-      "waived": "WAIVED 2026-10-26 — no fixture declares one yet, measured rather than asserted. The runtime landed with ADR-0142 phase 2 (#25769): the `queue` column on `ownership: 'user'` objects, the sitting-record read/edit path for queue members, claim / release / move through the owner gate (409 for the losing claimant, 422 QUEUE_NOT_FOUND), the `queue` sharing recipient and the `queue` approver. It is proven by unit and integration suites (plugin-sharing ownership-queue tests, the plugin-security queue gate and explain tests, the approvals queue tests), but no app this checklist drives (the showcase, the dev apps) declares a queue, and the console has no queue surface yet, so an item written to RUN today has no queue to claim from. WHAT RETIRES THIS WAIVER — an app the checklist drives declares a staffed queue (the HotCRM adoption phase of #25769); items then drive claim (two members race, one wins), release, move and the member-only read across two personas, and the same edit replaces this waiver with `items` naming them. ⚠️ Re-audit it every sweep, as SWEEP.md asks of every waiver."
+      "waived": "WAIVED 2026-10-26 — no fixture declares one yet, measured rather than asserted. The runtime landed with ADR-0142 phase 2 (#25769): the `queue` column on `ownership: 'user'` objects, the sitting-record read/edit path for queue members, claim / release / move through the owner gate (409 for the losing claimant, 422 QUEUE_NOT_FOUND), the `queue` sharing recipient and the `queue` approver. It is proven by unit and integration suites (plugin-sharing ownership-queue tests, the plugin-security queue gate and explain tests, the approvals queue tests), but no app this checklist drives (the showcase, the dev apps) declares a queue, and the console has no queue surface yet, so an item written to RUN today has no queue to claim from. WHAT RETIRES THIS WAIVER — an app the checklist drives declares a staffed queue (the HotCRM adoption phase of #25769); items then drive claim (two members race, one wins), release, move and the member-only read across two personas, and the same edit replaces this waiver with `items` naming them. ⚠️ Re-audit it every sweep, as SWEEP.md asks of every waiver. Re-audited 2026-11-10 by scoped sweep #32019 (framework 60f8149e): access-security.sharing-queue-assignment-package-resolution now declares a queue in two scratch packages, but only to drive the activation door's 409 for a name two packages hold. It stages no queue member and drives no claim, release, move or member-only read, so the premise above still holds for those and the waiver stands."
     },
     "realtime_subscription": {
       "waived": "WAIVED 2026-09-04 — there is no runtime behaviour to drive, measured rather than asserted. SubscriptionSchema (packages/spec/src/api/realtime.zod.ts) is a TRANSPORT-PROTOCOL declaration with zero runtime readers: its liveness ledger records every property dead at a same-day census, nothing outside packages/spec imports SubscriptionSchema / SubscriptionEventSchema / RealtimeConfigSchema, and the shipped in-memory adapter reads a different type entirely (RealtimeSubscriptionOptions, packages/spec/src/contracts/realtime-service.ts). There is also nothing for a client to connect to: measured on a stock showcase boot for #14646, GET /api/v1/discovery reports realtime enabled:true but status degraded, handlerReady:false, and no realtime entry in the routes map — #14646 is the open decision on whether the open framework mounts an HTTP/WS/SSE realtime surface at all. An item authored today could only assert absence, which belongs in FOLLOW-UPS.md (§10) and on #14646, not in a coverage entry. WHAT RETIRES THIS WAIVER — either the #14646 decision mounts a realtime transport that parses this schema, in which case author the subscribe / unsubscribe / event-delivery contract and flip this entry to items; or the ADR-0049 enforce-or-remove call retires the schema and its ledger, and the ratchet flags this entry as an ORPHAN to delete. ⚠️ Re-audit it every sweep: 6 of 6 waivers ever written in this file turned out stale (SWEEP.md), which is why this one is grounded in the census and the discovery reading rather than in the schema's own prose."
@@ -331,13 +352,15 @@
       "items": [
         "access-security.sharing-rules-widen",
         "access-security.sharing-rule-authoring-ui",
-        "access-security.record-share-grant-revoke"
+        "access-security.record-share-grant-revoke",
+        "access-security.sharing-queue-assignment-package-resolution"
       ]
     },
     "skill": {
       "items": [
         "ai.agent-tool-skill-metadata-roundtrip",
-        "ai.skill-instructions-mcp-prompts"
+        "ai.skill-instructions-mcp-prompts",
+        "ai.mcp-namespace-faces"
       ]
     },
     "tool": {

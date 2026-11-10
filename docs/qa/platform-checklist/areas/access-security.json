@@ -4704,6 +4704,305 @@
           "ref": "#25835"
         }
       ]
+    },
+    {
+      "id": "access-security.permission-set-package-resolution",
+      "title": "A package's position resolves its permission sets from that package and its declared dependencies: a set only the environment or an unrelated package holds is refused and grants nothing, the boot report names the candidates, and a grant row records the package that holds its set",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "admin (the seeded admin): the installs, the grant and the reads",
+        "a member who holds the position qa_b_desk: the effective-permissions read"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr_a, namespace qa_a) and qa_b (manifest id com.qa.addr_b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. qa_a holds the permission set qa_a_reader (read on one showcase object); qa_b holds the position qa_b_desk binding qa_a_reader and qa_env_reader, and declares no dependency on qa_a",
+          "an environment permission set qa_env_reader saved with PUT /api/v1/meta/permission/qa_env_reader and no ?package=; a member assigned qa_b_desk; the server restarted after the installs so the boot report runs"
+        ]
+      },
+      "steps": [
+        "read the boot log for the catalog reference report",
+        "as the member, read the effective permissions (GET /api/v1/auth/me/permissions); record whether either set's grants are present",
+        "rebuild qa_b declaring a dependency on qa_a, reinstall, restart, and repeat the two reads",
+        "as admin, insert a sys_user_permission_set row granting qa_a_reader to the member with no package column; read the row back"
+      ],
+      "acceptance": [
+        {
+          "clause": "a position's set that only the environment holds, or that a package outside the position's closure holds, resolves to nothing and grants nothing",
+          "oracle": "api",
+          "verify": "before the dependency, the member holds neither set's grants (packages/core/src/security/security-catalog.ts: a refusal confers nothing and is never a guess, reason outside-closure)",
+          "evidence": "the effective-permissions body"
+        },
+        {
+          "clause": "the boot report names each refused reference with its candidates",
+          "oracle": "log",
+          "verify": "the boot log names qa_b_desk, qa_a_reader with com.qa.addr_a, and qa_env_reader with the environment",
+          "evidence": "the report lines"
+        },
+        {
+          "clause": "once qa_b declares qa_a, the position reaches qa_a_reader; qa_env_reader stays refused, since no package can depend on the environment",
+          "oracle": "api",
+          "verify": "after the dependency, the member holds qa_a_reader's grants and not qa_env_reader's (ADR-0150 D3 (a))",
+          "evidence": "the second effective-permissions body"
+        },
+        {
+          "clause": "a grant row written without a package records the package that holds its set",
+          "oracle": "api",
+          "verify": "the read-back row carries permission_set_package com.qa.addr_a (packages/plugins/plugin-security/src/stored-permission-set-package-stamp.ts#registerPermissionSetPackageStamp)",
+          "evidence": "the row"
+        },
+        {
+          "clause": "confirming a binding suggestion whose set name is refused answers 409 naming the reviewed bind command",
+          "oracle": "test",
+          "verify": "run packages/plugins/plugin-security/src/suggested-audience-bindings.test.ts and cite the case naming os migrate stored-references bind (a live run needs a suggestion row whose set two holders reach, which no stock fixture writes)",
+          "evidence": "the test output"
+        }
+      ],
+      "negative": [
+        "the member holding qa_env_reader's grants through the package position is a FAIL: that is the D3 (a) narrowing",
+        "a grant row stamped with a package that does not hold the set is a FAIL"
+      ],
+      "traps": ["wrong-persona", "cache-staleness"],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/objectql/src/engine-security-catalog-package-door.test.ts, packages/plugins/plugin-security/src/suggested-audience-bindings.test.ts, packages/qa/dogfood/test/stored-reference-package-column.dogfood.test.ts (R1)"
+      },
+      "source": [
+        "packages/core/src/security/security-catalog.ts (reads permission sets by (package, name) through resolvePackageScopedHolders; positions stay one slot per name)",
+        "packages/plugins/plugin-security/src/stored-permission-set-package-stamp.ts#registerPermissionSetPackageStamp (the column stamp on insert and update)",
+        "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D3 (own, then the one holder in the closure, else the refusal) and D3 (a)",
+        "#31815 (E3), #31974 (R1/R3 stamp and the suggestion refusal)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0150 child E3 and the R1/R3 stamp (#31815, #31974). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
+          "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "access-security.sharing-queue-assignment-package-resolution",
+      "title": "Sharing rules, queues and assignment rules resolve by (package, name): the activation door refuses a name two packages hold with the candidates, a declared rule's queue recipient and an assignment rule's queue come from the rule's own package, and a refused declared name serves nothing",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": ["admin (the seeded admin): the activation calls"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr_a, namespace qa_a) and qa_b (manifest id com.qa.addr_b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Each holds a queue qa_desk, a sharing rule qa_share and an assignment rule qa_route (none of these types has a one-holder rule, and the namespaces differ, so both install)"
+        ]
+      },
+      "steps": [
+        "POST /api/v1/security/_activation/queue/qa_desk {\"enabled\": false}; record status and body",
+        "repeat for /security/_activation/sharing_rule/qa_share and /security/_activation/assignment_rule/qa_route",
+        "GET /api/v1/data/sys_metadata_activation; record any row for the three names"
+      ],
+      "acceptance": [
+        {
+          "clause": "the activation door answers 409 RESOURCE_CONFLICT with the candidates for a queue, sharing rule or assignment rule name two packages hold, and writes no row",
+          "oracle": "api",
+          "verify": "each call answers 409 with code RESOURCE_CONFLICT and candidates naming com.qa.addr_a and com.qa.addr_b (packages/runtime/src/domains/catalog-activation.ts); the ledger holds no row for the three names",
+          "evidence": "the three 409 bodies and the ledger read"
+        },
+        {
+          "clause": "a declared sharing rule's queue recipient and an assignment rule's queue resolve from the rule's own package, and a refused declared name serves nothing and warns once",
+          "oracle": "test",
+          "verify": "run packages/plugins/plugin-sharing/src/package-scoped-declarations.test.ts and packages/plugins/plugin-sharing/src/queue-recipient.test.ts and cite their output (packages/plugins/plugin-sharing/src/package-scoped-declarations.ts#resolveDeclaredName). No checklist app stages queue members, so the live leg is the door above",
+          "evidence": "the test output"
+        }
+      ],
+      "negative": [
+        "a 200 that switches off one of the two holders' items is a FAIL: the door never picks",
+        "a 503 for the same call is a regression of #31959, which maps the package-scoped refusal to 409"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-sharing/src/package-scoped-declarations.test.ts, packages/plugins/plugin-sharing/src/queue-recipient.test.ts, packages/plugins/plugin-sharing/src/stored-declaration-package-backfill.test.ts"
+      },
+      "source": [
+        "packages/plugins/plugin-sharing/src/package-scoped-declarations.ts#resolveDeclaredName and #listedHoldersView",
+        "packages/plugins/plugin-sharing/src/ownership-queue-service.ts (resolve, expandMembers and isMember take the caller's package)",
+        "packages/runtime/src/domains/catalog-activation.ts (the 409 with candidates)",
+        "#31728, #31789, #31850 (E4), #31959 (the activation door's 409)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0150 child E4 (#31728, #31789, #31850). The queue and assignment_rule waivers in coverage.json stand: this item drives the activation door, not claim, release or move. Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
+          "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "access-security.permission-set-address-in-execution-context",
+      "title": "A permission set travels as (package, name) from the grant to every request's evaluation: the execution context carries permissionSetAddresses",
+      "since": null,
+      "status": "planned",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": ["a member holding a packaged permission set"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": ["two packages in two namespaces whose permission sets would share a name once child B narrows that family (#31698)"]
+      },
+      "acceptance": [
+        {
+          "clause": "a request's execution context carries each held set as { packageId, name }, and evaluation reads the set of that package",
+          "oracle": "api",
+          "verify": "read the context the request was evaluated under and the effective permissions",
+          "evidence": "the context and the permissions body"
+        }
+      ],
+      "source": [
+        "packages/spec/src/kernel/execution-context.zod.ts#PermissionSetAddressSchema (declared by #31978)",
+        "packages/runtime/src/security/assemble-execution-context.ts (sets permissionSetAddresses to undefined at the base sha)",
+        "#31971 (the server half, open), #31698 (permission-set family narrowing, open)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — planned. The schema half landed in #31978, but the context assembler always leaves permissionSetAddresses undefined until #31971, so it is declared-but-absent. Scoped sweep #32019 (epic #32022 M1, theme 1), read from source at 60f8149e. Steps arrive with the implementing card, in the edit that promotes this item after a run in which it passes",
+          "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "access-security.ai-service-account-agent-ceiling",
+      "title": "An AI service account acts under the agent ceiling: its key never carries View All, Modify All, the destructive class, a system permission or admin standing, an assignment above the ceiling is refused 400 naming the set, and a set edited above it after assignment still grants nothing more",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["organization administrator: the assignments", "the AI service account, through its key: every effective read"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "an account with a key, registered as identity-auth.ai-service-account-register-and-key does; a scratch permission set qa_agent_reader (read on one showcase object, no system permissions) and a second set qa_view_all with viewAllRecords on the same object"
+        ]
+      },
+      "steps": [
+        "with the key: GET /api/v1/auth/me/permissions; record system permissions, admin standing and any View All / Modify All",
+        "as the administrator: insert sys_user_permission_set granting qa_view_all to the account, then qa_agent_reader; record each answer",
+        "with the key: read the object; then as the administrator edit qa_agent_reader to add viewAllRecords (PUT /api/v1/meta/permission/qa_agent_reader) and repeat the effective-permissions read and the object read with the key"
+      ],
+      "acceptance": [
+        {
+          "clause": "the account resolves as an agent: no system permissions, no admin standing, and no everyone-anchor sets",
+          "oracle": "api",
+          "verify": "the effective-permissions body lists no system permission and no admin scope (packages/core/src/security/resolve-authz-context.ts#isAgentAccountRow, #resolveUserAuthzGrants)",
+          "evidence": "the body"
+        },
+        {
+          "clause": "assigning a set above the ceiling is refused 400 VALIDATION_FAILED at permission_set naming the set and the breaching bits; a set inside it is accepted",
+          "oracle": "api",
+          "verify": "the qa_view_all grant answers 400 with code VALIDATION_FAILED and invalid_value at permission_set naming viewAllRecords (packages/plugins/plugin-security/src/agent-account-grant-refusal.ts#agentAccountSetGrantMessage); the qa_agent_reader grant is accepted",
+          "evidence": "both answers"
+        },
+        {
+          "clause": "a set edited above the ceiling after assignment is still read under it",
+          "oracle": "api",
+          "verify": "after the edit the key's effective permissions still carry no View All, and the object read returns only what qa_agent_reader allowed before the edit (packages/plugins/plugin-security/src/agent-ceiling-clamp.ts#clampPermissionSetToAgentCeiling)",
+          "evidence": "the effective-permissions body and both object reads"
+        }
+      ],
+      "negative": [
+        "View All reaching the key through any path is a FAIL",
+        "the ceiling refusal applied to a person's grant is a FAIL: only an agent holder is judged"
+      ],
+      "traps": ["wrong-persona", "cache-staleness"],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-security/src/agent-account-grant-refusal.test.ts, packages/plugins/plugin-security/src/agent-ceiling-clamp.test.ts, packages/core/src/security/resolve-authz-context.agent-account.test.ts"
+      },
+      "source": [
+        "packages/plugins/plugin-security/src/agent-account-grant-refusal.ts#registerAgentAccountGrantRefusal (the write-path refusal, priority 45)",
+        "packages/plugins/plugin-security/src/agent-ceiling-clamp.ts#AGENT_CEILING_OBJECT_KEYS (the clamp at evaluation)",
+        "packages/core/src/security/resolve-authz-context.ts#resolveUserAuthzGrants",
+        "docs/adr/0151-ai-service-account-a-headless-agent-is-a-registered-principal-of-its-own.md D3",
+        "#31867"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0151 D3, the agent ceiling (#31867). Scoped sweep #32019 (epic #32022 M1, theme 3: AI service accounts and identity), read from source at 60f8149e; no live run made",
+          "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "access-security.credential-use-audit-row",
+      "title": "Each API key or OAuth access token use writes one credential_use audit row per use window, naming the credential, its owner and the client's address, and never the key, its hash or its prefix",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": ["a member holding an osk_ API key: the requests", "admin (the seeded admin): the audit read"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": ["one API key a member minted at POST /api/v1/keys, unused since it was minted"]
+      },
+      "steps": [
+        "make two reads with the key in quick succession",
+        "as admin: GET /api/v1/data/sys_audit_log filtered to action credential_use; record every row for the key",
+        "search each row's whole text for the raw key and for its prefix"
+      ],
+      "acceptance": [
+        {
+          "clause": "the first admitted use writes one credential_use row; a second use inside the window writes none",
+          "oracle": "api",
+          "verify": "exactly one row for the key (packages/plugins/plugin-audit/src/credential-use-audit.ts#CREDENTIAL_USE_AUDIT_ACTION; the stamp is the window)",
+          "evidence": "the audit rows"
+        },
+        {
+          "clause": "the row names the key owner as actor, the key row as its record, and carries credential_kind api_key, credential_id, used_at and the client address and user agent, or ip_address_absent",
+          "oracle": "api",
+          "verify": "the row's metadata holds those keys (packages/plugins/plugin-audit/src/credential-use-audit.ts#buildCredentialUseAuditRow; packages/core/src/security/credential-use-client.ts#credentialUseClientOf)",
+          "evidence": "the row"
+        },
+        {
+          "clause": "the row never carries the key, its hash or its prefix",
+          "oracle": "api",
+          "verify": "neither search finds a match",
+          "evidence": "the two search results"
+        }
+      ],
+      "negative": [
+        "one row per request is a FAIL: the ledger would grow with traffic, not with use windows",
+        "a client address read from X-Forwarded-For is a FAIL: only the transport peer is read"
+      ],
+      "traps": ["eventual-consistency"],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-audit/src/credential-use-audit.integration.test.ts, packages/core/src/security/credential-use-client-doors.pin.test.ts"
+      },
+      "source": [
+        "packages/plugins/plugin-audit/src/credential-use-audit.ts#installCredentialUseAudit (the stamp is the window; the row's keys)",
+        "packages/core/src/security/credential-use-client.ts#transportPeerAddressOf",
+        "#31862, #31897, #31967"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — the credential_use ledger row (#31862, #31897, #31967). Scoped sweep #32019 (epic #32022 M1, theme 3: AI service accounts and identity), read from source at 60f8149e; no live run made",
+          "ref": "#32019"
+        }
+      ]
     }
   ]
 }

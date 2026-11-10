@@ -2620,6 +2620,138 @@
           "ref": "#28579"
         }
       ]
+    },
+    {
+      "id": "cli.address-grammar-reserved-names",
+      "title": "The address grammar reserves its segments: a bucket 2/3 name led by _ is refused at defineStack and os validate, a namespace that spells a grammar literal is refused at the running install door (a boot-registered one boots with a warning), and lint's namespace-prefix rule judges only capabilities and positions",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": ["developer at the CLI", "admin (the seeded admin): the install leg"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a scratch app that declares a flow named _qa_flow; a compiled scratch package whose manifest namespace is hooks (a NAMESPACE_REFUSED_LITERALS value); and a scratch app with a flow whose name carries no namespace prefix"
+        ]
+      },
+      "steps": [
+        "os validate the app with _qa_flow; record the exit code and output",
+        "install the hooks-namespaced package into a running boot: os package install FILE; record status and body",
+        "add the same package to a scratch app's code-registered packages and boot it; read the boot log",
+        "os lint the app whose flow name has no namespace prefix; record findings for naming/namespace-prefix"
+      ],
+      "acceptance": [
+        {
+          "clause": "a _-led name of a bucket 2/3 type is refused, naming the reserved prefix",
+          "oracle": "build",
+          "verify": "os validate exits non-zero naming _qa_flow and the prefix (packages/spec/src/kernel/address-grammar.ts#ROUTER_RESERVED_NAME_PREFIX, #ROUTER_ADDRESSABLE_NAME_PATTERN)",
+          "evidence": "the output and exit code"
+        },
+        {
+          "clause": "the running install door refuses a namespace that spells a grammar literal: 422 NAMESPACE_CONFLICT naming it",
+          "oracle": "api",
+          "verify": "the install answers 422 with code NAMESPACE_CONFLICT (packages/spec/src/kernel/address-grammar.ts#validateNamespaceNotAddressLiteral, #NAMESPACE_REFUSED_LITERALS: actions, connectors, global, hooks, oauth, trigger)",
+          "evidence": "the 422 body"
+        },
+        {
+          "clause": "a boot-registered package with such a namespace boots, with a warning naming it",
+          "oracle": "log",
+          "verify": "the boot completes and the log names the namespace hooks (packages/objectql/src/registry-namespace-address-literal.test.ts)",
+          "evidence": "the boot log lines"
+        },
+        {
+          "clause": "naming/namespace-prefix no longer reports a behavioural name without a prefix; it judges only capabilities and positions",
+          "oracle": "build",
+          "verify": "os lint reports no naming/namespace-prefix finding for the flow (packages/cli/src/commands/lint.ts#PREFIX_JUDGED_COLLECTIONS)",
+          "evidence": "the lint output"
+        }
+      ],
+      "negative": [
+        "a _-led flow name accepted by os validate is a FAIL: the router reads _-led segments as its own",
+        "a hooks namespace installed at the running door is a FAIL"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/spec/src/kernel/address-grammar.test.ts, packages/spec/src/kernel/router-reserved-name.test.ts, packages/objectql/src/registry-namespace-address-literal.test.ts"
+      },
+      "source": [
+        "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D5 (literal segments win; _-led names refused; the install gate refuses a literal namespace)",
+        "packages/spec/src/kernel/address-grammar.ts#NAMESPACE_REFUSED_LITERALS and #validateNamespaceNotAddressLiteral",
+        "packages/cli/src/commands/lint.ts#PREFIX_JUDGED_COLLECTIONS",
+        "#31765 (P), #31959 (the install door's literal refusal); #31968 (refusing it at build time) is open"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0150 child P and the G1 install refusal (#31765, #31959). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
+          "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "cli.migrate-stored-references",
+      "title": "os migrate stored-references reports every stored package reference the boot could not bind, read-only, and os migrate stored-references bind writes one reviewed row per run with its audit row, refusing a package that is not a candidate",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "cli",
+      "personas": ["operator at the CLI, pointed at the deployment's database"],
+      "fixtures": {
+        "app": "any",
+        "requires": [
+          "an 18.3.0-shaped SQLite file, copied, never the original, by one of two routes. (a) A file a boot of npm `@objectstack/cli@18.3.0` (published; the tree is 18.3.0 plus the unreleased v18.4 work) wrote for a blank scaffold, with the rows the steps name planted through that release's own doors; a blank scaffold, because the showcase is a private workspace package with no published build. (b) The planted shape: a copy of a file DB this tree's own boot wrote, in which the step's columns are set back to NULL (and, for the activation ledger, the index uniq_sys_metadata_activation_packageless is dropped), which is what a database an earlier release built holds once this release's schema sync has added the columns, after its first boot on this tree, with one sys_queue_member row left null because two installed packages in two namespaces both hold its queue qa_desk"
+        ]
+      },
+      "steps": [
+        "os migrate stored-references --json; record the findings; run it again and diff the two outputs; record any row change",
+        "os migrate stored-references bind --table sys_queue_member --id ID --package P with P one of the finding's candidates; answer the prompt n, then run with --yes",
+        "run the same bind again; then bind with a package that is not a candidate, and with --table sys_flow_dispatch",
+        "read the queue member row and sys_audit_log"
+      ],
+      "acceptance": [
+        {
+          "clause": "the report lists each unbound reference with its table, row id, column, name, reason and candidates, and writes nothing; two runs print the same JSON",
+          "oracle": "build",
+          "verify": "the finding for the queue member has reason ambiguous and candidates spelled ns/name (qa_a/qa_desk, qa_b/qa_desk); an environment holder is spelled _env/name (packages/cli/src/utils/stored-package-references.ts#collectStoredPackageReferences); the outputs are identical and no row changed",
+          "evidence": "both outputs and the row diff"
+        },
+        {
+          "clause": "bind writes one row only after confirmation, and leaves one sys_audit_log row",
+          "oracle": "api",
+          "verify": "answering n changes nothing; --yes sets queue_package to P and one sys_audit_log row records the change (packages/cli/src/utils/stored-package-references.ts#bindStoredPackageReference; the bind composes the audit plugin)",
+          "evidence": "the row before and after, and the audit row"
+        },
+        {
+          "clause": "bind refuses what it may not decide: an already bound row, a package that is not a candidate, and a report-only table",
+          "oracle": "build",
+          "verify": "the three runs exit non-zero naming already-bound, not-a-candidate and report-only, and write nothing",
+          "evidence": "the three outputs"
+        }
+      ],
+      "negative": ["the report writing any row is a FAIL: it is read-only", "bind accepting a package outside the candidates is a FAIL"],
+      "traps": ["destructive-in-place"],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/cli/src/commands/migrate/stored-references.integration.test.ts"
+      },
+      "source": [
+        "packages/cli/src/utils/stored-package-references.ts#collectStoredPackageReferences and #bindStoredPackageReference",
+        "packages/cli/src/commands/migrate/stored-references/index.ts (the read-only report and its deterministic --json)",
+        "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D10",
+        "#31961 (S4)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0150 child S4 (#31961). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
+          "ref": "#32019"
+        }
+      ]
     }
   ]
 }
