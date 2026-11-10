@@ -30,7 +30,8 @@
  *   which the engine applies after it filters. The cap is the datasource's
  *   `external.rowCap` (#29762), else `EXTERNAL_ROW_CAP`, never above
  *   `EXTERNAL_ROW_CAP_CEILING` ({@link resolveExternalRowCap}). More than
- *   cap rows back ⇒ {@link ExternalRowCapExceededError};
+ *   cap rows back ⇒ {@link ExternalRowCapExceededError}, which carries what
+ *   came back on the error object only (ADR-0153 D2, the sync-in pull's windows);
  *   otherwise the engine applies the whole query to the rows
  *   (`applyDriverQueryInMemory`), so a driver that returned every row still
  *   answers the right subset. `findOne` is that read with `limit: 1`, `count`
@@ -244,7 +245,13 @@ export function createExternalDriverFloor(driver: IDataDriver, host: ExternalDri
     if (!Array.isArray(rows)) {
       throw remoteFailure(object, 'find', new Error(`find answered ${typeof rows}, not an array of rows`));
     }
-    if (rows.length > cap) throw new ExternalRowCapExceededError(host.datasource, object, cap);
+    // [ADR-0153 D2] The rows ride on the refusal privately (never `details`,
+    // never the wire): the sync-in pull's windowed read cuts its next window
+    // below a value they show, and tells an over-cap window from a driver that
+    // did not push the window's bounds.
+    if (rows.length > cap) {
+      throw new ExternalRowCapExceededError(host.datasource, object, cap, rows as Record<string, unknown>[]);
+    }
     return rows as Record<string, unknown>[];
   };
 

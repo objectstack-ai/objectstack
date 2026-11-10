@@ -2106,6 +2106,10 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         label: "JIT(Just-in-Time) 프로비저닝 허용",
         help: "가입 대상이 초대 전용일 때, 계정이나 초대 없이 이 공급자를 통해 로그인하는 사람에게 계정을 만들어 줍니다. 기본값은 꺼짐이며, 그런 사람은 거부됩니다. 다른 가입 대상 모드는 이전과 같이 프로비저닝합니다. “로그인 옵션 편집”으로 변경하세요."
       },
+      skip_user_info: {
+        label: "ID 토큰에서만 클레임 읽기",
+        help: "OIDC 전용. ID 공급자의 검증된 ID 토큰에서 이메일, 이름, 그룹을 읽고 userinfo 엔드포인트는 호출하지 않습니다. Microsoft Entra ID에서는 켜야 합니다. 해당 userinfo 응답에는 그룹도 preferred_username도 없습니다. 기본값은 꺼짐이며, userinfo 엔드포인트가 있는 공급자는 그 응답에서 클레임을 읽습니다. '로그인 옵션 편집'에서 변경하세요."
+      },
       user_id: {
         label: "등록한 사람",
         help: "이 공급자를 등록한 사용자"

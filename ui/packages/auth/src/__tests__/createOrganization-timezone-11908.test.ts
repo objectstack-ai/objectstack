@@ -110,6 +110,16 @@ describe('createOrganization sends the edition as a query parameter, only when a
     expect(Object.keys(call.body).sort()).toEqual(['name', 'slug']);
   });
 
+  it('any served edition value rides unchanged, not only developer (objectstack#31988)', async () => {
+    const { client, createCalls } = recordingFetch();
+
+    await client.createOrganization({ name: 'Acme', slug: 'acme', edition: 'sandbox_plus' });
+
+    const [call] = createCalls();
+    expect(call.url.search).toBe('?edition=sandbox_plus');
+    expect(Object.keys(call.body).sort()).toEqual(['name', 'slug']);
+  });
+
   it('control: no edition → no edition parameter, the zone alone as before', async () => {
     const { client, createCalls } = recordingFetch();
 
