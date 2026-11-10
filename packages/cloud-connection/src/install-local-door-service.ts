@@ -52,6 +52,14 @@ export interface InstallLocalDoorGrant {
     packageId: string;
     /** The granted version, as the grant echoed it (`data.version`). */
     version?: string;
+    /**
+     * [#31963] The manifest id the grant is for, set only when the request
+     * carries the grant's own manifest inline: the grant's `data.manifest_id`,
+     * or the requested package id when that is itself a manifest id. The
+     * inline manifest must declare exactly this id and {@link version}, or the
+     * door copies nothing.
+     */
+    manifestId?: string;
     /** The environment the grant is for. */
     environmentId?: string;
     /** The installer: the session the cloud-connection door admitted. */
@@ -71,6 +79,12 @@ export interface InstallLocalDoor {
      * the rest) hands the `audit` slot one `package_unmanaged_import` failure
      * event, carrying the answer's code and status. Without it, nothing
      * changes.
+     *
+     * [#31963] A grant-path request whose body carries a `manifest` is the
+     * grant's own manifest: the door copies it only when it declares the
+     * grant's `manifestId` and `version` (502 `PLUGIN_MANIFEST_INVALID`
+     * otherwise, before any write), and every later check runs on it as on a
+     * fetched one, with the fetched manifest's statuses.
      */
     install(request: Request, options?: { grant?: InstallLocalDoorGrant }): Promise<Response>;
 }
