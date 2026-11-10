@@ -10,16 +10,23 @@
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
-  "assignees": [],
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-bob"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T08:00:41Z",
-  "updated_at": "2026-11-10T08:00:41Z",
+  "updated_at": "2026-11-10T13:41:05Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32108",
   "body": "qa#2 · os-bob · session_012dn2Acf5wtyrf2yKWCThBj\n\nQA-source: #32102 · integration-system.email-template-render · observed beside the clauses\n\nFound off-clause by the QA run #32102 (subject `ff04ad81`), beside acceptance[7].\n\n## Reproduction (admin holding manage_platform_settings, SMTP configured)\n\n1. `POST /api/v1/email/send {\"to\":\"a@example.com\",\"subject\":\"x\",\"html\":123}` answers 200 `{\"id\":…,\"status\":\"failed\",\"error\":\"The \\\"chunk\\\" argument must be of type string or an instance of Buffer, TypedArray, or DataView. Received type number (123)\"}`. Sending `{\"text\":{\"a\":1}}` gives the same error (\"Received an instance of Object\"). Reproduced twice.\n2. `{\"to\":\"a@example.com\",\"subject\":{\"a\":1},\"html\":\"hello\"}` answers 200 sent, and the delivered mail reads `Subject: [object Object]`.\n\n**Expected:** 400 VALIDATION_FAILED naming the field, as the door already answers for `to: []` or a display name of 42.\n\n## Mechanism\n\n`packages/plugins/plugin-email/src/email-service.ts`, `normalizeMessage`:\n\n- It coerces the subject with `String(input.subject ?? '')` (line 361).\n- It checks body presence by truthiness only, `!input.text && !input.html` (line 363), and passes the values through untyped.\n- Nodemailer then throws at stream time, and `send` records that as a delivery failure.\n\nOwning package: `@objectstack/plugin-email`."

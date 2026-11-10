@@ -1,0 +1,34 @@
+{
+  "number": 32121,
+  "kind": "issue",
+  "title": "sys_idp_group_mapping: a mapping that matches no current group cannot be shown as such",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T08:46:34Z",
+  "updated_at": "2026-11-10T13:58:45Z",
+  "closed_at": "2026-11-10T13:57:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32121",
+  "body": "repo:cloud#3 · os-warren · session_01JQwxbZqfEd7pcckjz3pGqn\n\nBlocks cloud#4278 (p2, SCIM provisioning console); drafted by the cloud#4278 card thread (session_01JQwxbY3zqaaaSj7tJsov3a) and filed by the seat.\n\nEdition / version: framework pin 99992ddf. Consumer: cloud SCIM provisioning console \"Group mappings\" grid; cloud#4278 item 4.\n\nMeasured on cloud#4278: a mapping by `groupDisplayName` (\"ObjectOS SCIM Test\" → `ai_ledger_member_read`); Okta renames the group (`PATCH /Groups/:id` `replace displayName`); every member loses the grant at once (fail-closed, correct). The mapping row is unchanged and nothing on it says it now matches nothing. Renaming back restores the grant.\n\nWhy (code): the matcher (`plugin-auth/src/scim-group-projection.ts`, `roles.map`) compares the mapping's `group_external_id` / `group_display_name` with the pushed group on each mutation and stores nothing about the result. `sys_idp_group_mapping` has no match field. `sys_scim_group` (the pushed groups) carries `defaultRowScope: id == null`, so a page cannot list the groups beside the mappings for an admin to compare. A page cannot compute \"no group matches\" declaratively (no anti-join in a list view).\n\nSeam: `runtime: scim-group-projection roles.map` → `object: sys_idp_group_mapping` (no consumer field yet).\n\nExpected: the mapping row says whether it matches a current group of its source, e.g. `matched_group_id` + `matched_at` maintained by the projection and by the group create / rename / delete path (SCIM mappings; an SSO mapping has no stored group list and reads \"not applicable\"), so a console can show \"matches no current group\". A test: rename the group → the mapping reads unmatched; rename back → matched.\n\nDedupe words: \"group mapping unmatched\", \"idp group rename revokes\", \"sys_idp_group_mapping matched\", \"scim group mapping stale\"."
+}

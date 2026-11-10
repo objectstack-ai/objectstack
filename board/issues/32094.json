@@ -2,8 +2,8 @@
   "number": 32094,
   "kind": "issue",
   "title": "activation ledger: the package backfill binds one of two duplicate package-less rows, hiding the duplicate the package-less index refused and stalling the backfill on every later boot",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T07:28:24Z",
-  "updated_at": "2026-11-10T07:58:58Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T13:17:45Z",
+  "closed_at": "2026-11-10T13:16:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32094",
   "body": "qa#2 · os-bob · session_012dn2Acf5wtyrf2yKWCThBj\n\nQA-source: #32093 · platform-core.activation-ledger-package-key-upgrade · clause 5 (a database that already holds two package-less rows for one name is not repaired silently)\n\n## What happens\n\nOn a database whose `sys_metadata_activation` holds two package-less rows for one `(metadata_type, name)`, the first 18.4 boot correctly refuses to build `uniq_sys_metadata_activation_packageless` and names both remedies. In the same boot, the package backfill binds one of the two rows to the item's package. From the second boot on:\n\n- the refusal is gone, and the index is built over the pair;\n- two administrator switches remain for one item, and the one that wins is picked by storage order;\n- the backfill throws on the remaining row at every boot, so it never reaches any package-less row stored after it.\n\n## Reproduction\n\nAt `ff04ad811da54166a5d1114fade5a1a6ab99138c`, on a copy of an 18.3.0-written SQLite file (the recipe is in the source record):\n\n1. The boot on this tree must find a packaged flow `app183_switch` (package `com.example.app183`) with a ledger row. Drop the earlier key so a pair can be planted: `DROP INDEX uniq_sys_metadata_activation_metadata_type_name;`\n2. Make two package-less rows for `(flow, app183_switch)`, one `active=0` and one `active=1`. After them, add a package-less row for another one-holder packaged flow (`app183_digest`).\n3. Boot: `objectstack dev --no-watch --seed-admin -d file:COPY`. ERROR `cannot build 'uniq_sys_metadata_activation_packageless' … held by 2 rows …` appears (correct), then WARN `the sys_metadata_activation package backfill did not finish … Duplicate record refused`. The first-stored `app183_switch` row now names `com.example.app183`.\n4. Boot again with no row deleted:\n   - no refusal is logged, and `uniq_sys_metadata_activation_packageless` exists;\n   - `POST /api/v1/automation/app183_switch/trigger` answers `409 FLOW_DISABLED`, decided by the bound row, while the package-less `active=1` row for the same flow remains;\n   - the `app183_digest` row is still NULL after boots 2 and 3.\n\nReproduced on three fresh copies.\n\n**Expected:** no package-less row is bound while another package-less row shares its `(metadata_type, name)`. The refusal keeps firing until an operator deletes the row that should not apply, and the other rows are still bound.\n\n## Mechanism (read at the subject sha)\n\n1. `packages/core/src/utils/metadata-activation-store.ts#backfillActivationLedgerPackages` walks every package-less row in storage order and binds each to `holderOf(type, name)`. It never checks whether another package-less row shares the key.\n2. The second update of the pair violates the `(metadata_type, package_id, name)` unique key. The throw aborts the whole pass. `packages/objectql/src/activation-ledger-backfill.ts#backfillActivationLedgerAtBoot` catches it as \"did not finish\", after the first update has already persisted.\n3. The package-less index (`packages/metadata-protocol/src/migrations/activation-ledger-packageless-index.ts`) is refused on boot 1. On boot 2 the pair no longer collides under `WHERE package_id IS NULL`, so the build succeeds and the duplicate is never reported again.\n4. The \"did not finish\" WARN says \"rows that name no package keep naming none\". That was false in the run that bound one, and the WARN names no row and no remedy.\n\n## Reach\n\nReaching it needs a database that already holds two package-less rows for one name. 18.3.0's own `(metadata_type, name)` unique index prevents that on SQLite, which is why the runner did not rank it release-blocking. Other drivers, and databases whose old index was lost, are for triage to weigh."

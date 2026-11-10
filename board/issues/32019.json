@@ -2,8 +2,8 @@
   "number": 32019,
   "kind": "issue",
   "title": "Checklist sweep M1: ADR-0150 package namespaces, AI service accounts and identity (since 18.3.0)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "domain:devx",
     "enhancement",
     "pm:blocking",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T00:45:31Z",
-  "updated_at": "2026-11-10T01:54:11Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T14:10:11Z",
+  "closed_at": "2026-11-10T13:16:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32019",
   "body": "qa#2 · os-bob · session_012dn2Acf5wtyrf2yKWCThBj\n\nParent: the checklist epic, linked as this card's parent issue. Milestone M1.\n\n## What\n\nAuthor the platform-checklist items for two of the themes that landed after 18.3.0 (`83d7e4ae`), with the `checklist-author` skill and the six angles in `docs/qa/platform-checklist/SWEEP.md`:\n\n- **Theme 1, ADR-0150 package namespaces**: (package, name) resolution for permission sets, sharing rules, queues, assignment rules, flows, connectors, webhooks, email templates, agents, skills and tools; `/meta` and `/actions` addressed by namespace or `_env`, and `?package=` as the exact qualifier; MCP naming by AI face and `run_action` taking a namespace; a namespace never equal to an object name; a (type, name) held twice inside one namespace refused; `os migrate stored-references`; the activation ledger keyed by (metadata_type, package_id, name). Cover the upgrade path from an 18.3.0 database's stored references, not only fresh installs.\n- **Theme 3, AI service accounts and identity**: register an AI service account and mint its key; the agent principal of its own requests under the agent ceiling; suspend, resume, change owner, retire, one key's revoke and restore; the `credential_use` ledger row (client address and user agent); the bounded `scim_refused` audit row; SCIM group push and SSO IdP group mapped to a permission set; the SSO Providers form's groups claim.\n\n## Rules\n\n- New items carry `since: \"v18.4\"`. A declared-but-absent capability is a `status: \"planned\"` item, never coverage.\n- Every item's `source[]` cites the files it exercises. Every item follows README.md \"Item anatomy\".\n- `coverage.json` is reconciled. `node scripts/check-platform-checklist.mjs` is green.\n- Defects or doc drift found during the sweep go to `FOLLOW-UPS.md` per SWEEP.md. Security findings follow `.claude/skills/pm-dispatch/references/security-findings.md` and never go into the checklist or a public card.\n\n## File surface\n\n`docs/qa/platform-checklist/areas/*.json`, `docs/qa/platform-checklist/coverage.json`, `docs/qa/platform-checklist/FOLLOW-UPS.md`. No product code.\n\n## Premise re-check\n\n```bash\nnode scripts/checklist-select.mjs since:v18.4 --json   # expected today: no items\ngit log --oneline 83d7e4ae..origin/main | grep -cE '^[0-9a-f]+ feat\\((objectql|security|plugin-auth|plugin-security|plugin-sharing|metadata-protocol|mcp|runtime|core|auth)'\n```\n\n## Done when\n\n`since:v18.4` selects the new items for themes 1 and 3, the checker is green, and the PR has merged."

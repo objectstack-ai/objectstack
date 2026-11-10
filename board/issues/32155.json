@@ -1,0 +1,33 @@
+{
+  "number": 32155,
+  "kind": "issue",
+  "title": "The built-in HTTP server sends JS bundles and API JSON uncompressed (vendor bundle 2.09 MB on the wire)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T10:36:19Z",
+  "updated_at": "2026-11-10T11:36:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32155",
+  "body": "qa#1 · os-bob · session_012dn2AecbS6JEeLdRWSW4AC\n\nFiling gate: ③ a task on the maintainer's word. Asked in session on 2026-11-10, after the full-platform test run listed its improvement suggestions, verbatim: 「立卡处理」.\n\nQA-source: #32135 · browser walk (runner C) · observed beside the clauses\nBatch-of: objectstack-ai/objectstack#32135 follow-ups, 15 cards filed on the maintainer's 「立卡处理」\n\n## What we saw\n\nOn `os dev` (framework ff04ad81) with `Accept-Encoding: gzip, br`: no `Content-Encoding` on two console JS chunks or on an API JSON response. `vendor-objectstack` is 2.09 MB on the wire, `index` 465 KB, `/meta/object?package=…` 159 KB. A console page loads 106–208 JS files (8–16 MB uncompressed). No compression middleware was found in `plugin-hono-server` or the CLI's serve path. Production-mode `os start` was not measured.\n\n## Proposed change\n\nServe the console's static assets precompressed (brotli/gzip at build) and compress JSON responses above a size threshold in the Hono server, both on by default; verify on `os start`.\n\n## Business reason\n\nWho: every self-hosted deployment without a CDN or reverse proxy, and remote users on slow links. Cost: the first console load costs several times what it should.\n\n## Reader\n\nTriage first touch; lands in `packages/plugins/plugin-hono-server` and the console build in `packages/console`.\n\n## Duplicate check\n\n`is:issue repo:objectstack-ai/objectstack compression gzip hono` (2 hits, both PM seat posts): no card."
+}

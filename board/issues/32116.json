@@ -13,18 +13,18 @@
   "labels": [
     "bug",
     "domain:server",
-    "finding",
+    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T08:05:24Z",
-  "updated_at": "2026-11-10T08:05:24Z",
+  "updated_at": "2026-11-10T09:06:24Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32116",
   "body": "## Edition / version\nObjectOS Enterprise, cloud `main` `de8d979` (framework pin `e24136c2`). Local SCIM run for objectstack-ai/cloud#3667. Follow-up to #31829 (closed).\n\n## Measured\nAll requests below carried the **valid** bearer of connection `okta-test`:\n\n| request | status | `sys_audit_log.actor` | `metadata.scim_connection_id` |\n|---|---|---|---|\n| duplicate `POST /Users` | 409 | `svc:scim:okta-test` | `okta-test` |\n| `GET /Users/{unknown}` | 404 | `svc:scim:okta-test` | `okta-test` |\n| `PATCH /Users/{id}` with op `explode` | 400 `invalidValue` | **null** | **`unknown`** (`presented_credential: scim_bearer`) |\n| `POST /Users` with no `userName` | 400 `invalidValue` | **null** | **`unknown`** |\n\nThe cloud SCIM provisioning console filters on `actor starts_with 'svc:scim:'` (`SCIM_OPERATION_FILTER`). Both 400 rows are therefore invisible under the connection. They are the rows an administrator needs most when an IdP's attribute mapping is wrong: a mis-mapped Okta or Entra attribute surfaces as a schema 400 on every push.\n\n## Why\nThis is the known vendor ordering, pinned in the header of `scim-refusal-audit.test.ts`: a body that fails the vendor's schema is refused **before** the bearer verifier runs, so `scimRequestScope` never gets `connectionId`. #31829's acceptance line (\"the four refusals … each leave a row naming the connection (or 'unknown' for 401)\") listed the malformed PATCH among the ones that should name the connection.\n\n## Proposal\nIn `observeScimRefusal`, when the scope has no `connectionId` and the presented credential is a SCIM bearer, resolve it the way the verifier does (digest lookup in `sys_scim_connection_credential`, active and unexpired) before building the event. Only a credential that really resolves names a connection, so a forged bearer still reads `unknown`. The existing bound and secret rules stay as they are. Add a case to the suite: a schema 400 with a valid bearer names the connection."

@@ -1,0 +1,33 @@
+{
+  "number": 32161,
+  "kind": "issue",
+  "title": "Automation: an after-update flow with a failing outbound call holds the user's save for its whole retry ladder (8.8 s), and its error says only \"fetch failed\"",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T10:39:10Z",
+  "updated_at": "2026-11-10T13:52:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32161",
+  "body": "qa#1 · os-bob · session_012dn2AecbS6JEeLdRWSW4AC\n\nFiling gate: ③ a task on the maintainer's word. Asked in session on 2026-11-10, after the full-platform test run listed its improvement suggestions, verbatim: 「立卡处理」.\n\nQA-source: #32135 · automation.flow-error-handling · observed beside the clauses\nBatch-of: objectstack-ai/objectstack#32135 follow-ups, 15 cards filed on the maintainer's 「立卡处理」\n\n## What we saw\n\nShowcase, framework ff04ad81:\n- The PATCH that fired `showcase_resilient_sync` (an after-update flow whose `http` node fails and retries) took 8.8 s: the write response waits for every retry.\n- The step error reads `NODE_FAILURE \"http: fetch failed\"` with no host or cause (DNS, refused, proxy 403, TLS), so a failed sync cannot be diagnosed from the run record.\n- A resumed screen flow reported `durationMs: 18691`, which includes the time the run waited for the user.\n\n## Proposed change\n\nRun after-triggers' outbound work off the request path (or cap the inline time and continue asynchronously); put the target host and the underlying cause in http-node failures; report execution time and wait time separately.\n\n## Business reason\n\nWho: every end user saving a record that triggers an integration, and every admin debugging one. Cost: slow saves whenever a partner system is down, and failures nobody can explain.\n\n## Reader\n\nTriage first touch; lands in `packages/services/service-automation` (trigger dispatch, http node, run timing).\n\n## Duplicate check\n\n`is:issue repo:objectstack-ai/objectstack after-update flow blocks write response` (32, open and closed): no card."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 32141,
+  "kind": "issue",
+  "title": "objectstack verify drops 26 showcase seed rows (no home currency when invoices load), skips 8 objects, and still reports \"verify passed\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T10:06:18Z",
+  "updated_at": "2026-11-10T14:16:20Z",
+  "closed_at": "2026-11-10T14:12:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32141",
+  "body": "qa#1 · os-bob · session_012dn2AecbS6JEeLdRWSW4AC\n\nFiling gate: ① product defect (a verifier that reports success over a degraded run, reproduced on every run).\n\nQA-source: #32135 · access-security.rls-both-sides · acceptance (the RLS proof's population)\n\n## What happens\n\n`objectstack verify` on the showcase drops 26 seed rows during its own in-process boot, skips the 8 objects that depend on them, and still prints `✓ verify passed — no runtime failures` (exit 0). The same seed loads cleanly under `os dev` (138 rows).\n\n## Reproduction (framework ff04ad81)\n\n1. `cd examples/app-showcase && pnpm exec objectstack verify --rls`.\n2. The log carries `[Seeder] Seed loading completed with 26 dropped record(s) and 26 error(s)`: all 12 `showcase_invoice` rows are refused with \"Insert on 'showcase_invoice' was REFUSED: 'amount' stores its amount converted into the home currency in 'amount_home', and the organization has no home currency…\", and the 7 `showcase_invoice_line` rows then fail \"Invoice is required\", plus ERROR lines \"Deferred reference UNRESOLVED after pass 2\".\n3. The CRUD summary reads `15 verified, 0 gaps, 0 FAILED, 1 needs-fixture, 8 skipped`, the skips naming `showcase_invoice`, `showcase_project`, `showcase_task`, `showcase_field_zoo`, `showcase_invoice_line`, `showcase_project_membership` (\"required relation … no created … record\") and the two external objects.\n4. The run ends `✓ verify passed`.\n\n- Expected: verify's boot seeds what `os dev` seeds (the organization's home currency is in place before the invoice seed runs), or a dropped seed row fails the run loudly.\n- Actual: the seed order in verify's boot leaves no home currency when invoices load, and the verdict ignores the drop.\n\n## Reach\n\n`objectstack verify` is the documented proof step for app authors and the RLS oracle the checklist scores; on any app whose seed carries currency amounts the proof silently covers fewer objects than it claims. AGENTS.md \"Absence must be loud\": a verifier that degrades must not report success.\n\n## Reader\n\nTriage first touch; the fix lands in `packages/verify` (and wherever its boot orders the localization seed relative to app seeds).\n\n## Duplicate check\n\n`is:issue repo:objectstack-ai/objectstack verify seed home currency` (72, open and closed): #27197 introduced the multi-currency invoice seed and #30206 the first-run checklist; no card for verify's boot dropping it."
+}

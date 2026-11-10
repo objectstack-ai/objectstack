@@ -1,0 +1,33 @@
+{
+  "number": 32242,
+  "kind": "pull_request",
+  "title": "fix(example-showcase): translate the Chart Gallery KPI measure labels for zh-CN",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T14:13:54Z",
+  "updated_at": "2026-11-10T14:15:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32242",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"huangyiirene\"} -->\n_Requested by **Irene** · [project thread](https://claude.ai/code/project/chan_01TJXtQ1tVD26ecLDZxFS67x?thread=cmsg_01TJXtQ1tVD26ecLDZxFS67xRtPsks4VL6y7CH3VyyoqHz)_\nFixes #32219\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：showcase 的 Chart Gallery 仪表盘在中文界面下，三个 KPI 副标题现在显示「任务数」「项目数」「总预算」，不再是英文 Tasks / Projects / Total Budget。\n- **为什么改**：这三个副标题来自数据集度量的标签，中文翻译包里一直没有对应条目，整页已翻译唯独它们是英文；showcase 是面向中文市场的演示应用。\n- **风险与回滚**：只加翻译条目（中文三条、英文三条与原标签逐字相同），英文界面显示不变；不动任何 `ui/**` 或平台代码。回滚即还原翻译文件与基线一行。\n- **先看**：`examples/app-showcase/src/system/translations/index.ts`（两个 `datasets` 块）、`examples/app-showcase/test/zh-cn-chart-gallery-measure-labels.test.ts`、`scripts/i18n-coverage-baseline.json`（320 → 317）。\n- **两分钟验证**：`pnpm --filter @objectstack/example-showcase exec vitest run test/zh-cn-chart-gallery-measure-labels.test.ts`，预期 2 个全绿；或用中文账号打开 showcase 的 Chart Gallery，KPI 副标题为中文。\n- **需要你做的**：无，等席位评审后落地。\n\n## What changes\n\n- The zh-CN bundle's `datasets` block gains `showcase_task_metrics.measures.task_count` (任务数) and a `showcase_project_metrics` entry with `project_count` (项目数) and `budget_sum` (总预算), next to the existing `done_count` / `done_rate` entries and in the datasets' declaration order. 任务数 matches showcase_project's `task_count` column label; 总预算 matches the gallery's `kpi_total_budget` widget title and the command center's `cc_k6` tile.\n- The `en` block lacked the three too, so it now carries them with the authored labels byte for byte (`Tasks`, `Projects`, `Total Budget`), as the order asks. The coverage gate does not count `en` (zh-CN alone moved it 320 → 317), so these three entries are bundle symmetry, not coverage.\n- `scripts/i18n-coverage-baseline.json`: `examples/app-showcase/objectstack.config.ts` 320 → 317, written by `node scripts/check-i18n-coverage.mjs --update`. No other row moved.\n- `chart-gallery.dataset.ts` is unchanged; no key is renamed or moved; nothing under `ui/**` or `packages/**` is touched, so the console's `i18n-locale-en` chunk is untouched.\n- Changeset: patch on `@objectstack/example-showcase` (private but versioned; `privatePackages.version` is on and the package keeps a CHANGELOG).\n\n## Tests\n\n- New `examples/app-showcase/test/zh-cn-chart-gallery-measure-labels.test.ts`: `translateMetadataDocument('dataset', …)` with the app's own bundle, the translator the analytics route applies to the dataset it resolves (`translateMetaItem(req, 'dataset', …)` in `packages/rest/src/analytics-routes.ts`), so this is the path the KPI subtitle takes. One case asserts the three zh-CN labels; the preservation case asserts `en` still serves `Tasks`, `Projects`, `Total Budget`.\n\n## Acceptance notes\n\n- None.\n\n## Verification\n\n<details><summary>Repro on origin/main e1146e80 (new test, translations untouched)</summary>\n\n```\n× serves the three measure labels in Chinese under zh-CN\n- Expected\n+ Received\n+   \"task_count\": \"Tasks\",\nTests  1 failed | 1 passed (2)\n```\n\n</details>\n\n<details><summary>After the fix (bb56932b; pre-merge 6a884658)</summary>\n\n```\nzh-cn-chart-gallery-measure-labels.test.ts  Tests  2 passed (2)\n@objectstack/example-showcase vitest run    Test Files 47 passed (47) · Tests 546 passed (546)\n@objectstack/example-showcase typecheck     exit 0 (tsconfig includes test/**)\ncheck-i18n-coverage (before --update)       examples/app-showcase/objectstack.config.ts improved 320 → 317\ncheck-i18n-coverage (after --update)        OK (14 config(s), 423 baselined untranslated string(s), none new)\n```\n\nGates: the 59 commands `dispatch-gates.mjs --commands` derives for this diff plus `check-sdui-manifest.mjs` and `ui` `check:spec-symbols` ran on 6a884658: 59 exit 0, `check:dual-build-cjs-loads` exit 3 = PREREQUISITE NOT MET (packages outside the showcase/cli build closure have no `dist/`; NOT MEASURED locally, CI's run is the reading; this diff touches no package). `check:type-check-debt` exit 0. After merging `origin/main` (no overlap with this diff), the changeset gates, `check:nul-bytes`, `check:cross-package-test-inputs`, `check:i18n-coverage` and the new test re-ran green on bb56932b.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01J8VVAj5MJxsrVuiB1giFAH)_\n"
+}

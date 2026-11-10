@@ -1,7 +1,7 @@
 {
   "number": 27737,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 4 — 🟢 os-steve · 由 os-steve 账户的项目负责",
+  "title": "[PM seat] domain:server · seat 4 — 🟢 os-support-ai · 由 os-support-ai 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,17 +14,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "os-steve"
+    "os-support-ai"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T21:50:22Z",
-  "updated_at": "2026-11-08T15:55:57Z",
+  "updated_at": "2026-11-10T09:57:29Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 16,
+  "comments": 17,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27737",
-  "body": "domain:server#4 · os-steve · session_01ADHkmP8JJo4zF2sjTBRwnX\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 4**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761, seat 5 is #28677 and seat 6 is #29908 (⛔ this post is none of them).\n\n## Current PM\n\n🟢 `os-steve` · `session_01ADHkmP8JJo4zF2sjTBRwnX` · seated 2026-11-08T15:54Z (opening mark 6723634425) · held by the os-steve account's project \"objectstack server\". Previous PM: `marchtian` · `session_017ihL2dLQEXWGsE2SZ3Qn5F`, sign-off brief 6716818062 (the previous body revision is the archive).\n\n## Handover ledger\n\n- **In flight from this seat:** none yet.\n- **Pointer:** posture, ledger and round reports live in the project. The canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#4` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing.\n\n## Notes\n\n- **Mailbox:** PR #31579. **Patrol:** `trig_01WQLpdsVtVxuuWV12NrdEae` · `52 * * * *`.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`) as `objectstack-fleet[bot]`. ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n\n<!-- signed: domain:server#4 · os-steve · session_01ADHkmP8JJo4zF2sjTBRwnX -->\n"
+  "body": "domain:server#4 · os-support-ai · session_01WGufzi1tLRTEYwYGtbNCyk\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 4**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761, seat 5 is #28677 and seat 6 is #29908 (⛔ this post is none of them).\n\n## Current PM\n\n🟢 `os-support-ai` · `session_01WGufzi1tLRTEYwYGtbNCyk` · seated 2026-11-10T09:55Z by the maintainer's forced takeover order (opening mark 6764280400) · held by the os-support-ai account's project \"objectstack spec\". Previous PM: `os-steve` · `session_01ADHkmP8JJo4zF2sjTBRwnX`, out of tokens, no sign-off brief (the previous body revision is the archive).\n\n## Handover ledger\n\n- **In flight from this seat:** #31908 (slice P1a, PR #32100 superseded by the resumed thread's PR), #32076 (resume of `claude/project-thread-p9al1d` at `25d7c420`). Takeover comments on each card.\n- **Pointer:** posture, ledger and round reports live in the project. The canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#4` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- **This seat holds:** `packages/plugins/plugin-audit/**` for #31908 slices P1a → P1b → P2 → P3 → P4 (serial on this seat).\n\n## Notes\n\n- **Mailbox:** PR #32133. **Patrol:** `trig_01B2GpVnzTF3Jtf5FPM5B6gc` · `55 * * * *`.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`) as `objectstack-fleet[bot]`. ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n\n<!-- signed: domain:server#4 · os-support-ai · session_01WGufzi1tLRTEYwYGtbNCyk -->\n"
 }

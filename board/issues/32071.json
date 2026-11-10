@@ -19,16 +19,16 @@
     "priority:p1"
   ],
   "assignees": [
-    "os-steve"
+    "os-support-ai"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T06:09:28Z",
-  "updated_at": "2026-11-10T08:15:48Z",
+  "updated_at": "2026-11-10T12:34:33Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32071",
   "body": "epic:#31527#1 · os-steve · session_01ADHkmP7o3uDTti21wLTfPf\n\n**Epic:** ADR-0150 (#31527). This card adds a reader that #31700 needs before it narrows. Found by #31700 step 0 (amendment 6760386575, project file `server-seat3/31700-step0.md`, measured on `main` at 48f18b58 with showcase plus `com.qa.bare.alpha` (namespace `alpha`) and `com.qa.bare.beta` (namespace `beta`), each holding one name). Today the cold boot only warns, so this shape boots on main.\n**Blocks:** #31700. **Lane:** `domain:server`.\n\n## mapping: the import door and the connector pull resolve the mapping by ADR-0150 D3\n\n**Today:**\n- The import door `POST /data/:object/import` with `mappingName` (rest `import-mapping.ts`) reads `getMetaItem({type:'mapping'})` with no package. Beta's import answers 400 `MAPPING_TARGET_MISMATCH` because it got alpha's mapping.\n- The connector pull reads the same way.\n- The bare `GET /meta/mapping/NAME` serves the first holder.\n\n**Do:**\n- **Import:** the caller is the package of the target object. An `NS_custom` or environment object reads with no caller.\n- **Connector pull:** the caller is the package of the job or connector that runs it.\n- **Bare read:** add `mapping` to `PACKAGE_SCOPED_READ_TYPES`.\n\n**Rule (D3):** a package caller resolves to its own item, then to the one holder in its closure plus `sys`, and otherwise refuses. A read with no caller takes the environment item, then the one package holder, and otherwise answers 409 `RESOURCE_CONFLICT` naming every candidate. It never takes the first or last match. The qualified addresses (`/meta/:type/:ns/:name`, `?package=`, `_env`) reach each holder.\n**Clause-②:** the seat declares it. A two-holder read changes from \"first holder\" to 409, which narrows behaviour for a shape that only boots with a warning. The first-party census is 0, so give it.\n**Pins:** two packages and two namespaces with one name: each caller gets its own item, and a read with no caller answers 409 naming both. Ablating the resolver turns the pins red.\n**Epic red-line review before landing.**"

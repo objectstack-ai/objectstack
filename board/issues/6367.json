@@ -15,17 +15,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "os-steve"
+    "os-support-ai"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-08-07T15:16:20Z",
-  "updated_at": "2026-11-08T15:55:02Z",
+  "updated_at": "2026-11-10T10:05:21Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 366,
+  "comments": 367,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/6367",
-  "body": "domain:server#1 · os-steve · session_01ADHkmPF1skfu2kx89BEXZi\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 1**. Seat 2 is #20966, seat 3 is #26761, seat 4 is #27737, seat 5 is #28677 and seat 6 is #29908. #6021 and #6024 are archives of this post, ⛔ do not sit there.\n\n<sub>Refreshed at seating 2026-11-08T15:52Z; the seating mark is the newest comment.</sub>\n\n## Current PM\n\n🟢 `os-steve` · `session_01ADHkmPF1skfu2kx89BEXZi` · seated 2026-11-08T15:52Z · 由 os-steve 账户的项目负责 (Claude Code project \"objectstack server\"). Posture and ledger live in the project.\n\n## Handover ledger\n\n- **Inherited:** clock-out brief 6717079918 (`sunhaolin`): in flight none, stay-behind none.\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#1` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- **This seat holds:** none.\n\n## Notes\n\n- **Mailbox:** PR #31578 (subscribed). **Patrol:** `trig_01FH8EWwxvSdbp31pwN3B2DT` · `52 * * * *`.\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n\n<!-- signed: domain:server#1 · os-steve · session_01ADHkmPF1skfu2kx89BEXZi -->\n"
+  "body": "domain:server#1 · os-support-ai · session_01WGufzg5AUtn9pwa3g2bBqk\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 1**. Seat 2 is #20966, seat 3 is #26761, seat 4 is #27737, seat 5 is #28677 and seat 6 is #29908. #6021 and #6024 are archives of this post, ⛔ do not sit there.\n\n<sub>Refreshed at seating 2026-11-10T10:04Z; the seating mark is the newest comment.</sub>\n\n## Current PM\n\n🟢 `os-support-ai` · `session_01WGufzg5AUtn9pwa3g2bBqk` · seated by forced takeover · 由 os-support-ai 账户的项目负责 (Claude Code project \"objectstack spec\"). Posture and ledger live in the project.\n\n## Handover ledger\n\n- **Inherited:** takeover of `os-steve` · `session_01ADHkmPF1skfu2kx89BEXZi` (out of tokens; the maintainer's order is quoted in the seating comment). Previous body revision holds that seat's stub.\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#1` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- **This seat holds:** `packages/objectql/src/bare-name-one-holder.ts` (`NAMESPACE_SCOPED_BARE_NAME_TYPES`): ADR-0150 child B cards land in the order they pass review and go green; each later one merges `origin/main` and keeps every card's entry (claim amendment 6762064600).\n\n## Notes\n\n- **Mailbox:** PR #32136 (subscribed). **Patrol:** `trig_015bifQ4bG2aQGvnjsiyVFz6` · `4 * * * *` (self-bound).\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n\n<!-- signed: domain:server#1 · os-support-ai · session_01WGufzg5AUtn9pwa3g2bBqk -->\n"
 }

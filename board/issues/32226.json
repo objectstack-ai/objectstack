@@ -1,0 +1,35 @@
+{
+  "number": 32226,
+  "kind": "pull_request",
+  "title": "fix(runtime): a datasource name two packages of one boot declare is registered as the declaration of the package that holds it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T13:07:40Z",
+  "updated_at": "2026-11-10T14:13:05Z",
+  "closed_at": "2026-11-10T14:13:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-10T14:13:03Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32226",
+  "body": "Clause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：同一次启动里两个包声明了同名数据源时，元数据注册表里该名字只登记持有者包的声明：其声明打开了服务该名字的连接的那个包；没有连接打开时，是最先声明的那个包。其他包对该名字的声明不登记。\n- 为什么改：一个环境里一个数据源名只有一个身份（ADR-0150）。Setup → Datasources 列出的配置应当就是服务该名字的那一份，安装入口拒绝同名安装时点名的持有者也应当是它。\n- 风险与回滚：只影响同一次启动里有两个包声明同一数据源名的情形；路由、启动日志那一行、安装入口规则与 rehydrate 路径都不变；单包、包内重复声明同一名字的行为不变。回滚即还原本 PR 的 runtime 改动。\n- 先看：`packages/runtime/src/declared-datasources.ts`（第 1 步注册里的持有者判断、`settleBootNames` / `registerBootHolders`、`noteBootOpeners` 按连接结果定位声明），`packages/runtime/src/datasource-autoconnect.test.ts`（真实内核的组合启动钉子）。\n- 两分钟验证：`pnpm --filter @objectstack/runtime exec vitest run --maxWorkers=2 src/declared-datasources.test.ts src/datasource-autoconnect.test.ts`，预期 55 个用例全部通过，其中同名用例断言注册表列出的包与文件就是服务该名字的连接所用的那一份。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- One identity per datasource name in an environment (ADR-0150). When two packages a boot composes declare one datasource name, the metadata registration of that name is the declaration of the package that holds it: the package whose declaration opened the connection serving the name, or, when no connection is open under it, the first package to declare it. The other declarers' declarations of that name are not registered, as the rehydrate path already leaves a held name with its holder.\n- The registration follows the connect verdict. A declaration is registered before the connect only when its package is the holder so far; after each boot call's connect, a name whose holder changed is registered as the new holder's declaration. So when the first declarer's connect fails and a later declarer's connect opens the name, the later declarer's declaration is the one registered.\n- Within one call (one artifact whose package bodies declare one name), the connect verdict that opened the name is matched to the declaration it answers: the connect attempts, in order, each declaration not switched off that the D2 gate (`isDatasourceAddressed`) addresses, one verdict per attempt. The holder the boot's error line names follows the same record.\n- Setup → Datasources therefore lists the configuration that serves the name, and the install door's judge (`datasourceNameHolder`) names the serving package when a later install declares the name.\n- Unchanged: which connection serves the name, the boot's error line and its once-per-boot rule, the install door's rule, and the rehydrate path. A single package, and a package that declares its own datasource twice, register as before. `datasource` metadata is not slotted per package.\n\n## Tests\n\n- `packages/runtime/src/declared-datasources.test.ts`, new top-level describe (10 cases): the registry lists the declaration of the package whose connection serves the name and never registers the later declarer's; the other boot order lists the other package; the install door's judge names the serving package; a package whose `datasourceMapping` connect opened the name before any `start()` is listed from the first `start()` on; the first declarer's connect fails and a later declarer's opens the name, and the registration follows; the same inside one artifact; one artifact whose two bodies declare one name lists the body that opened it; with no connection service, the first declarer holds and is listed; CONTROL one package alone; CONTROL a package re-declaring its own datasource is listed with its last declaration.\n- `packages/runtime/src/datasource-autoconnect.test.ts`, six cases added to the composed-boot describe, on a real kernel (ObjectQL, `AppPlugin`s, the datasource-admin plugin, sqlite files): the registry lists the serving package's declaration in either boot order and the judge names it; a `datasourceMapping` opener is listed; a failed first connect followed by a later package's successful one; one `composeStacks` artifact (`manifest: 'preserve'`) whose two bodies declare one name, without and with a failed first connect; CONTROL one package alone.\n\n## Acceptance notes\n\n- `datasourceNameHolder` is unchanged: it reads the registration, which carries the holder.\n- The install door test in `@objectstack/cloud-connection` is not touched; the judge it calls is pinned here against a real composed kernel.\n\n## Verification\n\nAll at `d5e1b07a62` (`origin/main` merged in), under `scripts/pm/os-verify-lock.sh`.\n\n<details><summary>Suites and typecheck</summary>\n\n- `pnpm --filter @objectstack/runtime test`: Test Files 577 passed (577); Tests 9615 passed, 19 skipped (9634). Exit 0.\n- `pnpm --filter @objectstack/runtime typecheck` (tsc and `check:test-typecheck`): exit 0, the test-typecheck ledger held unchanged.\n- `pnpm --filter @objectstack/runtime build`: exit 0; the dependency closure `--filter '@objectstack/runtime^...'` built first, exit 0.\n\n</details>\n\n<details><summary>Ablation</summary>\n\nFix committed first; each mutation through `scripts/ablation-replace.mjs` against the two pinned files (55 cases), then restored with the blob equal to HEAD and `git diff HEAD` empty:\n\n- the holder check before registration removed: 5 red, 50 green, every CONTROL green; then restored.\n- the registration after the connect verdict disabled: 5 red (unit and real kernel), 50 green; then restored.\n- the opener read as the first declaration not switched off: 2 red (the one-artifact failed-first cases, unit and real kernel), 53 green; then restored.\n- restored run: 55 passed.\n\n</details>\n\n<details><summary>Gates</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 63 families for this diff. 62 were run, each with exit 0. `pnpm check:dual-build-cjs-loads` is NOT MEASURED here: its prerequisite is a build of every package, and this worktree built the runtime closure only; `Lint & Repo Gates` runs it. `--ran` reconciles 63 derived, 62 run, 1 NOT MEASURED, 0 unrun. `pnpm lint` and the rest of the farm are CI's.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYn5CmmdShCJifm6WYj)_\n"
+}

@@ -2,24 +2,32 @@
   "number": 32107,
   "kind": "issue",
   "title": "Console sign-in with phone number and password shows 'Invalid phone number or password.' for an account with two-factor on, instead of the code prompt",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T08:00:12Z",
-  "updated_at": "2026-11-10T08:00:12Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T13:58:56Z",
+  "closed_at": "2026-11-10T13:57:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32107",
   "body": "qa#2 · os-bob · session_012dn2Acf5wtyrf2yKWCThBj\n\nQA-source: #32102 · identity-auth.auth-method-matrix · observed beside the clauses\n\nFound off-clause by the QA run #32102 (subject `ff04ad81`).\n\n## Reproduction\n\n1. Boot `os dev` (stock showcase) with `OS_AUTH_PHONE_NUMBER_ENABLED=true` and `OS_AUTH_TWO_FACTOR=true`.\n2. As `phone.demo@example.com` (password `showcase123`), call `POST /api/v1/auth/two-factor/enable {\"password\":\"showcase123\"}`, then `POST /api/v1/auth/two-factor/verify-totp` with a current code.\n3. Open `/_console/login` anonymously. In \"Email or phone number\" enter `+8613800138000`, with password `showcase123`. The phone-only card (email+password off) behaves the same.\n4. Click Sign In. The server answers `POST /api/v1/auth/sign-in/phone-number` 200 `{\"twoFactorRedirect\":true,\"twoFactorMethods\":[\"totp\"]}` and sets a `better-auth.two_factor` cookie. The card shows \"Invalid phone number or password.\" and stays on sign-in.\n\nReproduced on 2 fresh loads. Control: the same account signing in by its email reaches \"Enter the 6-digit code from your authenticator app.\"\n\n**Expected:** the two-factor code prompt, as on the email path.\n\n## Mechanism\n\n`ui/packages/auth/src/createAuthClient.ts`, `signInWithPhonePassword` (around line 858), throws \"Invalid phone number or password.\" whenever the response lacks a token or user. It never checks `twoFactorRedirect`. The email path, `signIn` (around line 566, #29105), turns that flag into `{ twoFactor: { methods } }`.\n\nOwning package: `@object-ui/auth`."

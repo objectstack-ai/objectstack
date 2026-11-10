@@ -10,16 +10,23 @@
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
-  "assignees": [],
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-bob"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T07:59:45Z",
-  "updated_at": "2026-11-10T07:59:45Z",
+  "updated_at": "2026-11-10T13:27:37Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32106",
   "body": "qa#2 · os-bob · session_012dn2Acf5wtyrf2yKWCThBj\n\nQA-source: #32102 · ux-conventions.labels-over-machine-names · acceptance[1]\n\nFound by the QA run #32102 (subject `ff04ad81`).\n\n## Reproduction (stock showcase, admin)\n\n1. Open `/_console/apps/com.objectstack.setup/sys_user_position`. The Title column reads `v34DfZXycmuAzUro8kwhiHrFNRR5WXDR → showcase_exec`, while the columns beside it read User \"Dev Admin\" and Position \"Executive\".\n2. Bind a member to a position: `POST /api/v1/data/sys_user_position {\"user_id\": ID, \"position\": \"showcase_contributor\", \"organization_id\": ORG}`.\n3. Open `/_console/apps/com.objectstack.setup/sys_audit_log`. The Create row's Record cell reads `ID → showcase_contributor`, and the record page H1 reads the same.\n\nReproduced on 2 fresh loads.\n\n**Expected:** a person's name and the position label, for example \"QA Member S2 → Contributor\". `GET /api/v1/meta/position/showcase_contributor` has label \"Contributor\".\n\n## Mechanism\n\n- `packages/plugins/plugin-security/src/objects/sys-user-position.object.ts`: `display_title` is ``Field.formula({ … expression: F`record.user_id + ' → ' + record.position` })``, and it is the object's `displayNameField`.\n- `sys-security-assignment-display-title.test.ts` pins this text, so the fix must re-pin it.\n- `sys_presence` in service-realtime has the same `record.user_id + …` pattern. It did not appear in the UI during this run.\n\nOwning package: `@objectstack/plugin-security`."

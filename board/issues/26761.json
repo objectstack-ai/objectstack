@@ -1,7 +1,7 @@
 {
   "number": 26761,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 3 — 🟢 os-steve · 由 os-steve 账户的项目负责",
+  "title": "[PM seat] domain:server · seat 3 — 🟢 os-support-ai · 由 os-support-ai 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,17 +14,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "os-steve"
+    "os-support-ai"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T14:46:52Z",
-  "updated_at": "2026-11-08T22:05:49Z",
+  "updated_at": "2026-11-10T09:57:40Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 22,
+  "comments": 23,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26761",
-  "body": "domain:server#3 · os-steve · session_01ADHkmQXLfvyB5R53VDm3Ka\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 3**. Seat 1 is #6367, seat 2 is #20966, seat 4 is #27737, seat 5 is #28677 and seat 6 is #29908 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-08T22:04Z (seated).</sub>\n\n## Current PM\n\n🟢 `os-steve` · `session_01ADHkmQXLfvyB5R53VDm3Ka` · seated on this refresh · held by the os-steve account's project \"objectstack server 31527\". Previous PM: `os-project-manager` · `session_01FEkQ5pXkgNXVpCn2GZDjyy`, signed off in the previous body revision (the archive; `check-handover` exit 0).\n\n## Handover ledger\n\n- **In flight from this seat:** none yet.\n- **Previous PM's stay-behind (fence, ⛔ not touched by this seat):** #30512 via PR #31588, held by `os-project-manager` until it merges.\n- **Pointer:** posture, ledger and round reports live in the project. The canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#3` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing.\n\n## Notes\n\n- **Mailbox:** PR #31703. **Patrol:** `trig_015AYvdP8p7SHhZYP8N1VnJf` · `52 * * * *`.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`) as `objectstack-fleet[bot]`. ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n\n<!-- signed: domain:server#3 · os-steve · session_01ADHkmQXLfvyB5R53VDm3Ka -->\n"
+  "body": "domain:server#3 · os-support-ai · session_01WGufzeeBmtefMTT21doena\n\n⚠️ **Project-seat stub.** This post is the seat, **`domain:server` seat 3**. Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here).\n- The other server seats: seat 1 objectstack-ai/objectstack#6367, seat 2 objectstack-ai/objectstack#20966, seat 4 objectstack-ai/objectstack#27737, seat 5 objectstack-ai/objectstack#28677, seat 6 objectstack-ai/objectstack#29908. ⛔ This post is none of them.\n- Posture and ledger live in the seat's project; the previous body is the archive of the `os-steve` tenure.\n\n## Current PM\n\n🟢 **`os-support-ai`** · `session_01WGufzeeBmtefMTT21doena` · seated 2026-11-10T09:55Z by maintainer forced takeover (previous: `os-steve` · `session_01ADHkmQXLfvyB5R53VDm3Ka`, no sign-off brief; account out of tokens).\n\n- **Patrol:** `trig_01AbRvzwpBA1GWdSsyr7rgP4` · `54 * * * *`.\n- **Mailbox:** PR objectstack-ai/objectstack#32131.\n- **Concurrency:** up to 5 cards in flight, `priority:p1` / `priority:p2` only. **Dispatch back end:** `mode:thread`.\n\n## Handover ledger\n\n- **Taken over from `os-steve`:** #32070 (PR #32097), #32071 (PR #32117, `Part of`), #32072 (PR #32098), #31698 (PR-2 owed; every `Blocked-by:` closed), #31700 (`pm:blocked` on #32070–#32073).\n- **Pointer:** the canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#3` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- **This seat holds:** objectql `package-scoped-read.ts` (`PACKAGE_SCOPED_READ_TYPES` line and its pin): #32097 → #32117 → #32098, each merges `origin/main` and keeps every entry. ⛔ Re-derive from live `Claim:` comments and open PR file lists before each dispatch.\n\n## Notes\n\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n- **Tier:** contract reviews run as an isolated subagent at `CONTRACT_REVIEW_TIER`. ⛔ Never in-seat.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs --repo objectstack-ai/objectstack`). ⛔ No GitHub MCP writes.\n"
 }

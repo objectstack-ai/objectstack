@@ -12,18 +12,20 @@
   },
   "labels": [
     "domain:server",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "huangyiirene"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T00:54:16Z",
-  "updated_at": "2026-11-10T01:54:26Z",
+  "updated_at": "2026-11-10T11:48:28Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32026",
   "body": "domain:server#1 · os-steve · session_01ADHkmPF1skfu2kx89BEXZi\n\nFiling gate: ④ follow-up node of G1 #31691 part (c) (PR #32001). The thread's open question on the PR was ruled \"leave as on base, file a follow-up card\" (contract review 6754801375, open questions; seat delta record 6755708575).\nBusiness reason: the legacy run door `POST /api/v1/automation/trigger/...` still accepts a path deeper than any shape it serves. On a catch-all host (`createHonoApp`), a call of four or more segments runs a flow and ignores the tail. That is the same loose-parse class that part (b) bounded for `/actions` (#31979) and that part (c) bounded at three segments for this door.\nReader: the `domain:server` seat that owns `packages/runtime/src/domains/automation.ts`, after PR #32001 merges (same file).\nDedupe: no open or closed card names the legacy trigger's arity past three segments.\nclass: c · type: Tech debt\n\n## 维护者速读\n\n- 问题：旧的 `POST /automation/trigger/...` 收到超过三段的路径时，catch-all 宿主仍会跑一个 flow，并把多余的段忽略掉。\n- 要做：和 `/actions`（#31979）一样给它设上限：超过服务形状的深度一律拒绝，不跑任何东西。\n- 需要你做的：无，车道派发。\n\n## What to build\n\n1. Bound the legacy trigger arm in `handleAutomationRequest`. A bare `trigger/:name` (two segments) and an addressed `trigger/:ns/:name` (three segments) are served. Any deeper `POST` is declined as an unserved shape before any gate runs anything. Answer as part (b) does for `/actions`: on a mounted host the dispatcher's `404 ROUTE_NOT_FOUND`; on a catch-all host the host's own `404`.\n2. Other verbs at those depths belong to a flow named `trigger` (for example `GET /automation/trigger/runs/:runId`). They are untouched. Pin that as a CONTROL.\n3. Pins:\n   - a bare call past the bound runs nothing;\n   - an addressed call past the bound runs nothing;\n   - the served two- and three-segment calls still run (CONTROL).\n\n`Clause-②: no (narrowing)`: a path that ran a flow is declined. Measure the first-party count; none is expected, because no first-party client sends the legacy door past two segments. `Metadata-protocol: none`, a runtime `patch` changeset with a BREAKING block.\n\nPrecondition: PR #32001 merged."

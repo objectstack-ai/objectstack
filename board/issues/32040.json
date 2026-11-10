@@ -12,18 +12,20 @@
   },
   "labels": [
     "domain:ui",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T02:08:48Z",
-  "updated_at": "2026-11-10T07:09:50Z",
+  "updated_at": "2026-11-10T14:09:26Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32040",
   "body": "domain:server#1 · os-steve · session_01ADHkmPF1skfu2kx89BEXZi\n\nBlocked-by: objectstack-ai/objectstack#31482 (its PR), objectstack-ai/cloud#4206\n\nSplit from #31482 (item 3, carried there from #31994) by the domain:server#1 seat. Consumer: objectstack-ai/cloud#3648 item 4, objectstack-ai/cloud#3626.\n\n## 维护者速读\n\n- 问题：托管环境里以\"非托管\"方式安装应用时，安装对话框既不显示默认的目标命名空间，也不能改；命名空间冲突时也不会让用户换一个名字再试。\n- 影响面：托管环境的市场安装（非托管副本）。服务端在 #31482 之后已经能按命名空间复制，只差界面。\n- 要做：对话框显示控制面给的默认命名空间并允许编辑；冲突时提示换名重试。默认值的读取需要一条环境内的同源转发路由（新路由名，由席位定）。\n- 需要你做的：无，车道派发。\n\n## Gap (objectstack main, after #31482's PR)\n\n1. `ui/packages/app-shell/src/console/marketplace/MarketplacePackagePage.tsx`: the hosted install dialog (`hostedInstallMode`, `doInstall`, the install `Dialog`) sends `install_mode` but no namespace, and draws no namespace field for an unmanaged install.\n2. `ui/packages/app-shell/src/console/marketplace/marketplaceApi.ts` `installPackage`: the same-origin `POST /api/v1/cloud-connection/install` body carries no `target_namespace`.\n3. The default namespace is answered by the control plane on `GET /api/v1/cloud/packages/:id/install-namespace?environment_id=` (cloud PR #4206). A tenant console cannot call it directly: it is cross-origin, and the console does not know its own environment id (`defaultEnvironmentId` is absent on a tenant runtime). So the environment needs a same-origin proxy in `@objectstack/cloud-connection` (resolving the environment by hostname, as `/cloud-connection/install` does), with its closed query-parameter set declared on the day it lands. Its route name is the seat's call.\n\n## What done looks like\n\n1. For an unmanaged hosted install, the dialog shows the default namespace (read through the proxy) in an editable field, and sends the value as `target_namespace`. A managed install sends none (the route refuses it there).\n2. On `409 RESOURCE_CONFLICT` with `details.namespace` (the namespace is owned by another package), the dialog stays open, says the name is taken, and asks for another. On `400 INVALID_REQUEST` with `details.targetNamespace` (malformed or reserved), it shows the server's sentence beside the field.\n3. Known limit to state, not fix here: a second unmanaged copy of the same package is refused `409 RESOURCE_CONFLICT` with `details.targetPackageId` (the copy's base is always `<source>-copy`); a new namespace does not clear it, so the dialog must not offer one for that refusal.\n4. Strings in all 11 locales of `@object-ui/i18n`'s `marketplace` namespace.\n5. Tests: the default shown, the edited value sent, the re-ask on the ownership conflict, no field for a managed install; the proxy route's refusal and preservation pins.\n\nClause-②: yes (widening) for the proxy route · Metadata-protocol: none\n\nDedupe: \"install-namespace\", \"target_namespace dialog\", \"unmanaged install namespace\"."

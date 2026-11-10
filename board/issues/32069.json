@@ -2,8 +2,8 @@
   "number": 32069,
   "kind": "issue",
   "title": "metadata: qualified /meta/api/:ns/:name returns another package's api body stamped with the requested package (ADR-0150 D5)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,8 +14,6 @@
     "area:devpath",
     "bug",
     "domain:server",
-    "pm:blocking",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -24,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T06:07:38Z",
-  "updated_at": "2026-11-10T07:28:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T08:53:32Z",
+  "closed_at": "2026-11-10T08:25:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32069",
   "body": "epic:#31527#1 · os-steve · session_01ADHkmP7o3uDTti21wLTfPf\n\n## A qualified `/meta/api` read returns another package's body, stamped with the package it asked for\n\n**Found by:** #31700 step 0 (project file `server-seat3/31700-step0.md`, measured on `main` at 48f18b58).\n**Epic:** ADR-0150 (#31527), D5 qualified reads (G1 #31691 part (c)).\n**Red line:** 2 (never guess). A qualified address must reach its own package's item or refuse. Here it answers 200 with the wrong item and labels it as the right one.\n\n### Reproduce\n\n1. Use showcase plus two packages: `com.qa.bare.alpha` (namespace `alpha`) and `com.qa.bare.beta` (namespace `beta`). Each declares an `api` named `feed`. Alpha's path is `/api/v1/apps/alpha/feed`, and beta's is `/api/v1/apps/beta/feed`. Today the cold boot only warns about the clash, so the deployment boots.\n2. `GET /meta/api/alpha/feed`, or `GET /meta/api/feed?package=com.qa.bare.alpha`.\n3. **Actual:** 200 with **beta's** body (path `/api/v1/apps/beta/feed`), stamped `_packageId: com.qa.bare.alpha`.\n4. **Expected:** alpha's own body. If alpha's item cannot be read, the answer is a refusal (404, or 409 naming the candidates), never another package's body.\n\nRelated on the same root: alpha's endpoint `/apps/alpha/feed` answers 404 while beta's answers 200.\n\n### Root cause (from step 0)\n\n`MetadataManager`'s in-memory store keys `api` by its bare name, so the later registration overwrites the earlier one. E6 split the index (`listForPackageScopedIndex`) by `(package, name)`, but the source map is still keyed by bare name, so alpha's body is gone before the index splits. The qualified read then puts the requested package on whatever body the bare key holds.\n\n### Fix (root, 根治)\n\n- Store `api` by `(package, name)` at the source, so both packages' bodies survive and each endpoint is served.\n- The qualified read must **never stamp a package it did not read from**. Its `_packageId` must come from the stored item's holder, never from the request. Pin this for every type the qualified `/meta` read serves, not only `api`. A pin that only asserts `_packageId` echoes the request would have passed on this defect.\n- Pins: two packages, two namespaces, one `api` name. Each qualified read returns its own body. Each endpoint returns 200. The bare `/meta/api/feed` follows the type's D9 state (one holder, or 409 naming both).\n- Clause-②: this corrects an answer that misattributes the item. The seat declares the line.\n\nThis is independent of the narrowing in #31700. It is a defect on `main` today, in the warn-only shape that boots. The narrowing for `api` in #31700 builds on this fix."

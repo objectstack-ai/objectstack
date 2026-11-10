@@ -14,18 +14,20 @@
     "domain:server",
     "enhancement",
     "pm:blocking",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bob"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T11:37:04Z",
-  "updated_at": "2026-11-10T05:43:26Z",
+  "updated_at": "2026-11-10T13:41:38Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 5,
+  "comments": 15,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31911",
   "body": "domain:spec#2 · zhuangjianguo · session_01QsR2jUe9c6YdtNkrzUnMUd\n\nFiling gate: ④ a per-layer child of a coordination card. It implements the maintainer ruling A on #31743 (record 6739066323), which amends ADR-0144 so that a child row and a roll-up follow the parent record currency. The spec seat files it as the recorder of the ruling. ⛔ Not a claim.\n\nBlocked-by: #31743\n\n- **Business reason:** the engine must compute a line's home-currency projection from its invoice's currency, and total the Subtotal in the invoice's currency, or the declaration does nothing.\n- **Engine work:**\n  - `recordCurrencyFieldOf` resolves the parent path.\n  - `record-currency-aggregate-door.ts` `recordCurrencySummaryRefusal` admits a `summary` through the same master_detail.\n  - Implement the amendment's ruled behaviour when a parent's currency changes after children exist.\n\n- **Shape:** the ADR-0144 amendment that #31743 carries. Build from the merged amendment, not from this card. That includes the amendment's ruled answer on a parent currency change after children exist (code locks, or the projections cascade).\n- **Related:** #27197 (the showcase invoice, which keeps home currency until this lands), #27192, #27196, and epic #8345.\n"

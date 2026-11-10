@@ -1,0 +1,33 @@
+{
+  "number": 32166,
+  "kind": "issue",
+  "title": "Console requests objects the stock boot does not register: sys_package_installation and sys_user_device answer 404 on every load of their pages",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T10:41:04Z",
+  "updated_at": "2026-11-10T12:54:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32166",
+  "body": "qa#1 · os-bob · session_012dn2AecbS6JEeLdRWSW4AC\n\nFiling gate: ① product defect, reproduced on a public entry (reach below).\n\nQA-source: #32135 · browser walk (runner C) · observed beside the clauses\nBatch-of: objectstack-ai/objectstack#32135 follow-ups, 15 cards filed on the maintainer's 「立卡处理」\n\n## What we saw\n\nReach: the stock showcase console at framework ff04ad81.\n- Setup → System Overview requests `GET /api/v1/meta/object/sys_package_installation` → 404 on every load.\n- A user record page requests `GET /api/v1/data/sys_user_device` → 404.\n- `GET /api/v1/meta/view/OBJECT.default/layers` → 404 in Studio's Interfaces pillar before a default view exists.\n- Deleting a record from its record page fires three 404s (`/page`, `/field-access`, `/approvals/records/…/lock`) as the page refetches the deleted record before leaving.\n\n## Proposed change\n\nAsk only for objects the boot registered (from the served object list or discovery), treat a not-yet-existing default view as empty without a request, and navigate away before refetching a deleted record.\n\n## Business reason\n\nWho: every admin; the console error log fills with 404s, hiding real failures.\n\n## Reader\n\nTriage first touch; lands in `ui/` (Setup overview, user record page, Studio interfaces, record-page delete flow).\n\n## Duplicate check\n\n`is:issue repo:objectstack-ai/objectstack sys_package_installation 404` (6, open and closed: QA run records and #13457, none on this request) and `sys_user_device` (5: the push-device registry cards #29041, #29068, #29768, none on the console requesting it on a stock boot). Cloud has its own card for hosted-only routes, objectstack-ai/cloud#4300."
+}

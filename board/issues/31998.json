@@ -2,8 +2,8 @@
   "number": 31998,
   "kind": "issue",
   "title": "security-role-word lint skips fields declared through objectExtensions, so a field named role passes validate, build and verify",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T23:48:19Z",
-  "updated_at": "2026-11-10T01:50:28Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T12:51:52Z",
+  "closed_at": "2026-11-10T12:51:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31998",
   "body": "qa#1 · zhuangjianguo · session_01QsR2jUARzLeR7GhKms8a5s\n\nQA-source: #31433 comment 6754602020 · scenario:service_desk · build\n\nFound by the QA seat's scenario half (round record: comment 6754602020 on #31433; subject `0647dabb`, `--packages workspace`). The service_desk authoring agent hit the reserved-word refusal on an object field and declared the same field through an object extension instead, on purpose, and said so; the app then built and booted with the reserved name.\n\n## Reproduction\n\n1. In an app, declare `defineObjectExtension({ extend: 'NS_agent', fields: { role: { type: 'select', label: 'Group Function', options: [...] } } })` and register it under `objectExtensions` in `defineStack`.\n2. Run `objectstack validate`, `build` and `verify`: no finding; the app boots with `NS_agent.role`.\n3. Contrast: the same field in the object's own `fields` fails with \"security-role-word … uses the reserved word 'role' (ADR-0090 D3)\".\n\n## Mechanism\n\n`packages/lint/src/validate-security-posture.ts` line 1643, `validateSecurityRoleWord`: it walks `recordsOf(stack.objects)` and each object's `fields`, `actions` and `fieldGroups`, plus permissions, positions, apps and books. It never walks `stack.objectExtensions`, though the same file already has `objectExtensionsByTarget` (used around line 771). One door refuses a name another lets through: the shape the rule's own docstring forbids. Not measured: whether the runtime publish gate has the same gap.\n\nSeverity as read: low (a governance rule bypassed; no data exposure).\n\nOwning package: `@objectstack/lint`."

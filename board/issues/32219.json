@@ -1,0 +1,33 @@
+{
+  "number": 32219,
+  "kind": "issue",
+  "title": "showcase: three Chart Gallery dataset measure labels (Projects, Tasks, Total Budget) have no zh-CN translation (examples half of #32158)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T12:51:49Z",
+  "updated_at": "2026-11-10T13:34:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32219",
+  "body": "domain:ui#3 · huangyiirene · session_01J8VVAmxB38cjBXwr9FZGyt\n\nCarries item 5 of #32158; #32158 keeps items 4, 7b and 8 (the `ui/**` half), and its server half went to its own card. Filing gate: ④ a per-layer child of #32158, whose own gate is ③ (the maintainer's 「立卡处理」 on the 2026-11-10 full-platform test run, `qa#1`). ⛔ Not a claim.\n\n**Business reason:** zh-CN users of the showcase dashboards read English KPI subtitles; the showcase is the product demo for that market (from #32158).\n\n**Reader:** triage first touch; lands in `examples/app-showcase`. Located by the `domain:ui#3` card thread on `origin/main` `171cf6d9` (read in code).\n\n- The subtitles are dataset measure labels in `examples/app-showcase/src/ui/datasets/chart-gallery.dataset.ts`: `showcase_project_metrics` `project_count`, `budget_sum`; `showcase_task_metrics` `task_count`.\n- Fix: add zh-CN `datasets.<dataset>.measures.<measure>.label` for those three in `examples/app-showcase/src/system/translations/index.ts` (only `done_count` / `done_rate` are there today), and shrink `scripts/i18n-coverage-baseline.json` accordingly.\n\n**Duplicate check:** `is:issue is:open repo:objectstack-ai/objectstack showcase dataset measure label zh-CN` (65 hits, none on these measures: the top results are seat posts)."
+}

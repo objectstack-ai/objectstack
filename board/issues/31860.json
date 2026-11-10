@@ -2,8 +2,8 @@
   "number": 31860,
   "kind": "issue",
   "title": "skills(objectstack-ui): teach the action `preflight` read in the param dialog (after #31808)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T07:50:04Z",
-  "updated_at": "2026-11-10T06:36:36Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T11:14:22Z",
+  "closed_at": "2026-11-10T11:14:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

@@ -2,8 +2,8 @@
   "number": 31695,
   "kind": "issue",
   "title": "client: optional namespace on automation.*, actions.invoke and meta.getItem (ADR-0150 child G3)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:devpath",
     "domain:server",
     "enhancement",
-    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T21:51:08Z",
-  "updated_at": "2026-11-10T06:29:13Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T14:15:51Z",
+  "closed_at": "2026-11-10T14:12:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31695",
   "body": "epic:#31527#1 · os-steve · session_01ADHkmP7o3uDTti21wLTfPf\n\nFiling gate: ④ coordination node: child G3 of the epic #31527 (parent and per-layer children), as ADR-0150 (`docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md`, merged in #31586 at 5d1382a5)'s execution plan lists it. Filed by the epic seat after its take-over (6727547008; the previous holder's hand-over 6727376945 left this row unfiled). ⛔ Not a claim.\nRuling-ref: per-type table A (6723462584); epic A 「立专题」 (6723499113); division of labour A 「留核心，其余交车道」 (6723571682); Q1/Q2 (6724050556); Q3 (6724530715); D2 (6724570466); ADR-0150 accepted by merge (#31586).\nBusiness reason: inherited from the parent #31527. Behavioural metadata is addressed by (package, name), so two installed packages can each ship an item of the same name and every reader answers the right one, or refuses with the candidates, instead of silently taking the first match.\nReader: the next `domain:server` seat picks it from the queue once every `Blocked-by:` below is closed; the epic seat reviews its PR against the red lines below (ruling 6723571682).\nDedupe (open AND closed): `client SDK namespace automation` (50; top hits #31527(open) #30806(open) #23859(closed), none on point: they are this epic, its parent, or an unrelated SDK typing card).\nclass: d · type: Feature\nGrade: p1, inherited from the parent (self-graded under 「定级你可以自己决定」).\nBlocked-by: #31691\nBlocked-by: #31692\n\n## 维护者速读\n\n客户端 SDK 的 automation.*、actions.invoke、meta.getItem 增加可选的命名空间参数，对应 G1 的新地址段。不传时行为不变。\n\n## What to build\n\nThe client SDK takes an optional namespace on `automation.*`, `actions.invoke` and `meta.getItem`, and sends G1's address segment. Without it the call is byte-for-byte today's. A `409` from the door surfaces with its candidate list.\n\n## Surface\n\n- Expected file surface: client (`packages/client`).\n- Clause-②: yes (additive: an optional argument).\n- Narrowing: no.\n\n## Acceptance — the epic's three red lines (every child shares them)\n\n- **Resolution never loosens.** No first-registered fallback, no environment-wide guess for a caller with a package, no silent pick.\n- **Ambiguity is reported, never guessed.** Every refusal and every migration report names every candidate.\n- **Independently releasable** (red line 3). The PR proves it with ADR-0150's four readings: (a) the phase-1 one-holder tests stay green; (b) bare-name behaviour (URLs, MCP, SDK) is unchanged for every name with one holder, except this card's declared narrowing; (c) any migration is re-runnable and never guesses; (d) its `Clause-②:` declaration and, where it changes the protocol, its ADR-0087 migration entry.\n- The epic seat accepts the PR against these lines; a narrowing beyond the declared one goes to the maintainer (`needs-user-decision`) before landing.\n\nParent: #31527."

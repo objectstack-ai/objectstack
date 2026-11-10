@@ -1,0 +1,36 @@
+{
+  "number": 32132,
+  "kind": "issue",
+  "title": "A refused IdP-initiated SAML sign-in lands on the site root and loses its error, so the login page shows nothing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T09:53:58Z",
+  "updated_at": "2026-11-10T14:04:54Z",
+  "closed_at": "2026-11-10T13:57:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32132",
+  "body": "domain:ui#2 · os-support-ai · session_01WGufzge87Pae2h7uSQzX8H\n\nFiling gate: **④ coordination child**, the server half of #32087 item 3. The console half (the sentence) waits on this card; PR #32129 ships item 3 for OIDC only.\n\n## 维护者速读\n\n- 问题：企业客户在 Okta 门户里点应用图标（IdP 发起登录），而系统没有开启「允许 IdP 发起登录」时，服务端拒绝了，但用户落到登录页上什么提示都没有。\n- 原因：服务端把拒绝带着 `?error=unsolicited_response` 跳到站点根 `/`，而根路径再跳 `/_console/` 时把参数丢了，登录页收不到任何信号。\n- 要做：让这次拒绝像其他 SAML 拒绝一样落到登录页（或者根跳转保留查询参数）。之后界面卡只需加一行文案。\n- 需要你做的：无，车道派发。\n\n## Measured (seat reading at `origin/main` `45f0f81f`; the #32087 card thread's browser leg)\n\n- `packages/plugins/plugin-auth/src/sso-saml-refusal-landing.test.ts:420-448`: with IdP-initiated sign-in off, an unsolicited SAML Response is refused `302` with `error=unsolicited_response` (`sso-sign-in-options.ts:40`).\n- That 302 goes to the site root `/` with the query (#32087 card thread, os-dev-report 6764267685, browser leg on a dev boot with one SAML provider).\n- `packages/cli/src/utils/console.ts:1217` and `:1334`: `app.get('/', (c) => c.redirect(`${CONSOLE_PATH}/`))` redirects without the query, so `/_console/login` receives no `error`.\n- The other SAML refusals (`saml_error`, `invalid_saml_response`) and the OIDC refusals already reach the login page (the console reads `?error=` there, `ui/apps/console/src/pages/auth/LoginPage.tsx`).\n\n## Expected\n\nA refused IdP-initiated SAML sign-in reaches the console login page with its `error` code, the way the other SAML refusals do. The lane picks the door: land this refusal on the login page's error URL, or keep the query string through the root redirect (both `console.ts` mounts). A pin that the code arrives (CONTROL: an allowed IdP-initiated sign-in is unaffected).\n\n## Who acts next\n\n`domain:server` builds it. Then `domain:ui` adds one row for `unsolicited_response` to `ssoCallbackRefusal.ts` (#32087, after PR #32129).\n\n## Business reason\n\nEnterprise order (#31574): objectstack-ai/cloud#3666's live Okta run met this. A user who clicks the app tile in the identity provider's portal gets a silent bounce and no idea why.\n\nDedupe: `is:issue unsolicited_response` → #32087 (the parent), #30967 (closed: added the IdP-initiated knob itself); `is:issue \"root redirect\" query` → 18 hits, none on this landing (#6015 is the triage seat post; the rest closed and on other redirects)."
+}

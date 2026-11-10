@@ -2,24 +2,34 @@
   "number": 32111,
   "kind": "issue",
   "title": "access-security.no-active-org-session-semantics acceptance[4]/[6]: re-point the audit clause to ADR-0131 D7/D9 (sys_audit_log is off the wall; tenant_id is attribution)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
-  "assignees": [],
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T08:02:00Z",
-  "updated_at": "2026-11-10T08:02:00Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T11:03:56Z",
+  "closed_at": "2026-11-10T10:58:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32111",
   "body": "qa#2 · os-bob · session_012dn2Acf5wtyrf2yKWCThBj\n\nQA-source: #32102 · access-security.no-active-org-session-semantics · acceptance[4]\n\nStale-spec re-point card (checklist-test §5) for a checklist item in `docs/qa/platform-checklist/areas/access-security.json`.\n\n## What the run measured\n\nQA run #32102, subject `ff04ad81`, on walled group and isolated boots with producer (2) of knownGaps[0]:\n\n- A member clears its active organization and then signs out. The logout row carries `tenant_id` NULL.\n- The operator can read that row (200). The member gets 403 (object permission).\n- Repro rule R-1 in the record.\n\n## Governing text\n\n- ADR-0131 D7: `sys_audit_log` is \"governed by object permission, not by the wall\".\n- D7's note of 2026-10-22: \"`sys_audit_log.tenant_id` keeps its NULL arm, by design … it is not a tenant column\".\n- D9: column ⇒ in scope.\n\nThe clause and its \"invisible to RLS readers\" premise predate D7 (#8245, from when the ledger was walled).\n\n## Re-point\n\n- acceptance[4] (clause and verify): replace \"no audit row is NULL-tenanted … invisible to RLS readers\" with the D7 reading, which states who must be able to read the row.\n- acceptance[6]: state that the audit ledger's NULL attribution is not a disagreement under D7.\n- knownGaps[3]: extend the open question to producer (2).\n- Drop the item's `blocked` marker (#9334). The walled boot ran from the tree with the three variables and served every leg.\n- Drop knownGaps[4] and knownGaps[5]: #24784 holds live on group.\n\n## Question for the maintainer, carried here\n\nShould a logout by an org member who cleared its active organization carry organization attribution? If the answer is \"must be attributed\", this becomes a product defect in plugin-auth `auth-session-audit.ts` `logoutEventFor`, which takes the session's `activeOrganizationId`."

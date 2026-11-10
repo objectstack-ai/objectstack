@@ -1,0 +1,31 @@
+{
+  "number": 32217,
+  "kind": "issue",
+  "title": "fleet-write: `advisory_list` fails at its execute step (exit 5) while `advisory_create` under the same grant lands, so a seat cannot check for a duplicate advisory first",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T12:45:22Z",
+  "updated_at": "2026-11-10T13:02:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32217",
+  "body": "domain:skills#3 · huangyiirene · session_01J8VVAmAzSRKZHAn7T8sArV\n\nFiling gate: ① a named failing tool with a reproduction (relay run ids below). This is relay tooling, not a security finding. Nothing about any advisory's content is involved. ⛔ Not a claim.\nBusiness reason: before filing a draft advisory, a seat that finds a security issue is expected to check whether one already exists. With `advisory_list` failing, every finding seat either skips that check or reports a blocked step, and duplicate drafts become likely.\nReader who acts: the `domain:skills` lane (`scripts/pm/fleet-write/**`, `.github/workflows/fleet-write.yml`).\nDedupe (open and closed): `advisory_list fleet-write exit`, 0 hits. The filing card #32178 noted this failure under \"Related\", and its PR #32215 deliberately left it out.\n\n## Readings\n\n- Relay run 42795023621: `advisory_list` failed at its execute step with exit 5.\n- Relay runs 42795163131, 42795304535, 42795413628, 42795515228 and 42799867145: `advisory_create` landed under the same `repository-advisories` grant.\n- Every one of these runs logs the token action's `Unexpected input(s) 'permission-repository-advisories'`. The #32178 card thread checked this: the warning is documented as expected and appears on the successful creates too, so it does not explain the exit 5. **The cause is not measured.**\n\n## Done when\n\nThe cause is measured from run 42795023621's execute-step log and fixed (or documented, if the platform refuses the list for this grant), and `advisory_list` lands through the relay. Or, if listing cannot work under the App, `security-findings.md` stops telling a seat to list before it creates.\n\nClause-②: no · changeset: none expected (scripts/pm)\nSuggested grade: p3"
+}

@@ -15,18 +15,20 @@
     "domain:server",
     "enhancement",
     "pm:blocking",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T06:28:59Z",
-  "updated_at": "2026-11-10T06:58:16Z",
+  "updated_at": "2026-11-10T14:14:01Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32076",
   "body": "epic:#31527#1 · os-steve · session_01ADHkmP7o3uDTti21wLTfPf\n\n**Epic:** ADR-0150 (#31527). This card is the \"missing resolver slice fails closed\" obligation (6729233545, carried by E1, E5 and every B card). Seat 3 raised it while working on #32070. **Blocks:** #31700. **Lane:** `domain:server`.\n\n## A by-name `/meta` read that the registry cannot judge fails closed for a package-scoped type\n\n**Today** (main, `packages/metadata-protocol`):\n- `protocol-meta-item-reads.ts` (about line 109) and `protocol-exact-qualifier.ts#exactQualifierRegistry` judge a read by `(package, name)` only when the engine's registry answers `readsByPackage`, `packageScopedHoldersOf`, `getEnvironmentScopedItem` and `getPackageScopedItem`.\n- On an engine whose registry lacks those, both fall back to `getItem`, which serves the first match. That covers a read naming no package, and the exact qualifier as well: `?package=X` or `/meta/:type/:ns/:name` is then served by `getItem`'s prefer-local read.\n- In that composition, a qualified read can therefore answer another package's item. That is the defect class of #32069.\n\n**Do:**\n1. **Step 0: a census of the compositions.** List every composition that runs the metadata protocol: the kernel, the CLI, the cloud worker, the test harness and the examples. For each one, state whether its engine registry carries the slice. If every production composition carries it, say so with the evidence; the fallback is then reachable only from tests.\n2. **Fail closed either way.** For a type in the spec's static covered set (`PACKAGE_SCOPED_RESOLVABLE_TYPES`, or the constant that lists ADR-0150's covered types; the decision cannot depend on the registry that is missing), a read the registry cannot judge is refused:\n   - A read that names a package (the exact qualifier) is never served by `getItem`.\n   - A read that names no package is refused when the layers below could hold the name for two packages.\n   - The refusal names the cause, which is that the composition has no package-scoped resolver. It never serves a first match. `503`, `501`, or the `PackageScopedNameRefusedError` shape is the seat's call.\n3. **Pins:** an engine stub with no slice; a qualified read for a covered type refuses; an uncovered type keeps `getItem`; ablating the guard turns the pins red.\n\n**Clause-②:** the seat declares it. If the census shows a production composition without the slice, this is a narrowing, so state FROM→TO. If it shows none, nothing changes for production.\n**Epic red-line review before landing.**"

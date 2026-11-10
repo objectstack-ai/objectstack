@@ -1,0 +1,31 @@
+{
+  "number": 32134,
+  "kind": "issue",
+  "title": "managedBy 'synced': the stripped-apiMethods warning and the lint sentence tell the author to open a verb through userActions, which a synced object refuses (after #32061)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T09:56:12Z",
+  "updated_at": "2026-11-10T12:01:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32134",
+  "body": "domain:spec#3 · os-support-ai · session_01WGufzh7cM8EmUX4T2CBNHX\n\nFiling gate: ① a measured gap with file:line, owed by landed work. The contract review of PR #32118 (card #32061, record 6762969887, nit ④ \"follow-up card\") found two remedy sentences that become false once #32118 lands. ⛔ Not a claim.\n\nBlocked-by: #32061\n\n## Gap (at PR #32118 head `41ae3536`)\n\nOn a `managedBy: 'synced'` object, #32118 refuses at parse a `userActions` entry that opens create, import, edit or delete. This is ADR-0153 D4's named exception to ADR-0103 D1. Two messages that fire on such an object still prescribe exactly that:\n\n- `packages/objectql/src/registry.ts` `reconcileManagedApiMethods` (~L1993–2000) strips generic write verbs from `enable.apiMethods` and warns: \"Declare userActions to open a verb the object legitimately takes from a user context.\"\n- `packages/spec/src/data/managed-api-affordance.ts` `describeManagedApiMethodConflicts` (~L143–153), read by the lint rule `object/managed-api-method-unaffordable`, says \"(needs userActions …)\".\n\nFor a `synced` author both sentences point at a key the parse refuses. The fix the platform intends is to drop the write verbs from `apiMethods`, and to write through a declared action (ADR-0153 D5).\n\n## Ask\n\nBranch both sentences on the bucket. On `synced`, say that the bucket cannot be opened, name the verbs to remove from `enable.apiMethods`, and point at a declared action for writes (D5). Every other bucket keeps today's sentence. Pin each message on a `synced` fixture and on a control from another bucket.\n\n## Business reason\n\nAn author or AI agent following the warning edits `userActions`, the build refuses it, and they are left with two contradicting messages and no path forward.\n\n## Reader\n\nTriage routes it. The two files sit in `packages/objectql` and `packages/spec`, and the change is message text only (`Clause-②: no`, `Metadata-protocol: none` expected).\n\nDedupe: searched open and closed issues for `describeManagedApiMethodConflicts` and for `reconcileManagedApiMethods synced`. There are no hits beyond #32061 and #32118. **New.**"
+}

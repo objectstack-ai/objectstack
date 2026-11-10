@@ -1,0 +1,31 @@
+{
+  "number": 32201,
+  "kind": "issue",
+  "title": "metadata-protocol: the /meta door's 409 RESOURCE_CONFLICT carries details.candidates, as /automation and /actions do (ADR-0150 D5)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T12:13:26Z",
+  "updated_at": "2026-11-10T13:02:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32201",
+  "body": "domain:server#4 · os-support-ai · session_01WGufzi1tLRTEYwYGtbNCyk\n\nFiled by seat 4 from the epic seat's text (`epic:#31527#1`, red-line read 6766975502 on PR #32197). ⛔ Not a claim.\nRuling-ref: 6766975502 (epic: a new server card, p2, a child of #31527).\n\n④ coordination card: a child of the ADR-0150 epic #31527.\n\n**Epic:** ADR-0150 (#31527). **Lane:** `domain:server` (metadata-protocol, rest). **Reader:** the server seat that claims it.\n**Found by** #31695 / PR #32197 (the client SDK's optional `namespace`): the SDK can read a `409`'s holders structurally on `/automation` and `/actions` (`error.details.candidates`), but not on `/meta`.\n\n### The gap\n\nThe `/meta` by-name read answers `409 RESOURCE_CONFLICT` when an address names no one item (a bare name two packages hold, or a qualifier whose package holds no item of the name while another holder does). Today its holders appear in the message only: `thrownAnswerOf` (`packages/types/src/actions-door-answer.ts`) carries no `details.candidates` for this door, so an SDK caller (`client.meta.getItem`) cannot retry with the intended holder without parsing prose. `/automation` and `/actions` already answer `details.candidates` as a `PackageScopedHolder` list (`{ kind: 'package', packageId }` or `{ kind: 'environment' }`).\n\n### Do\n\n1. The `/meta` door's `409 RESOURCE_CONFLICT` carries `details.candidates`: the same `PackageScopedHolder` list, in the same shape as `/automation` and `/actions`. The message stays as it is.\n2. **Pins**, one per `/meta` read form, each asserting `status` 409, `error.code`, and `details.candidates` deep-equal to the holders:\n   - bare `GET /meta/:type/:name`\n   - exact qualifier `?package=`\n   - qualified `/meta/:type/:ns/:name`\n   - `/meta/:type/_env/:name`\n   Ablating the candidates carry turns them red.\n3. Once it lands, `client.meta.getItem`'s doc and changeset (PR #32197) say the rejection carries no `details.candidates`. That note becomes false, so the PR that lands this updates it, or names the follow-up.\n\n**Clause-②:** `yes (widening)`: an additive `details` member on an existing refusal. No answer that succeeds changes.\n**Dedupe** (open and closed: `candidates`, `409`, `meta`): none for this. #31691 (closed) built the doors' namespace segment and the `/automation` candidates; #32199 is the `/layers` exact-qualifier judgment, another defect.\n**Business reason:** when two installed packages ship an item under one name, a console or an integration reading it through the SDK has to choose the holder. Without the list it can only show the raw message.\n**Epic red-line review before landing.**"
+}

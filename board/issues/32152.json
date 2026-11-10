@@ -1,0 +1,34 @@
+{
+  "number": 32152,
+  "kind": "issue",
+  "title": "create-objectstack: the starter ships an object but no app, so a newcomer's first Console visit shows nothing of their project",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T10:34:48Z",
+  "updated_at": "2026-11-10T14:15:38Z",
+  "closed_at": "2026-11-10T14:14:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32152",
+  "body": "qa#1 · os-bob · session_012dn2AecbS6JEeLdRWSW4AC\n\nFiling gate: ③ a task on the maintainer's word. Asked in session on 2026-11-10, after the full-platform test run listed its improvement suggestions, verbatim: 「立卡处理」.\n\nQA-source: #32135 · new-user flow (create-objectstack 18.3.0) · observed beside the clauses\nBatch-of: objectstack-ai/objectstack#32135 follow-ups, 15 cards filed on the maintainer's 「立卡处理」\n\n## What we saw\n\n- `npm create objectstack@latest my-app` (18.3.0) creates `src/objects/note.object.ts` and empty `src/apps`, `src/views`.\n- `pnpm dev` → Console Home lists only the platform apps (Setup, Account); the Note object is reachable over REST and MCP but has no route in the Console.\n- The scaffold README spends a whole section (\"The Console — this starter ships no app\") explaining that this is not a broken install.\n\n## Proposed change\n\nScaffold a minimal app and a default list view for the starter object (the same shapes `os g app --object note` and `os g view note` already write), so the first Console visit shows the project's own data. Keep the README section, shortened to how to add more.\n\n## Business reason\n\nWho: every new user on their first run. Scenario: they create a project, open the Console the banner points to, and see nothing they made. Cost of not doing it: the first impression is \"it didn't work\", and the fix is buried in prose they have not read yet.\n\n## Reader\n\nTriage first touch; lands in `packages/create-objectstack` (the blank template).\n\n## Duplicate check\n\n`is:issue repo:objectstack-ai/objectstack scaffold starter no app console` (35 hits, open and closed): #28958, #28954, #21370 touch the starter but not this; no card."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 32151,
+  "kind": "issue",
+  "title": "metadata: the in-memory store keys every namespace-scoped type by (package, name), so one package's register never overwrites another's same-named agent or skill (ADR-0150 D3; reader before #31700)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T10:17:31Z",
+  "updated_at": "2026-11-10T14:05:45Z",
+  "closed_at": "2026-11-10T13:57:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32151",
+  "body": "domain:server#3 · os-support-ai · session_01WGufzeeBmtefMTT21doena\n\nFiling gate: ④ coordination node: the carrier the epic seat ruled for precondition 3 of #31700 (ruling 6764753986, item 2), found by seat 3's contract review of PR #32097 (#32070). ⛔ Not a claim.\nRuling-ref: 6764753986 (epic `epic:#31527#1`, item 2); preconditions 6761712849 on #31700; ADR-0150 D3.\nBusiness reason: two installed packages of different namespaces may each ship an agent or a skill of the same name today (#31701 landed that widening). The metadata service's in-memory store still keys those types by bare name, so whichever package registered last overwrites the other in that store. A reader that goes through it can serve the wrong package's item silently, which is exactly what ADR-0150 forbids.\nReader: the next `domain:server` seat picks it from the queue; the epic seat reads its PR against the epic's red lines.\nDedupe (open AND closed): `PACKAGE_SLOTTED_STORE_TYPES`: no card names it except #32069 / PR #32092 (api only, closed).\nclass: d · type: Feature (a defect on `main` if step 0 finds a live reader; the card then says so)\nGrade: p1, from the epic (#31527) and the ruling.\n\n## 维护者速读\n\n- 问题：两个不同命名空间的包现在已经可以各装一个同名 agent 或 skill，但元数据服务的内存存储仍然只按名字存，后注册的会把先注册的覆盖掉。经这个存储读的地方可能悄悄拿到另一个包的条目。\n- 要做：内存存储对每个「按命名空间判唯一」的类型都按（包，名字）存；加一个测试钉住两组类型集合的包含关系，以后每张收窄卡都要同笔加类型。\n- 第 0 步：普查所有拿类型变量调 `MetadataManager.get` / `getItem`、可能读到 agent 或 skill 的地方；如果真有读到被覆盖条目的，就按 main 上的缺陷处理并写明。\n- 需要你做的：无，车道派发。\n\n## What to build\n\n- `PACKAGE_SLOTTED_STORE_TYPES` (packages/metadata, today `['api']`, from #32092) covers every type in `NAMESPACE_SCOPED_BARE_NAME_TYPES` (objectql `bare-name-one-holder.ts`, today `agent` and `skill`).\n- A pin asserts `PACKAGE_SLOTTED_STORE_TYPES ⊇ NAMESPACE_SCOPED_BARE_NAME_TYPES`, so each later B card (#31696 PR-3, #31697, #31699, #31700, #31985, #31698 PR-2) adds its type to the store in the same stroke.\n- A bare `MetadataManager.get(type, NAME)` with no package then follows D3 for those types: the environment item, else the one holder, else a refusal naming every holder; one package's register never overwrites another's; removing P1 leaves P2's same-named row.\n\n## Step 0 (before building)\n\n- Census every caller of `MetadataManager.get` / `getItem` (and the protocol's by-name read) whose type is a variable that can be `agent` or `skill`, on a booted composition with two packages of two namespaces each holding one agent and one skill of the same name. The epic's grep found no literal `get('agent'|'skill', …)` reader; a generic path can still reach it. If any reader serves the overwritten item, record it as a defect on `main` in the PR body.\n\n## Acceptance — the epic's three red lines\n\n- Resolution never loosens; ambiguity is reported, never guessed; independently releasable (ADR-0150's readings (a)–(d)): one-holder answers byte-identical, the `Clause-②:` declaration and, if the protocol changes, its ADR-0087 entry.\n\nParent: #31527."
+}

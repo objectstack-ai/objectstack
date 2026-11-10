@@ -1,0 +1,33 @@
+{
+  "number": 32150,
+  "kind": "issue",
+  "title": "[Decision] SSO: may an Okta or Entra app tile start an OIDC sign-in (third-party-initiated login, #32086 item 1)?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T10:14:50Z",
+  "updated_at": "2026-11-10T10:27:40Z",
+  "closed_at": "2026-11-10T10:27:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32150",
+  "body": "domain:server#4 · os-support-ai · session_01WGufzi1tLRTEYwYGtbNCyk\n\nRuled: 6764924025 · letter A (gated third-party-initiated entry onto the vendor's SP-initiated flow) · 2026-11-10T10:24Z\nRuling-ref: 6764924025\n\nDecision card for #32086 item 1. #32086 items 2 and 3 proceed without it (PR-A); item 1 (PR-B) waits on this answer.\n\n## 一句话问题\n\n企业客户在 Okta 或 Entra ID 的应用门户里点 ObjectOS 的 OIDC 应用图标，今天会落到一个 `state_not_found` 错误页；要让这一下点击能登录，平台需要新增一个「由 IdP 发起、交给我们走标准登录」的入口，而这个入口不是 `@better-auth/sso` 自带的。\n\n## 背景\n\n- 实测（cloud#3666，真实 Okta 开发者组织）：Okta 的 OIDC IdP 发起登录只有两种模式。`OKTA` 模式走隐式流，被拒（`unsupported_response_type`）；`SPEC` 模式（OIDC Core §4「第三方发起登录」）把浏览器带到 `initiate_login_uri`，只带 `iss`（和可选 `target_link_uri`），**不带 code**。ObjectOS 现在回 `?error=state_not_found`。Entra ID 的 OIDC「My Apps」也是打开应用的登录地址，不发 code。\n- SAML 的 IdP 发起登录已经可用（#30967 落地）。\n- #30967 的 `bounceIfIdpInitiated` 只处理「带 code、不带 state」的回调，Okta 从不这样发。\n\n## Governing text\n\n- 维护者裁决 A（#30967，记录 6718355623，2026-11-08）：「Per-provider IdP-initiated sign-in toggles for SAML and OIDC, default off, every change audited.」以及评估稿的约束：IdP 发起登录「exposes what `@better-auth/sso` already implements; ⛔ no sign-in mechanism of our own」。\n- OIDC Core 1.0 §4（Initiating Login from a Third Party）：RP 必须校验 `iss`，必须检查 `target_link_uri` 防开放重定向。\n- `Prior rulings read: \"idp-initiated\" \"allowIdpInitiated\" \"third-party-initiated\" → 6718355623 (#30967 ruling A); ADR none; thread: none`\n\n## 前提（带复查命令）\n\n- `bounceIfIdpInitiated` 只在有 `code` 无 `state` 时触发：`grep -n \"bounceIfIdpInitiated\" node_modules/@better-auth/sso/dist/index.mjs`（vendor 1.7.12，`:4132`/`:4178`）。\n- 带 `iss` 无 `code` 的回调落到 `state_not_found`：#32086 step-0 读数 `/mnt/project-files/issue-32086/step0.md`（main `45f0f81f`）。\n- 设计入口不铸会话：会话只在 IdP 带 `code` + 匹配的 `state` 回来、换码成功、ID token 验签通过时由 vendor 创建。\n\n## 选项\n\n| 选项 | 做什么 | 客户感受 | 工作量 |\n|:--|:--|:--|:--|\n| **A. 建入口** | 在现有回调路径 `GET /sso/callback/:providerId` 上，遇到「只带 `iss`、无 code/state/error」的请求，且该 provider 已登记、`allow_idp_initiated` 打开、`iss` 与登记的 issuer 逐字节相等时，转交 vendor 自己的 `POST /sign-in/sso` 发起标准 SP 登录（新 state、PKCE），302 到 IdP。任何一条不满足就照旧 `state_not_found`。`target_link_uri` 只认同源或受信源。 | 点 Okta/Entra 图标直接进入 ObjectOS；开关默认关，由管理员按 provider 打开。 | server 车道 · 1 个 PR（PR-B）约 400–500 行含测试 · 先例 #30967 的 IdP 发起开关 |\n| **B. 不建，写明不支持** | 文档写明 OIDC 的 IdP 发起登录不支持，客户在 Okta 用「书签应用」指向登录页，或改用 SAML。 | 企业客户的 OIDC 图标点了报错，需要绕路或换协议。 | devx/文档 · 1 个小 PR |\n| **C. 等上游** | 向 better-auth 提需求，上游支持后再接。 | 时间不可控，期间同 B。 | 无先例，时程未知 |\n\n## 业务含义直译\n\n- A：像门禁接受「公司前台打电话来说这人是我们的人」，但我们仍要求访客自己刷卡（走完整的标准登录），前台的电话只是让他直接走到刷卡机前。\n- B：前台的电话一律不接，访客得自己从大门绕进来。\n- C：等门禁厂商出新版本再说。\n\n## 四维分析\n\n- **项目长远合理性（≥50%）**：两年后企业 SSO 的平台样子是：SAML 和 OIDC 都能从 IdP 门户一键进入，这是 Okta/Entra 集成目录的基本要求（Salesforce、Slack 作为 RP 都支持 `initiate_login_uri`）。A 只加一个翻译入口，登录的每一步安全机制（state、PKCE、换码、验签、建会话）仍是 vendor 的；它与裁决 A「不自建登录机制」的精神一致，只是入口本身是我们的。B/C 让 OIDC 永远比 SAML 少一项能力，而 SAML 的 IdP 发起本身是协议上更弱的那种（维护者在裁决 A 里已接受这个风险）。\n- **实际业务拉动**：有。cloud#3666 是 `cloud/ROADMAP.md` 第 1 档「外部 IdP SSO 端到端验证」，真实 Okta 组织实测撞上；Entra My Apps 同样。\n- **防 AI 犯错**：A 的入口是闭合判据（四条全满足才放行，其余原样拒绝并记一行 warn），没有宽容回退；出错时用户看到的是今天的 `state_not_found`，不会静默登录错人。\n- **创业阶段不扩散**：A 约 400–500 行，复用现有开关，不加新配置键；B 最省，但把一个已裁定要做的能力（裁决 A 写明 SAML 和 OIDC 都有开关）留成半截。\n\nos-decision-facets\n① 长远：A 补齐裁决 A 已承诺的 OIDC 半边，不增新契约键；B/C 留一个永久特例（OIDC 少一项）。\n② 拉动：路线图第 1 档客户实测撞上（cloud#3666，Okta + Entra）。\n③ 防错：闭合四条判据，失败即今天的拒绝，不铸会话；无静默放行。\n④ 不扩散：A 复用现有开关、无新键，约 400–500 行；B 最小但留半截能力。\n\n## 推荐\n\n**A。** 只看①选 A；②③④ 是否翻转：否。置信缺口：入口可被任意网站上的链接触发（GET），对已开启开关的 provider 会启动一次 SSO 流程；但它能到达的东西不超过今天任何人都能调用的 `POST /sign-in/sso`，而且最终登录仍需用户在 IdP 侧通过认证。\n\n不取 B：OIDC 客户无法从门户进入，裁决 A 的 OIDC 开关形同虚设。不取 C：时程不可控，期间等同 B。\n\n## 安全面说明（人工地板）\n\n本项改变未登录请求能到达的东西：一种新的未登录 GET 形状会得到 302 到 IdP、一个 state cookie 和一条 auth-state 记录（今天得到 `state_not_found`）。按 pm-dispatch，认证流的放宽是人工地板，席位不代裁。\n\n## 裁后执行\n\n- 选 A：#32086 的卡线程按 step-0 设计写 PR-B（`Fixes #32086`），pin：入口不发会话 cookie、不写 `sys_session`；随后带外来或缺失 state 的回调仍被拒；开关关闭、`iss` 差一个字符、SAML provider、不受信 `target_link_uri` 四个对照组全部维持今天的行为。席位按契约复审档复核后落地。\n- 选 B：席位关掉 #32086 的 item 1，立一张 devx 文档卡写明不支持与 Okta 书签应用的绕法。\n- 选 C：同 B，另在卡上记上游需求链接，挂 `pm:on-hold` + `Restart-when:` 上游发布。\n\n## 相关\n\n#32086（item 1）· #30967（裁决 A）· cloud#3666 · step-0 读数 `/mnt/project-files/issue-32086/step0.md`"
+}

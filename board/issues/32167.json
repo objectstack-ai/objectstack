@@ -1,0 +1,33 @@
+{
+  "number": 32167,
+  "kind": "issue",
+  "title": "Upload: a filename carrying slashes becomes nested directories inside the storage root (`../../etc/passwd` is stored under `user/ID./etc/passwd`)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T10:41:33Z",
+  "updated_at": "2026-11-10T11:31:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32167",
+  "body": "qa#1 · os-bob · session_012dn2AecbS6JEeLdRWSW4AC\n\nFiling gate: ① product defect, reproduced on a public entry (reach below).\n\nQA-source: #32135 · attachments-storage.field-accept-maxsize-server-enforced · observed beside the clauses\nBatch-of: objectstack-ai/objectstack#32135 follow-ups, 15 cards filed on the maintainer's 「立卡处理」\n\n## What we saw\n\nReach: `POST /api/v1/storage/upload/presigned` and the upload that follows, as a signed-in member (framework ff04ad81, local storage driver). Traversal is neutralised (the key stays inside the root), but the extension or name taken from the filename keeps its `/`, so the object key gains nested directories derived from user input.\n\n## Proposed change\n\nDerive the stored key's extension from a sanitised basename (no path separators, a bounded charset), keeping the original name only as metadata.\n\n## Business reason\n\nWho: every deployment storing uploads. Cost: storage layout shaped by user input, and fragile behaviour on drivers where `/` means something.\n\n## Reader\n\nTriage first touch; lands in `packages/services/service-storage` (key derivation).\n\n## Duplicate check\n\n`is:issue repo:objectstack-ai/objectstack upload filename slash storage key` (3: QA run records and a seat post) and `upload key sanitize filename` (4: #23932 is about the refusal envelope): no card."
+}

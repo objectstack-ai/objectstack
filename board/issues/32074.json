@@ -2,8 +2,8 @@
   "number": 32074,
   "kind": "issue",
   "title": "spec(auth): /auth/config serves the organization-create choices (value, label, hint, member cap) so the console draws Developer Edition without product copy (ADR-0060 door for #31988)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,7 +15,6 @@
     "domain:spec",
     "enhancement",
     "pm:blocking",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T06:12:56Z",
-  "updated_at": "2026-11-10T07:15:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T13:58:59Z",
+  "closed_at": "2026-11-10T13:57:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32074",
   "body": "domain:ui#3 · zhuangjianguo · session_01QsR2jVEjiYrK7onirxUGyo\n\nFiling gate: ④ a per-layer child of p1 card #31988, filed on the maintainer's ruling there (6760436953: \"先合客户端，对话框走契约门\"). ⛔ Not a claim.\n\nBlocks: #31988 (the dialog half)\n\n## 维护者速读\n\n- **问题：** 「新建工作区」对话框里的 Developer Edition 选项是产品专属文案，而 objectui 是产品中立的渲染器。ADR-0060 冻结了 organizations 目录和 `workspace` 文案命名空间，所以前端不能自己写这几句话。PR #32042 撞上的就是这道守门测试。\n- **要做：** 在 spec 里开一个契约门。`/auth/config` 下发「创建组织时可选的版本」：取值、标题、说明和成员上限，文案按请求语言给出。前端只用一个通用块把服务端给的选项画出来，不写任何产品词。\n- **需要你做的：** 无（你已在 #31988 选了这条路）。\n\n## Why (ADR-0060, `ui/docs/adr/0060-product-neutral-renderer.md`)\n\n- `:26-30`: a page that cannot be composed is fixed by a generic block or by a spec contract door. It is never fixed by a dialog or an i18n namespace named for the product.\n- `:126`, `:136`, `:231`: `workspace` is a frozen namespace, and no key may be added in any locale.\n- `:151-154`: a card that asks objectui for product copy is refiled in one of those two shapes. This card is that refiling.\n\n## What to build\n\n1. **Spec.** Add a host-declared list of organization-create choices to `/auth/config`, beside or replacing the boolean `features.developerEditionCreate` (`packages/spec/src/api/auth-endpoints.zod.ts:273-278`, from #31990 / PR #32017). The lane designs the shape. Its needs:\n   - **Value:** the query value the create door takes (`edition=developer`, cloud#4042).\n   - **Copy:** a label and a hint, already resolved in the request language.\n   - **Member cap:** when one applies, as a number, so the copy is never a renderer constant. cloud reads it from `quotaForPlan('developer').memberLimit` (cloud#1, 6754499855 (d)).\n   - **Default:** unchecked.\n   - The nearest existing label-bearing shape is `AuthProviderInfoSchema` (`auth-endpoints.zod.ts:191-193`).\n   - Decide whether the boolean stays, as a derived flag, or is retired under ADR-0049. Name that in the PR.\n2. **plugin-auth.** `getPublicConfig()` serves the list from a host option, the successor of `AuthManagerOptions.developerEditionCreate` (`packages/plugins/plugin-auth/src/auth-manager.ts:775-783`, `:5211`). With nothing set, the served answer carries no choices.\n3. **The registry.** `developerEditionCreate` is registered with `surface: 'login'` (`packages/spec/src/kernel/public-auth-features.ts:319-320`), but its only consumer is the console create-organization form. The vocabulary is `'crud' | 'login' | 'status'` (`:58`). Classify the new key honestly. Widen the vocabulary only if none of the three fits.\n4. **Tests.** The registry-to-schema pin (`auth-endpoints.test.ts`) and a plugin-auth test: the choices are served only when the host sets them.\n\n**After this lands:**\n- `domain:ui` (#31988's dialog half) draws the served choices with a generic block, with no pack keys under `workspace`.\n- The cloud lane sets the host option and its copy. The cloud seat files that card.\n\n**Reader:** `domain:spec`, with the plugin-auth host seam riding along. `needs:contract-review` is expected, because it is a new public `/auth/config` shape.\n\n**Suggested grade:** p1. It blocks #31988 (p1), which blocks cloud#4039. cloud#4198 (p2) also waits on #31988 (cloud#2 mailbox 6757623180).\n\n**Clause-②:** expected yes (widening). **Metadata-protocol:** expected none.\n\n## Dedupe\n\nSearched open issues on 2026-11-10 for \"createOptions auth config edition\", \"developerEditionCreate\" and \"organization create choices\". The only hits are #31988 and #31990 (closed). **New.**\n"

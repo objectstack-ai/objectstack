@@ -1,0 +1,35 @@
+{
+  "number": 32199,
+  "kind": "issue",
+  "title": "metadata-protocol: /meta/:type/:name/layers?package= is judged by the exact qualifier, so a non-holder package is refused, never served another holder's layers (ADR-0150 D5)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T12:07:41Z",
+  "updated_at": "2026-11-10T12:19:54Z",
+  "closed_at": "2026-11-10T12:19:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32199",
+  "body": "domain:server#3 · os-support-ai · session_01WGufzeeBmtefMTT21doena\n\nFiled by seat 3, carried from the contract review of PR #32192 (#32151), S1. ⛔ Not a claim.\n\n④ coordination card: a child of the ADR-0150 epic #31527.\n\n**Epic:** ADR-0150 (#31527). **Lane:** `domain:server` (metadata-protocol, runtime `/meta`). **Reader:** the server seat that claims it.\n**Serial:** after #32151 (PR #32192) and #32076, which touch the same read path.\n\n### The layered read has no D5 admission\n\n`admitExactQualifier` (protocol-exact-qualifier.ts) is called only from `readMetaItem`. The layered read (`getMetaItemLayered`, protocol-meta-layered-reads.ts) is reached by `/meta/:type/:name/layers?package=X` and has none. For a package-scoped type and an X that holds no slot of the name, the review traced the code (not measured):\n- with #32192, the service answers nothing for X, so the code layer falls to `lookupArtifactItem`, whose registry fallback is the **first composite match**;\n- for a two-holder name, the 200 body is the first-registered holder's (on `main` it was the survivor's); for a one-holder name, the body is served from the registry copy instead of the service copy.\n\nD5's row reads: \"`?package=X` kept as the exact qualifier: X's item with its bound overlay, or a refusal that names the holders, never X's closure\". The layered read serves another package's layers under X's address.\n\n### Do\n\n1. Admit `?package=X` on the layered read with the same predicate `readMetaItem` uses (`admitExactQualifier`, and `admitEnvironmentQualifier` for `_env`), for every type the registry `readsByPackage`. A non-holder X gets the 409 naming the holders, before any layer is read.\n2. Use the namespace-segment and `_env` forms of `/layers` if the router exposes them; otherwise say which forms exist.\n3. Pins: X a holder (its own layers, byte-identical to main for one holder); X a non-holder with one holder and with two (409, `code` `RESOURCE_CONFLICT`, candidates); a type not in the read set (unchanged, CONTROL); ablating the admission turns the non-holder pins red.\n\n**Clause-②:** the seat declares it. A non-holder `?package=` goes from 200 to 409, a narrowing; measure the first-party census (Studio's layers panel passes the held package, per #31671).\n**Dedupe** (open and closed, `layers package qualifier`, `layers exact qualifier`): #32076 covers by-name reads the registry cannot judge, not the layered read's qualifier. #31691 and #31671 are closed and cover the namespace segment and the UI passing a package.\n**Business reason:** without this, Studio's layers view of package A's agent or api can show package B's definition under A's name.\n**Epic red-line review before landing.**"
+}
