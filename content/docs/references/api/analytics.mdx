@@ -250,8 +250,8 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **status** | `integer` | ✅ | The HTTP status `POST /analytics/dataset/query` answers this query with. |
-| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | ✅ | The refusal that door answers this query with — the same code, message and details. |
+| **status** | `integer` | ✅ | The HTTP status `POST /analytics/dataset/query` answers this query with. The authority: `error.httpStatus`, when present, equals it. |
+| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | ✅ | That door's refusal of this query, mapped into the house error envelope: a vocabulary `code` (a code outside the vocabulary moves to `declaredCode`), a `message`, and `details` where the refusal has them. |
 
 ### Nested Shape: `DatasetQueryBatchEntry[option 2].error`
 

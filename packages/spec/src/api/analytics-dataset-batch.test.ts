@@ -94,6 +94,20 @@ describe('DatasetQueryBatchEntrySchema / DatasetQueryBatchResponseSchema', () =>
     }).success).toBe(false);
   });
 
+  it('a refusal is mapped into the envelope: a fault\'s text as `message`, an outside code in `declaredCode`', () => {
+    // The single door answers an undeclared fault as `{ code, error }` with no
+    // `message`; relayed as it is, it is not an entry.
+    expect(DatasetQueryBatchEntrySchema.safeParse({
+      status: 500, error: { code: 'ANALYTICS_QUERY_FAILED', error: 'Analytics query failed.' },
+    }).success).toBe(false);
+    expect(DatasetQueryBatchEntrySchema.safeParse({
+      status: 500, error: { code: 'ANALYTICS_QUERY_FAILED', message: 'Analytics query failed.' },
+    }).success).toBe(true);
+    expect(DatasetQueryBatchEntrySchema.safeParse({
+      status: 422, error: { code: 'VALIDATION_FAILED', declaredCode: 'ACME_QUOTA_RULE', message: 'Over quota.', httpStatus: 422 },
+    }).success).toBe(true);
+  });
+
   it('an entry is exactly one of answer or refusal, never both and never neither', () => {
     expect(DatasetQueryBatchEntrySchema.safeParse({ ...answered, ...refused }).success).toBe(false);
     expect(DatasetQueryBatchEntrySchema.safeParse({}).success).toBe(false);

@@ -787,8 +787,10 @@ export const DATASET_QUERY_BATCH_MAX_QUERIES = 50;
  * {@link DatasetSelectionSchema} — and the server judges it exactly as that
  * door judges it: the same outer-body check, the same selection parse, the same
  * dataset resolution, and the same permission, row-level and field-level reads,
- * as the same caller. A query the single door would refuse is refused here with
- * the same code, status and message, in its own entry of the answer.
+ * as the same caller. A query the single door would refuse is refused here in
+ * its own entry of the answer, with the HTTP status that door answers and its
+ * refusal mapped into the house error envelope
+ * ({@link DatasetQueryBatchEntrySchema} says how).
  *
  * ⛔ That is why this schema does not parse a query's members. A second parse
  * here would refuse a whole batch for one malformed query and could disagree
@@ -835,9 +837,23 @@ export const DatasetQueryBatchRequestSchema = lazySchema(() => z.object({
  * - `{ data }` — what `POST /analytics/dataset/query` answers with a 200: the
  *   dataset `AnalyticsResult`, the same object
  *   `AnalyticsResultResponse['data']` declares.
- * - `{ status, error }` — what that door answers instead: `status` is the HTTP
- *   status it answers with, and `error` is its refusal body in the house error
- *   envelope (`ApiErrorSchema`: the same `code`, `message` and `details`).
+ * - `{ status, error }` — that door's refusal of the query. `status` is the
+ *   HTTP status the door answers with, and it is the authority: `error.httpStatus`,
+ *   when present, equals `status`.
+ *
+ * `error` is the refusal MAPPED into the house error envelope
+ * (`ApiErrorSchema`), not the door's response body relayed as it is: the single
+ * door does not answer every refusal in that shape. The batch door writes:
+ *
+ * - `code` — a member of the closed vocabulary. A code the door answers that
+ *   is not a member moves to `declaredCode`, and `code` carries the member the
+ *   status derives, the rule `ApiErrorSchema` states for every door.
+ * - `message` — the door's refusal sentence. For an undeclared server fault,
+ *   which the door answers as `{ code, error }` with no `message`, it is the
+ *   outward text the door carries under `error`, withheld as the door withholds
+ *   it.
+ * - `details` — where the door's refusal has them (the field-addressed
+ *   `details.fields[]` of a validation refusal, for one).
  */
 export const DatasetQueryBatchEntrySchema = lazySchema(() => z.union([
   z.object({
@@ -847,10 +863,13 @@ export const DatasetQueryBatchEntrySchema = lazySchema(() => z.union([
   }).strict(),
   z.object({
     status: z.number().int().min(400).max(599).describe(
-      'The HTTP status `POST /analytics/dataset/query` answers this query with.',
+      'The HTTP status `POST /analytics/dataset/query` answers this query with. The authority: '
+      + '`error.httpStatus`, when present, equals it.',
     ),
     error: ApiErrorSchema.describe(
-      'The refusal that door answers this query with — the same code, message and details.',
+      'That door\'s refusal of this query, mapped into the house error envelope: a vocabulary `code` '
+      + '(a code outside the vocabulary moves to `declaredCode`), a `message`, and `details` where the '
+      + 'refusal has them.',
     ),
   }).strict(),
 ]));
