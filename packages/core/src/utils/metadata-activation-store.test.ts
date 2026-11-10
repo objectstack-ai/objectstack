@@ -627,10 +627,8 @@ describe('the ledger addressed by (package, name) — a write never adopts one o
                 ['insert', { metadata_type: 'flow', name: 'f', package_id: 'com.example.b', active: false }],
                 ['update', { id: 'b1', active: true, package_id: 'com.example.b' }],
             ]);
-            expect(await store.list()).toEqual([
-                { name: 'f', packageId: 'com.example.a', active: false },
-                { name: 'f', packageId: 'com.example.b', active: true },
-            ]);
+            // A's row: never addressed, and as it was.
+            expect(table[0]).toEqual({ id: 'a1', metadata_type: 'flow', name: 'f', package_id: 'com.example.a', active: false });
         }
     });
 });
