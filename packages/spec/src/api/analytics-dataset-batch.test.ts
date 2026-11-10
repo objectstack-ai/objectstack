@@ -75,8 +75,9 @@ describe('DatasetQueryBatchEntrySchema / DatasetQueryBatchResponseSchema', () =>
   it('parses an answer mixing a success and a refusal, in order', () => {
     const results: DatasetQueryBatchEntry[] = [answered, refused, answered];
     const parsed = DatasetQueryBatchResponseSchema.parse({ success: true, data: { results } });
-    expect(parsed.data.results.map((entry) => ('error' in entry ? entry.error.code : 'answered')))
-      .toEqual(['answered', 'PERMISSION_DENIED', 'answered']);
+    // `null` marks an answered entry, which carries no refusal.
+    expect(parsed.data.results.map((entry) => ('error' in entry ? entry.error.code : null)))
+      .toEqual([null, 'PERMISSION_DENIED', null]);
   });
 
   it('an answered entry carries the single door\'s answer, member for member', () => {
