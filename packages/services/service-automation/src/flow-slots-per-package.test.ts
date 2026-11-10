@@ -293,6 +293,10 @@ describe('#31696 two packages\' flows of one name — both armed, each its own',
         ship(P1, leaf('f', 'p1'));
         ship(P2, leaf('f', 'p2'));
         expect(() => engine.registerFlow('f', leaf('f', 'env'))).toThrow(/held by 2 packages/);
+        // N1: an override arm that names no slot is no package's either, even
+        // where the loader's by-name reader answers one owner.
+        engine.setPackagedFlowSource((_name, packageId) => (packageId === undefined ? P1 : packageId));
+        expect(() => engine.registerFlow('f', leaf('f', 'ovr'), { source: 'override', packageId: `${P1}.custom` })).toThrow(/held by 2 packages/);
         expect(engine.getFlowSlots('f')).toHaveLength(2);
     });
 

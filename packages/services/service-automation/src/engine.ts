@@ -4765,7 +4765,9 @@ export class AutomationEngine implements IAutomationService {
         if (arm.source === 'override') {
             const keys = this.flowSlots.keysOf(name);
             if (keys.length === 1) return this.flowSlots.slot(keys[0])?.packageId ?? this.loaderOwnerOf(name);
-            return this.loaderOwnerOf(name);
+            // Two slots and no `holder`: nothing says whose override it is, so
+            // it names none, and {@link placeFlowSlot} refuses it naming both.
+            return keys.length === 0 ? this.loaderOwnerOf(name) : undefined;
         }
         return undefined;
     }
