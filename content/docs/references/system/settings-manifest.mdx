@@ -141,6 +141,7 @@ const result = ResolvedSettingValueSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **manifest** | `{ namespace: string; version?: integer; label: string \| Record<string, string>; icon?: string; … }` | ✅ |  |
 | **values** | `Record<string, { value: any; source: Enum<'env' \| 'global' \| 'tenant' \| 'user' \| 'default'>; locked: boolean; lockedReason?: string; … }>` | ✅ | Effective values keyed by specifier.key |
+| **live** | `Record<string, { value: string \| null; source: Enum<'settings' \| 'environment' \| 'none'> }>` | optional | Values in use in the running system, keyed by specifier.key, as its runtime states them; absent = not stated |
 
 ### Nested Shape: `SettingsNamespacePayload.manifest`
 
@@ -171,6 +172,13 @@ const result = ResolvedSettingValueSchema.parse(data);
 | **locked** | `boolean` | ✅ | Cannot be overridden from UI |
 | **lockedReason** | `string` | optional | Reason for the lock (UI tooltip) |
 | **cascadeChain** | `{ scope: Enum<'env' \| 'global' \| 'tenant' \| 'user' \| 'default'>; value: any; locked?: boolean; lockedReason?: string; … }[]` | optional | Full cascade trace (env → global → tenant → user → default) |
+
+### Nested Shape: `SettingsNamespacePayload.live[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **value** | `string \| null` | ✅ | The option in use; null exactly when source is 'none' |
+| **source** | `Enum<'settings' \| 'environment' \| 'none'>` | ✅ | Where the running system took it from: these settings, its own boot environment, or nothing in use |
 
 
 ---

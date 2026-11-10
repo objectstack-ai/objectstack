@@ -3108,6 +3108,8 @@ const STUDIO_EN: Record<string, string> = {
     'This view has no object binding yet. Set the bound {object} in the right panel to fetch live data and field options.',
   'engine.viewPreview.formFailed': "The form view references an object or field that doesn't resolve.",
   'engine.viewPreview.listFailed': "The view references an object or field that doesn't resolve.",
+  'engine.viewPreview.listHeldForColumns':
+    'The list preview is held: the server refuses its query while a column names a field the object does not have. Fix or remove the columns above to preview the list.',
   'engine.reportPreview.renderFailed':
     "The Report references a dataset/measure that doesn't resolve, or its config is incomplete.",
   'engine.reportPreview.loading': 'Loading report renderer…',

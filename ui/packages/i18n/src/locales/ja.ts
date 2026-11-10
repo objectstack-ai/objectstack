@@ -3129,6 +3129,10 @@ const ja = {
       unknownApp: "あるアプリケーション",
       unidentified: "このアプリケーションを識別できませんでした。",
       clientId: "クライアント ID",
+      unverified: "未確認のアプリケーション",
+      unverifiedHint: "このアプリケーションはここの管理者が登録したものではないため、その名前は確認されていません。{{destination}} を信頼できる場合にのみ承認してください。",
+      destinationUnconfirmed: "このアクセス権の送信先を確認できなかったため、ここでは承認できません。",
+      sentTo: "アクセス権の送信先:",
       willAllow: "このアプリは次のことができます:",
       scope: {
         openid: "本人確認を行う",
@@ -4196,6 +4200,16 @@ const ja = {
       collapse: '折りたたむ',
       expandTable: '展開',
       exitExpandedTable: '閉じる',
+    },
+    answerSource: {
+      title: '計算方法',
+      object: 'オブジェクト',
+      filter: 'フィルター',
+      allRecords: 'すべてのレコード',
+      groupedBy: 'グループ化',
+      aggregations: '集計',
+      records: 'レコード',
+      visibleToYou: 'あなたが閲覧できるレコードのみ',
     },
     tool: {
       aggregate_data: "関連データを集計する",

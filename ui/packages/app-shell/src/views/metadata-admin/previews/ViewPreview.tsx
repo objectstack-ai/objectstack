@@ -133,15 +133,33 @@ export function buildFormPreviewSchema(
 }
 
 /**
- * objectstack#29311 — where a served warning on a form view points, said with
- * the section's own authored text: the section's `label` (resolved in the
- * designer `locale`), else its `name`. The path is the item-relative one the
- * server writes (`config.sections.0.fields.1`); `body` is the item's `config`.
- * A path into no section is shown as the server wrote it, and an absent one
+ * objectstack#31938 — the item-relative path of a served warning ON a list
+ * column, the entry itself or its `field`: what the read's
+ * `list-view-field-unknown` pass writes for a column naming a field its
+ * object lacks (`config.columns.1.field`; `config.columns.1` for a
+ * bare-string column). A position nested inside a column
+ * (`config.columns.1.summary.field`) is not the column's own field.
+ */
+const LIST_COLUMN_WARNING_PATH = /^config\.columns\.(\d+)(?:\.field)?$/;
+
+/**
+ * objectstack#29311 — where a served warning on a view points, said with the
+ * author's own text. The path is the item-relative one the server writes;
+ * `body` is the item's `config`.
+ *
+ * - Into a form section (`config.sections.0.fields.1`): the section's `label`
+ *   (resolved in the designer `locale`), else its `name`.
+ * - objectstack#31938 — onto a list column ({@link LIST_COLUMN_WARNING_PATH}):
+ *   the column's `label`, else the field it names; a bare-string column is
+ *   its field name.
+ *
+ * A path into neither is shown as the server wrote it, and an absent one
  * names nothing.
  */
 function warningPlace(path: string | undefined, body: Record<string, unknown>, locale: string | undefined): string | undefined {
   if (!path) return undefined;
+  const column = LIST_COLUMN_WARNING_PATH.exec(path);
+  if (column) return columnPlace(body, Number(column[1]), locale) ?? path;
   const at = /^config\.sections\.(\d+)(?:\.|$)/.exec(path);
   const section = at && Array.isArray(body.sections) ? (body.sections as unknown[])[Number(at[1])] : undefined;
   if (!section || typeof section !== 'object') return path;
@@ -151,27 +169,56 @@ function warningPlace(path: string | undefined, body: Record<string, unknown>, l
   return typeof s.name === 'string' && s.name ? s.name : path;
 }
 
+/** The column at `index` in a list view body, named as {@link warningPlace} says. */
+function columnPlace(body: Record<string, unknown>, index: number, locale: string | undefined): string | undefined {
+  const column = Array.isArray(body.columns) ? (body.columns as unknown[])[index] : undefined;
+  if (typeof column === 'string') return column || undefined;
+  if (!column || typeof column !== 'object') return undefined;
+  const c = column as { label?: Parameters<typeof resolveI18nLabel>[0]; field?: unknown };
+  const label = resolveI18nLabel(c.label, locale);
+  if (label && label.trim()) return label;
+  return typeof c.field === 'string' && c.field ? c.field : undefined;
+}
+
 /**
- * objectstack#29311 — a form view's served warnings (a section naming a field
- * its object lacks: the server's `form-field-unknown`), each at the section it
- * points into, in the canvas's existing warn block. The message is the
- * server's, as served. Errors are not this block's: the editor that holds the
- * verdict says those. Nothing is drawn when there are none.
+ * objectstack#31938 — whether a served warning stands on one of the list's
+ * own columns. The query projects every column, and the server refuses the
+ * whole query for one field the object lacks, so the canvas list could only
+ * draw that refusal: the same fact the warnings block already states.
  */
-function FormViewWarnings({
+function holdsListCanvas(diagnostics: MetadataPreviewProps['diagnostics']): boolean {
+  return (diagnostics ?? []).some(
+    (d) => d.severity === 'warning' && !!d.path && LIST_COLUMN_WARNING_PATH.test(d.path),
+  );
+}
+
+/**
+ * objectstack#29311 — a view's served warnings, each at the place it points
+ * into ({@link warningPlace}), in the canvas's existing warn block: a form
+ * view's `form-field-unknown` at its sections, and (objectstack#31938) a list
+ * view's `list-view-field-unknown` at its columns. The message is the
+ * server's, as served. Errors are not this block's: the editor that holds the
+ * verdict says those. Nothing is drawn when there are none. `held` adds the
+ * line saying the list preview waits for the columns to be fixed.
+ */
+function ViewWarnings({
+  kind,
   diagnostics,
   body,
   locale,
+  held = false,
 }: {
+  kind: 'form' | 'list';
   diagnostics: MetadataPreviewProps['diagnostics'];
   body: Record<string, unknown>;
   locale: string | undefined;
+  held?: boolean;
 }) {
   const warnings = (diagnostics ?? []).filter((d) => d.severity === 'warning');
   if (warnings.length === 0) return null;
   return (
     <PreviewMessage tone="warn">
-      <div data-testid="view-form-warnings">
+      <div data-testid={`view-${kind}-warnings`}>
         <div className="font-medium">
           {tFormat('engine.edit.diagnostics.warnTitle', locale, { count: warnings.length })}
         </div>
@@ -179,13 +226,18 @@ function FormViewWarnings({
           {warnings.map((w, i) => {
             const place = warningPlace(w.path, body, locale);
             return (
-              <li key={i} data-testid="view-form-warning" data-path={w.path} className="whitespace-normal break-words">
+              <li key={i} data-testid={`view-${kind}-warning`} data-path={w.path} className="whitespace-normal break-words">
                 {place && <span className="font-medium">{place}: </span>}
                 {w.message}
               </li>
             );
           })}
         </ul>
+        {held && (
+          <p data-testid="view-list-preview-held" className="mt-2 text-xs">
+            {tr('engine.viewPreview.listHeldForColumns', locale)}
+          </p>
+        )}
       </div>
     </PreviewMessage>
   );
@@ -298,7 +350,7 @@ export function ViewPreview({ name, draft, editing, locale, diagnostics }: Metad
     return (
       <PreviewShell hint={`view · ${rawType} · form${designMode ? ' · design' : ''}`}>
         <ViewLabelHeading label={viewLabel} />
-        <FormViewWarnings diagnostics={diagnostics} body={body as Record<string, unknown>} locale={locale} />
+        <ViewWarnings kind="form" diagnostics={diagnostics} body={body as Record<string, unknown>} locale={locale} />
         <PreviewErrorBoundary fallbackHint={tr('engine.viewPreview.formFailed', locale)}>
           <div className="min-h-[300px] max-h-[75vh] overflow-auto">
             <PreviewModeProvider><SchemaRenderer schema={formSchema as any} /></PreviewModeProvider>
@@ -312,14 +364,23 @@ export function ViewPreview({ name, draft, editing, locale, diagnostics }: Metad
   // Delegate to `object-view` — the same renderer the runtime route uses —
   // with the draft body injected so the preview reflects unsaved edits.
   // -------------------------------------------------------------------------
+  // objectstack#31938 — the list view's served warnings above the canvas. A
+  // warning on one of its columns holds the canvas: its query would be
+  // refused, and the refusal would repeat the block.
+  const held = !!body && holdsListCanvas(diagnostics);
   return (
     <PreviewShell hint={`view · ${defaultViewType}${designMode ? ' · design' : ''}`}>
       <ViewLabelHeading label={viewLabel} />
-      <PreviewErrorBoundary fallbackHint={tr('engine.viewPreview.listFailed', locale)}>
-        <div className="min-h-[300px] max-h-[75vh] overflow-auto">
-          <PreviewModeProvider><SchemaRenderer schema={schema as any} /></PreviewModeProvider>
-        </div>
-      </PreviewErrorBoundary>
+      {body && (
+        <ViewWarnings kind="list" diagnostics={diagnostics} body={body as Record<string, unknown>} locale={locale} held={held} />
+      )}
+      {!held && (
+        <PreviewErrorBoundary fallbackHint={tr('engine.viewPreview.listFailed', locale)}>
+          <div className="min-h-[300px] max-h-[75vh] overflow-auto">
+            <PreviewModeProvider><SchemaRenderer schema={schema as any} /></PreviewModeProvider>
+          </div>
+        </PreviewErrorBoundary>
+      )}
     </PreviewShell>
   );
 }

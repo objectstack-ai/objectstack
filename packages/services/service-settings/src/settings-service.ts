@@ -34,6 +34,7 @@ import {
   type SettingsActionHandler,
   type SettingsLiveStatus,
   type SettingsLiveStatusProvider,
+  type SettingsLiveValue,
   type SettingsOptionSource,
   type SettingsOptionSourceAnswer,
   type SettingsWritePredicate,
@@ -2191,22 +2192,39 @@ export class SettingsService {
   /**
    * The namespace's live-status statement as an `info_banner` specifier, ready
    * to head the page, or `undefined` when no provider is registered or the
-   * provider has nothing to state.
-   *
-   * Asked on every page read and never cached, so the statement follows a
-   * runtime swap (a transport rebuilt from this very namespace). A provider
-   * that throws is not passed over in silence: the page then says the live
-   * status could not be read, because a missing statement reads as "nothing
-   * to worry about".
+   * provider has nothing to state. The banner half of {@link liveStatementOf}.
    */
   async liveStatusOf(
     namespace: string,
     ctx: SettingsContext = {},
     display: SettingsDisplayOptions = {},
   ): Promise<SettingsManifest['specifiers'][number] | undefined> {
+    return (await this.liveStatementOf(namespace, ctx, display)).banner;
+  }
+
+  /**
+   * The namespace's live-status statement, from ONE call of its provider: the
+   * `info_banner` specifier that heads the page (`banner`), and the values its
+   * keys have in the running system (`live`, see {@link SettingsLiveStatus.values}).
+   * Both are absent when no provider is registered or it has nothing to state;
+   * `live` is absent too when the statement names no values.
+   *
+   * Asked on every page read and never cached, so the statement follows a
+   * runtime swap (a transport rebuilt from this very namespace). A provider
+   * that throws is not passed over in silence: the page then says the live
+   * status could not be read, because a missing statement reads as "nothing
+   * to worry about". A stated value the page cannot serve is left out of
+   * `live` and logged once, without the value ({@link servedLiveValues}).
+   */
+  async liveStatementOf(
+    namespace: string,
+    ctx: SettingsContext = {},
+    display: SettingsDisplayOptions = {},
+  ): Promise<{ banner?: SettingsManifest['specifiers'][number]; live?: Record<string, SettingsLiveValue> }> {
     const provider = this.liveStatusProviders.get(namespace);
-    if (!provider) return undefined;
+    if (!provider) return {};
     let status: SettingsLiveStatus | undefined;
+    let live: Record<string, SettingsLiveValue> | undefined;
     try {
       status = await provider({
         namespace,
@@ -2214,6 +2232,18 @@ export class SettingsService {
         organizationId: async () => organizationReachRowOwner(await this.organizationReachOf(ctx)),
         locale: display.locale,
       });
+      // Read inside the same guard: a statement whose `values` cannot be read
+      // (a throwing accessor) is a provider that could not answer, not a 500.
+      if (status?.values !== undefined) {
+        const { served, dropped } = this.servedLiveValues(namespace, status.values);
+        if (dropped.length > 0) {
+          this.logger?.warn?.(
+            `SettingsService: the live status of settings namespace '${namespace}' states values this page `
+            + `cannot serve; they are left out, so those keys read as not stated: ${dropped.join('; ')}`,
+          );
+        }
+        if (Object.keys(served).length > 0) live = served;
+      }
     } catch (err: any) {
       this.logger?.warn?.(
         `SettingsService: the live status of settings namespace '${namespace}' could not be read — `
@@ -2225,9 +2255,10 @@ export class SettingsService {
           + 'The values below are what is stored, which is not necessarily what is in use.',
         bannerSeverity: 'error',
       };
+      live = undefined;
     }
-    if (!status) return undefined;
-    return {
+    if (!status) return {};
+    const banner = {
       type: 'info_banner',
       id: SETTINGS_LIVE_STATUS_BANNER_ID,
       label: status.label,
@@ -2235,6 +2266,63 @@ export class SettingsService {
       bannerText: status.bannerText,
       bannerSeverity: status.bannerSeverity,
     } as SettingsManifest['specifiers'][number];
+    return live ? { banner, live } : { banner };
+  }
+
+  /**
+   * The live values a provider stated, as the page serves them: each entry
+   * rebuilt from its `value` and `source` alone, so nothing else a runtime
+   * attaches (a key it holds, a prefix of one) is ever served. An entry that
+   * is not servable is left out and named in `dropped`, by its key and why,
+   * never by its value: the key is not an option-bearing key of the
+   * namespace, the value is not one its option table admits, or `value` and
+   * `source` disagree about "none". The value is kept out of `dropped`
+   * because an entry this wrong may be carrying the very credential the rule
+   * keeps off the page.
+   */
+  private servedLiveValues(
+    namespace: string,
+    values: unknown,
+  ): { served: Record<string, SettingsLiveValue>; dropped: string[] } {
+    const served: Record<string, SettingsLiveValue> = {};
+    const dropped: string[] = [];
+    if (!values || typeof values !== 'object' || Array.isArray(values)) {
+      return { served, dropped: ['the live values are not an object keyed by setting key'] };
+    }
+    const reg = this.registry.get(namespace);
+    for (const [key, entry] of Object.entries(values as Record<string, unknown>)) {
+      const judged = this.judgeLiveValue(namespace, reg, entry, key);
+      if ('why' in judged) dropped.push(`'${key}' ${judged.why}`);
+      else served[key] = judged.served;
+    }
+    return { served, dropped };
+  }
+
+  /**
+   * One stated live value judged once: the `{ value, source }` pair it is
+   * served as, read from the entry a single time, or why it cannot be served.
+   */
+  private judgeLiveValue(
+    namespace: string,
+    reg: RegisteredManifest | undefined,
+    entry: unknown,
+    key: string,
+  ): { served: SettingsLiveValue } | { why: string } {
+    if (!reg?.scopes.has(key)) return { why: 'is not a key of this namespace' };
+    const table = this.optionTableOf(namespace, key, reg.optionTables.get(key) ?? []);
+    if (!table.sourced && table.allowed.length === 0) return { why: 'has no option table to serve a value from' };
+    if (!entry || typeof entry !== 'object') return { why: 'is not stated as { value, source }' };
+    const { value, source } = entry as { value?: unknown; source?: unknown };
+    if (source !== 'settings' && source !== 'environment' && source !== 'none') {
+      return { why: "names no source this page serves ('settings', 'environment' or 'none')" };
+    }
+    if (source === 'none') {
+      return value === null ? { served: { value: null, source } } : { why: "states a value under source 'none'" };
+    }
+    if (typeof value !== 'string' || table.judge(value) !== null) {
+      return { why: 'states a value that is not one of its options' };
+    }
+    return { served: { value, source } };
   }
 
   // ---------------------------------------------------------------------

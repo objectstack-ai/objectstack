@@ -31,6 +31,8 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { LiteKernel, Plugin, PluginContext } from '@objectstack/core';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import type { IHttpServer } from '@objectstack/spec/contracts';
+// The source reaches `import('@objectstack/metadata')`; its first load is paid at collection.
+import '@objectstack/metadata';
 
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 
@@ -187,8 +189,11 @@ describe('#5519 — the mounted /actions and /automation routes deny anonymous c
     it('[#19543] GET /api/v1/automation answers the host\'s standard 405 + Allow: POST — anonymous AND with a session', async () => {
         listFlows.mockClear();
         // The control: a path of this domain where GET was NEVER registered
-        // and POST is (`/:name/toggle`). Same host, same answer shape.
-        const control = await fetch(`${baseUrl}/api/v1/automation/crm_escalation_flow/toggle`);
+        // and POST is (`/:name/runs/:runId/resume`). Same host, same answer
+        // shape. [ADR-0150 D5, child G1] Not a two-segment path: those now
+        // reach the domain under every verb (`/automation/:ns/:name`), which
+        // decides them, so the host's own 405 no longer answers there.
+        const control = await fetch(`${baseUrl}/api/v1/automation/crm_escalation_flow/runs/r1/resume`);
         const controlBody: any = await control.json();
         expect(control.status).toBe(405);
 
@@ -204,7 +209,7 @@ describe('#5519 — the mounted /actions and /automation routes deny anonymous c
             // factored out — the retired route left nothing of its own behind.
             const echoless = (b: unknown, path: string) => JSON.stringify(b).split(path).join('PATH');
             expect(echoless(body, '/api/v1/automation'))
-                .toBe(echoless(controlBody, '/api/v1/automation/crm_escalation_flow/toggle'));
+                .toBe(echoless(controlBody, '/api/v1/automation/crm_escalation_flow/runs/r1/resume'));
         }
         // Answered by the host before any dispatch: the engine's name
         // enumeration is unreachable over HTTP.

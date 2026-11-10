@@ -82,9 +82,12 @@ describe('shouldDenyAnonymous — the shared HTTP anonymous-deny decision (#2567
     for (const method of ['GET', 'PUT', 'DELETE', 'HEAD', undefined, null]) {
       expect(shouldDenyAnonymous({ path: '/automation/hooks/f/h', method }), String(method)).toBe(true);
     }
-    for (const path of ['/automation/hooks', '/automation/hooks/x', '/automation/hooks/x/y/z', '/automation/f/trigger', '/automation']) {
+    for (const path of ['/automation/hooks', '/automation/hooks/x', '/automation/hooks/runs/r1/cancel', '/automation/hooks/x/y/z/w', '/automation/f/trigger', '/automation']) {
       expect(shouldDenyAnonymous({ path, method: 'POST' }), path).toBe(true);
     }
+    // [ADR-0150 D5] The qualified hook's row: five segments, its qualifier never `runs`.
+    expect(shouldDenyAnonymous({ path: '/automation/hooks/x/y/z', method: 'POST' })).toBe(false);
+    expect(shouldDenyAnonymous({ path: '/automation/hooks/x/y/z', method: 'GET' })).toBe(true);
     // ⭐ The pathless guard still decides first: a method alone exempts nothing.
     expect(shouldDenyAnonymous({ method: 'POST' })).toBe(true);
     expect(shouldDenyAnonymous({ path: '', method: 'POST' })).toBe(true);

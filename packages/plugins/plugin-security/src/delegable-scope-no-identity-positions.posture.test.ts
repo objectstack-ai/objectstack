@@ -138,7 +138,10 @@ async function boot(posture: Posture) {
     // [ADR-0150 D3, #31674] The manifest service registers the plugin's own
     // permission sets into the engine registry under the plugin's package, as
     // a booted kernel does, so a built-in position resolves them as its own.
-    manifest: { register: vi.fn((m: { id: string; permissions?: Array<Record<string, unknown>> }) => {
+    // [ADR-0150 D2] …and installs the package, so its kernel namespace (`sys`)
+    // reads as the platform's holder, as a booted kernel's `registerApp` does.
+    manifest: { register: vi.fn((m: { id: string; namespace?: string; version?: string; type?: string; name?: string; permissions?: Array<Record<string, unknown>> }) => {
+      (engine as any).registry.installPackage({ id: m.id, namespace: m.namespace, version: m.version, type: m.type, name: m.name }, 'code');
       for (const ps of m.permissions ?? []) (engine as any).registry.registerItem('permission', structuredClone(ps), 'name', m.id);
     }) },
     objectql: engine,

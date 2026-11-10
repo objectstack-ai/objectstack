@@ -3197,6 +3197,10 @@ const es = {
       unknownApp: "una aplicación",
       unidentified: "No se pudo identificar esta aplicación.",
       clientId: "ID de cliente",
+      unverified: "Aplicación no verificada",
+      unverifiedHint: "Ningún administrador de aquí registró esta aplicación, así que su nombre no se ha comprobado. Autorízala solo si confías en {{destination}}.",
+      destinationUnconfirmed: "No se pudo confirmar a dónde se enviaría este acceso, por lo que no se puede autorizar aquí.",
+      sentTo: "El acceso se enviará a:",
       willAllow: "Esta aplicación podrá:",
       scope: {
         openid: "Confirmar su identidad",
@@ -4279,6 +4283,16 @@ const es = {
       collapse: 'Contraer',
       expandTable: 'Ampliar',
       exitExpandedTable: 'Cerrar',
+    },
+    answerSource: {
+      title: 'Cómo se calculó',
+      object: 'Objeto',
+      filter: 'Filtro',
+      allRecords: 'Todos los registros',
+      groupedBy: 'Agrupado por',
+      aggregations: 'Agregaciones',
+      records: 'Registros',
+      visibleToYou: 'Solo los registros que puede ver',
     },
     tool: {
       aggregate_data: "Resumir los datos",

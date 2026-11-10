@@ -324,6 +324,15 @@ export interface AuthPublicConfig {
      */
     cloudManaged?: boolean;
     /**
+     * Developer Edition organizations can be created here
+     * (`AuthFeaturesConfigSchema.developerEditionCreate` in `@objectstack/spec`):
+     * `true` only where the host's organization-create door accepts
+     * `?edition=developer`, the value `createOrganization`'s `edition`
+     * sends. A create-organization form may offer the Developer Edition
+     * choice only on an explicit `true`. Absent or `false` ⇒ no choice.
+     */
+    developerEditionCreate?: boolean;
+    /**
      * When `false`, the server's `beforeCreateOrganization` hook blocks
      * creation of new organizations. The org plugin endpoints (list, update,
      * invite-accept) still work — only fresh creation is forbidden.
@@ -495,8 +504,19 @@ export interface AuthClient {
    * as the `timezone` QUERY parameter of `POST /organization/create`, never in
    * the body, which stays `{ name, slug, logo }`. Omitted or empty, nothing is
    * sent and the server keeps its default zone; the server judges the value.
+   *
+   * `edition: 'developer'` asks for a Developer Edition organization. It
+   * travels as the `edition` QUERY parameter the same way, and only a host
+   * whose `/auth/config` serves `features.developerEditionCreate: true`
+   * accepts it. Omitted, nothing is sent.
    */
-  createOrganization: (data: { name: string; slug: string; logo?: string; timezone?: string }) => Promise<AuthOrganization>;
+  createOrganization: (data: {
+    name: string;
+    slug: string;
+    logo?: string;
+    timezone?: string;
+    edition?: 'developer';
+  }) => Promise<AuthOrganization>;
   /** Set the active organization for the current session */
   setActiveOrganization: (orgId: string) => Promise<AuthOrganization | null>;
   /** Get the full active organization object */

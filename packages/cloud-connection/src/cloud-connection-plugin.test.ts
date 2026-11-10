@@ -12,6 +12,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { CLOUD_BINDING_SERVICE, type ICloudBindingService } from '@objectstack/spec/contracts';
 import { CloudConnectionPlugin, createCloudConnectionPlugin } from './cloud-connection-plugin.js';
+import { TARGET_NAMESPACE_ON_MANAGED_INSTALL_MESSAGE } from './install-local-door-service.js';
 import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
 type Handler = (c: any) => Promise<Response | any>;
@@ -280,6 +281,82 @@ describe('multi-tenant mode (env-registry + per-env kernel auth)', () => {
                 recordId: 'pkg_1',
                 params: { environment_id: ENV, seed_sample_data: false, installer_user_id: 'user-1' },
             }));
+        }
+    });
+
+    // ── [#31482, cloud#3648] the namespace an unmanaged copy takes, forwarded ──
+
+    it('[#31482] install forwards `target_namespace` beside an unmanaged install, as the control plane spells it', async () => {
+        // What is SENT is pinned here; what the grant's answer does with it is pinned below.
+        const { sent } = await installWith({ package_id: 'pkg_1', install_mode: 'unmanaged', target_namespace: 'acme' });
+        expect(sent).toEqual({
+            recordId: 'pkg_1',
+            params: { environment_id: ENV, seed_sample_data: false, install_mode: 'unmanaged', target_namespace: 'acme', installer_user_id: 'user-1' },
+        });
+    });
+
+    it('[#31482] install reads `targetNamespace` as a second spelling, as it reads the mode; either is trimmed, and two that agree are one', async () => {
+        for (const body of [
+            { package_id: 'pkg_1', install_mode: 'unmanaged', targetNamespace: 'acme' },
+            { package_id: 'pkg_1', installMode: 'unmanaged', targetNamespace: ' acme ' },
+            { package_id: 'pkg_1', install_mode: 'unmanaged', target_namespace: '  acme' },
+            { package_id: 'pkg_1', install_mode: 'unmanaged', target_namespace: 'acme', targetNamespace: 'acme' },
+        ]) {
+            const { sent } = await installWith(body);
+            expect(sent.params.target_namespace, JSON.stringify(body)).toBe('acme');
+            expect(sent.params, JSON.stringify(body)).not.toHaveProperty('targetNamespace');
+        }
+    });
+
+    it('[#31482] install refuses `target_namespace` and `targetNamespace` that disagree: 400 naming both, no control-plane call', async () => {
+        for (const body of [
+            { package_id: 'pkg_1', install_mode: 'unmanaged', target_namespace: 'acme', targetNamespace: 'other' },
+            // Beside a managed install too: which spelling the caller meant is asked before the mode is judged.
+            { package_id: 'pkg_1', target_namespace: 'acme', targetNamespace: 'other' },
+        ]) {
+            const { res, fetchSpy } = await installWith(body);
+            expect(res.status, JSON.stringify(body)).toBe(400);
+            expect(res.payload.error.code).toBe('INVALID_REQUEST');
+            expect(res.payload.error.message).toContain('`target_namespace` ("acme") and `targetNamespace` ("other") disagree');
+            expect(fetchSpy, JSON.stringify(body)).not.toHaveBeenCalled();
+        }
+    });
+
+    it('[#31482] CONTROL — install with no `target_namespace` (absent or null) sends no `target_namespace` key', async () => {
+        for (const body of [{ package_id: 'pkg_1', install_mode: 'unmanaged' }, { package_id: 'pkg_1', install_mode: 'unmanaged', target_namespace: null }]) {
+            const { sent } = await installWith(body);
+            expect(sent.params, JSON.stringify(body)).toEqual({
+                environment_id: ENV, seed_sample_data: false, install_mode: 'unmanaged', installer_user_id: 'user-1',
+            });
+        }
+    });
+
+    it('[#31482] install refuses `target_namespace` beside a managed install or no mode: 400, the install-local door\'s own sentence, no control-plane call', async () => {
+        for (const body of [
+            { package_id: 'pkg_1', target_namespace: 'acme' },
+            { package_id: 'pkg_1', install_mode: 'managed', target_namespace: 'acme' },
+            // The value is not judged first: beside a managed install any value is refused the same way.
+            { package_id: 'pkg_1', installMode: 'managed', target_namespace: 'Not A Namespace' },
+            // Either spelling.
+            { package_id: 'pkg_1', targetNamespace: 'acme' },
+            { package_id: 'pkg_1', install_mode: 'managed', targetNamespace: 'acme' },
+        ]) {
+            const { res, fetchSpy } = await installWith(body);
+            expect(res.status, JSON.stringify(body)).toBe(400);
+            expect(res.payload.error).toEqual({ code: 'INVALID_REQUEST', message: TARGET_NAMESPACE_ON_MANAGED_INSTALL_MESSAGE });
+            expect(fetchSpy, JSON.stringify(body)).not.toHaveBeenCalled();
+        }
+    });
+
+    it('[#31482] install refuses a `target_namespace` the manifest namespace declaration refuses: 400 INVALID_REQUEST, `details.targetNamespace`, no control-plane call', async () => {
+        for (const value of ['Acme', 'acme-corp', '1acme', '', '   ', 42, true, { ns: 'acme' }, ['acme']]) {
+            const { res, fetchSpy } = await installWith({ package_id: 'pkg_1', install_mode: 'unmanaged', target_namespace: value });
+            expect(res.status, JSON.stringify(value)).toBe(400);
+            expect(res.payload.error.code).toBe('INVALID_REQUEST');
+            expect(res.payload.error.message).toContain('`target_namespace`');
+            expect(res.payload.error.message).toContain('Nothing was installed');
+            expect(res.payload.error.details).toEqual({ targetNamespace: value });
+            expect(fetchSpy, JSON.stringify(value)).not.toHaveBeenCalled();
         }
     });
 
@@ -623,6 +700,79 @@ describe('[#30964] an unmanaged grant hands the copy to the environment\'s insta
             const warned = (logger.warn as any).mock.calls.map((call: unknown[]) => String(call[0])).join('\n');
             expect(warned).toContain('was not copied');
             expect(warned).not.toContain('may have installed the package managed');
+        }
+    });
+
+    // ── [#31482, cloud#3648] the namespace the grant names governs the copy ──
+
+    const echoing = (extra: Record<string, unknown>) =>
+        ({ json: { success: true, data: { install_mode: 'unmanaged', version_id: 'ver_9', version: '2.0.0', ...extra } } });
+
+    it('[#31482] a namespace asked for and echoed by the grant reaches the door as `targetNamespace`; the control plane was sent it', async () => {
+        const { res, seen, fetchSpy } = await grant({
+            body: { package_id: 'pkg_1', install_mode: 'unmanaged', target_namespace: 'acme' },
+            answer: echoing({ target_namespace: 'acme' }),
+        });
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(seen.body).toEqual({ packageId: 'pkg_1', versionId: 'ver_9', installMode: 'unmanaged', targetNamespace: 'acme' });
+        const sent = JSON.parse(String((fetchSpy.mock.calls[0] as any[])[1].body));
+        expect(sent.params.target_namespace).toBe('acme');
+    });
+
+    it('[#31482] with no ask, the namespace the grant names is the copy\'s: the grant governs it', async () => {
+        const { res, seen, fetchSpy } = await grant({ answer: echoing({ target_namespace: 'acme_default' }) });
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(seen.body).toEqual({ packageId: 'pkg_1', versionId: 'ver_9', installMode: 'unmanaged', targetNamespace: 'acme_default' });
+        const sent = JSON.parse(String((fetchSpy.mock.calls[0] as any[])[1].body));
+        expect(sent.params).not.toHaveProperty('target_namespace');
+    });
+
+    it('[#31482] CONTROL: no ask and no echo (absent or null) hands the door no `targetNamespace`: the copy keeps the source\'s namespace', async () => {
+        for (const extra of [{}, { target_namespace: null }]) {
+            const { res, seen } = await grant({ answer: echoing(extra) });
+            expect(res.status, JSON.stringify(extra)).toBe(200);
+            expect(seen.body, JSON.stringify(extra)).toEqual({ packageId: 'pkg_1', versionId: 'ver_9', installMode: 'unmanaged' });
+        }
+    });
+
+    it('[#31482] a namespace asked for that the grant does not echo, or echoes another, fails closed: 502, nothing copied, audited', async () => {
+        for (const extra of [{}, { target_namespace: null }, { target_namespace: 'other' }]) {
+            const { res, door, auditEvents } = await grant({
+                body: { package_id: 'pkg_1', install_mode: 'unmanaged', target_namespace: 'acme' },
+                answer: echoing(extra),
+            });
+            expect(res.status, JSON.stringify(extra)).toBe(502);
+            expect(res.payload.error.code).toBe('PLUGIN_INSTALL_FAILED');
+            expect(res.payload.error.message).toContain('cannot tell which namespace it granted');
+            expect(res.payload.error.message).toContain('Nothing was copied');
+            expect((door as any).install).not.toHaveBeenCalled();
+            // Both namespaces are on the record: the one asked for and the one the grant named.
+            expect(auditEvents).toEqual([{
+                action: 'package_unmanaged_import', packageId: 'pkg_1', version: '2.0.0', environmentId: ENV, actor: 'user-1',
+                outcome: 'failure', errorCode: 'PLUGIN_INSTALL_FAILED', status: 502,
+                requestedNamespace: 'acme',
+                ...(typeof (extra as any).target_namespace === 'string' ? { grantedNamespace: (extra as any).target_namespace } : {}),
+            }]);
+        }
+    });
+
+    it('[#31482] the grant governs either spelling: a `targetNamespace` the grant does not echo never reaches the door', async () => {
+        const { res, door, fetchSpy } = await grant({
+            body: { package_id: 'pkg_1', install_mode: 'unmanaged', targetNamespace: 'forged' },
+            answer: echoing({}),
+        });
+        expect(res.status).toBe(502);
+        expect((door as any).install).not.toHaveBeenCalled();
+        const sent = JSON.parse(String((fetchSpy.mock.calls[0] as any[])[1].body));
+        expect(sent.params.target_namespace).toBe('forged');
+    });
+
+    it('[#31482] a grant whose `target_namespace` is not a string fails closed: 502, nothing copied, asked or not', async () => {
+        for (const body of [{ package_id: 'pkg_1', install_mode: 'unmanaged' }, { package_id: 'pkg_1', install_mode: 'unmanaged', target_namespace: 'acme' }]) {
+            const { res, door } = await grant({ body, answer: echoing({ target_namespace: ['acme'] }) });
+            expect(res.status, JSON.stringify(body)).toBe(502);
+            expect(res.payload.error.code).toBe('PLUGIN_INSTALL_FAILED');
+            expect((door as any).install).not.toHaveBeenCalled();
         }
     });
 

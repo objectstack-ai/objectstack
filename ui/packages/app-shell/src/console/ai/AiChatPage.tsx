@@ -66,6 +66,7 @@ import {
   detectBuilderHandoff,
   detectRecordHandoff,
   detectRecordWrite,
+  detectAnswerSource,
   detectSampleDataCleanup,
   detectPackageRemoval,
   detectProposedChanges,
@@ -288,6 +289,10 @@ export function hydratedMessagesToChatMessages(messages: HydratedUIMessage[]): C
         // cloud#3565 — the record-write card rides the pending approval the
         // id below is lifted from; it must survive a reload like the rest.
         const recordWrite = detectRecordWrite(result);
+        // objectstack#31868 — the data tools' `source` block, drawn as the
+        // turn's "How this was computed" block; lifted here as the live mapper
+        // lifts it, so the block survives a reload or a cache restore.
+        const answerSource = detectAnswerSource(result);
         const sampleDataCleanup = detectSampleDataCleanup(result);
         const packageRemoval = detectPackageRemoval(result);
         const proposedChanges = detectProposedChanges(result);
@@ -338,6 +343,7 @@ export function hydratedMessagesToChatMessages(messages: HydratedUIMessage[]): C
           ...(builderHandoff ? { builderHandoff } : {}),
           ...(recordHandoff ? { recordHandoff } : {}),
           ...(recordWrite ? { recordWrite } : {}),
+          ...(answerSource ? { answerSource } : {}),
           ...(sampleDataCleanup ? { sampleDataCleanup } : {}),
           ...(packageRemoval ? { packageRemoval } : {}),
           ...(proposedChanges ? { proposedChanges } : {}),

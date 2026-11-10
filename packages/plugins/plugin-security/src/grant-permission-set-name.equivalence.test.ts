@@ -201,8 +201,10 @@ async function grantsByPrincipal(posture: Posture): Promise<Record<string, unkno
   // channel split (`directPermissions`); it pins the grants, so the split is
   // left out here and pinned where it was added
   // (`resolve-authz-context.direct-permissions.test.ts`, core).
+  // [ADR-0150 D3] `permissionSetAddresses` postdates it too, and is left out
+  // the same way; the addresses are pinned in `permission-set-address.test.ts`.
   const resolve = (userId: string) => resolveUserAuthzGrants(engine, userId, { tenantId: ORG })
-    .then(({ directPermissions: _channel, ...grants }) => grants);
+    .then(({ directPermissions: _channel, permissionSetAddresses: _addresses, ...grants }) => grants);
   const admin = await resolve('usr_admin');
   const orgAdmin = await resolve('usr_orgadmin');
   const member = await resolve('usr_member');

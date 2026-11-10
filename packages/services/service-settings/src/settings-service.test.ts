@@ -499,8 +499,10 @@ describe('SettingsService — save-time validation (required/visible/pattern)', 
 
   it('does not validate fields hidden for the selected provider', async () => {
     const svc = aiService();
-    // openai_api_key is required:true but invisible when provider=memory.
-    await expect(svc.setMany('ai', { provider: 'memory' })).resolves.toBeDefined();
+    // openai_api_key is required:true but invisible when provider=gateway.
+    await expect(
+      svc.setMany('ai', { provider: 'gateway', gateway_model: 'openai/gpt-4o' }),
+    ).resolves.toBeDefined();
   });
 
   it('leaves unrelated single-key writes untouched', async () => {

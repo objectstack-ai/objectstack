@@ -316,6 +316,25 @@ function providerLogoutURL(data: { url?: unknown; redirect?: unknown } | null | 
 }
 
 /**
+ * Clients whose last `getSession()` answered `null` without the server having
+ * said there is no session: the request failed in transport or the server
+ * answered with an error other than 401. `getSession()` still answers `null`
+ * there (the tab reads as signed out for now), but that answer is not a
+ * sign-out, and what this browser holds for its user must not be cleared on
+ * it. Read through {@link sessionReadWasInconclusive}.
+ */
+const inconclusiveSessionReads = new WeakSet<AuthClient>();
+
+/**
+ * Whether `client`'s last `getSession()` answered `null` without the server
+ * saying "no session". `false` for any client this module did not build: for
+ * an injected client, `null` is its own statement that there is no session.
+ */
+export function sessionReadWasInconclusive(client: AuthClient): boolean {
+  return inconclusiveSessionReads.has(client);
+}
+
+/**
  * The slot the console's pre-React auth preflight (`apps/console/src/lib/
  * auth-preflight.ts`) leaves its `get-session` answer in when the stored Bearer
  * was valid: the auth URL it asked, the token it sent and the body as JSON text. The
@@ -528,7 +547,7 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
     throw lastError instanceof Error ? lastError : new Error(String(lastError));
   }
 
-  return {
+  const client: AuthClient = {
     async signIn(credentials: SignInCredentials) {
       const { data, error } = await betterAuth.signIn.email({
         email: credentials.email,
@@ -694,11 +713,20 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       // better-fetch RETHROWS transport errors (it does not wrap them in
       // `{ error }`); a network hiccup must read as "signed out for now",
       // not an exception in every AuthProvider boot.
+      // Whether every request made below was ANSWERED by the server: a body,
+      // or a 401. A transport error or any other error status leaves it
+      // false, and a `null` answer then is not a statement that there is no
+      // session (see `sessionReadWasInconclusive`).
+      let answered = true;
+      inconclusiveSessionReads.delete(client);
       let data: unknown = null;
       try {
         const res = await betterAuth.getSession();
         if (!res.error) data = res.data;
-      } catch { /* transport error — fall through to the retry/null path */ }
+        else if (res.error.status !== 401) answered = false;
+      } catch {
+        answered = false; /* transport error — fall through to the retry/null path */
+      }
       if (data) {
         const payload = data as unknown as { user: AuthUser; session: AuthClientSession };
         // Keep localStorage in sync if the server returns a fresh token
@@ -738,9 +766,14 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
             // sign-in starts clean. (Transport errors keep the token: they
             // prove nothing about its validity.)
             TokenStorage.clear();
+          } else if (resp.status !== 401) {
+            answered = false;
           }
-        } catch { /* network hiccup — treat as signed out, keep the token */ }
+        } catch {
+          answered = false; /* network hiccup — treat as signed out, keep the token */
+        }
       }
+      if (!answered) inconclusiveSessionReads.add(client);
       // No session: whatever reads the config next is the sign-in page (a
       // session that expired lands there without a sign-out), so it reads it
       // fresh rather than the copy cached while signed in.
@@ -1054,18 +1087,30 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       return (data ?? []) as AuthOrganization[];
     },
 
-    async createOrganization(orgData: { name: string; slug: string; logo?: string; timezone?: string }): Promise<AuthOrganization> {
+    async createOrganization(orgData: {
+      name: string;
+      slug: string;
+      logo?: string;
+      timezone?: string;
+      edition?: 'developer';
+    }): Promise<AuthOrganization> {
       // objectui#11908: the creator's zone rides the QUERY (`?timezone=`), the
       // shape the server's create route reads it from; the body stays
       // `{ name, slug, logo }`. better-auth's client proxy lifts
-      // `fetchOptions.query` onto the URL and keeps it out of the body. An
-      // absent or empty zone sends no parameter at all.
-      const { timezone } = orgData;
+      // `fetchOptions.query` onto the URL and keeps it out of the body. The
+      // edition (`?edition=developer`) rides the same query. An absent or
+      // empty value sends no parameter at all, and with neither there is no
+      // query object.
+      const { timezone, edition } = orgData;
+      const query = {
+        ...(timezone ? { timezone } : {}),
+        ...(edition ? { edition } : {}),
+      };
       const { data, error } = await (betterAuth as any).organization.create({
         name: orgData.name,
         slug: orgData.slug,
         logo: orgData.logo,
-        ...(timezone ? { fetchOptions: { query: { timezone } } } : {}),
+        ...(Object.keys(query).length > 0 ? { fetchOptions: { query } } : {}),
       });
       if (error) throw toAuthError(error, 'Failed to create organization');
       return data as unknown as AuthOrganization;
@@ -1244,4 +1289,5 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       return asAuthInvitations(data, 'listUserInvitations');
     },
   };
+  return client;
 }

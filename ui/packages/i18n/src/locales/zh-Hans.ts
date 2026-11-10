@@ -3209,6 +3209,10 @@ const zh = {
       unknownApp: '某个应用',
       unidentified: '无法识别此应用。',
       clientId: '客户端 ID',
+      unverified: '未经验证的应用',
+      unverifiedHint: '此应用并非由此处的管理员注册，其名称未经核实。仅在您信任 {{destination}} 时才授权。',
+      destinationUnconfirmed: '无法确认此访问权限将发送到何处，因此无法在此授权。',
+      sentTo: '访问权限将发送到：',
       willAllow: '此应用将能够：',
       scope: {
         openid: '确认您的身份',
@@ -4404,6 +4408,16 @@ const zh = {
       collapse: '收起',
       expandTable: '展开',
       exitExpandedTable: '关闭',
+    },
+    answerSource: {
+      title: '计算方式',
+      object: '对象',
+      filter: '筛选条件',
+      allRecords: '全部记录',
+      groupedBy: '分组依据',
+      aggregations: '汇总',
+      records: '记录',
+      visibleToYou: '仅包含你可见的记录',
     },
     tool: {
       aggregate_data: '汇总相关数据',

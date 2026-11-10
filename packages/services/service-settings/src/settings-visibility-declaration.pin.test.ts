@@ -82,7 +82,11 @@ describe('settings `visible` — declaration ⇄ evaluator', () => {
     // 94 -> 96 at #11768: the `audience` group added two gated fields
     // (`audience_allowed_email_domains`, `audience_self_registration_permission_set`),
     // each with one `visible` predicate over `data.audience_posture`.
-    expect(predicates).toHaveLength(96);
+    // 96 -> 90 at #31960: `ai.provider` no longer offers `memory`, so the six
+    // `${data.provider !== 'memory'}` predicates on the generation-default and
+    // title fields went with it (they now always show), and `title_max_length`
+    // keeps only its `title_generation_enabled` term.
+    expect(predicates).toHaveLength(90);
   });
 
   it('every bundled predicate is accepted by BOTH sides', () => {

@@ -464,6 +464,12 @@ Use `processVisibility="hidden"` when a host wants to suppress non-interactive
 agent activity entirely. Human-in-the-loop approvals and draft review actions
 remain visible so users can still complete required decisions.
 
+In every mode, an answer whose data tools returned a `source` block ends with
+one collapsed "How this was computed" block: per tool, the object, the filter,
+the grouping, the aggregations, how many records the figures cover, and whether
+only the reader's visible records were read. It draws that block alone, never
+the rest of the tool payload.
+
 Console hosts also keep a sanitized browser-side display cache for the active
 conversation. If the backend conversation record is available but returns no
 message rows on refresh, the UI can restore user/assistant text plus grouped

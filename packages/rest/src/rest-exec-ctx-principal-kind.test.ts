@@ -24,6 +24,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { hashApiKey, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS } from '@objectstack/core';
 import { runWithPerfDisclosure, type PerfDisclosureGate } from '@objectstack/observability';
 import { RestServer } from './rest-server';
+// Paid at collection, not inside a case's clocked window: the routes reach it by dynamic import.
+import '@objectstack/objectql';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 const TASK = {
@@ -295,6 +297,10 @@ describe('#6216 — the REST face assembles through the SHARED assembler, output
             'positions', 'permissions', 'systemPermissions', 'isSystem', 'principalKind',
             'userId', 'email', 'posture', 'org_user_ids', 'accessible_org_ids',
             'timezone', 'locale',
+            // [ADR-0150 D3] The (package, name) each granted set resolved to,
+            // beside `permissions`: the assembler fills it whenever a set is
+            // granted (#31970's field, filled by #31971).
+            'permissionSetAddresses',
             // Not an ExecutionContext field — the REST face still adds this one
             // itself, after assembly (the resolved kernel, ADR-0057 D10). The
             // ADR-0069 gate posture used to sit beside it here; #7280 declared

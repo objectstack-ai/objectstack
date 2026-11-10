@@ -17,6 +17,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 // barrel closure (`index.ts` re-exports `AiChatPage`, which imports it), so
 // this adds no package edge and no eager bundle weight.
 import { chartAnswerParts, detectPendingApproval } from '@object-ui/plugin-chatbot/core';
+// Type-only, so it is erased and pulls no barrel closure into the hook.
+import type { AnswerSource } from '@object-ui/plugin-chatbot';
 
 /** Minimal UIMessage shape compatible with `@ai-sdk/react`'s `useChat`. */
 export interface HydratedUIMessagePart {
@@ -212,6 +214,13 @@ interface CacheableChatToolInvocation {
     signature?: string;
   };
   pendingActionId?: string;
+  /**
+   * objectstack#31868 — the data tool's `source` block ("How this was
+   * computed"), as `detectAnswerSource` lifted it. It rides INSIDE the cached
+   * `output`, beside whichever envelope took it, because `output` is the one
+   * carrier both hydration paths re-parse (see `sanitizeChatMessagesForCache`).
+   */
+  answerSource?: AnswerSource;
 }
 
 interface CacheableChatMessage {
@@ -535,6 +544,17 @@ export function sanitizeChatMessagesForCache(
                 : tool.pendingActionId
                   ? pendingApprovalToCachedResult(tool.pendingActionId)
                   : undefined;
+          // objectstack#31868 — the source block is a top-level key of the
+          // data tool's result, so it is written as one into `output`, BESIDE
+          // the envelope above rather than as a rival arm: it is not an
+          // affordance and must never displace one. A data tool usually has no
+          // envelope, so it gets an `output` of its own; a turn that also
+          // carries a pending approval keeps `status` / `pendingActionId` and
+          // gains `source`, and `detectPendingApproval` and
+          // `detectAnswerSource` each read their own keys back.
+          const output = tool.answerSource
+            ? { ...(cachedOutput ?? {}), source: tool.answerSource }
+            : cachedOutput;
           parts.push({
             type: `tool-${tool.toolName}`,
             toolCallId: tool.toolCallId,
@@ -550,7 +570,7 @@ export function sanitizeChatMessagesForCache(
             // `detectPendingApproval` FIRST and only falls back here, so the
             // one contract still decides wherever it has anything to say.
             ...(tool.pendingActionId ? { pendingActionId: tool.pendingActionId } : {}),
-            ...(cachedOutput !== undefined ? { output: cachedOutput } : {}),
+            ...(output !== undefined ? { output } : {}),
           });
         }
       }

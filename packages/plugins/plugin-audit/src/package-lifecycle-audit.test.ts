@@ -198,6 +198,16 @@ describe('[#31186] the package lifecycle writer on the real `audit` slot', () =>
     });
   });
 
+  it('[#31482] a grant refused over its namespace records the namespace asked for and the one the grant named (null when none)', async () => {
+    const refused = { targetPackageId: undefined, namespace: undefined, copiedCount: undefined, outcome: 'failure' as const, errorCode: 'PLUGIN_INSTALL_FAILED', status: 502 };
+    await audit.recordPackageLifecycleEvent(importEvent({ ...refused, requestedNamespace: 'acme', grantedNamespace: 'other' }));
+    let rows = await importRows();
+    expect(metadataOf(rows[rows.length - 1])).toMatchObject({ requested_namespace: 'acme', granted_namespace: 'other', error_code: 'PLUGIN_INSTALL_FAILED', status: 502 });
+    await audit.recordPackageLifecycleEvent(importEvent({ ...refused, requestedNamespace: 'acme' }));
+    rows = await importRows();
+    expect(metadataOf(rows[rows.length - 1])).toMatchObject({ requested_namespace: 'acme', granted_namespace: null });
+  });
+
   it('an event that names no package, or another action, writes nothing', async () => {
     const before = (await uninstallRows()).length;
     await audit.recordPackageLifecycleEvent(uninstallEvent({ packageId: '  ' }));
