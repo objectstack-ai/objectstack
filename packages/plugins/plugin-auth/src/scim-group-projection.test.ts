@@ -27,7 +27,9 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { SecurityPlugin } from '@objectstack/plugin-security';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
 import { MCP_AGENT_PERMISSION_SETS } from '@objectstack/spec/ai';
+import type { PluginContext } from '@objectstack/core';
 import { AuthManager } from './auth-manager.js';
+import { AuthPlugin } from './auth-plugin.js';
 import { authIdentityObjects } from './manifest.js';
 import { createTenancyService } from './tenancy-service.js';
 import { mintScimConnectionCredential, revokeScimConnectionCredential } from './scim-connection-service.js';
@@ -685,5 +687,50 @@ describe('a group mapping says whether it matches a current group of its source'
     } finally {
       registerIdpGroupMappingMatchTrigger(h.engine as never);
     }
+  });
+});
+
+describe('auth-plugin binds the match trigger and runs the boot sweep on `kernel:ready`', () => {
+  it('after-hooks on sys_scim_group (insert, update, delete) and on sys_idp_group_mapping (insert, update), and one sweep read', async () => {
+    const registered: Array<{ event: string; options: any }> = [];
+    const swept: string[] = [];
+    const engine = {
+      registerHook: (event: string, _handler: unknown, options: any) => { registered.push({ event, options }); },
+      getSchema: (name: string) => (name === 'sys_idp_group_mapping' ? { name } : undefined),
+      find: async (object: string) => { swept.push(object); return []; },
+    };
+    const ready: Array<() => Promise<void>> = [];
+    const ctx = {
+      registerService: vi.fn(),
+      getService: vi.fn((name: string): any => {
+        if (name === 'manifest') return { register: vi.fn() };
+        if (name === 'objectql') return engine;
+        return undefined;
+      }),
+      getServices: vi.fn(() => new Map()),
+      hook: vi.fn((name: string, handler: () => Promise<void>) => { if (name === 'kernel:ready') ready.push(handler); }),
+      trigger: vi.fn(),
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+      getKernel: vi.fn(),
+    } as unknown as PluginContext;
+    const plugin = new AuthPlugin({ secret: SECRET, baseUrl: BASE });
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    for (const handler of ready) {
+      try { await handler(); } catch { /* other kernel:ready work needs services this double does not offer */ }
+    }
+
+    expect(
+      registered
+        .filter((r) => r.options?.packageId === IDP_GROUP_MAPPING_MATCH_PACKAGE_ID)
+        .map((r) => [r.event, r.options.object]),
+    ).toEqual([
+      ['afterInsert', 'sys_scim_group'],
+      ['afterUpdate', 'sys_scim_group'],
+      ['afterDelete', 'sys_scim_group'],
+      ['afterInsert', 'sys_idp_group_mapping'],
+      ['afterUpdate', 'sys_idp_group_mapping'],
+    ]);
+    expect(swept.filter((o) => o === 'sys_idp_group_mapping'), 'the boot sweep read the mappings once').toEqual(['sys_idp_group_mapping']);
   });
 });
