@@ -17,9 +17,18 @@
 // better-sqlite3 and on SqliteWasmDriver are packages/qa/dogfood's
 // `test/record-currency-probes.test.ts`. The write's blank-code refusal is
 // also the `validate()` preview's finding (changeset 26684's parity).
+//
+// [ADR-0144 D2 and D6, amended 2026-11-09 by #31743] The last four describes
+// pin a child amount that follows its parent's currency through a
+// `master_detail` (`currencyField: 'invoice.currency_code'`): its code is the
+// parent's at every write, an aggregate over it is refused whatever it groups
+// by, a `summary` through that very `master_detail` registers and totals each
+// parent's own rows, and the parent's code locks while a child row (a binned
+// one included) follows it.
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import type { EngineAggregateOptions, EngineUpdateOptions } from '@objectstack/spec/data';
+import { RECYCLE_BIN_ENTRY_FIELDS, RECYCLE_BIN_OBJECT, type EngineAggregateOptions, type EngineUpdateOptions } from '@objectstack/spec/data';
+import { resolveThrownHttpError } from '@objectstack/types';
 import { ObjectQL } from './engine.js';
 
 function makeDriver() {
@@ -344,5 +353,297 @@ describe('a summary roll-up over a record-mode amount is refused at registration
     } as any);
     other.engine.registry.registerObject(parentWith('sum', 'qty') as any);
     expect(other.engine.registry.getObject('fx_parent')).toBeDefined();
+  });
+});
+
+// ── [ADR-0144 D2 and D6, amended 2026-11-09 by #31743] A child that follows its parent's currency ──
+
+const CODE_FIELD = { type: 'text', valueDomain: 'iso_4217_currency' } as const;
+const FOLLOWS = { currencyMode: 'record', currencyField: 'invoice.currency_code' } as const;
+const PP_INVOICE = {
+  name: 'pp_invoice',
+  fields: {
+    title: { type: 'text' },
+    currency_code: CODE_FIELD,
+    billing_currency: CODE_FIELD,
+    subtotal: {
+      type: 'summary',
+      currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' },
+      summaryOperations: { object: 'pp_line', field: 'amount', function: 'sum' },
+    },
+  },
+};
+const PP_LINE = {
+  name: 'pp_line',
+  fields: {
+    title: { type: 'text' },
+    invoice: { type: 'master_detail', reference: 'pp_invoice' },
+    amount: { type: 'currency', currencyConfig: FOLLOWS },
+  },
+};
+const VALIDATION_FAILED = { code: 'VALIDATION_FAILED', status: 400 };
+/** The refusal as every HTTP door reads it (ADR-0112): a `ValidationError` carries its 400 there, not on itself. */
+const httpOf = (err: Thrown) => {
+  const { code, status } = resolveThrownHttpError(err);
+  return { code, status };
+};
+const BIN = { name: RECYCLE_BIN_OBJECT, label: 'Recycle Bin Entry', managedBy: 'engine-owned', fields: { ...RECYCLE_BIN_ENTRY_FIELDS } };
+
+async function bootFollowing(options: { bin?: boolean; parentFirst?: boolean } = {}) {
+  const booted = await bootEngine();
+  const { engine } = booted;
+  if (options.bin) engine.registry.registerObject(BIN as any);
+  for (const o of options.parentFirst === false ? [PP_LINE, PP_INVOICE] : [PP_INVOICE, PP_LINE]) engine.registry.registerObject(o as any);
+  await engine.insert('pp_invoice', { id: 'inv_usd', title: 'usd', currency_code: 'USD' });
+  await engine.insert('pp_invoice', { id: 'inv_eur', title: 'eur', currency_code: 'EUR' });
+  await engine.insert('pp_invoice', { id: 'inv_blank', title: 'blank' });
+  return booted;
+}
+
+describe('a child amount that follows its parent\'s currency is written with the parent\'s code (ADR-0144 D2, amended)', () => {
+  let engine: ObjectQL;
+  let storeFor: ReturnType<typeof makeDriver>['storeFor'];
+
+  beforeEach(async () => {
+    ({ engine, storeFor } = await bootFollowing());
+  });
+
+  it('insert: a line under a parent holding a code is written, and stores no code of its own', async () => {
+    const line = await engine.insert('pp_line', { title: 'l1', invoice: 'inv_usd', amount: 100 });
+    const stored = storeFor('pp_line').get(line.id);
+    expect(stored).toMatchObject({ invoice: 'inv_usd', amount: 100 });
+    expect(Object.keys(stored).filter((k) => k.includes('.') || k === 'currency_code')).toEqual([]);
+  });
+
+  it('insert: a line with an amount under a parent with no code is refused ERR_CURRENCY_CODE_REQUIRED, and nothing is written', async () => {
+    const err = await refusalOf(engine.insert('pp_line', { title: 'l1', invoice: 'inv_blank', amount: 100 }));
+    expect(envelopeOf(err)).toEqual(CODE_REQUIRED);
+    expect(err?.field).toBe('invoice.currency_code');
+    expect(err?.amountField).toBe('amount');
+    expect(err?.message).toContain("the 'pp_invoice' record it names has a blank 'currency_code'");
+    expect(storeFor('pp_line').size).toBe(0);
+    // The control: no amount needs no code.
+    await engine.insert('pp_line', { title: 'l2', invoice: 'inv_blank' });
+    expect(storeFor('pp_line').size).toBe(1);
+  });
+
+  it('insert: a line naming a parent that is not there is answered by the reference check, not the currency guard', async () => {
+    const err = await refusalOf(engine.insert('pp_line', { title: 'l1', invoice: 'inv_gone', amount: 100 }));
+    expect(err?.code).not.toBe('ERR_CURRENCY_CODE_REQUIRED');
+    expect(httpOf(err)).toEqual(VALIDATION_FAILED);
+    expect((err as any)?.fields?.map((f: any) => [f.field, f.code])).toEqual([['invoice', 'reference_not_found']]);
+    expect(storeFor('pp_line').size).toBe(0);
+  });
+
+  it('by-id update: moving a line to a parent with no code is refused; to a parent with one it passes; an unrelated edit is not judged', async () => {
+    const line = await engine.insert('pp_line', { title: 'l1', invoice: 'inv_usd', amount: 100 });
+    const moved = await refusalOf(engine.update('pp_line', { id: line.id, invoice: 'inv_blank' }));
+    expect(envelopeOf(moved)).toEqual(CODE_REQUIRED);
+    expect(moved?.message).toContain(`(record ${line.id})`);
+    expect(storeFor('pp_line').get(line.id).invoice).toBe('inv_usd');
+
+    await engine.update('pp_line', { id: line.id, invoice: 'inv_eur' });
+    expect(storeFor('pp_line').get(line.id).invoice).toBe('inv_eur');
+    storeFor('pp_line').set('legacy', { id: 'legacy', title: 'old', invoice: 'inv_blank', amount: 5 });
+    await engine.update('pp_line', { id: 'legacy', title: 'renamed' });
+    expect(storeFor('pp_line').get('legacy').title).toBe('renamed');
+  });
+
+  it('predicate update: one matched line whose parent holds no code refuses the whole write', async () => {
+    const a = await engine.insert('pp_line', { title: 'batch', invoice: 'inv_usd', amount: 1 });
+    const b = await engine.insert('pp_line', { title: 'batch', invoice: 'inv_blank' });
+    const err = await refusalOf(engine.update('pp_line', { amount: 9 }, BATCH));
+    expect(envelopeOf(err)).toEqual(CODE_REQUIRED);
+    expect(err?.message).toContain(`(record ${b.id})`);
+    expect(storeFor('pp_line').get(a.id).amount).toBe(1);
+    // The control: the same write, moving every line under a parent with a code.
+    await engine.update('pp_line', { amount: 9, invoice: 'inv_eur' }, BATCH);
+    expect(storeFor('pp_line').get(b.id)).toMatchObject({ amount: 9, invoice: 'inv_eur' });
+  });
+
+  it('validate(): the insert and update previews refuse what the write refuses', async () => {
+    const preview = await engine.validate('pp_line', [
+      { title: 'p1', invoice: 'inv_blank', amount: 1 },
+      { title: 'p2', invoice: 'inv_usd', amount: 1 },
+    ]);
+    expect(preview.results?.map((r) => r.valid)).toEqual([false, true]);
+    expect(preview.results?.[0]?.errors?.[0]).toMatchObject({ field: 'invoice.currency_code', code: 'ERR_CURRENCY_CODE_REQUIRED' });
+    const line = await engine.insert('pp_line', { title: 'l1', invoice: 'inv_usd', amount: 1 });
+    const moved = await engine.validate('pp_line', { id: line.id, invoice: 'inv_blank' }, { mode: 'update' });
+    expect(moved.results?.[0]?.errors?.[0]).toMatchObject({ field: 'invoice.currency_code', code: 'ERR_CURRENCY_CODE_REQUIRED' });
+    expect((await engine.validate('pp_line', { id: line.id, invoice: 'inv_eur' }, { mode: 'update' })).valid).toBe(true);
+  });
+});
+
+describe('an aggregate over a child amount that follows its parent is refused whatever it groups by (ADR-0144 D6, Open item 14)', () => {
+  let engine: ObjectQL;
+
+  beforeEach(async () => {
+    ({ engine } = await bootFollowing());
+    await engine.insert('pp_line', { title: 'u', invoice: 'inv_usd', amount: 100 });
+    await engine.insert('pp_line', { title: 'e', invoice: 'inv_eur', amount: 100 });
+  });
+
+  it('ungrouped, grouped by the parent path, and grouped by the master_detail are each refused INVALID_FIELD', async () => {
+    // Grouped by the parent path, the engine read the dotted key as a column of
+    // the line, which no line stores: USD 100 and EUR 100 answered one null
+    // group of 200. The door refuses before any driver is asked.
+    for (const groupBy of [undefined, ['invoice.currency_code'], [{ field: 'invoice.currency_code' }], ['invoice']]) {
+      const err = await refusalOf(engine.aggregate('pp_line', aggregateQuery({
+        ...(groupBy ? { groupBy: groupBy as EngineAggregateOptions['groupBy'] } : {}),
+        aggregations: [{ function: 'sum', field: 'amount', alias: 'total' }],
+      })));
+      expect(envelopeOf(err), JSON.stringify(groupBy)).toEqual(INVALID_FIELD);
+      expect(err?.field).toBe('amount');
+      expect(err?.message).toContain("following 'invoice.currency_code' through the master_detail 'invoice'");
+      expect(err?.message.indexOf('Aggregate a stored home-currency amount field')).toBeLessThan(500);
+    }
+  });
+
+  it('count is not judged', async () => {
+    const rows = await engine.aggregate('pp_line', aggregateQuery({ aggregations: [{ function: 'count', field: 'amount', alias: 'n' }] }));
+    expect(rows[0]).toMatchObject({ n: 2 });
+  });
+
+  it('the parent\'s roll-up is in each parent\'s own currency: refused ungrouped, one total per currency grouped by its code', async () => {
+    const err = await refusalOf(engine.aggregate('pp_invoice', aggregateQuery({ aggregations: [{ function: 'sum', field: 'subtotal', alias: 'v' }] })));
+    expect(envelopeOf(err)).toEqual(INVALID_FIELD);
+    expect(err?.message).toContain("does not group by 'currency_code'");
+    const rows = await engine.aggregate('pp_invoice', aggregateQuery({
+      groupBy: ['currency_code'],
+      aggregations: [{ function: 'sum', field: 'subtotal', alias: 'v' }],
+    }));
+    expect(Object.fromEntries(rows.filter((r: any) => r.currency_code).map((r: any) => [r.currency_code, r.v]))).toEqual({ USD: 100, EUR: 100 });
+  });
+});
+
+describe('a summary rolled up through the master_detail its children follow registers, in the parent\'s currency (ADR-0144 D6, amended)', () => {
+  it('registers in either order, and each parent totals its own lines', async () => {
+    for (const parentFirst of [true, false]) {
+      const { engine, storeFor } = await bootFollowing({ parentFirst });
+      expect(engine.registry.getObject('pp_invoice'), String(parentFirst)).toBeDefined();
+      await engine.insert('pp_line', { title: 'u1', invoice: 'inv_usd', amount: 100 });
+      await engine.insert('pp_line', { title: 'u2', invoice: 'inv_usd', amount: 50 });
+      await engine.insert('pp_line', { title: 'e1', invoice: 'inv_eur', amount: 100 });
+      expect(storeFor('pp_invoice').get('inv_usd').subtotal, String(parentFirst)).toBe(150);
+      expect(storeFor('pp_invoice').get('inv_eur').subtotal, String(parentFirst)).toBe(100);
+    }
+  });
+
+  const PROJECT = { name: 'pp_project', fields: { title: { type: 'text' } } };
+  const lineWith = (extra: Record<string, unknown>) => ({ ...PP_LINE, fields: { ...PP_LINE.fields, ...extra } });
+
+  it('a summary through another relation is refused INVALID_METADATA, whichever end registers second', async () => {
+    const PROJECT_TOTAL = {
+      ...PROJECT,
+      fields: { ...PROJECT.fields, total: { type: 'summary', summaryOperations: { object: 'pp_line', field: 'amount', function: 'sum' } } },
+    };
+    const line = lineWith({ project: { type: 'master_detail', reference: 'pp_project' } });
+    for (const order of [[line, PROJECT_TOTAL], [PROJECT_TOTAL, line]]) {
+      const { engine } = await bootEngine();
+      engine.registry.registerObject(PP_INVOICE as any);
+      engine.registry.registerObject(order[0] as any);
+      const err = await refusalOf(() => engine.registry.registerObject(order[1] as any));
+      expect(envelopeOf(err)).toEqual(INVALID_METADATA);
+      expect(err?.name).toBe('RecordCurrencySummaryRefusedError');
+      expect(err?.objectName).toBe('pp_project');
+      expect(err?.message).toContain("totals the rows of 'pp_project' records, not of the 'pp_invoice' record each row follows");
+    }
+  });
+
+  it('a summary on the parent read through another relation back to it is refused, naming the relation', async () => {
+    const { engine } = await bootEngine();
+    engine.registry.registerObject(lineWith({ origin: { type: 'lookup', reference: 'pp_invoice' } }) as any);
+    const err = await refusalOf(() => engine.registry.registerObject({
+      ...PP_INVOICE,
+      fields: {
+        ...PP_INVOICE.fields,
+        subtotal: { ...PP_INVOICE.fields.subtotal, summaryOperations: { ...PP_INVOICE.fields.subtotal.summaryOperations, relationshipField: 'origin' } },
+      },
+    } as any));
+    expect(envelopeOf(err)).toEqual(INVALID_METADATA);
+    expect(err?.message).toContain("goes through 'origin'");
+    // The control: the same roll-up written through the master_detail the amount follows registers.
+    engine.registry.registerObject({
+      ...PP_INVOICE,
+      fields: {
+        ...PP_INVOICE.fields,
+        subtotal: { ...PP_INVOICE.fields.subtotal, summaryOperations: { ...PP_INVOICE.fields.subtotal.summaryOperations, relationshipField: 'invoice' } },
+      },
+    } as any);
+    expect(engine.registry.getObject('pp_invoice')).toBeDefined();
+  });
+
+  it('a roll-up one level up over the parent\'s roll-up is refused: each parent total is in its own currency', async () => {
+    const { engine } = await bootEngine();
+    engine.registry.registerObject({ ...PP_INVOICE, fields: { ...PP_INVOICE.fields, account: { type: 'master_detail', reference: 'pp_account' } } } as any);
+    engine.registry.registerObject(PP_LINE as any);
+    const err = await refusalOf(() => engine.registry.registerObject({
+      name: 'pp_account',
+      fields: { total: { type: 'summary', summaryOperations: { object: 'pp_invoice', field: 'subtotal', function: 'sum' } } },
+    } as any));
+    expect(envelopeOf(err)).toEqual(INVALID_METADATA);
+    expect(err?.message).toContain("rolls up sum(pp_invoice.subtotal)");
+    expect(err?.message).toContain("the code in 'currency_code'");
+  });
+});
+
+describe('a record a child row follows keeps its code field (ADR-0144 D2, amended: the lock)', () => {
+  let engine: ObjectQL;
+  let storeFor: ReturnType<typeof makeDriver>['storeFor'];
+
+  beforeEach(async () => {
+    ({ engine, storeFor } = await bootFollowing({ bin: true }));
+    await engine.insert('pp_line', { id: 'l_usd', title: 'batch', invoice: 'inv_usd', amount: 100 });
+    await engine.insert('pp_line', { id: 'l_blank', title: 'n', invoice: 'inv_blank' });
+  });
+
+  const expectLocked = (err: Thrown, record: string, to: string) => {
+    expect(httpOf(err)).toEqual(VALIDATION_FAILED);
+    expect((err as any)?.fields?.map((f: any) => [f.field, f.code])).toEqual([['currency_code', 'invalid_value']]);
+    expect(err?.message).toContain(`'currency_code' on 'pp_invoice' (record ${record}) cannot change from 'USD' to ${to}`);
+    expect(err?.message).toContain("rows of 'pp_line' follow this record's currency");
+    expect(err?.message).toContain('The code can change once no child row follows it');
+  };
+
+  it('by id: another code, or blank, is refused VALIDATION_FAILED / invalid_value, and nothing is written', async () => {
+    expectLocked(await refusalOf(engine.update('pp_invoice', { id: 'inv_usd', currency_code: 'EUR' })), 'inv_usd', "'EUR'");
+    expectLocked(await refusalOf(engine.update('pp_invoice', { id: 'inv_usd', currency_code: null })), 'inv_usd', 'blank');
+    expect(storeFor('pp_invoice').get('inv_usd').currency_code).toBe('USD');
+  });
+
+  it('by predicate: a matched record a child follows refuses the whole write', async () => {
+    expectLocked(await refusalOf(engine.update('pp_invoice', { currency_code: 'JPY' }, { where: { title: 'usd' }, multi: true })), 'inv_usd', "'JPY'");
+    expect(storeFor('pp_invoice').get('inv_usd').currency_code).toBe('USD');
+  });
+
+  it('the same code again, a first code over a blank one, another field, and a record no child follows all pass', async () => {
+    await engine.update('pp_invoice', { id: 'inv_usd', currency_code: 'USD', title: 'same' });
+    await engine.update('pp_invoice', { id: 'inv_blank', currency_code: 'EUR' });
+    await engine.update('pp_invoice', { id: 'inv_usd', billing_currency: 'GBP' });
+    await engine.update('pp_invoice', { id: 'inv_eur', currency_code: 'JPY' });
+    expect([...storeFor('pp_invoice').values()].map((r) => [r.id, r.currency_code])).toEqual([
+      ['inv_usd', 'USD'], ['inv_eur', 'JPY'], ['inv_blank', 'EUR'],
+    ]);
+  });
+
+  it('validate(): the update preview refuses what the write refuses', async () => {
+    const preview = await engine.validate('pp_invoice', { id: 'inv_usd', currency_code: 'EUR' }, { mode: 'update' });
+    expect(preview.valid).toBe(false);
+    expect(preview.results?.[0]?.errors?.[0]).toMatchObject({ field: 'currency_code', code: 'invalid_value' });
+  });
+
+  it('a deleted line in the recycle bin still follows: the lock holds until it is purged, then lifts', async () => {
+    await engine.delete('pp_line', { where: { id: 'l_usd' } } as any);
+    expect(storeFor('pp_line').has('l_usd')).toBe(false);
+    const [entry] = [...storeFor(RECYCLE_BIN_OBJECT).values()];
+    expect(entry?.object_name).toBe('pp_line');
+    const held = await refusalOf(engine.update('pp_invoice', { id: 'inv_usd', currency_code: 'EUR' }));
+    expectLocked(held, 'inv_usd', "'EUR'");
+    expect(held?.message).toContain('a deleted row in the recycle bin included');
+
+    await engine.purge(entry.id, { context: { isSystem: true } } as any);
+    await engine.update('pp_invoice', { id: 'inv_usd', currency_code: 'EUR' });
+    expect(storeFor('pp_invoice').get('inv_usd').currency_code).toBe('EUR');
   });
 });
