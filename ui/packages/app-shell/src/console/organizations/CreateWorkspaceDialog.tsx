@@ -13,6 +13,14 @@
  * continues; the field stays editable and nothing is created until the user
  * clicks. Creating a further organization opens with an empty name.
  *
+ * Where the host serves `features.organizationEditions`, the dialog draws one
+ * choice per entry under the name: the host's label and hint as given, every
+ * choice unchecked when the dialog opens, at most one picked. A picked choice
+ * sends its `edition` value with the create call; with none picked, or no list
+ * served, nothing is sent and the dialog is what it was without the list. The
+ * words are the host's, never the console's (ADR-0060: the console draws a
+ * generic block and names no product).
+ *
  * @module
  */
 
@@ -27,9 +35,10 @@ import {
   Button,
   Input,
   Label,
+  Checkbox,
 } from '@object-ui/components';
 import { useAuth } from '@object-ui/auth';
-import type { AuthOrganization } from '@object-ui/auth';
+import type { AuthOrganization, AuthPublicConfig } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { Loader2 } from 'lucide-react';
 import { provisionProductionEnvironment } from './provisionEnvironment.js';
@@ -117,24 +126,41 @@ function browserTimeZone(): string | undefined {
  * with a suffixed variant (at most `SLUG_ATTEMPTS` calls in all). The user
  * cannot see or edit the slug in this dialog, so a collision is not theirs to
  * resolve; any other refusal is rethrown unchanged. Every attempt carries the
- * same `timezone`, and none carries the key when there is no zone.
+ * same `timezone` and the same `edition`, and none carries a key whose value
+ * is absent.
  */
 async function createWithGeneratedSlug(
-  create: (data: { name: string; slug: string; timezone?: string }) => Promise<AuthOrganization>,
+  create: (data: {
+    name: string;
+    slug: string;
+    timezone?: string;
+    edition?: string;
+  }) => Promise<AuthOrganization>,
   name: string,
   slug: string,
   timezone: string | undefined,
+  edition: string | undefined,
 ): Promise<AuthOrganization> {
   let attemptSlug = slug;
   for (let attempt = 1; ; attempt++) {
     try {
-      return await create({ name, slug: attemptSlug, ...(timezone ? { timezone } : {}) });
+      return await create({
+        name,
+        slug: attemptSlug,
+        ...(timezone ? { timezone } : {}),
+        ...(edition ? { edition } : {}),
+      });
     } catch (err) {
       if (attempt >= SLUG_ATTEMPTS || !isSlugTaken(err)) throw err;
       attemptSlug = suffixedSlug(slug);
     }
   }
 }
+
+/** One organization-create choice the host serves (`features.organizationEditions`). */
+type OrganizationEditionChoice = NonNullable<
+  NonNullable<AuthPublicConfig['features']>['organizationEditions']
+>[number];
 
 interface CreateWorkspaceDialogProps {
   open: boolean;
@@ -194,6 +220,12 @@ export function CreateWorkspaceDialog({
   // dialog by another path we still want to fail fast with a friendly message
   // instead of bouncing off the server's FORBIDDEN.
   const [multiOrgDisabled, setMultiOrgDisabled] = useState(false);
+  // The host's organization-create choices, drawn as given; empty when the
+  // host serves none. `edition` is the picked choice's value: every choice
+  // starts unchecked (the contract's renderer rule), so it is `undefined`
+  // until the user checks one.
+  const [editionChoices, setEditionChoices] = useState<readonly OrganizationEditionChoice[]>([]);
+  const [edition, setEdition] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     if (!open) return;
@@ -202,6 +234,8 @@ export function CreateWorkspaceDialog({
       .then((cfg) => {
         if (cancelled) return;
         setMultiOrgDisabled(cfg?.features?.multiOrgEnabled === false);
+        const served = cfg?.features?.organizationEditions;
+        setEditionChoices(Array.isArray(served) ? served : []);
       })
       .catch(() => {
         /* leave default — server still enforces */
@@ -215,6 +249,7 @@ export function CreateWorkspaceDialog({
   useEffect(() => {
     if (open) {
       setName(defaultNameRef.current);
+      setEdition(undefined);
       setError(null);
     }
   }, [open]);
@@ -241,6 +276,7 @@ export function CreateWorkspaceDialog({
           name.trim(),
           slug.trim(),
           browserTimeZone(),
+          edition,
         );
         // Born-with-env: eagerly ensure the new org's production environment so
         // the user lands in a ready workspace with no onboarding-wizard detour.
@@ -276,7 +312,7 @@ export function CreateWorkspaceDialog({
         setIsSubmitting(false);
       }
     },
-    [name, slug, multiOrgDisabled, t, createOrganization, onCreated],
+    [name, slug, edition, multiOrgDisabled, t, createOrganization, onCreated],
   );
 
   return (
@@ -308,6 +344,36 @@ export function CreateWorkspaceDialog({
                 data-testid="workspace-name-input"
               />
             </div>
+
+            {editionChoices.length > 0 && (
+              <div className="grid gap-3" data-testid="workspace-edition-choices">
+                {editionChoices.map((choice) => {
+                  const id = `workspace-edition-${choice.edition}`;
+                  return (
+                    <div key={choice.edition} className="flex items-start gap-2">
+                      <Checkbox
+                        id={id}
+                        className="mt-0.5"
+                        checked={edition === choice.edition}
+                        onCheckedChange={(checked) =>
+                          setEdition(checked === true ? choice.edition : undefined)
+                        }
+                        aria-describedby={`${id}-hint`}
+                        data-testid={id}
+                      />
+                      <div className="grid gap-1">
+                        <Label htmlFor={id} className="cursor-pointer">
+                          {choice.label}
+                        </Label>
+                        <p id={`${id}-hint`} className="text-sm text-muted-foreground">
+                          {choice.hint}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
             {error && (
               <p className="text-sm text-destructive" data-testid="workspace-create-error">

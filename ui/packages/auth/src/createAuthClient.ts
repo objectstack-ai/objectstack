@@ -1104,13 +1104,13 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       slug: string;
       logo?: string;
       timezone?: string;
-      edition?: 'developer';
+      edition?: string;
     }): Promise<AuthOrganization> {
       // objectui#11908: the creator's zone rides the QUERY (`?timezone=`), the
       // shape the server's create route reads it from; the body stays
       // `{ name, slug, logo }`. better-auth's client proxy lifts
       // `fetchOptions.query` onto the URL and keeps it out of the body. The
-      // edition (`?edition=developer`) rides the same query. An absent or
+      // edition (`?edition=VALUE`) rides the same query. An absent or
       // empty value sends no parameter at all, and with neither there is no
       // query object.
       const { timezone, edition } = orgData;

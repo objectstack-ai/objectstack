@@ -14,6 +14,7 @@ import type {
 } from '@objectstack/spec/contracts';
 import type { TenancyPosture } from '@objectstack/spec/security';
 import type { AudiencePosture } from '@objectstack/spec/system';
+import type { OrganizationEditionChoice } from '@objectstack/spec/api';
 import type { AuthInvitationStatus } from './invitation-status.js';
 
 /**
@@ -328,10 +329,22 @@ export interface AuthPublicConfig {
      * (`AuthFeaturesConfigSchema.developerEditionCreate` in `@objectstack/spec`):
      * `true` only where the host's organization-create door accepts
      * `?edition=developer`, the value `createOrganization`'s `edition`
-     * sends. A create-organization form may offer the Developer Edition
-     * choice only on an explicit `true`. Absent or `false` ⇒ no choice.
+     * sends. A create-organization form reads its choices from
+     * `organizationEditions`, not from this boolean. Absent or `false` ⇒ no
+     * developer choice is served.
      */
     developerEditionCreate?: boolean;
+    /**
+     * The editions the host's organization-create door accepts besides its
+     * default (`AuthFeaturesConfigSchema.organizationEditions` in
+     * `@objectstack/spec`): each with its `edition` query value, a `label` and
+     * a `hint` the host already resolved in the request language, and its
+     * `memberLimit` when one applies. The create-organization dialog draws
+     * each as a choice that starts unchecked and sends the picked one's
+     * `edition` through `createOrganization`. Absent or empty ⇒ the door
+     * takes no edition and no choice is drawn.
+     */
+    organizationEditions?: readonly OrganizationEditionChoice[];
     /**
      * When `false`, the server's `beforeCreateOrganization` hook blocks
      * creation of new organizations. The org plugin endpoints (list, update,
@@ -510,17 +523,17 @@ export interface AuthClient {
    * the body, which stays `{ name, slug, logo }`. Omitted or empty, nothing is
    * sent and the server keeps its default zone; the server judges the value.
    *
-   * `edition: 'developer'` asks for a Developer Edition organization. It
+   * `edition` is the `edition` value of one of the host's
+   * `features.organizationEditions` choices (for example `developer`). It
    * travels as the `edition` QUERY parameter the same way, and only a host
-   * whose `/auth/config` serves `features.developerEditionCreate: true`
-   * accepts it. Omitted, nothing is sent.
+   * that serves that choice accepts it. Omitted, nothing is sent.
    */
   createOrganization: (data: {
     name: string;
     slug: string;
     logo?: string;
     timezone?: string;
-    edition?: 'developer';
+    edition?: string;
   }) => Promise<AuthOrganization>;
   /** Set the active organization for the current session */
   setActiveOrganization: (orgId: string) => Promise<AuthOrganization | null>;
