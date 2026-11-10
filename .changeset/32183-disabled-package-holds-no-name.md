@@ -6,9 +6,10 @@
 '@objectstack/plugin-security': patch
 '@objectstack/plugin-email': patch
 '@objectstack/plugin-sharing': patch
+'@objectstack/metadata-protocol': patch
 ---
 
-fix(objectql)!: by-name doors judge a name's holders over the served set, so a disabled package's item is not a holder (ADR-0150 D3, #32183)
+fix(objectql, metadata-protocol)!: by-name doors judge a name's holders over the served set, so a disabled package's item is not a holder (ADR-0150 D3, #32183)
 
 Clause-②: no (narrowing) — for a name that only disabled packages hold, `SchemaRegistry.resolveItem`, `MetadataFacade.get` / `getEntry` and `SchemaRegistry.getApp` (`@objectstack/objectql`) answer `undefined` where they answered the disabled package's body, and `MetadataFacade.exists` answers false where it answered true. Every by-name door already withheld that body. Every other moved answer widens or names fewer packages: a name one enabled and one disabled package hold is served by the enabled holder where it was refused naming both.
 Metadata-protocol: none
@@ -38,6 +39,7 @@ Same status, the disabled package no longer named:
 409 → 404:
 
 - A name only disabled packages hold, on `_env`, `?package=NONHOLDER` and its qualified path: 409 naming the disabled package → 404.
+- A name two or more disabled packages hold, and nothing else, on the bare read: 409 naming them → 404.
 
 Refused → not-found:
 
@@ -47,6 +49,6 @@ Degraded → 409:
 
 - The REST action rung: a package-scoped refusal the protocol's execution read throws → the declaration's `refusal`, answered as the declared `409 RESOURCE_CONFLICT`, where it was swallowed as `degraded`. No door makes that read throw one for an `action` today.
 
-**Not moved.** `?package=DISABLED` and the disabled package's namespace keep their 404. Every holder's own read, the served lists, and a name only disabled packages hold on the bare read (404) answer as before. Durable judgments read every holder, so a binding never moves with a reversible disable: the four stored-reference backfills (R1/R3 permission sets, R4 activation ledger, R5/R6/R13 sharing declarations, R20 email templates), the CLI stored-reference report (`os migrate stored-references`), and the picklist verdict that the load audit, the install door and a field's options share. The install gate (`bareNamePackageHolders`) and the security catalog's item seam are separate reads and are not touched.
+**Not moved.** `?package=DISABLED` and the disabled package's namespace keep their 404. A name only disabled packages hold keeps the missing name's 404 on the bare `/meta/:type/:name/layers` and `/published`, and the layered view at any other address answers 404 as the plain read does: the item face (`@objectstack/metadata-protocol`) answers it as that package's withheld item, the shape a disabled holder's read had. Every holder's own read, the served lists, and a name only disabled packages hold on the bare read (404) answer as before. Durable judgments read every holder, so a binding never moves with a reversible disable: the four stored-reference backfills (R1/R3 permission sets, R4 activation ledger, R5/R6/R13 sharing declarations, R20 email templates), the CLI stored-reference report (`os migrate stored-references`), and the picklist verdict that the load audit, the install door and a field's options share. The install gate (`bareNamePackageHolders`) and the security catalog's item seam are separate reads and are not touched.
 
 **Also in this change, not breaking.** `SchemaRegistry.packageScopedHoldersOf(type, name, callerPackageId?, options?)` takes `options.includeDisabledPackages` (the option name `listItems` already carries) to read every holder, and `resolvePackageScopedName`'s query takes `includeDisabledPackages`, forwarded to it.
