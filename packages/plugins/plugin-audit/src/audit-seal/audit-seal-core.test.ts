@@ -2,6 +2,8 @@
 
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+import { SysAuditAmendment } from '../objects/sys-audit-amendment.object.js';
+import { SysAuditCheckpoint } from '../objects/sys-audit-checkpoint.object.js';
 import { SysAuditLog } from '../objects/sys-audit-log.object.js';
 import {
   AUDIT_SEAL_CANON_VERSION,
@@ -194,6 +196,16 @@ describe('seed salts and secret coordinates (D2, D6)', () => {
       expect(isAuditSealSecretCoordinate(ns, key), `${ns}/${key}`).toBe(false);
     }
   });
+
+  it('answers false, and never throws, for a key with no canonical form', () => {
+    // The text parses to ["<unpaired surrogate>", 0]: well-formed JSON whose
+    // value JCS refuses, so checkpointSeedContext could never have built it.
+    const key = '["\\ud800",0]';
+    expect(JSON.parse(key)).toEqual(['\ud800', 0]);
+    expect(() => checkpointSeedContext('sys_audit_log', '\ud800', 0)).toThrow(CanonicalJsonError);
+    expect(() => isAuditSealSecretCoordinate('sys_audit_log', key)).not.toThrow();
+    expect(isAuditSealSecretCoordinate('sys_audit_log', key)).toBe(false);
+  });
 });
 
 describe('the Merkle tree (D1, RFC 6962 domain separation)', () => {
@@ -314,7 +326,7 @@ describe('signed bodies (D4, D7, D8)', () => {
       tenant_id: null,
       amended_at: '2026-11-10T06:00:00.000Z',
       signing_key_id: 'c'.repeat(64),
-      checkpoint_id: 'cp1',
+      checkpoint_sequence: 3,
       row_id: 'r1',
       column_name: 'new_value',
       sealed_commitment: 'e'.repeat(64),
@@ -400,5 +412,103 @@ describe('the deployment chain signs a NULL organization (D5)', () => {
     // The stored-only key never enters the signed bytes.
     expect(text).not.toContain('chain_key');
     expect(text).not.toContain('deployment');
+  });
+});
+
+describe('a redaction names its checkpoint by the signed sequence (D7)', () => {
+  const redaction: RedactionAmendmentBody = {
+    kind: 'redaction',
+    sealed_object: 'sys_audit_log',
+    tenant_id: 'org_1',
+    amended_at: '2026-11-10T06:00:00.000Z',
+    signing_key_id: 'c'.repeat(64),
+    checkpoint_sequence: 7,
+    row_id: 'r1',
+    column_name: 'new_value',
+    sealed_commitment: 'e'.repeat(64),
+    rewritten_commitment: 'f'.repeat(64),
+    rewritten_by: 'audit-metadata-bodies',
+  };
+
+  it('signs checkpoint_sequence as a number, stores it, and reads it back from a driver spelling', () => {
+    const row = amendmentRow(redaction, { id: 'a1', signature: 's' });
+    expect(row.checkpoint_sequence).toBe(7);
+    expect(row).not.toHaveProperty('checkpoint_id');
+    expect(signedBodyBytes(amendmentBodyFromRow(row)).toString('utf8')).toContain('"checkpoint_sequence":7');
+    expect(amendmentBodyFromRow({ ...row, checkpoint_sequence: '7' })).toEqual(redaction);
+  });
+
+  it('refuses a redaction whose checkpoint reference is not a sequence', () => {
+    const { checkpoint_sequence: _omitted, ...withoutSequence } = redaction;
+    for (const bad of [
+      { ...redaction, checkpoint_sequence: 'cp1' },
+      { ...redaction, checkpoint_sequence: -1 },
+      { ...redaction, checkpoint_sequence: 1.5 },
+      withoutSequence,
+    ]) {
+      expect(() => amendmentBodyFromRow(bad as unknown as Record<string, unknown>), JSON.stringify(bad)).toThrow(SignedBodyError);
+    }
+  });
+
+  it('declares one column per stored field, checkpoint_sequence a number and no checkpoint_id', () => {
+    const stored = Object.keys(amendmentRow(redaction, { id: 'a1', signature: 's' })).sort();
+    expect(Object.keys(SysAuditAmendment.fields).sort()).toEqual(stored);
+    expect(SysAuditAmendment.fields.checkpoint_sequence?.type).toBe('number');
+  });
+
+  it('declares one checkpoint column per stored field, the sequence a redaction refers to among them', () => {
+    const body: CheckpointSignedBody = {
+      sealed_object: 'sys_audit_log', tenant_id: null, sequence: 0, kind: 'window',
+      window_start: '2026-11-10T04:00:00.000Z', window_end: '2026-11-10T05:00:00.000Z',
+      sealed_through: '2026-11-10T05:00:00.000Z', leaf_count: 1, row_ids: ['r1'], root: 'a'.repeat(64),
+      previous_digest: null, columns: { clear: ['created_at', 'id'], committed: [] },
+      canon_version: AUDIT_SEAL_CANON_VERSION, seed_handle: 'sec_0', fencing_token: '1',
+      sealed_at: '2026-11-10T05:10:00.000Z', signing_key_id: 'c'.repeat(64),
+    };
+    const stored = Object.keys(checkpointRow(body, { id: 'cp0', signature: 's' })).sort();
+    expect(Object.keys(SysAuditCheckpoint.fields).sort()).toEqual(stored);
+    expect(SysAuditCheckpoint.fields.sequence?.type).toBe('number');
+  });
+});
+
+describe('NULL names the deployment chain only when it is stated (D5)', () => {
+  const checkpoint: CheckpointSignedBody = {
+    sealed_object: 'sys_audit_log', tenant_id: null, sequence: 0, kind: 'window',
+    window_start: '2026-11-10T04:00:00.000Z', window_end: '2026-11-10T05:00:00.000Z',
+    sealed_through: '2026-11-10T05:00:00.000Z', leaf_count: 1, row_ids: ['r1'], root: 'a'.repeat(64),
+    previous_digest: null, columns: { clear: ['created_at', 'id'], committed: [] },
+    canon_version: AUDIT_SEAL_CANON_VERSION, seed_handle: 'sec_0', fencing_token: '1',
+    sealed_at: '2026-11-10T05:10:00.000Z', signing_key_id: 'c'.repeat(64),
+  };
+  const expiry: ExpiryAmendmentBody = {
+    kind: 'expiry', sealed_object: 'sys_audit_log', tenant_id: null,
+    amended_at: '2033-11-10T06:00:00.000Z', signing_key_id: 'c'.repeat(64),
+    first_sequence: 0, last_sequence: 4,
+    covered_from: '2026-11-10T00:00:00.000Z', covered_to: '2026-11-10T05:00:00.000Z',
+    last_removed_digest: 'b'.repeat(64), policy: 'archive.keep', policy_value: '7y',
+  };
+  const without = (row: Record<string, unknown>, field: string) => {
+    const copy = { ...row };
+    delete copy[field];
+    return copy;
+  };
+
+  it('reads a stored NULL tenant_id as the deployment chain', () => {
+    const stored = checkpointRow(checkpoint, { id: 'cp0', signature: 's' });
+    expect(checkpointBodyFromRow(stored).tenant_id).toBeNull();
+    expect(amendmentBodyFromRow(amendmentRow(expiry, { id: 'a1', signature: 's' })).tenant_id).toBeNull();
+  });
+
+  it('refuses a row with no tenant_id at all, as a projection that dropped the column hands back', () => {
+    const storedCheckpoint = checkpointRow(checkpoint, { id: 'cp0', signature: 's' });
+    const storedAmendment = amendmentRow(expiry, { id: 'a1', signature: 's' });
+    for (const [label, read] of [
+      ['checkpoint', () => checkpointBodyFromRow(without(storedCheckpoint, 'tenant_id'))],
+      ['amendment', () => amendmentBodyFromRow(without(storedAmendment, 'tenant_id'))],
+      ['checkpoint, undefined', () => checkpointBodyFromRow({ ...storedCheckpoint, tenant_id: undefined })],
+    ] as const) {
+      expect(read, label).toThrow(SignedBodyError);
+      expect(read, label).toThrow(/tenant_id/);
+    }
   });
 });

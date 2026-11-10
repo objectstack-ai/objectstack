@@ -798,7 +798,8 @@ function auditSealMintedPair(object: string, row: Record<string, unknown>): { na
       ? checkpointSeedContext(
         String(row.sealed_object),
         row.tenant_id == null ? null : String(row.tenant_id),
-        typeof row.sequence === 'string' ? Number(row.sequence) : (row.sequence as number),
+        // Decimal digits only: `Number('')` is 0, and an empty or blank text is a malformed sequence, not the first one.
+        typeof row.sequence === 'string' && /^\d+$/.test(row.sequence) ? Number(row.sequence) : (row.sequence as number),
       )
       : signingKeyContext(String(row.fingerprint));
     return { namespace: ctx.namespace, key: ctx.key };

@@ -111,6 +111,11 @@ export function signingKeyContext(fingerprint: string): CryptoContext {
  * a signing key's private half, or a seed's checkpoint coordinate. Evidence,
  * read from the row alone, that `audit_seal` secrets exist even where their
  * holder objects are not registered.
+ *
+ * Total: it answers for any row and never throws. A key this producer cannot
+ * have written (one whose canonical form does not exist, such as an array
+ * holding an unpaired surrogate, which {@link checkpointSeedContext} refuses
+ * to build) answers `false`.
  */
 export function isAuditSealSecretCoordinate(namespace: unknown, key: unknown): boolean {
   if (namespace === AUDIT_SIGNING_KEY_OBJECT) return true;
@@ -125,5 +130,9 @@ export function isAuditSealSecretCoordinate(namespace: unknown, key: unknown): b
   const [tenantId, sequence] = parsed;
   if (!(tenantId === null || typeof tenantId === 'string')) return false;
   if (!Number.isSafeInteger(sequence) || (sequence as number) < 0) return false;
-  return canonicalJson(parsed) === key;
+  try {
+    return canonicalJson(parsed) === key;
+  } catch {
+    return false; // no canonical form, so not a key checkpointSeedContext can have built
+  }
 }

@@ -9,9 +9,10 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * Two kinds, one object, with the columns of the other kind left empty:
  *
  *  - **`redaction`** (D7) — written BEFORE a migration rewrites a value column
- *    of a sealed row: the checkpoint that sealed the row, the row and the
- *    column, the commitment the checkpoint sealed and the commitment of the
- *    rewritten value under the same salt, and which migration rewrote it. A
+ *    of a sealed row: the checkpoint that sealed the row (by its signed
+ *    sequence in the chain), the row and the column, the commitment the
+ *    checkpoint sealed and the commitment of the rewritten value under the
+ *    same salt, and which migration rewrote it. A
  *    verifier that finds the row's current commitment equal to the rewritten
  *    one rebuilds the leaf with the sealed one and reports the row `redacted`.
  *  - **`expiry`** (D8) — written BEFORE retention removes a prefix of a chain:
@@ -83,7 +84,15 @@ export const SysAuditAmendment = ObjectSchema.create({
     amended_at: Field.datetime({ label: 'Amended At', required: true, readonly: true }),
 
     // ── redaction ────────────────────────────────────────────────
-    checkpoint_id: Field.text({ label: 'Checkpoint', required: false, readonly: true }),
+    // The checkpoint that sealed the row, by its signed `sequence` in the chain
+    // `sealed_object` and `tenant_id` name: unlike its row id, the sequence is
+    // under the checkpoint's signature and leaves the host with it.
+    checkpoint_sequence: Field.number({
+      label: 'Checkpoint Sequence',
+      required: false,
+      readonly: true,
+      description: 'The sequence, in this chain, of the checkpoint that sealed the row',
+    }),
     // A sealed row's id: the `varchar(255)` primary key `driver-sql` creates.
     row_id: Field.text({ label: 'Row ID', required: false, readonly: true, maxLength: 255 }),
     column_name: Field.text({ label: 'Column', required: false, readonly: true }),

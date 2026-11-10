@@ -87,7 +87,14 @@ interface AmendmentCommon {
 /** What a redaction amendment's signature covers (D7). */
 export interface RedactionAmendmentBody extends AmendmentCommon {
   readonly kind: 'redaction';
-  readonly checkpoint_id: string;
+  /**
+   * The `sequence` of the checkpoint that sealed the row, in the chain this
+   * body names (`sealed_object`, `tenant_id`). By sequence, not by the
+   * checkpoint's row `id`: the sequence is under the checkpoint's signature
+   * and in what a sink receives, so an off-host copy resolves the reference;
+   * the `id` is neither.
+   */
+  readonly checkpoint_sequence: number;
   readonly row_id: string;
   readonly column_name: string;
   readonly sealed_commitment: string;
@@ -123,9 +130,16 @@ function text(row: Readonly<Record<string, unknown>>, field: string): string {
   return value;
 }
 
+/**
+ * A column whose NULL means something — `tenant_id`, NULL for the deployment
+ * chain (D5). Only a stated NULL reads as that: an ABSENT column (a
+ * projection that dropped it, a body built without it) is refused, never
+ * read as the deployment chain.
+ */
 function nullableText(row: Readonly<Record<string, unknown>>, field: string): string | null {
   const value = row[field];
-  if (value === null || value === undefined) return null;
+  if (value === undefined) throw new SignedBodyError(`${field}: is absent; NULL (the deployment chain) must be stated, not omitted`);
+  if (value === null) return null;
   return text(row, field);
 }
 
@@ -273,7 +287,7 @@ export function amendmentBodyFromRow(row: Readonly<Record<string, unknown>>): Am
     return {
       kind,
       ...common,
-      checkpoint_id: text(row, 'checkpoint_id'),
+      checkpoint_sequence: count(row, 'checkpoint_sequence'),
       row_id: text(row, 'row_id'),
       column_name: text(row, 'column_name'),
       sealed_commitment: digest(row, 'sealed_commitment'),
@@ -304,7 +318,7 @@ export function amendmentRow(
 ): Record<string, unknown> {
   const valid = amendmentBodyFromRow(body as unknown as Record<string, unknown>);
   const empty = {
-    checkpoint_id: null, row_id: null, column_name: null, sealed_commitment: null, rewritten_commitment: null, rewritten_by: null,
+    checkpoint_sequence: null, row_id: null, column_name: null, sealed_commitment: null, rewritten_commitment: null, rewritten_by: null,
     first_sequence: null, last_sequence: null, covered_from: null, covered_to: null, last_removed_digest: null, policy: null, policy_value: null,
   };
   return { ...empty, ...valid, id: stored.id, chain_key: chainKeyOf(valid.tenant_id), signature: stored.signature };

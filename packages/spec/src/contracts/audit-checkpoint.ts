@@ -49,7 +49,19 @@ export interface AuditCheckpointSignature {
  * Implementations MUST be safe to call concurrently.
  */
 export interface IAuditCheckpointSigner {
-  /** Sign `bytes` with the active key. Throws when no key can sign. */
+  /**
+   * Sign `bytes` with the active key. Throws when no key can sign.
+   *
+   * The caller's duty. A signed body names its signing key inside the bytes
+   * (`signing_key_id`, ADR-0154 D4), and the active key is only known from
+   * what this method returns. So the caller builds the body with the key id
+   * it expects, signs it, and compares the returned
+   * {@link AuditCheckpointSignature.keyId} with the key id in the bytes. When
+   * the two differ (the key rotated between the build and the call), the
+   * caller rebuilds the body with the returned key id and signs again; it
+   * never stores a signature whose `keyId` differs from the one its bytes
+   * name, because such a record never verifies.
+   */
   sign(bytes: Uint8Array): Promise<AuditCheckpointSignature>;
 
   /**
@@ -71,8 +83,18 @@ export interface AuditCheckpointSinkEntry {
   readonly kind: 'checkpoint' | 'amendment';
   /**
    * The signed body exactly as signed — the object whose RFC 8785 (JCS)
-   * serialization the signature covers. It carries no value, no salt and no
-   * seed (ADR-0154 D2): only commitments, roots, digests and handle ids.
+   * serialization the signature covers.
+   *
+   * What a sink receives in it: commitments, Merkle roots, digests and
+   * `sys_secret` handle ids; and beside them the sealed object's name, the
+   * organization id the chain is about (`tenant_id`, `null` for the
+   * deployment chain), the id of every sealed row (a checkpoint's `row_ids`,
+   * an amendment's `row_id`), the window's instants, the names of the sealed
+   * columns, sequence numbers, and on an amendment the retention policy with
+   * its value or the name of the migration that rewrote a value. None of
+   * these is a value of a sealed column, a salt, a seed or key material
+   * (ADR-0154 D2), but the organization id and the row ids identify an
+   * organization and its records, and a sink classifies the body accordingly.
    */
   readonly body: Readonly<Record<string, unknown>>;
   /** The key that signed it. */

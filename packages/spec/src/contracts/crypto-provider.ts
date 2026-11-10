@@ -32,7 +32,8 @@
  *     sequence]`, `handle.id` recorded in `sys_audit_checkpoint.seed_handle`;
  *     the signing key's private half: `ctx.namespace` is
  *     `sys_audit_signing_key`, `ctx.key` the key's fingerprint, `handle.id`
- *     recorded in `sys_audit_signing_key.private_handle`.
+ *     recorded in `sys_audit_signing_key.private_handle`. Neither passes a
+ *     `tenantId` (see {@link CryptoContext.tenantId}).
  *
  * All four persist a `sys_secret` row keyed by `handle.id`, and the four
  * `(namespace, key)` vocabularies are uncoordinated: `sys_secret` declares
@@ -140,13 +141,14 @@ export type CryptoContextScope = (typeof CRYPTO_CONTEXT_SCOPES)[number];
  *
  * **What the binding covers (ADR-0128).** The AAD binds a ciphertext to the
  * triple `(scope, namespace, key)`. `(namespace, key)` alone is not a
- * coordinate: the three producer vocabularies share it, uncoordinated, and
- * nothing reserves a name in one against another. `scope` names which
- * vocabulary the pair is drawn from, so under a conforming provider a
- * ciphertext sealed by one producer does not authenticate under another
- * producer's context — however the two pairs are spelled — and within one
- * producer a ciphertext moved to another coordinate does not authenticate
- * either.
+ * coordinate: the four producer vocabularies share it, uncoordinated, and
+ * nothing reserves a name in one against another (the audit sealer's
+ * `namespace` is a sealed object's name, an object name the secret-field
+ * path uses too). `scope` names which vocabulary the pair is drawn from, so
+ * under a conforming provider a ciphertext sealed by one producer does not
+ * authenticate under another producer's context — however the two pairs are
+ * spelled — and within one producer a ciphertext moved to another
+ * coordinate does not authenticate either.
  *
  * Every provider that binds AAD MUST:
  *
@@ -187,17 +189,29 @@ export interface CryptoContext {
    */
   scope: CryptoContextScope;
   /**
-   * Producer-scoped namespace: a settings namespace, an **object name**
-   * (secret fields), or a caller-supplied datasource namespace (default
-   * `'datasource'`). Not a settings namespace in general.
+   * Producer-scoped namespace, one per producer: a settings namespace, an
+   * **object name** (secret fields), a caller-supplied datasource namespace
+   * (default `'datasource'`), or for the audit sealer (`'audit_seal'`) the
+   * sealed object's name (a checkpoint's seed) or `sys_audit_signing_key` (a
+   * signing key's private half). Not a settings namespace in general.
    */
   namespace: string;
   /**
-   * Producer-scoped key within {@link CryptoContext.namespace}: a settings
-   * specifier key, a **field name** (secret fields), or a datasource name.
+   * Producer-scoped key within {@link CryptoContext.namespace}, one per
+   * producer: a settings specifier key, a **field name** (secret fields), a
+   * datasource name, or for the audit sealer the JCS array
+   * `[organization id or null, sequence]` (a checkpoint's seed) or the
+   * signing key's fingerprint (its private half).
    */
   key: string;
-  /** Optional tenant id for multi-tenant key segregation. */
+  /**
+   * Optional tenant id for multi-tenant key segregation.
+   *
+   * The audit sealer (`'audit_seal'`) passes none, even for an
+   * organization's chain: the audit ledger is deployment-level (ADR-0131 D7)
+   * and so are its seeds and signing key, and a chain must stay verifiable
+   * after its organization, and any key held for it, is gone (ADR-0154 D5).
+   */
   tenantId?: string;
 }
 

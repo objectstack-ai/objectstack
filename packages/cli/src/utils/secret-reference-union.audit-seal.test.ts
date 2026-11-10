@@ -172,6 +172,32 @@ describe('family 4 (audit-seal) — holders registered', () => {
     expect(union.handleIds.has(privateHandle)).toBe(true);
   });
 
+  it.each([
+    ['an empty text', ''],
+    ['a blank text', ' '],
+  ] as const)('names no minted pair for a checkpoint whose sequence is %s, never the pair of sequence 0', async (_label, sequence) => {
+    const rt = await buildRuntime({ registerHolders: true });
+    const seedHandle = await rt.mint('seed', checkpointSeedContext('sys_audit_log', null, 0));
+    rt.store.seed('sys_audit_checkpoint', { id: 'cp_bad', sealed_object: 'sys_audit_log', tenant_id: null, sequence, seed_handle: seedHandle });
+
+    const result = await collectAuditSealSecretReferences(rt.engine);
+    expect(result.status).toBe('enumerated');
+    const ref = result.references.find((r) => r.handleId === seedHandle);
+    expect(ref?.column).toMatchObject({ object: 'sys_audit_checkpoint', record: 'cp_bad', mintedPair: null });
+  });
+
+  it('reads a sequence a driver hands back as decimal text', async () => {
+    const rt = await buildRuntime({ registerHolders: true });
+    const ctx = checkpointSeedContext('sys_audit_log', 'org_1', 3);
+    const seedHandle = await rt.mint('seed', ctx);
+    rt.store.seed('sys_audit_checkpoint', { id: 'cp_3', sealed_object: 'sys_audit_log', tenant_id: 'org_1', sequence: '3', seed_handle: seedHandle });
+
+    const result = await collectAuditSealSecretReferences(rt.engine);
+    expect(result.references.find((r) => r.handleId === seedHandle)?.column).toMatchObject({
+      mintedPair: { namespace: ctx.namespace, key: ctx.key },
+    });
+  });
+
   it('is a gap when a holder cannot be read', async () => {
     const rt = await buildRuntime({ registerHolders: true });
     await sealSomething(rt, true);
@@ -212,6 +238,18 @@ describe('family 4 (audit-seal) — holders not registered', () => {
     expect(union.complete).toBe(false);
     expect(union.gaps.map((g) => g.family)).toContain('audit-seal');
     expect(() => assertSecretReferenceUnionComplete(union)).toThrow(IncompleteSecretReferenceUnionError);
+  });
+
+  it('reaches a verdict, instead of throwing, over a sys_secret key with no canonical form', async () => {
+    const rt = await buildRuntime({ registerHolders: false });
+    // A row whose key parses to ["<unpaired surrogate>", 0]: no producer
+    // context can build it, so it is no audit-seal evidence, and the family
+    // must still answer rather than abort the command.
+    rt.store.seed('sys_secret', { id: 'sec_odd', namespace: 'sys_audit_log', key: '["\\ud800",0]', ciphertext: 'x' });
+
+    await expect(collectAuditSealSecretReferences(rt.engine)).resolves.toEqual({
+      family: 'audit-seal', status: 'enumerated', references: [],
+    });
   });
 
   it('is a gap when sys_secret itself cannot be read to look for evidence', async () => {

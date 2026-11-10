@@ -66,8 +66,11 @@ const ZONELESS_DATETIME = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/;
 
 /**
  * A datetime in the one spelling D1 fixes: UTC ISO-8601 to the millisecond,
- * `YYYY-MM-DDTHH:mm:ss.sssZ`, whatever the driver returned. A zoneless SQL
- * text is read as UTC, which is how every writer of this platform stores it.
+ * `YYYY-MM-DDTHH:mm:ss.sssZ`, whatever the driver returned: a `Date`, an
+ * ISO-8601 text, a zoneless SQL text, or a number. A zoneless SQL text is read
+ * as UTC, which is how every writer of this platform stores it. A number is
+ * read as epoch milliseconds (not seconds); digits handed over as text are a
+ * text, not a number, and are refused unless they parse as a datetime text.
  */
 export function canonicalDatetime(value: unknown, at = 'value'): string {
   let date: Date;
