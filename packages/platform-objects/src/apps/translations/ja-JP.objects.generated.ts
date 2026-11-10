@@ -2871,7 +2871,64 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "すべて"
+        label: "すべて",
+        emptyState: {
+          title: "グループマッピングはまだありません",
+          message: "「SSO グループをマッピング」（SSO プロバイダーがサインイン時に送るグループ）または「SCIM グループをマッピング」（SCIM 接続がプロビジョニングするグループ）で、ID プロバイダーのグループのメンバーに権限セットを付与します。"
+        }
+      }
+    },
+    _actions: {
+      map_sso_group: {
+        label: "SSO グループをマッピング",
+        description: "SSO プロバイダーがサインイン時に送るグループのすべてのメンバーに権限セットを付与します。各メンバーが次にそのプロバイダー経由でサインインしたときに適用されます。",
+        successMessage: "グループマッピングを保存しました。各メンバーが次にそのプロバイダー経由でサインインしたときに適用されます。",
+        params: {
+          providerId: {
+            label: "SSO プロバイダー ID",
+            helpText: "サインインでグループを送る SSO プロバイダーのプロバイダー ID（例: “okta”）。プロバイダーにグループクレームが設定されている必要があります（SSO プロバイダーの「グループクレームを編集」）。"
+          },
+          groupExternalId: {
+            label: "グループ外部 ID",
+            helpText: "グループクレームが ID を送る場合、その値をそのまま入力します（例: Entra ID のグループオブジェクト ID）。グループ表示名とどちらか一方だけを設定してください。"
+          },
+          groupDisplayName: {
+            label: "グループ表示名",
+            helpText: "グループクレームが名前を送る場合、その値をそのまま入力します（例: “Sales”）。グループ外部 ID とどちらか一方だけを設定してください。"
+          },
+          permissionSet: {
+            label: "権限セット",
+            helpText: "グループのメンバーに、プロバイダーの組織内で付与される権限セット。管理者権限セットは拒否されます。"
+          }
+        }
+      },
+      map_scim_group: {
+        label: "SCIM グループをマッピング",
+        description: "SCIM 接続がプロビジョニングするグループのすべてのメンバーに権限セットを付与します。グループの現在のメンバーにはすぐに付与されます。",
+        successMessage: "グループマッピングを保存しました",
+        params: {
+          connectionId: {
+            label: "SCIM 接続 ID",
+            helpText: "グループをプロビジョニングする SCIM 接続（例: “okta-prod”）。資格情報の接続 ID です。"
+          },
+          groupExternalId: {
+            label: "グループ外部 ID",
+            helpText: "ID プロバイダーが送るグループの externalId。グループ表示名とどちらか一方だけを設定してください。"
+          },
+          groupDisplayName: {
+            label: "グループ表示名",
+            helpText: "グループの displayName。完全一致で照合されます。グループ外部 ID とどちらか一方だけを設定してください。"
+          },
+          permissionSet: {
+            label: "権限セット",
+            helpText: "グループのメンバーに、接続の組織内で付与される権限セット。管理者権限セットは拒否されます。"
+          }
+        }
+      },
+      delete_group_mapping: {
+        label: "マッピングを削除",
+        confirmText: "このグループマッピングを削除しますか？グループのメンバーにはこの権限セットが付与されなくなります。SCIM 接続の場合、グループのメンバーはすぐに再投影され、このマッピングによる付与が取り消されます。SSO プロバイダーの場合、そのサインインでこの権限セットに付与されたものがすぐに取り消されます（同じ権限セットを指すプロバイダーの別のマッピングがある場合を除く）。元に戻すには、グループを再度マッピングしてください。",
+        successMessage: "グループマッピングを削除しました"
       }
     }
   },

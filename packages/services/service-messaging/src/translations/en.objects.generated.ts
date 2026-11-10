@@ -60,6 +60,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       created_at: {
         label: "Created At"
+      },
+      keyed_text: {
+        label: "Text Keys",
+        help: "The catalog keys and params the title and body were rendered from at delivery. A read re-renders the title and body from them in the reader's language; null when the notification carried no keys, and the stored title and body are then served as written."
       }
     },
     _views: {

@@ -843,6 +843,11 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
 
     async signInWithPhoneOtp(phoneNumber: string, code: string) {
       const payload = await postPhoneNumberEndpoint('/phone-number/verify', { phoneNumber, code });
+      // An account with an enrolled second factor is not signed in by the
+      // code alone: the server answers the same two-factor challenge the
+      // password doors answer, and the code step follows.
+      const twoFactor = readTwoFactorChallenge(payload);
+      if (twoFactor) return { twoFactor };
       // Response: `{ status, token: string|null, user: object|null }` —
       // token/user are null when the number belongs to no account (the
       // endpoint also serves the change-phone verification flow).

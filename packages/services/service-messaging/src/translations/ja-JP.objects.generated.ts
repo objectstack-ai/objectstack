@@ -60,6 +60,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       created_at: {
         label: "作成日時"
+      },
+      keyed_text: {
+        label: "テキストキー",
+        help: "配信時にタイトルと本文のレンダリングに使われたカタログキーとパラメーター。読み取り時に、これらから読み手の言語でタイトルと本文を再レンダリングします。通知にキーがない場合は null で、保存されたタイトルと本文がそのまま返されます。"
       }
     },
     _views: {
