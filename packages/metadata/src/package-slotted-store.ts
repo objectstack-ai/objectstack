@@ -359,6 +359,33 @@ export function storeRemovalKeys(
 }
 
 /**
+ * [ADR-0150 D3, #32246 R1/R1b] Refuse a write by name that cannot tell which
+ * slot of `name` it means: `store` holds more than one slot of the name — two
+ * packages', or a package's beside the name's package-less slot. The refusal
+ * names every holder in the store's order (each package, and the environment
+ * for the package-less slot), and nothing picks one. `DatabaseLoader`'s
+ * rollback by name asks it over the name's rows.
+ *
+ * @throws {PackageScopedNameRefusedError} two or more slots of the name.
+ */
+export function refuseSeveralSlots(store: ReadonlyMap<string, unknown> | undefined, type: string, name: string): void {
+  const keys = storeKeysNamed(store, type, name);
+  if (keys.length <= 1) return;
+  const base: Omit<PackageScopedRefusal, 'message'> = {
+    status: 'refused',
+    reason: 'ambiguous-in-environment',
+    type: type as PackageScopedResolvableType,
+    name,
+    callerPackageId: null,
+    candidates: keys.map((key) => {
+      const packageId = slotPackageOf(key);
+      return packageId === undefined ? { kind: 'environment' as const } : { kind: 'package' as const, packageId };
+    }),
+  };
+  throw new PackageScopedNameRefusedError({ ...base, message: packageScopedRefusalMessage(base) });
+}
+
+/**
  * The in-memory answer to a by-name read of `(type, name)`.
  *
  *  - `{ found: true, data }` — the store answers;

@@ -28,6 +28,7 @@ import type { IDataDriver, IDataEngine, DriverQuery } from '@objectstack/spec/co
 import type { MetadataLoader, MetadataKeyedItem, MetadataLoaderDeleteOptions } from './loader-interface.js';
 import {
   PACKAGE_SLOTTED_STORE_TYPES,
+  refuseSeveralSlots,
   slotPackageOf,
   storedItemPackageId,
   storeRemovalKeys,
@@ -1469,14 +1470,15 @@ export class DatabaseLoader implements MetadataLoader {
   ): Promise<void> {
     await this.ensureSchema();
 
-    // [ADR-0150 D3, #32246 R1] A by-package type keeps a row per `(package,
-    // name)`. With rows of two or more packages, a rollback by name cannot
-    // tell whose row it restores — the first row the driver returned would be
-    // overwritten with a body that may be the other package's — so it is
-    // refused naming every holder (`storeRemovalKeys`' refusal), before any
-    // write or history row. Rollback by package is a follow-up card.
+    // [ADR-0150 D3, #32246 R1/R1b] A by-package type keeps a row per
+    // `(package, name)`. With more than one row slot of the name — two
+    // packages', or a package's beside the name's package-less row — a
+    // rollback by name cannot tell whose row it restores: the first row the
+    // driver returned would be overwritten with a body that may be another
+    // holder's. It is refused naming every holder (`refuseSeveralSlots`),
+    // before any write or history row. Rollback by package is a follow-up card.
     if (PACKAGE_SLOTTED_STORE_TYPES.has(type)) {
-      storeRemovalKeys(await this.rowSlots(type, name), type, name);
+      refuseSeveralSlots(await this.rowSlots(type, name), type, name);
     }
 
     const now = new Date().toISOString();
@@ -1494,7 +1496,7 @@ export class DatabaseLoader implements MetadataLoader {
 
     const previousChecksum = existing.checksum as string | undefined;
     // [#32246] A by-package type numbers versions per name (see the class
-    // doc); at most one package holds the name here (refused above).
+    // doc); the name has one row slot here (refused above).
     const newVersion = PACKAGE_SLOTTED_STORE_TYPES.has(type)
       ? await this.nextNameVersion(type, name)
       : ((existing.version as number) ?? 0) + 1;

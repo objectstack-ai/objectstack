@@ -1227,6 +1227,28 @@ describe('per-package loader storage for every type stored per package (ADR-0150
     expect(((await ctx.manager.get(type, ctx.name, A)) as any)?.label, 'the registry untouched').toBe(label(type, A));
   });
 
+  /**
+   * [#32246 red-line R1b] One package's row beside the name's package-less row
+   * is two row slots too: a rollback by name would overwrite whichever the
+   * driver returned first. Reach: A and B save, a package-less save lands on
+   * the bare row (item 6), B is removed. Refused naming A and the environment,
+   * before any write or history row.
+   */
+  it.each(SLOTTED)('%s: a rollback of a name whose rows are one package\'s and the package-less row is refused naming both, both rows byte-unchanged and no history row written (BASE: the first row the driver returned was overwritten)', async (type) => {
+    const ctx = await boot(type);
+    await ctx.manager.register(type, ctx.name, { name: ctx.name, label: 'env' }, { notify: false });
+    await ctx.manager.unregisterPackage(B);
+    expect(ctx.rows().map((row) => row.package_id ?? null)).toEqual([A, null]);
+    const rowsBefore = JSON.stringify(ctx.rows());
+    const historyBefore = ctx.history().length;
+    const err = await refusalOf(ctx.manager.rollback(type, ctx.name, 1));
+    expect(err).toBeInstanceOf(PackageScopedNameRefusedError);
+    expect([err!.code, err!.status, err!.refusal.reason]).toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment']);
+    expect(err!.refusal.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'environment' }]);
+    expect(JSON.stringify(ctx.rows())).toBe(rowsBefore);
+    expect(ctx.history()).toHaveLength(historyBefore);
+  });
+
   it.each(SLOTTED)('%s: CONTROL — a rollback of a name one package holds still restores that version into its row', async (type) => {
     const ctx = await boot(type, [A]);
     await ctx.manager.register(type, ctx.name, { ...doorItem(type, A), label: 'alpha edited' }, { notify: false });
