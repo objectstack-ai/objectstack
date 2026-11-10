@@ -274,7 +274,9 @@ describe('#4940: what an admin identity operation leaves in sys_audit_log', () =
     });
     expect(minted.status, await minted.clone().text()).toBe(200);
     expect(minted.headers.get('cache-control')).toBe('no-store');
-    const { token, credentialId } = (await minted.json()).data as { token: string; credentialId: string };
+    const { token, credentialId, tokenHint } = (await minted.json()).data as { token: string; credentialId: string; tokenHint: string };
+    // [#32120] The non-secret hint answered beside the token: its last four characters.
+    expect(tokenHint).toBe(token.slice(-4));
 
     const provision = (localPart: string) =>
       stack.api('/auth/scim/v2/Users', {
@@ -329,6 +331,14 @@ describe('#4940: what an admin identity operation leaves in sys_audit_log', () =
     const listed = await list.text();
     expect(list.status, listed).toBe(200);
     expect(listed).toContain(credentialId);
+    // [#32120] The list door serves the hint and the last use the provisioning
+    // call stamped, so two credentials of one connection can be told apart.
+    const listedRow = (((JSON.parse(listed) as { records?: Array<Record<string, unknown>> }).records) ?? [])
+      .find((r) => r.id === credentialId);
+    expect(listedRow, listed.slice(0, 500)).toBeDefined();
+    expect(listedRow!.token_hint).toBe(tokenHint);
+    expect(listedRow!.last_used_at, listed.slice(0, 500)).toBeTruthy();
+    expect(listedRow).not.toHaveProperty('token_digest');
     // Export is refused outright, even to the platform admin: no permission set
     // grants `allowExport` on this engine-owned object (measured 403). Pinned so a
     // future grant has to come back here and show the export serves no secret.
