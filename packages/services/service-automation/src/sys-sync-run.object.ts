@@ -129,7 +129,8 @@ export const SysSyncRun = ObjectSchema.create({
       required: false,
       readonly: true,
       group: 'Identity',
-      description: "How a datasource source was read (ADR-0153 D1): 'builtin', windows read whole and paged by the key; 'floored', a plugin driver read through the engine's floor. Empty for a connector source.",
+      // [ADR-0153 D1] The two read paths.
+      description: "How a datasource source was read: 'builtin', windows read whole and paged by the key; 'floored', a plugin driver read through the platform's row cap. Empty for a connector source.",
     }),
 
     status: Field.select(['running', 'completed', 'degraded', 'failed'], {
@@ -189,7 +190,8 @@ export const SysSyncRun = ObjectSchema.create({
       readonly: true,
       maxLength: 64,
       group: 'Position',
-      description: "The read position this run committed at its last finished window (ADR-0153 D2): the next pull of the mapping in this organization starts there. Empty when the run wrote no row, and on a connector source, which keeps no position of its own here.",
+      // [ADR-0153 D2, invariants 8 and 9] Committed only at a window's end.
+      description: "The read position this run committed at its last finished window: the next pull of the mapping in this organization starts there. Empty when the run wrote no row, and on a connector source, which keeps no position of its own here.",
     }),
 
     committed_at: Field.datetime({
