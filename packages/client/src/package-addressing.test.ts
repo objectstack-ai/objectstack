@@ -494,12 +494,23 @@ describe('4c. the /meta door: a qualified read reaches its holder, and a 409 rej
         expect((await client.meta.getItem('page', 'home', { namespace: 'beta' })).item?.label).toBe('beta page');
     });
 
-    it('a namespace that holds nothing of the name: rejected 409, the message naming both holders', async () => {
+    it('a namespace that holds nothing of a name another package holds: rejected 409, the message naming the holder', async () => {
+        const { dispatcher, ship } = metaDoor();
+        ship('page', 'home', A);
+        const { client } = producerBackedClient(dispatcher, ADMIN);
+        const err = await refusalOf(client.meta.getItem('page', 'home', { namespace: 'gamma' }));
+        expect([err.httpStatus, err.code]).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(err.message).toContain(`package "${A}"`);
+        // CONTROL — the bare read of the same one-holder name is served.
+        expect((await client.meta.getItem('page', 'home')).item?.label).toBe('alpha page');
+    });
+
+    it('a bare read of a name two packages hold: rejected 409, the message naming both', async () => {
         const { dispatcher, ship } = metaDoor();
         ship('page', 'home', A);
         ship('page', 'home', B);
         const { client } = producerBackedClient(dispatcher, ADMIN);
-        const err = await refusalOf(client.meta.getItem('page', 'home', { namespace: 'gamma' }));
+        const err = await refusalOf(client.meta.getItem('page', 'home'));
         expect([err.httpStatus, err.code]).toEqual([409, 'RESOURCE_CONFLICT']);
         expect(err.message).toContain(`package "${A}"`);
         expect(err.message).toContain(`package "${B}"`);
