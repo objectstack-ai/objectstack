@@ -1,9 +1,10 @@
 import React from 'react';
 import { EmptyValue } from '@object-ui/components';
-import { useDisplayLocale } from '@object-ui/i18n';
+import { useDisplayLocale, useLocalization } from '@object-ui/i18n';
 import { isEmptyValue } from '@object-ui/core';
 import { FieldWidgetComponentProps } from './types.js';
-import { formatNumberFieldValue } from './number-format.js';
+import { formatNumberFieldValue, formatCurrency } from './number-format.js';
+import { resolveFieldCurrency, summaryDeclaresCurrency } from '../currency.js';
 import { coerceToSafeValue } from '../coerceToSafeValue.js';
 
 /**
@@ -40,10 +41,11 @@ import { coerceToSafeValue } from '../coerceToSafeValue.js';
  * aggregation function in both faces and compares the two texts, so neither
  * can move alone.
  */
-export function SummaryField({ value, field, ...props }: FieldWidgetComponentProps<any>) {
+export function SummaryField({ value, field, dependentValues, ...props }: FieldWidgetComponentProps<any>) {
   // Before the empty-value early return: the hook count must not change when a
   // value flips between null and set.
   const locale = useDisplayLocale();
+  const { currency: tenantCurrency } = useLocalization();
 
   // The floor, on the coerced value, exactly as the formula cell takes it.
   // This read `value == null`, so `''` and `[]` drew a blank span with no
@@ -56,10 +58,16 @@ export function SummaryField({ value, field, ...props }: FieldWidgetComponentPro
   // Only a JS number is a number, the cell's rule for a field with no
   // `returnType` (objectui#11683); the aggregation `function` decides nothing
   // here, so `summaryOperations` is not read.
+  // A roll-up that declares its currency is money (ADR-0144 D6 as amended),
+  // drawn by the call the currency cell and `CurrencyField` make, so this face
+  // and `FormulaCellRenderer`'s agree; `dependentValues` is the parent record.
+  const isNumber = typeof value === 'number' && !isNaN(value);
   const text =
-    typeof value === 'number' && !isNaN(value)
-      ? formatNumberFieldValue(value, field, locale)
-      : String(safe);
+    isNumber && summaryDeclaresCurrency(field)
+      ? formatCurrency(value, resolveFieldCurrency(field as any, tenantCurrency, dependentValues), locale)
+      : isNumber
+        ? formatNumberFieldValue(value, field, locale)
+        : String(safe);
 
   return (
     <span className={`text-sm font-medium tabular-nums text-gray-700 ${props.className || ''}`}>
