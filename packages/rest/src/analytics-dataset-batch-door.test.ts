@@ -46,7 +46,7 @@ function mockServer() {
         use: vi.fn(), listen: vi.fn().mockResolvedValue(undefined), close: vi.fn().mockResolvedValue(undefined),
     };
 }
-function mockProtocol(extra: Record<string, unknown> = {}) {
+function mockProtocol(extra: Record<string, unknown> = {}): any {
     return {
         getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
         getMetaTypes: vi.fn().mockResolvedValue([]),
@@ -103,7 +103,7 @@ function packagedProtocol(saved: any[] = [dataset('orders', 'order')]) {
 
 /** An analytics service whose answer names the dataset and the measures it ran. */
 function echoService() {
-    const queryDataset = vi.fn(async (ds: any, sel: any) => ({
+    const queryDataset = vi.fn(async (ds: any, sel: any, _context?: unknown, _options?: unknown) => ({
         rows: [{ dataset: ds.name, measures: sel.measures.join(',') }],
         fields: [{ name: 'revenue', type: 'number' }],
     }));
