@@ -91,8 +91,8 @@ export interface SmtpTransportOptions {
   /**
    * The host's connect policy ({@link SmtpConnectPolicy}). Applied after
    * `transportOptions`, which may then carry none of
-   * {@link SMTP_CONNECT_POLICY_REFUSED_TRANSPORT_OPTIONS} nor an OAuth2
-   * `auth`. Absent: the transport connects exactly as it does without one.
+   * {@link SMTP_CONNECT_POLICY_REFUSED_TRANSPORT_OPTIONS}, an OAuth2 `auth`
+   * nor a `tls.socket`. Absent: the transport connects exactly as it does without one.
    */
   connect?: SmtpConnectPolicy;
   /** Diagnostic logger. */
@@ -117,21 +117,31 @@ export interface SmtpConnectRequest {
  * the transport opens. It admits a connection by opening the socket itself
  * and handing it back as `{ connection }` (TLS, STARTTLS and SNI then still
  * run against the configured host name), and refuses one by calling back with
- * an error, whose message is what the failed send reports.
+ * an error, whose message is what the failed send reports. An answer without
+ * a socket fails the connection.
  */
 export interface SmtpConnectPolicy {
   getSocket(request: SmtpConnectRequest, callback: SmtpConnectCallback): void;
 }
 
 /** How {@link SmtpConnectPolicy.getSocket} answers: an error, or the socket it opened. */
-export type SmtpConnectCallback = (err: Error | null, socket?: { connection: Socket } | false) => void;
+export type SmtpConnectCallback = (err: Error | null, socket?: { connection: Socket }) => void;
+
+/** What nodemailer's own `getSocket` callback accepts. */
+type NodemailerSocketCallback = (err: Error | null, socket?: { connection: Socket } | false) => void;
+
+/** The error a connection fails with when the policy admits it without handing back a socket. */
+export const SMTP_CONNECT_POLICY_NO_SOCKET =
+  'SmtpTransport: the connect policy admitted a connection without handing back a socket';
 
 /**
  * `transportOptions` keys an {@link SmtpTransport} refuses while a connect
  * policy is set: each one chooses the socket or the transport kind itself,
- * or opens a connection of its own. An OAuth2 `auth` is refused too.
+ * or opens a connection of its own. An OAuth2 `auth` and a `tls` block
+ * naming a `socket` are refused too.
  */
 export const SMTP_CONNECT_POLICY_REFUSED_TRANSPORT_OPTIONS = [
+  'send',
   'proxy',
   'url',
   'sendmail',
@@ -164,11 +174,35 @@ function assertConnectPolicyHolds(
       );
     }
   }
+  // Present at all is enough here: the TLS options are copied over the admitted socket.
+  if (extra.tls !== null && typeof extra.tls === 'object' && 'socket' in extra.tls) {
+    throw new Error(
+      'SmtpTransport: transportOptions.tls.socket cannot be used while a connect policy is set',
+    );
+  }
   if (isOAuth2Auth(extra.auth)) {
     throw new Error(
       'SmtpTransport: transportOptions.auth of type OAuth2 cannot be used while a connect policy is set',
     );
   }
+}
+
+/**
+ * Ask the policy, passing its refusal on; an answer that carries no socket
+ * fails the connection rather than letting nodemailer open one itself.
+ */
+function admitOnlyWithSocket(
+  connect: SmtpConnectPolicy,
+  request: SmtpConnectRequest,
+  callback: NodemailerSocketCallback,
+): void {
+  connect.getSocket(request, (err, socket) => {
+    if (err) return callback(err);
+    if (!socket || !(socket as { connection?: unknown }).connection) {
+      return callback(new Error(SMTP_CONNECT_POLICY_NO_SOCKET));
+    }
+    return callback(null, socket);
+  });
 }
 
 /** Minimal structural view of the nodemailer surface this transport uses. */
@@ -247,7 +281,7 @@ export class SmtpTransport implements IEmailTransport {
       ...(this.opts.transportOptions ?? {}),
       // Last, so nothing above can replace the host's connect policy.
       ...(connect !== undefined
-        ? { getSocket: (request: SmtpConnectRequest, callback: SmtpConnectCallback) => connect.getSocket(request, callback) }
+        ? { getSocket: (request: SmtpConnectRequest, callback: NodemailerSocketCallback) => admitOnlyWithSocket(connect, request, callback) }
         : {}),
     };
   }

@@ -11,7 +11,8 @@
 // be LOUD (error log + a failing test action), never a LogTransport reporting
 // success.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import net from 'node:net';
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
 import { EmailServicePlugin } from './email-plugin.js';
 import { EmailService, LogTransport } from './email-service.js';
 import { SmtpTransport, type SmtpConnectPolicy, type SmtpConnectRequest } from './transports/smtp.js';
@@ -631,12 +632,32 @@ describe('sender display name follows the product name when none is set', () => 
 // `transports/smtp.wire.test.ts`.
 
 describe('a host SMTP connect policy reaches every SMTP transport the plugin builds', () => {
+  // The host's own relay: an admitting policy opens a real socket to it and hands it back.
+  let relay: net.Server;
+  let relayPort = 0;
+  beforeAll(async () => {
+    relay = net.createServer((s) => s.on('error', () => {}));
+    await new Promise<void>((resolve) => relay.listen(0, '127.0.0.1', resolve));
+    relayPort = (relay.address() as net.AddressInfo).port;
+  });
+  afterAll(async () => {
+    await new Promise<void>((resolve) => relay.close(() => resolve()));
+  });
+
   function hostPolicy(answer: (req: SmtpConnectRequest) => Error | null = () => null) {
     const seen: Array<{ host?: string; port?: number }> = [];
     const smtpConnect: SmtpConnectPolicy = {
       getSocket(request, callback) {
         seen.push({ host: request.host, port: request.port });
-        callback(answer(request), false);
+        const refusal = answer(request);
+        if (refusal) return callback(refusal);
+        const socket = net.connect(relayPort, '127.0.0.1');
+        const onError = (err: Error) => callback(err);
+        socket.once('error', onError);
+        socket.once('connect', () => {
+          socket.removeListener('error', onError);
+          callback(null, { connection: socket });
+        });
       },
     };
     return { smtpConnect, seen };
@@ -646,7 +667,10 @@ describe('a host SMTP connect policy reaches every SMTP transport the plugin bui
   function dial(options: Record<string, unknown>): Promise<Error | 'admitted' | 'no hook'> {
     const getSocket = options.getSocket;
     if (typeof getSocket !== 'function') return Promise.resolve('no hook');
-    return new Promise((resolve) => getSocket({ ...options }, (err: Error | null) => resolve(err ?? 'admitted')));
+    return new Promise((resolve) => getSocket({ ...options }, (err: Error | null, answer?: { connection?: net.Socket }) => {
+      answer?.connection?.destroy();
+      resolve(err ?? 'admitted');
+    }));
   }
 
   const lastCreateOptions = () => {

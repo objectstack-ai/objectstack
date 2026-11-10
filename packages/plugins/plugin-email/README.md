@@ -20,14 +20,18 @@ const smtpConnect: SmtpConnectPolicy = {
     // Refuse: callback(new Error('…')) — the failed send, and the test answer, carry this message.
     // Admit: open the socket yourself (openAllowedSocket is the host's own) and hand it back.
     const socket = openAllowedSocket(host, port);
-    socket.once('connect', () => callback(null, { connection: socket }));
-    socket.once('error', (err) => callback(err));
+    const onError = (err: Error) => callback(err);
+    socket.once('error', onError);
+    socket.once('connect', () => {
+      socket.removeListener('error', onError);
+      callback(null, { connection: socket });
+    });
   },
 };
 
 new EmailServicePlugin({ provider: 'smtp', providerOptions: { host: 'smtp.example.com' }, smtpConnect });
 ```
 
-- `getSocket` is asked for every connection, with the configured `host` and `port`. It admits a connection by handing back the socket it opened; TLS and STARTTLS still run against the configured host name.
-- It is applied last, after any `transportOptions`. While it is set, `transportOptions` that choose the socket or the transport kind themselves (`proxy`, `url`, `sendmail`, `streamTransport`, `jsonTransport`, `SES`, `connection`, `socket`) and an OAuth2 `auth` are refused when the transport is built.
+- `getSocket` is asked for every connection, with the configured `host` and `port`. It admits a connection by handing back the socket it opened; TLS and STARTTLS still run against the configured host name. An answer without a socket fails the connection.
+- It is applied last, after any `transportOptions`. While it is set, `transportOptions` that choose the socket or the transport kind themselves (`send`, `proxy`, `url`, `sendmail`, `streamTransport`, `jsonTransport`, `SES`, `connection`, `socket`), a `tls` block that names a `socket`, and an OAuth2 `auth` are refused when the transport is built.
 - Without it, SMTP connects exactly as before.

@@ -4,11 +4,13 @@
 // nodemailer is mocked here so the assertions are about what WE hand it; the
 // real library (and the real wire bytes) are exercised in smtp.wire.test.ts.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import net from 'node:net';
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
 import {
   SmtpTransport,
   smtpOptionsFromMailSettings,
   SMTP_CONNECT_POLICY_REFUSED_TRANSPORT_OPTIONS,
+  SMTP_CONNECT_POLICY_NO_SOCKET,
   type SmtpConnectPolicy,
 } from './smtp.js';
 import { formatInvalidSmtpPortNotice } from './smtp-port-contract.js';
@@ -348,13 +350,32 @@ describe('smtpOptionsFromMailSettings', () => {
 // handed to nodemailer are exactly what they were before the policy existed.
 
 describe('SmtpTransport — a host connect policy', () => {
-  /** A policy that records what it was asked and answers with `answer`. */
+  // The host's own relay: an admitting policy opens a real socket to it and hands it back.
+  let relay: net.Server;
+  let relayPort = 0;
+  beforeAll(async () => {
+    relay = net.createServer((s) => s.on('error', () => {}));
+    await new Promise<void>((resolve) => relay.listen(0, '127.0.0.1', resolve));
+    relayPort = (relay.address() as net.AddressInfo).port;
+  });
+  afterAll(async () => {
+    await new Promise<void>((resolve) => relay.close(() => resolve()));
+  });
+
+  /** A policy that records what it was asked; it refuses with `answer`, else admits with a socket it opened. */
   function policy(answer: Error | null = null) {
     const seen: Array<{ host?: string; port?: number }> = [];
     const connect: SmtpConnectPolicy = {
       getSocket(request, callback) {
         seen.push({ host: request.host, port: request.port });
-        callback(answer, false);
+        if (answer) return callback(answer);
+        const socket = net.connect(relayPort, '127.0.0.1');
+        const onError = (err: Error) => callback(err);
+        socket.once('error', onError);
+        socket.once('connect', () => {
+          socket.removeListener('error', onError);
+          callback(null, { connection: socket });
+        });
       },
     };
     return { connect, seen };
@@ -364,7 +385,10 @@ describe('SmtpTransport — a host connect policy', () => {
   function dial(options: Record<string, unknown>): Promise<Error | 'admitted' | 'no hook'> {
     const getSocket = options.getSocket;
     if (typeof getSocket !== 'function') return Promise.resolve('no hook');
-    return new Promise((resolve) => getSocket({ ...options }, (err: Error | null) => resolve(err ?? 'admitted')));
+    return new Promise((resolve) => getSocket({ ...options }, (err: Error | null, answer?: { connection?: net.Socket }) => {
+      answer?.connection?.destroy();
+      resolve(err ?? 'admitted');
+    }));
   }
 
   const NO_POLICY_OPTIONS = {
@@ -426,6 +450,7 @@ describe('SmtpTransport — a host connect policy', () => {
   });
 
   const REFUSED: Array<[string, unknown]> = [
+    ['send', () => {}],
     ['proxy', 'http://proxy.example.test:3128'],
     ['url', 'smtp://smtp.example.test:25'],
     ['sendmail', true],
@@ -465,6 +490,34 @@ describe('SmtpTransport — a host connect policy', () => {
 
     await new SmtpTransport({ host: 'smtp.x', transportOptions: { auth } }).send(MSG);
     expect(nm.createTransport.mock.calls[0][0]).toStrictEqual({ ...NO_POLICY_OPTIONS, auth });
+  });
+
+  it.each([
+    ['false', false],
+    ['undefined', undefined],
+    ['an object without a connection', {}],
+  ] as const)('an answer without a socket (%s) fails the connection', async (_label, answer) => {
+    const connect: SmtpConnectPolicy = {
+      getSocket(_request, callback) { (callback as (e: Error | null, s?: unknown) => void)(null, answer); },
+    };
+    await new SmtpTransport({ host: 'smtp.x', connect }).send(MSG);
+    const result = await dial(nm.createTransport.mock.calls[0][0]);
+    expect(result).toBeInstanceOf(Error);
+    expect((result as Error).message).toBe(SMTP_CONNECT_POLICY_NO_SOCKET);
+  });
+
+  it.each([
+    ['a socket value', { socket: {} }],
+    ['a socket key left undefined', { socket: undefined }],
+  ] as const)('refuses transportOptions.tls carrying %s while a policy is set', async (_label, tls) => {
+    const { connect } = policy();
+    expect(() => new SmtpTransport({ host: 'smtp.x', connect, transportOptions: { tls } }))
+      .toThrow('SmtpTransport: transportOptions.tls.socket cannot be used while a connect policy is set');
+    // Other TLS settings are not refused, and without a policy tls passes through as before.
+    expect(() => new SmtpTransport({ host: 'smtp.x', connect, transportOptions: { tls: { rejectUnauthorized: false } } }))
+      .not.toThrow();
+    await new SmtpTransport({ host: 'smtp.x', transportOptions: { tls } }).send(MSG);
+    expect(nm.createTransport.mock.calls[0][0]).toStrictEqual({ ...NO_POLICY_OPTIONS, tls });
   });
 
   it('refuses a policy that carries no getSocket function', () => {

@@ -12,7 +12,7 @@
 
 import net from 'node:net';
 import { describe, it, expect, afterEach } from 'vitest';
-import { SmtpTransport, type SmtpConnectPolicy } from './smtp.js';
+import { SmtpTransport, SMTP_CONNECT_POLICY_NO_SOCKET, type SmtpConnectPolicy } from './smtp.js';
 // The fake server + wire decoders live in a testkit since #5177, so the
 // sys_email round-trip suite proves itself against the SAME wire, not a second
 // hand-written copy of it.
@@ -125,8 +125,12 @@ describe('SmtpTransport — a host connect policy over a real SMTP conversation'
       getSocket(request, callback) {
         seen.push({ host: request.host, port: request.port });
         const socket = net.connect(Number(request.port), String(request.host));
-        socket.once('connect', () => callback(null, { connection: socket }));
-        socket.once('error', (err) => callback(err));
+        const onError = (err: Error) => callback(err);
+        socket.once('error', onError);
+        socket.once('connect', () => {
+          socket.removeListener('error', onError);
+          callback(null, { connection: socket });
+        });
       },
     };
     return { connect, seen };
@@ -142,7 +146,24 @@ describe('SmtpTransport — a host connect policy over a real SMTP conversation'
     const transport = new SmtpTransport({ host: '127.0.0.1', port: server.port, secure: false, timeout: 5_000, connect });
     await expect(transport.send(SEND)).rejects.toThrow('the host does not allow this destination');
     await transport.close();
+    expect(server.connections).toBe(0);
     expect(server.commands).toEqual([]);
+    expect(server.messages).toHaveLength(0);
+  }, 20_000);
+
+  it.each([
+    ['false', false],
+    ['undefined', undefined],
+    ['an object without a connection', {}],
+  ] as const)('an answer without a socket (%s) fails the send, and the server is never reached', async (_label, answer) => {
+    server = await startFakeSmtp();
+    const connect: SmtpConnectPolicy = {
+      getSocket(_request, callback) { (callback as (e: Error | null, s?: unknown) => void)(null, answer); },
+    };
+    const transport = new SmtpTransport({ host: '127.0.0.1', port: server.port, secure: false, timeout: 5_000, connect });
+    await expect(transport.send(SEND)).rejects.toThrow(SMTP_CONNECT_POLICY_NO_SOCKET);
+    await transport.close();
+    expect(server.connections).toBe(0);
     expect(server.messages).toHaveLength(0);
   }, 20_000);
 
