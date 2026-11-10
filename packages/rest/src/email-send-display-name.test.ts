@@ -160,3 +160,43 @@ describe('POST /api/v1/email/send — a non-string recipient display name is the
     expect(out.body.status).toBe('sent');
   });
 });
+
+describe('POST /api/v1/email/send — a non-string subject / text / html is the caller\'s 400, refused before the transport', () => {
+  const NON_STRING: Array<[string, Record<string, unknown>, 'subject' | 'text' | 'html']> = [
+    ['`html: 123`', { subject: 'x', html: 123 }, 'html'],
+    ['`text: {a:1}`', { subject: 'x', text: { a: 1 } }, 'text'],
+    ['`subject: {a:1}`', { subject: { a: 1 }, html: 'hello' }, 'subject'],
+  ];
+
+  for (const [what, fields, field] of NON_STRING) {
+    it(`${what}: 400 VALIDATION_FAILED naming \`${field}\`, and a failed rejection row`, async () => {
+      const { post, rows } = await boot();
+      const out = await post({ to: OK, ...fields });
+
+      expect(out.status).toBe(400);
+      expect(out.body.code).toBe('VALIDATION_FAILED');
+      expect(String(out.body.error).startsWith(`\`${field}\` `)).toBe(true);
+      // Refused before delivery: the one row is the rejection record, never a
+      // delivery attempt at `sent` / `failed` from the transport.
+      expect(rows).toHaveLength(1);
+      expect(rows[0].row).toMatchObject({ status: 'failed', attempt_count: 0 });
+      expect(String(rows[0].row.error).startsWith('rejected before delivery: VALIDATION_FAILED: ')).toBe(true);
+    });
+  }
+
+  it('CONTROL — a string subject and body still send (200 sent)', async () => {
+    const { post } = await boot();
+    const out = await post({ to: OK, subject: 'x', html: '<p>hello</p>', text: 'hello' });
+
+    expect(out.status).toBe(200);
+    expect(out.body.status).toBe('sent');
+  });
+
+  it('CONTROL — a `null` text beside a string html still sends, as an absent one does', async () => {
+    const { post } = await boot();
+    const out = await post({ to: OK, subject: 'x', html: '<p>hello</p>', text: null });
+
+    expect(out.status).toBe(200);
+    expect(out.body.status).toBe('sent');
+  });
+});

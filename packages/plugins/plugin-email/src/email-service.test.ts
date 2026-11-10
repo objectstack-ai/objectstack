@@ -121,6 +121,65 @@ describe('normalizeMessage — a malformed CALLER address is the caller\'s VALID
   });
 });
 
+describe('normalizeMessage — a non-string subject / text / html is the caller\'s VALIDATION_FAILED', () => {
+  const FROM = 'no-reply@example.test';
+  const refusal = (input: Record<string, unknown>) => {
+    try {
+      normalizeMessage({ to: 'a@b.com', ...input } as any, FROM);
+    } catch (err) {
+      return String((err as Error).message);
+    }
+    throw new Error('expected normalizeMessage to refuse the input');
+  };
+
+  it.each([
+    ['`html` as a number', { subject: 'x', html: 123 }, 'html'],
+    ['`text` as an object', { subject: 'x', text: { a: 1 } }, 'text'],
+    ['`subject` as an object', { subject: { a: 1 }, html: 'hello' }, 'subject'],
+    ['`subject` as a number', { subject: 42, text: 'hello' }, 'subject'],
+    ['`html` as an array beside a string `text`', { subject: 'x', text: 'ok', html: ['<p>'] }, 'html'],
+    ['`text` as a falsy non-string (0) beside a string `html`', { subject: 'x', html: 'ok', text: 0 }, 'text'],
+  ])('%s is refused VALIDATION_FAILED, naming the field', (_label, input, field) => {
+    const message = refusal(input);
+    expect(message.startsWith('VALIDATION_FAILED: ')).toBe(true);
+    expect(message.slice('VALIDATION_FAILED: '.length).startsWith(`\`${field}\` `)).toBe(true);
+  });
+
+  it('EmailService.send refuses before any transport call, and still records the rejection row', async () => {
+    const rows: Array<Record<string, any>> = [];
+    const persistence: EmailPersistence = {
+      async insert(row) { rows.push({ ...row }); return { id: row.id }; },
+      async update() { /* no-op */ },
+    };
+    const transport = { send: vi.fn(async () => ({ messageId: '<m@x>' })) };
+    const svc = new EmailService({ transport, defaultFrom: FROM, persistence });
+
+    await expect(svc.send({ to: 'a@b.com', subject: 'x', html: 123 } as any)).rejects.toThrow(/^VALIDATION_FAILED: `html` /);
+    expect(transport.send).not.toHaveBeenCalled();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: 'failed', attempt_count: 0 });
+    expect(rows[0]).not.toHaveProperty('body_html');
+  });
+
+  // CONTROL — what was legal stays legal: absence (`undefined` / `null`) is
+  // judged by the presence checks exactly as before, never as a wrong type.
+  it('string fields still normalize, and a null or absent body beside a string one is still accepted', () => {
+    expect(normalizeMessage({ to: 'a@b.com', subject: ' Hi ', text: 't', html: '<p>h</p>' }, FROM))
+      .toMatchObject({ subject: 'Hi', text: 't', html: '<p>h</p>' });
+    expect(() => normalizeMessage({ to: 'a@b.com', subject: 'Hi', html: '<p>h</p>', text: null } as any, FROM))
+      .not.toThrow();
+    expect(() => normalizeMessage({ to: 'a@b.com', subject: 'Hi', text: 't', html: null } as any, FROM))
+      .not.toThrow();
+    expect(() => normalizeMessage({ to: 'a@b.com', subject: 'Hi', text: 't' }, FROM)).not.toThrow();
+  });
+
+  it('an absent subject or body is still the presence refusal, not a type refusal', () => {
+    expect(refusal({ subject: null, text: 'x' })).toBe('VALIDATION_FAILED: subject is required');
+    expect(refusal({ subject: 'x', text: null, html: null })).toBe('VALIDATION_FAILED: at least one of text or html is required');
+    expect(refusal({ subject: 'x', text: '', html: '' })).toBe('VALIDATION_FAILED: at least one of text or html is required');
+  });
+});
+
 describe('LogTransport', () => {
   it('returns a synthetic Message-ID and logs', async () => {
     const logger = { info: vi.fn() };
