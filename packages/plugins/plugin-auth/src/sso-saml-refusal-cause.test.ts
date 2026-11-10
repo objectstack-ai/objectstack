@@ -102,7 +102,9 @@ describe('classifySamlRefusal: the first failing check in samlify order names th
       ['an encrypted assertion under a configured Response signature', samlResponse({ assertion: 'encrypted', responseSignature: signature(CERT) }), CONFIG],
       ['a missing status (samlify ERR_UNDEFINED_STATUS)', samlResponse({ status: null }), CONFIG],
       ['a wrapped Assertion inside SubjectConfirmationData', samlResponse({ assertionSignature: signature(OTHER_CERT), confirmationExtra: '<saml:Assertion/>' }), CONFIG],
-      ['XML the vendor validator rejects', Buffer.from('<samlp:Response><unclosed></samlp:Response>').toString('base64'), CONFIG],
+      // A failure status inside XML the vendor's validator rejects: the lenient
+      // parser would read the status, so only the validator keeps it unnamed.
+      ['XML the vendor validator rejects', Buffer.from('<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"><samlp:Status><samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Responder"/></samlp:Status><unclosed></samlp:Response>').toString('base64'), CONFIG],
       ['a document that is not a Response', Buffer.from('<samlp:LogoutResponse/>').toString('base64'), CONFIG],
       ['text that is not base64', 'not base64 at all!', CONFIG],
       ['base64 that is not XML', Buffer.from('just words').toString('base64'), CONFIG],
