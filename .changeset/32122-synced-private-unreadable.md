@@ -1,5 +1,5 @@
 ---
-'@objectstack/lint': minor
+'@objectstack/lint': patch
 ---
 
 feat(lint): warn on a `private` synced object that no sharing rule grants read on
