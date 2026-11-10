@@ -172,6 +172,16 @@ export function addressedUnknownNameRefusal(
 }
 
 /**
+ * [ADR-0106 D6 tier 3] A definition read the visibility question could not
+ * make: answered as the field-visibility fault, fail-closed.
+ */
+class ActionDefinitionReadFault extends Error {
+    constructor(readonly objectName: string, readonly reason: unknown) {
+        super(`The definition of object '${objectName}' could not be read.`);
+    }
+}
+
+/**
  * [ADR-0110 D3] The sequence's answer for a name its resolution found no
  * declaration for — and, [ADR-0106 D1], for an action the caller is not shown,
  * where the door states no answer of its own.
@@ -303,18 +313,28 @@ async function admitResolvedAction(
     // refuses the read). A `passthrough` posture — the system context, a
     // D4-exempt caller, no security service, the mask switched off — runs as
     // before.
-    const visibility = await projectActionForCaller(actionRunMasker(deps, requestContext), {
-        action: actionDef,
-        objectName,
-        obj: actionSchema,
-        readObject: (other) => {
-            try {
-                return (typeof ql?.getSchema === 'function' ? ql.getSchema(other) : undefined) ?? ql?.registry?.getObject?.(other);
-            } catch {
-                return undefined;
-            }
-        },
-    });
+    //
+    // A definition read that THROWS is a fault, never "no object": judged with
+    // no own object, the action's mentions of that object's fields would go
+    // unjudged, so a failed read must not open the run.
+    let visibility: Awaited<ReturnType<typeof projectActionForCaller>>;
+    try {
+        visibility = await projectActionForCaller(actionRunMasker(deps, requestContext), {
+            action: actionDef,
+            objectName,
+            obj: actionSchema,
+            readObject: (other) => {
+                try {
+                    return (typeof ql?.getSchema === 'function' ? ql.getSchema(other) : undefined) ?? ql?.registry?.getObject?.(other);
+                } catch (cause) {
+                    throw new ActionDefinitionReadFault(other, cause);
+                }
+            },
+        });
+    } catch (error) {
+        if (!(error instanceof ActionDefinitionReadFault)) throw error;
+        visibility = { kind: 'fault', object: error.objectName };
+    }
     if (visibility.kind === 'fault') {
         const fault = actionRunFieldVisibilityRefusal(visibility.object);
         return refuse({ message: fault.message, status: fault.status, details: { code: fault.code } });

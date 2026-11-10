@@ -451,3 +451,35 @@ describe('[ADR-0106 D1] an addressed call of an action the caller is not shown i
         expect(ran.map((r) => r.key)).toEqual(['rename_deal', 'rename_deal']);
     });
 });
+
+describe('[ADR-0106 D6] a run whose action definition read fails is refused 503 FIELD_VISIBILITY_UNRESOLVED, never judged as an action with no object', () => {
+    const DEAL = {
+        name: 'crm_deal',
+        label: 'Deal',
+        fields: { title: { name: 'title', type: 'text' }, margin: { name: 'margin', type: 'currency' } },
+    };
+    /** Bound to the deal's `margin`, which the caller cannot read. */
+    const SET_MARGIN = act('set_margin', undefined, { objectName: DEAL.name, params: [{ field: 'margin' }] });
+    const security = { getMetadataReadableFields: async (object: string) => (object === DEAL.name ? ['title'] : undefined) };
+    /** The deal's definition read throws, as a registry that cannot answer does. */
+    const failingReads = (extra: Record<string, unknown>) => {
+        const door = dispatcherWith([DEAL], [SET_MARGIN], undefined, extra);
+        const unreadable = () => { throw new Error('schema registry unavailable'); };
+        door.ql.getSchema = unreadable;
+        door.ql.registry.getObject = unreadable;
+        return door;
+    };
+
+    it('REST /actions/:object/:action: 503 FIELD_VISIBILITY_UNRESOLVED, and nothing runs', async () => {
+        const { post, ran } = failingReads({ security });
+        const answer = await post(`/${DEAL.name}/set_margin`);
+        expect({ status: answer.status, code: codeOf(answer) }).toEqual({ status: 503, code: 'FIELD_VISIBILITY_UNRESOLVED' });
+        expect(ran).toEqual([]);
+    });
+
+    it('CONTROL — with no security service the posture is a passthrough, no definition is read, and the failing read refuses nothing', async () => {
+        const { post } = failingReads({});
+        const answer = await post(`/${DEAL.name}/set_margin`);
+        expect(codeOf(answer)).not.toBe('FIELD_VISIBILITY_UNRESOLVED');
+    });
+});
