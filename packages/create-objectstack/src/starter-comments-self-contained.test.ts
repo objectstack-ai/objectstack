@@ -72,8 +72,10 @@
 // row, which is worse than never having reported on it (commit cc986c913).
 //
 // The sixth pattern closes that spelling. It is a pure regression guardrail:
-// this tree ships zero `../` of any kind today, so it catches nothing on the
-// day it lands and exists so the shape cannot grow back.
+// it caught nothing on the day it landed and exists so the shape cannot grow
+// back. Since the blank template's starter app and view import the sample
+// object from a sibling directory, it judges each `../` by where it lands —
+// only a path that leaves the project is a hit (see the entry itself).
 
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
@@ -165,8 +167,64 @@ const MONOREPO_ONLY = [
   // shallowest point a path reaches") — never an exemption for the file, and
   // never a widened pattern, which would hand the escaping spelling its
   // exemption back.
-  { label: 'a path that climbs out of the scaffolded project', re: /(?<![\w.])\.\.\/[\w./-]*/ },
+  //
+  // That condition arrived with card #32152: the blank template's starter app
+  // and list view (`src/apps/main.app.ts`, `src/views/note.view.ts`) import the
+  // sample object as `../objects/note.object.js`, a climb that stays inside the
+  // project. So the depth judgement is now in place: every `../` run is still
+  // matched, and each one is resolved from the directory of the file that
+  // writes it; it is a hit only when the path it reaches lies outside that
+  // file's project (`escapesProject`). The escaping spelling this entry exists
+  // for — `../../content/docs` from a project-root file — still reddens.
+  {
+    label: 'a path that climbs out of the scaffolded project',
+    re: /(?<![\w.])\.\.\/[\w./-]*/g,
+    isHit: (rel: string, found: string) => escapesProject(rel, found),
+  },
 ];
+
+/**
+ * The root of the project a shipped file lands in, relative to the templates
+ * directory: a template's own directory (`blank`) for a file under one, and
+ * the templates directory itself for a file shared by every template (the
+ * root `AGENTS.md`, copied into each project's root).
+ */
+function projectRootOf(rel: string): string {
+  const first = rel.split('/')[0];
+  return rel.includes('/') && fs.statSync(path.join(templateRoot, first)).isDirectory() ? first : '';
+}
+
+/**
+ * Whether the relative path `found`, written in the shipped file `rel`,
+ * reaches outside that file's project — the shallowest point the path walks
+ * to is above the project root. A climb that stays inside the project
+ * (`../objects/note.object.js` from `src/apps/`) is not.
+ */
+function escapesProject(rel: string, found: string): boolean {
+  const root = projectRootOf(rel);
+  const fromRoot = path.posix.relative(root || '.', path.posix.dirname(rel)) || '.';
+  let depth = fromRoot === '.' ? 0 : fromRoot.split('/').length;
+  for (const segment of found.split('/')) {
+    if (segment === '..') depth -= 1;
+    else if (segment !== '.' && segment !== '') depth += 1;
+    if (depth < 0) return true;
+  }
+  return false;
+}
+
+/**
+ * The first text in `text` an entry of {@link MONOREPO_ONLY} reports for the
+ * shipped file `rel`, else null. An entry with `isHit` judges each match it
+ * finds; the rest report their first match. Built fresh per call, so a global
+ * pattern's `lastIndex` never carries from one file to the next.
+ */
+function firstHit(entry: (typeof MONOREPO_ONLY)[number], rel: string, text: string): string | null {
+  if (!('isHit' in entry)) return entry.re.exec(text)?.[0] ?? null;
+  for (const m of text.matchAll(new RegExp(entry.re.source, 'g'))) {
+    if (entry.isHit(rel, m[0])) return m[0];
+  }
+  return null;
+}
 
 const read = (rel: string) => fs.readFileSync(path.join(templateRoot, rel), 'utf8');
 
@@ -184,11 +242,12 @@ describe('shipped template comments are followable by a stranger', () => {
     '%s cites nothing that only exists in this monorepo',
     (rel) => {
       const text = read(rel);
-      for (const { label, re } of MONOREPO_ONLY) {
-        const hit = re.exec(text);
+      for (const entry of MONOREPO_ONLY) {
+        const { label } = entry;
+        const hit = firstHit(entry, rel, text);
         expect(
           hit,
-          `${rel} cites ${label} (${JSON.stringify(hit?.[0])}). A scaffolded project ` +
+          `${rel} cites ${label} (${JSON.stringify(hit)}). A scaffolded project ` +
             'ships no ADRs, no issue tracker and none of this repo\'s scripts, so this ' +
             'reads as a reference the newcomer is failing to follow. State the fact ' +
             'self-contained, or link a public docs page — do not delete the rationale.',
@@ -316,7 +375,7 @@ describe('shipped template comments are followable by a stranger', () => {
   // ── the exclusion is live, or it is gone ─────────────────────────────────
   it.each([...EXCLUDED.keys()])('%s still needs its exclusion', (rel) => {
     const text = read(rel);
-    const hits = MONOREPO_ONLY.filter(({ re }) => re.test(text));
+    const hits = MONOREPO_ONLY.filter((entry) => firstHit(entry, rel, text) !== null);
     expect(
       hits.length,
       `${rel} no longer cites anything monorepo-only — remove it from EXCLUDED in ` +

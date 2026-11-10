@@ -122,6 +122,34 @@ describe('blank template — tree and README agree about the Console', () => {
     ).toMatch(/Console navigation only when an app lists it/i);
   });
 
+  it('reaches the sample object by `Note.name`, never by the template\'s own name', () => {
+    // Scaffolding moves the template's namespace onto the project's by
+    // rewriting `name: 'blank_…'` literals only (`rewriteObjectNamePrefix`).
+    // A `blank_note` typed out anywhere else — an app's `objectName`, a
+    // view's `object` — would ship literally into `my-app`, pointing at an
+    // object that no longer exists there. So outside a `name:` literal, the
+    // template's namespace prefix is never written in its source.
+    const namespace = /\bnamespace:\s*'([a-z0-9_]+)'/.exec(
+      fs.readFileSync(path.join(blankRoot, 'objectstack.config.ts'), 'utf8'),
+    )?.[1];
+    expect(namespace, 'the template config declares its namespace').toBeTruthy();
+    const literal = new RegExp(`(['"\`])${namespace}_[a-z0-9_]+\\1`, 'g');
+    const outsideName: string[] = [];
+    for (const rel of srcFiles.filter((f) => f.endsWith('.ts'))) {
+      for (const line of fs.readFileSync(path.join(blankRoot, 'src', rel), 'utf8').split('\n')) {
+        for (const m of line.matchAll(literal)) {
+          const before = line.slice(0, m.index);
+          if (!/\bname:\s*$/.test(before)) outsideName.push(`src/${rel}: ${line.trim()}`);
+        }
+      }
+    }
+    expect(outsideName).toEqual([]);
+    // Vacuity guard: the starter app and view really do reach the object.
+    for (const rel of [path.join('apps', 'main.app.ts'), path.join('views', 'note.view.ts')]) {
+      expect(fs.readFileSync(path.join(blankRoot, 'src', rel), 'utf8')).toMatch(/\bNote\.name\b/);
+    }
+  });
+
   it('does not hard-code the rewritten object name', () => {
     // `rewrite-identity.ts` rewrites `.ts` files only, so a README naming the
     // template's own `blank_note` would ship literally into `my-app`, where the
