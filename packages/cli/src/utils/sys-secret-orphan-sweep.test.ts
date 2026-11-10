@@ -404,6 +404,7 @@ describe('the falsifiable criterion — an incomplete union refuses, and NAMES t
       settings: { family: 'settings', status: 'enumerated', references: [] },
       'object-field': partial,
       datasource: { family: 'datasource', status: 'enumerated', references: [] },
+      'audit-seal': { family: 'audit-seal', status: 'enumerated', references: [] },
     });
     const plan = planSysSecretOrphanSweep({
       secrets: [{ id: 'sec_partial', namespace: 'smtp', key: 'password' }],

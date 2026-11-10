@@ -3068,3 +3068,36 @@ describe('audit writers — a SCIM connection is the actor of its writes (#30960
     expect(audit?.row.metadata).toBeUndefined();
   });
 });
+
+describe('audit writers — the ledger\'s own tamper evidence is excluded (ADR-0154 D4)', () => {
+  // A checkpoint, an amendment or a signing key written through the generic
+  // writer would write a ledger row, which the next sealing pass would seal
+  // into a new checkpoint, which would write a row again; an expiry would
+  // write ledger rows about its own deletes.
+  const OBJECTS = {
+    sys_audit_checkpoint: ['id', 'sealed_object', 'chain_key', 'tenant_id', 'sequence', 'root', 'seed_handle', 'signature'],
+    sys_audit_amendment: ['id', 'kind', 'sealed_object', 'chain_key', 'tenant_id', 'row_id', 'signature'],
+    sys_audit_signing_key: ['id', 'fingerprint', 'public_key', 'status', 'private_handle'],
+  };
+  const SCHEMA = {
+    sys_audit_log: SINGLE_TENANT.sys_audit_log,
+    sys_activity: SINGLE_TENANT.sys_activity,
+    ...OBJECTS,
+    crm_lead: ['id', 'name'],
+  };
+
+  it.each(Object.keys(OBJECTS))('writes NO audit/activity row for an insert or delete of %s', async (object) => {
+    const { engine, fire, created } = makeEngine(SCHEMA);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterInsert', { object, input: { id: 'x-1' }, result: { id: 'x-1' }, session: { isSystem: true } });
+    await fire('afterDelete', { object, input: { id: 'x-1' }, previous: { id: 'x-1' }, result: { id: 'x-1' }, session: { isSystem: true } });
+    expect(created, `${object} must not reach the audit ledger`).toEqual([]);
+  });
+
+  it('still audits a business write fired the same way (the skip stays narrow)', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMA);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterInsert', { object: 'crm_lead', input: { id: 'lead-1' }, result: { id: 'lead-1', name: 'Acme' }, session: { isSystem: true } });
+    expect(created.map((c) => c.object)).toContain('sys_audit_log');
+  });
+});
