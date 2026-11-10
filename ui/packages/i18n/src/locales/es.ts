@@ -3279,11 +3279,6 @@ const es = {
     settings: "Configuración de la organización",
     multiOrgDisabled: "La creación de nuevas organizaciones está deshabilitada en esta instancia.",
     createFailed: 'No se pudo crear la organización',
-    developerEdition: 'Developer Edition',
-    developerEditionHint: 'Gratuita, no apta para producción, hasta {{count}} miembros',
-    developerEditionHint_one: 'Gratuita, no apta para producción, hasta {{count}} miembro',
-    developerEditionHint_many: 'Gratuita, no apta para producción, hasta {{count}} de miembros',
-    developerEditionHint_other: 'Gratuita, no apta para producción, hasta {{count}} miembros',
   },
   help: {
     onThisPage: "En esta página",

@@ -327,9 +327,9 @@ export interface AuthPublicConfig {
      * Developer Edition organizations can be created here
      * (`AuthFeaturesConfigSchema.developerEditionCreate` in `@objectstack/spec`):
      * `true` only where the host's organization-create door accepts
-     * `?edition=developer`. The create-organization dialog offers the
-     * Developer Edition choice only on an explicit `true`. Absent or `false`
-     * ⇒ no choice is offered and the dialog is unchanged.
+     * `?edition=developer`, the value `createOrganization`'s `edition`
+     * sends. A create-organization form may offer the Developer Edition
+     * choice only on an explicit `true`. Absent or `false` ⇒ no choice.
      */
     developerEditionCreate?: boolean;
     /**

@@ -3849,10 +3849,6 @@ const en = {
     settings: 'Organization settings',
     multiOrgDisabled: 'Creating new organizations is disabled on this instance.',
     createFailed: 'Failed to create organization',
-    developerEdition: 'Developer Edition',
-    developerEditionHint: 'Free, non-production, up to {{count}} members',
-    developerEditionHint_one: 'Free, non-production, up to {{count}} member',
-    developerEditionHint_other: 'Free, non-production, up to {{count}} members',
   },
   help: {
     onThisPage: 'On this page',
