@@ -1318,8 +1318,9 @@ what needed an item:
 - angle 1, limited to the Console's sign-in, sign-out and report drill.
 
 Angles 4, 5 and 6 were not run, so this section supports **no** claim about what else is
-missing. No live run was made: every clause is read from source, and each item's
-`automated.ref` names the pins that hold it today.
+missing. The new items had no live run: every clause is read from source, and each item's
+`automated.ref` names the pins that hold it today. The one live run made is the verification
+run that earned the promotion in 19b.
 
 - **The zero-citation list, before and after.** 28 → **22** packages (41 → 35 if the
   legacy spelling is not read). Every package on the before list has a disposition in
@@ -1340,19 +1341,54 @@ missing. No live run was made: every clause is read from source, and each item's
   kind, as §17 ruled), every planned item with why, and the 28 package dispositions. No gate
   reads `releaseSweeps`: `check-platform-checklist.mjs` and `checklist-select.mjs` read
   `metadataKinds` only.
-- **`since:v18.4`**: 48 → **53** runnable, 58 → **64** with `--include-blocked`.
+- **One M1 item promoted, one corrected** (19b): `api-backend.client-sdk-namespace-address`
+  planned → active after a live run, and two stale lines in
+  `api-backend.automation-namespace-address`.
+- **`since:v18.4`**: 48 → **54** runnable, 58 → **65** with `--include-blocked` (the six new
+  items, plus the promoted one).
 
 ### 19a. Declared but not landed — written as `planned`
 
-None new. The three planned items of M1–M3 are listed in `releaseSweeps` with why; one of
-them is stale (19b).
+None new. M1–M3 left three planned items. One is promoted here (19b); the other two are
+listed in `releaseSweeps` with why.
 
 ### 19b. Measured from source — notes for owners, no card filed
 
-- **`api-backend.client-sdk-namespace-address` is stale.** It was written `planned` because
-  the client SDK took no namespace (#31695). #32197 (`f9eaba2d`) landed it and closed #31695
-  on 2026-11-10, so the item is owed a promotion to active. Not done here: this close-out
-  re-authors no M1 item.
+- **`api-backend.client-sdk-namespace-address` promoted, after a passing run.** It was
+  written `planned` because the client SDK took no namespace (#31695). #32197 (`f9eaba2d`)
+  landed the option and #32272 put the candidates on the `/meta` 409, so the seat asked for
+  the promotion in this close-out (the order's stale-`source[]` case). README "Implementation
+  status" makes promotion earned, so revision 2 carries steps read from `packages/client` at
+  `60b99f8f` and a verification run on a showcase boot of `97c6ab29` (`60b99f8f` plus checklist
+  data only). The fixture was the scratch pair `qa_a` and `qa_b` installed with
+  `os package install`, plus an environment page and flow, driven through the built
+  `@objectstack/client` with a request-recording `fetch`. Every clause passed: 26 requests, the
+  six refused calls sent none, and the bare and addressed answers compared byte for byte. The
+  action legs use the showcase's own `showcase_portfolio_snapshot`, because an installed
+  artifact ships no handler code. Per RUNNER's verification re-run rule, the evidence is the
+  item's history row and the PR body, and no `qa-run` issue is filed.
+- **Eleven M1 items name scratch package ids that do not build.** Their fixtures spell the
+  manifest ids with an underscore: `com.qa.addr_a` and `com.qa.addr_b` in
+  `api-backend.meta-qualified-item-read`, `api-backend.actions-namespace-address`,
+  `api-backend.automation-namespace-address` (`addr_b` only),
+  `access-security.permission-set-package-resolution`,
+  `access-security.sharing-queue-assignment-package-resolution`,
+  `access-security.permission-set-address-in-execution-context`, `ai.mcp-namespace-faces`,
+  `automation.flow-reference-package-resolution`, `integration-system.job-package-key` and
+  `platform-core.bare-name-one-holder-refusal`; `com.qa.n_one` and `com.qa.n_two` in
+  `platform-core.namespace-co-owner-name-refusal`. `objectstack build` refuses each: "Invalid
+  package id 'com.qa.addr_a' … underscores are not admitted. Did you mean 'com.qa.addr-a'?". The
+  run above used `com.qa.addr-a` and `com.qa.addr-b` with the namespaces `qa_a` and `qa_b`
+  unchanged. `api-backend.meta-qualified-item-read` also quotes the ids in its steps and
+  expected messages, so a runner reads them with the hyphen there too. Not edited here: a fixture
+  is not a `source[]` line, so it is outside the order's one exception. It is a
+  checklist-accuracy fix for those items' next edit, and a runner who meets it before then
+  substitutes the hyphen.
+- **`api-backend.automation-namespace-address` corrected (revision 2).** A variant line and the
+  route-ledger `source[]` line said the 16 addressed `/automation` rows are server-only
+  because the SDK names no namespace. Since #32197, eleven are `disposition: 'sdk'`, and the
+  addressed cancel, restore-suspension and three connector connection rows stay server-only.
+  The variant and source lines now say so, with no step or clause change.
 - **Package changes no item covers.** Their home packages are cited elsewhere, so they are
   off the zero-citation list, but nothing drives them:
   - `@object-ui/auth`: a refused single sign-on names its cause and SSO with no email asks

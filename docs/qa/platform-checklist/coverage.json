@@ -13,6 +13,7 @@
         "records-forms.script-action-hook-refusal-toast",
         "studio-authoring.actions-tab-presets",
         "api-backend.actions-namespace-address",
+        "api-backend.client-sdk-namespace-address",
         "ai.mcp-namespace-faces",
         "studio-authoring.action-preflight-authoring-refusals",
         "records-forms.action-preflight-panel"
@@ -192,7 +193,8 @@
         "platform-core.activation-ledger-package-key-upgrade",
         "platform-core.stored-reference-package-backfill-upgrade",
         "cli.address-grammar-reserved-names",
-        "api-backend.automation-namespace-address"
+        "api-backend.automation-namespace-address",
+        "api-backend.client-sdk-namespace-address"
       ]
     },
     "hook": {
@@ -278,6 +280,7 @@
         "studio-authoring.authored-page-slots-and-variables",
         "studio-authoring.uninstalled-package-refused",
         "api-backend.meta-qualified-item-read",
+        "api-backend.client-sdk-namespace-address",
         "platform-core.namespace-co-owner-name-refusal",
         "studio-authoring.page-row-table-block",
         "studio-authoring.page-api-binding-reread-after-action"
@@ -449,7 +452,7 @@
       "epic": "#32022",
       "subject": "83d7e4ae (18.3.0)",
       "closedOutAt": "60b99f8f (#32270)",
-      "counts": "checklist-select since:v18.4: 53 runnable, 64 with --include-blocked (58 of them themes 1-8, 6 the close-out)",
+      "counts": "checklist-select since:v18.4: 54 runnable, 65 with --include-blocked (59 of them themes 1-8, 6 the close-out)",
       "themes": [
         {
           "theme": 1,
@@ -471,11 +474,9 @@
             "integration-system.job-package-key",
             "platform-core.activation-ledger-package-key-upgrade",
             "platform-core.stored-reference-package-backfill-upgrade",
-            "cli.migrate-stored-references"
-          ],
-          "planned": {
-            "api-backend.client-sdk-namespace-address": "written planned at 60f8149e, when the client SDK took no namespace (#31695). #31695 closed on 2026-11-10 by #32197 (f9eaba2d, on main at 60b99f8f), so the premise is stale and the item is owed a promotion to active. Not done here: the close-out re-authors no M1 item (FOLLOW-UPS §19b)"
-          }
+            "cli.migrate-stored-references",
+            "api-backend.client-sdk-namespace-address"
+          ]
         },
         {
           "theme": 2,
