@@ -563,9 +563,8 @@ if (!res.success && res.candidates) {
 }
 ```
 
-On `/automation` and `/actions` the `409` lists the holders in
-`details.candidates`. On `/meta` the server names them only in the error
-message, so `err.details?.candidates` is `undefined` there.
+On `/automation`, `/actions` and `/meta` the `409` lists the holders in
+`details.candidates`, and the error message names them too.
 
 **Some addresses have no qualified path, and the SDK refuses them before
 sending.** The server reads the segment after the door in a fixed order (the
