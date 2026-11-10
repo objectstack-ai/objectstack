@@ -2870,6 +2870,28 @@ export function diffManagedIndexes(args: {
       // part is the tenant column's — nothing else the plainness rule refuses.
       return l.widenedBy !== undefined && isNullSafeTenantNarrower(p, tenantField);
     });
+    // [#32164] A narrower key a #11627 hash shadow carries (MySQL, MariaDB: the
+    // shape a key over a long TEXT column takes) is excluded from `present`
+    // above, because `replace_unique_index` drops the legacy name and nothing
+    // here retires a shadow with it. On the widening arm it is still the
+    // narrower key the declaration superseded — before the respelling, the same
+    // physical index was the declared one and matched by name — so it is KEPT:
+    // accounted for, nothing offered, never left to the orphan arm, which would
+    // offer to drop it (destructive). The disposition the uncertified NULL-safe
+    // case below gets. Only a carrier whose resolved key is exactly the narrower
+    // columns (any NULL-safe part being the tenant column's) is claimed; an
+    // unresolved carrier stays not-ours-to-reconcile, as the orphan arm already
+    // treats it.
+    if (l.widenedBy !== undefined) {
+      for (const n of l.legacyNames) {
+        const p = byName.get(n);
+        if (!p || !p.unique || p.partial === true || !isHashShadowCarrier(p) || !p.shadowKey) continue;
+        const key = enforcedIndexKey(p);
+        if (!sameColumns(key.columns, l.legacyColumns)) continue;
+        if (!(key.nullSafeColumns ?? []).every((c) => c === tenantField)) continue;
+        explained.add(n);
+      }
+    }
     if (present.length === 0) continue;
     for (const n of present) explained.add(n);
     // Kept, not offered: the widening arm found the narrower index still the

@@ -28,12 +28,22 @@
  *    which neither the wider key nor the guard does), and on a certified one
  *    (ADR-0131 D1: the tenant column holds no NULL, so the two forms are one
  *    constraint) kept until the guard stands, then one SAFE replace. Measured
- *    on the upgrade dogfoods' 18.0 and 18.0.0 fixtures first (#32164).
+ *    on the upgrade dogfoods' 18.0 and 18.0.0 fixtures first (#32164);
+ *  - the narrower key carried by a #11627 hash shadow (MySQL, MariaDB), plain
+ *    or NULL-safe, certified or not, guard or none: KEPT, nothing offered,
+ *    never an orphan `drop_index` (pure functions; no live MySQL here).
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { SqlDriver } from './index.js';
 import { asPre18TenantColumn } from './pre-18-tenant-column.testkit.js';
+import {
+  buildIndexName,
+  diffManagedIndexes,
+  hashShadowColumnFor,
+  legacyUniqueReplacements,
+  type PhysicalIndex,
+} from './schema-drift.js';
 
 const GRANTS = 'sys_user_permission_set';
 const GUARD_NAME = 'uniq_sys_user_permission_set_packageless';
@@ -250,5 +260,80 @@ describe('the narrower key as 18.0 built it (the NULL-safe organization form) �
     expect(await lands('p1', 'com.acme.crm', 'org_1')).toBe(true);
     expect(await lands('p2', 'com.acme.hr', 'org_1')).toBe(true);
     expect(await lands('p3', 'com.acme.crm', 'org_1')).toBe(false);
+  });
+});
+
+describe('the narrower key carried by a hash shadow (MySQL, MariaDB) — pure functions', () => {
+  // A #11627 shadow-carried UNIQUE stores ONE generated digest column, named
+  // from the index name, and enforces the key parts the digest hashes
+  // (`shadowKey`, read back from the generation expression). `replace_unique_index`
+  // drops the legacy name and retires no shadow, so the widening arm never
+  // offers it; the ruling (6774853256, must-fix 3) is that it is KEPT with
+  // nothing offered — never the orphan arm's destructive `drop_index` — the
+  // disposition an uncertified NULL-safe narrower gets.
+  const NARROW = ['user_id', 'permission_set', 'organization_id'];
+  const WIDE = ['user_id', 'permission_set', 'permission_set_package', 'organization_id'];
+  const LEGACY = buildIndexName(GRANTS, NARROW, true);
+  const WIDE_NAME = buildIndexName(GRANTS, WIDE, true);
+  const columns = new Set(['id', ...WIDE]);
+  const fields = grants(NEW_INDEXES)[0].fields;
+  const carrier = (organizationNullSafe: boolean, name = LEGACY, key = NARROW): PhysicalIndex => ({
+    name,
+    columns: [hashShadowColumnFor(name)],
+    unique: true,
+    shadowKey: key.map((column) => ({ column, nullSafe: organizationNullSafe && column === 'organization_id' })),
+  });
+  const wide: PhysicalIndex = { name: WIDE_NAME, columns: WIDE, unique: true };
+  const guard: PhysicalIndex = { name: GUARD_NAME, columns: NARROW, unique: true, partial: true };
+  const diff = (physical: PhysicalIndex[], tenantKeyCertified: boolean) =>
+    diffManagedIndexes({
+      table: GRANTS,
+      expected: [{ name: WIDE_NAME, columns: WIDE, unique: true }],
+      legacy: legacyUniqueReplacements({
+        table: GRANTS, fields, tenantField: 'organization_id', physicalColumns: columns, declaredIndexes: NEW_INDEXES, physical,
+      }),
+      physical,
+      tenantField: 'organization_id',
+      tenantKeyCertified,
+    });
+
+  it('the generated name is the 18.0 fixtures\' — the carrier this arm is asked about', () => {
+    expect(LEGACY).toBe('uniq_sys_user_permission_set_ac248331');
+  });
+
+  for (const organizationNullSafe of [false, true]) {
+    const form = organizationNullSafe ? "COALESCE(organization_id, '__global__')" : 'plain organization_id';
+    for (const tenantKeyCertified of [false, true]) {
+      it(`${form}, ${tenantKeyCertified ? 'certified' : 'not certified'}: KEPT whether or not the guard stands — no replace, no orphan drop`, () => {
+        for (const physical of [[carrier(organizationNullSafe), wide], [carrier(organizationNullSafe), wide, guard]]) {
+          expect(diff(physical, tenantKeyCertified)).toEqual([]);
+        }
+      });
+    }
+  }
+
+  it('a gained column not yet physical keeps the carrier too', () => {
+    const before = new Set(['id', ...NARROW]);
+    const physical = [carrier(true)];
+    expect(diffManagedIndexes({
+      table: GRANTS,
+      expected: [{ name: WIDE_NAME, columns: WIDE, unique: true }],
+      legacy: legacyUniqueReplacements({
+        table: GRANTS, fields, tenantField: 'organization_id', physicalColumns: before, declaredIndexes: NEW_INDEXES, physical,
+      }),
+      physical,
+      tenantField: 'organization_id',
+      tenantKeyCertified: true,
+    }).filter((e) => e.op.type !== 'create_index')).toEqual([]);
+  });
+
+  it('CONTROL: a carrier whose resolved key is NOT the narrower columns is still the orphan arm\'s (drop_index, destructive)', () => {
+    const other = carrier(false, LEGACY, ['user_id', 'permission_set']);
+    expect(diff([other, wide, guard], true).map((e) => [e.op.type, e.category])).toEqual([['drop_index', 'destructive']]);
+  });
+
+  it('CONTROL: the same key built plain (not shadow-carried) is still the one SAFE replace once the guard stands', () => {
+    const plainNarrow: PhysicalIndex = { name: LEGACY, columns: NARROW, unique: true };
+    expect(diff([plainNarrow, wide, guard], true).map((e) => [e.op.type, e.category])).toEqual([['replace_unique_index', 'safe']]);
   });
 });
