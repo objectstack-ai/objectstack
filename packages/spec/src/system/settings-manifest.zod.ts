@@ -962,6 +962,28 @@ export type ResolvedSettingValue<T = unknown> = Omit<z.infer<typeof ResolvedSett
 export const SettingsNamespacePayloadSchema = lazySchema(() => z.object({
   manifest: SettingsManifestSchema,
   values: z.record(z.string(), ResolvedSettingValueSchema).describe('Effective values keyed by specifier.key'),
+  /**
+   * The value some option-bearing keys have in the RUNNING system, as the
+   * runtime that owns them states it (the settings service's live-status
+   * seam), keyed by specifier.key. `values` says what the settings resolve;
+   * this says what is in use, which may come from elsewhere: the AI runtime
+   * detects a provider from its own boot environment when nothing is saved.
+   * Absent, or a key absent from it, means not stated (unknown), which is not
+   * `source: 'none'`. Only `value` and `source` are served, and `value` is
+   * always one of the key's options, never a credential.
+   */
+  live: z
+    .record(
+      z.string(),
+      z.object({
+        value: z.string().nullable().describe("The option in use; null exactly when source is 'none'"),
+        source: z
+          .enum(['settings', 'environment', 'none'])
+          .describe("Where the running system took it from: these settings, its own boot environment, or nothing in use"),
+      }),
+    )
+    .optional()
+    .describe('Values in use in the running system, keyed by specifier.key, as its runtime states them; absent = not stated'),
 }));
 export type SettingsNamespacePayload = z.input<typeof SettingsNamespacePayloadSchema>;
 /** Post-parse shape of {@link SettingsNamespacePayload} — defaults applied, transforms run (ADR-0122). */

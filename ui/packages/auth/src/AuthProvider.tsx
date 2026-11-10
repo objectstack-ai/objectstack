@@ -939,7 +939,13 @@ export function AuthProvider({
   );
 
   const createOrganization = useCallback(
-    async (data: { name: string; slug: string; logo?: string; timezone?: string }): Promise<AuthOrganization> => {
+    async (data: {
+      name: string;
+      slug: string;
+      logo?: string;
+      timezone?: string;
+      edition?: 'developer';
+    }): Promise<AuthOrganization> => {
       setError(null);
       try {
         const org = await client.createOrganization(data);

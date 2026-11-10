@@ -42,6 +42,28 @@ type Answer =
   | { kind: 'network' }
   | { kind: 'never' };
 
+/** The server's account of the signed request, for a client a platform administrator registered. */
+const ADMIN_REGISTERED: Answer = {
+  kind: 'http',
+  status: 200,
+  body: {
+    success: true,
+    data: { clientId: CLIENT_ID, redirectUri: 'https://acme.example/cb', registeredByAdministrator: true },
+  },
+};
+
+const CONSENT_REQUEST_PATH = '/api/v1/auth/oauth-consent/request';
+
+function respond(answer: Answer) {
+  if (answer.kind === 'never') return new Promise(() => {});
+  if (answer.kind === 'network') return Promise.reject(new TypeError('Failed to fetch'));
+  return Promise.resolve({
+    ok: answer.status >= 200 && answer.status < 300,
+    status: answer.status,
+    json: async () => answer.body,
+  });
+}
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -72,19 +94,15 @@ function authClient(signedIn: boolean): AuthClient {
   } as unknown as AuthClient;
 }
 
-function stubLookup(answer: Answer) {
-  const fetchMock = vi.fn((input: unknown) => {
+function stubLookup(answer: Answer, request: Answer = ADMIN_REGISTERED) {
+  // Typed as `fetch` is called (input, init), so a recorded call reads as both.
+  const fetchMock = vi.fn((input: unknown, _init?: RequestInit) => {
     const url = String(input);
+    if (url.includes(CONSENT_REQUEST_PATH)) return respond(request);
     if (!url.includes('/oauth2/public-client')) {
       return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
     }
-    if (answer.kind === 'never') return new Promise(() => {});
-    if (answer.kind === 'network') return Promise.reject(new TypeError('Failed to fetch'));
-    return Promise.resolve({
-      ok: answer.status >= 200 && answer.status < 300,
-      status: answer.status,
-      json: async () => answer.body,
-    });
+    return respond(answer);
   });
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
@@ -188,5 +206,116 @@ describe('OAuthConsentPage — the public-client lookup (objectui#12301)', () =>
 
     expect(await screen.findByText('login-stub')).toBeTruthy();
     expect(lookupCalls(fetchMock)).toEqual([]);
+  });
+});
+
+/** The server's account of the signed request, answering `redirectUri` and `registeredByAdministrator`. */
+const requestAnswer = (redirectUri: string, registeredByAdministrator: boolean): Answer => ({
+  kind: 'http',
+  status: 200,
+  body: { success: true, data: { clientId: CLIENT_ID, redirectUri, registeredByAdministrator } },
+});
+
+const NAMED: Answer = {
+  kind: 'http',
+  status: 200,
+  // The client's own registration metadata names a redirect the request does
+  // not use: the destination shown is never read from it.
+  body: { client_id: CLIENT_ID, client_name: 'Acme Notes', redirect_uris: ['https://declared.example/cb'] },
+};
+
+const authorizeButton = () => screen.getByRole('button', { name: /Authorize/ });
+const denyButton = () => screen.getByRole('button', { name: /Deny/ });
+
+describe('OAuthConsentPage — where the grant goes, and an unverified client', () => {
+  it('asks the server about the signed request, sending the query it was given verbatim', async () => {
+    const fetchMock = stubLookup(NAMED, requestAnswer('https://acme.example/cb', true));
+    renderConsent();
+
+    await screen.findByTestId('oauth-consent-destination');
+    const calls = fetchMock.mock.calls.filter(([input]) => String(input).includes(CONSENT_REQUEST_PATH));
+    expect(calls).toHaveLength(1);
+    const [url, init] = calls[0] as [string, RequestInit];
+    expect(url).toBe(`${SERVER_URL}${CONSENT_REQUEST_PATH}`);
+    expect(init).toEqual(expect.objectContaining({ method: 'POST', credentials: 'include' }));
+    expect(JSON.parse(String(init.body))).toEqual({ oauth_query: SEARCH.slice(1) });
+  });
+
+  it('names the host the server says the grant is sent to, never a redirect the client declared', async () => {
+    stubLookup(NAMED, requestAnswer('https://acme.example/cb?x=1', true));
+    renderConsent();
+
+    const destination = await screen.findByTestId('oauth-consent-destination');
+    expect(within(destination).getByText('Access will be sent to:')).toBeTruthy();
+    expect(within(destination).getByText('acme.example').tagName).toBe('CODE');
+    expect(screen.queryAllByText('declared.example', { exact: false })).toHaveLength(0);
+  });
+
+  it('marks a dynamically registered client as unverified, naming the destination, and still lets the person decide', async () => {
+    stubLookup(NAMED, requestAnswer('https://helper.example.net/oauth/cb', false));
+    renderConsent();
+
+    const mark = await screen.findByTestId('oauth-consent-unverified');
+    expect(within(mark).getByText('Unverified application')).toBeTruthy();
+    expect(
+      within(mark).getByText(
+        'No administrator here registered this application, so its name has not been checked. Authorize it only if you trust helper.example.net.',
+      ),
+    ).toBeTruthy();
+    expect(within(screen.getByTestId('oauth-consent-destination')).getByText('helper.example.net')).toBeTruthy();
+    expect(authorizeButton().hasAttribute('disabled')).toBe(false);
+  });
+
+  it('shows a client a platform administrator registered without the unverified mark', async () => {
+    stubLookup(NAMED, requestAnswer('https://acme.example/cb', true));
+    renderConsent();
+
+    await screen.findByTestId('oauth-consent-destination');
+    expect(screen.queryByTestId('oauth-consent-unverified')).toBeNull();
+    expect(screen.queryByText('Unverified application')).toBeNull();
+    expect(authorizeButton().hasAttribute('disabled')).toBe(false);
+  });
+
+  it.each<[string, string, string]>([
+    ['a loopback redirect by its host and port', 'http://127.0.0.1:56789/callback', '127.0.0.1:56789'],
+    ['a localhost redirect by its host and port', 'http://localhost:33418/oauth/done', 'localhost:33418'],
+    ['a custom-scheme redirect as it is', 'cursor://anysphere.cursor-mcp/oauth/callback', 'cursor://anysphere.cursor-mcp/oauth/callback'],
+    ['a reverse-domain redirect as it is', 'com.example.notes:/oauth2redirect', 'com.example.notes:/oauth2redirect'],
+  ])('names %s', async (_label, redirectUri, shown) => {
+    stubLookup(NAMED, requestAnswer(redirectUri, false));
+    renderConsent();
+
+    const destination = await screen.findByTestId('oauth-consent-destination');
+    expect(within(destination).getByText(shown).tagName).toBe('CODE');
+    expect(screen.getByTestId('oauth-consent-unverified')).toBeTruthy();
+  });
+
+  it.each<[string, Answer]>([
+    ['refused (400)', { kind: 'http', status: 400, body: { success: false, error: { code: 'VALIDATION_ERROR' } } }],
+    ['an unknown client (404)', { kind: 'http', status: 404, body: { success: false, error: { code: 'RESOURCE_NOT_FOUND' } } }],
+    ['a network failure', { kind: 'network' }],
+    ['an answer without a redirect', { kind: 'http', status: 200, body: { success: true, data: { registeredByAdministrator: true } } }],
+    ['an answer without the registration fact', { kind: 'http', status: 200, body: { success: true, data: { redirectUri: 'https://acme.example/cb' } } }],
+  ])('cannot be authorized when the destination is not confirmed: %s', async (_label, request) => {
+    stubLookup(NAMED, request);
+    renderConsent();
+
+    const alert = await screen.findByTestId('oauth-consent-unconfirmed');
+    expect(
+      within(alert).getByText('Where this access would be sent could not be confirmed, so it cannot be authorized here.'),
+    ).toBeTruthy();
+    expect(screen.queryByTestId('oauth-consent-destination')).toBeNull();
+    expect(authorizeButton().hasAttribute('disabled')).toBe(true);
+    expect(denyButton().hasAttribute('disabled')).toBe(false);
+  });
+
+  it('cannot be authorized while the server has not yet answered', async () => {
+    stubLookup(NAMED, { kind: 'never' });
+    renderConsent();
+
+    await screen.findByText('Acme Notes wants to access your account');
+    expect(screen.queryByTestId('oauth-consent-destination')).toBeNull();
+    expect(authorizeButton().hasAttribute('disabled')).toBe(true);
+    expect(denyButton().hasAttribute('disabled')).toBe(false);
   });
 });
