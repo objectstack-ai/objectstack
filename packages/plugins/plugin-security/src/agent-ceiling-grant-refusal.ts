@@ -25,23 +25,27 @@
  * every writer. What an account may be assigned is judged on its own by
  * `agent-account-grant-refusal.ts`.
  *
- * A non-system insert or update that would STORE an assignment naming one of
- * those sets is refused, for every caller, a platform administrator included.
- * So is every other way the platform offers to give a person a set — each door
- * below refuses with the one refusal this module builds
+ * A non-system or seed insert or update that would STORE an assignment naming
+ * one of those sets is refused, for every caller, a platform administrator
+ * included. These doors refuse with the same refusal this module builds
  * ({@link agentCeilingGrantError}), worded for where the set was named
- * ({@link AgentCeilingCarrier}):
+ * ({@link AgentCeilingCarrier}), and hold exactly what is listed here:
  *
  * - a position definition whose `permissionSets` names one, at the metadata
- *   door ({@link registerPositionAgentCeilingGate}): a holder of a position
- *   holds every set it names;
- * - an assignment of a position whose definition names one (a definition a
- *   package or the stack declares in code never meets the metadata door), at
- *   every write of `sys_user_position`;
+ *   door — a save (draft or active) and a restore
+ *   ({@link registerPositionAgentCeilingGate});
+ * - every write of `sys_user_position` naming a position whose definition, as
+ *   the security catalog serves it, names one;
+ * - a seed write of a `sys_user_permission_set` row naming one;
  * - the deployment's baseline (`SecurityPlugin`'s `fallbackPermissionSet` and
  *   `acceptedDefaultPermissionSets` options), at construction;
- * - the self-registration set, by the audience validation in
- *   `@objectstack/plugin-auth`.
+ * - and, outside this module, the self-registration set, by the audience
+ *   validation in `@objectstack/plugin-auth`.
+ *
+ * These doors do not judge a position a person holds without an assignment
+ * row, or a position definition that reaches the security catalog without
+ * passing the metadata door; whether the read side refuses those is a
+ * separate decision with the maintainer (the security seat, #32004).
  *
  * ## Which rows it judges
  *
@@ -76,8 +80,9 @@
  *     that admits that configuration (`assertAudienceConfig`,
  *     `@objectstack/plugin-auth`) refuses an agent ceiling set there;
  *   - an identity-provider group mapping's projection writes the mapped set,
- *     and the mapping's save refuses a set outside the organization boundary,
- *     which keeps every agent ceiling out by name;
+ *     and the organization boundary's by-name denylist keeps every agent
+ *     ceiling out of it, asked at the mapping's save and again before each
+ *     projected grant (both pinned in `@objectstack/plugin-auth`);
  *   - the development-only demo accounts are given only sets their stack
  *     declares in `permissions` (the stack's own validation), and no stack
  *     declares an agent ceiling's name: this plugin holds those names, and a
@@ -328,7 +333,7 @@ function onPositionUpdate(engine: unknown) {
 /**
  * The metadata door's half: a position whose definition names an agent ceiling
  * set is refused before it is stored — on a draft and an active save, and on a
- * restore, every door that runs the protocol's authoring gate for `position`.
+ * restore: the doors that run the protocol's authoring gate for `position`.
  * Feature-detected, as the sibling gates are: a protocol without the seam keeps
  * its behavior, and the call answers `false`.
  */
