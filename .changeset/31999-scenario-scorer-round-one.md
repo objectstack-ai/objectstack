@@ -15,6 +15,8 @@ Metadata-protocol: none
 - **Correction requests.** A request for the missing value ("What should it say?", "tell me the right number", "What I need from you: …") reads as asking for a correction.
 - **Flow refusals.** A `run_action` whose flow ended on its declared refusal (`result.status: 'refused'`) reads as `refused (the flow refused)` with the flow's text, not as an applied write.
 - **Hidden values.** A hidden number equal to a number the persona can read in a field it is not hidden from is no longer matched as a leak. A tool call that served the hidden field is still caught by the field's name.
+- **The app's own refusal.** A declared `VALIDATION_FAILED` is also met by a refusal code the app defined itself (one outside the platform's error catalogue) at any 4xx status, and by the app's flow refusal. A platform catalogue code other than the declared one still never meets it, at any status.
+- **Probes that meet the build's lock.** When the runner's own probe write is refused 403 `PERMISSION_DENIED`, writes nothing, and the build locks a field the probe writes for the acting persona and declares an action on the object, the operation's platform half is not measured: it counts in neither passed nor total, is never a pass, and the scorecard lists the reason under the mode's findings.
 - **Object extensions.** The build graph merges every `objectExtensions` entry's `fields` into the object it extends, in the registry's priority order, so the select, lookup and field-count checks read what the runtime serves.
 
 No model call and no network, as before.
