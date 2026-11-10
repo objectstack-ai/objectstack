@@ -543,7 +543,7 @@
       "title": "Authored skill instructions project onto the MCP prompts primitive (#3905) — listed with identity, fetchable by name, and NOT projected when instruction-less or inactive",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -568,7 +568,7 @@
         {
           "clause": "qa_prompt_full is listed as an MCP prompt carrying the skill's name, label (title) and description — the metadata → prompts projection is live in the OPEN framework, not just cloud",
           "oracle": "network",
-          "verify": "prompts/list contains qa_prompt_full with the authored identity (packages/mcp/src/skill-prompts.ts projectSkillPrompt)",
+          "verify": "prompts/list contains qa_prompt_full with the authored identity (packages/mcp/src/skill-prompts.ts projectSkillPrompt). A skill authored in a package with a namespace NS is listed under its face NS-qa_prompt_full (packages/spec/src/ai/face-name.ts#deriveAiFaceName, ADR-0150 D6), and prompts/get takes the face, or the bare name while one holder exists; a runtime-authored skill (no package) keeps the bare name. Record which route the run took",
           "evidence": "the prompts/list payload"
         },
         {
@@ -612,7 +612,13 @@
         { "revision": 1, "date": "2026-08-07", "change": "new item: the open framework's one live skill consumer (#3905) had no checklist coverage", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-10-17", "change": "steps[5] said 'reload metadata' without naming what makes a source edit live (checklist-accuracy finding, #23878 close-out): os dev serves the built dist, so a bare restart re-serves the old definition at /meta while the MCP projection follows the source. The step now names the rebuild routes (the watcher's rebuild + restart, objectstack build, --compile), the stale-boot warning, the runtime PUT route, and a /meta active:true check before re-listing; the fixture names the runtime-authored route. Re-run on main c91af8ed6. Runtime route on stock showcase: three skills PUT (200 each); initialize declares the prompts capability; prompts/list carries qa_prompt_full with title and description, not qa_prompt_bare or qa_prompt_off; prompts/get qa_prompt_full returns the authored instructions verbatim; prompts/get qa_prompt_bare and an unknown name answer -32602; PUT qa_prompt_off active:true and the next list carries it. File route on a scratch copy of the showcase under os dev: list carried only qa_prompt_full; saving active:true rebuilt and restarted the server and the list then carried qa_prompt_off (/meta active true); flipping it back to false with the server stopped and restarting without a build printed the stale-dist warning, and on that boot prompts/list omitted qa_prompt_off while GET /api/v1/meta/skill/qa_prompt_off still read active true. Clause 4: packages/mcp src/skill-prompts.test.ts 12 passed", "ref": "#24036" },
         { "revision": 3, "date": "2026-10-19", "change": "fixtures.requires[0] gives the runtime-authored skill body the shape the door accepts — checklist-accuracy finding of the 18.0 QA sweep (QA run #24540, ai.skill-instructions-mcp-prompts fixtures.requires; wave anchor #24579 §3). Re-derived at base 9a7838edf5 (packages/spec/src/ai/skill.zod.ts: `tools` is a required array). No clause changed", "ref": "#24649" },
-        { "revision": 4, "date": "2026-10-26", "change": "acceptance[3].verify and the automated.ref prose corrected — checklist-accuracy findings of the 18.2.0 sweep, Tier 1 record #25815 at 6679644a (wave anchor #25807): the verify cited skill-prompts.test.ts as the pin, but it drives only an unknown name through a stub bridge, and no pin asserts prompts/get refusing an inactive skill (negative[1]). Re-read on main at b4199c96: unchanged. No clause changed, no status changed", "ref": "#25836" }
+        { "revision": 4, "date": "2026-10-26", "change": "acceptance[3].verify and the automated.ref prose corrected — checklist-accuracy findings of the 18.2.0 sweep, Tier 1 record #25815 at 6679644a (wave anchor #25807): the verify cited skill-prompts.test.ts as the pin, but it drives only an unknown name through a stub bridge, and no pin asserts prompts/get refusing an inactive skill (negative[1]). Re-read on main at b4199c96: unchanged. No clause changed, no status changed", "ref": "#25836" },
+        {
+          "revision": 5,
+          "date": "2026-11-10",
+          "change": "acceptance[0].verify names the face. ADR-0150 D6 (#31955) lists a package skill under NS-NAME, so a run on the fixture's writable-package route would not find the bare qa_prompt_full in prompts/list and could score a FAIL that is the ruled behaviour. ai.mcp-namespace-faces covers the faces. Checklist-accuracy finding of scoped sweep #32019, read from source at 60f8149e",
+          "ref": "#32019"
+        }
       ]
     },
     {
@@ -972,6 +978,87 @@
         },
         { "revision": 3, "date": "2026-10-26", "change": "automated.ref extended — checklist-accuracy findings of the 18.2.0 sweep, Tier 1 record #25815 at 6679644a (wave anchor #25807). acceptance[1]: mcp-coded-refusal.test.ts asserts the clause at plugin-unit layer but was not in the ref. acceptance[2]: the record found no pin driving query_records on an apiEnabled false runtime object across a restart; re-read on main at b4199c96, packages/qa/dogfood/test/mcp-stdio-runtime-object-exposure.test.ts does, on the stdio door at engine layer, so it joins the ref and the ref now names each pin's layer. No clause changed, no status changed", "ref": "#25836" },
         { "revision": 4, "date": "2026-10-31", "change": "fixtures.requires[3] and steps[2] name acceptance[3]'s producer. Checklist-accuracy finding of QA run #27409 (18.3.0 sweep, wave 3, Tier 1 half A, at c4c515ad; sweep anchor #27377): the fixtures named no recipe for the PERMISSION_DENIED arm, and the run staged it with a runtime declarative update action on showcase_task, ai-exposed, run as auditor.demo. Re-read at base 488b3ed0: packages/runtime/src/action-execution.ts (the declarative update writes as the caller), packages/spec/src/ui/action.zod.ts (ai.exposed requires a description). The clause is unchanged", "ref": "#27409" }
+      ]
+    },
+    {
+      "id": "ai.mcp-namespace-faces",
+      "title": "MCP names package items by their face: prompts/list serves NS-NAME for a package skill and the bare name for an environment skill, list_actions rows carry namespace and face, run_action takes namespace, and a name two holders share is refused naming the faces",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["admin holding an osk_ API key, over MCP HTTP"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr_a, namespace qa_a) and qa_b (manifest id com.qa.addr_b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Each holds a skill qa_triage with instructions (skill is narrowed to one holder per namespace, so two namespaces may each hold it); qa_a also holds an object-less action qa_a_ping and an object qa_a_ticket with an embedded action escalate. One skill name long enough that NS-NAME passes 64 characters",
+          "an environment skill qa_env_triage (PUT /api/v1/meta/skill/qa_env_triage with tools: [] and instructions)",
+          "MCP HTTP reachable with an osk_ key (see ai.mcp-http-surface)"
+        ]
+      },
+      "steps": [
+        "prompts/list; record every name",
+        "prompts/get qa_a-qa_triage, prompts/get qa_triage (bare, two holders), prompts/get qa_env_triage",
+        "call list_actions; record the rows for qa_a_ping and escalate and any refusedFaces entry",
+        "call run_action { actionName: 'qa_a_ping', namespace: 'qa_a' }, then { actionName: 'qa_a_ping', namespace: 'qa_nowhere' }"
+      ],
+      "acceptance": [
+        {
+          "clause": "prompts/list names a package skill by its face NS-NAME and an environment skill by its bare name",
+          "oracle": "network",
+          "verify": "the list holds qa_a-qa_triage, qa_b-qa_triage and qa_env_triage, and no bare qa_triage (packages/spec/src/ai/face-name.ts#deriveAiFaceName; packages/mcp/src/skill-prompts.ts#skillPromptFaces)",
+          "evidence": "the prompts/list payload"
+        },
+        {
+          "clause": "prompts/get takes the face; a bare name two holders share is refused -32602 naming both faces, never one served",
+          "oracle": "network",
+          "verify": "prompts/get qa_a-qa_triage returns qa_a's instructions; prompts/get qa_triage errors -32602 with data { code: RESOURCE_CONFLICT, status: 409, candidates: [both faces] } (packages/mcp/src/skill-prompts.ts#lookupSkillPrompt, #skillPromptRefusalError)",
+          "evidence": "both payloads"
+        },
+        {
+          "clause": "a face past 64 characters is cut to 55, then a dash and 8 hex characters of a hash of the full identity",
+          "oracle": "network",
+          "verify": "the long skill's listed name is 64 characters, its first 55 are the start of NS-NAME, and it ends with - and 8 hex (packages/spec/src/ai/face-name.ts#AI_FACE_NAME_CUT_LENGTH, #AI_FACE_NAME_HASH_LENGTH)",
+          "evidence": "the listed name and its length"
+        },
+        {
+          "clause": "list_actions rows carry the holder's namespace and the face: NS-NAME for an object-less action, OBJECT-ACTION for an object-bound one",
+          "oracle": "network",
+          "verify": "the qa_a_ping row has namespace qa_a and face qa_a-qa_a_ping; the escalate row has namespace qa_a and face qa_a_ticket-escalate (packages/runtime/src/domains/mcp.ts)",
+          "evidence": "the two rows"
+        },
+        {
+          "clause": "run_action takes namespace as the exact qualifier: it runs that namespace's action, and a namespace nothing installed holds answers 404",
+          "oracle": "network",
+          "verify": "the qa_a call runs qa_a_ping; the qa_nowhere call errors with \"No installed package has the namespace 'qa_nowhere'\" (packages/runtime/src/action-execution.ts#resolveAddressedRouteActionDeclaration)",
+          "evidence": "both tool results"
+        }
+      ],
+      "negative": [
+        "a bare qa_triage in prompts/list beside the two faces is a FAIL: a package skill is named by its face",
+        "prompts/get qa_triage answering one holder's instructions is a FAIL",
+        "two actions deriving one face both listed is a FAIL: the face is listed once under refusedFaces and dropped from the rows (packages/mcp/src/mcp-http-tools.ts)"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/mcp/src/skill-prompts.test.ts, packages/spec/src/ai/face-name.test.ts, packages/runtime/src/mcp-action-namespace.test.ts; no live spec drives the scratch-package pair"
+      },
+      "source": [
+        "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D6 (the ruled faces NS-NAME and OBJECT-ACTION, the 64-character cut) and D5 (MCP)",
+        "packages/spec/src/ai/face-name.ts#deriveAiFaceName",
+        "packages/mcp/src/skill-prompts.ts#lookupSkillPrompt (the face or the bare name while one holder exists)",
+        "packages/mcp/src/mcp-http-tools.ts (refusedFaces)",
+        "packages/runtime/src/domains/mcp.ts (list_actions namespace and face, run_action namespace)",
+        "#31955 (G2)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0150 child G2, the MCP faces and namespace (#31955). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
+          "ref": "#32019"
+        }
       ]
     }
   ]
