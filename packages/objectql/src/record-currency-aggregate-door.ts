@@ -438,7 +438,7 @@ export interface RecordCurrencyFollowRegistryView {
   readonly lookup: (name: string) => ObjectLike | undefined;
   /** Every registered object, as served. */
   readonly all: () => readonly ObjectLike[];
-  /** The fields the registered `extend` contributions of `name` add (they fold onto any base that registers). */
+  /** The fields the registered `extend` contributions of `name` add, a disabled package's withheld as the served fold withholds them (they fold onto any base that registers). */
   readonly extensionFieldsOf: (name: string) => Record<string, unknown> | undefined;
   /** The incoming body is an `extend` contribution: its fields are not the object's whole field map. */
   readonly partial: boolean;
@@ -471,10 +471,14 @@ export interface RecordCurrencyFollowRegistryView {
  * `defineStack` skips it. The parent's fields at its own registration are its
  * body with its registered extensions' fields under it.
  *
- * The registry asks this only once the cold boot has ended (the AGENTS.md
+ * The registry asks this only of a single save or publish that relays the
+ * refusal to its author (`SchemaRegistry.objectRegistrationRefusal`'s
+ * `againstRegistry`), and only once the cold boot has ended (the AGENTS.md
  * startup-registry rule): during the boot an `extend` contribution or the
  * other end can still register and contradict a verdict, and a stored row is
- * hydrated in no particular order.
+ * hydrated in no particular order. A multi-registration unit after the boot
+ * (`registerApp`, whose `objectExtensions` register after its `objects`, and
+ * the batch writers) has the same hazard, so `registerObject` never asks it.
  */
 export function recordCurrencyFollowRefusal(
   incoming: ObjectLike,
@@ -531,7 +535,7 @@ export function recordCurrencyFollowRefusal(
           return new RecordCurrencyFollowRefusedError(
             otherName,
             field,
-            `'${name}' would no longer hold the code a registered amount follows. ${message}`,
+            `'${name}' does not hold the code a registered amount follows. ${message}`,
           );
         }
         continue;

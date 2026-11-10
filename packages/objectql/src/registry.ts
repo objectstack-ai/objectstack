@@ -5222,9 +5222,10 @@ export class SchemaRegistry {
    * asked of a draft before its batch registers it answers both ways wrong —
    * it refuses a draft whose sibling in the same batch takes the child amount
    * out of record-currency mode, and it passes one whose sibling completes the
-   * pair. It stays the registration's own question, except for a single save
-   * that names `againstRegistry` on a sealed registry (see that option). The
-   * single-owner rule is
+   * pair. D6's door stays the registration's own question, and the follow
+   * door is asked nowhere else: both are asked here only for a single save
+   * or publish that names `againstRegistry` on a sealed registry (see that
+   * option). The single-owner rule is
    * the protocol's (`classifyObjectContribution`), and a code package's action
    * parse never judges a tenant-authored body.
    */
@@ -5234,20 +5235,28 @@ export class SchemaRegistry {
     ownership: ObjectOwnership = 'own',
     options: {
       /**
-       * [ADR-0144 D2 and D6, amended] The caller is a SINGLE save that makes
-       * the body live in the same breath (the `/meta` save door, not a batch
-       * publish, an install or a migration pass): no sibling of a batch can
-       * still change the other end of a pair, so the doors that read the
-       * registry's other objects are asked too — D6's roll-up half and its
-       * follow door — once the cold boot has sealed the registry. A refused
-       * save is then answered with the door's own envelope and stores nothing,
-       * instead of being stored and refused, logged, at the write-through.
+       * [ADR-0144 D2 and D6, amended] The caller is a SINGLE save or publish
+       * that makes the body live in the same breath and relays the refusal to
+       * its author (the producers are enumerated in `@objectstack/metadata-protocol`'s
+       * `registry-question.ts`; not a batch publish, an install or a migration
+       * pass): no sibling of a batch can still change the other end of a pair,
+       * so the doors that read the registry's other objects are asked too —
+       * D6's roll-up half and its follow door — once the cold boot has sealed
+       * the registry. A refused save is then answered with the door's own
+       * envelope and stores nothing, instead of being stored and refused,
+       * logged, at the write-through.
+       *
+       * The follow door is asked ONLY under this option (seat ruling on the
+       * contract review of PR #32368): {@link registerObject} never asks it,
+       * so the boot, hydration, `registerApp` (install and reload, whose
+       * `objectExtensions` register after its `objects`), the batch writers
+       * and a package publish register the follow pair exactly as before.
        */
       againstRegistry?: boolean;
     } = {},
   ): Error | null {
     const againstRegistry = options.againstRegistry === true && this.bareNameHoldersAreSealed;
-    const door = this.judgeRegistrationDoors(schema, packageId, ownership, { bodyOnly: !againstRegistry });
+    const door = this.judgeRegistrationDoors(schema, packageId, ownership, { bodyOnly: !againstRegistry, againstRegistry });
     return 'refusal' in door ? door.refusal : null;
   }
 
@@ -5255,15 +5264,16 @@ export class SchemaRegistry {
    * [#29673] The registration doors of {@link registerObject}, moved here
    * whole so {@link objectRegistrationRefusal} asks exactly what the
    * registration throws: the refusal, or the body to register (an `extend`
-   * body re-keyed to the object it extends). `bodyOnly` skips the one door
-   * that reads the registry's other objects (see
-   * {@link objectRegistrationRefusal}).
+   * body re-keyed to the object it extends). `bodyOnly` skips the doors
+   * that read the registry's other objects, and `againstRegistry` (a sealed
+   * registry's single save or publish) is the only way the follow door is
+   * asked (see {@link objectRegistrationRefusal}).
    */
   private judgeRegistrationDoors(
     schema: ServiceObject,
     packageId: string | undefined,
     ownership: ObjectOwnership,
-    opts: { bodyOnly?: boolean } = {},
+    opts: { bodyOnly?: boolean; againstRegistry?: boolean } = {},
   ): { refusal: Error } | { schema: ServiceObject } {
     // [#16319] ⭐ THE FIELD-`type` DOOR — first statement in the method, and
     // its position is the whole point.
@@ -5335,17 +5345,27 @@ export class SchemaRegistry {
     // following amount whose parent holds no code field under that name, and a
     // `record` roll-up over a child amount that follows nothing — the halves
     // `defineStack` judges where a stack holds both objects, for the
-    // single-object save that holds one. Asked once the cold boot has sealed
-    // the registry (AGENTS.md, startup registry reads): before that an `extend`
-    // contribution or the other end can still register and contradict the
-    // verdict, so the boot registers what it registered before.
-    if (this.bareNameHoldersAreSealed) {
+    // single-object save that holds one. Asked only of a single save or
+    // publish that relays the refusal (`againstRegistry`, which
+    // {@link objectRegistrationRefusal} grants only once the cold boot has
+    // sealed the registry): before the seal an `extend` contribution or the
+    // other end can still register and contradict the verdict (AGENTS.md,
+    // startup registry reads), and a multi-registration unit after it —
+    // `registerApp`'s objects before its `objectExtensions`, a batch writer's
+    // rows in its own order — has the same hazard and hears a refusal only as
+    // a log line. So `registerObject` registers the follow pair as before.
+    if (opts.againstRegistry === true && this.bareNameHoldersAreSealed) {
       const recordCurrencyFollow = recordCurrencyFollowRefusal(schema, {
         lookup: (name) => this.getObject(name),
         all: () => this.getAllObjects(),
         extensionFieldsOf: (name) => {
           const fqn = this.resolveObjectKey(name);
-          const extensions = fqn === undefined ? [] : this.getObjectContributors(fqn).filter((c) => c.ownership === 'extend');
+          // As the served fold reads the parent ({@link resolveObject}): a
+          // disabled package's extension is withheld, so both ends of the pair
+          // read one parent.
+          const extensions = fqn === undefined
+            ? []
+            : this.getObjectContributors(fqn).filter((c) => c.ownership === 'extend' && !this.isPackageDisabled(c.packageId));
           return extensions.length === 0
             ? undefined
             : Object.assign({}, ...extensions.map((c) => (c.definition as { fields?: Record<string, unknown> }).fields ?? {}));

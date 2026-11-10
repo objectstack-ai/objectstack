@@ -81,6 +81,7 @@ import { withRefusalAudit } from './protocol-refusal-audit.js';
 import type { MutationProjectionOutcome } from './protocol-mutation-events.js';
 import type { ProtocolHost } from './protocol-host.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
+import { saveRegistryQuestion } from './registry-question.js';
 
 export class ProtocolSaveFacet {
     /**
@@ -1481,16 +1482,16 @@ export class ProtocolSaveFacet {
                 // made live at once, so it also asks the doors that read the
                 // registry's other objects (the record-currency roll-up and
                 // follow doors), on a sealed registry: refused there, the row
-                // was stored, answered `200` and left unregistered. A draft
-                // publishes later inside a batch, and the batch faces
-                // (duplicate, imports, install, migration passes) save in an
-                // order a later sibling can still complete, so they keep the
-                // body-only question (#29673's reason).
+                // was stored, answered `200` and left unregistered. A draft is
+                // judged when it is published (the per-item publish asks the
+                // same), and the batch faces (duplicate, imports, migration
+                // passes) save in an order a later sibling can still complete,
+                // so they keep the body-only question (#29673's reason). The
+                // faces and producers are enumerated in `registry-question.ts`.
                 if (objectRegistrationLayer) {
-                    const singleLiveSave = mode === 'publish'
-                        && (request.writeFace === 'meta-envelope' || request.writeFace === 'meta-dispatch');
                     const registration = host.objectRegistrationRefusal(
-                        request.item, objectRegistrationLayer, { againstRegistry: singleLiveSave },
+                        request.item, objectRegistrationLayer,
+                        { againstRegistry: saveRegistryQuestion({ mode, writeFace: request.writeFace }) === 'against-registry' },
                     );
                     if (registration) throw registration;
                 }

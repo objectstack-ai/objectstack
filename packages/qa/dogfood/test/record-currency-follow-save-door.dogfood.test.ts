@@ -12,10 +12,16 @@
 //  - D6's roll-up over a child amount in its own record currency is refused at
 //    the save the same way;
 //  - CONTROL: a child following its parent's code field saves `200` and
-//    registers.
+//    registers;
+//  - the per-item publish (`POST /meta/object/:name/publish`) of a draft that
+//    follows no code is refused the same way: the draft saved `200` (a draft
+//    is judged when it is published), the publish answers `422`, and the
+//    published row and the registered object stay as they were.
 //
 // Before, the save door judged the body alone: each refused body was stored,
-// answered `200`, and left unregistered (its registration refused, logged).
+// answered `200`, and left unregistered (its registration refused, logged);
+// the per-item publish promoted the draft, answered `published`, and kept the
+// old definition registered under the new stored row.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
@@ -145,5 +151,41 @@ describe('the /meta save door asks the record-currency doors that read other obj
     const saved = await call('PUT', '/meta/object/rcf_good_line', lineBody('rcf_good_line', 'invoice.currency_code'));
     expect(saved.status, JSON.stringify(saved.json)).toBe(200);
     expect(ql.registry.getObject('rcf_good_line')).toBeDefined();
+  });
+
+  it('the per-item publish of a draft that follows no code is refused 422, and the published row and registered object stay as they were', async () => {
+    const name = 'rcf_pub_line';
+    const followed = (json: any) => json?.item?.fields?.amount?.currencyConfig?.currencyField
+      ?? json?.fields?.amount?.currencyConfig?.currencyField;
+    // A published, registered child following the parent's code field.
+    expect((await call('PUT', `/meta/object/${name}`, lineBody(name, 'invoice.currency_code'))).status).toBe(200);
+    const before = await call('GET', `/meta/object/${name}`);
+    expect(followed(before.json), JSON.stringify(before.json).slice(0, 400)).toBe('invoice.currency_code');
+    // A draft repointing it at a field that holds no code saves (the re-point
+    // is a destructive change, acknowledged with `force`): a draft is judged
+    // at its publish.
+    const draft = await call('PUT', `/meta/object/${name}?mode=draft&force=true`, lineBody(name, 'invoice.title'));
+    expect(draft.status, JSON.stringify(draft.json)).toBe(200);
+    const published = await call('POST', `/meta/object/${name}/publish`, {});
+    expect(published.status, JSON.stringify(published.json)).toBe(422);
+    expect(codeOf(published.json)).toBe('INVALID_METADATA');
+    expect(messageOf(published.json)).toContain(
+      "Object 'rcf_pub_line' field 'amount' currencyConfig.currencyField: 'invoice.title' follows 'rcf_invoice.title', a 'text' field that does not hold an ISO 4217 code",
+    );
+    const after = await call('GET', `/meta/object/${name}`);
+    expect(after.status).toBe(200);
+    expect(followed(after.json), JSON.stringify(after.json).slice(0, 400)).toBe('invoice.currency_code');
+    expect((ql.registry.getObject(name)?.fields as any)?.amount?.currencyConfig?.currencyField).toBe('invoice.currency_code');
+  });
+
+  it('the per-item publish of a NEW object\'s draft that follows no code is refused 422, and nothing is published or registered', async () => {
+    const name = 'rcf_pub_new_line';
+    const draft = await call('PUT', `/meta/object/${name}?mode=draft`, lineBody(name, 'invoice.title'));
+    expect(draft.status, JSON.stringify(draft.json)).toBe(200);
+    const published = await call('POST', `/meta/object/${name}/publish`, {});
+    expect(published.status, JSON.stringify(published.json)).toBe(422);
+    expect(codeOf(published.json)).toBe('INVALID_METADATA');
+    expect(messageOf(published.json)).toContain("'rcf_invoice.title', a 'text' field that does not hold an ISO 4217 code");
+    await expectNothingLeft(name);
   });
 });

@@ -360,7 +360,7 @@ describe('[#21908] the deny round — the platform-store calls still reaching th
             await protocol.publishMetaItem({ type: 'view', name: 'proj_task_grid' });
         });
         await expectSystemOptIn(calls, 'promoteDraftForPublish', () =>
-            protocol.promoteDraftForPublish({ type: 'view', name: 'proj_task_grid' }).catch(() => undefined));
+            protocol.promoteDraftForPublish({ type: 'view', name: 'proj_task_grid', registryQuestion: 'body-only' }).catch(() => undefined));
     });
 
     it('the readers behind the history, audit, diff and commit doors', async () => {
