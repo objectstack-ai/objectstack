@@ -48,6 +48,11 @@
 //   5. ⭐ the walled posture (`isolated`), across organizations: the owner of
 //      another organization gets, on every act door, the answer an id that
 //      names no request gets, and the request is not touched.
+//   6. ⭐ the walled posture (`isolated`), a request with no organization
+//      (ADR-0131 D1): every organization's administrator gets, on every act
+//      door, the answer an id that names no request gets, and the request is
+//      not touched; the platform administrator is not answered as for an
+//      unseen request, and the decision's write is refused by ADR-0131 D9.
 //
 // Each has a control: on the action door, the submitter is relayed the
 // route's `403 FORBIDDEN` and the approver decides (`200`); on a returned
@@ -76,6 +81,7 @@ import { defineStack, defineFlow } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { PermissionSetSchema, type PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const SHEET = 'actvis_sheet';
 const SYS = { context: { isSystem: true } } as const;
@@ -474,6 +480,101 @@ describe('behind the organization wall (isolated posture), the act doors answer 
         const overridden = await act(ownerAToken, overrideOnly.id, 'approve', {});
         expect(overridden.status, JSON.stringify(overridden.body)).toBe(200);
         expect((await stored(overrideOnly.id))?.status).toBe('approved');
+      } finally {
+        await stack.stop();
+      }
+    },
+    180_000,
+  );
+});
+
+describe('behind the organization wall (isolated posture), a request with no organization is acted on only by a platform administrator', () => {
+  /** The owner of organization A: an organization administrator. */
+  const OWNER_A = 'actvis-nullorg-owner-a@verify.test';
+  /** A plain member of A, who submits. */
+  const SUBMITTER_A = 'actvis-nullorg-submitter@verify.test';
+  /** The owner of organization B: an administrator of another organization. */
+  const OWNER_B = 'actvis-nullorg-owner-b@verify.test';
+
+  it(
+    'answers every organization administrator 404 REQUEST_NOT_FOUND on every act door for a request with no organization, the same as for no request; the platform administrator is not answered as unseen, and ADR-0131 D9 refuses the decision write',
+    async () => {
+      const scene = await bootScene({ multiTenant: 'posture-only' });
+      const { stack, ql, idOf, act, open, stored, snapshot, expectAnsweredAsMissing } = scene;
+      try {
+        const adminToken = await stack.signIn(); // the seeded platform administrator
+        const ownerAToken = await stack.signUp(OWNER_A);
+        const submitterToken = await stack.signUp(SUBMITTER_A);
+        const ownerBToken = await stack.signUp(OWNER_B);
+        const ownerAId = await idOf(OWNER_A);
+
+        const setActive = async (token: string, organizationId: string) => {
+          const active = await stack.apiAs(token, 'POST', '/auth/organization/set-active', { organizationId });
+          expect(active.status, await active.clone().text()).toBe(200);
+        };
+        const createOrg = async (token: string, slug: string): Promise<string> => {
+          const created = await stack.apiAs(token, 'POST', '/auth/organization/create', { name: slug, slug });
+          expect(created.status, await created.clone().text()).toBe(200);
+          const id = String(((await created.json()) as { id?: string }).id ?? '');
+          await setActive(token, id);
+          return id;
+        };
+        const orgA = await createOrg(ownerAToken, 'actvis-nullorg-a');
+        await createOrg(ownerBToken, 'actvis-nullorg-b');
+        await ql.insert('sys_member', { user_id: await idOf(SUBMITTER_A), organization_id: orgA, role: 'member' }, { context: SYS.context });
+        await setActive(submitterToken, orgA);
+
+        const orgLess = await open(submitterToken, 'nullorg');
+        const orgLessForAdmin = await open(submitterToken, 'nullorg-admin');
+        const inA = await open(submitterToken, 'nullorg-control-a');
+        // A stored row with no organization predates ADR-0131 D9 (a new write is
+        // stamped or refused), so it is planted below the engine, as one that
+        // already exists. That residue lives only on a store built before 18.x,
+        // whose tenant column is nullable (ADR-0131 D1 makes a fresh one NOT
+        // NULL): the three approval tables are that store's.
+        await relaxTenantColumns(ql as any, ['sys_approval_request', 'sys_approval_action', 'sys_approval_approver']);
+        const driver = ql.getDriver('sys_approval_request');
+        for (const r of [orgLess, orgLessForAdmin]) {
+          await driver.update('sys_approval_request', r.id, { organization_id: null });
+        }
+
+        // PRECONDITION: a real wall, and the rows really carry no organization.
+        const tenancy = await stack.kernel.getServiceAsync<{ posture: string; degraded: boolean }>('tenancy');
+        expect(tenancy.posture).toBe('isolated');
+        expect(tenancy.degraded).toBe(false);
+        expect((await stored(orgLess.id))?.organization_id ?? null).toBeNull();
+        expect((await stored(orgLessForAdmin.id))?.organization_id ?? null).toBeNull();
+        expect((await stored(inA.id))?.organization_id).toBe(orgA);
+
+        // ⭐ Every act door, for both organization administrators: the answer an
+        // id that names no request gets, and nothing written.
+        await expectAnsweredAsMissing(ownerAToken, orgLess.id, ACT_DOORS(ownerAId), 'no organization · owner of A');
+        await expectAnsweredAsMissing(ownerBToken, orgLess.id, ACT_DOORS(ownerAId), 'no organization · owner of B');
+
+        // CONTROL — the platform administrator is the actor the rule admits: the
+        // door does not answer them as for an unseen request. Under a walled
+        // posture the decision's action write carries no organization, which
+        // ADR-0131 D9 refuses at the engine, so the request is not decided at
+        // the door and nothing is written; the organization-ownership ceremony
+        // gives such a row its owner. (Admission is pinned at the service in
+        // `approval-tenant-positions-name-authority.test.ts`.)
+        const before = await snapshot(orgLessForAdmin.id);
+        expect(before.row?.status).toBe('pending');
+        const decided = await act(adminToken, orgLessForAdmin.id, 'approve', {});
+        const label = JSON.stringify(decided);
+        expect(['REQUEST_NOT_FOUND', 'FORBIDDEN'], label).not.toContain(codeOf(decided));
+        // The door relays the engine's refusal under its own fault code; the
+        // subject it names is the action table whose write was refused.
+        expect(decided.status, label).toBe(500);
+        expect(codeOf(decided), label).toBe('APPROVAL_APPROVE_FAILED');
+        expect(String((decided.body as any)?.error ?? ''), label).toContain('sys_approval_action');
+        expect(await snapshot(orgLessForAdmin.id), 'nothing was written').toEqual(before);
+
+        // CONTROL — A's own administrator still decides A's request through the
+        // override: the refusal above is about the missing organization.
+        const overridden = await act(ownerAToken, inA.id, 'approve', {});
+        expect(overridden.status, JSON.stringify(overridden.body)).toBe(200);
+        expect((await stored(inA.id))?.status).toBe('approved');
       } finally {
         await stack.stop();
       }
