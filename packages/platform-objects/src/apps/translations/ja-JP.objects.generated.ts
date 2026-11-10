@@ -3676,6 +3676,55 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_metadata_commit: {
+    label: "メタデータコミット",
+    pluralLabel: "メタデータコミット",
+    description: "1 回の操作で行われたメタデータ変更をまとめる、パッケージ単位のコミットログ。",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      package_id: {
+        label: "パッケージ"
+      },
+      operation: {
+        label: "操作",
+        options: {
+          apply: "適用",
+          revert: "ロールバック"
+        }
+      },
+      message: {
+        label: "メッセージ",
+        help: "変更の概要。AI による操作では、その変更を生んだユーザーの指示。"
+      },
+      actor: {
+        label: "実行主体"
+      },
+      ai_model: {
+        label: "AI モデル"
+      },
+      parent_commit_id: {
+        label: "親コミット"
+      },
+      event_seq_start: {
+        label: "開始イベントシーケンス"
+      },
+      event_seq_end: {
+        label: "終了イベントシーケンス"
+      },
+      items: {
+        label: "項目",
+        help: "JSON: [{ type, name, existedBefore, prevVersion }] — ロールバック計画。"
+      },
+      item_count: {
+        label: "項目数"
+      },
+      created_at: {
+        label: "作成日時"
+      }
+    }
+  },
   sys_setting: {
     label: "設定",
     pluralLabel: "設定",
