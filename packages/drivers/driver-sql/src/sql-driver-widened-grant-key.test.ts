@@ -312,6 +312,36 @@ describe('the narrower key carried by a hash shadow (MySQL, MariaDB) — pure fu
     }
   }
 
+  // [must-fix 1 on #32356] A carrier whose generation expression could not be
+  // read (no `shadowKey`): we know by name that it is driver-owned and stores a
+  // digest, not what it hashes. BASE (P1 at 4c1d00f3d): the orphan arm offered
+  // it as `drop_index`, destructive, in every case below.
+  const unresolved: PhysicalIndex = { name: LEGACY, columns: [hashShadowColumnFor(LEGACY)], unique: true };
+
+  for (const tenantKeyCertified of [false, true]) {
+    it(`an unresolved carrier (its key could not be read), ${tenantKeyCertified ? 'certified' : 'not certified'}: KEPT whether or not the guard stands — nothing offered`, () => {
+      for (const physical of [[unresolved, wide], [unresolved, wide, guard]]) {
+        expect(diff(physical, tenantKeyCertified)).toEqual([]);
+      }
+    });
+  }
+
+  it('an unresolved carrier read before the gained column exists: KEPT, only the wider key\'s create_index offered', () => {
+    const before = new Set(['id', ...NARROW]);
+    const physical = [unresolved];
+    const entries = diffManagedIndexes({
+      table: GRANTS,
+      expected: [{ name: WIDE_NAME, columns: WIDE, unique: true }],
+      legacy: legacyUniqueReplacements({
+        table: GRANTS, fields, tenantField: 'organization_id', physicalColumns: before, declaredIndexes: NEW_INDEXES, physical,
+      }),
+      physical,
+      tenantField: 'organization_id',
+      tenantKeyCertified: true,
+    });
+    expect(entries.map((e) => e.op.type)).toEqual(['create_index']);
+  });
+
   it('a gained column not yet physical keeps the carrier too', () => {
     const before = new Set(['id', ...NARROW]);
     const physical = [carrier(true)];
@@ -325,6 +355,28 @@ describe('the narrower key carried by a hash shadow (MySQL, MariaDB) — pure fu
       tenantField: 'organization_id',
       tenantKeyCertified: true,
     }).filter((e) => e.op.type !== 'create_index')).toEqual([]);
+  });
+
+  // [should-fix 3 on #32356] The absent-gained-column term of `kept`, alone:
+  // with the gained column declared `required` nothing else keeps the narrower
+  // key, so without the term the arm would offer a replace whose wider key
+  // names a column the table does not have yet.
+  it('a plain narrower whose REQUIRED gained column is not yet physical: KEPT, no replace (only the wider key\'s create_index)', () => {
+    const before = new Set(['id', ...NARROW]);
+    const plainNarrow: PhysicalIndex = { name: LEGACY, columns: NARROW, unique: true };
+    const physical = [plainNarrow];
+    const requiredFields = { ...fields, permission_set_package: { ...fields.permission_set_package, required: true } };
+    const entries = diffManagedIndexes({
+      table: GRANTS,
+      expected: [{ name: WIDE_NAME, columns: WIDE, unique: true }],
+      legacy: legacyUniqueReplacements({
+        table: GRANTS, fields: requiredFields, tenantField: 'organization_id', physicalColumns: before, declaredIndexes: NEW_INDEXES, physical,
+      }),
+      physical,
+      tenantField: 'organization_id',
+      tenantKeyCertified: true,
+    });
+    expect(entries.map((e) => e.op.type)).toEqual(['create_index']);
   });
 
   it('CONTROL: a carrier whose resolved key is NOT the narrower columns is still the orphan arm\'s (drop_index, destructive)', () => {

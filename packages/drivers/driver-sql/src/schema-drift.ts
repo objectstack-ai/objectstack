@@ -2878,14 +2878,23 @@ export function diffManagedIndexes(args: {
     // physical index was the declared one and matched by name — so it is KEPT:
     // accounted for, nothing offered, never left to the orphan arm, which would
     // offer to drop it (destructive). The disposition the uncertified NULL-safe
-    // case below gets. Only a carrier whose resolved key is exactly the narrower
-    // columns (any NULL-safe part being the tenant column's) is claimed; an
-    // unresolved carrier stays not-ours-to-reconcile, as the orphan arm already
-    // treats it.
+    // case below gets. A carrier whose resolved key is exactly the narrower
+    // columns (any NULL-safe part being the tenant column's) is claimed. So is a
+    // carrier whose generation expression could not be read (no `shadowKey`):
+    // it sits under the narrower key's generated name and we do not know what
+    // it hashes, so it is kept, not guessed at — the orphan arm below does NOT
+    // skip an unresolved carrier, and would offer it as a destructive
+    // `drop_index` (contract review must-fix 1 on #32356). A carrier whose
+    // resolved key is some other set of columns is still the orphan arm's.
     if (l.widenedBy !== undefined) {
       for (const n of l.legacyNames) {
         const p = byName.get(n);
-        if (!p || !p.unique || p.partial === true || !isHashShadowCarrier(p) || !p.shadowKey) continue;
+        if (!p || !p.unique || !isHashShadowCarrier(p)) continue;
+        if (!p.shadowKey) {
+          explained.add(n);
+          continue;
+        }
+        if (p.partial === true) continue;
         const key = enforcedIndexKey(p);
         if (!sameColumns(key.columns, l.legacyColumns)) continue;
         if (!(key.nullSafeColumns ?? []).every((c) => c === tenantField)) continue;
