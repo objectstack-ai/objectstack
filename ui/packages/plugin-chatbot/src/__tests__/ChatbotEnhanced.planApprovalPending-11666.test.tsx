@@ -164,12 +164,15 @@ describe('ChatbotEnhanced — onPlanApprovalPendingChange (objectui#11666)', () 
 
   it('an older plan a newer one superseded does not keep the reading alive', () => {
     const spy = vi.fn();
+    // The two plans sit in two turns, a user message between them: within ONE
+    // turn the older plan draws no card at all (one plan card per build turn).
     render(
       <ChatbotEnhanced
-        messages={thread(
-          [toolPart('propose_blueprint', 'plan-1', proposal('Helpdesk'))],
-          [toolPart('propose_blueprint', 'plan-2', proposal('Helpdesk with SLAs'))],
-        )}
+        messages={uiMessagesToChatMessages([
+          { id: 'a1', role: 'assistant', parts: [toolPart('propose_blueprint', 'plan-1', proposal('Helpdesk'))] },
+          { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'add SLAs' }] },
+          { id: 'a2', role: 'assistant', parts: [toolPart('propose_blueprint', 'plan-2', proposal('Helpdesk with SLAs'))] },
+        ])}
         onSendMessage={vi.fn()}
         onPlanApprovalPendingChange={spy}
       />,
