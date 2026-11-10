@@ -437,10 +437,20 @@ describe('[#32116] a schema-refused SCIM request names the connection its live b
     expect(h.refusals).toEqual([
       { connectionId: CONNECTION, organizationId: ORG, resource: 'Users', method: 'POST', status: 400, scimType: 'invalidValue', ipAddress: CLIENT },
     ]);
-    // Read-only: the lookup wrote nothing to the credential, its last use included.
+    // Read-only: the lookup wrote nothing to the credential. A never-used
+    // credential is exactly the row the verifier's last-use stamp WOULD write
+    // (its `last_used_at` is empty), so a refusal that counted as a use shows here.
     expect(writes).toEqual([]);
     const after = await h.engine.findOne(SCIM_CREDENTIAL_OBJECT, { where: { id: h.credentialId } }, { context: { isSystem: true } } as never);
+    expect((before as Record<string, unknown>).last_used_at ?? null).toBeNull();
+    expect((after as Record<string, unknown>).last_used_at ?? null).toBeNull();
     expect(after).toEqual(before);
+    // CONTROL: the same bearer on a request that verifies IS stamped — the column is live.
+    vi.restoreAllMocks();
+    const accepted = await h.send(scimRequest(h, 'GET', '/Users'));
+    expect(accepted.status).toBe(200);
+    const used = await h.engine.findOne(SCIM_CREDENTIAL_OBJECT, { where: { id: h.credentialId } }, { context: { isSystem: true } } as never);
+    expect((used as Record<string, unknown>).last_used_at ?? null).not.toBeNull();
   }, 60_000);
 
   it('(6) CONTROL: a forged SCIM-prefixed bearer on a schema 400 still names no connection', async () => {
