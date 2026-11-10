@@ -154,6 +154,26 @@ describe('validateSecurityPosture (ADR-0090 D7)', () => {
     expect(finding.message).not.toContain('incident');
   });
 
+  // [ADR-0153 D4] A pulled copy has no person owner, so 'private' — the
+  // general recommendation — would hide every row a sharing rule does not
+  // grant. The fix-it for a synced object recommends a model that does not.
+  it("a synced object's fix-it recommends 'public_read', and names the sharing rule 'private' needs", () => {
+    const [finding, ...rest] = validateSecurityPosture({
+      objects: [{ name: 'erp_order_copy', label: 'ERP order copy', managedBy: 'synced' }],
+    });
+    expect(rest).toEqual([]);
+    expect(finding).toMatchObject({ severity: 'error', rule: SECURITY_OWD_UNSET, where: 'object "erp_order_copy"' });
+    expect(finding.hint).toMatch(/^declare sharingModel: 'public_read' \(recommended:/);
+    expect(finding.hint).toContain('a sharing rule that grants read');
+    expect(finding.hint).not.toContain("'private' (owner + shares; recommended)");
+    expect(finding.hint).not.toContain('\n');
+    // twin: the same object unmanaged keeps the general recommendation
+    const [plain] = validateSecurityPosture({ objects: [{ name: 'erp_order_copy', label: 'ERP order copy' }] });
+    expect(plain.hint).toContain("'private' (owner + shares; recommended)");
+    // and a synced object that declares its model is not flagged
+    expect(rulesOf({ objects: [{ name: 'erp_order_copy', managedBy: 'synced', sharingModel: 'public_read' }] })).toEqual([]);
+  });
+
   it('does not flag system objects for unset OWD', () => {
     expect(rulesOf({ objects: [{ name: 'sys_thing' }, { name: 'custom', isSystem: true }] })).toEqual([]);
   });
@@ -1982,8 +2002,9 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     // the OWD dials FLAT and has no `security` envelope to nest them under.
     // [#18306] `fieldGroups` joined when the ADR-0090 D3 vocabulary freeze
     // started visiting the group headings that sit above the fields it already
-    // judged.
-    expected: ['actions', 'fieldGroups', 'fields', 'isSystem', 'label', 'name', 'sharingModel'],
+    // judged. [ADR-0153 D4] `managedBy` joined: `security-owd-unset` gives a
+    // `synced` object its own fix-it.
+    expected: ['actions', 'fieldGroups', 'fields', 'isSystem', 'label', 'managedBy', 'name', 'sharingModel'],
     declaredBy: 'ObjectSchema',
     keys: () => Object.keys(ObjectSchema.shape),
   },

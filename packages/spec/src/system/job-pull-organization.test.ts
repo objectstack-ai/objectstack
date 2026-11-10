@@ -117,7 +117,14 @@ describe('JobSchema.organization — the scheduled flow\'s value shape, reused',
 
 describe('defineStack refuses a job pull its stack cannot resolve — the cross-reference envelope', () => {
   const manifest = { id: 'com.example.jobpull', name: 'job-pull-test', version: '1.0.0', type: 'app' as const };
-  const order = { name: 'order', label: 'Order', fields: { external_id: { type: 'text' as const } } };
+  // [ADR-0153 D4] A sourced mapping writes into a `synced` object only.
+  const order = {
+    name: 'order',
+    label: 'Order',
+    managedBy: 'synced' as const,
+    sharingModel: 'public_read' as const,
+    fields: { external_id: { type: 'text' as const } },
+  };
   const mapping = {
     name: 'orders_pull',
     targetObject: 'order',
