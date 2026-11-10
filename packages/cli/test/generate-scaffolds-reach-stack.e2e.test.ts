@@ -150,7 +150,9 @@ describe('[#20215] `os init -t app` → `os g` every type → `os validate`', ()
     expect(validate.code, validate.stdout + validate.stderr).toBe(0);
     // The template's own object plus the generated one.
     expect(validate.stdout).toMatch(/Data: 2 Objects/);
-    for (const [label, n] of [['Apps', 1], ['Views', 1], ['Dashboards', 1], ['Actions', 1], ['Flows', 1]] as const) {
+    // [#32212] Likewise the template's starter app and its object's list
+    // view, beside the app and the view generated here.
+    for (const [label, n] of [['Apps', 2], ['Views', 2], ['Dashboards', 1], ['Actions', 1], ['Flows', 1]] as const) {
       expect(validate.stdout, label).toMatch(new RegExp(`\\b${n} ${label}\\b`));
     }
   });
