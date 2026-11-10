@@ -63,7 +63,8 @@ const FIELD_NO_CONSUMERS_EXPLANATION: RuleExplanation = {
     'A declared field is CONSUMED when something in this stack reads or displays it: a view column, ' +
       'an inline grid column, a form section, a page binding, a flow node, a dataset or cube member, a ' +
       'dashboard widget, a formula, a validation, a hook or an action that names it; a row-level ' +
-      'security predicate (`rowLevelSecurity[].using` / `.check`) that filters or checks rows by it; the ' +
+      'security predicate (`rowLevelSecurity[].using` / `.check`, or an object\'s `defaultRowScope`) that ' +
+      'filters or checks rows by it; the ' +
       'line-position field an inline grid stamps on drag-reorder and orders its lines by; a declared field ' +
       'group (`group` naming one of the object\'s `fieldGroups`) that places it on the synthesized ' +
       'layout; or a seed or import mapping that matches on it (`externalId` / `upsertKey`). One such ' +

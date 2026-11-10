@@ -1593,6 +1593,18 @@ describe('[#32256] validateFieldConsumers — a row-level security predicate rea
     const findings = verdicts(stack({ rowLevelSecurity: [OWN_ROWS] }));
     expect(findings['other.owner']).toBe('inert');
   });
+
+  it("an object's `defaultRowScope` is the same policy, on the object that declares it", () => {
+    const s = stack({});
+    (s.objects as AnyRec[])[0].defaultRowScope = { operation: 'all', using: "region == 'emea'", check: 'owner == current_user.email' };
+    expect(verdicts(s)).toEqual({ 'other.owner': 'inert' });
+  });
+
+  it('⛔ an object key that is not its row scope reads a bare word as prose, as before', () => {
+    const s = stack({});
+    (s.objects as AnyRec[])[0].description = "region == 'emea'";
+    expect(verdicts(s)['inv.region']).toBe('inert');
+  });
 });
 
 describe('[#32256] validateFieldConsumers — an inline grid reads its line-position field', () => {

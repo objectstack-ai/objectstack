@@ -40,7 +40,8 @@
  *     hook or action body, a dataset or cube dimension or measure (every
  *     field its column path reads — {@link creditAnalyticsColumns}), a widget
  *     filter, a sharing-rule condition, a row-level security predicate
- *     ({@link isRlsPredicateSite} — `rowLevelSecurity[].using` / `.check`).
+ *     ({@link isRlsPredicateSite} — `rowLevelSecurity[].using` / `.check`,
+ *     and an object's `defaultRowScope`).
  *   - **display** — the field is drawn: a view column, a form section, a page
  *     binding, an inline grid column ({@link creditInlineGridColumns}),
  *     `highlightFields`, `searchableFields`, an index.
@@ -86,7 +87,10 @@
  *     Both READ the fields they name on every request, as a sharing-rule
  *     `condition` does, so both are behaviour sites; and since the policy's
  *     fields are bare CEL identifiers (`owner == current_user.email`), both
- *     are read as expressions, every identifier a candidate.
+ *     are read as expressions, every identifier a candidate. An object's
+ *     `defaultRowScope` is the same policy shape with the object implied
+ *     (`DefaultRowScopeSchema`), already a behaviour site under `objects`,
+ *     and its two clauses are read as expressions the same way.
  *   - **A derived inline grid** ({@link creditDerivedInlineGrid},
  *     `deriveInlineGridColumns`). A relationship field that sets `inlineEdit`
  *     with no `inlineColumns`, and a `subforms` entry with no `columns`, both
@@ -204,9 +208,9 @@ import {
   isInlineRowFormOffered,
   resolveDisplayField,
 } from '@objectstack/spec/data';
-import type { DisplayNameObjectMeta } from '@objectstack/spec/data';
+import type { DisplayNameObjectMeta, ServiceObject } from '@objectstack/spec/data';
 import { referenceTargetOf } from '@objectstack/spec/data';
-import type { PermissionSet, RowLevelSecurityPolicy } from '@objectstack/spec/security';
+import type { DefaultRowScope, PermissionSet, RowLevelSecurityPolicy } from '@objectstack/spec/security';
 import { collectionEntries } from './collection-entries.js';
 import {
   indexServedObjectGraph,
@@ -323,6 +327,14 @@ const CARRIER_IDENTITY_SEGMENTS: ReadonlySet<string> = new Set(['externalId', 'u
 const RLS_POLICIES_KEY = 'rowLevelSecurity' satisfies keyof PermissionSet;
 
 /**
+ * The object key that holds its implied-object row policy
+ * (`ObjectSchema.defaultRowScope`, `DefaultRowScopeSchema`), enforced by
+ * `plugin-security`'s `object-default-row-scope.ts`. Typed against the spec
+ * for the reason {@link RLS_POLICIES_KEY} gives.
+ */
+const DEFAULT_ROW_SCOPE_KEY = 'defaultRowScope' satisfies keyof ServiceObject;
+
+/**
  * The two predicate clauses of a row-level security policy
  * (`RowLevelSecurityPolicySchema`): `using`, the row filter compiled onto
  * every read, update and delete the policy governs (ADR-0056 D4), and
@@ -336,29 +348,30 @@ const RLS_POLICIES_KEY = 'rowLevelSecurity' satisfies keyof PermissionSet;
  * error here rather than a credit that quietly stops matching.
  */
 const RLS_PREDICATE_KEYS: ReadonlySet<string> = new Set(
-  ['using', 'check'] as const satisfies readonly (keyof RowLevelSecurityPolicy)[],
+  ['using', 'check'] as const satisfies readonly (keyof RowLevelSecurityPolicy & keyof DefaultRowScope)[],
 );
 
 /**
- * [#32256] Whether a site is a row-level security predicate of a permission
- * set: `permissions[].rowLevelSecurity[].using` / `.check`. The walk does not
- * put array indices in `segments`, so the policy key and the clause are the
- * last two segments whatever shape (array or name-keyed map) `permissions`
- * was authored in.
+ * [#32256] Whether a site is a row-level security predicate: a permission
+ * set's `permissions[].rowLevelSecurity[].using` / `.check`, or an object's
+ * `objects[].defaultRowScope.using` / `.check`. The walk does not put array
+ * indices in `segments`, so the policy key and the clause are the last two
+ * segments whatever shape (array or name-keyed map) the root was authored in.
  *
- * It is the only READ under the `permissions` carrier root: a field-level
- * grant (`fields`), an object grant and every other key of a permission set
- * stay carriers. A policy's `object` is the enclosing
- * declaration {@link contextOf} already resolves, so the predicate's
- * identifiers are credited to the object the policy filters.
+ * A permission-set policy is the only READ under the `permissions` carrier
+ * root: a field-level grant (`fields`), an object grant and every other key
+ * of a permission set stay carriers. A policy's `object` is the enclosing
+ * declaration {@link contextOf} already resolves, and a `defaultRowScope`'s
+ * object is the one that declares it, so the predicate's identifiers are
+ * credited to the object the policy filters.
  */
 function isRlsPredicateSite(root: string, segments: readonly string[]): boolean {
   const n = segments.length;
+  if (n < 2 || !RLS_PREDICATE_KEYS.has(segments[n - 1])) return false;
+  const carrier = segments[n - 2];
   return (
-    root === 'permissions' &&
-    n >= 2 &&
-    segments[n - 2] === RLS_POLICIES_KEY &&
-    RLS_PREDICATE_KEYS.has(segments[n - 1])
+    (root === 'permissions' && carrier === RLS_POLICIES_KEY) ||
+    (root === 'objects' && carrier === DEFAULT_ROW_SCOPE_KEY)
   );
 }
 
