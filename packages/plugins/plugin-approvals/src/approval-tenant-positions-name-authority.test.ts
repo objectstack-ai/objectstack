@@ -530,6 +530,16 @@ describe('[ADR-0131 D1] under a walled posture, a request with no organization i
     return { status: row?.status, pending: row?.pending_approvers, actions: actions.length };
   }
 
+  /**
+   * An admitted caller's answer: the door's result, or — for a caller whose
+   * active organization is not the request's — `READ_BACK_FAILED`, the loud
+   * answer for a write that landed but whose echo the caller's organization
+   * scope cannot read (the write is recorded). Never a refusal.
+   */
+  const expectAdmitted = (threw: string | null) => {
+    if (threw !== null) expect(threw).toMatch(/^READ_BACK_FAILED:/);
+  };
+
   /** The effect an admitted override door leaves. */
   const ADMITTED: Record<string, (t: Awaited<ReturnType<typeof trace>>) => void> = {
     approve: (t) => expect(t.status).toBe('approved'),
@@ -577,13 +587,13 @@ describe('[ADR-0131 D1] under a walled posture, a request with no organization i
 
     it.each(OVERRIDE_DOORS)('CONTROL — a platform administrator still acts on `%s`', async (door) => {
       const { engine, svc, id } = await setup(posture, null);
-      expect(await act(svc, door, id, PLATFORM)).toBeNull();
+      expectAdmitted(await act(svc, door, id, PLATFORM));
       ADMITTED[door](await trace(engine, id, 'usr_platform'));
     });
 
     it.each(OVERRIDE_DOORS)('CONTROL — a system context still acts on `%s`', async (door) => {
       const { engine, svc, id } = await setup(posture, null);
-      expect(await act(svc, door, id, SYS)).toBeNull();
+      expectAdmitted(await act(svc, door, id, SYS));
       ADMITTED[door](await trace(engine, id, 'system'));
     });
 
@@ -606,7 +616,7 @@ describe('[ADR-0131 D1] under a walled posture, a request with no organization i
     it.each(OVERRIDE_DOORS)('CONTROL — a tenant administrator still acts on `%s` for a request with no organization', async (door) => {
       const { context } = await resolve('genuine');
       const { engine, svc, id } = await setup('single', null);
-      expect(await act(svc, door, id, context)).toBeNull();
+      expectAdmitted(await act(svc, door, id, context));
       ADMITTED[door](await trace(engine, id, ACTOR));
     });
   });

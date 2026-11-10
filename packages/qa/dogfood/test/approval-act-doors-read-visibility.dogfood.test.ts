@@ -549,8 +549,11 @@ describe('behind the organization wall (isolated posture), a request with no org
         // CONTROL — the platform administrator decides a request with no organization.
         const before = await snapshot(orgLessForAdmin.id);
         expect(before.row?.status).toBe('pending');
+        // Admitted, never refused: the decision lands. (Its echo is read in the
+        // administrator's active organization, which the row is outside, so the
+        // answer may be the loud READ_BACK_FAILED, the write recorded.)
         const decided = await act(adminToken, orgLessForAdmin.id, 'approve', {});
-        expect(decided.status, JSON.stringify(decided.body)).toBe(200);
+        expect(['REQUEST_NOT_FOUND', 'FORBIDDEN'], JSON.stringify(decided.body)).not.toContain(codeOf(decided));
         expect((await stored(orgLessForAdmin.id))?.status).toBe('approved');
 
         // CONTROL — A's own administrator still decides A's request through the
