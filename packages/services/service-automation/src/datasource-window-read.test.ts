@@ -37,40 +37,61 @@ type Row = Record<string, unknown>;
 
 type Pushdown = 'both' | 'lower' | 'upper' | 'none';
 
+/** How the remote behind the plugin driver answers. */
+interface RemoteBehaviour {
+    /** Which of a range's two bounds (`$gte`, `$lt`) the driver sends to the remote. */
+    pushdown: Pushdown;
+    /** Fields whose predicates the driver does NOT push (they reach the floor only). */
+    unpushed: string[];
+    /** Called after each `find` answers — a remote written to while the pull reads it. */
+    afterFind?: (call: number) => void;
+}
+
 /**
- * Evaluate the parts of `where` this driver pushes down: the comparisons on
- * `field` its mode names. Every other predicate (the organization equality, a
- * key comparison) is NOT pushed — the driver answers a superset, which the
+ * The parts of `where` this driver pushes down: an equality on any field, and
+ * a range's bounds as its `pushdown` names them. A field in `unpushed`, and any
+ * other operator, is NOT pushed — the driver answers a superset, which the
  * floor re-applies in memory.
  */
-function pushedDown(where: unknown, row: Row, field: string, mode: Pushdown): boolean {
+function pushedDown(where: unknown, row: Row, behaviour: RemoteBehaviour): boolean {
     if (where === null || typeof where !== 'object') return true;
     const w = where as Record<string, unknown>;
-    if (Array.isArray(w.$and)) return w.$and.every((part) => pushedDown(part, row, field, mode));
-    const cond = w[field];
-    if (cond === undefined || cond === null || typeof cond !== 'object') return true;
-    const value = row[field];
-    const ops = cond as Record<string, unknown>;
-    const cmp = (a: unknown, b: unknown) => (typeof a === 'number' ? a - (b as number) : String(a).localeCompare(String(b)));
-    if ('$gte' in ops && (mode === 'both' || mode === 'lower')) {
-        if (value === null || value === undefined || cmp(value, ops.$gte) < 0) return false;
-    }
-    if ('$lt' in ops && (mode === 'both' || mode === 'upper')) {
-        if (value === null || value === undefined || cmp(value, ops.$lt) >= 0) return false;
-    }
-    return true;
+    return Object.keys(w).every((key) => {
+        const cond = w[key];
+        if (key === '$and') return !Array.isArray(cond) || cond.every((part) => pushedDown(part, row, behaviour));
+        if (key.startsWith('$') || behaviour.unpushed.includes(key)) return true;
+        const value = row[key];
+        if (cond === null || typeof cond !== 'object') return value === cond;
+        const ops = cond as Record<string, unknown>;
+        // Only a comparison of two numbers or two strings is pushed; anything else is left to the floor.
+        const comparable = (b: unknown) => (typeof value === 'number' && typeof b === 'number')
+            || (typeof value === 'string' && typeof b === 'string');
+        const below = (b: unknown) => (typeof value === 'number' ? value < (b as number) : String(value) < String(b));
+        const mode = behaviour.pushdown;
+        if ('$gte' in ops && (mode === 'both' || mode === 'lower')) {
+            if (value === null || value === undefined) return false;
+            if (comparable(ops.$gte) && below(ops.$gte)) return false;
+        }
+        if ('$lt' in ops && (mode === 'both' || mode === 'upper')) {
+            if (value === null || value === undefined) return false;
+            if (comparable(ops.$lt) && !below(ops.$lt)) return false;
+        }
+        return true;
+    });
 }
 
 interface PluginRemote {
     rows: Row[];
     sent: Row[];
-    /** Called after each `find` answers — a remote written to while the pull reads it. */
-    afterFind?: (call: number) => void;
+    behaviour: RemoteBehaviour;
 }
 
-function flooredEngine(opts: { rows: Row[]; pushdown?: Pushdown; rowCap?: number; field?: string; fieldType?: string }) {
-    const field = opts.field ?? 'seq';
-    const remote: PluginRemote = { rows: opts.rows.map((r) => ({ ...r })), sent: [] };
+function flooredEngine(opts: { rows: Row[]; pushdown?: Pushdown; unpushed?: string[]; rowCap?: number }) {
+    const remote: PluginRemote = {
+        rows: opts.rows.map((r) => ({ ...r })),
+        sent: [],
+        behaviour: { pushdown: opts.pushdown ?? 'both', unpushed: opts.unpushed ?? [] },
+    };
     const driver = {
         name: 'warehouse',
         version: '0.0.1',
@@ -80,12 +101,12 @@ function flooredEngine(opts: { rows: Row[]; pushdown?: Pushdown; rowCap?: number
         async find(_object: string, query: Row = {}) {
             remote.sent.push({ ...query });
             const answer = remote.rows
-                .filter((r) => pushedDown(query.where, r, field, opts.pushdown ?? 'both'))
+                .filter((r) => pushedDown(query.where, r, remote.behaviour))
                 .map((r) => ({ ...r }))
                 .reverse();
-            const page = typeof query.limit === 'number' ? answer.slice(0, query.limit) : answer;
-            remote.afterFind?.(remote.sent.length);
-            return page;
+            remote.behaviour.afterFind?.(remote.sent.length);
+            // The caller's bound, applied after the filter, by presence: the floor sends cap + 1.
+            return typeof query.limit === 'number' ? answer.slice(0, query.limit) : answer;
         },
         async findOne() { throw new Error('the floor answers findOne itself'); },
         async count() { throw new Error('the floor answers count itself'); },
@@ -156,7 +177,7 @@ describe('[ADR-0153 D2] floored: windows bounded on both sides, through the floo
         const { engine } = flooredEngine({ rows: seqRows([5, 9, 7]) });
         const rec = recorder();
         const report = await readSourceInWindows(FLOORED_SOURCE, {
-            find: (q) => engine.find('wh_order', q as any),
+            find: (q) => engine.find('wh_order', q),
             ...rec,
         }, { path: 'floored', from: 0 });
         expect(rec.written.map((r) => r.seq).sort()).toEqual([5, 7, 9]);
@@ -169,7 +190,7 @@ describe('[ADR-0153 D2] floored: windows bounded on both sides, through the floo
         const { engine, remote } = flooredEngine({ rows: seqRows(values), rowCap: 4 });
         const rec = recorder();
         const report = await readSourceInWindows(FLOORED_SOURCE, {
-            find: (q) => engine.find('wh_order', q as any),
+            find: (q) => engine.find('wh_order', q),
             ...rec,
         }, { path: 'floored', from: 100 });
         const seqs = rec.written.map((r) => r.seq as number);
@@ -191,7 +212,7 @@ describe('[ADR-0153 D2] floored: windows bounded on both sides, through the floo
         const values = Array.from({ length: 12 }, (_, i) => 10 + i);
         const { engine, remote } = flooredEngine({ rows: seqRows(values), rowCap: 4 });
         const rec = recorder();
-        await readSourceInWindows(FLOORED_SOURCE, { find: (q) => engine.find('wh_order', q as any), ...rec },
+        await readSourceInWindows(FLOORED_SOURCE, { find: (q) => engine.find('wh_order', q), ...rec },
             { path: 'floored', from: 10 });
         const max = Math.max(...values);
         for (const query of remote.sent) {
@@ -207,7 +228,7 @@ describe('[ADR-0153 D2] floored: windows bounded on both sides, through the floo
         const { engine } = flooredEngine({ rows: [...seqRows([1, 2]), ...seqRows([7, 7, 7, 7, 7, 7]).map((r, i) => ({ ...r, id: `x${i}` }))], rowCap: 4 });
         const rec = recorder();
         const err = await refusalOf(readSourceInWindows(FLOORED_SOURCE, {
-            find: (q) => engine.find('wh_order', q as any), ...rec,
+            find: (q) => engine.find('wh_order', q), ...rec,
         }, { path: 'floored', from: 0 }));
         expect(err.code).toBe('EXTERNAL_ROW_CAP_EXCEEDED');
         expect(err.status).toBe(422);
@@ -224,7 +245,7 @@ describe('[ADR-0153 D2] floored: windows bounded on both sides, through the floo
             const { engine, remote } = flooredEngine({ rows: seqRows(values), rowCap: 4, pushdown: mode });
             const rec = recorder();
             const err = await refusalOf(readSourceInWindows(FLOORED_SOURCE, {
-                find: (q) => engine.find('wh_order', q as any), ...rec,
+                find: (q) => engine.find('wh_order', q), ...rec,
             }, { path: 'floored', from: 10 }));
             expect(err.code).toBe('EXTERNAL_ROW_CAP_EXCEEDED');
             expect(err.status).toBe(422);
@@ -240,10 +261,10 @@ describe('[ADR-0153 D2] floored: windows bounded on both sides, through the floo
         const mine = seqRows(Array.from({ length: 6 }, (_, i) => 10 + i), { organization_id: 'org_a' });
         const theirs = seqRows(Array.from({ length: 6 }, (_, i) => 10 + i), { organization_id: 'org_b' })
             .map((r, i) => ({ ...r, id: `b${i}` }));
-        const { engine, remote } = flooredEngine({ rows: [...mine, ...theirs], rowCap: 4 });
+        const { engine, remote } = flooredEngine({ rows: [...mine, ...theirs], rowCap: 4, unpushed: ['organization_id'] });
         const rec = recorder();
         await readSourceInWindows({ ...FLOORED_SOURCE, scope: { organization_id: 'org_a' } }, {
-            find: (q) => engine.find('wh_order', q as any), ...rec,
+            find: (q) => engine.find('wh_order', q), ...rec,
         }, { path: 'floored', from: 10 });
         expect(rec.written.every((r) => r.organization_id === 'org_a')).toBe(true);
         expect(rec.written).toHaveLength(6);
@@ -256,17 +277,17 @@ describe('[ADR-0153 D2] floored: windows bounded on both sides, through the floo
         const during = Array.from({ length: 8 }, (_, i) => 5401 + i * 114); // 5401..6199
         const { engine, remote } = flooredEngine({ rows: seqRows(before), rowCap: 4 });
         let landed = false;
-        remote.afterFind = () => {
+        remote.behaviour.afterFind = () => {
             if (landed) return;
             landed = true;
             remote.rows.push(...seqRows(during).map((r, i) => ({ ...r, id: `late${i}` })));
         };
         const rec = recorder();
         const first = await readSourceInWindows(FLOORED_SOURCE, {
-            find: (q) => engine.find('wh_order', q as any), ...rec,
+            find: (q) => engine.find('wh_order', q), ...rec,
         }, { path: 'floored', from: 5000 });
         expect(first.committed).toBeDefined();
-        await readSourceInWindows(FLOORED_SOURCE, { find: (q) => engine.find('wh_order', q as any), ...rec },
+        await readSourceInWindows(FLOORED_SOURCE, { find: (q) => engine.find('wh_order', q), ...rec },
             { path: 'floored', from: first.committed as number });
         const pulled = new Set(rec.written.map((r) => r.seq));
         for (const value of [...before, ...during]) expect(pulled.has(value), String(value)).toBe(true);
@@ -276,7 +297,7 @@ describe('[ADR-0153 D2] floored: windows bounded on both sides, through the floo
         const { engine } = flooredEngine({ rows: [{ id: 'o1', seq: 2 ** 53 + 2 }] });
         const rec = recorder();
         const err = await refusalOf(readSourceInWindows(FLOORED_SOURCE, {
-            find: (q) => engine.find('wh_order', q as any), ...rec,
+            find: (q) => engine.find('wh_order', q), ...rec,
         }, { path: 'floored', from: 0 }));
         expect(err.code).toBe('VALIDATION_ERROR');
         expect(err.status).toBe(400);
@@ -288,7 +309,7 @@ describe('[ADR-0153 D2] floored: windows bounded on both sides, through the floo
         const { engine } = flooredEngine({ rows: [{ id: 2 ** 53 + 2, seq: 3 }] });
         const rec = recorder();
         const err = await refusalOf(readSourceInWindows(FLOORED_SOURCE, {
-            find: (q) => engine.find('wh_order', q as any), ...rec,
+            find: (q) => engine.find('wh_order', q), ...rec,
         }, { path: 'floored', from: 0 }));
         expect(err.code).toBe('VALIDATION_ERROR');
         expect(err.status).toBe(400);
@@ -300,7 +321,7 @@ describe('[ADR-0153 D2] floored: windows bounded on both sides, through the floo
         const { engine } = flooredEngine({ rows: seqRows([3, 4]) });
         const rec = recorder(() => true);
         const report = await readSourceInWindows(FLOORED_SOURCE, {
-            find: (q) => engine.find('wh_order', q as any), ...rec,
+            find: (q) => engine.find('wh_order', q), ...rec,
         }, { path: 'floored', from: 0 });
         expect(rec.commits).toEqual([]);
         expect(report.committed).toBeUndefined();
@@ -310,7 +331,7 @@ describe('[ADR-0153 D2] floored: windows bounded on both sides, through the floo
     it('a refused row below a written one stays behind the commit; one above every written row keeps the position below it', async () => {
         const { engine } = flooredEngine({ rows: seqRows([3, 5, 8]) });
         const rec = recorder((row) => row.seq === 8);
-        await readSourceInWindows(FLOORED_SOURCE, { find: (q) => engine.find('wh_order', q as any), ...rec },
+        await readSourceInWindows(FLOORED_SOURCE, { find: (q) => engine.find('wh_order', q), ...rec },
             { path: 'floored', from: 0 });
         // (a) of invariant 9 is the largest value WRITTEN: the refused 8 is read again next run.
         expect(lastOf(rec.commits)?.position).toBe(5);
@@ -345,7 +366,7 @@ async function builtinEngine(rows: Array<{ no: string; at: string | null; org?: 
     engine.registerDatasourceDef({ name: 'erp', driver: 'sqlite', schemaMode: 'external' } as any);
     engine.registerApp({ id: 'erp_pkg', name: 'ERP', objects: [object] } as any);
     const sent: SyncWindowQuery[] = [];
-    const find = (q: SyncWindowQuery) => { sent.push(q); return engine.find('erp_order', q as any); };
+    const find = (q: SyncWindowQuery) => { sent.push(q); return engine.find('erp_order', q); };
     return { engine, driver: d, find, sent };
 }
 
@@ -491,14 +512,14 @@ describe('[ADR-0153 D2] builtin: aligned windows read whole, paged by key', () =
         engine.registerDriver(d);
         engine.registerDatasourceDef({ name: 'ledger', driver: 'sqlite', schemaMode: 'external' } as any);
         engine.registerApp({ id: 'ledger_pkg', name: 'Ledger', objects: [object] } as any);
-        const raw = await engine.find('ledger_row', { where: { seq: 1 } } as any);
+        const raw = await engine.find('ledger_row', { where: { seq: 1 } });
         expect(typeof raw[0].id).toBe('number');
         expect(Number.isSafeInteger(raw[0].id)).toBe(false);
         const source: SyncWindowSource = {
             mapping: 'ledger_rows', object: 'ledger_row', datasource: 'ledger', field: 'seq', kind: 'integer', key: 'id',
         };
         const err = await refusalOf(readSourceInWindows(source, {
-            find: (q) => engine.find('ledger_row', q as any), ...recorder(),
+            find: (q) => engine.find('ledger_row', q), ...recorder(),
         }, { path: 'builtin', from: 0 }));
         // The high-water read meets the 64-bit watermark first.
         expect(err.reason).toBe('watermark_not_exact');
@@ -506,7 +527,7 @@ describe('[ADR-0153 D2] builtin: aligned windows read whole, paged by key', () =
         expect(err.status).toBe(400);
         await d.knex.raw('update LEDGER set SEQ = 2 where K = 2');
         const keyErr = await refusalOf(readSourceInWindows(source, {
-            find: (q) => engine.find('ledger_row', q as any), ...recorder(),
+            find: (q) => engine.find('ledger_row', q), ...recorder(),
         }, { path: 'builtin', from: 0 }));
         expect(keyErr.reason).toBe('source_key_not_exact');
         expect(keyErr.status).toBe(400);

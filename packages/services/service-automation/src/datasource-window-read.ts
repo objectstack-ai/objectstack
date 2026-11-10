@@ -74,7 +74,7 @@
 
 import { temporalStorageForm } from '@objectstack/core';
 import { EXTERNAL_ROW_CAP_EXCEEDED_CODE } from '@objectstack/objectql';
-import { EXTERNAL_ROW_CAP_CEILING } from '@objectstack/spec/data';
+import { EXTERNAL_ROW_CAP_CEILING, type FilterCondition, type SortNode } from '@objectstack/spec/data';
 import { ConnectorPullError, type ConnectorPullRefusalReason } from './pull-refusal.js';
 
 type Row = Record<string, unknown>;
@@ -93,8 +93,8 @@ export interface SyncWindow {
 
 /** The read a window or a page sends to the source object. */
 export interface SyncWindowQuery {
-    where: Record<string, unknown>;
-    orderBy?: Array<{ field: string; order: 'asc' | 'desc' }>;
+    where: FilterCondition;
+    orderBy?: SortNode[];
     limit?: number;
 }
 
@@ -116,7 +116,7 @@ export interface SyncWindowSource {
      * source states its own organization scope — e.g. `{ organization_id: X }`.
      * Absent: the source is read as configured (shared, or a `single` posture).
      */
-    scope?: Record<string, unknown>;
+    scope?: FilterCondition;
 }
 
 export interface SyncWindowReadDeps {
@@ -485,15 +485,15 @@ class WindowRun {
     }
 
     /** The window's bounds as a `where`: `field >= lo`, and `field < hi` when bounded. */
-    private range(window: SyncWindow): Record<string, unknown> {
+    private range(window: SyncWindow): FilterCondition {
         const { field, kind } = this.source;
-        const lower = { [field]: { $gte: spellCanon(kind, window.lo) } };
+        const lower: FilterCondition = { [field]: { $gte: spellCanon(kind, window.lo) } };
         return window.hi === undefined ? lower : { $and: [lower, { [field]: { $lt: spellCanon(kind, window.hi) } }] };
     }
 
     /** `where` with the organization conjunct (invariant 10) and any extra conjunct. */
-    private scoped(where: Record<string, unknown>, extra?: Record<string, unknown>): Record<string, unknown> {
-        const parts = [this.source.scope, where, extra].filter((p): p is Record<string, unknown> => p !== undefined);
+    private scoped(where: FilterCondition, extra?: FilterCondition): FilterCondition {
+        const parts = [this.source.scope, where, extra].filter((p): p is FilterCondition => p !== undefined);
         return parts.length === 1 ? parts[0] : { $and: parts };
     }
 
