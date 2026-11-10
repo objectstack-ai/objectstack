@@ -529,18 +529,25 @@ export function judgeJobPull(
  * body's job — each body's items register under the body's own id — so the
  * body is found the way `AppPlugin` finds a datasource's owner: walking
  * `resolveArtifactPackageOrder`. A body's job object answers that body (by
- * identity, else, for a top-level copy of it, by name in body order); a
- * top-level job no body declares is the residual, registered under `appId`.
- * An artifact without `packages[]` declares every job from `appId`.
+ * identity, else, for a top-level copy of it, by name in body order).
+ *
+ * A top-level job no body declares is the residual: the job service runs it
+ * under `appId`, but that id is no package (`ObjectQL#recordResidualOwner`:
+ * "the residual is not a package") unless a body carries it, so such a job
+ * answers `undefined` and its pull names no package — the no-package read,
+ * as before. An artifact without `packages[]` declares every job from `appId`.
  */
-export function jobDeclaringPackages(bundle: unknown, appId: string): (job: unknown) => string {
+export function jobDeclaringPackages(bundle: unknown, appId: string): (job: unknown) => string | undefined {
     if (bundle === null || typeof bundle !== 'object' || (bundle as { packages?: unknown }).packages === undefined) {
         return () => appId;
     }
     const byIdentity = new Map<unknown, string>();
     const byName = new Map<string, string>();
+    // The residual's owner is a package only when a body carries its id.
+    let residual: string | undefined;
     for (const body of resolveArtifactPackageOrder(bundle)) {
         const id = artifactPackageId(body);
+        if (id === appId) residual = appId;
         const jobs = (body as { jobs?: unknown } | null | undefined)?.jobs;
         if (!id || !Array.isArray(jobs)) continue;
         for (const job of jobs) {
@@ -554,7 +561,7 @@ export function jobDeclaringPackages(bundle: unknown, appId: string): (job: unkn
         const held = byIdentity.get(job);
         if (held !== undefined) return held;
         const name = (job as { name?: unknown } | null | undefined)?.name;
-        return (typeof name === 'string' ? byName.get(name) : undefined) ?? appId;
+        return (typeof name === 'string' ? byName.get(name) : undefined) ?? residual;
     };
 }
 
@@ -802,7 +809,8 @@ export interface AppArtifactJobScheduling {
  *     `automation` service serves `pullConnectorSource`; each run calls that
  *     contract method through the service registry under the job's execution
  *     context and as the package that declares the job
- *     ({@link jobDeclaringPackages}, its `callerPackageId`), and maps the
+ *     ({@link jobDeclaringPackages}, its `callerPackageId`; a residual
+ *     top-level job names none), and maps the
  *     result with {@link pullRunOutcomeOf}. A pull that
  *     does not bind schedules nothing (warn) — install-local refuses that
  *     shape up front ({@link collectJobsWithoutBody}), so on that door this
@@ -1045,7 +1053,12 @@ export async function scheduleAppArtifactJobs(
                     + 'stamped with could not be resolved — the pull runs with none, and its match lookup reads by the key alone',
                     { appId, job: jobName, mapping, error: err instanceof Error ? err.message : String(err) },
                 ));
-                const result = await service.pullConnectorSource({ mapping, context: jobExecutionContext(runAs), callerPackageId });
+                const result = await service.pullConnectorSource({
+                    mapping,
+                    context: jobExecutionContext(runAs),
+                    // A residual job names no package (above): the no-package read.
+                    ...(callerPackageId !== undefined ? { callerPackageId } : {}),
+                });
                 return pullRunOutcomeOf(result);
             };
             form = 'pull';

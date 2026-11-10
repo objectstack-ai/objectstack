@@ -671,7 +671,7 @@ describe('[#32071] a pull job names the package that declares it', () => {
         expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true }, callerPackageId: APP_ID }]);
     });
 
-    it('several packages: each body\'s job its own body; a residual top-level job the top-level id', async () => {
+    it('several packages: each body\'s job its own body; a residual top-level job no package', async () => {
         const residual = { ...PULL_JOB, name: 'residual_pull' };
         const bundle = {
             manifest: { id: 'com.example.maps', name: 'Maps', version: '0.1.0', type: 'app' },
@@ -685,8 +685,30 @@ describe('[#32071] a pull job names the package that declares it', () => {
         expect(of(PULL_JOB)).toBe('com.example.jobs');
         // A top-level copy of a body's job (an assembled artifact) is that body's.
         expect(of({ ...PULL_JOB })).toBe('com.example.jobs');
-        expect(of(residual)).toBe('com.example.top');
+        // The residual's owner is no package (`recordResidualOwner`)…
+        expect(of(residual)).toBeUndefined();
+        // …unless a body carries the top-level id: then that body is its package.
+        expect(jobDeclaringPackages(bundle, 'com.example.maps')(residual)).toBe('com.example.maps');
         // No `packages[]`: every job is the app's.
         expect(jobDeclaringPackages({ id: APP_ID, jobs: [PULL_JOB] }, APP_ID)(PULL_JOB)).toBe(APP_ID);
+    });
+    it('a residual top-level job\'s run names no package, so the pull reads by no package as before', async () => {
+        const h = harness();
+        const residual = { ...PULL_JOB, name: 'residual_pull' };
+        const out = await scheduleAppArtifactJobs(
+            { logger: h.logger, getService: (n: string) => h.services[n] } as unknown as PluginContext,
+            {
+                manifest: { id: 'com.example.top', name: 'Top', version: '0.1.0', type: 'app' },
+                jobs: [residual],
+                packages: [
+                    { manifest: { id: 'com.example.maps', name: 'Maps', version: '0.1.0', type: 'app', mappings: [MAPPING] } },
+                ],
+            },
+            { appId: 'com.example.top', ql: undefined, source: 'Test' },
+        );
+        expect(out.pulls).toEqual(['residual_pull']);
+        await h.run('residual_pull');
+        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true } }]);
+        expect(Object.keys(h.pulls[0] as object)).not.toContain('callerPackageId');
     });
 });

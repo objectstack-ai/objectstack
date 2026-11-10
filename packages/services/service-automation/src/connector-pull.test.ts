@@ -694,6 +694,78 @@ describe('[#32071] connector pull — a package caller reads the mapping from it
         expect(pathPulled(h)).toBe('alpha');
     });
 
+    const pullError = (h: Harness, callerPackageId?: string) =>
+        pullConnectorSource(h.deps, { mapping: 'crm_contacts', callerPackageId }).then(
+            () => undefined,
+            (e: unknown) => e as ConnectorPullError,
+        );
+    const answerOf = (err: ConnectorPullError | undefined) =>
+        err === undefined ? 'pulled' : `${err.status} ${err.reason}`;
+
+    it('a disabled package\'s own mapping answers mapping_not_found for its caller, as the no-package read does', async () => {
+        const h = overRegistry((r) => { install(r, CALLER); ship(r, CALLER); r.disablePackage(CALLER); });
+        expect(answerOf(await pullError(h)), 'no-package (main)').toBe('404 mapping_not_found');
+        expect(answerOf(await pullError(h, CALLER))).toBe('404 mapping_not_found');
+        expect(h.handler).not.toHaveBeenCalled();
+    });
+
+    it('a disabled closure holder\'s mapping answers mapping_not_found, as the no-package read does', async () => {
+        const h = overRegistry((r) => { install(r, ALPHA); install(r, CALLER, [ALPHA]); ship(r, ALPHA); r.disablePackage(ALPHA); });
+        expect(answerOf(await pullError(h)), 'no-package (main)').toBe('404 mapping_not_found');
+        expect(answerOf(await pullError(h, CALLER))).toBe('404 mapping_not_found');
+        expect(h.handler).not.toHaveBeenCalled();
+        // Re-enabled, the same caller pulls it: the withholding is the disable, nothing else.
+        h.registry.enablePackage(ALPHA);
+        await pullConnectorSource(h.deps, { mapping: 'crm_contacts', callerPackageId: CALLER });
+        expect(pathPulled(h)).toBe('alpha');
+    });
+
+    it('a disabled sole holder outside the closure answers mapping_not_found, not a refusal naming it', async () => {
+        const h = overRegistry((r) => { install(r, BETA); install(r, CALLER); ship(r, BETA); r.disablePackage(BETA); });
+        expect(answerOf(await pullError(h)), 'no-package (main)').toBe('404 mapping_not_found');
+        expect(answerOf(await pullError(h, CALLER))).toBe('404 mapping_not_found');
+    });
+
+    it('CONTROL (#32183\'s class): a disabled holder beside an enabled one in the closure still counts — refused, as today', async () => {
+        const h = overRegistry((r) => {
+            install(r, ALPHA); install(r, BETA); install(r, CALLER, [ALPHA, BETA]);
+            ship(r, ALPHA); ship(r, BETA); r.disablePackage(ALPHA);
+        });
+        expect(answerOf(await pullError(h)), 'no-package (main)').toBe('409 mapping_name_refused');
+        const err = await pullError(h, CALLER);
+        expect(answerOf(err)).toBe('409 mapping_name_refused');
+        expect(err?.message).toContain(ALPHA);
+        expect(err?.message).toContain(BETA);
+        expect(h.handler).not.toHaveBeenCalled();
+    });
+
+    describe('a multi-package artifact\'s residual owner (ADR-0130 D4: no package row)', () => {
+        // The residual rule files a stack's unclaimed top-level items under the
+        // top-level id, which is no package (`recordResidualOwner`); a body is
+        // a package. The binder sends no package for a residual job.
+        const TOP = 'com.acme.top';
+
+        it('a residual job (no package) pulls the mapping a body declares, as on main', async () => {
+            const h = overRegistry((r) => { install(r, BETA); ship(r, BETA); });
+            await pullConnectorSource(h.deps, { mapping: 'crm_contacts' });
+            expect(pathPulled(h)).toBe('beta');
+        });
+
+        it('a residual job (no package) pulls a mapping filed under the residual owner, as on main', async () => {
+            const h = overRegistry((r) => { install(r, BETA); ship(r, TOP); });
+            await pullConnectorSource(h.deps, { mapping: 'crm_contacts' });
+            expect(pathPulled(h)).toBe('top');
+        });
+
+        it('MIRROR: a body\'s job pulling a mapping filed under the residual owner is refused outside-closure (no package: pulled)', async () => {
+            const h = overRegistry((r) => { install(r, BETA); ship(r, TOP); });
+            const err = await pullError(h, BETA);
+            expect(answerOf(err)).toBe('409 mapping_name_refused');
+            expect(err?.message).toContain(TOP);
+            expect(h.handler).not.toHaveBeenCalled();
+        });
+    });
+
     it('CONTROL: an absent, null or empty caller package reads by no package; no registry to ask reads by no package', async () => {
         for (const callerPackageId of [undefined, null, '']) {
             const h = overRegistry((r) => { install(r, ALPHA); ship(r, ALPHA); });

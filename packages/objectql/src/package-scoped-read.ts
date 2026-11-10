@@ -22,11 +22,14 @@
  * `SchemaRegistry.getItem`'s, exactly as before (`SchemaRegistry.resolveItem`).
  *
  * `mapping`'s two by-name readers outside `/meta` — the import door's
- * `mappingName` (`@objectstack/rest`) and the connector pull
- * (`@objectstack/service-automation`) — read through the protocol's by-name
- * read with no package, so they are callers with no package: one holder is
- * served as before, and a name two packages hold is refused naming both
- * (each door answers that refusal as the `409` it is).
+ * `mappingName` (`@objectstack/rest`) and a connector pull that names no
+ * package (`@objectstack/service-automation`) — read through the protocol's
+ * by-name read with no package, so they are callers with no package: one
+ * holder is served as before, and a name two packages hold is refused naming
+ * both (each door answers that refusal as the `409` it is). A pull that names
+ * its package (`callerPackageId`, which the job binder sets to the package
+ * declaring the job, #32071) reads through `resolvePackageScopedName` from
+ * that package instead.
  *
  * ## What a reader answers
  *

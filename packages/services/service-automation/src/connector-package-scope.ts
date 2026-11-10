@@ -1,9 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [ADR-0150 D3/D4, epic #31527 child E5] Which declared connector instance a
- * name means — answered by the ONE package-scoped resolver
- * (`resolvePackageScopedName`, `@objectstack/objectql`), never by list order.
+ * [ADR-0150 D3/D4, epic #31527 child E5; #32071] Which declared connector
+ * instance a name means, and which `mapping` a package caller's connector
+ * pull reads ({@link mappingNameResolver}) — answered by the ONE
+ * package-scoped resolver (`resolvePackageScopedName`, `@objectstack/objectql`),
+ * never by list order.
  *
  * A connector is addressed by `(package, name)`. The engine keeps one live
  * instance per name, and the reconcile that materializes declared instances
@@ -27,6 +29,7 @@
 
 import {
     resolvePackageScopedName,
+    type PackageScopedHolder,
     type PackageScopedRefusal,
     type PackageScopedRegistry,
     type PackageScopedResolution,
@@ -115,6 +118,45 @@ export function mappingNameResolver(
             return undefined;
         }
         if (!registry) return undefined;
-        return resolvePackageScopedName(registry, { type: 'mapping', name, callerPackageId });
+        return withholdDisabledHolder(registry, resolvePackageScopedName(registry, { type: 'mapping', name, callerPackageId }));
     };
+}
+
+/**
+ * [#32071] The answer as the served face gives it on `main`: an item of a
+ * disabled package is answered as a missing name is (#24210,
+ * `isItemOfDisabledPackage` in the protocol's item face, applied AFTER
+ * resolution). So the pull answers `mapping_not_found` for a disabled
+ * package's mapping on the package-caller path as the no-package read does.
+ *
+ *  - Resolved to a package holder that is disabled (the caller's own item, or
+ *    the one holder in its closure): `not-found`.
+ *  - Refused `outside-closure` naming exactly one holder, a disabled package:
+ *    `not-found`, as the no-package read withholds that one holder's item.
+ *  - Every other refusal stands as the resolver wrote it. A disabled holder
+ *    beside an enabled one in the closure still counts, as it does for the
+ *    no-package read today; dropping disabled holders from the holder set is
+ *    #32183's change at `packageScopedHoldersOf`, which this does not touch.
+ *
+ * A registry that cannot say whether a package is disabled is read as is
+ * (plugin-sharing's `listedHoldersView` precedent).
+ */
+function withholdDisabledHolder(
+    registry: PackageScopedRegistry,
+    resolution: PackageScopedResolution,
+): PackageScopedResolution {
+    const isDisabled = (registry as { isPackageDisabled?: (id?: string) => boolean }).isPackageDisabled;
+    if (typeof isDisabled !== 'function') return resolution;
+    const disabled = (holder: PackageScopedHolder | undefined): boolean =>
+        holder?.kind === 'package' && isDisabled.call(registry, holder.packageId) === true;
+    if (resolution.status === 'resolved') {
+        return disabled(resolution.holder) ? { status: 'not-found' } : resolution;
+    }
+    if (resolution.status === 'refused'
+        && resolution.reason === 'outside-closure'
+        && resolution.candidates.length === 1
+        && disabled(resolution.candidates[0])) {
+        return { status: 'not-found' };
+    }
+    return resolution;
 }

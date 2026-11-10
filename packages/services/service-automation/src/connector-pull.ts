@@ -10,8 +10,11 @@
  * semantics (`mode`, `upsertKey`); `connectorSource` adds only where the rows
  * come from. So a pull is the import door with a different reader:
  *
- *   1. read the mapping through the protocol's `getMetaItem` — the read the
- *      import door's `mappingName` makes;
+ *   1. read the mapping by name (ADR-0150 D3): a pull that names its
+ *      package (`callerPackageId`) reads through the injected package-scoped
+ *      resolver (`mappingByPackage`) from that package; one that names none
+ *      reads through the protocol's `getMetaItem`, the read the import door's
+ *      `mappingName` makes;
  *   2. resolve `connectorSource.connector` to a DECLARED `rest` / `openapi`
  *      instance (`connectors[]`, materialized by this plugin), and its action;
  *   3. W1 watermark: read the highest value already written to the target
@@ -72,8 +75,9 @@ export type ConnectorPullRefusalReason =
     /**
      * [ADR-0150 D3, #32071] The mapping's name resolves to no one item for the
      * caller: two packages hold it in the caller's reach (for a caller with no
-     * package, the whole environment), or only a package outside the caller's
-     * closure holds it. The message names every candidate.
+     * package, the whole environment), only a package outside the caller's
+     * closure holds it, or, for a package caller, only the environment holds
+     * it (D3 (a)). The message names every candidate.
      */
     | 'mapping_name_refused'
     | 'no_connector_source'
