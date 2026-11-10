@@ -5602,9 +5602,16 @@ async function resolveRouteActionByPackage(deps: ActionExecutionDeps,
  * namespaces' object-less action — answer {@link pickActionHolder}'s refusal,
  * naming every holder; a package-qualified address reaches each. `undefined`
  * when one holder or none declares the name: the rungs of
- * {@link resolveRouteActionDeclaration} read it as before. A listing that
- * throws is the metadata plane failing to answer (ADR-0110 D3): `degraded`,
- * never a read of a copy.
+ * {@link resolveRouteActionDeclaration} read it as before.
+ *
+ * A listing that throws judges nothing: the rungs answer as before (they
+ * read their own sources, and fail as before when those fail), and the
+ * engine still refuses a call that names no package while two code owners
+ * hold a handler under the key (`ObjectQL#executeAction`, #31697). It
+ * is never read as "one holder": no declaration is served from it. A store
+ * read that throws while it is needed — an owner-less declaration beside
+ * another holder ({@link packagelessOriginOf}) — is the metadata plane
+ * failing to answer (ADR-0110 D3): `degraded`.
  */
 async function bareRouteHolderRefusal(deps: ActionExecutionDeps,
     requestContext: HttpProtocolContext,
@@ -5620,8 +5627,8 @@ async function bareRouteHolderRefusal(deps: ActionExecutionDeps,
             ? undefined
             : await deps.resolveService(requestContext, 'metadata', envId);
         decls = await collectActionDeclarations(deps, meta, objects, actions);
-    } catch (err: any) {
-        return { action: undefined, obj, degraded: true, reason: err?.message ?? String(err) };
+    } catch {
+        return undefined;
     }
     const named = decls.filter((d) => d.action?.name === actionName);
     const bound = isObjectLessActionKey(objectName) ? [] : named.filter((d) => d.objectName === objectName);
