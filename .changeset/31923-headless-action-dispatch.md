@@ -17,3 +17,5 @@ One narrowing, at the MCP action bridge below the published tool: an array `para
 
 Clause-②: yes (narrowing)
 Metadata-protocol: none
+
+<!-- adr-0087: not-required (no-migration-prescription) no metadata shape, schema, stored row or registered node type changes: the one narrowing is a malformed `params` array passed to the MCP action bridge (`run_action`), which ran before and is now refused before anything runs; the stored metadata is read exactly as before, so there is nothing for `objectstack migrate meta` to rewrite -->
