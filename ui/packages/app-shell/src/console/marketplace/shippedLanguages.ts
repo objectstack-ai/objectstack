@@ -17,7 +17,11 @@ export interface ShippedLanguage {
   label: string;
   /** The served `coverage_percent`, or `null` when the coverage names no row for it. */
   percent: number | null;
-  /** The version's default locale: the first the catalog lists. */
+  /**
+   * The version's default locale, as `locale_coverage.default_locale` names it.
+   * Never read off a position: the measurement lists the locales in bundle
+   * order when the app declares none, so the default need not come first.
+   */
   isDefault: boolean;
 }
 
@@ -42,8 +46,10 @@ export function languageLabel(code: string): string {
 
 /**
  * The languages `version` ships. `supported_locales` decides which languages
- * are drawn and in what order; `locale_coverage` only supplies each one's
- * percent, so a language the coverage names no row for is drawn without one.
+ * are drawn, in its order except that the default comes first;
+ * `locale_coverage` supplies the default (`default_locale`) and each one's
+ * percent, so a language the coverage names no row for is drawn without one,
+ * and without a coverage nothing is marked default.
  */
 export function readShippedLanguages(
   version: Pick<MarketplacePackageVersion, 'supported_locales' | 'locale_coverage'> | null | undefined,
@@ -54,16 +60,19 @@ export function readShippedLanguages(
   if (!Array.isArray(served)) return UNSERVED;
   const codes = served.filter((code): code is string => typeof code === 'string' && code !== '');
   if (codes.length === 0) return UNKNOWN;
-  const rows = Array.isArray(version.locale_coverage?.locales) ? version.locale_coverage.locales : [];
+  const coverage = version.locale_coverage;
+  const rows = Array.isArray(coverage?.locales) ? coverage.locales : [];
+  const defaultLocale = typeof coverage?.default_locale === 'string' ? coverage.default_locale : null;
+  const languages = codes.map((code): ShippedLanguage => {
+    const row = rows.find((r) => r?.locale === code);
+    const percent = typeof row?.coverage_percent === 'number' && Number.isFinite(row.coverage_percent)
+      ? row.coverage_percent
+      : null;
+    return { code, label: languageLabel(code), percent, isDefault: code === defaultLocale };
+  });
   return {
     kind: 'listed',
-    languages: codes.map((code, index) => {
-      const row = rows.find((r) => r?.locale === code);
-      const percent = typeof row?.coverage_percent === 'number' && Number.isFinite(row.coverage_percent)
-        ? row.coverage_percent
-        : null;
-      return { code, label: languageLabel(code), percent, isDefault: index === 0 };
-    }),
+    languages: [...languages.filter((l) => l.isDefault), ...languages.filter((l) => !l.isDefault)],
   };
 }
 
