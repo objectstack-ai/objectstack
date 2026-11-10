@@ -19,6 +19,8 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { listDrafts } from './protocol-drafts.js';
+// Pay @objectstack/lint's first transform at collection, not inside a clocked case.
+import '@objectstack/lint';
 
 const INSTALLED = 'com.acme.installed';
 const UNKNOWN = 'com.qa.nosuch';
