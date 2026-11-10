@@ -85,7 +85,9 @@ import {
     type SyncWindowQuery,
     type SyncWindowSource,
 } from './datasource-window-read.js';
-import { refuseBlankMatchKeys } from './pull-blank-match-keys.js';
+// `connector-pull.ts` dispatches here and this reads its blank-key rewrite: a
+// cycle of call-time references only, which neither module evaluates at load.
+import { refuseBlankMatchKeys } from './connector-pull.js';
 import { ConnectorPullError, type ConnectorPullRefusalReason } from './pull-refusal.js';
 
 /** A datasource source's pull: the federated object, its read path and the window positions. */
