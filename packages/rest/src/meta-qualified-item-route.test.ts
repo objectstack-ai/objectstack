@@ -226,3 +226,65 @@ describe('a shareable namespace two packages share (ADR-0150 D2)', () => {
         expect([answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
     });
 });
+
+/**
+ * ADR-0150 D3/D5, epic #31527 (#32076): on an engine whose registry has no
+ * package-scoped resolver slice, the protocol refuses a by-name read of a type
+ * ADR-0150 addresses by `(package, name)` with a DECLARED `501
+ * NOT_IMPLEMENTED`; this transport answers it with its sentence (the 5xx
+ * boundary keeps a declared refusal's text). The registry is this file's
+ * `SchemaRegistry`, read through a view that hides the five slice reads.
+ *
+ * BASE (main ff04ad81, this fixture): each read below answered `200` with
+ * alpha's item, the first registered.
+ */
+describe('a composition with no package-scoped resolver: the protocol\'s 501, with its sentence', () => {
+    const SLICE = new Set([
+        'readsByPackage', 'packageScopedHoldersOf', 'getEnvironmentScopedItem', 'getPackageScopedItem', 'resolveItem',
+    ]);
+
+    beforeEach(() => {
+        const view = new Proxy(registry, {
+            get(target, prop) {
+                if (typeof prop === 'string' && SLICE.has(prop)) return undefined;
+                const value = Reflect.get(target, prop, target);
+                return typeof value === 'function' ? value.bind(target) : value;
+            },
+        });
+        const engine = {
+            registry: view,
+            find: vi.fn().mockResolvedValue([]),
+            findOne: vi.fn().mockResolvedValue(null),
+            insert: vi.fn(),
+            update: vi.fn(),
+            delete: vi.fn(),
+            count: vi.fn().mockResolvedValue(0),
+            aggregate: vi.fn().mockResolvedValue([]),
+        };
+        const protocol = new ObjectStackProtocolImplementation(engine as never);
+        rest = new RestServer(mockServer() as any, protocol as any, { api: { requireAuth: false } } as any);
+        (rest as any).resolveExecCtx = async () => ({ isSystem: true });
+        rest.registerRoutes();
+    });
+
+    const expect501 = (answer: { status: number; body?: any }) => {
+        expect([answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([501, 'NOT_IMPLEMENTED']);
+        expect(messageOf(answer)).toContain('has no package-scoped resolver');
+    };
+
+    it('a bare name, `?package=`, the qualified path and `_env`: 501 (BASE: 200, alpha\'s page)', async () => {
+        ship('page', 'home', A);
+        ship('page', 'home', B);
+        expect501(await drive(ITEM, { type: 'page', name: 'home' }));
+        expect501(await drive(ITEM, { type: 'page', name: 'home' }, { package: C }));
+        expect501(await drive(QUALIFIED, { type: 'page', ns: 'beta', name: 'home' }));
+        expect501(await drive(QUALIFIED, { type: 'page', ns: '_env', name: 'home' }));
+    });
+
+    it('CONTROL — a type ADR-0150 does not address by package (view) is served as before', async () => {
+        registry.registerItem('view', { name: 'all', label: 'alpha view' }, 'name' as never, A);
+        const answer = await drive(ITEM, { type: 'view', name: 'all' });
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(labelOf(answer)).toBe('alpha view');
+    });
+});

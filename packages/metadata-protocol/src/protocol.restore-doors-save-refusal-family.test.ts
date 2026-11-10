@@ -47,6 +47,7 @@ import {
     assertEngineFindOnePredicate,
 } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 
 interface Row {
     id: string;
@@ -183,6 +184,7 @@ function makeStubEngine() {
         async syncObjectSchema() { return true; },
         async dropObjectSchema() { return true; },
         registry: {
+            ...NO_PACKAGE_SCOPED_READS,
             registerItem: (type: string, item: any) => {
                 if (!registered.has(type)) registered.set(type, new Map());
                 registered.get(type)!.set(item?.name, item);

@@ -34,6 +34,7 @@
 import { describe, it, expect } from 'vitest';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 import { decorateMetadataItem, withPublishVerdict } from './metadata-diagnostics.js';
 import { metaOverlayCacheEntryCount } from './meta-overlay-cache.js';
 
@@ -91,6 +92,7 @@ function harness(rows: Row[], opts: { disabledObjects?: string[]; automation?: b
     const disabled = new Set(opts.disabledObjects ?? []);
     const engine: Record<string, unknown> = {
         registry: {
+            ...NO_PACKAGE_SCOPED_READS,
             getItem: (type: string, name: string) =>
                 (type === 'object' || type === 'objects') && name === CODE_OBJECT.name
                     ? structuredClone(CODE_OBJECT)

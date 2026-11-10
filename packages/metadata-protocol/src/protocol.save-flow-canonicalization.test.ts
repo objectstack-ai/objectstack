@@ -39,6 +39,7 @@ import {
 } from '@objectstack/metadata-core';
 import { ObjectStackDefinitionSchema, applyConversionsToFlow, normalizeStackInput } from '@objectstack/spec';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 
 /** A flow body that passes `saveMetaItem`'s schema gate. */
 const flowBody = (config: Record<string, unknown>) => ({
@@ -166,6 +167,7 @@ function makeStubEngine() {
             return { deleted: 1 };
         },
         registry: {
+            ...NO_PACKAGE_SCOPED_READS,
             registerItem: () => {},
             registerObject: () => {},
         },

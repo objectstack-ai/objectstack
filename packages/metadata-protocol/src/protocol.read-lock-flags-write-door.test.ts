@@ -47,6 +47,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { assertEngineFindOnePredicate, isCodeArtifactBody } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 import { SysMetadataRepository, resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
 import { isOriginGatedType } from './packaged-base-regime.js';
 
@@ -116,6 +117,7 @@ const orgRow = (type: string): StoredRow => {
 function harness(environmentId: string | undefined, rows: StoredRow[] = [], extra: Record<string, Record<string, unknown>> = {}) {
     const artifacts = artifactsFor(extra);
     const registry = {
+        ...NO_PACKAGE_SCOPED_READS,
         getArtifactItem(type: string, name: string) {
             const hit = artifacts.get(type)?.get(name);
             return hit && isCodeArtifactBody(hit) ? hit : undefined;

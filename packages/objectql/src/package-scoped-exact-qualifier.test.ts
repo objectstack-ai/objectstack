@@ -22,7 +22,7 @@ import './__fixtures__/lint-root-preload.testkit.js';
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
-import { resolveThrownHttpError } from '@objectstack/types';
+import { declaredRefusalMessage, resolveThrownHttpError } from '@objectstack/types';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { SchemaRegistry } from './registry.js';
 import { PackageScopedNameRefusedError } from './package-scoped-read.js';
@@ -38,6 +38,8 @@ const manifest = (id: string) => ({
 
 let registry: SchemaRegistry;
 let protocol: ObjectStackProtocolImplementation;
+/** The engine double `protocol` reads; its registry is the real `SchemaRegistry`. */
+let engine: Record<string, unknown>;
 /** Stored `sys_metadata` rows the engine double answers. */
 let rows: Array<Record<string, unknown>>;
 
@@ -79,7 +81,7 @@ beforeEach(() => {
     const hits = rows.filter((r) => matches(r, opts?.where));
     return typeof opts?.limit === 'number' ? hits.slice(0, opts.limit) : hits;
   };
-  const engine = {
+  engine = {
     registry,
     find: vi.fn(async (_object: string, opts?: { where?: Record<string, unknown>; limit?: number }) => pick(opts)),
     findOne: vi.fn(async (object: string, opts?: { where?: Record<string, unknown> }) => {
@@ -193,5 +195,104 @@ describe('CONTROL — what the exact qualifier keeps serving', () => {
   it('a read naming no package is E8\'s, unchanged', async () => {
     ship('page', 'solo', A);
     expect(labelOf(await protocol.getMetaItem({ type: 'page', name: 'solo' }))).toBe('alpha page');
+  });
+});
+
+/**
+ * ADR-0150 D3/D5, epic #31527 (#32076): on an engine whose registry has no
+ * package-scoped resolver slice, a by-name read of a type ADR-0150 addresses by
+ * `(package, name)` fails closed — `501 NOT_IMPLEMENTED` naming the cause —
+ * instead of falling back to `getItem`'s first match.
+ *
+ * The fixture is this file's: the same `SchemaRegistry` and stored rows, read
+ * through a view of the registry that hides the five slice reads, so the only
+ * difference between the two protocols is the slice. BASE (main ff04ad81, the
+ * same fixture): every refused read below answered alpha's item, the first
+ * registered; the `?package=` read for a name alpha and beta hold, naming gamma,
+ * served alpha's.
+ */
+describe('fail closed — a registry with no package-scoped resolver refuses what it cannot judge', () => {
+  const SLICE = new Set([
+    'readsByPackage', 'packageScopedHoldersOf', 'getEnvironmentScopedItem', 'getPackageScopedItem', 'resolveItem',
+  ]);
+  let sliceless: ObjectStackProtocolImplementation;
+
+  beforeEach(() => {
+    const view = new Proxy(registry, {
+      get(target, prop) {
+        if (typeof prop === 'string' && SLICE.has(prop)) return undefined;
+        const value = Reflect.get(target, prop, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    sliceless = new ObjectStackProtocolImplementation({ ...engine, registry: view } as never);
+  });
+
+  async function unjudgeable(read: () => unknown): Promise<Error & { status?: number; code?: string; refusal?: unknown }> {
+    try {
+      await read();
+    } catch (err) {
+      return err as Error & { status?: number; code?: string; refusal?: unknown };
+    }
+    throw new Error('the read answered; a refusal was expected');
+  }
+
+  const expectUnjudgeable = (err: Error & { status?: number; code?: string; refusal?: unknown }) => {
+    expect([err.status, err.code, err.refusal]).toEqual([501, 'NOT_IMPLEMENTED', true]);
+    expect(err.message).toContain('has no package-scoped resolver');
+  };
+
+  it('a read naming a package (`?package=`) is refused 501, never another package\'s item (BASE: served alpha\'s)', async () => {
+    ship('page', 'home', A);
+    ship('page', 'home', B);
+    const err = await unjudgeable(() => sliceless.getMetaItem({ type: 'page', name: 'home', packageId: C }));
+    expectUnjudgeable(err);
+    expect(err.message).toContain(`naming package '${C}'`);
+    await unjudgeable(() => sliceless.getMetaItemForExecution({ type: 'page', name: 'home', packageId: C }));
+  });
+
+  it('the qualified path `/meta/:type/:ns/:name` — the namespace\'s package as the exact qualifier — is refused 501', async () => {
+    ship('page', 'home', B);
+    const address = sliceless.resolveMetaItemAddress({ type: 'page', segment: 'alpha', name: 'home' });
+    expect(address).toEqual({ kind: 'namespace', namespace: 'alpha', packageId: A });
+    const packageId = (address as { packageId: string }).packageId;
+    expectUnjudgeable(await unjudgeable(() => sliceless.getMetaItem({ type: 'page', name: 'home', packageId })));
+  });
+
+  it('the environment address (`/meta/:type/_env/:name`) is refused 501', async () => {
+    ship('report', 'pipeline', A);
+    const err = await unjudgeable(() => sliceless.admitEnvironmentQualifier({ type: 'report', name: 'pipeline' }));
+    expectUnjudgeable(err);
+    expect(err.message).toContain('naming the environment');
+  });
+
+  it('a read naming no package is refused 501: nothing can count its holders (BASE: served alpha\'s)', async () => {
+    ship('dashboard', 'sales', A);
+    const err = await unjudgeable(() => sliceless.getMetaItem({ type: 'dashboard', name: 'sales' }));
+    expectUnjudgeable(err);
+    expect(err.message).toContain('naming no package');
+  });
+
+  it('the refusal crosses a wire door as 501 with its own sentence, never withheld as a fault', async () => {
+    ship('page', 'home', A);
+    const err = await unjudgeable(() => sliceless.getMetaItem({ type: 'page', name: 'home', packageId: C }));
+    const answer = resolveThrownHttpError(err, 500);
+    expect([answer.status, answer.code]).toEqual([501, 'NOT_IMPLEMENTED']);
+    // A declared refusal: the 5xx boundary keeps the sentence, never withholds it as a fault.
+    expect(declaredRefusalMessage(err)).toBe(err.message);
+  });
+
+  it('CONTROL: a type ADR-0150 does not address by package (view) keeps `getItem`\'s read, both ways', async () => {
+    registry.registerItem('view', { name: 'all', label: 'alpha view' }, 'name' as never, A);
+    expect(labelOf(await sliceless.getMetaItem({ type: 'view', name: 'all', packageId: C }))).toBe('alpha view');
+    expect(labelOf(await sliceless.getMetaItem({ type: 'view', name: 'all' }))).toBe('alpha view');
+  });
+
+  it('CONTROL: the same reads on the registry WITH the slice answer as before', async () => {
+    ship('dashboard', 'sales', A);
+    ship('page', 'home', A);
+    expect(labelOf(await protocol.getMetaItem({ type: 'dashboard', name: 'sales' }))).toBe('alpha dashboard');
+    expect(labelOf(await protocol.getMetaItem({ type: 'page', name: 'home', packageId: A }))).toBe('alpha page');
+    expect(() => protocol.admitEnvironmentQualifier({ type: 'page', name: 'nothing' })).not.toThrow();
   });
 });
