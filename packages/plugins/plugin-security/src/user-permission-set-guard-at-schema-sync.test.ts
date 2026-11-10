@@ -6,10 +6,10 @@
  * the table's first DDL, as the three-column key it stands in for did — not
  * from `kernel:ready`.
  *
- * The declared key `(user_id, permission_set, permission_set_package,
- * organization_id)` is NULL-distinct, and every grant written before the boot
- * seals the holders names no package, so on a fresh database the declared key
- * alone constrains none of the bootstrap grants. A writer that is
+ * The key ADR-0150 D4 gives the grant, `(user_id, permission_set,
+ * permission_set_package, organization_id)`, is NULL-distinct, and every grant
+ * written before the boot seals the holders names no package, so on a fresh
+ * database that key alone constrains none of the bootstrap grants. A writer that is
  * find-then-insert and leans on the unique index (`auto-org-admin-grant.ts`)
  * lands twice when two replicas boot together. Built at `kernel:ready`, the
  * guard came after every plugin's `start()`, and never on a
@@ -26,9 +26,19 @@
  * the driver's own connection so no hook decides the answer: the physical
  * index does.
  *
- * Ablation (recorded in the PR): with the `objectql:schema-synced` subscription
+ * On every kernel whose schema sync runs the table's DDL (MF6's review,
+ * must-fix 1): a kernel with an `environmentId` and no declared
+ * `runPlatformMigrations` (a per-project kernel) and one that declares it
+ * `false` (as every one-shot CLI boot does) have the boot-repair gate off, and
+ * both create this table at their own schema sync, so both build the guard.
+ * The CLI's no-write and flush faces are pinned in `packages/cli`'s
+ * `schema-migrate.grant-guard.integration.test.ts`.
+ *
+ * Ablations (recorded in the PR): with the `objectql:schema-synced` subscription
  * removed from metadata-protocol's assembly, leaving the `kernel:ready` build,
- * both boot pins go red at the second package-less grant.
+ * the first two boot pins go red at the second package-less grant; with it
+ * moved back inside the `runPlatformMigrations` gate, the two gate-off pins go
+ * red; with `created` latched, the re-ensure pin goes red.
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -102,7 +112,7 @@ const WRITES: ReadonlyArray<{ id: string; permission_set_package: string | null 
  * (its dependency) and before `kernel:ready`. Records whether `kernel:ready`
  * had fired by then, so a pin cannot pass by writing late.
  */
-function earlyGrantWriter(seen: { outcomes: Outcome[]; afterReady?: boolean }): Plugin {
+function earlyGrantWriter(seen: { outcomes: Outcome[]; afterReady?: boolean; ctx?: PluginContext }): Plugin {
   let ready = false;
   return {
     name: 'test.early-grant-writer',
@@ -110,6 +120,7 @@ function earlyGrantWriter(seen: { outcomes: Outcome[]; afterReady?: boolean }): 
     version: '1.0.0',
     dependencies: ['com.objectstack.engine.objectql', 'test.grant-object'],
     async init(ctx: PluginContext) {
+      seen.ctx = ctx;
       ctx.hook('kernel:ready', async () => {
         ready = true;
       });
@@ -146,20 +157,24 @@ afterEach(async () => {
   kernel = undefined;
 });
 
-async function boot(bootPhaseHooks: boolean) {
-  const seen: { outcomes: Outcome[]; afterReady?: boolean } = { outcomes: [] };
+async function boot(
+  bootPhaseHooks: boolean,
+  engine: { environmentId?: string; runPlatformMigrations?: boolean } = {},
+) {
+  const seen: { outcomes: Outcome[]; afterReady?: boolean; ctx?: PluginContext } = { outcomes: [] };
   kernel = new ObjectKernel({ logger: { level: 'silent' }, bootPhaseHooks });
   await kernel.use(sqliteDriverPlugin());
-  await kernel.use(new ObjectQLPlugin());
+  await kernel.use(new ObjectQLPlugin(engine));
   await kernel.use(grantObjectPlugin());
   await kernel.use(earlyGrantWriter(seen));
   await kernel.bootstrap();
   const ql = kernel.getService<ObjectQL>('objectql');
   const knex = (ql as any).getDriver(GRANTS).knex;
-  const indexes = (await knex.raw("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ?", [GRANTS])) as Array<{
-    name: string;
-  }>;
-  return { seen, indexNames: indexes.map((i) => i.name) };
+  const indexNames = async (): Promise<string[]> =>
+    ((await knex.raw("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ?", [GRANTS])) as Array<{
+      name: string;
+    }>).map((i) => i.name);
+  return { seen, indexNames: await indexNames(), readIndexNames: indexNames, ql, knex };
 }
 
 describe('[#32164 MF6] the package-less grant guard stands from schema sync, before any later start() writes', () => {
@@ -180,6 +195,37 @@ describe('[#32164 MF6] the package-less grant guard stands from schema sync, bef
   it('a fresh database gets no old three-column key where the guard has a form (SQLite)', async () => {
     const { indexNames } = await boot(true);
     expect(indexNames).not.toContain(USER_PERMISSION_SET_OLD_KEY_INDEX_NAME);
+  });
+});
+
+describe('[#32164 MF6, review must-fix 1] on every kernel whose schema sync runs the table\'s DDL, whatever its boot-repair gate says', () => {
+  it('a kernel with an environmentId and no declared runPlatformMigrations (gate off): the guard stands from schema sync', async () => {
+    const { seen, indexNames } = await boot(true, { environmentId: 'env_project_a' });
+    expect(seen.afterReady).toBe(false);
+    expect(seen.outcomes).toEqual(['ok', 'refused', 'ok', 'ok']);
+    expect(indexNames).toContain(USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME);
+  });
+
+  it('a kernel that declares runPlatformMigrations: false (a one-shot CLI boot\'s posture), with bootPhaseHooks: false too: the guard stands from schema sync', async () => {
+    const { seen, indexNames } = await boot(false, { runPlatformMigrations: false });
+    expect(seen.afterReady).toBe(false);
+    expect(seen.outcomes).toEqual(['ok', 'refused', 'ok', 'ok']);
+    expect(indexNames).toContain(USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME);
+  });
+});
+
+describe('[#32164 review should-fix 2] a later pass re-ensures a guard the table lost', () => {
+  it('dropped after the boot (as a SQLite table rebuild drops every undeclared index), the next schema-sync pass builds it again', async () => {
+    const { seen, readIndexNames, ql, knex } = await boot(true);
+    expect(await readIndexNames()).toContain(USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME);
+
+    await knex.raw(`DROP INDEX ${USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME}`);
+    expect(await readIndexNames()).not.toContain(USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME);
+
+    // The event the next pass triggers (a `metadata:reloaded` re-sync, or a
+    // flushed one-shot pass), as `ObjectQLPlugin` triggers it.
+    await seen.ctx!.trigger(OBJECTQL_SCHEMA_SYNCED_HOOK, ql);
+    expect(await readIndexNames()).toContain(USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME);
   });
 });
 

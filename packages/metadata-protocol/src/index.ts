@@ -73,10 +73,11 @@ export type {
 
 // [ADR-0150 D4, #32164] `sys_user_permission_set`'s one grant per (user_id,
 // permission_set, organization_id) among the grants that name no package — a
-// runtime index ADDED beside the declared key, which gained the NULL-distinct
-// `permission_set_package`.
+// runtime index ADDED beside the grant's declared key, which ADR-0150 D4 widens
+// with the NULL-distinct `permission_set_package`.
 export {
     ensureUserPermissionSetPackagelessIndex,
+    createUserPermissionSetGuardAtSchemaSync,
     buildUserPermissionSetPackagelessIndexSql,
     buildUserPermissionSetPackagelessDuplicateProbeSql,
     resolveUserPermissionSetIndexSeam,
@@ -88,6 +89,7 @@ export {
 export type {
     EnsureUserPermissionSetPackagelessIndexResult,
     EnsureUserPermissionSetPackagelessIndexStatus,
+    UserPermissionSetGuardPassOutcome,
 } from './migrations/user-permission-set-packageless-index.js';
 
 // [#8629] `sys_setting`'s declared ROW IDENTITY, delivered as a runtime

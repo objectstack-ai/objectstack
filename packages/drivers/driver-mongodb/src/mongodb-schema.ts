@@ -320,7 +320,8 @@ const CONSOLE_SCHEMA_SYNC_LOGGER: SchemaSyncLogger = {
  *   deleted or rewritten; the line carries the aggregation that lists them.
  * - An options or key-spec conflict (85, 86): an index of that name or key
  *   already stands with other options. The line names it for an operator to
- *   inspect and drop.
+ *   inspect and drop, and says the key is enforced only as far as that index
+ *   enforces it (an older unique on the same fields does).
  * - Anything else: the server's text.
  */
 function reportRuntimeOwnedUniqueFailure(
@@ -333,10 +334,20 @@ function reportRuntimeOwnedUniqueFailure(
   const fields = Object.keys(spec as Record<string, unknown>);
   const name = String(options.name);
   const code = typeof error?.code === 'number' ? error.code : undefined;
-  const head =
+  const subject =
     `[driver-mongodb] ${collectionName}: could not build the runtime-owned unique index '${name}' on ` +
-    `(${fields.join(', ')}), so that key is NOT enforced: two documents it exists to keep to one can coexist. ` +
-    `Any older unique it stands in for is kept until it is built. `;
+    `(${fields.join(', ')}), `;
+  const kept = 'Any older unique it stands in for is kept until it is built. ';
+  // [#32164 review nit] Not "NOT enforced" on an options or key-spec conflict:
+  // the index already standing there may be an older unique on these fields,
+  // which enforces the key (and refuses more), so the line says what decides it.
+  const head =
+    code === 85 || code === 86
+      ? subject +
+        'so that key is enforced only as far as the index already standing in its way enforces it: an older ' +
+        'unique on the same fields refuses every second document this one would, any other index leaves two ' +
+        `such documents free to coexist. ${kept}`
+      : subject + `so that key is NOT enforced: two documents it exists to keep to one can coexist. ${kept}`;
   let cause: string;
   if (code === 11000) {
     const pipeline = [

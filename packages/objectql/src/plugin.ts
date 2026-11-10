@@ -490,6 +490,13 @@ export const OBJECTQL_DRIVERS_READY_HOOK = 'objectql:drivers-ready';
  * schema-migration lock) and each `metadata:reloaded` re-sync. Never on a
  * `skipSchemaSync` boot, which runs no DDL.
  *
+ * A pass whose driver holds DDL back (the one-shot CLI boot of `os migrate
+ * plan`, every dry-run mode, and `os migrate apply` before its confirmation;
+ * the driver reads `schemaDdlDeferred`) triggers it too, before any of that DDL
+ * exists: a subscriber that writes reads the same flag and builds nothing then.
+ * The CLI triggers it once more when its flush has performed what was held back
+ * (`DeferSchemaDdlPlugin.announceSchemaSynced`).
+ *
  * It exists for the runtime-managed indexes the declared index surface cannot
  * spell and a table must not stand without: the first is
  * `sys_user_permission_set`'s package-less guard (metadata-protocol's

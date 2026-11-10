@@ -7,16 +7,19 @@
  *
  * ## What is broken without it
  *
- * A permission set is identified by `(package, name)` (ADR-0150 D4), so the
- * grant's declared key is `(user_id, permission_set, permission_set_package,
- * organization_id)`: one user may hold both packages' sets of one name in one
- * organization. `permission_set_package` is NULL on every grant of a set the
- * environment authored, the platform registered, or two packages hold with no
- * binding yet (the column's documented "empty", never a sentinel), and a SQL
- * UNIQUE treats NULLs as distinct, so for exactly those grants the declared key
- * constrains nothing. The key it replaced, `(user_id, permission_set,
- * organization_id)`, held them to one. Two of them would grant the same set
- * twice, and a revoke that deletes one would leave the other granting.
+ * A permission set is identified by `(package, name)` (ADR-0150 D4), so
+ * ADR-0150 gives the grant the key `(user_id, permission_set,
+ * permission_set_package, organization_id)`: one user may hold both packages'
+ * sets of one name in one organization. `permission_set_package` is NULL on
+ * every grant of a set the environment authored, the platform registered, or
+ * two packages hold with no binding yet (the column's documented "empty", never
+ * a sentinel), and a SQL UNIQUE treats NULLs as distinct, so for exactly those
+ * grants that key constrains nothing. The key it replaces, `(user_id,
+ * permission_set, organization_id)`, holds them to one. Two of them would grant
+ * the same set twice, and a revoke that deletes one would leave the other
+ * granting. This index lands before the grant's declared key is widened; while
+ * the declared key is still the three-column one, that key refuses everything
+ * this index would.
  *
  * ## Why THIS route
  *
@@ -25,22 +28,42 @@
  * the activation ledger's package-less index applied to this table
  * (`activation-ledger-packageless-index.ts`, whose docblock carries the full
  * argument and the per-dialect measurements): a runtime-managed migration that
- * ADDS an index beside the declared key and replaces nothing. The epic seat
+ * ADDS an index beside the grant's declared key and replaces nothing. The epic seat
  * ruled the route on #32164 (comment 6770072902).
  *
- * ## When — at schema sync, not `kernel:ready`
+ * ## When — at schema sync, on every kernel that runs the table's DDL
  *
- * The old key stood from the table's first DDL, so this one must too (epic
- * ruling on #32164, MF6). `metadata-protocol`'s assembly runs it on
- * `objectql:schema-synced`, which `ObjectQLPlugin` triggers when each schema
- * sync pass's DDL is done: inside the boot's schema-migration lock, before any
- * later plugin's `start()` writes a grant, and on a `bootPhaseHooks: false`
- * host too, which withholds `kernel:ready`. Built at `kernel:ready`, a fresh
- * database took every bootstrap grant (each one package-less before the
- * holders are sealed) with no key over them, and a `bootPhaseHooks: false` host
- * never built it. `kernel:ready` still runs it when no sync pass settled it: a
- * `skipSchemaSync` boot, whose out-of-band DDL owns this index as it owns every
- * table, or a table registered after the last pass.
+ * The old key stood from the table's first DDL, on whichever kernel ran it, so
+ * this one must too (epic ruling on #32164, MF6, "on every host"; its review's
+ * must-fix 1). `metadata-protocol`'s assembly runs
+ * {@link createUserPermissionSetGuardAtSchemaSync} on `objectql:schema-synced`,
+ * which `ObjectQLPlugin` triggers when each schema sync pass's DDL is done:
+ * inside the boot's schema-migration lock, before any later plugin's `start()`
+ * writes a grant, and on a `bootPhaseHooks: false` host too, which withholds
+ * `kernel:ready`. Built at `kernel:ready`, a fresh database took every bootstrap
+ * grant (each one package-less before the holders are sealed) with no key over
+ * them, and a `bootPhaseHooks: false` host never built it.
+ *
+ * The subscription does not sit behind the `runPlatformMigrations` gate that
+ * arms the boot repairs: a kernel with an `environmentId` and no declaration
+ * (a per-project kernel) and every one-shot CLI boot have it off, and both
+ * create this table at their own schema sync. Instead:
+ *
+ * - A pass that performs no DDL builds nothing. `os migrate plan` and every
+ *   dry-run mode boot with their drivers holding DDL back, which the ensurer
+ *   reads (`'held-back'`); `os migrate apply` holds it back until the operator
+ *   confirms, then performs it and triggers the event again, which builds this
+ *   index. A one-shot write mode that boots plainly (`--apply` of the data
+ *   commands) builds it at its sync, as a serving boot does.
+ * - A `skipSchemaSync` boot (`OS_SKIP_SCHEMA_SYNC`) triggers no pass. Its
+ *   tables come from another boot's DDL (a serving boot, an
+ *   `OS_MIGRATE_AND_EXIT` job, or `os migrate apply`), which builds this index
+ *   with them. Where the gate is on, its `kernel:ready` repair builds it too,
+ *   for a database whose DDL came from somewhere that did not.
+ * - Re-ensured after every pass, never latched once built: a SQLite table
+ *   rebuild drops every index and recreates only the declared ones, so a later
+ *   pass puts this one back (`IF NOT EXISTS`). A refusal is reported once per
+ *   boot.
  *
  * ## The index, per dialect
  *
@@ -94,7 +117,8 @@
  * so the widening arm reads it as the superseded key and retires it once this
  * index stands. It refuses everything this index would, and also one user's
  * grant of a second package's set of the same name in one organization, which
- * the declared key admits: a declared limit of those servers.
+ * ADR-0150's `(package, name)` identity admits: a declared limit of those
+ * servers.
  *
  * ## Refuse, never keep-one (ADR-0120 D4; epic condition 2)
  *
@@ -116,6 +140,7 @@ import {
     classifyIndexFailure,
     countDuplicateKeys,
     describeDuplicateKeys,
+    isSchemaDdlHeldBackForTable,
     logProblem,
     resolveIndexSeamForTable,
     type IndexExec,
@@ -129,7 +154,7 @@ import { isDuplicateColumnName, isDuplicateKeyName, isMariaDb } from './activati
 export const USER_PERMISSION_SET_TABLE = 'sys_user_permission_set';
 
 /**
- * The index name. Its own name, never one the driver generates: the declared
+ * The index name. Its own name, never one the driver generates: the widened
  * key's narrower predecessor is the driver's generated name for
  * `(user_id, permission_set, organization_id)`, and claiming that name would let
  * the widening arm read this index as the superseded one.
@@ -352,6 +377,70 @@ export async function ensureUserPermissionSetPackagelessIndex(
     }
 }
 
+/**
+ * What one schema-sync pass did about the guard
+ * ({@link createUserPermissionSetGuardAtSchemaSync}): the migration's own
+ * status, or
+ *
+ * - `'held-back'`: the driver behind the table holds this pass's DDL back (a
+ *   dry run, or `os migrate apply` before its confirmation), so nothing was
+ *   built and the next pass tries again;
+ * - `'refused-earlier'`: this kernel already reported a refusal, so the build
+ *   is neither tried nor reported again until the next boot.
+ */
+export type UserPermissionSetGuardPassOutcome = EnsureUserPermissionSetPackagelessIndexStatus | 'held-back' | 'refused-earlier';
+
+/** The statuses that latch: each one was reported at `error`, and a second pass in one boot would only say it again. */
+const REFUSALS: ReadonlySet<EnsureUserPermissionSetPackagelessIndexStatus> = new Set(['conflict', 'unsupported', 'failed']);
+
+/**
+ * [#32164] The guard as a kernel's schema sync builds it: one ensurer per
+ * kernel, run after each pass's DDL (`objectql:schema-synced`, module doc
+ * "When"). `metadata-protocol`'s assembly subscribes it on every kernel,
+ * whatever its `runPlatformMigrations` gate says, so the guard follows the
+ * table's DDL wherever that runs.
+ *
+ * - **A pass that performed no DDL builds nothing.** While the driver behind the
+ *   table holds DDL back ({@link isSchemaDdlHeldBackForTable}) the answer is
+ *   `'held-back'`, unlatched: the one-shot CLI boot triggers the event again
+ *   once its flush has performed what was held back (`os migrate apply`), and
+ *   a dry run never flushes.
+ * - **`created` never latches.** Every later pass re-ensures the guard, a no-op
+ *   while it stands (`IF NOT EXISTS`, or the MySQL family's duplicate-key
+ *   answer), because a pass can lose it: a SQLite table rebuild drops every
+ *   index and recreates only the declared ones.
+ * - **A refusal latches.** `conflict`, `unsupported` and `failed` were each
+ *   reported at `error` once; the next boot tries again.
+ * - It never throws: a boot does not fail because the guard could not be built,
+ *   so an unexpected throw is reported at `error` and latched as a refusal.
+ */
+export function createUserPermissionSetGuardAtSchemaSync(
+    engine: unknown,
+    logger: IndexMigrationLogger,
+): () => Promise<UserPermissionSetGuardPassOutcome> {
+    let refused = false;
+    return async () => {
+        if (refused) return 'refused-earlier';
+        try {
+            if (isSchemaDdlHeldBackForTable(engine, USER_PERMISSION_SET_TABLE)) return 'held-back';
+            const seam = resolveUserPermissionSetIndexSeam(engine);
+            const { status } = await ensureUserPermissionSetPackagelessIndex(seam?.exec, logger, { client: seam?.client });
+            if (REFUSALS.has(status)) refused = true;
+            return status;
+        } catch (err: unknown) {
+            refused = true;
+            logProblem(
+                logger,
+                '[metadata-protocol] permission-set grant index migration skipped — the index that keeps one grant per ' +
+                    '(user_id, permission_set, organization_id) among grants naming no package was not ensured this boot, ' +
+                    'so two such grants can coexist for one user in one organization',
+                operatorFacingErrorText(err),
+            );
+            return 'failed';
+        }
+    };
+}
+
 /** Build (or find) the old three-column key where this index has no form. */
 async function keepOldKey(
     exec: IndexExec,
@@ -369,7 +458,8 @@ async function keepOldKey(
 /**
  * The `'unsupported'` line: what still guards (the old key, kept or built), or,
  * when that key could not be built either, that nothing does. `error` either
- * way: the declared key alone admits what the old key refused.
+ * way: once the grant's key is widened, that key alone admits what the old key
+ * refused.
  */
 function reportUnsupported(
     detail: string,
@@ -388,7 +478,7 @@ function reportUnsupported(
                 `The old (user_id, permission_set, organization_id) index '${USER_PERMISSION_SET_OLD_KEY_INDEX_NAME}' ` +
                 'stands in its place (kept, or built where it was missing) and refuses every second grant naming no ' +
                 'package, but it also refuses one user a second package\'s set of the same name in one organization, ' +
-                'which the declared key admits. Upgrade to MySQL 8.0.13+ or MariaDB 10.3+ and restart to build the ' +
+                'which a set\'s (package, name) identity admits. Upgrade to MySQL 8.0.13+ or MariaDB 10.3+ and restart to build the ' +
                 'index; the next safe sync then retires the old one.',
             detail,
         );
