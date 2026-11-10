@@ -26,7 +26,8 @@
  * message calls it clean (`composeSeedSettledMessage`): no rejected record, no
  * reference field dropped from a written row, no install that came up empty.
  * Each rejected record and each dropped reference counts as one failure, so the
- * number the run fails with is the number the seed lost. Two states count one
+ * number the run fails with is the number the seed loader's own `[Seeder]`
+ * warning reports dropped (see {@link SeedSourceReport.rejected}). Two states count one
  * failure each, because the run cannot say whether the app's rows landed: a
  * seed still writing when the wait ends, and a seed that settled without
  * reporting an outcome (`AppPlugin`'s basic-insert fallback, taken when the
@@ -65,7 +66,14 @@ export interface SeedSourceReport {
   updated: number;
   /** Rows already present (the load left them as they were). */
   skipped: number;
-  /** Records the load refused: the rows it did not write. */
+  /**
+   * The seed loader's errored count (`summary.totalErrored`), the number its
+   * own `[Seeder] … dropped record(s)` warning names: every record the engine
+   * refused, plus every deferred reference the second pass could not resolve.
+   * A refused record whose deferred reference also failed counts twice, so
+   * this can exceed the rows actually missing (the showcase without its home
+   * currency: 26 here, 19 of 138 records absent).
+   */
   rejected: number;
   /** Reference fields dropped from rows that WERE written. */
   droppedRefs: number;
