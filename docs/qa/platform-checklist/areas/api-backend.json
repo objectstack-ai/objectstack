@@ -3602,7 +3602,7 @@
       "title": "The automation, legacy trigger, connector connection and inbound hook doors take the namespace and _env segments: /automation/:ns/:name[/trigger|/toggle|/clone|/runs…], /automation/trigger/:ns/:name, /automation/connectors/:ns/:name/connection and /automation/hooks/:ns/:flowName/:hookId serve the name's one holder exactly as the bare path does, and refuse any other qualifier with 404, 409 RESOURCE_CONFLICT or, for the hook, the door's own 401",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3697,7 +3697,7 @@
         "a sub-resource literal in the name position keeps its bare route after a namespace: GET /automation/showcase/runs is the run list of a flow named showcase (packages/runtime/src/domains/automation-address.ts#AUTOMATION_FLOW_SUBRESOURCE_SEGMENTS: clone, runs, toggle, trigger)",
         "one of the door's own literals after a qualifier is no route: GET /automation/_env/actions and GET /automation/showcase/_status are declined, while the bare catalog GET /automation/actions is unchanged (#AUTOMATION_DOOR_LITERALS)",
         "the hook qualifier is never runs: POST /automation/hooks/runs/RUN_ID/cancel stays the run door of a flow named hooks (packages/core/src/security/auth-gate.ts#INBOUND_HOOK_QUALIFIER_EXCLUSIONS)",
-        "the 16 addressed /automation rows are server-only: the SDK names no namespace (api-backend.client-sdk-namespace-address)"
+        "the SDK builds eleven of the addressed /automation rows: get, update, delete, execute, toggle, clone, listRuns, getRun, resume, getScreen and the legacy trigger take an optional namespace since #32197 (api-backend.client-sdk-namespace-address). The addressed cancel and restore-suspension rows and the three connector connection rows stay server-only, as their bare rows do"
       ],
       "traps": ["dispatcher-vs-hono-route", "eventual-consistency", "wrong-persona"],
       "automated": {
@@ -3712,7 +3712,7 @@
         "packages/core/src/security/inbound-hook-answer.ts#admitInboundHookAddress and #inboundHookRefusal",
         "packages/core/src/security/auth-gate.ts#matchInboundHookRoute and #INBOUND_HOOK_QUALIFIER_EXCLUSIONS (the anonymous allow-list row, five segments, POST only)",
         "packages/triggers/trigger-api/src/plugin.ts#HOOKS_ADDRESSED_PATH (the raw mount)",
-        "packages/runtime/src/route-ledger.ts#ROUTE_LEDGER (16 server-only addressed /automation rows and the public POST /automation/hooks/:ns/:flowName/:hookId)",
+        "packages/runtime/src/route-ledger.ts#ROUTE_LEDGER (16 addressed /automation rows, 11 of them disposition sdk since #32197 and the cancel, restore-suspension and three connector connection rows server-only; and the public POST /automation/hooks/:ns/:flowName/:hookId)",
         "#32001 (G1 part c), #32049 (G1 part d, closed #31691)"
       ],
       "history": [
@@ -3721,34 +3721,114 @@
           "date": "2026-11-10",
           "change": "initial — ADR-0150 child G1 parts (c) and (d): the addressed /automation flow, legacy trigger and connector connection doors (#32001) and the qualified inbound hook (#32049). This sweep first drafted the item as planned at 60f8149e, before either landed; both landed before it reached main, so it is authored active, as a new item, not promoted. Scoped sweep #32019 (epic #32022 M1, theme 1), read from source at 0f7389cc; no live run made",
           "ref": "#32019"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-10",
+          "change": "corrected a stale variant and source line, which said the 16 addressed /automation rows are server-only because the SDK names no namespace. #32197 (f9eaba2d) gave the SDK the namespace and turned eleven of them to disposition sdk; the addressed cancel, restore-suspension and three connector connection rows stay server-only. No step or clause changes. Close-out #32270 (epic #32022 M4), read from source at 60b99f8f",
+          "ref": "#32270"
         }
       ]
     },
     {
       "id": "api-backend.client-sdk-namespace-address",
-      "title": "The client SDK builds the qualified path: automation.*, actions.invoke and meta.getItem take an optional namespace",
-      "since": null,
-      "status": "planned",
-      "revision": 1,
+      "title": "The client SDK names an item's package: automation.*, actions.invoke / invokeGlobal and meta.getItem take an optional namespace, send the qualified path the server reads, send the bare path unchanged without one, refuse before sending any path the router would read as another request, and hand a 409's candidates to the caller",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
-      "personas": ["an integrator calling the platform through @objectstack/client"],
+      "personas": [
+        "an integrator calling the platform through @objectstack/client, signed in as the seeded admin (admin@objectos.ai / admin123) with client.auth.login: every call"
+      ],
       "fixtures": {
         "app": "showcase",
-        "requires": ["the scratch-package pair api-backend.meta-qualified-item-read and api-backend.actions-namespace-address use"]
+        "requires": [
+          "a showcase boot on its own port and file DB (dogfood §0): `pnpm dev -- --fresh -p PORT` after a full `pnpm build`, which also builds packages/client/dist, the code the script imports. The showcase package (manifest id com.example.showcase, namespace showcase) is the one holder of the flow showcase_batch_reminders (autolaunched; it reads a list input tasks, so a run is sent { params: { tasks: [] } }) and of the object-less script action showcase_portfolio_snapshot (read-only: it counts accounts, projects and invoices)",
+          "two scratch packages, each in its own scratch app directory (never the shared examples), compiled with `objectstack build` and installed with `os package install DIR/dist/objectstack.json -u BASE --email … --password …`. Leave about 12 s between the two installs: each one signs in, and the sign-in rate limit answers a second one sooner with 429. qa_a (manifest id com.qa.addr-a, namespace qa_a) holds the pages qa_home and qa_only_a; qa_b (manifest id com.qa.addr-b, namespace qa_b) holds a page qa_home. Each page's label names its package ('qa_a home', 'qa_b home'). A page is { name, label, type: 'app', regions: [{ name: 'main', components: [{ type: 'page:header', properties: { title } }] }] }. A package id takes no underscore (the manifest id grammar refuses com.qa.addr_a at build), so the ids are hyphenated while the namespaces keep theirs",
+          "as admin, an environment page qa_env_home (PUT /api/v1/meta/page/qa_env_home with no ?package=, a page body as above) and an environment flow qa_env_flow (POST /api/v1/automation with type autolaunched, a start node and an end node joined by one edge), so no package holds either",
+          "a scratch Node script (an .mjs file outside the repo) that imports ObjectStackClient from the worktree's packages/client/dist/index.mjs and constructs it with baseUrl BASE and a `fetch` (ClientConfig.fetch) that records each request's method and path, then calls the global fetch. It signs in with client.auth.login, and for each call keeps the requests that call sent and either the resolved value or the rejection's code, httpStatus, message and details.candidates"
+        ],
+        "knownGaps": [
+          "the /actions 409 with candidates (a namespace two packages co-own, both declaring the name) is not reachable with this fixture. packages/client/src/package-addressing.test.ts §4b holds it through the real dispatcher; invoke reads the candidates with the same addressCandidatesOf the /meta and /automation legs drive here",
+          "this item drives get, execute, trigger, runs.list and runs.get on automation. update, delete, toggle, clone, resume and getScreen, and the scoped twins on client.environment(id), build their paths with the same qualifier helpers and are held by package-addressing.test.ts §1 and §2 (24 calls, bare and qualified, each matched to a route ledger row)"
+        ]
       },
+      "steps": [
+        "meta.getItem: getItem('page', 'qa_home', { namespace: 'qa_a' }), then { namespace: 'qa_b' }; getItem('page', 'qa_home') with no options and again with { namespace: undefined }; getItem('page', 'qa_env_home', { namespace: '_env' }); getItem('page', 'qa_only_a', { namespace: 'qa_b' }); getItem('page', 'qa_home', { packageId: 'com.qa.addr-a' }); getItem('page', 'qa_home', { namespace: 'qa_a', packageId: 'com.qa.addr-b' })",
+        "refused before sending: getItem('page', 'history', { namespace: 'qa_a' }) and getItem('page', 'qa_home', { namespace: 'Crm' }); count the requests each sent",
+        "automation reads: automation.get('showcase_batch_reminders') bare, with { namespace: undefined }, with { namespace: 'showcase' } and with { namespace: 'qa_b' }; automation.get('qa_env_flow', { namespace: '_env' })",
+        "automation runs: automation.runs.list('showcase_batch_reminders', { limit: 50 }) bare, keeping its ids; automation.execute('showcase_batch_reminders', { params: { tasks: [] } }, { namespace: 'showcase' }); automation.trigger('showcase_batch_reminders', { params: { tasks: [] } }, { namespace: 'showcase' }); the same trigger with { namespace: 'qa_b' }; then runs.list with { limit: 50, namespace: 'showcase' }, runs.list bare, and runs.get('showcase_batch_reminders', RUN_ID, { namespace: 'showcase' }) for the newest run id",
+        "automation refusals and the _env exception: automation.get('runs', { namespace: 'showcase' }) and automation.get('showcase_batch_reminders', { namespace: 'trigger' }), counting the requests each sent; then automation.get('runs', { namespace: '_env' })",
+        "actions: actions.invokeGlobal('showcase_portfolio_snapshot') bare, then with { namespace: 'showcase' }, { namespace: 'qa_b' } and { namespace: '_env' }; then actions.invoke('showcase_task', 'showcase_mark_done', { namespace: 'global' }) and with { namespace: 'Bad' }, counting the requests each sent"
+      ],
       "acceptance": [
         {
-          "clause": "a namespace passed to each method produces the qualified path the server reads, and no namespace keeps the bare path",
+          "clause": "no namespace, absent or undefined, sends the bare path unchanged",
           "oracle": "network",
-          "verify": "record each request URL and compare with the server's qualified grammar",
-          "evidence": "the request URLs and answers"
+          "verify": "getItem with no options and with { namespace: undefined } each send GET /api/v1/meta/page/qa_home; automation.get bare and with { namespace: undefined } each send GET /api/v1/automation/showcase_batch_reminders; the bare runs.list sends GET /api/v1/automation/showcase_batch_reminders/runs?limit=50; the bare invokeGlobal sends POST /api/v1/actions/global/showcase_portfolio_snapshot. packageId alone sends GET /api/v1/meta/page/qa_home?package=com.qa.addr-a and answers qa_a's page (packages/client/src/package-address.ts#metaItemQualifier and its siblings return '' when no namespace is named)",
+          "evidence": "the recorded request lines"
+        },
+        {
+          "clause": "a namespace sends the qualified path, and the door serves that namespace's holder exactly as the bare call or ?package= does",
+          "oracle": "api",
+          "verify": "getItem under qa_a sends GET /api/v1/meta/page/qa_a/qa_home and answers qa_a's page (label 'qa_a home', packageId com.qa.addr-a), byte-identical to the ?package=com.qa.addr-a answer; under qa_b it sends /meta/page/qa_b/qa_home and answers qa_b's page. automation.get under showcase sends GET /api/v1/automation/showcase/showcase_batch_reminders and answers the bare read's body byte for byte. invokeGlobal under showcase sends POST /api/v1/actions/showcase/global/showcase_portfolio_snapshot and resolves the bare call's result, { success: true, data: { ok: true, scope: 'global', accounts, projects, invoices } }. _env sends /meta/page/_env/qa_env_home and /automation/_env/qa_env_flow and answers the environment's page and flow (packages/client/src/index.ts: meta.getItem, automation.get, actions.invoke)",
+          "evidence": "the request lines and the compared answers"
+        },
+        {
+          "clause": "the run doors take the address: execute builds /automation/:ns/:name/trigger, trigger builds /automation/trigger/:ns/:name, and both runs land in the one run list the bare and addressed reads share",
+          "oracle": "api",
+          "verify": "execute sends POST /api/v1/automation/showcase/showcase_batch_reminders/trigger and trigger sends POST /api/v1/automation/trigger/showcase/showcase_batch_reminders; each resolves { success: true, output, durationMs, flowLabel, summary }. The addressed run list (GET /api/v1/automation/showcase/showcase_batch_reminders/runs?limit=50) then holds exactly two ids more than the first bare list, and the bare list read after it is identical. runs.get under showcase sends GET /api/v1/automation/showcase/showcase_batch_reminders/runs/RUN_ID and answers that run (packages/client/src/package-address.ts#automationTriggerQualifier and #automationFlowQualifier)",
+          "evidence": "the two run answers and the three run lists"
+        },
+        {
+          "clause": "a 409 from the door reaches the caller with every candidate: meta.getItem and automation.* reject with err.details.candidates",
+          "oracle": "api",
+          "verify": "the bare getItem of qa_home rejects with httpStatus 409, code RESOURCE_CONFLICT and details.candidates [{ kind: 'package', packageId: 'com.qa.addr-a' }, { kind: 'package', packageId: 'com.qa.addr-b' }], its message naming both (\"Nothing picks one of them: address it by its package.\"). getItem('page', 'qa_only_a', { namespace: 'qa_b' }) rejects 409 with candidates [com.qa.addr-a]. automation.get and automation.trigger under qa_b each reject 409 RESOURCE_CONFLICT with candidates [{ kind: 'package', packageId: 'com.example.showcase' }], and that trigger adds no run (#32272 put the candidates on the /meta 409; packages/client/src/package-address.ts#addressCandidatesOf)",
+          "evidence": "the four rejections and the run list after the qa_b trigger"
+        },
+        {
+          "clause": "actions.invoke never throws: a namespace that declares no such action resolves success: false with the door's 404 text and no candidates key",
+          "oracle": "api",
+          "verify": "invokeGlobal under qa_b resolves { success: false, error: \"Action 'showcase_portfolio_snapshot' not found on object 'global' in namespace 'qa_b'\" }, and under _env { success: false, error: \"Action 'showcase_portfolio_snapshot' not found on object 'global' in the environment\" }. Neither result has a candidates key (packages/client/src/index.ts#ActionInvokeResult: candidates appear only on a 409 that named them)",
+          "evidence": "the two results"
+        },
+        {
+          "clause": "a namespace or name the router would read as another request is refused before any request: 400 VALIDATION_ERROR, nothing sent",
+          "oracle": "network",
+          "verify": "getItem('page', 'history', { namespace: 'qa_a' }), getItem under 'Crm', automation.get('runs', { namespace: 'showcase' }) and automation.get under 'trigger' each reject with code VALIDATION_ERROR and httpStatus 400 and send zero requests; each message ends \"The request was not sent (ADR-0150 D5).\" invoke under 'global' and under 'Bad' resolve success: false with the same refusal text and send nothing (packages/client/src/package-address.ts: the namespace grammar and door literals it reads from NAMESPACE_PATTERN and NAMESPACE_POSITION_LITERALS, #META_ITEM_SUBRESOURCE_SEGMENTS and #AUTOMATION_FLOW_SUBRESOURCE_SEGMENTS)",
+          "evidence": "the six refusals and the request count around each"
+        },
+        {
+          "clause": "_env keeps a flow named like a sub-resource addressable, and two qualifiers on one read are left to the door to refuse",
+          "oracle": "network",
+          "verify": "automation.get('runs', { namespace: '_env' }) is sent as GET /api/v1/automation/_env/runs, and the door answers it (404 RESOURCE_NOT_FOUND 'Flow not found' while the environment holds no flow named runs). getItem with namespace qa_a and packageId com.qa.addr-b is sent as GET /api/v1/meta/page/qa_a/qa_home?package=com.qa.addr-b, and the door rejects it 400 VALIDATION_ERROR (\"The path names its namespace 'qa_a' as the exact qualifier, so `?package=` cannot name another one. Send one of the two (ADR-0150 D5).\")",
+          "evidence": "the two request lines and answers"
         }
       ],
+      "negative": [
+        "a refused call that sends any request is a FAIL: the router would answer that path as another item's read or another action's run",
+        "a bare call (no namespace, or namespace undefined) whose URL differs from the bare path is a FAIL: the option is additive",
+        "reading the 400 FLOW_FAILED of a run sent with an empty body as an address defect is wrong: showcase_batch_reminders reads a list input tasks, so without it the flow fails after the door has reached it (the run is still recorded). Send { params: { tasks: [] } }",
+        "reading invoke's success: false under a namespace as a thrown error is wrong: the actions surface reports and never throws (ActionInvokeResult)"
+      ],
+      "traps": [
+        "stale-dist"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/client/src/package-addressing.test.ts (79 tests: 24 calls bare and qualified, each matched to a route ledger row; the refusals with zero requests; §4 through the real dispatcher for /automation, /actions and /meta); the live leg is this item"
+      },
       "source": [
         "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D5 (the client SDK) and child G3",
-        "packages/client/src/index.ts (at the base sha actions.invoke takes objectName and actionName only, and meta.getItem takes { packageId })",
-        "#31695 (G3, open)"
+        "packages/client/src/package-address.ts#automationFlowQualifier, #automationTriggerQualifier, #actionsQualifier and #metaItemQualifier (the qualifier each door takes, and the refusals)",
+        "packages/client/src/package-address.ts#addressCandidatesOf (details.candidates off a rejection)",
+        "packages/client/src/index.ts#ActionInvokeResult (candidates on the result of invoke)",
+        "packages/client/src/index.ts (meta.getItem, automation.get, execute, trigger and runs, actions.invoke and invokeGlobal build the paths)",
+        "packages/spec/src/kernel/address-grammar.ts#NAMESPACE_PATTERN and #NAMESPACE_POSITION_LITERALS (the grammar and door literals the client refuses by)",
+        "packages/runtime/src/route-ledger.ts#ROUTE_LEDGER (the qualified rows with disposition sdk and the client method each names)",
+        "content/docs/api/client-sdk.mdx (Addressing an item by its package)",
+        "#32197 (G3, closed #31695), #32272 (the /meta 409 carries details.candidates, closed #32201)"
       ],
       "history": [
         {
@@ -3756,6 +3836,12 @@
           "date": "2026-11-10",
           "change": "initial — planned. ADR-0150 child G3 declares a namespace option on the SDK; packages/client takes none at the base sha. Scoped sweep #32019 (epic #32022 M1, theme 1), read from source at 60f8149e. Steps arrive with the implementing card, in the edit that promotes this item after a run in which it passes",
           "ref": "#32019"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-10",
+          "change": "promoted planned to active, earned by a live verification run. #32197 (f9eaba2d) landed the namespace option this item was written planned for, and #32272 put the candidates on the /meta 409. Steps, fixtures and clauses are read from packages/client at 60b99f8f, then run on a showcase boot of 97c6ab29 (60b99f8f plus checklist data only) with the scratch pair installed and the environment page and flow saved, through the built client: every clause passed (26 requests; the six refused calls sent none). The scratch package ids are hyphenated (com.qa.addr-a, com.qa.addr-b) because `objectstack build` refuses an underscore in a package id. The action legs use showcase_portfolio_snapshot because an installed artifact ships no handler code. Close-out #32270 (epic #32022 M4)",
+          "ref": "#32270"
         }
       ]
     },
