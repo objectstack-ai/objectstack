@@ -71,11 +71,19 @@ export function refusedConnectorNames(
  * composition with no ObjectQL, or whose registry offers none of the
  * package-scoped reads, has no registry to ask: the answer is `undefined` and
  * `connector_action` dispatches by name as before.
+ *
+ * [#32183] It judges the served holders, as the dispatch does;
+ * `options.includeDisabledPackages` asks over every holder, the question the
+ * stored-reference backfill's durable judgment asks.
  */
 export function connectorNameResolver(
     ctx: { getService<T>(name: string): T },
-): (name: string, callerPackageId: string | null) => PackageScopedResolution | undefined {
-    return (name, callerPackageId) => {
+): (
+    name: string,
+    callerPackageId: string | null,
+    options?: { readonly includeDisabledPackages?: boolean },
+) => PackageScopedResolution | undefined {
+    return (name, callerPackageId, options) => {
         let registry: PackageScopedRegistry | undefined;
         try {
             registry = packageScopedRegistryOf(ctx.getService<{ registry?: unknown }>('objectql')?.registry);
@@ -83,6 +91,9 @@ export function connectorNameResolver(
             return undefined;
         }
         if (!registry) return undefined;
-        return resolvePackageScopedName(registry, { type: 'connector', name, callerPackageId });
+        return resolvePackageScopedName(registry, {
+            type: 'connector', name, callerPackageId,
+            ...(options?.includeDisabledPackages === true ? { includeDisabledPackages: true } : {}),
+        });
     };
 }

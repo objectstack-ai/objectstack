@@ -2632,8 +2632,16 @@ export type PackagedFlowSource = (name: string, packageId?: string) => string | 
  * registry ({@link AutomationEngine.setFlowNameResolver}); `undefined` means
  * the host serves no registry to ask, and the engine's own flow map answers as
  * before. ⛔ Never a second implementation of the rule.
+ *
+ * [#32183] It judges the served holders: a disabled package holds no name.
+ * `options.includeDisabledPackages` asks it over every holder instead, the
+ * question a durable judgment asks ({@link AutomationEngine.durableFlowHolder}).
  */
-export type FlowNameResolver = (name: string, callerPackageId: string | null) => PackageScopedResolution | undefined;
+export type FlowNameResolver = (
+    name: string,
+    callerPackageId: string | null,
+    options?: { readonly includeDisabledPackages?: boolean },
+) => PackageScopedResolution | undefined;
 
 /**
  * [ADR-0150 D3, epic #31527 child E5] The same reader for the `connector` type:
@@ -2642,9 +2650,13 @@ export type FlowNameResolver = (name: string, callerPackageId: string | null) =>
  * automation plugin attaches `resolvePackageScopedName` over the ObjectQL
  * registry ({@link AutomationEngine.setConnectorNameResolver}); `undefined`
  * means the host serves no registry to ask. ⛔ Never a second implementation
- * of the rule.
+ * of the rule. [#32183] `options` as {@link FlowNameResolver}'s.
  */
-export type ConnectorNameResolver = (name: string, callerPackageId: string | null) => PackageScopedResolution | undefined;
+export type ConnectorNameResolver = (
+    name: string,
+    callerPackageId: string | null,
+    options?: { readonly includeDisabledPackages?: boolean },
+) => PackageScopedResolution | undefined;
 
 /**
  * [#28405] The stored body of flow `name` whose content identity is
@@ -5723,6 +5735,19 @@ export class AutomationEngine implements IAutomationService {
      */
     flowHolder(name: string): PackageScopedResolution | undefined {
         return this.flowNameResolver?.(name, null);
+    }
+
+    /**
+     * [#32183, ADR-0150 D8 rows R7–R10] {@link flowHolder}'s question asked
+     * over every holder, a disabled package's included: the read of a durable
+     * judgment, a package column a backfill writes once and never moves. A
+     * disable is reversible, so it moves no binding: a flow only a disabled
+     * package holds still binds to it, and a name an enabled and a disabled
+     * package both hold stays ambiguous. {@link flowHolder} and the execute
+     * doors keep judging the served holders. Read-only; records nothing.
+     */
+    durableFlowHolder(name: string): PackageScopedResolution | undefined {
+        return this.flowNameResolver?.(name, null, { includeDisabledPackages: true });
     }
 
     /**

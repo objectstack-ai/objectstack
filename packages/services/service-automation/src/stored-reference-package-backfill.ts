@@ -21,8 +21,10 @@
  * the one holder of the name in this environment when the backfill runs:
  * objectql's `resolvePackageScopedName` (ADR-0150 D3, the one rule every
  * reader of the epic shares), asked as a caller with no package, over the
- * whole registry — for a flow through {@link AutomationEngine.flowHolder}, for
- * a connector through {@link connectorNameResolver}. An environment override
+ * whole registry — for a flow through {@link AutomationEngine.durableFlowHolder},
+ * for a connector through {@link connectorNameResolver} — over every holder, a
+ * disabled package's included (#32183): the binding is written once, and a
+ * disable is reversible. An environment override
  * of P's flow is the overlay of P's item, not a second one (D4), so its rows
  * bind to P. ⛔ Not {@link AutomationEngine.armedFlowPackage}: that answers
  * the package a reference written IN the armed body resolves from, a caller's
