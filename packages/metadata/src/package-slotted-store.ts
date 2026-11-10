@@ -58,6 +58,18 @@
  * same change that adds it here: objectql pins the superset
  * (`registry-bare-name-one-holder-ai-family.test.ts`), since this package
  * cannot import objectql (objectql depends on it).
+ *
+ * `action` (#31697) joins with one difference: an action's identity is
+ * `(package, owning object, name)`, not `(package, name)` — two actions of one
+ * name bound to two objects are two names that never meet (objectql's
+ * `actionOwnerScopedRegistry`). So an action BOUND to an object is slotted by
+ * its object and name ({@link slotIdentityOf}); an object-less action by its
+ * name alone, exactly as `api`. The D3 refusal fires only among slots of one
+ * identity: two packages on the object-less name, or on one object and name.
+ * A by-name read that cannot see the object, of a name bound to more than one
+ * owner, answers the item written last under the name — what the bare-name
+ * map answered — and refuses only if one identity among them is itself a
+ * two-holder name ({@link readStoreEntry}).
  */
 
 import {
@@ -72,24 +84,91 @@ import { peelStoredEnvelope } from './stored-envelope.js';
 
 /**
  * The types whose in-memory items are stored per `(package, name)`: `api`,
- * then every namespace-scoped type (#32151; see "Which types" above).
+ * then every namespace-scoped type (#32151, #31697; see "Which types" above).
  */
-export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set(['api', 'agent', 'skill']);
+export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set(['api', 'agent', 'skill', 'action']);
 
 /** The provenance sentinel a rehydrated row carries in place of a package. */
 const OVERLAY_SENTINEL = 'sys_metadata';
 
 const SLOT_SEPARATOR = '\u0000';
 
+/** Between an action's owning object and its name in a slot identity. */
+const OWNER_SEPARATOR = '\u0001';
+
+/** The types whose slot identity carries the owning object besides the name. */
+const OWNER_KEYED_SLOT_TYPES: ReadonlySet<string> = new Set(['action']);
+
+/**
+ * The spellings of the object-LESS owner an action may carry: objectql's
+ * `GLOBAL_ACTION_OBJECT_KEY` and the legacy wildcard (this package cannot
+ * import objectql, which depends on it).
+ */
+const OBJECT_LESS_OWNERS: ReadonlySet<string> = new Set(['global', '*']);
+
+/** The object an action item is bound to; `undefined` for an object-less one. */
+function boundObjectOf(data: unknown): string | undefined {
+  const body = peelStoredEnvelope(data).body as { objectName?: unknown; object?: unknown } | null | undefined;
+  if (!body || typeof body !== 'object') return undefined;
+  for (const owner of [body.objectName, body.object]) {
+    if (typeof owner === 'string' && owner !== '') return OBJECT_LESS_OWNERS.has(owner) ? undefined : owner;
+  }
+  return undefined;
+}
+
+/**
+ * The identity a write of `(type, name, data)` is slotted under: the name, or,
+ * for an action bound to an object, its object and name.
+ */
+function slotIdentityOf(type: string, name: string, data: unknown): string {
+  if (!OWNER_KEYED_SLOT_TYPES.has(type)) return name;
+  const owner = boundObjectOf(data);
+  return owner === undefined ? name : `${owner}${OWNER_SEPARATOR}${name}`;
+}
+
+/** The identity a store key addresses: the key without its package. */
+function keyIdentityOf(key: string): string {
+  const at = key.indexOf(SLOT_SEPARATOR);
+  return at === -1 ? key : key.slice(at + 1);
+}
+
+/**
+ * [#31697] The order the store's keys were last written in, per store: a
+ * by-name read of an action name bound to more than one owner answers the one
+ * written last, as the bare-name map did. Recorded by {@link recordStoreWrite}.
+ */
+const writeOrder = new WeakMap<ReadonlyMap<string, unknown>, Map<string, number>>();
+let writeSequence = 0;
+
+/** Record that `key` of `store` was just written ({@link readStoreEntry}'s "written last"). */
+export function recordStoreWrite(store: ReadonlyMap<string, unknown>, key: string): void {
+  let order = writeOrder.get(store);
+  if (!order) writeOrder.set(store, (order = new Map()));
+  order.set(key, ++writeSequence);
+}
+
+/** Of `keys`, the one written last (the last in the store's order when none was recorded). */
+function writtenLast(store: ReadonlyMap<string, unknown>, keys: readonly string[]): string {
+  const order = writeOrder.get(store);
+  let best = keys[keys.length - 1]!;
+  let bestAt = order?.get(best) ?? 0;
+  for (const key of keys) {
+    const at = order?.get(key) ?? 0;
+    if (at > bestAt) { best = key; bestAt = at; }
+  }
+  return best;
+}
+
 /** The store key of `packageId`'s item of `name`. */
 function slotKey(packageId: string, name: string): string {
   return `${packageId}${SLOT_SEPARATOR}${name}`;
 }
 
-/** The name a store key addresses: the key itself, or the name of a package slot. */
+/** The name a store key addresses: the key itself, or the name of a package slot (an action's without its object). */
 export function storedNameOf(key: string): string {
-  const at = key.indexOf(SLOT_SEPARATOR);
-  return at === -1 ? key : key.slice(at + 1);
+  const identity = keyIdentityOf(key);
+  const at = identity.lastIndexOf(OWNER_SEPARATOR);
+  return at === -1 ? identity : identity.slice(at + 1);
 }
 
 /** The package of a package slot's key; `undefined` for a bare key. */
@@ -148,12 +227,12 @@ export function storeKeysNamed(store: ReadonlyMap<string, unknown> | undefined, 
   return [...store.keys()].filter((key) => storedNameOf(key) === name);
 }
 
-/** The packages holding a slot of `name`, in the store's order. */
-function packageSlotsOf(store: ReadonlyMap<string, unknown>, name: string): string[] {
+/** The packages holding a slot of `identity`, in the store's order. */
+function packageSlotsOf(store: ReadonlyMap<string, unknown>, identity: string): string[] {
   const holders: string[] = [];
   for (const key of store.keys()) {
     const packageId = slotPackageOf(key);
-    if (packageId !== undefined && storedNameOf(key) === name) holders.push(packageId);
+    if (packageId !== undefined && keyIdentityOf(key) === identity) holders.push(packageId);
   }
   return holders;
 }
@@ -169,17 +248,19 @@ export function storeWriteKey(
   name: string,
   data: unknown,
 ): { key: string; replaces: string[] } {
-  if (!PACKAGE_SLOTTED_STORE_TYPES.has(type) || !store) {
-    const packageId = PACKAGE_SLOTTED_STORE_TYPES.has(type) ? storedItemPackageId(data) : undefined;
-    return { key: packageId === undefined ? name : slotKey(packageId, name), replaces: [] };
+  if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) return { key: name, replaces: [] };
+  const identity = slotIdentityOf(type, name, data);
+  if (!store) {
+    const packageId = storedItemPackageId(data);
+    return { key: packageId === undefined ? identity : slotKey(packageId, identity), replaces: [] };
   }
-  const holders = packageSlotsOf(store, name);
+  const holders = packageSlotsOf(store, identity);
   const packageId = storedItemPackageId(data);
   if (packageId === undefined) {
-    return { key: holders.length === 1 ? slotKey(holders[0]!, name) : name, replaces: [] };
+    return { key: holders.length === 1 ? slotKey(holders[0]!, identity) : identity, replaces: [] };
   }
   const others = holders.filter((holder) => holder !== packageId);
-  return { key: slotKey(packageId, name), replaces: others.length === 0 && store.has(name) ? [name] : [] };
+  return { key: slotKey(packageId, identity), replaces: others.length === 0 && store.has(identity) ? [identity] : [] };
 }
 
 /** Whether a package id names a caller with a package (not empty, not the provenance sentinel). */
@@ -246,8 +327,14 @@ export function storeRemovalKeys(
  *    OTHER packages hold the name here: no item answers, and no loader's
  *    by-name copy is served in its place (⛔ never another package's item).
  *
+ * For an action name bound to more than one owner (two objects, or an object
+ * and the object-less key) the read cannot see the object: it answers the slot
+ * written last among those it may read (a read naming a package: that
+ * package's slots; one naming none: every identity's D3 answer), as the
+ * bare-name map did.
+ *
  * @throws {PackageScopedNameRefusedError} a read naming no package of a name
- *   two or more packages hold (D3, `ambiguous-in-environment`).
+ *   two or more packages hold on one identity (D3, `ambiguous-in-environment`).
  */
 export function readStoreEntry(
   store: ReadonlyMap<string, unknown> | undefined,
@@ -259,20 +346,38 @@ export function readStoreEntry(
   if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) {
     return store.has(name) ? { found: true, data: store.get(name) } : { found: false, settled: false };
   }
-  const holders = packageSlotsOf(store, name);
-  if (holders.length === 0) {
-    return store.has(name) ? { found: true, data: store.get(name) } : { found: false, settled: false };
+  const identities = [...new Set(storeKeysNamed(store, type, name).map(keyIdentityOf))];
+  if (identities.length === 0) return { found: false, settled: false };
+  const answers = identities.map((identity) => readIdentity(store, type, name, identity, packageId));
+  const found = answers.filter((answer): answer is { key: string } => answer !== undefined && answer !== 'settled');
+  if (found.length === 0) {
+    return { found: false, settled: answers.some((answer) => answer === 'settled') };
   }
+  return { found: true, data: store.get(writtenLast(store, found.map((answer) => answer.key))) };
+}
+
+/**
+ * One identity's answer to a by-name read: the key that answers, `'settled'`
+ * when the read names a package and only other packages hold the identity, or
+ * `undefined` when nothing does. See the module doc's **read** rule.
+ */
+function readIdentity(
+  store: ReadonlyMap<string, unknown>,
+  type: string,
+  name: string,
+  identity: string,
+  packageId: string | null | undefined,
+): { key: string } | 'settled' | undefined {
+  const holders = packageSlotsOf(store, identity);
+  if (holders.length === 0) return store.has(identity) ? { key: identity } : undefined;
   if (isPackageCaller(packageId)) {
-    return holders.includes(packageId)
-      ? { found: true, data: store.get(slotKey(packageId, name)) }
-      : { found: false, settled: true };
+    return holders.includes(packageId) ? { key: slotKey(packageId, identity) } : 'settled';
   }
   const resolution = resolvePackageScopedHolders(
     { type: type as PackageScopedResolvableType, name, callerPackageId: null },
-    packageScopedHolderSource(holders.map((holder) => [holder, store.get(slotKey(holder, name))] as const)),
+    packageScopedHolderSource(holders.map((holder) => [holder, slotKey(holder, identity)] as const)),
     () => new Set<string>(),
   );
   if (resolution.status === 'refused') throw new PackageScopedNameRefusedError(resolution);
-  return resolution.status === 'resolved' ? { found: true, data: resolution.item } : { found: false, settled: false };
+  return resolution.status === 'resolved' ? { key: resolution.item as string } : undefined;
 }

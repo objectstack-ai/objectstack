@@ -30,6 +30,7 @@ import { DEFAULT_DATASOURCE_NAME, type DatasourceConnectionState } from './datas
 // [#27618] The package's one "no such datasource" refusal, shared with the
 // admin service so every by-name door answers an unknown name alike.
 import { datasourceNotFoundError } from './datasource-admin-service.js';
+import { withRefusalDetails } from './datasource-refusal.js';
 import {
   suggestFieldTypeForSqlType,
   isCompatible,
@@ -351,14 +352,18 @@ function unattributedSchemaFilterError(args: {
     );
   }
   const err = new Error(
-    `Cannot narrow the remote tables of datasource '${datasource}' to ${target}: ` +
-      `${driver} named no schema for ${unattributed.length} of its ${total} table(s), ` +
-      `for example '${unattributed[0]}', so whether they belong there is unknown, ` +
-      `and listing them anyway could show tables the filter excludes. ${remedies.join(' ')}`,
+    `Cannot narrow the remote tables of datasource '${datasource}': ` +
+      `its driver named no schema for ${unattributed.length} of its ${total} table(s).`,
   ) as Error & { code?: string; status?: number };
   err.code = 'EXTERNAL_DATASOURCE_ERROR';
   err.status = 400;
-  return err;
+  return withRefusalDetails(
+    err,
+    'schema_filter_unattributed',
+    `The filter is ${target}. ${driver} named no schema for ${unattributed.length} of its ${total} table(s), ` +
+      `for example '${unattributed[0]}', so whether they belong there is unknown, ` +
+      `and listing them anyway could show tables the filter excludes. ${remedies.join(' ')}`,
+  );
 }
 
 /**
@@ -600,13 +605,16 @@ function importNameRefusedError(message: string): Error {
 function primaryDatasourceNotFederatedError(datasource: string, door: FederationDoor): Error {
   const code = door === 'import' ? 'EXTERNAL_IMPORT_ERROR' : 'EXTERNAL_DATASOURCE_ERROR';
   const err = new Error(
-    `Datasource '${datasource}' is the platform's managed primary datasource, not a federation source: ` +
-      `its tables are the platform's own objects, so there are no remote tables to list, draft or import ` +
-      `from it. Sync objects from an external datasource instead.`,
+    `Datasource '${datasource}' is the platform's managed primary datasource, not a federation source.`,
   ) as Error & { code?: string; status?: number };
   err.code = code;
   err.status = 400;
-  return err;
+  return withRefusalDetails(
+    err,
+    'primary_not_federated',
+    `Its tables are the platform's own objects, so there are no remote tables to list, draft or import ` +
+      `from it. Sync objects from an external datasource instead.`,
+  );
 }
 
 /**
@@ -673,13 +681,13 @@ function notAFederationSourceError(datasource: string, ds: DatasourceLike, door:
   const remedy =
     `To list, draft or import remote tables, use a datasource the platform does not own: ` +
     `one declared with schemaMode 'external' or 'validate-only'.`;
-  const err = new Error(`${lead}: ${rule} ${remedy}`) as Error & {
+  const err = new Error(`${lead}.`) as Error & {
     code?: string;
     status?: number;
   };
   err.code = code;
   err.status = 400;
-  return err;
+  return withRefusalDetails(err, 'not_federation_source', `${rule} ${remedy}`);
 }
 
 /** snake_case → Title Case label. */

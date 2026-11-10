@@ -223,8 +223,38 @@ describe('[#27277] reads: the engine applies the query', () => {
       expect(err.code).toBe('EXTERNAL_ROW_CAP_EXCEEDED');
       expect(err.status).toBe(422);
       expect(err.message).toContain('Narrow the filter');
-      expect(err.message).toContain('DataSync');
+      // [ADR-0153] The remedy is sync-in; the retired DataSync is never named.
+      expect(err.message).toContain('sync-in');
+      expect(err.message).not.toContain('DataSync');
     }
+  });
+
+  it('[ADR-0153 D2] the refusal carries what the driver returned, on the error object only', async () => {
+    const rows = Array.from({ length: EXTERNAL_ROW_CAP + 5 }, (_, i) => ({ id: `r${i}`, kind: 'leaf', weight: i }));
+    const { engine } = makeEngine({ rows });
+    const err = await engine.find('tree_node', { where: { kind: 'leaf' } }).then(() => undefined, (e) => e);
+    expect(err).toBeInstanceOf(ExternalRowCapExceededError);
+    // The floor asks for cap + 1 and the driver stopped there: that many came back.
+    expect(err.returnedRowCount).toBe(EXTERNAL_ROW_CAP + 1);
+    const weights = err.returnedValuesOf('weight');
+    expect(weights).toHaveLength(EXTERNAL_ROW_CAP + 1);
+    expect(weights.slice(0, 3)).toEqual([0, 1, 2]);
+    expect(err.returnedValuesOf('no_such_field').every((v: unknown) => v === undefined)).toBe(true);
+    // Never on the wire: not in details, not an own key, not in any serialization.
+    expect(err.details).toEqual({ datasource: 'tree', object: 'tree_node', cap: EXTERNAL_ROW_CAP });
+    expect(Object.keys(err)).not.toContain('returned');
+    const serialized = JSON.stringify({ ...err, message: err.message });
+    expect(serialized).not.toContain('r0');
+    expect(serialized).not.toContain('weight');
+    // A copy: mutating the answer does not reach the rows.
+    weights[0] = 'mutated';
+    expect(err.returnedValuesOf('weight')[0]).toBe(0);
+  });
+
+  it('[ADR-0153 D2] a refusal built without rows reports none returned', () => {
+    const err = new ExternalRowCapExceededError('tree', 'tree_node', 10);
+    expect(err.returnedRowCount).toBe(0);
+    expect(err.returnedValuesOf('weight')).toEqual([]);
   });
 
   it('a read the remote fails is ERR_DATASOURCE_UNAVAILABLE / 503, the cause logged and never in the message', async () => {
