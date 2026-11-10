@@ -103,7 +103,7 @@ export function bindingCrypto(): ICryptoProvider & { encrypts: CryptoContext[] }
   const master = randomBytes(32);
   const aad = (ctx: CryptoContext) => createHash('sha256').update(JSON.stringify([ctx.scope, ctx.namespace, ctx.key])).digest();
   const encrypts: CryptoContext[] = [];
-  return {
+  const provider: ICryptoProvider & { encrypts: CryptoContext[] } = {
     encrypts,
     async encrypt(plain: string, ctx: CryptoContext): Promise<CryptoHandle> {
       encrypts.push(ctx);
@@ -123,10 +123,14 @@ export function bindingCrypto(): ICryptoProvider & { encrypts: CryptoContext[] }
     async rotateKey(handle: CryptoHandle): Promise<CryptoHandle> {
       return handle;
     },
+    digest(plain: string): string {
+      return createHash('sha256').update(plain).digest('hex');
+    },
     async keyedDigest(plain: string): Promise<string> {
       return createHash('sha256').update(plain).digest('hex');
     },
-  } as ICryptoProvider & { encrypts: CryptoContext[] };
+  };
+  return provider;
 }
 
 /** A logger double that keeps every line. */
