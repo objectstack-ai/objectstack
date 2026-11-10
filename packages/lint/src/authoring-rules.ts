@@ -2472,8 +2472,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // All six collections, in one declaration: `object` covers the object's own
     // name/label plus its fields, actions and field groups; the other four are
     // one collection each. ⛔ Never a subset — that is the #7220 split this
-    // entry exists to have avoided.
-    runtimeTypes: ['object', 'permission', 'book', 'position', 'app'],
+    // entry exists to have avoided. [#31998] `object_extension` judges what an
+    // extension writes onto an object (its fields, its `label`, its
+    // `fieldPatches` relabels), which the CLI judges through `objectExtensions`.
+    runtimeTypes: ['object', 'permission', 'book', 'position', 'app', 'object_extension'],
     run: (stack) => validateSecurityRoleWord(stack),
   },
   // ADR-0105 D6 — the org tree is a REPORTING dimension. An RLS policy or
