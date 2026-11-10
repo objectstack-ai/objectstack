@@ -34,7 +34,9 @@ import { render, cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 
+import { renderHook } from '@testing-library/react';
 import { ObjectGrid } from '../ObjectGrid';
+import { useGroupedData } from '../useGroupedData';
 import { ActionProvider } from '@object-ui/react';
 import { registerAllFields } from '@object-ui/fields';
 import type { DataSource, ObjectGridSchema } from '@object-ui/types';
@@ -67,12 +69,12 @@ function storedInstant(offset: number): string {
 const RECENT_DAY = storedDay(-3);
 const RECENT_INSTANT = storedInstant(-2);
 const ROWS: Array<Record<string, unknown>> = [
-  { id: 'f1', name: 'Q4 opening', period_start: '2026-10-01', closed_at: '2026-10-01T09:30:00.000Z', region: 'emea' },
-  { id: 'f2', name: 'September', period_start: '2026-09-01', closed_at: '2026-09-01T16:45:00.000Z', region: 'amer' },
-  { id: 'f3', name: 'August', period_start: '2026-08-01', closed_at: '2026-08-01T07:05:00.000Z', region: 'apac' },
-  { id: 'f4', name: 'Q4 second', period_start: '2026-10-01', closed_at: '2026-10-01T09:30:00.000Z', region: 'emea' },
-  { id: 'f5', name: 'This week', period_start: RECENT_DAY, closed_at: RECENT_INSTANT, region: 'amer' },
-  { id: 'f6', name: 'Undated', period_start: null, closed_at: null, region: 'apac' },
+  { id: 'f1', name: 'Q4 opening', period_start: '2026-10-01', closed_at: '2026-10-01T09:30:00.000Z', region: 'emea', amount: 900 },
+  { id: 'f2', name: 'September', period_start: '2026-09-01', closed_at: '2026-09-01T16:45:00.000Z', region: 'amer', amount: 120.25 },
+  { id: 'f3', name: 'August', period_start: '2026-08-01', closed_at: '2026-08-01T07:05:00.000Z', region: 'apac', amount: 40 },
+  { id: 'f4', name: 'Q4 second', period_start: '2026-10-01', closed_at: '2026-10-01T09:30:00.000Z', region: 'emea', amount: 300 },
+  { id: 'f5', name: 'This week', period_start: RECENT_DAY, closed_at: RECENT_INSTANT, region: 'amer', amount: 80.5 },
+  { id: 'f6', name: 'Undated', period_start: null, closed_at: null, region: 'apac', amount: null },
 ];
 
 type Face = string | undefined;
@@ -84,6 +86,7 @@ function objectFields(dateFormat: Face, datetimeFormat: Face) {
     period_start: { type: 'date', label: 'Period Start', ...(dateFormat !== undefined ? { format: dateFormat } : {}) },
     closed_at: { type: 'datetime', label: 'Closed At', ...(datetimeFormat !== undefined ? { format: datetimeFormat } : {}) },
     region: { type: 'text', label: 'Region' },
+    amount: { type: 'number', label: 'Amount' },
   };
 }
 
@@ -102,24 +105,51 @@ function matches(row: Record<string, unknown>, cond: unknown): boolean {
   });
 }
 
+type Agg = { function: string; field?: string; alias: string };
+
+/**
+ * One aggregation node over a group's rows, as a SQL driver answers it: a
+ * `min` / `max` over a stored date or instant is that stored TEXT (ISO text
+ * orders as time), a `sum` / `avg` over numbers is a number.
+ */
+function aggregateOf(rows: Array<Record<string, unknown>>, node: Agg): unknown {
+  const values = rows.map((r) => r[node.field ?? '']).filter((v) => v !== null && v !== undefined);
+  if (values.length === 0) return null;
+  switch (node.function) {
+    case 'min': return typeof values[0] === 'number'
+      ? Math.min(...(values as number[]))
+      : [...values].sort((a, b) => (String(a) < String(b) ? -1 : 1))[0];
+    case 'max': return typeof values[0] === 'number'
+      ? Math.max(...(values as number[]))
+      : [...values].sort((a, b) => (String(a) < String(b) ? -1 : 1))[values.length - 1];
+    case 'sum': return (values as number[]).reduce((a, b) => a + Number(b), 0);
+    case 'avg': return (values as number[]).reduce((a, b) => a + Number(b), 0) / values.length;
+    default: throw new Error(`double: unsupported aggregation ${node.function}`);
+  }
+}
+
 /**
  * A data source that answers the group header query with the stored keys,
- * sorted as a `GROUP BY` answers them, and pages each group's rows.
+ * sorted as a `GROUP BY` answers them, and each aggregation node under its
+ * alias; and pages each group's rows.
  */
 function serverSource(fields: ReturnType<typeof objectFields>) {
   return {
-    queryGroupHeaders: vi.fn(async (_object: string, query: { where?: unknown; groupBy?: string[] }) => {
+    queryGroupHeaders: vi.fn(async (_object: string, query: { where?: unknown; groupBy?: string[]; aggregations?: Agg[] }) => {
       const groupBy = query.groupBy ?? [];
-      const buckets = new Map<string, number>();
+      const buckets = new Map<string, Array<Record<string, unknown>>>();
       for (const row of ROWS.filter((r) => matches(r, query.where))) {
         const key = JSON.stringify(groupBy.map((f) => row[f] ?? null));
-        buckets.set(key, (buckets.get(key) ?? 0) + 1);
+        buckets.set(key, [...(buckets.get(key) ?? []), row]);
       }
       return [...buckets.entries()]
         .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-        .map(([key, count]) => {
+        .map(([key, rows]) => {
           const values = JSON.parse(key) as unknown[];
-          return { ...Object.fromEntries(groupBy.map((f, i) => [f, values[i]])), count };
+          const aggregates = (query.aggregations ?? [])
+            .filter((node) => !(node.function === 'count' && node.field === undefined))
+            .map((node) => [node.alias, aggregateOf(rows, node)]);
+          return { ...Object.fromEntries(groupBy.map((f, i) => [f, values[i]])), ...Object.fromEntries(aggregates), count: rows.length };
         });
     }),
     find: vi.fn(async (_object: string, params: Record<string, unknown>) => {
@@ -151,7 +181,14 @@ function schemaOnlySource(fields: ReturnType<typeof objectFields>) {
 type GroupingEntry = { field: string; order?: 'asc' | 'desc' };
 type Source = 'server' | 'client';
 
-function renderGrouped(source: Source, grouping: GroupingEntry[], faces: { date?: Face; datetime?: Face } = {}) {
+type GroupAggregation = { field: string; type: 'sum' | 'avg' | 'min' | 'max' | 'count' | 'count_distinct' };
+
+function renderGrouped(
+  source: Source,
+  grouping: GroupingEntry[],
+  faces: { date?: Face; datetime?: Face } = {},
+  aggregations?: GroupAggregation[],
+) {
   const fields = objectFields(faces.date, faces.datetime);
   const ds = source === 'server' ? serverSource(fields) : schemaOnlySource(fields);
   render(
@@ -163,6 +200,7 @@ function renderGrouped(source: Source, grouping: GroupingEntry[], faces: { date?
           columns: ['name', 'period_start', 'closed_at', 'region'],
           ...(source === 'client' ? { data: { provider: 'value', items: ROWS } } : {}),
           grouping: { fields: grouping },
+          ...(aggregations ? { aggregations } : {}),
         } as unknown as ObjectGridSchema}
         dataSource={ds as unknown as DataSource}
       />
@@ -300,5 +338,113 @@ describe('two-level grouping, date first (objectui#13234)', () => {
       expect(band.heading).toBe(band.cell);
       expect(DAY_KEYS_DESC).not.toContain(band.heading);
     }
+  });
+});
+
+/** The cell text of `columnLabel` in the data row whose Name cell reads `name`. */
+function cellOfRow(name: string, columnLabel: string): string {
+  const index = columnIndex(columnLabel);
+  for (const tr of document.querySelectorAll('tbody tr')) {
+    const tds = tr.querySelectorAll('td');
+    if ([...tds].some((td) => td.textContent === name) && tds.length > index) return tds[index].textContent ?? '';
+  }
+  throw new Error(`no row named ${name}`);
+}
+
+/** The aggregation chip text of the depth-0 band keyed `0:KEY`. */
+function chipOf(key: string): string {
+  return document.querySelector(`[data-testid="group-row-0:${key}"] .group-aggregations`)?.textContent ?? '';
+}
+
+/** Wait until every region band drew its chip and every named row its cell. */
+async function settledChips(ds: { getObjectSchema: ReturnType<typeof vi.fn> }, rowNames: string[]) {
+  await vi.waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalled());
+  await vi.waitFor(() => {
+    for (const key of ['amer', 'apac', 'emea']) expect(chipOf(key)).not.toBe('');
+    for (const name of rowNames) expect(() => cellOfRow(name, 'Name')).not.toThrow();
+  });
+}
+
+describe.each<Source>(['server', 'client'])('a %s-grouped grid draws a date-family min / max as its cell reads (objectstack#32119)', (source) => {
+  describe.each<Face>([undefined, 'relative', 'short', 'YYYY-MM-DD'])('`datetime` field, format %s', (format) => {
+    it('a `max` reads the Closed At cell of the group\'s latest row, never NaN', async () => {
+      const ds = renderGrouped(source, [{ field: 'region' }], { datetime: format }, [{ field: 'closed_at', type: 'max' }]);
+      await settledChips(ds, ['This week', 'August', 'Q4 opening']);
+      // amer's latest is "This week", apac's only dated row is "August", and
+      // emea's two rows share one instant.
+      expect(chipOf('amer')).toBe(`max: ${cellOfRow('This week', 'Closed At')}`);
+      expect(chipOf('apac')).toBe(`max: ${cellOfRow('August', 'Closed At')}`);
+      expect(chipOf('emea')).toBe(`max: ${cellOfRow('Q4 opening', 'Closed At')}`);
+      for (const key of ['amer', 'apac', 'emea']) {
+        expect(chipOf(key)).not.toMatch(/NaN|\d{4}-\d{2}-\d{2}T/);
+      }
+    });
+  });
+
+  describe.each<Face>([undefined, 'relative', 'YYYY-MM-DD'])('`date` field, format %s', (format) => {
+    it('a `min` reads the Period Start cell of the group\'s earliest row', async () => {
+      const ds = renderGrouped(source, [{ field: 'region' }], { date: format }, [{ field: 'period_start', type: 'min' }]);
+      await settledChips(ds, ['September', 'August', 'Q4 opening']);
+      expect(chipOf('amer')).toBe(`min: ${cellOfRow('September', 'Period Start')}`);
+      expect(chipOf('apac')).toBe(`min: ${cellOfRow('August', 'Period Start')}`);
+      expect(chipOf('emea')).toBe(`min: ${cellOfRow('Q4 opening', 'Period Start')}`);
+    });
+  });
+
+  it('a `sum` / `avg` over a datetime field is left out, never NaN, and the numeric `max` beside it stands', async () => {
+    const ds = renderGrouped(source, [{ field: 'region' }], {}, [
+      { field: 'closed_at', type: 'sum' },
+      { field: 'closed_at', type: 'avg' },
+      { field: 'amount', type: 'max' },
+    ]);
+    await settledChips(ds, []);
+    expect(chipOf('amer')).toBe('max: 120.25');
+    expect(chipOf('apac')).toBe('max: 40');
+    expect(chipOf('emea')).toBe('max: 900');
+    if (source === 'server') {
+      // Dropped before the header query is compiled: the server is not asked
+      // to add up times.
+      const asked = (ds as ReturnType<typeof serverSource>).queryGroupHeaders.mock.calls
+        .flatMap(([, query]) => (query as { aggregations?: Agg[] }).aggregations ?? []);
+      expect(asked.some((node) => node.field === 'closed_at')).toBe(false);
+      expect(asked).toContainEqual({ function: 'max', field: 'amount', alias: 'max_amount' });
+    }
+  });
+
+  it('CONTROL — a numeric `min` / `max` / `avg` still prints the number as before', async () => {
+    const ds = renderGrouped(source, [{ field: 'region' }], {}, [
+      { field: 'amount', type: 'min' },
+      { field: 'amount', type: 'avg' },
+    ]);
+    await settledChips(ds, []);
+    expect(chipOf('amer')).toBe('min: 80.50avg: 100.38');
+    expect(chipOf('emea')).toBe('min: 300avg: 600');
+  });
+});
+
+describe('the published `useGroupedData`, which knows no cell face (objectstack#32119)', () => {
+  it('a server `max` answered as stored text is left out, never NaN; a numeric one stands', () => {
+    const { result } = renderHook(() => useGroupedData(
+      { fields: [{ field: 'region' }] },
+      [],
+      [{ field: 'closed_at', type: 'max' }, { field: 'amount', type: 'max' }],
+      undefined,
+      { headers: [[{ region: 'emea', count: 2, max_closed_at: '2026-10-01T09:30:00.000Z', max_amount: '900' }]] },
+    ));
+    expect(result.current.groups[0].aggregations).toEqual([{ field: 'amount', type: 'max', value: 900 }]);
+  });
+
+  it('a client `sum` over a field holding no number is left out, not drawn as 0; an empty group keeps its 0', () => {
+    const { result } = renderHook(() => useGroupedData(
+      { fields: [{ field: 'region' }] },
+      [
+        { region: 'emea', closed_at: '2026-10-01T09:30:00.000Z' },
+        { region: 'apac', closed_at: null },
+      ],
+      [{ field: 'closed_at', type: 'sum' }],
+    ));
+    const byKey = Object.fromEntries(result.current.groups.map((g) => [g.label, g.aggregations]));
+    expect(byKey.emea).toEqual([]);
+    expect(byKey.apac).toEqual([{ field: 'closed_at', type: 'sum', value: 0 }]);
   });
 });
