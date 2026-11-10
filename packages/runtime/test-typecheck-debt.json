@@ -52,7 +52,7 @@
       "TS2493: Tuple type '…' of length '1' has no element at index '1'.": 1
     },
     "src/http-dispatcher.keys.test.ts": {
-      "TS18048: 'res.response' is possibly 'undefined'.": 9
+      "TS18048: 'res.response' is possibly 'undefined'.": 8
     },
     "src/http-dispatcher.mcp.test.ts": {
       "TS18048: 'res.response' is possibly 'undefined'.": 11

@@ -2106,6 +2106,10 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         label: "JIT(Just-in-Time) 프로비저닝 허용",
         help: "가입 대상이 초대 전용일 때, 계정이나 초대 없이 이 공급자를 통해 로그인하는 사람에게 계정을 만들어 줍니다. 기본값은 꺼짐이며, 그런 사람은 거부됩니다. 다른 가입 대상 모드는 이전과 같이 프로비저닝합니다. “로그인 옵션 편집”으로 변경하세요."
       },
+      skip_user_info: {
+        label: "ID 토큰에서만 클레임 읽기",
+        help: "OIDC 전용. ID 공급자의 검증된 ID 토큰에서 이메일, 이름, 그룹을 읽고 userinfo 엔드포인트는 호출하지 않습니다. Microsoft Entra ID에서는 켜야 합니다. 해당 userinfo 응답에는 그룹도 preferred_username도 없습니다. 기본값은 꺼짐이며, userinfo 엔드포인트가 있는 공급자는 그 응답에서 클레임을 읽습니다. '로그인 옵션 편집'에서 변경하세요."
+      },
       user_id: {
         label: "등록한 사람",
         help: "이 공급자를 등록한 사용자"
@@ -2432,6 +2436,10 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         label: "토큰 다이제스트",
         help: "배포 인증 비밀을 키로 한 Bearer의 HMAC-SHA-256(base64url)입니다. 단방향이며, 평문은 발급할 때 한 번만 표시되고 저장되지 않습니다."
       },
+      token_hint: {
+        label: "토큰 힌트",
+        help: "베어러 토큰의 마지막 네 글자로, 발급 시 기록되어 한 연결의 자격 증명을 서로 구분하는 데 쓰입니다. 토큰이나 그 다이제스트는 절대 아닙니다. 힌트 기록 이전에 발급된 자격 증명은 비어 있습니다."
+      },
       active: {
         label: "활성",
         help: "취소 스위치입니다. 비활성 자격 증명은 검증 시 거부됩니다"
@@ -2439,6 +2447,10 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       expires_at: {
         label: "만료 시각",
         help: "단계적 자격 증명 교체를 위한 선택적 만료 시각입니다. 만료된 자격 증명은 거부됩니다"
+      },
+      last_used_at: {
+        label: "마지막 사용 시각",
+        help: "자격 증명이 마지막으로 SCIM 요청을 인증한 시각으로, 1분에 최대 한 번 기록됩니다. 사용 기록이 없으면 비어 있습니다"
       },
       user_id: {
         label: "발급한 사람",
@@ -2488,6 +2500,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "토큰을 저장했습니다",
           fields: {
             token: "토큰",
+            tokenHint: "토큰 힌트",
             connectionId: "연결 ID",
             expiresAt: "만료 시각"
           }

@@ -30,6 +30,13 @@
  * `os validate`'s summary has no row for skills, so the skill is held by the
  * compiled artifact instead: it is the same stack, emitted.
  *
+ * The template ships a starter app and its object's list view (#32212), and a
+ * package whose manifest type is 'app' holds at most one app (ADR-0019 D3).
+ * So first `os g app` is run beside the starter app, and must be refused by
+ * that rule with nothing written; then the starter app is removed, as an
+ * author replacing it with their own does, and every generator runs as above.
+ * Its list view stays, so `os validate` counts two views.
+ *
  * Every `os g` must also not print the wiring lines it prints for a scaffold
  * that did not reach the stack — the per-PR guard for that report is
  * `generate-stack-reach.test.ts`, and the template and instruments are
@@ -43,7 +50,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execFile } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GENERATOR_SCAFFOLD_TARGETS } from '../src/commands/generate.js';
@@ -53,7 +60,7 @@ import { childEnv } from './helpers/serve-process.js';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI = resolve(HERE, '../bin/run-dev.js');
 
-/** oclif + tsx cold starts, ten of them, sequential. */
+/** oclif + tsx cold starts, eleven of them, sequential. */
 const RUN_TIMEOUT_MS = 480_000;
 
 const NS = 'my_app';
@@ -89,6 +96,8 @@ function runCli(args: string[], cwd: string): Promise<Run> {
 let root: string;
 let project: string;
 let init: Run;
+let appBesideStarter: Run;
+let appsBarrelBefore: string;
 const generated: Record<string, Run> = {};
 let validate: Run;
 let compile: Run;
@@ -121,6 +130,13 @@ beforeAll(async () => {
   root = mkdtempSync(join(HERE, '..', 'node_modules', '.generate-reach-e2e-'));
   init = await runCli(['init', 'my-app', '-t', 'app', '--no-install'], root);
   project = join(root, 'my-app');
+  // [#32212] A second app beside the template's starter app, then the starter
+  // app removed (its file and its barrel line) before the generators run.
+  const appsBarrel = join(project, 'src', 'apps', 'index.ts');
+  appsBarrelBefore = readFileSync(appsBarrel, 'utf-8');
+  appBesideStarter = await runCli(['g', 'app', 'extra', '--object', `${NS}_item`], project);
+  rmSync(join(project, 'src', 'apps', 'main.app.ts'));
+  writeFileSync(appsBarrel, appsBarrelBefore.replace("export { default as main } from './main.app';\n", ''));
   for (const type of ORDER) {
     generated[type] = await runCli(argsFor(type), project);
   }
@@ -138,6 +154,14 @@ describe('[#20215] `os init -t app` → `os g` every type → `os validate`', ()
     expect(readFileSync(join(project, 'objectstack.config.ts'), 'utf-8')).toContain(`namespace: '${NS}'`);
   });
 
+  it('`os g app` beside the starter app is refused by the one-app rule, and writes nothing', () => {
+    expect(appBesideStarter.code, appBesideStarter.stdout + appBesideStarter.stderr).not.toBe(0);
+    expect(appBesideStarter.stdout + appBesideStarter.stderr).toMatch(/must define at most one app/);
+    expect(existsSync(join(project, 'src', 'apps', 'extra.app.ts'))).toBe(false);
+    // The barrel as the template wrote it, which is what the removal above edits.
+    expect(appsBarrelBefore).toContain("export { default as main } from './main.app';\n");
+  });
+
   it.each(ORDER)('`os g %s` exits 0 and reports no wiring to add', (type) => {
     const run = generated[type];
     const target = GENERATOR_SCAFFOLD_TARGETS.find((t) => t.type === type)!;
@@ -150,7 +174,9 @@ describe('[#20215] `os init -t app` → `os g` every type → `os validate`', ()
     expect(validate.code, validate.stdout + validate.stderr).toBe(0);
     // The template's own object plus the generated one.
     expect(validate.stdout).toMatch(/Data: 2 Objects/);
-    for (const [label, n] of [['Apps', 1], ['Views', 1], ['Dashboards', 1], ['Actions', 1], ['Flows', 1]] as const) {
+    // [#32212] The template's list view of its own object stays beside the
+    // one generated here; its starter app was removed for the generated one.
+    for (const [label, n] of [['Apps', 1], ['Views', 2], ['Dashboards', 1], ['Actions', 1], ['Flows', 1]] as const) {
       expect(validate.stdout, label).toMatch(new RegExp(`\\b${n} ${label}\\b`));
     }
   });

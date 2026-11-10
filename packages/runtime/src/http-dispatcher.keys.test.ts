@@ -5,6 +5,8 @@ import { describe, it, expect } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 import { HttpDispatcher, type HttpDispatcherResult } from './http-dispatcher.js';
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/metadata';
 import { resolveExecutionContext } from './security/resolve-execution-context.js';
 import { hashApiKey } from './security/api-key.js';
 
@@ -98,25 +100,30 @@ describe('HttpDispatcher.handleKeys (POST /keys — key generation)', () => {
     expect(rows).toHaveLength(0);
   });
 
-  it('pins user_id to the caller — body cannot impersonate', async () => {
+  // [#32281] A body naming another user, or a known secret, used to be
+  // answered 201 with the key minted for the caller and the extra keys dropped
+  // silently. Both are now refused before anything is written; the full
+  // unknown-key contract is the `unknown body keys` suite at the end.
+  it('refuses a body naming another user — no key is minted for anyone', async () => {
     const { kernel, rows } = makeKernel();
-    await dispatcher(kernel).handleKeys('POST', { name: 'x', user_id: 'evil', userId: 'evil' }, ctx());
-    expect(rows[0].user_id).toBe('u1');
+    const res = responseOf(await dispatcher(kernel).handleKeys('POST', { name: 'x', user_id: 'evil', userId: 'evil' }, ctx()));
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_FAILED');
+    expect(rows).toHaveLength(0);
   });
 
-  it('ignores body-injected key/id/revoked — cannot forge a known secret', async () => {
+  it('refuses body-injected key/id/revoked/prefix — cannot forge a known secret', async () => {
     const { kernel, rows } = makeKernel();
-    const res = await dispatcher(kernel).handleKeys(
+    const res = responseOf(await dispatcher(kernel).handleKeys(
       'POST',
       { name: 'x', key: 'attacker-known', id: 'fixed', revoked: false, prefix: 'evil_' },
       ctx(),
-    );
-    const data = res.response.body.data;
-    // Stored key is the hash of the GENERATED raw, never the attacker's value.
-    expect(rows[0].key).toBe(hashApiKey(data.key));
-    expect(rows[0].key).not.toBe('attacker-known');
-    expect(rows[0].key).not.toBe(hashApiKey('attacker-known'));
-    expect(data.prefix).toMatch(/^osk_/);
+    ));
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_FAILED');
+    expect(res.body.error.details.fields.map((f: any) => f.field)).toEqual(['key', 'id', 'revoked', 'prefix']);
+    expect(rows).toHaveLength(0);
+    expect(JSON.stringify(res.body)).not.toMatch(/osk_/);
   });
 
   it('rejects non-POST methods (405)', async () => {
@@ -260,7 +267,9 @@ const orgCtx = (tenantId?: string) => ({
  *
  * Scoped to the #8287 suite below on purpose: the older suite's reads are the
  * file's share of the frozen TEST_DEBT number, and pressing that number down is
- * a separate improvement to bank, not a rider on this repair.
+ * a separate improvement to bank, not a rider on this repair. [#32281] The two
+ * older cases that suite rewrote (a body naming another user or a known secret,
+ * now refused) read through it too, and the ledger was re-recorded.
  */
 function responseOf(res: HttpDispatcherResult): NonNullable<HttpDispatcherResult['response']> {
   const { response } = res;
@@ -280,11 +289,12 @@ describe('HttpDispatcher.handleKeys — organization inheritance (#8287)', () =>
 
   /**
    * ⛔ No org parameter, no cross-org keys in v1. The organization is
-   * INHERITED — a body that names another organization is ignored exactly the
-   * way a body naming another `user_id` already is, so minting can never be a
-   * lateral-movement step.
+   * INHERITED, so minting can never be a lateral-movement step. [#32281] A body
+   * that names an organization used to be answered 201 with the key pinned to
+   * the active organization and the body's value dropped; it is now refused,
+   * naming each key, and nothing is minted in either organization.
    */
-  it('ignores an organization supplied in the body (inherited, never parameterized)', async () => {
+  it('refuses an organization supplied in the body (inherited, never parameterized)', async () => {
     const { kernel, rows } = makeOrgKernel([{ user_id: 'u1', organization_id: 'org_a', role: 'owner' }], 'isolated');
     const res = responseOf(await dispatcher(kernel).handleKeys(
       'POST',
@@ -292,6 +302,16 @@ describe('HttpDispatcher.handleKeys — organization inheritance (#8287)', () =>
       orgCtx('org_a'),
     ));
 
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_FAILED');
+    expect(res.body.error.details.fields.map((f: any) => f.field))
+      .toEqual(['organization_id', 'active_organization_id', 'organizationId']);
+    expect(rows).toHaveLength(0);
+  });
+
+  it('still pins the key to the active organization when the body names none', async () => {
+    const { kernel, rows } = makeOrgKernel([{ user_id: 'u1', organization_id: 'org_a', role: 'owner' }], 'isolated');
+    const res = responseOf(await dispatcher(kernel).handleKeys('POST', { name: 'agent' }, orgCtx('org_a')));
     expect(res.status).toBe(201);
     expect(rows[0].active_organization_id).toBe('org_a');
   });
@@ -401,5 +421,94 @@ describe('HttpDispatcher.handleKeys — a refused insert is DELIVERED, never swa
 
     expect(JSON.stringify(res.body)).not.toMatch(/sentinel-row-content/);
     expect(res.body.error.message).not.toMatch(/duplicate key/);
+  });
+});
+
+// ── [#32281] Unknown body keys are refused, never dropped ──────────────────
+
+/**
+ * `POST /keys` reads `name` and `expires_at` and nothing else. Any other key is
+ * answered `400 VALIDATION_FAILED` with a `fields[]` entry per key, BEFORE any
+ * service is resolved or any row is read or written — the shape the data door
+ * and the `_activation` doors answer an undeclared key with. A caller who
+ * asked for a key for another user, or with scopes, is told it did not get one.
+ */
+describe('HttpDispatcher.handleKeys — unknown body keys (#32281)', () => {
+  /** A kernel that records every service lookup, so "before any read" is observable. */
+  function countingKernel() {
+    const { kernel, rows } = makeKernel();
+    const looked: string[] = [];
+    const counted = {
+      getService: (n: string): unknown => { looked.push(n); return kernel.getService(n); },
+      getServiceAsync: async (n: string): Promise<unknown> => { looked.push(n); return kernel.getServiceAsync(n); },
+    };
+    return { kernel: counted, rows, looked };
+  }
+
+  it('refuses one unknown key with 400 VALIDATION_FAILED naming it, before any service is resolved', async () => {
+    const { kernel, rows, looked } = countingKernel();
+    const d = dispatcher(kernel);
+    looked.length = 0;
+    const res = responseOf(await d.handleKeys('POST', { name: 'ci', userId: 'u2' }, ctx()));
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe('VALIDATION_FAILED');
+    expect(res.body.error.details.fields).toEqual([
+      expect.objectContaining({ field: 'userId', code: 'unknown_field' }),
+    ]);
+    expect(res.body.error.message).toMatch(/^Unknown key `userId` in the API key request/);
+    expect(rows).toHaveLength(0);
+    expect(looked).toEqual([]);
+  });
+
+  it('names every unknown key together, in body order', async () => {
+    const { kernel, rows } = makeKernel();
+    const res = responseOf(await dispatcher(kernel).handleKeys(
+      'POST', { scopes: ['admin'], name: 'ci', user_id: 'u2', nmae: 'typo' }, ctx()));
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_FAILED');
+    expect(res.body.error.details.fields).toEqual(['scopes', 'user_id', 'nmae'].map((field) =>
+      expect.objectContaining({ field, code: 'unknown_field' })));
+    expect(rows).toHaveLength(0);
+  });
+
+  it('a userId for another user mints no key at all: the caller\'s row count is unchanged', async () => {
+    const { kernel, rows } = makeKernel();
+    const d = dispatcher(kernel);
+    responseOf(await d.handleKeys('POST', { name: 'mine' }, ctx()));
+    expect(rows).toHaveLength(1);
+
+    const res = responseOf(await d.handleKeys('POST', { name: 'theirs', userId: 'u2' }, ctx()));
+    expect(res.status).toBe(400);
+    expect(rows).toHaveLength(1);
+    expect(rows.some((r) => r.user_id === 'u2')).toBe(false);
+    expect(rows.some((r) => r.name === 'theirs')).toBe(false);
+  });
+
+  it('refuses a body that is not an object, naming (body)', async () => {
+    const { kernel, rows } = makeKernel();
+    for (const body of [['name'], 'ci', 42]) {
+      const res = responseOf(await dispatcher(kernel).handleKeys('POST', body, ctx()));
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('VALIDATION_FAILED');
+      expect(res.body.error.details.fields).toEqual([expect.objectContaining({ field: '(body)', code: 'invalid_type' })]);
+    }
+    expect(rows).toHaveLength(0);
+  });
+
+  it('CONTROL: { name } and { name, expires_at } still mint 201, and an absent body still mints the default name', async () => {
+    const { kernel, rows } = makeKernel();
+    const d = dispatcher(kernel);
+    const named = responseOf(await d.handleKeys('POST', { name: 'ci' }, ctx()));
+    expect(named.status).toBe(201);
+    const future = '2999-01-01T00:00:00.000Z';
+    const dated = responseOf(await d.handleKeys('POST', { name: 'ci-dated', expires_at: future }, ctx()));
+    expect(dated.status).toBe(201);
+    expect(dated.body.data.expires_at).toBe(future);
+    const bare = responseOf(await d.handleKeys('POST', undefined, ctx()));
+    expect(bare.status).toBe(201);
+    expect(rows.map((r) => r.name)).toEqual(['ci', 'ci-dated', 'API Key']);
   });
 });
