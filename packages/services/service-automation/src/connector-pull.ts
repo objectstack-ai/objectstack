@@ -61,58 +61,15 @@ import {
     judgeConnectorInput,
     type ConnectorInputSchemaSource,
 } from './connector-input-schema.js';
+import { ConnectorPullError, type ConnectorPullRefusalReason } from './pull-refusal.js';
 
 /** The connector providers a v1 pull reads through (the ruling's "rest / openapi only"). */
 export const CONNECTOR_PULL_PROVIDERS: readonly string[] = Object.freeze(['rest', 'openapi']);
 
-/** Which part of the binding a refused pull failed on. */
-export type ConnectorPullRefusalReason =
-    | 'mapping_not_found'
-    /**
-     * [ADR-0150 D3, #32071] The mapping's name resolves to no one item: more
-     * than one package holds it. The message names every candidate.
-     */
-    | 'mapping_name_refused'
-    | 'no_connector_source'
-    | 'connector_not_registered'
-    | 'connector_plugin_origin'
-    | 'connector_degraded'
-    | 'connector_provider_unsupported'
-    | 'connector_action_unknown'
-    | 'upsert_key_empty'
-    | 'unsupported_transform'
-    | 'watermark_field_unmapped'
-    | 'input_query_not_object'
-    | 'input_schema_mismatch'
-    | 'mapping_target_refused'
-    | 'upstream_not_ok'
-    | 'records_not_array'
-    | 'record_not_object'
-    | 'mapping_apply_refused';
-
-/**
- * A refused pull. `code` + `status` are the ADR-0112 pair a door would put on
- * the wire; `reason` is the machine discriminator a caller branches on; the
- * message names the mapping and says what to change.
- */
-export class ConnectorPullError extends Error {
-    readonly code: string;
-    readonly status: number;
-    readonly reason: ConnectorPullRefusalReason;
-    readonly mapping: string;
-
-    constructor(
-        init: { code: string; status: number; reason: ConnectorPullRefusalReason; mapping: string },
-        message: string,
-    ) {
-        super(message);
-        this.name = 'ConnectorPullError';
-        this.code = init.code;
-        this.status = init.status;
-        this.reason = init.reason;
-        this.mapping = init.mapping;
-    }
-}
+// The refusal a pull throws, and its reason union, live in `./pull-refusal.ts`
+// so the datasource source's windowed read (`./datasource-window-read.ts`)
+// throws the same type without importing this module.
+export { ConnectorPullError, type ConnectorPullRefusalReason } from './pull-refusal.js';
 
 /** The protocol surface a pull reads and writes through: the import runner's, plus the metadata read. */
 export interface ConnectorPullProtocol extends ImportProtocolLike {

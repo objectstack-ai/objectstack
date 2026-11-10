@@ -35,6 +35,7 @@ import { assertEngineFindOnePredicate, hashSpec } from '@objectstack/metadata-co
 // statement, and both orderings read correctly — pinned by that gate's `--self-test`,
 // which is what guards this file now rather than the position of the line below.
 import '@objectstack/spec/kernel';
+import { refusalAccount } from './refusal-account.js';
 
 /**
  * Minimal PluginContext + in-memory metadata service. Boots the plugin and
@@ -148,12 +149,12 @@ describe('DatasourceAdminServicePlugin: probe', () => {
 describe('DatasourceAdminServicePlugin: secret fail-closed', () => {
   it('refuses to create a secret-bearing datasource without a secret binder', async () => {
     const { service, registry } = await boot({ driverFactory: fakeFactory() });
-    await expect(
+    expect(await refusalAccount(
       service.createDatasource(
         { name: 'reporting', driver: 'postgres', config: { database: 'analytics' } },
         { value: 'pw' },
       ),
-    ).rejects.toThrow(/no secret store configured/i);
+    )).toMatch(/no secret store configured/i);
     // nothing persisted
     expect(registry.get('datasource')?.size ?? 0).toBe(0);
   });
@@ -353,7 +354,7 @@ describe('DatasourceAdminServicePlugin: persistence + bound count', () => {
     expect(list.find((d) => d.name === 'crm_primary')?.origin).toBe('code');
     expect(list.find((d) => d.name === 'reporting')?.origin).toBe('runtime');
 
-    await expect(service.removeDatasource('reporting')).rejects.toThrow(/1 object\(s\)/);
+    expect(await refusalAccount(service.removeDatasource('reporting'))).toMatch(/1 object\(s\)/);
   });
 });
 
@@ -836,9 +837,9 @@ describe('DatasourceAdminServicePlugin: objects bound external are read from the
   it('refuses creating a managed datasource that a runtime-saved object binds external — nothing persisted', async () => {
     const { service, registry } = await boot({ services: { objectql: objectql([ORDERS]) } });
 
-    await expect(
+    expect(await refusalAccount(
       service.createDatasource({ name: 'wh', driver: 'postgres', config: { database: 'analytics' } }),
-    ).rejects.toThrow(/Object 'wh_orders' declares `external` on datasource 'wh', whose `schemaMode` is 'managed'/);
+    )).toMatch(/Object 'wh_orders' declares `external` on datasource 'wh', whose `schemaMode` is 'managed'/);
     expect(registry.get('datasource')?.has('wh') ?? false).toBe(false);
   });
 
@@ -852,7 +853,7 @@ describe('DatasourceAdminServicePlugin: objects bound external are read from the
       external: {},
     });
 
-    await expect(service.updateDatasource('wh', { schemaMode: 'managed' })).rejects.toThrow(/'wh_orders'/);
+    expect(await refusalAccount(service.updateDatasource('wh', { schemaMode: 'managed' }))).toMatch(/'wh_orders'/);
     expect((registry.get('datasource')?.get('wh') as { schemaMode?: string }).schemaMode).toBe('external');
   });
 

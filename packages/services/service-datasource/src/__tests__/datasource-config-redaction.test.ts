@@ -39,6 +39,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
+// Pay the driver's first load at collection, not inside a clocked `it()`
+// (`check:test-source-alias`).
+import '@objectstack/driver-sql';
 import { validateDriverConfig, getDriverConfigSchema, BUILTIN_DRIVER_IDS, DRIVER_ID_ALIASES } from '@objectstack/spec/data';
 import {
   redactDatasourceConfig,
@@ -52,6 +55,7 @@ import {
   type DatasourceAdminServiceConfig,
   type StoredDatasource,
 } from '../datasource-admin-service.js';
+import { refusalAccount } from './refusal-account.js';
 
 /** A legacy row: written before #8078, so it carries inline cleartext. */
 const LEGACY_PG: StoredDatasource = {
@@ -340,13 +344,13 @@ describe('#8337 — the query-parameter spelling, both halves at the service doo
 
   it('a NEW `?authToken=` URL is refused at the write door (#8337 write half)', async () => {
     const { service } = makeService([]);
-    await expect(
+    expect(await refusalAccount(
       service.createDatasource({
         name: 'nope',
         driver: 'turso',
         config: { url: 'libsql://x.turso.io?authToken=eyJhbGci.x.y' },
       } as never),
-    ).rejects.toThrow(/\?authToken=/);
+    )).toMatch(/\?authToken=/);
 
     const refused = validateDriverConfig('turso', { url: 'libsql://x.turso.io?authToken=x' });
     expect(refused).toMatchObject({ known: true });
@@ -364,12 +368,12 @@ describe('#8337 — the query-parameter spelling, both halves at the service doo
 describe('GREEN ON MAIN — #8078 is not weakened by anything above', () => {
   it('the parse refusal still fires, and its guidance still reaches the caller', async () => {
     const { service } = makeService([]);
-    await expect(
+    expect(await refusalAccount(
       service.createDatasource({
         name: 'nope', driver: 'postgres',
         config: { host: 'h', database: 'd', password: 'hunter2' },
       } as never),
-    ).rejects.toThrow(/is a credential and is not accepted inline/);
+    )).toMatch(/is a credential and is not accepted inline/);
 
     // The guidance names BOTH mechanisms the refusal diverts to. A refusal that
     // said only "not allowed" would leave the author with no next move.
@@ -382,11 +386,11 @@ describe('GREEN ON MAIN — #8078 is not weakened by anything above', () => {
 
   it('an author who types a refused key into a PATCH is still refused', async () => {
     const { service } = makeService([LEGACY_PG]);
-    await expect(
+    expect(await refusalAccount(
       service.updateDatasource('legacy_pg', {
         config: { host: 'h', database: 'd', password: 'newpassword' },
       } as never),
-    ).rejects.toThrow(/is a credential and is not accepted inline/);
+    )).toMatch(/is a credential and is not accepted inline/);
   });
 
   it('a URL-embedded credential is now REFUSED at the write door (#8082 — the ruling this pin waited for)', () => {
@@ -523,14 +527,14 @@ describe('#9040 — the passthrough spelling, both halves at the service door', 
 
   it('the write gate still refuses a TYPED-IN passthrough password on its own merits', async () => {
     const { service } = makeService([LEGACY_MONGO]);
-    await expect(
+    expect(await refusalAccount(
       service.updateDatasource('legacy_mongo', {
         config: {
           url: 'mongodb://app@mongo.internal:27017/events',
           options: { auth: { username: 'app', password: 'typed-new-secret' } },
         },
       }),
-    ).rejects.toThrow(/options\.auth\.password/);
+    )).toMatch(/options\.auth\.password/);
   });
 });
 
@@ -574,14 +578,14 @@ describe('nested credential positions OFF the passthrough table — the class co
 
   it('a TYPED-IN off-table nested credential is refused at the write gate on its own merits', async () => {
     const { service } = makeService([OFF_TABLE_MONGO]);
-    await expect(
+    expect(await refusalAccount(
       service.updateDatasource('off_table_mongo', {
         config: {
           database: 'events',
           options: { auth: { username: 'app', token: 'typed-new-secret' } },
         },
       }),
-    ).rejects.toThrow(/options\.auth\.token/);
+    )).toMatch(/options\.auth\.token/);
   });
 
   it('a NESTED URL string is redacted and restored like a top-level one — contract-less driver included', async () => {

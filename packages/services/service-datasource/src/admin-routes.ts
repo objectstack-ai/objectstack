@@ -57,6 +57,7 @@ import { DRIVER_CATALOG_SEGMENT } from './datasource-route-reserved-names.js';
 // [#27618] The package's one "no such datasource" refusal: GET answers an
 // unknown name in its words, as every other by-name door does.
 import { datasourceNotFoundError } from './datasource-admin-service.js';
+import { withRefusalDetails } from './datasource-refusal.js';
 
 /**
  * The services these routes dispatch to.
@@ -926,7 +927,14 @@ export function registerDatasourceAdminRoutes(
     const svc = resolve(res, 'external-datasource', 'generateObjectDraft');
     if (!svc) return;
     const { table, ...opts } = (req.body as Record<string, unknown>) ?? {};
-    if (!table) return badRequest(res, 'external-datasource', new Error('Body field "table" is required.'));
+    if (!table) {
+      // Declared like the service's own refusals, so `badRequest` relays its `details.reason`.
+      const missing = Object.assign(new Error('Body field "table" is required.'), {
+        code: 'EXTERNAL_DATASOURCE_ERROR' as const,
+        status: 400 as const,
+      });
+      return badRequest(res, 'external-datasource', withRefusalDetails(missing, 'table_required'));
+    }
     try {
       const draft = await svc.generateObjectDraft(req.params.name, String(table), opts);
       sendOk(res, { draft });
