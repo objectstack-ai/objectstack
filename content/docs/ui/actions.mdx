@@ -711,7 +711,7 @@ Pick the **posture** by who drives your door:
 | `posture` | Rules | Use it for |
 |:---|:---|:---|
 | `'rest'` (default) | Exactly the REST door's. | A door a person drives, or your own server code. |
-| `'ai'` | The REST door's, plus the three the MCP `run_action` tool adds: a `sys_*` action needs its own `ai.exposed`, every action needs `ai.exposed: true`, and an action with `ai.requiresConfirmation` is refused **428** `ACTION_CONFIRMATION_REQUIRED` until the call carries `confirm: true`. A script action with no handler binding is also refused. | **A host's in-product AI tool** — an agent picks the action, so it takes the AI door's rules. |
+| `'ai'` | The REST door's, plus the three the MCP `run_action` tool adds: a `sys_*` action needs its own `ai.exposed`, every action needs `ai.exposed: true`, and an action with `ai.requiresConfirmation` is refused **428** `ACTION_CONFIRMATION_REQUIRED` until the call carries `confirm: true`. A script action with no handler binding is also refused. A client-side or off-origin `api` action is refused **400** as under `'rest'`, with `run_action`'s sentence (`cannot be invoked via MCP`) instead of the REST prescription, so the agent is not handed the action's `target`. | **A host's in-product AI tool** — an agent picks the action, so it takes the AI door's rules. |
 
 `posture` is `'rest'`, `'ai'` or absent (`'rest'`); any other value is
 refused **400** `VALIDATION_FAILED` before anything runs, so a misspelt
@@ -722,6 +722,13 @@ REST door reads its request's: a same-origin `type: 'api'` action forwards
 with them, and its target authorizes the caller itself. Omit them and such an
 action forwards with none. `environmentId` names the environment the action
 runs in; without it the kernel's default environment is used.
+
+Pass the kernel your HTTP door is served from. On a multi-kernel host that is
+the kernel that registers the `kernel-resolver` service: the call is placed by
+the same step that places `POST /api/v1/environments/:id/actions/...`, so it
+runs on the environment's own kernel, and on the host kernel only where the
+resolver places it there. A resolver that fails refuses the call with its own
+status; the call never runs on the host kernel in its place.
 
 `namespace` addresses an installed package's action the way the
 `/api/v1/actions/:namespace/:object/:action` path does (`_env` names the
