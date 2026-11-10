@@ -6076,16 +6076,15 @@ export class ObjectStackClient {
        * A flow name the deployment does not hold rejects with **404** instead.
        * A run that PAUSED at a screen node is not a failure and still resolves.
        *
-       * **Since #9415 the two never-dispatched refusals are distinguishable**,
-       * completing the #9378 status table. Neither ran a single node, so
-       * neither carries a run summary and neither is `FLOW_FAILED`:
+       * **Since #9415 the never-dispatched refusals are distinguishable**,
+       * completing the #9378 status table. None ran a single node, so
+       * none carries a run summary and none is `FLOW_FAILED`:
        *
        * | `err.httpStatus` | `err.code` | what happened | the caller's remedy |
        * |:---|:---|:---|:---|
        * | `409` | `FLOW_DISABLED` | the flow is switched off | enable it — the identical request then succeeds |
-       * | `422` | `FLOW_NO_START_NODE` | the stored definition has no `start` node | fix the flow; retrying cannot help |
        * | `400` | `FLOW_FAILED` | the flow RAN and was rejected | read `err.details.summary` for the failing node |
-       * | `404` | — | no such flow in this deployment | check the name |
+       * | `404` | — | no flow by that name is held in this deployment; a flow stored with no `start` node is never armed, so it answers here | check the name |
        *
        * [#13079] **Resolves to the `AutomationResult` alone — the SAME value
        * its sibling `automation.execute` resolves to**, because both reach one
@@ -6380,9 +6379,9 @@ export class ObjectStackClient {
        * `400` `FLOW_FAILED` (author text on `err.details.errorMessage`, per-node
        * accounting on `err.details.summary`) instead of resolving with an inner
        * `{ success: false }` under HTTP 200; an unknown flow rejects with `404`.
-       * Since #9415, a DISABLED flow rejects with `409` `FLOW_DISABLED` and one
-       * whose definition has no `start` node with `422` `FLOW_NO_START_NODE` —
-       * both never dispatched, so neither is `FLOW_FAILED`.
+       * Since #9415, a DISABLED flow rejects with `409` `FLOW_DISABLED`, never
+       * dispatched, so not `FLOW_FAILED`. A flow with no `start` node is refused at
+       * registration, and a stored one is not armed: its trigger rejects with `404`.
        * See `automation.trigger` for the full table — both call the same door.
        */
       execute: async <T extends AutomationResult = AutomationResult>(name: string, ctx?: Record<string, any>, address?: QualifiedAddressOptions): Promise<T> => {
@@ -9020,9 +9019,9 @@ export class ScopedEnvironmentClient {
      * **breaking #9378 behaviour**: a run that ran and then failed REJECTS with
      * `400` `FLOW_FAILED` (author text on `err.details.errorMessage`) instead of
      * resolving with an inner `{ success: false }` under HTTP 200, and an
-     * unknown flow rejects with `404`. Since #9415 a disabled flow rejects with
-     * `409` `FLOW_DISABLED` and a definition with no `start` node with `422`
-     * `FLOW_NO_START_NODE`. See that method for the full table.
+     * unknown flow rejects with `404`, a flow stored with no `start` node (never
+     * armed) included. Since #9415 a disabled flow rejects with `409`
+     * `FLOW_DISABLED`. See that method for the full table.
      */
     execute: async <T extends AutomationResult = AutomationResult>(name: string, ctx?: Record<string, any>, address?: QualifiedAddressOptions): Promise<T> => {
       const qualifier = automationFlowQualifier(name, address);
