@@ -84,9 +84,9 @@ describe('[ADR-0151 D7] POST /service-account/register answers a declared licenc
   beforeAll(async () => {
     engine = createMemoryEngine();
     const insert = engine.insert.bind(engine);
-    (engine as any).insert = async (object: string, data: any, options?: any) => {
+    (engine as any).insert = async (object: string, data: any) => {
       if (object === refuseInsertOn) throw seatCap();
-      return insert(object, data, options);
+      return insert(object, data);
     };
     const manager = new AuthManager({
       secret: SECRET,
