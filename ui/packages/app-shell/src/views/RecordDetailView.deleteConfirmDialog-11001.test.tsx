@@ -80,7 +80,7 @@ vi.mock('./MetadataInspector', () => ({
 
 import { toast } from 'sonner';
 import { I18nProvider } from '@object-ui/i18n';
-import { MetadataCtx } from '@object-ui/react';
+import { MetadataCtx, useMutationInvalidationBridge } from '@object-ui/react';
 import { RecordDetailView } from './RecordDetailView';
 
 const OBJECT_NAME = 'crm_call';
@@ -153,9 +153,34 @@ function currentPath(): string {
   return screen.getByTestId('router-location').textContent ?? '';
 }
 
-/** Mount the real record page and wait for its header toolbar. */
-async function mountRecordPage(language: 'en' | 'zh' = 'en') {
+/**
+ * A data source that emits the mutation events a real adapter emits after
+ * each successful write (`MutationEvent`), bridged onto the invalidation bus
+ * as the console bridges it, so a write re-reads the record as it does there.
+ */
+function makeEmittingDataSource() {
+  const listeners = new Set<(event: Record<string, unknown>) => void>();
+  const emit = (event: Record<string, unknown>) => listeners.forEach((listener) => listener(event));
   const dataSource = makeDataSource();
+  dataSource.onMutation = (callback: (event: Record<string, unknown>) => void) => {
+    listeners.add(callback);
+    return () => listeners.delete(callback);
+  };
+  dataSource.delete = vi.fn(async (resource: string, id: string) => {
+    emit({ type: 'delete', resource, id: String(id) });
+    return true;
+  });
+  dataSource.emit = emit;
+  return dataSource;
+}
+
+function MutationBridge({ dataSource }: { dataSource: unknown }) {
+  useMutationInvalidationBridge(dataSource);
+  return null;
+}
+
+/** Mount the real record page and wait for its header toolbar. */
+async function mountRecordPage(language: 'en' | 'zh' = 'en', dataSource = makeDataSource()) {
   // Under a real `I18nProvider`, as the console mounts it: the dialog's own
   // title and buttons are pack keys with no inline default, so without a
   // provider they would render as the bare key names.
@@ -172,6 +197,7 @@ async function mountRecordPage(language: 'en' | 'zh' = 'en') {
           />
         </MetadataCtx.Provider>
         <LocationProbe />
+        <MutationBridge dataSource={dataSource} />
       </MemoryRouter>
     </I18nProvider>,
   );
@@ -308,5 +334,41 @@ describe('record page Delete names the record in zh too (objectui#11695)', () =>
 
     fireEvent.click(confirm);
     await waitFor(() => expect(dataSource.delete).toHaveBeenCalledWith(OBJECT_NAME, RECORD_ID));
+  });
+});
+
+// The delete's own mutation event invalidates the record on the bus in the
+// same dispatch that the page's navigation starts from, and the navigation is
+// a transition: the record page used to re-read the deleted record (the
+// record page payload, its field access, its approval lock) before leaving,
+// each answered 404. A deleted record is not read again; any other write to
+// it still re-reads it in place.
+describe('record page Delete never re-reads the deleted record', () => {
+  it('confirming Delete leaves for the list with no read of the deleted record', async () => {
+    const dataSource = await mountRecordPage('en', makeEmittingDataSource());
+    const readsBefore = dataSource.findOne.mock.calls.length;
+    await chooseHeaderDelete();
+
+    const dialog = await screen.findByRole('alertdialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: EN.objectActions.deleteConfirmButton }));
+
+    await waitFor(() => expect(dataSource.delete).toHaveBeenCalledWith(OBJECT_NAME, RECORD_ID));
+    await waitFor(() => expect(currentPath()).toBe(`/${OBJECT_NAME}`));
+    await act(async () => {
+      for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(dataSource.findOne.mock.calls.length).toBe(readsBefore);
+  });
+
+  it('CONTROL: an update of the record still re-reads it in place', async () => {
+    const dataSource = await mountRecordPage('en', makeEmittingDataSource());
+    const readsBefore = dataSource.findOne.mock.calls.length;
+
+    act(() => {
+      dataSource.emit({ type: 'update', resource: OBJECT_NAME, id: RECORD_ID, record: { id: RECORD_ID, name: 'Renamed call' } });
+    });
+
+    await waitFor(() => expect(dataSource.findOne.mock.calls.length).toBeGreaterThan(readsBefore));
+    expect(currentPath()).toBe(START_PATH);
   });
 });
