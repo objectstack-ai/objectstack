@@ -326,6 +326,9 @@ export * from './utils/dataset-format.js';
 // dashboard widget and the report renderer key their buckets identically
 // (objectstack#5473 / objectstack#5665).
 export * from './utils/dataset-pivot.js';
+// The package a served item belongs to (ADR-0150 D5), for the readers that
+// send it as `?package=` on a by-name read.
+export * from './utils/served-package.js';
 export * from './utils/record-title.js';
 // The served-object-label rule (objectstack#30311, objectstack#30390): a label
 // the server served is drawn as given, and the client bundle is asked only

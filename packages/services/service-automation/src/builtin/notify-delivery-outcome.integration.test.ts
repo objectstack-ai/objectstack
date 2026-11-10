@@ -223,3 +223,70 @@ describe('notify run summary vs. the durable delivery record (#7747)', () => {
         expect(run.summary).toMatchObject({ acted: 0, unmeasured: 0 });
     });
 });
+
+/**
+ * A notify step that delivered nothing says so on its own run-history row.
+ *
+ * The step stays a `success` and the run keeps going: a failing result would
+ * abort the run or route it down a `fault` edge, which would change what every
+ * flow with a refused channel does. The reason rides on the step's advisory
+ * `warnings`, the channel the Runs surface shows, and names the refused channel.
+ */
+describe('notify step names a refused channel on its run-history row', () => {
+    async function notifyStep(engine: AutomationEngine) {
+        const runs = await engine.listRuns('nudge');
+        expect(runs).toHaveLength(1);
+        return runs[0].steps.find((s) => s.nodeId === 'notify')!;
+    }
+
+    it('durable path, the only channel unregistered: the step warns and names the channel, and the run still completes', async () => {
+        const { engine } = bootOutboxStack([recordingChannel('inbox').channel]);
+        engine.registerFlow('nudge', notifyFlow(['push']));
+        const run = await engine.execute('nudge');
+
+        expect(run.success, 'flow control is unchanged: the run is not aborted').toBe(true);
+        const step = await notifyStep(engine);
+        expect(step.status).toBe('success');
+        expect(step.warnings).toHaveLength(1);
+        expect(step.warnings![0]).toContain("'push'");
+        expect(run.summary).toMatchObject({ selected: 1, acted: 0, unmeasured: 0 });
+    });
+
+    it('inline path, the only channel unregistered: the same warning', async () => {
+        const messaging = new MessagingService({ logger: silentLogger() });
+        messaging.registerChannel(recordingChannel('inbox').channel);
+        const engine = engineWith(messaging);
+        engine.registerFlow('nudge', notifyFlow(['push']));
+        const run = await engine.execute('nudge');
+
+        expect(run.success).toBe(true);
+        const step = await notifyStep(engine);
+        expect(step.status).toBe('success');
+        expect(step.warnings).toHaveLength(1);
+        expect(step.warnings![0]).toContain("'push'");
+    });
+
+    it('CONTROL: a registered channel leaves a clean success step with no warning', async () => {
+        const { engine } = bootOutboxStack([recordingChannel('inbox').channel]);
+        engine.registerFlow('nudge', notifyFlow(['inbox']));
+        const run = await engine.execute('nudge');
+
+        expect(run.success).toBe(true);
+        const step = await notifyStep(engine);
+        expect(step.status).toBe('success');
+        expect(step.warnings).toBeUndefined();
+    });
+
+    it('partial delivery: one channel refused beside one enqueued, the warning names only the refused one', async () => {
+        const { engine } = bootOutboxStack([recordingChannel('inbox').channel]);
+        engine.registerFlow('nudge', notifyFlow(['inbox', 'push']));
+        const run = await engine.execute('nudge');
+
+        expect(run.success).toBe(true);
+        const step = await notifyStep(engine);
+        expect(step.status).toBe('success');
+        expect(step.warnings).toHaveLength(1);
+        expect(step.warnings![0]).toContain("'push'");
+        expect(step.warnings![0]).not.toContain("'inbox'");
+    });
+});

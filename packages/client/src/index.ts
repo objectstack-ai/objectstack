@@ -7,6 +7,9 @@ import {
   GetRecordFieldAccessResponse,
   RecordPageRequest,
   RecordPageResponse,
+  // [#32200] The batch dataset-query answer `analytics.queryDatasetBatch`
+  // resolves to the `data` of.
+  DatasetQueryBatchResponse,
   AppMetadataBundleResponse,
   UpdateManyRequest,
   DeleteManyRequest,
@@ -288,6 +291,25 @@ export interface RecycleBinRestoreReport {
   recordId: string;
   rows: Array<{ object: string; id: string }>;
   relinked: number;
+}
+
+/**
+ * One `POST /analytics/dataset/query` body, as `analytics.queryDataset` sends
+ * it and as each entry of `analytics.queryDatasetBatch` carries it: `dataset`
+ * (an inline definition, Studio preview) or `datasetName` (a saved one), plus
+ * `selection.measures`; `previewDrafts` runs over draft-overlaid definitions
+ * (ADR-0037 P3), for a caller the server admits to drafts.
+ *
+ * [#32200] Named so the batch method types its entries as the single door's
+ * body rather than as records of `unknown` (the contract's
+ * `DatasetQueryBatchRequest['queries']` deliberately does not parse an entry:
+ * the server judges each one as the single door does).
+ */
+export interface DatasetQueryBody {
+  dataset?: any;
+  datasetName?: string;
+  selection: { measures: string[]; [k: string]: any };
+  previewDrafts?: boolean;
 }
 
 export interface ClientConfig {
@@ -2765,19 +2787,43 @@ export class ObjectStackClient {
      * `analytics-automation-json-erasure.test.ts`; the shape is
      * `IAnalyticsService.queryDataset`'s declared return.
      */
-    queryDataset: async (payload: {
-        dataset?: any;
-        datasetName?: string;
-        selection: { measures: string[]; [k: string]: any };
-        previewDrafts?: boolean;
-    }): Promise<AnalyticsResult> => {
+    queryDataset: async (payload: DatasetQueryBody): Promise<AnalyticsResult> => {
         const route = this.getRoute('analytics');
         const res = await this.fetch(`${this.baseUrl}${route}/dataset/query`, {
             method: 'POST',
             body: JSON.stringify(payload),
         });
         return res.json();
-    }
+    },
+    /**
+     * [#32200] Several dataset queries in ONE request
+     * (`POST /analytics/dataset/query/batch`), so a dashboard render sends one
+     * POST instead of one per widget. Each entry is a `queryDataset` body, and
+     * the server judges each one exactly as that door does, as the same caller.
+     *
+     * Resolves to the batch answer's `data`, `{ results }`: one entry per query,
+     * in the order sent. An entry is `{ data }` (that query's `AnalyticsResult`)
+     * or `{ status, error }` (that query's own refusal, in the house error
+     * envelope). One refused query never fails the others, so branch per entry.
+     *
+     * Throws, like every method of this client, when the server refuses the
+     * WHOLE batch: a malformed batch (`400 VALIDATION_FAILED`, including more
+     * than `DATASET_QUERY_BATCH_MAX_QUERIES` queries), an identity refusal, or
+     * no analytics service (`501`). It sends what it is given: it neither
+     * bounds nor splits `queries` — a caller with more than the bound sends
+     * consecutive batches.
+     *
+     * Unlike `queryDataset`, this door answers the `{ success, data }`
+     * envelope, so `unwrapResponse` is the right read here.
+     */
+    queryDatasetBatch: async (queries: DatasetQueryBody[]): Promise<DatasetQueryBatchResponse['data']> => {
+        const route = this.getRoute('analytics');
+        const res = await this.fetch(`${this.baseUrl}${route}/dataset/query/batch`, {
+            method: 'POST',
+            body: JSON.stringify({ queries }),
+        });
+        return this.unwrapResponse<DatasetQueryBatchResponse['data']>(res);
+    },
   };
 
   /**
@@ -6076,16 +6122,15 @@ export class ObjectStackClient {
        * A flow name the deployment does not hold rejects with **404** instead.
        * A run that PAUSED at a screen node is not a failure and still resolves.
        *
-       * **Since #9415 the two never-dispatched refusals are distinguishable**,
-       * completing the #9378 status table. Neither ran a single node, so
-       * neither carries a run summary and neither is `FLOW_FAILED`:
+       * **Since #9415 the never-dispatched refusals are distinguishable**,
+       * completing the #9378 status table. None ran a single node, so
+       * none carries a run summary and none is `FLOW_FAILED`:
        *
        * | `err.httpStatus` | `err.code` | what happened | the caller's remedy |
        * |:---|:---|:---|:---|
        * | `409` | `FLOW_DISABLED` | the flow is switched off | enable it — the identical request then succeeds |
-       * | `422` | `FLOW_NO_START_NODE` | the stored definition has no `start` node | fix the flow; retrying cannot help |
        * | `400` | `FLOW_FAILED` | the flow RAN and was rejected | read `err.details.summary` for the failing node |
-       * | `404` | — | no such flow in this deployment | check the name |
+       * | `404` | — | no flow by that name is held in this deployment; a flow stored with no `start` node is never armed, so it answers here | check the name |
        *
        * [#13079] **Resolves to the `AutomationResult` alone — the SAME value
        * its sibling `automation.execute` resolves to**, because both reach one
@@ -6380,9 +6425,9 @@ export class ObjectStackClient {
        * `400` `FLOW_FAILED` (author text on `err.details.errorMessage`, per-node
        * accounting on `err.details.summary`) instead of resolving with an inner
        * `{ success: false }` under HTTP 200; an unknown flow rejects with `404`.
-       * Since #9415, a DISABLED flow rejects with `409` `FLOW_DISABLED` and one
-       * whose definition has no `start` node with `422` `FLOW_NO_START_NODE` —
-       * both never dispatched, so neither is `FLOW_FAILED`.
+       * Since #9415, a DISABLED flow rejects with `409` `FLOW_DISABLED`, never
+       * dispatched, so not `FLOW_FAILED`. A flow with no `start` node is refused at
+       * registration, and a stored one is not armed: its trigger rejects with `404`.
        * See `automation.trigger` for the full table — both call the same door.
        */
       execute: async <T extends AutomationResult = AutomationResult>(name: string, ctx?: Record<string, any>, address?: QualifiedAddressOptions): Promise<T> => {
@@ -9020,9 +9065,9 @@ export class ScopedEnvironmentClient {
      * **breaking #9378 behaviour**: a run that ran and then failed REJECTS with
      * `400` `FLOW_FAILED` (author text on `err.details.errorMessage`) instead of
      * resolving with an inner `{ success: false }` under HTTP 200, and an
-     * unknown flow rejects with `404`. Since #9415 a disabled flow rejects with
-     * `409` `FLOW_DISABLED` and a definition with no `start` node with `422`
-     * `FLOW_NO_START_NODE`. See that method for the full table.
+     * unknown flow rejects with `404`, a flow stored with no `start` node (never
+     * armed) included. Since #9415 a disabled flow rejects with `409`
+     * `FLOW_DISABLED`. See that method for the full table.
      */
     execute: async <T extends AutomationResult = AutomationResult>(name: string, ctx?: Record<string, any>, address?: QualifiedAddressOptions): Promise<T> => {
       const qualifier = automationFlowQualifier(name, address);
