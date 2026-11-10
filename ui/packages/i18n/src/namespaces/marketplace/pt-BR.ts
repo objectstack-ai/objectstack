@@ -149,6 +149,13 @@ const pt = {
         unmanagedHint: "Copiado uma única vez para este runtime como seus próprios metadados: cada item pode ser editado aqui, e a cópia não recebe atualizações.",
         required: "Escolha um modo de instalação para instalar este pacote.",
       },
+      targetNamespace: {
+        label: "Namespace de destino",
+        placeholder: "ex.: crm_copy",
+        hint: "O namespace em que os metadados desta cópia são gravados. Edite-o para instalar com outro nome.",
+        noDefault: "Não foi possível ler um namespace padrão. Digite o namespace que esta cópia deve usar.",
+        taken: "O namespace \"{{namespace}}\" pertence a outro pacote. Escolha outro nome e instale novamente.",
+      },
       unmanagedSuccess: "v{{version}} de \"{{name}}\" copiado para este runtime como seus próprios metadados, na base {{base}}. A cópia pode ser editada e não recebe atualizações.",
       unmanagedStrippedLocks: "O pacote bloqueava estes itens. A cópia pode ser editada, então seus bloqueios não foram copiados:",
       unmanagedIgnored: "Este runtime não oferece suporte a instalações não gerenciadas, então \"{{name}}\" foi instalado como gerenciado (registrado como código) em vez de copiado. Atualize o runtime, depois desinstale o pacote e instale-o novamente como cópia não gerenciada.",
