@@ -44,6 +44,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import '@objectstack/metadata';
 import { inboundHookRefusalResponse, isAuthGateAllowlisted, matchInboundHookRoute, signHttpBodyAt, verifyHttpSignature } from '@objectstack/core';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext, KernelResolver } from '../http-dispatcher.js';
