@@ -449,7 +449,8 @@ function safeSamlTarget(
  * The relay-state row the vendor wrote at `/sign-in/sso` for this ACS request
  * (`auth-state:<RelayState>`, read through the vendor's own `internalAdapter`,
  * which the vendor deletes once it has read it), or `undefined` when there is
- * no relay state, the row is gone, or it is unreadable.
+ * no relay state, the row is gone, or it is unreadable or names no
+ * `callbackURL`.
  */
 async function readRelayStateRow(
   context: SamlLandingContext,
@@ -516,10 +517,10 @@ function rebaseSamlRefusal(location: string, target: string): string {
 }
 
 /**
- * Whether `location` is a refusal on the vendor's bare app-origin fallback:
- * the site root, with no query but the `error` and `error_description` the
- * vendor sets on it. The fallback itself carries no query, so a success there
- * never matches.
+ * Whether `location` sits on the vendor's bare app-origin fallback: the site
+ * root, with no fragment and no query but the `error` and `error_description`
+ * the vendor sets on a refusal. The fallback itself carries no query, so a
+ * success there carries no `error=` and is never re-based.
  */
 function isOnBareFallback(location: string, fallback: string): boolean {
   let url: URL;
