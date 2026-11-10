@@ -281,7 +281,7 @@ describe('OAuthConsentPage — where the grant goes, and an unverified client', 
     ['a custom-scheme redirect as it is', 'cursor://anysphere.cursor-mcp/oauth/callback', 'cursor://anysphere.cursor-mcp/oauth/callback'],
     ['a reverse-domain redirect as it is', 'com.example.notes:/oauth2redirect', 'com.example.notes:/oauth2redirect'],
   ])('names %s', async (_label, redirectUri, shown) => {
-    stubLookup(NAMED, requestAnswer(redirectUri, true));
+    stubLookup(NAMED, requestAnswer(redirectUri, false));
     renderConsent();
 
     const destination = await screen.findByTestId('oauth-consent-destination');
