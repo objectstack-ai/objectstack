@@ -206,8 +206,56 @@ function SyncResultNote({ result, locale }: { result: SyncResult; locale: Suppor
   );
 }
 
-/** A refused request: the envelope's message, with the HTTP status and the envelope's `code` beside it. */
-type DatasourceRequestError = Error & { status?: number; code?: string };
+/**
+ * The `details` of a refused request (objectstack#32305), as the datasource
+ * doors serve them (service-datasource `datasource-refusal.ts`): `reason`, the
+ * snake_case discriminator a client branches on; `hint`, the rationale and the
+ * remedy the one-line message leaves out (one finding per line for a list
+ * refusal); and the facts the reason is about (`objects` on `objects_bound`).
+ */
+type RefusalDetails = { reason?: string; hint?: string } & Record<string, unknown>;
+
+/**
+ * A refused request: the envelope's one-line message, with the HTTP status,
+ * the envelope's `code` and its `details` beside it.
+ */
+type DatasourceRequestError = Error & { status?: number; code?: string; details?: RefusalDetails };
+
+/** The refusal's `details.reason`, when the envelope names one. */
+function refusalReason(err: unknown): string | undefined {
+  const reason = (err as DatasourceRequestError | undefined)?.details?.reason;
+  return typeof reason === 'string' ? reason : undefined;
+}
+
+/** The refusal's `details.hint`, when the envelope carries a non-blank one. */
+function refusalHint(err: unknown): string | undefined {
+  const hint = (err as DatasourceRequestError | undefined)?.details?.hint;
+  return typeof hint === 'string' && hint.trim() ? hint : undefined;
+}
+
+/**
+ * Raise `line` as an error toast, with each hint under it as the toast's
+ * description (objectstack#32305). `whitespace-pre-line` keeps the hint's line
+ * breaks, so a list refusal reads one finding per line. With no hint the toast
+ * is the line alone, called exactly as before.
+ */
+function refusalToast(line: string, ...errs: unknown[]): void {
+  const hints = [...new Set(errs.map(refusalHint).filter((h): h is string => h !== undefined))];
+  if (hints.length) toast.error(line, { description: hints.join('\n'), descriptionClassName: 'whitespace-pre-line' });
+  else toast.error(line);
+}
+
+/** A refusal drawn inline (the editor's test line, the Sync dialog): its line and its hint. */
+interface InlineRefusal {
+  text: string;
+  hint?: string;
+}
+
+/** The hint under an inline refusal's line, its line breaks kept. */
+function RefusalHint({ hint, className = '' }: { hint?: string; className?: string }) {
+  if (!hint) return null;
+  return <p data-testid="datasource-refusal-hint" className={`mt-1 whitespace-pre-line text-xs opacity-90 ${className}`}>{hint}</p>;
+}
 
 /**
  * Status chip per verdict. `unvalidated` stays visually quiet — it means
@@ -449,7 +497,10 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
           (body && body.message) ||
           `HTTP ${res.status}`;
         const code = body && typeof body.error === 'object' && typeof body.error?.code === 'string' ? body.error.code : undefined;
-        throw Object.assign(new Error(detail), { status: res.status, code }) as DatasourceRequestError;
+        // objectstack#32305: the reason, the hint and the facts travel with the line.
+        const rawDetails = body && typeof body.error === 'object' ? body.error?.details : undefined;
+        const details = rawDetails && typeof rawDetails === 'object' && !Array.isArray(rawDetails) ? (rawDetails as RefusalDetails) : undefined;
+        throw Object.assign(new Error(detail), { status: res.status, code, ...(details ? { details } : {}) }) as DatasourceRequestError;
       }
       return body && typeof body.success === 'boolean' && 'data' in body ? body.data : body;
     },
@@ -462,7 +513,7 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
       const data = await api('/api/v1/datasources');
       setRows(Array.isArray(data?.datasources) ? data.datasources : []);
     } catch (err) {
-      toast.error(tFormat('engine.datasource.loadFailed', localeRef.current, { error: (err as Error).message }));
+      refusalToast(tFormat('engine.datasource.loadFailed', localeRef.current, { error: (err as Error).message }), err);
       setRows([]);
     } finally {
       setLoading(false);
@@ -482,7 +533,7 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
       else toast.success(tFormat('engine.datasource.rowTestOk', locale, { name }));
       void load();
     } catch (err) {
-      toast.error(`${name}: ${(err as Error).message}`);
+      refusalToast(`${name}: ${(err as Error).message}`, err);
     } finally {
       setBusy(null);
     }
@@ -516,15 +567,18 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
       toast.success(tFormat('engine.datasource.deleted', locale, { name }));
       void load();
     } catch (err) {
-      // A 400 on a datasource that objects still name is the server's
-      // bound-object refusal: read the objects now and name them in the
-      // console's language. Any other failure keeps the server's own message.
-      const objects = (err as DatasourceRequestError).status === 400 ? await readBoundObjects(name).catch(() => []) : [];
+      // The bound-object refusal is told by its `details.reason` (objectstack#32305),
+      // never by its status: every refusal of the family is a 400. Its
+      // `details.objects` carries names only, so the objects are read now for
+      // their labels and named in the console's language. Any other failure,
+      // and a bound-object refusal the read names no object for, keeps the
+      // server's own line and hint.
+      const objects = refusalReason(err) === 'objects_bound' ? await readBoundObjects(name).catch(() => []) : [];
       if (objects.length) {
         const list = objects.map(objectText).join(t('engine.datasource.boundObjectSeparator', locale));
         toast.error(tFormat('engine.datasource.deleteBoundRefused', locale, { name, objects: list }));
       } else {
-        toast.error(tFormat('engine.datasource.deleteFailed', locale, { name, error: (err as Error).message }));
+        refusalToast(tFormat('engine.datasource.deleteFailed', locale, { name, error: (err as Error).message }), err);
       }
     } finally {
       setBusy(null);
@@ -538,7 +592,7 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
   const [form, setForm] = React.useState<EditorForm | null>(null);
   const [hasSecret, setHasSecret] = React.useState(false);
   const [savingEditor, setSavingEditor] = React.useState(false);
-  const [testMsg, setTestMsg] = React.useState<{ ok: boolean; text: string } | null>(null);
+  const [testMsg, setTestMsg] = React.useState<({ ok: boolean } & InlineRefusal) | null>(null);
   const [testingDraft, setTestingDraft] = React.useState(false);
 
   const ensureDrivers = React.useCallback(async (): Promise<DriverEntry[]> => {
@@ -549,7 +603,7 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
       setDrivers(list);
       return list;
     } catch (err) {
-      toast.error(tFormat('engine.datasource.loadDriversFailed', localeRef.current, { error: (err as Error).message }));
+      refusalToast(tFormat('engine.datasource.loadDriversFailed', localeRef.current, { error: (err as Error).message }), err);
       return [];
     }
   }, [api, drivers]);
@@ -600,7 +654,7 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
       });
       setEditorOpen(true);
     } catch (err) {
-      toast.error(tFormat('engine.datasource.openFailed', locale, { name: row.name, error: (err as Error).message }));
+      refusalToast(tFormat('engine.datasource.openFailed', locale, { name: row.name, error: (err as Error).message }), err);
     } finally {
       setBusy(null);
     }
@@ -673,7 +727,7 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
       else if (res?.latencyMs != null) setTestMsg({ ok: true, text: tFormat('engine.datasource.connectionOkLatency', locale, { latency: res.latencyMs }) });
       else setTestMsg({ ok: true, text: t('engine.datasource.connectionOk', locale) });
     } catch (err) {
-      setTestMsg({ ok: false, text: (err as Error).message });
+      setTestMsg({ ok: false, text: (err as Error).message, hint: refusalHint(err) });
     } finally {
       setTestingDraft(false);
     }
@@ -693,7 +747,7 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
       setEditorOpen(false);
       void load();
     } catch (err) {
-      toast.error(tFormat('engine.datasource.saveFailed', locale, { error: (err as Error).message }));
+      refusalToast(tFormat('engine.datasource.saveFailed', locale, { error: (err as Error).message }), err);
     } finally {
       setSavingEditor(false);
     }
@@ -705,8 +759,8 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
   // ── Sync dialog ──────────────────────────────────────────────────────────
   const [syncName, setSyncName] = React.useState<string | null>(null);
   const [tables, setTables] = React.useState<RemoteTable[] | null>(null);
-  /** The refused remote-tables read's message, drawn in the dialog instead of the empty-datasource copy. */
-  const [syncError, setSyncError] = React.useState<string | null>(null);
+  /** The refused remote-tables read's line and hint, drawn in the dialog instead of the empty-datasource copy. */
+  const [syncError, setSyncError] = React.useState<InlineRefusal | null>(null);
   /** Which datasource's Sync dialog is open now, read when a slow introspection settles. */
   const syncNameRef = React.useRef<string | null>(null);
   React.useEffect(() => { syncNameRef.current = syncName; }, [syncName]);
@@ -737,8 +791,8 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
       // shows the envelope's message; a toast reports it only when the dialog
       // was closed before the refusal arrived.
       const message = (err as Error).message;
-      if (syncNameRef.current === name && syncSeqRef.current === seq) setSyncError(message);
-      else toast.error(tFormat('engine.datasource.introspectFailed', locale, { name, error: message }));
+      if (syncNameRef.current === name && syncSeqRef.current === seq) setSyncError({ text: message, hint: refusalHint(err) });
+      else refusalToast(tFormat('engine.datasource.introspectFailed', locale, { name, error: message }), err);
     }
   };
 
@@ -754,6 +808,7 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
     setSyncing(true);
     const created: BoundObject[] = [];
     const failures: string[] = [];
+    const failed: unknown[] = [];
     for (const table of selected) {
       try {
         const { draft } = await api(`/api/v1/datasources/${encodeURIComponent(syncName)}/object-draft`, {
@@ -765,10 +820,11 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
         created.push({ name: draft.name, label: typeof label === 'string' ? label : undefined });
       } catch (err) {
         failures.push(`${table}: ${(err as Error).message}`);
+        failed.push(err);
       }
     }
     setSyncing(false);
-    if (failures.length) toast.error(tFormat('engine.datasource.syncFailed', locale, { failures: failures.join('; ') }));
+    if (failures.length) refusalToast(tFormat('engine.datasource.syncFailed', locale, { failures: failures.join('; ') }), ...failed);
     // The dialog stays open on what was created, with the steps left (objectstack#30328).
     if (created.length) setSyncResult({ datasource: syncName, objects: created });
     else closeSync();
@@ -989,9 +1045,12 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
               </div>
 
               {testMsg && (
-                <div className={'flex items-center gap-1.5 text-xs ' + (testMsg.ok ? 'text-emerald-600' : 'text-destructive')}>
-                  {testMsg.ok ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
-                  {testMsg.text}
+                <div className={'text-xs ' + (testMsg.ok ? 'text-emerald-600' : 'text-destructive')}>
+                  <div className="flex items-center gap-1.5">
+                    {testMsg.ok ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
+                    {testMsg.text}
+                  </div>
+                  <RefusalHint hint={testMsg.hint} />
                 </div>
               )}
             </div>
@@ -1022,7 +1081,10 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
           {syncResult ? (
             <SyncResultNote result={syncResult} locale={locale} />
           ) : syncError != null ? (
-            <div role="alert" className="py-8 text-center text-sm text-destructive">{syncError}</div>
+            <div role="alert" className="py-8 text-center text-sm text-destructive">
+              {syncError.text}
+              <RefusalHint hint={syncError.hint} className="mx-auto max-w-md text-left" />
+            </div>
           ) : tables == null ? (
             <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> {t('engine.datasource.introspecting', locale)}</div>
           ) : tables.length === 0 ? (
