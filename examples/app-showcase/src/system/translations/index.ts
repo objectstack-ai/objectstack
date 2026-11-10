@@ -364,12 +364,20 @@ export const ShowcaseTranslationBundle = {
     // Translated at birth, same rule as the widgets above: the done rate moved
     // here from the delivery cube (#20943) as two new dataset measures, born
     // under the ratchet. The task dataset's older labels predate it and stay in
-    // the frozen baseline.
+    // the frozen baseline, except the three the Chart Gallery shows as KPI
+    // subtitles, which carry their authored labels here beside the zh-CN ones.
     datasets: {
       showcase_task_metrics: {
         measures: {
+          task_count: { label: 'Tasks' },
           done_count: { label: 'Done Tasks' },
           done_rate: { label: 'Done Rate' },
+        },
+      },
+      showcase_project_metrics: {
+        measures: {
+          project_count: { label: 'Projects' },
+          budget_sum: { label: 'Total Budget' },
         },
       },
     },
@@ -1234,12 +1242,22 @@ export const ShowcaseTranslationBundle = {
       },
     },
     // The done rate's two measures, translated at birth (#20943) — see the `en`
-    // block. The other task-dataset labels stay in the frozen baseline.
+    // block. The other task-dataset labels stay in the frozen baseline, except
+    // the three the Chart Gallery shows as KPI subtitles: 任务数 matches
+    // showcase_project's `task_count` column, 总预算 the `kpi_total_budget`
+    // widget and the command center's `cc_k6`.
     datasets: {
       showcase_task_metrics: {
         measures: {
+          task_count: { label: '任务数' },
           done_count: { label: '已完成任务' },
           done_rate: { label: '完成率' },
+        },
+      },
+      showcase_project_metrics: {
+        measures: {
+          project_count: { label: '项目数' },
+          budget_sum: { label: '总预算' },
         },
       },
     },
