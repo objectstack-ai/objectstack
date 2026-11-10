@@ -80,6 +80,7 @@ import { defineStack, defineFlow } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { PermissionSetSchema, type PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const SHEET = 'actvis_sheet';
 const SYS = { context: { isSystem: true } } as const;
@@ -527,7 +528,10 @@ describe('behind the organization wall (isolated posture), a request with no org
         const inA = await open(submitterToken, 'nullorg-control-a');
         // A stored row with no organization predates ADR-0131 D9 (a new write is
         // stamped or refused), so it is planted below the engine, as one that
-        // already exists.
+        // already exists. That residue lives only on a store built before 18.x,
+        // whose tenant column is nullable (ADR-0131 D1 makes a fresh one NOT
+        // NULL): the three approval tables are that store's.
+        await relaxTenantColumns(ql as any, ['sys_approval_request', 'sys_approval_action', 'sys_approval_approver']);
         const driver = ql.getDriver('sys_approval_request');
         for (const r of [orgLess, orgLessForAdmin]) {
           await driver.update('sys_approval_request', r.id, { organization_id: null });

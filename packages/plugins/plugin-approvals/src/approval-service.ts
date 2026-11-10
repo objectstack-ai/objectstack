@@ -2400,8 +2400,9 @@ export class ApprovalService implements IApprovalService {
    * [ADR-0105 D1] Does the posture in force enforce an organization wall?
    * `postureEnforcesWall` over the tenancy service's posture — the shared
    * predicate, never a second spelling of it. A stack with no tenancy service
-   * has no wall anywhere (the same reading `vetOrganizationClaim` takes), so an
-   * unresolvable posture answers `false`.
+   * has no wall anywhere, so an absent posture answers `false` — the reading
+   * `vetOrganizationClaim` takes for an absent posture. An unrecognised value
+   * answers `false` too, which `normalizeTenancyPosture` returns as absent.
    */
   private organizationWallStands(): boolean {
     const posture = normalizeTenancyPosture(this.tenancyPosture?.());

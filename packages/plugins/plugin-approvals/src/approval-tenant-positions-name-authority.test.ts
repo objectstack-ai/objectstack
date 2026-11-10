@@ -74,7 +74,7 @@ import { resolveUserAuthzGrants } from '@objectstack/core';
 // the engine it stands in for (`check:engine-double-contract`).
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import type { ApprovalRequestRow } from '@objectstack/spec/contracts';
-import { ApprovalService, type ApprovalNodeAutoOutcome } from './approval-service.js';
+import { ApprovalService, requestVisibilitySourceOf, type ApprovalNodeAutoOutcome } from './approval-service.js';
 import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
 interface FakeRow { [k: string]: any }
@@ -94,6 +94,12 @@ function makeFakeEngine() {
       const rv = row[k];
       if (v != null && typeof v === 'object' && '$in' in (v as any)) {
         if (!(v as any).$in.includes(rv)) return false;
+        continue;
+      }
+      // `{ $null: true }` — the organization fence the pending-approver read
+      // grant spells for a caller with no active organization.
+      if (v != null && typeof v === 'object' && '$null' in (v as any)) {
+        if (((rv ?? null) === null) !== Boolean((v as any).$null)) return false;
         continue;
       }
       if (rv !== v) return false;
@@ -608,6 +614,60 @@ describe('[ADR-0131 D1] under a walled posture, a request with no organization i
       const { engine, svc, id } = await setup(posture, OTHER_ORG);
       expect(await act(svc, door, id, context)).toBe(`REQUEST_NOT_FOUND: ${id}`);
       expect(await trace(engine, id, ACTOR)).toMatchObject({ status: 'pending', actions: 0 });
+    });
+  });
+
+  /**
+   * The same predicate answers the three readers that ask it with the CALLER'S
+   * active organization rather than a request's: the generic data door's
+   * request visibility (`visibleRequestIdsFor`), the approvals door's own list
+   * (`visibleRequestIds`) and the pending-approver read grant. For a tenant
+   * administrator context that carries no active organization, the
+   * organization asked is none, so the rule above holds there too: under a
+   * walled posture such a context is no override holder, and under `single`
+   * it is. The context is hand-built: it names the rung and the grant and no
+   * organization.
+   */
+  describe('a tenant-administrator context with no active organization', () => {
+    const ORGLESS_ADMIN = {
+      userId: 'usr_orgless_admin', posture: 'TENANT_ADMIN',
+      positions: [], permissions: [ORGANIZATION_ADMIN],
+    } as unknown as ExecutionContext;
+
+    describe.each(['isolated', 'group'])('under the walled `%s` posture', (posture) => {
+      it('the data door\'s request visibility is the participant set, without the request', async () => {
+        const { svc, id } = await setup(posture, null);
+        const visible = await requestVisibilitySourceOf(svc).visibleRequestIdsFor(ORGLESS_ADMIN, { requestId: id });
+        expect(visible).not.toBeNull();
+        expect([...(visible ?? [])]).not.toContain(id);
+      });
+
+      it('the approvals list does not show the request', async () => {
+        const { svc, id } = await setup(posture, null);
+        expect((await svc.listRequests({}, ORGLESS_ADMIN)).map((r) => r.id)).not.toContain(id);
+      });
+
+      it('the pending-approver read grant does not reach the record', async () => {
+        const { svc } = await setup(posture, null);
+        expect([...(await svc.pendingApproverReadGrants('opportunity', ORGLESS_ADMIN)).keys()]).not.toContain('opp1');
+      });
+    });
+
+    describe('CONTROL — under the `single` posture', () => {
+      it('the data door\'s request visibility is unrestricted', async () => {
+        const { svc, id } = await setup('single', null);
+        expect(await requestVisibilitySourceOf(svc).visibleRequestIdsFor(ORGLESS_ADMIN, { requestId: id })).toBeNull();
+      });
+
+      it('the approvals list shows the request', async () => {
+        const { svc, id } = await setup('single', null);
+        expect((await svc.listRequests({}, ORGLESS_ADMIN)).map((r) => r.id)).toContain(id);
+      });
+
+      it('the pending-approver read grant reaches the record', async () => {
+        const { svc, id } = await setup('single', null);
+        expect((await svc.pendingApproverReadGrants('opportunity', ORGLESS_ADMIN)).get('opp1')).toEqual([id]);
+      });
     });
   });
 

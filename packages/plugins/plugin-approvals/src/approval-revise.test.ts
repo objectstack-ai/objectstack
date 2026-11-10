@@ -395,7 +395,8 @@ describe('Send back for revision (ADR-0044)', () => {
     //
     // Both #3424 override postures are exercised. This harness's requests
     // carry no organization: a tenant admin qualifies as an override actor on
-    // them (`isOverrideActor`: a null-org request is global), and — as the
+    // them only where no wall stands (`isOverrideActor`, ADR-0131 D1; this
+    // service has no tenancy posture, so none does), and — as the
     // `can_override` pin above notes — `loadRequest` narrows by the CALLER's
     // org, so neither context carries a `tenantId` (the ADR-0095 `posture` is
     // the tenant-admin signal here). Neither is the submitter, who is
