@@ -62,7 +62,7 @@ function memoryEngine() {
       }
       return null;
     },
-    update: vi.fn(async (object: string, data: Record<string, unknown>, options?: { context?: { isSystem?: boolean } }) => {
+    update: vi.fn(async (object: string, data: Record<string, unknown>, options?: { context?: { isSystem?: boolean; actor?: string } }) => {
       if (engine.failUpdatesWith) throw engine.failUpdatesWith;
       updates.push({ object, data, options });
       const row = rows.get(String(data.id));
@@ -107,7 +107,7 @@ describe('[#32120] scimBearerTokenHint', () => {
 describe('[#32120] verifyScimBearerToken stamps last_used_at on a successful verify only, at most once a minute', () => {
   const T0 = Date.parse('2026-11-10T10:00:00.000Z');
 
-  it('a successful verify writes last_used_at as the system, with the server clock', async () => {
+  it('a successful verify writes last_used_at as the system, attributed to the connection, with the server clock', async () => {
     const engine = memoryEngine();
     const { token, credentialId } = await mintScimConnectionCredential(engine as never, SECRET_32120, { connectionId: 'okta-use' });
     const { stamper } = clockedStamper(T0);
@@ -117,7 +117,7 @@ describe('[#32120] verifyScimBearerToken stamps last_used_at on a successful ver
       {
         object: SCIM_CREDENTIAL_OBJECT,
         data: { id: credentialId, last_used_at: new Date(T0).toISOString() },
-        options: { context: { isSystem: true } },
+        options: { context: { isSystem: true, actor: 'svc:scim:okta-use' } },
       },
     ]);
   });

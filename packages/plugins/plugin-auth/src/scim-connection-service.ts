@@ -202,7 +202,7 @@ interface CredentialEngine {
     options?: { context?: { isSystem?: boolean } },
   ): Promise<Record<string, unknown> | null>;
   /** The last-use stamp's one write ({@link ScimCredentialLastUseStamper}). */
-  update?(object: string, data: Record<string, unknown>, options?: { context?: { isSystem?: boolean } }): Promise<unknown>;
+  update?(object: string, data: Record<string, unknown>, options?: { context?: { isSystem?: boolean; actor?: string } }): Promise<unknown>;
 }
 
 /**
@@ -375,7 +375,10 @@ function storedInstantMs(value: unknown): number | undefined {
  *    ({@link SCIM_CREDENTIAL_LAST_USE_MEMO_CAP}, oldest dropped first).
  *
  * The stored value is the server's clock at the request that claimed the
- * minute. No request field reaches it.
+ * minute. No request field reaches it. The write is the system's, attributed
+ * to the connection the bearer verified as (`svc:scim:CONNECTION_ID`, the
+ * actor every other write of a SCIM request carries — `authSystemWriteContext`),
+ * because the identity provider's use is what it records.
  *
  * ⛔ A failed stamp never fails the SCIM request: the bearer was judged on the
  * row as found. It is a durability loss all the same — the column claims the
@@ -404,7 +407,7 @@ export class ScimCredentialLastUseStamper {
    * process's last claim, is younger than the interval. Resolves once the
    * stamp is settled; never rejects.
    */
-  async record(engine: CredentialEngine, row: Record<string, unknown>): Promise<void> {
+  async record(engine: CredentialEngine, row: Record<string, unknown>, connectionId: string): Promise<void> {
     const id = row.id == null ? '' : String(row.id);
     if (!id || typeof engine.update !== 'function') return;
     const nowMs = (this.opts.now ?? Date.now)();
@@ -424,7 +427,7 @@ export class ScimCredentialLastUseStamper {
       await engine.update(
         SCIM_CREDENTIAL_OBJECT,
         { id, last_used_at: new Date(nowMs).toISOString() },
-        { context: { isSystem: true } },
+        { context: { isSystem: true, actor: scimServicePrincipal(connectionId) } },
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -474,7 +477,7 @@ export async function verifyScimBearerToken(
   if (!connectionId) return null;
   const domain = (row as { provisioning_domain_id?: unknown }).provisioning_domain_id;
   const organization = (row as { organization_id?: unknown }).organization_id;
-  if (lastUse) await lastUse.record(engine, row);
+  if (lastUse) await lastUse.record(engine, row, connectionId);
   return {
     connection: {
       id: connectionId,
