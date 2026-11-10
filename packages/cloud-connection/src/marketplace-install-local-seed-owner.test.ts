@@ -167,6 +167,8 @@ describe('stampSeedOwner — the rows a load created get the person who seeded t
         const schemas = {
             sys_thing: { name: 'sys_thing', fields: OWNED_FIELDS },
             managed_thing: { name: 'managed_thing', managedBy: 'package', fields: OWNED_FIELDS },
+            // [ADR-0153 D4] a pulled copy has no owner to stamp.
+            synced_thing: { name: 'synced_thing', managedBy: 'synced', fields: OWNED_FIELDS },
             remote_thing: { name: 'remote_thing', external: { datasource: 'erp' }, fields: OWNED_FIELDS },
             bare_thing: { name: 'bare_thing', fields: { name: { type: 'text' } } },
         };
@@ -182,6 +184,7 @@ describe('stampSeedOwner — the rows a load created get the person who seeded t
         expect(out.objects.map((o) => [o.object, o.skipped])).toEqual([
             ['sys_thing', 'platform-object'],
             ['managed_thing', 'platform-object'],
+            ['synced_thing', 'platform-object'],
             ['remote_thing', 'external'],
             ['bare_thing', 'no-owner-columns'],
             ['unknown_thing', 'no-schema'],

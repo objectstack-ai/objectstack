@@ -77,6 +77,7 @@ import { AuthLayout } from './AuthLayout';
 import { AuthFooter, readLegalLinks } from './AuthFooter';
 import { followOauthAuthorize } from './followAuthorize';
 import { handoffMarkQuery, useHandoffRedirect } from './handoffRedirect';
+import { ssoCallbackRefusalMessage, ssoCallbackTechnicalDetail } from './ssoCallbackRefusal';
 // Was module-private here; lifted to a shared module so `SetupPage` (whose
 // first-run exits went without it) and `RegisterPage` (which had copied it)
 // share ONE implementation — objectui#4181. Behaviour here is unchanged.
@@ -207,7 +208,9 @@ export function LoginPage() {
   // error URL with `?error=<code>` — the runtime points that at this login
   // page (framework AuthManager `onAPIError.errorURL`). Without this banner
   // the user who just SUCCEEDED at typing their password on the IdP lands
-  // back on a login form with zero explanation (objectui#2458 item 1).
+  // back on a login form with zero explanation (objectui#2458 item 1). Each
+  // refusal code reads as its own end-user sentence (`ssoCallbackRefusal.ts`),
+  // never as an expired link it is not.
   const callbackError = useMemo(() => {
     const code = params.get('error');
     if (!code) return null;
@@ -364,14 +367,20 @@ export function LoginPage() {
     <AuthLayout formWidth="base">
       <div className="flex flex-col gap-5">
         {callbackError ? (
-          <AuthErrorBanner
-            message={
-              t('auth.login.errors.oauthCallbackFailed', {
-                defaultValue:
-                  'Single sign-on could not be completed — the sign-in link expired or was already used. Please try again.',
-              }) + (callbackError.description ? ` (${callbackError.description})` : ` (${callbackError.code})`)
-            }
-          />
+          // The sentence is for the person signing in; the code and the
+          // server's description are written for administrators, so they sit
+          // behind a toggle the person can open and pass on.
+          <div className="flex flex-col gap-1.5" data-testid="sso-callback-refusal">
+            <AuthErrorBanner message={ssoCallbackRefusalMessage(t, callbackError.code)} />
+            <details className="px-1 text-xs text-muted-foreground">
+              <summary className="cursor-pointer select-none">
+                {t('auth.login.errors.ssoTechnicalDetails', { defaultValue: 'Technical details' })}
+              </summary>
+              <p className="mt-1 break-words font-mono" data-testid="sso-callback-refusal-detail">
+                {ssoCallbackTechnicalDetail(callbackError)}
+              </p>
+            </details>
+          </div>
         ) : null}
         {ssoTarget ? (
           <div
@@ -654,6 +663,9 @@ function LoginFormCard({
         // This block passes every `LoginFormLabels` member; a pin enumerates
         // the interface and holds both login pages to that.
         ssoButton: t('auth.login.ssoButton', { defaultValue: 'Sign in with SSO' }),
+        ssoEmailRequiredText: t('auth.login.ssoEmailRequiredText', {
+          defaultValue: 'Enter your work email to sign in with SSO.',
+        }),
         ssoOnlyDescription: t('auth.login.ssoOnlyDescription', {
           defaultValue: "Sign in with your organization's single sign-on",
         }),

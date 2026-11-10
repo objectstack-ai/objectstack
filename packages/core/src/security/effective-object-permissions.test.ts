@@ -674,6 +674,38 @@ describe('[#30440] a guarded managed object grants no verb its write guard refus
   });
 });
 
+describe('[ADR-0153 D4] a synced object grants no write verb, whatever its userActions says', () => {
+  const SCHEMAS: Record<string, any> = {
+    // `userActions` opens edit — on every other guarded bucket that keeps the
+    // verb; on `synced` it cannot (the named exception to ADR-0103 D1).
+    erp_order_copy: { name: 'erp_order_copy', managedBy: 'synced', userActions: { edit: true, delete: { enabled: true } } },
+    // twin: the same opt-in on an append-only object keeps the verbs.
+    sys_feed_note: { name: 'sys_feed_note', managedBy: 'append-only', userActions: { edit: true, delete: { enabled: true } } },
+  };
+  const source = { allSchemas: () => Object.values(SCHEMAS), schemaOf: (name: string) => SCHEMAS[name] };
+  const can = (entry: any) => Object.fromEntries(
+    (['allowRead', 'allowCreate', 'allowEdit', 'allowDelete', 'allowTransfer'] as const)
+      .map((verb) => [verb, objectPermissionGrants(entry, verb)]),
+  );
+
+  it('the clamp returns the closed row: read only, even with userActions: { edit: true } and modifyAllRecords', () => {
+    const map: any = buildEffectiveObjectPermissions(
+      [{ objects: { erp_order_copy: { allowCreate: true, allowEdit: true, allowDelete: true, modifyAllRecords: true } } }],
+      source,
+    );
+    expect(can(map.erp_order_copy)).toEqual({ allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false, allowTransfer: false });
+    expect(map.erp_order_copy.modifyAllRecords).toBe(false);
+  });
+
+  it('twin: the same set on the append-only object keeps the verbs its userActions opens', () => {
+    const map: any = buildEffectiveObjectPermissions(
+      [{ objects: { sys_feed_note: { allowCreate: true, allowEdit: true, allowDelete: true, modifyAllRecords: true } } }],
+      source,
+    );
+    expect(can(map.sys_feed_note)).toMatchObject({ allowEdit: true, allowDelete: true });
+  });
+});
+
 // ── [#25866 / ruling of record 6408558941] A field permission entry's row
 // condition (`when`): the ONE vote per verdict, and the row-blind merge behind
 // `/auth/me/permissions`' `fields` slot.

@@ -167,3 +167,46 @@ describe('apps/console/src/index.css @source scan', () => {
     }
   }, 60_000);
 });
+
+/**
+ * objectstack#32087 — a checkbox in the console keeps a small corner. The box
+ * is 16px and draws `rounded-sm`, i.e. `var(--radius-sm)`; the theme's larger
+ * `--radius` made that 10px, more than half the box, so every checkbox drew as
+ * a circle and read as a radio button. The compiled sheet scopes a smaller
+ * `--radius-sm` to the control itself.
+ */
+describe('apps/console/src/index.css — a checkbox is not drawn round (objectstack#32087)', () => {
+  /** A CSS length in px, for the units these declarations use (rem at 16px). */
+  const px = (value: string): number => {
+    const m = /^(-?[\d.]+)(px|rem)$/.exec(value.trim());
+    if (!m) throw new Error(`not a px/rem length: ${value}`);
+    return Number(m[1]) * (m[2] === 'rem' ? 16 : 1);
+  };
+
+  it('rounded-sm reads --radius-sm, and the checkbox sets --radius-sm below half its 16px box', async () => {
+    const { css } = await compileConsoleStylesheet();
+    const root = postcss.parse(css, { from: entry });
+
+    const roundedSm: string[] = [];
+    const checkboxRadius: string[] = [];
+    root.walkRules((rule) => {
+      if (rule.selector === '.rounded-sm') {
+        rule.walkDecls('border-radius', (d) => {
+          roundedSm.push(d.value);
+        });
+      }
+      // The compiler may drop the attribute value's quotes.
+      if (rule.selector.split(',').some((s) => s.trim().replace(/"/g, '') === '[role=checkbox]')) {
+        rule.walkDecls('--radius-sm', (d) => {
+          checkboxRadius.push(d.value);
+        });
+      }
+    });
+
+    // POSITIVE: the utility the Radix checkbox draws reads the token, so a
+    // token set on the control decides its corner.
+    expect(roundedSm).toEqual(['var(--radius-sm)']);
+    expect(checkboxRadius).toHaveLength(1);
+    expect(px(checkboxRadius[0])).toBeLessThan(8);
+  });
+});
