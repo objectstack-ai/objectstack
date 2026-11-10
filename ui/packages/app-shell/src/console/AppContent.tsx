@@ -36,7 +36,6 @@ import { useTrackRouteAsRecent } from '../hooks/useTrackRouteAsRecent.js';
 import { useHomePath } from '../hooks/useHomePath.js';
 import { readItemPreferLocal, useReadItemsByName } from '../hooks/useObjectPresence.js';
 import { useLauncherApps } from '../hooks/useLauncherApps.js';
-import { useSignedInUserLocale } from '../hooks/useUserLocale.js';
 import { resolveRecordFormTarget, resolveRecordFormModalLayout, resolveFormViewChrome, selectRecordFormView, resolveNavigateCreateUrl, resolveNavigateEditUrl, resolvePostCreateTarget, recordFormCreateValues, readRecordFormCreateValues, RECORD_FORM_CREATE_VALUES_STATE } from '../utils/recordFormNavigation.js';
 import { deriveRecordSurface, deriveRecordFlowSurface } from '@object-ui/plugin-view';
 import { isPhoneViewportNow } from '../hooks/usePhoneViewport.js';
@@ -833,14 +832,6 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // Readers (record detail, related lists, count badges) refetch in place;
   // nothing is remounted for a data refresh.
   useMutationInvalidationBridge(dataSource);
-
-  // objectui#10059 — the signed-in user's language has ONE source of truth,
-  // `sys_user.locale`. Mounted here, beside the bridge above, because it reads
-  // the column back off that bus: the profile page's language card writes the
-  // same column through the same adapter, so its save reaches this reader and
-  // the UI follows without a reload. See `hooks/useUserLocale.ts` for why the
-  // device-local value is a cache from here on rather than a second setting.
-  useSignedInUserLocale();
 
   // objectui#11080 — both toasts read the session's language: the words around
   // the operation's description are pack keys beside `actions.undo`, and the

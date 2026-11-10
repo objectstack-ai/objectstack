@@ -561,15 +561,15 @@
  *
  *   - `advisory_report` is one POST of the row's body. It LANDS on a 2xx
  *     whose answer carries a `ghsa_id` (`advisoryReportReadBack`); the row and
- *     a notice annotation name that id, so the seat follows with
- *     `advisory_collaborators_add` — the App is the submitter, so the finding
- *     seat is not a collaborator on its own;
+ *     a notice annotation name that id, and the seat is done — the App is the
+ *     submitter, so the finding seat is not a collaborator on its own, and
+ *     `advisory_collaborators_add` adds one only when a maintainer asks for it;
  *   - `advisory_create` is one POST of the row's body to the collection, and
  *     nothing is read first. It LANDS on a 2xx whose answer carries a
  *     `ghsa_id` and reads state `draft` (`advisoryCreateReadBack`); a 2xx
  *     without an id is UNCONFIRMED and one in another state FAILED, neither
- *     ever re-sent. The row and a notice annotation name the id, so the seat
- *     follows with `advisory_collaborators_add` exactly as after a report;
+ *     ever re-sent. The row and a notice annotation name the id, and the seat
+ *     is done, exactly as after a report;
  *   - `advisory_collaborators_add` reads the advisory first (`ADVISORY_FENCES`,
  *     judged by `advisoryPreflight` on the executor's own `GET`) and refuses
  *     with nothing sent unless the read answers 200 with the advisory the
@@ -1684,9 +1684,9 @@ export function advisoryReportReadBack(answer) {
   return { ok: true, ghsaId, state, why: '' };
 }
 
-/** The row a landed `advisory_report` prints: the id the platform gave it and its state, and the next stroke. Pure. */
+/** The row a landed `advisory_report` prints: the id the platform gave it and its state. Pure. */
 export function advisoryReportLandedText({ ghsaId, state }) {
-  return `reported ${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')} — add whoever works it with advisory_collaborators_add`;
+  return `reported ${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')}`;
 }
 
 /** The one state a created advisory may answer in — the endpoint's default, and the only one a draft has. */
@@ -1708,9 +1708,9 @@ export function advisoryCreateReadBack(answer) {
   return { ok: true, ghsaId, state, why: '' };
 }
 
-/** The row a landed `advisory_create` prints: the id the platform gave it and its state, and the next stroke. Pure. */
+/** The row a landed `advisory_create` prints: the id the platform gave it and its state. Pure. */
 export function advisoryCreateLandedText({ ghsaId, state }) {
-  return `created ${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')} — add whoever works it with advisory_collaborators_add`;
+  return `created ${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')}`;
 }
 
 // ---------------------------------------------------------------------------
