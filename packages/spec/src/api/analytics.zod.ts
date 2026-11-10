@@ -6,7 +6,7 @@ import { FilterConditionSchema } from '../data/filter.zod';
 import { AggregationFunction, DateGranularity } from '../data/query.zod';
 import { DatasetMeasurePolarity } from '../ui/dataset.zod';
 import { strictObject } from '../shared/strict-object';
-import { BaseResponseSchema } from './contract.zod';
+import { ApiErrorSchema, BaseResponseSchema } from './contract.zod';
 
 /**
  * Analytics API Protocol
@@ -752,6 +752,129 @@ export const DatasetSelectionSchema = lazySchema(() => {
   );
 });
 
+// ==========================================
+// 3. Batch dataset query
+// ==========================================
+
+/**
+ * The most dataset queries one batch may carry.
+ *
+ * Why a bound, and why this one: a batch is one HTTP request that the server
+ * answers by running every query in it, so an unbounded list is unbounded
+ * executor work behind one request and one timeout. The batch exists for one
+ * dashboard render — 9 queries on Delivery Operations and 18 on Chart Gallery,
+ * one per widget — so 50 holds the largest dashboard measured with room to
+ * spare, and it is the bound the record-page payload already puts on the
+ * related lists one request may name (`RECORD_PAGE_MAX_RELATED`). A render with
+ * more queries than this sends them in consecutive batches of at most this
+ * many.
+ *
+ * Exported so the server that enforces it and the client that splits by it
+ * read the one number. Declared ahead of the schema on purpose: under
+ * `OS_EAGER_SCHEMAS=1` (`gen:schema`) the factory runs at module evaluation.
+ */
+export const DATASET_QUERY_BATCH_MAX_QUERIES = 50;
+
+/**
+ * Batch dataset query request — several `POST /api/v1/analytics/dataset/query`
+ * bodies sent as one request, answered by
+ * {@link DatasetQueryBatchResponseSchema}.
+ *
+ * ## Each query is the single door's body, judged by the single door
+ *
+ * `queries[i]` is exactly the body `POST /analytics/dataset/query` takes —
+ * `{ dataset | datasetName, selection, previewDrafts? }`, with `selection` a
+ * {@link DatasetSelectionSchema} — and the server judges it exactly as that
+ * door judges it: the same outer-body check, the same selection parse, the same
+ * dataset resolution, and the same permission, row-level and field-level reads,
+ * as the same caller. A query the single door would refuse is refused here with
+ * the same code, status and message, in its own entry of the answer.
+ *
+ * ⛔ That is why this schema does not parse a query's members. A second parse
+ * here would refuse a whole batch for one malformed query and could disagree
+ * with the single door about what is malformed. At this level a query is only
+ * a JSON object; everything inside it is the single door's to judge.
+ *
+ * ## A query is named by its position
+ *
+ * The answer's `results[i]` answers `queries[i]`, and the array order is the
+ * only identity. No caller id is carried: the caller already holds the order
+ * it sent (a dashboard sends its widgets in render order), and an id would be
+ * a second identity the server has to keep unique — a rule a published JSON
+ * Schema cannot state, and one more way to refuse a whole batch.
+ *
+ * ## When the whole batch is refused
+ *
+ * Only when the batch itself is malformed: a body that is not this object,
+ * `queries` that is not an array, an empty `queries`, more than
+ * {@link DATASET_QUERY_BATCH_MAX_QUERIES} queries, or a query that is not a
+ * JSON object. That refusal is the house error envelope with no `data` —
+ * `400` and `{ success: false, error: { code: 'VALIDATION_FAILED', message } }`
+ * — and no query runs. A refusal that does not depend on any query (the
+ * caller is not authenticated, the deployment has no analytics service) also
+ * answers the whole request, with the status the single door answers it with.
+ */
+export const DatasetQueryBatchRequestSchema = lazySchema(() => z.object({
+  queries: z.array(
+    z.record(z.string(), z.unknown()).describe(
+      'One `POST /analytics/dataset/query` body — `{ dataset | datasetName, selection, previewDrafts? }` — '
+      + 'judged exactly as that door judges it, as the same caller. Its members are not parsed at the batch '
+      + 'level: a query the single door refuses is refused in its own answer entry, never the whole batch.',
+    ),
+  ).min(1).max(DATASET_QUERY_BATCH_MAX_QUERIES).describe(
+    'The dataset queries, in order; `results[i]` of the answer answers `queries[i]`. At least one and at most '
+    + `${DATASET_QUERY_BATCH_MAX_QUERIES}; an empty or over-long list refuses the whole batch (400 VALIDATION_FAILED).`,
+  ),
+}).strict());
+
+/**
+ * One entry of a batch answer: the single door's answer to that query, or the
+ * single door's refusal of it. Exactly one of the two, so a refused query can
+ * never be read as an empty result.
+ *
+ * - `{ data }` — what `POST /analytics/dataset/query` answers with a 200: the
+ *   dataset `AnalyticsResult`, the same object
+ *   `AnalyticsResultResponse['data']` declares.
+ * - `{ status, error }` — what that door answers instead: `status` is the HTTP
+ *   status it answers with, and `error` is its refusal body in the house error
+ *   envelope (`ApiErrorSchema`: the same `code`, `message` and `details`).
+ */
+export const DatasetQueryBatchEntrySchema = lazySchema(() => z.union([
+  z.object({
+    data: AnalyticsResultResponseSchema.shape.data.describe(
+      'The answer `POST /analytics/dataset/query` gives this query: the dataset `AnalyticsResult`.',
+    ),
+  }).strict(),
+  z.object({
+    status: z.number().int().min(400).max(599).describe(
+      'The HTTP status `POST /analytics/dataset/query` answers this query with.',
+    ),
+    error: ApiErrorSchema.describe(
+      'The refusal that door answers this query with — the same code, message and details.',
+    ),
+  }).strict(),
+]));
+
+/**
+ * Batch dataset query answer — the house success envelope around one entry
+ * per query, in request order.
+ *
+ * `data.results` has exactly as many entries as the request had queries, and
+ * `results[i]` answers `queries[i]`. Each entry is answered or refused on its
+ * own ({@link DatasetQueryBatchEntrySchema}): one refused query never fails the
+ * others, and the envelope's `success` is `true` whenever the batch itself was
+ * accepted, however many of its queries were refused. A batch refused whole
+ * answers the error envelope with no `data` instead (see
+ * {@link DatasetQueryBatchRequestSchema}).
+ */
+export const DatasetQueryBatchResponseSchema = lazySchema(() => BaseResponseSchema.extend({
+  data: z.object({
+    results: z.array(DatasetQueryBatchEntrySchema).describe(
+      'One entry per query, in request order: the query\'s answer (`data`) or its refusal (`status` + `error`).',
+    ),
+  }).strict(),
+}));
+
 export type AnalyticsEndpoint = z.input<typeof AnalyticsEndpoint>;
 export type AnalyticsQueryRequest = z.input<typeof AnalyticsQueryRequestSchema>;
 /**
@@ -786,3 +909,16 @@ export type DatasetTotals = z.input<typeof DatasetTotalsSchema>;
  * publishes is this type re-exported.
  */
 export type DatasetSelection = z.input<typeof DatasetSelectionSchema>;
+
+/** Request body of the batch dataset query: several single-door bodies, in order. */
+export type DatasetQueryBatchRequest = z.input<typeof DatasetQueryBatchRequestSchema>;
+/** Post-parse shape of {@link DatasetQueryBatchRequest} — defaults applied, transforms run (ADR-0122). */
+export type DatasetQueryBatchRequestParsed = z.infer<typeof DatasetQueryBatchRequestSchema>;
+/** One entry of a batch dataset query answer: the query's answer or its refusal. */
+export type DatasetQueryBatchEntry = z.input<typeof DatasetQueryBatchEntrySchema>;
+/** Post-parse shape of {@link DatasetQueryBatchEntry} — defaults applied, transforms run (ADR-0122). */
+export type DatasetQueryBatchEntryParsed = z.infer<typeof DatasetQueryBatchEntrySchema>;
+/** Answer of the batch dataset query: one entry per query, in request order. */
+export type DatasetQueryBatchResponse = z.input<typeof DatasetQueryBatchResponseSchema>;
+/** Post-parse shape of {@link DatasetQueryBatchResponse} — defaults applied, transforms run (ADR-0122). */
+export type DatasetQueryBatchResponseParsed = z.infer<typeof DatasetQueryBatchResponseSchema>;

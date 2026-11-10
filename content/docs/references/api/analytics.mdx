@@ -18,8 +18,8 @@ Provides endpoints for executing analytical queries and discovering metadata.
 ## TypeScript Usage
 
 ```typescript
-import { AnalyticsEndpoint, AnalyticsMetadataResponseSchema, AnalyticsQueryRequestSchema, AnalyticsResultResponseSchema, AnalyticsSqlResponseSchema, DatasetCompareToSchema, DatasetSelectionSchema, DatasetTotalsSchema, GetAnalyticsMetaRequestSchema } from '@objectstack/spec/api';
-import type { AnalyticsEndpoint, AnalyticsMetadataResponse, AnalyticsQueryRequest, AnalyticsResultResponse, AnalyticsSqlResponse, DatasetCompareTo, DatasetSelection, DatasetTotals, GetAnalyticsMetaRequest } from '@objectstack/spec/api';
+import { AnalyticsEndpoint, AnalyticsMetadataResponseSchema, AnalyticsQueryRequestSchema, AnalyticsResultResponseSchema, AnalyticsSqlResponseSchema, DatasetCompareToSchema, DatasetQueryBatchEntrySchema, DatasetQueryBatchRequestSchema, DatasetQueryBatchResponseSchema, DatasetSelectionSchema, DatasetTotalsSchema, GetAnalyticsMetaRequestSchema } from '@objectstack/spec/api';
+import type { AnalyticsEndpoint, AnalyticsMetadataResponse, AnalyticsQueryRequest, AnalyticsResultResponse, AnalyticsSqlResponse, DatasetCompareTo, DatasetQueryBatchEntry, DatasetQueryBatchRequest, DatasetQueryBatchResponse, DatasetSelection, DatasetTotals, GetAnalyticsMetaRequest } from '@objectstack/spec/api';
 
 // Validate data
 const result = AnalyticsEndpoint.parse(data);
@@ -209,6 +209,119 @@ const result = AnalyticsEndpoint.parse(data);
 | :--- | :--- | :--- | :--- |
 | **kind** | `Enum<'previousPeriod' \| 'previousYear'>` | ✅ | Comparison window: previousPeriod (equal-length, immediately before) or previousYear (the same window one calendar year back) |
 | **dimension** | `string` | optional | Time dimension to shift; omit when the selection has exactly one dated time dimension |
+
+
+---
+
+## DatasetQueryBatchEntry
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **data** | `{ rows: Record<string, any>[]; fields: object[]; sql?: string; totals?: object[]; … }` | ✅ | The answer `POST /analytics/dataset/query` gives this query: the dataset `AnalyticsResult`. |
+
+### Nested Shape: `DatasetQueryBatchEntry[option 1].data`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **rows** | `Record<string, any>[]` | ✅ | Result rows |
+| **fields** | `{ name: string; type: string; label?: string; format?: string; … }[]` | ✅ | Column metadata |
+| **sql** | `string` | optional | Executed SQL (if debug enabled) |
+| **totals** | `{ dimensions: string[]; rows: Record<string, any>[] }[]` | optional | Marginal aggregates - one entry per requested totals grouping, in request order, each computed with the measure's true aggregate over the underlying data (never re-derived from bucketed values). The grand-total grouping yields a single dimensionless row. |
+| **object** | `string` | optional | The base object of the dataset the answer was computed from: the dataset's `object`, by machine name. Every dataset answer (`POST /analytics/dataset/query`) must carry it, whatever dimensions are selected and whether or not rows came back, so a consumer can refresh on that object's record changes and drill into its records. Absent on a cube query answer, which has no dataset behind it. |
+| **dimensionFields** | `Record<string, string>` | optional | Drill-through sidecar: each equality-drillable dimension the answer is grouped by, dimension name to that dataset dimension's own `field` (a base-object field or a `relationship.field` path). Set only on a dataset answer (`POST /analytics/dataset/query`) that has rows and groups by at least one dimension with a `field` that is not `type: 'date'`; a date dimension is never listed (see `drillRanges`). Absent on a cube query answer. |
+| **drillRawRows** | `Record<string, any>[]` | optional | Drill-through sidecar, aligned to `rows` by index: each `dimensionFields` dimension name to the stored value that row was grouped by (a select option's value, a lookup's record id), captured before label resolution rewrites the row to its display label. An exact-match drill filter is built from these, not from the labels in `rows`. Set exactly when `dimensionFields` is. |
+| **drillRawTotals** | `Record<string, any>[][]` | optional | Drill-through sidecar for `totals`: entry `[i][j]` aligns to `totals[i].rows[j]` and holds the stored value of the `dimensionFields` dimensions that grouping groups by, so the grand-total grouping yields an empty map per row. Set only when `dimensionFields` is and the answer carries at least one `totals` grouping. |
+| **drillRanges** | `Record<string, { field: string; gte: string; lt: string }>[]` | optional | Drill-through sidecar for date ranges, aligned to `rows` by index: date dimension name to the half-open range `[gte, lt)` that row's records fall in on that dimension's field. A time bucket gets the span it covers; a `timeDimensions[].dateRange` window gets the window the query filtered by on every row, or narrows the bucket entry on the same field to the part inside the window. Bounds are `YYYY-MM-DD` calendar days, or ISO-8601 instants when the source field is `datetime` (a bucket's at midnight in the reference timezone); a row whose bucket value is null gets no bucket entry, and a window whose end is an instant or the last supported day gets none. Set only on a dataset answer that has rows and groups by at least one `type: 'date'` dimension with a `field` and a granularity, or carries a `dateRange` on a dimension with a `field`; independent of `dimensionFields`. Absent on a cube query answer. |
+| **drillScopes** | `Record<string, any>` | optional | Drill-through sidecar per measure: each selected measure name to the list filter, on the answer's `object`, that selects the records that measure aggregates: the dataset's own `filter`, AND the measure's own `filter`, AND, for a measure over a `field`, that field holding a value (`{ "$null": false }`; both instants for a duration measure), with each `{token}` resolved as the query resolved it; `{}` when none of these applies. A drill lists the clicked bucket (`dimensionFields` / `drillRawRows` / `drillRawTotals`, `drillRanges`) AND the widget's own filter AND this scope. A measure is left out when no list filter on `object` selects its records (a derived measure; a scope that names a relationship path such as `account.region`, as a key or as a `$field` reference), and a measure left out offers no drill. Keyed by measure name: a `__compare` column has no entry. Set on every dataset answer (`POST /analytics/dataset/query`) that has rows; absent on a cube query answer and on a draft-preview answer. |
+
+---
+
+#### Option 2
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **status** | `integer` | ✅ | The HTTP status `POST /analytics/dataset/query` answers this query with. |
+| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | ✅ | The refusal that door answers this query with — the same code, message and details. |
+
+### Nested Shape: `DatasetQueryBatchEntry[option 2].error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
+| **refusal** | `true` | optional | Producer-declared: the 5xx this envelope carries is a deliberate refusal whose `message` is authored for the caller, so a boundary that reads the declaration keeps it verbatim (until the withhold arms read it, a declared refusal is still withheld). Absent (the default) on a declared fault, whose `message` is withheld from the body and logged for the operator; redundant on a 4xx. Presence is the declaration — `true` is the only value. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+---
+
+
+---
+
+## DatasetQueryBatchRequest
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **queries** | `Record<string, any>[]` | ✅ | The dataset queries, in order; `results[i]` of the answer answers `queries[i]`. At least one and at most 50; an empty or over-long list refuses the whole batch (400 VALIDATION_FAILED). |
+
+
+---
+
+## DatasetQueryBatchResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **success** | `boolean` | ✅ | Operation success status |
+| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **data** | `{ results: (object \| object)[] }` | ✅ |  |
+
+### Nested Shape: `DatasetQueryBatchResponse.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
+| **refusal** | `true` | optional | Producer-declared: the 5xx this envelope carries is a deliberate refusal whose `message` is authored for the caller, so a boundary that reads the declaration keeps it verbatim (until the withhold arms read it, a declared refusal is still withheld). Absent (the default) on a declared fault, whose `message` is withheld from the body and logged for the operator; redundant on a 4xx. Presence is the declaration — `true` is the only value. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `DatasetQueryBatchResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
+
+### Nested Shape: `DatasetQueryBatchResponse.data`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **results** | `({ data: object } \| { status: integer; error: object })[]` | ✅ | One entry per query, in request order: the query's answer (`data`) or its refusal (`status` + `error`). |
 
 
 ---
