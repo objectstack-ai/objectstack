@@ -73,7 +73,7 @@ import {
 import { connectorReadWithheldText, type ConnectorFailureTextRewrite } from './connector-read-withheld-text.js';
 import { CONNECTOR_CREDENTIAL_SOURCE_SERVICE } from '@objectstack/types';
 import { createConnectorCredentialSource } from './connector-credential-source.js';
-import { connectorNameResolver, packageScopedRegistryOf, refusedConnectorNames } from './connector-package-scope.js';
+import { connectorNameResolver, mappingNameResolver, packageScopedRegistryOf, refusedConnectorNames } from './connector-package-scope.js';
 import type { PackageScopedRefusal, PackageScopedRegistry } from '@objectstack/objectql';
 import { createConnectorRequestSigner } from './request-signing/index.js';
 import { ConnectorConnectionStore, type ConnectorConnectionRecord } from './connector-connections.js';
@@ -1631,6 +1631,9 @@ export class AutomationServicePlugin implements Plugin {
                 registry: engine,
                 providerOf: (connector) => this.materializedConnectors.get(connector)?.provider,
                 logger: ctx.logger,
+                // [ADR-0150 D3, #32071] A pull naming the package that declares
+                // its job reads the mapping from that package.
+                mappingByPackage: mappingNameResolver(ctx),
             },
             opts,
         );

@@ -1084,8 +1084,9 @@ export interface ConnectorSourcePullRequest {
      *   twice in that reach, held only by a package outside it, or held only
      *   by an environment-authored item (ADR-0150 D3 (a)) is a refusal naming
      *   every candidate.
-     * - Absent (omitted, `null` or `''`): the read is by no package, exactly as
-     *   today — the bare name, read as a caller with no package.
+     * - Absent (omitted, `null` or `''`): the read is by no package — the
+     *   environment's own mapping, else the one package that holds the name;
+     *   a name two packages hold is a refusal naming both (ADR-0150 D3).
      *
      * The spelling and value type are the ownership-queue reads' caller
      * package (`OwnershipQueueCallerPackage`). Optional, so an implementation

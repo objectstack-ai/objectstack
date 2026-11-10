@@ -505,7 +505,10 @@ describe('FlowRuntimeState — carries the reason a flow is unbound', () => {
  *     is an implementation written before it.
  *  2. **The sibling contract's spelling and value type** — exactly the
  *     ownership-queue reads' `callerPackageId: string | null`, optional.
- *  3. **The absent value is stated where it is read:** no package, as today.
+ *  3. **The absent value is stated where it is read:** no package, which
+ *     ADR-0150 D3 answers — the environment's own mapping, else the one
+ *     package holder, and a name two packages hold is refused. Never "exactly
+ *     as today": the first registered holder is no longer served.
  *
  * ⛔ Not pinned: how an implementation resolves from the package — that is the
  * producer half (the runtime binder and the pull's mapping read).
@@ -554,8 +557,12 @@ describe('ConnectorSourcePullRequest — carries the caller package (ADR-0150 D3
     const at = body.indexOf('callerPackageId?: string | null;');
     expect(at).toBeGreaterThan(-1);
     const doc = body.slice(body.lastIndexOf('/**', at), at);
-    // The absent value: no package, exactly as today.
-    expect(doc).toMatch(/Absent \(omitted, `null` or `''`\): the read is by no package, exactly as[\s*]+today/);
+    // The absent value: no package, read by D3 — never "exactly as today",
+    // which named the first-registered read the pull no longer makes.
+    expect(doc).toMatch(/Absent \(omitted, `null` or `''`\): the read is by no package/);
+    expect(doc).toMatch(/environment's own mapping, else the one package that holds the name/);
+    expect(doc).toMatch(/a name two packages hold is a refusal naming both/);
+    expect(doc).not.toMatch(/exactly as[\s*]+today/);
     // Where the value comes from, and the ruling it serves.
     expect(doc).toContain('ADR-0150 D3');
     expect(doc).toMatch(/the package[\s*]+that declares the job/);

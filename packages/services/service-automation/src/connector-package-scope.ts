@@ -86,3 +86,35 @@ export function connectorNameResolver(
         return resolvePackageScopedName(registry, { type: 'connector', name, callerPackageId });
     };
 }
+
+/**
+ * [ADR-0150 D3, #32071] The connector pull's reader of a `mapping` name for a
+ * caller of package `callerPackageId` (`ConnectorSourcePullRequest
+ * .callerPackageId`, which the job binder sets to the package that declares
+ * the job): the package's own mapping, else the one holder in its declared
+ * dependency closure plus `sys`, else a refusal naming every candidate.
+ *
+ * Not the protocol's `getMetaItem({ packageId })`: that is the exact
+ * qualifier (ADR-0150 D5), which refuses every holder but the named package,
+ * so a mapping the job's package reaches through its closure would be refused.
+ * A pull that names no package keeps the protocol's read.
+ *
+ * Resolved at QUESTION time, like the connector reader. A composition with no
+ * ObjectQL, or whose registry offers none of the package-scoped reads, has no
+ * registry to ask: the answer is `undefined`, and the pull reads by no package
+ * as before.
+ */
+export function mappingNameResolver(
+    ctx: { getService<T>(name: string): T },
+): (name: string, callerPackageId: string) => PackageScopedResolution | undefined {
+    return (name, callerPackageId) => {
+        let registry: PackageScopedRegistry | undefined;
+        try {
+            registry = packageScopedRegistryOf(ctx.getService<{ registry?: unknown }>('objectql')?.registry);
+        } catch {
+            return undefined;
+        }
+        if (!registry) return undefined;
+        return resolvePackageScopedName(registry, { type: 'mapping', name, callerPackageId });
+    };
+}
