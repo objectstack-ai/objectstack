@@ -37,6 +37,8 @@
  * imported, so each pin can fail on its own.
  */
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions, imported from
 // `@objectstack/metadata-core` and NOT from `@objectstack/objectql`: objectql

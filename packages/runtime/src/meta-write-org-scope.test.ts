@@ -69,6 +69,8 @@
  * dressed up as a red.
  */
 
+// Pays `@objectstack/metadata`'s first load at collection, never inside a clocked case.
+import '@objectstack/metadata';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
     assertEngineDeleteDispatch,

@@ -25,6 +25,8 @@
  * scoped list's view-expansion stand-in (a package-less row the merge held
  * back, served in a package's slot) is `protocol.scoped-list-fallback.test.ts`.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, expect, it } from 'vitest';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation, mergePackageAwareOverlay, withRowBinding } from './protocol.js';

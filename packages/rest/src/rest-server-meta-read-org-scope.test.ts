@@ -24,6 +24,8 @@
 //     code. Until ADR-0131 C7 promotes such rows, a single-posture deployment
 //     observes this too (stage 0's F10 of the retirement card).
 
+// Pays `@objectstack/objectql`'s first load at collection, never inside a clocked case.
+import '@objectstack/objectql';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';

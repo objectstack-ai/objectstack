@@ -31,6 +31,8 @@
 // Test-path resolution: every subject is imported by relative specifier, so
 // vitest resolves it from this package's source.
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, it, expect } from 'vitest';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';

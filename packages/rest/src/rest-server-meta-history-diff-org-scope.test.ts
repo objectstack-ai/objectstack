@@ -19,6 +19,8 @@
 // harness's stub HONOURS that `where`, so the legacy cases below are the ones
 // that redden if a door starts naming an organization again.
 
+// Pays `@objectstack/objectql`'s first load at collection, never inside a clocked case.
+import '@objectstack/objectql';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';

@@ -40,6 +40,8 @@
  * would only compare the fix to a copy of itself.
  */
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, expect, it } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions, so the fake engine
 // below cannot accept a call ObjectQL refuses. From `@objectstack/metadata-core`
