@@ -489,6 +489,55 @@ describe('aiSettingsManifest — no provider is presented until one is configure
     expect(r.source).toBe('global');
   });
 
+  it('provider is not required: with nothing stored, an embedder-only save and a trace-only save resolve', async () => {
+    // The console blocks a page save on any visible required key that reads
+    // empty, so an unset provider must not be a required one: the Embedder and
+    // Observability sections save on their own, and a provider configured by
+    // boot environment variables keeps working with nothing stored here.
+    expect(providerSpec().required).toBe(false);
+    const parsed = SettingsManifestSchema.parse(aiSettingsManifest) as any;
+    expect(parsed.specifiers.find((s: any) => s.key === 'provider').required).toBe(false);
+    const svc = aiSvc();
+    await expect(
+      svc.setMany('ai', { embedder_provider: 'openai', embedder_api_key: 'k', embedder_model: 'text-embedding-3-small' }),
+    ).resolves.toBeDefined();
+    await expect(svc.setMany('ai', { trace_enabled: false })).resolves.toBeDefined();
+    await expect(svc.setMany('ai', { temperature: 0.3 })).resolves.toBeDefined();
+    expect((await svc.get('ai', 'embedder_provider')).value).toBe('openai');
+    expect((await svc.get('ai', 'trace_enabled')).value).toBe(false);
+    expect((await svc.get('ai', 'provider')).value).toBeNull();
+  });
+
+  it('an empty provider in a save is accepted: null clears to unset, an empty string reads as not configured', async () => {
+    const svc = aiSvc();
+    await svc.setMany('ai', { provider: 'openai', openai_api_key: 'sk-test' });
+    // `null` is a clear: the key falls back to the default rung, which is unset.
+    await expect(svc.setMany('ai', { provider: null, trace_enabled: true })).resolves.toBeDefined();
+    const cleared = await svc.get('ai', 'provider');
+    expect(cleared.value).toBeNull();
+    expect(cleared.source).toBe('default');
+    // `''` is stored as given (no option check judges an empty value), and the
+    // Test connection stub reads it as not configured.
+    await expect(svc.setMany('ai', { provider: '' })).resolves.toBeDefined();
+    const blank = await svc.get('ai', 'provider');
+    expect(blank.value).toBe('');
+    const r = await runTest({ provider: blank.value });
+    expect(r.ok).toBe(false);
+    expect(r.severity).toBe('warning');
+  });
+
+  it('with no provider the generation fields show, so their declared windows bind on a save', async () => {
+    // On main these fields were hidden while the provider was memory (the
+    // default), and a hidden specifier is not validated: `temperature: 5`
+    // was stored. They now always show, so the window refuses it.
+    const svc = aiSvc();
+    await expect(svc.setMany('ai', { temperature: 5 })).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [{ field: 'temperature', code: 'max_value', constraint: { min: 0, max: 2 }, value: 5 }],
+    });
+    expect((await svc.get('ai', 'temperature')).source).toBe('default');
+  });
+
   it('Test connection with no provider answers that none is configured, not a memory echo', async () => {
     for (const values of [{}, { provider: null }, { provider: '' }]) {
       const r = await runTest(values);

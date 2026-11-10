@@ -40,9 +40,13 @@ const manifest = {
     // so presenting or saving it told an administrator AI was configured while
     // it was disabled. Whether AI is disabled is the AI runtime's own decision;
     // it states it on this page itself (`registerLiveStatus`), never derived here.
+    // Not `required` either: unset is a served state (a provider may come from
+    // boot environment variables), and the console blocks every save on the
+    // page while a visible required key reads empty, which would keep the
+    // Embedder and Observability sections from saving on their own.
     { type: 'group', id: 'provider', label: 'Provider', required: false,
       description: 'Choose the LLM backend.' },
-    { type: 'select', key: 'provider', label: 'Provider', required: true,
+    { type: 'select', key: 'provider', label: 'Provider', required: false,
       options: [
         { value: 'gateway', label: 'Vercel AI Gateway' },
         { value: 'openai', label: 'OpenAI' },
