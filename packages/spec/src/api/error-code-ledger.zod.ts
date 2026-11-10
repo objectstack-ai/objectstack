@@ -1208,6 +1208,15 @@ export const ERROR_CODE_LEDGER = {
     'NO_MATCH',                   // import upsert found no record for the match key
     'SUMMARY_RECOMPUTE_FAILED',
     'UNSUPPORTED_TRANSFORM',
+    // [ADR-0150 D5, #31691] The inbound hook's one refusal moved here from
+    // `@objectstack/trigger-api`: `inboundHookRefusal()`
+    // (`security/inbound-hook-answer.ts`) renders the `401` every unverified
+    // post gets, and both faces answer through it. Wire path: the trigger's
+    // raw-app mounts (`POST /api/v1/automation/hooks/:flowName/:hookId` and its
+    // qualified `…/hooks/:ns/:flowName/:hookId`) via `ApiTrigger`'s answer, and
+    // the hosted `/automation` domain (`runtime/domains/automation-hooks.ts`)
+    // for a qualified address its qualifier does not admit. Provenance only.
+    'INVALID_SIGNATURE',          // hook secret did not verify the request body
   ],
   '@objectstack/types': [
     // [#20919] The REST door's error CLASSIFICATION half
@@ -1311,7 +1320,8 @@ export const ERROR_CODE_LEDGER = {
     // only: the code was already registered (six other packages), so the
     // union, casing and every other row are unchanged.
     'INVALID_REQUEST',
-    'INVALID_SIGNATURE',             // hook secret did not verify the request body
+    // `INVALID_SIGNATURE` moved to `@objectstack/core` (ADR-0150 D5, #31691):
+    // the refusal is rendered there and this package answers through it.
   ],
   '@objectstack/cli': [
     // [#13353] The serve command's unknown-hostname guard (`commands/serve.ts`,

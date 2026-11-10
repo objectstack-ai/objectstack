@@ -12,111 +12,33 @@ import { runBeforeSignOut } from './beforeSignOut.js';
 import type { AuthUser, AuthClient, AuthProviderOptions, PreviewModeOptions, AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthPublicConfig, SignInWithProviderOptions, SignInTwoFactorCodeKind, TwoFactorChallenge } from './types.js';
 import { TWO_FACTOR_CHALLENGE_ENDED_CODES } from './two-factor-codes.js';
 import { AuthCtx, type AuthContextValue } from './AuthContext.js';
-import { createAuthClient, takePreflightSession, TokenStorage } from './createAuthClient.js';
-import { ActiveOrganizationStorage, SessionUserScope } from './ActiveOrganizationStorage.js';
+import { createAuthClient, sessionReadWasInconclusive, takePreflightSession, TokenStorage } from './createAuthClient.js';
+import { ActiveOrganizationStorage, SessionUserScope, purgeSignedOutUserClientState } from './ActiveOrganizationStorage.js';
 
 /**
- * Prefix of every `MetadataProvider` seed entry in `sessionStorage`
- * (`objectui:metadata:<type>:<orgId>:<principal>`, `@object-ui/app-shell`).
+ * Sign-out leaves none of the signed-out user's client state in this browser
+ * (objectui#5198 for the metadata seed cache and the active org).
  *
- * Spelled out here rather than imported: `@object-ui/app-shell` depends on
- * `@object-ui/auth`, so the constant cannot travel in that direction without a
- * dependency cycle. The two ends are held together by BEHAVIOUR instead of by
- * a shared symbol — `MetadataProvider.crossPrincipalSeed.test.tsx` fills the
- * cache by running the real `MetadataProvider` and empties it by signing out
- * through this provider, so a prefix that drifts on either side fails there
- * rather than silently purging nothing.
- */
-const METADATA_SEED_CACHE_PREFIX = 'objectui:metadata:';
-
-/**
- * Drop the client-side caches that belong to the session being ended
- * (objectui#5198).
+ * `sessionStorage` is per-TAB, not per-session, `localStorage` is per-origin,
+ * and no sign-out call site reloads the page — `AppHeader`, `UserMenu` and
+ * `RemediationOverlay` all just call `signOut()` and let the SPA keep running.
+ * Even a sign-out that follows a provider-logout redirect comes back to this
+ * SPA in the same tab. Neither store ends with the session, so what the
+ * session wrote into them is removed here.
  *
- * `sessionStorage` is per-TAB, not per-session, and no sign-out call site
- * reloads the page — `AppHeader`, `UserMenu` and `RemediationOverlay` all
- * just call `signOut()` and let the SPA keep running. Even a sign-out that
- * follows a provider-logout redirect comes back to this SPA in the same tab.
- * So without this the next person to sign in in the same tab (a shared or
- * kiosk browser, a handover, a support session) is SEEDED from the previous
- * user's entry, and what is in it is that user's PERMISSION-FILTERED app list —
- * the server filters `GET /api/v1/meta/:type` per session. That makes it a
- * cross-principal disclosure, not ordinary staleness, which is why it is
- * cleared here and not left to the tab being closed.
+ * The removal is `purgeSignedOutUserClientState` (`ActiveOrganizationStorage.ts`),
+ * the same allowlist sweep a change of session user runs: every key goes but the
+ * few that describe the device, so a key added later is covered without being
+ * named. It runs on every sign-out path: `signOut()` below, and every session
+ * read the server answers with "no session" on a browser that has held one
+ * (`loadSession`). A read the server did not answer clears nothing.
  *
- * Two properties of the loop are load-bearing:
- *
- *  - It matches by PREFIX. The keys are org-scoped (objectui#4486), so a purge
- *    that recomputed the scope would depend on `ActiveOrganizationStorage`
- *    still holding the org those entries were written under. A prefix sweep has
- *    no such dependency and therefore no ordering hazard of its own.
- *  - It runs BEFORE `ActiveOrganizationStorage.clear()` anyway, so the ordering
- *    stays correct for anything scope-derived added later: clearing the org
- *    first would leave such a purge computing the no-org scope and deleting
- *    nothing while the real entries survived.
- *
- * `MetadataProvider` additionally keys the entry by session fingerprint, so a
- * blob that escapes this purge (a tab open across the upgrade, a session ended
- * by expiry rather than by this call) is unreadable rather than merely
+ * `MetadataProvider` additionally keys the seed entry by session fingerprint,
+ * so an entry that escapes the sweep is unreadable rather than merely
  * undeleted. The two halves are deliberately independent.
- *
- * ## The `try` guards the SNAPSHOT, not the walk (objectui#5777)
- *
- * `Object.keys(sessionStorage)` can itself throw — partitioned iframes, some
- * privacy modes — and that is the reason a guard exists here at all, so it
- * stays. What it must NOT do is wrap the loop: a `removeItem` that throws on
- * key `n` would abort the walk, leaving every still-unvisited MATCHING key
- * unswept, with the failure swallowed so the caller believes the sweep
- * completed. The keys this purges are a cross-principal disclosure risk on a
- * shared browser (objectui#5198), not ordinary staleness — a partial sweep
- * leaves an arbitrary subset of the previous principal's permission-filtered
- * app list readable to whoever signs in next in this tab. So each
- * `removeItem` gets its own `try`: one uncooperative key costs exactly that
- * key. Same defect class and same remedy as `sweepStore` in
- * `ActiveOrganizationStorage.ts` (objectui#5763) — different file and
- * different caller (sign-out, not sign-in) is why it is fixed here rather
- * than there.
- *
- * ## Reported, not quarantined — same reason as `sweepStore`
- *
- * This function walks keys it does not own reads for: `MetadataProvider`
- * (`@object-ui/app-shell`) is the reader of the seed cache, not this
- * provider — there is no local `get()` here to guard, so there is nothing to
- * quarantine the way `ActiveOrganizationStorage.clear()` quarantines a key
- * (objectui#5731). What IS mirrored is the reporting channel: a key whose
- * `removeItem` throws is named in a `console.warn`, so a partial sweep is
- * discoverable instead of silent. The caller (`signOut`, above) cannot act on
- * it either way — the session is already ending — so, like `sweepStore` on
- * the sign-in path, this must not throw.
  */
 function purgeSignedOutClientCaches(): void {
-  if (typeof sessionStorage !== 'undefined') {
-    let keys: string[];
-    try {
-      // Snapshot the keys first (`Object.keys`) — removing entries during a
-      // live index walk shifts the ones behind it and skips half of them.
-      // Same idiom as the `MarketplacePackagePage` purge loop.
-      keys = Object.keys(sessionStorage);
-    } catch {
-      keys = []; /* storage unavailable */
-    }
-    const unswept: string[] = [];
-    for (const key of keys) {
-      if (!key.startsWith(METADATA_SEED_CACHE_PREFIX)) continue;
-      try {
-        sessionStorage.removeItem(key);
-      } catch {
-        unswept.push(key);
-      }
-    }
-    if (unswept.length > 0) {
-      console.warn(
-        `[purgeSignedOutClientCaches] could not remove ${unswept.length} key(s) from sessionStorage: ` +
-          `${unswept.join(', ')}. The signed-out user's metadata seed cache may still be readable under these keys.`,
-      );
-    }
-  }
-  ActiveOrganizationStorage.clear();
+  purgeSignedOutUserClientState();
 }
 
 export interface AuthProviderProps extends AuthProviderOptions {
@@ -286,6 +208,15 @@ export function AuthProvider({
         // already null, so this changes nothing there.
         setUser(null);
         setSession(null);
+        // The server says there is no session, on a browser that has held
+        // one: the boot of an expired or revoked session, or one ended
+        // elsewhere. That is a sign-out too, so the signed-out user's client
+        // state goes before the sign-in page is shown. A read the server did
+        // not answer is not a sign-out, and a browser that never held a
+        // session has nothing to drop.
+        if (SessionUserScope.current() !== null && !sessionReadWasInconclusive(client)) {
+          purgeSignedOutClientCaches();
+        }
       }
     } catch (err) {
       if (isCancelled?.()) return;

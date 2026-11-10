@@ -226,7 +226,9 @@ describe('[ADR-0106] HTTP MCP bridge and the /metadata object door agree — the
             manifest: { register: vi.fn() },
             objectql: engine,
             metadata: {
-                get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+                // The catalog reads a set by name (ADR-0150 D3): served from the same list.
+                get: async (type: string, name: string) =>
+                  (type === 'permission' ? sets.find((s: any) => s?.name === name) : engine.getSchema(name)) ?? null,
                 list: async () => sets,
             },
         };
@@ -416,7 +418,9 @@ describe('[ADR-0106] HTTP MCP list_actions summarises an action against the obje
             manifest: { register: vi.fn() },
             objectql: engine,
             metadata: {
-                get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+                // The catalog reads a set by name (ADR-0150 D3): served from the same list.
+                get: async (type: string, name: string) =>
+                  (type === 'permission' ? sets.find((s: any) => s?.name === name) : engine.getSchema(name)) ?? null,
                 list: async () => sets,
             },
         };
@@ -620,7 +624,9 @@ describe('[ADR-0106 D1] a standalone or object-less action entry is served as th
             manifest: { register: vi.fn() },
             objectql: engine,
             metadata: {
-                get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+                // The catalog reads a set by name (ADR-0150 D3): served from the same list.
+                get: async (type: string, name: string) =>
+                  (type === 'permission' ? sets.find((s: any) => s?.name === name) : engine.getSchema(name)) ?? null,
                 list: async () => sets,
             },
         };

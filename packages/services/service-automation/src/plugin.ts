@@ -62,6 +62,7 @@ import {
     missingCredentialReason,
     probeConnectorCredential,
     resolveConnectorCredential,
+    rewrittenThrown,
     upstreamRefusalMessage,
     withoutCredentialThrown,
     type ClusterConnectorCredentialMutationPayload,
@@ -69,6 +70,7 @@ import {
     type ConnectorCredentialRecord,
     type ConnectorCredentialResolution,
 } from './connector-credentials.js';
+import { connectorReadWithheldText, type ConnectorFailureTextRewrite } from './connector-read-withheld-text.js';
 import { CONNECTOR_CREDENTIAL_SOURCE_SERVICE } from '@objectstack/types';
 import { createConnectorCredentialSource } from './connector-credential-source.js';
 import { connectorNameResolver, packageScopedRegistryOf, refusedConnectorNames } from './connector-package-scope.js';
@@ -1081,6 +1083,29 @@ function declaredInstanceFingerprint(declared: readonly unknown[]): string {
         parts.push(`${entry.name}=${connectorInstanceSignature(entry)}`);
     }
     return stableStringify(parts.sort());
+}
+
+/**
+ * `handlers` with every failure a call throws passed through `rewrite` (the
+ * instance's {@link connectorReadWithheldText}) before any caller reads it —
+ * a run's step error, the pull door, a log record. A result is returned as the
+ * handler answered it; a failure keeps its `code`, `status` and `name`.
+ */
+function withFailureTextRewritten(
+    handlers: Record<string, ConnectorMaterializationHandler>,
+    rewrite: ConnectorFailureTextRewrite,
+): Record<string, ConnectorMaterializationHandler> {
+    const rewritten: Record<string, ConnectorMaterializationHandler> = {};
+    for (const [key, handler] of Object.entries(handlers)) {
+        rewritten[key] = async (input, callCtx) => {
+            try {
+                return await handler(input, callCtx);
+            } catch (err) {
+                throw rewrittenThrown(err, rewrite);
+            }
+        };
+    }
+    return rewritten;
 }
 
 /**
@@ -2215,6 +2240,8 @@ export class AutomationServicePlugin implements Plugin {
                     return {
                         positions: grants.positions,
                         permissions: grants.permissions,
+                        // [ADR-0150 D3] Which package's set each name is.
+                        ...(grants.permissionSetAddresses ? { permissionSetAddresses: grants.permissionSetAddresses } : {}),
                         // The peer list the request path seeds through this
                         // same resolver: the run's organization's members and
                         // the user, so `sys_user_org_members` resolves for the
@@ -3499,8 +3526,15 @@ export class AutomationServicePlugin implements Plugin {
                 // only configuration faults keep the fail-loud contract below.
                 // [#27237] A provider's message is foreign text: an upstream that
                 // echoes the credential back must not carry it into the husk's
-                // reason, a log record or the thrown boot error.
-                const thrown = withoutCredentialThrown(err, credentialForms(credential?.value, basicUsernameOf(entry.auth)));
+                // reason, a log record or the thrown boot error. Nor may it
+                // carry what the connector metadata read withholds from the
+                // stored entry (./connector-read-withheld-text.ts), judged
+                // first, on the provider's own text: every reader below takes
+                // `thrown`, never `err`.
+                const thrown = withoutCredentialThrown(
+                    rewrittenThrown(err, connectorReadWithheldText(entry)),
+                    credentialForms(credential?.value, basicUsernameOf(entry.auth)),
+                );
                 // ADR-0143 D4 — the upstream refused the token borrowed from the
                 // discovery organization's connection while the instance listed
                 // its tools: that connection's grant, not the client secret the
@@ -3639,7 +3673,14 @@ export class AutomationServicePlugin implements Plugin {
                 : credentialHandle && entry.auth?.type === 'app-credential'
                     ? retryOnVendorTokenRefusal(name, entry.auth.vendor, credentialHandle, materialization.handlers)
                     : materialization.handlers;
-            engine.registerConnector(def, handlers, 'declarative');
+            // A call's failure text is the provider's too: what the connector
+            // metadata read withholds from the entry never reaches a run's
+            // step error or a log record through it.
+            engine.registerConnector(
+                def,
+                withFailureTextRewritten(handlers, connectorReadWithheldText(entry)),
+                'declarative',
+            );
             this.materializedConnectors.set(name, tracked);
             if (credentialHandle) this.grantHandles.set(name, credentialHandle);
             else this.grantHandles.delete(name);
@@ -5192,6 +5233,7 @@ export class AutomationServicePlugin implements Plugin {
                     upstreamRefusalMessage(
                         (result as { body?: unknown }).body,
                         credentialForms(info.credential.value, basicUsernameOf(info.entry.auth)),
+                        connectorReadWithheldText(info.entry),
                     ),
                     info.credential.source === 'object',
                 );

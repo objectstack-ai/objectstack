@@ -299,3 +299,130 @@ describe('[#17022] an MCP OAuth agent’s write is attributable to the agent, no
     expect(viaAgent.actor).toBe(viaConsole.actor);
   });
 });
+
+/**
+ * [ADR-0151 D5 · O4] One question for both kinds of agent, and the account
+ * attributed as itself.
+ *
+ * Three doors over one engine, each envelope built by the REAL assembler:
+ * an OAuth client acting for a person, an AI service account acting as itself
+ * (its row's kind arrives on `authz.principalKind`, as `resolveAuthzContext`
+ * reads it off `sys_user.principal_kind`), and the person on their own. A hook
+ * on the audited object records what each write's `HookContext` said; the
+ * ledger records what the writer wrote. Both read through `buildSession`
+ * (objectql `dist/`, so rebuild it before an ablation reads here).
+ */
+describe('[ADR-0151 D5] a hook reads principalKind for both kinds of agent, and the account is the ledger\'s user_id', () => {
+  const ACCOUNT = 'u_invoice_bot';
+  const OAUTH_RECORD = 'c_o4_via_oauth';
+  const ACCOUNT_RECORD = 'c_o4_via_account';
+  const PERSON_RECORD = 'c_o4_via_person';
+
+  let kernel: ObjectKernel;
+  let driver: SqliteWasmDriver;
+  let engine: ObjectQL;
+  let sql: (statement: string, bindings?: unknown[]) => Promise<unknown>;
+  /** What the hook saw, keyed by the record it saw it for (the writes run one after another). */
+  const seen: Record<string, { userId: unknown; principalKind: unknown; hasKind: boolean; performedByClientId: unknown }> = {};
+  let writing = '';
+
+  const assemble = (authz: Record<string, unknown>, oauth?: Record<string, unknown>) =>
+    assembleExecutionContext({
+      authz: authz as any,
+      oauth: oauth as any,
+      localization: undefined,
+      requestLocale: undefined,
+      accessToken: undefined,
+      authGate: undefined,
+    }) as unknown as Record<string, unknown>;
+
+  beforeAll(async () => {
+    kernel = new ObjectKernel({ logger: { level: 'silent' } });
+    await kernel.use(new ObjectQLPlugin());
+    await kernel.bootstrap();
+    engine = kernel.getService<ObjectQL>('objectql');
+    driver = new SqliteWasmDriver({ filename: ':memory:' });
+    await driver.connect();
+    engine.registerDriver(driver, true);
+    sql = (statement, bindings) =>
+      (driver as unknown as { execute(s: string, b: unknown[]): Promise<unknown> }).execute(statement, bindings ?? []);
+    engine.registry.registerObject(contactObject as any, HARNESS_PACKAGE);
+    engine.registry.registerObject(SysAuditLog as any, HARNESS_PACKAGE);
+    await engine.syncSchemas();
+    installAuditWriters(engine, HARNESS_PACKAGE);
+
+    engine.registerHook('beforeInsert', async (ctx: any) => {
+      const session = ctx.session ?? {};
+      seen[writing] = {
+        userId: session.userId,
+        principalKind: session.principalKind,
+        hasKind: 'principalKind' in session,
+        performedByClientId: ctx.provenance?.performedByClientId,
+      };
+    }, { object: AUDITED_OBJECT });
+
+    const oauthCtx = assemble({ ...AUTHZ }, {
+      userId: HUMAN,
+      scopes: ['data:read', 'data:write'],
+      clientId: CLIENT,
+      scopePermissions: ['agent_data_read', 'agent_data_write'],
+      delegatesActions: false,
+    });
+    const accountCtx = assemble({
+      ...AUTHZ,
+      userId: ACCOUNT,
+      email: 'invoice-bot@placeholder.invalid',
+      positions: [],
+      org_user_ids: [ACCOUNT],
+      principalKind: 'agent',
+    });
+    const personCtx = assemble({ ...AUTHZ });
+
+    writing = OAUTH_RECORD;
+    await engine.insert(AUDITED_OBJECT, { id: OAUTH_RECORD, full_name: 'Via OAuth' }, { context: oauthCtx as any });
+    writing = ACCOUNT_RECORD;
+    await engine.insert(AUDITED_OBJECT, { id: ACCOUNT_RECORD, full_name: 'Via account' }, { context: accountCtx as any });
+    writing = PERSON_RECORD;
+    await engine.insert(AUDITED_OBJECT, { id: PERSON_RECORD, full_name: 'Via person' }, { context: personCtx as any });
+  }, 120_000);
+
+  afterAll(async () => {
+    if (kernel) {
+      await Promise.race([kernel.shutdown(), new Promise<void>((resolve) => setTimeout(resolve, 10_000))]);
+    }
+  }, 30_000);
+
+  async function ledgerRow(recordId: string): Promise<Record<string, unknown>> {
+    const list = rows(await sql(
+      `SELECT * FROM "${LEDGER}" WHERE object_name = ? AND action = ? AND record_id = ?`,
+      [AUDITED_OBJECT, 'create', recordId],
+    ));
+    expect(list).toHaveLength(1);
+    return list[0]!;
+  }
+
+  it('control — the hook ran for all three writes, with a live identity channel', () => {
+    expect(seen[OAUTH_RECORD]?.userId).toBe(HUMAN);
+    expect(seen[ACCOUNT_RECORD]?.userId).toBe(ACCOUNT);
+    expect(seen[PERSON_RECORD]?.userId).toBe(HUMAN);
+  });
+
+  it('both kinds of agent read `agent`; the provenance alone tells the OAuth client from the account', () => {
+    expect(seen[OAUTH_RECORD]).toMatchObject({ principalKind: 'agent', performedByClientId: CLIENT });
+    expect(seen[ACCOUNT_RECORD]).toMatchObject({ principalKind: 'agent', performedByClientId: undefined });
+  });
+
+  it('CONTROL — the person on their own reads `human`', () => {
+    expect(seen[PERSON_RECORD]).toMatchObject({ principalKind: 'human', hasKind: true, performedByClientId: undefined });
+  });
+
+  it('the account\'s write is its own on the ledger: `user_id` is the account, and the row names no performer, no delegator and no kind', async () => {
+    const row = await ledgerRow(ACCOUNT_RECORD);
+    expect(row.user_id).toBe(ACCOUNT);
+    expect(row.actor).toBe(ACCOUNT);
+    // ADR-0151 D5: no `performedBy` naming the account, no `on_behalf_of`
+    // itself; ADR-0118 D5: no kind column, and no kind folded into metadata.
+    expect(row.metadata ?? null).toBeNull();
+    expect(Object.keys(row).filter((k) => /principal|kind/i.test(k))).toEqual([]);
+  });
+});

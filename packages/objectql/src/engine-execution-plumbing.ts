@@ -104,6 +104,12 @@ export function buildSession(execCtx?: ExecutionContext): HookContext['session']
   // into a session either.
   const locale = (execCtx as { locale?: unknown }).locale;
   if (typeof locale === 'string' && locale.length > 0) (session as { locale?: string }).locale = locale;
+  // [ADR-0151 D5 · O4] The principal's kind rides on the same existing session,
+  // copied verbatim — never defaulted to 'human', so a context that lost its
+  // kind reads as unstated rather than as a person — and asked after the
+  // presence test for the reason `locale` is: what sort of caller is not who.
+  const principalKind = execCtx.principalKind;
+  if (principalKind !== undefined) session!.principalKind = principalKind;
   return session;
 }
 

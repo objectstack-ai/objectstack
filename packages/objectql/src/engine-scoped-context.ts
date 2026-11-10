@@ -144,6 +144,9 @@ export class ScopedContextFacet {
     return this.derive({
       ...ctx,
       ...(needsGrants ? { positions: grants.positions, permissions: grants.permissions } : {}),
+      // [ADR-0150 D3] Which package's set each of those names is, carried with
+      // them and only with them.
+      ...(needsGrants && grants.permissionSetAddresses ? { permissionSetAddresses: grants.permissionSetAddresses } : {}),
       // [ADR-0151 D3] An AI service account is the agent principal of its own
       // calls, holding no system permission.
       ...(needsGrants && grants.principalKind ? { principalKind: grants.principalKind, systemPermissions: [] } : {}),
