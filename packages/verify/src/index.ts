@@ -36,6 +36,14 @@ export type { CrudCase, DerivedAssert, AssertKind, RelationalRef } from './deriv
 
 export { runCrudVerification, formatReport } from './verify.js';
 export type { VerifyReport, ObjectVerifyResult } from './verify.js';
+// #32141 — the boot's seed, judged: a dropped seed row counts in the verdict.
+export {
+  judgeSeedOutcome,
+  readSeedOutcome,
+  formatSeedReport,
+  DEFAULT_SEED_SETTLE_TIMEOUT_MS,
+} from './seed-outcome.js';
+export type { SeedReport, SeedSourceReport, SeedStatus } from './seed-outcome.js';
 
 export {
   runRlsProofs,
