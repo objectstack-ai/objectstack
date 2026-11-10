@@ -1067,3 +1067,115 @@ else is missing. No live run was made: every clause is read from source, and eac
 ### 16d. Security note
 
 No security finding was made, and none is withheld.
+
+## 17. Scoped sweep 2026-11-10 — themes 2, 4 and 5 since 18.3.0 (#32020, epic #32022 M2)
+
+**Not a full sweep.** One writer worked sequentially, with no hunter subagents. The scope is
+the epic's theme 2 (multi-replica on Redis), theme 4 (the recycle bin) and theme 5
+(multi-currency record-mode amounts), read from source at `43a51b55` against the 18.3.0
+subject `83d7e4ae`. The pass enumerated the commits of those themes since 18.3.0 (51 match
+the card's premise grep) and ran these SWEEP.md angles on what they touched:
+
+- angle 3: the route ledgers (`rest-route-ledger.ts`'s four recycle-bin rows, the runtime
+  `route-ledger.ts` `/packages` rows and `GET /ready`, the settings ledger, the install-local
+  routes);
+- angle 2: the spec constants that bound each refusal (the four restore refusal codes, the two
+  grant keys, the retention default and variable, the `homeAmount` pointers and rate scale);
+- angle 1, limited to the theme's own surfaces: the delete toast, the Setup recycle-bin page,
+  the form's home-amount preview and Studio's `homeAmount` editor;
+- angle 5: ADR-0144 (as amended), ADR-0148 and `content/docs/kernel/cluster.mdx` against what
+  the runtime serves.
+
+Angles 4 and 6 were not run, so this section supports **no** claim about what else is
+missing. No live run was made: every clause is read from source, and each item's
+`automated.ref` names the pins that hold it today.
+
+- **16 new items**, all `since: "v18.4"` except the one `planned` item (`since: null`).
+  - Theme 4, 4 items (all active): `api-backend.recycle-bin-delete-entry-restore`,
+    `api-backend.recycle-bin-refusals-purge-empty`, `records-forms.delete-toast-undo-restore`
+    and `records-forms.setup-recycle-bin-page`.
+  - Theme 5, 4 items (3 active, 1 planned): `records-forms.home-amount-preview-states`,
+    `studio-authoring.currency-home-amount-editor`,
+    `studio-authoring.currency-field-repointed-refusal`; planned:
+    `records-forms.master-detail-child-follows-parent-currency`.
+  - Theme 2, 8 items (all active, 6 of them `blocked(fixture)`, see 17c): runnable today,
+    `cli.serve-multi-replica-local-database-refusal` and
+    `cli.start-multi-replica-auth-secret-refusal`; blocked,
+    `attachments-storage.multi-replica-local-root-refusal`,
+    `platform-core.multi-replica-package-change-refusal` (the seven package doors,
+    install-local and the clone that would create a customization package),
+    `platform-core.ready-cluster-driver-health`, `platform-core.cluster-membership-heartbeat`,
+    `platform-core.settings-change-reaches-every-replica` and
+    `platform-core.shared-redis-cache-across-replicas`.
+- **Accuracy fix, a revision with its history row:** `records-forms.multi-currency-invoice`
+  (rev 2) carried `since: "v18"`, but the showcase invoice became the multi-currency example
+  in #31757, after 18.3.0, and the hint and preview its `acceptance[5]` reads landed in #31638
+  and #31724. It is `v18.4` now. Its knownGaps[0] said a child amount cannot take its
+  parent's currency; the spec admits that since #31956, and the engine half is the planned
+  item above.
+- **`coverage.json`**: the recycle-bin items are mapped to `crud_endpoints` (and the grants
+  item to `permission`); the currency items to `field`, and the re-point refusal to `object`
+  and `metadata_endpoints`. The invoice item, never mapped, is now under `field`. The six
+  blocked theme-2 items are mapped nowhere: an item no run can drive does not carry a kind.
+- **Commits the premise grep matches that no item here covers.** Docs, ADR, skills and test
+  commits change no surface (#30182, #30186, #30263, #30755, #30776, #30929, #30994, #31769,
+  #31917, #31986). Outside the card's named list, and not checked against existing items: the
+  home-amount recompute and the record-currency code backfill (#30183, #30737, #30809, #30867),
+  the rate-scale and summary refusals at the authoring door (#30644, #31976), the analytics
+  home-field proof (#30176), the automation currency screen field (#30269), the console fixes
+  (#30495, #30868), the replica fixes with no new surface (#31584, #31721, #31747, #31816,
+  #31996, #32204) and the objectql delete fix #31702. #31848 is a false match: "concurrency"
+  contains the grep's "currency".
+
+### 17a. Declared but not landed — written as `planned`, already carded
+
+- A `master_detail` child following its parent's currency (ADR-0144 D2 as amended, #31917).
+  The authoring door admits the `PARENT_FIELD.CODE_FIELD` path (#31956), but at `43a51b55`
+  the engine reads `currencyField` as a field of the same row
+  (`packages/objectql/src/validation/record-currency-code.ts`), so a path reads no code.
+  Tracked by #31911 (open).
+
+### 17b. Measured from source — notes for owners, no card filed
+
+- **A storage settings change to the local adapter under declared replicas is saved but not
+  applied.** The refusal is the settings subscriber's
+  (`packages/services/service-storage/src/storage-service-plugin.ts`): it logs the refusal and
+  "The storage settings change was NOT applied: the current adapter keeps serving.", while the
+  settings door has already stored the value. The next boot then reads the stored value and
+  stops at the `kernel:ready` refusal. An operator who changed it in Setup sees a saved setting
+  and a replica that will not restart. The item scores the subscriber's refusal and says the
+  PUT may answer 200. No card filed: whether the door should refuse first is the owner's call.
+- **`readClusterMembers()` has no consumer.** No HTTP door, CLI command or console surface
+  reads it at `43a51b55`, so `platform-core.cluster-membership-heartbeat` reads the keys in
+  Redis. The function is the read half a later surface would use.
+- **No stock persona holds `allowRestoreOwnDeleted` without `manageRecycleBin`.** The admin
+  holds both through `modifyAllRecords`, and `showcase_contributor` holds neither. So the
+  own-entry half of the restore rule (D5) and an Undo withheld from a caller without the grant
+  are pinned by tests only (see 17c).
+
+### 17c. Fixtures worth adding
+
+- **Two replicas on Redis, gated.** Six theme-2 items need two replicas declared on the redis
+  cluster driver over one Redis and one shared Postgres, with one `OS_AUTH_SECRET`. The open
+  tree registers no multi-node gate: `checkMultiNodeAllowed` fails closed with none
+  registered, `os serve` falls back to the in-process driver, and the split-brain guard refuses
+  the declared topology. So no declared multi-replica boot on Redis reaches `kernel:ready` on a
+  stock tree. The carriers ship with a distribution. The open-tree route the CLI pin uses is an
+  app whose own `@objectstack/service-cluster` calls `registerMultiNodeGate` on the instance
+  `os serve` imports from the host
+  (`packages/cli/test/serve-multi-node-gate-declaration.integration.test.ts`, `writeApp`),
+  there with a memory stand-in for the driver. A run that does the same with the real redis
+  driver, and proves it with the premise check each item states, should become an area-level
+  recipe with that provenance, and lift `blocked` on the six items in the same edit. The two
+  CLI refusals need no gate and are runnable now.
+- **A restore-own-deleted persona.** A permission set granting `allowRestoreOwnDeleted` alone
+  on one writable showcase object, bound to a member, would let
+  `api-backend.recycle-bin-refusals-purge-empty` drive "a caller restores the entries it
+  deleted, and only those", and `records-forms.delete-toast-undo-restore` show the Undo
+  withheld from a caller without it.
+- **A unique field on a showcase business object.** `RESTORE_UNIQUE_VALUE_TAKEN` has no live
+  fixture: no showcase business object declares a unique field.
+
+### 17d. Security note
+
+No security finding was made, and none is withheld.
