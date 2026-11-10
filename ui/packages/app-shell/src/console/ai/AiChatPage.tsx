@@ -958,9 +958,12 @@ export function useDeferredFirstSend(opts: {
   const { chatApi, conversationId, pendingRef, doSend, pendingSignal, agentRoute, ensureConversation } = opts;
   const apiMode = Boolean(chatApi);
   // Read through a ref: the replay effect must not re-run (or depend for
-  // correctness) on the identity of a host callback — ui/AGENTS.md #10.
+  // correctness) on the identity of a host callback — ui/AGENTS.md #10. Synced
+  // in a layout effect, which runs before the replay effect below.
   const ensureConversationRef = useRef(ensureConversation);
-  ensureConversationRef.current = ensureConversation;
+  useLayoutEffect(() => {
+    ensureConversationRef.current = ensureConversation;
+  }, [ensureConversation]);
 
   // Replay a deferred first message the instant a conversation id exists — in
   // the freshly-mounted pane after the remount, or in place if none happened.

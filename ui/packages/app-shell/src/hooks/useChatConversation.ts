@@ -15,7 +15,7 @@
  * this hook knows which surface a row belongs to.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 // One parse for one contract. `detectPendingApproval` is the live mapper's own
 // reader of the framework HITL envelope, exported (objectui#8442) so this
 // hydration path cannot grow a second dialect of it (Commandment #0.1).
@@ -897,14 +897,18 @@ export function useChatConversation(
   // Last non-transient user we saw, to detect a logout / user switch.
   const prevUserIdRef = useRef<string | undefined>(userId);
   // ── Create-on-first-send state (objectstack#32031) ──────────────────────
-  // The props of THIS render, so `ensureConversation` (called from a host
-  // effect, after commit) acts for the surface the user is looking at.
+  // The committed props, so `ensureConversation` (called from a host effect or
+  // event handler, after commit) acts for the surface the user is looking at.
+  // Synced in a LAYOUT effect: those run before every passive effect of the
+  // commit, the host's replay effect included.
   const latestRef = useRef({ userId, scope, apiBase });
-  latestRef.current = { userId, scope, apiBase };
   // Mirror of `conversationId`, written eagerly beside every create/settle so
   // a call landing before the re-render still sees the held id.
   const conversationIdRef = useRef<string | undefined>(conversationId);
-  conversationIdRef.current = conversationId;
+  useLayoutEffect(() => {
+    latestRef.current = { userId, scope, apiBase };
+    conversationIdRef.current = conversationId;
+  }, [userId, scope, apiBase, conversationId]);
   // The cache key the hook has SETTLED on with no conversation: nothing to
   // resume, so the first send mints the row. `undefined` while a resolve runs
   // or once a conversation is held.
@@ -919,7 +923,8 @@ export function useChatConversation(
     (key: string, forUser: string, forScope: string | undefined, base: string) => {
       const inflight = inflightRef.current;
       if (inflight && inflight.key === key) return inflight.promise;
-      const promise = (async (): Promise<string | undefined> => {
+      const entry = { key, promise: Promise.resolve<string | undefined>(undefined) };
+      entry.promise = (async (): Promise<string | undefined> => {
         try {
           const fresh = await createConversation(base);
           // The row exists and is the (user, scope)'s, whatever happens next.
@@ -940,11 +945,11 @@ export function useChatConversation(
           // send retries the create.
           return undefined;
         } finally {
-          if (inflightRef.current?.promise === promise) inflightRef.current = null;
+          if (inflightRef.current === entry) inflightRef.current = null;
         }
       })();
-      inflightRef.current = { key, promise };
-      return promise;
+      inflightRef.current = entry;
+      return entry.promise;
     },
     [],
   );
