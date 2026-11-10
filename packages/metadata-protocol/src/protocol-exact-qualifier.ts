@@ -33,6 +33,8 @@
 import { ITEM_KEY_DISCRIMINATORS, appOf, isPairOf, pairOf, pairsOf, type InstalledManifestLookup } from '@objectstack/metadata-core';
 import {
     PackageScopedNameRefusedError,
+    isPackageScopedType,
+    isPlatformRequestedBareName,
     packageScopedRefusalMessage,
     type PackageScopedHolder,
     type PackageScopedRefusalReason,
@@ -175,7 +177,19 @@ export function exactQualifierItem(
     const registry = exactQualifierRegistry(host);
     if (!registry) return item;
     const served = (item as { _packageId?: unknown })._packageId;
-    if (typeof served !== 'string' || served === address.packageId || address.registryHolders.includes(served)) return item;
+    if (typeof served !== 'string') {
+        // [epic ruling 6761802819 on #31699] A package-less row of a name two
+        // or more packages hold is no package's own (D4: it is the
+        // customization of one holder and cannot say which), so no holder's
+        // exact address serves it. The `_env` address never reaches here.
+        const owners = packageLessRowOwners(registry, request.type, request.name);
+        if (owners.length > 1) {
+            throw refusal(request.type, request.name, address.packageId, 'ambiguous-in-closure',
+                owners.map((owner) => ({ kind: 'package' as const, packageId: owner })));
+        }
+        return item;
+    }
+    if (served === address.packageId || address.registryHolders.includes(served)) return item;
     // A provenance sentinel or a package this registry does not hold is not another package's item.
     if (typeof registry.getPackage === 'function' && registry.getPackage(served) === undefined) return item;
     if (ITEM_KEY_DISCRIMINATORS[request.type] !== undefined) {
@@ -201,6 +215,39 @@ export function exactQualifierItem(
     return holder === undefined ? undefined : registry.getPackageScopedItem(request.type, request.name, holder, member);
 }
 
+
+/**
+ * [ADR-0150 D4, epic ruling 6761802819 on #31699] The packages a package-less
+ * row of `(type, name)` could be the customization of: every package holding
+ * the name, for a type whose readers consult `(package, name)`. Two or more
+ * mean the row cannot say whose it is: each holder's exact read refuses it
+ * naming every one, the list scoped to a holder leaves it out (so a send made
+ * from a holder reads that holder's own), and `os migrate stored-references`
+ * lists it, until it is saved under one package. With one holder it is that
+ * holder's customization, as before. A name the platform requests by
+ * spelling (the `auth.*` mails) resolves environment-wide, so its
+ * package-less row stays the environment's: an empty answer. ⛔ Never a pick
+ * between two.
+ */
+export function packageLessRowOwners(
+    registry: { readsByPackage?(type: string): boolean; packageScopedHoldersOf(type: string, name: string): readonly string[] | undefined },
+    type: string,
+    name: string,
+): string[] {
+    if (registry.readsByPackage?.(type) !== true || !isPackageScopedType(type)) return [];
+    if (isPlatformRequestedBareName(type, name)) return [];
+    return [...(registry.packageScopedHoldersOf(type, name) ?? [])];
+}
+
+/**
+ * Whether a list scoped to a package leaves out the package-less stand-in
+ * row `name` ({@link packageLessRowOwners}: two or more holders could own it).
+ */
+export function packageLessRowWithheld(host: Pick<ProtocolHost, 'engine'>, type: string, name: unknown): boolean {
+    if (typeof name !== 'string' || name === '') return false;
+    const registry = exactQualifierRegistry(host);
+    return registry !== undefined && packageLessRowOwners(registry, type, name).length > 1;
+}
 
 /** The base a member row's body declares it customizes (`overrides.package`, ADR-0146 D2), or `undefined`. */
 function declaredOverrideBase(item: unknown): string | undefined {

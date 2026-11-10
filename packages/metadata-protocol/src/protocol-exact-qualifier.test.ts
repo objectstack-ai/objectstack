@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { exactQualifierItem } from './protocol-exact-qualifier.js';
+import { exactQualifierItem, packageLessRowOwners } from './protocol-exact-qualifier.js';
 
 const BASE = 'com.acme.alpha';
 const PAIR = `${BASE}.custom`;
@@ -54,5 +54,28 @@ describe('the exact qualifier keeps a pair\'s item on its base\'s address for a 
         const own = { name: 'welcome', locale: 'fr-FR', _packageId: BASE };
         expect(exactQualifierItem(host({ email_template: own }), { type: 'email_template', name: 'welcome' }, ADDRESS,
             { name: 'welcome', locale: 'fr-FR', _packageId: OTHER }, 'fr-FR')).toBe(own);
+    });
+});
+
+/**
+ * [#31699, epic ruling 6761802819] The holders a package-less row could be the
+ * customization of: every package holding the name, for a type read by
+ * package. A name the platform requests by spelling resolves
+ * environment-wide, so its package-less row stays the environment's.
+ */
+describe('[#31699] packageLessRowOwners', () => {
+    const registry = (holders: string[], readsByPackage = true) => ({
+        readsByPackage: () => readsByPackage,
+        packageScopedHoldersOf: () => holders,
+    });
+
+    it('names every holder of the name, for a type read by package', () => {
+        expect(packageLessRowOwners(registry(['a.x', 'b.y']), 'email_template', 'welcome')).toEqual(['a.x', 'b.y']);
+        expect(packageLessRowOwners(registry(['a.x']), 'agent', 'helper')).toEqual(['a.x']);
+    });
+
+    it('CONTROL — a platform-requested name (an auth mail) and a type not read by package name none', () => {
+        expect(packageLessRowOwners(registry(['a.x', 'b.y']), 'email_template', 'auth.password_reset')).toEqual([]);
+        expect(packageLessRowOwners(registry(['a.x', 'b.y'], false), 'email_template', 'welcome')).toEqual([]);
     });
 });

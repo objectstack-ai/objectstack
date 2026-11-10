@@ -375,3 +375,83 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
     expect(await listed(Y)).not.toContain('pair fr-FR');
   });
 });
+
+/**
+ * [#31699, epic ruling 6761802819] A package-less row of a name two or more
+ * packages hold is the customization of one holder and cannot say which
+ * (ADR-0150 D4). Once a second namespace may install a name one package held,
+ * serving it on both holders' exact addresses would give one package's
+ * customization to the other: each exact read refuses it naming every holder,
+ * and the list scoped to a holder (which the send reads) leaves it out.
+ */
+describe('[#31699] a package-less row of a name two packages hold is no holder\'s own', () => {
+  const tpl = (locale: string, packageId: string) => registry.registerItem('email_template', {
+    name: 'welcome', label: `${packageId.split('.').pop()} ${locale}`, locale,
+    subject: `${packageId.split('.').pop()} ${locale}`, bodyHtml: '<p>x</p>',
+  }, 'name' as never, packageId);
+  const envRow = (locale: string) => rows.push({
+    id: `env_${locale}`, type: 'email_template', name: 'welcome', state: 'active', package_id: null, bundle_member: locale,
+    metadata: JSON.stringify({ name: 'welcome', label: `env ${locale}`, locale, subject: `env ${locale}`, bodyHtml: '<p>e</p>' }),
+  });
+  const read = (packageId: string, member: string) => protocol.getMetaItem({
+    type: 'email_template', name: 'welcome', packageId, member,
+  } as never);
+  const listed = async (packageId: string) => ((await protocol.getMetaItems({ type: 'email_template', packageId } as never)) as { items?: Array<{ label?: string }> })
+    .items?.map((i) => i.label).sort();
+  const forSend = async (packageId: string) => ((await protocol.getMetaItemsForExecution({ type: 'email_template', packageId } as never)) as { items?: Array<{ label?: string }> })
+    .items?.map((i) => i.label).sort();
+
+  beforeEach(() => {
+    registry.installPackage(manifest(A), 'code');
+    registry.installPackage(manifest(B), 'code');
+  });
+
+  it('two holders: both exact reads of the package-less member refuse 409 naming both; each list, and the send\'s read, serves the holder\'s own', async () => {
+    tpl('en-US', A);
+    tpl('en-US', B);
+    envRow('en-US');
+    envRow('fr-FR');
+    for (const at of [A, B]) {
+      const err = await refusalOf(() => read(at, 'fr-FR'));
+      expect([err.code, err.status, err.refusal.reason], at).toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-closure']);
+      expect(err.refusal.candidates, at).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
+    }
+    expect(await listed(A)).toEqual(['alpha en-US']);
+    expect(await listed(B)).toEqual(['beta en-US']);
+    expect(await forSend(A)).toEqual(['alpha en-US']);
+    expect(await forSend(B)).toEqual(['beta en-US']);
+  });
+
+  it('CONTROL — one holder: the package-less row is that holder\'s customization, on its exact address and in its list', async () => {
+    tpl('en-US', A);
+    envRow('en-US');
+    envRow('fr-FR');
+    expect(labelOf(await read(A, 'fr-FR'))).toBe('env fr-FR');
+    expect(await listed(A)).toEqual(['env en-US']);
+    expect(await forSend(A)).toEqual(['env en-US']);
+  });
+
+  for (const type of ['agent', 'skill', 'app', 'dashboard']) {
+    it(`${type}: the environment's item of a name two packages hold is refused on both exact addresses naming both; with one holder it is served`, async () => {
+      envItem(type, 'dup');
+      ship(type, 'dup', A);
+      expect(labelOf(await protocol.getMetaItem({ type, name: 'dup', packageId: A } as never)), 'one holder').toBe(`env ${type}`);
+      ship(type, 'dup', B);
+      for (const at of [A, B]) {
+        const err = await refusalOf(() => protocol.getMetaItem({ type, name: 'dup', packageId: at } as never));
+        expect([err.status, err.refusal.reason], at).toEqual([409, 'ambiguous-in-closure']);
+        expect(err.refusal.candidates, at).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
+      }
+    });
+  }
+
+  it('CONTROL — the `_env` address is untouched: it serves the environment\'s own item, and a package-less row of a held name is not that (D4), as on main', async () => {
+    envItem('agent', 'local');
+    expect(() => protocol.admitEnvironmentQualifier({ type: 'agent', name: 'local' })).not.toThrow();
+    expect(labelOf(await protocol.getMetaItem({ type: 'agent', name: 'local' } as never))).toBe('env agent');
+    envItem('agent', 'dup');
+    ship('agent', 'dup', A);
+    ship('agent', 'dup', B);
+    expect(() => protocol.admitEnvironmentQualifier({ type: 'agent', name: 'dup' })).toThrow(PackageScopedNameRefusedError);
+  });
+});

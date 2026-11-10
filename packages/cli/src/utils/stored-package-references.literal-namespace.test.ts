@@ -142,3 +142,76 @@ describe('[#31699 F2] the upgrade report lists a pair member row two holders cou
     expect((await collectStoredPackageReferences(engine, carrying())).pairMembers).toEqual([]);
   });
 });
+
+/**
+ * [#31699, epic ruling 6761802819] A package-less `sys_metadata` row of a name
+ * two or more packages hold is the customization of one of them and cannot say
+ * which: each holder's exact read refuses it, and the report lists it so the
+ * operator saves it under the one package it customizes.
+ */
+describe('[#31699] the upgrade report lists a package-less row two holders could own', () => {
+  const X = 'com.acme.alphax';
+  const Y = 'com.acme.betay';
+  let rows: Array<Record<string, unknown>>;
+  const engine = {
+    async find(object: string, options?: { where?: Record<string, unknown> }) {
+      if (object !== 'sys_metadata' || options?.where?.$and !== undefined) return [];
+      return rows.map((r) => ({ ...r }));
+    },
+    async update() { throw new Error('the report writes nothing'); },
+  };
+  const carrying = () => new Proxy(registry, {
+    get: (target, key, receiver) => (key === 'getObject'
+      ? (name: string) => (name === 'sys_metadata' ? { name } : undefined)
+      : Reflect.get(target, key, receiver)),
+  }) as unknown as StoredReferenceRegistry;
+  const tpl = (packageId: string) => registry.registerItem('email_template', {
+    name: 'welcome', label: 'Welcome', locale: 'en-US', subject: 'hi', bodyHtml: '<p>x</p>',
+  }, 'name' as never, packageId);
+  const agent = (packageId: string) => registry.registerItem('agent', { name: 'helper', label: 'Helper', role: 'r', instructions: 'i' }, 'name' as never, packageId);
+  const envRow = (id: string, type: string, name: string, member?: string) => rows.push({
+    id, type, name, state: 'active', package_id: null, ...(member ? { bundle_member: member } : {}),
+    metadata: JSON.stringify({ name }),
+  });
+
+  beforeEach(() => {
+    rows = [];
+    registry.installPackage(manifest(X, 'alphax'), 'code');
+    registry.installPackage(manifest(Y, 'betay'), 'code');
+  });
+
+  it('THE PIN: two holders, so the package-less row is listed naming both by their addresses, for a bundled type and any other', async () => {
+    tpl(X);
+    tpl(Y);
+    agent(X);
+    agent(Y);
+    envRow('row_a', 'agent', 'helper');
+    envRow('row_fr', 'email_template', 'welcome', 'fr-FR');
+    const answer = await collectStoredPackageReferences(engine, carrying());
+    expect(answer.packageLessRows).toEqual([
+      {
+        table: 'sys_metadata', id: 'row_a', type: 'agent', name: 'helper', member: null,
+        candidates: [
+          { holder: 'package', packageId: X, address: 'alphax/helper' },
+          { holder: 'package', packageId: Y, address: 'betay/helper' },
+        ],
+      },
+      {
+        table: 'sys_metadata', id: 'row_fr', type: 'email_template', name: 'welcome', member: 'fr-FR',
+        candidates: [
+          { holder: 'package', packageId: X, address: 'alphax/welcome' },
+          { holder: 'package', packageId: Y, address: 'betay/welcome' },
+        ],
+      },
+    ]);
+  });
+
+  it('CONTROL: one holder, or a row bound to a package, is not listed', async () => {
+    tpl(X);
+    envRow('row_fr', 'email_template', 'welcome', 'fr-FR');
+    expect((await collectStoredPackageReferences(engine, carrying())).packageLessRows).toEqual([]);
+    tpl(Y);
+    rows = [{ id: 'row_x', type: 'email_template', name: 'welcome', state: 'active', package_id: X, bundle_member: 'fr-FR', metadata: '{}' }];
+    expect((await collectStoredPackageReferences(engine, carrying())).packageLessRows).toEqual([]);
+  });
+});

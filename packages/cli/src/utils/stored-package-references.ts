@@ -52,6 +52,15 @@
  * already names the pair, and the fix is the row declaring its base
  * (`overrides.package`), after which only that base serves it.
  *
+ * Beside them it lists each package-less `sys_metadata` row of such a type
+ * (any type whose readers consult `(package, name)`, not only a bundled one)
+ * whose name two or more packages hold: the row is the customization of one
+ * holder and cannot say which (ADR-0150 D4), so each holder's exact read
+ * refuses it and the list scoped to a holder leaves it out
+ * (`packageLessRowOwners`, `@objectstack/metadata-protocol`; epic ruling
+ * 6761802819 on #31699). The fix is saving the row under the one package it
+ * customizes.
+ *
  * ## A database this release has not booted yet
  *
  * The release that carries D8 adds each package column at its first boot and
@@ -82,11 +91,11 @@
  */
 
 import type { PackageScopedHolder, PackageScopedResolution } from '@objectstack/core';
-import { resolvePackageScopedName, type PackageScopedRegistry } from '@objectstack/objectql';
+import { PACKAGE_SCOPED_READ_TYPES, resolvePackageScopedName, type PackageScopedRegistry } from '@objectstack/objectql';
 import { keysetWalk } from '@objectstack/types';
 import { isCustomizationPackage, validateNamespaceNotAddressLiteral } from '@objectstack/spec/kernel';
 import { ITEM_KEY_DISCRIMINATORS, installedManifestsOf } from '@objectstack/metadata-core';
-import { pairMemberOwners } from '@objectstack/metadata-protocol';
+import { packageLessRowOwners, pairMemberOwners } from '@objectstack/metadata-protocol';
 
 /** The D3 types a stored reference names. */
 type ReferencedType = 'permission' | 'sharing_rule' | 'queue' | 'assignment_rule' | 'flow' | 'connector' | 'email_template';
@@ -203,6 +212,18 @@ export interface PairMemberFinding {
   readonly candidates: readonly ReferenceCandidate[];
 }
 
+/** One package-less row two or more holders of the name could own (module doc; epic ruling 6761802819 on #31699). */
+export interface PackageLessRowFinding {
+  readonly table: 'sys_metadata';
+  readonly id: string;
+  readonly type: string;
+  readonly name: string;
+  /** The bundle member the row stores (an email template's locale), else `null`. */
+  readonly member: string | null;
+  /** Every holder the row could be the customization of. */
+  readonly candidates: readonly ReferenceCandidate[];
+}
+
 /** The report (module doc). */
 export interface StoredPackageReferenceReport {
   readonly stored: readonly StoredReferenceFinding[];
@@ -210,6 +231,7 @@ export interface StoredPackageReferenceReport {
   readonly sealedClashes: readonly SealedClashFinding[];
   readonly literalNamespaces: readonly LiteralNamespaceFinding[];
   readonly pairMembers: readonly PairMemberFinding[];
+  readonly packageLessRows: readonly PackageLessRowFinding[];
   /** D8 tables this composition does not carry, so not read. */
   readonly tablesNotCarried: readonly string[];
   /** D8 tables the boot measured absent from the database: nothing stored, read as no rows. */
@@ -423,6 +445,37 @@ async function ambiguousPairMemberRows(engine: StoredReferenceEngine, registry: 
   return findings.sort((a, b) => byText(a.id, b.id));
 }
 
+/** The package-less rows two or more holders of the name could own (module doc). Reads only; ordered by id. */
+async function ambiguousPackageLessRows(engine: StoredReferenceEngine, registry: StoredReferenceRegistry): Promise<PackageLessRowFinding[]> {
+  const types: string[] = PACKAGE_SCOPED_READ_TYPES.filter((type) => registry.readsByPackage?.(type) === true);
+  if (types.length === 0) return [];
+  const findings: PackageLessRowFinding[] = [];
+  const walk = keysetWalk<Row>(
+    async (query) => {
+      const page = await engine.find('sys_metadata', {
+        ...query, fields: ['id', 'type', 'name', 'package_id', 'bundle_member', 'state'], context: SYSTEM_CTX,
+      });
+      return Array.isArray(page) ? (page as Row[]) : [];
+    },
+    { where: { type: { $in: types }, state: 'active' }, pageSize: PAGE_SIZE },
+  );
+  for await (const page of walk.pages()) {
+    for (const row of page) {
+      const { id, type, name } = row;
+      if (id === null || id === undefined || typeof type !== 'string' || !types.includes(type) || typeof name !== 'string') continue;
+      if (row.state !== 'active' || (row.package_id !== null && row.package_id !== undefined && row.package_id !== '')) continue;
+      const owners = packageLessRowOwners(registry as never, type, name);
+      if (owners.length < 2) continue;
+      findings.push({
+        table: 'sys_metadata', id: String(id), type, name,
+        member: typeof row.bundle_member === 'string' && row.bundle_member !== '' ? row.bundle_member : null,
+        candidates: owners.map((packageId) => candidateOf(registry, { kind: 'package', packageId }, name)),
+      });
+    }
+  }
+  return findings.sort((a, b) => byText(a.id, b.id));
+}
+
 /**
  * The upgrade report (module doc): every refused stored row, every refused
  * picklist reference and every sealed clash, in a stable order, so two runs
@@ -498,11 +551,12 @@ export async function collectStoredPackageReferences(
   literalNamespaces.sort((a, b) => byText(a.packageId, b.packageId));
 
   // [#31699 F2] The pair member rows two holders could own.
-  const pairMembers = carries(registry, 'sys_metadata') && !options?.absent?.('sys_metadata')
-    ? await ambiguousPairMemberRows(engine, registry)
-    : [];
+  const readsMetadata = carries(registry, 'sys_metadata') && !options?.absent?.('sys_metadata');
+  const pairMembers = readsMetadata ? await ambiguousPairMemberRows(engine, registry) : [];
+  // [epic ruling 6761802819 on #31699] …and the package-less rows two holders could own.
+  const packageLessRows = readsMetadata ? await ambiguousPackageLessRows(engine, registry) : [];
 
-  return { stored, picklists, sealedClashes, literalNamespaces, pairMembers, tablesNotCarried, tablesAbsent };
+  return { stored, picklists, sealedClashes, literalNamespaces, pairMembers, packageLessRows, tablesNotCarried, tablesAbsent };
 }
 
 /** What the operator asks the bind to write. */
