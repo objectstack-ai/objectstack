@@ -2500,8 +2500,8 @@ const en = {
         action: 'Invite',
       },
       connectAssistant: {
-        title: 'Connect an AI assistant',
-        todo: 'Work in this system from Claude, Doubao and similar assistants, as yourself.',
+        title: 'Connect an external AI assistant',
+        todo: 'Work in this system as yourself from Claude, Doubao and similar assistants, over MCP. The built-in AI is set up separately, in Setup → AI & Embedder.',
         done: 'An AI assistant or API key of yours is connected.',
         action: 'Connect',
       },
@@ -3460,6 +3460,14 @@ const en = {
       invitationGoneDescription: 'It may have expired, been used, or been withdrawn. Ask the person who invited you to send a new invitation.',
       invitationGoneSignIn: 'Go to sign in',
       invitationLinkHint: 'Have an invitation? Open the link in the invitation email to accept it.',
+      // #32021 — the card on a deployment with no account yet (the server
+      // answered `hasOwner: false`): set up, not signed in to.
+      firstOwner: {
+        title: 'Set up this deployment',
+        description: 'Nobody has an account here yet. The first account you create owns this deployment.',
+        createButton: 'Create the owner account',
+        signInDivider: 'or sign in to an existing account',
+      },
       showPasswordText: 'Show password',
       hidePasswordText: 'Hide password',
       footer: {
@@ -3472,6 +3480,8 @@ const en = {
       },
       errors: {
         invalidCredentials: 'Invalid email or password. After several failed attempts, sign-in is paused for a while. Forgot your password? Reset it to sign in right away.',
+        // The same refusal where no mail leaves the deployment (`features.emailDelivery: false`).
+        invalidCredentialsNoMail: 'Invalid email or password. After several failed attempts, sign-in is paused for a while. Forgot your password? Ask your administrator to reset it.',
         emailNotVerified: 'Please verify your email address before signing in.',
         oauthCallbackFailed: 'Single sign-on could not be completed — the sign-in link expired or was already used. Please try again.',
         // objectstack#29105 — refusals of the two-factor sign-in step, by the
@@ -3499,6 +3509,14 @@ const en = {
       confirmPasswordPlaceholder: 'Confirm your password',
       passwordMismatchError: 'Passwords do not match',
       passwordTooShortError: 'Password must be at least 8 characters',
+      // #32021 — each field's own line under it; the form is `noValidate`.
+      nameRequiredError: 'Enter your name',
+      emailRequiredError: 'Enter your email address',
+      emailInvalidError: 'Enter an email address such as name@example.com',
+      firstOwner: {
+        title: 'Create the owner account',
+        description: 'Nobody has an account here yet. The account you create now owns this deployment; you can invite colleagues after.',
+      },
       submitButton: 'Create Account',
       submittingButton: 'Creating account…',
       hasAccountText: 'Already have an account?',

@@ -2308,8 +2308,8 @@ const ja = {
         action: "招待",
       },
       connectAssistant: {
-        title: 'AI アシスタントを接続',
-        todo: 'Claude や Doubao などのアシスタントから、あなた自身としてこのシステムを使えます。',
+        title: '外部の AI アシスタントを接続',
+        todo: 'MCP 経由で、Claude や Doubao などのアシスタントから、あなた自身としてこのシステムを使えます。内蔵 AI は別途 Setup → AI と Embedder で設定します。',
         done: 'あなたの AI アシスタントまたは API キーが接続されています。',
         action: '接続',
       },
@@ -2849,6 +2849,7 @@ const ja = {
         twoFactorExpired: "このサインインは期限切れです。パスワードでもう一度サインインしてください。",
         twoFactorLocked: "失敗した試行が多すぎるため、アカウントが一時的にロックされています。しばらくしてからもう一度お試しください。",
         invalidCredentials: "メールアドレスまたはパスワードが正しくありません。失敗が続くと、サインインはしばらく一時停止されます。パスワードをお忘れの場合は、リセットするとすぐにサインインできます。",
+        invalidCredentialsNoMail: 'メールアドレスまたはパスワードが正しくありません。失敗が続くと、サインインはしばらく一時停止されます。パスワードをお忘れの場合は、管理者にリセットを依頼してください。',
         emailNotVerified: "サインインする前にメールアドレスを確認してください。",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
@@ -2895,6 +2896,12 @@ const ja = {
       invitationGoneDescription: "招待の期限切れ、使用済み、または取り消しの可能性があります。招待した方に新しい招待の送信を依頼してください。",
       invitationGoneSignIn: "サインインへ",
       invitationLinkHint: "招待を受け取りましたか？招待メールのリンクを開いて承諾してください。",
+      firstOwner: {
+        title: 'このデプロイをセットアップ',
+        description: 'ここにはまだアカウントがありません。最初に作成したアカウントがこのデプロイのオーナーになります。',
+        createButton: 'オーナーアカウントを作成',
+        signInDivider: 'または既存のアカウントでサインイン',
+      },
       showPasswordText: "パスワードを表示",
       hidePasswordText: "パスワードを非表示",
       footer: {
@@ -2918,6 +2925,13 @@ const ja = {
       confirmPasswordPlaceholder: "パスワードを再入力",
       passwordMismatchError: "パスワードが一致しません",
       passwordTooShortError: "パスワードは8文字以上必要です",
+      nameRequiredError: '名前を入力してください',
+      emailRequiredError: 'メールアドレスを入力してください',
+      emailInvalidError: 'name@example.com のようなメールアドレスを入力してください',
+      firstOwner: {
+        title: 'オーナーアカウントを作成',
+        description: 'ここにはまだアカウントがありません。今作成するアカウントがこのデプロイのオーナーになります。同僚は後から招待できます。',
+      },
       submitButton: "アカウント作成",
       submittingButton: "アカウント作成中…",
       hasAccountText: "すでにアカウントをお持ちですか？",

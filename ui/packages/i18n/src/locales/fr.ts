@@ -2364,8 +2364,8 @@ const fr = {
         action: "Inviter",
       },
       connectAssistant: {
-        title: 'Connecter un assistant IA',
-        todo: "Travaillez dans ce système depuis Claude, Doubao et d'autres assistants, en votre nom.",
+        title: 'Connecter un assistant IA externe',
+        todo: 'Travaillez dans ce système en votre nom depuis Claude, Doubao et d’autres assistants, via MCP. L’IA intégrée se configure à part, dans Setup → IA et Embedder.',
         done: "Un assistant IA ou une clé d'API à vous est connecté.",
         action: 'Connecter',
       },
@@ -2909,6 +2909,7 @@ const fr = {
         twoFactorExpired: "Cette connexion a expiré. Reconnectez-vous avec votre mot de passe.",
         twoFactorLocked: "Trop de tentatives échouées. Votre compte est temporairement verrouillé. Réessayez plus tard.",
         invalidCredentials: "E-mail ou mot de passe invalide. Après plusieurs échecs, la connexion est suspendue pendant un moment. Mot de passe oublié ? Réinitialisez-le pour vous connecter immédiatement.",
+        invalidCredentialsNoMail: 'E-mail ou mot de passe invalide. Après plusieurs échecs, la connexion est suspendue pendant un moment. Mot de passe oublié ? Demandez à votre administrateur de le réinitialiser.',
         emailNotVerified: "Veuillez vérifier votre adresse e-mail avant de vous connecter.",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
@@ -2955,6 +2956,12 @@ const fr = {
       invitationGoneDescription: "Il a peut-être expiré, déjà été utilisé ou été retiré. Demandez à la personne qui vous a invité de vous envoyer une nouvelle invitation.",
       invitationGoneSignIn: "Aller à la connexion",
       invitationLinkHint: "Vous avez reçu une invitation ? Ouvrez le lien de l'e-mail d'invitation pour l'accepter.",
+      firstOwner: {
+        title: 'Configurer ce déploiement',
+        description: 'Aucun compte n’existe encore ici. Le premier compte que vous créez devient propriétaire de ce déploiement.',
+        createButton: 'Créer le compte propriétaire',
+        signInDivider: 'ou connectez-vous à un compte existant',
+      },
       showPasswordText: "Afficher le mot de passe",
       hidePasswordText: "Masquer le mot de passe",
       footer: {
@@ -2978,6 +2985,13 @@ const fr = {
       confirmPasswordPlaceholder: "Confirmez votre mot de passe",
       passwordMismatchError: "Les mots de passe ne correspondent pas",
       passwordTooShortError: "Le mot de passe doit contenir au moins 8 caractères",
+      nameRequiredError: 'Saisissez votre nom',
+      emailRequiredError: 'Saisissez votre adresse e-mail',
+      emailInvalidError: 'Saisissez une adresse e-mail comme nom@exemple.com',
+      firstOwner: {
+        title: 'Créer le compte propriétaire',
+        description: 'Aucun compte n’existe encore ici. Le compte que vous créez maintenant devient propriétaire de ce déploiement ; vous pourrez inviter vos collègues ensuite.',
+      },
       submitButton: "Créer un compte",
       submittingButton: "Création du compte…",
       hasAccountText: "Vous avez déjà un compte ?",

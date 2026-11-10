@@ -38,6 +38,17 @@
  * For an invitation the server no longer knows, the card holds app-shell's
  * `InvitationGoneNotice` alone: no prompt, no form (#27509).
  *
+ * A deployment with no account yet — `GET /auth/bootstrap-status` answered
+ * `hasOwner: false`, the probe whose `status` also switches the footer between
+ * "Sign up" and "Have an invitation?" — is set up, not signed in to: the card
+ * says so and leads with Create the owner account (the sign-up form), with the
+ * sign-in form below it. Only on the server's own answer: a probe that failed
+ * keeps the returning-user copy.
+ *
+ * A wrong password names the administrator instead of promising a reset when
+ * the server reports that no mail leaves this deployment
+ * (`features.emailDelivery: false`, see app-shell's `signInRefusalMessages`).
+ *
  * Layout (objectui#12600): one 400 px column — brand mark, the card, a footer.
  * The card carries this page's own two-line header, so `<LoginForm>` renders
  * with `hideHeader`. On a dev instance the card's last row offers a one-click
@@ -63,8 +74,8 @@ import {
   signInRefusalMessages,
   decideSignUpOffer,
   isInvitationRedirect,
-  needsBootstrapProbe,
-  useBootstrapStatus,
+  needsOwnerProbe,
+  useBootstrapProbe,
   InvitationGoneNotice,
   InvitationLinkHint,
   InvitationSignUpPrompt,
@@ -173,13 +184,16 @@ export function LoginPage() {
     if (!isLoading) setHasBootstrapped(true);
   }, [isLoading]);
 
-  // objectui#11691 — whether this visitor is offered "Sign up". The bootstrap
-  // probe runs only when the posture is closed to strangers and the visitor
-  // did not come from an invitation; see app-shell's `decideSignUpOffer`.
+  // objectui#11691 — whether this visitor is offered "Sign up"; see app-shell's
+  // `decideSignUpOffer`, which reads the bootstrap probe's `status` only for a
+  // posture closed to strangers. The probe runs for every posture that offers
+  // a form to a visitor not invited (`needsOwnerProbe`): its explicit
+  // `hasOwner: false` is what turns this page into the first-owner lead.
   const invitationRedirect = isInvitationRedirect(redirect);
-  const bootstrap = useBootstrapStatus(
-    hasBootstrapped && signInNeeded && needsBootstrapProbe(authConfig, invitationRedirect),
+  const ownerProbe = useBootstrapProbe(
+    hasBootstrapped && signInNeeded && needsOwnerProbe(authConfig, invitationRedirect),
   );
+  const bootstrap = ownerProbe.status;
   const signUpOffer = decideSignUpOffer(authConfig, { invitationRedirect, bootstrap });
   // #26473 — who invited this visitor, and to what; `null` keeps the generic
   // copy. #27509 — `gone` when the server no longer knows the invitation.
@@ -359,6 +373,10 @@ export function LoginPage() {
     : '/register';
   const legalLinks = readLegalLinks(authConfig);
   const offerSignUp = configRead === 'known' && signUpOffer === 'form';
+  // Nobody has an account here yet, on the server's word, and the server takes
+  // this visitor's sign-up: lead with creating the owner account.
+  const firstOwner = offerSignUp && !invitationRedirect && ownerProbe.noOwner;
+  const emailDelivery = authConfig?.features?.emailDelivery;
 
   return (
     <AuthLayout formWidth="base">
@@ -404,14 +422,21 @@ export function LoginPage() {
                 <h1 className="text-xl font-semibold tracking-tight text-foreground">
                   {invitationCopy
                     ? invitationCopy.title
-                    : t('auth.login.welcomeTitle', { defaultValue: 'Welcome back' })}
+                    : firstOwner
+                      ? t('auth.login.firstOwner.title', { defaultValue: 'Set up this deployment' })
+                      : t('auth.login.welcomeTitle', { defaultValue: 'Welcome back' })}
                 </h1>
                 <p className="mt-1 text-[13px] text-muted-foreground">
                   {invitationCopy
                     ? invitationCopy.description
-                    : t('auth.login.welcomeDescription', {
-                        defaultValue: 'Sign in to continue your work',
-                      })}
+                    : firstOwner
+                      ? t('auth.login.firstOwner.description', {
+                          defaultValue:
+                            'Nobody has an account here yet. The first account you create owns this deployment.',
+                        })
+                      : t('auth.login.welcomeDescription', {
+                          defaultValue: 'Sign in to continue your work',
+                        })}
                 </p>
               </div>
               {invitationRedirect && offerSignUp ? (
@@ -419,17 +444,24 @@ export function LoginPage() {
                   <InvitationSignUpPrompt registerUrl={registerUrl} />
                 </div>
               ) : null}
+              {firstOwner ? (
+                <div className="mb-5">
+                  <FirstOwnerPrompt registerUrl={registerUrl} />
+                </div>
+              ) : null}
               <LoginFormCard
-                // An invitee's sign-up is the prompt above, not a second link.
-                registerUrl={offerSignUp && !invitationRedirect ? registerUrl : undefined}
+                // An invitee's sign-up is the prompt above, not a second link,
+                // and so is the first owner's.
+                registerUrl={offerSignUp && !invitationRedirect && !firstOwner ? registerUrl : undefined}
                 redirect={redirect}
+                emailDelivery={emailDelivery}
               />
               <InvitationLinkHint offer={signUpOffer} />
               {/* The row signs in with email and password: with that sign-in
                   off (the same answer `LoginForm` reads) the server refuses
                   it, so the row is not drawn. */}
               {devSeedAdmin && authConfig?.emailPassword?.enabled !== false ? (
-                <DevAdminRow seed={devSeedAdmin} />
+                <DevAdminRow seed={devSeedAdmin} emailDelivery={emailDelivery} />
               ) : null}
             </>
           )}
@@ -466,7 +498,7 @@ const WrenchIcon = () => (
  * a hidden element. Only the email is shown, as the chip's tooltip. A seed
  * reported without a password gets the row with the email and no chip.
  */
-function DevAdminRow({ seed }: { seed: DevSeedAdmin }) {
+function DevAdminRow({ seed, emailDelivery }: { seed: DevSeedAdmin; emailDelivery?: boolean }) {
   const { t } = useObjectTranslation();
   const { signIn } = useAuth();
   const [pending, setPending] = useState(false);
@@ -488,7 +520,7 @@ function DevAdminRow({ seed }: { seed: DevSeedAdmin }) {
     } catch (err) {
       const authError = err instanceof Error ? err : new Error(String(err));
       const code = (authError as Error & { code?: string }).code;
-      setError((code && signInRefusalMessages(t)[code]) || authError.message);
+      setError((code && signInRefusalMessages(t, { emailDelivery })[code]) || authError.message);
       setPending(false);
     }
   };
@@ -563,12 +595,38 @@ export function ServerUnreachable({ retrying, onRetry }: { retrying: boolean; on
   );
 }
 
+/**
+ * The first-owner lead: on a deployment with no account yet, creating the
+ * owner account is the primary action, with the sign-in form below it — the
+ * layout `InvitationSignUpPrompt` gives an invitee, with the form's own
+ * primary button style because nothing else on the card is the way in.
+ */
+function FirstOwnerPrompt({ registerUrl }: { registerUrl: string }) {
+  const { t } = useObjectTranslation();
+  return (
+    <div data-testid="first-owner-sign-up" className="flex flex-col gap-4">
+      <Link to={registerUrl} className={AUTH_PRIMARY_BUTTON_CLASS}>
+        {t('auth.login.firstOwner.createButton', { defaultValue: 'Create the owner account' })}
+      </Link>
+      <div className="flex items-center gap-3 text-xs text-muted-foreground">
+        <span aria-hidden="true" className="h-px flex-1 bg-border" />
+        <span>
+          {t('auth.login.firstOwner.signInDivider', { defaultValue: 'or sign in to an existing account' })}
+        </span>
+        <span aria-hidden="true" className="h-px flex-1 bg-border" />
+      </div>
+    </div>
+  );
+}
+
 function LoginFormCard({
   registerUrl,
   redirect,
+  emailDelivery,
 }: {
   registerUrl?: string;
   redirect: string | null;
+  emailDelivery?: boolean;
 }) {
   const { t } = useObjectTranslation();
   const navigate = useNavigate();
@@ -612,7 +670,7 @@ function LoginFormCard({
       linkComponent={RouterLink}
       // Server refusal `code` → localized end-user text: the one map both
       // login pages pass, owned by `@object-ui/app-shell` (objectui#11058).
-      errorMessages={signInRefusalMessages(t)}
+      errorMessages={signInRefusalMessages(t, { emailDelivery })}
       labels={{
         emailLabel: t('auth.login.emailLabel', { defaultValue: 'Email' }),
         emailPlaceholder: t('auth.login.emailPlaceholder', { defaultValue: 'name@example.com' }),

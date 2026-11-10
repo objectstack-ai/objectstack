@@ -468,7 +468,7 @@ export const zhCN: PlatformTranslationData = {
     },
 
     ai: {
-      title: 'AI 与 Embedder',
+      title: 'AI 与向量化',
       description: '平台 AI 与知识库服务使用的 LLM 提供商、模型、凭据与向量化配置。',
       groups: {
         provider: { title: '提供商', description: '选择 LLM 后端。Memory 模式仅原样回显输入,仅用于测试,严禁用于生产。' },
@@ -484,7 +484,7 @@ export const zhCN: PlatformTranslationData = {
         titles: { title: '会话标题', description: '为新会话自动生成简短的摘要标题。' },
         defaults: { title: '生成默认值', description: '当 Agent 或聊天请求未指定时使用。' },
         observability: { title: '可观测性' },
-        embedder: { title: 'Embedder', description: '知识库和 RAG 使用的文本→向量提供商,与上方聊天提供商相互独立。' },
+        embedder: { title: '向量化', description: '知识库和 RAG 使用的文本→向量提供商,与上方聊天提供商相互独立。' },
       },
       keys: {
         provider: {
@@ -528,8 +528,8 @@ export const zhCN: PlatformTranslationData = {
         temperature: { label: '温度', help: '0 = 确定性,2 = 高度发散。' },
         max_tokens: { label: '最大输出 tokens', help: '单次响应生成的硬上限。' },
         request_timeout_ms: { label: '请求超时(毫秒)' },
-        trace_enabled: { label: '记录 Trace', help: '记录每次 AI 请求及其响应,出现问题时可以查看并回放对话。' },
-        log_prompts: { label: '记录完整 Prompt', help: '在 trace 行中包含完整 prompt 而非仅元数据。' },
+        trace_enabled: { label: '记录请求追踪', help: '记录每次 AI 请求及其响应,出现问题时可以查看并回放对话。' },
+        log_prompts: { label: '记录完整提示词', help: '在追踪记录中包含完整提示词,而非仅元数据。' },
         embedder_provider: {
           label: '提供商',
           options: {
@@ -545,7 +545,7 @@ export const zhCN: PlatformTranslationData = {
             custom: '自定义(OpenAI 兼容)',
           },
         },
-        embedder_api_key: { label: 'Embedder API Key', help: '作为 Authorization Bearer 发送。Ollama 任意非空值均可。' },
+        embedder_api_key: { label: '向量化 API Key', help: '作为 Authorization Bearer 发送。Ollama 任意非空值均可。' },
         embedder_model: { label: '模型', help: '示例 — OpenAI: text-embedding-3-small · 阿里通义: text-embedding-v3 · 智谱: embedding-3 · 硅基流动: BAAI/bge-m3 · Ollama: bge-m3' },
         embedder_base_url: { label: 'Base URL', help: '端点根路径(不含 /embeddings)。预设会自动填充,可覆盖为代理或自建网关。' },
         embedder_dimensions: { label: '维度', help: '覆盖输出维度(仅 Matryoshka 模型支持)。留空使用模型默认值。' },
@@ -553,11 +553,11 @@ export const zhCN: PlatformTranslationData = {
       },
       actions: {
         test: { label: '测试连接' },
-        test_embedder: { label: '测试 Embedder' },
+        test_embedder: { label: '测试向量化' },
         reset: { label: '重置为环境变量默认值' },
       },
       banners: {
-        log_prompts_warning: { title: 'Prompt 可能含有 PII', text: '可能泄露 PII,合规场景请关闭。' },
+        log_prompts_warning: { title: '提示词可能含有个人敏感信息', text: '可能泄露个人敏感信息,合规场景请关闭。' },
       },
     },
 
