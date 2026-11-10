@@ -63,6 +63,55 @@ describe('[#31697] the in-memory action store keeps one slot per (package, name)
     }
   });
 
+  describe('[contract review G1] an action is slotted by its identity, (package, object, name): two objects\' actions of one name never meet', () => {
+    const bound = (packageId: string, label: string, objectName: string) => ({ ...shipped(packageId, label), objectName });
+
+    it('two packages\' same-named actions bound to two different objects are both kept, each read by its package; the bare read is not refused and answers the one written last, as the bare-name map did', async () => {
+      const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+      manager.registerInMemory('action', 'digest', bound(ALPHA, 'alpha', 'alpha_item'));
+      manager.registerInMemory('action', 'digest', bound(BETA, 'beta', 'beta_item'));
+      expect(((await manager.list('action')) as any[]).map((item) => item.label)).toEqual(['alpha', 'beta']);
+      expect(await manager.listNames('action')).toEqual(['digest']);
+      expect(((await manager.get('action', 'digest', ALPHA)) as any)?.label).toBe('alpha');
+      expect(((await manager.get('action', 'digest', BETA)) as any)?.label).toBe('beta');
+      expect(((await manager.get('action', 'digest')) as any)?.label, 'not refused: two identities, one holder each').toBe('beta');
+      expect(((await manager.getDiagnosed('action', 'digest')).data as any)?.label).toBe('beta');
+      manager.registerInMemory('action', 'digest', bound(ALPHA, 'alpha again', 'alpha_item'));
+      expect(((await manager.get('action', 'digest')) as any)?.label, 'the one written last').toBe('alpha again');
+    });
+
+    it('two packages\' same-named actions bound to ONE object are the two-holder case: the bare read is refused naming both', async () => {
+      const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+      manager.registerInMemory('action', 'digest', bound(ALPHA, 'alpha', 'shared_item'));
+      manager.registerInMemory('action', 'digest', bound(BETA, 'beta', 'shared_item'));
+      const err = await manager.get('action', 'digest').then(() => undefined, (e: unknown) => e as PackageScopedNameRefusedError);
+      expect(err).toBeInstanceOf(PackageScopedNameRefusedError);
+      expect(err!.refusal.candidates).toEqual([
+        { kind: 'package', packageId: ALPHA },
+        { kind: 'package', packageId: BETA },
+      ]);
+      expect(((await manager.get('action', 'digest', BETA)) as any)?.label).toBe('beta');
+    });
+
+    it('one package binding one name to two objects keeps both (BASE: the later overwrote the earlier)', async () => {
+      const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+      manager.registerInMemory('action', 'digest', bound(ALPHA, 'on one', 'one_item'));
+      manager.registerInMemory('action', 'digest', bound(ALPHA, 'on two', 'two_item'));
+      expect(((await manager.list('action')) as any[]).map((item) => item.label)).toEqual(['on one', 'on two']);
+      expect(((await manager.get('action', 'digest', ALPHA)) as any)?.label).toBe('on two');
+      await manager.unregister('action', 'digest');
+      expect(await manager.exists('action', 'digest')).toBe(false);
+    });
+
+    it('a bound action beside a two-holder object-less name of the same name: the bare read is refused, since that identity is ambiguous', async () => {
+      const manager = twoHolders();
+      manager.registerInMemory('action', 'digest', bound('com.acme.gamma', 'gamma', 'gamma_item'));
+      const err = await manager.get('action', 'digest').then(() => undefined, (e: unknown) => e);
+      expect(err).toBeInstanceOf(PackageScopedNameRefusedError);
+      expect(((await manager.get('action', 'digest', 'com.acme.gamma')) as any)?.label).toBe('gamma');
+    });
+  });
+
   it('CONTROL — one package\'s action is answered to every read, the very object registered', async () => {
     const manager = new MetadataManager({ formats: ['json'], loaders: [] });
     const item = shipped(ALPHA, 'alpha');
