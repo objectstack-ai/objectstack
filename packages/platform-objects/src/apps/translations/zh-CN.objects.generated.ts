@@ -2106,6 +2106,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "允许即时开通账号",
         help: "在仅限邀请的受众策略下，为通过此提供方登录、但既无账号也无邀请的人创建账号。默认关闭：此类人员会被拒绝。其他策略照旧开通账号。请通过“编辑登录选项”修改。"
       },
+      skip_user_info: {
+        label: "仅从 ID 令牌读取声明",
+        help: "仅适用于 OIDC。从身份提供方已验证的 ID 令牌读取邮箱、姓名和组，不调用其 userinfo 端点。Microsoft Entra ID 需开启此项：它的 userinfo 响应不含组，也不含 preferred_username。默认关闭：配置了 userinfo 端点的提供方从该响应读取声明。请通过“编辑登录选项”修改。"
+      },
       user_id: {
         label: "注册人",
         help: "注册该提供方的用户"

@@ -2106,6 +2106,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         label: "Permitir provisionamento just-in-time",
         help: "Na política de público somente por convite, cria uma conta para quem faz login por este provedor sem conta nem convite. Desativado por padrão: essa pessoa é recusada. As demais políticas provisionam como antes. Altere em “Editar opções de login”."
       },
+      skip_user_info: {
+        label: "Ler declarações apenas do token de ID",
+        help: "Somente OIDC. Lê o e-mail, o nome e os grupos do token de ID verificado do provedor de identidade e não chama o endpoint userinfo dele. Ative para o Microsoft Entra ID, cuja resposta de userinfo não traz grupos nem preferred_username. Desativado por padrão: um provedor com endpoint userinfo lê suas declarações dessa resposta. Altere em “Editar opções de login”."
+      },
       user_id: {
         label: "Registrado por",
         help: "Usuário que registrou este provedor"

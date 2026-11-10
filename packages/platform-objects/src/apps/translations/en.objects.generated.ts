@@ -2106,6 +2106,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Allow Just-in-Time Provisioning",
         help: "Under the invite-only audience posture, create an account for a person who signs in through this provider without an account or an invitation. Off by default: such a person is refused. Other postures provision as before. Change it with “Edit Sign-In Options”."
       },
+      skip_user_info: {
+        label: "Read Claims From the ID Token Only",
+        help: "OIDC only. Read the email, name and groups from the identity provider’s verified ID token and do not call its userinfo endpoint. Turn it on for Microsoft Entra ID, whose userinfo answer carries no groups and no preferred_username. Off by default: a provider with a userinfo endpoint reads its claims from that answer. Change it with “Edit Sign-In Options”."
+      },
       user_id: {
         label: "Registered By",
         help: "User who registered this provider"

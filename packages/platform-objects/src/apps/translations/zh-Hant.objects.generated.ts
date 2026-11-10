@@ -2106,6 +2106,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "允許即時開通帳號",
         help: "在僅限邀請的受眾策略下，為透過此提供方登入、但既無帳號也無邀請的人建立帳號。預設關閉：此類人員會被拒絕。其他策略照舊開通帳號。請透過「編輯登入選項」修改。"
       },
+      skip_user_info: {
+        label: "僅從 ID 權杖讀取宣告",
+        help: "僅適用於 OIDC。從身分識別提供者已驗證的 ID 權杖讀取電子郵件、名稱和群組，不呼叫其 userinfo 端點。Microsoft Entra ID 需開啟此項：它的 userinfo 回應不含群組，也不含 preferred_username。預設關閉：設定了 userinfo 端點的提供者從該回應讀取宣告。請透過「編輯登入選項」修改。"
+      },
       user_id: {
         label: "註冊者",
         help: "註冊該提供方的使用者"

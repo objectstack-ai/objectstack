@@ -2106,6 +2106,10 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         label: "Autoriser le provisionnement juste-à-temps",
         help: "Avec la politique d’audience sur invitation uniquement, créer un compte pour une personne qui se connecte via ce fournisseur sans compte ni invitation. Désactivé par défaut : cette personne est refusée. Les autres politiques provisionnent comme avant. Modifiez-le avec « Modifier les options de connexion »."
       },
+      skip_user_info: {
+        label: "Lire les revendications uniquement depuis le jeton d’ID",
+        help: "OIDC uniquement. Lit l’e-mail, le nom et les groupes depuis le jeton d’ID vérifié du fournisseur d’identité, sans appeler son point de terminaison userinfo. À activer pour Microsoft Entra ID, dont la réponse userinfo ne contient ni groupes ni preferred_username. Désactivé par défaut : un fournisseur doté d’un point de terminaison userinfo lit ses revendications dans cette réponse. Modifiez-le avec « Modifier les options de connexion »."
+      },
       user_id: {
         label: "Enregistré par",
         help: "Utilisateur qui a enregistré ce fournisseur"
