@@ -1048,10 +1048,11 @@ ${starterObjectImport(namespace)}
  */
 // This project's app: what the Console lists beside the platform's own apps,
 // and what puts an object in the Console's navigation. An object no app lists
-// is still served over REST and MCP, but the Console has no route to it. To
-// put another object in the Console, add a navigation entry for it below and
-// give it a list view: \`objectstack generate view OBJECT\` writes one, and
-// \`objectstack generate app NAME --object OBJECT\` writes an app of its own.
+// is still served over REST and MCP, but the Console has no route to it. A
+// package whose manifest type is 'app' holds at most one app, so this is the
+// one: to put another object in the Console, add a navigation entry for it
+// below (a 'group' entry with children nests them) rather than a second app,
+// and give it a list view — \`objectstack generate view OBJECT\` writes one.
 //
 // The object is referenced through its import, never as a typed-out name, so
 // renaming it moves this entry with it. When you delete the starter object,
