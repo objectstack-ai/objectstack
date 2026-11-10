@@ -157,6 +157,17 @@ export const ALLOWED_ADVISORIES: readonly Allowed[] = [
   },
 ];
 
+/**
+ * Notices about the CHECKOUT, not the app, so they are neither required nor
+ * refused here. `sdui/jsx-parse-level-only` prints when the CLI finds no SDUI
+ * component manifest (the project's own `sdui.manifest.json`, or the one a built
+ * `@objectstack/console` ships in `dist/`), so the app's kind:'html' pages are
+ * parsed but their components are not checked. Whether it prints depends on
+ * whether the Console was built in this checkout: CI's test shards do not build
+ * it, a box that ran `pnpm console:build` does.
+ */
+const BUILD_STATE_NOTICES = new Set(['sdui/jsx-parse-level-only']);
+
 /** `objects[3].fields.owner` → `objects[].fields.owner`. */
 function indexFree(path: string | undefined): string | undefined {
   return path?.replace(/\[\d+\]/g, '[]');
@@ -192,7 +203,8 @@ describe('the showcase author-time advisories are the allow-listed ones (#32168)
     expect(run.status, run.stderr.slice(-2000)).toBe(0);
     const report = JSON.parse(run.stdout) as { valid: boolean; warnings?: Finding[] };
     expect(report.valid).toBe(true);
-    const findings = (report.warnings ?? []).filter((w) => typeof w.rule === 'string');
+    const findings = (report.warnings ?? [])
+      .filter((w) => typeof w.rule === 'string' && !BUILD_STATE_NOTICES.has(w.rule));
 
     const unlisted = findings.filter((f) => !ALLOWED_ADVISORIES.some((e) => matches(e, f)));
     expect(
