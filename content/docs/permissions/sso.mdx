@@ -160,7 +160,8 @@ the endpoint and the registration member that names it explicitly, for example
 `"userInfoEndpoint": "https://profile.example.com/userinfo"`. A host is never
 trusted only because a discovery document names it. Pass the endpoint as
 `oidcConfig.userInfoEndpoint` (or as `userInfoEndpoint` on the Register SSO Provider
-bridge, `POST /api/v1/auth/admin/sso/register`), and the
+bridge, `POST /api/v1/auth/admin/sso/register`, which the **Userinfo URL** field of
+**Setup → SSO Providers → Register SSO Provider** fills), and the
 registration trusts it.
 
 **Claims.** Microsoft Graph's userinfo answer carries `sub`, `name`, `email` and
@@ -487,7 +488,7 @@ default. The first two apply to OIDC and SAML, the third to OIDC only.
 provider row. It posts to `POST /api/v1/auth/sso/update-provider` with
 `{ providerId, allowIdpInitiated, allowJit, skipUserInfo }`, and
 `POST /api/v1/auth/sso/register` takes the same members, as does the Register SSO
-Provider bridge (`POST /api/v1/auth/admin/sso/register`) for `skipUserInfo`. The people who can change a provider today are the
+Provider bridge (`POST /api/v1/auth/admin/sso/register`) for `skipUserInfo`, which the register form offers as **Read Claims From the ID Token Only**. The people who can change a provider today are the
 only ones who can change these options. A value that is not a boolean is refused
 **400 `VALIDATION_ERROR`**, and nothing is written. Every option keeps a history,
 so every change writes a row to the audit ledger (`sys_audit_log`) and a
