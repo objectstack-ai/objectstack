@@ -3,6 +3,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   createSecurityCatalogReader,
+  holdsPlatformPermissionSet,
   resolveCatalogReference,
   storedPermissionSetScope,
   type SecurityCatalogEntry,
@@ -265,7 +266,12 @@ describe('security catalog read — permission sets by (package, name) through t
     throwOnHolders?: boolean;
   }
 
-  /** The by-name reads of {@link registry}, plus the package-scoped reads a `SchemaRegistry` carries. */
+  /**
+   * The by-name reads of {@link registry}, plus the package-scoped reads a
+   * `SchemaRegistry` carries — its served holders too (#32183): a disabled
+   * package holds no name, the caller's own holding aside, unless
+   * `includeDisabledPackages` asks for every holder.
+   */
   function scopedRegistry(
     byName: Record<string, Def[]>,
     opts: ScopedOptions = {},
@@ -278,10 +284,13 @@ describe('security catalog read — permission sets by (package, name) through t
     return {
       ...registry(byName, { disabled: opts.disabled }),
       asked,
-      packageScopedHoldersOf(type, name, caller) {
+      packageScopedHoldersOf(type, name, caller, options) {
         if (opts.throwOnHolders) throw new Error('registry gone');
-        if (type === 'permission') asked.push({ name, caller });
-        return held(type, name).filter((h) => h.packageId !== null).map((h) => h.packageId as string);
+        // `asked` records the rule's reads; the every-holder read is not the rule asked.
+        if (type === 'permission' && options?.includeDisabledPackages !== true) asked.push({ name, caller });
+        const disabled = new Set(opts.disabled ?? []);
+        return held(type, name).filter((h) => h.packageId !== null).map((h) => h.packageId as string)
+          .filter((id) => options?.includeDisabledPackages === true || id === caller || !disabled.has(id));
       },
       getPackageScopedItem: (type, name, packageId) => held(type, name).find((h) => h.packageId === packageId)?.item,
       getEnvironmentScopedItem: (type, name) => held(type, name).find((h) => h.packageId === null)?.item,
@@ -519,6 +528,68 @@ describe('security catalog read — permission sets by (package, name) through t
       const reader = createSecurityCatalogReader({ registry: r, metadata: metadata({}) });
       expect((await reader.resolve('permission', 'shared', { ...at(), ...storedPermissionSetScope(R, P) }))?.definition.label).toBe('R');
       expect(r.asked).toEqual([]);
+    });
+  });
+
+  /**
+   * [#32183] A disabled package holds no name. BASE (main de141e32): two
+   * holders with one disabled were refused naming both, for no reference and
+   * for a column naming the disabled one; a name only a disabled package holds
+   * resolved that holder and answered not-found, and `holdsPlatformPermissionSet`
+   * false.
+   */
+  describe('#32183 — a disabled holder', () => {
+    const SYS = 'com.objectstack.kernel';
+    const OFF = 'com.acme.off';
+    const two = () => scopedRegistry({}, {
+      packages: { [P]: {}, [Q]: {}, [OFF]: {}, [SYS]: { namespace: 'sys' } },
+      disabled: [OFF],
+      holders: {
+        shared: [{ packageId: Q, item: { name: 'shared', _packageId: Q, label: 'Q' } }, { packageId: OFF, item: { name: 'shared', _packageId: OFF, label: 'OFF' } }],
+        off_set: [{ packageId: OFF, item: { name: 'off_set', _packageId: OFF } }],
+        admin_set: [{ packageId: SYS, item: { name: 'admin_set', _packageId: SYS } }, { packageId: OFF, item: { name: 'admin_set', _packageId: OFF } }],
+      },
+    });
+
+    it('two holders, one disabled: a reference with no column resolves the enabled holder; a caller outside both is refused naming it only', async () => {
+      const reader = createSecurityCatalogReader({ registry: two(), metadata: metadata({}) });
+      expect((await reader.resolve('permission', 'shared'))?.definition.label).toBe('Q');
+      expect((await reader.resolve('permission', 'shared', storedPermissionSetScope(null)))?.definition.label).toBe('Q');
+      const answer = await resolveCatalogReference(reader, 'permission', 'shared', at());
+      expect(answer).toMatchObject({ status: 'refused', reason: 'outside-closure' });
+      if (answer.status === 'refused') {
+        expect(answer.candidates).toEqual([expect.stringContaining(Q)]);
+        expect(answer.message).not.toContain(OFF);
+      }
+    });
+
+    it('⛔ a column naming the disabled holder confers nothing: not-found, never re-targeted to the enabled holder, and not said stale', async () => {
+      const warn = vi.fn();
+      const reader = createSecurityCatalogReader({ registry: two(), metadata: metadata({}), logger: { warn } });
+      expect(await resolveCatalogReference(reader, 'permission', 'shared', storedPermissionSetScope(OFF))).toEqual({ status: 'not-found' });
+      expect(await reader.resolve('permission', 'shared', storedPermissionSetScope(OFF, P))).toBeUndefined();
+      expect(warn).not.toHaveBeenCalled();
+      // CONTROL: the enabled holder's column reads its set.
+      expect((await reader.resolve('permission', 'shared', storedPermissionSetScope(Q)))?.definition.label).toBe('Q');
+    });
+
+    it('⛔ a name only a disabled package holds is not-found, never the metadata service\'s by-name body', async () => {
+      const reader = createSecurityCatalogReader({
+        registry: two(),
+        metadata: metadata({ permission: [{ name: 'off_set', label: 'a metadata-service body of that name' }] }),
+      });
+      for (const scope of [undefined, storedPermissionSetScope(null), at(), storedPermissionSetScope(OFF)]) {
+        expect(await resolveCatalogReference(reader, 'permission', 'off_set', scope)).toEqual({ status: 'not-found' });
+      }
+    });
+
+    it('holdsPlatformPermissionSet: the enabled holder\'s verdict for two holders; a name only a disabled package holds is no identity', () => {
+      const ql = { registry: two() };
+      expect(holdsPlatformPermissionSet(ql, { permissions: ['admin_set'] }, 'admin_set')).toBe(true);
+      expect(holdsPlatformPermissionSet(ql, { permissions: ['shared'] }, 'shared')).toBe(false);
+      expect(holdsPlatformPermissionSet(ql, { permissions: ['off_set'] }, 'off_set')).toBe(false);
+      // CONTROL: a name the registry holds nowhere answers as a by-name read did.
+      expect(holdsPlatformPermissionSet(ql, { permissions: ['nowhere'] }, 'nowhere')).toBe(true);
     });
   });
 });

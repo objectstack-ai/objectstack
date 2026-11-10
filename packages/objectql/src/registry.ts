@@ -10185,6 +10185,13 @@ export class SchemaRegistry {
    * is reachable from `callerPackageId`, or more than one is). The audits
    * below read it, so the boot, the install door and the served field share
    * one answer.
+   *
+   * [#32183] Judged over every holder, a disabled package's included: a
+   * field's vocabulary is a durable judgment, so a reversible disable of the
+   * package holding a list a live field names neither refuses the next boot
+   * (the disabled state is seeded before the load audit runs) nor empties the
+   * field's options. The by-name `picklist` read (`resolveItem`) is a door and
+   * judges the served holders.
    */
   picklistReferenceVerdict(
     name: string,
@@ -10192,7 +10199,9 @@ export class SchemaRegistry {
     pendingManifests?: readonly unknown[],
   ): PackageScopedResolution<PicklistItemLike> {
     const registry = pendingManifests && pendingManifests.length > 0 ? this.withPendingManifests(pendingManifests) : this;
-    return resolvePackageScopedName<PicklistItemLike>(registry, { type: 'picklist', name, callerPackageId });
+    return resolvePackageScopedName<PicklistItemLike>(registry, {
+      type: 'picklist', name, callerPackageId, includeDisabledPackages: true,
+    });
   }
 
   /**
@@ -10231,13 +10240,11 @@ export class SchemaRegistry {
         ...this.getAllPackages().filter((row) => !pending.has(artifactPackageId(row.manifest) ?? '')),
         ...pending.values(),
       ],
-      // [#32183] The load audit is a durable judgment: every holder,
-      // disabled or not, so its verdict never moves with a reversible disable.
-      packageScopedHoldersOf: (type, name) => [
-        ...new Set([
-          ...this.packageScopedHoldersOf(type, name, undefined, { includeDisabledPackages: true }),
-          ...pendingHolders(type, name),
-        ]),
+      // [#32183] The asked holder set (served, or every holder for a
+      // durable judgment such as {@link picklistReferenceVerdict}), with the
+      // artifact's own lists beside it.
+      packageScopedHoldersOf: (type, name, callerPackageId, options) => [
+        ...new Set([...this.packageScopedHoldersOf(type, name, callerPackageId, options), ...pendingHolders(type, name)]),
       ],
       getPackageScopedItem: <T>(type: string, name: string, packageId: string, member?: string): T | undefined =>
         pendingHolders(type, name).has(packageId)

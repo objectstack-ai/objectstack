@@ -154,3 +154,21 @@ describe('R20 — a legacy email template row gains the package that holds its t
         });
     });
 });
+
+describe('#32183 — a binding never moves with a reversible disable: the backfill judges every holder', () => {
+    it('a name two packages hold stays refused while one of them is disabled, and a disabled sole holder still binds', async () => {
+        registry.disablePackage(B);
+        registry.registerItem('email_template', { name: 'beta_only', label: 'b', subject: 'b', body: 'b', locale: 'en-US', _packageId: B }, 'name' as never, B);
+        const engine = await boot();
+        await seed(engine);
+        await engine.insert('sys_email_template', row('t8', 'beta_only'), { context: SYS_ORG });
+
+        const report = await backfillTemplatePackages(engine, registry);
+
+        expect(report.ambiguous).toEqual([
+            { name: 'shared_notice', rows: 1, candidates: [`package "${A}"`, `package "${B}"`] },
+        ]);
+        expect(report.bound).toContainEqual({ name: 'beta_only', rows: 1, packageId: B });
+        expect((await packages(engine)).t4).toBeNull();
+    });
+});

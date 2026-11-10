@@ -408,3 +408,80 @@ describe('[#32072] dataset: the by-name read is the package-scoped resolver\'s',
     }
   });
 });
+
+/**
+ * [#32183] A disabled package holds no name: every library reader judges the
+ * served holders. Iterates the live `PACKAGE_SCOPED_READ_TYPES`.
+ *
+ * BASE (main de141e32): two holders with one disabled refused naming both at
+ * every reader; a name only a disabled package holds served that package's
+ * body from `resolveItem`, `MetadataFacade.get` / `getEntry` and `getApp`
+ * (`exists` true), while the protocol's by-name read withheld it. That last
+ * move is the declared narrowing: the body is now `undefined` (`exists`
+ * false) at every reader alike. No in-tree production caller reads it.
+ */
+describe('#32183 — a disabled package holds no name at the library readers', () => {
+  for (const type of PACKAGE_SCOPED_READ_TYPES) {
+    it(`${type}: two holders, one disabled — every reader serves the enabled holder's item`, async () => {
+      ship(type, 'shared', A);
+      ship(type, 'shared', B);
+      registry.disablePackage(B);
+      expect(labelOf(registry.resolveItem(type, 'shared'))).toBe(`alpha ${type}`);
+      expect(labelOf((await protocol.getMetaItem({ type, name: 'shared' }))?.item)).toBe(`alpha ${type}`);
+      expect(labelOf((await protocol.getMetaItemForExecution({ type, name: 'shared' }))?.item)).toBe(`alpha ${type}`);
+      expect(labelOf(await facade.get(type, 'shared'))).toBe(`alpha ${type}`);
+      expect(labelOf(facade.getEntry(type, 'shared'))).toBe(`alpha ${type}`);
+      expect(await facade.exists(type, 'shared')).toBe(true);
+    });
+
+    it(`${type}: only a disabled holder — no reader serves its body (the declared narrowing); its own caller still reads it`, async () => {
+      ship(type, 'solo', B);
+      registry.disablePackage(B);
+      expect(registry.resolveItem(type, 'solo')).toBeUndefined();
+      expect(await facade.get(type, 'solo')).toBeUndefined();
+      expect(facade.getEntry(type, 'solo')).toBeUndefined();
+      expect(await facade.exists(type, 'solo')).toBe(false);
+      expect((await protocol.getMetaItem({ type, name: 'solo' }))?.item).toBeUndefined();
+      // A caller inside the disabled package answers its own item, as before.
+      expect(labelOf(await facade.get(type, 'solo', B))).toBe(`beta ${type}`);
+      registry.enablePackage(B);
+      expect(labelOf(registry.resolveItem(type, 'solo'))).toBe(`beta ${type}`);
+    });
+  }
+
+  it('`getApp`: two holders, one disabled, serves the enabled one; only a disabled holder, none', () => {
+    ship('app', 'crm', A);
+    ship('app', 'crm', B);
+    ship('app', 'solo', B);
+    registry.disablePackage(B);
+    expect(labelOf(registry.getApp('crm'))).toBe('alpha app');
+    expect(registry.getApp('solo')).toBeUndefined();
+    expect(labelOf(registry.getApp('solo', B))).toBe('beta app');
+  });
+
+  it('the read MCP `agent_prompt` makes (the by-name read naming no package) serves the enabled holder\'s agent', async () => {
+    ship('agent', 'helper', A);
+    ship('agent', 'helper', B);
+    await expectRefusal(() => protocol.getMetaItem({ type: 'agent', name: 'helper' }), 'ambiguous-in-environment', [A, B]);
+    registry.disablePackage(B);
+    const read = await protocol.getMetaItem({ type: 'agent', name: 'helper' });
+    expect(labelOf(read?.item)).toBe('alpha agent');
+    expect((read?.item as { instructions?: string } | undefined)?.instructions).toBe('alpha');
+  });
+
+  it('a package caller outside both closures is refused naming the enabled holder only', async () => {
+    install(P);
+    ship('page', 'home', A);
+    ship('page', 'home', B);
+    registry.disablePackage(B);
+    let thrown: unknown;
+    try {
+      registry.resolveItem('page', 'home', P);
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(PackageScopedNameRefusedError);
+    expect((thrown as PackageScopedNameRefusedError).refusal.candidates).toEqual([{ kind: 'package', packageId: A }]);
+    expect((thrown as Error).message).not.toContain(B);
+  });
+});

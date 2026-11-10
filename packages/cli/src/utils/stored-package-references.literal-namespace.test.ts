@@ -73,3 +73,32 @@ describe('the upgrade report names an installed package under an address-literal
     expect((await report()).literalNamespaces).toEqual([]);
   });
 });
+
+describe('#32183 — the stored-reference report judges every holder, as the backfills do', () => {
+  const A = 'com.acme.alpha';
+  const B = 'com.acme.beta';
+
+  it('a row naming a template two packages hold stays refused while one of them is disabled, naming both', async () => {
+    for (const [id, namespace] of [[A, 'alpha'], [B, 'beta']]) registry.installPackage(manifest(id, namespace), 'marketplace');
+    for (const id of [A, B]) {
+      registry.registerItem('email_template', { name: 'shared_notice', label: 'n', subject: 'n', body: 'n', locale: 'en-US' }, 'name' as never, id);
+    }
+    registry.sealBareNameHolders();
+    registry.disablePackage(B);
+    vi.spyOn(registry, 'getObject').mockImplementation(((name: string) => (name === 'sys_email_template' ? { name } : undefined)) as never);
+    let asked = 0;
+    const engine = {
+      find: async (table: string) => (table === 'sys_email_template' && asked++ === 0
+        ? [{ id: 't1', name: 'shared_notice', package_id: null }]
+        : []),
+    } as never;
+
+    const answer = await collectStoredPackageReferences(engine, registry as unknown as StoredReferenceRegistry);
+    expect(answer.stored).toEqual([
+      expect.objectContaining({
+        d8: 'R20', table: 'sys_email_template', id: 't1', name: 'shared_notice', reason: 'ambiguous',
+        candidates: [expect.objectContaining({ packageId: A }), expect.objectContaining({ packageId: B })],
+      }),
+    ]);
+  });
+});

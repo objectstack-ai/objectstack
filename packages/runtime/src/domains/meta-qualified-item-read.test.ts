@@ -26,7 +26,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import '@objectstack/metadata';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
-import { SchemaRegistry } from '@objectstack/objectql';
+import { PACKAGE_SCOPED_READ_TYPES, SchemaRegistry } from '@objectstack/objectql';
 import { defineStack } from '@objectstack/spec';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
@@ -282,5 +282,101 @@ describe('a shareable namespace two packages share (ADR-0150 D2)', () => {
         ship('datasource', 'warehouse', SYS_TWO);
         const answer = await read('/datasource/sys/warehouse', undefined, asCaller(['manage_platform_settings', 'manage_metadata']));
         expect([answer.status, answer.body?.error?.code], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+    });
+});
+
+/**
+ * [#32183, ADR-0150 D3] A disabled package holds no name: every by-name read
+ * on this transport judges the holders the list serves. Iterates the live
+ * `PACKAGE_SCOPED_READ_TYPES`, so a type added there is pinned here.
+ *
+ * BASE (main de141e32, measured on this fixture for all 13 types): two
+ * holders with one disabled answered the bare read, `?package=gamma`,
+ * `/:type/gamma/:name` and `_env` with 409 naming both packages; a name only a
+ * disabled package holds answered `_env` and `?package=gamma` with 409 naming
+ * it; two co-owners of a shareable namespace, one disabled, answered 409
+ * `ambiguous-in-namespace`.
+ */
+describe('#32183 — a disabled package holds no name: the by-name read judges the served holders', () => {
+    const listedHolders = async (type: string, name: string): Promise<unknown[]> => {
+        const { body } = await read(`/${type}`);
+        const items = body?.data?.items ?? body?.items ?? (Array.isArray(body?.data) ? body.data : []);
+        return (items as any[]).filter((i) => i?.name === name).map((i) => i?._packageId ?? i?.packageId ?? null);
+    };
+    const refusedNaming = (answer: { status?: number; body?: any }, named: string[], unnamed: string[]) => {
+        expect([answer.status, answer.body?.error?.code], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        for (const id of named) expect(answer.body?.error?.message).toContain(`package "${id}"`);
+        for (const id of unnamed) expect(JSON.stringify(answer.body)).not.toContain(id);
+    };
+
+    for (const type of PACKAGE_SCOPED_READ_TYPES) {
+        it(`${type}: two holders, one disabled — the enabled holder answers; the disabled one is named nowhere`, async () => {
+            ship(type, 'shared', A);
+            ship(type, 'shared', B);
+            registry.disablePackage(B);
+            const bare = await read(`/${type}/shared`);
+            expect(bare.status, JSON.stringify(bare.body)).toBe(200);
+            expect(labelOf(bare)).toBe(`alpha ${type}`);
+            expect(labelOf(await read(`/${type}/shared`, { package: A }))).toBe(`alpha ${type}`);
+            expect(labelOf(await read(`/${type}/alpha/shared`))).toBe(`alpha ${type}`);
+            refusedNaming(await read(`/${type}/shared`, { package: C }), [A], [B]);
+            refusedNaming(await read(`/${type}/gamma/shared`), [A], [B]);
+            refusedNaming(await read(`/${type}/_env/shared`), [A], [B]);
+        });
+
+        it(`${type}: only a disabled holder — no holder: 404 on every address, never a 409 naming it`, async () => {
+            ship(type, 'solo', B);
+            registry.disablePackage(B);
+            for (const [path, query] of [
+                [`/${type}/solo`, undefined],
+                [`/${type}/_env/solo`, undefined],
+                [`/${type}/solo`, { package: C }],
+                [`/${type}/gamma/solo`, undefined],
+            ] as const) {
+                const answer = await read(path, query);
+                expect([answer.status, path, query], JSON.stringify(answer.body)).toEqual([404, path, query]);
+                expect(JSON.stringify(answer.body)).not.toContain(B);
+            }
+        });
+
+        it(`${type}: parity — the bare read and the list agree on the holders, through disable and enable`, async () => {
+            ship(type, 'shared', A);
+            ship(type, 'shared', B);
+            ship(type, 'solo', B);
+            const agree = async (name: string) => {
+                const listed = await listedHolders(type, name);
+                const bare = await read(`/${type}/${name}`);
+                if (listed.length === 0) expect([bare.status, name], JSON.stringify(bare.body)).toEqual([404, name]);
+                else if (listed.length === 1) {
+                    expect(bare.status, JSON.stringify(bare.body)).toBe(200);
+                    expect(labelOf(bare)).toBe(`${String(listed[0]).split('.').pop()} ${type}`);
+                } else refusedNaming(bare, listed as string[], []);
+                return listed;
+            };
+            expect(await agree('shared')).toEqual([A, B]);
+            expect(await agree('solo')).toEqual([B]);
+            registry.disablePackage(B);
+            expect(await agree('shared')).toEqual([A]);
+            expect(await agree('solo')).toEqual([]);
+            registry.enablePackage(B);
+            expect(await agree('shared')).toEqual([A, B]);
+            expect(await agree('solo')).toEqual([B]);
+        });
+    }
+
+    it('two co-owners of a shareable namespace, one disabled: the enabled co-owner answers its address and the bare read', async () => {
+        const SYS_ONE = 'com.acme.sys_one';
+        const SYS_TWO = 'com.acme.sys_two';
+        for (const id of [SYS_ONE, SYS_TWO]) {
+            registry.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace: 'sys' } as never, 'code');
+        }
+        ship('page', 'home', SYS_ONE);
+        ship('page', 'home', SYS_TWO);
+        registry.disablePackage(SYS_TWO);
+        for (const path of ['/page/sys/home', '/page/home']) {
+            const answer = await read(path);
+            expect([answer.status, path], JSON.stringify(answer.body)).toEqual([200, path]);
+            expect(labelOf(answer)).toBe('sys_one page');
+        }
     });
 });

@@ -384,3 +384,18 @@ describe('backfillActivationLedgerAtBoot — on a one-shot boot', () => {
     }
   });
 });
+
+describe('#32183 — a binding never moves with a reversible disable: the holder read judges every holder', () => {
+  it('a disabled holder still counts: two holders stay ambiguous, a disabled sole holder is still the holder', () => {
+    install(A);
+    install(B);
+    ship('flow', 'shared_flow', A);
+    ship('flow', 'shared_flow', B);
+    ship('flow', 'beta_flow', B);
+    registry.sealBareNameHolders();
+    registry.disablePackage(B);
+    const holderOf = activationLedgerHolderOf(registry);
+    expect(holderOf('flow', 'shared_flow')).toEqual({ kind: 'ambiguous', candidates: [A, B] });
+    expect(holderOf('flow', 'beta_flow')).toEqual({ kind: 'package', packageId: B });
+  });
+});

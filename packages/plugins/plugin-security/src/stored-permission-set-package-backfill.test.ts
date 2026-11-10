@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { ObjectQL } from '@objectstack/objectql';
+import { ObjectQL, SchemaRegistry } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { SysAudienceBindingSuggestion } from './objects/sys-audience-binding-suggestion.object.js';
@@ -489,5 +489,19 @@ describe('the write seam stamps the package column on every write that names a s
     const engine = await stamped(false);
     await engine.insert(GRANTS.object, grant('b1', ONE_HOLDER), { context: SYS_ORG });
     expect((await packagesById(engine, GRANTS.object)).b1).toBeNull();
+  });
+});
+
+describe('#32183 — a binding never moves with a reversible disable: the holder read judges every holder', () => {
+  it('a permission set only a disabled package holds still binds to that package, never unheld', () => {
+    const registry = new SchemaRegistry();
+    registry.logLevel = 'silent';
+    registry.installPackage({ id: HR, name: HR, version: '1.0.0', type: 'app', namespace: 'hr' } as never, 'code');
+    registry.registerItem('permission', { name: 'hr_reader', label: 'HR reader' }, 'name' as never, HR);
+    registry.disablePackage(HR);
+    // The served holders hold nothing; the backfill's read is every holder.
+    expect(registry.packageScopedHoldersOf('permission', 'hr_reader')).toEqual([]);
+    const holderOf = permissionSetHolderOf(registry as unknown as PermissionSetHolderRegistry);
+    expect(holderOf('hr_reader', null)).toEqual({ kind: 'package', packageId: HR });
   });
 });
