@@ -669,30 +669,7 @@ export class HttpDispatcher {
      * below, nothing else.
      */
     async resolveRequestScope(context: HttpProtocolContext, cleanPath: string): Promise<void> {
-        // ── Environment Resolution + Multi-Kernel Routing (ADR-0006 Phase 5) ──
-        // The host's KernelResolver owns the whole step: it resolves the
-        // request to an environment (hostname / header / session / defaults —
-        // strategy lives in the cloud distribution), SETS
-        // `context.environmentId` (+ `dataDriver`), and returns the kernel to
-        // serve from. The dispatcher only contributes parsing hints. No
-        // resolver registered → single-environment: every request serves from
-        // `defaultKernel` with no environment context.
-        this.prepareResolverHints(context, cleanPath);
-        // [#5155] The resolved kernel is written on the REQUEST, not on the
-        // dispatcher. Two requests interleaving across the awaits below (and
-        // across every await their handlers make afterwards) each keep their
-        // own; before this, the second resolution silently moved the first
-        // request onto the second one's environment.
-        if (this.kernelResolver) {
-            context.kernel = (await this.kernelResolver.resolveKernel(context, this.defaultKernel)) ?? this.defaultKernel;
-        } else {
-            context.kernel = this.defaultKernel;
-        }
-
-        // Touch scope for TTL/LRU tracking in shared-kernel mode
-        if (this.scopeManager && context.environmentId && context.environmentId !== 'platform') {
-            this.scopeManager.touch(context.environmentId);
-        }
+        await this.resolveRequestKernel(context, cleanPath);
 
         // ── Identity Resolution (RBAC/RLS/FLS context) ──
         // Resolve once per request; SecurityPlugin middleware reads
@@ -773,6 +750,46 @@ export class HttpDispatcher {
             if (isApiKeyLifecycleRefusalError(err)) throw err;
             rethrowAuthzStoreUnavailable(err);
             // anonymous request — leave executionContext undefined
+        }
+    }
+
+    /**
+     * The ENVIRONMENT and KERNEL half of {@link resolveRequestScope}: the
+     * resolver hints, the host's {@link KernelResolver} (or `defaultKernel`),
+     * and the scope touch, written onto `context` exactly as `dispatch()`
+     * writes them. A resolver that throws throws out of here, as it throws
+     * out of `dispatch()`.
+     *
+     * Split out for the one caller that brings its own identity: the host
+     * action door ({@link dispatchHostAction}, the published `dispatchAction`),
+     * whose caller the host already authenticated. It places the call with
+     * this same step, never a lookalike, so on a multi-kernel host the call
+     * runs on the kernel the REST door's scoped path is served from.
+     */
+    private async resolveRequestKernel(context: HttpProtocolContext, cleanPath: string): Promise<void> {
+        // ── Environment Resolution + Multi-Kernel Routing (ADR-0006 Phase 5) ──
+        // The host's KernelResolver owns the whole step: it resolves the
+        // request to an environment (hostname / header / session / defaults —
+        // strategy lives in the cloud distribution), SETS
+        // `context.environmentId` (+ `dataDriver`), and returns the kernel to
+        // serve from. The dispatcher only contributes parsing hints. No
+        // resolver registered → single-environment: every request serves from
+        // `defaultKernel` with no environment context.
+        this.prepareResolverHints(context, cleanPath);
+        // [#5155] The resolved kernel is written on the REQUEST, not on the
+        // dispatcher. Two requests interleaving across the awaits below (and
+        // across every await their handlers make afterwards) each keep their
+        // own; before this, the second resolution silently moved the first
+        // request onto the second one's environment.
+        if (this.kernelResolver) {
+            context.kernel = (await this.kernelResolver.resolveKernel(context, this.defaultKernel)) ?? this.defaultKernel;
+        } else {
+            context.kernel = this.defaultKernel;
+        }
+
+        // Touch scope for TTL/LRU tracking in shared-kernel mode
+        if (this.scopeManager && context.environmentId && context.environmentId !== 'platform') {
+            this.scopeManager.touch(context.environmentId);
         }
     }
 
@@ -2878,7 +2895,7 @@ export class HttpDispatcher {
      * (`./action-dispatch.ts#dispatchAction`, the published entry).
      */
     async dispatchHostAction(request: ActionDispatchRequest): Promise<ActionDispatchAnswer> {
-        return dispatchActionRequest(this.domainDeps, request);
+        return dispatchActionRequest(this.domainDeps, request, (context, routePath) => this.resolveRequestKernel(context, routePath));
     }
 
     /** Thin delegate — body extracted to `./domains/ai.ts` (D11③ PR-7). */

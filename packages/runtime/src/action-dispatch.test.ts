@@ -8,12 +8,16 @@
  * its throw read the way the MCP tool reads one: `actionsDoorAnswerOf`, with
  * a refusal's `details`).
  *
- * Three groups:
+ * Four groups:
  *
  *  1. `dispatchAction` answers what the REST door answers for the same call,
  *     byte for byte — a gated action and an elevated flow, refused and
  *     admitted (the card's "Done when"), an addressed call, and the
- *     anonymous floor. The `ai` posture adds exactly the AI door's rules.
+ *     anonymous floor. The `ai` posture adds exactly the AI door's rules,
+ *     and answers the type refusal with the AI door's sentence.
+ *  1b. On a two-kernel host, `dispatchAction` runs a call on the kernel the
+ *     REST door's scoped path is served from, through the same placement
+ *     step, and a failing resolver refuses it at both doors.
  *  2. The MCP refusals that change because the bridge now runs the REST
  *     door's sequence (the PR's "Served refusal codes that change"): each
  *     was refused before and stays refused; only the code, or the detail
