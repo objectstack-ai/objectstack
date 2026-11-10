@@ -43,6 +43,7 @@
  */
 
 import {
+    PackageScopedNameRefusedError,
     applyMappingToRows,
     buildFieldMetaMap,
     refuseUnknownMappingTargets,
@@ -67,6 +68,11 @@ export const CONNECTOR_PULL_PROVIDERS: readonly string[] = Object.freeze(['rest'
 /** Which part of the binding a refused pull failed on. */
 export type ConnectorPullRefusalReason =
     | 'mapping_not_found'
+    /**
+     * [ADR-0150 D3, #32071] The mapping's name resolves to no one item: more
+     * than one package holds it. The message names every candidate.
+     */
+    | 'mapping_name_refused'
     | 'no_connector_source'
     | 'connector_not_registered'
     | 'connector_plugin_origin'
@@ -264,11 +270,24 @@ async function pullOnce(
         refuse(failure.code, failure.status, reason, `Mapping "${mappingName}": ${failure.error}`);
 
     // 1. The mapping, read as the import door reads a `mappingName`.
+    //
+    // [ADR-0150 D3, #32071] `mapping` is addressed by `(package, name)`, and
+    // this read names no package: the pull is a caller with no package until
+    // the job's package reaches it (the pull request carries none). One
+    // holder is read as before; a name two packages hold is refused by the
+    // read naming both, and the pull is refused with that refusal's own code,
+    // status and sentence — ⛔ never as "no mapping is registered", and never
+    // by pulling through whichever package's mapping came first.
     let artifact: PulledMapping | undefined;
     try {
         const res = await protocol.getMetaItem({ type: 'mapping', name: mappingName }) as Record<string, unknown> | undefined;
         artifact = res?.item as PulledMapping | undefined;
-    } catch { /* treated as not found below */ }
+    } catch (err) {
+        if (err instanceof PackageScopedNameRefusedError) {
+            return refuse(err.code, err.status, 'mapping_name_refused', `Mapping "${mappingName}": ${err.message}`);
+        }
+        /* anything else is treated as not found below */
+    }
     if (!isPlainObject(artifact) || !Array.isArray(artifact.fieldMapping) || typeof artifact.targetObject !== 'string') {
         return refuse('MAPPING_NOT_FOUND', 404, 'mapping_not_found', `No mapping artifact named "${mappingName}" is registered`);
     }

@@ -625,6 +625,46 @@ describe('import route — named mapping artifact (#2611)', () => {
     expect(res._status).toBe(400);
     expect(res._json.code).toBe('MAPPING_FORMAT_MISMATCH');
   });
+
+  // [#32071, ADR-0150 D3] `mapping` is addressed by `(package, name)`, and the
+  // door names no package: a name two packages hold is refused naming both,
+  // and one holder answers as before — including one package's mapping into
+  // an object another package (or none) owns.
+  describe('a mapping name held by packages (#32071)', () => {
+    const ALPHA = 'com.acme.alpha';
+    const BETA = 'com.acme.beta';
+    const shipMapping = (packageId: string) => {
+      engine.registry.installPackage(
+        { id: packageId, name: packageId, version: '1.0.0', namespace: packageId.split('.').pop() } as any, 'code',
+      );
+      engine.registry.registerItem(
+        'mapping',
+        { ...TASK_CSV_MAPPING, name: 'task_pkg_feed', label: `${packageId} feed` } as any,
+        'name',
+        packageId,
+      );
+    };
+    const CSV = 'ID,Task Title\nk1,一';
+
+    it('two holders: 409 RESOURCE_CONFLICT naming both, never 404 and never the first holder; nothing written', async () => {
+      shipMapping(ALPHA);
+      shipMapping(BETA);
+      const res = await call(route, { format: 'csv', csv: CSV, mappingName: 'task_pkg_feed' });
+      expect(res._status).toBe(409);
+      expect(res._json.code).toBe('RESOURCE_CONFLICT');
+      expect(res._json.error).toContain(ALPHA);
+      expect(res._json.error).toContain(BETA);
+      expect(await engine.findOne('task', { where: { id: 'k1' } })).toBeFalsy();
+    });
+
+    it('CONTROL: one package holder of a mapping into an object no package owns imports as before', async () => {
+      shipMapping(ALPHA);
+      const res = await call(route, { format: 'csv', csv: CSV, mappingName: 'task_pkg_feed' });
+      expect(res._status).toBeUndefined(); // the success answer sets no status: 200
+      expect(res._json).toMatchObject({ total: 1, ok: 1 });
+      expect(await engine.findOne('task', { where: { id: 'k1' } })).toMatchObject({ title: '一' });
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

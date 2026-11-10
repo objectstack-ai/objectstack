@@ -114,9 +114,12 @@ beforeEach(() => {
   install(B);
 });
 
+/** The types a later child of epic #31527 wired, after E8: `mapping` (#32071). */
+const LATER_TYPES = ['mapping'] as const;
+
 describe('E8 wires exactly the nine types, every one of them package-scoped', () => {
-  it('PACKAGE_SCOPED_READ_TYPES is the card\'s nine, each one R addresses by package', () => {
-    expect([...PACKAGE_SCOPED_READ_TYPES].sort()).toEqual([...E8_TYPES].sort());
+  it('PACKAGE_SCOPED_READ_TYPES is the card\'s nine and the later children\'s, each one R addresses by package', () => {
+    expect([...PACKAGE_SCOPED_READ_TYPES].sort()).toEqual([...E8_TYPES, ...LATER_TYPES].sort());
     for (const type of PACKAGE_SCOPED_READ_TYPES) expect(isPackageScopedType(type), type).toBe(true);
   });
 });
@@ -263,5 +266,49 @@ describe('the types E8 does not wire keep the legacy read', () => {
   it('a view (bucket 1) and a flow (child E1) are read by getItem, untouched', async () => {
     ship('flow', 'onboard', A);
     expect(labelOf(await facade.get('flow', 'onboard', P))).toBe('alpha flow');
+  });
+});
+
+/**
+ * #32071 (ADR-0150 D3; a reader the picklist-family backstop #31700 needs):
+ * `mapping` joins the by-name readers that consult `(package, name)`. Its two
+ * readers outside `/meta` — the import door's `mappingName` and the connector
+ * pull — read through the protocol's by-name read naming no package, so they
+ * are pinned here at that read; their own refusal answers are pinned beside
+ * them (`@objectstack/rest` `import-integration.test.ts`,
+ * `@objectstack/service-automation` `connector-pull.test.ts`).
+ */
+describe('#32071 — mapping: a bare name two packages hold is refused, one holder answers as before', () => {
+  it('two holders: the protocol read naming no package (both faces) and the facade refuse naming both', async () => {
+    ship('mapping', 'feed', A);
+    ship('mapping', 'feed', B);
+    await expectRefusal(() => protocol.getMetaItem({ type: 'mapping', name: 'feed' }), 'ambiguous-in-environment', [A, B]);
+    await expectRefusal(() => protocol.getMetaItemForExecution({ type: 'mapping', name: 'feed' }), 'ambiguous-in-environment', [A, B]);
+    await expectRefusal(() => facade.get('mapping', 'feed'), 'ambiguous-in-environment', [A, B]);
+  });
+
+  it('two holders: each package caller reads its own, and the exact qualifier reaches each holder', async () => {
+    ship('mapping', 'feed', A);
+    ship('mapping', 'feed', B);
+    expect(labelOf(await facade.get('mapping', 'feed', A))).toBe('alpha mapping');
+    expect(labelOf(await facade.get('mapping', 'feed', B))).toBe('beta mapping');
+    expect(labelOf((await protocol.getMetaItem({ type: 'mapping', name: 'feed', packageId: A }))?.item)).toBe('alpha mapping');
+    expect(labelOf((await protocol.getMetaItem({ type: 'mapping', name: 'feed', packageId: B }))?.item)).toBe('beta mapping');
+  });
+
+  it('CONTROL: one package holder is served to a caller with no package exactly as getItem served it', async () => {
+    ship('mapping', 'solo', A);
+    const before = registry.getItem('mapping', 'solo');
+    expect(labelOf(before)).toBe('alpha mapping');
+    expect((await protocol.getMetaItem({ type: 'mapping', name: 'solo' }))?.item).toMatchObject(before as object);
+    expect((await protocol.getMetaItemForExecution({ type: 'mapping', name: 'solo' }))?.item).toMatchObject(before as object);
+    expect(await facade.get('mapping', 'solo')).toBe(before);
+    expect((await protocol.getMetaItem({ type: 'mapping', name: 'solo', packageId: A }))?.item).toMatchObject(before as object);
+  });
+
+  it('CONTROL: the environment\'s own mapping is served, and zero holders stays not-found', async () => {
+    envItem('mapping', 'local');
+    expect(labelOf((await protocol.getMetaItem({ type: 'mapping', name: 'local' }))?.item)).toBe('env mapping');
+    expect((await protocol.getMetaItem({ type: 'mapping', name: 'nothing' }))?.item).toBeUndefined();
   });
 });

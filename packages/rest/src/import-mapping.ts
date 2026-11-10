@@ -26,7 +26,7 @@
  *     data. Tracked on framework#2611.
  */
 
-import type { MappingArtifactLike, MappingFailure } from '@objectstack/core';
+import { PackageScopedNameRefusedError, type MappingArtifactLike, type MappingFailure } from '@objectstack/core';
 
 // The `fieldMapping` pipeline (`applyMappingToRows`) and the pre-row target
 // refusal (`refuseUnknownMappingTargets`) live in `@objectstack/core`
@@ -45,6 +45,17 @@ export type ResolveMappingResult = { ok: true; artifact: MappingArtifactLike } |
  * Resolve a named mapping artifact and check it against the request:
  * target object must match the URL object, and the artifact's declared
  * sourceFormat (when set) must match the payload format actually sent.
+ *
+ * [ADR-0150 D3, #32071] `mapping` is addressed by `(package, name)`. The
+ * door names no package (the target object's owner is no caller: a package's
+ * mapping into an object another package owns would be refused outside its
+ * closure, where it is served today), so the protocol's by-name read resolves
+ * it as a caller with no package: the environment's own item, else the one
+ * package holder. A name two packages hold is refused by that read naming
+ * both, and the refusal is answered as the `409 RESOURCE_CONFLICT` it is,
+ * with its own sentence — ⛔ never as `404 MAPPING_NOT_FOUND`, which would
+ * tell the caller the name means nothing when it means more than one thing.
+ * Every other failure of the read keeps its answer: not found.
  */
 export async function resolveNamedMapping(
     p: { getMetaItem?: (req: { type: string; name: string }) => Promise<unknown> },
@@ -62,7 +73,15 @@ export async function resolveNamedMapping(
         // shape sniff the single-item route carried, and had the same cause.
         const res = await p.getMetaItem({ type: 'mapping', name: mappingName }) as Record<string, unknown> | undefined;
         artifact = res?.item as MappingArtifactLike | undefined;
-    } catch { /* treated as not found below */ }
+    } catch (err) {
+        // [#32071] The by-name read refused: the name is held by more than
+        // one package. Answered with the refusal's own code, status and
+        // sentence, which names every candidate.
+        if (err instanceof PackageScopedNameRefusedError) {
+            return { ok: false, status: err.status, code: err.code, error: err.message };
+        }
+        /* anything else is treated as not found below */
+    }
     if (!artifact || typeof artifact !== 'object' || !Array.isArray(artifact.fieldMapping)) {
         return { ok: false, status: 404, code: 'MAPPING_NOT_FOUND', error: `No mapping artifact named "${mappingName}" is registered` };
     }
