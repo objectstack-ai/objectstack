@@ -76,7 +76,9 @@
  * those. Nothing else ever removes a metadata-service entry: the service's
  * one removal, `unregister`, also deletes through its writable `datasource:`
  * loaders and announces a `deleted` event, so it is called only once the
- * stored row is gone.
+ * stored row is gone — or, for a `permission` echo, on a slot of a package the
+ * stored row is no longer bound to (its binding moved), named by that package
+ * so the row, bound elsewhere, stays (ADR-0150 D4, #32162).
  */
 
 import { readLegacyOrganizationRows } from '@objectstack/metadata-core';
@@ -116,12 +118,80 @@ function registryServes(ql: any, type: SecurityCatalogEchoType, name: string): b
   }
 }
 
+/**
+ * One item the metadata service holds under `name`: the item, and the package
+ * whose slot it fills (`undefined` for the name's bare slot, or for the one
+ * item of a type stored by name).
+ */
+interface ServedSlot {
+  readonly item: any;
+  readonly packageId: string | undefined;
+}
+
+/**
+ * The packages a by-name refusal names (ADR-0150 D5, `409 RESOURCE_CONFLICT`):
+ * what the metadata service throws for a read naming no package of a name two
+ * packages' slots hold. `undefined` for any other error.
+ */
+function refusedPackageHolders(error: unknown): string[] | undefined {
+  const candidates = (error as { refusal?: { candidates?: unknown } } | null)?.refusal?.candidates;
+  if ((error as { code?: unknown } | null)?.code !== 'RESOURCE_CONFLICT' || !Array.isArray(candidates)) return undefined;
+  const packages = candidates
+    .filter((c): c is { kind: 'package'; packageId: string } =>
+      !!c && typeof c === 'object' && (c as any).kind === 'package' && typeof (c as any).packageId === 'string')
+    .map((c) => c.packageId);
+  return packages.length > 0 ? packages : undefined;
+}
+
+/**
+ * [ADR-0150 D3/D4, #32162] Every item the metadata service holds under `name`.
+ *
+ * `permission` is stored per `(package, name)` (`PACKAGE_SLOTTED_STORE_TYPES`
+ * in `@objectstack/metadata`), and our echo carries its owner as `_packageId`,
+ * so it fills that package's slot. A read naming no package serves the one
+ * item while one slot holds the name; with two it is refused naming each
+ * holder, and each holder's slot is then read by its package. `position` is
+ * stored by name and answers the bare read alone.
+ */
+async function servedSlotsOf(metadata: any, type: SecurityCatalogEchoType, name: string): Promise<ServedSlot[]> {
+  if (typeof metadata?.get !== 'function') return [];
+  let item: any;
+  try {
+    item = await metadata.get(type, name);
+  } catch (error) {
+    const holders = refusedPackageHolders(error);
+    if (!holders) throw error;
+    const slots: ServedSlot[] = [];
+    for (const packageId of holders) {
+      const held = await metadata.get(type, name, packageId);
+      if (held !== undefined && held !== null) slots.push({ item: held, packageId });
+    }
+    return slots;
+  }
+  if (item === undefined || item === null) return [];
+  const stamped = item && typeof item === 'object' ? item._packageId : undefined;
+  return [{ item, packageId: typeof stamped === 'string' && stamped !== '' ? stamped : undefined }];
+}
+
+/**
+ * Remove one echo slot of `name` from the metadata service: the slot's
+ * package named (`unregister(type, name, { packageId })`), so another
+ * package's item of the name, and the stored row it holds, are never taken
+ * with it; a slot with no package by name, as before.
+ */
+async function unregisterEchoSlot(metadata: any, type: SecurityCatalogEchoType, name: string, slot: ServedSlot): Promise<void> {
+  if (typeof metadata?.unregister !== 'function') return;
+  if (slot.packageId === undefined) await metadata.unregister(type, name);
+  else await metadata.unregister(type, name, { packageId: slot.packageId });
+}
+
 /** Remove our echo of `name` from the metadata service, and from the engine registry if it leaked there. */
-async function dropEcho(ql: any, metadata: any, type: SecurityCatalogEchoType, name: string): Promise<void> {
-  if (typeof metadata?.unregister === 'function') {
-    // unregister() also asks writable loaders to delete — the stored row is
-    // already gone, so this is an in-memory removal.
-    await metadata.unregister(type, name);
+async function dropEcho(ql: any, metadata: any, type: SecurityCatalogEchoType, name: string, slots: readonly ServedSlot[]): Promise<void> {
+  // unregister() also asks writable loaders to delete — the stored row is
+  // already gone, so this is an in-memory removal. Only our echoes go: a
+  // declaration another package holds under the name stays.
+  for (const slot of slots) {
+    if (isProjectionEcho(slot.item)) await unregisterEchoSlot(metadata, type, name, slot);
   }
   try {
     const leaked = ql?.registry?.getItem?.(type, name);
@@ -201,12 +271,12 @@ export async function echoSecurityCatalogMutation(
     }
   }
 
-  const current = typeof metadata.get === 'function' ? await metadata.get(type, name) : undefined;
+  const slots = await servedSlotsOf(metadata, type, name);
   if (!overlay?.name) {
-    // Overlay gone: drop an echo of ours. A declared artifact of the name is
-    // in the engine registry, which the catalog reads first.
-    if (!isProjectionEcho(current)) return 'skipped';
-    await dropEcho(ql, metadata, type, name);
+    // Overlay gone: drop every echo of ours. A declared artifact of the name
+    // is in the engine registry, which the catalog reads first.
+    if (!slots.some((slot) => isProjectionEcho(slot.item))) return 'skipped';
+    await dropEcho(ql, metadata, type, name, slots);
     return 'dropped';
   }
 
@@ -221,7 +291,7 @@ export async function echoSecurityCatalogMutation(
 
   // The metadata service holds a declaration of this name — a stack-declared
   // position lives only there. Never echo over it: see the module doc.
-  if (current !== undefined && current !== null && !isProjectionEcho(current)) return 'skipped';
+  if (slots.some((slot) => !isProjectionEcho(slot.item))) return 'skipped';
 
   // No declaration of the name is served. A permission set asks the lock,
   // which also reads the layered read's `code` layer and answers `unknown`
@@ -245,6 +315,18 @@ export async function echoSecurityCatalogMutation(
           'the next save, publish or boot re-reads the binding. Enforcement is unaffected.',
         { type, name, error: String((e as Error)?.message ?? e) },
       );
+    }
+  }
+  // [#32162] An echo of ours in another package's slot is stale: the stored
+  // row's binding moved (a namespace rename, a stamp, a re-bind). The write
+  // below fills the owner's slot and never replaces another package's, so the
+  // stale slot is dropped first, naming its package — the stored row, now
+  // bound to the new owner, is not that package's and stays. Left in place,
+  // two slots of the name would refuse every later read naming no package.
+  const ownerSlot = tenantAuthored ? ownerPackageId : undefined;
+  for (const slot of slots) {
+    if (slot.packageId !== undefined && slot.packageId !== ownerSlot) {
+      await unregisterEchoSlot(metadata, type, name, slot);
     }
   }
   metadata.registerInMemory(type, name, {

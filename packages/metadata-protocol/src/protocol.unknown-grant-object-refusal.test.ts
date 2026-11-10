@@ -37,9 +37,11 @@
  */
 // Pays the lint root's first load at collection, never inside a clocked case.
 import './lint-root-preload.testkit.js';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import { PackageScopedNameRefusedError, packageScopedRefusalMessage, type PackageScopedRefusalReason } from '@objectstack/core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { unknownGrantObjectSaveRefusal } from './protocol-save-door-refusals.js';
 
 interface Row {
     id: string;
@@ -388,5 +390,121 @@ describe('[#28990] controls — a grant on an object that exists is not refused'
         const { protocol, rows } = makeSession({ looksUpObjects: false });
         expect((await protocol.saveMetaItem({ type: 'permission', name: 'qa_probe', item: set('qa_probe', ['qa_no_such_object']) })).success).toBe(true);
         expect(stored(rows, 'permission', 'qa_probe')).toEqual(['active|-|qa_no_such_object']);
+    });
+});
+
+/**
+ * [#32162, ADR-0150 D3] The held-grants read — a grant the set already holds
+ * is not this save's to answer for — reads the set of the package the write
+ * lands in, through the exact qualifier: that package's own item, never
+ * another holder's of the name. A refusal (the package holds no set of the
+ * name while another package does, or a package-less save of a name two
+ * packages hold) is NOTHING HELD: the leniency is skipped and every unknown
+ * object is judged (fails closed).
+ *
+ * BASE (main c147fc23): the read named no package — `readMetaItem({ type:
+ * 'permission', name })` — so a save from alpha of a name beta also holds was
+ * judged against whichever set the by-name read served; with `permission` in
+ * `PACKAGE_SCOPED_READ_TYPES` that read refuses a two-holder name, and the
+ * refusal failed the save.
+ *
+ * The by-name read is a double with the protocol's answers at each address
+ * (the real read's four forms are pinned in objectql's
+ * `package-scoped-exact-qualifier.test.ts`); the doors' wiring of the landing
+ * package is pinned through `saveMetaItem`, `publishMetaItem` and the restore
+ * family below.
+ */
+describe('[#32162] the held-grants read is the landing package\'s own set', () => {
+    const ALPHA = 'com.acme.alpha';
+    const BETA = 'com.acme.beta';
+    const GAMMA = 'com.acme.gamma';
+
+    const refused = (reason: PackageScopedRefusalReason, callerPackageId: string | null, holders: string[]) => {
+        const base = {
+            status: 'refused' as const, reason, type: 'permission' as const, name: 'shared_set', callerPackageId,
+            candidates: holders.map((packageId) => ({ kind: 'package' as const, packageId })),
+        };
+        return new PackageScopedNameRefusedError({ ...base, message: packageScopedRefusalMessage(base) });
+    };
+
+    /** The protocol's by-name read over `holders` (package → granted objects), as the exact qualifier answers it. */
+    function hostOver(holders: Record<string, string[]>) {
+        const reads: Array<string | undefined> = [];
+        const ids = Object.keys(holders);
+        const host = {
+            engine: { registry: { getObject: () => undefined } },
+            listDrafts: async () => ({ drafts: [] }),
+            readMetaItem: async (req: { type: string; name: string; packageId?: string }) => {
+                if (req.type !== 'permission') return undefined;
+                reads.push(req.packageId);
+                const own = req.packageId !== undefined ? holders[req.packageId] : undefined;
+                if (req.packageId !== undefined) {
+                    if (own) return { item: { name: req.name, objects: Object.fromEntries(own.map((o) => [o, { allowRead: true }])) } };
+                    if (ids.length > 0) throw refused('not-held-by-qualifier', req.packageId, ids);
+                    return undefined;
+                }
+                if (ids.length > 1) throw refused('ambiguous-in-environment', null, ids);
+                const only = ids[0] !== undefined ? holders[ids[0]] : undefined;
+                return only ? { item: { name: req.name, objects: Object.fromEntries(only.map((o) => [o, { allowRead: true }])) } } : undefined;
+            },
+        };
+        return { host, reads };
+    }
+
+    const judge = (host: unknown, grants: string[], savingPackage?: string | null) =>
+        unknownGrantObjectSaveRefusal.call(
+            host as never, 'permission', set('shared_set', grants), 'shared_set',
+            undefined, undefined, 'save', undefined, savingPackage,
+        );
+
+    it('two holders, saved from alpha: alpha\'s held grant is exempt, beta\'s is judged (BASE: the read refused, failing the save)', async () => {
+        const { host, reads } = hostOver({ [ALPHA]: ['qa_alpha_gone'], [BETA]: ['qa_beta_gone'] });
+        expect(await judge(host, ['qa_alpha_gone'], ALPHA)).toBeUndefined();
+        expectRefusal(await judge(host, ['qa_beta_gone'], ALPHA), 'shared_set', ['qa_beta_gone']);
+        expect(reads).toEqual([ALPHA, ALPHA]);
+    });
+
+    it('two holders, saved from beta: beta\'s own grants, never alpha\'s', async () => {
+        const { host } = hostOver({ [ALPHA]: ['qa_alpha_gone'], [BETA]: ['qa_beta_gone'] });
+        expect(await judge(host, ['qa_beta_gone'], BETA)).toBeUndefined();
+        expectRefusal(await judge(host, ['qa_alpha_gone'], BETA), 'shared_set', ['qa_alpha_gone']);
+    });
+
+    it('a refusal reads as nothing held: a package holding no set of the name (fails closed)', async () => {
+        const { host } = hostOver({ [ALPHA]: ['qa_alpha_gone'], [BETA]: ['qa_beta_gone'] });
+        expectRefusal(await judge(host, ['qa_alpha_gone', 'qa_beta_gone'], GAMMA), 'shared_set', ['qa_alpha_gone', 'qa_beta_gone']);
+    });
+
+    it('a refusal reads as nothing held: a package-less save of a two-holder name (fails closed)', async () => {
+        const { host, reads } = hostOver({ [ALPHA]: ['qa_alpha_gone'], [BETA]: ['qa_beta_gone'] });
+        expectRefusal(await judge(host, ['qa_alpha_gone'], null), 'shared_set', ['qa_alpha_gone']);
+        expect(reads).toEqual([undefined]);
+    });
+
+    it('CONTROL one holder: its save keeps its held grant, read at its package or with none, as before', async () => {
+        const { host } = hostOver({ [ALPHA]: ['qa_alpha_gone'] });
+        expect(await judge(host, ['qa_alpha_gone'], ALPHA)).toBeUndefined();
+        expect(await judge(host, ['qa_alpha_gone'], null)).toBeUndefined();
+        expect(await judge(host, ['qa_alpha_gone'])).toBeUndefined();
+        expectRefusal(await judge(host, ['qa_never_held'], ALPHA), 'shared_set', ['qa_never_held']);
+    });
+
+    it('an error that is not a refusal is not read as nothing held', async () => {
+        const host = { ...hostOver({}).host, readMetaItem: async () => { throw new Error('store down'); } };
+        await expect(judge(host, ['qa_gone'], ALPHA)).rejects.toThrow('store down');
+    });
+
+    it('the doors hand the landing package: a save naming it, a draft publish into it, a restore bound to it', async () => {
+        const { protocol } = makeSession({ objects: ['qa_widget'] });
+        const spy = vi.spyOn(protocol, 'unknownGrantObjectSaveRefusal');
+        const landing = () => spy.mock.calls[spy.mock.calls.length - 1]?.[7];
+        await protocol.saveMetaItem({ type: 'permission', name: 'qa_ok', item: set('qa_ok', ['qa_widget']), mode: 'draft', packageId: PKG });
+        expect(landing()).toBe(PKG);
+        await protocol.publishMetaItem({ type: 'permission', name: 'qa_ok', packageId: PKG });
+        expect(landing()).toBe(PKG);
+        await protocol.saveMetaItem({ type: 'permission', name: 'qa_env', item: set('qa_env', ['qa_widget']) });
+        expect(landing()).toBeNull();
+        await protocol.refuseRestoredBodyTheSaveDoorRefuses('permission', 'qa_ok', set('qa_ok', ['qa_widget']), PKG, 'history');
+        expect(landing()).toBe(PKG);
     });
 });

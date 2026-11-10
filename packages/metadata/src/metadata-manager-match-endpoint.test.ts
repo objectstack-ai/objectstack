@@ -787,6 +787,22 @@ describe('removal by (package, name) for every type stored per package (ADR-0150
     });
   });
 
+  // #32162 Do 3, named: permission sets ride the rule above unchanged. A set
+  // carries grants, so the pin reads the surviving package's grants back.
+  it('permission (#32162): uninstalling P1 leaves P2\'s same-named set, with its own grants, in the store AND in the loader rows', async () => {
+    expect(PACKAGE_SLOTTED_STORE_TYPES.has('permission'), 'permission is a slotted type').toBe(true);
+    const ctx = await boot('permission');
+    const grantsOf = (item: any) => Object.keys(item?.objects ?? {});
+    // Give each package's slot its own grant, the way two packages' sets differ.
+    await ctx.manager.register('permission', ctx.name, { ...doorItem('permission', A), objects: { alpha_thing: { allowRead: true } } }, { notify: false });
+    await ctx.manager.register('permission', ctx.name, { ...doorItem('permission', B), objects: { beta_thing: { allowRead: true } } }, { notify: false });
+    await ctx.manager.unregisterPackage(A);
+    expect(await ctx.manager.get('permission', ctx.name, A)).toBeUndefined();
+    expect(grantsOf(await ctx.manager.get('permission', ctx.name, B))).toEqual(['beta_thing']);
+    expect(grantsOf(await ctx.manager.get('permission', ctx.name)), 'one holder left: the bare read serves P2').toEqual(['beta_thing']);
+    expect(ctx.rowBodies(), 'the row holding P2\'s set is kept').toEqual(['beta permission']);
+  });
+
   /**
    * Today's state, pinned so the carry stays visible. The artifact door's
    * `MemoryLoader` is a `memory:` loader, so no removal deletes from it, and it

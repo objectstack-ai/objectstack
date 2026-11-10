@@ -1660,6 +1660,18 @@ export class AppPlugin implements Plugin {
                     // already handed the `manifest` service, so the registry and
                     // this registrar cannot read two conversions of one bundle.
                     const securityBundle: any = this.forwardConverted(ctx).definition;
+                    // [ADR-0150 D3/D4, #32162] A permission set is stored per
+                    // `(package, name)` in the metadata service
+                    // (`PACKAGE_SLOTTED_STORE_TYPES`), and an item fills its
+                    // package's slot only when it carries its package. So each
+                    // set is stamped with the stack's own package — the id
+                    // `registerApp` installs it under, as the artifact door
+                    // stamps — or two packages' sets of one name would share
+                    // the bare slot and a read naming one package
+                    // (`/meta/permission/NAME?package=`) would be served the set
+                    // registered last. A set already carrying a package keeps
+                    // it; the other three collections keep their bytes.
+                    const permissionOwner = artifactPackageId(this.bundle.manifest || this.bundle);
                     let count = 0;
                     for (const [field, type] of SECURITY_FIELDS) {
                         const arr = securityBundle?.[field];
@@ -1681,7 +1693,13 @@ export class AppPlugin implements Plugin {
                             members = arr.length;
                             for (const item of arr) {
                                 if (!item?.name) { dropped += 1; continue; }
-                                metadata.registerInMemory(type, item.name, item);
+                                metadata.registerInMemory(
+                                    type,
+                                    item.name,
+                                    type === 'permission' && permissionOwner && item._packageId === undefined
+                                        ? { ...item, _packageId: permissionOwner }
+                                        : item,
+                                );
                                 count += 1;
                             }
                         }

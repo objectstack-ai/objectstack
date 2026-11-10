@@ -47,6 +47,17 @@ const envItem = (type: string, name: string) =>
   registry.registerItem(type, { name, label: `env ${type}`, _provenance: 'org' }, 'name' as never);
 const labelOf = (answer: unknown) => (answer as { item?: { label?: string } } | undefined)?.item?.label;
 
+/**
+ * [#32162] A permission set keeps one holder per deployment until its install
+ * rule narrows to the namespace (#31698 PR-2), so the registry refuses a second
+ * package's set of a name. The two-holder reads below are the state that rule
+ * opens: the security catalog's holder check is answered empty for this
+ * registry (the #31698 step-0 probe's switch), and nothing else changes.
+ */
+const admitSecondPermissionHolder = () =>
+  vi.spyOn(registry as unknown as { securityCatalogHoldersOtherThan: () => unknown[] }, 'securityCatalogHoldersOtherThan')
+    .mockReturnValue([]);
+
 // The engine double: equality and `$in`, and nothing else — any other
 // operator or combinator is refused loudly rather than read as a field.
 const matches = (row: Record<string, unknown>, where: Record<string, unknown> | undefined) =>
@@ -210,6 +221,7 @@ describe('CONTROL — what the exact qualifier keeps serving', () => {
  */
 describe('the exact read serves the holder\'s own body under the holder\'s own stamp, for every package-scoped type (#32069)', () => {
   it.each([...PACKAGE_SCOPED_READ_TYPES])('%s: `?package=` of each holder serves that holder\'s body and stamp, whatever the service answers', async (type) => {
+    if (type === 'permission') admitSecondPermissionHolder();
     ship(type, 'shared', A);
     ship(type, 'shared', B);
     const wrongBody = { name: 'shared', label: `beta ${type}`, _packageId: B };
@@ -227,5 +239,128 @@ describe('the exact read serves the holder\'s own body under the holder\'s own s
       expect([item?.label, item?._packageId], `${type} at ${packageId}`).toEqual([label, packageId]);
     }
     expect(metadata.get.mock.calls.length + metadata.getDiagnosed.mock.calls.length, 'the service layer was read').toBeGreaterThan(0);
+  });
+});
+
+/**
+ * [#32162, ADR-0150 D3/D5] `permission` joins the types whose by-name readers
+ * consult `(package, name)`. The four `/meta` read forms, at the protocol the
+ * two transports share: bare (a caller with no package), `?package=`, the
+ * qualified path `/meta/permission/:ns/:name` (`resolveMetaItemAddress`, read
+ * as `?package=`) and `_env` (`admitEnvironmentQualifier`).
+ *
+ * BASE (main c147fc23, `permission` not in `PACKAGE_SCOPED_READ_TYPES`): the
+ * bare read of a two-holder name served the first registered; `?package=` of a
+ * package that holds no set of the name served the holder's; `_env` of a name
+ * only a package holds served that package's set.
+ */
+describe('permission: the four `/meta` read forms by `(package, name)` (#32162)', () => {
+  const nsOf = (id: string) => id.split('.').pop()!;
+
+  describe('two holders (the state #31698 PR-2 opens)', () => {
+    beforeEach(() => {
+      admitSecondPermissionHolder();
+      ship('permission', 'shared_set', A);
+      ship('permission', 'shared_set', B);
+    });
+
+    it('bare: 409 RESOURCE_CONFLICT naming both holders (BASE: served alpha\'s)', async () => {
+      const err = await refusalOf(() => protocol.getMetaItem({ type: 'permission', name: 'shared_set' }));
+      expect([err.code, err.status, err.refusal.reason, err.refusal.callerPackageId])
+        .toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment', null]);
+      expect(err.refusal.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
+      const answer = resolveThrownHttpError(err, 500);
+      expect([answer.status, answer.code]).toEqual([409, 'RESOURCE_CONFLICT']);
+    });
+
+    it('`?package=` of each holder serves that holder\'s own set', async () => {
+      expect(labelOf(await protocol.getMetaItem({ type: 'permission', name: 'shared_set', packageId: A }))).toBe('alpha permission');
+      expect(labelOf(await protocol.getMetaItem({ type: 'permission', name: 'shared_set', packageId: B }))).toBe('beta permission');
+    });
+
+    it('`?package=` of a package holding no set of the name: 409 naming both (BASE: served alpha\'s)', async () => {
+      const err = await refusalOf(() => protocol.getMetaItem({ type: 'permission', name: 'shared_set', packageId: C }));
+      expect([err.code, err.status, err.refusal.reason]).toEqual(['RESOURCE_CONFLICT', 409, 'not-held-by-qualifier']);
+      expect(err.refusal.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
+    });
+
+    it('`/meta/permission/:ns/:name`: each namespace addresses its own holder\'s set', async () => {
+      for (const [id, label] of [[A, 'alpha permission'], [B, 'beta permission']] as const) {
+        const address = protocol.resolveMetaItemAddress({ type: 'permission', segment: nsOf(id), name: 'shared_set' });
+        expect(address).toEqual({ kind: 'namespace', namespace: nsOf(id), packageId: id });
+        expect(labelOf(await protocol.getMetaItem({ type: 'permission', name: 'shared_set', packageId: id }))).toBe(label);
+      }
+    });
+
+    it('`_env`: refused naming both holders, the environment holding none', async () => {
+      let thrown: unknown;
+      try { protocol.admitEnvironmentQualifier({ type: 'permission', name: 'shared_set' }); } catch (e) { thrown = e; }
+      expect(thrown).toBeInstanceOf(PackageScopedNameRefusedError);
+      const err = thrown as PackageScopedNameRefusedError;
+      expect([err.code, err.status, err.refusal.reason]).toEqual(['RESOURCE_CONFLICT', 409, 'not-held-by-qualifier']);
+      expect(err.refusal.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
+    });
+  });
+
+  describe('CONTROL — one holder answers as today', () => {
+    beforeEach(() => ship('permission', 'solo_set', A));
+
+    it('bare: the one holder\'s set', async () => {
+      expect(labelOf(await protocol.getMetaItem({ type: 'permission', name: 'solo_set' }))).toBe('alpha permission');
+    });
+
+    it('`?package=` of the holder: its set', async () => {
+      expect(labelOf(await protocol.getMetaItem({ type: 'permission', name: 'solo_set', packageId: A }))).toBe('alpha permission');
+    });
+
+    it('`/meta/permission/:ns/:name` of the holder\'s namespace: its set', async () => {
+      expect(protocol.resolveMetaItemAddress({ type: 'permission', segment: nsOf(A), name: 'solo_set' }))
+        .toEqual({ kind: 'namespace', namespace: nsOf(A), packageId: A });
+      expect(labelOf(await protocol.getMetaItem({ type: 'permission', name: 'solo_set', packageId: A }))).toBe('alpha permission');
+    });
+
+    it('`_env` of the environment\'s own set: admitted, and served', async () => {
+      envItem('permission', 'env_set');
+      expect(() => protocol.admitEnvironmentQualifier({ type: 'permission', name: 'env_set' })).not.toThrow();
+      expect(labelOf(await protocol.getMetaItem({ type: 'permission', name: 'env_set' }))).toBe('env permission');
+    });
+
+    it('zero holders stays not-found at every form, never a refusal', async () => {
+      expect(() => protocol.admitEnvironmentQualifier({ type: 'permission', name: 'nobody_set' })).not.toThrow();
+      expect(labelOf(await protocol.getMetaItem({ type: 'permission', name: 'nobody_set' }))).toBeUndefined();
+      expect(labelOf(await protocol.getMetaItem({ type: 'permission', name: 'nobody_set', packageId: A }))).toBeUndefined();
+    });
+  });
+
+  describe('narrowed for one holder too: a qualifier naming a non-holder', () => {
+    beforeEach(() => ship('permission', 'solo_set', A));
+
+    it('`?package=` of another package: 409 naming the holder (BASE: served alpha\'s)', async () => {
+      const err = await refusalOf(() => protocol.getMetaItem({ type: 'permission', name: 'solo_set', packageId: C }));
+      expect([err.code, err.status, err.refusal.reason]).toEqual(['RESOURCE_CONFLICT', 409, 'not-held-by-qualifier']);
+      expect(err.refusal.candidates).toEqual([{ kind: 'package', packageId: A }]);
+    });
+
+    it('`_env` of a name only a package holds: 409 naming it (BASE: served alpha\'s)', async () => {
+      let thrown: unknown;
+      try { protocol.admitEnvironmentQualifier({ type: 'permission', name: 'solo_set' }); } catch (e) { thrown = e; }
+      expect((thrown as PackageScopedNameRefusedError | undefined)?.refusal?.candidates).toEqual([{ kind: 'package', packageId: A }]);
+    });
+  });
+
+  describe('`guest_portal` (platform-requested, ADR-0150 D3 Exceptions) keeps one holder, answered as today', () => {
+    beforeEach(() => ship('permission', 'guest_portal', A));
+
+    it('bare: the one holder\'s set', async () => {
+      expect(labelOf(await protocol.getMetaItem({ type: 'permission', name: 'guest_portal' }))).toBe('alpha permission');
+    });
+
+    it('a caller of another package, outside the holder\'s closure, still resolves it', () => {
+      expect((registry.resolveItem('permission', 'guest_portal', C) as { label?: string } | undefined)?.label).toBe('alpha permission');
+    });
+
+    it('a second package\'s `guest_portal` is still refused at registration', () => {
+      expect(() => ship('permission', 'guest_portal', B)).toThrow(/permission set "guest_portal" is already held by package "com\.acme\.alpha"/);
+    });
   });
 });

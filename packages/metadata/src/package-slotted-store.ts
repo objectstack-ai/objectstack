@@ -52,6 +52,13 @@
  * same change that adds it here: objectql pins the superset
  * (`registry-bare-name-one-holder-ai-family.test.ts`), since this package
  * cannot import objectql (objectql depends on it).
+ *
+ * `permission` (#32162): two packages of two namespaces may each ship a
+ * permission set of one name once its one-holder rule narrows (#31698), and
+ * the security registrars write each package's set here — the artifact door
+ * stamped with `_packageId`, the stack registrar (`AppPlugin`) likewise for
+ * this type — so a read naming one package (`/meta/permission/NAME?package=`)
+ * is served that package's grants, never the set registered last.
  */
 
 import {
@@ -66,9 +73,10 @@ import { peelStoredEnvelope } from './stored-envelope.js';
 
 /**
  * The types whose in-memory items are stored per `(package, name)`: `api`,
- * then every namespace-scoped type (#32151; see "Which types" above).
+ * then every namespace-scoped type (#32151; see "Which types" above), then
+ * `permission` (#32162).
  */
-export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set(['api', 'agent', 'skill']);
+export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set(['api', 'agent', 'skill', 'permission']);
 
 /** The provenance sentinel a rehydrated row carries in place of a package. */
 const OVERLAY_SENTINEL = 'sys_metadata';
