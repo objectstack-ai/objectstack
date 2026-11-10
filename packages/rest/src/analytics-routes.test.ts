@@ -427,6 +427,19 @@ describe('[#32072] POST /analytics/dataset/query — the saved dataset is read b
     expect(queryDataset).not.toHaveBeenCalled();
   });
 
+  it('a refusal told apart by SHAPE (another copy of the class) is still 409, never the 503 of a failed read', async () => {
+    // A plain object of the shape the `/meta` dispatcher also reads.
+    const plain = { code: 'RESOURCE_CONFLICT', message: twoHolders().message, refusal: { ...twoHolders().refusal } };
+    expect(plain).not.toBeInstanceOf(PackageScopedNameRefusedError);
+    const protocol = { ...mockProtocol(), getMetaItem: vi.fn().mockRejectedValue(plain) };
+    const { res, queryDataset } = await send(protocol);
+    expect(res.statusCode).toBe(409);
+    expect(res.body.code).toBe('RESOURCE_CONFLICT');
+    expect(res.body.message).toContain('com.acme.alpha');
+    expect(res.body.message).toContain('com.acme.beta');
+    expect(queryDataset).not.toHaveBeenCalled();
+  });
+
   it('a repeated `?package=` is refused 400, naming no one package; nothing is read', async () => {
     const protocol = { ...mockProtocol(), ...savedDatasets([{ ...inlineDataset }]) };
     const { res, queryDataset } = await send(protocol, { package: ['com.acme.alpha', 'com.acme.beta'] });

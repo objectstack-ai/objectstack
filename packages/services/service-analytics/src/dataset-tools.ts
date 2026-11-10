@@ -143,10 +143,13 @@ export interface DatasetToolsDeps {
    */
   readonly analytics: unknown | (() => unknown);
   /**
-   * The saved `dataset` items of the caller's environment — the same
-   * `getMetaItems({ type: 'dataset' })` read the REST door resolves
-   * `datasetName` from — localized at the metadata boundary for the caller's
-   * locale, as the REST door localizes a saved dataset. Read decorations
+   * The saved `dataset` items of the caller's environment — the
+   * `getMetaItems({ type: 'dataset' })` list read, each row carrying the
+   * `_packageId` of the package that holds it — localized at the metadata
+   * boundary for the caller's locale, as the REST door localizes a saved
+   * dataset. `list_datasets` lists these rows, and `query_dataset` resolves a
+   * name over their holders ({@link resolveAdmittedDataset}); the REST door no
+   * longer reads this list for a `datasetName` (it reads by name, #32072). Read decorations
    * (`_diagnostics`, …) may be left on; the tools strip them. A throw is a
    * degraded read: `list_datasets` answers `partial`, `query_dataset` 503.
    */
@@ -231,7 +234,7 @@ interface LoadedDatasets {
    * [#32072] Every saved item read, as `(holder, name, dataset)`: the package
    * its `_packageId` names, `null` for the environment's own item, and the
    * parsed dataset, `undefined` for an item the parse left out. `query_dataset`
-   * resolves a name over these ({@link resolveSavedDataset}).
+   * resolves a name over these ({@link savedHoldersOf}, {@link resolveAdmittedDataset}).
    */
   readonly holdings: ReadonlyArray<{ readonly packageId: string | null; readonly name: unknown; readonly dataset?: Dataset }>;
   readonly partial: boolean;
@@ -249,27 +252,52 @@ function listedHolder(item: unknown): string | null {
 }
 
 /**
- * [#32072, ADR-0150 D3] The saved dataset `query_dataset` names, by the ONE
- * package-scoped rule (`resolvePackageScopedHolders`, `@objectstack/core`) over
- * the holders the listed items' `_packageId`s name — the same rule the REST
- * door's by-name read applies. The caller is one with no package: the tools'
- * only callers are the MCP bridges, whose clients belong to no package, and
- * the input carries none. So: the environment's own item, else the one
- * package holder; a name two packages hold is refused naming both
+ * [#32072] Each holder of `datasetName` among the listed items, with its item:
+ * the package its `_packageId` names, or `null` for the environment's own
+ * item; the parsed dataset, `undefined` for an item the parse left out.
+ *
+ * One holder, several rows: a list read can return two rows of one name
+ * stamped with one `_packageId` (the stdio fallback lists a bare-slot overlay
+ * beside the composite). They are one holder's item, never two holders, so
+ * they collapse to that holder's first row that parsed (else its first row):
+ * the row the `find` that stood here answered, so a one-holder answer is
+ * unchanged. Handed to `packageScopedHolderSource` as two rows, they threw its
+ * `TypeError` ("names … twice"), an undeclared throw with no `code`/`status`.
+ */
+function savedHoldersOf(loaded: LoadedDatasets, datasetName: string): Map<string | null, Dataset | undefined> {
+  const byHolder = new Map<string | null, Dataset | undefined>();
+  for (const h of loaded.holdings) {
+    if (h.name !== datasetName) continue;
+    if (!byHolder.has(h.packageId) || (byHolder.get(h.packageId) === undefined && h.dataset !== undefined)) {
+      byHolder.set(h.packageId, h.dataset);
+    }
+  }
+  return byHolder;
+}
+
+/**
+ * [#32072, ADR-0150 D3 after ADR-0149 D2] The saved dataset `query_dataset`
+ * names, by the ONE package-scoped rule (`resolvePackageScopedHolders`,
+ * `@objectstack/core`) over the holders THIS CALLER IS ADMITTED TO — the same
+ * rule the REST door's by-name read applies. Admission comes first (epic
+ * ruling 6766102988 on #32098): a holder the caller may not query does not
+ * exist for it (D2), so it is never a candidate and never named. The caller is
+ * one with no package: the tools' only callers are the MCP bridges, whose
+ * clients belong to no package, and the input carries none. So, over the
+ * admitted holders: the environment's own item, else the one package holder;
+ * two or more admitted package holders are refused naming only those
  * (`PackageScopedNameRefusedError`, `409 RESOURCE_CONFLICT`). It never takes
  * the first listed, which is what the `find` that stood here did.
  *
- * `undefined` when nothing holds the name, or when the holder's item failed
- * the parse (as before, a dataset the parse leaves out is not found).
+ * `undefined` when no holder is admitted: the caller's answer is then the one
+ * a missing name gets.
  *
  * @throws {PackageScopedNameRefusedError} when the rule refuses.
  */
-function resolveSavedDataset(loaded: LoadedDatasets, datasetName: string): Dataset | undefined {
-  const resolution = resolvePackageScopedHolders<Dataset | undefined>(
+function resolveAdmittedDataset(admitted: ReadonlyMap<string | null, Dataset>, datasetName: string): Dataset | undefined {
+  const resolution = resolvePackageScopedHolders<Dataset>(
     { type: 'dataset', name: datasetName, callerPackageId: null },
-    packageScopedHolderSource<Dataset | undefined>(
-      loaded.holdings.filter((h) => h.name === datasetName).map((h) => [h.packageId, h.dataset] as const),
-    ),
+    packageScopedHolderSource<Dataset>(admitted.entries()),
     // A caller with no package reads no dependency closure.
     () => new Set<string>(),
   );
@@ -411,22 +439,44 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
       );
     }
     const notFound = () => refusal('NOT_FOUND', 404, `Dataset "${datasetName}" not found.`);
-    const dataset = resolveSavedDataset(loaded, datasetName);
-    if (!dataset) throw notFound();
-    // Resolved exactly as `list_datasets` lists it: a dataset the caller may
-    // not query is absent, one answer for missing and hidden (ADR-0149 D2).
-    const admission = await service.admitDatasetCatalogEntry(dataset, context);
-    if (!admission.admitted) {
-      if (admission.unresolved) {
-        throw refusal(
-          'SERVICE_UNAVAILABLE',
-          503,
-          `Read access to the dataset "${datasetName}" could not be determined, so the query was not run. `
-            + 'This is a server-side fault, not a permission denial.',
-        );
-      }
-      throw notFound();
+    // Admitted exactly as `list_datasets` lists it, holder by holder, BEFORE
+    // the name is resolved: a dataset the caller may not query is absent, one
+    // answer for missing and hidden (ADR-0149 D2), so a hidden holder is no
+    // candidate and is never named. An item the parse left out is refused for
+    // every caller, so it is admitted to none.
+    const admitted = new Map<string | null, Dataset>();
+    let unresolved = false;
+    for (const [holder, candidate] of savedHoldersOf(loaded, datasetName)) {
+      if (candidate === undefined) continue;
+      const admission = await service.admitDatasetCatalogEntry(candidate, context);
+      if (admission.admitted) admitted.set(holder, candidate);
+      else if (admission.unresolved) unresolved = true;
     }
+    // A holder whose admission could not be judged may be one the caller can
+    // query: with fewer than two admitted, whether the answer is that holder,
+    // the other or a refusal is not known, so nothing runs (fail closed).
+    if (unresolved && admitted.size < 2) {
+      throw refusal(
+        'SERVICE_UNAVAILABLE',
+        503,
+        `Read access to the dataset "${datasetName}" could not be determined, so the query was not run. `
+          + 'This is a server-side fault, not a permission denial.',
+      );
+    }
+    // A degraded read (`partial: true`) may have left a holder out: with fewer
+    // than two admitted, "not found" or "the one holder" would be a guess over
+    // rows the read did not return, so nothing runs (fail closed). Two or more
+    // admitted are refused below whatever else the read missed.
+    if (loaded.partial && admitted.size < 2) {
+      throw refusal(
+        'SERVICE_UNAVAILABLE',
+        503,
+        `The dataset "${datasetName}" could not be resolved: the dataset read was degraded `
+          + `(${loaded.warning ?? 'partial'}). This is a server-side fault, not a missing dataset.`,
+      );
+    }
+    const dataset = resolveAdmittedDataset(admitted, datasetName);
+    if (!dataset) throw notFound();
 
     // The row cap: the caller's own `limit` when it is within the cap, the cap
     // otherwise; one row past it is asked for, so `truncated` is a fact.

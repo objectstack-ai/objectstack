@@ -260,12 +260,17 @@ export function registerAnalyticsEndpoints(this: AnalyticsRouteHost, basePath: s
                     // `404` below. [#32072] The resolver's refusal is not a
                     // failed read: it is rethrown as thrown, a declared
                     // `409 RESOURCE_CONFLICT` naming every candidate, which
-                    // the catch below answers through its ADR-0112 arm.
+                    // the catch below answers through its ADR-0112 arm. It is
+                    // told apart by class OR by shape, the `/meta`
+                    // dispatcher's predicate ({@link isPackageScopedRefusal}),
+                    // so a refusal from another copy of `@objectstack/core`
+                    // is still a 409 and never a 503.
                     let read: any;
                     try {
                         read = await p.getMetaItem(datasetRequest);
                     } catch (readError) {
                         if (readError instanceof PackageScopedNameRefusedError) throw readError;
+                        if (isPackageScopedRefusal(readError)) throw new PackageScopedNameRefusedError(readError.refusal);
                         throw Object.assign(
                             new Error(
                                 `The dataset "${body.datasetName}" could not be resolved: the dataset read failed. `
@@ -644,4 +649,17 @@ export function registerAnalyticsEndpoints(this: AnalyticsRouteHost, basePath: s
         },
         metadata: { summary: 'Run a semantic-layer dataset (preview/query)', tags: ['analytics'] },
     });
+}
+
+/**
+ * [#32072] A package-scoped resolver's refusal, by class or by shape: `code`
+ * `RESOURCE_CONFLICT` with a `refusal` whose `status` is `'refused'`. The same
+ * predicate the `/meta` dispatcher reads (`isPackageScopedRefusal` in
+ * `@objectstack/runtime`'s `domains/meta.ts`), so one refusal is a 409 at both
+ * doors whichever copy of the class threw it.
+ */
+function isPackageScopedRefusal(e: unknown): e is { code: 'RESOURCE_CONFLICT'; refusal: PackageScopedNameRefusedError['refusal'] } {
+    if (e instanceof PackageScopedNameRefusedError) return true;
+    const thrown = e as { code?: unknown; refusal?: { status?: unknown } } | null | undefined;
+    return thrown?.code === 'RESOURCE_CONFLICT' && thrown.refusal?.status === 'refused';
 }
