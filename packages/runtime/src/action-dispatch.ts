@@ -66,6 +66,8 @@ import { objectValueFailure } from './object-value-shape.js';
 import { apiErrorResponse } from './error-envelope.js';
 import { HttpDispatcher, type HttpProtocolContext, type HttpDispatcherResult } from './http-dispatcher.js';
 import type { DomainHandlerDeps } from './domain-handler-registry.js';
+// [ADR-0106 D1] The run doors' visibility question: the `/meta` projection's.
+import { actionRunFieldVisibilityRefusal, actionRunMasker, projectActionForCaller } from './action-run-visibility.js';
 
 /**
  * Which door's rules an action call is admitted under — see the module
@@ -137,9 +139,52 @@ export interface ResolvedActionCall {
     recordIdFromPath?: string;
     /** The AI-door confirmation member, read under the `ai` posture only. */
     confirmation?: AIActionConfirmation;
+    /**
+     * [ADR-0106 D1] This door's answer for a name nothing declares, where it
+     * is not the sequence's own undeclared `404` ({@link undeclaredActionRefusal}):
+     * an addressed call's resolver refuses a miss by name in its scope
+     * ({@link addressedUnknownNameRefusal}), and the MCP bridge's call naming
+     * no object has its own. A declared action the caller is not shown is
+     * answered with it, so the door's answers cannot tell the two apart.
+     */
+    unknownName?: ActionRefusal;
     /** The engine the gates and the script arm read (`executeAction`). */
     ql: any;
     wiring: ActionDispatchWiring;
+}
+
+/** A thrown `404` refusal (`code` + `status` on an `Error`), as the {@link ActionRefusal} a door renders. */
+export function refusalOfThrown(err: Error & { code: string; status: number }): ActionRefusal {
+    return { message: err.message, status: err.status, details: { code: err.code } };
+}
+
+/**
+ * [ADR-0106 D1] The answer an addressed call (ADR-0150 D5) gets for a name its
+ * scope declares none of — what its resolver throws — as a refusal, for
+ * {@link ResolvedActionCall.unknownName}.
+ */
+export function addressedUnknownNameRefusal(
+    actionName: string,
+    objectName: string | undefined,
+    qualifier: actionExec.ActionAddressQualifier,
+): ActionRefusal {
+    return refusalOfThrown(actionExec.addressedActionNotFoundError(actionName, objectName, actionExec.actionAddressScope(qualifier)));
+}
+
+/**
+ * [ADR-0110 D3] The sequence's answer for a name its resolution found no
+ * declaration for — and, [ADR-0106 D1], for an action the caller is not shown,
+ * where the door states no answer of its own.
+ */
+function undeclaredActionRefusal(actionName: string, objectName: string): ActionRefusal {
+    return {
+        message:
+            `Action '${actionName}' on '${objectName}' has no declaration — ` +
+            `add \`defineAction({ name: '${actionName}', … })\`, or register the handler under a ` +
+            `declared action's \`target\`. Undeclared handlers cannot be permission-gated ` +
+            `(ADR-0110 D3); startup logs every one of them under [action-governance].`,
+        status: 404,
+    };
 }
 
 /** The facts of an admitted call that a door's invocation row records. */
@@ -241,18 +286,40 @@ async function admitResolvedAction(
     // contract, no AI tool) yet would execute TRUSTED. Refused, with the fix.
     // There is no opt-out: a flag that runs an ungoverned handler IS the
     // fail-open this ruling closes.
-    if (!actionDef) {
-        return refuse({
-            message:
-                `Action '${actionName}' on '${objectName}' has no declaration — ` +
-                `add \`defineAction({ name: '${actionName}', … })\`, or register the handler under a ` +
-                `declared action's \`target\`. Undeclared handlers cannot be permission-gated ` +
-                `(ADR-0110 D3); startup logs every one of them under [action-governance].`,
-            status: 404,
-        });
-    }
+    if (!actionDef) return refuse(undeclaredActionRefusal(actionName, objectName));
 
     // ── 1/3: declared → gate against it ──
+
+    // [ADR-0106 D1] AN ACTION THE CALLER IS NOT SHOWN, THE CALLER CANNOT RUN.
+    // "Not shown" is the `/meta` projection's verdict, asked through the same
+    // function (`action-run-visibility.ts`) against the object this call runs
+    // the action under. Asked FIRST among the gates that read the declaration
+    // on the caller's behalf — the AI-door rules, D4's capability gate, the
+    // activation consult, the type checks, the param contract — and answered
+    // exactly as this door answers a name nothing declares, so no answer tells
+    // a withheld action from an unknown name and nothing about its shape is
+    // read. A field visibility that cannot be evaluated refuses the run
+    // (ADR-0106 D6 tier 3, `503 FIELD_VISIBILITY_UNRESOLVED`, as `/meta`
+    // refuses the read). A `passthrough` posture — the system context, a
+    // D4-exempt caller, no security service, the mask switched off — runs as
+    // before.
+    const visibility = await projectActionForCaller(actionRunMasker(deps, requestContext), {
+        action: actionDef,
+        objectName,
+        obj: actionSchema,
+        readObject: (other) => {
+            try {
+                return (typeof ql?.getSchema === 'function' ? ql.getSchema(other) : undefined) ?? ql?.registry?.getObject?.(other);
+            } catch {
+                return undefined;
+            }
+        },
+    });
+    if (visibility.kind === 'fault') {
+        const fault = actionRunFieldVisibilityRefusal(visibility.object);
+        return refuse({ message: fault.message, status: fault.status, details: { code: fault.code } });
+    }
+    if (visibility.kind === 'withhold') return refuse(call.unknownName ?? undeclaredActionRefusal(actionName, objectName));
     if (posture === 'ai') {
         // Fail-closed on system-object actions, PER ACTION (#27681): a `sys_*`
         // action passes only on its author's `ai.exposed` opt-in.
@@ -820,6 +887,7 @@ export async function dispatchActionRequest(deps: DomainHandlerDeps, request: Ac
         objectName,
         actionName,
         declaration: resolution.declaration,
+        ...(qualifier ? { unknownName: addressedUnknownNameRefusal(actionName, objectName, qualifier) } : {}),
         body: {
             ...(request.recordId !== undefined ? { recordId: request.recordId } : {}),
             ...(request.params !== undefined ? { params: request.params } : {}),

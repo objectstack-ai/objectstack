@@ -72,6 +72,7 @@ import * as actionExec from '../action-execution.js';
 import {
     refuseDispatchToDisabledObject,
     requestContextWiring,
+    addressedUnknownNameRefusal,
     resolveRoutedActionDeclaration,
     runResolvedActionAsRest,
 } from '../action-dispatch.js';
@@ -639,6 +640,9 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         objectName,
         actionName,
         declaration: resolution.declaration,
+        // [ADR-0106 D1] An addressed miss is its resolver's `404` by name: an
+        // action the caller is not shown is answered with it, too.
+        ...(addressQualifier ? { unknownName: addressedUnknownNameRefusal(actionName, objectName, addressQualifier) } : {}),
         body,
         ...(recordIdFromPath !== undefined ? { recordIdFromPath } : {}),
         ql,

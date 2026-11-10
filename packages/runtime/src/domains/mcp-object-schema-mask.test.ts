@@ -1026,6 +1026,14 @@ describe('[ADR-0106 D1] an action the caller is not shown is answered on every r
             return { refused: { message: String(error?.message), code: error?.code, status: error?.status } };
         }
     }
+    /** A host's own door (`dispatchAction`) under `persona`, at the given posture. */
+    async function hostRun(persona: Persona, action: string, bag: Record<string, unknown>, posture: 'rest' | 'ai') {
+        const dispatcher = new HttpDispatcher(kernelOver(services), undefined, { enforceProjectMembership: false });
+        const answer = await dispatcher.dispatchHostAction({
+            executionContext: { ...persona } as any, objectName: OBJ, actionName: action, posture, ...structuredClone(bag),
+        });
+        return { status: answer.status, body: answer.body };
+    }
     /** `text` with the unknown name standing where `name` stands. */
     const asUnknown = (text: string, name: string) => text.split(UNKNOWN).join(name);
 
@@ -1066,6 +1074,21 @@ describe('[ADR-0106 D1] an action the caller is not shown is answered on every r
             }
         }
         expect((await rowOf('p2'))?.budget).toBe(100);
+    });
+
+    it('host dispatchAction, both postures: an action the member is not shown is answered byte-identical to an unknown name, whatever the bag', async () => {
+        await seed('p6');
+        for (const posture of ['rest', 'ai'] as const) {
+            for (const bag of BAGS.map((b) => (b.recordId ? { ...b, recordId: 'p6' } : b))) {
+                const unknown = await hostRun(PERSONAS.member, UNKNOWN, bag, posture);
+                expect(unknown.status, 'precondition: an unknown name is a 404').toBe(404);
+                for (const name of WITHHELD) {
+                    const answer = await hostRun(PERSONAS.member, name, bag, posture);
+                    expect(JSON.stringify(answer), `${posture} ${name} ${JSON.stringify(bag)}`).toBe(asUnknown(JSON.stringify(unknown), name));
+                }
+            }
+        }
+        expect((await rowOf('p6'))?.budget).toBe(100);
     });
 
     it('a capability-gated action the member is not shown is answered as unknown on both doors, never as its gate\'s refusal; the scoped pre-screen names no gate', async () => {

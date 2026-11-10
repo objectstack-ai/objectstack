@@ -31,6 +31,12 @@
  *    D6 tier 3): `503 FIELD_VISIBILITY_UNRESOLVED`, as the `/meta` doors
  *    answer it ({@link actionRunFieldVisibilityRefusal}). Nothing runs.
  *
+ * Where it is asked: once in the admitted sequence every run door shares
+ * (`action-dispatch.ts`: the REST `/actions` door, MCP `run_action` and a
+ * host's `dispatchAction`), and by the MCP bridge where it lists or admits an
+ * action outside that sequence (`list_actions`, `run_action`'s scoped
+ * pre-screen, `resume_run`'s admitting action).
+ *
  * Who is judged is the masker's decision alone: a `passthrough` posture — the
  * system context, a D4-exempt caller, a deployment with no security service
  * or with the mask switched off — is served every action, as `/meta` serves
