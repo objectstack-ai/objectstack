@@ -2929,7 +2929,7 @@
       "title": "Calendar is interactive: drag reschedules via PATCH, a failing PATCH reverts with an error, mode switches re-render, empty-day click quick-creates",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2941,6 +2941,10 @@
           "the showcase_task Calendar view (examples/app-showcase/src/ui/views/task.view.ts: named 'Calendar' view + allowedVisualizations calendar, calendar.startDateField due_date, titleField title, colorField status)",
           "10 seeded tasks carrying due_date values so cards land on distinct days (examples/app-showcase/src/data/seed/index.ts)"
         ],
+        "provisioning": {
+          "use": "search:qa-contributor-bound-member",
+          "why": "steps[2]'s failing reschedule, which acceptance[1] scores: a member whose task_own_rows narrowing lets the admin reassign its task away server-side, so its drag PATCH answers 404 RECORD_NOT_FOUND and the optimistic move has something to roll back (a persona lacking edit gets draggable=false and moves nothing, QA run #24616). Run with `--task` for the assigned task. Without it acceptance[1] scores blocked(fixture), as QA run #32135 recorded"
+        },
         "knownGaps": [
           "NO PIN COVERS A FULL CLAUSE — `automated` was dropped at revision 4, so this P1 item is hand-driven (Tier 2). objectui packages/plugin-calendar/src/CalendarView.dnd.test.tsx, the pin it cited, asserts the drag geometry handed to onEventDrop and onTimeRangeSelect (move, resize, time-grid move, drag-create) with no PATCH, re-read, revert or toast, so it scores no clause (Tier 1 run #24598: every clause not-run); acceptance[1]'s verify still names it for the geometry alone. Re-add `automated` only with a pin that asserts a full clause."
         ]
@@ -2955,7 +2959,7 @@
         "open showcase_task; switch to the Calendar view; wait for cards to render (screenshot FIRST)",
         "drag one task card to another day; capture the PATCH /api/v1/data/showcase_task/<id> carrying the new due_date; re-read the record over the API",
         "reload the view; confirm the card renders on the new day from server state",
-        "force a FAILING reschedule: as a contributor-bound member (search:qa-contributor-bound-member; task_own_rows shows only its assigned tasks) load the calendar with a task assigned to it, have the admin reassign that task away server-side, then drag it — the PATCH answers 404 RECORD_NOT_FOUND; observe the optimistic move, then the rollback to the original day AND an error toast. ⛔ Not a persona lacking edit: it gets draggable=false, so nothing moves and there is no optimistic step to roll back (QA run #24616)",
+        "force a FAILING reschedule: as a contributor-bound member with a task assigned to it (fixtures.provisioning; one command, `node scripts/qa/qa-fixture.mjs contributor-member --task`, prints the persona and the task; task_own_rows shows only its assigned tasks) load the calendar, have the admin reassign that task away server-side, then drag it — the PATCH answers 404 RECORD_NOT_FOUND; observe the optimistic move, then the rollback to the original day AND an error toast. ⛔ Not a persona lacking edit: it gets draggable=false, so nothing moves and there is no optimistic step to roll back (QA run #24616)",
         "switch month → week → day modes; confirm the same records re-render placed by their date fields",
         "click an empty day cell; on showcase_task this hands off to the FULL create form with that date pre-filled, not a quick-create dialog — the object has a required field quick-create cannot fill (project), objectui plugin-calendar ObjectCalendar.tsx, objectui#12291; fill it and submit; capture the create and re-read the new row's due_date = the clicked day",
         "capture one screenshot per interaction variant"
@@ -3024,6 +3028,12 @@
           "date": "2026-10-20",
           "change": "automated dropped and fixtures.knownGaps[0] rewritten — §2 theme \"pins that cover no full clause\" of wave anchor #24579 (18.0 sweep). Tier 1 run #24598 scored every clause not-run on CalendarView.dnd.test.tsx (green at the sweep's console pin 4016370af3c9, a geometry-only unit pin); QA run #24616 passed the item by hand after round 1's #24572 handed it over. The item is now Tier 2 (P1, no pin). No clause changed",
           "ref": "#24697"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-10",
+          "change": "fixtures.provisioning opts into search:qa-contributor-bound-member, and steps[2] names its one command (`node scripts/qa/qa-fixture.mjs contributor-member --task`, which adds the assigned task the step drags). QA run #32135 scored this item PARTIAL with the contributor leg blocked(fixture) and listed the persona among the recurring fixture debt (#32168 ask C). The step named the recipe in prose only, so the validator could not see the dependency. No clause changed",
+          "ref": "#32168"
         }
       ]
     },

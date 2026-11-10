@@ -9,7 +9,7 @@
       "title": "Showcase boots clean: health + ready 200, no degraded startup banners, console + app metadata served",
       "since": "v15",
       "status": "active",
-      "revision": 13,
+      "revision": 14,
       "priority": "P0",
       "surface": "mixed",
       "preconditions": [
@@ -138,6 +138,12 @@
           "date": "2026-10-31",
           "change": "steps[3] and acceptance[2].verify move the end of the boot window from health-green to the first non-health request. Checklist-accuracy finding of QA run #27481 (18.3.0 wave 3, parked on anchor #27377; slice S4, #28338): /api/v1/health answered 200 before the Flows:/Seeds: banner was flushed, because serve.ts prints the banner after the bind, so cutting the log at health-green dropped the banner acceptance[2] reads. The ERROR-scope reason for a window is unchanged; only its end moved. acceptance[0] still records time-to-healthy. Re-read at 3fd80337",
           "ref": "#27481"
+        },
+        {
+          "revision": 14,
+          "date": "2026-11-10",
+          "change": "steps[3]'s example seed banner reads `com.example.showcase 138 rows` (was 132), the count seed-integrity steps[1] re-measured at 8523ef9a (20 datasets: sys_exchange_rate and showcase_invoice_line among them). Checklist-accuracy note of QA run #32135. No clause changed",
+          "ref": "#32168"
         }
       ]
     },
