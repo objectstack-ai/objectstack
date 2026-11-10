@@ -126,8 +126,12 @@ holds administrator standing, and the agent ceiling clears View All, Modify
 All, transfer, restore, purge, system permissions and admin scopes from any
 set it is given (giving it such a set is refused). Registration is an
 organization or platform administrator's act; its owner or an administrator
-mints its API key. It never signs in, and it is never counted among the
-administrators that keep an organization manageable. See
+mints its API key. Its owner or an administrator suspends it (every key
+stops, nothing is revoked) or revokes one key; only an administrator resumes
+it, changes its owner or retires it. If its owner leaves the organization, it
+is suspended until an administrator names a new owner. It never signs in, and
+it is never counted among the administrators that keep an organization
+manageable. See
 [AI service account](/docs/ai/agents#connect-your-ai-byo-ai-over-mcp).
 
 ### Security Layers
