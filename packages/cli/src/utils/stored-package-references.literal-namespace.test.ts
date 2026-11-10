@@ -73,3 +73,72 @@ describe('the upgrade report names an installed package under an address-literal
     expect((await report()).literalNamespaces).toEqual([]);
   });
 });
+
+/**
+ * [#31699 F2, the epic's ruling] A locale Studio added in an App's pair, which
+ * two packages of the App both ship the template of, cannot say whose member
+ * it is: each holder's exact read refuses it, and the report lists the row so
+ * the operator can declare the base it customizes. This registry carries
+ * `sys_metadata` (a stand-in `getObject`), so the report reads its rows.
+ */
+describe('[#31699 F2] the upgrade report lists a pair member row two holders could own', () => {
+  const APP = 'com.acme.suite';
+  const X = 'com.acme.suitex';
+  const Y = 'com.acme.suitey';
+  const PAIR = `${APP}.custom`;
+  const memberOf = (id: string) => ({
+    id, name: id, version: '1.0.0', type: 'module', namespace: id.split('.').pop(), dependencies: { [APP]: '^1.0.0' },
+  }) as never;
+  let rows: Array<Record<string, unknown>>;
+  const engine = {
+    // One page: the walk's cursor query (an `$and`) reads past the end.
+    async find(object: string, options?: { where?: Record<string, unknown> }) {
+      if (object !== 'sys_metadata' || options?.where?.$and !== undefined) return [];
+      return rows.map((r) => ({ ...r }));
+    },
+    async update() { throw new Error('the report writes nothing'); },
+  };
+  const carrying = () => new Proxy(registry, {
+    get: (target, key, receiver) => (key === 'getObject'
+      ? (name: string) => (name === 'sys_metadata' ? { name } : undefined)
+      : Reflect.get(target, key, receiver)),
+  }) as unknown as StoredReferenceRegistry;
+  const tpl = (packageId: string) => registry.registerItem('email_template', {
+    name: 'welcome', label: 'Welcome', locale: 'en-US', subject: 'hi', bodyHtml: '<p>x</p>',
+  }, 'name' as never, packageId);
+  const pairRow = (over: Record<string, unknown> = {}) => rows.push({
+    id: 'row_fr', type: 'email_template', name: 'welcome', state: 'active', package_id: PAIR, bundle_member: 'fr-FR',
+    metadata: JSON.stringify({ name: 'welcome', locale: 'fr-FR', subject: 'salut', bodyHtml: '<p>s</p>', ...over }),
+  });
+
+  beforeEach(() => {
+    rows = [];
+    registry.installPackage(manifest(APP, 'suite'), 'code');
+    registry.installPackage(memberOf(X), 'code');
+    registry.installPackage(memberOf(Y), 'code');
+  });
+
+  it('THE PIN: two holders share the pair, so the row is listed naming both by their addresses', async () => {
+    tpl(X);
+    tpl(Y);
+    pairRow();
+    const answer = await collectStoredPackageReferences(engine, carrying());
+    expect(answer.pairMembers).toEqual([{
+      table: 'sys_metadata', id: 'row_fr', type: 'email_template', name: 'welcome', member: 'fr-FR', pairId: PAIR,
+      candidates: [
+        { holder: 'package', packageId: X, address: 'suitex/welcome' },
+        { holder: 'package', packageId: Y, address: 'suitey/welcome' },
+      ],
+    }]);
+  });
+
+  it('CONTROL: one holder of the pair, or a row that declares its base, is not listed', async () => {
+    tpl(X);
+    pairRow();
+    expect((await collectStoredPackageReferences(engine, carrying())).pairMembers).toEqual([]);
+    tpl(Y);
+    rows = [];
+    pairRow({ overrides: { package: X } });
+    expect((await collectStoredPackageReferences(engine, carrying())).pairMembers).toEqual([]);
+  });
+});

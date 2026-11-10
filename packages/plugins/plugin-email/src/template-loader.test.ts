@@ -337,3 +337,128 @@ describe('the auth mails the platform sends are the platform-requested email tem
       .toEqual([...new Set(BUILTIN_AUTH_TEMPLATES.map((t) => t.name))].sort());
   });
 });
+
+/**
+ * [ADR-0150 D3, #31699 F1] The send resolves the template name from the
+ * package it is made from, so two namespaces' same-named templates are each
+ * sent by their own package; a send that names no package keeps the bare-name
+ * meaning, one rung at a time.
+ */
+describe('createRegistryEmailTemplateLoader — the send resolves the name from the caller\'s package (ADR-0150 D3, #31699)', () => {
+  const ALPHA = 'com.example.alpha';
+  const BETA = 'com.example.beta';
+  const GAMMA = 'com.example.gamma';
+  const DELTA = 'com.example.delta';
+  const tpl = (packageId: string, over: AnyRecord = {}): AnyRecord => ({
+    name: 'welcome', label: 'Welcome', subject: `${packageId.split('.').pop()} welcome`, bodyHtml: '<p>hi</p>',
+    _packageId: packageId, ...over,
+  });
+
+  /** A real registry: each `[id, deps]` installed as a code package of its own namespace, shipping `items`. */
+  function registryOf(packages: Array<[string, string[]]>, shipped: AnyRecord[]): SchemaRegistry {
+    const reg = new SchemaRegistry();
+    reg.logLevel = 'silent';
+    for (const [id, deps] of packages) {
+      reg.installPackage({
+        id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop(),
+        ...(deps.length ? { dependencies: Object.fromEntries(deps.map((d) => [d, '^1.0.0'])) } : {}),
+      } as never, 'code');
+    }
+    for (const item of shipped) {
+      const { _packageId: id, ...body } = item;
+      reg.registerItem('email_template', body, 'name' as never, id);
+    }
+    return reg;
+  }
+
+  /** The execution list, honouring the address a request names (`packageId`): that package's own items. */
+  function addressedProtocol(items: AnyRecord[]) {
+    const requests: AnyRecord[] = [];
+    return {
+      requests,
+      async getMetaItemsForExecution(request: { type: string; packageId?: string }) {
+        requests.push({ ...request });
+        const list = request.packageId === undefined ? items : items.filter((i) => i._packageId === request.packageId);
+        return { type: request.type, items: list.map((i) => ({ ...i })) };
+      },
+    };
+  }
+
+  const subjectOf = async (loader: ReturnType<typeof createRegistryEmailTemplateLoader>, callerPackageId?: string | null, locale = 'en-US') =>
+    (await loader.load('welcome', locale, callerPackageId === undefined ? undefined : { callerPackageId }))?.subject;
+
+  const twoNamespaces = () => {
+    const items = [tpl(ALPHA), tpl(BETA)];
+    const reg = registryOf([[ALPHA, []], [BETA, []], [GAMMA, [ALPHA]], [DELTA, []]], items);
+    const protocol = addressedProtocol(items);
+    return { protocol, loader: createRegistryEmailTemplateLoader({ protocol, registry: reg }) };
+  };
+
+  it('two namespaces ship the name: each package\'s send is its own template, read at its own address', async () => {
+    const { protocol, loader } = twoNamespaces();
+    expect(await subjectOf(loader, ALPHA)).toBe('alpha welcome');
+    expect(await subjectOf(loader, BETA)).toBe('beta welcome');
+    expect(protocol.requests.map((r) => r.packageId)).toEqual([ALPHA, BETA]);
+  });
+
+  it('a package that holds no template of the name sends the one holder of its declared closure', async () => {
+    const { loader } = twoNamespaces();
+    expect(await subjectOf(loader, GAMMA)).toBe('alpha welcome');
+  });
+
+  it('a package whose closure reaches no holder is refused with the 409 conflict naming the holders — never a pick', async () => {
+    const { loader } = twoNamespaces();
+    const err = await loader.load('welcome', 'en-US', { callerPackageId: DELTA }).then(() => undefined, (e: unknown) => e);
+    expect(err).toBeInstanceOf(EmailTemplateAmbiguousError);
+    expect(err).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+    expect((err as EmailTemplateAmbiguousError).candidates).toEqual([
+      { kind: 'package', packageId: ALPHA },
+      { kind: 'package', packageId: BETA },
+    ]);
+  });
+
+  it('a send with no package: two holders are refused naming both, whether the caller is omitted or null', async () => {
+    const { loader } = twoNamespaces();
+    for (const caller of [undefined, null]) {
+      const err = await loader.load('welcome', 'en-US', caller === undefined ? undefined : { callerPackageId: caller })
+        .then(() => undefined, (e: unknown) => e);
+      expect(err).toBeInstanceOf(EmailTemplateAmbiguousError);
+      expect((err as EmailTemplateAmbiguousError).candidates.map((c) => (c as { packageId?: string }).packageId)).toEqual([ALPHA, BETA]);
+    }
+  });
+
+  it('a send with no package: the one package holder, read from the environment-wide list as before', async () => {
+    const items = [tpl(ALPHA)];
+    const protocol = addressedProtocol(items);
+    const loader = createRegistryEmailTemplateLoader({ protocol, registry: registryOf([[ALPHA, []]], items) });
+    expect(await subjectOf(loader)).toBe('alpha welcome');
+    // A package caller of a one-holder name reads the same list, at no address.
+    expect(await subjectOf(loader, ALPHA)).toBe('alpha welcome');
+    expect(protocol.requests).toEqual([{ type: 'email_template' }, { type: 'email_template' }]);
+  });
+
+  it('a send with no package: the environment\'s own template, when no package holds the name', async () => {
+    const env = { name: 'welcome', label: 'Welcome', subject: 'environment welcome', bodyHtml: '<p>e</p>' };
+    const reg = registryOf([[ALPHA, []]], []);
+    reg.registerItem('email_template', env, 'name' as never);
+    const loader = createRegistryEmailTemplateLoader({ protocol: addressedProtocol([env]), registry: reg });
+    expect(await subjectOf(loader)).toBe('environment welcome');
+  });
+
+  it('a dependent\'s added locale meets its base: the dependent\'s send reads its base\'s address, never the other namespace\'s', async () => {
+    const items = [tpl(ALPHA), tpl(BETA), tpl(GAMMA, { locale: 'fr-FR', subject: 'gamma fr' })];
+    const reg = registryOf([[ALPHA, []], [BETA, []], [GAMMA, [ALPHA]]], items);
+    const protocol = addressedProtocol(items);
+    const loader = createRegistryEmailTemplateLoader({ protocol, registry: reg });
+    expect(await subjectOf(loader, GAMMA)).toBe('alpha welcome');
+    expect(protocol.requests.at(-1)).toEqual({ type: 'email_template', packageId: ALPHA });
+  });
+
+  it('with no protocol, the registry\'s own list is narrowed to the resolved holder alike', async () => {
+    const items = [tpl(ALPHA), tpl(BETA)];
+    const reg = registryOf([[ALPHA, []], [BETA, []]], items);
+    const loader = createRegistryEmailTemplateLoader({ registry: reg });
+    expect(await subjectOf(loader, BETA)).toBe('beta welcome');
+    expect(await subjectOf(loader, ALPHA)).toBe('alpha welcome');
+  });
+});

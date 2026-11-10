@@ -140,7 +140,7 @@ function printReport(report: StoredPackageReferenceReport, database: string): vo
   }
   console.log('');
   const total = report.stored.length + report.picklists.length + report.sealedClashes.length
-    + report.literalNamespaces.length;
+    + report.literalNamespaces.length + report.pairMembers.length;
   if (total === 0) {
     printSuccess('No stored reference, picklist reference or sealed name is refused by the resolution rule, and no '
       + 'package namespace spells an address literal — nothing to review.');
@@ -172,6 +172,15 @@ function printReport(report: StoredPackageReferenceReport, database: string): vo
     for (const f of report.literalNamespaces) {
       console.log(`  • package "${f.packageId}", namespace "${f.namespace}": ${f.message}`);
       console.log(`      Its items are read with ?package=${f.packageId}; rename the namespace to give them qualified addresses.`);
+    }
+    console.log('');
+  }
+  if (report.pairMembers.length > 0) {
+    console.log(chalk.bold(`${report.pairMembers.length} customization member row(s) two or more packages could own (each one's exact read is refused):`));
+    for (const f of report.pairMembers) {
+      console.log(`  • ${f.table} "${f.id}" ${f.type} "${f.name}"${f.member ? ` member "${f.member}"` : ''} in "${f.pairId}"`);
+      console.log(`      could be the added member of: ${f.candidates.map(describeCandidate).join('; ')}`);
+      console.log('      Declare in the row the package it customizes (overrides.package); only that package then serves it.');
     }
     console.log('');
   }

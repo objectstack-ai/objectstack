@@ -143,8 +143,11 @@
  * `readPackageScopedItem`, and the MCP prompt and agent faces are `NS-NAME`.
  * `email_template` followed (#31699): `/meta/email_template/NAME` reads
  * through `readPackageScopedItem` member by member, and a send resolves the
- * name caller-less (a refusal names both holders) and reads the resolved
- * holder's bundle only (plugin-email's template loader).
+ * name from the package it is made from (a flow's `notify` node passes the
+ * flow's armed package; a send that names none resolves caller-less, and a
+ * refusal names every holder). A name two packages hold is read at the
+ * resolved holder's own address, so the bundle is that holder's alone
+ * (plugin-email's template loader).
  *
  * Two holdings still meet under a narrowed type, whatever the namespaces:
  *

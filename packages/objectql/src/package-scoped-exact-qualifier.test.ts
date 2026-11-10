@@ -297,3 +297,81 @@ describe('the exact read serves the holder\'s own body under the holder\'s own s
     expect(metadata.get.mock.calls.length + metadata.getDiagnosed.mock.calls.length, 'the service layer was read').toBeGreaterThan(0);
   });
 });
+
+/**
+ * [#31699 F2, the epic's ruling on the contract review] Two packages of one
+ * App share the App's customization pair, so a locale Studio added there with
+ * no `overrides` cannot say whose template it extends. Serving it on both
+ * holders' exact addresses would give one package's member to the other.
+ */
+describe('[#31699 F2] a pair member row two holders could own is refused on both exact reads, naming both', () => {
+  const APP = 'com.acme.suite';
+  const X = 'com.acme.suitex';
+  const Y = 'com.acme.suitey';
+  const PAIR = `${APP}.custom`;
+  /** A package of the App: its own namespace, depending on the App. */
+  const memberOf = (id: string) => ({
+    id, name: id, version: '1.0.0', type: 'module', namespace: id.split('.').pop()!,
+    dependencies: { [APP]: '^1.0.0' },
+  }) as never;
+  const tpl = (locale: string, packageId: string) => registry.registerItem('email_template', {
+    name: 'welcome', label: `${packageId.split('.').pop()} ${locale}`, locale,
+    subject: `${packageId.split('.').pop()} ${locale}`, bodyHtml: '<p>x</p>',
+  }, 'name' as never, packageId);
+  const read = (packageId: string, member: string) => protocol.getMetaItem({
+    type: 'email_template', name: 'welcome', packageId, member,
+  } as never);
+  const pairRow = (over: Record<string, unknown> = {}) => rows.push({
+    id: 'row_fr', type: 'email_template', name: 'welcome', state: 'active', package_id: PAIR, bundle_member: 'fr-FR',
+    metadata: JSON.stringify({ name: 'welcome', label: 'pair fr-FR', locale: 'fr-FR', subject: 'pair fr-FR', bodyHtml: '<p>p</p>', ...over }),
+  });
+  const listed = async (packageId: string) => ((await protocol.getMetaItems({ type: 'email_template', packageId } as never)) as { items?: Array<{ label?: string }> })
+    .items?.map((i) => i.label).sort();
+
+  beforeEach(() => {
+    registry.installPackage(manifest(APP), 'code');
+    registry.installPackage(memberOf(X), 'code');
+    registry.installPackage(memberOf(Y), 'code');
+    registry.installPackage(manifest(PAIR), 'code');
+  });
+
+  it('two holders share the pair: both exact reads of the member refuse 409, naming both, and both lists leave it out', async () => {
+    tpl('en-US', X);
+    tpl('en-US', Y);
+    pairRow();
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([X, Y]);
+    for (const at of [X, Y]) {
+      const err = await refusalOf(() => read(at, 'fr-FR'));
+      expect([err.code, err.status], at).toEqual(['RESOURCE_CONFLICT', 409]);
+      expect(err.refusal.candidates, at).toEqual([{ kind: 'package', packageId: X }, { kind: 'package', packageId: Y }]);
+      expect(await listed(at), at).not.toContain('pair fr-FR');
+    }
+    // CONTROL: each holder's own member is still its own.
+    expect(labelOf(await read(X, 'en-US'))).toBe('suitex en-US');
+    expect(labelOf(await read(Y, 'en-US'))).toBe('suitey en-US');
+  });
+
+  it('one holder of the pair: the member is served on its address and listed there (#28390 ruling A)', async () => {
+    tpl('en-US', X);
+    pairRow();
+    expect(labelOf(await read(X, 'fr-FR'))).toBe('pair fr-FR');
+    expect(await listed(X)).toContain('pair fr-FR');
+  });
+
+  it('the App\'s own address keeps ruling A: its pair\'s added member is served there', async () => {
+    tpl('en-US', APP);
+    pairRow();
+    expect(labelOf(await read(APP, 'fr-FR'))).toBe('pair fr-FR');
+    expect(await listed(APP)).toContain('pair fr-FR');
+  });
+
+  it('a row that declares the base it customizes (the bind) is served on that base only', async () => {
+    tpl('en-US', X);
+    tpl('en-US', Y);
+    pairRow({ overrides: { package: X } });
+    expect(labelOf(await read(X, 'fr-FR'))).toBe('pair fr-FR');
+    expect((await read(Y, 'fr-FR'))?.item).toBeUndefined();
+    expect(await listed(X)).toContain('pair fr-FR');
+    expect(await listed(Y)).not.toContain('pair fr-FR');
+  });
+});

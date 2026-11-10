@@ -329,6 +329,13 @@ describe('one package holder per flow, webhook, connector and email template nam
       expect((refusal!.candidates ?? []).map((c) => c.packageId).sort()).toEqual(['com.qa.bare.alpha', 'com.qa.bare.beta']);
     });
 
+    it('a send made from each holder\'s package renders that package\'s own template (ADR-0150 D3, #31699 F1)', async () => {
+      const email = (stack.kernel as any).getService('email');
+      const from = (callerPackageId: string) => email.renderTemplate({ template: TPL, data: {}, callerPackageId });
+      expect((await from('com.qa.bare.alpha'))?.subject).toBe('alpha subject');
+      expect((await from('com.qa.bare.beta'))?.subject).toBe('beta subject');
+    });
+
     it('install-local of a third namespace\'s package shipping the held template name installs', async () => {
       const { status, body } = await installLocal(inline('zeta', { emailTemplates: [template('zeta')] }));
       expect(status, JSON.stringify(body)).toBeLessThan(300);

@@ -395,3 +395,44 @@ describe('makeTransport factory', () => {
     expect(() => makeTransport({ provider: 'postmark' })).toThrow(/apiKey/);
   });
 });
+
+describe('the caller package reaches the loader on every rung of the ladder (ADR-0150 D3, #31699)', () => {
+  const row: EmailTemplateRow = { name: 'welcome', locale: 'de-DE', subject: 'Hallo', body_html: '<p>Hallo</p>', active: true };
+  /** A loader that answers only `undefined` (its own no-locale answer) and records every ask. */
+  const recordingLoader = () => {
+    const asks: Array<[string | undefined, unknown]> = [];
+    const loader: TemplateLoader = {
+      async load(_name, locale, options) {
+        asks.push([locale, options]);
+        return locale === undefined ? row : null;
+      },
+    };
+    return { asks, loader };
+  };
+  const service = (loader: TemplateLoader) => new EmailService({
+    transport: new CaptureTransport(), defaultFrom: { address: 'no-reply@x.com' }, templateLoader: loader,
+  });
+
+  it('sendTemplate and renderTemplate hand callerPackageId to each load, the no-locale rung included', async () => {
+    const { asks, loader } = recordingLoader();
+    const svc = service(loader);
+    await svc.sendTemplate({ template: 'welcome', to: 'a@x.com', callerPackageId: 'com.acme.alpha' });
+    await svc.renderTemplate({ template: 'welcome', callerPackageId: 'com.acme.alpha' });
+    expect(asks).toEqual([
+      ['en-US', { callerPackageId: 'com.acme.alpha' }],
+      [undefined, { callerPackageId: 'com.acme.alpha' }],
+      ['en-US', { callerPackageId: 'com.acme.alpha' }],
+      [undefined, { callerPackageId: 'com.acme.alpha' }],
+    ]);
+  });
+
+  it('CONTROL — a send that names no package (omitted, null or empty) asks with no options', async () => {
+    const { asks, loader } = recordingLoader();
+    const svc = service(loader);
+    await svc.sendTemplate({ template: 'welcome', to: 'a@x.com' });
+    await svc.sendTemplate({ template: 'welcome', to: 'a@x.com', callerPackageId: null });
+    await svc.renderTemplate({ template: 'welcome', callerPackageId: '' });
+    expect(asks.every(([, options]) => options === undefined)).toBe(true);
+    expect(asks).toHaveLength(6);
+  });
+});
