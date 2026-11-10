@@ -25,7 +25,8 @@
 // nothing reaches the host filesystem and each boot starts empty.
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Runtime } from './runtime.js';
 import { DriverPlugin } from './driver-plugin.js';
@@ -476,6 +477,93 @@ describe('ADR-0062 connect policy seam', () => {
       expect(list.find((d) => d.name === 'decorative')!.status).toBe('unvalidated');
     } finally {
       try { await (kernel as any)?.stop?.(); } catch { /* noop */ }
+    }
+  }, BOOT_TIMEOUT);
+});
+
+// A boot composing two packages that declare one datasource name keeps ONE
+// connection for the name, and says so once, at error, naming the name and
+// both packages — and continues. The holder named is the package whose
+// declaration opened that connection: the first to connect in boot order,
+// which is the first `start()` unless a `datasourceMapping` connected another
+// package's declaration earlier, at the drivers-ready hook.
+describe('a boot composing two packages that declare one datasource name', () => {
+  /** Each package's declaration points at its own sqlite file, so the serving connection is identifiable. */
+  function pkg(id: string, file: string, mapped = false) {
+    const short = id.split('.').pop()!;
+    return {
+      manifest: { id, name: short, version: '1.0.0' },
+      objects: [
+        mapped
+          ? { name: `${short}_note`, label: 'Note', fields: { title: { type: 'text' } } }
+          : { name: `${short}_note`, label: 'Note', datasource: 'pkg_shared', fields: { title: { type: 'text' } } },
+      ],
+      datasources: [
+        { name: 'pkg_shared', label: `${short} store`, driver: 'sqlite', schemaMode: 'managed', origin: 'code', config: { filename: file }, active: true },
+      ],
+      ...(mapped ? { datasourceMapping: [{ objectPattern: `${short}_*`, datasource: 'pkg_shared' }] } : {}),
+    };
+  }
+
+  async function bootApps(apps: unknown[]) {
+    const { ObjectQLPlugin } = await import('@objectstack/objectql');
+    const { DatasourceAdminServicePlugin, createDefaultDatasourceDriverFactory } = await import('@objectstack/service-datasource');
+    const runtime = new Runtime({ cluster: false });
+    const kernel = runtime.getKernel();
+    const errors: string[] = [];
+    const logger = (kernel as any).logger;
+    const error = logger.error.bind(logger);
+    logger.error = (msg: unknown, ...rest: unknown[]) => { errors.push(String(msg)); return error(msg, ...rest); };
+    await kernel.use(new DriverPlugin(await makeDefaultDriver()));
+    await kernel.use(new ObjectQLPlugin());
+    for (const app of apps) await kernel.use(new AppPlugin(app as any));
+    await kernel.use(new DatasourceAdminServicePlugin({ driverFactory: createDefaultDatasourceDriverFactory() }));
+    await kernel.bootstrap();
+    const engine = kernel.getService<{ getDriverForObject(o: string): any; getDriverByName(n: string): any }>('data');
+    const fileOf = (driver: any): unknown => driver?.config?.connection?.filename;
+    return { kernel, errors: errors.filter((e) => e.includes("'pkg_shared'")), engine, fileOf };
+  }
+
+  let dir: string;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'ds-name-clash-')); });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  it('the first package to connect holds the name: both packages\' objects are served by its connection, and one error names both', async () => {
+    const alphaFile = join(dir, 'alpha.db');
+    const { kernel, errors, engine, fileOf } = await bootApps([pkg('com.qa.alpha', alphaFile), pkg('com.qa.beta', join(dir, 'beta.db'))]);
+    try {
+      expect(fileOf(engine.getDriverByName('pkg_shared'))).toBe(alphaFile);
+      expect(engine.getDriverForObject('alpha_note')).toBe(engine.getDriverByName('pkg_shared'));
+      expect(engine.getDriverForObject('beta_note')).toBe(engine.getDriverByName('pkg_shared'));
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain("opened from the declaration of 'com.qa.alpha'");
+      expect(errors[0]).toContain("'com.qa.beta'");
+      expect(errors[0]).not.toContain(dir);
+    } finally {
+      try { await (kernel as any)?.shutdown?.(); } catch { /* noop */ }
+    }
+  }, BOOT_TIMEOUT);
+
+  it('a package whose datasourceMapping connected the name before any start holds it, and is the one named', async () => {
+    const betaFile = join(dir, 'beta.db');
+    const { kernel, errors, engine, fileOf } = await bootApps([pkg('com.qa.alpha', join(dir, 'alpha.db')), pkg('com.qa.beta', betaFile, true)]);
+    try {
+      expect(fileOf(engine.getDriverByName('pkg_shared'))).toBe(betaFile);
+      expect(engine.getDriverForObject('alpha_note')).toBe(engine.getDriverByName('pkg_shared'));
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain("opened from the declaration of 'com.qa.beta'");
+      expect(errors[0]).toContain("'com.qa.alpha'");
+    } finally {
+      try { await (kernel as any)?.shutdown?.(); } catch { /* noop */ }
+    }
+  }, BOOT_TIMEOUT);
+
+  it('CONTROL: one package alone logs no error', async () => {
+    const { kernel, errors } = await bootApps([pkg('com.qa.alpha', join(dir, 'alpha.db'))]);
+    try {
+      expect(errors).toEqual([]);
+    } finally {
+      try { await (kernel as any)?.shutdown?.(); } catch { /* noop */ }
     }
   }, BOOT_TIMEOUT);
 });
