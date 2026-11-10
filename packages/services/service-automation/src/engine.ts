@@ -2691,17 +2691,13 @@ export interface FlowCredentialSource {
     held(flowName: string, flowPackage?: string): Array<{ nodeId: string; key: string }>;
     resolve(flowName: string, nodeId: string, key: string, flowPackage?: string): Promise<string | undefined>;
     /**
-     * [ADR-0150 D8 row R9, #31696] `true` when this source answers
-     * `flowPackage`: given one, only that package's rows answer. The
-     * automation plugin's `FlowCredentialChannel` does. A source that does not
-     * say so (one written before `flowPackage` existed) is never asked for a
-     * flow of a name two packages hold: it would answer every package's rows,
-     * so one package's flow could be signed or verified with another's
-     * secret. Such a flow's credential reads are refused instead, naming the
-     * flow and its package (`holds` answers `true`, so no caller reads the
-     * refusal as "no credential"; `held` and `resolve` throw
-     * `FlowCredentialUnresolvableError`). A flow of a name one package holds
-     * is asked by name, as before.
+     * [ADR-0150 D8 row R9, #31696] `true` when, given `flowPackage`, only
+     * that package's rows answer. A source that does not say so (the plugin's
+     * `FlowCredentialChannel` today, or one older than `flowPackage`) is never
+     * asked for a flow of a name two packages hold, since it could answer
+     * another package's secret: `holds` answers `true` (never "no
+     * credential"), and `held` / `resolve` throw
+     * `FlowCredentialUnresolvableError` naming the flow and its package.
      */
     readonly readsByPackage?: boolean;
 }
@@ -4765,8 +4761,7 @@ export class AutomationEngine implements IAutomationService {
         if (arm.source === 'override') {
             const keys = this.flowSlots.keysOf(name);
             if (keys.length === 1) return this.flowSlots.slot(keys[0])?.packageId ?? this.loaderOwnerOf(name);
-            // Two slots and no `holder`: nothing says whose override it is, so
-            // it names none, and {@link placeFlowSlot} refuses it naming both.
+            // Two slots and no `holder`: no package's, so placeFlowSlot refuses it.
             return keys.length === 0 ? this.loaderOwnerOf(name) : undefined;
         }
         return undefined;
@@ -4819,9 +4814,6 @@ export class AutomationEngine implements IAutomationService {
         }
         const incumbents = this.flowSlots.slotsOf(name);
         const incumbent = incumbents.length === 1 ? incumbents[0].packageId : null;
-        // A genuine arrival binds a package-less disable row to the one
-        // holder; one during the boot's convergence never does (M2: the
-        // holder would be the one that arrived first).
         if (incumbent !== null && this.flowHoldersSealed) this.bindPackagelessActivation(name, incumbent);
         const { key, moved } = this.flowSlots.add({ packageId, name });
         this.moveFlowRecords(moved);
@@ -4887,29 +4879,20 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
-     * [#31696, ADR-0150 D4, epic red line 1] Has the boot's set of flow holders
-     * converged ({@link sealFlowHolders})? Until it has, the packages of this
-     * boot are still arriving in an order no operator chose — the code
-     * packages at the boot pull, the installed ones at `kernel:ready`, each in
-     * sorted order — so which one is "the name's one holder" when a second
-     * arrives is decided by arrival, not by the row. A package-less disable
-     * row is bound ({@link bindPackagelessActivation}) only after the seal;
-     * before it, a name that becomes shared reads the row as one first read
-     * under two holders: every holder without a row of its own stays off, it
-     * is said once, and the row is never bound later.
+     * [#31696, ADR-0150 D4, epic red line 1] Have this boot's flow holders
+     * converged ({@link sealFlowHolders})? Before, packages arrive in boot
+     * order (code packages at the pull, installed ones at `kernel:ready`), so
+     * a second holder never binds a package-less disable row to the first:
+     * the row reads as one first read under two holders.
      */
     private flowHoldersSealed = false;
 
     /**
-     * [#31696, ADR-0150 D4] Declare this boot's flow holders converged: every
-     * package of the boot has registered. `AutomationServicePlugin` calls it
-     * at `kernel:bootstrapped`, when the registry seals its bare-name holders,
-     * after every `kernel:ready` rehydrate. From then on a second holder of a
-     * name is a genuine arrival — one holder at that moment, so a
-     * package-less disable row is bound to it ({@link
-     * bindPackagelessActivation}). An engine that is never sealed never binds
-     * such a row: it keeps every holder without a row of its own off.
-     * Idempotent.
+     * [#31696, ADR-0150 D4] Every package of the boot has registered:
+     * `AutomationServicePlugin` calls it at `kernel:bootstrapped`, as the
+     * registry seals its bare-name holders. Only a later second holder binds
+     * a package-less disable row ({@link bindPackagelessActivation}); an engine
+     * never sealed binds none. Idempotent.
      */
     sealFlowHolders(): void {
         this.flowHoldersSealed = true;

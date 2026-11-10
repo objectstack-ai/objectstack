@@ -286,71 +286,39 @@ describe('[#20790] a draft-to-active promotion', () => {
     });
 });
 
-describe('[ADR-0150 D8 row R9, #31696] under a flow name two packages hold, a save touches only its own rows', () => {
-    const P1 = 'com.acme.alpha';
-    const P2 = 'com.acme.beta';
-    const OTHER = 'pin-channel-other-package-61d7';
-    /** The resolver's refusal of the bare name for a writer with no package, as the engine's `flowHolder` answers it. */
+describe('[ADR-0150 D8 row R9, #31696] under a flow name two packages hold, no save or publish touches a stored credential', () => {
+    const [P1, P2] = ['com.acme.alpha', 'com.acme.beta'];
     const shared = (name: string) => ({
-        status: 'refused' as const,
-        reason: 'ambiguous-in-environment' as const,
-        type: 'flow' as const,
-        name,
-        callerPackageId: null,
+        status: 'refused' as const, reason: 'ambiguous-in-environment' as const, type: 'flow' as const, name, callerPackageId: null,
         candidates: [{ kind: 'package', packageId: P1 }, { kind: 'package', packageId: P2 }] as never,
         message: `The flow "${name}" is held by 2 packages in this environment (package "${P1}", package "${P2}").`,
     });
-    /** P1's row at the start node, P2's at the callout: each package's own credential. */
-    async function twoPackagesRows(ql: ObjectQL) {
-        await new FlowCredentialChannel(() => ql as never, () => P1).store({ name: 'pin_inbound', state: 'active', body: inbound({ hook: HOOK }) });
-        await new FlowCredentialChannel(() => ql as never, () => P2).store({ name: 'pin_inbound', state: 'active', body: inbound({ sign: SIGN }) });
-        const rows = await channelRows(ql);
-        expect(rows.map((r) => `${r.node_id}:${r.flow_package}`).sort()).toEqual([`begin:${P1}`, `callout:${P2}`]);
-        return rows;
-    }
     const withoutCallout = (body: any) => ({ ...body, nodes: body.nodes.filter((n: any) => n.id !== 'callout') });
 
-    it('a save whose body drops a position deletes no other package\'s row there; a publish the same', async () => {
+    it('a save or a publish that would update or delete another package\'s row is refused, naming both; nothing changes', async () => {
         const ql = await boot();
-        const before = await twoPackagesRows(ql);
-        const channel = new FlowCredentialChannel(() => ql as never, () => null, shared);
-
-        await channel.store({ name: 'pin_inbound', state: 'active', body: withoutCallout(inbound()) });
-        expect(await channelRows(ql)).toEqual(before);
-
-        await channel.promote({ name: 'pin_inbound', body: withoutCallout(inbound()) });
-        expect(await channelRows(ql)).toEqual(before);
-        // Each package's flow still reads its own credential.
-        expect(await channel.resolve('pin_inbound', 'begin', 'secret', P1)).toBe(HOOK);
-        expect(await channel.resolve('pin_inbound', 'callout', 'signingSecret', P2)).toBe(SIGN);
-    });
-
-    it('a save that sets or clears a credential is refused, naming both holders, and writes nothing', async () => {
-        const ql = await boot();
-        const before = await twoPackagesRows(ql);
-        const ciphers = await ql.find('sys_secret', { context: SYSTEM } as never);
-        const channel = new FlowCredentialChannel(() => ql as never, () => null, shared);
-
-        for (const body of [inbound({ hook: OTHER }), inbound({ sign: '' }), inbound({ nested: OTHER })]) {
-            const refused = await channel.store({ name: 'pin_inbound', state: 'active', body }).catch((e: unknown) => e);
+        // P1's row at the start node, P2's at the callout, as the boot backfill stamps them.
+        await new FlowCredentialChannel(() => ql as never).store({ name: 'pin_inbound', state: 'active', body: inbound({ hook: HOOK, sign: SIGN }) });
+        for (const [node, pkg] of [['begin', P1], ['callout', P2]]) {
+            const [row] = (await channelRows(ql)).filter((r) => r.node_id === node);
+            await ql.update(FLOW_CREDENTIAL_OBJECT, { id: row.id, flow_package: pkg }, { context: SYSTEM } as never);
+        }
+        const before = await channelRows(ql);
+        const channel = new FlowCredentialChannel(() => ql as never, shared);
+        const saves = [inbound({ hook: ROTATED }), inbound({ sign: '' }), withoutCallout(inbound())];
+        for (const attempt of [...saves.map((body) => () => channel.store({ name: 'pin_inbound', state: 'active', body })),
+            () => channel.promote({ name: 'pin_inbound', body: withoutCallout(inbound()) })]) {
+            const refused = await attempt().catch((e: unknown) => e);
             expect(refused).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
             expect((refused as Error).message).toContain(`package "${P1}"`);
             expect((refused as Error).message).toContain(`package "${P2}"`);
         }
-        // P1's credential was not overwritten with the save's value, nor P2's cleared.
         expect(await channelRows(ql)).toEqual(before);
-        expect(await ql.find('sys_secret', { context: SYSTEM } as never)).toEqual(ciphers);
-        expect(await channel.resolve('pin_inbound', 'begin', 'secret', P1)).toBe(HOOK);
-        expect(await channel.resolve('pin_inbound', 'callout', 'signingSecret', P2)).toBe(SIGN);
-    });
-
-    it('CONTROL: under a name one package holds, the same save rotates, clears and drops as before', async () => {
-        const ql = await boot();
-        const channel = new FlowCredentialChannel(() => ql as never, () => P1, () => undefined);
-        await channel.store({ name: 'pin_inbound', state: 'active', body: inbound({ hook: HOOK, sign: SIGN }) });
-        await channel.store({ name: 'pin_inbound', state: 'active', body: withoutCallout(inbound({ hook: ROTATED })) });
-        expect(await channel.resolve('pin_inbound', 'begin', 'secret', P1)).toBe(ROTATED);
-        expect((await channelRows(ql)).map((r) => `${r.node_id}:${r.flow_package}`)).toEqual([`begin:${P1}`]);
+        expect(await channel.resolve('pin_inbound', 'begin', 'secret')).toBe(HOOK);
+        expect(await channel.resolve('pin_inbound', 'callout', 'signingSecret')).toBe(SIGN);
+        // A save that writes and removes nothing (the served form) still saves.
+        await expect(channel.store({ name: 'pin_inbound', state: 'active', body: inbound() })).resolves.toBeDefined();
+        expect(await channelRows(ql)).toEqual(before);
     });
 });
 

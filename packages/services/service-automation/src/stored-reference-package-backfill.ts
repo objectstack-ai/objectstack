@@ -38,14 +38,14 @@
  * ## What it does not change
  *
  * Nothing here moves a reader or a writer onto the columns. The flow child
- * (#31696) does, for R8 and R9: a paused run is stored with the package of the
- * flow it runs, and so is a terminal history row; a credential is written
- * with its flow's one holder; and a resume or a credential read of a name two
- * packages hold reads the row's package (a row with none answers only while
- * one package holds the name). A null left by this backfill still reads by
- * name. The connection store (R11) still reads by name, until the connector
- * child moves it. S4's upgrade report reads the columns too. No unique key
- * changes.
+ * (#31696) does, for R8: a paused run is stored with the package of the flow
+ * it runs, and so is a terminal history row, and a resume of a name two
+ * packages hold reads the row's package. The credential channel (R9) still
+ * reads and writes by name, so a credential of a name two packages hold is
+ * neither read nor written; the flow child's next part moves it onto the
+ * column. A null left by this backfill still reads by name. The connection
+ * store (R11) still reads by name, until the connector child moves it. S4's
+ * upgrade report reads the columns too. No unique key changes.
  *
  * ## Re-runnable
  *

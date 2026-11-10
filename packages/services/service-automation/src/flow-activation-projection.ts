@@ -152,13 +152,10 @@ export class FlowActivationProjection {
     }
 
     /**
-     * [#31696, ADR-0150 D4, epic red line 1] A second holder of `name` arrives
-     * before the boot's holders have converged, while `packageId` holds it
-     * alone: which package held it first was decided by arrival order, so the
-     * row naming no package is not bound to it. Where {@link
-     * canBindPackageless} would have bound it, the row reads as one first read
-     * under two holders: it keeps every holder without a row of its own off,
-     * it is reported once, and it is never bound later.
+     * [#31696, epic red line 1] A second holder arrived before the boot's
+     * holders sealed: `packageId` held `name` first by arrival order only, so
+     * a row {@link canBindPackageless} would bind reads as first read under
+     * two holders instead — reported once, never bound later.
      */
     refusePackagelessBind(name: string, packageId: string): void {
         if (!this.canBindPackageless(name, packageId)) return;

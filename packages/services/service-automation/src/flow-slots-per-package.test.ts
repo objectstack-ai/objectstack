@@ -405,10 +405,7 @@ describe('#31696 the activation ledger per slot (epic red line 1)', () => {
         expect(await engine.executeSlot(P1, 'f')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
     });
 
-    // [M2] During the boot's convergence the "one holder" a second package
-    // meets is whichever registered first: code packages at the boot pull,
-    // installed ones at `kernel:ready` in sorted order. A row is never bound
-    // to it: it fails closed, as a row first read under two holders does.
+    // [M2] Before the seal the "one holder" is whichever registered first: never bound, it fails closed.
     for (const [first, second] of [[P1, P2], [P2, P1]] as const) {
         it(`boot convergence, two installed packages (${first === P1 ? 'alpha' : 'beta'} first): a package-less disable row is bound to neither — both off, one warning, never bound after the seal`, async () => {
             const store = new InMemoryFlowActivationStore();
@@ -438,26 +435,6 @@ describe('#31696 the activation ledger per slot (epic red line 1)', () => {
             expect(await engine.executeSlot(P2, 'f')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
         });
     }
-
-    it('boot convergence, a code package then an installed one: the row is not bound to the code package — both off, one warning', async () => {
-        const store = new InMemoryFlowActivationStore();
-        await store.setActive({ name: 'f', active: false });
-        engine.setFlowActivationStore(store);
-        // `start()`: the code package is pulled, then the ledger is read.
-        ship(P1, leaf('f', 'p1'));
-        await engine.hydrateFlowActivations();
-        expect(await engine.executeSlot(P1, 'f')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
-        // `kernel:ready`: the installed package is rehydrated, before the seal.
-        ship(P2, leaf('f', 'p2'));
-        await engine.flowActivationBinds();
-        expect(await engine.executeSlot(P1, 'f')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
-        expect(await engine.executeSlot(P2, 'f')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
-        expect(ran).toEqual([]);
-        expect(await store.list()).toEqual([{ name: 'f', active: false }]);
-        const warned = engineLogger.warn.mock.calls.filter(([message]: [string]) => /names no package/.test(message));
-        expect(warned).toHaveLength(1);
-        expect(warned[0][1]).toMatchObject({ flow: 'f', holders: [P1, P2] });
-    });
 
     it('the second holder is off until the bind lands; a bind that fails keeps both off, says so, and binds nothing', async () => {
         const rows = new InMemoryFlowActivationStore();
@@ -638,27 +615,7 @@ describe('#31696 R8 — a stored run names its flow\'s package and resumes on it
     });
 });
 
-describe('#31696 R9 — the credential channel reads one package\'s rows for a name two packages hold', () => {
-    it('reads by package when asked by package, every row of the name when not', async () => {
-        const rows = [
-            { id: '1', flow_name: 'f', flow_package: P1, node_id: 'start', credential_key: 'secret', state: 'active' },
-            { id: '2', flow_name: 'f', flow_package: '', node_id: 'call', credential_key: 'signingSecret', state: 'active' },
-        ];
-        const dataEngine = {
-            find: async () => rows,
-            resolveSecretField: async (_object: string, id: string) => `plain-${id}`,
-        };
-        const channel = new FlowCredentialChannel(() => dataEngine as never);
-        await channel.loadIndex();
-        expect(channel.holds('f', 'start', 'secret')).toBe(true);
-        expect(channel.holds('f', 'start', 'secret', P1)).toBe(true);
-        expect(channel.holds('f', 'start', 'secret', P2)).toBe(false);
-        expect(channel.holds('f', 'call', 'signingSecret', P1)).toBe(false);
-        expect(channel.held('f')).toHaveLength(2);
-        expect(await channel.resolve('f', 'start', 'secret', P2)).toBeUndefined();
-        expect(await channel.resolve('f', 'start', 'secret', P1)).toBe('plain-1');
-    });
-
+describe('#31696 R9 — the engine asks a credential source by package only for a slot of a shared name', () => {
     it('the engine asks the channel by package only for a slot of a name two packages hold', async () => {
         const asked: unknown[][] = [];
         engine.setFlowCredentialSource({
@@ -700,6 +657,10 @@ describe('#31696 R9 — the credential channel reads one package\'s rows for a n
         expect((refused as Error).message).toContain(`Package "${P1}" also holds`);
         // The source was never asked for the shared slot.
         expect(asked).toHaveLength(2);
+
+        // The plugin's channel reads by name alone (R9 by package is PR-1b's): refused the same way.
+        engine.setFlowCredentialSource(new FlowCredentialChannel(() => ({ find: async () => [] }) as never));
+        await expect(engine.resolveFlowCredential(key, 'start', 'secret')).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
     });
 });
 

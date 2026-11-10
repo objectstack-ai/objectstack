@@ -103,11 +103,8 @@ const otherStack = () =>
     ) as Record<string, unknown>;
 
 /**
- * Whether, and before or after the shipping package, OTHER is registered —
- * both as code packages, in `init()` (pulled at `start()`); or [M2, #31696]
- * at `kernel:ready`, as the install-local rehydrate registers an installed
- * package: `installed-after` beside the code package BASE, `installed-both`
- * with BASE installed too, in the order given.
+ * Whether, and before or after the shipping package, OTHER is registered: as code packages in `init()`, or
+ * [M2] installed, at `kernel:ready` as the install-local rehydrate does (`installed-both`: BASE too, in that order).
  */
 type Second = 'none' | 'before' | 'after' | 'installed-after' | 'installed-both' | 'installed-both-reversed';
 
@@ -422,12 +419,8 @@ describe('[#31696] a name a second package also ships: each package\'s flow is a
     });
 
     /**
-     * [M2, #31696] A package-less disable row in the activation ledger, read
-     * by a boot that reassembles the clash: the code packages are pulled at
-     * `start()`, the ledger is read, and the installed packages register at
-     * `kernel:ready`. Whichever package registers first is not "the name's
-     * one holder" the row was the switch of: the row is bound to neither, so
-     * both flows stay off, and the ledger row still names no package.
+     * [M2] A package-less disable row read by a boot that reassembles the clash (pull, ledger read, then the
+     * `kernel:ready` rehydrate): the first package to register is not the row's owner, so it binds to neither.
      */
     async function ledgerBoot(second: Second) {
         const dir = mkdtempSync(join(tmpdir(), 'qa-31696-'));
