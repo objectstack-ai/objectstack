@@ -42,6 +42,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MULTI_REPLICA_PACKAGE_CHANGE_REFUSED } from '@objectstack/service-cluster';
 import { HttpDispatcher } from '../http-dispatcher.js';
+import { loadDisabledPackageIds } from '../package-state-store.js';
 
 // ── caller contexts ──────────────────────────────────────────────────────────
 const ctx = (executionContext?: any): any => ({
@@ -490,6 +491,84 @@ describe('[cloud#3814 D1] /packages — declared replicas on the Redis driver re
             });
         }
     }
+
+    /**
+     * [#32265] The settings the refusal's remedy tells the operator to give the
+     * one replica that makes the change: each `NAME=value` it assigns and each
+     * `NAME unset`, read from the recipe (the text after `instead:`), never from
+     * the sentence that describes the declaration. A remedy that names none is
+     * an empty map, which the callers refuse.
+     */
+    function remedySettings(message: string): Record<string, string | undefined> {
+        const recipe = message.split(' instead: ')[1] ?? '';
+        const settings: Record<string, string | undefined> = {};
+        for (const m of recipe.matchAll(/\b(OS_[A-Z0-9_]+)=([^\s,;]+)/g)) settings[m[1]] = m[2];
+        for (const m of recipe.matchAll(/\b(OS_[A-Z0-9_]+) unset\b/g)) settings[m[1]] = undefined;
+        return settings;
+    }
+
+    /** Restart the one replica with `settings` applied over the current environment (`undefined` unsets). */
+    function applySettings(settings: Record<string, string | undefined>): void {
+        for (const [k, v] of Object.entries(settings)) {
+            if (v === undefined) delete process.env[k];
+            else process.env[k] = v;
+        }
+    }
+
+    // [#32265] The remedy names steps that work: on the one replica restarted with
+    // the settings it names, the same request goes through; with the replica
+    // count and the declaration restored, the next one is refused again.
+    for (const [label, env] of DECLARATIONS) {
+        for (const wc of packageDoors) {
+            it(`${label} on redis: the remedy ${wc.name}'s refusal names lets the same request through, and the restored declaration refuses it again`, async () => {
+                Object.assign(process.env, env);
+                const send = () => {
+                    const protocol = fullProtocol();
+                    const { dispatcher, registry } = make({ protocol, cluster: { driver: 'redis' } });
+                    const sent = dispatcher.handlePackages(wc.path, wc.method, wc.body ?? {}, wc.query ?? {}, authed(['manage_metadata'], wc.tenantId));
+                    return { sent, protocol, registry };
+                };
+                const refused = await send().sent;
+                expect(refused.response?.status).toBe(409);
+                const message = String(refused.response?.body?.error?.message);
+                const remedy = remedySettings(message);
+                expect(Object.keys(remedy), message).not.toEqual([]);
+
+                applySettings(remedy);
+                const remedied = send();
+                const r = await remedied.sent;
+                expect(r.response?.status, JSON.stringify(r.response?.body)).not.toBe(409);
+                expect(wc.target(remedied.protocol, remedied.registry)).toHaveBeenCalled();
+
+                Object.assign(process.env, env);
+                const again = await send().sent;
+                expect(again.response?.status).toBe(409);
+                expect(again.response?.body?.error?.code).toBe(MULTI_REPLICA_PACKAGE_CHANGE_REFUSED);
+            });
+        }
+    }
+
+    it('[#32265] the condition the remedy states for the enable/disable choice: a replica restarted over the same OS_HOME and directory reads it, one over another OS_HOME does not', async () => {
+        process.env.OS_CLUSTER_REPLICAS = '3';
+        const refused = await make({ protocol: fullProtocol(), cluster: { driver: 'redis' } })
+            .dispatcher.handlePackages('/pkg-a/disable', 'PATCH', {}, {}, authed(['manage_metadata']));
+        expect(refused.response?.status).toBe(409);
+        applySettings(remedySettings(String(refused.response?.body?.error?.message)));
+        const r = await make({ protocol: fullProtocol(), cluster: { driver: 'redis' } })
+            .dispatcher.handlePackages('/pkg-a/disable', 'PATCH', {}, {}, authed(['manage_metadata']));
+        expect(r.response?.status).toBe(200);
+
+        // The declaration restored; each replica's boot seed reads the file store when the host registers none.
+        process.env.OS_CLUSTER_REPLICAS = '3';
+        expect([...loadDisabledPackageIds('platform')]).toEqual(['pkg-a']);
+        const elsewhere = mkdtempSync(join(tmpdir(), 'os-packages-multi-replica-other-'));
+        try {
+            process.env.OS_HOME = elsewhere;
+            expect([...loadDisabledPackageIds('platform')]).toEqual([]);
+        } finally {
+            rmSync(elsewhere, { recursive: true, force: true });
+        }
+    });
 
     it('an isSystem caller is refused too: the change would still reach one replica', async () => {
         process.env.OS_CLUSTER_REPLICAS = '3';

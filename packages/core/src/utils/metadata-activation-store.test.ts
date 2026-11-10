@@ -349,6 +349,128 @@ describe('ObjectStoreMetadataActivationStore — an item no package ships', () =
     });
 });
 
+// [ADR-0150 D8 row R4] An item whose ledger already holds more than one row a
+// write could mean: two naming no package (stored before the package-less
+// index stood), or one naming none beside the write's package's own row. The
+// write used to update the FIRST match and give it the write's package, which
+// took one row of a package-less pair out of that index's reach, so the next
+// boot built the index over the pair and the duplicate was never reported
+// again. The store now refuses, naming every such row, and writes nothing —
+// the stance the boot backfill takes for the same rows (the describe below
+// `backfillActivationLedgerPackages`). The envelope (`code` + `status`) and
+// the row ids are asserted, never the sentence. These cases are the store
+// addressed by name (the default: actions and the catalog types); the same
+// refusal for a store addressed by `(package, name)` is the describe after
+// `the ledger addressed by (package, name)`.
+/** The writes a store engine double recorded. */
+const writes = (calls: Array<{ op: string }>) => calls.filter((c) => c.op === 'insert' || c.op === 'update');
+
+/** A refused write: its envelope (`code` + `status`) and every row id it names; never the sentence. */
+async function expectRefusedNaming(write: Promise<void>, ids: readonly string[]) {
+    const refusal = await write.then(() => undefined, (e: unknown) => e as { code?: unknown; status?: unknown; message?: unknown });
+    expect(refusal, 'the write was accepted').toBeDefined();
+    expect({ code: refusal?.code, status: refusal?.status }).toEqual({ code: 'RESOURCE_CONFLICT', status: 409 });
+    for (const id of ids) expect(String(refusal?.message)).toContain(id);
+}
+
+describe('ObjectStoreMetadataActivationStore by name — a write never picks one of several rows it could mean', () => {
+    it('refuses a write naming a package on an item with two package-less rows, naming both, and writes nothing', async () => {
+        const { engine, calls } = makeStoreEngine([
+            { id: 'd1', metadata_type: 'action', name: 'app_switch', package_id: null, active: 0 },
+            { id: 'd2', metadata_type: 'action', name: 'app_switch', package_id: null, active: 1 },
+        ]);
+
+        await expectRefusedNaming(
+            new ObjectStoreMetadataActivationStore(engine, 'action').setActive({ name: 'app_switch', packageId: 'com.example.app', active: false }),
+            ['d1', 'd2'],
+        );
+        expect(writes(calls)).toEqual([]);
+    });
+
+    it('refuses a write naming no package on the same pair: flipping one of two switches is picked by storage order', async () => {
+        const { engine, calls } = makeStoreEngine([
+            { id: 'd1', metadata_type: 'permission', name: 'env_set', package_id: null, active: false },
+            { id: 'd2', metadata_type: 'permission', name: 'env_set', package_id: null, active: true },
+        ]);
+
+        await expectRefusedNaming(
+            new ObjectStoreMetadataActivationStore(engine, 'permission').setActive({ name: 'env_set', active: true }),
+            ['d1', 'd2'],
+        );
+        expect(writes(calls)).toEqual([]);
+    });
+
+    it('refuses a write beside a package-less row AND the write\'s package\'s own row, naming both, in either storage order', async () => {
+        const packaged = { id: 'b1', metadata_type: 'action', name: 'approve', package_id: 'com.example.app', active: false };
+        const packageless = { id: 'n1', metadata_type: 'action', name: 'approve', package_id: null, active: false };
+        for (const rows of [[packaged, packageless], [packageless, packaged]]) {
+            const { engine, calls } = makeStoreEngine(rows.map((r) => ({ ...r })));
+
+            await expectRefusedNaming(
+                new ObjectStoreMetadataActivationStore(engine, 'action').setActive({ name: 'approve', packageId: 'com.example.app', active: true }),
+                ['b1', 'n1'],
+            );
+            expect(writes(calls)).toEqual([]);
+        }
+    });
+
+    it('refuses a write that finds rows of two other packages and none of its own: re-addressing one is a guess', async () => {
+        const { engine, calls } = makeStoreEngine([
+            { id: 'q1', metadata_type: 'action', name: 'app_switch', package_id: 'com.example.one', active: false },
+            { id: 'q2', metadata_type: 'action', name: 'app_switch', package_id: 'com.example.two', active: false },
+        ]);
+
+        await expectRefusedNaming(
+            new ObjectStoreMetadataActivationStore(engine, 'action').setActive({ name: 'app_switch', packageId: 'com.example.app', active: true }),
+            ['q1', 'q2'],
+        );
+        expect(writes(calls)).toEqual([]);
+    });
+
+    it('CONTROL: binds an item\'s ONE package-less row to the write\'s package, as before', async () => {
+        const { engine, calls } = makeStoreEngine([
+            { id: 'n1', metadata_type: 'action', name: 'app_switch', package_id: null, active: true },
+        ]);
+
+        await new ObjectStoreMetadataActivationStore(engine, 'action').setActive({ name: 'app_switch', packageId: 'com.example.app', active: false });
+
+        expect(writes(calls).map((c: any) => [c.op, c.data])).toEqual([
+            ['update', { id: 'n1', active: false, package_id: 'com.example.app' }],
+        ]);
+    });
+
+    it('CONTROL: beside another package\'s row, writes the row that names no package or the write\'s own, in either storage order', async () => {
+        const other = { id: 'q1', metadata_type: 'action', name: 'app_switch', package_id: 'com.example.other', active: false };
+        for (const mine of [
+            { id: 'n1', metadata_type: 'action', name: 'app_switch', package_id: null, active: true },
+            { id: 'm1', metadata_type: 'action', name: 'app_switch', package_id: 'com.example.app', active: true },
+        ]) {
+            for (const rows of [[other, mine], [mine, other]]) {
+                const { engine, calls } = makeStoreEngine(rows.map((r) => ({ ...r })));
+
+                await new ObjectStoreMetadataActivationStore(engine, 'action').setActive({ name: 'app_switch', packageId: 'com.example.app', active: false });
+
+                // Never the other package's row: that is its own switch (ADR-0150 D4).
+                expect(writes(calls).map((c: any) => [c.op, c.data])).toEqual([
+                    ['update', { id: mine.id, active: false, package_id: 'com.example.app' }],
+                ]);
+            }
+        }
+    });
+
+    it('CONTROL: re-addresses an item\'s ONE row of another package to the write\'s package, as before', async () => {
+        const { engine, calls } = makeStoreEngine([
+            { id: 'q1', metadata_type: 'action', name: 'app_switch', package_id: 'com.example.old', active: false },
+        ]);
+
+        await new ObjectStoreMetadataActivationStore(engine, 'action').setActive({ name: 'app_switch', packageId: 'com.example.app', active: true });
+
+        expect(writes(calls).map((c: any) => [c.op, c.data])).toEqual([
+            ['update', { id: 'q1', active: true, package_id: 'com.example.app' }],
+        ]);
+    });
+});
+
 // [ADR-0150 D4, #31696] A type whose readers consult the ledger by
 // `(package, name)` constructs its store with `addressing: 'package-and-name'`:
 // one package's write never re-attributes another package's row of the name.
@@ -419,6 +541,95 @@ describe('the ledger addressed by (package, name)', () => {
         await byName.setActive({ name: 'a', packageId: 'p1', active: false });
         await byName.setActive({ name: 'a', packageId: 'p2', active: true });
         expect(await byName.list()).toEqual([{ name: 'a', packageId: 'p2', active: true }]);
+    });
+});
+
+// [ADR-0150 D4, D8 row R4] The same refusal for a store addressed by
+// `(package, name)` (flows): a write for a package with no row of its own,
+// told to take the package-less row over (`adoptPackageless`, which the flow
+// toggle passes while its package is the name's one holder), never adopts one
+// of two; and a write for a package that finds only ANOTHER package's row
+// gets its own row beside it, never that one.
+describe('the ledger addressed by (package, name) — a write never adopts one of several rows, nor takes another package\'s', () => {
+    const BY_PACKAGE = { addressing: 'package-and-name' } as const;
+    const ADOPT = { adoptPackageless: true } as const;
+
+    it('refuses an adopting write over two package-less rows, naming both, and writes nothing', async () => {
+        const { engine, calls } = makeStoreEngine([
+            { id: 'd1', metadata_type: 'flow', name: 'f', package_id: null, active: 0 },
+            { id: 'd2', metadata_type: 'flow', name: 'f', package_id: null, active: 1 },
+        ]);
+
+        await expectRefusedNaming(
+            new ObjectStoreMetadataActivationStore(engine, 'flow', BY_PACKAGE).setActive({ name: 'f', packageId: 'p1', active: false }, ADOPT),
+            ['d1', 'd2'],
+        );
+        expect(writes(calls)).toEqual([]);
+    });
+
+    it('refuses a package-less write over two package-less rows', async () => {
+        const { engine, calls } = makeStoreEngine([
+            { id: 'd1', metadata_type: 'flow', name: 'f', package_id: null, active: false },
+            { id: 'd2', metadata_type: 'flow', name: 'f', package_id: null, active: true },
+        ]);
+
+        await expectRefusedNaming(
+            new ObjectStoreMetadataActivationStore(engine, 'flow', BY_PACKAGE).setActive({ name: 'f', active: true }),
+            ['d1', 'd2'],
+        );
+        expect(writes(calls)).toEqual([]);
+    });
+
+    it('CONTROL: a write that does not adopt (a name two packages hold) adds its own row and binds neither of the pair', async () => {
+        const { engine, calls } = makeStoreEngine([
+            { id: 'd1', metadata_type: 'flow', name: 'f', package_id: null, active: false },
+            { id: 'd2', metadata_type: 'flow', name: 'f', package_id: null, active: true },
+        ]);
+
+        await new ObjectStoreMetadataActivationStore(engine, 'flow', BY_PACKAGE).setActive({ name: 'f', packageId: 'p1', active: false });
+
+        expect(writes(calls).map((c: any) => [c.op, c.data])).toEqual([
+            ['insert', { metadata_type: 'flow', name: 'f', package_id: 'p1', active: false }],
+        ]);
+    });
+
+    it('CONTROL: the write\'s own row beside a package-less one is its switch, and is the row written', async () => {
+        for (const adopt of [undefined, ADOPT]) {
+            const { engine, calls } = makeStoreEngine([
+                { id: 'n1', metadata_type: 'flow', name: 'f', package_id: null, active: false },
+                { id: 'm1', metadata_type: 'flow', name: 'f', package_id: 'p1', active: false },
+            ]);
+
+            await new ObjectStoreMetadataActivationStore(engine, 'flow', BY_PACKAGE).setActive({ name: 'f', packageId: 'p1', active: true }, adopt);
+
+            expect(writes(calls).map((c: any) => [c.op, c.data])).toEqual([
+                ['update', { id: 'm1', active: true, package_id: 'p1' }],
+            ]);
+        }
+    });
+
+    it('two packages: a write for B that finds only A\'s row adds B\'s own row, A\'s untouched, and B\'s next switch lands on it', async () => {
+        for (const adopt of [undefined, ADOPT]) {
+            const table: any[] = [{ id: 'a1', metadata_type: 'flow', name: 'f', package_id: 'com.example.a', active: false }];
+            const { engine, calls } = makeStoreEngine(table);
+            const insert = engine.insert;
+            engine.insert = vi.fn(async (object: string, data: any, options?: any) => {
+                const stored = await insert(object, data, options);
+                table.push({ ...data, id: 'b1' });
+                return stored;
+            });
+            const store = new ObjectStoreMetadataActivationStore(engine, 'flow', BY_PACKAGE);
+
+            await store.setActive({ name: 'f', packageId: 'com.example.b', active: false }, adopt);
+            await store.setActive({ name: 'f', packageId: 'com.example.b', active: true }, adopt);
+
+            expect(writes(calls).map((c: any) => [c.op, c.data])).toEqual([
+                ['insert', { metadata_type: 'flow', name: 'f', package_id: 'com.example.b', active: false }],
+                ['update', { id: 'b1', active: true, package_id: 'com.example.b' }],
+            ]);
+            // A's row: never addressed, and as it was.
+            expect(table[0]).toEqual({ id: 'a1', metadata_type: 'flow', name: 'f', package_id: 'com.example.a', active: false });
+        }
     });
 });
 

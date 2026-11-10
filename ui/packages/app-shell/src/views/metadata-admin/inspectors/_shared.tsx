@@ -156,7 +156,8 @@ export interface InspectorReorderButtonsProps {
 /**
  * Compact ↑/↓ pair sized to fit alongside the close button in the
  * inspector header. Auto-disables boundaries (↑ at index 0, ↓ at
- * `total - 1`) and the whole pair when `total <= 1`.
+ * `total - 1`), each saying so through {@link DisabledControlReason}, and
+ * renders nothing when `total <= 1`.
  */
 export function InspectorReorderButtons({
   index,
@@ -173,32 +174,47 @@ export function InspectorReorderButtons({
   const downLabel = downLabelProp ?? t('engine.inspector.reorder.down', locale);
   const canUp = !disabled && index > 0;
   const canDown = !disabled && index < total - 1;
+  // A pair the host disabled (`disabled`) carries the host's reason, never
+  // these: only the boundary is this pair's own to explain.
+  const upReason = !disabled && !canUp ? t('engine.inspector.reorder.atFirst', locale) : undefined;
+  const downReason = !disabled && !canDown ? t('engine.inspector.reorder.atLast', locale) : undefined;
   return (
     <>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="h-7 w-7 p-0"
-        onClick={() => canUp && onMove(index - 1)}
-        disabled={!canUp}
-        aria-label={upLabel}
-        title={upLabel}
-      >
-        <ArrowUp className="h-4 w-4" />
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="h-7 w-7 p-0"
-        onClick={() => canDown && onMove(index + 1)}
-        disabled={!canDown}
-        aria-label={downLabel}
-        title={downLabel}
-      >
-        <ArrowDown className="h-4 w-4" />
-      </Button>
+      <DisabledControlReason reason={upReason} testId="inspector-reorder-up-reason">
+        {(describedBy) => (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0"
+            onClick={() => canUp && onMove(index - 1)}
+            disabled={!canUp}
+            aria-label={upLabel}
+            aria-describedby={describedBy}
+            // The name is the label; a disabled pair's reason is its wrapper's.
+            title={upReason ? undefined : upLabel}
+          >
+            <ArrowUp className="h-4 w-4" />
+          </Button>
+        )}
+      </DisabledControlReason>
+      <DisabledControlReason reason={downReason} testId="inspector-reorder-down-reason">
+        {(describedBy) => (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0"
+            onClick={() => canDown && onMove(index + 1)}
+            disabled={!canDown}
+            aria-label={downLabel}
+            aria-describedby={describedBy}
+            title={downReason ? undefined : downLabel}
+          >
+            <ArrowDown className="h-4 w-4" />
+          </Button>
+        )}
+      </DisabledControlReason>
     </>
   );
 }
@@ -760,6 +776,68 @@ export function InspectorReadOnlyReason({ readOnly, reason: reasonProp, label, t
           </div>
         </TooltipTrigger>
         <TooltipContent side="left" align="start">{reason}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+export interface DisabledControlReasonProps {
+  /**
+   * Why the control is disabled. Missing or blank, the control renders bare,
+   * so a caller passes it only while the control is disabled for that reason.
+   */
+  reason?: string | null;
+  /** Test id of the `sr-only` copy of the reason. */
+  testId?: string;
+  /** Extra classes on the wrapper, for a host layout that sizes its buttons. */
+  className?: string;
+  /**
+   * Renders the control, given the id it points `aria-describedby` at (or
+   * `undefined` when there is no reason). The control keeps its own name.
+   */
+  children: (describedBy: string | undefined) => React.ReactElement;
+}
+
+/**
+ * The reason ONE disabled button gives, on hover, on keyboard focus and to
+ * assistive tech: the treatment Studio's header Publish takes. A natively
+ * disabled button fires no hover or focus, so a wrapping span is the tooltip
+ * trigger and a tab stop, and the span and the button both point
+ * `aria-describedby` at an `sr-only` copy of the reason. The button must let
+ * the hover through (`disabled:pointer-events-none`, which the `Button`
+ * primitive already carries). The panel-wide counterpart is
+ * {@link InspectorReadOnlyReason}.
+ */
+export function DisabledControlReason({ reason: reasonProp, testId, className, children }: DisabledControlReasonProps) {
+  const reasonId = React.useId();
+  const [open, setOpen] = React.useState(false);
+  const reason = reasonProp?.trim() || undefined;
+  // One element tree whether or not a reason shows, so the control is never
+  // remounted when it turns on or off: a held node and focus both survive.
+  // Without a reason the span is inert: no tab stop, no description, and the
+  // tooltip never opens.
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip open={!!reason && open} onOpenChange={setOpen}>
+        <TooltipTrigger asChild>
+          <span
+            tabIndex={reason ? 0 : undefined}
+            aria-describedby={reason ? reasonId : undefined}
+            data-disabled-reason={reason ? '' : undefined}
+            className={cn(
+              'inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+              className,
+            )}
+          >
+            {children(reason ? reasonId : undefined)}
+            {reason && (
+              <span id={reasonId} className="sr-only" data-testid={testId}>
+                {reason}
+              </span>
+            )}
+          </span>
+        </TooltipTrigger>
+        {reason && <TooltipContent className="max-w-xs">{reason}</TooltipContent>}
       </Tooltip>
     </TooltipProvider>
   );

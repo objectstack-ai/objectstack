@@ -2086,12 +2086,35 @@ const FLOW_NODE_UNREACHABLE_EXPLANATION: RuleExplanation = {
       'reached by attachment to its host node rather than by an edge, so it and the nodes only it leads to ' +
       'are not judged. Nodes inside a region body (`loop`, `parallel`, `try_catch` and the rest) are not ' +
       'judged here either: a region is a single-entry acyclic graph, which the region validator already ' +
-      'holds, so every node in it is reached. A flow with no start node, or with an edge whose endpoint ' +
-      'names no node, is not judged: the flow parse refuses those shapes first.',
+      'holds, so every node in it is reached. A flow with an edge whose endpoint names no node is not ' +
+      'judged: the flow parse refuses that edge first. A flow with no start node is not judged here either: ' +
+      'the parse accepts it, and `flow-start-node-missing` names it.',
     'The rule lives in lint rather than in the flow parse because the metadata save door parses every ' +
       'save, drafts included: a designer that deletes a node and leaves its successor unwired must still ' +
       'be able to save the draft. The draft stores with the finding in its diagnostics, and publish ' +
       'refuses it.',
+    FLOW_GATE_REACH,
+  ],
+};
+
+const FLOW_START_NODE_MISSING_EXPLANATION: RuleExplanation = {
+  rule: 'flow-start-node-missing',
+  covers: 'why a flow with no start node never runs and what to add',
+  paragraphs: [
+    'A flow run begins at the flow\'s first `start` node and follows edges from there; nothing else ' +
+      'schedules a top-level node. A flow whose top-level `nodes` hold no node of type `start` can ' +
+      'therefore never run: every trigger and every explicit run would be refused with ' +
+      '`FLOW_NO_START_NODE`, and the automation engine refuses to register the flow at all, so the stored ' +
+      'row reads `registration: refused`.',
+    'The cure is one node: add a node with `type: \'start\'` to the top-level `nodes` and an edge from it ' +
+      'to the first step. A record-change or schedule flow declares its trigger in that node\'s `config`.',
+    'Only a flow with no start node is reported. A flow with more than one registers and runs from the ' +
+      'first, and `flow-node-unreachable` names each extra start node. Region bodies (`loop`, `parallel`, ' +
+      '`try_catch` and the rest) are entered at their single entry node, not at a start node, so they are ' +
+      'not judged.',
+    'The rule lives in lint rather than in the flow parse because the metadata save door parses every ' +
+      'save, drafts included: a designer draft may hold no start node mid-edit and must still save. The ' +
+      'draft stores with the finding in its diagnostics, and a live save and a publish refuse it.',
     FLOW_GATE_REACH,
   ],
 };
@@ -5941,6 +5964,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SHARING_RULE_OBJECT_NOT_SHAREABLE_EXPLANATION.rule]: SHARING_RULE_OBJECT_NOT_SHAREABLE_EXPLANATION,
   [SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT_EXPLANATION.rule]: SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT_EXPLANATION,
   [FLOW_NODE_UNREACHABLE_EXPLANATION.rule]: FLOW_NODE_UNREACHABLE_EXPLANATION,
+  [FLOW_START_NODE_MISSING_EXPLANATION.rule]: FLOW_START_NODE_MISSING_EXPLANATION,
   [FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID_EXPLANATION.rule]: FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID_EXPLANATION,
   [FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE_EXPLANATION.rule]: FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE_EXPLANATION,
   [FLOW_TIME_RELATIVE_OBJECT_MISMATCH_EXPLANATION.rule]: FLOW_TIME_RELATIVE_OBJECT_MISMATCH_EXPLANATION,
