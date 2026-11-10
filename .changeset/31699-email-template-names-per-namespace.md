@@ -3,6 +3,7 @@
 '@objectstack/core': minor
 '@objectstack/spec': minor
 '@objectstack/metadata-protocol': minor
+'@objectstack/metadata': minor
 '@objectstack/plugin-email': minor
 '@objectstack/service-automation': minor
 '@objectstack/service-messaging': minor
@@ -24,11 +25,15 @@ The bare-name one-holder rule (`bare-name-one-holder.ts`) has narrowed for `emai
 - A send (`IEmailService.sendTemplate` / `renderTemplate`) resolves the name from `callerPackageId`, a new optional member of `SendTemplateInput` and `RenderTemplateInput` (`@objectstack/spec`): that package's own template, else the one holder in its declared dependency closure, else `409` naming every candidate. A name two packages hold is then read at the resolved holder's own address only (its members, its pair's added members, its environment overlay), never mixed with the other holder's. A send that names no package keeps the bare-name meaning: the environment's own template, else the one package holder, else `409` naming every holder. The eight platform-requested `auth.*` mails resolve environment-wide whatever is passed.
 - The flow `notify` node records the package whose own flow body is armed (`AutomationEngine.flowCallerPackage`, now public) beside its template reference, as the delivery payload's `templateCallerPackageId`; the email and inbox channels hand it to the send. An environment-authored flow, or an environment override of a packaged one, records none; a `templateCallerPackageId` key in the node's literal `payload` is dropped, never forwarded. A delivery row queued before this release carries no such key and sends as before, with no package.
 
+- `MetadataManager`'s in-memory store keeps one slot per `(package, name)` for `email_template` (`PACKAGE_SLOTTED_STORE_TYPES` in `@objectstack/metadata`, now `api` and `email_template`): two packages' templates of one name both stay in it, `get(type, name, packageId)` answers that package's own (never another package's), and `get` naming no package of a two-holder name refuses `409` naming both (D3), where the second package's item overwrote the first's.
+
 So a package no longer has to rename an email template because a package of another namespace already ships one of that name, and each package's flows keep sending their own.
 
 A customization pair's member row (a locale Studio added in an App's pair) that two or more holders of the name could own, because two packages of the App each ship the template and the row declares no `overrides` naming its base, is no package's own: each such holder's exact read refuses it `409` naming every one, the list scoped to a holder leaves it out (a send there takes the locale ladder's next rung), and `os migrate stored-references` lists it under `pairMembers`. With one such holder it is that holder's, as before (#28390 ruling A); the App's own address keeps serving it; once the row declares the base it customizes (`overrides.package`), only that base serves it.
 
 Not changed, and declared: a legacy package-less environment row of a name two packages now hold stands in for both holders' slot, so both exact addresses serve it, as `main` already does for the nine presentation and AI types. A package-less row is the customization of one holder and cannot say which; it is recorded on the epic as an open item, to be refused for every covered type before that type narrows.
+
+Not changed, and declared: the holder set of the email template doors (the bare read, `?package=`, the send) is the registry's own, so a package an operator disabled still counts as a holder there and is named in a refusal, while the served lists withhold its items; the install gate counts it too, as it must. This is the class #32183 tracks for every package-scoped type, and it is fixed there, once.
 
 Unchanged, and still refused with the same `422 NAMESPACE_CONFLICT` envelope and sentence:
 

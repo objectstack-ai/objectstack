@@ -44,8 +44,16 @@ import {
 } from '@objectstack/core';
 import { peelStoredEnvelope } from './stored-envelope.js';
 
-/** The types whose in-memory items are stored per `(package, name)`. */
-export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set(['api']);
+/**
+ * The types whose in-memory items are stored per `(package, name)`.
+ *
+ * [#31699, ADR-0150 child B] `email_template` joins in the same change that
+ * adds it to `NAMESPACE_SCOPED_BARE_NAME_TYPES` (`@objectstack/objectql`):
+ * once two packages of two namespaces may each hold one template name, the
+ * second package's item must not overwrite the first's here before any reader
+ * sees it.
+ */
+export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set(['api', 'email_template']);
 
 /** The provenance sentinel a rehydrated row carries in place of a package. */
 const OVERLAY_SENTINEL = 'sys_metadata';
