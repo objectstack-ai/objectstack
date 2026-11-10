@@ -64,7 +64,10 @@ function dispatcherWith(h: Holdings, flowNames: string[] = ['send_digest', 'ping
         getRun: vi.fn(async (runId: string) => ({ id: runId, flowName: 'trigger' })),
     };
     const ql = { registry: registryWith(h) };
-    const services: Record<string, unknown> = { automation, objectql: ql };
+    // `auth` signs in the caller `dispatch()` resolves for itself (the catch-all
+    // seam below); `handleAutomation` is handed its execution context directly.
+    const auth = { api: { getSession: async () => ({ user: { id: 'u1' } }) } };
+    const services: Record<string, unknown> = { automation, objectql: ql, auth };
     const resolve = (name: string) => services[name];
     const kernel: any = { getService: resolve, getServiceAsync: async (name: string) => resolve(name), context: { getService: resolve } };
     const dispatcher = new HttpDispatcher(kernel);
@@ -79,8 +82,8 @@ function dispatcherWith(h: Holdings, flowNames: string[] = ['send_digest', 'ping
     };
     // What a catch-all host (`createHonoApp`) does with any `/api/v1/*` path:
     // hand it to `dispatch()` and answer what comes back.
-    const dispatch = async (path: string, method: string, ec: Record<string, unknown> = ADMIN) => {
-        const answered = await dispatcher.dispatch(method, path, {}, {}, { request: new Request(`http://host/api/v1${path}`, { method }), executionContext: ec } as any, '/api/v1');
+    const dispatch = async (path: string, method: string) => {
+        const answered = await dispatcher.dispatch(method, path, {}, {}, { request: new Request(`http://host/api/v1${path}`, { method }) } as any, '/api/v1');
         return { handled: answered.handled, status: answered.response?.status, body: answered.response?.body as any };
     };
     return { call, dispatch, automation };
