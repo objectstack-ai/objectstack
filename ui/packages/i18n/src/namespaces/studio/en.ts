@@ -3183,6 +3183,8 @@ const STUDIO_EN: Record<string, string> = {
   // under, shown when the caller supplies that rule (an object's namespace prefix).
   'engine.studio.createItem.savedAs': 'Saved as',
   'engine.studio.createItem.notDerived': 'The display name has no Latin letters to make an identifier from. Type one: lowercase letters, digits and underscores.',
+  'engine.studio.createItem.needLabel': 'Enter a display name first',
+  'engine.studio.createItem.needName': 'Enter an identifier first: lowercase letters, digits and underscores',
   // `383502b23` — this is the CONFIRM control of the shared create dialog.
   // Never give it a name that shares a leading run with the affordance that
   // OPENS that dialog (`engine.studio.app.create`, `Create app` — and the

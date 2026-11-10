@@ -2840,6 +2840,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.creating': '创建中…',
   'engine.studio.createItem.savedAs': '保存为',
   'engine.studio.createItem.notDerived': '显示名称里没有可用来生成标识的英文字母，请手动填写英文标识（小写字母、数字和下划线）。',
+  'engine.studio.createItem.needLabel': '请先填写显示名称',
+  'engine.studio.createItem.needName': '请先填写英文标识（小写字母、数字和下划线）',
   // `383502b23` — see the English entry. This value must share no leading
   // run with `engine.studio.app.create`, which opens the same dialog.
   'engine.studio.createDraft': '存为草稿',
