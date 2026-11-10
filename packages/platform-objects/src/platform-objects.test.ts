@@ -308,15 +308,20 @@ describe('@objectstack/platform-objects', () => {
         ['mapGroups', 'text', false],
       ]);
       const byName = new Map(params.map((p) => [p.name, p]));
+      // A help text is a `template` slot: the parsed object carries a bare string as `{ dialect, source }`.
+      const help = (name: string): string => {
+        const h = byName.get(name)?.helpText as string | { source?: string } | undefined;
+        return typeof h === 'string' ? h : String(h?.source ?? '');
+      };
       // Never set for the admin: no default on the opt-out or the email claim.
       expect(byName.get('skipUserInfo')?.defaultValue).toBeUndefined();
       expect(byName.get('mapEmail')?.defaultValue).toBeUndefined();
       // The Entra ID mapping is suggested in words, beside the issuer host it applies to.
-      expect(String(byName.get('mapEmail')?.helpText)).toContain('login.microsoftonline.com');
-      expect(String(byName.get('mapEmail')?.helpText)).toContain('"preferred_username"');
+      expect(help('mapEmail')).toContain('login.microsoftonline.com');
+      expect(help('mapEmail')).toContain('"preferred_username"');
       // Both nameable endpoints say a named endpoint is trusted for this provider.
       for (const name of ['discoveryEndpoint', 'userInfoEndpoint']) {
-        expect(String(byName.get(name)?.helpText), name).toContain('An endpoint named here is trusted for this provider');
+        expect(help(name), name).toContain('An endpoint named here is trusted for this provider');
       }
     });
 
