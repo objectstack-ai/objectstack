@@ -4,7 +4,7 @@
 // on a booted showcase holding the clash phase 1 still boots with a warning:
 // two `AppPlugin` packages of two namespaces, `com.qa.bare.alpha` (`alpha`) and
 // `com.qa.bare.beta` (`beta`), each shipping the dataset `qa_shared_dataset`
-// over its own object.
+// over its own object, and alpha alone holding `qa_alpha_dataset`.
 //
 // The doors driven here:
 //
@@ -14,7 +14,9 @@
 //     exact qualifier and runs X's own dataset, or refuses naming the holders;
 //   - `GET /meta/dataset/NAME` (bare 409), `/meta/dataset/NS/NAME` and
 //     `?package=` (each its own holder), now that `dataset` is one of the
-//     types whose by-name readers consult `(package, name)`;
+//     types whose by-name readers consult `(package, name)`; a qualified read
+//     naming a package that does not hold the name (`/NS/NAME`, `?package=`,
+//     `_env`) is refused naming the holder, where it served alpha's (200);
 //   - the MCP tool `query_dataset` (its callers belong to no package): two
 //     holders refused naming both.
 //
@@ -30,6 +32,7 @@ import { defineStack } from '@objectstack/spec';
 import { bootShowcase } from './showcase-boot.js';
 
 const DATASET = 'qa_shared_dataset';
+const ALPHA_ONLY = 'qa_alpha_dataset';
 const ALPHA = 'com.qa.bare.alpha';
 const BETA = 'com.qa.bare.beta';
 const SHOWCASE = 'com.example.showcase';
@@ -51,7 +54,13 @@ function bootPackage(p: 'alpha' | 'beta') {
       object: `${p}_item`,
       dimensions: [{ name: 'note', label: `${p} note`, field: 'note', type: 'string' }],
       measures: [{ name: 'row_count', label: `${p} count`, aggregate: 'count' }],
-    }],
+    }, ...(p === 'alpha' ? [{
+      name: ALPHA_ONLY,
+      label: 'alpha only dataset',
+      object: 'alpha_item',
+      dimensions: [{ name: 'note', label: 'alpha only note', field: 'note', type: 'string' }],
+      measures: [{ name: 'row_count', label: 'alpha only count', aggregate: 'count' }],
+    }] : [])],
   } as never);
 }
 
@@ -139,6 +148,38 @@ describe('[#32072] the dataset readers resolve a dataset by package (ADR-0150 D3
       expect(named.status).toBe(200);
       expect(named.body.item.label).toBe(`${p} dataset`);
     }
+  });
+
+  it('a qualified read naming a package that does not hold the name is refused naming the holder, on /meta and the query door', async () => {
+    for (const path of [
+      `/meta/dataset/beta/${ALPHA_ONLY}`,
+      `/meta/dataset/${ALPHA_ONLY}?package=${BETA}`,
+      `/meta/dataset/_env/${ALPHA_ONLY}`,
+    ]) {
+      const read = await meta(path);
+      expect([read.status, codeOf(read.body)], `${path} ${JSON.stringify(read.body)}`).toEqual([409, 'RESOURCE_CONFLICT']);
+      expect(messageOf(read.body), path).toContain(ALPHA);
+    }
+    const env = await meta(`/meta/dataset/_env/${DATASET}`);
+    expect([env.status, codeOf(env.body)], JSON.stringify(env.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+    expect(messageOf(env.body)).toContain(ALPHA);
+    expect(messageOf(env.body)).toContain(BETA);
+    const door = await query(ALPHA_ONLY, 'row_count', `?package=${BETA}`);
+    expect([door.status, codeOf(door.body)], door.text).toEqual([409, 'RESOURCE_CONFLICT']);
+    expect(messageOf(door.body)).toContain(ALPHA);
+  });
+
+  it('CONTROL: the one-holder alpha dataset is served bare, at its namespace and at its `?package=`', async () => {
+    for (const path of [`/meta/dataset/${ALPHA_ONLY}`, `/meta/dataset/alpha/${ALPHA_ONLY}`, `/meta/dataset/${ALPHA_ONLY}?package=${ALPHA}`]) {
+      const read = await meta(path);
+      expect(read.status, path).toBe(200);
+      expect(read.body.item.label, path).toBe('alpha only dataset');
+    }
+    const bare = await query(ALPHA_ONLY, 'row_count');
+    expect(bare.status, bare.text).toBe(200);
+    expect(bare.body.object).toBe('alpha_item');
+    const named = await query(ALPHA_ONLY, 'row_count', `?package=${ALPHA}`);
+    expect(named.text).toBe(bare.text);
   });
 
   it('the MCP tool query_dataset (a caller with no package) is refused naming both', async () => {
