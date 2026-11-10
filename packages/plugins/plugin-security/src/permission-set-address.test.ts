@@ -24,6 +24,7 @@ import {
   resolveUserAuthzGrants,
   securityCatalogReaderOf,
 } from '@objectstack/core';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { SecurityPlugin } from './security-plugin.js';
 import { buildContextForUser } from './explain-engine.js';
 
@@ -82,7 +83,7 @@ function engine(tables: Record<string, Array<Record<string, unknown>>>, position
     registry: scopedRegistry(HOLDERS, positions),
     registerMiddleware: () => {},
     getSchema: () => null,
-    findOne: async () => null,
+    findOne: async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; },
     find: async (object: string, opts: any) => {
       const rows = (tables[object] ?? []).filter((r) => matches(r, opts?.where));
       return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
