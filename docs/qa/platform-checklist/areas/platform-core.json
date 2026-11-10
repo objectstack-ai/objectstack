@@ -4592,6 +4592,380 @@
           "ref": "#32019"
         }
       ]
+    },
+    {
+      "id": "platform-core.multi-replica-package-change-refusal",
+      "title": "Under declared replicas on Redis a runtime package change is refused 409 MULTI_REPLICA_PACKAGE_CHANGE_REFUSED on every package door, on marketplace install-local, and on a clone that would create a customization package; nothing is written",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123): every call"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two replicas declared on Redis: a Redis server both reach (OS_REDIS_URL), ONE shared Postgres (OS_DATABASE_URL=postgres://…, never a file database: os serve refuses one under this declaration, cli.serve-multi-replica-local-database-refusal), OS_CLUSTER_DRIVER=redis with OS_CLUSTER_REPLICAS=2 on both, the same OS_AUTH_SECRET on both (os start refuses without one, cli.start-multi-replica-auth-secret-refusal), an app that declares @objectstack/service-cluster and @objectstack/service-cluster-redis, and a multi-node gate registered on the module instance os serve consults (packages/services/service-cluster/src/multi-node-gate.ts#registerMultiNodeGate). Two os start processes, each on its own port and its own home (--home), are replica A and replica B. Premise check before any clause: neither boot log carries `[cluster] multi-node not authorized (`, and GET /api/v1/ready on each answers a body whose cluster.driver is redis",
+          "a scratch app package built with objectstack build (its dist/objectstack.json) for the install probes"
+        ],
+        "knownGaps": [
+          "BLOCKED(fixture) until a run provisions REPLICA_FIXTURE. The open tree registers no multi-node gate: checkMultiNodeAllowed fails closed when none is registered (packages/services/service-cluster/src/multi-node-gate.ts#checkMultiNodeAllowed), os serve then drops the redis driver for the in-process one, and the split-brain guard refuses the declared topology at ClusterServicePlugin.init, so no declared multi-replica boot on Redis reaches kernel:ready on a stock tree. The gate carriers ship with a distribution, not this repository. The unproven open-tree route is the one the CLI pin uses: an app whose own copy of @objectstack/service-cluster calls registerMultiNodeGate on the instance os serve imports from the host (packages/cli/test/serve-multi-node-gate-declaration.integration.test.ts#writeApp), here with the real redis driver instead of the pin's memory stand-in. The first run that boots two replicas that way names the recipe and lifts `blocked` in the same revision. FOLLOW-UPS §17c"
+        ]
+      },
+      "steps": [
+        "on replica A: POST /api/v1/packages with the scratch package; PATCH /api/v1/packages/com.example.showcase/disable and /enable; PATCH /api/v1/packages/com.example.showcase; POST /api/v1/packages/com.example.showcase/duplicate and /ensure-customization; DELETE /api/v1/packages/com.example.showcase",
+        "POST /api/v1/marketplace/install-local with the scratch manifest, and DELETE /api/v1/marketplace/install-local/ID",
+        "clone a packaged flow of a package that has no customization package yet, through the automation clone door",
+        "GET /api/v1/packages on replica A and on replica B"
+      ],
+      "acceptance": [
+        {
+          "clause": "every package door answers 409 MULTI_REPLICA_PACKAGE_CHANGE_REFUSED naming its act, and nothing changes",
+          "oracle": "api",
+          "verify": "each answers 409 with code MULTI_REPLICA_PACKAGE_CHANGE_REFUSED and the message \"<act> was refused: this deployment declares several replicas … Make the change in a maintenance window instead … Nothing was changed or written.\" (packages/runtime/src/multi-replica-package-refusal.ts#multiReplicaPackageChangeMessage), the act being Installing a package, Enabling package \"ID\", Disabling package \"ID\", Updating package \"ID\", Duplicating package \"ID\", Ensuring the customization package of \"ID\" or Deleting package \"ID\"; the package list reads the same before and after on both replicas",
+          "evidence": "the seven 409 bodies and the two package lists"
+        },
+        {
+          "clause": "install-local refuses both directions the same way",
+          "oracle": "api",
+          "verify": "both answer 409 MULTI_REPLICA_PACKAGE_CHANGE_REFUSED, \"Installing a package through install-local was refused\" and \"Uninstalling a package through install-local was refused\", \"Nothing was installed, uninstalled or written.\" (packages/cloud-connection/src/marketplace-install-local-plugin.ts)",
+          "evidence": "both 409 bodies"
+        },
+        {
+          "clause": "a clone that would create the customization package is refused, naming the pair",
+          "oracle": "api",
+          "verify": "the clone answers 409 MULTI_REPLICA_PACKAGE_CHANGE_REFUSED, its message naming the paired customization package that does not exist yet (packages/runtime/src/multi-replica-package-refusal.ts#multiReplicaPairCreationRefusal)",
+          "evidence": "the 409 body"
+        }
+      ],
+      "negative": [
+        "a package door that changes replica A alone (the list differs between A and B) is a FAIL",
+        "reading these 409s on a single-node boot is wrong: each door proceeds as before when the declaration is absent (packages/runtime/src/multi-replica-package-refusal.ts#refuseMultiReplicaPackageChange)"
+      ],
+      "blocked": {
+        "by": "fixture",
+        "ref": "fixture gap: no multi-node gate the open tree can register, so no declared multi-replica boot on Redis reaches kernel:ready (FOLLOW-UPS §17c, #32020)"
+      },
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/runtime/src/domains/packages-capability-gate.test.ts, packages/runtime/src/domains/automation-flow-clone-custom-package.test.ts, packages/runtime/src/domains/permission-set-clone.test.ts and packages/cloud-connection/src/marketplace-install-local-register-refusal.test.ts; no live spec boots declared replicas"
+      },
+      "source": [
+        "packages/runtime/src/multi-replica-package-refusal.ts#refuseMultiReplicaPackageChange, #multiReplicaPackageChangeMessage and #multiReplicaPairCreationRefusal",
+        "packages/runtime/src/domains/packages.ts (the seven doors) and packages/runtime/src/domains/automation.ts (the clone)",
+        "packages/cloud-connection/src/marketplace-install-local-plugin.ts (the install-local refusal)",
+        "packages/services/service-cluster/src/multi-replica.ts#MULTI_REPLICA_PACKAGE_CHANGE_REFUSED",
+        "packages/runtime/src/route-ledger.ts (the /packages rows)",
+        "#31751 (runtime package changes), #31712 (install-local)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — multi-replica on Redis: runtime package changes and install-local are refused (#31751, #31712). Blocked(fixture): no multi-node gate in the open tree. Scoped sweep #32020 (epic #32022 M2), read from source at 43a51b55; no live run made",
+          "ref": "#32020"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.ready-cluster-driver-health",
+      "title": "GET /api/v1/ready reports the redis cluster driver's health under declared replicas: a cluster entry when it answers, and status degraded (still 200) when it does not; a single node's body is unchanged",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "an orchestrator probing readiness (no session)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two replicas declared on Redis: a Redis server both reach (OS_REDIS_URL), ONE shared Postgres (OS_DATABASE_URL=postgres://…, never a file database: os serve refuses one under this declaration, cli.serve-multi-replica-local-database-refusal), OS_CLUSTER_DRIVER=redis with OS_CLUSTER_REPLICAS=2 on both, the same OS_AUTH_SECRET on both (os start refuses without one, cli.start-multi-replica-auth-secret-refusal), an app that declares @objectstack/service-cluster and @objectstack/service-cluster-redis, and a multi-node gate registered on the module instance os serve consults (packages/services/service-cluster/src/multi-node-gate.ts#registerMultiNodeGate). Two os start processes, each on its own port and its own home (--home), are replica A and replica B. Premise check before any clause: neither boot log carries `[cluster] multi-node not authorized (`, and GET /api/v1/ready on each answers a body whose cluster.driver is redis",
+          "a way to stop the Redis server and start it again during the run (its own process or container)",
+          "for the control, a single-node showcase boot with no cluster variables"
+        ],
+        "knownGaps": [
+          "BLOCKED(fixture) until a run provisions REPLICA_FIXTURE. The open tree registers no multi-node gate: checkMultiNodeAllowed fails closed when none is registered (packages/services/service-cluster/src/multi-node-gate.ts#checkMultiNodeAllowed), os serve then drops the redis driver for the in-process one, and the split-brain guard refuses the declared topology at ClusterServicePlugin.init, so no declared multi-replica boot on Redis reaches kernel:ready on a stock tree. The gate carriers ship with a distribution, not this repository. The unproven open-tree route is the one the CLI pin uses: an app whose own copy of @objectstack/service-cluster calls registerMultiNodeGate on the instance os serve imports from the host (packages/cli/test/serve-multi-node-gate-declaration.integration.test.ts#writeApp), here with the real redis driver instead of the pin's memory stand-in. The first run that boots two replicas that way names the recipe and lifts `blocked` in the same revision. FOLLOW-UPS §17c"
+        ]
+      },
+      "steps": [
+        "GET /api/v1/ready on replica A",
+        "stop the Redis server; wait at least two seconds; GET /api/v1/ready on replica A",
+        "start Redis again; wait for the replica to reconnect; GET /api/v1/ready",
+        "control: GET /api/v1/ready on the single-node boot"
+      ],
+      "acceptance": [
+        {
+          "clause": "a healthy replica answers 200 with its status and a cluster entry naming the driver as reachable",
+          "oracle": "api",
+          "verify": "the body keeps its status ready and gains cluster { driver: 'redis', reachable: true } (packages/runtime/src/http-dispatcher.ts#withClusterReading; packages/services/service-cluster/src/driver-health.ts#ClusterDriverHealth)",
+          "evidence": "the body"
+        },
+        {
+          "clause": "with Redis down the probe still answers 200, with status degraded and why",
+          "oracle": "api",
+          "verify": "the body answers 200 with status degraded and cluster { driver: 'redis', reachable: false, reason } where reason is one of timeout, ping-failed, unexpected-reply or no-probe (the probe times out at packages/services/service-cluster/src/driver-health.ts#DEFAULT_CLUSTER_PROBE_TIMEOUT_MS, and the reading is held one second)",
+          "evidence": "the body"
+        },
+        {
+          "clause": "recovery reads healthy again, and a single node answers exactly as before",
+          "oracle": "api",
+          "verify": "after reconnect the body is the healthy one again; the single-node body has no cluster key",
+          "evidence": "both bodies"
+        }
+      ],
+      "negative": [
+        "a 503 while Redis is down, or a cluster key on the single-node body, is a FAIL"
+      ],
+      "traps": [
+        "cache-staleness"
+      ],
+      "blocked": {
+        "by": "fixture",
+        "ref": "fixture gap: no multi-node gate the open tree can register, so no declared multi-replica boot on Redis reaches kernel:ready (FOLLOW-UPS §17c, #32020)"
+      },
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/runtime/src/http-dispatcher.ready.test.ts and packages/services/service-cluster/src/driver-health.test.ts; no live spec boots declared replicas"
+      },
+      "source": [
+        "packages/runtime/src/http-dispatcher.ts#withClusterReading",
+        "packages/services/service-cluster/src/driver-health.ts#ClusterDriverHealth and #DEFAULT_CLUSTER_PROBE_TIMEOUT_MS",
+        "packages/runtime/src/route-ledger.ts (GET /ready)",
+        "#31711"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — multi-replica on Redis: /ready reports the cluster driver's health (#31711). Blocked(fixture): no multi-node gate in the open tree. Scoped sweep #32020 (epic #32022 M2), read from source at 43a51b55; no live run made",
+          "ref": "#32020"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.cluster-membership-heartbeat",
+      "title": "Under declared replicas on Redis each replica keeps a membership key alive by heartbeat and lists itself in the roster; a killed replica drops out within the TTL and a stopped one at once",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "an operator reading which replicas are alive"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two replicas declared on Redis: a Redis server both reach (OS_REDIS_URL), ONE shared Postgres (OS_DATABASE_URL=postgres://…, never a file database: os serve refuses one under this declaration, cli.serve-multi-replica-local-database-refusal), OS_CLUSTER_DRIVER=redis with OS_CLUSTER_REPLICAS=2 on both, the same OS_AUTH_SECRET on both (os start refuses without one, cli.start-multi-replica-auth-secret-refusal), an app that declares @objectstack/service-cluster and @objectstack/service-cluster-redis, and a multi-node gate registered on the module instance os serve consults (packages/services/service-cluster/src/multi-node-gate.ts#registerMultiNodeGate). Two os start processes, each on its own port and its own home (--home), are replica A and replica B. Premise check before any clause: neither boot log carries `[cluster] multi-node not authorized (`, and GET /api/v1/ready on each answers a body whose cluster.driver is redis",
+          "redis-cli against the same Redis, and the default cluster key prefix os:"
+        ],
+        "knownGaps": [
+          "BLOCKED(fixture) until a run provisions REPLICA_FIXTURE. The open tree registers no multi-node gate: checkMultiNodeAllowed fails closed when none is registered (packages/services/service-cluster/src/multi-node-gate.ts#checkMultiNodeAllowed), os serve then drops the redis driver for the in-process one, and the split-brain guard refuses the declared topology at ClusterServicePlugin.init, so no declared multi-replica boot on Redis reaches kernel:ready on a stock tree. The gate carriers ship with a distribution, not this repository. The unproven open-tree route is the one the CLI pin uses: an app whose own copy of @objectstack/service-cluster calls registerMultiNodeGate on the instance os serve imports from the host (packages/cli/test/serve-multi-node-gate-declaration.integration.test.ts#writeApp), here with the real redis driver instead of the pin's memory stand-in. The first run that boots two replicas that way names the recipe and lifts `blocked` in the same revision. FOLLOW-UPS §17c",
+          "readClusterMembers() has no HTTP door or CLI command at the base sha; the item reads the keys it reads, in Redis"
+        ]
+      },
+      "steps": [
+        "with both replicas up, redis-cli --scan --pattern 'os:kv:cluster:member:*', then GET each key and its TTL, and GET os:kv:cluster:members",
+        "kill -9 replica B; scan again every five seconds for twenty seconds",
+        "start B again, wait for its key, then stop it with SIGTERM and scan at once"
+      ],
+      "acceptance": [
+        {
+          "clause": "each live replica holds one member key with a TTL, and the roster lists both",
+          "oracle": "log",
+          "verify": "two keys os:kv:cluster:member:NODE_ID, each TTL at most 15 seconds and renewed between reads (packages/services/service-cluster/src/cluster-membership.ts#CLUSTER_MEMBER_KEY_PREFIX and #DEFAULT_TTL_MS); the roster value lists both node ids (#CLUSTER_MEMBERS_ROSTER_KEY)",
+          "evidence": "the redis-cli output"
+        },
+        {
+          "clause": "a killed replica drops out within the TTL, and the survivor prunes it from the roster",
+          "oracle": "log",
+          "verify": "B's key is gone within 15 seconds of the kill, and after A's next beat the roster no longer lists B",
+          "evidence": "the timed scans"
+        },
+        {
+          "clause": "a clean stop deletes the key at once",
+          "oracle": "log",
+          "verify": "the scan right after SIGTERM no longer shows B's new key",
+          "evidence": "the scan"
+        }
+      ],
+      "negative": [
+        "a member key with no TTL, or a roster that grows by one id per restart, is a FAIL"
+      ],
+      "traps": [
+        "eventual-consistency",
+        "clock-skew"
+      ],
+      "blocked": {
+        "by": "fixture",
+        "ref": "fixture gap: no multi-node gate the open tree can register, so no declared multi-replica boot on Redis reaches kernel:ready (FOLLOW-UPS §17c, #32020)"
+      },
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/services/service-cluster/src/cluster-membership.test.ts; no live spec boots declared replicas"
+      },
+      "source": [
+        "packages/services/service-cluster/src/cluster-membership.ts#CLUSTER_MEMBER_KEY_PREFIX, #CLUSTER_MEMBERS_ROSTER_KEY, #DEFAULT_TTL_MS and #readClusterMembers",
+        "packages/services/service-cluster-redis/src/kv.ts (keys stored as PREFIXkv:KEY)",
+        "content/docs/kernel/cluster.mdx",
+        "#31942"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — multi-replica on Redis: membership heartbeat keys and readClusterMembers() (#31942). Blocked(fixture): no multi-node gate in the open tree. Scoped sweep #32020 (epic #32022 M2), read from source at 43a51b55; no live run made",
+          "ref": "#32020"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.settings-change-reaches-every-replica",
+      "title": "Under declared replicas on Redis a settings change made through one replica takes effect on the others without a restart (the settings lane)",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123): the settings change",
+        "an anonymous visitor signing up or in on replica B"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two replicas declared on Redis: a Redis server both reach (OS_REDIS_URL), ONE shared Postgres (OS_DATABASE_URL=postgres://…, never a file database: os serve refuses one under this declaration, cli.serve-multi-replica-local-database-refusal), OS_CLUSTER_DRIVER=redis with OS_CLUSTER_REPLICAS=2 on both, the same OS_AUTH_SECRET on both (os start refuses without one, cli.start-multi-replica-auth-secret-refusal), an app that declares @objectstack/service-cluster and @objectstack/service-cluster-redis, and a multi-node gate registered on the module instance os serve consults (packages/services/service-cluster/src/multi-node-gate.ts#registerMultiNodeGate). Two os start processes, each on its own port and its own home (--home), are replica A and replica B. Premise check before any clause: neither boot log carries `[cluster] multi-node not authorized (`, and GET /api/v1/ready on each answers a body whose cluster.driver is redis",
+          "redis-cli against the same Redis for the channel probe"
+        ],
+        "knownGaps": [
+          "BLOCKED(fixture) until a run provisions REPLICA_FIXTURE. The open tree registers no multi-node gate: checkMultiNodeAllowed fails closed when none is registered (packages/services/service-cluster/src/multi-node-gate.ts#checkMultiNodeAllowed), os serve then drops the redis driver for the in-process one, and the split-brain guard refuses the declared topology at ClusterServicePlugin.init, so no declared multi-replica boot on Redis reaches kernel:ready on a stock tree. The gate carriers ship with a distribution, not this repository. The unproven open-tree route is the one the CLI pin uses: an app whose own copy of @objectstack/service-cluster calls registerMultiNodeGate on the instance os serve imports from the host (packages/cli/test/serve-multi-node-gate-declaration.integration.test.ts#writeApp), here with the real redis driver instead of the pin's memory stand-in. The first run that boots two replicas that way names the recipe and lifts `blocked` in the same revision. FOLLOW-UPS §17c"
+        ]
+      },
+      "steps": [
+        "redis-cli SUBSCRIBE os:ps:settings.changed in a side shell",
+        "on replica A as admin, GET /api/settings/auth, then PUT /api/settings/auth raising password_min_length above the current value",
+        "on replica B, without restarting it, attempt a sign-up (on an invitation, as search:qa-contributor-bound-member step 1 does) with a password one character shorter than the new minimum",
+        "put password_min_length back"
+      ],
+      "acceptance": [
+        {
+          "clause": "the change is published on the settings channel",
+          "oracle": "log",
+          "verify": "the subscriber receives one message on os:ps:settings.changed naming the auth namespace (packages/services/service-settings/src/settings-cluster-channel.ts#SETTINGS_CHANGE_CLUSTER_CHANNEL; channels are stored as PREFIXps:CHANNEL, packages/services/service-cluster-redis/src/pubsub.ts)",
+          "evidence": "the subscriber output"
+        },
+        {
+          "clause": "replica B enforces the new value without a restart",
+          "oracle": "api",
+          "verify": "B refuses the short password with the password-length refusal; the same password was admitted before the change",
+          "evidence": "the refusal body and the earlier admission"
+        }
+      ],
+      "negative": [
+        "⛔ a GET /api/settings/auth on B that reads the new value proves nothing: both replicas read one shared database. The verdict rests on B's behaviour, never on a read"
+      ],
+      "traps": [
+        "eventual-consistency",
+        "cache-staleness"
+      ],
+      "blocked": {
+        "by": "fixture",
+        "ref": "fixture gap: no multi-node gate the open tree can register, so no declared multi-replica boot on Redis reaches kernel:ready (FOLLOW-UPS §17c, #32020)"
+      },
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/services/service-settings/src/settings-cluster-lane.test.ts; no live spec boots declared replicas"
+      },
+      "source": [
+        "packages/services/service-settings/src/settings-cluster-channel.ts#SETTINGS_CHANGE_CLUSTER_CHANNEL",
+        "packages/services/service-settings/src/settings-service.ts (publishes on a change, re-reads on a message)",
+        "packages/plugins/plugin-auth/src/auth-plugin.ts (subscribes to the auth namespace)",
+        "content/docs/kernel/cluster.mdx",
+        "#31785"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — multi-replica on Redis: settings changes reach every replica (#31785). Blocked(fixture): no multi-node gate in the open tree. Scoped sweep #32020 (epic #32022 M2), read from source at 43a51b55; no live run made",
+          "ref": "#32020"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.shared-redis-cache-across-replicas",
+      "title": "Under declared replicas on Redis the cache service is the one shared Redis cache, so a cache-backed limit such as the sign-in rate limit holds across replicas",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "an anonymous caller attempting sign-in on both replicas"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two replicas declared on Redis: a Redis server both reach (OS_REDIS_URL), ONE shared Postgres (OS_DATABASE_URL=postgres://…, never a file database: os serve refuses one under this declaration, cli.serve-multi-replica-local-database-refusal), OS_CLUSTER_DRIVER=redis with OS_CLUSTER_REPLICAS=2 on both, the same OS_AUTH_SECRET on both (os start refuses without one, cli.start-multi-replica-auth-secret-refusal), an app that declares @objectstack/service-cluster and @objectstack/service-cluster-redis, and a multi-node gate registered on the module instance os serve consults (packages/services/service-cluster/src/multi-node-gate.ts#registerMultiNodeGate). Two os start processes, each on its own port and its own home (--home), are replica A and replica B. Premise check before any clause: neither boot log carries `[cluster] multi-node not authorized (`, and GET /api/v1/ready on each answers a body whose cluster.driver is redis",
+          "redis-cli against the same Redis",
+          "the auth rate limit read first with GET /api/settings/auth (rate_limit_max and rate_limit_window_seconds), lowered by an admin for the run if it is large"
+        ],
+        "knownGaps": [
+          "BLOCKED(fixture) until a run provisions REPLICA_FIXTURE. The open tree registers no multi-node gate: checkMultiNodeAllowed fails closed when none is registered (packages/services/service-cluster/src/multi-node-gate.ts#checkMultiNodeAllowed), os serve then drops the redis driver for the in-process one, and the split-brain guard refuses the declared topology at ClusterServicePlugin.init, so no declared multi-replica boot on Redis reaches kernel:ready on a stock tree. The gate carriers ship with a distribution, not this repository. The unproven open-tree route is the one the CLI pin uses: an app whose own copy of @objectstack/service-cluster calls registerMultiNodeGate on the instance os serve imports from the host (packages/cli/test/serve-multi-node-gate-declaration.integration.test.ts#writeApp), here with the real redis driver instead of the pin's memory stand-in. The first run that boots two replicas that way names the recipe and lifts `blocked` in the same revision. FOLLOW-UPS §17c"
+        ]
+      },
+      "steps": [
+        "redis-cli --scan --pattern 'os:cache:*' and note the count",
+        "send POST /api/v1/auth/sign-in/email with a wrong password for one address, alternating replica A and replica B, rate_limit_max times within the window, then once more on either replica",
+        "scan os:cache:* again"
+      ],
+      "acceptance": [
+        {
+          "clause": "the limit counts attempts across both replicas: the attempt past the maximum is refused whichever replica takes it",
+          "oracle": "api",
+          "verify": "the extra attempt answers 429 although neither replica alone saw more than half of the attempts (packages/plugins/plugin-auth/src/rate-limit-storage.shared-redis.test.ts pins the shared storage)",
+          "evidence": "the status of every attempt, with the replica that took it"
+        },
+        {
+          "clause": "cache entries live in the shared Redis under the cache prefix",
+          "oracle": "log",
+          "verify": "the scan finds keys under os:cache: that were not there before (entries stored at PREFIXcache:KEY, packages/services/service-cache/src/redis-cache-adapter.ts)",
+          "evidence": "the two scans"
+        }
+      ],
+      "negative": [
+        "an extra attempt admitted because each replica counted only its own share is a FAIL"
+      ],
+      "traps": [
+        "eventual-consistency"
+      ],
+      "blocked": {
+        "by": "fixture",
+        "ref": "fixture gap: no multi-node gate the open tree can register, so no declared multi-replica boot on Redis reaches kernel:ready (FOLLOW-UPS §17c, #32020)"
+      },
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-auth/src/rate-limit-storage.shared-redis.test.ts and packages/services/service-cache/src/cache-service-plugin.topology.test.ts; no live spec boots declared replicas"
+      },
+      "source": [
+        "packages/services/service-cache/src/cache-service-plugin.ts (redis is the adapter under a declared multi-node deployment on the redis cluster driver; memory is refused there)",
+        "packages/services/service-cache/src/redis-cache-adapter.ts",
+        "packages/services/service-cache/README.md",
+        "packages/plugins/plugin-auth/src/rate-limit-storage.shared-redis.test.ts",
+        "#31624"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — multi-replica on Redis: one shared Redis cache, so cache-backed limits hold across replicas (#31624). Blocked(fixture): no multi-node gate in the open tree. Scoped sweep #32020 (epic #32022 M2), read from source at 43a51b55; no live run made",
+          "ref": "#32020"
+        }
+      ]
     }
   ]
 }

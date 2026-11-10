@@ -115,6 +115,18 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // as on `main` (seat ruling (a)): it narrows in its own reader card.
     if (!request.packageId) refuseUnjudgeableByNameRead(host, request, { kind: 'none' });
     const registry = host.engine?.registry;
+    // [ADR-0150 D5, #31697] An object-less action two packages hold — two
+    // namespaces may, once the action's one-holder rule narrowed to the
+    // namespace — is refused here when the read names no package, naming
+    // each (a thrown `409 RESOURCE_CONFLICT`), before any layer is read; it
+    // served the first registered. So is a package's beside a package-less
+    // item the environment's store does not hold (the platform's: host code
+    // or a plugin), as the action doors refuse it; the store's own row is the
+    // environment's and answers first. A disabled package holds nothing here.
+    // An action bound to an object reads as before (`getItem`).
+    if (!request.packageId && request.type === 'action' && typeof registry?.refuseAmbiguousObjectLessAction === 'function') {
+        await registry.refuseAmbiguousObjectLessAction(request.name, () => host.readItemActiveRows('action', request.name));
+    }
     const packagelessScopedRead: { item: unknown } | undefined =
         !request.packageId && typeof registry?.readsByPackage === 'function' && registry.readsByPackage(request.type)
             ? { item: registry.resolveItem(request.type, request.name, null, member) }

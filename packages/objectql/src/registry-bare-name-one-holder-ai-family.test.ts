@@ -325,11 +325,12 @@ describe.each(TYPES)('%s — after the cold boot, a second package declaring a n
 describe('the narrowing — agent and skill hold one name per namespace (ADR-0150 D2/D9, child B)', () => {
   const NARROWED = ['agent', 'skill'] as const;
 
-  it('the switch holds agent and skill, and no other covered type', () => {
-    expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).toEqual(['agent', 'skill']);
+  it('the switch holds agent and skill (and, since #31697, the object-less action), and no other covered type', () => {
+    const narrowedTypes: readonly string[] = [...NARROWED, 'action'];
+    expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).toEqual(narrowedTypes);
     for (const type of BARE_NAME_ONE_HOLDER_TYPES) {
       // A type that has not narrowed meets every holder, namespaces or not.
-      expect(bareNameHoldersMeet(type, 'alpha', 'beta'), type).toBe(NARROWED.includes(type as never) ? false : true);
+      expect(bareNameHoldersMeet(type, 'alpha', 'beta'), type).toBe(narrowedTypes.includes(type) ? false : true);
       expect(bareNameHoldersMeet(type, 'alpha', 'alpha'), type).toBe(true);
       expect(bareNameHoldersMeet(type, undefined, 'beta'), type).toBe(true);
       expect(bareNameHoldersMeet(type, 'alpha', undefined), type).toBe(true);

@@ -2432,6 +2432,10 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
         label: "Дайджест токена",
         help: "HMAC-SHA-256 (base64url) токена Bearer с ключом — секретом аутентификации развёртывания; односторонний: открытый текст показывается один раз при выпуске и нигде не хранится."
       },
+      token_hint: {
+        label: "Подсказка токена",
+        help: "Последние четыре символа bearer-токена, записываемые при выпуске, чтобы различать учётные данные одного подключения; никогда не сам токен и не его дайджест. Пусто у учётных данных, выпущенных до того, как подсказки начали записываться."
+      },
       active: {
         label: "Активны",
         help: "Переключатель отзыва — неактивные учётные данные отклоняются при проверке"
@@ -2439,6 +2443,10 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
       expires_at: {
         label: "Истекает",
         help: "Необязательный жёсткий срок действия для поэтапной замены учётных данных; истёкшие учётные данные отклоняются"
+      },
+      last_used_at: {
+        label: "Последнее использование",
+        help: "Когда учётные данные в последний раз аутентифицировали SCIM-запрос; записывается не чаще раза в минуту; пусто, если использование не записано"
       },
       user_id: {
         label: "Кем выпущено",
@@ -2488,6 +2496,7 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Я сохранил(а) токен",
           fields: {
             token: "Токен",
+            tokenHint: "Подсказка токена",
             connectionId: "ID подключения",
             expiresAt: "Истекает"
           }
@@ -2871,7 +2880,64 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "Все"
+        label: "Все",
+        emptyState: {
+          title: "Сопоставлений групп пока нет",
+          message: "Выдайте набор разрешений участникам группы поставщика удостоверений с помощью «Сопоставить группу SSO» (группа, которую поставщик SSO передаёт при входе) или «Сопоставить группу SCIM» (группа, которую создаёт подключение SCIM)."
+        }
+      }
+    },
+    _actions: {
+      map_sso_group: {
+        label: "Сопоставить группу SSO",
+        description: "Выдать набор разрешений каждому участнику группы, которую поставщик SSO передаёт при входе. Действует со следующего входа участника через этого поставщика.",
+        successMessage: "Сопоставление группы сохранено. Оно действует со следующего входа каждого участника через поставщика.",
+        params: {
+          providerId: {
+            label: "ID поставщика SSO",
+            helpText: "ID поставщика SSO, чей вход передаёт группу, например «okta». У поставщика должно быть задано утверждение групп (Изменить утверждение групп у поставщика SSO)."
+          },
+          groupExternalId: {
+            label: "Внешний ID группы",
+            helpText: "Значение группы в точности так, как его передаёт утверждение групп, если это ID, например ID объекта группы Entra ID. Укажите это поле или отображаемое имя группы, но не оба."
+          },
+          groupDisplayName: {
+            label: "Отображаемое имя группы",
+            helpText: "Значение группы в точности так, как его передаёт утверждение групп, если это имя, например «Sales». Укажите это поле или внешний ID группы, но не оба."
+          },
+          permissionSet: {
+            label: "Набор разрешений",
+            helpText: "Набор разрешений, который участник группы получает в организации поставщика. Наборы администратора отклоняются."
+          }
+        }
+      },
+      map_scim_group: {
+        label: "Сопоставить группу SCIM",
+        description: "Выдать набор разрешений каждому участнику группы, которую создаёт подключение SCIM. Текущие участники группы получают его сразу.",
+        successMessage: "Сопоставление группы сохранено",
+        params: {
+          connectionId: {
+            label: "ID подключения SCIM",
+            helpText: "Подключение SCIM, через которое создаётся группа, например «okta-prod»: ID подключения его учётных данных."
+          },
+          groupExternalId: {
+            label: "Внешний ID группы",
+            helpText: "externalId группы в том виде, в каком его передаёт поставщик удостоверений. Укажите это поле или отображаемое имя группы, но не оба."
+          },
+          groupDisplayName: {
+            label: "Отображаемое имя группы",
+            helpText: "displayName группы, сравнивается точно. Укажите это поле или внешний ID группы, но не оба."
+          },
+          permissionSet: {
+            label: "Набор разрешений",
+            helpText: "Набор разрешений, который участник группы получает в организации подключения. Наборы администратора отклоняются."
+          }
+        }
+      },
+      delete_group_mapping: {
+        label: "Удалить сопоставление",
+        confirmText: "Удалить это сопоставление группы? Участники группы перестанут получать его набор разрешений. Для подключения SCIM участники группы будут сразу перепроецированы и потеряют выданные этим сопоставлением права. Для поставщика SSO права, выданные его входами для этого набора, будут сразу удалены, если только другое сопоставление поставщика не указывает тот же набор. Чтобы восстановить, сопоставьте группу снова.",
+        successMessage: "Сопоставление группы удалено"
       }
     }
   },
@@ -3673,6 +3739,55 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
       },
       note: {
         label: "Примечание"
+      }
+    }
+  },
+  sys_metadata_commit: {
+    label: "Metadata Commit",
+    pluralLabel: "Metadata Commits",
+    description: "Package-scoped commit log grouping a turn’s metadata changes.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      package_id: {
+        label: "Package"
+      },
+      operation: {
+        label: "Operation",
+        options: {
+          apply: "apply",
+          revert: "revert"
+        }
+      },
+      message: {
+        label: "Message",
+        help: "Change summary; for AI turns, the user instruction that produced it."
+      },
+      actor: {
+        label: "Actor"
+      },
+      ai_model: {
+        label: "AI Model"
+      },
+      parent_commit_id: {
+        label: "Parent Commit"
+      },
+      event_seq_start: {
+        label: "Event Seq Start"
+      },
+      event_seq_end: {
+        label: "Event Seq End"
+      },
+      items: {
+        label: "Items",
+        help: "JSON: [{ type, name, existedBefore, prevVersion }] — the revert plan."
+      },
+      item_count: {
+        label: "Item Count"
+      },
+      created_at: {
+        label: "Created At"
       }
     }
   },

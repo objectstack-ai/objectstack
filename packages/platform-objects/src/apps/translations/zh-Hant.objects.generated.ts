@@ -2432,6 +2432,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "權杖摘要",
         help: "Bearer 權杖的 HMAC-SHA-256（base64url），以部署的驗證金鑰為鍵——單向；明文僅在簽發時顯示一次，且絕不儲存。"
       },
+      token_hint: {
+        label: "權杖提示",
+        help: "Bearer 權杖的最後四個字元，於簽發時記錄，用於區分同一連線的多個憑證；絕非權杖本身或其摘要。提示功能上線前簽發的憑證此項為空。"
+      },
       active: {
         label: "啟用",
         help: "撤銷開關——未啟用的憑證在驗證時會被拒絕"
@@ -2439,6 +2443,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       expires_at: {
         label: "到期時間",
         help: "用於分階段憑證輪換的可選硬性過期時間；已過期的憑證會被拒絕"
+      },
+      last_used_at: {
+        label: "最近使用時間",
+        help: "該憑證最近一次通過驗證的 SCIM 請求的時間，每分鐘至多記錄一次；尚無使用記錄時為空"
       },
       user_id: {
         label: "簽發者",
@@ -2488,6 +2496,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "我已儲存權杖",
           fields: {
             token: "權杖",
+            tokenHint: "權杖提示",
             connectionId: "連線 ID",
             expiresAt: "到期時間"
           }
@@ -2871,7 +2880,64 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "全部"
+        label: "全部",
+        emptyState: {
+          title: "尚無群組對應",
+          message: "使用「對應 SSO 群組」（SSO 提供者在登入時傳送的群組）或「對應 SCIM 群組」（SCIM 連線佈建的群組），為身分提供者某個群組的成員授予權限集。"
+        }
+      }
+    },
+    _actions: {
+      map_sso_group: {
+        label: "對應 SSO 群組",
+        description: "為 SSO 提供者在登入時傳送的某個群組的每位成員授予一個權限集。成員下次透過該提供者登入時生效。",
+        successMessage: "群組對應已儲存。成員下次透過該提供者登入時生效。",
+        params: {
+          providerId: {
+            label: "SSO 提供者 ID",
+            helpText: "其登入會攜帶該群組的 SSO 提供者的提供者 ID，例如「okta」。該提供者必須已設定群組宣告（在 SSO 提供者上使用「編輯群組宣告」）。"
+          },
+          groupExternalId: {
+            label: "群組外部 ID",
+            helpText: "群組宣告傳送的值為 ID 時，照原樣填寫，例如 Entra ID 的群組物件 ID。與「群組顯示名稱」擇一，不要同時填寫。"
+          },
+          groupDisplayName: {
+            label: "群組顯示名稱",
+            helpText: "群組宣告傳送的值為名稱時，照原樣填寫，例如「Sales」。與「群組外部 ID」擇一，不要同時填寫。"
+          },
+          permissionSet: {
+            label: "權限集",
+            helpText: "該群組成員在提供者所屬組織中獲得的權限集。管理員權限集會被拒絕。"
+          }
+        }
+      },
+      map_scim_group: {
+        label: "對應 SCIM 群組",
+        description: "為某個 SCIM 連線佈建的群組的每位成員授予一個權限集。該群組的現有成員會立即獲得。",
+        successMessage: "群組對應已儲存",
+        params: {
+          connectionId: {
+            label: "SCIM 連線 ID",
+            helpText: "佈建該群組所經由的 SCIM 連線，例如「okta-prod」：即其憑證的連線 ID。"
+          },
+          groupExternalId: {
+            label: "群組外部 ID",
+            helpText: "身分提供者傳送的群組 externalId。與「群組顯示名稱」擇一，不要同時填寫。"
+          },
+          groupDisplayName: {
+            label: "群組顯示名稱",
+            helpText: "群組的 displayName，需完全一致。與「群組外部 ID」擇一，不要同時填寫。"
+          },
+          permissionSet: {
+            label: "權限集",
+            helpText: "該群組成員在連線所屬組織中獲得的權限集。管理員權限集會被拒絕。"
+          }
+        }
+      },
+      delete_group_mapping: {
+        label: "刪除對應",
+        confirmText: "刪除此群組對應？該群組成員將不再獲得它的權限集。對於 SCIM 連線，會立即重新投影該群組成員，並移除此對應授予的權限。對於 SSO 提供者，會立即移除其登入為該權限集授予的權限，除非該提供者的另一條對應仍指向同一權限集。如需恢復，請重新對應該群組。",
+        successMessage: "群組對應已刪除"
       }
     }
   },
@@ -3673,6 +3739,55 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       },
       note: {
         label: "備註"
+      }
+    }
+  },
+  sys_metadata_commit: {
+    label: "Metadata Commit",
+    pluralLabel: "Metadata Commits",
+    description: "Package-scoped commit log grouping a turn’s metadata changes.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      package_id: {
+        label: "Package"
+      },
+      operation: {
+        label: "Operation",
+        options: {
+          apply: "apply",
+          revert: "revert"
+        }
+      },
+      message: {
+        label: "Message",
+        help: "Change summary; for AI turns, the user instruction that produced it."
+      },
+      actor: {
+        label: "Actor"
+      },
+      ai_model: {
+        label: "AI Model"
+      },
+      parent_commit_id: {
+        label: "Parent Commit"
+      },
+      event_seq_start: {
+        label: "Event Seq Start"
+      },
+      event_seq_end: {
+        label: "Event Seq End"
+      },
+      items: {
+        label: "Items",
+        help: "JSON: [{ type, name, existedBefore, prevVersion }] — the revert plan."
+      },
+      item_count: {
+        label: "Item Count"
+      },
+      created_at: {
+        label: "Created At"
       }
     }
   },

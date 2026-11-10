@@ -1185,7 +1185,11 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                         sendMetaItemAbsent(res);
                         return;
                     }
-                    handleRouteError(res, error);
+                    // [#32201, ADR-0150 D5] The package-scoped refusal (the bare
+                    // name two packages hold, `?package=` of a package that
+                    // holds none of it) carries its holders as
+                    // `details.candidates`; anything else answers as before.
+                    handleRouteError(res, error, undefined, { packageScopedCandidates: true });
                 }
             },
             metadata: {

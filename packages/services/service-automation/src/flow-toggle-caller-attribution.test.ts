@@ -94,6 +94,8 @@ describe('#26474 — toggleFlow writes the ledger row under the caller it was ha
         await engine.toggleFlow('welcome', false, caller);
 
         expect(writes).toHaveLength(1);
-        expect(writes[0].options).toBeUndefined();
+        // No context: the store's own. [#31696] The options carry the
+        // `(package, name)` row's take-over flag beside it, never a caller.
+        expect(writes[0].options?.context).toBeUndefined();
     });
 });

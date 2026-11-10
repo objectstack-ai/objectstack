@@ -132,8 +132,8 @@ export function isBareNameOneHolderType(type: unknown): type is BareNameOneHolde
  * `bare-name-one-holder.ts` module doc, "The narrowing"). Each type joins in
  * its own trailing change, once its by-name readers, its AI faces and its
  * stored references all carry the package: the AI family's `agent` and
- * `skill` first (#31701). A type not listed here keeps one package holder per
- * deployment.
+ * `skill` first (#31701), then the object-less `action` (#31697). A type not
+ * listed here keeps one package holder per deployment.
  *
  * Here, not in objectql, so a reader objectql depends on can read it too: the
  * metadata protocol refuses a bare read of a narrowed type that an engine
@@ -143,6 +143,7 @@ export function isBareNameOneHolderType(type: unknown): type is BareNameOneHolde
 export const NAMESPACE_SCOPED_BARE_NAME_TYPES: readonly BareNameOneHolderType[] = Object.freeze([
   'agent',
   'skill',
+  'action',
 ]);
 
 /** Has `type`'s one-holder rule narrowed to the namespace ({@link NAMESPACE_SCOPED_BARE_NAME_TYPES})? */

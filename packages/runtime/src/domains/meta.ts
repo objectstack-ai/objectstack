@@ -10,6 +10,7 @@
 
 import {
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE, PackageScopedNameRefusedError,
+    type PackageScopedHolder,
 } from '@objectstack/core';
 // [commit 67ceb9aef] `canonicalMetaUrlType` is the FOLD this transport was missing.
 import { canonicalMetaUrlType, pluralToSingular } from '@objectstack/spec/shared';
@@ -1025,6 +1026,28 @@ function isDeclaredRefusal(e: unknown): boolean {
     return (e as { refusal?: unknown } | null | undefined)?.refusal === true;
 }
 
+/**
+ * [#32201, ADR-0150 D5] The package-scoped refusal on the wire: `409
+ * RESOURCE_CONFLICT`, the refusal's own sentence (the message
+ * `errorFromThrown` answered, unchanged), and every holder as
+ * `details.candidates` — the `PackageScopedHolder` list the `/automation` and
+ * `/actions` doors answer, so an SDK caller can retry with the holder it means
+ * rather than parse the sentence. The holders are the ones the message already
+ * names: the answer tells the caller nothing the message did not.
+ *
+ * ⛔ Only for a value {@link isPackageScopedRefusal} admits; a refusal whose
+ * candidate list is missing answers what it answered before (`errorFromThrown`).
+ */
+function packageScopedRefusalAnswer(deps: DomainHandlerDeps, e: unknown): HttpDispatcherResult['response'] {
+    const thrown = e as { message?: unknown; refusal?: { candidates?: unknown } };
+    const candidates = thrown.refusal?.candidates;
+    if (!Array.isArray(candidates) || typeof thrown.message !== 'string') return deps.errorFromThrown(e, 409);
+    return deps.error(thrown.message, 409, {
+        code: 'RESOURCE_CONFLICT',
+        candidates: candidates as readonly PackageScopedHolder[],
+    });
+}
+
 function decodeMetaNameSegment(segment: string): string {
     try {
         return decodeURIComponent(segment);
@@ -1098,7 +1121,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             // A shareable namespace whose owners both hold the name (ADR-0150
             // D2): the address names no one item — the refusal's own 409,
             // naming each, answered here like the item read's.
-            if (isPackageScopedRefusal(e)) return { handled: true, response: deps.errorFromThrown(e, 409) };
+            if (isPackageScopedRefusal(e)) return { handled: true, response: packageScopedRefusalAnswer(deps, e) };
             throw e;
         }
         if (address) {
@@ -2188,6 +2211,12 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             }
             return { handled: true, response: deps.error('Not found', 404) };
         } catch (e: any) {
+            // [#32201, ADR-0150 D5] The package-scoped refusal — the bare read
+            // and `?package=` (the protocol's `getMetaItem`), the qualified
+            // namespace read (`?package=` its holder) and `_env`
+            // (`admitEnvironmentQualifier`) — carries its holders as
+            // `details.candidates`.
+            if (isPackageScopedRefusal(e)) return { handled: true, response: packageScopedRefusalAnswer(deps, e) };
             // Fallback: treat first part as object name if only 1 part (handled below)
             // But here we are deep in 2 parts. Must be an error — 404 remains the
             // default, but an error carrying its own status keeps it.

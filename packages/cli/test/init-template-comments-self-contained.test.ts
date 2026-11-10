@@ -225,7 +225,14 @@ function renderAll(): Rendered[] {
  * and that one's answer the same question differently. See the file header
  * for the drift commit cc986c913 repaired.
  */
-const MONOREPO_ONLY = [
+interface MonorepoOnlyPattern {
+  label: string;
+  re: RegExp;
+  /** Judges each match; without it, the first match is a hit. */
+  isHit?: (rel: string, found: string) => boolean;
+}
+
+const MONOREPO_ONLY: MonorepoOnlyPattern[] = [
   { label: 'an ADR identifier', re: /\bADR-\d{3,4}\b/ },
   { label: 'a bare issue number', re: /(^|[^\w/])#\d{3,6}\b/ },
   { label: 'a repo build-script path', re: /\bscripts\/[\w.-]+\.(?:mjs|mts|cjs|ts|js)\b/ },
@@ -291,8 +298,55 @@ const MONOREPO_ONLY = [
   // is the depth judgement (`check:cross-package-test-inputs`-style, "the
   // shallowest point a path reaches") — never an exemption, and never a
   // widened pattern.
-  { label: 'a path that climbs out of the scaffolded project', re: /(?<![\w.])\.\.\/[\w./-]*/ },
+  //
+  // Condition 2 arrived with card #32212: the `app` template's starter app and
+  // list view (`src/apps/main.app.ts`, `src/views/<ns>_item.view.ts`) and the
+  // `plugin` template's list view import the starter object as
+  // `../objects/<ns>_item.object`, a climb that stays inside the project. So
+  // the depth judgement is now in place, as `create-objectstack`'s copy of
+  // this entry has it: every `../` run is still matched, and each one is
+  // resolved from the directory of the file that writes it; it is a hit only
+  // when the path it reaches lies above the project root (`escapesProject`).
+  // The escaping spelling this entry exists for — `../../content/docs` from a
+  // project-root file — still reddens.
+  {
+    label: 'a path that climbs out of the scaffolded project',
+    re: /(?<![\w.])\.\.\/[\w./-]*/g,
+    isHit: (rel: string, found: string) => escapesProject(rel, found),
+  },
 ];
+
+/**
+ * Whether the relative path `found`, written in the emitted file `rel` (a
+ * path relative to the project root), reaches outside the project: the
+ * shallowest point the path walks to is above the project root. A climb that
+ * stays inside the project (`../objects/x.object` from `src/apps/`) is not.
+ */
+function escapesProject(rel: string, found: string): boolean {
+  const from = path.posix.dirname(rel.split(path.sep).join('/'));
+  let depth = from === '.' ? 0 : from.split('/').length;
+  for (const segment of found.split('/')) {
+    if (segment === '..') depth -= 1;
+    else if (segment !== '.' && segment !== '') depth += 1;
+    if (depth < 0) return true;
+  }
+  return false;
+}
+
+/**
+ * The first text in `text` an entry of {@link MONOREPO_ONLY} reports for the
+ * emitted file `rel`, else null. An entry with `isHit` judges each match it
+ * finds; the rest report their first match. Built fresh per call, so a global
+ * pattern's `lastIndex` never carries from one file to the next.
+ */
+function firstHit(entry: MonorepoOnlyPattern, rel: string, text: string): string | null {
+  const { isHit } = entry;
+  if (!isHit) return entry.re.exec(text)?.[0] ?? null;
+  for (const m of text.matchAll(new RegExp(entry.re.source, 'g'))) {
+    if (isHit(rel, m[0])) return m[0];
+  }
+  return null;
+}
 
 describe('rendered scaffold templates are followable by a stranger', () => {
   const rendered = renderAll();
@@ -355,11 +409,12 @@ describe('rendered scaffold templates are followable by a stranger', () => {
     '%s cites nothing that only exists in this monorepo',
     (_label, r) => {
       const command = r.scaffoldId.startsWith('init:') ? 'os init' : 'os create';
-      for (const { label, re } of MONOREPO_ONLY) {
-        const hit = re.exec(r.content);
+      for (const entry of MONOREPO_ONLY) {
+        const { label } = entry;
+        const hit = firstHit(entry, r.file, r.content);
         expect(
           hit,
-          `${r.scaffoldId}/${r.file} cites ${label} (${JSON.stringify(hit?.[0])}). A project ` +
+          `${r.scaffoldId}/${r.file} cites ${label} (${JSON.stringify(hit)}). A project ` +
             `scaffolded by \`${command}\` ships no ADRs, no issue tracker and none of this repo's ` +
             'scripts, so this reads as a reference the newcomer is failing to follow. State the ' +
             'fact self-contained, or link a public docs page — do not delete the rationale.',

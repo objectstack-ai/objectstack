@@ -28,6 +28,7 @@ import {
     type PlacementHookEngine,
 } from './notification-template-placement.js';
 import { NotificationTextRenderer, type NotificationTextI18n } from './notification-text.js';
+import { installInboxReaderLocale, type InboxReaderLocaleEngine } from './inbox-reader-locale.js';
 import { convertWildcardPreferenceUsers } from './preference-user-conversion.js';
 import {
     InboxMessage,
@@ -405,6 +406,16 @@ export class MessagingServicePlugin implements Plugin {
             ctx.logger.warn(
                 '[messaging] no ObjectQL engine with a hook registry — a sys_notification_template save is NOT judged '
                 + 'for where its body places a hole',
+            );
+        }
+
+        // [#32240] A keyed inbox row reads in the READER's request language:
+        // the same renderer delivery uses, re-rendering the row's stored keys
+        // on a read that carries a locale. See inbox-reader-locale.ts.
+        if (this.options.registerInbox && !installInboxReaderLocale(engine as InboxReaderLocaleEngine | undefined, textRenderer)) {
+            ctx.logger.warn(
+                '[messaging] no ObjectQL engine with a middleware registry — inbox rows are served in the language '
+                + 'they were delivered in, not the reader\'s',
             );
         }
 
