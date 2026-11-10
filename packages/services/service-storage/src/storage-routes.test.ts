@@ -171,6 +171,26 @@ describe('Storage REST Routes', () => {
       },
     );
 
+    // The key's extension is read from `filename`: a name that is not a string
+    // is refused at the door, as the declaration refuses it, before any row.
+    it.each<[string, unknown]>([
+      ['a number', 123],
+      ['an array', ['a.png']],
+      ['an object', { name: 'a.png' }],
+    ])('REFUSED 400 INVALID_REQUEST: filename as %s, with no sys_file row written', async (_label, filename) => {
+      const handler = httpServer._getHandler('POST', '/api/v1/storage/upload/presigned')!;
+      const createFile = vi.spyOn(store, 'createFile');
+      const body = { filename, mimeType: 'image/png', size: 1 };
+      const res = createMockRes();
+      await handler(createMockReq({ body }), res);
+
+      expect(res._status, JSON.stringify(res._json)).toBe(400);
+      expect(res._json.success).toBe(false);
+      expect(res._json.error.code).toBe('INVALID_REQUEST');
+      expect(GetPresignedUrlRequestSchema.safeParse(body).success, 'the declaration refuses it').toBe(false);
+      expect(createFile, 'no pending sys_file row').not.toHaveBeenCalled();
+    });
+
     it.each([0, 1024])('CONTROL: size %d is accepted and stored on the pending row as sent', async (size) => {
       const handler = httpServer._getHandler('POST', '/api/v1/storage/upload/presigned')!;
       const body = { filename: 'a.png', mimeType: 'image/png', size };

@@ -1067,6 +1067,14 @@ export function registerStorageFamily(
         sendError(res, 400, 'INVALID_REQUEST', 'filename, mimeType, and size are required');
         return;
       }
+      // The storage key's extension is read from `filename`, so a name that
+      // is not a string is refused here, as the declared request schema
+      // refuses it: a number or an object used to throw while the key was
+      // built (a 500), and an array was stored as the file's name.
+      if (typeof filename !== 'string') {
+        sendError(res, 400, 'INVALID_REQUEST', 'filename must be a string');
+        return;
+      }
       // [#27413] Not a byte count ⇒ refused before anything is stored: a
       // non-numeric size otherwise failed the `sys_file` insert as a 500, and
       // a negative one was stored on a pending row.
