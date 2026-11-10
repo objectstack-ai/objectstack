@@ -151,6 +151,18 @@ import {
 } from './validate-external-owner-sharing.js';
 
 export const SECURITY_OWD_UNSET = 'security-owd-unset';
+
+/**
+ * [ADR-0153 D4] The fix-line `security-owd-unset` gives a `synced` object. A
+ * pull writes its rows with no person owner (attribution is the run, never an
+ * owner), so an owner-scoped model hides every row from a member no sharing
+ * rule reaches; the recommendation is a model that does not, and members never
+ * write the object whatever the model says.
+ */
+export const SYNCED_OBJECT_WAY_OUT =
+  "declare sharingModel: 'public_read' (recommended: a pulled row has no person owner, so on 'private' a " +
+  "member reads only the rows a sharing rule grants; members never write a synced object either way), or " +
+  "'private' with a sharing rule that grants read";
 export const SECURITY_OWD_ALIAS = 'security-owd-alias';
 export const SECURITY_WILDCARD_VAMA = 'security-wildcard-vama';
 export const SECURITY_ANCHOR_HIGH_PRIVILEGE = 'security-anchor-high-privilege';
@@ -876,9 +888,14 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
         //    (#27425), whatever the binding's writability. The publish gate
         //    sees no datasources, so there an allowWrites: false datasource
         //    reads as writable; both doors still never say 'private'.
+        // [ADR-0153 D4] A `synced` object's rows are pulled with no person
+        // owner, so 'private' reads none of them to a member that no sharing
+        // rule reaches: its fix-it names models that do not hide owner-less
+        // rows, as the read-only external one does.
         // Every other object, an external one that declares its owner
         // included, keeps the 'private' recommendation.
-        const ownershipGap = externalOwnershipGap(obj, readOnlyDatasources);
+        const synced = obj.managedBy === 'synced';
+        const ownershipGap = synced ? undefined : externalOwnershipGap(obj, readOnlyDatasources);
         findings.push({
           severity: 'error',
           rule: SECURITY_OWD_UNSET,
@@ -891,14 +908,16 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
           message:
             `custom object declares no sharingModel (OWD); the runtime falls back to 'private', ` +
             `but the baseline must be an authored decision`,
-          hint: ownershipGap
-            ? `${PUBLIC_READ_WRITE_WAY_OUT}, or ` +
-              `${declareOwnershipColumnWayOut(ownershipGap.column, ownershipGap.mapped)} ` +
-              `and declare sharingModel: 'private' or 'public_read'; 'controlled_by_parent' for master-detail children`
-            : hasUnprovableOwnerAnchor(obj)
-              ? READ_ONLY_EXTERNAL_WAY_OUT
-              : `declare sharingModel: 'private' (owner + shares; recommended), 'public_read', ` +
-                `'public_read_write', or 'controlled_by_parent' (master-detail children)`,
+          hint: synced
+            ? SYNCED_OBJECT_WAY_OUT
+            : ownershipGap
+              ? `${PUBLIC_READ_WRITE_WAY_OUT}, or ` +
+                `${declareOwnershipColumnWayOut(ownershipGap.column, ownershipGap.mapped)} ` +
+                `and declare sharingModel: 'private' or 'public_read'; 'controlled_by_parent' for master-detail children`
+              : hasUnprovableOwnerAnchor(obj)
+                ? READ_ONLY_EXTERNAL_WAY_OUT
+                : `declare sharingModel: 'private' (owner + shares; recommended), 'public_read', ` +
+                  `'public_read_write', or 'controlled_by_parent' (master-detail children)`,
         });
       } else if (typeof owd === 'string' && OWD_ALIAS_FIX[owd]) {
         // Reachable ONLY through the unparsed doors (`os lint` on a raw
@@ -1635,7 +1654,9 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
  *
  * Scope: security-relevant identifiers/labels across SIX collections — objects
  * (names, field names, action names, field-group keys and labels), permission
- * sets, positions, apps, books.
+ * sets, positions, apps, books — plus what an `objectExtensions` entry writes
+ * onto an object (#31998): the fields it adds (by name and label), its
+ * `label`, and each `fieldPatches` relabel, all served as that object's own.
  * Pages/views/components are NOT scanned — `role` there is HTML/ARIA
  * semantics, not permission vocabulary. The sole platform exception
  * (better-auth `sys_member.role`) is a system object, which app stacks never
@@ -1726,16 +1747,25 @@ export function validateSecurityRoleWord(stack: AnyRec): SecurityFinding[] {
           `is permission_set (capability), position (distribution), business_unit (hierarchy) (ADR-0090 D3).`,
         hint: `Rename using 'position' for distribution groups or a domain word (e.g. 'function', 'duty').`,
       });
-    } else if (labelHasRoleWord(label)) {
-      findings.push({
-        severity: 'error',
-        rule: SECURITY_ROLE_WORD,
-        where,
-        path: `${path.replace(/\.(?:name|key)$/, '')}.label`,
-        message: `${kind} label "${String(label)}" uses the reserved word "role" (ADR-0090 D3).`,
-        hint: `Relabel with 'Position' (distribution) or a domain word — admins must meet ONE vocabulary.`,
-      });
+    } else {
+      flagRoleLabel(kind, label, where, `${path.replace(/\.(?:name|key)$/, '')}.label`);
     }
+  };
+  /**
+   * The label half alone, at the label's own path: for a label written with no
+   * identifier beside it (an `objectExtensions` entry's `label`, a
+   * `fieldPatches` relabel, #31998).
+   */
+  const flagRoleLabel = (kind: string, label: unknown, where: string, labelPath: string) => {
+    if (!labelHasRoleWord(label)) return;
+    findings.push({
+      severity: 'error',
+      rule: SECURITY_ROLE_WORD,
+      where,
+      path: labelPath,
+      message: `${kind} label "${String(label)}" uses the reserved word "role" (ADR-0090 D3).`,
+      hint: `Relabel with 'Position' (distribution) or a domain word — admins must meet ONE vocabulary.`,
+    });
   };
 
   for (let i = 0; i < objects.length; i++) {
@@ -1761,6 +1791,55 @@ export function validateSecurityRoleWord(stack: AnyRec): SecurityFinding[] {
         `objects[${i}].fieldGroups[${gi}].key`,
         'key',
       );
+    }
+  }
+  // [#31998] What an `objectExtensions` entry writes onto an object, judged as
+  // the owner's own declarations are above: same messages, same severity.
+  //  - the fields it adds: they land in the target's field map (the registry
+  //    merges them as if declared inline);
+  //  - its `label`, which the engine merges over the target's (the owner
+  //    door judges `object.label`);
+  //  - each `fieldPatches.FIELD.label`, the label a base field is served
+  //    with (the owner door judges `field.label`). Option labels stay out:
+  //    the owner door does not judge them either.
+  // Refusing `fields: { role }` on the owner while admitting it here is the
+  // #7220 split one door over: the service desk scenario that found this
+  // renamed nothing, it moved the field.
+  //
+  // Read through the shared fold (`objectExtensionsByTarget`), not
+  // `objectsAsServed`, for two facts the served objects lose:
+  //  - the entry's own path, so a finding points at the extension the author
+  //    wrote (`objectExtensions[i].fields.F.name`, or its `packages[j]`
+  //    body), never at the owner object;
+  //  - entries whose target this stack does not declare (an object of a
+  //    dependency, a platform `sys_*` object): `objectsAsServed` folds only
+  //    onto declared objects, and those are the usual targets.
+  // The fold reads what the registry serves: `packages[]` bodies when the
+  // artifact has them, else the stack's own list, one entry per package per
+  // target (a replaced entry's fields are never served, so never judged).
+  //
+  // ⛔ No `isSystemObject` exemption here. It covers what the PLATFORM
+  // declares (better-auth `sys_member.role`); a field an app's extension adds
+  // to a `sys_*` object is the app's word, on a page an admin reads.
+  //
+  // The loop variables are not `ext` / `obj`: the key-read meta-test in
+  // `validate-security-posture.test.ts` holds those receivers to the spec's
+  // declared keys, and `visible` is the fold's output (`path` is its own).
+  for (const [target, entries] of objectExtensionsByTarget(stack)) {
+    for (const visible of entries) {
+      flagRoleLabel('object', visible.label, `object "${target}"`, `${visible.path}.label`);
+      for (const f of visible.fields) {
+        const fieldName = String(f.name ?? '?');
+        flagRole('field', f.name, f.label, `field "${target}.${fieldName}"`, `${visible.path}.fields.${fieldName}.name`);
+      }
+      for (const [fieldName, displayPatch] of Object.entries(visible.fieldPatches)) {
+        flagRoleLabel(
+          'field',
+          displayPatch.label,
+          `field "${target}.${fieldName}"`,
+          `${visible.path}.fieldPatches.${fieldName}.label`,
+        );
+      }
     }
   }
   for (let i = 0; i < permissionSets.length; i++) {

@@ -109,7 +109,7 @@ const result = CronScheduleSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **mapping** | `string` | ✅ | Name of the `mapping` whose `connectorSource` this job pulls on its schedule — a mapping the same stack declares, with a `connectorSource` (refused at `defineStack` / `os validate` otherwise). The mapping says where the rows come from, the field map, the write mode and the match key; the job says when. |
+| **mapping** | `string` | ✅ | Name of the `mapping` whose source this job pulls on its schedule — a mapping the same stack declares, with a `connectorSource` or a `datasourceSource` (refused at `defineStack` / `os validate` otherwise). The mapping says where the rows come from, the field map, the write mode and the match key; the job says when. |
 
 ### Nested Shape: `Job.retryPolicy`
 

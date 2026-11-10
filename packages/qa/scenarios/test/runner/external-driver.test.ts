@@ -114,6 +114,40 @@ describe('the external driver contract — one process per call, JSON in on stdi
     expect(authorNotMeasured(hung)).toBe('author timed out after 0.03 min');
   });
 
+  it('an answer that reports no usage stays valid, and its turn records no cost and no tokens — none, never a zero', async () => {
+    const d = new ExternalDriver({ command: COMMAND });
+    for (const turn of [(await d.author(author('ECHO build it'))).turn, await d.ask(ask('ECHO how many?'))]) {
+      expect(turn.meta).toMatchObject({ resultSubtype: 'success', isError: false, model: 'fake-model-1', numTurns: 2 });
+      expect(Object.keys(turn.meta).filter((k) => ['reportedCostUsd', 'inputTokens', 'outputTokens'].includes(k))).toEqual([]);
+      expect(authorNotMeasured(turn)).toBeUndefined();
+    }
+  });
+
+  it('an answer that reports usage: its cost and tokens are carried into the turn as reported, and a reported zero is a reading', async () => {
+    vi.stubEnv('FAKE_DRIVER_USAGE', JSON.stringify({ reportedCostUsd: 0.0123, inputTokens: 1500, outputTokens: 320 }));
+    const d = new ExternalDriver({ command: COMMAND });
+    expect((await d.author(author('ECHO build it'))).turn.meta).toMatchObject({ resultSubtype: 'success', reportedCostUsd: 0.0123, inputTokens: 1500, outputTokens: 320 });
+    vi.stubEnv('FAKE_DRIVER_USAGE', JSON.stringify({ reportedCostUsd: 0 }));
+    const free = await d.ask(ask('ECHO how many?'));
+    expect(free.meta.reportedCostUsd).toBe(0);
+    expect([free.meta.inputTokens, free.meta.outputTokens]).toEqual([undefined, undefined]);
+  });
+
+  it('a usage figure of another shape is invalid output, never a figure the runner guesses', async () => {
+    const d = new ExternalDriver({ command: COMMAND });
+    for (const [usage, path] of [
+      [{ reportedCostUsd: -0.5 }, 'reportedCostUsd'],
+      [{ reportedCostUsd: '0.42' }, 'reportedCostUsd'],
+      [{ reportedCostUsd: null }, 'reportedCostUsd'],
+      [{ inputTokens: 1.5 }, 'inputTokens'],
+      [{ outputTokens: -1 }, 'outputTokens'],
+    ] as const) {
+      vi.stubEnv('FAKE_DRIVER_USAGE', JSON.stringify(usage));
+      const turn = (await d.author(author('ECHO'))).turn;
+      expect([turn.meta.resultSubtype?.startsWith(`invalid-output(\`${path}\`: `), turn.meta.isError, turn.meta.reportedCostUsd]).toEqual([true, true, undefined]);
+    }
+  });
+
   it('`external:COMMAND` is split on whitespace, its relative paths resolved where the runner started; an empty one is refused', () => {
     expect(parseExternalCommand('node ./agent.mjs --fast', '/work')).toEqual(['node', '/work/agent.mjs', '--fast']);
     expect(parseExternalCommand('bin/agent ../x', '/work/a')).toEqual(['/work/a/bin/agent', '/work/x']);
@@ -144,12 +178,18 @@ class ThroughCommand implements AgentDriver {
     private readonly scripted: AgentDriver,
     private readonly external: ExternalDriver,
     private readonly script: string,
+    /** The usage keys the command adds to a task's answer; none by default. */
+    private readonly usage: (task: AuthorTask | AskTask) => Record<string, unknown> = () => ({}),
   ) {}
   info(): DriverInfo {
     return this.external.info();
   }
   private write(task: AuthorTask | AskTask, t: ParsedTurn) {
-    const answer = { replyText: t.replyText, toolCalls: t.toolCalls.map((c) => ({ name: c.name, input: c.input, output: c.output, ...(c.isError ? { isError: true } : {}) })) };
+    const answer = {
+      replyText: t.replyText,
+      toolCalls: t.toolCalls.map((c) => ({ name: c.name, input: c.input, output: c.output, ...(c.isError ? { isError: true } : {}) })),
+      ...this.usage(task),
+    };
     writeFileSync(join(this.script, `${encodeURIComponent(stepKey(task))}.json`), JSON.stringify(answer));
   }
   async author(task: AuthorTask): Promise<AuthorResult> {
@@ -215,6 +255,8 @@ describe('the persona keys, end to end over the external driver — the record, 
     // And the record and the gallery page name the driver that ran it.
     expect((fx.record.env as { driver: DriverInfo }).driver).toMatchObject({ driver: 'external:fake-agent', version: '1.2.3' });
     expect(readFileSync(join(out, 'apps', fx.scenario.card.id, 'README.md'), 'utf8')).toContain('- Driver: external:fake-agent 1.2.3\n');
+    // The command reported no usage: every turn passed all the same, and the page says the cost was not reported.
+    expect(readFileSync(join(out, 'apps', fx.scenario.card.id, 'README.md'), 'utf8')).toContain('- Author cost (as the driver reported it): not reported\n');
 
     // A replay of that recording keeps the driver that made it, and its page says it is a replay.
     const replay = new RecordedDriver(fx.recording, join(runs, 'recording.json')).info();
@@ -234,5 +276,41 @@ describe('the persona keys, end to end over the external driver — the record, 
     // shard one start took 212 ms (the info case) and this case was cut off
     // at 5042 ms (merge-queue run 42414930416). 30 s is ~6x the slowest
     // observed.
+  }, 30_000);
+});
+
+describe('the usage a command reports, end to end over the external driver — the record, the scorecard and the gallery page', () => {
+  it('a crm run whose every authoring turn reported a cost: each turn carries its figures, and the channel’s cost is their sum', async () => {
+    const script = tempDir('ext-script');
+    vi.stubEnv('FAKE_DRIVER_SCRIPT', script);
+    const external = new ExternalDriver({ command: COMMAND });
+    // Every authoring turn reports a cost and its tokens; the persona turns report tokens only.
+    const usage = (task: AuthorTask | AskTask) => ('cwd' in task ? { reportedCostUsd: 0.25, inputTokens: 1000, outputTokens: 200 } : { inputTokens: 50, outputTokens: 10 });
+    const fx = await runCrm({ wrap: (scripted) => new ThroughCommand(scripted, external, script, usage) });
+
+    // The run record: each turn as its command reported it, and nothing it did not report.
+    const scratch = fx.cardRun.modes.find((m) => m.mode === 'scratch')!;
+    expect(scratch.build!.author).toMatchObject({ resultSubtype: 'success', reportedCostUsd: 0.25, inputTokens: 1000, outputTokens: 200 });
+    const question = scratch.run!.questions.find((q) => q.turn)!.turn!;
+    expect([question.reportedCostUsd, question.inputTokens, question.outputTokens]).toEqual([undefined, 50, 10]);
+    const written = fx.record as { cardRun: typeof fx.cardRun; scorecard: { authorCost: unknown } };
+    expect(written.cardRun.modes[0]!.build!.author).toMatchObject({ reportedCostUsd: 0.25 });
+
+    // The scorecard: three authoring turns (scratch build, scratch iterate, template iterate), every one reported.
+    expect(written.scorecard.authorCost).toEqual({ turns: 3, reported: 3, usd: 0.75 });
+    const table = renderScorecard(cardScorecard(fx.cardRun));
+    expect(table).toContain('author cost: $0.75 over 3 author turns\n');
+    expect(table).toContain('| Author cost | $0.50 over 2 author turns | $0.25 over 1 author turn |');
+
+    // The gallery page and its scorecard state it too.
+    const runs = tempDir('ext-runs');
+    writeRecord(runs, fx.record);
+    const out = tempDir('ext-gallery');
+    const summary = await exportGallery({ runsDir: runs, outDir: out, cards: [fx.scenario], recordings: [fx.recording], guard: () => ({ eligible: true, reasons: [] }), screenshots: false });
+    expect(summary.refused).toEqual([]);
+    const app = join(out, 'apps', fx.scenario.card.id);
+    expect(readFileSync(join(app, 'README.md'), 'utf8')).toContain('- Author cost (as the driver reported it): $0.75 over 3 author turns\n');
+    expect(readFileSync(join(app, 'scorecard.md'), 'utf8')).toContain('author cost: $0.75 over 3 author turns\n');
+    // The same measured budget as the key case above: one stand-in start per turn, 45 of them.
   }, 30_000);
 });

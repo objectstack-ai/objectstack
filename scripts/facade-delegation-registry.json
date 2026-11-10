@@ -29,12 +29,6 @@
   "exceptions": [
     {
       "file": "packages/metadata-protocol/src/protocol.ts",
-      "member": "publishPackageDrafts",
-      "card": "#30020",
-      "reason": "state-owning: closed-set, a bare `this` (not `this.<member>`) hands the instance itself on (#29985 report)"
-    },
-    {
-      "file": "packages/metadata-protocol/src/protocol.ts",
       "member": "triggerAutomation",
       "card": "#30147",
       "reason": "accepted terminal exception (ruling 6687801899): accepted exception (#30147 phase 3): its body is one `throw` (no shorter than a stub), and its section (Batch and *Many data) has no facet module; the codemod's members pass adds to a written facet and never starts one, so a facet for one statement would be the only reason to start it"

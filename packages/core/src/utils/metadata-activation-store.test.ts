@@ -601,3 +601,95 @@ describe('backfillActivationLedgerPackages — rows with no package take their o
         }));
     });
 });
+
+describe('backfillActivationLedgerPackages — an item with more than one row is reported, never bound', () => {
+    const holderOf = (type: string, name: string): ActivationLedgerHolder =>
+        type === 'flow' && (name === 'app_switch' || name === 'app_digest')
+            ? { kind: 'package', packageId: 'com.example.app' }
+            : { kind: 'unheld' };
+
+    it('binds neither of two rows that name no package for one item, names both, and still binds the item stored after them', async () => {
+        const { engine, table, updates } = makeLedger([
+            { id: 'd1', metadata_type: 'flow', name: 'app_switch', package_id: null, active: 0 },
+            { id: 'd2', metadata_type: 'flow', name: 'app_switch', package_id: null, active: 1 },
+            { id: 'd3', metadata_type: 'flow', name: 'app_digest', package_id: null, active: 0 },
+        ]);
+
+        const report = await backfillActivationLedgerPackages(engine, holderOf);
+
+        expect(updates.map((u) => u.data)).toEqual([{ id: 'd3', package_id: 'com.example.app' }]);
+        expect(table.filter((r) => r.name === 'app_switch').map((r) => r.package_id)).toEqual([null, null]);
+        expect(report.bound).toEqual([{ metadataType: 'flow', name: 'app_digest', packageId: 'com.example.app' }]);
+        expect(report.duplicated).toEqual([{
+            metadataType: 'flow',
+            name: 'app_switch',
+            packageId: 'com.example.app',
+            rows: [{ id: 'd1', active: false }, { id: 'd2', active: true }],
+        }]);
+        expect(report.failed).toEqual([]);
+    });
+
+    it('binds no row that names no package beside one that already names the holder, and names both', async () => {
+        const { engine, updates } = makeLedger([
+            { id: 'b1', metadata_type: 'flow', name: 'app_switch', package_id: 'com.example.app', active: 0 },
+            { id: 'n1', metadata_type: 'flow', name: 'app_switch', package_id: null, active: 1 },
+        ]);
+
+        const report = await backfillActivationLedgerPackages(engine, holderOf);
+
+        expect(updates).toEqual([]);
+        expect(report.duplicated).toEqual([{
+            metadataType: 'flow',
+            name: 'app_switch',
+            packageId: 'com.example.app',
+            rows: [{ id: 'b1', packageId: 'com.example.app', active: false }, { id: 'n1', active: true }],
+        }]);
+    });
+
+    it('a dry run reports the same duplicate and writes nothing', async () => {
+        const { engine, updates } = makeLedger([
+            { id: 'd1', metadata_type: 'flow', name: 'app_switch', package_id: null, active: 0 },
+            { id: 'd2', metadata_type: 'flow', name: 'app_switch', package_id: null, active: 1 },
+        ]);
+
+        const report = await backfillActivationLedgerPackages(engine, holderOf, { dryRun: true });
+
+        expect(updates).toEqual([]);
+        expect(report.duplicated.map((d) => d.rows.map((r) => r.id))).toEqual([['d1', 'd2']]);
+    });
+
+    it('a write that fails is reported with its error, and the rows stored after it are still bound', async () => {
+        const { engine, table, updates } = makeLedger([
+            { id: 'x1', metadata_type: 'flow', name: 'app_switch', package_id: null, active: 0 },
+            { id: 'x2', metadata_type: 'flow', name: 'app_digest', package_id: null, active: 0 },
+        ]);
+        const update = engine.update.getMockImplementation()!;
+        engine.update.mockImplementation(async (object: string, data: any, options?: any) => {
+            if (data.id === 'x1') throw new Error('Duplicate record refused');
+            return update(object, data, options);
+        });
+
+        const report = await backfillActivationLedgerPackages(engine, holderOf);
+
+        expect(report.failed).toEqual([{
+            metadataType: 'flow', name: 'app_switch', id: 'x1', packageId: 'com.example.app', error: 'Duplicate record refused',
+        }]);
+        expect(report.bound).toEqual([{ metadataType: 'flow', name: 'app_digest', packageId: 'com.example.app' }]);
+        expect(updates.map((u) => u.data.id)).toEqual(['x2']);
+        expect(table.find((r) => r.id === 'x1')?.package_id).toBeNull();
+    });
+
+    it('asks every question before the first write: a resolver that throws leaves the ledger unwritten', async () => {
+        const { engine, updates } = makeLedger([
+            { id: 'x1', metadata_type: 'flow', name: 'app_digest', package_id: null, active: 0 },
+            { id: 'x2', metadata_type: 'flow', name: 'boom', package_id: null, active: 0 },
+        ]);
+        const throwing = (type: string, name: string): ActivationLedgerHolder => {
+            if (name === 'boom') throw new Error('resolver failed');
+            return holderOf(type, name);
+        };
+
+        await expect(backfillActivationLedgerPackages(engine, throwing)).rejects.toThrow('resolver failed');
+        expect(updates).toEqual([]);
+    });
+});

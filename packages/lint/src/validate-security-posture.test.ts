@@ -154,6 +154,26 @@ describe('validateSecurityPosture (ADR-0090 D7)', () => {
     expect(finding.message).not.toContain('incident');
   });
 
+  // [ADR-0153 D4] A pulled copy has no person owner, so 'private' — the
+  // general recommendation — would hide every row a sharing rule does not
+  // grant. The fix-it for a synced object recommends a model that does not.
+  it("a synced object's fix-it recommends 'public_read', and names the sharing rule 'private' needs", () => {
+    const [finding, ...rest] = validateSecurityPosture({
+      objects: [{ name: 'erp_order_copy', label: 'ERP order copy', managedBy: 'synced' }],
+    });
+    expect(rest).toEqual([]);
+    expect(finding).toMatchObject({ severity: 'error', rule: SECURITY_OWD_UNSET, where: 'object "erp_order_copy"' });
+    expect(finding.hint).toMatch(/^declare sharingModel: 'public_read' \(recommended:/);
+    expect(finding.hint).toContain('a sharing rule that grants read');
+    expect(finding.hint).not.toContain("'private' (owner + shares; recommended)");
+    expect(finding.hint).not.toContain('\n');
+    // twin: the same object unmanaged keeps the general recommendation
+    const [plain] = validateSecurityPosture({ objects: [{ name: 'erp_order_copy', label: 'ERP order copy' }] });
+    expect(plain.hint).toContain("'private' (owner + shares; recommended)");
+    // and a synced object that declares its model is not flagged
+    expect(rulesOf({ objects: [{ name: 'erp_order_copy', managedBy: 'synced', sharingModel: 'public_read' }] })).toEqual([]);
+  });
+
   it('does not flag system objects for unset OWD', () => {
     expect(rulesOf({ objects: [{ name: 'sys_thing' }, { name: 'custom', isSystem: true }] })).toEqual([]);
   });
@@ -781,6 +801,138 @@ describe('validateSecurityPosture (ADR-0090 D7)', () => {
         objects: [{ name: 'sys_member', fieldGroups: [{ key: 'role_info', label: 'Organization Role' }] }],
       }),
     ).toEqual([]);
+  });
+
+  // ── What an `objectExtensions` entry writes onto an object (#31998) ──
+  // The service-desk scenario that found this hit the refusal on an object
+  // field and moved the same field into an extension, which walked through
+  // `validate`, `build` and `verify`. Each case below asks the extension door
+  // and the owner door the same question and expects the same answer, located
+  // at the entry the author wrote.
+  describe('[#31998] an objectExtensions entry is judged as the owner door judges', () => {
+    const roleSelect = { type: 'select', label: 'Group Function', options: [{ value: 'l1', label: 'Tier 1' }] };
+
+    it('refuses an extension field NAMED with the reserved token, at the entry, with the owner door\'s message', () => {
+      const viaExtension = validateSecurityRoleWord({
+        objectExtensions: [{ extend: 'sd_agent', fields: { role: roleSelect } }],
+      });
+      expect(viaExtension).toHaveLength(1);
+      expect(viaExtension[0]).toMatchObject({
+        severity: 'error',
+        rule: SECURITY_ROLE_WORD,
+        where: 'field "sd_agent.role"',
+        path: 'objectExtensions[0].fields.role.name',
+      });
+      // Same field on the owner's own `fields`: one rule, one message.
+      const viaOwner = validateSecurityRoleWord({
+        objects: [{ name: 'sd_agent', sharingModel: 'private', fields: { role: roleSelect } }],
+      });
+      expect(viaOwner.map((f) => [f.where, f.message, f.hint])).toEqual(
+        viaExtension.map((f) => [f.where, f.message, f.hint]),
+      );
+      expect(viaOwner[0]!.path).toBe('objects[0].fields.role.name');
+    });
+
+    it('refuses an extension field LABELLED with the reserved word, at its label', () => {
+      const findings = validateSecurityRoleWord({
+        objectExtensions: [{ extend: 'sd_agent', fields: { group_function: { type: 'text', label: 'Support Role' } } }],
+      });
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+        [SECURITY_ROLE_WORD, 'error', 'objectExtensions[0].fields.group_function.label'],
+      ]);
+      expect(findings[0]!.message).toBe('field label "Support Role" uses the reserved word "role" (ADR-0090 D3).');
+    });
+
+    it('reads a packages[] body\'s extensions, as the registry registers them', () => {
+      const findings = validateSecurityRoleWord({
+        packages: [
+          { manifest: { objects: [{ name: 'sd_agent', sharingModel: 'private', fields: { tier: { type: 'text' } } }] } },
+          { manifest: { objectExtensions: [{ extend: 'sd_agent', fields: { role: roleSelect } }] } },
+        ],
+      });
+      expect(findings.map((f) => f.path)).toEqual(['packages[1].manifest.objectExtensions[0].fields.role.name']);
+      expect(findings[0]!.where).toBe('field "sd_agent.role"');
+    });
+
+    it('refuses the extension\'s own `label` and a `fieldPatches` relabel — the two labels it serves', () => {
+      const findings = validateSecurityRoleWord({
+        objectExtensions: [
+          {
+            extend: 'crm_account',
+            label: 'Account Roles',
+            fieldPatches: {
+              industry: { label: 'Role In Market' },
+              // Option labels stay out: the owner door does not judge them.
+              type: { options: { customer: { label: 'Role Player' } } },
+            },
+          },
+        ],
+      });
+      expect(findings.map((f) => [f.where, f.path])).toEqual([
+        ['object "crm_account"', 'objectExtensions[0].label'],
+        ['field "crm_account.industry"', 'objectExtensions[0].fieldPatches.industry.label'],
+      ]);
+      expect(findings.every((f) => f.rule === SECURITY_ROLE_WORD && f.severity === 'error')).toBe(true);
+      expect(findings[0]!.message).toBe('object label "Account Roles" uses the reserved word "role" (ADR-0090 D3).');
+    });
+
+    it('stays silent on a clean extension — the showcase shape', () => {
+      expect(
+        validateSecurityRoleWord({
+          objectExtensions: [
+            {
+              extend: 'showcase_account',
+              label: 'Account (Success Overlay)',
+              pluralLabel: 'Accounts (Success Overlay)',
+              fields: {
+                loyalty_tier: { type: 'select', label: 'Loyalty Tier', options: [{ value: 'gold', label: 'Gold' }] },
+                payroll_code: { type: 'text', label: 'Payroll — Controlled Rollout' },
+              },
+              fieldPatches: { industry: { label: 'Sector' } },
+              priority: 210,
+            },
+          ],
+        }),
+      ).toEqual([]);
+    });
+
+    it('refuses an extension field on a sys_ object: the exemption covers the platform\'s words, not an app\'s', () => {
+      // The owner-side control first, unchanged: the platform's own
+      // `sys_member.role` stays exempt.
+      expect(
+        validateSecurityRoleWord({ objects: [{ name: 'sys_member', fields: { role: { name: 'role', label: 'Role' } } }] }),
+      ).toEqual([]);
+      const findings = validateSecurityRoleWord({
+        objects: [{ name: 'sys_member', fields: { role: { name: 'role', label: 'Role' } } }],
+        objectExtensions: [{ extend: 'sys_user', fields: { support_role: { type: 'text', label: 'Desk' } } }],
+      });
+      expect(findings.map((f) => [f.where, f.path])).toEqual([
+        ['field "sys_user.support_role"', 'objectExtensions[0].fields.support_role.name'],
+      ]);
+    });
+
+    it('judges the owner field and the extension field side by side, each at its own entry', () => {
+      const findings = validateSecurityRoleWord({
+        objects: [{ name: 'sd_agent', sharingModel: 'private', fields: { role_code: { type: 'text', label: 'Code' } } }],
+        objectExtensions: [{ extend: 'sd_agent', fields: { role: roleSelect } }],
+      });
+      expect(findings.map((f) => f.path)).toEqual([
+        'objects[0].fields.role_code.name',
+        'objectExtensions[0].fields.role.name',
+      ]);
+    });
+
+    it('judges only the entry a package\'s later extension of the same target leaves served', () => {
+      // One entry per package per target: the registry removes the earlier
+      // one, its fields included, so its words are never served.
+      const findings = validateSecurityRoleWord({
+        objectExtensions: [
+          { extend: 'sd_agent', fields: { role: roleSelect } },
+          { extend: 'sd_agent', fields: { duty_role: { type: 'text', label: 'Duty' } } },
+        ],
+      });
+      expect(findings.map((f) => f.path)).toEqual(['objectExtensions[1].fields.duty_role.name']);
+    });
   });
 
   // ── Rule: security-private-no-readscope (info) ──────────────────────
@@ -1982,8 +2134,9 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     // the OWD dials FLAT and has no `security` envelope to nest them under.
     // [#18306] `fieldGroups` joined when the ADR-0090 D3 vocabulary freeze
     // started visiting the group headings that sit above the fields it already
-    // judged.
-    expected: ['actions', 'fieldGroups', 'fields', 'isSystem', 'label', 'name', 'sharingModel'],
+    // judged. [ADR-0153 D4] `managedBy` joined: `security-owd-unset` gives a
+    // `synced` object its own fix-it.
+    expected: ['actions', 'fieldGroups', 'fields', 'isSystem', 'label', 'managedBy', 'name', 'sharingModel'],
     declaredBy: 'ObjectSchema',
     keys: () => Object.keys(ObjectSchema.shape),
   },
@@ -2120,9 +2273,17 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
   },
   {
     receiver: 'ext',
-    expected: ['extend', 'fields', 'priority', 'validations'],
+    expected: ['extend', 'fieldPatches', 'fields', 'label', 'priority', 'validations'],
     declaredBy: 'ObjectStackSchema.objectExtensions[]',
     keys: () => shapeKeysOf(ObjectStackSchema.shape.objectExtensions),
+  },
+  // [#31998] One `fieldPatches` entry, read by the role-word rule for the label
+  // a base field is served with, and for nothing else.
+  {
+    receiver: 'displayPatch',
+    expected: ['label'],
+    declaredBy: 'ObjectStackSchema.objectExtensions[].fieldPatches{}',
+    keys: () => shapeKeysOf(shapeOf(ObjectStackSchema.shape.objectExtensions).fieldPatches),
   },
   // [#18535] The ADR-0066 D1 capability declarations the anchor rule reads: it
   // wants their NAMES and hands the declarations themselves to the predicate,
@@ -2196,6 +2357,9 @@ describe('validateSecurityPosture — reads only keys the spec declares (meta-te
       // #30905: `cbpMasterCandidates`' required-master list (`.length`, a JS property) and the spec
       // resolver's answer (`controlledByParentMasterOf`: `.field` / `.optional`, fields of its own return value).
       'requiredMasters', 'master',
+      // #31998: the role-word extension walk's finding path (`….fieldPatches.${fieldName}.label`), a template
+      // segment and not a receiver.
+      'fieldPatches',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });

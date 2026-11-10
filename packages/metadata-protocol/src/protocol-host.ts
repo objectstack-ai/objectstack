@@ -57,6 +57,7 @@ export interface ProtocolHost {
     readonly anonymousElevatedFlowRefusal: ObjectStackProtocolImplementation['anonymousElevatedFlowRefusal'];
     readonly anotherPackageShips: ObjectStackProtocolImplementation['anotherPackageShips'];
     readonly applyObjectRegistryMutation: ObjectStackProtocolImplementation['applyObjectRegistryMutation'];
+    readonly applyPublishBackfill: ObjectStackProtocolImplementation['applyPublishBackfill'];
     readonly applyRegistryWriteThrough: ObjectStackProtocolImplementation['applyRegistryWriteThrough'];
     readonly applyRemoteMetadataMutation: ObjectStackProtocolImplementation['applyRemoteMetadataMutation'];
     readonly applySeedBodies: ObjectStackProtocolImplementation['applySeedBodies'];
@@ -87,6 +88,7 @@ export interface ProtocolHost {
     clusterUnsubscribe: ObjectStackProtocolImplementation['clusterUnsubscribe'];
     readonly codeOnlyCreateError: (typeof ObjectStackProtocolImplementation)['codeOnlyCreateError'];
     readonly codeOnlyOverrideError: (typeof ObjectStackProtocolImplementation)['codeOnlyOverrideError'];
+    readonly collectBatchPendingDeclarations: ObjectStackProtocolImplementation['collectBatchPendingDeclarations'];
     readonly convertStoredItem: ObjectStackProtocolImplementation['convertStoredItem'];
     readonly convertStoredItemDetailed: ObjectStackProtocolImplementation['convertStoredItemDetailed'];
     readonly copiesOwnShippedViewContainer: ObjectStackProtocolImplementation['copiesOwnShippedViewContainer'];
@@ -114,6 +116,7 @@ export interface ProtocolHost {
     readonly expandStoredViewContainers: ObjectStackProtocolImplementation['expandStoredViewContainers'];
     readonly expandUnderOwnName: ObjectStackProtocolImplementation['expandUnderOwnName'];
     readonly externalBindingSaveRefusal: ObjectStackProtocolImplementation['externalBindingSaveRefusal'];
+    readonly facade: ObjectStackProtocolImplementation; // the instance itself: a moved body's bare `this` reads `this.facade` (#30020 R1)
     readonly findEnvironmentRow: ObjectStackProtocolImplementation['findEnvironmentRow'];
     readonly findEnvironmentRows: ObjectStackProtocolImplementation['findEnvironmentRows'];
     readonly findPairAddedMemberRow: ObjectStackProtocolImplementation['findPairAddedMemberRow'];
@@ -181,6 +184,7 @@ export interface ProtocolHost {
     readonly pairsOfAddedMember: ObjectStackProtocolImplementation['pairsOfAddedMember'];
     readonly parseCommitItems: ObjectStackProtocolImplementation['parseCommitItems'];
     readonly permissionSetNameCollisionRefusal: ObjectStackProtocolImplementation['permissionSetNameCollisionRefusal'];
+    readonly planPublishBackfill: ObjectStackProtocolImplementation['planPublishBackfill'];
     readonly probeRecord: ObjectStackProtocolImplementation['probeRecord'];
     readonly promoteDraftForPublish: ObjectStackProtocolImplementation['promoteDraftForPublish'];
     readonly publishMaterializers: ObjectStackProtocolImplementation['publishMaterializers'];
