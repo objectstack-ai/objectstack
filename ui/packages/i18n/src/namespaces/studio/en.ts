@@ -322,6 +322,8 @@ const STUDIO_EN: Record<string, string> = {
   'designer.canvas.expandSection': 'Expand section',
   'designer.canvas.moveSectionUp': 'Move section up',
   'designer.canvas.moveSectionDown': 'Move section down',
+  'designer.canvas.sectionFirst': 'Already the first section',
+  'designer.canvas.sectionLast': 'Already the last section',
   'designer.canvas.removeSection': 'Remove section',
   'designer.canvas.removeSectionHint': 'Remove section (fields move to Ungrouped)',
   'designer.canvas.renameHint': 'Double-click to rename',
@@ -1652,6 +1654,8 @@ const STUDIO_EN: Record<string, string> = {
   // Reorder buttons (used in InspectorShell header)
   'engine.inspector.reorder.up': 'Move up',
   'engine.inspector.reorder.down': 'Move down',
+  'engine.inspector.reorder.atFirst': 'Already first',
+  'engine.inspector.reorder.atLast': 'Already last',
   // InspectorComboField defaults (objectui#10586). `{value}` is the typed
   // text, drawn in a code span by the combo.
   'engine.inspector.combo.search': 'Search or type…',
@@ -3437,6 +3441,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.designer.fieldRole': 'draggable field',
   'engine.studio.designer.groupUp': 'Move group up',
   'engine.studio.designer.groupDown': 'Move group down',
+  'engine.studio.designer.groupUpFirst': 'Already the first group',
+  'engine.studio.designer.groupDownLast': 'Already the last group',
   'engine.studio.designer.groupDelete': 'Delete group',
   'engine.studio.designer.groupDeleteTitle': 'Delete group (its fields move to Ungrouped)',
   'engine.studio.designer.dropHere': 'Drag fields here',
