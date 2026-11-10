@@ -8,7 +8,9 @@
  * from the database at boot only, so a package created, installed, edited or
  * deleted on one replica is not seen by the others until they restart; and the
  * enable/disable choice is written to the serving replica's own package-state
- * store (`OS_HOME/package-state/<hash>.json` when the host registers none), a
+ * store (when the host registers none, a file under `OS_HOME/package-state/`
+ * named by `packageStateFileName` in `./package-state-store.ts`: the
+ * environment id and a key of the directory the process starts in), a
  * file on its own volume, so replicas that restart read different choices for
  * good. The maintainer ruled 「多副本时拒绝」: under declared replicas these doors
  * refuse, `409` with `MULTI_REPLICA_PACKAGE_CHANGE_REFUSED`, naming the
@@ -31,11 +33,7 @@
  * byte-for-byte what they were.
  */
 
-import {
-    declaresMultiReplicaOnRedis,
-    MULTI_REPLICA_PACKAGE_CHANGE_REFUSED,
-    multiReplicaMaintenanceWindowRecipe,
-} from '@objectstack/service-cluster';
+import { declaresMultiReplicaOnRedis, MULTI_REPLICA_PACKAGE_CHANGE_REFUSED } from '@objectstack/service-cluster';
 import { installedManifestsOf, pairOf, type InstalledPackageSource } from '@objectstack/metadata-core';
 import type { HttpDispatcherResult, HttpProtocolContext } from './http-dispatcher.js';
 
@@ -68,10 +66,15 @@ export async function packageChangeReachesOneReplica(
  * stands every replica refuses the change the same way, whichever client sends
  * it (Studio, the REST API, a script), so "run it on a single replica" is
  * refused again; and no `os` command reaches these doors at all. So the
- * remedy is the one maintenance-window recipe the install-local doors name too
- * (`multiReplicaMaintenanceWindowRecipe`, `@objectstack/service-cluster`): one
- * replica, the declaration lifted, the same request, then the count and the
- * declaration restored and every replica restarted.
+ * remedy gives the steps the install-local doors name too
+ * (`multiReplicaInstallLocalRefusalMessage`, `@objectstack/cloud-connection`):
+ * one replica, the declaration lifted, the same request, then the count and
+ * the declaration restored and every replica restarted. Lifted means
+ * `declaresMultiNode` (`@objectstack/service-cluster`) reads false:
+ * `OS_CLUSTER_REPLICAS` at 1 and `OS_EXPECT_MULTI_NODE` unset, the two
+ * settings it reads. The two messages spell the steps separately: a shared
+ * builder would be a new export of a published package, a public-surface
+ * change this remedy-text fix does not carry.
  *
  * Then the condition the change needs to reach the other replicas, read where
  * they read it at boot: a package created, installed, edited or deleted here
@@ -88,9 +91,11 @@ export function multiReplicaPackageChangeMessage(subject: string): string {
         + 'or OS_EXPECT_MULTI_NODE=true) on the Redis cluster driver, and a package change at runtime reaches only '
         + 'the replica that serves the request: the package registry is read at boot and the enable/disable choice '
         + 'is kept per replica, so the other replicas would keep serving the packages as they were. Every replica '
-        + 'refuses the change the same way while the declaration stands, whichever client sends it. '
-        + multiReplicaMaintenanceWindowRecipe('repeat the request')
-        + ' Each replica loads the packages changed at runtime from the database (sys_packages) and the '
+        + 'refuses the change the same way while the declaration stands, whichever client sends it. Make the change '
+        + 'in a maintenance window instead: scale the deployment to one replica and restart it with '
+        + 'OS_CLUSTER_REPLICAS=1 and OS_EXPECT_MULTI_NODE unset, repeat the request against that replica, then '
+        + 'restore the replica count and the declaration and restart every replica. '
+        + 'Each replica loads the packages changed at runtime from the database (sys_packages) and the '
         + 'enable/disable choice from its package-state store when it starts, so the change reaches every replica '
         + 'only when they all read the same database and the same package-state store: the host\'s, or '
         + 'package-state under one shared OS_HOME with every replica started from the same directory. '

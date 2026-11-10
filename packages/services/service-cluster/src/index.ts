@@ -49,12 +49,10 @@ export {
 
 // [cloud#3814 R2/R3] Declared multi-replica over the Redis cluster driver: the
 // one switch every multi-replica behaviour keys on, and the code a door answers
-// when it refuses a package change under it, with the one maintenance-window
-// recipe those refusals name (#32265).
+// when it refuses a package change under it.
 export {
     MULTI_REPLICA_CLUSTER_DRIVER,
     MULTI_REPLICA_PACKAGE_CHANGE_REFUSED,
-    multiReplicaMaintenanceWindowRecipe,
     declaresMultiReplicaOnRedis,
     composedClusterDriver,
 } from './multi-replica.js';

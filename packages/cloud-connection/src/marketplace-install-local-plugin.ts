@@ -404,12 +404,7 @@ import {
 } from '@objectstack/metadata-protocol';
 import { resolveThrownHttpError, type ThrownHttpError } from '@objectstack/types';
 import { unknownQueryParamRefusalMessage } from '@objectstack/rest';
-import {
-    composedClusterDriver,
-    declaresMultiReplicaOnRedis,
-    MULTI_REPLICA_PACKAGE_CHANGE_REFUSED,
-    multiReplicaMaintenanceWindowRecipe,
-} from '@objectstack/service-cluster';
+import { composedClusterDriver, declaresMultiReplicaOnRedis, MULTI_REPLICA_PACKAGE_CHANGE_REFUSED } from '@objectstack/service-cluster';
 
 /** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
 type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
@@ -1411,10 +1406,7 @@ function refuseMultiReplicaPackageChange(c: any, ctx: PluginContext, subject: 'I
  * declaration has to be lifted for the change, on a deployment scaled to the
  * one replica that makes it. Lifted means `declaresMultiNode`
  * (`@objectstack/service-cluster`) reads false: `OS_CLUSTER_REPLICAS` at 1 and
- * `OS_EXPECT_MULTI_NODE` unset, the two settings it reads. [#32265] Those
- * steps are the one recipe every multi-replica package refusal names, the
- * runtime package doors' included, so they are spelled once beside that
- * reader (`multiReplicaMaintenanceWindowRecipe`). The change then
+ * `OS_EXPECT_MULTI_NODE` unset, the two settings it reads. The change then
  * reaches the other replicas only through the ledger they rehydrate at boot,
  * so the recipe says so, with the condition that holds it: they must read the
  * same ledger directory (`<OS_HOME>/installed-packages` unless the host sets
@@ -1428,9 +1420,10 @@ export function multiReplicaInstallLocalRefusalMessage(subject: 'Installing' | '
         + '(OS_CLUSTER_REPLICAS greater than 1, or OS_EXPECT_MULTI_NODE=true) on the Redis cluster driver, and '
         + 'install-local changes only the replica that serves the request: its own install ledger and its own '
         + `kernel. The other replicas would never see ${what}. Every client of this door, \`os package install\` and `
-        + 'any script that runs it included, is refused the same way while the declaration stands. '
-        + multiReplicaMaintenanceWindowRecipe(`run the ${change}`)
-        + ' Each replica loads the packages its '
+        + 'any script that runs it included, is refused the same way while the declaration stands. Make the change '
+        + 'in a maintenance window instead: scale the deployment to one replica and restart it with '
+        + `OS_CLUSTER_REPLICAS=1 and OS_EXPECT_MULTI_NODE unset, run the ${change} against that replica, then restore `
+        + 'the replica count and the declaration and restart every replica. Each replica loads the packages its '
         + 'install ledger lists when it starts (installed-packages under OS_HOME, unless the host configures '
         + 'another directory), so the change reaches every replica only when they all read that one directory. '
         + 'Nothing was installed, uninstalled or written.';
