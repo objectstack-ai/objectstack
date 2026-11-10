@@ -18,7 +18,13 @@
 //     holders and the rename, and installs nothing;
 //   - the same door refusing a package that redeclares the showcase's own
 //     mapping and dataset names, naming the showcase;
-//   - CONTROL: a package declaring fresh names installs.
+//   - CONTROL: a package declaring fresh names installs;
+//   - [#32070] the picklist's by-name read on that clash answers by ADR-0150
+//     D3: the bare `GET /meta/picklist/NAME` is 409 naming both holders, each
+//     qualified address reaches its own list, a qualifier that does not hold
+//     the name is refused, and each field still serves its own package's
+//     options (child E6). CONTROL: a name one package holds is served as
+//     before at the bare and the holder's addresses.
 
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -37,6 +43,8 @@ const SHOWCASE_DATASET = 'showcase_task_metrics';
 const PICKLIST = 'qa_shared_status';
 const MAPPING = 'qa_shared_mapping';
 const DATASET = 'qa_shared_dataset';
+/** A picklist only `alpha` holds: the one-holder CONTROL. */
+const SOLO_PICKLIST = 'qa_alpha_status';
 
 const picklist = (p: string, name = PICKLIST) => ({
   name, label: `${p} status`, options: [{ label: `${p} one`, value: `${p}_one` }],
@@ -66,7 +74,7 @@ function bootPackage(p: 'alpha' | 'beta') {
         },
       },
     ],
-    picklists: [picklist(p)],
+    picklists: [picklist(p), ...(p === 'alpha' ? [picklist(p, SOLO_PICKLIST)] : [])],
     mappings: [mapping(p)],
     datasets: [dataset(p)],
   } as never);
@@ -185,6 +193,58 @@ describe('one package holder per picklist, mapping and dataset name, on a booted
     expect(message).toContain(SHOWCASE_PKG);
     expect(message).toContain(`"delta_${SHOWCASE_MAPPING}"`);
     expect(await packageIds(), 'the package list is unchanged').toEqual(before);
+  });
+
+  describe('[#32070] the picklist\'s by-name read answers by package (ADR-0150 D3)', () => {
+    const read = async (path: string) => {
+      const res = await stack.apiAs(admin, 'GET', path);
+      return { status: res.status, body: (await res.json()) as any };
+    };
+    const labelOf = (body: any) => body?.item?.label ?? body?.data?.item?.label;
+    const sentenceOf = (body: any) => String(typeof body?.error === 'string' ? body.error : body?.error?.message ?? '');
+
+    it('the bare read of a name both packages hold is 409 RESOURCE_CONFLICT naming both, never the first registered', async () => {
+      const { status, body } = await read(`/meta/picklist/${PICKLIST}`);
+      expect([status, codeOf(body)], JSON.stringify(body)).toEqual([409, 'RESOURCE_CONFLICT']);
+      expect(sentenceOf(body)).toContain('com.qa.bare.alpha');
+      expect(sentenceOf(body)).toContain('com.qa.bare.beta');
+    });
+
+    it('each namespace address and each `?package=` reaches its own package\'s list', async () => {
+      for (const p of ['alpha', 'beta']) {
+        for (const path of [`/meta/picklist/${p}/${PICKLIST}`, `/meta/picklist/${PICKLIST}?package=com.qa.bare.${p}`]) {
+          const { status, body } = await read(path);
+          expect(status, `${path} ${JSON.stringify(body)}`).toBe(200);
+          expect(labelOf(body), path).toBe(`${p} status`);
+        }
+      }
+    });
+
+    it('a qualifier that does not hold the name is refused naming its holder, never served another package\'s list', async () => {
+      for (const path of [`/meta/picklist/beta/${SOLO_PICKLIST}`, `/meta/picklist/${SOLO_PICKLIST}?package=com.qa.bare.beta`, `/meta/picklist/_env/${SOLO_PICKLIST}`]) {
+        const { status, body } = await read(path);
+        expect([status, codeOf(body)], `${path} ${JSON.stringify(body)}`).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(sentenceOf(body), path).toContain('com.qa.bare.alpha');
+      }
+    });
+
+    it('CONTROL: a name one package holds is served at the bare address and at the holder\'s qualified addresses', async () => {
+      for (const path of [`/meta/picklist/${SOLO_PICKLIST}`, `/meta/picklist/alpha/${SOLO_PICKLIST}`, `/meta/picklist/${SOLO_PICKLIST}?package=com.qa.bare.alpha`]) {
+        const { status, body } = await read(path);
+        expect(status, `${path} ${JSON.stringify(body)}`).toBe(200);
+        expect(labelOf(body), path).toBe('alpha status');
+      }
+    });
+
+    it('each field still serves its own package\'s options (child E6)', async () => {
+      for (const p of ['alpha', 'beta']) {
+        const { status, body } = await read(`/meta/object/${p}_item`);
+        expect(status).toBe(200);
+        const object = body?.data ?? body;
+        const options = object?.fields?.status?.options ?? object?.item?.fields?.status?.options;
+        expect(options, `${p}_item.status`).toEqual([{ label: `${p} one`, value: `${p}_one` }]);
+      }
+    });
   });
 
   it('CONTROL — install-local of a package declaring fresh names installs', async () => {
