@@ -191,10 +191,9 @@ describe('sign-out clears the signed-out user’s list state and list filters', 
     // and the user's last list change would be lost on every device.
     const events: string[] = [];
     const client = authClient(async () => ({ user: ALICE, session: { token: 'tok-alice' } }));
-    const signOutCall = (client.signOut as ReturnType<typeof vi.fn>).getMockImplementation()!;
     (client.signOut as ReturnType<typeof vi.fn>).mockImplementation(async () => {
       events.push('session ended');
-      await signOutCall();
+      TokenStorage.clear();
     });
     const family = serverFamily();
     family.save.mockImplementation(async () => {
