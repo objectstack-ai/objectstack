@@ -26,6 +26,12 @@ import { declaredRefusalMessage, resolveThrownHttpError } from '@objectstack/typ
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { SchemaRegistry } from './registry.js';
 import { PACKAGE_SCOPED_READ_TYPES, PackageScopedNameRefusedError } from './package-scoped-read.js';
+import { PACKAGE_SCOPED_TYPES } from '@objectstack/core';
+
+/** ADR-0150's covered types whose by-name readers no child of the epic has wired yet. */
+const UNWIRED_COVERED_TYPES = PACKAGE_SCOPED_TYPES.filter(
+  (type) => !(PACKAGE_SCOPED_READ_TYPES as readonly string[]).includes(type),
+);
 
 const A = 'com.acme.alpha';
 const B = 'com.acme.beta';
@@ -294,7 +300,24 @@ describe('fail closed — a registry with no package-scoped resolver refuses wha
     expect(labelOf(await protocol.getMetaItem({ type: 'dashboard', name: 'sales' }))).toBe('alpha dashboard');
     expect(labelOf(await protocol.getMetaItem({ type: 'page', name: 'home', packageId: A }))).toBe('alpha page');
     expect(() => protocol.admitEnvironmentQualifier({ type: 'page', name: 'nothing' })).not.toThrow();
+  });
 
+  /**
+   * The registry WITH the resolver reads a covered type no child of the epic
+   * has wired yet (`readsByPackage` answers `false`) through `getItem`, as on
+   * main. That answer is every in-repo composition's for these types, so the
+   * guard judges the registry's declaration, never the type alone: refusing a
+   * `false` answer would refuse every by-name read of them in production.
+   */
+  it.each(UNWIRED_COVERED_TYPES)('CONTROL: %s, covered but read through `getItem` by this registry, is served as before, both ways', async (type) => {
+    expect(registry.readsByPackage(type), 'this registry reads the type through getItem').toBe(false);
+    ship(type, 'solo', A);
+    expect(labelOf(await protocol.getMetaItem({ type, name: 'solo' }))).toBe(`alpha ${type}`);
+    expect(labelOf(await protocol.getMetaItem({ type, name: 'solo', packageId: A }))).toBe(`alpha ${type}`);
+  });
+});
+
+/**
  * [#32069] The exact read never serves a body under a package it was not read
  * from. On main ff04ad81, `GET /meta/api/alpha/NAME` of an api two packages
  * hold answered beta's body stamped `_packageId: alpha`: the metadata service
