@@ -172,3 +172,30 @@ describe('[#24245] the auth arm answers HEAD /auth/config as its GET', () => {
     expect(handleRequest).not.toHaveBeenCalled();
   });
 });
+
+// The host's organization-create choices are resolved in the language of the
+// request, so the auth arm hands the request to `getPublicConfig()` the way
+// plugin-auth's own `/config` route does.
+describe('the auth arm hands GET /auth/config\'s request to getPublicConfig', () => {
+  it('the service receives the client request, accept-language included', async () => {
+    const getPublicConfig = vi.fn((_request?: unknown) => ({ features: {} }));
+    const authKernel = {
+      getServiceAsync: vi.fn().mockResolvedValue({
+        getPublicConfig,
+        handleRequest: vi.fn(),
+        ownsRoute: async () => false,
+      }),
+    } as any;
+    const app = createHonoApp({ kernel: authKernel, prefix: PREFIX, cors: false });
+
+    const res = await app.request(`http://hosted.test${PREFIX}/auth/config`, {
+      headers: { 'accept-language': 'zh-CN,zh;q=0.9' },
+    });
+
+    expect(res.status).toBe(200);
+    expect(getPublicConfig).toHaveBeenCalledTimes(1);
+    const request = getPublicConfig.mock.calls[0]?.[0] as Request | undefined;
+    expect(request).toBeInstanceOf(Request);
+    expect(request?.headers.get('accept-language')).toBe('zh-CN,zh;q=0.9');
+  });
+});

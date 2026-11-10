@@ -31,7 +31,7 @@
     "selectFields": [
       {"object": "customer", "field": "tier", "minOptions": 3},
       {"object": "agent_group", "field": "tier", "minOptions": 2},
-      {"object": "agent", "field": "role", "minOptions": 2},
+      {"object": "agent", "field": "job_function", "minOptions": 2},
       {"object": "sla_policy", "field": "priority", "minOptions": 4},
       {"object": "escalation_rule", "field": "priority", "minOptions": 4},
       {"object": "ticket", "field": "category", "minOptions": 3},
@@ -90,15 +90,15 @@
         {"id": "grp_tier2", "name": "Tier 2", "lead": "a08", "queue_email": "tier2@support.example.com", "tier": "escalation"}
       ],
       "agent": [
-        {"id": "a01", "name": "Mia Wong", "group": "grp_billing", "role": "lead", "email": "mia.wong@support.example.com", "hourly_cost": 48},
-        {"id": "a02", "name": "Leo Garcia", "group": "grp_billing", "role": "agent", "email": "leo.garcia@support.example.com", "hourly_cost": 32},
-        {"id": "a03", "name": "Priya Nair", "group": "grp_billing", "role": "agent", "email": "priya.nair@support.example.com", "hourly_cost": 32},
-        {"id": "a04", "name": "Sam Okafor", "group": "grp_tech", "role": "lead", "email": "sam.okafor@support.example.com", "hourly_cost": 52},
-        {"id": "a05", "name": "Lena Fischer", "group": "grp_tech", "role": "agent", "email": "lena.fischer@support.example.com", "hourly_cost": 36},
-        {"id": "a06", "name": "Tom Becker", "group": "grp_tech", "role": "agent", "email": "tom.becker@support.example.com", "hourly_cost": 36},
-        {"id": "a07", "name": "Aisha Rahman", "group": "grp_tech", "role": "agent", "email": "aisha.rahman@support.example.com", "hourly_cost": 34},
-        {"id": "a08", "name": "Ken Sato", "group": "grp_tier2", "role": "lead", "email": "ken.sato@support.example.com", "hourly_cost": 60},
-        {"id": "a09", "name": "Rosa Lima", "group": "grp_tier2", "role": "agent", "email": "rosa.lima@support.example.com", "hourly_cost": 44}
+        {"id": "a01", "name": "Mia Wong", "group": "grp_billing", "job_function": "lead", "email": "mia.wong@support.example.com", "hourly_cost": 48},
+        {"id": "a02", "name": "Leo Garcia", "group": "grp_billing", "job_function": "agent", "email": "leo.garcia@support.example.com", "hourly_cost": 32},
+        {"id": "a03", "name": "Priya Nair", "group": "grp_billing", "job_function": "agent", "email": "priya.nair@support.example.com", "hourly_cost": 32},
+        {"id": "a04", "name": "Sam Okafor", "group": "grp_tech", "job_function": "lead", "email": "sam.okafor@support.example.com", "hourly_cost": 52},
+        {"id": "a05", "name": "Lena Fischer", "group": "grp_tech", "job_function": "agent", "email": "lena.fischer@support.example.com", "hourly_cost": 36},
+        {"id": "a06", "name": "Tom Becker", "group": "grp_tech", "job_function": "agent", "email": "tom.becker@support.example.com", "hourly_cost": 36},
+        {"id": "a07", "name": "Aisha Rahman", "group": "grp_tech", "job_function": "agent", "email": "aisha.rahman@support.example.com", "hourly_cost": 34},
+        {"id": "a08", "name": "Ken Sato", "group": "grp_tier2", "job_function": "lead", "email": "ken.sato@support.example.com", "hourly_cost": 60},
+        {"id": "a09", "name": "Rosa Lima", "group": "grp_tier2", "job_function": "agent", "email": "rosa.lima@support.example.com", "hourly_cost": 44}
       ],
       "sla_policy": [
         {"id": "sla_urgent", "name": "Urgent", "priority": "urgent", "first_response_hours": 1, "resolution_hours": 8},
