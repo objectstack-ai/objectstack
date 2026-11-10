@@ -5,6 +5,8 @@ import { describe, it, expect } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 import { HttpDispatcher, type HttpDispatcherResult } from './http-dispatcher.js';
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/metadata';
 import { resolveExecutionContext } from './security/resolve-execution-context.js';
 import { hashApiKey } from './security/api-key.js';
 

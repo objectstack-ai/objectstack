@@ -18,6 +18,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { envelopeViolations } from '@objectstack/spec/api';
 import { HttpDispatcher } from './http-dispatcher.js';
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/metadata';
 import { DomainHandlerRegistry } from './domain-handler-registry.js';
 import type { DomainHandler } from './domain-handler-registry.js';
 
