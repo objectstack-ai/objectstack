@@ -356,6 +356,9 @@ describe('[#18783] the engine is handed the same producer', () => {
  *    model. There the pin holds the refuse direction only — the map never grants
  *    what the evaluator refuses. [#30440] `transfer` is one of them: an owner
  *    change is an update, which the guard refuses unless the object opts `edit` in.
+ *  - [Ruling of record 6755714726 on #32004] `transfer` is compared with the
+ *    owner-change door's two halves, edit AND the evaluator's `transfer` cell:
+ *    the map grants a transfer only with edit, on every object.
  *
  * [#20134] Subjects whose sets carry a SUPER-USER wildcard are held by the same
  * table, one row per shape: the shipped platform admin and walled org admin, a
@@ -528,7 +531,13 @@ describe('[#20083] parity: can() over the member\'s map answers what checkObject
         for (const verb of OBJECT_PERMISSION_VERB_NAMES) {
           const target = resolveObjectPermissionVerb(verb)!;
           const map = can(permissions, schema.name, verb);
-          const server = evaluator.checkObjectPermission(OPERATION[target], schema.name, sets, { isPrivate });
+          // [Ruling of record 6755714726 on #32004] The map's `transfer` is the
+          // owner-change door's answer: edit AND the transfer grant the
+          // evaluator's `transfer` cell reads.
+          const server = target === 'allowTransfer'
+            ? evaluator.checkObjectPermission('transfer', schema.name, sets, { isPrivate })
+              && evaluator.checkObjectPermission('update', schema.name, sets, { isPrivate })
+            : evaluator.checkObjectPermission(OPERATION[target], schema.name, sets, { isPrivate });
           cells += 1;
           if (map === server) continue;
           // The managed-write clamp may only NARROW, and only on its own verbs.
