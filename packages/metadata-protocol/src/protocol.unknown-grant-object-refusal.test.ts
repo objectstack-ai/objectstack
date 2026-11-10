@@ -78,7 +78,7 @@ function matchesWhere(r: Row, where: Record<string, unknown>): boolean {
     return true;
 }
 
-function makeSession(opts: { objects?: string[]; looksUpObjects?: boolean } = {}) {
+function makeSession(opts: { objects?: string[]; looksUpObjects?: boolean; packageScopedReads?: boolean } = {}) {
     const rows = new Map<string, Row>();
     const history: Array<Record<string, unknown>> = [];
     const objects = new Set(opts.objects ?? []);
@@ -92,7 +92,7 @@ function makeSession(opts: { objects?: string[]; looksUpObjects?: boolean } = {}
         return null;
     };
     const registry: any = {
-        ...NO_PACKAGE_SCOPED_READS,
+        ...(opts.packageScopedReads === false ? {} : NO_PACKAGE_SCOPED_READS),
         registerItem: () => {},
         registerObject: () => {},
         listItems: () => [],
@@ -494,6 +494,26 @@ describe('[#32162] the held-grants read is the landing package\'s own set', () =
     it('an error that is not a refusal is not read as nothing held', async () => {
         const host = { ...hostOver({}).host, readMetaItem: async () => { throw new Error('store down'); } };
         await expect(judge(host, ['qa_gone'], ALPHA)).rejects.toThrow('store down');
+    });
+
+    // [#32162 x #32076] On a registry without the package-scoped reads the
+    // exact qualifier needs, the qualified held-grants read is #32076's
+    // fail-closed `501 NOT_IMPLEMENTED` — a declared refusal, not the D3
+    // refusal read as nothing held — so the save fails 501 rather than being
+    // judged without its own held grants. Every in-repo composition mounts the
+    // protocol on ObjectQL's `SchemaRegistry`, which carries the reads.
+    it('a registry without the package-scoped reads: the held-grants read naming the landing package fails the save 501, never read as nothing held', async () => {
+        const { protocol } = makeSession({ packageScopedReads: false });
+        const err = await refusalOf(protocol.unknownGrantObjectSaveRefusal(
+            'permission', set('qa_set', ['qa_gone']), 'qa_set', undefined, undefined, 'save', undefined, PKG,
+        ));
+        expect([err?.code, err?.status, err?.refusal]).toEqual(['NOT_IMPLEMENTED', 501, true]);
+
+        // CONTROL: the same registry with the reads judges the grant (422).
+        const control = makeSession();
+        expectRefusal(await control.protocol.unknownGrantObjectSaveRefusal(
+            'permission', set('qa_set', ['qa_gone']), 'qa_set', undefined, undefined, 'save', undefined, PKG,
+        ), 'qa_set', ['qa_gone']);
     });
 
     it('the doors hand the landing package: a save naming it, a draft publish into it, a restore bound to it', async () => {

@@ -688,6 +688,11 @@ describe('the exact read serves the holder\'s own body under the holder\'s own s
 describe('permission: the four `/meta` read forms by `(package, name)` (#32162)', () => {
   const nsOf = (id: string) => id.split('.').pop()!;
 
+  it('permission is wired, so it leaves the derived unwired set #32076 parameterizes over', () => {
+    expect(registry.readsByPackage('permission')).toBe(true);
+    expect(UNWIRED_COVERED_TYPES).not.toContain('permission');
+  });
+
   describe('two holders (the state #31698 PR-2 opens)', () => {
     beforeEach(() => {
       admitSecondPermissionHolder();
