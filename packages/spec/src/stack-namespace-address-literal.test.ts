@@ -48,7 +48,7 @@ afterEach(() => {
 });
 
 const literalWarnings = () =>
-  warn.mock.calls.map((c) => String(c[0])).filter((line) => line.includes('spells a literal segment of the address grammar'));
+  warn.mock.calls.map((c: unknown[]) => String(c[0])).filter((line: string) => line.includes('spells a literal segment of the address grammar'));
 
 describe('defineStack — an address-literal namespace loads, with one warning', () => {
   it('the six literals are the ones this file pins', () => {
