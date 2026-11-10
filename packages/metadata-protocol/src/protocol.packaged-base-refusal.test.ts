@@ -634,7 +634,8 @@ describe('the override write gate — only the base\'s paired .custom declares a
         view: (name) => ({ name, label: 'List', object: 'task', viewKind: 'list', columns: [{ field: 'title', label: 'Title' }] }),
         dashboard: (name) => ({ name, label: 'Board', widgets: [] }),
         page: (name) => ({ name, label: 'Home', object: 'task', type: 'list', kind: 'full', regions: [] }),
-        flow: (name) => ({ name, label: 'Flow', type: 'autolaunched', nodes: [], edges: [] }),
+        // [#32289] A start node: the live save gate refuses a flow with none (`flow-start-node-missing`).
+        flow: (name) => ({ name, label: 'Flow', type: 'autolaunched', nodes: [{ id: 'start', type: 'start', label: 'Start' }], edges: [] }),
         action: (name) => ({ name, label: 'Action', type: 'script', body: { language: 'js', source: 'return { success: true };' } }),
         permission: (name) => ({ name, label: 'Perm', objects: {} }),
         object: (name) => ({ name, label: 'Account', pluralLabel: 'Accounts', fields: {}, sharingModel: 'private' }),
