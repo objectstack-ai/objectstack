@@ -119,6 +119,15 @@ const SHAPES = {
     'no params at all': {},
     'an objectOverride param bound to a field the member cannot read': { params: [{ field: 'rate', objectOverride: VENDOR.name }] },
     'an objectOverride param bound to a field every caller reads': { params: [{ field: 'name', objectOverride: VENDOR.name }] },
+    // Mentions outside a param's `field` (`object-schema-fls-references.ts`, the presentation-entry rule).
+    'a declarative patch writing a field the member cannot read': { operation: 'update', patch: { budget: 0 } },
+    'a visibility predicate reading a field the member cannot read': { visible: 'record.budget > 0' },
+    'an inline param named like a field the member cannot read': { params: [{ name: 'budget', type: 'number' }] },
+    'a param default equal to the name of a field the member cannot read': { params: [{ name: 'note', type: 'text', defaultValue: 'budget' }] },
+    // The changeset's migration: a handler action whose declaration names no such field.
+    'a handler target and an inline param that name no field the member cannot read': {
+        type: 'script', target: 'apply_project_amount', params: [{ name: 'new_amount', type: 'number' }],
+    },
 } as const;
 
 describe('[ADR-0106 D1] the run doors withhold exactly the actions the /meta projection withholds', () => {
@@ -165,10 +174,28 @@ describe('[ADR-0106 D1] the run doors withhold exactly the actions the /meta pro
             'no params at all': 'serve',
             'an objectOverride param bound to a field the member cannot read': 'withhold',
             'an objectOverride param bound to a field every caller reads': 'serve',
+            'a declarative patch writing a field the member cannot read': 'withhold',
+            'a visibility predicate reading a field the member cannot read': 'withhold',
+            'an inline param named like a field the member cannot read': 'withhold',
+            'a param default equal to the name of a field the member cannot read': 'withhold',
+            'a handler target and an inline param that name no field the member cannot read': 'serve',
         });
         // A posture that cannot be evaluated is a fault, never a run.
         const outage = maskerFor(OUTAGE, { userId: 'u_member', systemPermissions: [] });
         expect(await runDoorVerdict(outage, { name: 'act', ...SHAPES['no params at all'] }, PROJECT.name)).toBe('fault');
+    });
+
+    it('an object-less action run under a routed object is judged against that object, as the object door judges that object\'s action', async () => {
+        const masker = maskerFor(MEMBER, { userId: 'u_member', systemPermissions: [] });
+        // No `objectName`: an object-less declaration, reached under the routed project.
+        const bound = { name: 'act', label: 'Act', type: 'script', params: [{ field: 'budget' }] };
+        expect(await runDoorVerdict(masker, bound, PROJECT.name)).toBe('withhold');
+        expect(await objectDoorVerdict(masker, PROJECT, bound)).toBe('withhold');
+        // The `/meta` action read judges an object-less entry by its `objectOverride` params alone.
+        expect(await actionDoorVerdict(masker, bound)).toBe('serve');
+        // CONTROL: a field the member reads is run under the routed object as anywhere else.
+        const readable = { ...bound, params: [{ field: 'title' }] };
+        expect(await runDoorVerdict(masker, readable, PROJECT.name)).toBe('serve');
     });
 
     it('CONTROL — the system context is served every action, without asking the security service', async () => {
