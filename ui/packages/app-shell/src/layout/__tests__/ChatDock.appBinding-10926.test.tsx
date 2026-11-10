@@ -62,10 +62,17 @@ vi.mock('@object-ui/plugin-chatbot', async (importOriginal) => {
         setMessages: vi.fn(),
       };
     },
-    ChatbotEnhanced: (props: { headerSlot?: React.ReactNode; labels?: { emptyTitle?: string } }) => (
+    ChatbotEnhanced: (props: {
+      headerSlot?: React.ReactNode;
+      labels?: { emptyTitle?: string };
+      onSendMessage?: (text: string) => void;
+    }) => (
       <div data-testid="pane">
         {props.headerSlot}
         <span data-testid="pane-empty-title">{props.labels?.emptyTitle}</span>
+        <button data-testid="pane-send" onClick={() => props.onSendMessage?.('first message')}>
+          send
+        </button>
       </div>
     ),
   };
@@ -216,6 +223,15 @@ function renderDock(appPackageId: string | undefined, onMaximize = vi.fn()) {
   return { onMaximize, switchApp: (pkg: string | undefined) => rerender(tree(pkg)) };
 }
 
+/**
+ * objectstack#32031 — the user's first send, which is what creates a surface's
+ * conversation now (a mount creates none). Click the pane's composer once and
+ * let the create land.
+ */
+async function sendFirst(): Promise<void> {
+  fireEvent.click(await screen.findByTestId('pane-send'));
+}
+
 /** The conversation id the dock's pane settled on (the transport's options). */
 async function settledConversationId(): Promise<string> {
   await waitFor(() => expect(state.chat?.conversationId).toBeTruthy(), { timeout: 4000 });
@@ -245,7 +261,15 @@ afterEach(() => {
 describe('console dock — build thread bound to the current authorable app (objectui#10926)', () => {
   it('inside app X the build chip names X, the empty state names X, and the request carries X', async () => {
     renderDock('app.crm');
+    // objectstack#32031 — opening the dock creates no conversation; the chip,
+    // the empty state and the agent context already name the app.
+    expect(await screen.findByTestId('ai-build-package-chip')).toHaveTextContent('Customer Desk');
+    expect(screen.getByTestId('pane-empty-title')).toHaveTextContent('Customer Desk');
+    expect(state.chat?.body?.context?.packageId).toBe('app.crm');
+    expect(minted).toBe(0);
+    await sendFirst();
     const id = await settledConversationId();
+    expect(minted).toBe(1);
 
     expect(screen.getByTestId('ai-build-package-chip')).toHaveTextContent('Customer Desk');
     expect(screen.getByTestId('pane-empty-title')).toHaveTextContent('Customer Desk');
@@ -257,6 +281,7 @@ describe('console dock — build thread bound to the current authorable app (obj
 
   it('the dock and /ai/build?package=X resolve the SAME thread', async () => {
     renderDock('app.crm');
+    await sendFirst();
     const dockThread = await settledConversationId();
     cleanup();
     state.chat = undefined;
@@ -284,6 +309,7 @@ describe('console dock — build thread bound to the current authorable app (obj
   it('ask stays ambient: product-only key, no package in the agent context, no chip', async () => {
     state.canAuthor = false; // no maker convergence → the dock resolves `ask`
     renderDock('app.crm');
+    await sendFirst();
     const id = await settledConversationId();
 
     expect(window.localStorage.getItem(cacheKey('ask'))).toBe(id);
@@ -297,6 +323,7 @@ describe('console dock — build thread bound to the current authorable app (obj
     ['no app', undefined],
   ])('%s keeps the product-only build thread, unchanged', async (_label, appPackageId) => {
     renderDock(appPackageId);
+    await sendFirst();
     const id = await settledConversationId();
 
     expect(window.localStorage.getItem(cacheKey('build'))).toBe(id);
@@ -320,6 +347,7 @@ describe('console dock — build thread bound to the current authorable app (obj
     window.localStorage.setItem(cacheKey('build'), 'conv-legacy');
     renderDock('app.crm');
 
+    await sendFirst();
     const id = await settledConversationId();
     expect(id).not.toBe('conv-legacy');
     expect(minted).toBe(1);
@@ -328,9 +356,11 @@ describe('console dock — build thread bound to the current authorable app (obj
 
   it('moving to another app never pairs the previous app\'s thread with the new package', async () => {
     const dock = renderDock('app.crm');
+    await sendFirst();
     const crmThread = await settledConversationId();
     state.chat = undefined;
     dock.switchApp('app.other');
+    await sendFirst();
     const otherThread = await settledConversationId();
 
     expect(otherThread).not.toBe(crmThread);
@@ -342,6 +372,7 @@ describe('console dock — build thread bound to the current authorable app (obj
 
   it('maximize hands the bound package to the caller; an app-less thread hands none', async () => {
     const bound = renderDock('app.crm');
+    await sendFirst();
     await settledConversationId();
     fireEvent.click(screen.getByTestId('chat-dock-maximize'));
     expect(bound.onMaximize).toHaveBeenCalledWith('app.crm');
@@ -350,6 +381,7 @@ describe('console dock — build thread bound to the current authorable app (obj
     state.chat = undefined;
     state.canAuthor = false;
     const ambient = renderDock('app.crm');
+    await sendFirst();
     await settledConversationId();
     fireEvent.click(screen.getByTestId('chat-dock-maximize'));
     expect(ambient.onMaximize).toHaveBeenCalledWith(undefined);
@@ -373,6 +405,7 @@ describe('console dock — build thread bound to the current authorable app (obj
       </I18nProvider>
     );
     const { rerender } = render(sheet(true));
+    await sendFirst();
     await settledConversationId();
     expect(state.chat?.body?.context?.packageId).toBe('app.crm');
 

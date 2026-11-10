@@ -107,6 +107,8 @@ describe('mapping.connectorSource — the shape', () => {
       name: 'orders_pull',
       targetObject: 'order',
       fieldMapping: [{ source: 'id', target: 'external_id' }],
+      mode: 'upsert',
+      upsertKey: ['external_id'],
       connectorSource: {
         connector: 'orders_api',
         action: 'request',
@@ -146,12 +148,17 @@ describe('mapping.connectorSource — the closed door and what it does not carry
     }
   });
 
-  it('the retired policy keys are refused and say version 1 has no such policy', () => {
-    for (const key of ['deleteMode', 'conflictResolution', 'direction']) {
+  it('the retired policy keys are refused: a conflict or direction policy has no key, a delete policy is `deletePolicy`', () => {
+    for (const key of ['conflictResolution', 'direction']) {
       const message = refusal(key, 'soft_delete');
-      expect(message, key).toContain('one-way pull');
+      expect(message, key).toContain('one-way');
       expect(message, key).toContain('`upsertKey`');
     }
+    // [ADR-0153 D3] The retired connector-side `deleteMode` lands on the key
+    // that now carries the intent, and says a pull never deletes physically.
+    const deleteMode = refusal('deleteMode', 'soft_delete');
+    expect(deleteMode).toContain('`deletePolicy`');
+    expect(deleteMode).toContain('never deletes a row physically');
     expect(refusal('strategy', 'incremental')).toContain('`watermark`');
   });
 
@@ -181,7 +188,7 @@ describe('mapping.connectorSource — the closed door and what it does not carry
 describe('mapping.connectorSource — executed when a job\'s `pull` drives it: the ledger and the schema say so', () => {
   const LEDGER = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../liveness/mapping.json');
 
-  it('every key of the binding is `live`, citing the executor, and no row of it opts into an author warning', () => {
+  it('every executed key of the binding is `live`, citing the executor, with no author warning; the ADR-0153 keys are `planned` and warn', () => {
     type Row = { status: string; evidence?: string; authorWarn?: boolean; authorHint?: string; children?: Record<string, Row> };
     const ledger = JSON.parse(fs.readFileSync(LEDGER, 'utf8')) as { props: Record<string, Row> };
     const EXECUTOR = 'packages/services/service-automation/src/connector-pull.ts#pullConnectorSource';
@@ -202,10 +209,19 @@ describe('mapping.connectorSource — executed when a job\'s `pull` drives it: t
       }
     };
     walk({ connectorSource: row! }, '');
-    expect(warned, 'a row of the binding carries an author warning').toEqual([]);
+    // [ADR-0153 D2/D3] Declared spec-first: the P2 engine card's pull reads
+    // them, so each is `planned` and warns its author until then (a `planned`
+    // row may warn; only a `live` one may not).
+    const PLANNED = ['deletePolicy', 'deletedField', 'paging'];
+    expect(warned.sort(), 'only the planned rows warn').toEqual(PLANNED.map((k) => `connectorSource.${k}`));
     const children = row!.children!;
-    expect(Object.keys(children).sort()).toEqual(['action', 'connector', 'input', 'recordsPath', 'watermark']);
+    expect(Object.keys(children).sort()).toEqual(['action', 'connector', 'input', 'recordsPath', 'watermark', ...PLANNED].sort());
     for (const [key, child] of Object.entries(children)) {
+      if (PLANNED.includes(key)) {
+        expect(child.status, key).toBe('planned');
+        expect(child.authorWarn, key).toBe(true);
+        continue;
+      }
       expect(child.status, key).toBe('live');
       expect(child.evidence, key).toContain(EXECUTOR);
     }

@@ -246,12 +246,18 @@ describe('resolveRowCrudAffordances', () => {
     // (objectstack#3355) into `engine-owned` (locked) and `system-data`
     // (writable), so the old value now resolves to the default-writable
     // fallback and asserting it is locked pins nothing.
-    it.each(['engine-owned', 'append-only', 'better-auth'])(
+    it.each(['engine-owned', 'append-only', 'synced', 'better-auth'])(
       'engine-owned bucket %s hides generic edit/delete',
       (managedBy) => {
         expect(rowGate({ ...wired, managedBy })).toEqual({ canEdit: false, canDelete: false });
       },
     );
+
+    // objectstack ADR-0153 D4 — the one bucket a userActions opt-in cannot re-open.
+    it('a userActions opt-in does NOT re-open a synced object', () => {
+      expect(rowGate({ ...wired, managedBy: 'synced', userActions: { edit: true, delete: true } }))
+        .toEqual({ canEdit: false, canDelete: false });
+    });
 
     it('a userActions opt-in re-opens a bucket-locked object (sys_user edit)', () => {
       expect(rowGate({ ...wired, managedBy: 'better-auth', userActions: { edit: true } }))
