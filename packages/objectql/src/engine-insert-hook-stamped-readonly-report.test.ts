@@ -10,7 +10,8 @@
  *
  * The platform's own case is `created_by`: the audit binder stamps it from the
  * session, so a forged value was stored as the caller's id with no report,
- * while a forged `organization_id` in the same request was reported. A value
+ * while a forged `organization_id` in the same request was reported. Under
+ * `strictReadonlyWrites` it is refused like every reported drop. A value
  * equal to the stamp was not lost, so it adds no row: the console toasts every
  * reported field. `owning_business_unit_id` has no stamp (ADR-0117 D2 has not
  * landed), so the static strip takes a forged value and reports it already;
@@ -122,11 +123,27 @@ describe('insert: an audit column the audit binder stamped over is reported, not
     expect(outcomes[2].droppedFields).toBeUndefined();
   });
 
-  it('strictReadonlyWrites still stores the stamp rather than refusing: the report is not a refusal', async () => {
+  it('strictReadonlyWrites refuses a forged created_by like every reported drop: nothing written, no report', async () => {
     const { objectql, captured } = await boot();
-    const dropped = await create(objectql, { title: 'e', created_by: 'forged_user' }, { strictReadonlyWrites: true });
+    const before = captured.length;
+    const dropped: any[] = [];
+    const err: any = await objectql.insert('stamp_note', { title: 'e', created_by: 'forged_user' }, {
+      context: { userId: REAL_USER },
+      onFieldsDropped: (e: any) => dropped.push(e),
+      strictReadonlyWrites: true,
+    } as any).then(() => null, (e: unknown) => e);
+    expect(err?.code).toBe('ERR_READONLY_FIELD_REJECTED');
+    expect(err.fields).toEqual(['created_by']);
+    expect(err.drops).toEqual([{ object: 'stamp_note', fields: ['created_by'], reason: 'readonly' }]);
+    expect(captured.length).toBe(before);
+    expect(dropped).toEqual([]);
+  });
+
+  it('CONTROL: strictReadonlyWrites admits created_by sent equal to the stamp', async () => {
+    const { objectql, captured } = await boot();
+    const dropped = await create(objectql, { title: 'e2', created_by: REAL_USER }, { strictReadonlyWrites: true });
     expect(captured.at(-1)!.created_by).toBe(REAL_USER);
-    expect(dropped.flatMap((d) => d.fields)).toEqual(['created_by']);
+    expect(dropped).toEqual([]);
   });
 
   it('a historical import (preserveAudit) keeps the caller\'s created_by and reports nothing', async () => {

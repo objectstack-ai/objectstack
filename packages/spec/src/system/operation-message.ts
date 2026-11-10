@@ -217,9 +217,10 @@ export function operationMessageTranslationKey(messageKey: string): string {
  *   - `field_edit_denied` takes `{{fields}}`: the refused fields' LABELS in the
  *     caller's locale, as a list. A label is named only when the field has one
  *     (a translated or declared label, never the API name as the last rung)
- *     and the caller can read the field (a field withheld from the caller's
- *     object schema is not named to them). When any refused field fails either
- *     test, `field_edit_denied_opaque` is used and no field is named.
+ *     and the caller can read the field by the query read guard (a field the
+ *     caller cannot read, or reads only partially masked, is not named to
+ *     them). When any refused field fails either test,
+ *     `field_edit_denied_opaque` is used and no field is named.
  */
 export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> = {
   en: {

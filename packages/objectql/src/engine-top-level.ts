@@ -2462,8 +2462,10 @@ function withholdInsertReadonlyFromHooks(
  * and the caller was told nothing — while the update path reports the same
  * forgery. Each such key whose stored value differs from the caller's is
  * pushed onto `superseded`, and the insert reports it under `droppedFields`
- * reason `readonly`. A caller value equal to what is stored was not lost, so it
- * is not pushed: the console toasts every reported field.
+ * reason `readonly` and refuses it under `strictReadonlyWrites`, like every
+ * reported drop. A caller value equal to what is stored was not lost, so it
+ * is not pushed: the console toasts every reported field, and strict does not
+ * refuse a value it would have stored anyway.
  *
  * Only the audit provenance keys. Any other read-only key an app's hook
  * assigns stays the hook's write and is not reported (#14259): the hook owns
