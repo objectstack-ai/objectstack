@@ -336,7 +336,7 @@ export const zhHant: PlatformTranslationData = {
       title: 'AI 與 Embedder',
       description: '平台 AI 與知識庫服務使用的 LLM 提供者、模型、憑證與 Embedder 設定。',
       groups: {
-        provider: { title: '提供者', description: '選擇 LLM 後端。Memory 模式只會回傳輸入內容——適合測試，絕不可用於正式環境。' },
+        provider: { title: '提供者', description: '選擇 LLM 後端。' },
         gateway: { title: 'Vercel AI Gateway', description: '多提供者路由器。模型寫成 provider/model，例如 openai/gpt-4o。' },
         openai: { title: 'OpenAI' },
         anthropic: { title: 'Anthropic' },
@@ -364,7 +364,6 @@ export const zhHant: PlatformTranslationData = {
         provider: {
           label: '提供者',
           options: {
-            memory: 'Memory（回傳輸入——僅供測試）',
             gateway: 'Vercel AI Gateway',
             openai: 'OpenAI',
             anthropic: 'Anthropic',
