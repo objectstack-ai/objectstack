@@ -154,15 +154,17 @@ describe('the bare read and `?package=` on this transport', () => {
 /**
  * Seat ruling (c) of #32076 (claim amendment 6764879174): a covered type the
  * registry still reads through `getItem` (`readsByPackage` answers `false`; a
- * picklist here) is judged by the exact qualifier too.
+ * queue here) is judged by the exact qualifier too.
  */
 describe('a covered type the registry reads through `getItem`: the exact qualifier on this transport', () => {
-    it('`?package=`, the qualified path and `_env` of a name only alpha holds: 409 naming it (BASE: 200, alpha\'s picklist)', async () => {
-        ship('picklist', 'status', A);
+    it('`?package=`, the qualified path and `_env` of a name only alpha holds: 409 naming it (BASE: 200, alpha\'s queue)', async () => {
+        // The premise: this registry reads a queue through `getItem`, so the 409 is ruling (c)'s, not G1's.
+        expect(registry.readsByPackage('queue')).toBe(false);
+        ship('queue', 'status', A);
         for (const answer of [
-            await read('/picklist/status', { package: C }),
-            await read('/picklist/gamma/status'),
-            await read('/picklist/_env/status'),
+            await read('/queue/status', { package: C }),
+            await read('/queue/gamma/status'),
+            await read('/queue/_env/status'),
         ]) {
             expect([answer.status, answer.body?.error?.code], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
             expect(answer.body?.error?.message).toContain(`package "${A}"`);
@@ -170,10 +172,10 @@ describe('a covered type the registry reads through `getItem`: the exact qualifi
     });
 
     it('CONTROL: the bare read and the holder\'s own reads answer as before', async () => {
-        ship('picklist', 'status', A);
-        expect(labelOf(await read('/picklist/status'))).toBe('alpha picklist');
-        expect(labelOf(await read('/picklist/status', { package: A }))).toBe('alpha picklist');
-        expect(labelOf(await read('/picklist/alpha/status'))).toBe('alpha picklist');
+        ship('queue', 'status', A);
+        expect(labelOf(await read('/queue/status'))).toBe('alpha queue');
+        expect(labelOf(await read('/queue/status', { package: A }))).toBe('alpha queue');
+        expect(labelOf(await read('/queue/alpha/status'))).toBe('alpha queue');
     });
 });
 

@@ -160,15 +160,17 @@ describe('GET /meta/:type/:name?package=X — the exact qualifier on this transp
 /**
  * Seat ruling (c) of #32076 (claim amendment 6764879174): a covered type the
  * registry still reads through `getItem` (`readsByPackage` answers `false`; a
- * picklist here) is judged by the exact qualifier too.
+ * queue here) is judged by the exact qualifier too.
  */
 describe('a covered type the registry reads through `getItem`: the exact qualifier on this transport', () => {
-    it('`?package=`, the qualified path and `_env` of a name only alpha holds: 409 naming it (BASE: 200, alpha\'s picklist)', async () => {
-        ship('picklist', 'status', A);
+    it('`?package=`, the qualified path and `_env` of a name only alpha holds: 409 naming it (BASE: 200, alpha\'s queue)', async () => {
+        // The premise: this registry reads a queue through `getItem`, so the 409 is ruling (c)'s, not G1's.
+        expect(registry.readsByPackage('queue')).toBe(false);
+        ship('queue', 'status', A);
         for (const answer of [
-            await drive(ITEM, { type: 'picklist', name: 'status' }, { package: C }),
-            await drive(QUALIFIED, { type: 'picklist', ns: 'gamma', name: 'status' }),
-            await drive(QUALIFIED, { type: 'picklist', ns: '_env', name: 'status' }),
+            await drive(ITEM, { type: 'queue', name: 'status' }, { package: C }),
+            await drive(QUALIFIED, { type: 'queue', ns: 'gamma', name: 'status' }),
+            await drive(QUALIFIED, { type: 'queue', ns: '_env', name: 'status' }),
         ]) {
             expect([answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
             expect(messageOf(answer)).toContain(`package "${A}"`);
@@ -176,10 +178,10 @@ describe('a covered type the registry reads through `getItem`: the exact qualifi
     });
 
     it('CONTROL: the bare read and the holder\'s own reads answer as before', async () => {
-        ship('picklist', 'status', A);
-        expect(labelOf(await drive(ITEM, { type: 'picklist', name: 'status' }))).toBe('alpha picklist');
-        expect(labelOf(await drive(ITEM, { type: 'picklist', name: 'status' }, { package: A }))).toBe('alpha picklist');
-        expect(labelOf(await drive(QUALIFIED, { type: 'picklist', ns: 'alpha', name: 'status' }))).toBe('alpha picklist');
+        ship('queue', 'status', A);
+        expect(labelOf(await drive(ITEM, { type: 'queue', name: 'status' }))).toBe('alpha queue');
+        expect(labelOf(await drive(ITEM, { type: 'queue', name: 'status' }, { package: A }))).toBe('alpha queue');
+        expect(labelOf(await drive(QUALIFIED, { type: 'queue', ns: 'alpha', name: 'status' }))).toBe('alpha queue');
     });
 });
 

@@ -389,15 +389,15 @@ describe('a covered type the registry reads through `getItem` (seat rulings (a),
     });
 
     it('the qualified path of a namespace that holds nothing is the same 409', async () => {
-      shipValid('picklist', 'status', A);
-      const address = protocol.resolveMetaItemAddress({ type: 'picklist', segment: 'gamma', name: 'status' });
+      shipValid('queue', 'triage', A);
+      const address = protocol.resolveMetaItemAddress({ type: 'queue', segment: 'gamma', name: 'triage' });
       expect(address).toEqual({ kind: 'namespace', namespace: 'gamma', packageId: C });
-      await refusalOf(() => protocol.getMetaItem({ type: 'picklist', name: 'status', packageId: C }));
+      await refusalOf(() => protocol.getMetaItem({ type: 'queue', name: 'triage', packageId: C }));
     });
 
     it('`_env` of a name only a package holds is 409 naming it (BASE: admitted, alpha\'s served)', async () => {
-      shipValid('mapping', 'import', A);
-      const err = await refusalOf(() => protocol.admitEnvironmentQualifier({ type: 'mapping', name: 'import' }));
+      shipValid('webhook', 'notify', A);
+      const err = await refusalOf(() => protocol.admitEnvironmentQualifier({ type: 'webhook', name: 'notify' }));
       expect([err.refusal.reason, err.refusal.callerPackageId]).toEqual(['not-held-by-qualifier', null]);
       expect(err.refusal.candidates).toEqual([{ kind: 'package', packageId: A }]);
     });
@@ -417,17 +417,17 @@ describe('a covered type the registry reads through `getItem` (seat rulings (a),
     });
 
     it('CONTROL: Studio\'s pair read of a base-held item answers the base\'s item (ui carry-in 1)', async () => {
-      shipValid('picklist', 'status', B);
-      shipValid('picklist', 'status', A);
-      expect(labelOf(await protocol.getMetaItem({ type: 'picklist', name: 'status', packageId: PAIR_A }))).toBe('alpha picklist');
+      shipValid('queue', 'triage', B);
+      shipValid('queue', 'triage', A);
+      expect(labelOf(await protocol.getMetaItem({ type: 'queue', name: 'triage', packageId: PAIR_A }))).toBe('alpha queue');
     });
 
     it('CONTROL: a row bound to the package named is served at it', async () => {
       rows.push({
-        type: 'picklist', name: 'extra', state: 'active', package_id: PAIR_A,
-        metadata: JSON.stringify({ name: 'extra', label: 'pair picklist' }),
+        type: 'flow', name: 'extra', state: 'active', package_id: PAIR_A,
+        metadata: JSON.stringify({ name: 'extra', label: 'pair flow' }),
       });
-      expect(labelOf(await protocol.getMetaItem({ type: 'picklist', name: 'extra', packageId: PAIR_A }))).toBe('pair picklist');
+      expect(labelOf(await protocol.getMetaItem({ type: 'flow', name: 'extra', packageId: PAIR_A }))).toBe('pair flow');
     });
 
     it('CONTROL: zero holders stays not-found; the environment\'s own item is admitted at `_env`', async () => {
