@@ -31,6 +31,16 @@ import { PLATFORM_ADMIN_SETTINGS_GATE } from './platform-admin-action-gate.js';
  * `externalId` (for SSO: a claim value equal to it) when the row names one,
  * else by its `displayName`; the row names exactly one.
  *
+ * Whether the row matches anything now: `match_status`, `matched_group_id` and
+ * `match_changed_at` say whether a group its SCIM connection currently pushes
+ * (`sys_scim_group`) is the one the row names, so a console can show a mapping
+ * that matches no current group (renamed or deleted at the identity provider),
+ * which grants nothing. plugin-auth keeps them current on every write to either
+ * side (`idp-group-mapping-match.ts`, engine hooks on `sys_scim_group` and on
+ * this object); nothing else writes them. An SSO provider sends its groups only
+ * as a sign-in claim and stores no group list, so an SSO row reads
+ * `not_applicable`. They describe the row; they never decide a grant.
+ *
  * @namespace sys
  */
 export const SysIdpGroupMapping = ObjectSchema.create({
@@ -211,7 +221,7 @@ export const SysIdpGroupMapping = ObjectSchema.create({
       name: 'all',
       label: 'All',
       data: { provider: 'object', object: 'sys_idp_group_mapping' },
-      columns: ['source_kind', 'source_id', 'group_external_id', 'group_display_name', 'permission_set', 'organization_id'],
+      columns: ['source_kind', 'source_id', 'group_external_id', 'group_display_name', 'permission_set', 'organization_id', 'match_status'],
       sort: [{ field: 'source_id', order: 'asc' }],
       pagination: { pageSize: 50 },
       // Per-object empty state: the engine-owned bucket's shared copy ("entries
@@ -278,6 +288,36 @@ export const SysIdpGroupMapping = ObjectSchema.create({
       maxLength: 255,
       description: 'The organization the grant is made in: the organization that owns the SCIM connection or the SSO provider.',
       group: 'Grant',
+    }),
+
+    match_status: Field.select({
+      label: 'Match Status',
+      required: false,
+      readonly: true,
+      description: 'Whether the group the mapping names is one its SCIM connection currently pushes. Unmatched grants nothing. Not applicable for an SSO provider, which stores no group list.',
+      group: 'Match',
+      options: [
+        { value: 'matched', label: 'Matched' },
+        { value: 'unmatched', label: 'Matches No Current Group' },
+        { value: 'not_applicable', label: 'Not Applicable' },
+      ],
+    }),
+
+    matched_group_id: Field.text({
+      label: 'Matched Group ID',
+      required: false,
+      readonly: true,
+      maxLength: 255,
+      description: 'The ID of the SCIM group the mapping currently matches. Empty when it matches none.',
+      group: 'Match',
+    }),
+
+    match_changed_at: Field.datetime({
+      label: 'Match Changed At',
+      required: false,
+      readonly: true,
+      description: 'When the match status or the matched group last changed.',
+      group: 'Match',
     }),
 
     created_at: Field.datetime({ label: 'Created At', defaultValue: 'NOW()', readonly: true, group: 'System' }),
