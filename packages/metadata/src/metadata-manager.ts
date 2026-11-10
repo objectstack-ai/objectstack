@@ -86,10 +86,13 @@ import type {
 } from '@objectstack/metadata-core';
 import { EndpointMatcher } from './endpoint-matcher.js';
 import {
+  PACKAGE_SLOTTED_STORE_TYPES,
   readStoreEntry,
+  recordStoreWrite,
   storedItemPackageId as indexedItemPackageId,
   storedNameOf,
   storeKeysNamed,
+  storeRemovalKeys,
   storeWriteKey,
 } from './package-slotted-store.js';
 // [#5309] The stored ENVELOPE / authored BODY split — peeled before any spec
@@ -104,6 +107,42 @@ import type { ApiEndpointMatch } from '@objectstack/spec/contracts';
  * Watch callback function (legacy)
  */
 export type WatchCallback = (event: MetadataWatchEvent) => void | Promise<void>;
+
+/**
+ * [ADR-0150 D3/D4, #32198] {@link MetadataManager.unregister}'s options: the
+ * spec's {@link MetadataWriteOptions}, plus the package whose item is removed.
+ *
+ * `packageId` matters only for a type stored per `(package, name)`
+ * (`PACKAGE_SLOTTED_STORE_TYPES`): it removes that package's slot only, and
+ * the storage half deletes only that package's row. Without it, a name two or
+ * more packages hold is refused (`PackageScopedNameRefusedError`, `409`)
+ * rather than removed from every package. A type outside that set has one
+ * item per name, and the option changes nothing for it.
+ *
+ * Class-level on purpose: the spec's `MetadataWriteOptions` is not widened
+ * here (a change to the published contract is the spec lane's), the way
+ * {@link MetadataManager.get} already takes a package beyond the spec's
+ * signature.
+ */
+export interface MetadataUnregisterOptions extends MetadataWriteOptions {
+  /** The package whose item is removed; see the interface doc. */
+  packageId?: string;
+}
+
+/**
+ * [#22113, #32198] Whether `item` belongs to `packageId`: any of the three
+ * keys that name a package on an item names it — `packageId` (the publish
+ * envelope's own key, and what a caller that registers an item for a package
+ * writes), `package` (the legacy stamp) or `_packageId` (the provenance stamp
+ * `applyProtection` writes on every item a code-shipped artifact registers
+ * here, and the ONLY key such an item carries). The one membership rule of
+ * the package-wide verbs: {@link MetadataManager.unregisterPackage},
+ * `publishPackage` and `revertPackage` (`collectPackageMembers`).
+ */
+function isPackageMember(item: unknown, packageId: string): boolean {
+  const meta = item as { packageId?: unknown; package?: unknown; _packageId?: unknown } | null | undefined;
+  return meta?.packageId === packageId || meta?.package === packageId || meta?._packageId === packageId;
+}
 
 /**
  * [#5654] The two methods `capabilities.write` promises on a `datasource:`
@@ -943,6 +982,7 @@ export class MetadataManager implements IMetadataService {
     const existed = typeStore.has(key) || replaces.length > 0;
     for (const replaced of replaces) typeStore.delete(replaced);
     typeStore.set(key, data);
+    recordStoreWrite(typeStore, key);
     return existed;
   }
 
@@ -1588,24 +1628,31 @@ export class MetadataManager implements IMetadataService {
    * rather than being duplicated on both sides of them — a second invalidate
    * before the await would buy nothing and would re-open step 1's window.
    */
-  async unregister(type: string, name: string, options?: MetadataWriteOptions): Promise<void> {
+  async unregister(type: string, name: string, options?: MetadataUnregisterOptions): Promise<void> {
     return this.unregisterAt(type, name, options);
   }
 
   /**
-   * {@link unregister}, whose in-memory half drops only `registryKeys` when
-   * given — [ADR-0150 D4] one package's slot of a type stored per
-   * `(package, name)`, for {@link unregisterPackage} — else every slot of the
-   * name.
+   * {@link unregister}, given what it removes.
+   *
+   * [ADR-0150 D3/D4, #32198] `removal` is the store keys the in-memory half
+   * drops and, for a type stored per `(package, name)` removed by one package,
+   * that package: the storage half deletes only its row, and the realtime
+   * `deleted` event names it. {@link unregisterPackage} passes the entry it
+   * found; {@link unregister} judges it from the store with
+   * `storeRemovalKeys` — BEFORE anything is touched, so a refused removal (a
+   * name two packages hold, with no package named) deletes nothing from
+   * storage or memory and announces nothing.
    */
   private async unregisterAt(
     type: string,
     name: string,
-    options?: MetadataWriteOptions,
-    registryKeys?: readonly string[],
+    options?: MetadataUnregisterOptions,
+    removal?: { keys: readonly string[]; packageId?: string },
   ): Promise<void> {
     // [#7378 row 2] Remove from the store `register` wrote: the canonical type.
     type = canonicalMetadataServiceType(type);
+    const { keys, packageId } = removal ?? storeRemovalKeys(this.registry.get(type), type, name, options?.packageId);
     // ── 1. Storage first ────────────────────────────────────────────────
     // Delete only from database-backed loaders that declare write capability.
     for (const loader of this.loaders.values()) {
@@ -1619,21 +1666,26 @@ export class MetadataManager implements IMetadataService {
       // the protocols the gate does not cover.
       if (typeof loader.delete !== 'function') continue;
       try {
-        await this.deleteMetaItemFromLoader(loader, type, name);
+        await this.deleteMetaItemFromLoader(loader, type, name, packageId);
       } catch (error) {
         this.reportMetaItemDeleteFailure(loader.contract.name, type, name, error);
       }
     }
 
     // ── 2. In-memory state, then invalidation — nothing awaited between ──
-    // [ADR-0150 D4] Every slot of the name, or only the package's own when a
-    // package is unregistered ({@link unregisterPackage}).
-    this.deleteRegistryEntries(type, name, registryKeys);
+    // [ADR-0150 D4] Every slot of the name, or only the package's own when
+    // one package's item is removed.
+    this.deleteRegistryEntries(type, name, keys);
     this.invalidateListCache(type);
 
     // ── 3. Announce ─────────────────────────────────────────────────────
-    // Publish metadata.{type}.deleted event to realtime service
+    // Publish metadata.{type}.deleted event to realtime service.
+    // [ADR-0150 D4, #32198] One package's slot removed names that package, so
+    // a listener drops that package's item and keeps another package's
+    // same-named one. ⛔ The watcher event below carries no package: the
+    // spec's `MetadataWatchEvent` declares no such field.
     await this.publishRealtimeMetadataEvent('deleted', type, name, {
+      packageId,
       userId: options?.userId,
     });
 
@@ -1676,10 +1728,15 @@ export class MetadataManager implements IMetadataService {
     loader: MetadataLoader,
     type: string,
     name: string,
+    packageId?: string,
   ): Promise<void> {
     const del = loader.delete;
     if (typeof del !== 'function') return;
-    await del.call(loader, type, name);
+    // [ADR-0150 D4, #32198] One package's item of a type stored per
+    // `(package, name)`: the loader deletes only that package's row. Every
+    // other delete keeps its by-name call, byte for byte.
+    if (packageId === undefined) await del.call(loader, type, name);
+    else await del.call(loader, type, name, { packageId });
   }
 
   /**
@@ -1946,18 +2003,24 @@ export class MetadataManager implements IMetadataService {
 
   /**
    * Unregister all metadata items from a specific package
+   *
+   * [#32198] A package's items are selected by the one membership rule the
+   * package-wide verbs share ({@link isPackageMember}): `packageId`, `package`
+   * or `_packageId`. An item a code-shipped artifact registered carries only
+   * `_packageId`, and reading the first two alone left every such item behind.
+   *
+   * [ADR-0150 D4] Each is removed by its store key, so a type stored per
+   * `(package, name)` drops this package's slot and keeps another package's
+   * same-named item — and, for such a type, the storage half deletes only this
+   * package's row and the `deleted` event names this package.
    */
   async unregisterPackage(packageName: string): Promise<void> {
     // Collect all items to delete (type and name pairs)
-    // [ADR-0150 D4] Keyed by the entry's store key, so a type stored per
-    // `(package, name)` drops this package's slot and keeps another package's
-    // same-named item.
     const itemsToDelete: Array<{ type: string; name: string; key: string }> = [];
 
     for (const [type, typeStore] of this.registry) {
       for (const [key, data] of typeStore) {
-        const meta = data as any;
-        if (meta?.packageId === packageName || meta?.package === packageName) {
+        if (isPackageMember(data, packageName)) {
           itemsToDelete.push({ type, name: storedNameOf(key), key });
         }
       }
@@ -1965,7 +2028,10 @@ export class MetadataManager implements IMetadataService {
 
     // Delete each item using unregister() to ensure deletion from both registry and loaders
     for (const { type, name, key } of itemsToDelete) {
-      await this.unregisterAt(type, name, undefined, [key]);
+      await this.unregisterAt(type, name, undefined, {
+        keys: [key],
+        ...(PACKAGE_SLOTTED_STORE_TYPES.has(type) ? { packageId: packageName } : {}),
+      });
     }
   }
 
@@ -2001,9 +2067,8 @@ export class MetadataManager implements IMetadataService {
     const members: Array<{ type: string; name: string; data: any }> = [];
     for (const [type, typeStore] of this.registry) {
       for (const [key, data] of typeStore) {
-        const meta = data as any;
-        if (meta?.packageId === packageId || meta?.package === packageId || meta?._packageId === packageId) {
-          members.push({ type, name: storedNameOf(key), data: meta });
+        if (isPackageMember(data, packageId)) {
+          members.push({ type, name: storedNameOf(key), data });
         }
       }
     }

@@ -1380,26 +1380,53 @@ function refuseHeldSession(c: any, principal: InstallPrincipal): Response | null
  * from) that process's kernel alone, and the other replicas never see it —
  * a permanent divergence, since each replica rehydrates its own ledger at
  * boot. So under declared replicas the change is refused, `409`, with
- * `MULTI_REPLICA_PACKAGE_CHANGE_REFUSED` and the maintenance-window recipe;
- * nothing is written, registered or withdrawn. The cluster service's driver
- * is read here, per request, where the answer is used. `null` on a single
- * node, the in-process driver or any other driver: the door proceeds exactly
- * as before.
+ * `MULTI_REPLICA_PACKAGE_CHANGE_REFUSED` and the maintenance-window recipe
+ * ({@link multiReplicaInstallLocalRefusalMessage}); nothing is written,
+ * registered or withdrawn. The cluster service's driver is read here, per
+ * request, where the answer is used. `null` on a single node, the in-process
+ * driver or any other driver: the door proceeds exactly as before.
  */
 function refuseMultiReplicaPackageChange(c: any, ctx: PluginContext, subject: 'Installing' | 'Uninstalling'): Response | null {
     if (!declaresMultiReplicaOnRedis(process.env, composedClusterDriver(ctx))) return null;
-    const what = subject === 'Installing' ? 'the package' : 'the uninstall';
     return c.json({
         success: false,
-        error: {
-            code: MULTI_REPLICA_PACKAGE_CHANGE_REFUSED,
-            message: `${subject} a package through install-local was refused: this deployment declares several replicas `
-                + '(OS_CLUSTER_REPLICAS greater than 1, or OS_EXPECT_MULTI_NODE=true) on the Redis cluster driver, and '
-                + 'install-local changes only the replica that serves the request: its own install ledger and its own '
-                + `kernel. The other replicas would never see ${what}. Make the change in a maintenance window instead: `
-                + 'run the install script, then restart every replica. Nothing was installed, uninstalled or written.',
-        },
+        error: { code: MULTI_REPLICA_PACKAGE_CHANGE_REFUSED, message: multiReplicaInstallLocalRefusalMessage(subject) },
     }, 409);
+}
+
+/**
+ * [cloud#3814 R6, #32176] The message of the install-local doors' multi-replica
+ * refusal, spelled once: the door answers it, and `os package install` prints
+ * the door's message verbatim, so the text an operator acts on is this one on
+ * every surface.
+ *
+ * The recipe names only steps that work. Every client of this door —
+ * `os package install`, and any deploy script that runs it — posts to this
+ * same door, so "run the install" under the declaration is refused again; the
+ * declaration has to be lifted for the change, on a deployment scaled to the
+ * one replica that makes it. Lifted means `declaresMultiNode`
+ * (`@objectstack/service-cluster`) reads false: `OS_CLUSTER_REPLICAS` at 1 and
+ * `OS_EXPECT_MULTI_NODE` unset, the two settings it reads. The change then
+ * reaches the other replicas only through the ledger they rehydrate at boot,
+ * so the recipe says so, with the condition that holds it: they must read the
+ * same ledger directory (`<OS_HOME>/installed-packages` unless the host sets
+ * `storageDir`). The host path itself is never printed: the listing serves it
+ * only to a `manage_metadata` holder.
+ */
+export function multiReplicaInstallLocalRefusalMessage(subject: 'Installing' | 'Uninstalling'): string {
+    const what = subject === 'Installing' ? 'the package' : 'the uninstall';
+    const change = subject === 'Installing' ? 'install' : 'uninstall';
+    return `${subject} a package through install-local was refused: this deployment declares several replicas `
+        + '(OS_CLUSTER_REPLICAS greater than 1, or OS_EXPECT_MULTI_NODE=true) on the Redis cluster driver, and '
+        + 'install-local changes only the replica that serves the request: its own install ledger and its own '
+        + `kernel. The other replicas would never see ${what}. Every client of this door, \`os package install\` and `
+        + 'any script that runs it included, is refused the same way while the declaration stands. Make the change '
+        + 'in a maintenance window instead: scale the deployment to one replica and restart it with '
+        + `OS_CLUSTER_REPLICAS=1 and OS_EXPECT_MULTI_NODE unset, run the ${change} against that replica, then restore `
+        + 'the replica count and the declaration and restart every replica. Each replica loads the packages its '
+        + 'install ledger lists when it starts (installed-packages under OS_HOME, unless the host configures '
+        + 'another directory), so the change reaches every replica only when they all read that one directory. '
+        + 'Nothing was installed, uninstalled or written.';
 }
 
 /**

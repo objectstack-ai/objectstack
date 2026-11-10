@@ -1298,6 +1298,17 @@ const ActiveNavIdContext = React.createContext<string | null>(null);
 const NavIsMobileContext = React.createContext<boolean>(false);
 
 /**
+ * Whether the desktop sidebar is collapsed to its icon rail, provided at the
+ * tree root by {@link NavMobileSource} (objectstack#32156). In the rail a
+ * group's label is hidden and its entries are the rail's icons, so a group
+ * draws its entries there whether it is open or not: a closed group's entries
+ * would otherwise be in no rail icon at all. The group's own open state is
+ * left as it is, so the expanded sidebar shows it as the reader left it. Only
+ * the groups read it, so a toggle re-renders the groups, not every row.
+ */
+const NavIconRailContext = React.createContext<boolean>(false);
+
+/**
  * The phone-size answer the rows read, decided once for the whole tree.
  *
  * Inside a sidebar provider it is the provider's own `isMobile`, which settled
@@ -1312,12 +1323,19 @@ const NavIsMobileContext = React.createContext<boolean>(false);
  * once here for every row. The provider's value does not change when the
  * sidebar opens or closes, so the rows below do not re-render on a toggle:
  * `children` is the element the root rendered, and the provided value is the
- * same boolean.
+ * same boolean. The icon-rail answer it also provides does change on a
+ * toggle, and only the groups read it ({@link NavIconRailContext}).
  */
 function NavMobileSource({ children }: { children: React.ReactNode }) {
   const sidebar = useOptionalSidebar();
   if (sidebar) {
-    return <NavIsMobileContext.Provider value={sidebar.isMobile}>{children}</NavIsMobileContext.Provider>;
+    return (
+      <NavIsMobileContext.Provider value={sidebar.isMobile}>
+        <NavIconRailContext.Provider value={!sidebar.isMobile && sidebar.state === 'collapsed'}>
+          {children}
+        </NavIconRailContext.Provider>
+      </NavIsMobileContext.Provider>
+    );
   }
   return <ViewportMobileSource>{children}</ViewportMobileSource>;
 }
@@ -1746,6 +1764,8 @@ function NavigationItemRenderer({
   const activeNavId = React.useContext(ActiveNavIdContext);
   const initialOpen = React.useMemo(() => groupOpensOnFirstView(item, activeNavId), [item, activeNavId]);
   const [isOpen, setIsOpen] = useState(initialOpen);
+  // In the icon rail a group lists its entries open or not (objectstack#32156).
+  const inIconRail = React.useContext(NavIconRailContext);
 
   // --- Per-item guards: `visible`, `requiredPermissions`, and the
   // runtime-capability gates (an entry whose required object/service is not
@@ -1807,7 +1827,7 @@ function NavigationItemRenderer({
     };
 
     const group = (
-      <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+      <Collapsible open={isOpen || inIconRail} onOpenChange={setIsOpen}>
         <SidebarGroup>
           <SidebarGroupLabel asChild className={cn(HIDDEN_ICON_LABEL_NO_POINTER, HIDDEN_ICON_LABEL_NOT_FOCUSABLE)}>
             <CollapsibleTrigger className={cn('flex w-full items-center justify-between', isMobile && 'min-h-[44px] text-[15px] rounded-xl')}>

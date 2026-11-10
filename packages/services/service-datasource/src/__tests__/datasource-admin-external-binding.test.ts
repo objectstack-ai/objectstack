@@ -1,6 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
+// Pay the driver's first load at collection, not inside a clocked `it()`
+// (`check:test-source-alias`).
+import '@objectstack/driver-sql';
 import { externalBindingDatasourceRefusal } from '@objectstack/spec/data';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 import { registerDatasourceAdminRoutes } from '../admin-routes.js';
@@ -128,11 +131,18 @@ function predicateMessage(object: BoundObject, declared: { schemaMode?: unknown 
 
 async function expectRefusal(res: Response, expected: string[]): Promise<string> {
   expect(res.status).toBe(400);
-  const body = (await res.json()) as { success: boolean; error: { code: string; message: string } };
+  const body = (await res.json()) as {
+    success: boolean;
+    error: { code: string; message: string; details?: { reason?: string; hint?: string } };
+  };
   expect(body.success).toBe(false);
   expect(body.error.code).toBe('DATASOURCE_ADMIN_ERROR');
-  for (const line of expected) expect(body.error.message).toContain(line);
-  return body.error.message;
+  expect(typeof body.error.details?.reason).toBe('string');
+  // The whole account of a refusal: its one-line message, then its hint.
+  const hint = body.error.details?.hint;
+  const account = hint ? `${body.error.message}\n${hint}` : body.error.message;
+  for (const line of expected) expect(account).toContain(line);
+  return account;
 }
 
 const PG = { database: 'analytics' };
@@ -155,7 +165,7 @@ describe('POST /api/v1/datasources refuses a managed datasource under objects bo
     });
 
     const message = await expectRefusal(res, [predicateMessage(ORDERS, { schemaMode: 'managed' })]);
-    expect(message.startsWith("Invalid datasource 'wh'.")).toBe(true);
+    expect(message.startsWith("Invalid datasource 'wh': it is managed")).toBe(true);
     expect(door.records.size).toBe(0);
     expect(door.secrets.size).toBe(0);
     expect(door.ops).toEqual([]);

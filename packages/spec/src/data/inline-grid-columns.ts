@@ -84,6 +84,16 @@
  * editor there), and otherwise only when the form has more fields than the
  * grid has columns. A thin grid whose columns already cover every field shows
  * no expand control.
+ *
+ * ## The line-position field ({@link deriveInlineGridSortField})
+ *
+ * Both derivations above skip the {@link INLINE_GRID_SORT_FIELDS} names because
+ * the grid uses one of them differently: it stamps each line's position into
+ * it on drag-reorder and loads the child rows ordered by it. Which one is the
+ * renderer's rule too, measured in its `deriveDetail`
+ * (`ui/packages/plugin-form/src/deriveMasterDetail.ts`): the first child
+ * field, in field-map order, that carries one of the names. Every grid
+ * resolves it, with authored columns or derived ones.
  */
 
 // The sort-position names live in their own module, reached by relative
@@ -278,6 +288,33 @@ export function deriveInlineRowFormFields(
     out.push(name);
   }
   return out;
+}
+
+/**
+ * Derive the child field an inline master-detail grid stamps with each line's
+ * position — the grid's line-position field — from the child object's
+ * definition (or any bare record shaped like one: `{ fields }` with the field
+ * map the spec declares).
+ *
+ * The renderer's own rule, reproduced exactly: the FIRST child field, in the
+ * field map's own order, whose name is one of {@link INLINE_GRID_SORT_FIELDS}.
+ * Nothing else about the field is consulted — not its type and not its
+ * `hidden` / `readonly` / `system` flags. Every inline grid resolves it, with
+ * authored columns or derived ones: the grid writes it on drag-reorder and
+ * loads the child rows ordered by it, so the field is read whenever such a grid
+ * is drawn, though no column draws it (both derivations above skip it).
+ *
+ * The names stay private to the spec (`inline-grid-sort-fields.ts` says why);
+ * a caller asking which field a grid reads asks this function, never a copy of
+ * the list.
+ *
+ * Returns `undefined` when the child declares none of the names, or the
+ * definition carries no field map.
+ */
+export function deriveInlineGridSortField(def: unknown): string | undefined {
+  const fields = prop(def, 'fields');
+  if (!fields || typeof fields !== 'object') return undefined;
+  return Object.keys(fields as AnyRec).find((name) => INLINE_GRID_SORT_FIELDS.has(name));
 }
 
 /**

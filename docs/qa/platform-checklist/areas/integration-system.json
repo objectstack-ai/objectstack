@@ -136,14 +136,14 @@
       "title": "An unreachable connector upstream degrades that ONE instance (CONNECTOR_UPSTREAM_UNAVAILABLE) instead of failing boot, retries on 5s→300s backoff, and recovers atomically — while config faults stay boot-fatal",
       "since": "v15.1",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the showcase_mcp_tools stdio instance — break its upstream deterministically by making its script unreachable: point providerConfig.transport.args at a nonexistent script (the experiment its own fixture comment prescribes, examples/app-showcase/src/system/connectors/index.ts#DevToolsMcpConnector), or move scripts/mcp-fixture.mjs out of the app, as QA run #24575 did. Do either in a SCRATCH copy of examples/app-showcase, for every boot of this item (steps[0] and steps[5]), never the shared tree. The path is relative to the serving process's cwd (./scripts/mcp-fixture.mjs), and moving the file is the variant steps[4] can undo with no config change",
-          "a config-fault twin for the both-sides check: the same entry with an invalid providerConfig shape (e.g. transport.kind: 'carrier_pigeon'). `os compile` accepts it — providerConfig is deliberately untyped in the spec (connector.zod.ts) — and only the provider factory refuses it, at boot, so the twin's refusal is read off the boot (steps[5]), never off a build"
+          "the showcase_mcp_tools stdio instance — break its upstream deterministically by making its script unreachable: point providerConfig.transport.args at a nonexistent script (the experiment its own fixture comment prescribes, examples/app-showcase/src/system/connectors/index.ts#DevToolsMcpConnector), or move scripts/mcp-fixture.mjs out of the app, as QA run #24575 did. Do either in a SCRATCH copy of examples/app-showcase, for every boot of this item (steps[0] and steps[5]), never the shared tree. The path is relative to the serving process's cwd (./scripts/mcp-fixture.mjs), and moving the file is the variant steps[4] can undo with no config change. ONE COMMAND makes that copy: `node scripts/qa/qa-fixture.mjs broken-upstream-app` copies the showcase to a /tmp run directory, parks scripts/mcp-fixture.mjs beside it and prints the copy's boot command (with --log-level info, for steps[3]); `node scripts/qa/qa-fixture.mjs restore-upstream --dir DIR` is steps[4]'s restore, and `teardown --dir DIR` removes the copy once you have stopped its boot",
+          "a config-fault twin for the both-sides check: the same entry with an invalid providerConfig shape (e.g. transport.kind: 'carrier_pigeon'). `os compile` accepts it — providerConfig is deliberately untyped in the spec (connector.zod.ts) — and only the provider factory refuses it, at boot, so the twin's refusal is read off the boot (steps[5]), never off a build. `node scripts/qa/qa-fixture.mjs broken-upstream-app --variant config-fault` makes the twin as its own scratch copy"
         ]
       },
       "steps": [
@@ -237,6 +237,12 @@
           "date": "2026-10-27",
           "change": "steps[3] names the log level the retry intervals need; acceptance[2].verify says the unknown-connector comparator has no live recipe and where its sentence lives. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26476, release-18.2.0-w2-manual-api, at 756220c4; wave anchor #25807, slice A): the interval line is info-level, and A2's comparator had no recipe to drive. Re-read at base e4ba846f (service-automation plugin.ts: the attempt line is logger.error, the next-retry line logger.info; builtin/connector-nodes.ts: the degraded and no-handler arms). No clause changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-10",
+          "change": "fixtures.requires[0] and [1] name the one command that makes each scratch copy (`node scripts/qa/qa-fixture.mjs broken-upstream-app`, `--variant config-fault` for the twin) and the one that restores the upstream for steps[4] (`restore-upstream --dir DIR`). QA run #32135 scored this item BLOCKED (fixture: needs a broken-upstream scratch app) and listed the scratch app among the recurring fixture debt (#32168 ask C). Proved on a copy outside the tree: the boot logged the connector registered DEGRADED, and the restore put the script back. No clause changed",
+          "ref": "#32168"
         }
       ]
     },
@@ -582,13 +588,13 @@
       "title": "Outbound webhooks are read from the registry (spec object→object_name, no sys_webhook row) and switched through the activation ledger, fire per trigger variant through the sys_http_delivery outbox with HMAC + timeout honored, redeliver terminal rows tenant-scoped via POST /api/v1/webhooks/redeliver, and reject retired trigger kinds",
       "since": "v15",
       "status": "active",
-      "revision": 13,
+      "revision": 14,
       "priority": "P1",
       "surface": "mixed",
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a reachable webhook receiver (local echo server on the run's own port range) and a SCRATCH webhook authored INSIDE the showcase organization that points at it — Setup → Integrations → Webhooks → New as the signed-in admin, or POST /api/v1/data/sys_webhook under that session, so the row carries the organization. ⚠ The shipped showcase_task_changed cannot carry the per-record or bulk delivery legs: it is a declared webhook, read-only, so its url stays the placeholder hooks.example and cannot be pointed at the receiver. Once switched on it DOES deliver under `single` — a declared webhook is deployment-wide there and each delivery is stamped with the event's organization (packages/plugins/plugin-webhooks/src/auto-enqueuer.ts, AutoEnqueuer.admitsOrganization, CachedSubscription.deploymentWide) — and the same holds under `isolated` and `group` (ADR-0131 D2/D9, ruling A: CachedSubscription.deploymentWide is set on every declared webhook). Switched on by the platform operator, since under a wall the activation door is operator-only, it delivers one sys_http_delivery row per event stamped with that event's organization, and each organization reads only its own rows: packages/qa/dogfood/test/wall-declared-webhook-deployment-wide.dogfood.test.ts pins it in its '[ruling A] isolated|group: a declared webhook is deployment-wide' describe, run under both postures, and QA run #24783 measured it live. Authoring the scratch webhook over POST /api/v1/data/sys_webhook needs `definition_json` (required: the serialised Webhook envelope of @objectstack/spec/automation/webhook) and a lower-case `method` such as `post`, because Field.select lower-cases the select's option values (packages/plugins/plugin-webhooks/src/sys-webhook.object.ts)",
+          "a reachable webhook receiver (local echo server on the run's own port range) and a SCRATCH webhook authored INSIDE the showcase organization that points at it — Setup → Integrations → Webhooks → New as the signed-in admin, or POST /api/v1/data/sys_webhook under that session, so the row carries the organization. ⚠ The shipped showcase_task_changed cannot carry the per-record or bulk delivery legs: it is a declared webhook, read-only, so its url stays the placeholder hooks.example and cannot be pointed at the receiver. Once switched on it DOES deliver under `single` — a declared webhook is deployment-wide there and each delivery is stamped with the event's organization (packages/plugins/plugin-webhooks/src/auto-enqueuer.ts, AutoEnqueuer.admitsOrganization, CachedSubscription.deploymentWide) — and the same holds under `isolated` and `group` (ADR-0131 D2/D9, ruling A: CachedSubscription.deploymentWide is set on every declared webhook). Switched on by the platform operator, since under a wall the activation door is operator-only, it delivers one sys_http_delivery row per event stamped with that event's organization, and each organization reads only its own rows: packages/qa/dogfood/test/wall-declared-webhook-deployment-wide.dogfood.test.ts pins it in its '[ruling A] isolated|group: a declared webhook is deployment-wide' describe, run under both postures, and QA run #24783 measured it live. Authoring the scratch webhook over POST /api/v1/data/sys_webhook needs `definition_json` (required: the serialised Webhook envelope of @objectstack/spec/automation/webhook) and a lower-case `method` such as `post`, because Field.select lower-cases the select's option values (packages/plugins/plugin-webhooks/src/sys-webhook.object.ts). In the same file: the row's on/off column is `active` (a boolean, default true; there is no `is_active`), and its credentials are columns of their own, never keys of definition_json — the HMAC key in `signing_secret` and the custom headers, as one JSON object, in `headers_secret`, both Field.secret, encrypted into sys_secret on write and read back as the mask",
           "the shipped fixture: showcase_task_changed (object showcase_task, triggers create/update/delete, isActive:false ON PURPOSE — switching it on through the activation door is part of the test, examples/app-showcase/src/automation/webhooks/index.ts)",
           "a predicate multi-write path for the bulk variants (update/delete with multi:true on showcase_task) — NOT reachable over REST, see the knownGap below: author a flow with an `update_record` / `delete_record` node carrying multi:true and fire it through the api trigger"
         ],
@@ -610,11 +616,11 @@
       "steps": [
         "boot the showcase on a fresh database; verify the declared webhook is NOT materialized (ADR-0131 D2 retired the boot seeder): read sys_webhook over /api/v1/data and find NO showcase_task_changed row — the dispatcher reads the declaration from the registry",
         "switch the shipped declared showcase_task_changed on as the admin: POST /api/v1/security/_activation/webhook/showcase_task_changed with { enabled: true } — 200 { type: 'webhook', name, enabled: true }, and one sys_metadata_activation row of metadata_type 'webhook' whose `active` column is true (the door's body and answer spell it `enabled`, the row's column is `active`); an undeclared name answers 404. A declared webhook is read-only: pointing it at the receiver means a copy under a new name (the scratch webhook below). This switch is the subject of acceptance[6] ONLY: switched on, the declaration delivers under `single` (one sys_http_delivery row with ref_id declared:showcase_task_changed, stamped with the Default Organization, per task change), but only to its placeholder url (fixtures.requires[0]). Author the in-organization scratch webhook beside it for the delivery legs",
-        "with the in-organization scratch webhook (fixtures.requires[0]) active and pointed at the receiver, create, update, then delete a showcase_task; capture the three deliveries at the receiver (headers incl. the HMAC signature when a secret is set, body incl. recordId). The create needs showcase_task's required `project` lookup — pass an existing showcase_project id, or the create answers 400 VALIDATION_FAILED 'Project is required' and no create event fires",
+        "with the in-organization scratch webhook (fixtures.requires[0]) active and pointed at the receiver, create, update, then delete a showcase_task; capture the three deliveries at the receiver (headers incl. the HMAC signature when the row's `signing_secret` is set, body incl. recordId). The create needs showcase_task's required `project` lookup — pass an existing showcase_project id, or the create answers 400 VALIDATION_FAILED 'Project is required' and no create event fires",
         "run a predicate multi-update and multi-delete (multi:true) matching several rows — through a FLOW node, not REST: author update_record / delete_record nodes with multi:true and fire them via the api trigger (the REST batch routes strip options.multi, #3897 — see the knownGap); capture the bulk deliveries and their { object, matched } shape",
         "read sys_http_delivery over /api/v1/data (a `$filter` is a JSON filter object): one row per delivery with status/attempts/response_code",
         "kill the receiver and mutate again; re-read the delivery row through its retry/failure states",
-        "restore the receiver answering a permanent 4xx (not 408/429), so the failing row reaches a terminal status (failed/dead) at its next attempt — packages/services/service-messaging/src/http-sender.ts maps a 4xx to a permanent failure and retries 408, 429, 5xx and transport errors on the outbox schedule, so a receiver that only comes back healthy leaves the row non-terminal for the whole schedule — then POST /api/v1/webhooks/redeliver with { deliveryId: <that row's id> } as the seeded admin (the door is gated on webhook-administration access): capture the 200 { id, status } and the receiver's re-hit — compare the replayed X-Objectstack-Signature byte-for-byte against the original delivery's; re-read the row; then probe the refusals: anonymous POST (401), non-JSON body (400 INVALID_REQUEST), body without deliveryId (400 MISSING_REQUIRED_FIELD), a garbage/unknown deliveryId (404), a row still pending/in_flight (409 DELIVERY_NOT_ELIGIBLE)",
+        "restore the receiver answering a permanent 4xx (not 408/429), so the failing row reaches a terminal status (failed/dead) at its next attempt — packages/services/service-messaging/src/http-sender.ts maps a 4xx to a permanent failure and retries 408, 429, 5xx and transport errors on the outbox schedule, so a receiver that only comes back healthy leaves the row non-terminal for the whole schedule — then POST /api/v1/webhooks/redeliver with { deliveryId: <that row's id> } as the seeded admin (the body key is camelCase `deliveryId`, which webhook-outbox-plugin.ts reads; a `delivery_id` or `id` key is read as no deliveryId at all and answers 400 MISSING_REQUIRED_FIELD) (the door is gated on webhook-administration access): capture the 200 { id, status } and the receiver's re-hit — compare the replayed X-Objectstack-Signature byte-for-byte against the original delivery's; re-read the row; then probe the refusals: anonymous POST (401), non-JSON body (400 INVALID_REQUEST), body without deliveryId (400 MISSING_REQUIRED_FIELD), a garbage/unknown deliveryId (404), a row still pending/in_flight (409 DELIVERY_NOT_ELIGIBLE)",
         "redeploy/reboot and confirm the activation switch survived: the sys_metadata_activation row is still there with `active` true, and the switch is still in force. No public door reads a declared webhook's switch: GET /api/v1/meta/webhook/showcase_task_changed serves the declaration, which answers isActive:false by design (the activation ledger is separate, ADR-0126 §4), so the in-force half is read off a fresh sys_http_delivery row for a task change made after the reboot (the switch is deployment state; the declaration is code)"
       ],
       "acceptance": [
@@ -758,6 +764,12 @@
           "date": "2026-10-29",
           "change": "contract-review follow-up on the same hardening: acceptance[4].verify no longer cites a no-capability posture in the route's docblock (the docblock states the gate), and names where the gate and the replay's organization are stated and pinned; steps[6] drives the redeliver as the seeded admin, not as any authenticated user; acceptance[4] names the walled-posture refusal of an organization claim no current membership backs, vetted as the data API vets it. The admin-driven assertions are unchanged",
           "ref": "#27474"
+        },
+        {
+          "revision": 14,
+          "date": "2026-11-10",
+          "change": "fixtures.requires[0], steps[2] and steps[6] name the keys a runner met. Checklist-accuracy findings of QA run #32135 (at ff04ad81; card #32168): the scratch webhook's on/off column is `active`, not `is_active`; its secret goes in `signing_secret` and its custom headers in `headers_secret`, not in definition_json; redeliver's body key is `deliveryId`. Re-read at base 8523ef9a: packages/plugins/plugin-webhooks/src/sys-webhook.object.ts (active, signing_secret, headers_secret; definition_json carries no credentials), packages/plugins/plugin-webhooks/src/webhook-outbox-plugin.ts (the redeliver route reads body.deliveryId, else 400 MISSING_REQUIRED_FIELD). No clause changed",
+          "ref": "#32168"
         }
       ],
       "enumSource": {
@@ -1879,7 +1891,7 @@
       "title": "A shipped driver's datasource credential can never be authored inline NOR read back: every inline-credential door refuses at publish, and BOTH read doors redact, including legacy alias spellings already sitting in stored rows. A plugin driver's config is its author's to keep credential-free; the platform redacts only its fixed credential spellings there and does not guess",
       "since": "v17",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P0",
       "surface": "mixed",
       "personas": ["seeded admin", "authenticated non-admin", "anonymous"],
@@ -1892,7 +1904,7 @@
         "knownGaps": [
           "The legacy-alias clause tests a row shape the CURRENT parse refuses to create — a stored row from before the aliases moved to `guidance`. It is only reachable by writing the row directly (⚠️ NOT through the runtime wizard: POST /api/v1/datasources refuses an alias-spelled config key 400 DATASOURCE_ADMIN_ERROR — the aliases moved to `guidance`, which refuses them, #8078 — measured on a stock showcase boot with `passwd` and by QA run #21056. The run planted its rows with a direct sys_metadata write while the server was STOPPED, then booted and read through both doors). If the run cannot write such a row, that clause is blocked(fixture) and MUST be recorded — a redaction that has never been tested against the shape it exists for is an untested redaction.",
           "`encryptionKey` (turso) is RETIRED since #25050 (it encrypted nothing in any mode): the parse refuses it on EVERY turso datasource, remote or local, on config.encryptionKey with the removal prescription, so a write refusal is the correct expectation everywhere. A stored row from before the retirement may still carry it; such a row is reachable only by a direct sys_metadata write, and its value must still be redacted on read through both doors (packages/spec/src/data/datasource-credential-redaction.ts#RETIRED_CREDENTIAL_KEYS). Plant it beside a file: url: the load-path conversion (turso-config-encryption-key-removed) deletes it beside a remote url on the datasource loaders, and leaves a local-url value for its author.",
-          "acceptance[1] (the credential-bound datasource actually connects) and acceptance[6] (judged by a connect probe after the echoed-config round-trip) need a reachable, credential-protected database of a SHIPPED driver (postgres, mysql or mongodb — the driver id since 18; an authored `mongo` is refused by name, packages/spec/src/data/datasource.zod.ts). Stock showcase provides none, but the QA container has a PostgreSQL 16 install (/usr/lib/postgresql/16/bin, with a `postgres` system user), and QA run #24575 proved a recipe on it that scored both clauses pass (#24615 reused it): as `postgres`, `initdb -A scram-sha-256` into a scratch data directory, then `pg_ctl … -o '-p PORT -k SOCKETDIR -c listen_addresses=127.0.0.1' start`; create a login role WITH a password and a database it owns; bind it through POST /api/v1/datasources with the password in the top-level `secret`, never in `config`, so the door binds external.credentialsRef. Every parent directory of the data and socket directories must be traversable by `postgres`, and a socket path may not exceed 107 bytes: a session scratchpad fails both (its parent chain is root 0700, and its socket path is too long). QA run #26481 ran the database from a /tmp/RUN-pg data directory with -c unix_socket_directories='' (TCP only, 127.0.0.1). A failed connect states its real cause only in the create response's `statusReason` (packages/services/service-datasource/src/datasource-admin-service.ts); POST /api/v1/datasources/NAME/test then answers 'no registered driver to introspect', which names no cause, so read the create response first. Runs before #24575 recorded both clauses blocked(environment) (#21784, #21845). CI has postgres and mysql only inside the Temporal Conformance (live PG + MySQL) job (.github/workflows/ci.yml services postgres:16 and mysql:8.0), which runs no checklist item, and has no mongodb anywhere. ⛔ Never score either clause from a successful publish alone, which proves the paved path is accepted, not that it connects. A run that cannot start the database still reads the stored-credential half of acceptance[6] (after the PATCH, the admin door still reports hasSecret and the bound secret handle is unchanged); record that as a partial reading, separate from the connect half",
+          "acceptance[1] (the credential-bound datasource actually connects) and acceptance[6] (judged by a connect probe after the echoed-config round-trip) need a reachable, credential-protected database of a SHIPPED driver (postgres, mysql or mongodb — the driver id since 18; an authored `mongo` is refused by name, packages/spec/src/data/datasource.zod.ts). Stock showcase provides none. ONE COMMAND provisions it: `node scripts/qa/qa-fixture.mjs external-database` replays the recipe below on a local PostgreSQL install, or takes a database the runner brings as OS_TEST_EXTERNAL_DB_URL (postgres://USER:PASSWORD@HOST:PORT/DATABASE, read and never stored), and prints the POST /api/v1/datasources body with the password in the top-level `secret`; with neither input it refuses, exit 2, naming both, and starts nothing. It generates the passwords per run and writes them only under its own /tmp run directory (mode 0600), never into the repository; `node scripts/qa/qa-fixture.mjs teardown --dir DIR` stops the cluster and removes the directory. The recipe it replays: the QA container has a PostgreSQL 16 install (/usr/lib/postgresql/16/bin, with a `postgres` system user), and QA run #24575 proved a recipe on it that scored both clauses pass (#24615 reused it): as `postgres`, `initdb -A scram-sha-256` into a scratch data directory, then `pg_ctl … -o '-p PORT -k SOCKETDIR -c listen_addresses=127.0.0.1' start`; create a login role WITH a password and a database it owns; bind it through POST /api/v1/datasources with the password in the top-level `secret`, never in `config`, so the door binds external.credentialsRef. Every parent directory of the data and socket directories must be traversable by `postgres`, and a socket path may not exceed 107 bytes: a session scratchpad fails both (its parent chain is root 0700, and its socket path is too long). QA run #26481 ran the database from a /tmp/RUN-pg data directory with -c unix_socket_directories='' (TCP only, 127.0.0.1). A failed connect states its real cause only in the create response's `statusReason` (packages/services/service-datasource/src/datasource-admin-service.ts); POST /api/v1/datasources/NAME/test then answers 'no registered driver to introspect', which names no cause, so read the create response first. Runs before #24575 recorded both clauses blocked(environment) (#21784, #21845). CI has postgres and mysql only inside the Temporal Conformance (live PG + MySQL) job (.github/workflows/ci.yml services postgres:16 and mysql:8.0), which runs no checklist item, and has no mongodb anywhere. ⛔ Never score either clause from a successful publish alone, which proves the paved path is accepted, not that it connects. A run that cannot start the database still reads the stored-credential half of acceptance[6] (after the PATCH, the admin door still reports hasSecret and the bound secret handle is unchanged); record that as a partial reading, separate from the connect half",
           "the plugin-driver boundary is RULED (#21921, docs note in content/docs/data-modeling/drivers.mdx): for a driver the platform ships no contract for, the platform neither validates config nor guesses which of its keys are credentials. Keeping credentials out of a plugin driver's config, through external.credentialsRef, is the plugin author's responsibility. Only the platform's FIXED credential spellings are redacted there by name (acceptance[5]). A credential under any other key of a plugin driver's config being stored and served to administrators as written is that boundary, never a finding",
           "no datasource read door serves the mask literal (packages/spec/src/data/secret-mask.ts#SECRET_MASK is read by the encrypted-field read path and the settings REST boundary, not here): the admin door OMITS each withheld credential key and names it in redactedConfigKeys beside hasSecret, and the metadata door serves the external.credentialsRef handle. So the round-trip acceptance[6] drives carries no mask, and what it exercises is the carry-forward of the withheld keys on PATCH (packages/services/service-datasource/src/datasource-config-redaction.ts#restoreRedactedConfig). QA run #24575 also measured a hand-written literal mask: PATCH /api/v1/datasources/NAME with `secret` set to it is accepted 200 and rewraps the stored secret to the mask (the reconnect then fails). No read door serves that string, so it is not the echoed case acceptance[6] and negative[5] score; it is held for the maintainer on #24579 §7, where no contract declares it. ⛔ Score it under neither",
           "Two credential routes beside external.credentialsRef are not driven by any step here; a run records them as not covered by this item, never as pass, and never reads them as holes in the refusal matrix. (a) The code author's route (ADR-0015, the note under §10, #28208): a datasource defined in code reads its credential at connect from the environment variable derived from its name, OS_DATASOURCE_NAME_PASSWORD (`warehouse` reads OS_DATASOURCE_WAREHOUSE_PASSWORD), only on a code-origin connect and only while the host switch OS_DATASOURCE_ENV_CREDENTIALS is on, which the CLI host stamps and every other composition leaves off (packages/services/service-datasource/src/datasource-env-credential.ts). The inline-credential and URL-userinfo refusals, and the datasource-level password guidance, now end with that route's sentence (CODE_DEFINED_CREDENTIAL_ROUTE, packages/spec/src/data/driver/common.zod.ts), so acceptance[0] reads it as part of the prescription. (b) The connector channel (ADR-0015 D7): an API-backed datasource may borrow a declared connector instance's credential through external.connector, under three refusals — connector beside credentialsRef; connector on a built-in database driver or on a managed datasource; a connector the same stack does not declare with a provider and an auth other than none (packages/spec/src/data/datasource.zod.ts#ExternalDatasourceSettingsSchema, packages/spec/src/stack.zod.ts#collectDatasourceConnectorErrors)"
@@ -2034,6 +2046,12 @@
           "date": "2026-11-01",
           "change": "Three QA run #28545 (W3-C1R) findings. acceptance[6].verify listed the item route's methods as 'GET, POST, PATCH, DELETE', mixing in the collection's POST; /datasources/NAME serves GET, PATCH and DELETE (admin-routes.ts), and the 405's Allow reads DELETE, GET, HEAD, PATCH. knownGaps[5] and source name the two credential routes new since c4c515ad: the code-author env route OS_DATASOURCE_NAME_PASSWORD behind OS_DATASOURCE_ENV_CREDENTIALS, whose sentence (CODE_DEFINED_CREDENTIAL_ROUTE) now ends the refusals, and the external.connector channel (ADR-0015 D7) with its three refusals. Both are described as the code and the ADR state them. steps[0] says which door names both refusals for a `mongo` probe: the runtime door judges config first and reports config.password alone (datasource-admin-service.ts), and the build door names the driver refusal too. No clause weakened. Read from source at base 6b9c1ca991. Wave anchor #27377, wave-3 accuracy slice S9 (#28641); finding parked in anchor comment 6554042054",
           "ref": "#28545"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-10",
+          "change": "fixtures.knownGaps[2] names the one command that provisions the credentialed PostgreSQL acceptance[1] and acceptance[6] connect to (`node scripts/qa/qa-fixture.mjs external-database`, or OS_TEST_EXTERNAL_DB_URL for a database the runner brings), and how it refuses without either. QA run #32135 left both connect legs not run and listed this database among the recurring fixture debt (#32168 ask C). The recipe text it replays is unchanged. No clause changed",
+          "ref": "#32168"
         }
       ]
     },
@@ -2554,6 +2572,386 @@
           "date": "2026-11-10",
           "change": "initial — ADR-0150 child E7 (#31730). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
           "ref": "#32019"
+        }
+      ]
+    },
+    {
+      "id": "integration-system.federation-only-driver-catalog",
+      "title": "The driver catalog marks oracle and mssql federation-only, and Studio's New datasource dialog offers them External and Validate only, saying why Managed is not offered",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), over REST and in Setup"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin`"
+        ]
+      },
+      "steps": [
+        "GET /api/v1/datasources/drivers; record the oracle, mssql and postgres entries",
+        "open /_console/apps/setup/metadata/datasource and the New datasource dialog; pick PostgreSQL, set Schema mode to Managed, then pick Oracle; read the Schema mode options and the sentence under them",
+        "pick SQL Server, then PostgreSQL again; read the options each time"
+      ],
+      "acceptance": [
+        {
+          "clause": "the catalog marks exactly the federation-only drivers, and the key is absent elsewhere",
+          "oracle": "api",
+          "verify": "oracle and mssql carry federationOnly: true; postgres, mysql and sqlite carry no federationOnly key (absent, never false) (packages/services/service-datasource/src/driver-catalog.ts, read from the spec's FEDERATION_ONLY_DRIVER_IDS)",
+          "evidence": "the three entries"
+        },
+        {
+          "clause": "a federation-only driver is offered External and Validate only, with the sentence that says why",
+          "oracle": "dom",
+          "verify": "for Oracle and SQL Server the Schema mode list holds 'External: read an existing database' and 'Validate only', no Managed; [data-testid=datasource-schema-mode-federation-only] reads 'Managed is not offered: this driver only connects to a database another system owns, and ObjectStack never creates or changes its tables.' (ui/packages/app-shell/src/views/metadata-admin/datasource/DatasourceResourcePage.tsx)",
+          "evidence": "a screenshot of the open list and the sentence"
+        },
+        {
+          "clause": "switching from a managed draft to a federation-only driver moves the mode to External, and a managed driver gets all three back with no sentence",
+          "oracle": "dom",
+          "verify": "after PostgreSQL + Managed, picking Oracle shows External selected; picking PostgreSQL again lists Managed and the sentence is gone",
+          "evidence": "the selected mode after each switch"
+        }
+      ],
+      "negative": [
+        "Managed offered for oracle or mssql is a FAIL: the spec refuses that datasource",
+        "federationOnly: false on any entry is a FAIL: the key is present only when true"
+      ],
+      "traps": [
+        "hydration-race"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/services/service-datasource/src/__tests__/driver-catalog.test.ts, ui/packages/app-shell/src/views/metadata-admin/datasource/DatasourceResourcePage.newDatasourceModes-30327.test.tsx; no live spec opens the dialog on a federation-only driver"
+      },
+      "source": [
+        "packages/services/service-datasource/src/driver-catalog.ts",
+        "ui/packages/app-shell/src/views/metadata-admin/datasource/DatasourceResourcePage.tsx#schemaModesFor",
+        "ui/packages/i18n/src/namespaces/studio/en.ts (engine.datasource.schemaModeFederationOnly)",
+        "docs/adr/0015-external-datasource-federation.md §4.6",
+        "#31389"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — the federation-only drivers in the catalog and the New datasource dialog (#31389). Scoped sweep #32269 (epic #32022 M3, theme 8: federation and CLI), read from source at 9091955b; no live run made",
+          "ref": "#32269"
+        }
+      ]
+    },
+    {
+      "id": "integration-system.federation-only-managed-refusal",
+      "title": "A managed datasource on a federation-only driver is refused at the admin door and at build, naming schemaMode and the fix; an oracle config refuses an inline password and a URL with the sentence that says what to write",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), over REST",
+        "a developer running os validate"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin`. No Oracle or SQL Server is needed: every call below is refused before any connection",
+          "a scratch app directory outside examples/ whose stack declares datasources: [{ name: 'qa_ora', driver: 'oracle', config: { host: 'oracle.qa.invalid', serviceName: 'FREEPDB1', username: 'qa' } }] (no schemaMode, so managed by default)"
+        ]
+      },
+      "steps": [
+        "POST /api/v1/datasources { name: 'qa_ora_managed', driver: 'oracle', config: { host: 'oracle.qa.invalid', serviceName: 'FREEPDB1', username: 'qa' } }; then GET /api/v1/datasources",
+        "POST /api/v1/datasources { name: 'qa_mssql_managed', driver: 'mssql', schemaMode: 'managed', config: { host: 'mssql.qa.invalid', database: 'qa', username: 'qa' } }",
+        "POST the oracle body with config.password 'x'; then with config.url 'oracle://qa@oracle.qa.invalid/FREEPDB1' in place of host and serviceName",
+        "run `os validate` in the scratch app directory"
+      ],
+      "acceptance": [
+        {
+          "clause": "a managed oracle datasource is refused 400 at schemaMode with the federation-only sentence, and nothing is stored",
+          "oracle": "api",
+          "verify": "400; the message opens \"Invalid datasource 'qa_ora_managed'.\" and carries \"schemaMode: the 'oracle' driver serves federation only\" and \"Set `schemaMode: 'external'`\"; the GET lists no qa_ora_managed (packages/spec/src/data/datasource.zod.ts#federationOnlyDriverOnManagedRefusal)",
+          "evidence": "status, body and the GET"
+        },
+        {
+          "clause": "the same refusal names mssql when it is declared managed explicitly",
+          "oracle": "api",
+          "verify": "400 with \"the 'mssql' driver serves federation only\"",
+          "evidence": "status and body"
+        },
+        {
+          "clause": "an oracle config refuses an inline password and a scheme URL, each with what to write instead",
+          "oracle": "api",
+          "verify": "both answer 400 \"Invalid configuration for driver 'oracle'.\"; the url one says 'Oracle has no `scheme://` connection URL' and names connectString or host, port and serviceName (packages/spec/src/data/driver/oracle.zod.ts#OracleConfigSchema); the password one tells the author to bind the secret",
+          "evidence": "both bodies"
+        },
+        {
+          "clause": "the build door refuses the same declaration",
+          "oracle": "build",
+          "verify": "os validate exits non-zero naming the qa_ora datasource, schemaMode and the federation-only sentence",
+          "evidence": "the exit code and the output"
+        }
+      ],
+      "negative": [
+        "a managed oracle or mssql datasource stored, or a connection attempted before the refusal, is a FAIL",
+        "a refusal that names no field is a FAIL: schemaMode is the located path"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/spec/src/data/driver/config-registry.test.ts (the federation-only refusal at parse), packages/drivers/driver-sql/src/sql-driver-oracle-dialect.test.ts (DDL refused as federation-only); no pin drives the admin door or os validate with it"
+      },
+      "source": [
+        "packages/spec/src/data/datasource.zod.ts#federationOnlyDriverOnManagedRefusal",
+        "packages/spec/src/data/driver/oracle.zod.ts#OracleConfigSchema",
+        "packages/services/service-datasource/src/datasource-admin-service.ts (assertValidConfig, then the record judged against DatasourceSchema before anything is stored)",
+        "docs/adr/0015-external-datasource-federation.md §4.6"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0015 §4.6: a federation-only driver never holds a managed datasource. Scoped sweep #32269 (epic #32022 M3, theme 8: federation and CLI), read from source at 9091955b; no live run made",
+          "ref": "#32269"
+        }
+      ]
+    },
+    {
+      "id": "integration-system.oracle-federated-read-write",
+      "title": "An Oracle datasource reads its tables as objects, refuses an empty-string comparand (Oracle stores '' as NULL), writes only under the double opt-in, and refuses upsert as a capability gap",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), over REST"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "an Oracle Database (Oracle Database Free 23ai qualifies) with a login and one table QA_TICKET (ID NUMBER primary key, TITLE VARCHAR2, NOTE VARCHAR2 with at least one NULL) holding a few rows, bound through POST /api/v1/datasources { name: 'qa_oracle_fed', driver: 'oracle', schemaMode: 'external', config: { host: HOST, port: 1521, serviceName: SERVICE, username: USER }, secret: PASSWORD, external: { allowWrites: true } } (the password in the top-level `secret`, never in `config`, so the door binds external.credentialsRef), then its tables imported as objects through Sync objects (integration-system.external-schema-introspection)",
+          "a second import of the same table with the object's external.writable left off, for the opt-in leg"
+        ],
+        "knownGaps": [
+          "BLOCKED(fixture) until a run provisions a credentialed Oracle Database. The one fixture command, `node scripts/qa/qa-fixture.mjs external-database` (#32233, merged as #32277), provisions PostgreSQL only: it replays its recipe on a local PostgreSQL install or takes OS_TEST_EXTERNAL_DB_URL, and refuses any URL that is not postgres:// (scripts/qa/qa-fixture.mjs, the external-database step). No CI job runs Oracle Database; the driver's live suite reads OS_TEST_ORACLE_URL. The run that brings a reachable Oracle Database with a login records the recipe at the area level and lifts `blocked` in the same revision. FOLLOW-UPS §18c"
+        ]
+      },
+      "steps": [
+        "GET /api/v1/data/QA_TICKET_OBJECT; then with a filter NOTE = ''; then with NOTE $null true",
+        "POST a row to the writable object; PATCH it; DELETE it",
+        "POST a row to the object whose external.writable is off"
+      ],
+      "acceptance": [
+        {
+          "clause": "the imported object lists the table's rows through the data door",
+          "oracle": "api",
+          "verify": "the list answers every row with its columns",
+          "evidence": "the list body"
+        },
+        {
+          "clause": "an empty-string comparand is refused INVALID_FILTER 400, naming the $null remedy",
+          "oracle": "api",
+          "verify": "400 INVALID_FILTER saying Oracle stores '' as NULL and to use { \"$null\": true }; the $null filter answers the NULL rows (packages/drivers/driver-sql/src/sql-driver-oracle-dialect.ts#assertOracleComparandNotEmptyString)",
+          "evidence": "both answers"
+        },
+        {
+          "clause": "create, update and delete work under the double opt-in; without the object's opt-in a write is refused 403",
+          "oracle": "api",
+          "verify": "the writable object takes all three; the other answers 403 EXTERNAL_WRITE_FORBIDDEN (packages/spec/src/shared/external-errors.ts#ExternalWriteForbiddenError)",
+          "evidence": "the four answers"
+        },
+        {
+          "clause": "the pins pass at the run subject sha: upsert is refused NOT_IMPLEMENTED 501 before any statement, DDL is refused as federation-only, and the dialect binds dates and day values as it declares",
+          "oracle": "test",
+          "verify": "run each file in automated.ref with the driver-sql vitest; the dialect file reports ≥1 test and 0 failed, and the conformance file runs (not skipped) only with OS_TEST_ORACLE_URL set",
+          "evidence": "the vitest summary lines, with the subject sha and whether OS_TEST_ORACLE_URL was set"
+        }
+      ],
+      "negative": [
+        "a NOTE = '' filter answering 200 with zero rows is a FAIL: that is the silent wrong answer the refusal exists for",
+        "a write landing without both opt-ins is a FAIL"
+      ],
+      "blocked": {
+        "by": "fixture",
+        "ref": "fixture gap: no credentialed Oracle Database; qa-fixture external-database is PostgreSQL only (FOLLOW-UPS §18c, #32233)"
+      },
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/drivers/driver-sql/src/sql-driver-oracle-dialect.test.ts, packages/drivers/driver-sql/src/sql-driver-oracle-federation-conformance.test.ts (live, skipped without OS_TEST_ORACLE_URL)"
+      },
+      "source": [
+        "packages/drivers/driver-sql/src/sql-driver-oracle-dialect.ts#assertOracleComparandNotEmptyString",
+        "packages/drivers/driver-sql/src/sql-driver-oracle-dialect.ts#oracleUpsertUnsupportedError",
+        "packages/drivers/driver-sql/src/sql-driver-oracle-introspection.ts",
+        "packages/spec/src/shared/external-errors.ts#ExternalWriteForbiddenError",
+        "docs/adr/0015-external-datasource-federation.md §4.6"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — the Oracle federation dialect: reads, the empty-string refusal, gated writes and the upsert gap. Blocked(fixture): no credentialed Oracle. Scoped sweep #32269 (epic #32022 M3, theme 8: federation and CLI), read from source at 9091955b; no live run made",
+          "ref": "#32269"
+        }
+      ]
+    },
+    {
+      "id": "integration-system.oracle-raw16-uuid-reference",
+      "title": "An Oracle RAW(16) key reads as a lower-case uuid, is filtered and written by that text, a reference over it resolves, and a comparand or written value that is not uuid text is refused",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), over REST"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the Oracle datasource of integration-system.oracle-federated-read-write, with two more tables: QA_PARENT (ID RAW(16) DEFAULT SYS_GUID() primary key, NAME VARCHAR2) and QA_CHILD (ID NUMBER primary key, PARENT_ID RAW(16) referencing QA_PARENT), both imported; the draft maps PARENT_ID to a lookup to the QA_PARENT object"
+        ],
+        "knownGaps": [
+          "BLOCKED(fixture) until a run provisions a credentialed Oracle Database. The one fixture command, `node scripts/qa/qa-fixture.mjs external-database` (#32233, merged as #32277), provisions PostgreSQL only: it replays its recipe on a local PostgreSQL install or takes OS_TEST_EXTERNAL_DB_URL, and refuses any URL that is not postgres:// (scripts/qa/qa-fixture.mjs, the external-database step). No CI job runs Oracle Database; the driver's live suite reads OS_TEST_ORACLE_URL. The run that brings a reachable Oracle Database with a login records the recipe at the area level and lifts `blocked` in the same revision. FOLLOW-UPS §18c"
+        ]
+      },
+      "steps": [
+        "GET the QA_PARENT list; record one id",
+        "GET QA_PARENT by that id; GET the list filtered ID = that id, then ID = 'not-a-uuid'",
+        "GET the QA_CHILD list with the lookup expanded",
+        "POST a QA_CHILD row with PARENT_ID set to the recorded id; then with 'not-a-uuid'"
+      ],
+      "acceptance": [
+        {
+          "clause": "a RAW(16) key reads back as lower-case hyphenated uuid text, and that text finds the row by id and by filter",
+          "oracle": "api",
+          "verify": "ids match 8-4-4-4-12 lower-case hex; the by-id GET and the filter both answer the row (packages/drivers/driver-sql/src/sql-driver-oracle-dialect.ts#oracleRaw16AsUuid, #oracleUuidRawBinding)",
+          "evidence": "the id, the by-id answer and the filter answer"
+        },
+        {
+          "clause": "a reference over a RAW(16) key resolves, and a written uuid lands",
+          "oracle": "api",
+          "verify": "the expanded lookup carries the parent row; the POST with the recorded id answers 201 and reads back with that id (packages/spec/src/data/type-compat.ts: RAW(16) backs lookup, master_detail and user exactly)",
+          "evidence": "the expanded list and the POST"
+        },
+        {
+          "clause": "a comparand that is not uuid text is refused INVALID_FILTER 400, and a written one VALIDATION_ERROR 400",
+          "oracle": "api",
+          "verify": "both say the value 'is not a uuid' and that the column is a RAW(16) uuid on an Oracle table (packages/drivers/driver-sql/src/sql-driver-oracle-dialect.ts#assertOracleUuidComparand)",
+          "evidence": "both answers"
+        }
+      ],
+      "negative": [
+        "a non-uuid comparand answering 200 with zero rows is a FAIL: it is refused, never silently unmatched"
+      ],
+      "blocked": {
+        "by": "fixture",
+        "ref": "fixture gap: no credentialed Oracle Database; qa-fixture external-database is PostgreSQL only (FOLLOW-UPS §18c, #32233)"
+      },
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/drivers/driver-sql/src/sql-driver-oracle-dialect.test.ts, packages/spec/src/data/type-compat.test.ts, packages/drivers/driver-sql/src/sql-driver-oracle-federation-conformance.test.ts (live, skipped without OS_TEST_ORACLE_URL)"
+      },
+      "source": [
+        "packages/drivers/driver-sql/src/sql-driver-oracle-dialect.ts#oracleRaw16AsUuid",
+        "packages/drivers/driver-sql/src/sql-driver-oracle-dialect.ts#oracleUuidRawBinding",
+        "packages/drivers/driver-sql/src/sql-driver-oracle-dialect.ts#assertOracleUuidComparand",
+        "packages/spec/src/data/type-compat.ts (the oracle uuid demotion, references exact)",
+        "#31390",
+        "#31786"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — Oracle RAW(16) uuid keys and the references over them (#31390, #31786). Blocked(fixture): no credentialed Oracle. Scoped sweep #32269 (epic #32022 M3, theme 8: federation and CLI), read from source at 9091955b; no live run made",
+          "ref": "#32269"
+        }
+      ]
+    },
+    {
+      "id": "integration-system.mssql-federated-read-write",
+      "title": "A SQL Server datasource reads its tables as objects, matches a uniqueidentifier column in text operators by the lower-case text every read answers, keeps case-exact matching exact, and writes only under the double opt-in",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), over REST"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a SQL Server 2017 or later (the TRANSLATE floor) with a login and one table qa_device (id uniqueidentifier DEFAULT NEWID() primary key, label nvarchar with mixed-case values) holding a few rows, bound through POST /api/v1/datasources { name: 'qa_mssql_fed', driver: 'mssql', schemaMode: 'external', config: { host: HOST, port: 1433, database: DATABASE, username: USER }, secret: PASSWORD, external: { allowWrites: true } } (the password in the top-level `secret`, never in `config`, so the door binds external.credentialsRef), then its tables imported as objects through Sync objects (integration-system.external-schema-introspection)"
+        ],
+        "knownGaps": [
+          "BLOCKED(fixture) until a run provisions a credentialed SQL Server. The one fixture command, `node scripts/qa/qa-fixture.mjs external-database` (#32233, merged as #32277), provisions PostgreSQL only: it replays its recipe on a local PostgreSQL install or takes OS_TEST_EXTERNAL_DB_URL, and refuses any URL that is not postgres:// (scripts/qa/qa-fixture.mjs, the external-database step). No CI job runs SQL Server; the driver's live suite reads OS_TEST_MSSQL_URL. The run that brings a reachable SQL Server with a login records the recipe at the area level and lifts `blocked` in the same revision. FOLLOW-UPS §18c"
+        ]
+      },
+      "steps": [
+        "GET the qa_device list; record one id as read",
+        "filter id $contains the id's first 8 characters as read (lower-case)",
+        "filter label $contains a fragment in the wrong case, then $icontains the same fragment",
+        "POST, PATCH and DELETE a row"
+      ],
+      "acceptance": [
+        {
+          "clause": "a uniqueidentifier reads lower-case, and a lower-case fragment copied from a read matches it in a text operator",
+          "oracle": "api",
+          "verify": "the id is lower-case; the $contains filter answers that row (packages/drivers/driver-sql/src/sql-driver-predicate-emitters.ts, the uniqueidentifier text match)",
+          "evidence": "the id and the filter answer"
+        },
+        {
+          "clause": "the case-exact operator stays exact and the folding one folds",
+          "oracle": "api",
+          "verify": "the wrong-case $contains answers no row; $icontains answers it (packages/core/src/utils/text-match-sql.ts#mssqlCaseExactSql, #mssqlAsciiLowerSql)",
+          "evidence": "both answers"
+        },
+        {
+          "clause": "create, update and delete work under the double opt-in",
+          "oracle": "api",
+          "verify": "each answers 2xx and the list reflects it; without the object's external.writable a write answers 403 EXTERNAL_WRITE_FORBIDDEN",
+          "evidence": "the answers"
+        },
+        {
+          "clause": "the pins pass at the run subject sha: the mssql dialect, the analytics text-match parity on mssql and oracle, and the SQL Server row window",
+          "oracle": "test",
+          "verify": "run each file in automated.ref with its package's vitest; each non-live file reports ≥1 test and 0 failed; the conformance file runs only with OS_TEST_MSSQL_URL set",
+          "evidence": "the vitest summary lines, with the subject sha"
+        }
+      ],
+      "negative": [
+        "a lower-case fragment of a read id matching nothing is a FAIL: the match reads the text the read answers"
+      ],
+      "blocked": {
+        "by": "fixture",
+        "ref": "fixture gap: no credentialed SQL Server; qa-fixture external-database is PostgreSQL only (FOLLOW-UPS §18c, #32233)"
+      },
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/drivers/driver-sql/src/sql-driver-mssql-dialect.test.ts, packages/services/service-analytics/src/__tests__/text-match-mssql-oracle.test.ts, packages/drivers/driver-sql/src/sql-driver-mssql-federation-conformance.test.ts (live, skipped without OS_TEST_MSSQL_URL)"
+      },
+      "source": [
+        "packages/drivers/driver-sql/src/sql-driver-predicate-emitters.ts (mssqlGuidText)",
+        "packages/drivers/driver-sql/src/sql-driver-mssql-introspection.ts",
+        "packages/core/src/utils/text-match-sql.ts#mssqlCaseExactSql",
+        "packages/core/src/utils/mssql-window-sql.ts#mssqlWindowSql",
+        "packages/spec/src/data/driver/mssql.zod.ts",
+        "#31395",
+        "#31623",
+        "#31625",
+        "#31770"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — the SQL Server federation dialect: uniqueidentifier text matching, case-exact parity and gated writes. Blocked(fixture): no credentialed SQL Server. Scoped sweep #32269 (epic #32022 M3, theme 8: federation and CLI), read from source at 9091955b; no live run made",
+          "ref": "#32269"
         }
       ]
     }

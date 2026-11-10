@@ -107,6 +107,12 @@ export { resolveFlowPrecedence, describeFlowContender, renderFlowContender } fro
 export type { FlowNameRefusalReader } from './flow-precedence.js';
 export type { FlowPrecedenceWinner } from './flow-precedence.js';
 
+// [#31696, ADR-0150 D4] The engine holds flows by `(package, name)`: the slot
+// `AutomationEngine.getFlowSlots` answers, and the key a slot of a name two
+// packages hold is filed under (`PACKAGE/NAME`).
+export { qualifiedFlowKey } from './flow-slots.js';
+export type { FlowSlot } from './flow-slots.js';
+
 // Per-run summary (#4354): the fold that turns a run's step log into
 // "selected N, acted M, skipped K by <gate>". Exported so a host building its
 // own observability surface (or a test asserting a sweep actually wrote

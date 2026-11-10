@@ -181,26 +181,63 @@ export class ExternalWriteRefusedError extends Error {
  * {@link EXTERNAL_ROW_CAP}). The engine applies the query itself over the rows
  * the driver returns, so it cannot answer correctly over a set it only partly
  * holds, and refuses instead of returning a short or wrongly ordered list. 422
- * with the prescription: narrow the filter, mirror the data into a real object
- * with DataSync, or — below the platform maximum — raise the datasource's
- * `external.rowCap`.
+ * with the prescription: narrow the filter, copy the rows into a `synced`
+ * object with sync-in (ADR-0153) and read that, or — below the platform
+ * maximum — raise the datasource's `external.rowCap`.
+ *
+ * [ADR-0153 D2] The refusal also carries what the driver returned — the row
+ * count ({@link returnedRowCount}) and each returned row's value of a field
+ * ({@link returnedValuesOf}) — for the one in-process caller that reads it:
+ * the sync-in pull's windowed read, which cuts its next window below a value
+ * the source has shown and tells an over-cap window from a driver that did not
+ * push the window's bounds. The floor receives one `where` and cannot tell
+ * which parts of it are bounds, so it hands the rows over and the pull judges
+ * its own bounds on them.
+ *
+ * ⛔ The rows live in a private field, never in `details`, never in an own
+ * enumerable property: nothing that serializes the error (the HTTP door, a log
+ * line, `JSON.stringify`, `structuredClone`) can reach them, so a refused read
+ * carries no row data off the process. Nothing in what the floor admits
+ * changes: the error is thrown on exactly the reads it was thrown on before.
  */
 export class ExternalRowCapExceededError extends Error {
   readonly code = EXTERNAL_ROW_CAP_EXCEEDED_CODE;
   readonly status = 422;
   readonly httpStatus = 422;
   readonly details: { datasource: string; object: string; cap: number };
+  readonly #returned: readonly Readonly<Record<string, unknown>>[];
 
-  constructor(datasource: string, object: string, cap: number = EXTERNAL_ROW_CAP) {
+  constructor(
+    datasource: string,
+    object: string,
+    cap: number = EXTERNAL_ROW_CAP,
+    returned: readonly Readonly<Record<string, unknown>>[] = [],
+  ) {
     super(
       `This read on '${object}' matched more than ${cap} rows from datasource '${datasource}', the most the `
       + `engine reads from its plugin driver for one request. Narrow the filter so fewer than ${cap + 1} rows `
-      + `match, or mirror the data into a real object with DataSync and read that instead`
+      + `match, or copy the rows into a synced object with sync-in (a mapping whose datasourceSource names `
+      + `'${object}', pulled by a job) and read that instead`
       + (cap < EXTERNAL_ROW_CAP_CEILING
         ? `; an administrator may raise the datasource's \`external.rowCap\` (at most ${EXTERNAL_ROW_CAP_CEILING}).`
         : '.'),
     );
     this.name = 'ExternalRowCapExceededError';
     this.details = { datasource, object, cap };
+    this.#returned = Object.freeze([...returned]);
+  }
+
+  /** How many rows the driver returned for the refused read (the floor asks for cap + 1). */
+  get returnedRowCount(): number {
+    return this.#returned.length;
+  }
+
+  /**
+   * Each returned row's value of `field`, in the order the driver returned the
+   * rows — `undefined` for a row that carries no such key. A copy: the caller
+   * cannot reach the rows themselves.
+   */
+  returnedValuesOf(field: string): unknown[] {
+    return this.#returned.map((row) => row[field]);
   }
 }

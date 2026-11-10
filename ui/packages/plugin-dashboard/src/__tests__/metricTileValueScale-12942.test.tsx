@@ -37,6 +37,7 @@ import {
   METRIC_TILE_VALUE_FINAL_SIZES,
   METRIC_TILE_VALUE_INSET,
   METRIC_TILE_VALUE_LADDER,
+  METRIC_TILE_BARE_VALUE_LADDER,
   metricTileValueClass,
   metricTileValueEm,
 } from '../metricTile';
@@ -46,14 +47,14 @@ afterEach(cleanup);
 const classesOf = (el: Element) => (el.getAttribute('class') ?? '').split(/\s+/).filter(Boolean);
 
 /** Tailwind's type scale, in px, for the sizes the ladder uses. */
-const PX: Record<string, number> = { 'text-sm': 14, 'text-base': 16, 'text-lg': 18, 'text-xl': 20, 'text-2xl': 24 };
+const PX: Record<string, number> = { 'text-sm': 14, 'text-base': 16, 'text-lg': 18, 'text-xl': 20, 'text-2xl': 24, 'text-3xl': 30, 'text-[2rem]': 32 };
 
 /** The size a class list draws at in a container `width` px wide. */
 function sizeAt(classes: string[], width: number): number {
   let px = 0;
   let from = -1;
   for (const c of classes) {
-    const step = /^@\[(\d+)px\]:(text-[a-z0-9]+)$/.exec(c);
+    const step = /^@\[(\d+)px\]:(text-[a-z0-9]+|text-\[2rem\])$/.exec(c);
     if (step && PX[step[2]] !== undefined) {
       const at = Number(step[1]);
       if (width >= at && at > from) { from = at; px = PX[step[2]]; }
@@ -168,4 +169,71 @@ describe('rendered tiles (objectui#12942)', () => {
     expect(sizeAt(cls, WIDE)).toBe(24);
     expect(value).not.toHaveAttribute('title');
   });
+});
+
+/**
+ * objectstack#32165 — the `bare` tile (the big-number face of a data screen)
+ * scales too. QA on the showcase's Command Center read "$1,090,0…": its hero
+ * strip lays six `object-metric` tiles across, each 166 px wide at a 1440 px
+ * viewport (measured in a browser, in the pull request), and the bare face
+ * drew every value at 32 px with an ellipsis.
+ */
+describe('the bare tile\'s value ladder (objectstack#32165)', () => {
+  const BUDGET = '$1,090,000.00';
+  const HERO_TILE = 166;
+
+  it('starts every step where its size fits the rung\'s widest value, with no inset', () => {
+    for (const { maxEm, sizes } of METRIC_TILE_BARE_VALUE_LADDER.slice(1)) {
+      const cls = sizes.split(' ');
+      expect(cls[0]).toBe('text-sm');
+      for (const c of cls.slice(1)) {
+        const step = /^@\[(\d+)px\]:(.+)$/.exec(c);
+        expect(step, c).not.toBeNull();
+        expect(Number(step![1]), `${c} on the ${maxEm} em rung`).toBe(Math.ceil(maxEm * PX[step![2]]));
+      }
+      // It climbs to the bare face, never past it.
+      expect(cls[cls.length - 1]).toMatch(/:text-\[2rem\]$/);
+    }
+    expect(METRIC_TILE_BARE_VALUE_LADDER.map((r) => r.maxEm)).toEqual(METRIC_TILE_VALUE_LADDER.map((r) => r.maxEm));
+  });
+
+  it('CONTROL: a short value keeps the 32 px face at every width', () => {
+    expect(METRIC_TILE_BARE_VALUE_LADDER[0].sizes).toBe('text-[2rem]');
+    const value = renderBare(14);
+    expect(sizeAt(classesOf(value), 80)).toBe(32);
+    expect(value).not.toHaveAttribute('title');
+  });
+
+  it('draws the Command Center budget whole in its 166 px hero tile, with the full figure as its tooltip', () => {
+    const value = renderBare(1090000);
+    expect(value.textContent).toBe(BUDGET);
+    const cls = classesOf(value);
+    const px = sizeAt(cls, HERO_TILE);
+    expect(px).toBe(20);
+    expect(metricTileValueEm(BUDGET) * px).toBeLessThanOrEqual(HERO_TILE);
+    // The old face did not fit: 32 px for the same figure.
+    expect(metricTileValueEm(BUDGET) * 32).toBeGreaterThan(HERO_TILE);
+    expect(value).toHaveAttribute('title', BUDGET);
+    // The tile's own box is what the steps read.
+    expect(value.parentElement).toHaveClass('@container');
+    // One 32 px line box at every size, so a scaled value's label lines up.
+    expect(cls).toContain('leading-8');
+    expect(cls).not.toContain('leading-none');
+  });
+
+  function renderBare(fallbackValue: number) {
+    render(
+      <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
+        <SchemaRendererProvider dataSource={undefined as never}>
+          <SchemaRenderer
+            schema={{
+              type: 'object-metric',
+              properties: { objectName: 'showcase_project', label: '总预算 Budget', variant: 'bare', fallbackValue, format: '0,0.00', currency: 'USD' },
+            } as never}
+          />
+        </SchemaRendererProvider>
+      </I18nProvider>,
+    );
+    return document.querySelector('.font-extrabold') as HTMLElement;
+  }
 });

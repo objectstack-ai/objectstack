@@ -672,6 +672,37 @@ export function formatDateTimeCompactParts(
 }
 
 /**
+ * The timestamp face: the compact face's numeric date and 12-hour clock, to
+ * the SECOND — `3/4/2020, 3:30:00 PM` in `en-US`, `2020/3/4 下午3:30:00` in
+ * `zh-CN`. For a log line whose order within one minute matters (the audit
+ * log), where the grid's minute-precision compact face would drop it.
+ *
+ * It is the compact face's convention, not a third one: the same numeric
+ * date, the same `hour12: true` (so a zh-CN reader never sees `上午7:03` in a
+ * cell beside `07:24:26` in a log), the same display zone (objectui#11693).
+ * Its own function rather than a `style` value, because a field's authored
+ * `format` reaches `formatDateTime`'s `style` key (`temporalCellFace.ts`), and
+ * a new value there would be a new metadata spelling.
+ *
+ * `'—'` for an empty or unparseable value, as {@link formatDateTime}.
+ */
+export function formatDateTimeStamp(value: string | Date | number, options?: DateDisplayOptions): string {
+  if (value === null || value === undefined || value === '') return '—';
+  const date = toDisplayDate(value);
+  if (!(date instanceof Date) || isNaN(date.getTime())) return '—';
+  return date.toLocaleString(options?.locale, {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+    ...inZone(zoneFor(date)),
+  });
+}
+
+/**
  * Format datetime value.
  *
  * `options.style` selects a named face:

@@ -8,6 +8,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { authGateEvents } from './auth-gate-events.js';
+import { sessionEndEvents } from './session-end-events.js';
 import { runBeforeSignOut } from './beforeSignOut.js';
 import type { AuthUser, AuthClient, AuthProviderOptions, PreviewModeOptions, AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthPublicConfig, SignInWithProviderOptions, SignInTwoFactorCodeKind, TwoFactorChallenge } from './types.js';
 import { TWO_FACTOR_CHALLENGE_ENDED_CODES } from './two-factor-codes.js';
@@ -264,6 +265,58 @@ export function AuthProvider({
       void loadSession();
     });
   }, [enabled, isPreviewMode, loadSession]);
+
+  /**
+   * objectstack#32138 — a `401` on an API call re-checks the session.
+   *
+   * The session can end on the server while the tab still holds it (signed
+   * out elsewhere, expired, revoked). Every later API call then answers `401`,
+   * and without this the shell stayed signed in and read each one as a missing
+   * page or a network fault. `createAuthenticatedFetch` reports each `401`;
+   * while a session is held, this asks the server once whether it still is.
+   *
+   *   - The server says no session: identity clears the way `loadSession`
+   *     clears it, so the route guard sends the visitor to the login page with
+   *     the current page as the return link, as a reload would.
+   *   - The server says the session is live: nothing changes. That endpoint
+   *     refused this one request for its own reasons.
+   *   - The read was not answered (transport error, another status): nothing
+   *     changes either. A read nobody answered is not a sign-out.
+   *
+   * No session held (the login page, a signed-out visitor): a `401` is the
+   * expected answer and is ignored, so there is no loop. A burst of `401`s from
+   * one navigation collapses to one read, and a read already in flight (the
+   * mount, a rotation, `refreshSession`) answers for all of them.
+   */
+  const sessionEndCheckInFlight = useRef(false);
+  const holdsSession = user !== null && session !== null;
+  useEffect(() => {
+    if (!enabled || isPreviewMode || !holdsSession) return;
+    // Cleared when the session this subscription was made for changes (a
+    // sign-out, a sign-in as someone else): a late answer must not end THAT.
+    let cancelled = false;
+    const unsubscribe = sessionEndEvents.subscribe(() => {
+      if (sessionEndCheckInFlight.current || sessionLoadInFlight.current) return;
+      sessionEndCheckInFlight.current = true;
+      void (async () => {
+        try {
+          const result = await client.getSession();
+          if (cancelled || result || sessionReadWasInconclusive(client)) return;
+          setUser(null);
+          setSession(null);
+          if (SessionUserScope.current() !== null) purgeSignedOutClientCaches();
+        } catch {
+          /* an unanswered read is not a sign-out */
+        } finally {
+          sessionEndCheckInFlight.current = false;
+        }
+      })();
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [enabled, isPreviewMode, holdsSession, client]);
 
   // Load session on mount (only if auth is enabled and not in preview mode)
   useEffect(() => {
@@ -548,8 +601,16 @@ export function AuthProvider({
       setError(null);
       try {
         const result = await client.signInWithPhoneOtp(phoneNumber, code);
+        if (result.twoFactor) {
+          // The code was accepted for an account with an enrolled second
+          // factor: no session yet, the code step follows.
+          setTwoFactorChallenge(result.twoFactor);
+          return { twoFactorRequired: true };
+        }
+        setTwoFactorChallenge(null);
         setUser(result.user);
         setSession(result.session);
+        return { twoFactorRequired: false };
       } catch (err) {
         const authError = err instanceof Error ? err : new Error(String(err));
         setError(authError);
@@ -951,7 +1012,7 @@ export function AuthProvider({
       slug: string;
       logo?: string;
       timezone?: string;
-      edition?: 'developer';
+      edition?: string;
     }): Promise<AuthOrganization> => {
       setError(null);
       try {
