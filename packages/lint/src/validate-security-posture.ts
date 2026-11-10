@@ -23,6 +23,7 @@
  * | security-modify-all-delete-withheld(error) | #25575 Modify All includes delete — UNPARSED intakes only, see the arm |
  * | security-controlled-by-parent-owner-policy-without-opt-in (warning) | ADR-0055 §3 amendment (ruling 6398566164): a caller-keyed update policy on a detail admits nobody the master gate refuses — unless it keys `owner_id` and the detail opted in (#26591: the opt-in is prescribed only there) |
  * | security-superuser-field-mask-inert (warning) | ADR-0066 D2 ⑧ as amended (ruling 6573563853, letter A): a set's View All / Modify All on an object votes on every field of it, so its own `readable: false` (or, under Modify All, its edit lock) on that object binds none of its holders |
+ * | security-controlled-by-parent-master-reference-hidden (warning) | ADR-0055 §3: a write of a detail needs edit access to the master its stored reference names, so a set's `readable: false` on that reference hides a field that still decides its holders' writes, and a holder refused there gets a refusal that names no master |
  *
  * Per ADR-0049 discipline these are NOT advisory security: every `error` rule
  * mirrors a runtime enforcement point (D1 fail-closed OWD default, D4
@@ -150,6 +151,18 @@ import {
 } from './validate-external-owner-sharing.js';
 
 export const SECURITY_OWD_UNSET = 'security-owd-unset';
+
+/**
+ * [ADR-0153 D4] The fix-line `security-owd-unset` gives a `synced` object. A
+ * pull writes its rows with no person owner (attribution is the run, never an
+ * owner), so an owner-scoped model hides every row from a member no sharing
+ * rule reaches; the recommendation is a model that does not, and members never
+ * write the object whatever the model says.
+ */
+export const SYNCED_OBJECT_WAY_OUT =
+  "declare sharingModel: 'public_read' (recommended: a pulled row has no person owner, so on 'private' a " +
+  "member reads only the rows a sharing rule grants; members never write a synced object either way), or " +
+  "'private' with a sharing rule that grants read";
 export const SECURITY_OWD_ALIAS = 'security-owd-alias';
 export const SECURITY_WILDCARD_VAMA = 'security-wildcard-vama';
 export const SECURITY_ANCHOR_HIGH_PRIVILEGE = 'security-anchor-high-privilege';
@@ -166,6 +179,7 @@ export const SECURITY_CBP_AMBIGUOUS_RELATION = 'security-controlled-by-parent-am
 export const SECURITY_MODIFY_ALL_DELETE_WITHHELD = 'security-modify-all-delete-withheld';
 export const SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN = 'security-controlled-by-parent-owner-policy-without-opt-in';
 export const SECURITY_SUPERUSER_FIELD_MASK_INERT = 'security-superuser-field-mask-inert';
+export const SECURITY_CBP_MASTER_REFERENCE_HIDDEN = 'security-controlled-by-parent-master-reference-hidden';
 
 export type SecuritySeverity = 'error' | 'warning' | 'info';
 
@@ -645,6 +659,29 @@ function pushCbpCallerPolicyOffOwnerColumn(
 }
 
 /**
+ * `security-controlled-by-parent-master-reference-hidden` for one field
+ * permission `flsKey`, at `path`: the set hides the master reference of a
+ * controlled_by_parent detail.
+ */
+function pushCbpMasterReferenceHidden(findings: SecurityFinding[], psName: string, path: string, flsKey: string): void {
+  findings.push({
+    severity: 'warning',
+    rule: SECURITY_CBP_MASTER_REFERENCE_HIDDEN,
+    where: `permission set "${psName}"`,
+    path,
+    // One verdict sentence; why the stored reference decides the write, and
+    // what a refused holder is told, are this id's `os explain` entry.
+    message:
+      `'${flsKey}' hides the master reference of a controlled_by_parent detail, which still decides each write ` +
+      `of the detail by this set's holders; a refused holder gets a refusal naming no master`,
+    // One remedy line.
+    hint:
+      `Make '${flsKey}' readable (readable: true) so a refused holder is told which master the write needs, ` +
+      `or keep it hidden if a generic refusal is meant`,
+  });
+}
+
+/**
  * `security-controlled-by-parent-no-relation` for one object, at `path`. One
  * site for the declared object and the merged one
  * ({@link pushExtensionMergedCbpFindings}), so the two read in one wording.
@@ -851,9 +888,14 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
         //    (#27425), whatever the binding's writability. The publish gate
         //    sees no datasources, so there an allowWrites: false datasource
         //    reads as writable; both doors still never say 'private'.
+        // [ADR-0153 D4] A `synced` object's rows are pulled with no person
+        // owner, so 'private' reads none of them to a member that no sharing
+        // rule reaches: its fix-it names models that do not hide owner-less
+        // rows, as the read-only external one does.
         // Every other object, an external one that declares its owner
         // included, keeps the 'private' recommendation.
-        const ownershipGap = externalOwnershipGap(obj, readOnlyDatasources);
+        const synced = obj.managedBy === 'synced';
+        const ownershipGap = synced ? undefined : externalOwnershipGap(obj, readOnlyDatasources);
         findings.push({
           severity: 'error',
           rule: SECURITY_OWD_UNSET,
@@ -866,14 +908,16 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
           message:
             `custom object declares no sharingModel (OWD); the runtime falls back to 'private', ` +
             `but the baseline must be an authored decision`,
-          hint: ownershipGap
-            ? `${PUBLIC_READ_WRITE_WAY_OUT}, or ` +
-              `${declareOwnershipColumnWayOut(ownershipGap.column, ownershipGap.mapped)} ` +
-              `and declare sharingModel: 'private' or 'public_read'; 'controlled_by_parent' for master-detail children`
-            : hasUnprovableOwnerAnchor(obj)
-              ? READ_ONLY_EXTERNAL_WAY_OUT
-              : `declare sharingModel: 'private' (owner + shares; recommended), 'public_read', ` +
-                `'public_read_write', or 'controlled_by_parent' (master-detail children)`,
+          hint: synced
+            ? SYNCED_OBJECT_WAY_OUT
+            : ownershipGap
+              ? `${PUBLIC_READ_WRITE_WAY_OUT}, or ` +
+                `${declareOwnershipColumnWayOut(ownershipGap.column, ownershipGap.mapped)} ` +
+                `and declare sharingModel: 'private' or 'public_read'; 'controlled_by_parent' for master-detail children`
+              : hasUnprovableOwnerAnchor(obj)
+                ? READ_ONLY_EXTERNAL_WAY_OUT
+                : `declare sharingModel: 'private' (owner + shares; recommended), 'public_read', ` +
+                  `'public_read_write', or 'controlled_by_parent' (master-detail children)`,
         });
       } else if (typeof owd === 'string' && OWD_ALIAS_FIX[owd]) {
         // Reachable ONLY through the unparsed doors (`os lint` on a raw
@@ -983,17 +1027,44 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
   // refused whole by the two rules above). A wildcard policy names no detail.
   // The opt-in is read through the spec's one reader, raw or parsed, so the
   // unparsed doors (`os lint` on a raw config) read it as the parse does.
-  const cbpDetails = new Map<string, { optedIn: boolean; ownerColumn: boolean }>();
+  const cbpDetails = new Map<string, { optedIn: boolean; ownerColumn: boolean; masterField: string }>();
   for (const obj of objects) {
     if (!obj || typeof obj !== 'object' || typeof obj.name !== 'string') continue;
-    if (owdOf(obj) !== 'controlled_by_parent' || !resolveCbpRelation(obj)) continue;
-    cbpDetails.set(obj.name, { optedIn: controlledByParentOwnerMayEdit(obj), ownerColumn: carriesCbpOwnerColumn(obj) });
+    if (owdOf(obj) !== 'controlled_by_parent') continue;
+    const rel = resolveCbpRelation(obj);
+    if (!rel) continue;
+    cbpDetails.set(obj.name, {
+      optedIn: controlledByParentOwnerMayEdit(obj),
+      ownerColumn: carriesCbpOwnerColumn(obj),
+      masterField: rel.field,
+    });
   }
   if (cbpDetails.size > 0) {
     for (let i = 0; i < permissionSets.length; i++) {
       const ps = permissionSets[i];
       if (!ps || typeof ps !== 'object') continue;
       const psName = typeof ps.name === 'string' ? ps.name : `(permission set ${i})`;
+      // [ADR-0055 §3] `security-controlled-by-parent-master-reference-hidden`:
+      // the set's `readable: false` on the master reference of a detail above.
+      // A write of the detail is decided by the master that reference names,
+      // read from the stored row whatever the writer may read, so the hidden
+      // field still decides the holder's write, and a holder refused there is
+      // told only the rule, with no master named. Read as the field merges
+      // read the entry (an omitted `readable` is `true`), and not reported
+      // beside the set's own View All or Modify All on the detail, which
+      // makes the mask inert (`security-superuser-field-mask-inert`).
+      // `warning`: hiding the reference is legal, and no door refuses it.
+      const flsEntries = ps.fields && typeof ps.fields === 'object' ? (ps.fields as AnyRec) : {};
+      for (const [flsKey, flsEntry] of Object.entries(flsEntries)) {
+        if (!flsEntry || typeof flsEntry !== 'object' || (flsEntry as AnyRec).readable !== false) continue;
+        const dot = flsKey.indexOf('.');
+        if (dot <= 0) continue; // unqualified: `security-fls-unqualified-key`
+        const detailName = flsKey.slice(0, dot);
+        const detail = cbpDetails.get(detailName);
+        if (!detail || flsKey.slice(dot + 1) !== detail.masterField) continue;
+        if (holdsSuperuserBypass(ps, detailName, 'view')) continue;
+        pushCbpMasterReferenceHidden(findings, psName, `permissions[${i}].fields["${flsKey}"]`, flsKey);
+      }
       const policies = recordsOf(ps.rowLevelSecurity);
       for (let j = 0; j < policies.length; j++) {
         const policy = policies[j];

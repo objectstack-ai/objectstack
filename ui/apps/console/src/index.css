@@ -430,6 +430,15 @@ header.sticky {
     0 4px 12px -4px hsl(240 40% 20% / 0.12) !important;
 }
 
+/* A checkbox keeps a small corner. The 16px box draws `rounded-sm`, which is
+   `--radius-sm`, and the larger `--radius` above would make that half the box
+   or more: a circle, which reads as a radio button (either/or) instead of an
+   independent yes/no. Scoped to the control, so every other `rounded-sm`
+   keeps the theme's corners. */
+[role="checkbox"] {
+  --radius-sm: 0.25rem;
+}
+
 /* iOS-style press springback on interactive controls. */
 @media (hover: hover) {
   button:not([disabled]) {

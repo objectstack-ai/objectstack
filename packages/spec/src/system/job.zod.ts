@@ -379,18 +379,25 @@ export const JobSchema = lazySchema(() => strictObject({
    * needs its own pull.
    *
    * `mapping` names a `mapping` the same stack declares, with a
-   * `connectorSource`: `defineStack` (and so `os validate`) refuses a name that
-   * resolves to neither.
+   * `connectorSource` or a `datasourceSource` (ADR-0153 D1): `defineStack`
+   * (and so `os validate`) refuses a name that resolves to neither. Only a
+   * `connectorSource` pull runs today; the datasource reader is the P2 engine
+   * card's, and until it lands the mapping's `datasourceSource` warns its
+   * author (a `planned` liveness row) and the binder does not schedule it.
    */
   pull: strictObject({
     surface: 'this job’s pull',
     history:
       'Declared closed from its first day: an unrecognized key is refused, never dropped.',
-    aliases: { name: 'mapping', mappingName: 'mapping', source: 'mapping', connectorSource: 'mapping', from: 'mapping' },
+    aliases: {
+      name: 'mapping', mappingName: 'mapping', source: 'mapping', connectorSource: 'mapping',
+      datasourceSource: 'mapping', from: 'mapping',
+    },
   }, {
     mapping: SnakeCaseIdentifierSchema.describe(
-      'Name of the `mapping` whose `connectorSource` this job pulls on its schedule — a mapping the same '
-      + 'stack declares, with a `connectorSource` (refused at `defineStack` / `os validate` otherwise). The '
+      'Name of the `mapping` whose source this job pulls on its schedule — a mapping the same stack '
+      + 'declares, with a `connectorSource` or a `datasourceSource` (refused at `defineStack` / `os validate` '
+      + 'otherwise). The '
       + 'mapping says where the rows come from, the field map, the write mode and the match key; the job '
       + 'says when.',
     ),
