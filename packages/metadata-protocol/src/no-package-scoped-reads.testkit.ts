@@ -14,11 +14,15 @@
  * type read through the double's own `getItem`, as `SchemaRegistry` reads a
  * type no child of epic #31527 has wired, and no package holder of any name,
  * so the exact qualifier names no one and the read answers what the double's
- * layers answer.
+ * layers answer. Nor does it hold an object-less action under two packages, so
+ * the bare action read's own judge (`SchemaRegistry.refuseAmbiguousObjectLessAction`,
+ * #31697) refuses nothing, and the read of that narrowed type is judged rather
+ * than refused as unjudgeable.
  */
 export const NO_PACKAGE_SCOPED_READS = Object.freeze({
     readsByPackage: (_type: string): boolean => false,
     packageScopedHoldersOf: (_type: string, _name: string): string[] => [],
     getEnvironmentScopedItem: (_type: string, _name: string, _member?: string): unknown => undefined,
     getPackageScopedItem: (_type: string, _name: string, _packageId: string, _member?: string): unknown => undefined,
+    refuseAmbiguousObjectLessAction: async (_name: string): Promise<void> => undefined,
 });
