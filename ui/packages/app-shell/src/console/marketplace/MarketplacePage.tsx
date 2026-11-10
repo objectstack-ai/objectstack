@@ -45,6 +45,7 @@ import {
   listInstalledPackages,
   installPackage,
   installLocal,
+  type MarketplaceFacetCount,
   type MarketplaceListParams,
   type MarketplacePackageSummary,
   type LocalInstallEntry,
@@ -68,6 +69,7 @@ import {
   EMPTY_FACET_SELECTION,
   NO_SERVED_FACETS,
   facetListParams,
+  readLanguageCounts,
   readListingTaxonomy,
   widenServedFacets,
   type FacetSelection,
@@ -396,6 +398,10 @@ function MarketplacePageBody() {
   const [total, setTotal] = useState(0);
   // The facets some answered listing carried (`ServedFacets`).
   const [servedFacets, setServedFacets] = useState<ServedFacets>(NO_SERVED_FACETS);
+  // The newest answer's languages counts (`facets.languages`); `null` while the
+  // catalog serves none. Unlike the taxonomy facets these ARE the values: there
+  // is no declared vocabulary of languages to offer instead.
+  const [languageCounts, setLanguageCounts] = useState<readonly MarketplaceFacetCount[] | null>(null);
   // Whether a read has settled the side loads (installs, org packages); a
   // read for another page or selection then reads the catalog alone.
   const sideLoaded = useRef(false);
@@ -492,6 +498,7 @@ function MarketplacePageBody() {
         setItems(page);
         setTotal(typeof catalog.resp.total === 'number' ? catalog.resp.total : page.length);
         setServedFacets((served) => widenServedFacets(served, page.map(readListingTaxonomy)));
+        setLanguageCounts(readLanguageCounts(catalog.resp));
       }
     } catch (e: unknown) {
       if (!current()) return;
@@ -765,7 +772,12 @@ function MarketplacePageBody() {
             aria-label={t('marketplace.searchAria')}
           />
         </div>
-        <MarketplaceFacetFilters served={servedFacets} selection={facets} onChange={selectFacets} />
+        <MarketplaceFacetFilters
+          served={servedFacets}
+          selection={facets}
+          onChange={selectFacets}
+          languageCounts={languageCounts}
+        />
       </div>
 
       {/* objectui#12710 — a catalog read still pending once the skeleton's
