@@ -20,9 +20,10 @@
  */
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
-import { describe, it, expect, vi } from 'vitest';
-import { act, renderHook, render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { act, renderHook, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { useDeferredFirstSend, type PendingFirstMessage } from '../AiChatPage';
+import { useChatConversation } from '../../../hooks/useChatConversation';
 
 const API = 'https://example.test/api/v1/ai/agents/build/chat';
 
@@ -228,5 +229,108 @@ describe('useDeferredFirstSend', () => {
     expect(doSend).toHaveBeenCalledTimes(1);
     expect(doSend).toHaveBeenCalledWith('first message', undefined);
     expect(pendingRef.current).toBeNull();
+  });
+});
+
+// objectstack#32031 — the conversation row is created by the FIRST SEND, not
+// on mount. The stash above is what makes that safe: the send waits in the
+// page-owned ref while `ensureConversation` mints the row, then replays into
+// the remounted pane. These drive the real hook pair over a mocked fetch.
+describe('useDeferredFirstSend — the first send creates the conversation (objectstack#32031)', () => {
+  const AI_BASE = 'https://example.test/api/v1/ai';
+  let fetchMock: ReturnType<typeof vi.fn>;
+  const createCount = () =>
+    fetchMock.mock.calls.filter(
+      (c) => c[0] === `${AI_BASE}/conversations` && (c[1] as RequestInit | undefined)?.method === 'POST',
+    ).length;
+
+  beforeEach(() => {
+    localStorage.clear();
+    fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: 'conv-1', messages: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function mountSurface() {
+    const pendingRef: React.MutableRefObject<PendingFirstMessage | null> = { current: null };
+    const doSend = vi.fn();
+    function Pane(props: { conversationId: string | undefined; ensure: () => unknown }) {
+      const submit = useDeferredFirstSend({
+        chatApi: API,
+        conversationId: props.conversationId,
+        pendingRef,
+        doSend,
+        ensureConversation: props.ensure,
+      });
+      return (
+        <>
+          <button data-testid="send-a" onClick={() => submit('first message')}>a</button>
+          <button data-testid="send-b" onClick={() => submit('second message')}>b</button>
+        </>
+      );
+    }
+    function Page() {
+      const { conversationId, ensureConversation } = useChatConversation({
+        userId: 'u1',
+        scope: 'ask',
+        apiBase: AI_BASE,
+      });
+      return (
+        <>
+          <span data-testid="conv">{conversationId ?? 'pending'}</span>
+          <Pane key={conversationId ?? 'pending'} conversationId={conversationId} ensure={ensureConversation} />
+        </>
+      );
+    }
+    render(<Page />);
+    return { pendingRef, doSend };
+  }
+
+  it('mounting creates nothing; the first send creates one row and is replayed into it', async () => {
+    const { doSend } = mountSurface();
+    // Let the mount-time resolve settle: still no row.
+    await act(async () => {});
+    expect(createCount()).toBe(0);
+    expect(screen.getByTestId('conv').textContent).toBe('pending');
+
+    fireEvent.click(screen.getByTestId('send-a'));
+    await waitFor(() => expect(screen.getByTestId('conv').textContent).toBe('conv-1'));
+    expect(createCount()).toBe(1);
+    expect(doSend).toHaveBeenCalledTimes(1);
+    expect(doSend).toHaveBeenCalledWith('first message', undefined);
+  });
+
+  it('a fast double submit makes one row and keeps the first message', async () => {
+    const { doSend } = mountSurface();
+    await act(async () => {});
+
+    fireEvent.click(screen.getByTestId('send-a'));
+    fireEvent.click(screen.getByTestId('send-b'));
+    await waitFor(() => expect(screen.getByTestId('conv').textContent).toBe('conv-1'));
+    expect(createCount()).toBe(1);
+    expect(doSend).toHaveBeenCalledTimes(1);
+    expect(doSend).toHaveBeenCalledWith('first message', undefined);
+  });
+
+  it('a stash seeded out of band (the handoff) asks for the conversation itself', async () => {
+    const pendingRef: React.MutableRefObject<PendingFirstMessage | null> = {
+      current: { content: 'handoff prompt' },
+    };
+    const doSend = vi.fn();
+    const ensure = vi.fn();
+    renderHook(() =>
+      useDeferredFirstSend({ chatApi: API, conversationId: undefined, pendingRef, doSend, ensureConversation: ensure }),
+    );
+    expect(ensure).toHaveBeenCalled();
+    expect(doSend).not.toHaveBeenCalled();
+    expect(pendingRef.current).toEqual({ content: 'handoff prompt' });
   });
 });
